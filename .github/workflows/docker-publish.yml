@@ -9,13 +9,6 @@ on:
       - 'frontend/**'
       - 'Dockerfile'
       - '.github/workflows/docker-publish.yml'
-    paths-ignore:
-      - 'README.md'
-      - '.gitignore'
-      - 'documentation/**'
-      - 'docker-compose.yml'
-      - 'env.example'
-      - 'CHANGELOG.md'
 
 env:
   GH_REGISTRY: ghcr.io
