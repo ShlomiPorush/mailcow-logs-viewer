@@ -20,7 +20,7 @@ services:
 
   # Main Application
   app:
-    image: mailcow-logs-viewer
+    image: ghcr.io/shlomiporush/mailcow-logs-viewer:latest
     container_name: mailcow-logs-app
     restart: unless-stopped
     depends_on:
