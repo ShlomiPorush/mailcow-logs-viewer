@@ -23,8 +23,8 @@ cd mailcow-logs-viewer
 
 Download these two files to your project directory:
 
-- 📄 **[docker-compose.yml](docker-compose.yml)** - Docker Compose configuration
-- 📄 **[env.example](env.example)** - Environment variables template
+- 📄 **[docker-compose.yml](../docker-compose.yml)** - Docker Compose configuration
+- 📄 **[env.example](../env.example)** - Environment variables template
 
 Then rename the environment file:
 
@@ -151,9 +151,8 @@ docker compose up -d
 
 ## Documentation
 
-- **[README](README.md)** - Project overview and features
-- **[API Documentation](API_DOCUMENTATION.md)** - Full API reference
-- **[Changelog](CHANGELOG.md)** - Version history
+- **[API Documentation](API.md)** - Full API reference
+- **[Changelog](../CHANGELOG.md)** - Version history
 
 ---
 

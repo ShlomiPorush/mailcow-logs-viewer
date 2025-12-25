@@ -3,8 +3,13 @@
 A modern, self-hosted dashboard for viewing and analyzing Mailcow mail server logs. Built for system administrators and technicians who need quick access to mail delivery status, spam analysis, and authentication failures.
 
 ![Main](images/Main.png)
+
 ![Messages](images/Messages.png)
+
 ![Message Details](images/Message%20Details.png)
+
+![Security](images/Security.png)
+
 ![Status](images/Status.png)
 
 ---
@@ -80,7 +85,7 @@ docker compose up -d
 # Open http://localhost:8080
 ```
 
-📖 **Full installation guide:** [GETTING_STARTED.md](GETTING_STARTED.md)
+📖 **Full installation guide:** [Getting Started](documentation/GETTING_STARTED.md)
 
 ---
 
@@ -137,7 +142,7 @@ RESTful API for all functionality:
 | `GET /api/status/summary` | System status |
 | `GET /api/export/{type}/csv` | CSV export |
 
-📖 **Full API reference:** [API_DOCUMENTATION.md](API_DOCUMENTATION.md)
+📖 **Full API reference:** [API Documentation](documentation/API.md)
 
 ---
 
@@ -145,9 +150,9 @@ RESTful API for all functionality:
 
 | Document | Description |
 |----------|-------------|
-| [GETTING_STARTED.md](GETTING_STARTED.md) | Installation guide |
-| [API_DOCUMENTATION.md](API_DOCUMENTATION.md) | API reference |
-| [CHANGELOG.md](CHANGELOG.md) | Version history |
+| [Getting Started](documentation/GETTING_STARTED.md) | Installation guide |
+| [API Documentation](documentation/API.md) | API reference |
+| [Changelog](CHANGELOG.md) | Version history |
 | [env.example](env.example) | Configuration options |
 
 ---
@@ -160,6 +165,29 @@ RESTful API for all functionality:
 - 1GB disk (varies with retention)
 
 ---
+
+## Rate Limiting
+
+Currently, there is no rate limiting implemented. For production deployments, consider adding rate limiting via a reverse proxy (e.g., Traefik, Nginx).
+
+---
+
+## Authentication
+
+Currently, no authentication is required. For production deployments, consider:
+- Adding basic authentication via reverse proxy
+- Using OAuth2/OIDC
+
+---
+
+## Notes
+
+1. **Timestamps**: All timestamps are returned in ISO 8601 format with UTC timezone (suffix `Z`)
+2. **Pagination**: Most list endpoints support `page` and `limit` parameters
+3. **Filtering**: Filters are applied server-side before pagination
+4. **Export Limits**: CSV exports are limited to `CSV_EXPORT_LIMIT` rows (default: 10,000)
+5. **Real-time Data**: Queue and Quarantine endpoints fetch data directly from Mailcow API
+6. **Cached Data**: All other log data is stored in PostgreSQL and updated periodically
 
 ## License
 

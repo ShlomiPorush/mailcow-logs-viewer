@@ -936,29 +936,3 @@ All endpoints may return the following error responses:
   "detail": "Error description (only in debug mode)"
 }
 ```
-
----
-
-## Rate Limiting
-
-Currently, there is no rate limiting implemented. For production deployments, consider adding rate limiting via a reverse proxy (e.g., Traefik, Nginx).
-
----
-
-## Authentication
-
-Currently, no authentication is required. For production deployments, consider:
-- Adding basic authentication via reverse proxy
-- Implementing API key authentication
-- Using OAuth2/OIDC
-
----
-
-## Notes
-
-1. **Timestamps**: All timestamps are returned in ISO 8601 format with UTC timezone (suffix `Z`)
-2. **Pagination**: Most list endpoints support `page` and `limit` parameters
-3. **Filtering**: Filters are applied server-side before pagination
-4. **Export Limits**: CSV exports are limited to `CSV_EXPORT_LIMIT` rows (default: 10,000)
-5. **Real-time Data**: Queue and Quarantine endpoints fetch data directly from Mailcow API
-6. **Cached Data**: All other log data is stored in PostgreSQL and updated periodically
