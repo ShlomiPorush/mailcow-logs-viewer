@@ -7,7 +7,7 @@ on:
 
 env:
   GH_REGISTRY: ghcr.io
-  DOCKER_HUB_REPO: shlomiporush/mailcow-logs-viewer
+  DOCKER_HUB_REPO: shlomip/mailcow-logs-viewer
 
 jobs:
   build-and-push:
