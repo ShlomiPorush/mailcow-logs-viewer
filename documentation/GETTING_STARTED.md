@@ -59,13 +59,31 @@ nano .env
 4. Copy & Enable **Read-Only Access**
 6. Paste the generated API key to your `.env` file
 
-### Step 5: Start the Application
+### Step 5: Configure Postfix (Important!)
+
+For optimal message correlation, add this line to your Postfix configuration:
+
+### Add to `data/conf/postfix/extra.cf`:
+```conf
+always_add_missing_headers = yes
+```
+
+**Why is this needed?**
+
+This ensures Postfix always adds a Message-ID header when missing. The Mailcow Logs Viewer uses Message-ID to correlate:
+- Rspamd logs (spam filtering)
+- Postfix logs (delivery)
+- Netfilter logs (authentication)
+
+Without Message-ID, some messages won't be properly linked between log sources.
+
+### Step 6: Start the Application
 
 ```bash
 docker compose up -d
 ```
 
-### Step 6: Access the Dashboard
+### Step 7: Access the Dashboard
 
 Open your browser:
 
