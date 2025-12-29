@@ -47,7 +47,7 @@ nano .env
 | `MAILCOW_URL` | Your Mailcow instance URL | `https://mail.example.com` |
 | `MAILCOW_API_KEY` | Your Mailcow API key | `abc123-def456...` |
 | `MAILCOW_LOCAL_DOMAINS` | Your email domains | `example.com,domain.net` |
-| `POSTGRES_PASSWORD` | Database password | `your-secure-password` |
+| `POSTGRES_PASSWORD` | Database password<br>⚠️ Avoid special chars (`@:/?#`) - breaks connection strings<br>💡 Use UUID: Linux/Mac: `uuidgen` <br> or online https://it-tools.tech/uuid-generator  | Example: `a7f3c8e2-4b1d-4f9a-8c3e-7d2f1a9b5e4c` |
 
 **Review all other settings** and adjust as needed for your environment (timezone, fetch intervals, retention period, etc.)
 
