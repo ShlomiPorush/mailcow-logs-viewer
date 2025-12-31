@@ -219,6 +219,22 @@
 
         // Load app title on page load
         document.addEventListener('DOMContentLoaded', async () => {
+            // First check if authentication is enabled
+            try {
+                const infoResponse = await fetch('/api/info');
+                if (infoResponse.ok) {
+                    const infoData = await infoResponse.json();
+                    // If authentication is disabled, redirect to main app
+                    if (!infoData.auth_enabled) {
+                        window.location.replace('/');
+                        return;
+                    }
+                }
+            } catch (e) {
+                // If we can't check, assume auth is enabled for safety
+                console.warn('Could not check auth status, assuming enabled');
+            }
+            
             loadAuthCredentials();
             
             // If already authenticated, redirect to main app

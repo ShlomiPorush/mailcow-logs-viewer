@@ -139,6 +139,22 @@ function handleLogout() {
 
 // Check authentication on page load
 async function checkAuthentication() {
+    // First check if authentication is enabled
+    try {
+        const infoResponse = await fetch('/api/info');
+        if (infoResponse.ok) {
+            const infoData = await infoResponse.json();
+            // If authentication is disabled, allow access
+            if (!infoData.auth_enabled) {
+                return true;
+            }
+        }
+    } catch (e) {
+        // If we can't check, assume auth is enabled for safety
+        console.warn('Could not check auth status, assuming enabled');
+    }
+    
+    // Authentication is enabled, check credentials
     loadAuthCredentials();
     
     if (!authCredentials) {
@@ -240,6 +256,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
 async function loadAppInfo() {
     try {
+        // Use regular fetch since this is called after authentication check
         const response = await authenticatedFetch('/api/info');
         const data = await response.json();
         
@@ -253,6 +270,16 @@ async function loadAppInfo() {
             logoImg.src = data.app_logo_url;
             logoImg.classList.remove('hidden');
             document.getElementById('default-logo').classList.add('hidden');
+        }
+        
+        // Show/hide logout button based on auth status
+        const logoutBtn = document.getElementById('logout-btn');
+        if (logoutBtn) {
+            if (data.auth_enabled) {
+                logoutBtn.classList.remove('hidden');
+            } else {
+                logoutBtn.classList.add('hidden');
+            }
         }
     } catch (error) {
         console.error('Failed to load app info:', error);
