@@ -63,7 +63,7 @@ A modern, self-hosted dashboard for viewing and analyzing Mailcow mail server lo
 - Expired correlations counter
 
 ### ⚙️ Additional
-- 🔐 Built-in HTTP Basic Authentication
+- 🔐 Built-in Basic Authentication
 - 🌙 Dark mode
 - 📱 Responsive design
 - 🔄 Auto-refresh
