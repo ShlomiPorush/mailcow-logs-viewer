@@ -5,8 +5,8 @@ Shows configuration, last import times, and background job status
 import logging
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
-from sqlalchemy import func, desc, text
-from datetime import datetime, timezone
+from sqlalchemy import func, desc, text, or_
+from datetime import datetime, timezone, timedelta
 from typing import Dict, Any, Optional
 
 from ..database import get_db
@@ -58,6 +58,20 @@ async def get_settings_info(db: Session = Depends(get_db)):
         ).scalar()
         expired_correlations = db.query(func.count(MessageCorrelation.id)).filter(
             MessageCorrelation.final_status == 'expired'
+        ).scalar()
+        
+        # Count correlations without definitive final_status (for update_final_status job)
+        # Only count correlations within Max Correlation Age (older ones should be expired)
+        status_cutoff_time = datetime.utcnow() - timedelta(
+            minutes=settings.max_correlation_age_minutes
+        )
+        correlations_needing_status = db.query(func.count(MessageCorrelation.id)).filter(
+            MessageCorrelation.created_at >= status_cutoff_time,
+            MessageCorrelation.queue_id.isnot(None),
+            or_(
+                MessageCorrelation.final_status.is_(None),
+                MessageCorrelation.final_status.notin_(['delivered', 'bounced', 'rejected', 'expired'])
+            )
         ).scalar()
         
         # Get total counts
@@ -131,9 +145,15 @@ async def get_settings_info(db: Session = Depends(get_db)):
                     "status": "running"
                 },
                 "complete_correlations": {
-                    "interval": "120 seconds (2 minutes)",
+                    "interval": f"{settings.correlation_check_interval} seconds ({settings.correlation_check_interval // 60} minutes)",
                     "status": "running",
                     "pending_items": incomplete_correlations or 0
+                },
+                "update_final_status": {
+                    "interval": f"{settings.correlation_check_interval} seconds ({settings.correlation_check_interval // 60} minutes)",
+                    "max_age": f"{settings.max_correlation_age_minutes} minutes",
+                    "status": "running",
+                    "pending_items": correlations_needing_status or 0
                 },
                 "expire_correlations": {
                     "interval": "60 seconds (1 minute)",

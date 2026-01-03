@@ -131,8 +131,8 @@ Get unified messages view combining Postfix and Rspamd data.
 | `search` | string | Search in sender, recipient, subject, message_id, queue_id |
 | `sender` | string | Filter by sender email |
 | `recipient` | string | Filter by recipient email |
-| `direction` | string | Filter by direction: `inbound`, `outbound` |
-| `status` | string | Filter by status: `delivered`, `bounced`, `deferred`, `rejected`, `spam` |
+| `direction` | string | Filter by direction: `inbound`, `outbound`, `internal` |
+| `status` | string | Filter by status: `delivered`, `bounced`, `deferred`, `rejected`, `spam`<br>**Note:** `spam` filter checks both `final_status='spam'` and `is_spam=True` from Rspamd |
 | `user` | string | Filter by authenticated user |
 | `ip` | string | Filter by source IP address |
 | `start_date` | datetime | Start date (ISO format) |
@@ -361,7 +361,7 @@ Get Rspamd spam analysis logs.
 | `limit` | int | Items per page (default: 50, max: 500) |
 | `search` | string | Search in subject, sender, message_id |
 | `sender` | string | Filter by sender |
-| `direction` | string | Filter: `inbound`, `outbound`, `unknown` |
+| `direction` | string | Filter: `inbound`, `outbound`, `internal`, `unknown` |
 | `min_score` | float | Minimum spam score |
 | `max_score` | float | Maximum spam score |
 | `action` | string | Filter by action: `no action`, `greylist`, `add header`, `reject` |
@@ -530,7 +530,8 @@ Get main dashboard statistics.
   },
   "direction": {
     "inbound_24h": 800,
-    "outbound_24h": 434
+    "outbound_24h": 434,
+    "internal_24h": 120
   }
 }
 ```
@@ -846,8 +847,15 @@ Get system configuration and status information.
       "status": "running",
       "pending_items": 500
     },
+    "update_final_status": {
+      "interval": "120 seconds (2 minutes)",
+      "max_age": "10 minutes",
+      "status": "running",
+      "pending_items": 150
+    },
     "expire_correlations": {
-      "interval": "300 seconds (5 minutes)",
+      "interval": "60 seconds (1 minute)",
+      "expire_after": "10 minutes",
       "status": "running"
     },
     "cleanup_logs": {

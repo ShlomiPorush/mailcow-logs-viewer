@@ -411,8 +411,19 @@ function hasDataChanged(newData, cacheKey) {
 }
 
 // Smart refresh for Messages - only update if new messages arrived
+// Only refreshes if there are no active filters/search (to avoid disrupting user's view)
 async function smartRefreshMessages() {
     const filters = currentFilters.messages || {};
+    
+    // Don't refresh if user has active search or filters
+    const hasActiveFilters = filters.search || filters.sender || filters.recipient || 
+                            filters.direction || filters.status || filters.user || filters.ip;
+    
+    // Don't refresh if user is not on first page
+    if (hasActiveFilters || currentPage.messages > 1) {
+        return; // Skip refresh to avoid disrupting user's view
+    }
+    
     const params = new URLSearchParams({
         page: currentPage.messages,
         limit: 50
@@ -422,7 +433,9 @@ async function smartRefreshMessages() {
     if (filters.sender) params.append('sender', filters.sender);
     if (filters.recipient) params.append('recipient', filters.recipient);
     if (filters.direction) params.append('direction', filters.direction);
+    if (filters.status) params.append('status', filters.status);
     if (filters.user) params.append('user', filters.user);
+    if (filters.ip) params.append('ip', filters.ip);
     
     const response = await authenticatedFetch(`/api/messages?${params}`);
     if (!response.ok) return;
@@ -450,8 +463,8 @@ function renderMessagesData(data) {
         <div class="space-y-3">
             ${data.data.map(msg => `
                 <div class="border border-gray-200 dark:border-gray-700 rounded-lg p-4 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition cursor-pointer" onclick="viewMessageDetails('${msg.correlation_key}')">
-                    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-2">
-                        <div class="flex-1">
+                    <div class="grid grid-cols-1 sm:grid-cols-[1fr_auto] gap-2 mb-2 items-start">
+                        <div class="min-w-0 overflow-hidden">
                             <div class="flex flex-wrap items-center gap-2 mb-1">
                                 <span class="text-sm font-medium text-gray-900 dark:text-white">${escapeHtml(msg.sender || 'Unknown')}</span>
                                 <svg class="w-4 h-4 text-gray-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -459,12 +472,17 @@ function renderMessagesData(data) {
                                 </svg>
                                 <span class="text-sm text-gray-600 dark:text-gray-300">${escapeHtml(msg.recipient || 'Unknown')}</span>
                             </div>
-                            <p class="text-xs text-gray-500 dark:text-gray-400 truncate">${escapeHtml(msg.subject || 'No subject')}</p>
+                            <p class="text-xs text-gray-500 dark:text-gray-400 truncate" title="${escapeHtml(msg.subject || 'No subject')}">${escapeHtml(msg.subject || 'No subject')}</p>
                         </div>
-                        <div class="flex flex-wrap items-center gap-2">
-                            ${msg.is_complete !== null ? `<span class="inline-block px-2 py-0.5 text-xs font-medium rounded ${msg.is_complete ? 'bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300' : 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-800 dark:text-yellow-300'}" title="${msg.is_complete ? 'Correlation complete' : 'Waiting for Postfix logs'}">${msg.is_complete ? '[OK] Linked' : '[...] Pending'}</span>` : ''}
+                        <div class="flex flex-wrap items-center gap-2 flex-shrink-0 sm:justify-end">
+                            ${(() => {
+                                const correlationStatus = getCorrelationStatusDisplay(msg);
+                                if (correlationStatus) {
+                                    return `<span class="inline-block px-2 py-0.5 text-xs font-medium rounded ${correlationStatus.class}" title="${msg.final_status || (msg.is_complete ? 'Correlation complete' : 'Waiting for Postfix logs')}">${correlationStatus.display}</span>`;
+                                }
+                                return '';
+                            })()}
                             ${msg.direction ? `<span class="inline-block px-2 py-0.5 text-xs font-medium rounded ${getDirectionClass(msg.direction)}">${msg.direction}</span>` : ''}
-                            ${msg.final_status ? `<span class="inline-block px-2 py-0.5 text-xs font-medium rounded ${getStatusClass(msg.final_status)}">${msg.final_status}</span>` : ''}
                             ${msg.is_spam !== null ? `<span class="inline-block px-2 py-0.5 text-xs font-medium rounded ${msg.is_spam ? 'bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-300' : 'bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300'}">${msg.is_spam ? 'SPAM' : 'CLEAN'}</span>` : ''}
                         </div>
                     </div>
@@ -516,10 +534,10 @@ function renderNetfilterData(data) {
     // Deduplicate logs
     const uniqueLogs = deduplicateNetfilterLogs(data.data);
     
-    // Update count display with deduplicated count
+    // Update count display with total count from API (like Messages page)
     const countEl = document.getElementById('security-count');
     if (countEl) {
-        countEl.textContent = uniqueLogs.length > 0 ? `(${uniqueLogs.length.toLocaleString()} results)` : '';
+        countEl.textContent = data.total ? `(${data.total.toLocaleString()} results)` : '';
     }
     
     container.innerHTML = `
@@ -530,7 +548,7 @@ function renderNetfilterData(data) {
                         <div class="flex flex-wrap items-center gap-2">
                             <span class="font-mono text-sm font-semibold text-gray-900 dark:text-white">${log.ip || '-'}</span>
                             ${log.username && log.username !== '-' ? `<span class="text-sm text-blue-600 dark:text-blue-400">${escapeHtml(log.username)}</span>` : ''}
-                            <span class="inline-block px-2 py-0.5 text-xs font-medium rounded ${log.action === 'banned' ? 'bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-300' : 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-800 dark:text-yellow-300'}">${log.action || 'warning'}</span>
+                            <span class="inline-block px-2 py-0.5 text-xs font-medium rounded ${getActionClass(log.action)}">${getActionLabel(log.action)}</span>
                             ${log.attempts_left !== null && log.attempts_left !== undefined ? `<span class="text-xs text-gray-500 dark:text-gray-400">${log.attempts_left} attempts left</span>` : ''}
                         </div>
                         <span class="text-xs text-gray-500 dark:text-gray-400">${formatTime(log.time)}</span>
@@ -875,21 +893,21 @@ async function loadRecentActivity() {
         }
         
         container.innerHTML = data.activity.map(msg => `
-            <div class="flex flex-col sm:flex-row sm:items-center justify-between p-3 sm:p-4 bg-gray-50 dark:bg-gray-700/50 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition cursor-pointer" onclick="viewMessageDetails('${msg.correlation_key}')">
-                <div class="flex-1 mb-2 sm:mb-0">
+            <div class="grid grid-cols-1 sm:grid-cols-[1fr_auto] gap-2 p-3 sm:p-4 bg-gray-50 dark:bg-gray-700/50 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition cursor-pointer items-start" onclick="viewMessageDetails('${msg.correlation_key}')">
+                <div class="min-w-0 overflow-hidden">
                     <div class="flex flex-wrap items-center gap-2 mb-1">
                         <span class="text-sm font-medium text-gray-900 dark:text-white">${escapeHtml(msg.sender || 'Unknown')}</span>
-                        <svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <svg class="w-4 h-4 text-gray-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
                         </svg>
                         <span class="text-sm text-gray-600 dark:text-gray-300">${escapeHtml(msg.recipient || 'Unknown')}</span>
                         ${msg.direction ? `<span class="inline-block px-2 py-0.5 text-xs font-medium rounded ${getDirectionClass(msg.direction)}">${msg.direction}</span>` : ''}
                     </div>
-                    <p class="text-xs text-gray-500 dark:text-gray-400 truncate">${escapeHtml(msg.subject || 'No subject')}</p>
+                    <p class="text-xs text-gray-500 dark:text-gray-400 truncate" title="${escapeHtml(msg.subject || 'No subject')}">${escapeHtml(msg.subject || 'No subject')}</p>
                 </div>
-                <div class="flex items-center gap-2">
+                <div class="flex items-center gap-2 flex-shrink-0 sm:justify-end">
                     <span class="inline-block px-2 py-1 text-xs font-medium rounded ${getStatusClass(msg.status)}">${msg.status || 'unknown'}</span>
-                    <p class="text-xs text-gray-500 dark:text-gray-400">${formatTime(msg.time)}</p>
+                    <p class="text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap">${formatTime(msg.time)}</p>
                 </div>
             </div>
         `).join('');
@@ -1180,10 +1198,10 @@ async function loadNetfilterLogs(page = 1) {
         // Deduplicate logs based on message + time + priority
         const uniqueLogs = deduplicateNetfilterLogs(data.data);
         
-        // Update count display with deduplicated count
+        // Update count display with total count from API (like Messages page)
         const countEl = document.getElementById('security-count');
         if (countEl) {
-            countEl.textContent = uniqueLogs.length > 0 ? `(${uniqueLogs.length.toLocaleString()} results)` : '';
+            countEl.textContent = data.total ? `(${data.total.toLocaleString()} results)` : '';
         }
         
         container.innerHTML = `
@@ -1194,7 +1212,7 @@ async function loadNetfilterLogs(page = 1) {
                             <div class="flex flex-wrap items-center gap-2">
                                 <span class="font-mono text-sm font-semibold text-gray-900 dark:text-white">${log.ip || '-'}</span>
                                 ${log.username && log.username !== '-' ? `<span class="text-sm text-blue-600 dark:text-blue-400">${escapeHtml(log.username)}</span>` : ''}
-                                <span class="inline-block px-2 py-0.5 text-xs font-medium rounded ${log.action === 'banned' ? 'bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-300' : 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-800 dark:text-yellow-300'}">${log.action || 'warning'}</span>
+                                <span class="inline-block px-2 py-0.5 text-xs font-medium rounded ${getActionClass(log.action)}">${getActionLabel(log.action)}</span>
                                 ${log.attempts_left !== null && log.attempts_left !== undefined ? `<span class="text-xs text-gray-500 dark:text-gray-400">${log.attempts_left} attempts left</span>` : ''}
                             </div>
                             <span class="text-xs text-gray-500 dark:text-gray-400">${formatTime(log.time)}</span>
@@ -1436,8 +1454,8 @@ async function loadMessages(page = 1) {
             <div class="space-y-3">
                 ${data.data.map(msg => `
                     <div class="border border-gray-200 dark:border-gray-700 rounded-lg p-4 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition cursor-pointer" onclick="viewMessageDetails('${msg.correlation_key}')">
-                        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-2">
-                            <div class="flex-1">
+                        <div class="grid grid-cols-1 sm:grid-cols-[1fr_auto] gap-2 mb-2 items-start">
+                            <div class="min-w-0 overflow-hidden">
                                 <div class="flex flex-wrap items-center gap-2 mb-1">
                                     <span class="text-sm font-medium text-gray-900 dark:text-white">${escapeHtml(msg.sender || 'Unknown')}</span>
                                     <svg class="w-4 h-4 text-gray-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1445,12 +1463,17 @@ async function loadMessages(page = 1) {
                                     </svg>
                                     <span class="text-sm text-gray-600 dark:text-gray-300">${escapeHtml(msg.recipient || 'Unknown')}</span>
                                 </div>
-                                <p class="text-xs text-gray-500 dark:text-gray-400 truncate">${escapeHtml(msg.subject || 'No subject')}</p>
+                                <p class="text-xs text-gray-500 dark:text-gray-400 truncate" title="${escapeHtml(msg.subject || 'No subject')}">${escapeHtml(msg.subject || 'No subject')}</p>
                             </div>
-                            <div class="flex flex-wrap items-center gap-2">
-                                ${msg.is_complete !== null ? `<span class="inline-block px-2 py-0.5 text-xs font-medium rounded ${msg.is_complete ? 'bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300' : 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-800 dark:text-yellow-300'}" title="${msg.is_complete ? 'Correlation complete' : 'Waiting for Postfix logs'}">${msg.is_complete ? '[OK] Linked' : '[...] Pending'}</span>` : ''}
+                            <div class="flex flex-wrap items-center gap-2 flex-shrink-0 sm:justify-end">
+                                ${(() => {
+                                    const correlationStatus = getCorrelationStatusDisplay(msg);
+                                    if (correlationStatus) {
+                                        return `<span class="inline-block px-2 py-0.5 text-xs font-medium rounded ${correlationStatus.class}" title="${msg.final_status || (msg.is_complete ? 'Correlation complete' : 'Waiting for Postfix logs')}">${correlationStatus.display}</span>`;
+                                    }
+                                    return '';
+                                })()}
                                 ${msg.direction ? `<span class="inline-block px-2 py-0.5 text-xs font-medium rounded ${getDirectionClass(msg.direction)}">${msg.direction}</span>` : ''}
-                                ${msg.final_status ? `<span class="inline-block px-2 py-0.5 text-xs font-medium rounded ${getStatusClass(msg.final_status)}">${msg.final_status}</span>` : ''}
                                 ${msg.is_spam !== null ? `<span class="inline-block px-2 py-0.5 text-xs font-medium rounded ${msg.is_spam ? 'bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-300' : 'bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300'}">${msg.is_spam ? 'SPAM' : 'CLEAN'}</span>` : ''}
                             </div>
                         </div>
@@ -1773,6 +1796,7 @@ function renderStatusJobs(jobs) {
         <div class="space-y-3">
             ${renderJobCard('Fetch Logs', jobs.fetch_logs, 'Imports logs from Mailcow API')}
             ${renderJobCard('Complete Correlations', jobs.complete_correlations, 'Links Postfix logs to messages')}
+            ${renderJobCard('Update Final Status', jobs.update_final_status, 'Updates final status for correlations with late-arriving Postfix logs')}
             ${renderJobCard('Expire Correlations', jobs.expire_correlations, 'Marks old incomplete correlations as expired')}
             ${renderJobCard('Cleanup Old Logs', jobs.cleanup_logs, 'Removes logs older than retention period')}
         </div>
@@ -1970,15 +1994,30 @@ function renderModalTab(tab, data) {
 }
 
 function renderOverviewTab(content, data) {
-    // Show all recipients if there are multiple
-    let recipientsHtml = '';
-    if (data.recipients && data.recipients.length > 0) {
-        if (data.recipients.length > 1) {
-            recipientsHtml = `
-                <div class="md:col-span-2">
-                    <p class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Recipients (${data.recipient_count})</p>
-                    <div class="mt-2 space-y-1">
-                        ${data.recipients.map(r => `
+    // Collect recipients from Postfix logs if available (these have full addresses including +)
+    let recipientsFromPostfix = new Set();
+    if (data.postfix && data.postfix.length > 0) {
+        data.postfix.forEach(log => {
+            if (log.recipient) {
+                recipientsFromPostfix.add(log.recipient);
+            }
+        });
+    }
+    
+    // Use Postfix recipients if available, otherwise fall back to correlation recipients
+    const recipientsToDisplay = recipientsFromPostfix.size > 0 
+        ? Array.from(recipientsFromPostfix) 
+        : (data.recipients || []);
+    
+    // Build recipients section for right column
+    let recipientsRightColumn = '';
+    if (recipientsToDisplay.length > 0) {
+        if (recipientsToDisplay.length > 1) {
+            recipientsRightColumn = `
+                <div>
+                    <p class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Recipients (${recipientsToDisplay.length})</p>
+                    <div class="mt-2 space-y-1 max-h-32 overflow-y-auto">
+                        ${recipientsToDisplay.map(r => `
                             <div class="flex items-center gap-2">
                                 <svg class="w-4 h-4 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
@@ -1990,15 +2029,15 @@ function renderOverviewTab(content, data) {
                 </div>
             `;
         } else {
-            recipientsHtml = `
+            recipientsRightColumn = `
                 <div>
                     <p class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">To</p>
-                    <p class="text-sm font-semibold text-gray-900 dark:text-white mt-1">${escapeHtml(data.recipient || data.recipients[0] || '-')}</p>
+                    <p class="text-sm font-semibold text-gray-900 dark:text-white mt-1">${escapeHtml(recipientsToDisplay[0] || '-')}</p>
                 </div>
             `;
         }
     } else if (data.recipient) {
-        recipientsHtml = `
+        recipientsRightColumn = `
             <div>
                 <p class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">To</p>
                 <p class="text-sm font-semibold text-gray-900 dark:text-white mt-1">${escapeHtml(data.recipient)}</p>
@@ -2007,56 +2046,53 @@ function renderOverviewTab(content, data) {
     }
     
     content.innerHTML = `
-        <div class="space-y-6">
-            <div class="bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-gray-800 dark:to-gray-700 p-4 rounded-lg">
-                <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-3">Message Overview</h3>
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                        <p class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">From</p>
-                        <p class="text-sm font-semibold text-gray-900 dark:text-white mt-1">${escapeHtml(data.sender || '-')}</p>
+        <div class="flex flex-col h-full">
+            <div class="flex-1 overflow-y-auto min-h-0">
+                <div class="bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-gray-800 dark:to-gray-700 p-4 rounded-lg">
+                    <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-3">Message Overview</h3>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <!-- Left Column -->
+                        <div class="space-y-3">
+                            <div>
+                                <p class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">From</p>
+                                <p class="text-sm font-semibold text-gray-900 dark:text-white mt-1">${escapeHtml(data.sender || '-')}</p>
+                            </div>
+                            ${data.subject && data.subject !== 'Postfix Log Details' ? `
+                                <div class="min-w-0">
+                                    <p class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Subject</p>
+                                    <p class="text-sm text-gray-900 dark:text-white mt-1 truncate" title="${escapeHtml(data.subject)}">${escapeHtml(data.subject)}</p>
+                                </div>
+                            ` : ''}
+                            ${data.final_status || data.direction ? `
+                                <div>
+                                    <p class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase mb-1">Status & Direction</p>
+                                    <div class="flex items-center gap-2 flex-wrap">
+                                        ${data.final_status ? `<span class="inline-block px-3 py-1 text-xs font-medium rounded ${getStatusClass(data.final_status)}">${data.final_status}</span>` : ''}
+                                        ${data.direction ? `<span class="inline-block px-3 py-1 text-xs font-medium rounded ${getDirectionClass(data.direction)}">${data.direction}</span>` : ''}
+                                    </div>
+                                </div>
+                            ` : ''}
+                        </div>
+                        <!-- Right Column -->
+                        <div class="space-y-3">
+                            ${recipientsRightColumn}
+                            ${data.queue_id ? `
+                                <div>
+                                    <p class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Queue ID</p>
+                                    <p class="text-xs font-mono text-gray-600 dark:text-gray-400 mt-1">${data.queue_id}</p>
+                                </div>
+                            ` : ''}
+                            ${data.message_id ? `
+                                <div>
+                                    <p class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Message ID</p>
+                                    <p class="text-xs font-mono text-gray-600 dark:text-gray-400 mt-1 break-all">${escapeHtml(data.message_id)}</p>
+                                </div>
+                            ` : ''}
+                        </div>
                     </div>
-                    ${recipientsHtml}
-                    ${data.subject && data.subject !== 'Postfix Log Details' ? `
-                        <div class="md:col-span-2">
-                            <p class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Subject</p>
-                            <p class="text-sm text-gray-900 dark:text-white mt-1">${escapeHtml(data.subject)}</p>
-                        </div>
-                    ` : ''}
-                    ${data.direction ? `
-                        <div>
-                            <p class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Direction</p>
-                            <span class="inline-block px-3 py-1 text-xs font-medium rounded ${getDirectionClass(data.direction)} mt-1">${data.direction}</span>
-                        </div>
-                    ` : ''}
-                    ${data.final_status ? `
-                        <div>
-                            <p class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Final Status</p>
-                            <span class="inline-block px-3 py-1 text-xs font-medium rounded ${getStatusClass(data.final_status)} mt-1">${data.final_status}</span>
-                        </div>
-                    ` : ''}
-                    ${data.queue_id ? `
-                        <div>
-                            <p class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Queue ID</p>
-                            <p class="text-sm font-mono text-gray-900 dark:text-white mt-1">${data.queue_id}</p>
-                        </div>
-                    ` : ''}
-                    ${data.message_id ? `
-                        <div class="md:col-span-2">
-                            <p class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Message ID</p>
-                            <p class="text-xs font-mono text-gray-700 dark:text-gray-300 mt-1 break-all">${escapeHtml(data.message_id)}</p>
-                        </div>
-                    ` : ''}
-                    ${data.first_seen ? `
-                        <div>
-                            <p class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">First Seen</p>
-                            <p class="text-sm text-gray-900 dark:text-white mt-1">${formatTime(data.first_seen)}</p>
-                        </div>
-                    ` : ''}
                 </div>
-            </div>
-            
-            ${data.rspamd ? `
-                <div class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-4">
+                ${data.rspamd ? `
+                    <div class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-4 mt-1">
                     <h4 class="text-md font-semibold text-gray-900 dark:text-white mb-3">Quick Spam Summary</h4>
                     <div class="grid grid-cols-3 gap-4">
                         <div class="text-center">
@@ -2075,33 +2111,36 @@ function renderOverviewTab(content, data) {
                     <p class="text-xs text-gray-500 dark:text-gray-400 text-center mt-3">
                         Click "Spam Analysis" tab for detailed breakdown
                     </p>
-                </div>
-            ` : data.postfix && data.postfix.length > 0 ? `
-                <div class="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
+                    </div>
+                ` : data.postfix && data.postfix.length > 0 ? `
+                    <div class="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4 mt-3">
                     <div class="flex items-start gap-3">
                         <svg class="w-5 h-5 text-blue-600 dark:text-blue-400 flex-shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
                             <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"></path>
                         </svg>
                         <div>
                             <p class="text-sm font-medium text-blue-900 dark:text-blue-300">Postfix Delivery Logs</p>
-                            <p class="text-xs text-blue-800 dark:text-blue-400 mt-1">Click "Postfix" tab to see complete delivery timeline (${data.postfix.length} entries)</p>
+                            <p class="text-xs text-blue-800 dark:text-blue-400 mt-1">Click "Logs" tab to see complete delivery timeline (${data.postfix.length} entries)</p>
                         </div>
                     </div>
-                </div>
-            ` : ''}
+                    </div>
+                ` : ''}
+            </div>
             ${data.rspamd ? `
-                <div class="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
-                    <div class="flex items-start gap-3">
-                        <svg class="w-5 h-5 text-blue-600 dark:text-blue-400 flex-shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
-                            <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"></path>
-                        </svg>
-                        <div>
-                            <p class="text-sm font-medium text-blue-900 dark:text-blue-300">Additional Details</p>
-                            <div class="mt-2 space-y-1 text-xs text-blue-800 dark:text-blue-400">
-                                ${data.rspamd.ip ? `<p>Source IP: ${data.rspamd.ip}</p>` : ''}
-                                ${data.rspamd.user ? `<p>Authenticated User: ${escapeHtml(data.rspamd.user)}</p>` : ''}
-                                ${data.rspamd.size ? `<p>Message Size: ${formatSize(data.rspamd.size)}</p>` : ''}
-                                ${data.rspamd.has_auth ? `<p>Authentication: Verified (MAILCOW_AUTH)</p>` : ''}
+                <div class="flex-shrink-0 mt-auto pt-3 border-t border-gray-200 dark:border-gray-700">
+                    <div class="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
+                        <div class="flex items-start gap-3">
+                            <svg class="w-5 h-5 text-blue-600 dark:text-blue-400 flex-shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
+                                <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"></path>
+                            </svg>
+                            <div class="flex-1">
+                                <p class="text-sm font-medium text-blue-900 dark:text-blue-300 mb-2">Additional Details</p>
+                                <div class="space-y-1 text-xs text-blue-800 dark:text-blue-400">
+                                    ${data.rspamd.ip ? `<p>Source IP: ${data.rspamd.ip}</p>` : ''}
+                                    ${data.rspamd.user ? `<p>Authenticated User: ${escapeHtml(data.rspamd.user)}</p>` : ''}
+                                    ${data.rspamd.size ? `<p>Message Size: ${formatSize(data.rspamd.size)}</p>` : ''}
+                                    ${data.rspamd.has_auth ? `<p>Authentication: Verified (MAILCOW_AUTH)</p>` : ''}
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -2128,6 +2167,7 @@ function renderPostfixTab(content, data) {
     let sender = null, clientIp = null, relay = null;
     let messageId = null, finalStatus = null, totalDelay = null, queueId = null;
     let errorReasons = [];
+    let recipientsFromPostfix = new Set(); // Collect all unique recipients from Postfix logs
     
     data.postfix.forEach(log => {
         if (log.queue_id && !queueId) queueId = log.queue_id;
@@ -2136,6 +2176,10 @@ function renderPostfixTab(content, data) {
         if (log.message_id && !messageId) messageId = log.message_id;
         if (log.status) finalStatus = log.status;
         if (log.delay) totalDelay = log.delay;
+        // Collect recipients from Postfix logs (these have the full address including +)
+        if (log.recipient) {
+            recipientsFromPostfix.add(log.recipient);
+        }
         
         if (!clientIp && log.message) {
             const ipMatch = log.message.match(/client=.*?\[(\d+\.\d+\.\d+\.\d+)\]/);
@@ -2207,12 +2251,17 @@ function renderPostfixTab(content, data) {
                             <p class="text-sm font-semibold text-gray-900 dark:text-white mt-1">${escapeHtml(sender)}</p>
                         </div>
                     ` : ''}
-                    ${data.recipients && data.recipients.length > 0 ? `
+                    ${recipientsFromPostfix.size > 0 ? `
+                        <div>
+                            <p class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">To (${recipientsFromPostfix.size})</p>
+                            <p class="text-sm font-semibold text-gray-900 dark:text-white mt-1">${recipientsFromPostfix.size === 1 ? escapeHtml(Array.from(recipientsFromPostfix)[0]) : `${recipientsFromPostfix.size} recipients`}</p>
+                        </div>
+                    ` : (data.recipients && data.recipients.length > 0 ? `
                         <div>
                             <p class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">To (${data.recipients.length})</p>
                             <p class="text-sm font-semibold text-gray-900 dark:text-white mt-1">${data.recipients.length === 1 ? escapeHtml(data.recipients[0]) : `${data.recipients.length} recipients`}</p>
                         </div>
-                    ` : ''}
+                    ` : '')}
                     ${clientIp ? `
                         <div>
                             <p class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Client IP</p>
@@ -2231,10 +2280,10 @@ function renderPostfixTab(content, data) {
                             <span class="inline-block px-3 py-1 text-sm font-medium rounded ${getStatusClass(finalStatus)} mt-1">${finalStatus}</span>
                         </div>
                     ` : ''}
-                    ${totalDelay ? `
+                    ${relay ? `
                         <div>
-                            <p class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Total Delay</p>
-                            <p class="text-sm font-semibold text-gray-900 dark:text-white mt-1">${totalDelay.toFixed(2)}s</p>
+                            <p class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Relay</p>
+                            <p class="text-sm font-mono font-semibold text-gray-900 dark:text-white mt-1 truncate" title="${escapeHtml(relay)}">${escapeHtml(relay)}</p>
                         </div>
                     ` : ''}
                     ${messageId ? `
@@ -2245,6 +2294,27 @@ function renderPostfixTab(content, data) {
                     ` : ''}
                 </div>
             </div>
+            
+            <!-- Delivery Summary by Recipient (if multiple recipients) -->
+            ${recipientEntries.length > 1 ? `
+                <div class="border-t border-gray-200 dark:border-gray-700 pt-4">
+                    <h4 class="text-md font-semibold text-gray-900 dark:text-white mb-3">Delivery Summary by Recipient</h4>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        ${recipientEntries.map(([recipient, logs]) => {
+                            const statusLog = logs.find(l => l.status) || logs[0];
+                            return `
+                                <div class="p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg border border-gray-200 dark:border-gray-600">
+                                    <div class="flex items-center justify-between">
+                                        <span class="text-sm text-gray-900 dark:text-white truncate flex-1">${escapeHtml(recipient)}</span>
+                                        ${statusLog.status ? `<span class="ml-2 inline-block px-2 py-0.5 text-xs font-medium rounded ${getStatusClass(statusLog.status)}">${statusLog.status}</span>` : ''}
+                                    </div>
+                                    ${statusLog.relay ? `<p class="text-xs text-gray-500 dark:text-gray-400 mt-1 truncate">via ${escapeHtml(statusLog.relay)}</p>` : ''}
+                                </div>
+                            `;
+                        }).join('')}
+                    </div>
+                </div>
+            ` : ''}
             
             <!-- Complete Log Timeline - ALWAYS show all logs -->
             <div>
@@ -2270,27 +2340,6 @@ function renderPostfixTab(content, data) {
                     `).join('')}
                 </div>
             </div>
-            
-            <!-- Delivery Summary by Recipient (if multiple recipients) -->
-            ${recipientEntries.length > 1 ? `
-                <div class="border-t border-gray-200 dark:border-gray-700 pt-4">
-                    <h4 class="text-md font-semibold text-gray-900 dark:text-white mb-3">Delivery Summary by Recipient</h4>
-                    <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-                        ${recipientEntries.map(([recipient, logs]) => {
-                            const statusLog = logs.find(l => l.status) || logs[0];
-                            return `
-                                <div class="p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg border border-gray-200 dark:border-gray-600">
-                                    <div class="flex items-center justify-between">
-                                        <span class="text-sm text-gray-900 dark:text-white truncate flex-1">${escapeHtml(recipient)}</span>
-                                        ${statusLog.status ? `<span class="ml-2 inline-block px-2 py-0.5 text-xs font-medium rounded ${getStatusClass(statusLog.status)}">${statusLog.status}</span>` : ''}
-                                    </div>
-                                    ${statusLog.relay ? `<p class="text-xs text-gray-500 dark:text-gray-400 mt-1 truncate">via ${escapeHtml(statusLog.relay)}</p>` : ''}
-                                </div>
-                            `;
-                        }).join('')}
-                    </div>
-                </div>
-            ` : ''}
         </div>
     `;
 }
@@ -2414,7 +2463,7 @@ function renderNetfilterTab(content, data) {
                                 <span class="text-xs font-mono text-gray-600 dark:text-gray-300">${formatTime(log.time)}</span>
                                 <span class="text-xs font-mono font-semibold text-gray-900 dark:text-white">${log.ip}</span>
                             </div>
-                            <span class="inline-block px-2 py-0.5 text-xs font-medium rounded ${log.action === 'banned' ? 'bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-300' : 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-800 dark:text-yellow-300'}">${log.action}</span>
+                            <span class="inline-block px-2 py-0.5 text-xs font-medium rounded ${getActionClass(log.action)}">${getActionLabel(log.action)}</span>
                         </div>
                         ${log.username ? `<p class="text-xs text-gray-700 dark:text-gray-300">User: ${escapeHtml(log.username)}</p>` : ''}
                         ${log.auth_method ? `<p class="text-xs text-gray-600 dark:text-gray-400">Method: ${log.auth_method}</p>` : ''}
@@ -2548,14 +2597,88 @@ function getStatusClass(status) {
     }
 }
 
+function getCorrelationStatusDisplay(msg) {
+    // If there's a final_status, show it with emoji
+    if (msg.final_status) {
+        const statusEmoji = {
+            'delivered': '✓',
+            'sent': '✓',
+            'bounced': '↩',
+            'rejected': '✗',
+            'deferred': '⏳',
+            'spam': '⚠',
+            'expired': '⏸'
+        };
+        const statusText = {
+            'delivered': 'Delivered',
+            'sent': 'Sent',
+            'bounced': 'Bounced',
+            'rejected': 'Rejected',
+            'deferred': 'Deferred',
+            'spam': 'Spam',
+            'expired': 'Expired'
+        };
+        const emoji = statusEmoji[msg.final_status] || '•';
+        const text = statusText[msg.final_status] || msg.final_status;
+        return { display: `${emoji} ${text}`, class: getStatusClass(msg.final_status) };
+    }
+    
+    // If no final_status but correlation is complete, show Linked
+    if (msg.is_complete === true) {
+        return { display: '✓ Linked', class: 'bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300' };
+    }
+    
+    // If correlation is not complete, show Pending
+    if (msg.is_complete === false) {
+        return { display: '⏳ Pending', class: 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-800 dark:text-yellow-300' };
+    }
+    
+    return null;
+}
+
 function getDirectionClass(direction) {
     switch (direction) {
         case 'inbound':
             return 'bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-300';
         case 'outbound':
             return 'bg-purple-100 dark:bg-purple-900/30 text-purple-800 dark:text-purple-300';
+        case 'internal':
+            return 'bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300';
         default:
             return 'bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-300';
+    }
+}
+
+function getActionLabel(action) {
+    switch (action) {
+        case 'ban':
+            return 'BAN';
+        case 'unban':
+            return 'UNBAN';
+        case 'banned':
+            return 'BAN'; // Legacy support
+        case 'warning':
+            return 'warning';
+        case 'info':
+            return 'info';
+        default:
+            return action || 'warning';
+    }
+}
+
+function getActionClass(action) {
+    switch (action) {
+        case 'ban':
+        case 'banned': // Legacy support
+            return 'bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-300';
+        case 'unban':
+            return 'bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300';
+        case 'warning':
+            return 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-800 dark:text-yellow-300';
+        case 'info':
+            return 'bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-300';
+        default:
+            return 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-800 dark:text-yellow-300';
     }
 }
 
@@ -2922,6 +3045,7 @@ function renderJobCard(title, data, description) {
                 ${data.schedule ? `<span>Schedule: ${data.schedule}</span>` : ''}
                 ${data.retention ? `<span>Retention: ${data.retention}</span>` : ''}
                 ${data.expire_after ? `<span>Expire after: ${data.expire_after}</span>` : ''}
+                ${data.max_age ? `<span>Max age: ${data.max_age}</span>` : ''}
                 ${data.pending_items !== undefined ? `<span>Pending: ${data.pending_items}</span>` : ''}
             </div>
         </div>

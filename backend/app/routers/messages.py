@@ -6,7 +6,7 @@ FIXED: All timestamps now sent with proper UTC timezone ('Z' suffix)
 import logging
 from fastapi import APIRouter, Depends, Query, HTTPException
 from sqlalchemy.orm import Session
-from sqlalchemy import or_, and_, desc
+from sqlalchemy import or_, and_, desc, select
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
@@ -140,12 +140,12 @@ async def get_unified_messages(
             )
             
             # Also search in Rspamd fields (IP and user) via subquery
-            rspamd_subquery = db.query(RspamdLog.id).filter(
+            rspamd_subquery = select(RspamdLog.id).where(
                 or_(
                     RspamdLog.ip.ilike(search_term),
                     RspamdLog.user.ilike(search_term)
                 )
-            ).subquery()
+            )
             
             query = query.filter(
                 or_(
@@ -164,7 +164,21 @@ async def get_unified_messages(
             query = query.filter(MessageCorrelation.direction == direction)
         
         if status:
-            query = query.filter(MessageCorrelation.final_status == status)
+            # For spam status, check both final_status and is_spam from Rspamd
+            if status == 'spam':
+                # Use outerjoin to include correlations without Rspamd logs
+                # Check if final_status is 'spam' OR if Rspamd marked it as spam
+                query = query.outerjoin(
+                    RspamdLog,
+                    MessageCorrelation.rspamd_log_id == RspamdLog.id
+                ).filter(
+                    or_(
+                        MessageCorrelation.final_status == 'spam',
+                        RspamdLog.is_spam == True
+                    )
+                )
+            else:
+                query = query.filter(MessageCorrelation.final_status == status)
         
         if start_date:
             query = query.filter(MessageCorrelation.first_seen >= start_date)
@@ -173,15 +187,21 @@ async def get_unified_messages(
             query = query.filter(MessageCorrelation.first_seen <= end_date)
         
         # Filter by user (need to join with Rspamd)
+        # Check if we already have a join from spam filter (outerjoin)
+        has_rspamd_join = status == 'spam'
         if user:
-            query = query.join(
-                RspamdLog,
-                MessageCorrelation.rspamd_log_id == RspamdLog.id
-            ).filter(RspamdLog.user.ilike(f"%{user}%"))
+            if not has_rspamd_join:
+                query = query.join(
+                    RspamdLog,
+                    MessageCorrelation.rspamd_log_id == RspamdLog.id
+                )
+                has_rspamd_join = True
+            # outerjoin works fine for filtering, no need to change it
+            query = query.filter(RspamdLog.user.ilike(f"%{user}%"))
         
         # Filter by IP (need to join with Rspamd if not already joined)
         if ip:
-            if not user:  # Only join if we haven't already
+            if not has_rspamd_join:
                 query = query.join(
                     RspamdLog,
                     MessageCorrelation.rspamd_log_id == RspamdLog.id
@@ -268,10 +288,17 @@ async def get_message_full_details(
                 RspamdLog.id == correlation.rspamd_log_id
             ).first()
         
-        # Get Postfix logs - DEDUPLICATE by using set()
+        # Get Postfix logs - Use queue_id instead of postfix_log_ids
+        # This ensures we always get ALL logs, even if they arrive after correlation is marked complete
         postfix_logs = []
-        if correlation.postfix_log_ids:
-            # Remove duplicates from postfix_log_ids
+        if correlation.queue_id:
+            # Query ALL postfix logs with this queue_id
+            # This is the source of truth, not postfix_log_ids
+            postfix_logs = db.query(PostfixLog).filter(
+                PostfixLog.queue_id == correlation.queue_id
+            ).order_by(PostfixLog.time).all()
+        elif correlation.postfix_log_ids:
+            # Fallback: if no queue_id yet, use postfix_log_ids (for incomplete correlations)
             unique_ids = list(set(correlation.postfix_log_ids))
             postfix_logs = db.query(PostfixLog).filter(
                 PostfixLog.id.in_(unique_ids)
@@ -288,18 +315,14 @@ async def get_message_full_details(
                 deduplicated_postfix_logs.append(log)
         postfix_logs = deduplicated_postfix_logs
         
-        # Get Netfilter logs by IP (if available from Rspamd)
+        # Get Netfilter logs by IP from Rspamd
+        # Simply filter by IP without time restrictions to show all security events
         netfilter_logs = []
         if rspamd_log and rspamd_log.ip:
-            # Get logs within 1 hour before/after the message
-            time_window_start = rspamd_log.time - timedelta(hours=1)
-            time_window_end = rspamd_log.time + timedelta(hours=1)
-            
+            # Get all Netfilter logs for this IP (no time window restriction)
             netfilter_logs = db.query(NetfilterLog).filter(
-                NetfilterLog.ip == rspamd_log.ip,
-                NetfilterLog.time >= time_window_start,
-                NetfilterLog.time <= time_window_end
-            ).order_by(NetfilterLog.time).all()
+                NetfilterLog.ip == rspamd_log.ip
+            ).order_by(NetfilterLog.time.desc()).limit(100).all()  # Limit to 100 most recent to avoid too many results
         
         # Get all recipients - from Rspamd (primary source) or from Postfix logs
         recipients = []

@@ -11,7 +11,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 from apscheduler.triggers.cron import CronTrigger
 from sqlalchemy.orm import Session
-from sqlalchemy import desc
+from sqlalchemy import desc, or_
 
 from .config import settings
 from .database import get_db_context
@@ -334,18 +334,19 @@ def parse_netfilter_message(message: str, priority: Optional[str] = None) -> Dic
     if attempts_match:
         result['attempts_left'] = int(attempts_match.group(1))
     
-    if 'banning' in message_lower or 'banned' in message_lower:
+    # Check for unbanning first (before banning) - use word boundaries to avoid matching "banning" inside "unbanning"
+    # Check for "unbanning" or "unban" as separate words
+    if re.search(r'\bunban(?:ning)?\b', message_lower):
+        result['action'] = 'unban'
+    # Check for "banning" or "banned" as separate words (but not if it's part of "unbanning")
+    elif re.search(r'\bban(?:ning|ned)\b', message_lower):
         if 'more attempts' in message_lower:
             result['action'] = 'warning'
         else:
-            result['action'] = 'banned'
+            result['action'] = 'ban'
     elif priority and priority.lower() == 'crit':
-        if 'unbanning' in message_lower or 'unban' in message_lower:
-            result['action'] = 'info'
-        elif 'banning' in message_lower:
-            result['action'] = 'banned'
-        else:
-            result['action'] = 'banned'
+        # For crit priority, default to ban if not already set
+        result['action'] = 'ban'
     elif 'warning' in message_lower:
         result['action'] = 'warning'
     else:
@@ -653,6 +654,34 @@ def correlate_single_message(db: Session, rspamd_log: RspamdLog) -> Optional[Mes
         elif rspamd_log.is_spam:
             final_status = 'spam'
     
+    # Check if email was delivered locally (relay=dovecot + both sender and recipient are local domains)
+    # This is the definitive way to determine if email is internal
+    direction = rspamd_log.direction
+    
+    # Check if sender and recipient are both local domains
+    from .correlation import extract_domain, is_local_domain
+    sender_domain = extract_domain(rspamd_log.sender_smtp)
+    recipients = rspamd_log.recipients_smtp or []
+    
+    sender_is_local = sender_domain and is_local_domain(sender_domain)
+    all_recipients_local = True
+    if recipients:
+        for recipient in recipients:
+            recipient_domain = extract_domain(recipient)
+            if not recipient_domain or not is_local_domain(recipient_domain):
+                all_recipients_local = False
+                break
+    else:
+        all_recipients_local = False
+    
+    # Only mark as internal if: relay=dovecot AND sender is local AND all recipients are local
+    if sender_is_local and all_recipients_local:
+        for plog in all_postfix_logs:
+            if plog.relay and 'dovecot' in plog.relay.lower():
+                direction = 'internal'
+                rspamd_log.direction = 'internal'
+                break
+    
     # Get earliest timestamp (ensure timezone-aware)
     now = datetime.now(timezone.utc)
     first_seen = rspamd_log.time
@@ -670,7 +699,7 @@ def correlate_single_message(db: Session, rspamd_log: RspamdLog) -> Optional[Mes
             sender=rspamd_log.sender_smtp,
             recipient=first_recipient,
             subject=rspamd_log.subject,
-            direction=rspamd_log.direction,
+            direction=direction,
             final_status=final_status,
             rspamd_log_id=rspamd_log.id,
             postfix_log_ids=[plog.id for plog in all_postfix_logs] if all_postfix_logs else [],
@@ -802,8 +831,12 @@ async def expire_old_correlations():
     """
     SEPARATE JOB: Mark old incomplete correlations as "expired".
     
-    This runs independently to ensure old correlations get expired even if
+    This runs independently to ensure old incomplete correlations get expired even if
     the complete_incomplete_correlations job has issues.
+    
+    Only marks incomplete correlations (is_complete == False) as expired.
+    Complete correlations with non-final statuses (None, 'deferred', etc.) are left as-is,
+    as they may have legitimate statuses that don't need to be changed.
     
     Uses datetime.utcnow() (naive) to match the naive datetime in created_at.
     """
@@ -836,6 +869,95 @@ async def expire_old_correlations():
     
     except Exception as e:
         logger.error(f"[ERROR] Expire correlations error: {e}")
+
+
+async def update_final_status_for_correlations():
+    """
+    Background job to update final_status for correlations that don't have one yet.
+    
+    This handles the case where Postfix logs (especially status=sent) arrive after
+    the initial correlation was created. The job:
+    1. Finds correlations without a definitive final_status
+    2. Only checks correlations within Max Correlation Age
+    3. Looks for new Postfix logs that may have arrived
+    4. Updates final_status if a better status is found
+    
+    This runs independently from correlation creation to ensure we catch
+    late-arriving Postfix logs.
+    """
+    try:
+        with get_db_context() as db:
+            # Only check correlations within Max Correlation Age
+            cutoff_time = datetime.utcnow() - timedelta(
+                minutes=settings.max_correlation_age_minutes
+            )
+            
+            # Find correlations that:
+            # 1. Are within the correlation age limit
+            # 2. Have a queue_id (so we can check Postfix logs)
+            # 3. Don't have a definitive final_status yet
+            #    We exclude 'delivered', 'bounced', 'rejected', 'expired' as these are final
+            #    We check None, 'deferred', 'spam', and other non-final statuses
+            correlations_to_check = db.query(MessageCorrelation).filter(
+                MessageCorrelation.created_at >= cutoff_time,
+                MessageCorrelation.queue_id.isnot(None),
+                or_(
+                    MessageCorrelation.final_status.is_(None),
+                    MessageCorrelation.final_status.notin_(['delivered', 'bounced', 'rejected', 'expired'])
+                )
+            ).limit(100).all()
+            
+            if not correlations_to_check:
+                return
+            
+            updated_count = 0
+            
+            for correlation in correlations_to_check:
+                try:
+                    # Get all Postfix logs for this queue_id
+                    all_postfix = db.query(PostfixLog).filter(
+                        PostfixLog.queue_id == correlation.queue_id
+                    ).all()
+                    
+                    if not all_postfix:
+                        continue
+                    
+                    # Determine best final status from all Postfix logs
+                    # Priority: bounced > rejected > sent (delivered) > deferred
+                    # We check all logs to find the best status
+                    new_final_status = correlation.final_status
+                    
+                    for plog in all_postfix:
+                        if plog.status:
+                            if plog.status in ['bounced', 'rejected']:
+                                new_final_status = plog.status
+                                break  # Highest priority, stop here
+                            elif plog.status == 'sent':
+                                # 'sent' (delivered) is better than 'deferred' or None
+                                if new_final_status not in ['bounced', 'rejected', 'delivered']:
+                                    new_final_status = 'delivered'
+                            elif plog.status == 'deferred' and new_final_status not in ['bounced', 'rejected', 'delivered']:
+                                new_final_status = 'deferred'
+                    
+                    # Update if we found a better status
+                    if new_final_status and new_final_status != correlation.final_status:
+                        old_status = correlation.final_status
+                        correlation.final_status = new_final_status
+                        correlation.last_seen = datetime.now(timezone.utc)
+                        updated_count += 1
+                        logger.debug(f"Updated final_status for correlation {correlation.id} ({correlation.message_id[:40] if correlation.message_id else 'no-id'}...): {old_status} -> {new_final_status}")
+                
+                except Exception as e:
+                    logger.warning(f"Failed to update final_status for correlation {correlation.id}: {e}")
+                    continue
+            
+            db.commit()
+            
+            if updated_count > 0:
+                logger.info(f"[STATUS] Updated final_status for {updated_count} correlations")
+    
+    except Exception as e:
+        logger.error(f"[ERROR] Update final status error: {e}")
 
 
 # =============================================================================
@@ -1022,7 +1144,19 @@ def start_scheduler():
             max_instances=1
         )
         
-        # Job 5: Cleanup old logs (daily at 2 AM)
+        # Job 5: Update final status for correlations (every correlation_check_interval)
+        # This handles late-arriving Postfix logs (e.g., status=sent) that arrive
+        # after the initial correlation was created
+        scheduler.add_job(
+            update_final_status_for_correlations,
+            trigger=IntervalTrigger(seconds=settings.correlation_check_interval),
+            id='update_final_status',
+            name='Update Final Status',
+            replace_existing=True,
+            max_instances=1
+        )
+        
+        # Job 6: Cleanup old logs (daily at 2 AM)
         scheduler.add_job(
             cleanup_old_logs,
             trigger=CronTrigger(hour=2, minute=0),
@@ -1036,6 +1170,8 @@ def start_scheduler():
         logger.info("[OK] Scheduler started")
         logger.info(f"   [INFO] Import: every {settings.fetch_interval}s")
         logger.info(f"   [LINK] Correlation: every 30s")
+        logger.info(f"   [COMPLETE] Incomplete correlations: every {settings.correlation_check_interval}s")
+        logger.info(f"   [STATUS] Update final status: every {settings.correlation_check_interval}s (max age: {settings.max_correlation_age_minutes}min)")
         logger.info(f"   [EXPIRE] Old correlations: every 60s (expire after {settings.max_correlation_age_minutes}min)")
         
         # Log blacklist status

@@ -250,7 +250,7 @@ async def get_rspamd_logs(
     limit: int = Query(50, ge=1, le=500),
     search: Optional[str] = Query(None),
     sender: Optional[str] = Query(None),
-    direction: Optional[str] = Query(None, regex="^(inbound|outbound|unknown)$"),
+    direction: Optional[str] = Query(None, regex="^(inbound|outbound|internal|unknown)$"),
     min_score: Optional[float] = Query(None),
     max_score: Optional[float] = Query(None),
     action: Optional[str] = Query(None),
@@ -376,7 +376,24 @@ async def get_netfilter_logs(
             query = query.filter(NetfilterLog.username.ilike(f"%{username}%"))
         
         if action:
-            query = query.filter(NetfilterLog.action == action)
+            # Backward compatibility: 'ban' filter should also include legacy 'banned' values
+            # 'unban' filter should also include legacy 'info' values that are actually unbanning events
+            if action == 'ban':
+                query = query.filter(
+                    or_(
+                        NetfilterLog.action == 'ban',
+                        NetfilterLog.action == 'banned'
+                    )
+                )
+            elif action == 'unban':
+                query = query.filter(
+                    or_(
+                        NetfilterLog.action == 'unban',
+                        NetfilterLog.action == 'info'
+                    )
+                )
+            else:
+                query = query.filter(NetfilterLog.action == action)
         
         if start_date:
             query = query.filter(NetfilterLog.time >= start_date)
@@ -473,9 +490,17 @@ async def get_message_details(
                 RspamdLog.id == correlation.rspamd_log_id
             ).first()
         
-        # Get Postfix logs
+        # Get Postfix logs - Use queue_id instead of postfix_log_ids
+        # This ensures we always get ALL logs, even if they arrive after correlation is marked complete
         postfix_logs = []
-        if correlation.postfix_log_ids:
+        if correlation.queue_id:
+            # Query ALL postfix logs with this queue_id
+            # This is the source of truth, not postfix_log_ids
+            postfix_logs = db.query(PostfixLog).filter(
+                PostfixLog.queue_id == correlation.queue_id
+            ).order_by(PostfixLog.time).all()
+        elif correlation.postfix_log_ids:
+            # Fallback: if no queue_id yet, use postfix_log_ids (for incomplete correlations)
             postfix_logs = db.query(PostfixLog).filter(
                 PostfixLog.id.in_(correlation.postfix_log_ids)
             ).order_by(PostfixLog.time).all()

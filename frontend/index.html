@@ -278,6 +278,7 @@
                         <option value="">All Directions</option>
                         <option value="inbound">Inbound</option>
                         <option value="outbound">Outbound</option>
+                        <option value="internal">Internal</option>
                     </select>
                     <select id="messages-filter-status" class="px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-lg">
                         <option value="">All Statuses</option>
@@ -327,7 +328,8 @@
                     <input type="text" id="netfilter-filter-username" placeholder="Username" class="px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-lg" onkeypress="if(event.key==='Enter') applyNetfilterFilters()">
                     <select id="netfilter-filter-action" class="px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-lg">
                         <option value="">All Actions</option>
-                        <option value="banned">Banned</option>
+                        <option value="ban">BAN</option>
+                        <option value="unban">UNBAN</option>
                         <option value="warning">Warning</option>
                     </select>
                     <button onclick="applyNetfilterFilters()" class="px-3 py-2 text-sm bg-blue-600 hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600 text-white rounded-lg">

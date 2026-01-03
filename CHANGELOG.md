@@ -5,6 +5,101 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.4] - 2026-01-04
+
+### Added
+
+#### Email Direction Detection
+- **Internal Email Detection**: Added new "internal" direction for emails delivered locally
+  - Internal emails require ALL of the following conditions:
+    - `relay=dovecot` in Postfix logs (indicates local delivery)
+    - Sender domain is in local domains list
+    - Recipient domain(s) are in local domains list
+  - Prevents inbound emails from external domains being incorrectly marked as internal
+  - More accurate than domain-only detection (handles cases where domain mailboxes exist on different servers)
+  - Direction is determined after Postfix logs are available (not during initial import)
+  - Added "Internal" option to direction filter in Messages page
+  - Internal direction displayed with green badge in UI
+  - Backend API now tracks internal statistics (`internal_24h` in dashboard stats endpoint)
+
+#### Background Jobs
+- **Final Status Update Job**: Added new background job to update final status for correlations
+  - Handles cases where Postfix logs arrive after initial correlation
+  - Runs at `CORRELATION_CHECK_INTERVAL` frequency (default: 120 seconds)
+  - Only checks correlations within `MAX_CORRELATION_AGE_MINUTES` window
+  - Prevents emails from remaining without final status when logs arrive late
+  - Job appears in Status page with pending items count
+  - Respects correlation age limits to avoid infinite checking
+
+### Fixed
+
+#### Messages Page
+- **Auto-Refresh Behavior**: Fixed auto-refresh disrupting user's search and pagination
+  - Auto-refresh now skips when user has active search or filters
+  - Auto-refresh skips when user is not on first page
+  - Prevents results from changing while user is browsing/searching
+  - Only refreshes when viewing default first page with no filters
+
+- **Spam Filter**: Fixed spam filter not showing results
+  - Spam filter now checks both `final_status='spam'` and `is_spam=True` from Rspamd
+  - Previously only checked `final_status`, missing emails marked as spam by Rspamd but delivered
+  - Now correctly shows all spam emails regardless of delivery status
+
+#### Message Correlation & Display
+- **Missing Postfix Logs**: Fixed issue where Postfix logs weren't displayed in Logs tab after correlation was marked complete
+  - Now queries all Postfix logs with matching `queue_id` directly from database
+  - Ensures all logs are displayed even if they arrive after correlation is marked complete
+  - Applied fix to both `/api/message/{correlation_key}/details` and `/api/logs/message/{correlation_key}` endpoints
+
+- **Security Tab Events**: Fixed Security tab in Message Details not showing events from sender's IP address
+  - Now uses IP address from Rspamd log to fetch all Netfilter security events for that IP
+  - Removed time window restrictions - shows all security events for the sender's IP
+  - Displays up to 100 most recent security events to avoid overwhelming the UI
+
+#### UI Improvements
+- **Email Subject Truncation**: Fixed long email subjects pushing status indicators off-screen
+  - Changed Messages page layout from flex to grid for better control
+  - Applied fix to both main Messages page and Recent Activity on Dashboard
+
+- **Email Address Display**: Fixed email addresses with `+` (plus signs) being truncated
+  - In Logs tab: Now uses recipients from Postfix logs (which include full addresses with `+`)
+  - In Overview tab: Prioritizes recipients from Postfix logs over correlation recipients
+  - Postfix logs contain complete addresses while Rspamd may truncate them
+  - Fallback to correlation recipients if Postfix logs unavailable
+
+- **Mail Details Display**: Replaced "Total Delay" with "Relay" in Logs tab Mail Details section
+  - Relay information is more useful for troubleshooting delivery issues
+  - Shows the server where email was delivered (e.g., `dovecot` for local delivery)
+
+- **Message Details Modal Layout**: Improved Overview tab layout for better space utilization
+  - Removed "First Seen" field (redundant information)
+  - Reduced spacing between sections for more compact display
+  - "Additional Details" section always visible at bottom (no scrolling needed)
+
+- **Correlation Status Display**: Simplified status badge in Messages page
+  - Changed from "[OK] Linked" / "[...] Pending" to single status badge with emoji
+  - Displays email delivery status: ✓ Delivered, ↩ Bounced, ✗ Rejected, ⏳ Deferred, ⚠ Spam, ⏸ Expired
+  - If email has final status (delivered/bounced/etc), shows that status
+  - If correlation is complete but no final status yet, shows "✓ Linked"
+  - If correlation is incomplete (waiting for Postfix logs), shows "⏳ Pending"
+  - Removed separate "final_status" badge (now combined into single status indicator)
+
+### Changed
+
+#### Security Tab
+- **Result Count Display**: Fixed incorrect result count in Security tab header
+  - Resolves issue where count showed only items on current page instead of total results
+  
+- **Banning/Unbanning Event Classification**: Fixed incorrect categorization of security events
+  - "Unbanning" events were incorrectly classified as "banned" instead of "unban"
+  - "Banning" events now correctly classified as "ban" (instead of "banned")
+  - Improved detection logic using word boundaries to prevent false matches (e.g., "unbanning" containing "banning")
+  - Unbanning events now properly displayed with green "UNBAN" badge
+  - Banning events now properly displayed with red "BAN" badge
+  - Replaced single "Banned" option with distinct "BAN" and "UNBAN" filters
+
+---
+
 ## [1.4.3] - 2026-01-01
 
 ### Changed

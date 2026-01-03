@@ -23,9 +23,44 @@ from .config import settings
 logger = logging.getLogger(__name__)
 
 
+def extract_domain(email: str) -> Optional[str]:
+    """
+    Extract domain from email address
+    
+    Args:
+        email: Email address (e.g., "user@example.com")
+    
+    Returns:
+        Domain name or None if invalid
+    """
+    if not email or '@' not in email:
+        return None
+    return email.split('@', 1)[1].lower().strip()
+
+
+def is_local_domain(domain: Optional[str]) -> bool:
+    """
+    Check if domain is in local domains list
+    
+    Args:
+        domain: Domain name to check
+    
+    Returns:
+        True if domain is local, False otherwise
+    """
+    if not domain:
+        return False
+    local_domains = settings.local_domains_list
+    if not local_domains:
+        return False
+    return domain.lower() in [d.lower() for d in local_domains]
+
+
 def detect_direction(rspamd_log: Dict[str, Any]) -> str:
     """
     Detect if email is inbound or outbound based on Rspamd log
+    
+    Note: Internal direction is determined later based on Postfix relay=dovecot
     
     Logic:
     1. Check for MAILCOW_AUTH symbol (definitive outbound indicator)
@@ -374,6 +409,34 @@ def create_correlation_with_all_data(
     all_times = [rspamd_log.time] + [log.time for log in postfix_logs]
     first_seen = min(all_times)
     
+    # Check if email was delivered locally (relay=dovecot + both sender and recipient are local domains)
+    # This is the definitive way to determine if email is internal
+    direction = rspamd_log.direction
+    
+    # Check if sender and recipient are both local domains
+    sender_domain = extract_domain(rspamd_log.sender_smtp)
+    recipients = rspamd_log.recipients_smtp if rspamd_log.recipients_smtp else []
+    
+    sender_is_local = sender_domain and is_local_domain(sender_domain)
+    all_recipients_local = True
+    if recipients:
+        for recipient in recipients:
+            recipient_domain = extract_domain(recipient)
+            if not recipient_domain or not is_local_domain(recipient_domain):
+                all_recipients_local = False
+                break
+    else:
+        all_recipients_local = False
+    
+    # Only mark as internal if: relay=dovecot AND sender is local AND all recipients are local
+    if sender_is_local and all_recipients_local:
+        for plog in postfix_logs:
+            if plog.relay and 'dovecot' in plog.relay.lower():
+                direction = 'internal'
+                # Also update Rspamd log
+                rspamd_log.direction = 'internal'
+                break
+    
     correlation = MessageCorrelation(
         correlation_key=correlation_key,
         message_id=message_id,
@@ -381,7 +444,7 @@ def create_correlation_with_all_data(
         sender=rspamd_log.sender_smtp,
         recipient=first_recipient,
         subject=rspamd_log.subject,
-        direction=rspamd_log.direction,
+        direction=direction,
         final_status=final_status,
         rspamd_log_id=rspamd_log.id,
         postfix_log_ids=postfix_log_ids,
@@ -514,6 +577,27 @@ def update_correlation_with_postfix_log(
             
             correlation.postfix_log_ids = current_ids
     
+    # Check if email was delivered locally (relay=dovecot + both sender and recipient are local domains)
+    # This is the definitive way to determine if email is internal
+    if postfix_log.relay and 'dovecot' in postfix_log.relay.lower():
+        # Check if sender and recipient are both local domains
+        sender_domain = extract_domain(correlation.sender or postfix_log.sender)
+        recipient_domain = extract_domain(correlation.recipient or postfix_log.recipient)
+        
+        sender_is_local = sender_domain and is_local_domain(sender_domain)
+        recipient_is_local = recipient_domain and is_local_domain(recipient_domain)
+        
+        # Only mark as internal if both sender and recipient are local domains
+        if sender_is_local and recipient_is_local:
+            correlation.direction = 'internal'
+            # Also update Rspamd log if it exists
+            if correlation.rspamd_log_id:
+                rspamd_log = db.query(RspamdLog).filter(
+                    RspamdLog.id == correlation.rspamd_log_id
+                ).first()
+                if rspamd_log:
+                    rspamd_log.direction = 'internal'
+    
     # Update final status based on current Postfix log status
     # Priority: bounced > rejected > deferred > sent
     if postfix_log.status:
@@ -569,6 +653,35 @@ def update_correlation_with_postfix_logs(
         
         # Update correlation key in Postfix log
         plog.correlation_key = correlation.correlation_key
+    
+    # Check if email was delivered locally (relay=dovecot + both sender and recipient are local domains)
+    # This is the definitive way to determine if email is internal
+    is_internal = False
+    
+    # Check if sender and recipient are both local domains
+    sender_domain = extract_domain(correlation.sender)
+    recipient_domain = extract_domain(correlation.recipient)
+    
+    sender_is_local = sender_domain and is_local_domain(sender_domain)
+    recipient_is_local = recipient_domain and is_local_domain(recipient_domain)
+    
+    # Only mark as internal if: relay=dovecot AND sender is local AND recipient is local
+    if sender_is_local and recipient_is_local:
+        for plog in postfix_logs:
+            if plog.relay and 'dovecot' in plog.relay.lower():
+                is_internal = True
+                break
+    
+    # Update direction to internal if all conditions met
+    if is_internal:
+        correlation.direction = 'internal'
+        # Also update Rspamd log if it exists
+        if correlation.rspamd_log_id:
+            rspamd_log = db.query(RspamdLog).filter(
+                RspamdLog.id == correlation.rspamd_log_id
+            ).first()
+            if rspamd_log:
+                rspamd_log.direction = 'internal'
     
     # Determine final status from all logs
     final_status = None

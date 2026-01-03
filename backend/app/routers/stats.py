@@ -119,6 +119,13 @@ async def get_dashboard_stats(db: Session = Depends(get_db)):
             )
         ).count()
         
+        internal_24h = db.query(RspamdLog).filter(
+            and_(
+                RspamdLog.time >= day_ago,
+                RspamdLog.direction == 'internal'
+            )
+        ).count()
+        
         return {
             "messages": {
                 "24h": messages_24h,
@@ -140,7 +147,8 @@ async def get_dashboard_stats(db: Session = Depends(get_db)):
             },
             "direction": {
                 "inbound_24h": inbound_24h,
-                "outbound_24h": outbound_24h
+                "outbound_24h": outbound_24h,
+                "internal_24h": internal_24h
             }
         }
     except Exception as e:
@@ -151,7 +159,7 @@ async def get_dashboard_stats(db: Session = Depends(get_db)):
             "blocked": {"24h": 0, "7d": 0, "percentage_24h": 0},
             "deferred": {"24h": 0, "7d": 0},
             "auth_failures": {"24h": 0, "7d": 0},
-            "direction": {"inbound_24h": 0, "outbound_24h": 0}
+            "direction": {"inbound_24h": 0, "outbound_24h": 0, "internal_24h": 0}
         }
 
 
