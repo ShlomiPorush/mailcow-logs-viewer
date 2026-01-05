@@ -715,18 +715,65 @@ Get Mailcow version and update status.
 
 Get application version and check for updates from GitHub.
 
+**Query Parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `force` | boolean | Force a fresh version check regardless of cache age (default: false) |
+
 **Response:**
 ```json
 {
-  "current_version": "1.4.3",
-  "latest_version": "1.4.3",
+  "current_version": "1.4.6",
+  "latest_version": "1.4.6",
   "update_available": false,
-  "changelog": "Release notes...",
-  "last_checked": "2026-01-01T10:30:00Z"
+  "changelog": "Release notes in Markdown format...",
+  "last_checked": "2026-01-05T15:52:46Z"
 }
 ```
 
-**Note:** This endpoint checks GitHub once per day and caches the result.
+**Note:** 
+- This endpoint checks GitHub once per day and caches the result
+- All timestamps include UTC timezone indicator ('Z' suffix)
+- Use `force=true` parameter to bypass cache and get fresh version check
+
+---
+
+### GET /status/app-version/changelog/{version}
+
+Get changelog for a specific app version from GitHub.
+
+**Path Parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `version` | string | Version number (with or without 'v' prefix, e.g., "1.4.6" or "v1.4.6") |
+
+**Response:**
+```json
+{
+  "version": "1.4.6",
+  "changelog": "Full changelog in Markdown format for the specified version..."
+}
+```
+
+**Note:** Returns the changelog from the GitHub release for the specified version tag.
+
+---
+
+### GET /status/mailcow-connection
+
+Check Mailcow API connection status.
+
+**Response:**
+```json
+{
+  "connected": true,
+  "timestamp": "2026-01-05T15:52:46Z"
+}
+```
+
+**Note:** Returns connection status and current timestamp in UTC format.
 
 ---
 

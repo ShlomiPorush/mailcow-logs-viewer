@@ -377,19 +377,11 @@ async def get_netfilter_logs(
         
         if action:
             # Backward compatibility: 'ban' filter should also include legacy 'banned' values
-            # 'unban' filter should also include legacy 'info' values that are actually unbanning events
             if action == 'ban':
                 query = query.filter(
                     or_(
                         NetfilterLog.action == 'ban',
                         NetfilterLog.action == 'banned'
-                    )
-                )
-            elif action == 'unban':
-                query = query.filter(
-                    or_(
-                        NetfilterLog.action == 'unban',
-                        NetfilterLog.action == 'info'
                     )
                 )
             else:

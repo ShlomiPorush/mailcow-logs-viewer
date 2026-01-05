@@ -189,6 +189,7 @@ async function checkAuthentication() {
 
 // Global state
 let currentTab = 'dashboard';
+let appTimezone = 'UTC'; // Default timezone, will be updated from API
 let currentPage = {
     postfix: 1,
     rspamd: 1,
@@ -294,10 +295,63 @@ async function loadAppInfo() {
             }
         }
         
+        // Store timezone for date formatting
+        if (data.timezone) {
+            appTimezone = data.timezone;
+            console.log('Timezone loaded from API:', appTimezone);
+        } else {
+            console.warn('No timezone in API response, using default:', appTimezone);
+        }
+        
         // Load app version status for update check
         await loadAppVersionStatus();
+        
+        // Load mailcow connection status
+        await loadMailcowConnectionStatus();
     } catch (error) {
         console.error('Failed to load app info:', error);
+    }
+}
+
+async function loadMailcowConnectionStatus() {
+    try {
+        const response = await authenticatedFetch('/api/status/mailcow-connection');
+        if (!response.ok) return;
+        
+        const data = await response.json();
+        const indicator = document.getElementById('mailcow-connection-indicator');
+        
+        if (indicator) {
+            indicator.classList.remove('hidden');
+            if (data.connected) {
+                indicator.classList.remove('text-red-500');
+                indicator.classList.add('text-green-500');
+                indicator.title = 'Connected to Mailcow';
+                // Update SVG to checkmark
+                const svg = indicator.querySelector('svg');
+                if (svg) {
+                    svg.innerHTML = '<path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path>';
+                }
+            } else {
+                indicator.classList.remove('text-green-500');
+                indicator.classList.add('text-red-500');
+                indicator.title = 'Not connected to Mailcow';
+                // Update SVG to X
+                const svg = indicator.querySelector('svg');
+                if (svg) {
+                    svg.innerHTML = '<path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd"></path>';
+                }
+            }
+        }
+    } catch (error) {
+        console.error('Failed to load mailcow connection status:', error);
+        const indicator = document.getElementById('mailcow-connection-indicator');
+        if (indicator) {
+            indicator.classList.remove('hidden');
+            indicator.classList.remove('text-green-500');
+            indicator.classList.add('text-gray-400');
+            indicator.title = 'Connection status unknown';
+        }
     }
 }
 
@@ -2501,6 +2555,34 @@ function closeMessageModal() {
     }
 }
 
+function showChangelogModal(changelog) {
+    const modal = document.getElementById('changelog-modal');
+    const content = document.getElementById('changelog-content');
+    if (modal && content) {
+        // Render markdown if marked.js is available, otherwise show as plain text
+        if (typeof marked !== 'undefined' && changelog) {
+            // Configure marked options
+            marked.setOptions({
+                breaks: true,
+                gfm: true
+            });
+            content.innerHTML = marked.parse(changelog);
+        } else {
+            content.textContent = changelog || 'No changelog available';
+        }
+        modal.classList.remove('hidden');
+        document.body.style.overflow = 'hidden';
+    }
+}
+
+function closeChangelogModal() {
+    const modal = document.getElementById('changelog-modal');
+    if (modal) {
+        modal.classList.add('hidden');
+        document.body.style.overflow = '';
+    }
+}
+
 // =============================================================================
 // EXPORT CSV
 // =============================================================================
@@ -2567,7 +2649,53 @@ function loadLogs(type, page) {
 function formatTime(isoString) {
     if (!isoString) return '-';
     const date = new Date(isoString);
-    return date.toLocaleString();
+    // Use timezone from app configuration if set, otherwise use browser's local timezone
+    // The date is already in UTC (with 'Z' suffix), so browser will convert it correctly
+    try {
+        if (appTimezone && appTimezone !== 'UTC') {
+            // Use Intl.DateTimeFormat with app timezone
+            const formatter = new Intl.DateTimeFormat(undefined, {
+                day: '2-digit',
+                month: '2-digit',
+                year: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit',
+                hour12: false,
+                timeZone: appTimezone
+            });
+            return formatter.format(date);
+        } else {
+            // Use browser's local timezone and locale
+            return date.toLocaleString(undefined, {
+                day: '2-digit',
+                month: '2-digit',
+                year: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit',
+                hour12: false
+            });
+        }
+    } catch (e) {
+        // Fallback to browser's local timezone if timezone is invalid
+        console.warn('Invalid timezone, using browser local timezone:', appTimezone, e);
+        return date.toLocaleString(undefined, {
+            day: '2-digit',
+            month: '2-digit',
+            year: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit',
+            hour12: false
+        });
+    }
+}
+
+function formatDate(isoString) {
+    if (!isoString) return '-';
+    // Use formatTime for consistent date/time formatting
+    return formatTime(isoString);
 }
 
 function formatSize(bytes) {
@@ -2748,8 +2876,29 @@ document.addEventListener('DOMContentLoaded', function() {
             if (modal && !modal.classList.contains('hidden')) {
                 closeMessageModal();
             }
+            const changelogModal = document.getElementById('changelog-modal');
+            if (changelogModal && !changelogModal.classList.contains('hidden')) {
+                closeChangelogModal();
+            }
         }
     });
+    
+    // Changelog modal event listeners
+    const changelogModal = document.getElementById('changelog-modal');
+    if (changelogModal) {
+        changelogModal.addEventListener('click', function(e) {
+            if (e.target.id === 'changelog-modal') {
+                closeChangelogModal();
+            }
+        });
+        
+        const changelogContent = changelogModal.querySelector('.bg-white, .dark\\:bg-gray-800');
+        if (changelogContent) {
+            changelogContent.addEventListener('click', function(e) {
+                e.stopPropagation();
+            });
+        }
+    }
 });
 
 // =============================================================================
@@ -2769,37 +2918,64 @@ async function loadSettings() {
     content.classList.add('hidden');
     
     try {
-        // Load settings info and app version status in parallel
-        const [settingsResponse, appInfoResponse, versionResponse] = await Promise.all([
-            authenticatedFetch('/api/settings/info'),
-            authenticatedFetch('/api/info'),
-            authenticatedFetch('/api/status/app-version')
-        ]);
+        // Load settings info first (most important)
+        const settingsResponse = await authenticatedFetch('/api/settings/info');
         
         if (!settingsResponse.ok) {
             throw new Error(`HTTP ${settingsResponse.status}`);
         }
         
         const data = await settingsResponse.json();
-        const appInfo = appInfoResponse.ok ? await appInfoResponse.json() : null;
-        const versionInfo = versionResponse.ok ? await versionResponse.json() : null;
         
-        console.log('Settings loaded:', data);
-        
-        // Add version info to data and cache it
-        if (appInfo) {
-            data.app_version = appInfo.version;
-            versionInfoCache.app_version = appInfo.version;
+        // Use cached version info if available to show page immediately
+        if (versionInfoCache.app_version) {
+            data.app_version = versionInfoCache.app_version;
         }
-        if (versionInfo) {
-            data.version_info = versionInfo;
-            versionInfoCache.version_info = versionInfo;
+        if (versionInfoCache.version_info) {
+            data.version_info = versionInfoCache.version_info;
         }
         
+        // Render settings immediately with cached or default data
         renderSettings(content, data);
         
         loading.classList.add('hidden');
         content.classList.remove('hidden');
+        
+        // Load app info and version status in parallel (non-blocking)
+        (async () => {
+            try {
+                const [appInfoResponse, versionResponse] = await Promise.all([
+                    authenticatedFetch('/api/info'),
+                    authenticatedFetch('/api/status/app-version')
+                ]);
+                
+                const appInfo = appInfoResponse.ok ? await appInfoResponse.json() : null;
+                const versionInfo = versionResponse.ok ? await versionResponse.json() : null;
+                
+                // Update cache
+                if (appInfo) {
+                    versionInfoCache.app_version = appInfo.version;
+                }
+                if (versionInfo) {
+                    versionInfoCache.version_info = versionInfo;
+                }
+                
+                // Update UI with fresh data
+                if (appInfo || versionInfo) {
+                    const currentData = { ...data };
+                    if (appInfo) {
+                        currentData.app_version = appInfo.version;
+                    }
+                    if (versionInfo) {
+                        currentData.version_info = versionInfo;
+                    }
+                    renderSettings(content, currentData);
+                }
+            } catch (error) {
+                console.error('Failed to load version info:', error);
+                // Page is already shown, so just log the error
+            }
+        })();
         
     } catch (error) {
         console.error('Failed to load settings:', error);
@@ -2838,10 +3014,30 @@ function updateVersionInfoUI(versionInfo) {
         versionTextEl.textContent = versionInfo.latest_version ? `v${versionInfo.latest_version}` : 'Checking...';
     }
     
-    // Update or create badge
+    // Update last_checked date
     const badgeContainer = latestVersionContainer.querySelector('.flex.items-center');
     if (badgeContainer) {
-        // Remove existing badges (but keep the button)
+        // Find or create last_checked span
+        let lastCheckedSpan = Array.from(badgeContainer.querySelectorAll('span.text-xs.text-gray-500, span.text-xs.text-gray-400'))
+            .find(span => span.textContent.includes('Last checked'));
+        
+        if (versionInfo.last_checked) {
+            if (!lastCheckedSpan) {
+                lastCheckedSpan = document.createElement('span');
+                lastCheckedSpan.className = 'text-xs text-gray-500 dark:text-gray-400';
+                const button = badgeContainer.querySelector('button');
+                if (button) {
+                    badgeContainer.insertBefore(lastCheckedSpan, button);
+                } else {
+                    badgeContainer.appendChild(lastCheckedSpan);
+                }
+            }
+            lastCheckedSpan.textContent = `(Last checked: ${formatDate(versionInfo.last_checked)})`;
+        } else if (lastCheckedSpan) {
+            lastCheckedSpan.remove();
+        }
+        
+        // Remove existing badges (but keep the button and last_checked span)
         const existingBadges = Array.from(badgeContainer.querySelectorAll('span.px-2.py-1.rounded.text-xs'));
         existingBadges.forEach(badge => {
             badge.remove();
@@ -2892,11 +3088,31 @@ function updateVersionInfoUI(versionInfo) {
                     <p class="text-sm text-green-800 dark:text-green-300">
                         <strong>Update available!</strong> A new version (v${versionInfo.latest_version}) is available on GitHub.
                     </p>
+                    ${versionInfo.changelog ? `
+                        <div class="mt-3 border border-green-200 dark:border-green-800 rounded p-3 bg-white dark:bg-gray-800">
+                            <p class="text-xs font-semibold text-green-800 dark:text-green-300 mb-2">Changelog:</p>
+                            <div class="update-changelog-content markdown-body" style="max-height: 16rem; overflow-y: auto; overflow-x: hidden; display: block;"></div>
+                        </div>
+                    ` : ''}
                     <a href="https://github.com/ShlomiPorush/mailcow-logs-viewer/releases/latest" target="_blank" rel="noopener noreferrer" class="text-sm text-green-600 dark:text-green-400 hover:underline mt-2 inline-block">
                         View release notes →
                     </a>
                 `;
                 gridContainer.parentNode.insertBefore(messageDiv, gridContainer.nextSibling);
+                
+                // Render markdown in changelog if marked.js is available
+                // Do this immediately after inserting to DOM
+                if (typeof marked !== 'undefined' && versionInfo.changelog) {
+                    marked.setOptions({
+                        breaks: true,
+                        gfm: true
+                    });
+                    const changelogEl = messageDiv.querySelector('.update-changelog-content');
+                    if (changelogEl && versionInfo.changelog) {
+                        // Use the full changelog text directly
+                        changelogEl.innerHTML = marked.parse(versionInfo.changelog);
+                    }
+                }
             }
         }
     }
@@ -2922,12 +3138,22 @@ function renderSettings(content, data) {
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div class="p-4 bg-gray-50 dark:bg-gray-700/30 rounded-lg">
                         <p class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase mb-2">Current Version</p>
-                        <p class="text-lg font-semibold text-gray-900 dark:text-white">v${appVersion}</p>
+                        <div class="flex items-center gap-2">
+                            <p id="current-version-text" class="text-lg font-semibold text-gray-900 dark:text-white cursor-pointer hover:text-blue-600 dark:hover:text-blue-400 transition-colors" title="Click to view changelog">v${appVersion}</p>
+                            <svg class="w-4 h-4 text-blue-500 dark:text-blue-400 cursor-pointer" fill="none" stroke="currentColor" viewBox="0 0 24 24" title="Click to view changelog">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                            </svg>
+                        </div>
                     </div>
                     <div class="p-4 bg-gray-50 dark:bg-gray-700/30 rounded-lg">
                         <p class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase mb-2">Latest Version</p>
                         <div class="flex items-center gap-2 flex-wrap">
                             <p class="text-lg font-semibold text-gray-900 dark:text-white">${versionInfo.latest_version ? `v${versionInfo.latest_version}` : 'Checking...'}</p>
+                            ${versionInfo.last_checked ? `
+                                <span class="text-xs text-gray-500 dark:text-gray-400">
+                                    (Last checked: ${formatDate(versionInfo.last_checked)})
+                                </span>
+                            ` : ''}
                             ${versionInfo.update_available ? `
                                 <span class="px-2 py-1 bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300 rounded text-xs font-medium">
                                     Update Available
@@ -2951,6 +3177,12 @@ function renderSettings(content, data) {
                         <p class="text-sm text-green-800 dark:text-green-300">
                             <strong>Update available!</strong> A new version (v${versionInfo.latest_version}) is available on GitHub.
                         </p>
+                        ${versionInfo.changelog ? `
+                            <div class="mt-3 border border-green-200 dark:border-green-800 rounded p-3 bg-white dark:bg-gray-800">
+                                <p class="text-xs font-semibold text-green-800 dark:text-green-300 mb-2">Changelog:</p>
+                                <div class="update-changelog-content markdown-body" style="max-height: 16rem; overflow-y: auto; overflow-x: hidden; display: block;"></div>
+                            </div>
+                        ` : ''}
                         <a href="https://github.com/ShlomiPorush/mailcow-logs-viewer/releases/latest" target="_blank" rel="noopener noreferrer" class="text-sm text-green-600 dark:text-green-400 hover:underline mt-2 inline-block">
                             View release notes →
                         </a>
@@ -3065,6 +3297,51 @@ function renderSettings(content, data) {
             </div>
         </div>
     `;
+    
+    // Add event listener for version number click (changelog popup)
+    const currentVersionText = document.getElementById('current-version-text');
+    const currentVersionIcon = currentVersionText?.parentElement?.querySelector('svg');
+    
+    const loadCurrentVersionChangelog = async () => {
+        try {
+            // Remove 'v' prefix if present for API call
+            const versionForApi = appVersion.startsWith('v') ? appVersion.substring(1) : appVersion;
+            const response = await authenticatedFetch(`/api/status/app-version/changelog/${versionForApi}`);
+            if (response.ok) {
+                const data = await response.json();
+                showChangelogModal(data.changelog || 'No changelog available');
+            } else {
+                showChangelogModal('Failed to load changelog');
+            }
+        } catch (error) {
+            console.error('Failed to load changelog:', error);
+            showChangelogModal('Failed to load changelog');
+        }
+    };
+    
+    if (currentVersionText) {
+        currentVersionText.onclick = loadCurrentVersionChangelog;
+    }
+    if (currentVersionIcon) {
+        currentVersionIcon.onclick = loadCurrentVersionChangelog;
+    }
+    
+    // Render markdown in changelog sections if marked.js is available
+    // Use versionInfo from the data object directly instead of data attributes
+    if (typeof marked !== 'undefined' && versionInfo && versionInfo.changelog) {
+        marked.setOptions({
+            breaks: true,
+            gfm: true
+        });
+        const changelogElements = content.querySelectorAll('.update-changelog-content');
+        changelogElements.forEach(el => {
+            // Use the changelog directly from versionInfo object
+            const changelogText = versionInfo.changelog;
+            if (changelogText) {
+                el.innerHTML = marked.parse(changelogText);
+            }
+        });
+    }
     
     // Add event listener for version check button
     const checkVersionBtn = document.getElementById('check-version-btn');

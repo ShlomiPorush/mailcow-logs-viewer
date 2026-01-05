@@ -4,7 +4,7 @@ API endpoints for system status and health monitoring
 import logging
 import httpx
 from fastapi import APIRouter, HTTPException, Query
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, Any
 
 from ..mailcow_api import mailcow_api
@@ -73,7 +73,7 @@ async def check_app_version_update():
         app_version_cache["latest_version"] = "unknown"
         app_version_cache["update_available"] = False
     
-    app_version_cache["checked_at"] = datetime.utcnow()
+    app_version_cache["checked_at"] = datetime.now(timezone.utc)
 
 @router.get("/status/containers")
 async def get_containers_status():
@@ -163,7 +163,7 @@ async def get_version_status():
         global version_cache
         
         # Check if we need to refresh the cache (once per day)
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         if (version_cache["checked_at"] is None or 
             now - version_cache["checked_at"] > timedelta(days=1)):
             
@@ -204,12 +204,24 @@ async def get_version_status():
             
             version_cache["checked_at"] = now
         
+        # Format last_checked with UTC timezone indicator ('Z' suffix)
+        last_checked = None
+        if version_cache["checked_at"]:
+            if version_cache["checked_at"].tzinfo is None:
+                # If naive, assume UTC
+                dt = version_cache["checked_at"].replace(tzinfo=timezone.utc)
+            else:
+                dt = version_cache["checked_at"]
+            # Convert to UTC and format with 'Z' suffix
+            dt_utc = dt.astimezone(timezone.utc)
+            last_checked = dt_utc.replace(microsecond=0).isoformat().replace('+00:00', 'Z')
+        
         return {
             "current_version": version_cache["current_version"],
             "latest_version": version_cache["latest_version"],
             "update_available": version_cache["update_available"],
             "changelog": version_cache["changelog"],
-            "last_checked": version_cache["checked_at"].isoformat() if version_cache["checked_at"] else None
+            "last_checked": last_checked
         }
     except Exception as e:
         logger.error(f"Error fetching version status: {e}")
@@ -229,18 +241,30 @@ async def get_app_version_status(force: bool = Query(False, description="Force a
         
         # Force check or check if cache is stale (more than 1 day old) and refresh if needed
         # This is a fallback in case the scheduler hasn't run yet
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         if (force or 
             app_version_cache["checked_at"] is None or 
             now - app_version_cache["checked_at"] > timedelta(days=1)):
             await check_app_version_update()
+        
+        # Format last_checked with UTC timezone indicator ('Z' suffix)
+        last_checked = None
+        if app_version_cache["checked_at"]:
+            if app_version_cache["checked_at"].tzinfo is None:
+                # If naive, assume UTC
+                dt = app_version_cache["checked_at"].replace(tzinfo=timezone.utc)
+            else:
+                dt = app_version_cache["checked_at"]
+            # Convert to UTC and format with 'Z' suffix
+            dt_utc = dt.astimezone(timezone.utc)
+            last_checked = dt_utc.replace(microsecond=0).isoformat().replace('+00:00', 'Z')
         
         return {
             "current_version": app_version_cache["current_version"],
             "latest_version": app_version_cache["latest_version"],
             "update_available": app_version_cache["update_available"],
             "changelog": app_version_cache["changelog"],
-            "last_checked": app_version_cache["checked_at"].isoformat() if app_version_cache["checked_at"] else None
+            "last_checked": last_checked
         }
     except Exception as e:
         logger.error(f"Error fetching app version status: {e}")
@@ -290,6 +314,63 @@ async def get_mailcow_info():
     except Exception as e:
         logger.error(f"Error fetching Mailcow info: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/status/mailcow-connection")
+async def get_mailcow_connection_status():
+    """
+    Check Mailcow API connection status
+    """
+    try:
+        is_connected = await mailcow_api.test_connection()
+        return {
+            "connected": is_connected,
+            "timestamp": datetime.utcnow().isoformat()
+        }
+    except Exception as e:
+        logger.error(f"Error checking Mailcow connection: {e}")
+        return {
+            "connected": False,
+            "timestamp": datetime.utcnow().isoformat(),
+            "error": str(e)
+        }
+
+
+@router.get("/status/app-version/changelog/{version}")
+async def get_app_version_changelog(version: str):
+    """
+    Get changelog for a specific app version from GitHub
+    """
+    try:
+        # Remove 'v' prefix if present for API call
+        version_tag = version if version.startswith('v') else f'v{version}'
+        
+        async with httpx.AsyncClient(timeout=10) as client:
+            # Try to get the specific release by tag
+            response = await client.get(
+                f"https://api.github.com/repos/ShlomiPorush/mailcow-logs-viewer/releases/tags/{version_tag}"
+            )
+            
+            if response.status_code == 200:
+                release_data = response.json()
+                changelog = release_data.get('body', 'No changelog available')
+                return {
+                    "version": version,
+                    "changelog": changelog
+                }
+            else:
+                logger.warning(f"GitHub API returned status {response.status_code} for version {version_tag}")
+                return {
+                    "version": version,
+                    "changelog": "Changelog not found for this version"
+                }
+                
+    except Exception as e:
+        logger.error(f"Failed to fetch changelog for version {version}: {e}")
+        return {
+            "version": version,
+            "changelog": f"Failed to fetch changelog: {str(e)}"
+        }
 
 
 @router.get("/status/summary")

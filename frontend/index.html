@@ -9,6 +9,8 @@
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%233b82f6' stroke-width='2'><path stroke-linecap='round' stroke-linejoin='round' d='M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z'/></svg>">
     
     <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/github-markdown-css/5.5.1/github-markdown.min.css">
     <script>
         tailwind.config = {
             darkMode: 'class',
@@ -61,6 +63,179 @@
         #recent-activity::-webkit-scrollbar {
             display: none;
         }
+        /* Markdown styling for changelog */
+        /* GitHub markdown styling for changelog - override background colors */
+        .update-changelog-content.markdown-body,
+        #changelog-content.markdown-body {
+            background-color: transparent !important;
+            color: inherit !important;
+            font-size: 14px;
+            padding: 16px;
+            box-sizing: border-box;
+            display: block;
+            width: 100%;
+        }
+        /* Override GitHub markdown CSS background colors */
+        .markdown-body {
+            background-color: transparent !important;
+        }
+        /* Force text color in dark mode */
+        .dark .update-changelog-content.markdown-body,
+        .dark #changelog-content.markdown-body {
+            color: rgb(243 244 246) !important; /* gray-100 - white text in dark mode */
+        }
+        .dark .update-changelog-content.markdown-body *,
+        .dark #changelog-content.markdown-body * {
+            color: rgb(243 244 246) !important; /* gray-100 - white text in dark mode */
+        }
+        .dark .update-changelog-content.markdown-body h1,
+        .dark .update-changelog-content.markdown-body h2,
+        .dark .update-changelog-content.markdown-body h3,
+        .dark .update-changelog-content.markdown-body h4,
+        .dark .update-changelog-content.markdown-body h5,
+        .dark .update-changelog-content.markdown-body h6,
+        .dark #changelog-content.markdown-body h1,
+        .dark #changelog-content.markdown-body h2,
+        .dark #changelog-content.markdown-body h3,
+        .dark #changelog-content.markdown-body h4,
+        .dark #changelog-content.markdown-body h5,
+        .dark #changelog-content.markdown-body h6 {
+            color: rgb(243 244 246) !important; /* gray-100 - white text in dark mode */
+        }
+        .dark .update-changelog-content.markdown-body p,
+        .dark .update-changelog-content.markdown-body li,
+        .dark .update-changelog-content.markdown-body span,
+        .dark #changelog-content.markdown-body p,
+        .dark #changelog-content.markdown-body li,
+        .dark #changelog-content.markdown-body span {
+            color: rgb(243 244 246) !important; /* gray-100 - white text in dark mode */
+        }
+        .update-changelog-content.markdown-body h1,
+        .update-changelog-content.markdown-body h2,
+        .update-changelog-content.markdown-body h3,
+        #changelog-content.markdown-body h1,
+        #changelog-content.markdown-body h2,
+        #changelog-content.markdown-body h3 {
+            font-size: 1.25em;
+            margin-top: 1em;
+            margin-bottom: 0.5em;
+            font-weight: 600;
+            border-bottom: none;
+            padding-bottom: 0;
+        }
+        .update-changelog-content.markdown-body h1,
+        #changelog-content.markdown-body h1 {
+            font-size: 2em;
+        }
+        .update-changelog-content.markdown-body h2,
+        #changelog-content.markdown-body h2 {
+            font-size: 1.5em;
+        }
+        .update-changelog-content.markdown-body ul,
+        .update-changelog-content.markdown-body ol,
+        #changelog-content.markdown-body ul,
+        #changelog-content.markdown-body ol {
+            margin: 0.5em 0;
+            padding-left: 2em;
+            list-style-type: disc;
+            display: block;
+        }
+        .update-changelog-content.markdown-body ol,
+        #changelog-content.markdown-body ol {
+            list-style-type: decimal;
+        }
+        .update-changelog-content.markdown-body ul ul,
+        #changelog-content.markdown-body ul ul {
+            list-style-type: circle;
+        }
+        .update-changelog-content.markdown-body ul ul ul,
+        #changelog-content.markdown-body ul ul ul {
+            list-style-type: square;
+        }
+        .update-changelog-content.markdown-body li,
+        #changelog-content.markdown-body li {
+            margin: 0.25em 0;
+            display: list-item;
+            list-style-position: outside;
+        }
+        .update-changelog-content.markdown-body li::marker,
+        #changelog-content.markdown-body li::marker {
+            color: inherit;
+        }
+        .update-changelog-content.markdown-body p,
+        #changelog-content.markdown-body p {
+            margin: 0.5em 0;
+        }
+        .update-changelog-content.markdown-body code,
+        #changelog-content.markdown-body code {
+            background-color: rgba(175, 184, 193, 0.2);
+            padding: 0.2em 0.4em;
+            border-radius: 3px;
+            font-size: 85%;
+        }
+        .dark .update-changelog-content.markdown-body code,
+        .dark #changelog-content.markdown-body code {
+            background-color: rgba(110, 118, 129, 0.4);
+        }
+        .update-changelog-content.markdown-body pre,
+        #changelog-content.markdown-body pre {
+            background-color: rgba(175, 184, 193, 0.15);
+            padding: 16px;
+            border-radius: 6px;
+            overflow-x: auto;
+        }
+        .dark .update-changelog-content.markdown-body pre,
+        .dark #changelog-content.markdown-body pre {
+            background-color: rgba(110, 118, 129, 0.3);
+        }
+        .update-changelog-content.markdown-body pre code,
+        #changelog-content.markdown-body pre code {
+            background-color: transparent;
+            padding: 0;
+        }
+        .update-changelog-content.markdown-body a,
+        #changelog-content.markdown-body a {
+            color: #0969da;
+            text-decoration: none;
+        }
+        .dark .update-changelog-content.markdown-body a,
+        .dark #changelog-content.markdown-body a {
+            color: #58a6ff;
+        }
+        .update-changelog-content.markdown-body a:hover,
+        #changelog-content.markdown-body a:hover {
+            text-decoration: underline;
+        }
+        .update-changelog-content.markdown-body blockquote,
+        #changelog-content.markdown-body blockquote {
+            border-left: 4px solid #d0d7de;
+            padding-left: 16px;
+            margin: 0.5em 0;
+            color: #656d76;
+        }
+        .dark .update-changelog-content.markdown-body blockquote,
+        .dark #changelog-content.markdown-body blockquote {
+            border-left-color: #30363d;
+            color: #8b949e;
+        }
+        .update-changelog-content.markdown-body table,
+        #changelog-content.markdown-body table {
+            border-collapse: collapse;
+            margin: 0.5em 0;
+        }
+        .update-changelog-content.markdown-body table th,
+        .update-changelog-content.markdown-body table td,
+        #changelog-content.markdown-body table th,
+        #changelog-content.markdown-body table td {
+            border: 1px solid #d0d7de;
+            padding: 6px 13px;
+        }
+        .dark .update-changelog-content.markdown-body table th,
+        .dark .update-changelog-content.markdown-body table td,
+        .dark #changelog-content.markdown-body table th,
+        .dark #changelog-content.markdown-body table td {
+            border-color: #30363d;
+        }
     </style>
 </head>
 <body class="h-full bg-gray-50 dark:bg-gray-900">
@@ -76,6 +251,11 @@
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path>
                     </svg>
                     <h1 id="app-title" class="text-lg sm:text-xl font-bold text-gray-900 dark:text-white">Mailcow Logs Viewer</h1>
+                    <span id="mailcow-connection-indicator" class="ml-2 hidden" title="Mailcow connection status">
+                        <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                            <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path>
+                        </svg>
+                    </span>
                 </div>
                 <div class="flex items-center space-x-2 sm:space-x-4">
                     <button id="theme-toggle" onclick="toggleDarkMode()" class="p-2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 rounded-lg">
@@ -331,6 +511,7 @@
                         <option value="ban">BAN</option>
                         <option value="unban">UNBAN</option>
                         <option value="warning">Warning</option>
+                        <option value="info">Info</option>
                     </select>
                     <button onclick="applyNetfilterFilters()" class="px-3 py-2 text-sm bg-blue-600 hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600 text-white rounded-lg">
                         Apply
@@ -569,6 +750,23 @@
         </div>
     </div>
 
+    <!-- Changelog Modal -->
+    <div id="changelog-modal" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+        <div class="bg-white dark:bg-gray-800 rounded-lg max-w-3xl w-full max-h-[80vh] flex flex-col">
+            <div class="flex-shrink-0 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-6 py-4 flex justify-between items-center rounded-t-lg">
+                <h3 class="text-lg font-semibold text-gray-900 dark:text-white">Changelog</h3>
+                <button onclick="closeChangelogModal()" class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                    </svg>
+                </button>
+            </div>
+            <div class="flex-1 overflow-y-auto p-6">
+                <div id="changelog-content" class="markdown-body"></div>
+            </div>
+        </div>
+    </div>
+
     <!-- Footer -->
     <footer id="app-footer" class="bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 mt-6">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
@@ -577,9 +775,9 @@
                     <span id="app-name-footer">Mailcow Logs Viewer</span>
                     <span class="text-gray-400 dark:text-gray-500">•</span>
                     <span id="app-version-footer">v1.4.2</span>
-                    <span id="update-badge" class="hidden ml-2 px-2 py-0.5 bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300 rounded text-xs font-medium">
+                    <button id="update-badge" onclick="switchTab('settings')" class="hidden ml-2 px-2 py-0.5 bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300 rounded text-xs font-medium hover:bg-green-200 dark:hover:bg-green-900/50 cursor-pointer transition-colors">
                         Update Available
-                    </span>
+                    </button>
                 </div>
                 <div class="flex flex-wrap items-center gap-2 justify-center sm:justify-end">
                     <span>Created with ❤️</span>

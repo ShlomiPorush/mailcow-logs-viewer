@@ -5,6 +5,66 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.6] - 2026-01-05
+
+### Added
+
+#### Version Check Improvements
+- **Periodic Version Check**: Version check now runs automatically every 6 hours (instead of only on container startup)
+  - Background scheduler job checks for app updates from GitHub
+  - Runs immediately on startup, then every 6 hours
+
+- **Manual Version Check Button**: Added "Check Now" button in Settings page
+  - Located next to "Latest Version" badge
+  - Allows users to manually trigger version check at any time
+
+#### Settings Page Enhancements
+- **Version Information Improvements**:
+  - Added last checked date display next to "Latest Version" in Settings page
+  - Added clickable version number (Current Version) to view changelog in popup modal
+  - Added changelog display in update notification area
+
+- **Mailcow Connection Indicator**: Added connection status indicator in header next to application name
+  - Green checkmark when connected to Mailcow
+  - Red X when not connected
+  - Status updates automatically via `/api/status/mailcow-connection` endpoint
+
+### Changed
+
+#### Version Check Behavior
+- **Background Updates**: Version check endpoint now supports `force` parameter to bypass cache
+- **UI Updates**: Version information updates in real-time without page refresh
+  - Latest version display updates immediately
+  - Badge status ("Update Available" / "Up to Date") updates dynamically
+  - Update notification message appears/disappears based on check results
+
+#### Settings Page Performance
+- **Faster Loading**: Optimized Settings page loading time
+  - Page now displays immediately with cached version info
+  - Version information updates in background without blocking page display
+
+#### Footer Updates
+- **Update Available Button**: Made "Update Available" badge in footer clickable
+  - Clicking the badge navigates to Settings page
+  - Improved user experience for accessing update information
+
+#### Timezone Handling
+- **Consistent Timezone Display**: Fixed timezone handling across all endpoints
+  - All timestamps now sent with UTC timezone indicator ('Z' suffix)
+  - Time display respects timezone from ENV configuration (TZ variable)
+  - Removed hardcoded locale preferences, uses browser's local settings
+
+### Fixed
+
+#### Security Tab
+- **Unban Filter Accuracy**: Fixed Unban filter displaying Info results
+  - Unban filter now only shows actual unban actions (not all info logs)
+  - Removed backward compatibility code that incorrectly included all 'info' results
+  - Added separate "Info" filter option in Netfilter action dropdown
+  - Users can now filter by Info separately from Unban actions
+
+---
+
 ## [1.4.5] - 2026-01-04
 
 ### Added
