@@ -232,7 +232,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         'content-queue',
         'content-quarantine',
         'content-status',
-        'content-settings'
+        'content-settings',
+        'content-domains'
     ];
     
     const missing = requiredElements.filter(id => !document.getElementById(id));
@@ -809,6 +810,9 @@ function switchTab(tab) {
             break;
         case 'status':
             loadStatus();
+            break;
+        case 'domains':
+            loadDomains();
             break;
         case 'settings':
             loadSettings();
@@ -1405,31 +1409,73 @@ async function loadQuarantine() {
         const data = await response.json();
         console.log('Quarantine data:', data);
         
+        // ⭐ NEW: Update counter display
+        const countEl = document.getElementById('quarantine-count');
+        if (countEl) {
+            countEl.textContent = data.total ? `(${data.total.toLocaleString()} results)` : '';
+        }
+        
         if (!data.data || data.data.length === 0) {
             container.innerHTML = '<p class="text-gray-500 dark:text-gray-400 text-center py-8">No quarantined messages</p>';
             return;
         }
         
-        container.innerHTML = `
-            <div class="space-y-4">
-                ${data.data.map(item => `
-                    <div class="border border-red-200 dark:border-red-900/50 rounded-lg p-4 bg-red-50 dark:bg-red-900/20">
-                        <div class="flex flex-col sm:flex-row sm:justify-between sm:items-start mb-2 gap-2">
-                            <div class="flex-1">
-                                <p class="text-sm font-medium text-gray-900 dark:text-white">${escapeHtml(item.subject || 'No subject')}</p>
-                                <p class="text-sm text-gray-600 dark:text-gray-300">From: ${escapeHtml(item.sender)}</p>
-                            </div>
-                            <span class="text-xs text-gray-500 dark:text-gray-400">${formatTime(item.created)}</span>
-                        </div>
-                        <p class="text-xs text-red-600 dark:text-red-400 mt-2">${item.reason || 'Quarantined'}</p>
-                    </div>
-                `).join('')}
-            </div>
-        `;
+        // ⭐ NEW: Use separate render function
+        renderQuarantineData(data);
     } catch (error) {
         console.error('Failed to load quarantine:', error);
         document.getElementById('quarantine-logs').innerHTML = `<p class="text-red-500 text-center py-8">Failed to load quarantine: ${error.message}</p>`;
+        // ⭐ NEW: Clear counter on error
+        const countEl = document.getElementById('quarantine-count');
+        if (countEl) countEl.textContent = '';
     }
+}
+
+// Render quarantine without loading spinner (for smart refresh)
+function renderQuarantineData(data) {
+    const container = document.getElementById('quarantine-logs');
+    if (!container) return;
+    
+    // Update counter display
+    const countEl = document.getElementById('quarantine-count');
+    if (countEl) {
+        countEl.textContent = data.total ? `(${data.total.toLocaleString()} results)` : '';
+    }
+    
+    if (!data.data || data.data.length === 0) {
+        container.innerHTML = '<p class="text-gray-500 dark:text-gray-400 text-center py-8">No quarantined messages</p>';
+        return;
+    }
+    
+    container.innerHTML = `
+        <div class="space-y-3">
+            ${data.data.map(item => `
+                <div class="border border-red-200 dark:border-red-900/50 rounded-lg p-4 bg-red-50 dark:bg-red-900/20 hover:bg-red-100 dark:hover:bg-red-900/30 transition">
+                    <div class="grid grid-cols-1 sm:grid-cols-[1fr_auto] gap-2 mb-2 items-start">
+                        <div class="min-w-0 overflow-hidden">
+                            <div class="flex flex-wrap items-center gap-2 mb-1">
+                                <span class="text-sm font-medium text-gray-900 dark:text-white">${escapeHtml(item.sender || 'Unknown')}</span>
+                                <svg class="w-4 h-4 text-gray-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
+                                </svg>
+                                <span class="text-sm text-gray-600 dark:text-gray-300">${escapeHtml(item.rcpt || 'Unknown')}</span>
+                            </div>
+                            <p class="text-xs text-gray-500 dark:text-gray-400 truncate" title="${escapeHtml(item.subject || 'No subject')}">${escapeHtml(item.subject || 'No subject')}</p>
+                        </div>
+                        <div class="flex flex-wrap items-center gap-2 flex-shrink-0 sm:justify-end">
+                            <span class="inline-block px-2 py-0.5 text-xs font-medium rounded bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-300">${item.action || 'Quarantined'}</span>
+                            ${item.virus_flag ? '<span class="inline-block px-2 py-0.5 text-xs font-medium rounded bg-purple-100 dark:bg-purple-900/30 text-purple-800 dark:text-purple-300">🦠 VIRUS</span>' : ''}
+                        </div>
+                    </div>
+                    <div class="flex flex-wrap items-center gap-4 text-xs text-gray-600 dark:text-gray-400">
+                        <span>${formatTime(item.created)}</span>
+                        ${item.qid ? `<span class="font-mono" title="Queue ID">Q: ${item.qid}</span>` : ''}
+                        ${item.score !== undefined && item.score !== null ? `<span>Score: <span class="${item.score >= 15 ? 'text-red-600 dark:text-red-400 font-semibold' : 'text-gray-600 dark:text-gray-300'}">${item.score.toFixed(1)}</span></span>` : ''}
+                    </div>
+                </div>
+            `).join('')}
+        </div>
+    `;
 }
 
 // =============================================================================
@@ -2900,6 +2946,495 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
 });
+
+// =============================================================================
+// DOMAINS TAB - Domains management with DNS validation
+// =============================================================================
+
+async function loadDomains() {
+    const loading = document.getElementById('domains-loading');
+    const content = document.getElementById('domains-content');
+    
+    if (!loading || !content) {
+        console.error('Domains elements not found');
+        return;
+    }
+    
+    loading.classList.remove('hidden');
+    content.classList.add('hidden');
+    
+    try {
+        const response = await authenticatedFetch('/api/domains/all');
+        
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+        }
+        
+        const data = await response.json();
+        
+        renderDomains(content, data);
+        
+        loading.classList.add('hidden');
+        content.classList.remove('hidden');
+        
+    } catch (error) {
+        console.error('Failed to load domains:', error);
+        loading.innerHTML = `
+            <div class="text-center py-12">
+                <svg class="w-16 h-16 mx-auto text-red-400 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                </svg>
+                <p class="text-red-500">Failed to load domains</p>
+                <p class="text-sm text-gray-500 dark:text-gray-400 mt-2">${escapeHtml(error.message)}</p>
+            </div>
+        `;
+    }
+}
+
+function renderDomains(container, data) {
+    const domains = data.domains || [];
+    
+    if (domains.length === 0) {
+        container.innerHTML = `
+            <div class="text-center py-12">
+                <svg class="w-16 h-16 mx-auto text-gray-400 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path>
+                </svg>
+                <p class="text-gray-500 dark:text-gray-400">No domains found</p>
+            </div>
+        `;
+        return;
+    }
+    
+    // Summary cards
+    const summaryHTML = `
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+            <div class="bg-white dark:bg-gray-800 rounded-lg shadow border border-gray-200 dark:border-gray-700 p-6">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <p class="text-sm text-gray-500 dark:text-gray-400 font-medium">Total Domains</p>
+                        <p class="text-3xl font-bold text-gray-900 dark:text-white mt-1">${data.total || 0}</p>
+                    </div>
+                    <div class="bg-blue-100 dark:bg-blue-900/30 rounded-lg p-3">
+                        <svg class="w-8 h-8 text-blue-600 dark:text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9"></path>
+                        </svg>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="bg-white dark:bg-gray-800 rounded-lg shadow border border-gray-200 dark:border-gray-700 p-6">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <p class="text-sm text-gray-500 dark:text-gray-400 font-medium">Active Domains</p>
+                        <p class="text-3xl font-bold text-green-600 dark:text-green-400 mt-1">${data.active || 0}</p>
+                    </div>
+                    <div class="bg-green-100 dark:bg-green-900/30 rounded-lg p-3">
+                        <svg class="w-8 h-8 text-green-600 dark:text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                        </svg>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="bg-white dark:bg-gray-800 rounded-lg shadow border border-gray-200 dark:border-gray-700 p-6">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <p class="text-sm text-gray-500 dark:text-gray-400 font-medium">Inactive Domains</p>
+                        <p class="text-3xl font-bold text-gray-500 dark:text-gray-400 mt-1">${(data.total || 0) - (data.active || 0)}</p>
+                    </div>
+                    <div class="bg-gray-100 dark:bg-gray-700 rounded-lg p-3">
+                        <svg class="w-8 h-8 text-gray-500 dark:text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"></path>
+                        </svg>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    // Search/Filter bar
+    const filterHTML = `
+        <div class="bg-white dark:bg-gray-800 rounded-lg shadow border border-gray-200 dark:border-gray-700 p-4 mb-4">
+            <div class="flex items-center gap-3 flex-wrap">
+                <div class="flex items-center gap-3 flex-1 min-w-0">
+                    <svg class="w-5 h-5 text-gray-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
+                    </svg>
+                    <input 
+                        type="text" 
+                        id="domain-search-input"
+                        placeholder="Search domains..." 
+                        class="flex-1 px-3 py-2 text-sm border-0 bg-transparent text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-0 min-w-0"
+                        oninput="filterDomains()"
+                    >
+                </div>
+                
+                <div class="flex items-center gap-4 flex-shrink-0">
+                    <!-- Filter: Show only domains with issues -->
+                    <label class="flex items-center gap-2 cursor-pointer">
+                        <input 
+                            type="checkbox" 
+                            id="filter-issues-only"
+                            class="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 dark:focus:ring-blue-600 dark:ring-offset-gray-800 focus:ring-2 dark:bg-gray-700 dark:border-gray-600"
+                            onchange="filterDomains()"
+                        >
+                        <span class="text-sm font-medium text-gray-700 dark:text-gray-300 whitespace-nowrap">Show issues only</span>
+                    </label>
+                    
+                    <!-- Domain count badge -->
+                    <span id="domain-count-badge" class="px-3 py-1 text-xs font-medium bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-full whitespace-nowrap">
+                        ${domains.length} domains
+                    </span>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    // Domains list with accordion style
+    const domainsHTML = domains.map(domain => renderDomainAccordionRow(domain)).join('');
+    
+    container.innerHTML = summaryHTML + filterHTML + `
+        <div id="domains-list" class="space-y-2">
+            ${domainsHTML}
+        </div>
+    `;
+    
+    // Store domains data for filtering
+    window.domainsData = domains;
+}
+
+// Filter domains based on search input and issues checkbox
+function filterDomains() {
+    const searchInput = document.getElementById('domain-search-input');
+    const issuesCheckbox = document.getElementById('filter-issues-only');
+    const domainsList = document.getElementById('domains-list');
+    const countBadge = document.getElementById('domain-count-badge');
+    
+    if (!searchInput || !domainsList || !window.domainsData) return;
+    
+    const searchTerm = searchInput.value.toLowerCase().trim();
+    const showIssuesOnly = issuesCheckbox ? issuesCheckbox.checked : false;
+    
+    // Filter domains
+    let filteredDomains = window.domainsData.filter(domain => {
+        // Search filter
+        const matchesSearch = domain.domain_name.toLowerCase().includes(searchTerm);
+        
+        // Issues filter - check if domain has any DNS issues
+        let hasIssues = false;
+        if (showIssuesOnly) {
+            const dns = domain.dns_checks || {};
+            const spf = dns.spf || {};
+            const dkim = dns.dkim || {};
+            const dmarc = dns.dmarc || {};
+            
+            // Check if any DNS check has error or warning status
+            hasIssues = 
+                spf.status === 'error' || spf.status === 'warning' ||
+                dkim.status === 'error' || dkim.status === 'warning' ||
+                dmarc.status === 'error' || dmarc.status === 'warning';
+        }
+        
+        return matchesSearch && (!showIssuesOnly || hasIssues);
+    });
+    
+    // Update count badge
+    if (countBadge) {
+        countBadge.textContent = `${filteredDomains.length} domain${filteredDomains.length !== 1 ? 's' : ''}`;
+    }
+    
+    // Re-render filtered domains
+    if (filteredDomains.length === 0) {
+        const noResultsMessage = showIssuesOnly && searchTerm === '' 
+            ? 'No domains with DNS issues found' 
+            : `No domains found matching "${escapeHtml(searchTerm)}"`;
+            
+        domainsList.innerHTML = `
+            <div class="text-center py-12 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
+                <svg class="w-16 h-16 mx-auto text-gray-400 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
+                </svg>
+                <p class="text-gray-500 dark:text-gray-400">${noResultsMessage}</p>
+            </div>
+        `;
+    } else {
+        domainsList.innerHTML = filteredDomains.map(domain => renderDomainAccordionRow(domain)).join('');
+    }
+}
+
+function renderDomainAccordionRow(domain) {
+    const dns = domain.dns_checks || {};
+    const spf = dns.spf || { status: 'unknown', message: 'Not checked' };
+    const dkim = dns.dkim || { status: 'unknown', message: 'Not checked' };
+    const dmarc = dns.dmarc || { status: 'unknown', message: 'Not checked' };
+    
+    // Status icons for inline display
+    const getStatusIcon = (status) => {
+        if (status === 'success') return '<span class="text-green-500" title="OK">✓</span>';
+        if (status === 'warning') return '<span class="text-amber-500" title="Warning">⚠</span>';
+        if (status === 'error') return '<span class="text-red-500" title="Error">✗</span>';
+        return '<span class="text-gray-400" title="Unknown">?</span>';
+    };
+    
+    const domainId = `domain-${escapeHtml(domain.domain_name).replace(/\./g, '-')}`;
+    
+    return `
+        <div class="bg-white dark:bg-gray-800 rounded-lg shadow border border-gray-200 dark:border-gray-700 overflow-hidden">
+            <!-- Summary Row - Clickable -->
+            <div class="p-4 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700/30 transition" onclick="toggleDomainDetails('${domainId}')">
+                <!-- Desktop Layout (lg and up) -->
+                <div class="hidden lg:grid lg:grid-cols-[minmax(0,350px)_1fr_minmax(0,280px)] items-center gap-4">
+                    <!-- Left: Expand Icon + Domain Name + Status (max 350px) -->
+                    <div class="flex items-center gap-3 min-w-0">
+                        <svg id="${domainId}-icon-desktop" class="w-5 h-5 text-gray-400 transition-transform flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
+                        </svg>
+                        
+                        <div class="flex items-center gap-2 min-w-0">
+                            <h3 class="text-base font-bold text-gray-900 dark:text-white truncate">${escapeHtml(domain.domain_name)}</h3>
+                            ${domain.active ? 
+                                '<span class="px-2 py-0.5 text-xs font-semibold rounded-full bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-200 flex-shrink-0">Active</span>' :
+                                '<span class="px-2 py-0.5 text-xs font-semibold rounded-full bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-200 flex-shrink-0">Inactive</span>'
+                            }
+                        </div>
+                    </div>
+                    
+                    <!-- Center: DNS Status Indicators -->
+                    <div class="flex items-center justify-center">
+                        <div class="flex items-center gap-4 px-4 py-2 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
+                            <div class="flex items-center gap-1.5">
+                                <span class="font-medium text-xs text-gray-600 dark:text-gray-400">SPF</span>
+                                ${getStatusIcon(spf.status)}
+                            </div>
+                            <div class="w-px h-4 bg-gray-300 dark:bg-gray-600"></div>
+                            <div class="flex items-center gap-1.5">
+                                <span class="font-medium text-xs text-gray-600 dark:text-gray-400">DKIM</span>
+                                ${getStatusIcon(dkim.status)}
+                            </div>
+                            <div class="w-px h-4 bg-gray-300 dark:bg-gray-600"></div>
+                            <div class="flex items-center gap-1.5">
+                                <span class="font-medium text-xs text-gray-600 dark:text-gray-400">DMARC</span>
+                                ${getStatusIcon(dmarc.status)}
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Right: Quick Stats (max 280px) - Right aligned -->
+                    <div class="flex items-center justify-end gap-4 text-xs min-w-0">
+                        <div class="text-right min-w-0">
+                            <p class="text-gray-500 dark:text-gray-400 text-xs">Mailboxes</p>
+                            <p class="font-semibold text-gray-900 dark:text-white truncate">${domain.mboxes_in_domain}/${domain.max_num_mboxes_for_domain}</p>
+                        </div>
+                        <div class="text-right min-w-0">
+                            <p class="text-gray-500 dark:text-gray-400 text-xs">Aliases</p>
+                            <p class="font-semibold text-gray-900 dark:text-white truncate">${domain.aliases_in_domain}/${domain.max_num_aliases_for_domain}</p>
+                        </div>
+                        <div class="text-right min-w-0">
+                            <p class="text-gray-500 dark:text-gray-400 text-xs">Storage</p>
+                            <p class="font-semibold text-gray-900 dark:text-white truncate">${formatBytes(domain.bytes_total)}</p>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Mobile/Tablet Layout (below lg) -->
+                <div class="flex lg:hidden items-start justify-between gap-3">
+                    <!-- Left: Expand Icon + Domain Name + Status -->
+                    <div class="flex items-center gap-3 min-w-0 flex-1">
+                        <svg id="${domainId}-icon-mobile" class="w-5 h-5 text-gray-400 transition-transform flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
+                        </svg>
+                        
+                        <div class="min-w-0">
+                            <h3 class="text-base font-bold text-gray-900 dark:text-white truncate">${escapeHtml(domain.domain_name)}</h3>
+                            ${domain.active ? 
+                                '<span class="inline-block px-2 py-0.5 text-xs font-semibold rounded-full bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-200 mt-1">Active</span>' :
+                                '<span class="inline-block px-2 py-0.5 text-xs font-semibold rounded-full bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-200 mt-1">Inactive</span>'
+                            }
+                        </div>
+                    </div>
+                    
+                    <!-- Right: DNS Status (Vertical) -->
+                    <div class="flex flex-col gap-0.5 text-right flex-shrink-0">
+                        <div class="flex items-center justify-end gap-1.5">
+                            <span class="font-medium text-xs text-gray-600 dark:text-gray-400">SPF:</span>
+                            ${getStatusIcon(spf.status)}
+                        </div>
+                        <div class="flex items-center justify-end gap-1.5">
+                            <span class="font-medium text-xs text-gray-600 dark:text-gray-400">DKIM:</span>
+                            ${getStatusIcon(dkim.status)}
+                        </div>
+                        <div class="flex items-center justify-end gap-1.5">
+                            <span class="font-medium text-xs text-gray-600 dark:text-gray-400">DMARC:</span>
+                            ${getStatusIcon(dmarc.status)}
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Details Section - Hidden by default -->
+            <div id="${domainId}-details" class="hidden border-t border-gray-200 dark:border-gray-700">
+                <!-- Domain Stats -->
+                <div class="p-6 bg-gray-50 dark:bg-gray-700/30">
+                    <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                        <div>
+                            <p class="text-xs text-gray-500 dark:text-gray-400 font-medium mb-1">Mailboxes</p>
+                            <p class="text-lg font-bold text-gray-900 dark:text-white">${domain.mboxes_in_domain} / ${domain.max_num_mboxes_for_domain}</p>
+                            <p class="text-xs text-gray-500 dark:text-gray-400">${domain.mboxes_left} available</p>
+                        </div>
+                        <div>
+                            <p class="text-xs text-gray-500 dark:text-gray-400 font-medium mb-1">Aliases</p>
+                            <p class="text-lg font-bold text-gray-900 dark:text-white">${domain.aliases_in_domain} / ${domain.max_num_aliases_for_domain}</p>
+                            <p class="text-xs text-gray-500 dark:text-gray-400">${domain.aliases_left} available</p>
+                        </div>
+                        <div>
+                            <p class="text-xs text-gray-500 dark:text-gray-400 font-medium mb-1">Storage Used</p>
+                            <p class="text-lg font-bold text-gray-900 dark:text-white">${formatBytes(domain.bytes_total)}</p>
+                            ${domain.max_quota_for_domain > 0 ? 
+                                `<p class="text-xs text-gray-500 dark:text-gray-400">${formatBytes(domain.max_quota_for_domain)} max</p>` : 
+                                '<p class="text-xs text-gray-500 dark:text-gray-400">Unlimited</p>'
+                            }
+                        </div>
+                        <div>
+                            <p class="text-xs text-gray-500 dark:text-gray-400 font-medium mb-1">Total Messages</p>
+                            <p class="text-lg font-bold text-gray-900 dark:text-white">${domain.msgs_total.toLocaleString()}</p>
+                        </div>
+                    </div>
+                    
+                    <!-- Additional Domain Info -->
+                    <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mt-4 pt-4 border-t border-gray-200 dark:border-gray-600">
+                        <div>
+                            <p class="text-xs text-gray-500 dark:text-gray-400 font-medium mb-1">Created Date</p>
+                            <p class="text-sm font-semibold text-gray-900 dark:text-white">${domain.created ? formatDate(domain.created) : 'N/A'}</p>
+                        </div>
+                        <div>
+                            <p class="text-xs text-gray-500 dark:text-gray-400 font-medium mb-1">Backup MX</p>
+                            <p class="text-sm font-semibold text-gray-900 dark:text-white">${domain.backupmx == 1 ? 'Yes' : 'No'}</p>
+                        </div>
+                        <div>
+                            <p class="text-xs text-gray-500 dark:text-gray-400 font-medium mb-1">Relay All Recipients</p>
+                            <p class="text-sm font-semibold text-gray-900 dark:text-white">${domain.relay_all_recipients == 1 ? 'Yes' : 'No'}</p>
+                        </div>
+                        <div>
+                            <p class="text-xs text-gray-500 dark:text-gray-400 font-medium mb-1">Relay Unknown Only</p>
+                            <p class="text-sm font-semibold text-gray-900 dark:text-white">${domain.relay_unknown_only == 1 ? 'Yes' : 'No'}</p>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- DNS Checks -->
+                <div class="p-6">
+                    <h4 class="text-sm font-semibold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
+                        <svg class="w-5 h-5 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"></path>
+                        </svg>
+                        DNS Security Records
+                    </h4>
+                    <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                        ${renderDNSCheck('SPF', spf)}
+                        ${renderDNSCheck('DKIM', dkim)}
+                        ${renderDNSCheck('DMARC', dmarc)}
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+// Toggle domain details accordion
+function toggleDomainDetails(domainId) {
+    const details = document.getElementById(`${domainId}-details`);
+    const iconDesktop = document.getElementById(`${domainId}-icon-desktop`);
+    const iconMobile = document.getElementById(`${domainId}-icon-mobile`);
+    
+    if (details.classList.contains('hidden')) {
+        details.classList.remove('hidden');
+        if (iconDesktop) iconDesktop.style.transform = 'rotate(90deg)';
+        if (iconMobile) iconMobile.style.transform = 'rotate(90deg)';
+    } else {
+        details.classList.add('hidden');
+        if (iconDesktop) iconDesktop.style.transform = 'rotate(0deg)';
+        if (iconMobile) iconMobile.style.transform = 'rotate(0deg)';
+    }
+}
+
+function renderDNSCheck(type, check) {
+    const statusColors = {
+        'success': 'border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-900/20',
+        'warning': 'border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20',
+        'error': 'border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20',
+        'unknown': 'border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800'
+    };
+    
+    const statusTextColors = {
+        'success': 'text-green-700 dark:text-green-300',
+        'warning': 'text-amber-700 dark:text-amber-300',
+        'error': 'text-red-700 dark:text-red-300',
+        'unknown': 'text-gray-500 dark:text-gray-400'
+    };
+    
+    const statusIcons = {
+        'success': '<svg class="w-5 h-5 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>',
+        'warning': '<svg class="w-5 h-5 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>',
+        'error': '<svg class="w-5 h-5 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>',
+        'unknown': '<svg class="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>'
+    };
+    
+    const status = check.status || 'unknown';
+    
+    return `
+        <div class="border ${statusColors[status]} rounded-lg p-4">
+            <div class="flex items-start justify-between mb-2">
+                <h5 class="text-sm font-semibold text-gray-900 dark:text-white">${type}</h5>
+                ${statusIcons[status]}
+            </div>
+            <p class="text-sm ${statusTextColors[status]} font-medium mb-2">${escapeHtml(check.message || 'No information')}</p>
+            
+            ${check.record ? `
+                <details class="mt-3">
+                    <summary class="text-xs text-gray-600 dark:text-gray-400 cursor-pointer hover:text-gray-900 dark:hover:text-gray-200 font-medium">
+                        View Record
+                    </summary>
+                    <div class="mt-2 p-2 bg-white dark:bg-gray-900 rounded border border-gray-200 dark:border-gray-700">
+                        <code class="text-xs text-gray-700 dark:text-gray-300 break-all block leading-relaxed">${escapeHtml(check.record)}</code>
+                    </div>
+                </details>
+            ` : ''}
+            
+            ${check.warnings && check.warnings.length > 0 ? `
+                <div class="mt-3 space-y-1">
+                    ${check.warnings.map(warning => `
+                        <div class="flex items-start gap-2 text-xs ${statusTextColors['warning']}">
+                            <svg class="w-3 h-3 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
+                            </svg>
+                            <span>${escapeHtml(warning)}</span>
+                        </div>
+                    `).join('')}
+                </div>
+            ` : ''}
+            
+            ${check.status === 'error' && check.expected_record ? `
+                <details class="mt-3">
+                    <summary class="text-xs text-gray-600 dark:text-gray-400 cursor-pointer hover:text-gray-900 dark:hover:text-gray-200 font-medium">
+                        Expected Value
+                    </summary>
+                    <div class="mt-2 p-2 bg-white dark:bg-gray-900 rounded border border-gray-200 dark:border-gray-700">
+                        <code class="text-xs text-gray-700 dark:text-gray-300 break-all block leading-relaxed">${escapeHtml(check.expected_record)}</code>
+                    </div>
+                </details>
+            ` : ''}
+        </div>
+    `;
+}
+
+function formatBytes(bytes) {
+    if (bytes === 0 || bytes === '0') return '0 B';
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+}
 
 // =============================================================================
 // SETTINGS PAGE

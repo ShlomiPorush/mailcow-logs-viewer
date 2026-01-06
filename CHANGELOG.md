@@ -5,6 +5,86 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.7] - 2026-01-06
+
+### Added
+
+#### Domains Management Feature
+- **Complete Domains Manager**: New comprehensive interface for Viewing Mailcow domains
+  - Real-time DNS security validation (SPF, DKIM, DMARC)
+  - Summary statistics dashboard (Total, Active, Inactive domains)
+  - Search and filter functionality
+
+#### Domain Information Display
+- **Core Statistics**:
+  - Mailboxes: used/max with available count
+  - Aliases: used/max with available count
+  - Storage: used/max (or unlimited)
+  - Total message count
+  - Created date
+  
+- **Relay Configuration**:
+  - Backup MX status (`backupmx`)
+  - Relay All Recipients status (`relay_all_recipients`)
+  - Relay Unknown Only status (`relay_unknown_only`)
+
+#### DNS Security Validation
+- **Automated DNS Checks**:
+  - **SPF (Sender Policy Framework)**:
+    - Detects all policy types: `-all`, `~all`, `?all`, `+all`, and missing `all`
+    - Color-coded status indicators
+    - Policy-specific recommendations
+  - **DKIM (DomainKeys Identified Mail)**:
+    - Fetches configuration from Mailcow API
+    - Queries DNS for actual DKIM record
+    - Compares expected vs actual records
+  - **DMARC (Domain-based Message Authentication)**:
+    - Checks for existence at `_dmarc.domain.com`
+    - Validates policy (p=reject/quarantine/none)
+    - Recommendations for stricter policy
+
+- **DNS Status Indicators**:
+  - Color-coded icons: ✓ (green), ⚠ (amber), ✗ (red), ? (gray)
+
+### Changed
+
+#### Quarantine Page Enhancement
+- **UI Redesign**: Completely redesigned Quarantine page to match Messages page layout and design
+  - Changed from basic card layout to professional grid-based design
+  - Added sender → recipient display with visual arrow indicator
+  - Improved visual hierarchy with better spacing and organization
+  - Added hover effects for better interactivity
+  - Fully responsive design for mobile and desktop
+  - Complete dark mode support
+
+- **Additional Information Display**: Enhanced Quarantine page to show more useful information
+  - **Recipient (rcpt)**: Now displayed next to sender with arrow (→) separator
+  - **Spam Score**: Displayed in metadata row with red highlighting for scores >= 15
+  - **Virus Flag**: Purple badge with 🦠 emoji appears when virus is detected
+  - **Queue ID (qid)**: Displayed in metadata row for reference
+  - **Action Badge**: Action (reject/quarantine) now shown as colored badge instead of plain text
+  - **Result Count**: Added total count display in page header (e.g., "Quarantined Messages (3 results)")
+
+### Fixed
+
+#### Quarantine Timestamp Display
+- **Timestamp Formatting**: Fixed timestamp display in Quarantine page to be consistent with other pages
+  - Quarantine timestamps now properly formatted with UTC timezone indicator ('Z' suffix)
+  - Backend endpoint `/api/quarantine` now processes timestamps before returning to frontend
+
+### Technical
+
+#### Backend (`domains.py`)
+- **New API Router**: `/api/domains` endpoint
+- **DNS Validation Functions**:
+  - `check_spf_record()`: Enhanced SPF validation with comprehensive policy detection
+  - `check_dkim_record()`: DKIM validation with flexible API response handling
+  - `check_dmarc_record()`: DMARC validation with policy checking
+- **Async Operations**: All DNS queries use async resolver for better performance
+- **Error Handling**: Comprehensive try-except blocks with detailed logging
+
+---
+
 ## [1.4.6] - 2026-01-05
 
 ### Added

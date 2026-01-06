@@ -442,6 +442,9 @@ async def get_queue():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+from datetime import datetime, timezone
+
+
 @router.get("/quarantine")
 async def get_quarantine():
     """
@@ -449,6 +452,27 @@ async def get_quarantine():
     """
     try:
         quarantine = await mailcow_api.get_quarantine()
+        
+        # Format timestamps for each quarantine item to ensure consistency
+        for item in quarantine:
+            if 'created' in item and item['created']:
+                # Handle Unix timestamp (number) or ISO string
+                if isinstance(item['created'], (int, float)):
+                    # Convert Unix timestamp to ISO format with 'Z' suffix
+                    dt = datetime.fromtimestamp(item['created'], tz=timezone.utc)
+                    item['created'] = dt.replace(microsecond=0).isoformat().replace('+00:00', 'Z')
+                elif isinstance(item['created'], str):
+                    # Parse ISO string and ensure it has 'Z' suffix for UTC
+                    try:
+                        dt = datetime.fromisoformat(item['created'].replace('Z', '+00:00'))
+                        if dt.tzinfo is None:
+                            dt = dt.replace(tzinfo=timezone.utc)
+                        else:
+                            dt = dt.astimezone(timezone.utc)
+                        item['created'] = dt.replace(microsecond=0).isoformat().replace('+00:00', 'Z')
+                    except (ValueError, AttributeError):
+                        pass
+        
         return {
             "total": len(quarantine),
             "data": quarantine

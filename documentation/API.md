@@ -12,16 +12,17 @@ This document describes all available API endpoints for the Mailcow Logs Viewer 
 
 1. [Authentication](#authentication)
 2. [Health & Info](#health--info)
-3. [Messages (Unified View)](#messages-unified-view)
-4. [Logs](#logs)
+3. [Domains](#domains)
+4. [Messages (Unified View)](#messages-unified-view)
+5. [Logs](#logs)
    - [Postfix Logs](#postfix-logs)
    - [Rspamd Logs](#rspamd-logs)
    - [Netfilter Logs](#netfilter-logs)
-5. [Queue & Quarantine](#queue--quarantine)
-6. [Statistics](#statistics)
-7. [Status](#status)
-8. [Settings](#settings)
-9. [Export](#export)
+6. [Queue & Quarantine](#queue--quarantine)
+7. [Statistics](#statistics)
+8. [Status](#status)
+9. [Settings](#settings)
+10. [Export](#export)
 
 ---
 
@@ -113,6 +114,97 @@ Application information and configuration.
   "auth_enabled": false
 }
 ```
+
+---
+
+## Domains
+
+### GET /domains
+
+Get list of all domains with statistics and DNS validation.
+
+**Response:**
+```json
+{
+  "total": 10,
+  "active": 8,
+  "domains": [
+    {
+      "domain_name": "example.com",
+      "description": "Main domain",
+      "aliases": "example.com,mail.example.com",
+      "mailboxes": 25,
+      "mailbox_quota": 102400,
+      "max_num_aliases_for_domain": 400,
+      "max_num_mboxes_for_domain": 1000,
+      "max_quota_for_domain": 10240000,
+      "quota_used_in_domain": 1572864,
+      "bytes_total": 1572864,
+      "msgs_total": 1234,
+      "mboxes_in_domain": 5,
+      "mboxes_left": 995,
+      "aliases_in_domain": 3,
+      "aliases_left": 397,
+      "created": "2025-01-01T00:00:00Z",
+      "active": true,
+      "backupmx": 0,
+      "relay_all_recipients": 0,
+      "relay_unknown_only": 0,
+      "dns_checks": {
+        "spf": {
+          "status": "success",
+          "message": "SPF configured correctly with strict -all policy",
+          "record": "v=spf1 mx include:_spf.google.com -all",
+          "has_strict_all": true,
+          "includes_mx": true,
+          "includes": ["_spf.google.com"],
+          "warnings": []
+        },
+        "dkim": {
+          "status": "success",
+          "message": "DKIM configured correctly",
+          "selector": "dkim",
+          "dkim_domain": "dkim._domainkey.example.com",
+          "expected_record": "v=DKIM1;k=rsa;...",
+          "actual_record": "v=DKIM1;k=rsa;...",
+          "match": true
+        },
+        "dmarc": {
+          "status": "success",
+          "message": "DMARC configured with strict policy",
+          "record": "v=DMARC1; p=reject; rua=mailto:dmarc@example.com",
+          "policy": "reject",
+          "subdomain_policy": null,
+          "pct": "100"
+        }
+      }
+    }
+  ]
+}
+```
+
+**DNS Check Status Values:**
+- `success`: Check passed
+- `warning`: Check passed but with recommendations
+- `error`: Check failed or record not found
+- `unknown`: Check not performed
+
+**SPF Policy Types:**
+- `-all`: Strict policy (success)
+- `~all`: Soft fail (warning)
+- `?all`: Neutral (warning)
+- `+all`: Pass all (error - no protection)
+- No `all`: Missing mechanism (error)
+
+**DMARC Policy Types:**
+- `reject`: Strict policy (success)
+- `quarantine`: Moderate policy (warning)
+- `none`: Monitor only (warning)
+
+**Relay Configuration:**
+- `backupmx`: 1 if domain is backup MX, 0 otherwise
+- `relay_all_recipients`: 1 if relaying all recipients, 0 otherwise
+- `relay_unknown_only`: 1 if relaying only unknown recipients, 0 otherwise
 
 ---
 

@@ -15,6 +15,7 @@ from .scheduler import start_scheduler, stop_scheduler
 from .mailcow_api import mailcow_api
 from .routers import logs, stats
 from .routers import export as export_router
+from .routers import domains as domains_router
 from .migrations import run_migrations
 from .auth import BasicAuthMiddleware
 from .version import __version__
@@ -126,6 +127,7 @@ app.include_router(export_router.router, prefix="/api", tags=["Export"])
 app.include_router(status_router.router, prefix="/api", tags=["Status"])
 app.include_router(messages_router.router, prefix="/api", tags=["Messages"])
 app.include_router(settings_router.router, prefix="/api", tags=["Settings"])
+app.include_router(domains_router.router, prefix="/api", tags=["Domains"])
 
 # Mount static files (frontend)
 app.mount("/static", StaticFiles(directory="/app/frontend"), name="static")

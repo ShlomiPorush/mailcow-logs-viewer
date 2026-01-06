@@ -305,6 +305,9 @@
                 <button onclick="switchTab('status')" id="tab-status" class="py-4 px-1 font-medium text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300 whitespace-nowrap">
                     Status
                 </button>
+                <button onclick="switchTab('domains')" id="tab-domains" class="py-4 px-1 font-medium text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300 whitespace-nowrap">
+                    Domains
+                </button>
                 <button onclick="switchTab('settings')" id="tab-settings" class="py-4 px-1 font-medium text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300 whitespace-nowrap">
                     Settings
                 </button>
@@ -577,7 +580,8 @@
         <div id="content-quarantine" class="tab-content hidden">
             <div class="bg-white dark:bg-gray-800 rounded-lg shadow dark:shadow-gray-900/30">
                 <div class="px-4 sm:px-6 py-4 border-b border-gray-200 dark:border-gray-700">
-                    <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Quarantined Messages</h2>
+                    <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Quarantined Messages <span id="quarantine-count" class="text-sm font-normal text-gray-500 dark:text-gray-400"></span>
+                    </h2>
                 </div>
                 <div id="quarantine-logs" class="p-4 sm:p-6">
                     <div class="text-center py-8">
@@ -691,6 +695,19 @@
                     </div>
                 </div>
             </div>
+        </div>
+
+        <!-- Domains Tab -->
+        <div id="content-domains" class="tab-content hidden">
+            <div class="mb-6">
+                <h2 class="text-2xl font-bold text-gray-900 dark:text-white">Domains Overview</h2>
+                <p class="text-gray-600 dark:text-gray-400 mt-1">View Domains Settings with DNS records validation</p>
+            </div>
+            <div id="domains-loading" class="text-center py-12">
+                <div class="loading mx-auto mb-4"></div>
+                <p class="text-gray-500 dark:text-gray-400">Loading domains...</p>
+            </div>
+            <div id="domains-content" class="hidden"></div>
         </div>
 
         <!-- Settings Tab -->
