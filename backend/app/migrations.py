@@ -369,7 +369,6 @@ def add_is_full_check_column(db: Session):
         logger.error(f"Error adding is_full_check column: {e}")
         db.rollback()
 
-
 def add_postfix_unique_constraint(db: Session):
     """
     Add UNIQUE constraint to postfix_logs to prevent duplicate logs
@@ -378,19 +377,18 @@ def add_postfix_unique_constraint(db: Session):
     
     try:
         result = db.execute(text("""
-            SELECT constraint_name 
-            FROM information_schema.table_constraints 
-            WHERE table_name='postfix_logs' 
-            AND constraint_name='uq_postfix_log'
+            SELECT indexname 
+            FROM pg_indexes 
+            WHERE tablename='postfix_logs' 
+            AND indexname='uq_postfix_log'
         """))
         
         if result.fetchone():
-            logger.info("UNIQUE constraint already exists, skipping...")
+            logger.info("UNIQUE index already exists, skipping...")
             return
         
         logger.info("Cleaning up duplicate Postfix logs...")
         
-        # Delete ALL duplicates in ONE query - much faster
         result = db.execute(text("""
             DELETE FROM postfix_logs
             WHERE id IN (
@@ -415,26 +413,25 @@ def add_postfix_unique_constraint(db: Session):
         else:
             logger.info("No duplicate Postfix logs found")
         
-        logger.info("Creating UNIQUE constraint...")
+        logger.info("Creating UNIQUE index...")
         db.execute(text("""
-            ALTER TABLE postfix_logs
-            ADD CONSTRAINT uq_postfix_log 
-            UNIQUE (time, program, COALESCE(queue_id, ''), message);
+            CREATE UNIQUE INDEX uq_postfix_log 
+            ON postfix_logs (time, program, COALESCE(queue_id, ''), message);
         """))
         
         db.commit()
-        logger.info("✓ UNIQUE constraint added successfully")
+        logger.info("✓ UNIQUE index added successfully")
         
     except Exception as e:
         error_msg = str(e).lower()
         if "already exists" in error_msg or "duplicate" in error_msg:
-            logger.info("UNIQUE constraint already exists, skipping...")
+            logger.info("UNIQUE index already exists, skipping...")
             db.rollback()
         elif "deadlock" in error_msg or "lock" in error_msg:
-            logger.warning(f"Could not add UNIQUE constraint due to lock (will retry on next startup): {e}")
+            logger.warning(f"Could not add UNIQUE index due to lock (will retry on next startup): {e}")
             db.rollback()
         else:
-            logger.error(f"Error adding UNIQUE constraint: {e}")
+            logger.error(f"Error adding UNIQUE index: {e}")
             db.rollback()
 
 def ensure_dmarc_tables(db: Session):
