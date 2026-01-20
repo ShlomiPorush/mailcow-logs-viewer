@@ -58,6 +58,57 @@ def parse_dmarc_file(file_content: bytes, filename: str) -> Optional[Dict[str, A
         return None
 
 
+def find_element(parent: ET.Element, tag: str, namespaces: List[str]) -> Optional[ET.Element]:
+    """
+    Find an element trying multiple namespaces
+    
+    Args:
+        parent: Parent XML element
+        tag: Tag name to find
+        namespaces: List of namespace prefixes to try (empty string for no namespace)
+        
+    Returns:
+        Found element or None
+    """
+    for ns in namespaces:
+        if ns:
+            elem = parent.find(f'{{{ns}}}{tag}')
+        else:
+            elem = parent.find(tag)
+        if elem is not None:
+            return elem
+    return None
+
+
+def find_all_elements(parent: ET.Element, tag: str, namespaces: List[str]) -> List[ET.Element]:
+    """
+    Find all elements matching tag, trying multiple namespaces
+    
+    Args:
+        parent: Parent XML element
+        tag: Tag name to find
+        namespaces: List of namespace prefixes to try
+        
+    Returns:
+        List of found elements
+    """
+    for ns in namespaces:
+        if ns:
+            elems = parent.findall(f'{{{ns}}}{tag}')
+        else:
+            elems = parent.findall(tag)
+        if elems:
+            return elems
+    return []
+
+
+# Known DMARC XML namespaces
+DMARC_NAMESPACES = [
+    '',  # No namespace (DMARC 1.0)
+    'urn:ietf:params:xml:ns:dmarc-2.0',  # DMARC 2.0
+]
+
+
 def parse_dmarc_xml(xml_string: str, raw_xml: str) -> Dict[str, Any]:
     """
     Parse DMARC XML content
@@ -72,38 +123,38 @@ def parse_dmarc_xml(xml_string: str, raw_xml: str) -> Dict[str, Any]:
     try:
         root = ET.fromstring(xml_string)
         
-        # Parse report metadata
-        metadata = root.find('report_metadata')
+        # Parse report metadata (try with and without namespace)
+        metadata = find_element(root, 'report_metadata', DMARC_NAMESPACES)
         if metadata is None:
             raise ValueError("Missing report_metadata element")
         
-        org_name = get_element_text(metadata, 'org_name')
-        email = get_element_text(metadata, 'email')
-        extra_contact_info = get_element_text(metadata, 'extra_contact_info')
-        report_id = get_element_text(metadata, 'report_id')
+        org_name = get_element_text(metadata, 'org_name', DMARC_NAMESPACES)
+        email = get_element_text(metadata, 'email', DMARC_NAMESPACES)
+        extra_contact_info = get_element_text(metadata, 'extra_contact_info', DMARC_NAMESPACES)
+        report_id = get_element_text(metadata, 'report_id', DMARC_NAMESPACES)
         
-        date_range = metadata.find('date_range')
+        date_range = find_element(metadata, 'date_range', DMARC_NAMESPACES)
         if date_range is None:
             raise ValueError("Missing date_range element")
         
-        begin_date = int(get_element_text(date_range, 'begin'))
-        end_date = int(get_element_text(date_range, 'end'))
+        begin_date = int(get_element_text(date_range, 'begin', DMARC_NAMESPACES))
+        end_date = int(get_element_text(date_range, 'end', DMARC_NAMESPACES))
         
         # Parse published policy
-        policy = root.find('policy_published')
+        policy = find_element(root, 'policy_published', DMARC_NAMESPACES)
         if policy is None:
             raise ValueError("Missing policy_published element")
         
-        domain = get_element_text(policy, 'domain')
+        domain = get_element_text(policy, 'domain', DMARC_NAMESPACES)
         
         policy_published = {
-            'adkim': get_element_text(policy, 'adkim'),
-            'aspf': get_element_text(policy, 'aspf'),
-            'p': get_element_text(policy, 'p'),
-            'sp': get_element_text(policy, 'sp'),
-            'pct': get_element_text(policy, 'pct'),
-            'fo': get_element_text(policy, 'fo'),
-            'np': get_element_text(policy, 'np'),
+            'adkim': get_element_text(policy, 'adkim', DMARC_NAMESPACES),
+            'aspf': get_element_text(policy, 'aspf', DMARC_NAMESPACES),
+            'p': get_element_text(policy, 'p', DMARC_NAMESPACES),
+            'sp': get_element_text(policy, 'sp', DMARC_NAMESPACES),
+            'pct': get_element_text(policy, 'pct', DMARC_NAMESPACES),
+            'fo': get_element_text(policy, 'fo', DMARC_NAMESPACES),
+            'np': get_element_text(policy, 'np', DMARC_NAMESPACES),
         }
         
         # Remove None values
@@ -111,7 +162,7 @@ def parse_dmarc_xml(xml_string: str, raw_xml: str) -> Dict[str, Any]:
         
         # Parse records
         records = []
-        for record_elem in root.findall('record'):
+        for record_elem in find_all_elements(root, 'record', DMARC_NAMESPACES):
             record_data = parse_dmarc_record(record_elem)
             if record_data:
                 records.append(record_data)
@@ -145,38 +196,38 @@ def parse_dmarc_record(record_elem: ET.Element) -> Optional[Dict[str, Any]]:
         Dictionary with parsed record data
     """
     try:
-        row = record_elem.find('row')
+        row = find_element(record_elem, 'row', DMARC_NAMESPACES)
         if row is None:
             return None
         
         # Source and count
-        source_ip = get_element_text(row, 'source_ip')
-        count = int(get_element_text(row, 'count', '0'))
+        source_ip = get_element_text(row, 'source_ip', DMARC_NAMESPACES)
+        count = int(get_element_text(row, 'count', DMARC_NAMESPACES, '0'))
         
         # Policy evaluation
-        policy_eval = row.find('policy_evaluated')
-        disposition = get_element_text(policy_eval, 'disposition') if policy_eval else None
-        dkim_result = get_element_text(policy_eval, 'dkim') if policy_eval else None
-        spf_result = get_element_text(policy_eval, 'spf') if policy_eval else None
+        policy_eval = find_element(row, 'policy_evaluated', DMARC_NAMESPACES)
+        disposition = get_element_text(policy_eval, 'disposition', DMARC_NAMESPACES) if policy_eval else None
+        dkim_result = get_element_text(policy_eval, 'dkim', DMARC_NAMESPACES) if policy_eval else None
+        spf_result = get_element_text(policy_eval, 'spf', DMARC_NAMESPACES) if policy_eval else None
         
         # Identifiers
-        identifiers = record_elem.find('identifiers')
-        header_from = get_element_text(identifiers, 'header_from') if identifiers else None
-        envelope_from = get_element_text(identifiers, 'envelope_from') if identifiers else None
-        envelope_to = get_element_text(identifiers, 'envelope_to') if identifiers else None
+        identifiers = find_element(record_elem, 'identifiers', DMARC_NAMESPACES)
+        header_from = get_element_text(identifiers, 'header_from', DMARC_NAMESPACES) if identifiers else None
+        envelope_from = get_element_text(identifiers, 'envelope_from', DMARC_NAMESPACES) if identifiers else None
+        envelope_to = get_element_text(identifiers, 'envelope_to', DMARC_NAMESPACES) if identifiers else None
         
         # Auth results
         auth_results = {}
-        auth_results_elem = record_elem.find('auth_results')
+        auth_results_elem = find_element(record_elem, 'auth_results', DMARC_NAMESPACES)
         
         if auth_results_elem:
             # Parse DKIM results
             dkim_results = []
-            for dkim_elem in auth_results_elem.findall('dkim'):
+            for dkim_elem in find_all_elements(auth_results_elem, 'dkim', DMARC_NAMESPACES):
                 dkim_data = {
-                    'domain': get_element_text(dkim_elem, 'domain'),
-                    'selector': get_element_text(dkim_elem, 'selector'),
-                    'result': get_element_text(dkim_elem, 'r') or get_element_text(dkim_elem, 'result')
+                    'domain': get_element_text(dkim_elem, 'domain', DMARC_NAMESPACES),
+                    'selector': get_element_text(dkim_elem, 'selector', DMARC_NAMESPACES),
+                    'result': get_element_text(dkim_elem, 'r', DMARC_NAMESPACES) or get_element_text(dkim_elem, 'result', DMARC_NAMESPACES)
                 }
                 dkim_results.append({k: v for k, v in dkim_data.items() if v})
             
@@ -185,11 +236,11 @@ def parse_dmarc_record(record_elem: ET.Element) -> Optional[Dict[str, Any]]:
             
             # Parse SPF results
             spf_results = []
-            for spf_elem in auth_results_elem.findall('spf'):
+            for spf_elem in find_all_elements(auth_results_elem, 'spf', DMARC_NAMESPACES):
                 spf_data = {
-                    'domain': get_element_text(spf_elem, 'domain'),
-                    'scope': get_element_text(spf_elem, 'scope'),
-                    'result': get_element_text(spf_elem, 'r') or get_element_text(spf_elem, 'result')
+                    'domain': get_element_text(spf_elem, 'domain', DMARC_NAMESPACES),
+                    'scope': get_element_text(spf_elem, 'scope', DMARC_NAMESPACES),
+                    'result': get_element_text(spf_elem, 'r', DMARC_NAMESPACES) or get_element_text(spf_elem, 'result', DMARC_NAMESPACES)
                 }
                 spf_results.append({k: v for k, v in spf_data.items() if v})
             
@@ -213,13 +264,14 @@ def parse_dmarc_record(record_elem: ET.Element) -> Optional[Dict[str, Any]]:
         return None
 
 
-def get_element_text(parent: Optional[ET.Element], tag: str, default: Optional[str] = None) -> Optional[str]:
+def get_element_text(parent: Optional[ET.Element], tag: str, namespaces: List[str] = None, default: Optional[str] = None) -> Optional[str]:
     """
-    Safely get text from XML element
+    Safely get text from XML element with namespace support
     
     Args:
         parent: Parent XML element
         tag: Tag name to find
+        namespaces: List of namespace prefixes to try
         default: Default value if not found
         
     Returns:
@@ -228,7 +280,11 @@ def get_element_text(parent: Optional[ET.Element], tag: str, default: Optional[s
     if parent is None:
         return default
     
-    elem = parent.find(tag)
+    if namespaces:
+        elem = find_element(parent, tag, namespaces)
+    else:
+        elem = parent.find(tag)
+    
     if elem is not None and elem.text:
         return elem.text.strip()
     

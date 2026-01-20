@@ -795,6 +795,59 @@ def create_dmarc_sync_table(db: Session):
         db.rollback()
         raise
 
+def ensure_mailbox_statistics_table(db: Session):
+    """Ensure mailbox_statistics table exists with proper structure"""
+    try:
+        # Check if table exists
+        result = db.execute(text("""
+            SELECT EXISTS (
+                SELECT FROM information_schema.tables 
+                WHERE table_name = 'mailbox_statistics'
+            )
+        """)).scalar()
+        
+        if not result:
+            logger.info("Creating mailbox_statistics table...")
+            db.execute(text("""
+                CREATE TABLE mailbox_statistics (
+                    id SERIAL PRIMARY KEY,
+                    username VARCHAR(255) UNIQUE NOT NULL,
+                    domain VARCHAR(255) NOT NULL,
+                    name VARCHAR(255),
+                    quota BIGINT DEFAULT 0,
+                    quota_used BIGINT DEFAULT 0,
+                    percent_in_use FLOAT DEFAULT 0.0,
+                    messages INTEGER DEFAULT 0,
+                    active BOOLEAN DEFAULT TRUE,
+                    last_imap_login BIGINT,
+                    last_pop3_login BIGINT,
+                    last_smtp_login BIGINT,
+                    spam_aliases INTEGER DEFAULT 0,
+                    rl_value INTEGER,
+                    rl_frame VARCHAR(20),
+                    attributes JSONB,
+                    created_at TIMESTAMP DEFAULT NOW(),
+                    updated_at TIMESTAMP DEFAULT NOW()
+                )
+            """))
+            
+            # Create indexes
+            db.execute(text("CREATE INDEX IF NOT EXISTS idx_mailbox_domain ON mailbox_statistics(domain)"))
+            db.execute(text("CREATE INDEX IF NOT EXISTS idx_mailbox_active ON mailbox_statistics(active)"))
+            db.execute(text("CREATE INDEX IF NOT EXISTS idx_mailbox_quota_used ON mailbox_statistics(quota_used)"))
+            db.execute(text("CREATE INDEX IF NOT EXISTS idx_mailbox_username ON mailbox_statistics(username)"))
+            
+            db.commit()
+            logger.info("mailbox_statistics table created successfully")
+        else:
+            logger.debug("mailbox_statistics table already exists")
+            
+    except Exception as e:
+        logger.error(f"Error ensuring mailbox_statistics table: {e}")
+        db.rollback()
+        raise
+
+
 def run_migrations():
     """
     Run all database migrations and maintenance tasks
@@ -826,6 +879,17 @@ def run_migrations():
 
         # GeoIP fields
         add_geoip_fields_to_dmarc(db)
+        
+        # Mailbox statistics table
+        ensure_mailbox_statistics_table(db)
+        
+        # Alias statistics table
+        ensure_alias_statistics_table(db)
+
+        # System settings (for cache signaling)
+        ensure_system_settings_table(db)
+        
+        add_geoip_fields_to_dmarc(db)
         add_geoip_fields_to_rspamd(db)
         
         if removed > 0:
@@ -838,3 +902,81 @@ def run_migrations():
         raise
     finally:
         db.close()
+
+
+def ensure_alias_statistics_table(db: Session):
+    """Ensure alias_statistics table exists with all required fields"""
+    try:
+        # Check if table exists
+        result = db.execute(text("""
+            SELECT EXISTS (
+                SELECT FROM information_schema.tables 
+                WHERE table_name = 'alias_statistics'
+            )
+        """))
+        table_exists = result.scalar()
+        
+        if not table_exists:
+            logger.info("Creating alias_statistics table...")
+            db.execute(text("""
+                CREATE TABLE alias_statistics (
+                    id SERIAL PRIMARY KEY,
+                    alias_address VARCHAR(255) NOT NULL UNIQUE,
+                    goto TEXT,
+                    domain VARCHAR(255) NOT NULL,
+                    active BOOLEAN DEFAULT TRUE,
+                    is_catch_all BOOLEAN DEFAULT FALSE,
+                    primary_mailbox VARCHAR(255),
+                    created_at TIMESTAMP DEFAULT NOW(),
+                    updated_at TIMESTAMP DEFAULT NOW()
+                )
+            """))
+            
+            # Create indexes
+            db.execute(text("CREATE INDEX IF NOT EXISTS idx_alias_domain ON alias_statistics(domain)"))
+            db.execute(text("CREATE INDEX IF NOT EXISTS idx_alias_active ON alias_statistics(active)"))
+            db.execute(text("CREATE INDEX IF NOT EXISTS idx_alias_primary_mailbox ON alias_statistics(primary_mailbox)"))
+            db.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS idx_alias_address ON alias_statistics(alias_address)"))
+            
+            db.commit()
+            logger.info("alias_statistics table created successfully")
+        else:
+            logger.debug("alias_statistics table already exists")
+            
+    except Exception as e:
+        logger.error(f"Error ensuring alias_statistics table: {e}")
+        db.rollback()
+        raise
+
+
+def ensure_system_settings_table(db: Session):
+    """Ensure system_settings table exists"""
+    try:
+        # Check if table exists
+        result = db.execute(text("""
+            SELECT EXISTS (
+                SELECT FROM information_schema.tables 
+                WHERE table_name = 'system_settings'
+            )
+        """))
+        table_exists = result.scalar()
+        
+        if not table_exists:
+            logger.info("Creating system_settings table...")
+            db.execute(text("""
+                CREATE TABLE system_settings (
+                    key VARCHAR(255) PRIMARY KEY,
+                    value TEXT,
+                    updated_at TIMESTAMP DEFAULT NOW()
+                )
+            """))
+            
+            db.commit()
+            logger.info("system_settings table created successfully")
+        else:
+            logger.debug("system_settings table already exists")
+            
+    except Exception as e:
+        logger.error(f"Error ensuring system_settings table: {e}")
+        db.rollback()
+        raise

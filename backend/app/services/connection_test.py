@@ -20,11 +20,18 @@ def test_smtp_connection() -> Dict:
         logs.append(f"Host: {settings.smtp_host}")
         logs.append(f"Port: {settings.smtp_port}")
         logs.append(f"Use TLS: {settings.smtp_use_tls}")
+        logs.append(f"Relay Mode: {settings.smtp_relay_mode}")
         logs.append(f"User: {settings.smtp_user}")
         
-        if not settings.smtp_host or not settings.smtp_user or not settings.smtp_password:
-            logs.append("ERROR: SMTP not fully configured")
-            return {"success": False, "logs": logs}
+        # Different validation for relay mode
+        if settings.smtp_relay_mode:
+            if not settings.smtp_host or not settings.smtp_from:
+                logs.append("ERROR: SMTP relay mode requires host and from address")
+                return {"success": False, "logs": logs}
+        else:
+            if not settings.smtp_host or not settings.smtp_user or not settings.smtp_password:
+                logs.append("ERROR: SMTP not fully configured")
+                return {"success": False, "logs": logs}
         
         logs.append("Connecting to SMTP server...")
         
@@ -40,9 +47,13 @@ def test_smtp_connection() -> Dict:
                 server.starttls()
                 logs.append("TLS established")
         
-        logs.append("Logging in...")
-        server.login(settings.smtp_user, settings.smtp_password)
-        logs.append("Login successful")
+        # Skip login in relay mode
+        if not settings.smtp_relay_mode:
+            logs.append("Logging in...")
+            server.login(settings.smtp_user, settings.smtp_password)
+            logs.append("Login successful")
+        else:
+            logs.append("Relay mode - skipping authentication")
         
         logs.append("Sending test email...")
         msg = MIMEMultipart()

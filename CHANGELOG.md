@@ -5,6 +5,205 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.0] - 2026-01-20
+
+### Added
+
+#### Mailbox Statistics Page
+- **Complete Mailbox Statistics Feature**: New page showing per-mailbox message statistics
+  - Summary cards: Total Sent, Received, Failed, and Failure Rate
+  - Accordion-style mailbox list with expandable details
+  - Message counts aggregated from MessageCorrelation table (not Mailcow API)
+  - Per-alias message statistics with sent/received/failed counts
+  - Combined totals (mailbox + all its aliases)
+
+- **Clickable Statistics Links**: All stat cards and alias table cells are clickable
+  - Click on any stat (Sent, Received, Internal, Delivered, Deferred, Bounced, Rejected) to navigate to Messages page
+  - Search automatically pre-filled with the mailbox/alias email address
+
+- **Mailbox Details Display (Domains-style)**:
+  - Quota usage with percentage
+  - Messages in mailbox count
+  - Last IMAP/SMTP/POP3 login times
+  - Created and Modified dates
+  - Rate limiting settings (value/frame)
+  - Access permissions indicators: IMAP, POP3, SMTP, Sieve, SOGo, TLS Enforce
+  - Color-coded status dots (green=enabled, red=disabled)
+
+- **Filtering & Search**:
+  - **Date Range Picker with Presets**:
+    - Quick select preset buttons: Today, 7 Days, 30 Days, 90 Days
+    - Custom date range with From/To date inputs
+  - Domain filter dropdown
+  - Search by mailbox username, name, or alias address
+  - "Active Only" checkbox (default: checked)
+  - "Hide Zero Activity" checkbox (default: checked) - filters mailboxes and aliases with no messages
+  - Sort by: Sent, Received, Failure Rate, Quota Used, Username
+
+- **Pagination**: 50 mailboxes per page with navigation controls
+
+#### Background Jobs
+- **Mailbox Statistics Job**: Fetches mailbox data from Mailcow API every 5 minutes
+  - Syncs quota, messages, login times, rate limits, and attributes
+  - Marks deleted mailboxes as inactive (preserves historical data)
+  
+- **Alias Statistics Job**: Fetches alias data from Mailcow API every 5 minutes
+  - Links aliases to their target mailboxes
+  - Marks deleted aliases as inactive (preserves historical data)
+
+#### SMTP Relay Mode
+- **No-Authentication SMTP Support**: New option for sending emails through local relay servers without credentials
+  - Enable via `SMTP_RELAY_MODE=true` in environment variables
+  - When enabled, `SMTP_USER` and `SMTP_PASSWORD` are not required
+  - Useful for local Postfix relay servers, internal mail gateways, or trusted SMTP relays
+  - Connection test in Settings page properly handles relay mode authentication bypass
+
+#### Clean URL Routing (History API)
+- **Shareable URLs for All Pages**: Implemented History API-based routing for the SPA
+  - Direct navigation to any tab via clean URLs (e.g., `/dashboard`, `/messages`, `/dmarc`, `/settings`)
+  - Browser Back/Forward buttons now work correctly between pages
+  - URLs can be bookmarked and shared
+
+- **DMARC Nested Routes**: Deep linking support for all DMARC views
+  - `/dmarc` - Domains list
+  - `/dmarc/{domain}` - Domain overview
+  - `/dmarc/{domain}/reports` - Daily Reports tab
+  - `/dmarc/{domain}/sources` - Source IPs tab
+  - `/dmarc/{domain}/tls` - TLS Reports tab
+  - `/dmarc/{domain}/report/{date}` - Specific daily report details
+  - `/dmarc/{domain}/source/{ip}` - Specific source IP details
+
+- **Removed Internal Back Button**: DMARC section no longer uses custom back button
+  - Users now use browser's native Back button
+  - Cleaner UI without duplicate navigation controls
+
+#### TLS-RPT (TLS Reporting) Support
+- **Complete TLS-RPT Implementation**: Full support for TLS aggregate reports (RFC 8460)
+  - TLS-RPT parser for JSON reports (gzip compressed)
+  - Database models for TLS reports and policies
+  - IMAP auto-import support for TLS-RPT emails
+  - Manual upload support for TLS-RPT files
+
+- **TLS Reports Tab in DMARC Page**:
+  - New "TLS Reports" sub-tab alongside Daily Reports and Source IPs
+  - Daily aggregated view showing reports grouped by date
+  - Success rate with color-coded progress bars (green ≥95%, yellow ≥80%, red <80%)
+  - Provider breakdown with session counts
+
+- **TLS Report Details View**:
+  - Click any daily report to see detailed breakdown
+  - Stats cards: Sessions, Success Rate, Successful, Failed
+  - Providers table with per-provider success rates
+
+- **TLS in Domain List**:
+  - TLS Success Rate column in DMARC domains table
+  - TLS report count displayed per domain
+  - Domains with only TLS reports (no DMARC) now included in list
+
+#### DMARC Navigation Improvements
+- **Breadcrumb Navigation**: Clear path indicator for all DMARC views
+  - Shows current location: `domain.com > Daily Reports > Jan 14, 2026`
+  - Clickable links to navigate back to any level
+  - Displayed below page description
+
+#### Mobile Navigation Hamburger Menu
+- **Hamburger Menu for Mobile**: 
+  - Replaced horizontal scrolling tabs with a proper hamburger menu on mobile devices
+
+### Fixed
+
+#### DMARC Source IPs - Broken Flag Images
+- **Fixed broken flag images when MAXMIND is not configured**: When GeoIP integration is not set up, the Source IPs tab was showing broken images
+  - Now displays a generic server icon instead of a broken image when country data is unavailable
+  - Flag is completely hidden in source details view when no GeoIP data exists
+  - Added `onerror` fallback handlers to gracefully handle missing flag files
+  - Improves UX for users who haven't configured MAXMIND integration
+
+#### DMARC Parser
+- **DMARC 2.0 XML Namespace Support**: Fixed parsing error for DMARC reports using XML namespaces
+  - Reports from GMX and other providers using the new format now parse correctly
+  - Parser now tries both namespaced and non-namespaced element lookups
+
+### Improved
+
+#### Backend API Performance
+- **In-Memory Caching for Statistics API**: Added 5-minute TTL cache for `/api/mailbox-stats/all` endpoint
+  - Cache key generated from all query parameters
+  - First request fetches from database, subsequent requests return from cache
+  - Cache automatically expires after 5 minutes for fresh data
+  - Significantly reduces database load and improves response times
+
+- **In-Memory Caching for DMARC API**: Added 5-minute TTL cache for `/api/dmarc/domains` endpoint
+  - Reduces heavy database queries for domain statistics
+  - Cache cleared on new report imports
+
+#### DMARC IMAP Auto-Import
+- **Batch Processing**: Emails are now processed in configurable batches to prevent memory issues
+  - New `DMARC_IMAP_BATCH_SIZE` environment variable (default: 10)
+  - Processes emails in chunks, re-searching after each batch
+  - Progress logging shows batch number and completion status
+  - Prevents application crashes when syncing mailboxes with lots of emails
+
+- **UID-Based Email Handling**: Fixed "Invalid messageset" IMAP errors
+  - Changed from sequence numbers to UIDs for all IMAP operations
+  - UIDs remain stable even after deleting emails during sync
+  - Affects SEARCH, FETCH, STORE operations
+
+- **Flexible DMARC Email Detection**: Now supports more email providers
+  - Yahoo and other providers that don't include "Report-ID:" now detected correctly
+  - Primary validation is now attachment-based (.xml.gz or .zip files)
+  - Accepts: "Report Domain:" only, "Report Domain:" + "Submitter:", or "DMARC" keyword
+  
+- **Improved Error Reporting in Notifications**: 
+  - Error notification emails now show actual error messages
+  - Parse failures show: "Failed to parse: filename.xml.gz"
+  - Processing errors show: "Error processing filename: exception details"
+  - Duplicate reports no longer counted as failures
+
+- **Infinite Loop Prevention**: Fixed sync running endlessly when emails fail validation
+  - Added `UNSEEN` filter to search criteria
+  - Failed or processed emails are marked as Seen and excluded from next search
+  - Prevents re-processing the same emails repeatedly
+
+- **Microsoft Outlook Support**: Fixed DMARC reports from Microsoft not being recognized
+  - Now detects DMARC reports by filename pattern (contains `!` separator)
+  - Supports filenames like: `enterprise.protection.outlook.com!domain!timestamp!timestamp.xml.gz`
+
+- **Enhanced Attachment Extraction**: More robust attachment detection
+  - Now supports plain `.xml` files in addition to `.xml.gz` and `.zip`
+  - Falls back to Content-Type `name` parameter when filename header is missing
+  - Recognizes attachments by Content-Type: `application/gzip`, `application/zip`, `text/xml`, etc.
+  - Added debug logging to help troubleshoot attachment detection issues
+
+#### Domains Page - DKIM View Record
+- **DKIM Record Viewer**: Added "View Record" functionality for DKIM, similar to SPF
+  - Displays the full DNS record name including selector (e.g., `dkim._domainkey.example.com`)
+  - Shows the DKIM public key record value
+  - Helps users identify exactly which DNS record to configure
+
+### Technical
+
+#### New API Endpoints
+```
+GET  /api/mailbox-stats/summary
+GET  /api/mailbox-stats/all
+GET  /api/mailbox-stats/domains
+```
+
+#### API Parameters
+- `date_range`: today, 7days, 30days, 90days, custom
+- `start_date`: Custom start date (YYYY-MM-DD) - required when date_range is 'custom'
+- `end_date`: Custom end date (YYYY-MM-DD) - required when date_range is 'custom'
+- `domain`: Filter by specific domain
+- `active_only`: true/false
+- `hide_zero`: true/false (filter zero-activity mailboxes)
+- `search`: Search mailbox/alias addresses
+- `sort_by`: sent_total, received_total, failure_rate, quota_used, username
+- `sort_order`: asc, desc
+- `page`, `page_size`: Pagination
+
+---
+
 ## [2.0.4] - 2026-01-15
 
 ### Fixed

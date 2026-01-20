@@ -50,10 +50,11 @@ class BasicAuthMiddleware(BaseHTTPMiddleware):
         if not settings.auth_enabled:
             return await call_next(request)
         
-        # Allow access to login page, static files, and health check without authentication
+        # Allow access to login page, static files, health check, and info endpoint without authentication
         # Health check endpoint must be accessible for Docker health monitoring
+        # Info endpoint is used to check if authentication is enabled
         path = request.url.path
-        if path == "/login" or path.startswith("/static/") or path == "/api/health":
+        if path == "/login" or path.startswith("/static/") or path == "/api/health" or path == "/api/info":
             return await call_next(request)
         
         # Check if password is configured
@@ -67,9 +68,10 @@ class BasicAuthMiddleware(BaseHTTPMiddleware):
         # Extract credentials from Authorization header
         authorization = request.headers.get("Authorization", "")
         
-        # For root page, allow access without Authorization header
+        # For frontend routes (not API), allow access without Authorization header
         # The frontend JavaScript will handle authentication and redirect if needed
-        if path == "/":
+        # This enables clean URLs like /dashboard, /messages, /dmarc etc.
+        if not path.startswith("/api/"):
             return await call_next(request)
         
         # For all other paths (API endpoints), require authentication

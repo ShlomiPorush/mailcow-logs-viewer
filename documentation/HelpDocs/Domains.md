@@ -36,6 +36,8 @@ The system automatically validates three critical DNS records:
   - `none`: Monitoring only (weakest)
 - **Status**: Same indicators as SPF
 
+---
+
 ## How to Use
 
 ### Viewing Domains
@@ -59,6 +61,8 @@ When you expand a domain, the DNS Security section shows:
 - Specific warnings or recommendations
 - Time of last validation
 
+---
+
 ## Best Practices
 
 1. **Regular Monitoring**: Review DNS status regularly, especially after DNS changes
@@ -66,6 +70,8 @@ When you expand a domain, the DNS Security section shows:
 3. **Strong DMARC Policy**: Aim for `quarantine` or `reject` policy
 4. **SPF Optimization**: Keep SPF records concise (under 10 DNS lookups)
 5. **DKIM Key Rotation**: Periodically rotate DKIM keys for security
+
+---
 
 ## Troubleshooting
 

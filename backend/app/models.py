@@ -6,7 +6,7 @@ SIMPLIFIED VERSION:
 - Removed old generate_correlation_key function
 - Correlation key is now SHA256 of Message-ID
 """
-from sqlalchemy import Column, Integer, String, Float, DateTime, Boolean, Text, Index, JSON, UniqueConstraint
+from sqlalchemy import Column, Integer, BigInteger, String, Float, DateTime, Boolean, Text, Index, JSON, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
 from datetime import datetime
 
@@ -293,3 +293,173 @@ class DMARCSync(Base):
     
     def __repr__(self):
         return f"<DMARCSync(type={self.sync_type}, status={self.status}, reports={self.reports_created})>"
+
+
+class MailboxStatistics(Base):
+    """
+    Mailbox statistics fetched from Mailcow API
+    Tracks quota usage, message counts, and last access times for each mailbox
+    """
+    __tablename__ = "mailbox_statistics"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    
+    # Mailbox identification
+    username = Column(String(255), unique=True, index=True, nullable=False)  # email address
+    domain = Column(String(255), index=True, nullable=False)
+    name = Column(String(255))  # Display name
+    
+    # Quota information (in bytes)
+    quota = Column(BigInteger, default=0)  # Allocated quota
+    quota_used = Column(BigInteger, default=0)  # Used quota
+    percent_in_use = Column(Float, default=0.0)  # Percentage used
+    
+    # Message counts
+    messages = Column(Integer, default=0)  # Total messages in mailbox
+    
+    # Status
+    active = Column(Boolean, default=True, index=True)
+    
+    # Access times (Unix timestamps from API, stored as integers)
+    last_imap_login = Column(BigInteger, nullable=True)
+    last_pop3_login = Column(BigInteger, nullable=True)
+    last_smtp_login = Column(BigInteger, nullable=True)
+    
+    # Spam filter settings
+    spam_aliases = Column(Integer, default=0)
+    
+    # Rate limits
+    rl_value = Column(Integer, nullable=True)  # Rate limit value
+    rl_frame = Column(String(20), nullable=True)  # Rate limit time frame (e.g., "s", "m", "h")
+    
+    # Attributes from API
+    attributes = Column(JSONB)  # Store full attributes for reference
+    
+    # Timestamps
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    __table_args__ = (
+        Index('idx_mailbox_domain', 'domain'),
+        Index('idx_mailbox_active', 'active'),
+        Index('idx_mailbox_quota_used', 'quota_used'),
+    )
+    
+    def __repr__(self):
+        return f"<MailboxStatistics(username={self.username}, quota_used={self.quota_used}/{self.quota})>"
+
+
+class AliasStatistics(Base):
+    """
+    Alias statistics for tracking message counts per alias
+    Links aliases to their target mailboxes
+    """
+    __tablename__ = "alias_statistics"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    
+    # Alias identification
+    alias_address = Column(String(255), unique=True, index=True, nullable=False)  # The alias email
+    goto = Column(Text)  # Target mailbox(es), comma-separated
+    domain = Column(String(255), index=True, nullable=False)
+    
+    # Status
+    active = Column(Boolean, default=True, index=True)
+    is_catch_all = Column(Boolean, default=False)  # Is this a catch-all alias
+    
+    # Link to primary mailbox (if applicable)
+    primary_mailbox = Column(String(255), index=True, nullable=True)  # Main target mailbox
+    
+    # Timestamps
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    __table_args__ = (
+        Index('idx_alias_domain', 'domain'),
+        Index('idx_alias_active', 'active'),
+        Index('idx_alias_primary_mailbox', 'primary_mailbox'),
+    )
+    
+    def __repr__(self):
+        return f"<AliasStatistics(alias={self.alias_address}, goto={self.goto})>"
+
+
+class TLSReport(Base):
+    """TLS-RPT (SMTP TLS Reporting) reports received from email providers"""
+    __tablename__ = "tls_reports"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    
+    # Report identification
+    report_id = Column(String(255), unique=True, index=True, nullable=False)
+    
+    # Organization that sent the report
+    organization_name = Column(String(255), index=True)
+    contact_info = Column(String(255))
+    
+    # Domain being reported on
+    policy_domain = Column(String(255), index=True, nullable=False)
+    
+    # Date range of the report
+    start_datetime = Column(DateTime, nullable=False)
+    end_datetime = Column(DateTime, nullable=False)
+    
+    # Raw JSON for reference
+    raw_json = Column(Text)
+    
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    __table_args__ = (
+        Index('idx_tls_report_domain_date', 'policy_domain', 'start_datetime'),
+        Index('idx_tls_report_org', 'organization_name'),
+    )
+    
+    def __repr__(self):
+        return f"<TLSReport(report_id={self.report_id}, domain={self.policy_domain}, org={self.organization_name})>"
+
+
+class TLSReportPolicy(Base):
+    """Individual policy records within a TLS-RPT report"""
+    __tablename__ = "tls_report_policies"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    tls_report_id = Column(Integer, index=True, nullable=False)
+    
+    # Policy information
+    policy_type = Column(String(50))  # "sts", "no-policy-found", etc.
+    policy_domain = Column(String(255))
+    policy_string = Column(JSONB)  # The policy string array
+    mx_host = Column(JSONB)  # List of MX hosts
+    
+    # Session counts
+    successful_session_count = Column(Integer, default=0)
+    failed_session_count = Column(Integer, default=0)
+    
+    # Failure details if any
+    failure_details = Column(JSONB)
+    
+    created_at = Column(DateTime, default=datetime.utcnow)
+    
+    __table_args__ = (
+        Index('idx_tls_policy_report', 'tls_report_id'),
+        Index('idx_tls_policy_type', 'policy_type'),
+    )
+    
+    def __repr__(self):
+        return f"<TLSReportPolicy(type={self.policy_type}, success={self.successful_session_count}, fail={self.failed_session_count})>"
+
+
+class SystemSetting(Base):
+    """
+    Global system settings and state
+    Used for inter-process signaling (e.g., cache invalidation)
+    """
+    __tablename__ = "system_settings"
+    
+    key = Column(String(255), primary_key=True, index=True)
+    value = Column(Text)  # JSON string or simple text
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    def __repr__(self):
+        return f"<SystemSetting(key={self.key}, updated={self.updated_at})>"

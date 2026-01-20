@@ -2,6 +2,8 @@
 DMARC Router - Domain-centric view (Cloudflare style)
 """
 import logging
+import hashlib
+import json
 from typing import List, Optional
 from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, BackgroundTasks
@@ -9,10 +11,16 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func, and_, or_, case
 
 from ..database import get_db
-from ..models import DMARCReport, DMARCRecord, DMARCSync
+from ..models import DMARCReport, DMARCRecord, DMARCSync, TLSReport, TLSReportPolicy
 from ..services.dmarc_parser import parse_dmarc_file
 from ..services.geoip_service import enrich_dmarc_record
 from ..services.dmarc_imap_service import sync_dmarc_reports_from_imap
+from ..services.dmarc_cache import (
+    get_dmarc_cache_key, 
+    get_dmarc_cached, 
+    set_dmarc_cache, 
+    clear_dmarc_cache
+)
 from ..config import settings
 from ..scheduler import update_job_status
 
@@ -20,21 +28,52 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+# =============================================================================
+# CACHING SYSTEM
+# =============================================================================
+
+# =============================================================================
+# CACHING SYSTEM (Delegated to services.dmarc_cache)
+# =============================================================================
+
+# Cache functions imported from ..services.dmarc_cache
+
 
 # =============================================================================
 # DOMAINS LIST
 # =============================================================================
+
+@router.post("/dmarc/cache/clear")
+async def clear_cache(
+    db: Session = Depends(get_db)
+):
+    """
+    Clear all DMARC related cache
+    """
+    try:
+        clear_dmarc_cache(db)
+        return {"status": "success", "message": "Cache cleared"}
+    except Exception as e:
+        logger.error(f"Error clearing DMARC cache: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 @router.get("/dmarc/domains")
 async def get_domains_list(
     db: Session = Depends(get_db)
 ):
     """
-    Get list of all domains with DMARC reports and their statistics
-    Similar to Cloudflare's domain list
+    Get list of all domains with DMARC and/or TLS-RPT reports and their statistics
     """
     try:
-        domains_query = db.query(
+        # Check cache first
+        cache_key = get_dmarc_cache_key("domains_list")
+        cached_result = get_dmarc_cached(cache_key, db)
+        if cached_result is not None:
+            return cached_result
+        
+        # Get domains from DMARC reports
+        dmarc_domains = db.query(
             DMARCReport.domain,
             func.count(DMARCReport.id).label('report_count'),
             func.min(DMARCReport.begin_date).label('first_report'),
@@ -43,53 +82,137 @@ async def get_domains_list(
             DMARCReport.domain
         ).all()
         
+        # Get domains from TLS reports
+        tls_domains = db.query(
+            TLSReport.policy_domain
+        ).distinct().all()
+        tls_domain_set = {d[0] for d in tls_domains}
+        
+        # Combine domains
+        all_domains = set()
+        dmarc_domain_data = {}
+        
+        for domain, report_count, first_report, last_report in dmarc_domains:
+            all_domains.add(domain)
+            dmarc_domain_data[domain] = {
+                'report_count': report_count,
+                'first_report': first_report,
+                'last_report': last_report
+            }
+        
+        # Add TLS-only domains
+        all_domains.update(tls_domain_set)
+        
         domains_list = []
         
-        for domain, report_count, first_report, last_report in domains_query:
+        for domain in all_domains:
             thirty_days_ago = int((datetime.now() - timedelta(days=30)).timestamp())
+            thirty_days_ago_datetime = datetime.now() - timedelta(days=30)
             
-            stats = db.query(
-                func.sum(DMARCRecord.count).label('total_messages'),
-                func.count(func.distinct(DMARCRecord.source_ip)).label('unique_ips'),
-                func.sum(
-                    case(
-                        (and_(DMARCRecord.spf_result == 'pass', DMARCRecord.dkim_result == 'pass'), DMARCRecord.count),
-                        else_=0
-                    )
-                ).label('dmarc_pass_count')
+            # Get TLS stats for this domain
+            tls_stats = db.query(
+                func.count(TLSReport.id).label('tls_report_count'),
+                func.sum(TLSReportPolicy.successful_session_count).label('tls_success'),
+                func.sum(TLSReportPolicy.failed_session_count).label('tls_fail')
             ).join(
-                DMARCReport,
-                DMARCRecord.dmarc_report_id == DMARCReport.id
+                TLSReportPolicy,
+                TLSReportPolicy.tls_report_id == TLSReport.id
             ).filter(
                 and_(
-                    DMARCReport.domain == domain,
-                    DMARCReport.begin_date >= thirty_days_ago
+                    TLSReport.policy_domain == domain,
+                    TLSReport.start_datetime >= thirty_days_ago_datetime
                 )
             ).first()
             
-            total_msgs = stats.total_messages or 0
-            dmarc_pass = stats.dmarc_pass_count or 0
+            tls_report_count = tls_stats.tls_report_count or 0
+            tls_success = tls_stats.tls_success or 0
+            tls_fail = tls_stats.tls_fail or 0
+            tls_total = tls_success + tls_fail
+            tls_success_pct = round((tls_success / tls_total * 100) if tls_total > 0 else 100, 2)
             
-            domains_list.append({
-                'domain': domain,
-                'report_count': report_count,
-                'first_report': first_report,
-                'last_report': last_report,
-                'stats_30d': {
-                    'total_messages': total_msgs,
-                    'unique_ips': stats.unique_ips or 0,
-                    'dmarc_pass_pct': round((dmarc_pass / total_msgs * 100) if total_msgs > 0 else 0, 2)
-                }
-            })
+            # Get DMARC stats
+            dmarc_data = dmarc_domain_data.get(domain)
+            if dmarc_data:
+                stats = db.query(
+                    func.sum(DMARCRecord.count).label('total_messages'),
+                    func.count(func.distinct(DMARCRecord.source_ip)).label('unique_ips'),
+                    func.sum(
+                        case(
+                            (and_(DMARCRecord.spf_result == 'pass', DMARCRecord.dkim_result == 'pass'), DMARCRecord.count),
+                            else_=0
+                        )
+                    ).label('dmarc_pass_count')
+                ).join(
+                    DMARCReport,
+                    DMARCRecord.dmarc_report_id == DMARCReport.id
+                ).filter(
+                    and_(
+                        DMARCReport.domain == domain,
+                        DMARCReport.begin_date >= thirty_days_ago
+                    )
+                ).first()
+                
+                total_msgs = stats.total_messages or 0
+                dmarc_pass = stats.dmarc_pass_count or 0
+                
+                domains_list.append({
+                    'domain': domain,
+                    'report_count': dmarc_data['report_count'],
+                    'tls_report_count': tls_report_count,
+                    'first_report': dmarc_data['first_report'],
+                    'last_report': dmarc_data['last_report'],
+                    'has_dmarc': True,
+                    'has_tls': domain in tls_domain_set,
+                    'stats_30d': {
+                        'total_messages': total_msgs,
+                        'unique_ips': stats.unique_ips or 0,
+                        'dmarc_pass_pct': round((dmarc_pass / total_msgs * 100) if total_msgs > 0 else 0, 2),
+                        'tls_success_pct': tls_success_pct
+                    }
+                })
+            else:
+                # TLS-only domain
+                tls_report = db.query(TLSReport).filter(
+                    TLSReport.policy_domain == domain
+                ).order_by(TLSReport.end_datetime.desc()).first()
+                
+                first_tls = db.query(func.min(TLSReport.start_datetime)).filter(
+                    TLSReport.policy_domain == domain
+                ).scalar()
+                
+                domains_list.append({
+                    'domain': domain,
+                    'report_count': 0,
+                    'tls_report_count': tls_report_count,
+                    'first_report': int(first_tls.timestamp()) if first_tls else None,
+                    'last_report': int(tls_report.end_datetime.timestamp()) if tls_report and tls_report.end_datetime else None,
+                    'has_dmarc': False,
+                    'has_tls': True,
+                    'stats_30d': {
+                        'total_messages': 0,
+                        'unique_ips': 0,
+                        'dmarc_pass_pct': 0,
+                        'tls_success_pct': tls_success_pct
+                    }
+                })
         
-        return {
-            'domains': sorted(domains_list, key=lambda x: x['last_report'], reverse=True),
+        # Sort by last_report, handling None values
+        domains_list.sort(key=lambda x: x['last_report'] or 0, reverse=True)
+        
+        response = {
+            'domains': domains_list,
             'total': len(domains_list)
         }
+        
+        # Cache the result
+        set_dmarc_cache(cache_key, response)
+        
+        return response
         
     except Exception as e:
         logger.error(f"Error fetching domains list: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
 
 
 # =============================================================================
@@ -624,6 +747,297 @@ async def get_source_details(
     except Exception as e:
         logger.error(f"Error fetching source details: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+# =============================================================================
+# TLS-RPT REPORTS
+# =============================================================================
+
+@router.get("/dmarc/domains/{domain}/tls-reports")
+async def get_domain_tls_reports(
+    domain: str,
+    days: int = 30,
+    page: int = 1,
+    limit: int = 50,
+    db: Session = Depends(get_db)
+):
+    """
+    Get TLS-RPT reports for a domain
+    Returns list of TLS reports with organization, date range, success/fail counts
+    """
+    try:
+        cutoff_date = datetime.now(timezone.utc) - timedelta(days=days)
+        
+        # Query TLS reports for domain
+        reports_query = db.query(TLSReport).filter(
+            and_(
+                TLSReport.policy_domain == domain,
+                TLSReport.start_datetime >= cutoff_date
+            )
+        ).order_by(TLSReport.start_datetime.desc())
+        
+        total = reports_query.count()
+        reports = reports_query.offset((page - 1) * limit).limit(limit).all()
+        
+        # Get aggregated totals
+        total_success = 0
+        total_fail = 0
+        organizations = set()
+        
+        reports_list = []
+        for report in reports:
+            # Get policies for this report
+            policies = db.query(TLSReportPolicy).filter(
+                TLSReportPolicy.tls_report_id == report.id
+            ).all()
+            
+            report_success = sum(p.successful_session_count for p in policies)
+            report_fail = sum(p.failed_session_count for p in policies)
+            
+            total_success += report_success
+            total_fail += report_fail
+            organizations.add(report.organization_name)
+            
+            policies_list = [{
+                'policy_type': p.policy_type,
+                'policy_domain': p.policy_domain,
+                'mx_host': p.mx_host,
+                'successful_sessions': p.successful_session_count,
+                'failed_sessions': p.failed_session_count,
+                'failure_details': p.failure_details
+            } for p in policies]
+            
+            reports_list.append({
+                'id': report.id,
+                'report_id': report.report_id,
+                'organization_name': report.organization_name,
+                'contact_info': report.contact_info,
+                'start_datetime': report.start_datetime.isoformat() if report.start_datetime else None,
+                'end_datetime': report.end_datetime.isoformat() if report.end_datetime else None,
+                'successful_sessions': report_success,
+                'failed_sessions': report_fail,
+                'total_sessions': report_success + report_fail,
+                'success_rate': round((report_success / (report_success + report_fail) * 100) if (report_success + report_fail) > 0 else 100, 2),
+                'policies': policies_list
+            })
+        
+        return {
+            'domain': domain,
+            'total': total,
+            'page': page,
+            'limit': limit,
+            'pages': (total + limit - 1) // limit if total > 0 else 0,
+            'totals': {
+                'total_reports': total,
+                'total_successful_sessions': total_success,
+                'total_failed_sessions': total_fail,
+                'overall_success_rate': round((total_success / (total_success + total_fail) * 100) if (total_success + total_fail) > 0 else 100, 2),
+                'unique_organizations': len(organizations)
+            },
+            'data': reports_list
+        }
+        
+    except Exception as e:
+        logger.error(f"Error fetching TLS reports for domain {domain}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/dmarc/domains/{domain}/tls-reports/daily")
+async def get_domain_tls_daily_reports(
+    domain: str,
+    days: int = 30,
+    page: int = 1,
+    limit: int = 30,
+    db: Session = Depends(get_db)
+):
+    """
+    Get TLS-RPT reports aggregated by date
+    Groups multiple reports from same day together, like DMARC daily reports
+    """
+    try:
+        cutoff_date = datetime.now(timezone.utc) - timedelta(days=days)
+        
+        # Query all TLS reports for domain
+        reports = db.query(TLSReport).filter(
+            and_(
+                TLSReport.policy_domain == domain,
+                TLSReport.start_datetime >= cutoff_date
+            )
+        ).order_by(TLSReport.start_datetime.desc()).all()
+        
+        # Group by date
+        daily_data = {}
+        for report in reports:
+            if report.start_datetime:
+                date_key = report.start_datetime.strftime('%Y-%m-%d')
+                if date_key not in daily_data:
+                    daily_data[date_key] = {
+                        'date': date_key,
+                        'report_count': 0,
+                        'organizations': set(),
+                        'total_success': 0,
+                        'total_fail': 0,
+                        'reports': []
+                    }
+                
+                # Get policies for this report
+                policies = db.query(TLSReportPolicy).filter(
+                    TLSReportPolicy.tls_report_id == report.id
+                ).all()
+                
+                report_success = sum(p.successful_session_count for p in policies)
+                report_fail = sum(p.failed_session_count for p in policies)
+                
+                daily_data[date_key]['report_count'] += 1
+                daily_data[date_key]['organizations'].add(report.organization_name)
+                daily_data[date_key]['total_success'] += report_success
+                daily_data[date_key]['total_fail'] += report_fail
+                daily_data[date_key]['reports'].append({
+                    'id': report.id,
+                    'organization_name': report.organization_name,
+                    'successful_sessions': report_success,
+                    'failed_sessions': report_fail
+                })
+        
+        # Convert to list and add success rate
+        daily_list = []
+        for date_key in sorted(daily_data.keys(), reverse=True):
+            data = daily_data[date_key]
+            total = data['total_success'] + data['total_fail']
+            success_rate = round((data['total_success'] / total * 100) if total > 0 else 100, 2)
+            
+            daily_list.append({
+                'date': date_key,
+                'report_count': data['report_count'],
+                'organizations': list(data['organizations']),
+                'organization_count': len(data['organizations']),
+                'total_success': data['total_success'],
+                'total_fail': data['total_fail'],
+                'total_sessions': total,
+                'success_rate': success_rate,
+                'reports': data['reports']
+            })
+        
+        # Pagination
+        total = len(daily_list)
+        start_idx = (page - 1) * limit
+        end_idx = start_idx + limit
+        paginated = daily_list[start_idx:end_idx]
+        
+        # Calculate overall totals
+        overall_success = sum(d['total_success'] for d in daily_list)
+        overall_fail = sum(d['total_fail'] for d in daily_list)
+        overall_total = overall_success + overall_fail
+        
+        return {
+            'domain': domain,
+            'total': total,
+            'page': page,
+            'limit': limit,
+            'pages': (total + limit - 1) // limit if total > 0 else 0,
+            'totals': {
+                'total_days': total,
+                'total_reports': sum(d['report_count'] for d in daily_list),
+                'total_successful_sessions': overall_success,
+                'total_failed_sessions': overall_fail,
+                'overall_success_rate': round((overall_success / overall_total * 100) if overall_total > 0 else 100, 2)
+            },
+            'data': paginated
+        }
+        
+    except Exception as e:
+        logger.error(f"Error fetching TLS daily reports for domain {domain}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/dmarc/domains/{domain}/tls-reports/{report_date}/details")
+async def get_tls_report_details(
+    domain: str,
+    report_date: str,
+    db: Session = Depends(get_db)
+):
+    """
+    Get detailed TLS-RPT reports for a specific date
+    Shows all reports and policies from that day with breakdown by provider
+    """
+    try:
+        date_obj = datetime.strptime(report_date, '%Y-%m-%d').date()
+        start_dt = datetime.combine(date_obj, datetime.min.time(), tzinfo=timezone.utc)
+        end_dt = datetime.combine(date_obj, datetime.max.time(), tzinfo=timezone.utc)
+        
+        reports = db.query(TLSReport).filter(
+            and_(
+                TLSReport.policy_domain == domain,
+                TLSReport.start_datetime >= start_dt,
+                TLSReport.start_datetime <= end_dt
+            )
+        ).all()
+        
+        if not reports:
+            raise HTTPException(status_code=404, detail="No TLS reports found for this date")
+        
+        # Aggregate stats
+        total_success = 0
+        total_fail = 0
+        providers = []
+        
+        for report in reports:
+            policies = db.query(TLSReportPolicy).filter(
+                TLSReportPolicy.tls_report_id == report.id
+            ).all()
+            
+            report_success = sum(p.successful_session_count for p in policies)
+            report_fail = sum(p.failed_session_count for p in policies)
+            
+            total_success += report_success
+            total_fail += report_fail
+            
+            # Add provider details
+            policies_list = []
+            for p in policies:
+                policies_list.append({
+                    'policy_type': p.policy_type,
+                    'policy_domain': p.policy_domain,
+                    'mx_host': p.mx_host,
+                    'successful_sessions': p.successful_session_count,
+                    'failed_sessions': p.failed_session_count,
+                    'total_sessions': p.successful_session_count + p.failed_session_count,
+                    'success_rate': round((p.successful_session_count / (p.successful_session_count + p.failed_session_count) * 100) if (p.successful_session_count + p.failed_session_count) > 0 else 100, 2),
+                    'failure_details': p.failure_details
+                })
+            
+            providers.append({
+                'report_id': report.report_id,
+                'organization_name': report.organization_name,
+                'contact_info': report.contact_info,
+                'start_datetime': report.start_datetime.isoformat() if report.start_datetime else None,
+                'end_datetime': report.end_datetime.isoformat() if report.end_datetime else None,
+                'successful_sessions': report_success,
+                'failed_sessions': report_fail,
+                'total_sessions': report_success + report_fail,
+                'success_rate': round((report_success / (report_success + report_fail) * 100) if (report_success + report_fail) > 0 else 100, 2),
+                'policies': policies_list
+            })
+        
+        total = total_success + total_fail
+        
+        return {
+            'domain': domain,
+            'date': report_date,
+            'stats': {
+                'total_reports': len(reports),
+                'total_providers': len(set(r.organization_name for r in reports)),
+                'total_success': total_success,
+                'total_fail': total_fail,
+                'total_sessions': total,
+                'success_rate': round((total_success / total * 100) if total > 0 else 100, 2)
+            },
+            'providers': providers
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching TLS report details for {domain}/{report_date}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # =============================================================================
@@ -796,66 +1210,156 @@ async def get_sync_history(
         logger.error(f"Error fetching sync history: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-
 # =============================================================================
 # UPLOAD
 # =============================================================================
 
 @router.post("/dmarc/upload")
-async def upload_dmarc_report(
+async def upload_report(
     file: UploadFile = File(...),
     db: Session = Depends(get_db)
 ):
+    """
+    Upload and parse DMARC or TLS-RPT report file
+    
+    Supported formats:
+    - DMARC: .xml, .xml.gz, .zip (XML content)
+    - TLS-RPT: .json, .json.gz
+    """
     if not settings.dmarc_manual_upload_enabled:
         raise HTTPException(
             status_code=403,
-            detail="Manual DMARC report upload is disabled"
+            detail="Manual report upload is disabled"
         )
 
-    """Upload and parse DMARC report file (GZ or ZIP)"""
     try:
         file_content = await file.read()
+        filename = file.filename.lower()
         
-        parsed_data = parse_dmarc_file(file_content, file.filename)
+        # Detect file type based on extension
+        # TLS-RPT files: .json, .json.gz, .json.zip
+        is_tls_rpt = filename.endswith('.json') or filename.endswith('.json.gz') or filename.endswith('.json.zip')
         
-        if not parsed_data:
-            raise HTTPException(status_code=400, detail="Failed to parse DMARC report")
-        
-        records_data = parsed_data.pop('records', [])
-        report_data = parsed_data
-        
-        existing = db.query(DMARCReport).filter(
-            DMARCReport.report_id == report_data['report_id']
-        ).first()
-        
-        if existing:
-            return {
-                'status': 'duplicate',
-                'message': f'Report {report_data["report_id"]} already exists'
-            }
-        
-        report = DMARCReport(**report_data)
-        db.add(report)
-        db.flush()
-        
-        for record_data in records_data:
-            record_data['dmarc_report_id'] = report.id
-            enriched = enrich_dmarc_record(record_data)
-            record = DMARCRecord(**enriched)
-            db.add(record)
-        
-        db.commit()
-        
-        return {
-            'status': 'success',
-            'message': f'Uploaded report for {report.domain} from {report.org_name}',
-            'report_id': report.id,
-            'records_count': len(records_data)
-        }
+        if is_tls_rpt:
+            # Process TLS-RPT report
+            return await _upload_tls_rpt_report(file_content, file.filename, db)
+        else:
+            # Process DMARC report (default)
+            return await _upload_dmarc_report(file_content, file.filename, db)
         
     except HTTPException:
         raise
     except Exception as e:
         db.rollback()
-        logger.error(f"Error uploading DMARC report: {e}", exc_info=True)
+        logger.error(f"Error uploading report: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
+
+
+async def _upload_dmarc_report(file_content: bytes, filename: str, db: Session):
+    """Handle DMARC report upload"""
+    parsed_data = parse_dmarc_file(file_content, filename)
+    
+    if not parsed_data:
+        raise HTTPException(status_code=400, detail="Failed to parse DMARC report")
+    
+    records_data = parsed_data.pop('records', [])
+    report_data = parsed_data
+    
+    existing = db.query(DMARCReport).filter(
+        DMARCReport.report_id == report_data['report_id']
+    ).first()
+    
+    if existing:
+        return {
+            'status': 'duplicate',
+            'report_type': 'dmarc',
+            'message': f'Report {report_data["report_id"]} already exists'
+        }
+    
+    report = DMARCReport(**report_data)
+    db.add(report)
+    db.flush()
+    
+    for record_data in records_data:
+        record_data['dmarc_report_id'] = report.id
+        enriched = enrich_dmarc_record(record_data)
+        record = DMARCRecord(**enriched)
+        db.add(record)
+    
+    db.commit()
+    
+    # Clear cache
+    clear_dmarc_cache(db)
+    
+    return {
+        'status': 'success',
+        'report_type': 'dmarc',
+        'message': f'Uploaded DMARC report for {report.domain} from {report.org_name}',
+        'report_id': report.id,
+        'records_count': len(records_data)
+    }
+
+
+async def _upload_tls_rpt_report(file_content: bytes, filename: str, db: Session):
+    """Handle TLS-RPT report upload"""
+    from ..services.tls_rpt_parser import parse_tls_rpt_file
+    
+    parsed_data = parse_tls_rpt_file(file_content, filename)
+    
+    if not parsed_data:
+        raise HTTPException(status_code=400, detail="Failed to parse TLS-RPT report")
+    
+    # Extract policies
+    policies_data = parsed_data.pop('policies', [])
+    
+    # Check for duplicate
+    existing = db.query(TLSReport).filter(
+        TLSReport.report_id == parsed_data['report_id']
+    ).first()
+    
+    if existing:
+        return {
+            'status': 'duplicate',
+            'report_type': 'tls-rpt',
+            'message': f'TLS-RPT report {parsed_data["report_id"]} already exists'
+        }
+    
+    # Create TLS report
+    tls_report = TLSReport(
+        report_id=parsed_data['report_id'],
+        organization_name=parsed_data.get('organization_name', 'Unknown'),
+        contact_info=parsed_data.get('contact_info', ''),
+        policy_domain=parsed_data['policy_domain'],
+        start_datetime=parsed_data['start_datetime'],
+        end_datetime=parsed_data['end_datetime'],
+        raw_json=parsed_data.get('raw_json', '')
+    )
+    db.add(tls_report)
+    db.flush()
+    
+    # Create policy records
+    for policy_data in policies_data:
+        policy = TLSReportPolicy(
+            tls_report_id=tls_report.id,
+            policy_type=policy_data.get('policy_type', 'unknown'),
+            policy_domain=policy_data.get('policy_domain', ''),
+            policy_string=policy_data.get('policy_string', []),
+            mx_host=policy_data.get('mx_host', []),
+            successful_session_count=policy_data.get('successful_session_count', 0),
+            failed_session_count=policy_data.get('failed_session_count', 0),
+            failure_details=policy_data.get('failure_details', [])
+        )
+        db.add(policy)
+    
+    db.commit()
+    
+    # Clear cache
+    clear_dmarc_cache(db)
+    
+    return {
+        'status': 'success',
+        'report_type': 'tls-rpt',
+        'message': f'Uploaded TLS-RPT report for {tls_report.policy_domain} from {tls_report.organization_name}',
+        'report_id': tls_report.id,
+        'policies_count': len(policies_data)
+    }

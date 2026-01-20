@@ -21,8 +21,10 @@ class SmtpService:
         self.host = settings.smtp_host
         self.port = settings.smtp_port
         self.use_tls = settings.smtp_use_tls
+        self.use_ssl = settings.smtp_use_ssl
         self.user = settings.smtp_user
         self.password = settings.smtp_password
+        self.relay_mode = settings.smtp_relay_mode
         self.from_address = settings.smtp_from or settings.smtp_user
     
     def is_configured(self) -> bool:
@@ -70,13 +72,22 @@ class SmtpService:
                 part2 = MIMEText(html_content, 'html')
                 msg.attach(part2)
             
-            if self.use_tls:
+            # Determine connection mode
+            # Priority 1: Implicit SSL (if configured or using port 465)
+            if self.use_ssl or self.port == 465:
+                server = smtplib.SMTP_SSL(self.host, self.port)
+            # Priority 2: STARTTLS (if configured)
+            elif self.use_tls:
                 server = smtplib.SMTP(self.host, self.port)
                 server.starttls()
+            # Priority 3: Plaintext
             else:
-                server = smtplib.SMTP_SSL(self.host, self.port)
+                server = smtplib.SMTP(self.host, self.port)
             
-            server.login(self.user, self.password)
+            # Skip login in relay mode
+            if not self.relay_mode:
+                server.login(self.user, self.password)
+            
             server.sendmail(self.from_address, [recipient], msg.as_string())
             server.quit()
             

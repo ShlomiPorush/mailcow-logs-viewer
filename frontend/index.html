@@ -1,17 +1,20 @@
 <!DOCTYPE html>
 <html lang="en" class="h-full">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Mailcow Logs Viewer</title>
-    
+
     <!-- Favicon -->
-    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%233b82f6' stroke-width='2'><path stroke-linecap='round' stroke-linejoin='round' d='M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z'/></svg>">
-    
+    <link rel="icon" type="image/svg+xml"
+        href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%233b82f6' stroke-width='2'><path stroke-linecap='round' stroke-linejoin='round' d='M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z'/></svg>">
+
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/github-markdown-css/5.5.1/github-markdown.min.css">
+    <link rel="stylesheet"
+        href="https://cdnjs.cloudflare.com/ajax/libs/github-markdown-css/5.5.1/github-markdown.min.css">
     <script>
         tailwind.config = {
             darkMode: 'class',
@@ -25,24 +28,56 @@
             border-bottom: 2px solid #3b82f6;
             color: #3b82f6;
         }
+
         .modal-tab {
             padding: 0.7rem 1.5rem;
             border-bottom: 2px solid transparent;
             transition: all 0.2s;
             cursor: pointer;
-            color: #6b7280; /* gray-500 */
+            color: #6b7280;
+            /* gray-500 */
         }
+
         .dark .modal-tab {
-            color: #9ca3af; /* dark:gray-400 */
+            color: #9ca3af;
+            /* dark:gray-400 */
         }
+
         .modal-tab:hover {
             background-color: rgba(59, 130, 246, 0.05);
         }
+
         .modal-tab.active {
             border-bottom-color: #3b82f6;
             color: #3b82f6 !important;
             background-color: rgba(59, 130, 246, 0.1);
         }
+
+        /* Smaller tabs for DMARC sub-tabs */
+        .modal-tab-sm {
+            padding: 0.5rem 1rem;
+            border-bottom: 2px solid transparent;
+            transition: all 0.2s;
+            cursor: pointer;
+            color: #6b7280;
+            font-size: 0.875rem;
+            white-space: nowrap;
+        }
+
+        .dark .modal-tab-sm {
+            color: #9ca3af;
+        }
+
+        .modal-tab-sm:hover {
+            background-color: rgba(59, 130, 246, 0.05);
+        }
+
+        .modal-tab-sm.active {
+            border-bottom-color: #3b82f6;
+            color: #3b82f6 !important;
+            background-color: rgba(59, 130, 246, 0.1);
+        }
+
         .loading {
             border: 3px solid #f3f4f6;
             border-top: 3px solid #3b82f6;
@@ -51,19 +86,136 @@
             height: 40px;
             animation: spin 1s linear infinite;
         }
+
         @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
+            0% {
+                transform: rotate(0deg);
+            }
+
+            100% {
+                transform: rotate(360deg);
+            }
         }
+
         @media (max-width: 640px) {
-            .hide-mobile { display: none; }
+            .hide-mobile {
+                display: none;
+            }
         }
+
         .mobile-scroll {
             -webkit-overflow-scrolling: touch;
         }
+
+        /* Hamburger animation when active */
+        #hamburger-btn.active .hamburger-line:nth-child(1) {
+            transform: rotate(45deg) translate(5px, 5px);
+        }
+
+        #hamburger-btn.active .hamburger-line:nth-child(2) {
+            opacity: 0;
+        }
+
+        #hamburger-btn.active .hamburger-line:nth-child(3) {
+            transform: rotate(-45deg) translate(5px, -5px);
+        }
+
+        /* Mobile Menu Styles */
+        .mobile-menu {
+            display: none;
+        }
+
+        @media (max-width: 767px) {
+            .mobile-menu {
+                display: block;
+                position: fixed;
+                top: 112px;
+                /* Below nav (64px) + tabs bar (48px) */
+                left: 0;
+                right: 0;
+                bottom: 0;
+                background-color: rgba(0, 0, 0, 0.5);
+                z-index: 40;
+                opacity: 0;
+                visibility: hidden;
+                transition: all 0.3s ease;
+            }
+
+            .mobile-menu.active {
+                opacity: 1;
+                visibility: visible;
+            }
+
+            .mobile-menu-content {
+                position: absolute;
+                top: 0;
+                left: 0;
+                width: 280px;
+                max-width: 80%;
+                height: 100%;
+                background-color: white;
+                transform: translateX(-100%);
+                transition: transform 0.3s ease;
+                overflow-y: auto;
+                box-shadow: 2px 0 10px rgba(0, 0, 0, 0.1);
+                padding-top: 8px;
+            }
+
+            .dark .mobile-menu-content {
+                background-color: #1f2937;
+            }
+
+            .mobile-menu.active .mobile-menu-content {
+                transform: translateX(0);
+            }
+
+            .mobile-menu-item {
+                display: flex;
+                align-items: center;
+                width: 100%;
+                padding: 16px 20px;
+                font-size: 16px;
+                font-weight: 500;
+                color: #4b5563;
+                border: none;
+                background: none;
+                border-bottom: 1px solid #e5e7eb;
+                transition: all 0.2s ease;
+                text-align: left;
+                cursor: pointer;
+            }
+
+            .dark .mobile-menu-item {
+                color: #9ca3af;
+                border-bottom-color: #374151;
+            }
+
+            .mobile-menu-item:hover {
+                background-color: #f3f4f6;
+            }
+
+            .dark .mobile-menu-item:hover {
+                background-color: #374151;
+            }
+
+            .mobile-menu-item.active {
+                color: #3b82f6;
+                background-color: rgba(59, 130, 246, 0.1);
+                border-left: 4px solid #3b82f6;
+            }
+
+            .mobile-menu-item svg {
+                width: 20px;
+                height: 20px;
+                margin-right: 12px;
+                flex-shrink: 0;
+            }
+        }
+
         #recent-activity::-webkit-scrollbar {
             display: none;
         }
+
         /* Markdown styling for changelog */
         /* GitHub markdown styling for changelog - override background colors */
         .update-changelog-content.markdown-body,
@@ -76,19 +228,25 @@
             display: block;
             width: 100%;
         }
+
         /* Override GitHub markdown CSS background colors */
         .markdown-body {
             background-color: transparent !important;
         }
+
         /* Force text color in dark mode */
         .dark .update-changelog-content.markdown-body,
         .dark #changelog-content.markdown-body {
-            color: rgb(243 244 246) !important; /* gray-100 - white text in dark mode */
+            color: rgb(243 244 246) !important;
+            /* gray-100 - white text in dark mode */
         }
+
         .dark .update-changelog-content.markdown-body *,
         .dark #changelog-content.markdown-body * {
-            color: rgb(243 244 246) !important; /* gray-100 - white text in dark mode */
+            color: rgb(243 244 246) !important;
+            /* gray-100 - white text in dark mode */
         }
+
         .dark .update-changelog-content.markdown-body h1,
         .dark .update-changelog-content.markdown-body h2,
         .dark .update-changelog-content.markdown-body h3,
@@ -101,16 +259,20 @@
         .dark #changelog-content.markdown-body h4,
         .dark #changelog-content.markdown-body h5,
         .dark #changelog-content.markdown-body h6 {
-            color: rgb(243 244 246) !important; /* gray-100 - white text in dark mode */
+            color: rgb(243 244 246) !important;
+            /* gray-100 - white text in dark mode */
         }
+
         .dark .update-changelog-content.markdown-body p,
         .dark .update-changelog-content.markdown-body li,
         .dark .update-changelog-content.markdown-body span,
         .dark #changelog-content.markdown-body p,
         .dark #changelog-content.markdown-body li,
         .dark #changelog-content.markdown-body span {
-            color: rgb(243 244 246) !important; /* gray-100 - white text in dark mode */
+            color: rgb(243 244 246) !important;
+            /* gray-100 - white text in dark mode */
         }
+
         .update-changelog-content.markdown-body h1,
         .update-changelog-content.markdown-body h2,
         .update-changelog-content.markdown-body h3,
@@ -124,14 +286,17 @@
             border-bottom: none;
             padding-bottom: 0;
         }
+
         .update-changelog-content.markdown-body h1,
         #changelog-content.markdown-body h1 {
             font-size: 2em;
         }
+
         .update-changelog-content.markdown-body h2,
         #changelog-content.markdown-body h2 {
             font-size: 1.5em;
         }
+
         .update-changelog-content.markdown-body ul,
         .update-changelog-content.markdown-body ol,
         #changelog-content.markdown-body ul,
@@ -141,32 +306,39 @@
             list-style-type: disc;
             display: block;
         }
+
         .update-changelog-content.markdown-body ol,
         #changelog-content.markdown-body ol {
             list-style-type: decimal;
         }
+
         .update-changelog-content.markdown-body ul ul,
         #changelog-content.markdown-body ul ul {
             list-style-type: circle;
         }
+
         .update-changelog-content.markdown-body ul ul ul,
         #changelog-content.markdown-body ul ul ul {
             list-style-type: square;
         }
+
         .update-changelog-content.markdown-body li,
         #changelog-content.markdown-body li {
             margin: 0.25em 0;
             display: list-item;
             list-style-position: outside;
         }
+
         .update-changelog-content.markdown-body li::marker,
         #changelog-content.markdown-body li::marker {
             color: inherit;
         }
+
         .update-changelog-content.markdown-body p,
         #changelog-content.markdown-body p {
             margin: 0.5em 0;
         }
+
         .update-changelog-content.markdown-body code,
         #changelog-content.markdown-body code {
             background-color: rgba(175, 184, 193, 0.2);
@@ -174,10 +346,12 @@
             border-radius: 3px;
             font-size: 85%;
         }
+
         .dark .update-changelog-content.markdown-body code,
         .dark #changelog-content.markdown-body code {
             background-color: rgba(110, 118, 129, 0.4);
         }
+
         .update-changelog-content.markdown-body pre,
         #changelog-content.markdown-body pre {
             background-color: rgba(175, 184, 193, 0.15);
@@ -185,28 +359,34 @@
             border-radius: 6px;
             overflow-x: auto;
         }
+
         .dark .update-changelog-content.markdown-body pre,
         .dark #changelog-content.markdown-body pre {
             background-color: rgba(110, 118, 129, 0.3);
         }
+
         .update-changelog-content.markdown-body pre code,
         #changelog-content.markdown-body pre code {
             background-color: transparent;
             padding: 0;
         }
+
         .update-changelog-content.markdown-body a,
         #changelog-content.markdown-body a {
             color: #0969da;
             text-decoration: none;
         }
+
         .dark .update-changelog-content.markdown-body a,
         .dark #changelog-content.markdown-body a {
             color: #58a6ff;
         }
+
         .update-changelog-content.markdown-body a:hover,
         #changelog-content.markdown-body a:hover {
             text-decoration: underline;
         }
+
         .update-changelog-content.markdown-body blockquote,
         #changelog-content.markdown-body blockquote {
             border-left: 4px solid #d0d7de;
@@ -214,16 +394,19 @@
             margin: 0.5em 0;
             color: #656d76;
         }
+
         .dark .update-changelog-content.markdown-body blockquote,
         .dark #changelog-content.markdown-body blockquote {
             border-left-color: #30363d;
             color: #8b949e;
         }
+
         .update-changelog-content.markdown-body table,
         #changelog-content.markdown-body table {
             border-collapse: collapse;
             margin: 0.5em 0;
         }
+
         .update-changelog-content.markdown-body table th,
         .update-changelog-content.markdown-body table td,
         #changelog-content.markdown-body table th,
@@ -231,6 +414,7 @@
             border: 1px solid #d0d7de;
             padding: 6px 13px;
         }
+
         .dark .update-changelog-content.markdown-body table th,
         .dark .update-changelog-content.markdown-body table td,
         .dark #changelog-content.markdown-body table th,
@@ -239,783 +423,1373 @@
         }
     </style>
 </head>
+
 <body class="min-h-screen bg-gray-50 dark:bg-gray-900 flex flex-col">
     <!-- Main App Content -->
     <div id="app-content" class="flex flex-col flex-1">
-    <!-- Navigation -->
-    <nav class="bg-white dark:bg-gray-800 shadow dark:shadow-gray-900/30">
-        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <div class="flex justify-between h-16">
-                <div class="flex items-center">
-                    <img id="app-logo" src="" alt="Logo" class="h-8 w-8 mr-3 hidden">
-                    <svg id="default-logo" class="h-8 w-8 text-blue-600 dark:text-blue-400 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path>
-                    </svg>
-                    <h1 id="app-title" class="text-lg sm:text-xl font-bold text-gray-900 dark:text-white">Mailcow Logs Viewer</h1>
-                    <span id="mailcow-connection-indicator" class="ml-2 hidden" title="Mailcow connection status">
-                        <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
-                            <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path>
-                        </svg>
-                    </span>
-                </div>
-                <div class="flex items-center space-x-2 sm:space-x-4">
-                    <button id="theme-toggle" onclick="toggleDarkMode()" class="p-2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 rounded-lg">
-                        <svg id="theme-toggle-dark-icon" class="w-5 h-5 hidden" fill="currentColor" viewBox="0 0 20 20">
-                            <path d="M17.293 13.293A8 8 0 016.707 2.707a8.001 8.001 0 1010.586 10.586z"></path>
-                        </svg>
-                        <svg id="theme-toggle-light-icon" class="w-5 h-5 hidden" fill="currentColor" viewBox="0 0 20 20">
-                            <path d="M10 2a1 1 0 011 1v1a1 1 0 11-2 0V3a1 1 0 011-1zm4 8a4 4 0 11-8 0 4 4 0 018 0zm-.464 4.95l.707.707a1 1 0 001.414-1.414l-.707-.707a1 1 0 00-1.414 1.414zm2.12-10.607a1 1 0 010 1.414l-.706.707a1 1 0 11-1.414-1.414l.707-.707a1 1 0 011.414 0zM17 11a1 1 0 100-2h-1a1 1 0 100 2h1zm-7 4a1 1 0 011 1v1a1 1 0 11-2 0v-1a1 1 0 011-1zM5.05 6.464A1 1 0 106.465 5.05l-.708-.707a1 1 0 00-1.414 1.414l.707.707zm1.414 8.486l-.707.707a1 1 0 01-1.414-1.414l.707-.707a1 1 0 011.414 1.414zM4 11a1 1 0 100-2H3a1 1 0 000 2h1z" fill-rule="evenodd" clip-rule="evenodd"></path>
-                        </svg>
-                    </button>
-                    <button onclick="refreshAllData()" class="px-3 py-2 bg-blue-600 hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600 text-white rounded-lg transition text-sm font-medium">
-                        <svg class="w-4 h-4 inline mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
-                        </svg>
-                        <span class="hidden sm:inline">Refresh</span>
-                    </button>
-                    <button onclick="handleLogout()" id="logout-btn" class="hidden px-3 py-2 text-sm bg-red-600 hover:bg-red-700 dark:bg-red-500 dark:hover:bg-red-600 text-white rounded-lg transition font-medium">
-                        <svg class="w-4 h-4 inline mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"></path>
-                        </svg>
-                        <span class="hidden sm:inline">Logout</span>
-                    </button>
+        <!-- Navigation -->
+        <nav class="bg-white dark:bg-gray-800 shadow dark:shadow-gray-900/30">
+            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                <div class="flex justify-between h-16">
+                    <div class="flex items-center">
+                        <a href="/" onclick="navigateTo('dashboard'); return false;"
+                            class="flex items-center cursor-pointer hover:opacity-80 transition-opacity">
+                            <img id="app-logo" src="" alt="Logo" class="h-8 w-8 mr-3 hidden">
+                            <svg id="default-logo" class="h-8 w-8 text-blue-600 dark:text-blue-400 mr-3" fill="none"
+                                stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                    d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z">
+                                </path>
+                            </svg>
+                            <h1 id="app-title" class="text-lg sm:text-xl font-bold text-gray-900 dark:text-white">
+                                Mailcow
+                                Logs Viewer</h1>
+                        </a>
+                        <span id="mailcow-connection-indicator" class="ml-2 hidden" title="Mailcow connection status">
+                            <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                                <path fill-rule="evenodd"
+                                    d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
+                                    clip-rule="evenodd"></path>
+                            </svg>
+                        </span>
+                    </div>
+                    <div class="flex items-center space-x-2 sm:space-x-4">
+                        <button id="theme-toggle" onclick="toggleDarkMode()"
+                            class="p-2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 rounded-lg">
+                            <svg id="theme-toggle-dark-icon" class="w-5 h-5 hidden" fill="currentColor"
+                                viewBox="0 0 20 20">
+                                <path d="M17.293 13.293A8 8 0 016.707 2.707a8.001 8.001 0 1010.586 10.586z"></path>
+                            </svg>
+                            <svg id="theme-toggle-light-icon" class="w-5 h-5 hidden" fill="currentColor"
+                                viewBox="0 0 20 20">
+                                <path
+                                    d="M10 2a1 1 0 011 1v1a1 1 0 11-2 0V3a1 1 0 011-1zm4 8a4 4 0 11-8 0 4 4 0 018 0zm-.464 4.95l.707.707a1 1 0 001.414-1.414l-.707-.707a1 1 0 00-1.414 1.414zm2.12-10.607a1 1 0 010 1.414l-.706.707a1 1 0 11-1.414-1.414l.707-.707a1 1 0 011.414 0zM17 11a1 1 0 100-2h-1a1 1 0 100 2h1zm-7 4a1 1 0 011 1v1a1 1 0 11-2 0v-1a1 1 0 011-1zM5.05 6.464A1 1 0 106.465 5.05l-.708-.707a1 1 0 00-1.414 1.414l.707.707zm1.414 8.486l-.707.707a1 1 0 01-1.414-1.414l.707-.707a1 1 0 011.414 1.414zM4 11a1 1 0 100-2H3a1 1 0 000 2h1z"
+                                    fill-rule="evenodd" clip-rule="evenodd"></path>
+                            </svg>
+                        </button>
+                        <button onclick="refreshAllData()"
+                            class="px-3 py-2 bg-blue-600 hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600 text-white rounded-lg transition text-sm font-medium">
+                            <svg class="w-4 h-4 inline mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                    d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15">
+                                </path>
+                            </svg>
+                            <span class="hidden sm:inline">Refresh</span>
+                        </button>
+                        <button onclick="handleLogout()" id="logout-btn"
+                            class="hidden px-3 py-2 text-sm bg-red-600 hover:bg-red-700 dark:bg-red-500 dark:hover:bg-red-600 text-white rounded-lg transition font-medium">
+                            <svg class="w-4 h-4 inline mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                    d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1">
+                                </path>
+                            </svg>
+                            <span class="hidden sm:inline">Logout</span>
+                        </button>
+                    </div>
                 </div>
             </div>
-        </div>
-    </nav>
+        </nav>
 
-    <!-- Tabs -->
-    <div class="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 overflow-x-auto">
-        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <div class="flex space-x-4 sm:space-x-8 min-w-max">
-                <button onclick="switchTab('dashboard')" id="tab-dashboard" class="tab-active py-4 px-1 font-medium text-sm whitespace-nowrap">
+        <!-- Mobile Menu Overlay -->
+        <div id="mobile-menu" class="mobile-menu">
+            <div class="mobile-menu-content">
+                <button onclick="navigateToMobile('dashboard')" id="mobile-tab-dashboard"
+                    class="mobile-menu-item active">
+                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                            d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z">
+                        </path>
+                    </svg>
                     Dashboard
                 </button>
-                <button onclick="switchTab('messages')" id="tab-messages" class="py-4 px-1 font-medium text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300 whitespace-nowrap">
+                <button onclick="navigateToMobile('messages')" id="mobile-tab-messages" class="mobile-menu-item">
+                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                            d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z">
+                        </path>
+                    </svg>
                     Messages
                 </button>
-                <button onclick="switchTab('netfilter')" id="tab-netfilter" class="py-4 px-1 font-medium text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300 whitespace-nowrap">
+                <button onclick="navigateToMobile('netfilter')" id="mobile-tab-netfilter" class="mobile-menu-item">
+                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                            d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z">
+                        </path>
+                    </svg>
                     Security
                 </button>
-                <button onclick="switchTab('queue')" id="tab-queue" class="py-4 px-1 font-medium text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300 whitespace-nowrap">
+                <button onclick="navigateToMobile('queue')" id="mobile-tab-queue" class="mobile-menu-item">
+                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                            d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10">
+                        </path>
+                    </svg>
                     Queue
                 </button>
-                <button onclick="switchTab('quarantine')" id="tab-quarantine" class="py-4 px-1 font-medium text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300 whitespace-nowrap">
+                <button onclick="navigateToMobile('quarantine')" id="mobile-tab-quarantine" class="mobile-menu-item">
+                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                            d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z">
+                        </path>
+                    </svg>
                     Quarantine
                 </button>
-                <button onclick="switchTab('status')" id="tab-status" class="py-4 px-1 font-medium text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300 whitespace-nowrap">
+                <button onclick="navigateToMobile('status')" id="mobile-tab-status" class="mobile-menu-item">
+                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                            d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z">
+                        </path>
+                    </svg>
                     Status
                 </button>
-                <button onclick="switchTab('domains')" id="tab-domains" class="py-4 px-1 font-medium text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300 whitespace-nowrap">
+                <button onclick="navigateToMobile('domains')" id="mobile-tab-domains" class="mobile-menu-item">
+                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                            d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9">
+                        </path>
+                    </svg>
                     Domains
                 </button>
-                <button onclick="switchTab('dmarc')" id="tab-dmarc" class="py-4 px-1 font-medium text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300 whitespace-nowrap">
+                <button onclick="navigateToMobile('dmarc')" id="mobile-tab-dmarc" class="mobile-menu-item">
+                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                            d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                    </svg>
                     DMARC
                 </button>
-                <button onclick="switchTab('settings')" id="tab-settings" class="py-4 px-1 font-medium text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300 whitespace-nowrap">
+                <button onclick="navigateToMobile('mailbox-stats')" id="mobile-tab-mailbox-stats"
+                    class="mobile-menu-item">
+                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                            d="M16 8v8m-4-5v5m-4-2v2m-2 4h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z">
+                        </path>
+                    </svg>
+                    Mailbox Stats
+                </button>
+                <button onclick="navigateToMobile('settings')" id="mobile-tab-settings" class="mobile-menu-item">
+                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                            d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z">
+                        </path>
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                            d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
+                    </svg>
                     Settings
                 </button>
             </div>
         </div>
-    </div>
 
-    <!-- Main Content -->
-    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-6 flex-1 w-full">
-        
-        <!-- Dashboard Tab -->
-        <div id="content-dashboard" class="tab-content">
-            <!-- Stats Grid -->
-            <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6 mb-6">
-                <div class="bg-white dark:bg-gray-800 rounded-lg shadow dark:shadow-gray-900/30 p-4 sm:p-6">
-                    <div class="flex items-center justify-between mb-2">
-                        <h3 class="text-xs sm:text-sm font-medium text-gray-600 dark:text-gray-400">Messages (24h)</h3>
-                        <svg class="w-8 h-8 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path>
-                        </svg>
+        <!-- Tabs -->
+        <div class="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
+            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                <div class="flex items-center md:justify-start">
+                    <!-- Hamburger Button for Mobile -->
+                    <button id="hamburger-btn"
+                        class="flex md:hidden flex-col justify-around w-6 h-5 bg-transparent border-none cursor-pointer p-0 z-[60] text-gray-500 dark:text-gray-400"
+                        onclick="toggleMobileMenu()">
+                        <span class="hamburger-line block w-6 h-0.5 bg-current rounded transition-all"></span>
+                        <span class="hamburger-line block w-6 h-0.5 bg-current rounded transition-all"></span>
+                        <span class="hamburger-line block w-6 h-0.5 bg-current rounded transition-all"></span>
+                    </button>
+                    <span id="current-tab-label"
+                        class="md:hidden py-4 flex-1 text-center font-medium text-sm text-blue-600 dark:text-blue-400">Dashboard</span>
+                    <!-- Spacer to balance the hamburger button on the left -->
+                    <div class="md:hidden w-6"></div>
+
+                    <!-- Desktop Tabs -->
+                    <div class="hidden md:flex space-x-2 lg:space-x-4">
+                        <button onclick="navigateTo('dashboard')" id="tab-dashboard"
+                            class="tab-active py-4 px-2 font-medium text-sm whitespace-nowrap flex items-center gap-1.5">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                    d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z">
+                                </path>
+                            </svg>
+                            Dashboard
+                        </button>
+                        <button onclick="navigateTo('messages')" id="tab-messages"
+                            class="py-4 px-2 font-medium text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300 whitespace-nowrap flex items-center gap-1.5">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                    d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z">
+                                </path>
+                            </svg>
+                            Messages
+                        </button>
+                        <button onclick="navigateTo('netfilter')" id="tab-netfilter"
+                            class="py-4 px-2 font-medium text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300 whitespace-nowrap flex items-center gap-1.5">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                    d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z">
+                                </path>
+                            </svg>
+                            Security
+                        </button>
+                        <button onclick="navigateTo('queue')" id="tab-queue"
+                            class="py-4 px-2 font-medium text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300 whitespace-nowrap flex items-center gap-1.5">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                    d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10">
+                                </path>
+                            </svg>
+                            Queue
+                        </button>
+                        <button onclick="navigateTo('quarantine')" id="tab-quarantine"
+                            class="py-4 px-2 font-medium text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300 whitespace-nowrap flex items-center gap-1.5">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                    d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z">
+                                </path>
+                            </svg>
+                            Quarantine
+                        </button>
+                        <button onclick="navigateTo('status')" id="tab-status"
+                            class="py-4 px-2 font-medium text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300 whitespace-nowrap flex items-center gap-1.5">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                    d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z">
+                                </path>
+                            </svg>
+                            Status
+                        </button>
+                        <button onclick="navigateTo('domains')" id="tab-domains"
+                            class="py-4 px-2 font-medium text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300 whitespace-nowrap flex items-center gap-1.5">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                    d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9">
+                                </path>
+                            </svg>
+                            Domains
+                        </button>
+                        <button onclick="navigateTo('dmarc')" id="tab-dmarc"
+                            class="py-4 px-2 font-medium text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300 whitespace-nowrap flex items-center gap-1.5">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                    d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                            </svg>
+                            DMARC
+                        </button>
+                        <button onclick="navigateTo('mailbox-stats')" id="tab-mailbox-stats"
+                            class="py-4 px-2 font-medium text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300 whitespace-nowrap flex items-center gap-1.5">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                    d="M16 8v8m-4-5v5m-4-2v2m-2 4h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z">
+                                </path>
+                            </svg>
+                            Mailbox Stats
+                        </button>
+                        <button onclick="navigateTo('settings')" id="tab-settings"
+                            class="py-4 px-2 font-medium text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300 whitespace-nowrap flex items-center gap-1.5">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                    d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z">
+                                </path>
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                    d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
+                            </svg>
+                            Settings
+                        </button>
                     </div>
-                    <p id="stat-messages-24h" class="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-white">0</p>
-                    <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">7d: <span id="stat-messages-7d">0</span></p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Main Content -->
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-6 flex-1 w-full">
+
+            <!-- Dashboard Tab -->
+            <div id="content-dashboard" class="tab-content">
+                <!-- Stats Grid -->
+                <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6 mb-6">
+                    <div class="bg-white dark:bg-gray-800 rounded-lg shadow dark:shadow-gray-900/30 p-4 sm:p-6">
+                        <div class="flex items-center justify-between mb-2">
+                            <h3 class="text-xs sm:text-sm font-medium text-gray-600 dark:text-gray-400">Messages (24h)
+                            </h3>
+                            <svg class="w-8 h-8 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                    d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z">
+                                </path>
+                            </svg>
+                        </div>
+                        <p id="stat-messages-24h" class="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-white">0
+                        </p>
+                        <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">7d: <span
+                                id="stat-messages-7d">0</span>
+                        </p>
+                    </div>
+
+                    <div class="bg-white dark:bg-gray-800 rounded-lg shadow dark:shadow-gray-900/30 p-4 sm:p-6">
+                        <div class="flex items-center justify-between mb-2">
+                            <h3 class="text-xs sm:text-sm font-medium text-gray-600 dark:text-gray-400">Blocked (24h)
+                            </h3>
+                            <svg class="w-8 h-8 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                    d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636">
+                                </path>
+                            </svg>
+                        </div>
+                        <p id="stat-blocked-24h" class="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-white">0
+                        </p>
+                        <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">7d: <span id="stat-blocked-7d">0</span>
+                            (<span id="stat-blocked-percentage">0</span>%)</p>
+                    </div>
+
+                    <div class="bg-white dark:bg-gray-800 rounded-lg shadow dark:shadow-gray-900/30 p-4 sm:p-6">
+                        <div class="flex items-center justify-between mb-2">
+                            <h3 class="text-xs sm:text-sm font-medium text-gray-600 dark:text-gray-400">Deferred (24h)
+                            </h3>
+                            <svg class="w-8 h-8 text-yellow-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                    d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                            </svg>
+                        </div>
+                        <p id="stat-deferred-24h" class="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-white">0
+                        </p>
+                        <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">7d: <span
+                                id="stat-deferred-7d">0</span>
+                        </p>
+                    </div>
+
+                    <div class="bg-white dark:bg-gray-800 rounded-lg shadow dark:shadow-gray-900/30 p-4 sm:p-6">
+                        <div class="flex items-center justify-between mb-2">
+                            <h3 class="text-xs sm:text-sm font-medium text-gray-600 dark:text-gray-400">Auth Fails (24h)
+                            </h3>
+                            <svg class="w-8 h-8 text-orange-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                    d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z">
+                                </path>
+                            </svg>
+                        </div>
+                        <p id="stat-auth-failures-24h"
+                            class="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-white">
+                            0</p>
+                        <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">7d: <span
+                                id="stat-auth-failures-7d">0</span></p>
+                    </div>
                 </div>
 
-                <div class="bg-white dark:bg-gray-800 rounded-lg shadow dark:shadow-gray-900/30 p-4 sm:p-6">
-                    <div class="flex items-center justify-between mb-2">
-                        <h3 class="text-xs sm:text-sm font-medium text-gray-600 dark:text-gray-400">Blocked (24h)</h3>
-                        <svg class="w-8 h-8 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"></path>
-                        </svg>
+                <!-- Recent Activity & Quick Search & System Status -->
+                <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                    <!-- Recent Activity -->
+                    <div class="lg:col-span-2 bg-white dark:bg-gray-800 rounded-lg shadow dark:shadow-gray-900/30">
+                        <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+                            <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Recent Activity</h2>
+                        </div>
+                        <div id="recent-activity" class="p-6 space-y-3"
+                            style="max-height: unset; overflow-y: auto; scrollbar-width: none; -ms-overflow-style: none;">
+                            <div class="text-center py-8">
+                                <div class="loading mx-auto mb-4"></div>
+                                <p class="text-gray-500 dark:text-gray-400">Loading...</p>
+                            </div>
+                        </div>
                     </div>
-                    <p id="stat-blocked-24h" class="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-white">0</p>
-                    <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">7d: <span id="stat-blocked-7d">0</span> (<span id="stat-blocked-percentage">0</span>%)</p>
-                </div>
 
-                <div class="bg-white dark:bg-gray-800 rounded-lg shadow dark:shadow-gray-900/30 p-4 sm:p-6">
-                    <div class="flex items-center justify-between mb-2">
-                        <h3 class="text-xs sm:text-sm font-medium text-gray-600 dark:text-gray-400">Deferred (24h)</h3>
-                        <svg class="w-8 h-8 text-yellow-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                        </svg>
-                    </div>
-                    <p id="stat-deferred-24h" class="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-white">0</p>
-                    <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">7d: <span id="stat-deferred-7d">0</span></p>
-                </div>
+                    <!-- System Status Summary & Quick Search -->
+                    <div class="space-y-6">
+                        <!-- Quick Search -->
+                        <div class="bg-white dark:bg-gray-800 rounded-lg shadow dark:shadow-gray-900/30 p-6">
+                            <h3 class="text-md font-semibold text-gray-900 dark:text-white mb-4">Quick Search</h3>
+                            <div class="space-y-3">
+                                <input type="text" id="dashboard-search-query" placeholder="Search messages..."
+                                    class="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-lg"
+                                    onkeypress="if(event.key==='Enter') performDashboardSearch()">
+                                <select id="dashboard-search-status"
+                                    class="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-lg">
+                                    <option value="">All Statuses</option>
+                                    <option value="delivered">Delivered</option>
+                                    <option value="sent">Sent</option>
+                                    <option value="deferred">Deferred</option>
+                                    <option value="bounced">Bounced</option>
+                                    <option value="rejected">Rejected</option>
+                                    <option value="expired">Expired</option>
+                                </select>
+                                <button onclick="performDashboardSearch()"
+                                    class="w-full px-4 py-2 bg-blue-600 hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600 text-white rounded-lg transition text-sm font-medium">
+                                    Search
+                                </button>
+                            </div>
+                        </div>
 
-                <div class="bg-white dark:bg-gray-800 rounded-lg shadow dark:shadow-gray-900/30 p-4 sm:p-6">
-                    <div class="flex items-center justify-between mb-2">
-                        <h3 class="text-xs sm:text-sm font-medium text-gray-600 dark:text-gray-400">Auth Fails (24h)</h3>
-                        <svg class="w-8 h-8 text-orange-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path>
-                        </svg>
+                        <!-- Containers Summary -->
+                        <div class="bg-white dark:bg-gray-800 rounded-lg shadow dark:shadow-gray-900/30">
+                            <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+                                <h3 class="text-md font-semibold text-gray-900 dark:text-white">Containers</h3>
+                            </div>
+                            <div id="dashboard-containers-summary" class="p-6 space-y-2">
+                                <div class="text-center py-4">
+                                    <div class="loading mx-auto mb-2"
+                                        style="width: 24px; height: 24px; border-width: 2px;">
+                                    </div>
+                                    <p class="text-xs text-gray-500 dark:text-gray-400">Loading...</p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Storage Summary -->
+                        <div class="bg-white dark:bg-gray-800 rounded-lg shadow dark:shadow-gray-900/30">
+                            <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+                                <h3 class="text-md font-semibold text-gray-900 dark:text-white">Storage</h3>
+                            </div>
+                            <div id="dashboard-storage-summary" class="p-6">
+                                <div class="text-center py-4">
+                                    <div class="loading mx-auto mb-2"
+                                        style="width: 24px; height: 24px; border-width: 2px;">
+                                    </div>
+                                    <p class="text-xs text-gray-500 dark:text-gray-400">Loading...</p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- System Summary -->
+                        <div class="bg-white dark:bg-gray-800 rounded-lg shadow dark:shadow-gray-900/30">
+                            <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+                                <h3 class="text-md font-semibold text-gray-900 dark:text-white">System</h3>
+                            </div>
+                            <div id="dashboard-system-summary" class="p-6">
+                                <div class="text-center py-4">
+                                    <div class="loading mx-auto mb-2"
+                                        style="width: 24px; height: 24px; border-width: 2px;">
+                                    </div>
+                                    <p class="text-xs text-gray-500 dark:text-gray-400">Loading...</p>
+                                </div>
+                            </div>
+                        </div>
                     </div>
-                    <p id="stat-auth-failures-24h" class="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-white">0</p>
-                    <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">7d: <span id="stat-auth-failures-7d">0</span></p>
                 </div>
             </div>
 
-            <!-- Recent Activity & Quick Search & System Status -->
-            <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                <!-- Recent Activity -->
-                <div class="lg:col-span-2 bg-white dark:bg-gray-800 rounded-lg shadow dark:shadow-gray-900/30">
-                    <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
-                        <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Recent Activity</h2>
+            <!-- Messages Tab -->
+            <div id="content-messages" class="tab-content hidden">
+                <!-- Filters -->
+                <div class="bg-white dark:bg-gray-800 rounded-lg shadow dark:shadow-gray-900/30 p-4 mb-4">
+                    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 mb-3">
+                        <input type="text" id="messages-filter-search"
+                            placeholder="Search (sender, recipient, subject, IP, user)..."
+                            class="px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-lg"
+                            onkeypress="if(event.key==='Enter') applyMessagesFilters()">
+                        <input type="text" id="messages-filter-sender" placeholder="Sender"
+                            class="px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-lg"
+                            onkeypress="if(event.key==='Enter') applyMessagesFilters()">
+                        <input type="text" id="messages-filter-recipient" placeholder="Recipient"
+                            class="px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-lg"
+                            onkeypress="if(event.key==='Enter') applyMessagesFilters()">
+                        <input type="text" id="messages-filter-user" placeholder="Authenticated User"
+                            class="px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-lg"
+                            onkeypress="if(event.key==='Enter') applyMessagesFilters()">
                     </div>
-                    <div id="recent-activity" class="p-6 space-y-3" style="max-height: unset; overflow-y: auto; scrollbar-width: none; -ms-overflow-style: none;">
+                    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                        <select id="messages-filter-direction"
+                            class="px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-lg">
+                            <option value="">All Directions</option>
+                            <option value="inbound">Inbound</option>
+                            <option value="outbound">Outbound</option>
+                            <option value="internal">Internal</option>
+                        </select>
+                        <select id="messages-filter-status"
+                            class="px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-lg">
+                            <option value="">All Statuses</option>
+                            <option value="delivered">Delivered</option>
+                            <option value="deferred">Deferred</option>
+                            <option value="bounced">Bounced</option>
+                            <option value="rejected">Rejected</option>
+                            <option value="spam">Spam</option>
+                        </select>
+                        <input type="text" id="messages-filter-ip" placeholder="Source IP"
+                            class="px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-lg"
+                            onkeypress="if(event.key==='Enter') applyMessagesFilters()">
+                        <div class="flex gap-2">
+                            <button onclick="applyMessagesFilters()"
+                                class="flex-1 px-3 py-2 text-sm bg-blue-600 hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600 text-white rounded-lg">
+                                Apply
+                            </button>
+                            <button onclick="clearMessagesFilters()"
+                                class="flex-1 px-3 py-2 text-sm bg-gray-200 hover:bg-gray-300 dark:bg-gray-600 dark:hover:bg-gray-500 text-gray-700 dark:text-gray-300 rounded-lg">
+                                Clear
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="bg-white dark:bg-gray-800 rounded-lg shadow dark:shadow-gray-900/30">
+                    <div
+                        class="px-4 sm:px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center">
+                        <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
+                            All Messages
+                            <span id="messages-count"
+                                class="ml-2 text-sm font-normal text-gray-500 dark:text-gray-400"></span>
+                        </h2>
+                        <button onclick="exportCSV('messages')"
+                            class="px-3 py-2 text-sm bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600">
+                            Export CSV
+                        </button>
+                    </div>
+                    <div id="messages-logs" class="p-4 sm:p-6">
                         <div class="text-center py-8">
                             <div class="loading mx-auto mb-4"></div>
                             <p class="text-gray-500 dark:text-gray-400">Loading...</p>
                         </div>
                     </div>
                 </div>
-
-                <!-- System Status Summary & Quick Search -->
-                <div class="space-y-6">
-                    <!-- Quick Search -->
-                    <div class="bg-white dark:bg-gray-800 rounded-lg shadow dark:shadow-gray-900/30 p-6">
-                        <h3 class="text-md font-semibold text-gray-900 dark:text-white mb-4">Quick Search</h3>
-                        <div class="space-y-3">
-                            <input type="text" id="dashboard-search-query" placeholder="Search messages..." class="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-lg" onkeypress="if(event.key==='Enter') performDashboardSearch()">
-                            <select id="dashboard-search-status" class="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-lg">
-                                <option value="">All Statuses</option>
-                                <option value="delivered">Delivered</option>
-                                <option value="sent">Sent</option>
-                                <option value="deferred">Deferred</option>
-                                <option value="bounced">Bounced</option>
-                                <option value="rejected">Rejected</option>
-                                <option value="expired">Expired</option>
-                            </select>
-                            <button onclick="performDashboardSearch()" class="w-full px-4 py-2 bg-blue-600 hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600 text-white rounded-lg transition text-sm font-medium">
-                                Search
-                            </button>
-                        </div>
-                    </div>
-
-                    <!-- Containers Summary -->
-                    <div class="bg-white dark:bg-gray-800 rounded-lg shadow dark:shadow-gray-900/30">
-                        <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
-                            <h3 class="text-md font-semibold text-gray-900 dark:text-white">Containers</h3>
-                        </div>
-                        <div id="dashboard-containers-summary" class="p-6 space-y-2">
-                            <div class="text-center py-4">
-                                <div class="loading mx-auto mb-2" style="width: 24px; height: 24px; border-width: 2px;"></div>
-                                <p class="text-xs text-gray-500 dark:text-gray-400">Loading...</p>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- Storage Summary -->
-                    <div class="bg-white dark:bg-gray-800 rounded-lg shadow dark:shadow-gray-900/30">
-                        <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
-                            <h3 class="text-md font-semibold text-gray-900 dark:text-white">Storage</h3>
-                        </div>
-                        <div id="dashboard-storage-summary" class="p-6">
-                            <div class="text-center py-4">
-                                <div class="loading mx-auto mb-2" style="width: 24px; height: 24px; border-width: 2px;"></div>
-                                <p class="text-xs text-gray-500 dark:text-gray-400">Loading...</p>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- System Summary -->
-                    <div class="bg-white dark:bg-gray-800 rounded-lg shadow dark:shadow-gray-900/30">
-                        <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
-                            <h3 class="text-md font-semibold text-gray-900 dark:text-white">System</h3>
-                        </div>
-                        <div id="dashboard-system-summary" class="p-6">
-                            <div class="text-center py-4">
-                                <div class="loading mx-auto mb-2" style="width: 24px; height: 24px; border-width: 2px;"></div>
-                                <p class="text-xs text-gray-500 dark:text-gray-400">Loading...</p>
-                            </div>
-                        </div>
-                    </div>
-                </div>
             </div>
-        </div>
 
-        <!-- Messages Tab -->
-        <div id="content-messages" class="tab-content hidden">
-            <!-- Filters -->
-            <div class="bg-white dark:bg-gray-800 rounded-lg shadow dark:shadow-gray-900/30 p-4 mb-4">
-                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 mb-3">
-                    <input type="text" id="messages-filter-search" placeholder="Search (sender, recipient, subject, IP, user)..." class="px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-lg" onkeypress="if(event.key==='Enter') applyMessagesFilters()">
-                    <input type="text" id="messages-filter-sender" placeholder="Sender" class="px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-lg" onkeypress="if(event.key==='Enter') applyMessagesFilters()">
-                    <input type="text" id="messages-filter-recipient" placeholder="Recipient" class="px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-lg" onkeypress="if(event.key==='Enter') applyMessagesFilters()">
-                    <input type="text" id="messages-filter-user" placeholder="Authenticated User" class="px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-lg" onkeypress="if(event.key==='Enter') applyMessagesFilters()">
-                </div>
-                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-                    <select id="messages-filter-direction" class="px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-lg">
-                        <option value="">All Directions</option>
-                        <option value="inbound">Inbound</option>
-                        <option value="outbound">Outbound</option>
-                        <option value="internal">Internal</option>
-                    </select>
-                    <select id="messages-filter-status" class="px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-lg">
-                        <option value="">All Statuses</option>
-                        <option value="delivered">Delivered</option>
-                        <option value="deferred">Deferred</option>
-                        <option value="bounced">Bounced</option>
-                        <option value="rejected">Rejected</option>
-                        <option value="spam">Spam</option>
-                    </select>
-                    <input type="text" id="messages-filter-ip" placeholder="Source IP" class="px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-lg" onkeypress="if(event.key==='Enter') applyMessagesFilters()">
-                    <div class="flex gap-2">
-                        <button onclick="applyMessagesFilters()" class="flex-1 px-3 py-2 text-sm bg-blue-600 hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600 text-white rounded-lg">
+            <!-- Netfilter Tab -->
+            <div id="content-netfilter" class="tab-content hidden">
+                <!-- Filters -->
+                <div class="bg-white dark:bg-gray-800 rounded-lg shadow dark:shadow-gray-900/30 p-4 mb-4">
+                    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+                        <input type="text" id="netfilter-filter-ip" placeholder="IP Address"
+                            class="px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-lg"
+                            onkeypress="if(event.key==='Enter') applyNetfilterFilters()">
+                        <input type="text" id="netfilter-filter-username" placeholder="Username"
+                            class="px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-lg"
+                            onkeypress="if(event.key==='Enter') applyNetfilterFilters()">
+                        <select id="netfilter-filter-action"
+                            class="px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-lg">
+                            <option value="">All Actions</option>
+                            <option value="ban">BAN</option>
+                            <option value="unban">UNBAN</option>
+                            <option value="warning">Warning</option>
+                            <option value="info">Info</option>
+                        </select>
+                        <button onclick="applyNetfilterFilters()"
+                            class="px-3 py-2 text-sm bg-blue-600 hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600 text-white rounded-lg">
                             Apply
                         </button>
-                        <button onclick="clearMessagesFilters()" class="flex-1 px-3 py-2 text-sm bg-gray-200 hover:bg-gray-300 dark:bg-gray-600 dark:hover:bg-gray-500 text-gray-700 dark:text-gray-300 rounded-lg">
+                        <button onclick="clearNetfilterFilters()"
+                            class="px-3 py-2 text-sm bg-gray-200 hover:bg-gray-300 dark:bg-gray-600 dark:hover:bg-gray-500 text-gray-700 dark:text-gray-300 rounded-lg">
                             Clear
                         </button>
                     </div>
                 </div>
-            </div>
-            
-            <div class="bg-white dark:bg-gray-800 rounded-lg shadow dark:shadow-gray-900/30">
-                <div class="px-4 sm:px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center">
-                    <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
-                        All Messages
-                        <span id="messages-count" class="ml-2 text-sm font-normal text-gray-500 dark:text-gray-400"></span>
-                    </h2>
-                    <button onclick="exportCSV('messages')" class="px-3 py-2 text-sm bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600">
-                        Export CSV
-                    </button>
-                </div>
-                <div id="messages-logs" class="p-4 sm:p-6">
-                    <div class="text-center py-8">
-                        <div class="loading mx-auto mb-4"></div>
-                        <p class="text-gray-500 dark:text-gray-400">Loading...</p>
-                    </div>
-                </div>
-            </div>
-        </div>
 
-        <!-- Netfilter Tab -->
-        <div id="content-netfilter" class="tab-content hidden">
-            <!-- Filters -->
-            <div class="bg-white dark:bg-gray-800 rounded-lg shadow dark:shadow-gray-900/30 p-4 mb-4">
-                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
-                    <input type="text" id="netfilter-filter-ip" placeholder="IP Address" class="px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-lg" onkeypress="if(event.key==='Enter') applyNetfilterFilters()">
-                    <input type="text" id="netfilter-filter-username" placeholder="Username" class="px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-lg" onkeypress="if(event.key==='Enter') applyNetfilterFilters()">
-                    <select id="netfilter-filter-action" class="px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-lg">
-                        <option value="">All Actions</option>
-                        <option value="ban">BAN</option>
-                        <option value="unban">UNBAN</option>
-                        <option value="warning">Warning</option>
-                        <option value="info">Info</option>
-                    </select>
-                    <button onclick="applyNetfilterFilters()" class="px-3 py-2 text-sm bg-blue-600 hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600 text-white rounded-lg">
-                        Apply
-                    </button>
-                    <button onclick="clearNetfilterFilters()" class="px-3 py-2 text-sm bg-gray-200 hover:bg-gray-300 dark:bg-gray-600 dark:hover:bg-gray-500 text-gray-700 dark:text-gray-300 rounded-lg">
-                        Clear
-                    </button>
-                </div>
-            </div>
-            
-            <div class="bg-white dark:bg-gray-800 rounded-lg shadow dark:shadow-gray-900/30">
-                <div class="px-4 sm:px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center">
-                    <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
-                        Security Events
-                        <span id="security-count" class="ml-2 text-sm font-normal text-gray-500 dark:text-gray-400"></span>
-                    </h2>
-                    <button onclick="exportCSV('netfilter')" class="px-3 py-2 text-sm bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600">
-                        Export CSV
-                    </button>
-                </div>
-                <div id="netfilter-logs" class="p-4 sm:p-6">
-                    <div class="text-center py-8">
-                        <div class="loading mx-auto mb-4"></div>
-                        <p class="text-gray-500 dark:text-gray-400">Loading...</p>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Queue Tab -->
-        <div id="content-queue" class="tab-content hidden">
-            <!-- Filters -->
-            <div class="bg-white dark:bg-gray-800 rounded-lg shadow dark:shadow-gray-900/30 p-4 mb-4">
-                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-                    <input type="text" id="queue-filter-search" placeholder="Search sender/recipient..." class="px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-lg" onkeypress="if(event.key==='Enter') applyQueueFilters()">
-                    <input type="text" id="queue-filter-queue-id" placeholder="Queue ID" class="px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-lg" onkeypress="if(event.key==='Enter') applyQueueFilters()">
-                    <button onclick="applyQueueFilters()" class="px-3 py-2 text-sm bg-blue-600 hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600 text-white rounded-lg">
-                        Apply
-                    </button>
-                    <button onclick="clearQueueFilters()" class="px-3 py-2 text-sm bg-gray-200 hover:bg-gray-300 dark:bg-gray-600 dark:hover:bg-gray-500 text-gray-700 dark:text-gray-300 rounded-lg">
-                        Clear
-                    </button>
-                </div>
-            </div>
-            
-            <div class="bg-white dark:bg-gray-800 rounded-lg shadow dark:shadow-gray-900/30">
-                <div class="px-4 sm:px-6 py-4 border-b border-gray-200 dark:border-gray-700">
-                    <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
-                        Mail Queue
-                        <span id="queue-count" class="ml-2 text-sm font-normal text-gray-500 dark:text-gray-400"></span>
-                    </h2>
-                </div>
-                <div id="queue-logs" class="p-4 sm:p-6">
-                    <div class="text-center py-8">
-                        <div class="loading mx-auto mb-4"></div>
-                        <p class="text-gray-500 dark:text-gray-400">Loading...</p>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Quarantine Tab -->
-        <div id="content-quarantine" class="tab-content hidden">
-            <div class="bg-white dark:bg-gray-800 rounded-lg shadow dark:shadow-gray-900/30">
-                <div class="px-4 sm:px-6 py-4 border-b border-gray-200 dark:border-gray-700">
-                    <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Quarantined Messages <span id="quarantine-count" class="text-sm font-normal text-gray-500 dark:text-gray-400"></span>
-                    </h2>
-                </div>
-                <div id="quarantine-logs" class="p-4 sm:p-6">
-                    <div class="text-center py-8">
-                        <div class="loading mx-auto mb-4"></div>
-                        <p class="text-gray-500 dark:text-gray-400">Loading...</p>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Status Tab -->
-        <div id="content-status" class="tab-content hidden">
-            <!-- Row 1: Containers, System, Storage -->
-            <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
-                <!-- Containers -->
                 <div class="bg-white dark:bg-gray-800 rounded-lg shadow dark:shadow-gray-900/30">
-                    <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
-                        <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Containers</h2>
-                    </div>
-                    <div id="status-containers" class="p-6">
-                        <div class="text-center py-8">
-                            <div class="loading mx-auto mb-4"></div>
-                            <p class="text-gray-500 dark:text-gray-400">Loading...</p>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- System Info -->
-                <div class="bg-white dark:bg-gray-800 rounded-lg shadow dark:shadow-gray-900/30">
-                    <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
-                        <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Mailcow System</h2>
-                    </div>
-                    <div id="status-system" class="p-6">
-                        <div class="text-center py-8">
-                            <div class="loading mx-auto mb-4"></div>
-                            <p class="text-gray-500 dark:text-gray-400">Loading...</p>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Storage -->
-                <div class="bg-white dark:bg-gray-800 rounded-lg shadow dark:shadow-gray-900/30">
-                    <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
-                        <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Storage</h2>
-                    </div>
-                    <div id="status-storage" class="p-6">
-                        <div class="text-center py-8">
-                            <div class="loading mx-auto mb-4"></div>
-                            <p class="text-gray-500 dark:text-gray-400">Loading...</p>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Row 2: Import Status -->
-            <div class="mb-6">
-                <div class="bg-white dark:bg-gray-800 rounded-lg shadow dark:shadow-gray-900/30">
-                    <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
-                        <h2 class="text-lg font-semibold text-gray-900 dark:text-white flex items-center gap-2">
-                            <svg class="w-5 h-5 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"></path>
-                            </svg>
-                            Import Status
+                    <div
+                        class="px-4 sm:px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center">
+                        <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
+                            Security Events
+                            <span id="security-count"
+                                class="ml-2 text-sm font-normal text-gray-500 dark:text-gray-400"></span>
                         </h2>
-                    </div>
-                    <div id="status-import" class="p-6">
-                        <div class="text-center py-8">
-                            <div class="loading mx-auto mb-4"></div>
-                            <p class="text-gray-500 dark:text-gray-400">Loading...</p>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Row 3: Correlation Status -->
-            <div class="mb-6">
-                <div class="bg-white dark:bg-gray-800 rounded-lg shadow dark:shadow-gray-900/30">
-                    <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
-                        <h2 class="text-lg font-semibold text-gray-900 dark:text-white flex items-center gap-2">
-                            <svg class="w-5 h-5 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
-                            </svg>
-                            Message Correlation Status
-                        </h2>
-                    </div>
-                    <div id="status-correlation" class="p-6">
-                        <div class="text-center py-8">
-                            <div class="loading mx-auto mb-4"></div>
-                            <p class="text-gray-500 dark:text-gray-400">Loading...</p>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Row 4: Background Jobs -->
-            <div class="mb-6">
-                <div class="bg-white dark:bg-gray-800 rounded-lg shadow dark:shadow-gray-900/30">
-                    <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
-                        <h2 class="text-lg font-semibold text-gray-900 dark:text-white flex items-center gap-2">
-                            <svg class="w-5 h-5 text-orange-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                            </svg>
-                            Background Jobs
-                        </h2>
-                    </div>
-                    <div id="status-jobs" class="p-6">
-                        <div class="text-center py-8">
-                            <div class="loading mx-auto mb-4"></div>
-                            <p class="text-gray-500 dark:text-gray-400">Loading...</p>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Domains Tab -->
-        <div id="content-domains" class="tab-content hidden">
-            <div class="mb-6">
-                <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
-                    <div class="text-center lg:text-left">
-                        <div class="flex items-center justify-center lg:justify-start gap-2">
-                            <h2 class="text-2xl font-bold text-gray-900 dark:text-white">Domains Overview</h2>
-                            <button onclick="showHelpModal('Domains')" class="text-gray-400 hover:text-blue-500 dark:hover:text-blue-400 transition-colors" title="Help - Domains Information">
-                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                                </svg>
-                            </button>
-                        </div>
-                        <p class="text-gray-600 dark:text-gray-400 mt-1">View Domains Settings with DNS records validation</p>
-                    </div>
-
-                    <div id="dns-check-info" class="flex items-center gap-3 justify-center lg:justify-end"></div>
-                </div>
-            </div>
-            <div id="domains-loading" class="text-center py-12">
-                <div class="loading mx-auto mb-4"></div>
-                <p class="text-gray-500 dark:text-gray-400">Loading domains...</p>
-            </div>
-            <div id="domains-content" class="hidden"></div>
-        </div>
-
-        <!-- DMARC Tab -->
-        <div id="content-dmarc" class="tab-content hidden">
-            <!-- Sub-navigation -->
-            <div class="mb-6">
-                <div class="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
-                    <div class="text-center lg:text-left flex items-center gap-4 justify-center lg:justify-start">
-                        <button id="dmarc-back-btn" onclick="dmarcGoBack()" class="hidden text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-200 transition-colors">
-                            <svg class="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path>
-                            </svg>
+                        <button onclick="exportCSV('netfilter')"
+                            class="px-3 py-2 text-sm bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600">
+                            Export CSV
                         </button>
-                        <div>
+                    </div>
+                    <div id="netfilter-logs" class="p-4 sm:p-6">
+                        <div class="text-center py-8">
+                            <div class="loading mx-auto mb-4"></div>
+                            <p class="text-gray-500 dark:text-gray-400">Loading...</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Queue Tab -->
+            <div id="content-queue" class="tab-content hidden">
+                <!-- Filters -->
+                <div class="bg-white dark:bg-gray-800 rounded-lg shadow dark:shadow-gray-900/30 p-4 mb-4">
+                    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                        <input type="text" id="queue-filter-search" placeholder="Search sender/recipient..."
+                            class="px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-lg"
+                            onkeypress="if(event.key==='Enter') applyQueueFilters()">
+                        <input type="text" id="queue-filter-queue-id" placeholder="Queue ID"
+                            class="px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-lg"
+                            onkeypress="if(event.key==='Enter') applyQueueFilters()">
+                        <button onclick="applyQueueFilters()"
+                            class="px-3 py-2 text-sm bg-blue-600 hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600 text-white rounded-lg">
+                            Apply
+                        </button>
+                        <button onclick="clearQueueFilters()"
+                            class="px-3 py-2 text-sm bg-gray-200 hover:bg-gray-300 dark:bg-gray-600 dark:hover:bg-gray-500 text-gray-700 dark:text-gray-300 rounded-lg">
+                            Clear
+                        </button>
+                    </div>
+                </div>
+
+                <div class="bg-white dark:bg-gray-800 rounded-lg shadow dark:shadow-gray-900/30">
+                    <div class="px-4 sm:px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+                        <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
+                            Mail Queue
+                            <span id="queue-count"
+                                class="ml-2 text-sm font-normal text-gray-500 dark:text-gray-400"></span>
+                        </h2>
+                    </div>
+                    <div id="queue-logs" class="p-4 sm:p-6">
+                        <div class="text-center py-8">
+                            <div class="loading mx-auto mb-4"></div>
+                            <p class="text-gray-500 dark:text-gray-400">Loading...</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Quarantine Tab -->
+            <div id="content-quarantine" class="tab-content hidden">
+                <div class="bg-white dark:bg-gray-800 rounded-lg shadow dark:shadow-gray-900/30">
+                    <div class="px-4 sm:px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+                        <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Quarantined Messages <span
+                                id="quarantine-count"
+                                class="text-sm font-normal text-gray-500 dark:text-gray-400"></span>
+                        </h2>
+                    </div>
+                    <div id="quarantine-logs" class="p-4 sm:p-6">
+                        <div class="text-center py-8">
+                            <div class="loading mx-auto mb-4"></div>
+                            <p class="text-gray-500 dark:text-gray-400">Loading...</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Status Tab -->
+            <div id="content-status" class="tab-content hidden">
+                <!-- Row 1: Containers, System, Storage -->
+                <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
+                    <!-- Containers -->
+                    <div class="bg-white dark:bg-gray-800 rounded-lg shadow dark:shadow-gray-900/30">
+                        <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+                            <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Containers</h2>
+                        </div>
+                        <div id="status-containers" class="p-6">
+                            <div class="text-center py-8">
+                                <div class="loading mx-auto mb-4"></div>
+                                <p class="text-gray-500 dark:text-gray-400">Loading...</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- System Info -->
+                    <div class="bg-white dark:bg-gray-800 rounded-lg shadow dark:shadow-gray-900/30">
+                        <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+                            <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Mailcow System</h2>
+                        </div>
+                        <div id="status-system" class="p-6">
+                            <div class="text-center py-8">
+                                <div class="loading mx-auto mb-4"></div>
+                                <p class="text-gray-500 dark:text-gray-400">Loading...</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Storage -->
+                    <div class="bg-white dark:bg-gray-800 rounded-lg shadow dark:shadow-gray-900/30">
+                        <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+                            <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Storage</h2>
+                        </div>
+                        <div id="status-storage" class="p-6">
+                            <div class="text-center py-8">
+                                <div class="loading mx-auto mb-4"></div>
+                                <p class="text-gray-500 dark:text-gray-400">Loading...</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Row 2: Import Status -->
+                <div class="mb-6">
+                    <div class="bg-white dark:bg-gray-800 rounded-lg shadow dark:shadow-gray-900/30">
+                        <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+                            <h2 class="text-lg font-semibold text-gray-900 dark:text-white flex items-center gap-2">
+                                <svg class="w-5 h-5 text-green-500" fill="none" stroke="currentColor"
+                                    viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                        d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"></path>
+                                </svg>
+                                Import Status
+                            </h2>
+                        </div>
+                        <div id="status-import" class="p-6">
+                            <div class="text-center py-8">
+                                <div class="loading mx-auto mb-4"></div>
+                                <p class="text-gray-500 dark:text-gray-400">Loading...</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Row 3: Correlation Status -->
+                <div class="mb-6">
+                    <div class="bg-white dark:bg-gray-800 rounded-lg shadow dark:shadow-gray-900/30">
+                        <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+                            <h2 class="text-lg font-semibold text-gray-900 dark:text-white flex items-center gap-2">
+                                <svg class="w-5 h-5 text-indigo-500" fill="none" stroke="currentColor"
+                                    viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                        d="M13 10V3L4 14h7v7l9-11h-7z"></path>
+                                </svg>
+                                Message Correlation Status
+                            </h2>
+                        </div>
+                        <div id="status-correlation" class="p-6">
+                            <div class="text-center py-8">
+                                <div class="loading mx-auto mb-4"></div>
+                                <p class="text-gray-500 dark:text-gray-400">Loading...</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Row 4: Background Jobs -->
+                <div class="mb-6">
+                    <div class="bg-white dark:bg-gray-800 rounded-lg shadow dark:shadow-gray-900/30">
+                        <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+                            <h2 class="text-lg font-semibold text-gray-900 dark:text-white flex items-center gap-2">
+                                <svg class="w-5 h-5 text-orange-500" fill="none" stroke="currentColor"
+                                    viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                        d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                                </svg>
+                                Background Jobs
+                            </h2>
+                        </div>
+                        <div id="status-jobs" class="p-6">
+                            <div class="text-center py-8">
+                                <div class="loading mx-auto mb-4"></div>
+                                <p class="text-gray-500 dark:text-gray-400">Loading...</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Domains Tab -->
+            <div id="content-domains" class="tab-content hidden">
+                <div class="mb-6">
+                    <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+                        <div class="text-center lg:text-left">
                             <div class="flex items-center justify-center lg:justify-start gap-2">
-                                <h2 id="dmarc-page-title" class="text-2xl font-bold text-gray-900 dark:text-white">DMARC Reports</h2>
-                                <button onclick="showHelpModal('DMARC')" class="text-gray-400 hover:text-blue-500 dark:hover:text-blue-400 transition-colors" title="Help - DMARC Information">
+                                <h2 class="text-2xl font-bold text-gray-900 dark:text-white">Domains Overview</h2>
+                                <button onclick="showHelpModal('Domains')"
+                                    class="text-gray-400 hover:text-blue-500 dark:hover:text-blue-400 transition-colors"
+                                    title="Help - Domains Information">
                                     <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                            d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
                                     </svg>
                                 </button>
                             </div>
-                            <p id="dmarc-subtitle" class="text-gray-600 dark:text-gray-400 mt-1">Monitor Domain Authentication and Global Delivery Reports</p>
+                            <p class="text-gray-600 dark:text-gray-400 mt-1">View Domains Settings with DNS records
+                                validation</p>
                         </div>
-                    </div>
-                    <div id="dmarc-header-actions" class="flex flex-col sm:flex-row items-start gap-3 justify-center lg:justify-end">
-                        <label id="dmarc-upload-btn" class="hidden cursor-pointer inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 transition shadow-sm">
-                            <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path>
-                            </svg>
-                            Upload Report
-                            <input type="file" id="dmarc-file-input" class="hidden" accept=".xml,.gz,.zip" onchange="uploadDmarcReport(event)">
-                        </label>
-                        <div id="dmarc-sync-container" class="hidden flex flex-col items-center lg:items-end gap-1">
-                            <button id="dmarc-sync-btn" onclick="triggerDmarcSync()" class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-green-600 hover:bg-green-700 transition shadow-sm">
-                                <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
-                                </svg>
-                                <span id="dmarc-sync-btn-text">Sync from IMAP</span>
-                            </button>
-                            <div id="dmarc-last-sync-info" class="text-xs text-gray-500 dark:text-gray-400 text-right"></div>
-                        </div>
+
+                        <div id="dns-check-info" class="flex items-center gap-3 justify-center lg:justify-end"></div>
                     </div>
                 </div>
-                
-                <!-- Breadcrumb -->
-                <div id="dmarc-breadcrumb" class="text-sm text-gray-500 dark:text-gray-400">
-                </div>
-            </div>
-
-            <!-- Domains List View -->
-            <div id="dmarc-domains-view">
-                <!-- Stats Cards -->
-                <div id="dmarc-main-stats-container"></div>
-
-                <!-- Domains Table -->
-                <div class="rounded-xl overflow-hidden shadow-sm border-0 md:border border-gray-200 dark:border-gray-700" style="background-color: #111827;">
-                    <table class="min-w-full">
-                        <thead class="hidden md:table-header-group bg-gray-700/50">
-                            <tr>
-                                <th class="px-6 py-4 text-left text-sm font-bold text-gray-400">Domain</th>
-                                <th class="px-6 py-4 text-left text-sm font-bold text-gray-400">Activity Period</th>
-                                <th class="px-6 py-4 text-center text-sm font-bold text-gray-400">Reports</th>
-                                <th class="px-6 py-4 text-left text-sm font-bold text-gray-400">Messages (30d)</th>
-                                <th class="px-6 py-4 text-left text-sm font-bold text-gray-400">Unique IPs</th>
-                                <th class="px-6 py-4 text-left text-sm font-bold text-gray-400">DMARC Pass</th>
-                            </tr>
-                        </thead>
-                        <tbody id="dmarc-domains-list" class="block md:table-row-group divide-y divide-gray-700">
-                            </tbody>
-                    </table>
-                </div>
-            </div>
-
-            <!-- Domain Overview View (hidden by default) -->
-            <div id="dmarc-overview-view" class="hidden">
-                <!-- Overview Stats -->
-                <div id="dmarc-overview-stats-container"></div>
-
-                <!-- Chart -->
-                <div class="bg-white dark:bg-gray-800 rounded-lg shadow p-6 mb-8 relative h-80">
-                    <h3 class="text-lg font-medium text-gray-900 dark:text-white mb-4">Email Volume (Last 30 Days)</h3>
-                    <canvas id="dmarc-chart"></canvas>
-                </div>
-
-                <!-- Sub-tabs: Reports | Sources -->
-                <div class="bg-white dark:bg-gray-800 rounded-lg shadow">
-                    <div class="border-b border-gray-200 dark:border-gray-700">
-                        <div class="flex space-x-8 px-6">
-                            <button onclick="dmarcSwitchSubTab('reports')" id="dmarc-subtab-reports" class="modal-tab active">
-                                Daily Reports
-                            </button>
-                            <button onclick="dmarcSwitchSubTab('sources')" id="dmarc-subtab-sources" class="modal-tab">
-                                Source IPs
-                            </button>
-                        </div>
-                    </div>
-
-                    <!-- Reports Tab Content -->
-                    <div id="dmarc-reports-content" class="p-6">
-                        <div id="dmarc-reports-list" class="space-y-4">
-                            <div class="text-center py-12">
-                                <div class="loading mx-auto mb-4"></div>
-                                <p class="text-gray-500 dark:text-gray-400">Loading reports...</p>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- Sources Tab Content -->
-                    <div id="dmarc-sources-content" class="p-6 hidden">
-                        <div id="dmarc-sources-list">
-                            <div class="text-center py-12">
-                                <div class="loading mx-auto mb-4"></div>
-                                <p class="text-gray-500 dark:text-gray-400">Loading sources...</p>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Report Details View (hidden by default) -->
-            <div id="dmarc-report-details-view" class="hidden">
-                <!-- Stats -->
-                <div id="report-details-stats-container"></div>
-
-                <!-- Sources Table -->
-                <div class="bg-white dark:bg-gray-800 rounded-lg shadow">
-                    <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
-                        <h3 class="text-lg font-medium text-gray-900 dark:text-white">Sources</h3>
-                    </div>
-                    <div class="overflow-x-auto">
-                        <div id="report-detail-sources-list">
-                            <div class="text-center py-12">
-                                <div class="loading mx-auto mb-4"></div>
-                                <p class="text-gray-500 dark:text-gray-400">Loading sources...</p>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Source Details View (hidden by default) -->
-            <div id="dmarc-source-details-view" class="hidden">
-                <!-- Source Info Header -->
-                <div class="bg-white dark:bg-gray-800 rounded-lg shadow p-6 mb-6">
-                    <div class="flex items-start gap-4">
-                        <img id="source-detail-flag" src="" alt="" class="w-12 h-8 object-cover rounded shadow" style="border: 1px solid rgba(0,0,0,0.1);">
-                        <div class="flex-1">
-                            <h3 id="source-detail-name" class="text-xl font-semibold text-gray-900 dark:text-white mb-1">-</h3>
-                            <p id="source-detail-ip" class="text-sm text-gray-600 dark:text-gray-400 mb-2">-</p>
-                            <div class="flex flex-wrap gap-4 text-sm text-gray-600 dark:text-gray-400">
-                                <span id="source-detail-location">-</span>
-                                <span id="source-detail-asn">-</span>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Stats -->
-                <div id="source-details-stats-container"></div>
-
-                <!-- Envelope From Groups Table -->
-                <div class="bg-white dark:bg-gray-800 rounded-lg shadow">
-                    <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
-                        <h3 class="text-lg font-medium text-gray-900 dark:text-white">Email Details</h3>
-                    </div>
-                    <div class="overflow-x-auto">
-                        <div id="source-detail-envelope-list">
-                            <div class="text-center py-12">
-                                <div class="loading mx-auto mb-4"></div>
-                                <p class="text-gray-500 dark:text-gray-400">Loading details...</p>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Settings Tab -->
-        <div id="content-settings" class="tab-content hidden">
-            <div class="mb-6">
-                <h2 class="text-2xl font-bold text-gray-900 dark:text-white">Settings</h2>
-                <p class="text-gray-600 dark:text-gray-400 mt-1">Application configuration</p>
-            </div>
-            
-            <!-- Loading State -->
-            <div id="settings-loading" class="text-center py-12">
-                <div class="loading mx-auto mb-4"></div>
-                <p class="text-gray-500 dark:text-gray-400">Loading settings...</p>
-            </div>
-            
-            <!-- Content -->
-            <div id="settings-content" class="hidden space-y-6"></div>
-        </div>
-    </div>
-
-    <!-- Message Detail Modal -->
-    <div id="message-modal" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4" style="position: fixed;">
-        <div class="bg-white dark:bg-gray-800 rounded-lg max-w-6xl w-full" style="height: 90%; display: flex; flex-direction: column; position: relative;">
-            <div class="flex-shrink-0 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-6 py-4 flex justify-between items-center rounded-t-lg">
-                <h3 class="text-lg font-semibold text-gray-900 dark:text-white">Message Details</h3>
-                <button onclick="closeMessageModal()" class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200">
-                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
-                    </svg>
-                </button>
-            </div>
-            
-            <!-- Modal Tabs -->
-            <div class="w-full flex border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700/50">
-                <button id="modal-tab-overview" class="modal-tab active flex-1 py-2 sm:py-3 px-1 sm:px-4 transition-colors" onclick="switchModalTab('overview')">
-                    <span class="text-xs sm:text-sm font-medium">Overview</span>
-                </button>
-                <button id="modal-tab-postfix" class="modal-tab flex-1 py-2 sm:py-3 px-1 sm:px-4 transition-colors" onclick="switchModalTab('postfix')">
-                    <span class="text-xs sm:text-sm font-medium">Logs</span>
-                </button>
-                <button id="modal-tab-spam" class="modal-tab flex-1 py-2 sm:py-3 px-1 sm:px-4 transition-colors" onclick="switchModalTab('spam')">
-                    <span class="text-xs sm:text-sm font-medium leading-tight">Spam Analysis</span>
-                </button>
-                <button id="modal-tab-netfilter" class="modal-tab flex-1 py-2 sm:py-3 px-1 sm:px-4 transition-colors" onclick="switchModalTab('netfilter')">
-                    <div class="flex items-center justify-center gap-1">
-                        <span class="text-xs sm:text-sm font-medium">Security</span>
-                        <span class="w-1.5 h-1.5 sm:w-2 sm:h-2 bg-green-500 rounded-full shadow-[0_0_8px_rgba(34,197,94,0.6)]"></span>
-                    </div>
-                </button>
-            </div>
-
-            <!-- Modal Content with fixed height -->
-            <div id="message-modal-content" class="flex-1 overflow-y-auto p-6" style="min-height: 400px;">
-                <div class="text-center py-8">
+                <div id="domains-loading" class="text-center py-12">
                     <div class="loading mx-auto mb-4"></div>
-                    <p class="text-gray-500 dark:text-gray-400">Loading...</p>
+                    <p class="text-gray-500 dark:text-gray-400">Loading domains...</p>
+                </div>
+                <div id="domains-content" class="hidden"></div>
+            </div>
+
+            <!-- DMARC Tab -->
+            <div id="content-dmarc" class="tab-content hidden">
+                <!-- Sub-navigation -->
+                <div class="mb-6">
+                    <div class="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
+                        <div class="text-center lg:text-left flex items-center gap-4 justify-center lg:justify-start">
+                            <div>
+                                <div class="flex items-center justify-center lg:justify-start gap-2">
+                                    <h2 id="dmarc-page-title" class="text-2xl font-bold text-gray-900 dark:text-white">
+                                        DMARC Reports</h2>
+                                    <button onclick="showHelpModal('DMARC')"
+                                        class="text-gray-400 hover:text-blue-500 dark:hover:text-blue-400 transition-colors"
+                                        title="Help - DMARC Information">
+                                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                                d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                                        </svg>
+                                    </button>
+                                </div>
+                                <p id="dmarc-subtitle" class="text-gray-600 dark:text-gray-400 mt-1">Monitor Domain
+                                    Authentication and Global Delivery Reports</p>
+                            </div>
+                        </div>
+                        <div id="dmarc-header-actions"
+                            class="flex flex-row items-start gap-3 justify-end w-full lg:w-auto">
+                            <label id="dmarc-upload-btn"
+                                class="hidden cursor-pointer inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 transition shadow-sm">
+                                <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                        d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12">
+                                    </path>
+                                </svg>
+                                Upload Report
+                                <input type="file" id="dmarc-file-input" class="hidden" accept=".xml,.gz,.zip,.json"
+                                    onchange="uploadDmarcReport(event)">
+                            </label>
+                            <div id="dmarc-sync-container" class="hidden flex flex-col items-center lg:items-end gap-1">
+                                <button id="dmarc-sync-btn" onclick="triggerDmarcSync()"
+                                    class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-green-600 hover:bg-green-700 transition shadow-sm">
+                                    <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                            d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15">
+                                        </path>
+                                    </svg>
+                                    <span id="dmarc-sync-btn-text">Sync from IMAP</span>
+                                </button>
+                                <div id="dmarc-last-sync-info"
+                                    class="text-xs text-gray-500 dark:text-gray-400 text-right">
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Breadcrumb -->
+                    <div id="dmarc-breadcrumb" class="text-sm text-gray-500 dark:text-gray-400">
+                    </div>
+                </div>
+
+                <!-- Domains List View -->
+                <div id="dmarc-domains-view">
+                    <!-- Stats Cards -->
+                    <div id="dmarc-main-stats-container"></div>
+
+                    <!-- Domains Table -->
+                    <div
+                        class="rounded-xl overflow-hidden shadow-sm border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
+                        <table class="min-w-full">
+                            <thead class="hidden md:table-header-group bg-gray-100 dark:bg-gray-700/50">
+                                <tr>
+                                    <th class="px-6 py-4 text-left text-sm font-bold text-gray-600 dark:text-gray-400">
+                                        Domain</th>
+                                    <th class="px-6 py-4 text-left text-sm font-bold text-gray-600 dark:text-gray-400">
+                                        Activity Period</th>
+                                    <th
+                                        class="px-6 py-4 text-center text-sm font-bold text-gray-600 dark:text-gray-400">
+                                        Reports</th>
+                                    <th class="px-6 py-4 text-left text-sm font-bold text-gray-600 dark:text-gray-400">
+                                        Messages (30d)</th>
+                                    <th class="px-6 py-4 text-left text-sm font-bold text-gray-600 dark:text-gray-400">
+                                        Unique IPs</th>
+                                    <th class="px-6 py-4 text-left text-sm font-bold text-gray-600 dark:text-gray-400">
+                                        DMARC Pass</th>
+                                    <th class="px-6 py-4 text-left text-sm font-bold text-gray-600 dark:text-gray-400">
+                                        TLS Success</th>
+                                </tr>
+                            </thead>
+                            <tbody id="dmarc-domains-list"
+                                class="block md:table-row-group divide-y divide-gray-200 dark:divide-gray-700">
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Domain Overview View (hidden by default) -->
+                <div id="dmarc-overview-view" class="hidden">
+                    <!-- Overview Stats -->
+                    <div id="dmarc-overview-stats-container"></div>
+
+                    <!-- Chart -->
+                    <div class="bg-white dark:bg-gray-800 rounded-lg shadow p-6 mb-8 relative h-80">
+                        <h3 class="text-lg font-medium text-gray-900 dark:text-white mb-4">Email Volume (Last 30 Days)
+                        </h3>
+                        <canvas id="dmarc-chart"></canvas>
+                    </div>
+
+                    <!-- Sub-tabs: Reports | Sources | TLS Reports -->
+                    <div class="bg-white dark:bg-gray-800 rounded-lg shadow">
+                        <div class="border-b border-gray-200 dark:border-gray-700 overflow-x-auto">
+                            <div class="flex space-x-4 px-4 min-w-max">
+                                <button onclick="dmarcSwitchSubTab('reports')" id="dmarc-subtab-reports"
+                                    class="modal-tab-sm active">
+                                    Daily Reports
+                                </button>
+                                <button onclick="dmarcSwitchSubTab('sources')" id="dmarc-subtab-sources"
+                                    class="modal-tab-sm">
+                                    Source IPs
+                                </button>
+                                <button onclick="dmarcSwitchSubTab('tls')" id="dmarc-subtab-tls" class="modal-tab-sm">
+                                    TLS Reports
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Reports Tab Content -->
+                        <div id="dmarc-reports-content" class="p-6">
+                            <div id="dmarc-reports-list" class="space-y-4">
+                                <div class="text-center py-12">
+                                    <div class="loading mx-auto mb-4"></div>
+                                    <p class="text-gray-500 dark:text-gray-400">Loading reports...</p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Sources Tab Content -->
+                        <div id="dmarc-sources-content" class="p-6 hidden">
+                            <div id="dmarc-sources-list">
+                                <div class="text-center py-12">
+                                    <div class="loading mx-auto mb-4"></div>
+                                    <p class="text-gray-500 dark:text-gray-400">Loading sources...</p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- TLS Reports Tab Content -->
+                        <div id="dmarc-tls-content" class="p-6 hidden">
+                            <div id="dmarc-tls-list">
+                                <div class="text-center py-12">
+                                    <div class="loading mx-auto mb-4"></div>
+                                    <p class="text-gray-500 dark:text-gray-400">Loading TLS reports...</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Report Details View (hidden by default) -->
+                <div id="dmarc-report-details-view" class="hidden">
+                    <!-- Stats -->
+                    <div id="report-details-stats-container"></div>
+
+                    <!-- Sources Table -->
+                    <div class="bg-white dark:bg-gray-800 rounded-lg shadow">
+                        <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+                            <h3 class="text-lg font-medium text-gray-900 dark:text-white">Sources</h3>
+                        </div>
+                        <div class="overflow-x-auto">
+                            <div id="report-detail-sources-list">
+                                <div class="text-center py-12">
+                                    <div class="loading mx-auto mb-4"></div>
+                                    <p class="text-gray-500 dark:text-gray-400">Loading sources...</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Source Details View (hidden by default) -->
+                <div id="dmarc-source-details-view" class="hidden">
+                    <!-- Source Info Header -->
+                    <div class="bg-white dark:bg-gray-800 rounded-lg shadow p-6 mb-6">
+                        <div class="flex items-start gap-4">
+                            <img id="source-detail-flag" src="" alt="" class="w-12 h-8 object-cover rounded shadow"
+                                style="border: 1px solid rgba(0,0,0,0.1);">
+                            <div class="flex-1">
+                                <h3 id="source-detail-name"
+                                    class="text-xl font-semibold text-gray-900 dark:text-white mb-1">-</h3>
+                                <p id="source-detail-ip" class="text-sm text-gray-600 dark:text-gray-400 mb-2">-</p>
+                                <div class="flex flex-wrap gap-4 text-sm text-gray-600 dark:text-gray-400">
+                                    <span id="source-detail-location">-</span>
+                                    <span id="source-detail-asn">-</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Stats -->
+                    <div id="source-details-stats-container"></div>
+
+                    <!-- Envelope From Groups Table -->
+                    <div class="bg-white dark:bg-gray-800 rounded-lg shadow">
+                        <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+                            <h3 class="text-lg font-medium text-gray-900 dark:text-white">Email Details</h3>
+                        </div>
+                        <div class="overflow-x-auto">
+                            <div id="source-detail-envelope-list">
+                                <div class="text-center py-12">
+                                    <div class="loading mx-auto mb-4"></div>
+                                    <p class="text-gray-500 dark:text-gray-400">Loading details...</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
-        </div>
-    </div>
 
-    <!-- Changelog Modal -->
-    <div id="changelog-modal" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
-        <div class="bg-white dark:bg-gray-800 rounded-lg max-w-3xl w-full max-h-[80vh] flex flex-col">
-            <div class="flex-shrink-0 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-6 py-4 flex justify-between items-center rounded-t-lg">
-                <h3 class="text-lg font-semibold text-gray-900 dark:text-white">Changelog</h3>
-                <button onclick="closeChangelogModal()" class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200">
-                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
-                    </svg>
-                </button>
+            <!-- Mailbox Stats Tab -->
+            <div id="content-mailbox-stats" class="tab-content hidden">
+                <!-- Header -->
+                <div class="mb-6">
+                    <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+                        <div class="text-center lg:text-left">
+                            <div class="flex items-center justify-center lg:justify-start gap-2">
+                                <h2 class="text-2xl font-bold text-gray-900 dark:text-white">Mailbox Statistics</h2>
+                                <button onclick="showHelpModal('Mailbox Statistics')"
+                                    class="text-gray-400 hover:text-blue-500 dark:hover:text-blue-400 transition-colors"
+                                    title="Help - Mailbox Statistics">
+                                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                            d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                                    </svg>
+                                </button>
+                            </div>
+                            <p class="text-gray-600 dark:text-gray-400 mt-1">View message statistics per mailbox and aliases</p>
+                        </div>
+                        <div id="mailbox-stats-header-info"
+                            class="flex items-center gap-3 justify-center lg:justify-end"><span id="mailbox-stats-last-update" class="text-sm text-gray-500 dark:text-gray-400"></span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Summary Cards -->
+                <div id="mailbox-stats-summary" class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+                    <div
+                        class="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-4 border border-gray-200 dark:border-gray-700">
+                        <div class="flex items-center justify-between">
+                            <div class="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">Messages Sent
+                            </div>
+                            <svg class="w-6 h-6 text-purple-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                    d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"></path>
+                            </svg>
+                        </div>
+                        <div id="mailbox-stats-sent" class="text-3xl font-bold text-gray-900 dark:text-white mt-2">-
+                        </div>
+                        <div id="mailbox-stats-date-label-sent" class="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                            Last 30 days</div>
+                    </div>
+                    <div
+                        class="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-4 border border-gray-200 dark:border-gray-700">
+                        <div class="flex items-center justify-between">
+                            <div class="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">Messages
+                                Received</div>
+                            <svg class="w-6 h-6 text-cyan-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                    d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4">
+                                </path>
+                            </svg>
+                        </div>
+                        <div id="mailbox-stats-received" class="text-3xl font-bold text-gray-900 dark:text-white mt-2">-
+                        </div>
+                        <div id="mailbox-stats-date-label-recv" class="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                            Last 30 days</div>
+                    </div>
+                    <div
+                        class="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-4 border border-gray-200 dark:border-gray-700">
+                        <div class="flex items-center justify-between">
+                            <div class="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">Failed</div>
+                            <svg class="w-6 h-6 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                    d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636">
+                                </path>
+                            </svg>
+                        </div>
+                        <div id="mailbox-stats-failed" class="text-3xl font-bold text-gray-900 dark:text-white mt-2">-
+                        </div>
+                        <div id="mailbox-stats-date-label-failed" class="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                            Last 30 days</div>
+                    </div>
+                    <div
+                        class="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-4 border border-gray-200 dark:border-gray-700">
+                        <div class="flex items-center justify-between">
+                            <div class="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">Failure Rate
+                            </div>
+                            <svg class="w-6 h-6 text-orange-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                    d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                            </svg>
+                        </div>
+                        <div id="mailbox-stats-failure-rate"
+                            class="text-3xl font-bold text-gray-900 dark:text-white mt-2">-
+                        </div>
+                        <div id="mailbox-stats-date-label-rate" class="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                            Last 30 days</div>
+                    </div>
+                </div>
+
+                <!-- Search and Filters -->
+                <div class="bg-white dark:bg-gray-800 rounded-lg shadow mb-4 p-4">
+                    <div class="flex flex-col lg:flex-row gap-4">
+                        <!-- Search -->
+                        <div class="flex-1">
+                            <div class="relative">
+                                <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                                    <svg class="h-5 w-5 text-gray-400" fill="none" stroke="currentColor"
+                                        viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                            d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
+                                    </svg>
+                                </div>
+                                <input type="text" id="mailbox-stats-search" oninput="applyMailboxStatsFilters()"
+                                    placeholder="Search mailboxes..."
+                                    class="block w-full pl-10 pr-3 py-2.5 border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-lg text-sm focus:ring-blue-500 focus:border-blue-500">
+                            </div>
+                        </div>
+                        <!-- Filters -->
+                        <div class="flex flex-wrap items-center gap-3">
+                            <!-- Date Range Picker -->
+                            <div class="relative" id="date-range-picker-container">
+                                <!-- Toggle Button -->
+                                <button type="button" onclick="toggleDateRangePicker()" id="date-range-picker-btn"
+                                    class="flex items-center gap-2 text-sm border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-lg shadow-sm py-2.5 pl-3 pr-3 hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors">
+                                    <svg class="w-4 h-4 text-gray-500 dark:text-gray-400" fill="none"
+                                        stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                            d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z">
+                                        </path>
+                                    </svg>
+                                    <span id="date-range-label">Last 30 Days</span>
+                                    <svg class="w-4 h-4 text-gray-400 transition-transform" id="date-range-arrow"
+                                        fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                            d="M19 9l-7 7-7-7"></path>
+                                    </svg>
+                                </button>
+
+                                <!-- Dropdown Panel -->
+                                <div id="date-range-dropdown"
+                                    class="hidden absolute left-0 top-full mt-2 w-80 bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 z-50">
+                                    <!-- Preset Shortcuts -->
+                                    <div class="p-3 border-b border-gray-200 dark:border-gray-700">
+                                        <p
+                                            class="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-2">
+                                            Quick Select</p>
+                                        <div class="flex flex-wrap gap-2">
+                                            <button type="button" onclick="selectDatePreset('today')"
+                                                data-preset="today"
+                                                class="date-preset-btn px-3 py-1.5 text-xs font-medium rounded-md border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+                                                Today
+                                            </button>
+                                            <button type="button" onclick="selectDatePreset('7days')"
+                                                data-preset="7days"
+                                                class="date-preset-btn px-3 py-1.5 text-xs font-medium rounded-md border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+                                                7 Days
+                                            </button>
+                                            <button type="button" onclick="selectDatePreset('30days')"
+                                                data-preset="30days"
+                                                class="date-preset-btn px-3 py-1.5 text-xs font-medium rounded-md border border-blue-500 bg-blue-500 text-white transition-colors">
+                                                30 Days
+                                            </button>
+                                            <button type="button" onclick="selectDatePreset('90days')"
+                                                data-preset="90days"
+                                                class="date-preset-btn px-3 py-1.5 text-xs font-medium rounded-md border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+                                                90 Days
+                                            </button>
+                                        </div>
+                                    </div>
+
+                                    <!-- Custom Date Range -->
+                                    <div class="p-3">
+                                        <p
+                                            class="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-2">
+                                            Custom Range</p>
+                                        <div class="flex items-center gap-2">
+                                            <div class="flex-1">
+                                                <label
+                                                    class="text-xs text-gray-500 dark:text-gray-400 block mb-1">From</label>
+                                                <input type="date" id="date-range-start"
+                                                    class="w-full text-sm border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-md py-1.5 px-2 focus:ring-blue-500 focus:border-blue-500">
+                                            </div>
+                                            <div class="flex-1">
+                                                <label
+                                                    class="text-xs text-gray-500 dark:text-gray-400 block mb-1">To</label>
+                                                <input type="date" id="date-range-end"
+                                                    class="w-full text-sm border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-md py-1.5 px-2 focus:ring-blue-500 focus:border-blue-500">
+                                            </div>
+                                        </div>
+                                        <button type="button" onclick="applyCustomDateRange()"
+                                            class="w-full mt-3 px-3 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-md transition-colors">
+                                            Apply Custom Range
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <!-- Hidden input for compatibility with existing code -->
+                                <input type="hidden" id="mailbox-stats-date-range" value="30days">
+                                <input type="hidden" id="mailbox-stats-start-date" value="">
+                                <input type="hidden" id="mailbox-stats-end-date" value="">
+                            </div>
+                            <select id="mailbox-stats-domain-filter" onchange="applyMailboxStatsFilters()"
+                                class="text-sm border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-lg shadow-sm focus:border-blue-500 focus:ring-blue-500 py-2.5 pl-3 pr-8">
+                                <option value="">All Domains</option>
+                            </select>
+                            <select id="mailbox-stats-sort" onchange="applyMailboxStatsFilters()"
+                                class="text-sm border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-lg shadow-sm focus:border-blue-500 focus:ring-blue-500 py-2.5 pl-3 pr-8">
+                                <option value="sent_total-desc">Sent (High to Low)</option>
+                                <option value="received_total-desc">Received (High to Low)</option>
+                                <option value="failure_rate-desc">Failure Rate (High to Low)</option>
+                                <option value="quota_used-desc">Quota Used (High to Low)</option>
+                                <option value="username-asc">Username (A-Z)</option>
+                            </select>
+                            <label
+                                class="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400 whitespace-nowrap">
+                                <input type="checkbox" id="mailbox-stats-active-only" checked
+                                    onchange="applyMailboxStatsFilters()"
+                                    class="rounded border-gray-300 dark:border-gray-600 text-blue-600 focus:ring-blue-500">
+                                Active Only
+                            </label>
+                            <label
+                                class="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400 whitespace-nowrap">
+                                <input type="checkbox" id="mailbox-stats-hide-zero" checked
+                                    onchange="applyMailboxStatsFilters()"
+                                    class="rounded border-gray-300 dark:border-gray-600 text-blue-600 focus:ring-blue-500">
+                                Hide Zero Activity
+                            </label>
+                            <button onclick="resetMailboxStatsFilters()"
+                                class="flex items-center gap-1 px-3 py-2 text-sm text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-white border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                        d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15">
+                                    </path>
+                                </svg>
+                                Reset
+                            </button>
+                        </div>
+                    </div>
+                    <div class="mt-3 flex items-center justify-between text-sm text-gray-500 dark:text-gray-400">
+                        <span id="mailbox-stats-count">0 mailboxes</span>
+                        <span id="mailbox-stats-page-info"></span>
+                    </div>
+                </div>
+
+                <!-- Loading State -->
+                <div id="mailbox-stats-loading" class="text-center py-12">
+                    <div class="loading mx-auto mb-4"></div>
+                    <p class="text-gray-500 dark:text-gray-400">Loading mailbox statistics...</p>
+                </div>
+
+                <!-- Mailboxes List (Accordion Style) -->
+                <div id="mailbox-stats-content" class="hidden space-y-2">
+                    <div id="mailbox-stats-list">
+                        <!-- Mailbox rows will be rendered here by JavaScript -->
+                    </div>
+                </div>
             </div>
-            <div class="flex-1 overflow-y-auto p-6">
-                <div id="changelog-content" class="markdown-body"></div>
+
+            <!-- Settings Tab -->
+            <div id="content-settings" class="tab-content hidden">
+                <div class="mb-6">
+                    <h2 class="text-2xl font-bold text-gray-900 dark:text-white">Settings</h2>
+                    <p class="text-gray-600 dark:text-gray-400 mt-1">Application configuration</p>
+                </div>
+
+                <!-- Loading State -->
+                <div id="settings-loading" class="text-center py-12">
+                    <div class="loading mx-auto mb-4"></div>
+                    <p class="text-gray-500 dark:text-gray-400">Loading settings...</p>
+                </div>
+
+                <!-- Content -->
+                <div id="settings-content" class="hidden space-y-6"></div>
             </div>
         </div>
-    </div>
 
-    <!-- Footer -->
-    <footer id="app-footer" class="bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 mt-6">
-        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
-            <div class="flex flex-col sm:flex-row justify-between items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
-                <div class="flex flex-wrap items-center gap-2 justify-center sm:justify-start">
-                    <span id="app-name-footer">Mailcow Logs Viewer</span>
-                    <span class="text-gray-400 dark:text-gray-500">•</span>
-                    <span id="app-version-footer">v1.4.2</span>
-                    <button id="update-badge" onclick="switchTab('settings')" class="hidden ml-2 px-2 py-0.5 bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300 rounded text-xs font-medium hover:bg-green-200 dark:hover:bg-green-900/50 cursor-pointer transition-colors">
-                        Update Available
+        <!-- Message Detail Modal -->
+        <div id="message-modal"
+            class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4"
+            style="position: fixed;">
+            <div class="bg-white dark:bg-gray-800 rounded-lg max-w-6xl w-full"
+                style="height: 90%; display: flex; flex-direction: column; position: relative;">
+                <div
+                    class="flex-shrink-0 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-6 py-4 flex justify-between items-center rounded-t-lg">
+                    <h3 class="text-lg font-semibold text-gray-900 dark:text-white">Message Details</h3>
+                    <button onclick="closeMessageModal()"
+                        class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200">
+                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                d="M6 18L18 6M6 6l12 12">
+                            </path>
+                        </svg>
                     </button>
                 </div>
-                <div class="flex flex-wrap items-center gap-2 justify-center sm:justify-end">
-                    <span>Created with ❤️</span>
-                    <span class="text-gray-400 dark:text-gray-500">•</span>
-                    <a href="https://github.com/ShlomiPorush/mailcow-logs-viewer" target="_blank" rel="noopener noreferrer" class="text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 transition flex items-center gap-1">
-                        <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
-                            <path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/>
-                        </svg>
-                        GitHub
-                    </a>
+
+                <!-- Modal Tabs -->
+                <div class="w-full flex border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700/50">
+                    <button id="modal-tab-overview"
+                        class="modal-tab active flex-1 py-2 sm:py-3 px-1 sm:px-4 transition-colors"
+                        onclick="switchModalTab('overview')">
+                        <span class="text-xs sm:text-sm font-medium">Overview</span>
+                    </button>
+                    <button id="modal-tab-postfix" class="modal-tab flex-1 py-2 sm:py-3 px-1 sm:px-4 transition-colors"
+                        onclick="switchModalTab('postfix')">
+                        <span class="text-xs sm:text-sm font-medium">Logs</span>
+                    </button>
+                    <button id="modal-tab-spam" class="modal-tab flex-1 py-2 sm:py-3 px-1 sm:px-4 transition-colors"
+                        onclick="switchModalTab('spam')">
+                        <span class="text-xs sm:text-sm font-medium leading-tight">Spam Analysis</span>
+                    </button>
+                    <button id="modal-tab-netfilter"
+                        class="modal-tab flex-1 py-2 sm:py-3 px-1 sm:px-4 transition-colors"
+                        onclick="switchModalTab('netfilter')">
+                        <div class="flex items-center justify-center gap-1">
+                            <span class="text-xs sm:text-sm font-medium">Security</span>
+                            <span
+                                class="w-1.5 h-1.5 sm:w-2 sm:h-2 bg-green-500 rounded-full shadow-[0_0_8px_rgba(34,197,94,0.6)]"></span>
+                        </div>
+                    </button>
+                </div>
+
+                <!-- Modal Content with fixed height -->
+                <div id="message-modal-content" class="flex-1 overflow-y-auto p-6" style="min-height: 400px;">
+                    <div class="text-center py-8">
+                        <div class="loading mx-auto mb-4"></div>
+                        <p class="text-gray-500 dark:text-gray-400">Loading...</p>
+                    </div>
                 </div>
             </div>
         </div>
-    </footer>
+
+        <!-- Changelog Modal -->
+        <div id="changelog-modal"
+            class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+            <div class="bg-white dark:bg-gray-800 rounded-lg max-w-3xl w-full max-h-[80vh] flex flex-col">
+                <div
+                    class="flex-shrink-0 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-6 py-4 flex justify-between items-center rounded-t-lg">
+                    <h3 class="text-lg font-semibold text-gray-900 dark:text-white">Changelog</h3>
+                    <button onclick="closeChangelogModal()"
+                        class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200">
+                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                d="M6 18L18 6M6 6l12 12">
+                            </path>
+                        </svg>
+                    </button>
+                </div>
+                <div class="flex-1 overflow-y-auto p-6">
+                    <div id="changelog-content" class="markdown-body"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Footer -->
+        <footer id="app-footer" class="bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 mt-6">
+            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
+                <div
+                    class="flex flex-col sm:flex-row justify-between items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
+                    <div class="flex flex-wrap items-center gap-2 justify-center sm:justify-start">
+                        <span id="app-name-footer">Mailcow Logs Viewer</span>
+                        <span class="text-gray-400 dark:text-gray-500">•</span>
+                        <span id="app-version-footer">v1.4.2</span>
+                        <button id="update-badge" onclick="switchTab('settings')"
+                            class="hidden ml-2 px-2 py-0.5 bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300 rounded text-xs font-medium hover:bg-green-200 dark:hover:bg-green-900/50 cursor-pointer transition-colors">
+                            Update Available
+                        </button>
+                    </div>
+                    <div class="flex flex-wrap items-center gap-2 justify-center sm:justify-end">
+                        <span>Created with ❤️</span>
+                        <span class="text-gray-400 dark:text-gray-500">•</span>
+                        <a href="https://github.com/ShlomiPorush/mailcow-logs-viewer" target="_blank"
+                            rel="noopener noreferrer"
+                            class="text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 transition flex items-center gap-1">
+                            <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                                <path
+                                    d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z" />
+                            </svg>
+                            GitHub
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </footer>
     </div> <!-- Close app-content div -->
 
+    <!-- JavaScript -->
+    <script src="/static/router.js"></script>
     <script src="/static/app.js"></script>
 
     <!-- DMARC Sync History Modal -->
-    <div id="dmarc-sync-history-modal" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+    <div id="dmarc-sync-history-modal"
+        class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
         <div class="bg-white dark:bg-gray-800 rounded-lg max-w-6xl w-full max-h-[80vh] flex flex-col">
-            <div class="flex-shrink-0 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-6 py-4 flex justify-between items-center rounded-t-lg">
+            <div
+                class="flex-shrink-0 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-6 py-4 flex justify-between items-center rounded-t-lg">
                 <h3 class="text-lg font-semibold text-gray-900 dark:text-white">IMAP Sync History</h3>
-                <button onclick="closeDmarcSyncHistoryModal()" class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200">
+                <button onclick="closeDmarcSyncHistoryModal()"
+                    class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200">
                     <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12">
+                        </path>
                     </svg>
                 </button>
             </div>
@@ -1029,6 +1803,6 @@
             </div>
         </div>
     </div>
-
 </body>
+
 </html>

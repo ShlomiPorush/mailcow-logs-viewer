@@ -224,6 +224,20 @@ async def get_settings_info(db: Session = Depends(get_db)):
                     "status": jobs_status.get('update_geoip', {}).get('status', 'idle') if is_license_configured() else 'disabled',
                     "last_run": format_datetime_utc(jobs_status.get('update_geoip', {}).get('last_run')) if is_license_configured() else None,
                     "error": jobs_status.get('update_geoip', {}).get('error') if is_license_configured() else None
+                },
+                "mailbox_stats": {
+                    "interval": "5 minutes",
+                    "description": "Fetches mailbox statistics from Mailcow API",
+                    "status": jobs_status.get('mailbox_stats', {}).get('status', 'unknown'),
+                    "last_run": format_datetime_utc(jobs_status.get('mailbox_stats', {}).get('last_run')),
+                    "error": jobs_status.get('mailbox_stats', {}).get('error')
+                },
+                "alias_stats": {
+                    "interval": "5 minutes",
+                    "description": "Syncs alias data from Mailcow API",
+                    "status": jobs_status.get('alias_stats', {}).get('status', 'unknown'),
+                    "last_run": format_datetime_utc(jobs_status.get('alias_stats', {}).get('last_run')),
+                    "error": jobs_status.get('alias_stats', {}).get('error')
                 }
             },
             "smtp_configuration": {

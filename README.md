@@ -59,6 +59,31 @@ A modern, self-hosted dashboard for viewing and analyzing Mailcow mail server lo
 - Quarantined emails
 - Search and filter
 
+### 🌐 Domains Overview
+- Complete domains overview with DNS validation
+- SPF validation with DNS lookup counter and server IP authorization check
+- DKIM validation with Mailcow configuration comparison
+- DMARC policy checking and recommendations
+- Automated DNS checks every 6 hours
+- Domain info: mailboxes, aliases, storage, relay settings
+- Color-coded status indicators (✓ green, ⚠ amber, ✗ red)
+
+### 📊 Mailbox Statistics
+- Per-mailbox message statistics (sent, received, failed, failure rate)
+- Accordion-style mailbox list with expandable details
+- Per-alias statistics with message counts
+- Quota usage, login times, rate limits
+- Filtering by date range, domain, search, active only, hide zero activity
+- Sorting by sent, received, failure rate, quota, username
+
+### 📧 DMARC Reports
+- DMARC report viewing and analysis
+- GeoIP enrichment with MaxMind (City + ASN)
+- Daily aggregated reports with compliance rates
+- Manual upload (XML, GZ, ZIP formats)
+- IMAP auto-import with configurable sync interval
+- Sync history tracking with error notifications
+
 ### 📈 Status
 - All container states (running/stopped count)
 - Storage usage with percentage bar

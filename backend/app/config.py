@@ -162,6 +162,12 @@ class Settings(BaseSettings):
         description='Run IMAP sync once on application startup'
     )
 
+    dmarc_imap_batch_size: int = Field(
+        default=10,
+        env='DMARC_IMAP_BATCH_SIZE',
+        description='Number of emails to process per batch (prevents memory issues with large mailboxes)'
+    )
+
     dmarc_error_email: Optional[str] = Field(
         default=None,
         env='DMARC_ERROR_EMAIL',
@@ -188,9 +194,15 @@ class Settings(BaseSettings):
     )
 
     smtp_use_tls: bool = Field(
-        default=True,
+        default=False,
         env='SMTP_USE_TLS',
         description='Use STARTTLS for SMTP connection'
+    )
+
+    smtp_use_ssl: bool = Field(
+        default=False,
+        env='SMTP_USE_SSL',
+        description='Use Implicit SSL/TLS for SMTP connection (usually port 465)'
     )
 
     smtp_user: Optional[str] = Field(
@@ -209,6 +221,12 @@ class Settings(BaseSettings):
         default=None,
         env='SMTP_FROM',
         description='From address for emails (defaults to SMTP user if not set)'
+    )
+
+    smtp_relay_mode: bool = Field(
+        default=False,
+        env='SMTP_RELAY_MODE',
+        description='Relay mode - send emails without authentication (for local relay servers)'
     )
 
     # Global Admin Email
@@ -260,12 +278,21 @@ class Settings(BaseSettings):
     @property
     def notification_smtp_configured(self) -> bool:
         """Check if SMTP is properly configured for notifications"""
-        return (
-            self.smtp_enabled and 
-            self.smtp_host is not None and 
-            self.smtp_user is not None and 
-            self.smtp_password is not None
-        )
+        if self.smtp_relay_mode:
+            # Relay mode - only need host and from address
+            return (
+                self.smtp_enabled and 
+                self.smtp_host is not None and
+                self.smtp_from is not None
+            )
+        else:
+            # Standard mode - need authentication
+            return (
+                self.smtp_enabled and 
+                self.smtp_host is not None and 
+                self.smtp_user is not None and 
+                self.smtp_password is not None
+            )
 
     @property
     def database_url(self) -> str:

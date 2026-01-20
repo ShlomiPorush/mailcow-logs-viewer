@@ -20,6 +20,7 @@ from .routers import logs, stats
 from .routers import export as export_router
 from .routers import domains as domains_router
 from .routers import dmarc as dmarc_router
+from .routers import mailbox_stats as mailbox_stats_router
 from .routers import documentation
 from .migrations import run_migrations
 from .auth import BasicAuthMiddleware
@@ -172,6 +173,7 @@ app.include_router(messages_router.router, prefix="/api", tags=["Messages"])
 app.include_router(settings_router.router, prefix="/api", tags=["Settings"])
 app.include_router(domains_router.router, prefix="/api", tags=["Domains"])
 app.include_router(dmarc_router.router, prefix="/api", tags=["DMARC"])
+app.include_router(mailbox_stats_router.router, prefix="/api", tags=["Mailbox Stats"])
 app.include_router(documentation.router, prefix="/api", tags=["Documentation"])
 
 # Mount static files (frontend)
@@ -254,6 +256,23 @@ async def global_exception_handler(request: Request, exc: Exception):
             "detail": str(exc) if settings.debug else "An error occurred"
         }
     )
+
+
+# SPA catch-all route - must be AFTER all other routes and exception handlers
+# Returns index.html for all frontend routes (e.g., /dashboard, /messages, /dmarc)
+@app.get("/{full_path:path}", response_class=HTMLResponse)
+async def spa_catch_all(full_path: str):
+    """Serve the SPA for all frontend routes - enables clean URLs"""
+    # API and static routes are handled by their respective routers/mounts
+    # This catch-all only receives unmatched routes
+    try:
+        with open("/app/frontend/index.html", "r") as f:
+            return HTMLResponse(content=f.read())
+    except FileNotFoundError:
+        return HTMLResponse(
+            content="<h1>Mailcow Logs Viewer</h1><p>Frontend not found. Please check installation.</p>",
+            status_code=500
+        )
 
 
 if __name__ == "__main__":

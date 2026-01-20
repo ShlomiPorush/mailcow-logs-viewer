@@ -10,6 +10,8 @@ The DMARC Reports page provides detailed analysis of DMARC aggregate reports rec
 - Tells receiving servers what to do with emails that fail validation
 - Provides reports about email authentication results
 
+---
+
 ## Report Types
 
 ### Aggregate Reports (XML)
@@ -64,6 +66,8 @@ Click an IP address to see:
 - **Volume**: Number of messages from this source
 - **Reverse DNS**: Hostname associated with the IP
 
+---
+
 ## Understanding Report Data
 
 ### DMARC Alignment
@@ -80,6 +84,8 @@ What the receiving server did with the email:
 ### Policy vs. Disposition
 - **Policy**: What your DMARC record tells servers to do
 - **Disposition**: What servers actually did (they may override your policy)
+
+---
 
 ## Key Features
 
@@ -102,6 +108,8 @@ What the receiving server did with the email:
 - Pass rate percentage for SPF and DKIM
 - DMARC policy effectiveness
 - Recommendations for policy adjustments
+
+---
 
 ## Common Scenarios
 
@@ -138,6 +146,51 @@ What the receiving server did with the email:
 - Verify DKIM is configured on all sending systems
 - Look for email forwarding issues
 
+---
+
+## 🚀 Implementation: Enabling DMARC Reporting
+
+To leverage the monitoring capabilities, you must publish a DMARC record in your DNS. This triggers global receivers (Google, Microsoft, etc.) to generate and send aggregate reports (`rua`) to your system.
+
+### 1. DNS Configuration
+
+Create a **TXT** record at the `_dmarc` subdomain (e.g., `_dmarc.example.com`):
+
+```text
+v=DMARC1; p=none; rua=mailto:dmarc@example.net;
+
+```
+
+### 2. Parameter Details
+
+* **`p=none` (Monitoring Mode):** The recommended starting point. It ensures no mail is blocked while you collect data to verify that all legitimate sources are correctly authenticated.
+* **`rua=mailto:...`:** This is the feedback loop trigger. Ensure this address is the one configured in the **IMAP Settings** of Mailcow Logs Viewer.
+* **`v=DMARC1`:** Required version prefix.
+
+### 3. External Domain Reporting (Verification)
+
+If you want to receive DMARC reports to a different domain from the one the record is set on (e.g., reports for `example.com` sent to `dmarc@example.net`), you must authorize (`example.net`) to receiving DMARC reports. 
+
+Without this DNS record, major providers (like Google and Microsoft) will **not** send the reports to prevent spam.
+
+#### Option 1: Specific Domain Authorization (Recommended for security)
+Add a TXT record to the DNS of the **receiving domain** (`example.net`):
+
+| Host / Name | Value |
+| :--- | :--- |
+| `example.com._report._dmarc.example.net` | `v=DMARC1;` |
+
+#### Option 2: Wildcard Authorization (Recommended for multiple domains)
+If the receiving domain handles reports for many different domains, or if you prefer not to add a record for every single domain, you can use a wildcard record to authorize **all** domains at once:
+
+| Host / Name | Value |
+| :--- | :--- |
+| `*._report._dmarc.example.net` | `v=DMARC1;` |
+
+*Note: Not all DNS provider support wildcard records. use Cloudflare / Route53.*
+
+---
+
 ## Best Practices
 
 ### Policy Progression
@@ -162,6 +215,8 @@ When using email services (marketing, support desk, etc.):
 - Test before going live
 - Monitor their authentication success
 
+---
+
 ## Troubleshooting
 
 ### No Reports Appearing
@@ -184,6 +239,8 @@ When using email services (marketing, support desk, etc.):
 - Default: 90 days
 - Older reports are automatically deleted to save space
 - Export reports before they're deleted if long-term analysis is needed
+
+---
 
 ## Security Considerations
 

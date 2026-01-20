@@ -18,7 +18,7 @@ from sqlalchemy.exc import IntegrityError
 from .config import settings, set_cached_active_domains
 from .database import get_db_context, SessionLocal
 from .mailcow_api import mailcow_api
-from .models import PostfixLog, RspamdLog, NetfilterLog, MessageCorrelation, DMARCSync, DomainDNSCheck
+from .models import PostfixLog, RspamdLog, NetfilterLog, MessageCorrelation, DMARCSync, DomainDNSCheck, MailboxStatistics, AliasStatistics
 from .correlation import detect_direction, parse_postfix_message
 from .routers.domains import check_domain_dns, save_dns_check_to_db
 from .services.dmarc_imap_service import sync_dmarc_reports_from_imap
@@ -44,7 +44,9 @@ job_status = {
     'check_app_version': {'last_run': None, 'status': 'idle', 'error': None},
     'dns_check': {'last_run': None, 'status': 'idle', 'error': None},
     'update_geoip': {'last_run': None, 'status': 'idle', 'error': None},
-    'dmarc_imap_sync': {'last_run': None, 'status': 'idle', 'error': None}
+    'dmarc_imap_sync': {'last_run': None, 'status': 'idle', 'error': None},
+    'mailbox_stats': {'last_run': None, 'status': 'idle', 'error': None},
+    'alias_stats': {'last_run': None, 'status': 'idle', 'error': None}
 }
 
 def update_job_status(job_name: str, status: str, error: str = None):
@@ -1405,6 +1407,266 @@ async def sync_local_domains():
         return False
 
 # =============================================================================
+# MAILBOX STATISTICS
+# =============================================================================
+
+def safe_int(value, default=0):
+    """Safely convert a value to int, handling '- ', None, and other invalid values"""
+    if value is None:
+        return default
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str):
+        value = value.strip()
+        if value in ('', '-', '- '):
+            return default
+        try:
+            return int(value)
+        except (ValueError, TypeError):
+            return default
+    try:
+        return int(value)
+    except (ValueError, TypeError):
+        return default
+
+def safe_float(value, default=0.0):
+    """Safely convert a value to float, handling '- ', None, and other invalid values"""
+    if value is None:
+        return default
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        value = value.strip()
+        if value in ('', '-', '- '):
+            return default
+        try:
+            return float(value)
+        except (ValueError, TypeError):
+            return default
+    try:
+        return float(value)
+    except (ValueError, TypeError):
+        return default
+
+async def update_mailbox_statistics():
+    """
+    Fetch mailbox statistics from Mailcow API and update the database.
+    Runs every 5 minutes.
+    Also removes mailboxes that no longer exist in Mailcow.
+    """
+    update_job_status('mailbox_stats', 'running')
+    logger.info("Starting mailbox statistics update...")
+    
+    try:
+        # Fetch mailboxes from Mailcow API
+        mailboxes = await mailcow_api.get_mailboxes()
+        
+        if not mailboxes:
+            logger.warning("No mailboxes retrieved from Mailcow API")
+            update_job_status('mailbox_stats', 'success')
+            return
+        
+        # Get set of current mailbox usernames from API
+        api_mailbox_usernames = {mb.get('username') for mb in mailboxes if mb.get('username')}
+        
+        with get_db_context() as db:
+            updated = 0
+            created = 0
+            deleted = 0
+            
+            # First, mark mailboxes that no longer exist in Mailcow as inactive
+            db_mailboxes = db.query(MailboxStatistics).all()
+            for db_mb in db_mailboxes:
+                if db_mb.username not in api_mailbox_usernames:
+                    if db_mb.active:  # Only log and count if it was previously active
+                        logger.info(f"Marking deleted mailbox as inactive: {db_mb.username}")
+                        db_mb.active = False
+                        db_mb.updated_at = datetime.now(timezone.utc)
+                        deleted += 1
+            
+            for mb in mailboxes:
+                try:
+                    username = mb.get('username')
+                    if not username:
+                        continue
+                    
+                    # Extract domain from username
+                    domain = username.split('@')[-1] if '@' in username else ''
+                    
+                    # Check if mailbox exists
+                    existing = db.query(MailboxStatistics).filter(
+                        MailboxStatistics.username == username
+                    ).first()
+                    
+                    # Prepare data - safely convert values
+                    attributes = mb.get('attributes', {})
+                    rl_value_raw = mb.get('rl_value')
+                    rl_value = safe_int(rl_value_raw) if rl_value_raw not in (None, '', '-', '- ') else None
+                    rl_frame = mb.get('rl_frame')
+                    if rl_frame in ('', '-', '- '):
+                        rl_frame = None
+                    
+                    if existing:
+                        # Update existing record
+                        existing.domain = domain
+                        existing.name = mb.get('name', '') or ''
+                        existing.quota = safe_int(mb.get('quota'), 0)
+                        existing.quota_used = safe_int(mb.get('quota_used'), 0)
+                        existing.percent_in_use = safe_float(mb.get('percent_in_use'), 0.0)
+                        existing.messages = safe_int(mb.get('messages'), 0)
+                        existing.active = mb.get('active', 1) == 1
+                        existing.last_imap_login = safe_int(mb.get('last_imap_login'), 0) or None
+                        existing.last_pop3_login = safe_int(mb.get('last_pop3_login'), 0) or None
+                        existing.last_smtp_login = safe_int(mb.get('last_smtp_login'), 0) or None
+                        existing.spam_aliases = safe_int(mb.get('spam_aliases'), 0)
+                        existing.rl_value = rl_value
+                        existing.rl_frame = rl_frame
+                        existing.attributes = attributes
+                        existing.updated_at = datetime.now(timezone.utc)
+                        updated += 1
+                    else:
+                        # Create new record
+                        new_mailbox = MailboxStatistics(
+                            username=username,
+                            domain=domain,
+                            name=mb.get('name', '') or '',
+                            quota=safe_int(mb.get('quota'), 0),
+                            quota_used=safe_int(mb.get('quota_used'), 0),
+                            percent_in_use=safe_float(mb.get('percent_in_use'), 0.0),
+                            messages=safe_int(mb.get('messages'), 0),
+                            active=mb.get('active', 1) == 1,
+                            last_imap_login=safe_int(mb.get('last_imap_login'), 0) or None,
+                            last_pop3_login=safe_int(mb.get('last_pop3_login'), 0) or None,
+                            last_smtp_login=safe_int(mb.get('last_smtp_login'), 0) or None,
+                            spam_aliases=safe_int(mb.get('spam_aliases'), 0),
+                            rl_value=rl_value,
+                            rl_frame=rl_frame,
+                            attributes=attributes
+                        )
+                        db.add(new_mailbox)
+                        created += 1
+                
+                except Exception as e:
+                    logger.error(f"Error processing mailbox {mb.get('username', 'unknown')}: {e}")
+                    continue
+            
+            db.commit()
+            logger.info(f"✓ Mailbox statistics updated: {updated} updated, {created} created, {deleted} deactivated")
+            update_job_status('mailbox_stats', 'success')
+    
+    except Exception as e:
+        logger.error(f"✗ Failed to update mailbox statistics: {e}")
+        update_job_status('mailbox_stats', 'failed', str(e))
+
+
+# =============================================================================
+# ALIAS STATISTICS
+# =============================================================================
+
+async def update_alias_statistics():
+    """
+    Fetch aliases from Mailcow API and update the database.
+    Links aliases to their target mailboxes.
+    Runs every 5 minutes.
+    Also removes aliases that no longer exist in Mailcow.
+    """
+    update_job_status('alias_stats', 'running')
+    logger.info("Starting alias statistics update...")
+    
+    try:
+        # Fetch aliases from Mailcow API
+        aliases = await mailcow_api.get_aliases()
+        
+        if not aliases:
+            logger.warning("No aliases retrieved from Mailcow API")
+            update_job_status('alias_stats', 'success')
+            return
+        
+        # Get set of current alias addresses from API
+        api_alias_addresses = {alias.get('address') for alias in aliases if alias.get('address')}
+        
+        with get_db_context() as db:
+            updated = 0
+            created = 0
+            deleted = 0
+            
+            # First, mark aliases that no longer exist in Mailcow as inactive
+            db_aliases = db.query(AliasStatistics).all()
+            for db_alias in db_aliases:
+                if db_alias.alias_address not in api_alias_addresses:
+                    if db_alias.active:  # Only log and count if it was previously active
+                        logger.info(f"Marking deleted alias as inactive: {db_alias.alias_address}")
+                        db_alias.active = False
+                        db_alias.updated_at = datetime.now(timezone.utc)
+                        deleted += 1
+            
+            for alias in aliases:
+                try:
+                    alias_address = alias.get('address')
+                    if not alias_address:
+                        continue
+                    
+                    # Skip if this is a mailbox address (not an alias)
+                    if alias.get('is_catch_all') is None and not alias.get('goto'):
+                        continue
+                    
+                    # Extract domain from alias address
+                    domain = alias_address.split('@')[-1] if '@' in alias_address else ''
+                    
+                    # Get the target mailbox(es)
+                    goto = alias.get('goto', '')
+                    
+                    # Determine primary mailbox (first in goto list)
+                    primary_mailbox = None
+                    if goto:
+                        goto_list = [g.strip() for g in goto.split(',') if g.strip()]
+                        if goto_list:
+                            primary_mailbox = goto_list[0]
+                    
+                    # Check if alias exists
+                    existing = db.query(AliasStatistics).filter(
+                        AliasStatistics.alias_address == alias_address
+                    ).first()
+                    
+                    is_catch_all = alias.get('is_catch_all', 0) == 1
+                    is_active = alias.get('active', 1) == 1
+                    
+                    if existing:
+                        # Update existing record
+                        existing.goto = goto
+                        existing.domain = domain
+                        existing.active = is_active
+                        existing.is_catch_all = is_catch_all
+                        existing.primary_mailbox = primary_mailbox
+                        existing.updated_at = datetime.now(timezone.utc)
+                        updated += 1
+                    else:
+                        # Create new record
+                        new_alias = AliasStatistics(
+                            alias_address=alias_address,
+                            goto=goto,
+                            domain=domain,
+                            active=is_active,
+                            is_catch_all=is_catch_all,
+                            primary_mailbox=primary_mailbox
+                        )
+                        db.add(new_alias)
+                        created += 1
+                
+                except Exception as e:
+                    logger.error(f"Error processing alias {alias.get('address', 'unknown')}: {e}")
+                    continue
+            
+            db.commit()
+            logger.info(f"✓ Alias statistics updated: {updated} updated, {created} created, {deleted} deactivated")
+            update_job_status('alias_stats', 'success')
+    
+    except Exception as e:
+        logger.error(f"✗ Failed to update alias statistics: {e}")
+        update_job_status('alias_stats', 'failed', str(e))
+
+
+# =============================================================================
 # SCHEDULER SETUP
 # =============================================================================
 
@@ -1561,6 +1823,46 @@ def start_scheduler():
                 name='DMARC IMAP Sync (Startup)'
             )
             logger.info("Scheduled initial DMARC IMAP sync on startup")
+
+        # Job 13: Mailbox Statistics (every 5 minutes)
+        scheduler.add_job(
+            update_mailbox_statistics,
+            IntervalTrigger(minutes=5),
+            id='mailbox_stats',
+            name='Update Mailbox Statistics',
+            replace_existing=True,
+            max_instances=1
+        )
+        
+        # Run once on startup (after 45 seconds)
+        scheduler.add_job(
+            update_mailbox_statistics,
+            'date',
+            run_date=datetime.now(timezone.utc) + timedelta(seconds=45),
+            id='mailbox_stats_startup',
+            name='Mailbox Statistics (Startup)'
+        )
+        logger.info("Scheduled mailbox statistics job (interval: 5 minutes)")
+
+        # Job 14: Alias Statistics (every 5 minutes)
+        scheduler.add_job(
+            update_alias_statistics,
+            IntervalTrigger(minutes=5),
+            id='alias_stats',
+            name='Update Alias Statistics',
+            replace_existing=True,
+            max_instances=1
+        )
+        
+        # Run once on startup (after 50 seconds)
+        scheduler.add_job(
+            update_alias_statistics,
+            'date',
+            run_date=datetime.now(timezone.utc) + timedelta(seconds=50),
+            id='alias_stats_startup',
+            name='Alias Statistics (Startup)'
+        )
+        logger.info("Scheduled alias statistics job (interval: 5 minutes)")
 
         scheduler.start()
 

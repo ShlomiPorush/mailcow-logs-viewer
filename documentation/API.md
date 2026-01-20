@@ -14,18 +14,19 @@ This document describes all available API endpoints for the Mailcow Logs Viewer 
 2. [Health & Info](#health--info)
 3. [Job Status Tracking](#job-status-tracking)
 4. [Domains](#domains)
-5. [Messages (Unified View)](#messages-unified-view)
-6. [Logs](#logs)
+5. [Mailbox Statistics](#mailbox-statistics)
+6. [Messages (Unified View)](#messages-unified-view)
+7. [Logs](#logs)
    - [Postfix Logs](#postfix-logs)
    - [Rspamd Logs](#rspamd-logs)
    - [Netfilter Logs](#netfilter-logs)
-7. [Queue & Quarantine](#queue--quarantine)
-8. [Statistics](#statistics)
-9. [Status](#status)
-10. [Settings](#settings)
+8. [Queue & Quarantine](#queue--quarantine)
+9. [Statistics](#statistics)
+10. [Status](#status)
+11. [Settings](#settings)
     - [SMTP & IMAP Test](#smtp--imap-test)
-11. [Export](#export)
-12. [DMARC](#dmarc)
+12. [Export](#export)
+13. [DMARC](#dmarc)
     - [DMARC IMAP Auto-Import](#dmarc-imap-auto-import)
 
 ---
@@ -732,6 +733,200 @@ POST /api/domains/example.com/check-dns
     "p": "MIIBIjANBg..."
   }
 }
+```
+
+---
+
+## Mailbox Statistics
+
+### GET /api/mailbox-stats/summary
+
+Get summary statistics for all mailboxes.
+
+**Query Parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `date_range` | string | Date range: `today`, `7days`, `30days`, `90days` (default: `30days`) |
+
+**Response:**
+```json
+{
+  "total_mailboxes": 25,
+  "active_mailboxes": 23,
+  "inactive_mailboxes": 2,
+  "total_sent": 1234,
+  "total_received": 5678,
+  "sent_failed": 45,
+  "failure_rate": 3.6,
+  "date_range": "30days",
+  "start_date": "2026-01-16T00:00:00Z",
+  "end_date": "2026-02-16T00:00:00Z"
+}
+```
+
+---
+
+### GET /api/mailbox-stats/all
+
+Get all mailbox statistics with message counts and aliases (paginated).
+
+**Query Parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `domain` | string | Filter by domain name |
+| `active_only` | bool | Only show active mailboxes (default: `true`) |
+| `hide_zero` | bool | Hide mailboxes with zero activity (default: `false`) |
+| `search` | string | Search mailbox username, name, or alias address |
+| `date_range` | string | Date range: `today`, `7days`, `30days`, `90days` (default: `30days`) |
+| `sort_by` | string | Sort by: `sent_total`, `received_total`, `failure_rate`, `quota_used`, `username` |
+| `sort_order` | string | Sort order: `asc`, `desc` (default: `desc`) |
+| `page` | int | Page number (default: `1`) |
+| `page_size` | int | Items per page, 10-100 (default: `50`) |
+
+**Example Request:**
+```
+GET /api/mailbox-stats/all?date_range=30days&active_only=true&hide_zero=true&sort_by=sent_total&sort_order=desc&page=1
+```
+
+**Response:**
+```json
+{
+  "total": 25,
+  "page": 1,
+  "page_size": 50,
+  "total_pages": 1,
+  "date_range": "30days",
+  "start_date": "2026-01-16T00:00:00Z",
+  "end_date": "2026-02-16T00:00:00Z",
+  "mailboxes": [
+    {
+      "id": 1,
+      "username": "user@example.com",
+      "domain": "example.com",
+      "name": "John Doe",
+      "active": true,
+      "quota": 1073741824,
+      "quota_formatted": "1.0 GB",
+      "quota_used": 536870912,
+      "quota_used_formatted": "512 MB",
+      "percent_in_use": 50.0,
+      "messages_in_mailbox": 1234,
+      "last_imap_login": "2026-01-15T10:30:00Z",
+      "last_pop3_login": null,
+      "last_smtp_login": "2026-01-16T08:45:00Z",
+      "rl_value": 100,
+      "rl_frame": "m",
+      "attributes": {
+        "imap_access": "1",
+        "pop3_access": "0",
+        "smtp_access": "1",
+        "sieve_access": "1",
+        "sogo_access": "1",
+        "tls_enforce_in": "0",
+        "tls_enforce_out": "0"
+      },
+      "mailbox_counts": {
+        "sent_total": 150,
+        "sent_delivered": 145,
+        "sent_bounced": 3,
+        "sent_deferred": 2,
+        "sent_rejected": 0,
+        "sent_failed": 5,
+        "received_total": 320,
+        "failure_rate": 3.3
+      },
+      "aliases": [
+        {
+          "alias_address": "info@example.com",
+          "active": true,
+          "is_catch_all": false,
+          "sent_total": 50,
+          "sent_delivered": 48,
+          "sent_bounced": 2,
+          "sent_deferred": 0,
+          "sent_rejected": 0,
+          "sent_failed": 2,
+          "received_total": 100,
+          "failure_rate": 4.0
+        }
+      ],
+      "alias_count": 1,
+      "combined_sent": 200,
+      "combined_received": 420,
+      "combined_total": 620,
+      "combined_failed": 7,
+      "combined_failure_rate": 3.5,
+      "created": "2025-01-01T00:00:00Z",
+      "modified": "2026-01-15T12:00:00Z"
+    }
+  ]
+}
+```
+
+**Response Fields:**
+
+| Field | Description |
+|-------|-------------|
+| `username` | Email address of the mailbox |
+| `name` | Display name |
+| `active` | Whether mailbox is active in Mailcow |
+| `quota` / `quota_used` | Quota in bytes |
+| `percent_in_use` | Quota usage percentage |
+| `messages_in_mailbox` | Number of messages stored |
+| `last_*_login` | Last login timestamps (null if never) |
+| `rl_value` / `rl_frame` | Rate limiting (e.g., 100/m = 100 per minute) |
+| `attributes` | Access permissions from Mailcow |
+| `mailbox_counts` | Message statistics for mailbox only |
+| `aliases` | Array of alias statistics |
+| `combined_*` | Combined totals (mailbox + all aliases) |
+| `created` / `modified` | Mailbox creation and last update timestamps |
+
+---
+
+### GET /api/mailbox-stats/domains
+
+Get list of domains with mailbox counts for filter dropdown.
+
+**Response:**
+```json
+{
+  "domains": [
+    {
+      "domain": "example.com",
+      "mailbox_count": 15
+    },
+    {
+      "domain": "company.org",
+      "mailbox_count": 10
+    }
+  ]
+}
+```
+
+### Caching
+
+The Mailbox Statistics API uses in-memory caching to improve performance:
+
+| Setting | Value |
+|---------|-------|
+| **Cache TTL** | 5 minutes (300 seconds) |
+| **Cache Scope** | Per unique query parameter combination |
+| **Cached Parameters** | domain, active_only, hide_zero, search, date_range, start_date, end_date, sort_by, sort_order, page, page_size |
+
+**Cache Behavior:**
+- First request with specific parameters fetches from database and caches result
+- Subsequent requests with identical parameters return cached data
+- Cache automatically expires after 5 minutes
+- Changing any parameter results in a cache miss (new database query)
+
+**Cache Management:**
+```python
+from app.routers.mailbox_stats import clear_stats_cache
+
+# Clear all stats cache (e.g., after data import)
+clear_stats_cache()
 ```
 
 ---
@@ -2502,6 +2697,165 @@ Get history of IMAP sync operations.
 - Failed email details include message ID, subject, and error reason
 - Useful for debugging sync issues and monitoring system health
 - History persists across application restarts
+
+---
+
+## TLS-RPT (TLS Reporting)
+
+### Overview
+
+TLS-RPT (TLS Reporting) provides visibility into TLS connection failures when other mail servers attempt to deliver emails to your domain. This helps identify MTA-STS policy issues and certificate problems.
+
+---
+
+### GET /api/dmarc/domains/{domain}/tls-reports
+
+Get TLS reports for a specific domain (individual reports).
+
+**Path Parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `domain` | string | Domain name |
+
+**Query Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `days` | integer | 30 | Number of days to look back |
+
+**Response:**
+```json
+{
+  "domain": "example.com",
+  "total": 15,
+  "data": [
+    {
+      "id": 1,
+      "report_id": "2026-01-14T00:00:00Z!example.com!google.com",
+      "organization_name": "Google Inc.",
+      "start_datetime": "2026-01-14T00:00:00Z",
+      "end_datetime": "2026-01-15T00:00:00Z",
+      "total_success": 1250,
+      "total_fail": 5,
+      "success_rate": 99.6
+    }
+  ]
+}
+```
+
+---
+
+### GET /api/dmarc/domains/{domain}/tls-reports/daily
+
+Get TLS reports aggregated by date (daily view).
+
+**Path Parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `domain` | string | Domain name |
+
+**Query Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `days` | integer | 30 | Number of days to look back |
+| `page` | integer | 1 | Page number |
+| `page_size` | integer | 20 | Items per page |
+
+**Response:**
+```json
+{
+  "domain": "example.com",
+  "totals": {
+    "total_days": 14,
+    "total_reports": 28,
+    "total_successful_sessions": 15000,
+    "total_failed_sessions": 25,
+    "overall_success_rate": 99.83
+  },
+  "data": [
+    {
+      "date": "2026-01-17",
+      "report_count": 3,
+      "organization_count": 2,
+      "organizations": ["Google Inc.", "Microsoft Corporation"],
+      "total_success": 1500,
+      "total_fail": 2,
+      "success_rate": 99.87
+    }
+  ]
+}
+```
+
+---
+
+### GET /api/dmarc/domains/{domain}/tls-reports/{report_date}/details
+
+Get detailed TLS reports for a specific date.
+
+**Path Parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `domain` | string | Domain name |
+| `report_date` | string | Date in YYYY-MM-DD format |
+
+**Response:**
+```json
+{
+  "domain": "example.com",
+  "date": "2026-01-17",
+  "stats": {
+    "total_reports": 3,
+    "total_providers": 2,
+    "total_success": 1500,
+    "total_fail": 2,
+    "total_sessions": 1502,
+    "success_rate": 99.87
+  },
+  "providers": [
+    {
+      "report_id": "2026-01-17T00:00:00Z!example.com!google.com",
+      "organization_name": "Google Inc.",
+      "contact_info": "smtp-tls-reporting@google.com",
+      "start_datetime": "2026-01-17T00:00:00Z",
+      "end_datetime": "2026-01-18T00:00:00Z",
+      "successful_sessions": 1200,
+      "failed_sessions": 1,
+      "total_sessions": 1201,
+      "success_rate": 99.92,
+      "policies": [
+        {
+          "policy_type": "sts",
+          "policy_domain": "example.com",
+          "mx_host": "mail.example.com",
+          "successful_sessions": 1200,
+          "failed_sessions": 1,
+          "total_sessions": 1201,
+          "success_rate": 99.92,
+          "failure_details": null
+        }
+      ]
+    }
+  ]
+}
+```
+
+---
+
+### POST /api/dmarc/upload (TLS-RPT Support)
+
+The existing DMARC upload endpoint also accepts TLS-RPT reports.
+
+**Supported TLS-RPT Formats:**
+- `.json.gz` - Gzip-compressed JSON (standard format)
+- `.json` - Plain JSON
+
+**Detection:**
+- File is identified as TLS-RPT if JSON contains `"policies"` array
+- TLS-RPT reports use RFC 8460 JSON format
 
 ---
 
