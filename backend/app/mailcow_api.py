@@ -1,6 +1,6 @@
 """
 Mailcow API client for fetching logs
-Handles authentication and API calls to Mailcow instance
+Handles authentication and API calls to mailcow instance
 """
 import httpx
 import logging
@@ -14,12 +14,12 @@ logger = logging.getLogger(__name__)
 
 
 class MailcowAPIError(Exception):
-    """Custom exception for Mailcow API errors"""
+    """Custom exception for mailcow API errors"""
     pass
 
 
 class MailcowAPI:
-    """Client for interacting with Mailcow API"""
+    """Client for interacting with mailcow API"""
     
     def __init__(self):
         self.base_url = settings.mailcow_url
@@ -32,7 +32,7 @@ class MailcowAPI:
             "Content-Type": "application/json"
         }
         
-        logger.info(f"Mailcow API client initialized for {self.base_url}")
+        logger.info(f"mailcow API client initialized for {self.base_url}")
     
     @retry(
         stop=stop_after_attempt(3),
@@ -40,7 +40,7 @@ class MailcowAPI:
     )
     async def _make_request(self, endpoint: str, method: str = "GET", **kwargs) -> Any:
         """
-        Make HTTP request to Mailcow API with retry logic
+        Make HTTP request to mailcow API with retry logic
         
         Args:
             endpoint: API endpoint (without base URL)
@@ -71,14 +71,14 @@ class MailcowAPI:
                 raise MailcowAPIError(f"API returned status {e.response.status_code}")
             except httpx.RequestError as e:
                 logger.error(f"Request error for {url}: {e}")
-                raise MailcowAPIError(f"Failed to connect to Mailcow API: {e}")
+                raise MailcowAPIError(f"Failed to connect to mailcow API: {e}")
             except Exception as e:
                 logger.error(f"Unexpected error for {url}: {e}")
                 raise MailcowAPIError(f"Unexpected error: {e}")
     
     async def get_postfix_logs(self, count: int = 500) -> List[Dict[str, Any]]:
         """
-        Fetch Postfix logs from Mailcow
+        Fetch Postfix logs from mailcow
         
         Args:
             count: Number of logs to fetch
@@ -103,7 +103,7 @@ class MailcowAPI:
     
     async def get_rspamd_logs(self, count: int = 500) -> List[Dict[str, Any]]:
         """
-        Fetch Rspamd history from Mailcow
+        Fetch Rspamd history from mailcow
         
         Args:
             count: Number of logs to fetch
@@ -128,7 +128,7 @@ class MailcowAPI:
     
     async def get_netfilter_logs(self, count: int = 500) -> List[Dict[str, Any]]:
         """
-        Fetch Netfilter logs from Mailcow
+        Fetch Netfilter logs from mailcow
         
         Args:
             count: Number of logs to fetch
@@ -153,7 +153,7 @@ class MailcowAPI:
     
     async def get_queue(self) -> List[Dict[str, Any]]:
         """
-        Fetch current mail queue from Mailcow (real-time)
+        Fetch current mail queue from mailcow (real-time)
         
         Returns:
             List of queued messages
@@ -175,7 +175,7 @@ class MailcowAPI:
     
     async def get_quarantine(self) -> List[Dict[str, Any]]:
         """
-        Fetch quarantined messages from Mailcow (real-time)
+        Fetch quarantined messages from mailcow (real-time)
         
         Returns:
             List of quarantined messages
@@ -197,9 +197,9 @@ class MailcowAPI:
 
     async def get_status_containers(self) -> List[Dict[str, Any]]:
         """
-        Fetch container status from Mailcow
+        Fetch container status from mailcow
         
-        Mailcow API returns: [{"container1": {...}, "container2": {...}}]
+        mailcow API returns: [{"container1": {...}, "container2": {...}}]
         
         Returns:
             List of container status information
@@ -208,7 +208,7 @@ class MailcowAPI:
         try:
             data = await self._make_request("/api/v1/get/status/containers")
             
-            # Mailcow returns: [{ "watchdog-mailcow": {...}, "acme-mailcow": {...}, ... }]
+            # mailcow returns: [{ "watchdog-mailcow": {...}, "acme-mailcow": {...}, ... }]
             if isinstance(data, list) and len(data) > 0 and isinstance(data[0], dict):
                 # Extract the first dict from the list
                 containers_dict = data[0]
@@ -228,9 +228,9 @@ class MailcowAPI:
 
     async def get_status_vmail(self) -> Dict[str, Any]:
         """
-        Fetch vmail disk usage from Mailcow
+        Fetch vmail disk usage from mailcow
         
-        Mailcow API returns: [{"type": "info", "disk": "/dev/sdb1", ...}]
+        mailcow API returns: [{"type": "info", "disk": "/dev/sdb1", ...}]
         
         Returns:
             Dictionary with disk usage information
@@ -239,7 +239,7 @@ class MailcowAPI:
         try:
             data = await self._make_request("/api/v1/get/status/vmail")
             
-            # Mailcow returns: [{"type": "info", "disk": "/dev/sdb1", "used": "14G", ...}]
+            # mailcow returns: [{"type": "info", "disk": "/dev/sdb1", "used": "14G", ...}]
             if isinstance(data, list) and len(data) > 0:
                 logger.info("Retrieved vmail status")
                 return data[0]  # Return first element
@@ -256,12 +256,12 @@ class MailcowAPI:
     
     async def get_status_version(self) -> str:
         """
-        Fetch Mailcow version
+        Fetch mailcow version
         
         Returns:
             Version string
         """
-        logger.info("Fetching Mailcow version")
+        logger.info("Fetching mailcow version")
         try:
             data = await self._make_request("/api/v1/get/status/version")
             
@@ -277,7 +277,7 @@ class MailcowAPI:
     
     async def get_domains(self) -> List[Dict[str, Any]]:
         """
-        Fetch all domains from Mailcow
+        Fetch all domains from mailcow
         
         Returns:
             List of domains
@@ -299,7 +299,7 @@ class MailcowAPI:
     
     async def get_active_domains(self) -> List[str]:
         """
-        Fetch active domains from Mailcow and return domain names only
+        Fetch active domains from mailcow and return domain names only
         
         Returns:
             List of active domain names (where active=1)
@@ -324,7 +324,7 @@ class MailcowAPI:
     
     async def get_mailboxes(self) -> List[Dict[str, Any]]:
         """
-        Fetch all mailboxes from Mailcow
+        Fetch all mailboxes from mailcow
         
         Returns:
             List of mailboxes
@@ -346,7 +346,7 @@ class MailcowAPI:
     
     async def get_aliases(self) -> List[Dict[str, Any]]:
         """
-        Fetch all aliases from Mailcow
+        Fetch all aliases from mailcow
         
         Returns:
             List of aliases
@@ -368,19 +368,19 @@ class MailcowAPI:
     
     async def test_connection(self) -> bool:
         """
-        Test connection to Mailcow API
+        Test connection to mailcow API
         
         Returns:
             True if connection successful, False otherwise
         """
-        logger.info("Testing Mailcow API connection")
+        logger.info("Testing mailcow API connection")
         try:
             # Try to fetch a small number of logs to test
             await self._make_request("/api/v1/get/logs/postfix/1")
-            logger.info("Mailcow API connection test: SUCCESS")
+            logger.info("mailcow API connection test: SUCCESS")
             return True
         except MailcowAPIError as e:
-            logger.error(f"Mailcow API connection test: FAILED - {e}")
+            logger.error(f"mailcow API connection test: FAILED - {e}")
             return False
 
 

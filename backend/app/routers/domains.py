@@ -27,7 +27,7 @@ _server_ip_cache = None
 
 async def init_server_ip():
     """
-    Initialize and cache server IP address from Mailcow API
+    Initialize and cache server IP address from mailcow API
     Called once during application startup
     """
     global _server_ip_cache
@@ -47,7 +47,7 @@ async def init_server_ip():
             response.raise_for_status()
             data = response.json()
             
-            logger.debug(f"Mailcow IP API response: {data}")
+            logger.debug(f"mailcow IP API response: {data}")
             
             if isinstance(data, list) and len(data) > 0:
                 _server_ip_cache = data[0].get('ipv4')
@@ -66,7 +66,7 @@ async def init_server_ip():
             else:
                 logger.warning(f"Unexpected API response format. Type: {type(data)}, Data: {data}")
         
-        logger.warning("Could not fetch server IP from Mailcow - no valid IP in response")
+        logger.warning("Could not fetch server IP from mailcow - no valid IP in response")
         return None
         
     except httpx.HTTPStatusError as e:
@@ -139,7 +139,7 @@ async def check_spf_record(domain: str) -> Dict[str, Any]:
         parts = spf_record.split()
         mechanisms = parts[1:] if len(parts) > 1 else []
         
-        valid_prefixes = ['ip4:', 'ip6:', 'a', 'mx', 'include:', 'exists:', 'all']
+        valid_prefixes = ['ip4:', 'ip6:', 'a', 'mx', 'include:', 'exists:', 'redirect', 'all']
         invalid_mechanisms = []
         
         for mechanism in mechanisms:
@@ -164,7 +164,9 @@ async def check_spf_record(domain: str) -> Dict[str, Any]:
         has_neutral = '?all' in spf_lower
         has_pass_all = '+all' in spf_lower or ' all' in spf_lower
         
-        if not (has_strict_all or has_soft_fail or has_neutral or has_pass_all):
+        has_redirect = any(m.startswith('redirect=') for m in mechanisms)
+        
+        if not (has_strict_all or has_soft_fail or has_neutral or has_pass_all or has_redirect):
             return {
                 'status': 'error',
                 'message': 'SPF record missing "all" mechanism',
@@ -219,6 +221,17 @@ async def check_spf_record(domain: str) -> Dict[str, Any]:
             status = 'warning'
             message = 'SPF uses ?all (neutral). Consider using -all for stricter policy'
             warnings = ['Using ?all provides minimal protection']
+        elif has_redirect:
+            redirect_domain = next((m.split('=', 1)[1] for m in mechanisms if m.startswith('redirect=')), 'unknown')
+            
+            if server_authorized:
+                status = 'success'
+                message = f'SPF redirects to {redirect_domain} (Server authorized via {authorization_method})'
+                warnings = []
+            else:
+                status = 'warning'
+                message = f'SPF redirects to {redirect_domain}'
+                warnings = [f'Server IP {server_ip} not authorized by redirected SPF'] if server_ip else []
         else:
             status = 'success'
             message = 'SPF record found'
@@ -341,6 +354,26 @@ async def check_ip_in_spf(domain: str, ip_to_check: str, spf_record: str, resolv
                         )
                         if authorized:
                             return True, f'include:{include_domain} ({method})'
+            except:
+                pass
+        
+        elif clean_part.startswith('redirect='):
+            redirect_domain = clean_part.replace('redirect=', '')
+            try:
+                redirect_answers = await resolver.resolve(redirect_domain, 'TXT')
+                for rdata in redirect_answers:
+                    redirect_spf = b''.join(rdata.strings).decode('utf-8')
+                    if redirect_spf.startswith('v=spf1'):
+                        authorized, method = await check_ip_in_spf(
+                            redirect_domain, 
+                            ip_to_check, 
+                            redirect_spf, 
+                            resolver, 
+                            visited_domains.copy(),
+                            depth + 1
+                        )
+                        if authorized:
+                            return True, f'redirect:{redirect_domain} ({method})'
             except:
                 pass
     
@@ -476,7 +509,9 @@ def normalize_dkim_record(record: str) -> Dict[str, str]:
     """Parse DKIM record into normalized parameter dictionary"""
     params = {}
     for part in record.split(';'):
-        part = part.strip().replace(' ', '').replace('\n', '').replace('\r', '').replace('\t', '')
+        part = part.strip()
+        if not part:
+            continue
         if '=' in part:
             key, value = part.split('=', 1)
             params[key.strip()] = value.strip()
@@ -494,7 +529,7 @@ async def check_dkim_record(domain: str) -> Dict[str, Any]:
         Dictionary with DKIM check results
     """
     try:
-        # Get DKIM configuration from Mailcow using httpx directly
+        # Get DKIM configuration from mailcow using httpx directly
         import httpx
         from app.config import settings
         
@@ -507,10 +542,10 @@ async def check_dkim_record(domain: str) -> Dict[str, Any]:
                 response.raise_for_status()
                 dkim_data = response.json()
             except httpx.HTTPStatusError as e:
-                logger.error(f"HTTP error fetching DKIM from Mailcow for {domain}: {e.response.status_code}")
+                logger.error(f"HTTP error fetching DKIM from mailcow for {domain}: {e.response.status_code}")
                 return {
                     'status': 'error',
-                    'message': f'Mailcow API error: HTTP {e.response.status_code}',
+                    'message': f'mailcow API error: HTTP {e.response.status_code}',
                     'selector': None,
                     'expected_record': None,
                     'actual_record': None,
@@ -520,10 +555,10 @@ async def check_dkim_record(domain: str) -> Dict[str, Any]:
                     'parameters': {}
                 }
             except httpx.RequestError as e:
-                logger.error(f"Request error fetching DKIM from Mailcow for {domain}: {e}")
+                logger.error(f"Request error fetching DKIM from mailcow for {domain}: {e}")
                 return {
                     'status': 'error',
-                    'message': 'Failed to connect to Mailcow API',
+                    'message': 'Failed to connect to mailcow API',
                     'selector': None,
                     'expected_record': None,
                     'actual_record': None,
@@ -540,10 +575,10 @@ async def check_dkim_record(domain: str) -> Dict[str, Any]:
         elif isinstance(dkim_data, list):
             # API returned list
             if len(dkim_data) == 0:
-                logger.warning(f"DKIM not configured in Mailcow for {domain}")
+                logger.warning(f"DKIM not configured in mailcow for {domain}")
                 return {
                     'status': 'error',
-                    'message': 'DKIM not configured in Mailcow',
+                    'message': 'DKIM not configured in mailcow',
                     'selector': None,
                     'expected_record': None,
                     'actual_record': None,
@@ -588,10 +623,10 @@ async def check_dkim_record(domain: str) -> Dict[str, Any]:
         expected_value = dkim_config.get('dkim_txt', '')
         
         if not expected_value:
-            logger.warning(f"DKIM record is empty in Mailcow for {domain}")
+            logger.warning(f"DKIM record is empty in mailcow for {domain}")
             return {
                 'status': 'error',
-                'message': 'DKIM record is empty in Mailcow configuration',
+                'message': 'DKIM record is empty in mailcow configuration',
                 'selector': selector,
                 'expected_record': None,
                 'actual_record': None,

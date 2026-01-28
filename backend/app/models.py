@@ -297,7 +297,7 @@ class DMARCSync(Base):
 
 class MailboxStatistics(Base):
     """
-    Mailbox statistics fetched from Mailcow API
+    Mailbox statistics fetched from mailcow API
     Tracks quota usage, message counts, and last access times for each mailbox
     """
     __tablename__ = "mailbox_statistics"
@@ -463,3 +463,62 @@ class SystemSetting(Base):
     
     def __repr__(self):
         return f"<SystemSetting(key={self.key}, updated={self.updated_at})>"
+
+
+class BlacklistCheck(Base):
+    """
+    IP Blacklist check results stored in database
+    Results are cached for 24 hours to avoid excessive DNS queries
+    """
+    __tablename__ = "blacklist_checks"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    server_ip = Column(String(50), index=True, nullable=False)
+    
+    # Summary counts
+    total_blacklists = Column(Integer, default=0)
+    listed_count = Column(Integer, default=0)
+    clean_count = Column(Integer, default=0)
+    error_count = Column(Integer, default=0)
+    timeout_count = Column(Integer, default=0)
+    
+    # Overall status: 'clean', 'listed', 'error'
+    status = Column(String(20), index=True)
+    
+    # Full results as JSONB
+    results = Column(JSONB)
+    
+    # Timestamps
+    checked_at = Column(DateTime, nullable=False, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    
+    __table_args__ = (
+        Index('idx_blacklist_check_ip_time', 'server_ip', 'checked_at'),
+    )
+    
+    def __repr__(self):
+        return f"<BlacklistCheck(ip={self.server_ip}, status={self.status}, listed={self.listed_count})>"
+
+
+class MonitoredHost(Base):
+    """
+    Hosts to be monitored for blacklisting
+    Includes the local server and any external transport/relay hosts
+    """
+    __tablename__ = "monitored_hosts"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    hostname = Column(String(255), unique=True, index=True, nullable=False)
+    source = Column(String(50))  # 'system', 'transport', 'relayhost'
+    active = Column(Boolean, default=True, index=True)
+    last_seen = Column(DateTime)
+    
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    __table_args__ = (
+        Index('idx_monitored_host_active', 'active'),
+    )
+    
+    def __repr__(self):
+        return f"<MonitoredHost(hostname={self.hostname}, source={self.source})>"

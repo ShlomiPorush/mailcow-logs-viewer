@@ -59,9 +59,9 @@ def test_smtp_connection() -> Dict:
         msg = MIMEMultipart()
         msg['From'] = settings.smtp_from or settings.smtp_user
         msg['To'] = settings.admin_email or settings.smtp_user
-        msg['Subject'] = 'SMTP Test - Mailcow Logs Viewer'
+        msg['Subject'] = 'SMTP Test - mailcow Logs Viewer'
         
-        body = "This is a test email from Mailcow Logs Viewer.\n\nIf you received this, SMTP is working correctly."
+        body = "This is a test email from mailcow Logs Viewer.\n\nIf you received this, SMTP is working correctly."
         msg.attach(MIMEText(body, 'plain'))
         
         server.send_message(msg)

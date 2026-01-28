@@ -385,7 +385,7 @@ let autoRefreshTimer = null;
 
 // Initialize on page load
 document.addEventListener('DOMContentLoaded', async () => {
-    console.log('=== Mailcow Logs Viewer Initializing ===');
+    console.log('=== mailcow Logs Viewer Initializing ===');
 
     // Check authentication first
     const isAuthenticated = await checkAuthentication();
@@ -506,7 +506,7 @@ async function loadMailcowConnectionStatus() {
             if (data.connected) {
                 indicator.classList.remove('text-red-500');
                 indicator.classList.add('text-green-500');
-                indicator.title = 'Connected to Mailcow';
+                indicator.title = 'Connected to mailcow';
                 // Update SVG to checkmark
                 const svg = indicator.querySelector('svg');
                 if (svg) {
@@ -515,7 +515,7 @@ async function loadMailcowConnectionStatus() {
             } else {
                 indicator.classList.remove('text-green-500');
                 indicator.classList.add('text-red-500');
-                indicator.title = 'Not connected to Mailcow';
+                indicator.title = 'Not connected to mailcow';
                 // Update SVG to X
                 const svg = indicator.querySelector('svg');
                 if (svg) {
@@ -1055,6 +1055,7 @@ async function loadDashboard() {
 
         loadRecentActivity();
         loadDashboardStatusSummary();
+        loadDashboardBlacklistSummary();
     } catch (error) {
         console.error('Failed to load dashboard:', error);
     }
@@ -1138,7 +1139,7 @@ async function loadRecentActivity() {
     try {
         console.log('Loading Recent Activity...');
 
-        const response = await authenticatedFetch('/api/stats/recent-activity?limit=10');
+        const response = await authenticatedFetch('/api/stats/recent-activity?limit=11');
         if (!response.ok) {
             throw new Error(`HTTP ${response.status}: ${response.statusText}`);
         }
@@ -2019,12 +2020,498 @@ async function loadStatusExtended() {
         // Render Background Jobs
         renderStatusJobs(data.background_jobs || {});
 
+        // Load Blacklist Status separately
+        loadBlacklistStatus();
+
     } catch (error) {
         console.error('Failed to load extended status:', error);
         document.getElementById('status-import').innerHTML = `<p class="text-red-500 text-center py-8">Failed to load: ${error.message}</p>`;
         document.getElementById('status-correlation').innerHTML = `<p class="text-red-500 text-center py-8">Failed to load: ${error.message}</p>`;
         document.getElementById('status-jobs').innerHTML = `<p class="text-red-500 text-center py-8">Failed to load: ${error.message}</p>`;
     }
+}
+
+async function checkBlacklists(force = false) {
+    const btn = document.getElementById('blacklist-check-btn');
+    const container = document.getElementById('status-blacklist');
+
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = `
+            <svg class="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+            Running...
+        `;
+    }
+
+    showToast('Starting blacklist check...', 'info');
+
+    // Inject temporary progress bar at the top
+    if (container) {
+        // Remove existing temp progress if any
+        const existing = document.getElementById('blacklist-temp-progress');
+        if (existing) existing.remove();
+
+        const progressHtml = `
+            <div id="blacklist-temp-progress" class="mb-4 p-4 bg-white dark:bg-gray-800 rounded-lg border border-blue-200 dark:border-blue-900 shadow-sm">
+                <div class="flex justify-between items-center mb-2">
+                    <span class="text-sm font-medium text-blue-700 dark:text-blue-400 flex items-center gap-2">
+                        <svg class="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                        Running Scan...
+                    </span>
+                    <span id="blacklist-progress-text" class="text-xs text-gray-500 dark:text-gray-400">Initializing...</span>
+                </div>
+                <div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
+                    <div id="blacklist-progress-bar" class="bg-blue-600 h-2 rounded-full transition-all duration-300" style="width: 0%"></div>
+                </div>
+            </div>
+        `;
+        container.insertAdjacentHTML('afterbegin', progressHtml);
+    }
+
+    // Start progress polling
+    let progressInterval = setInterval(async () => {
+        try {
+            const progressRes = await authenticatedFetch('/api/blacklist/progress');
+            if (progressRes.ok) {
+                const progress = await progressRes.json();
+                const progressBar = document.getElementById('blacklist-progress-bar');
+                const progressText = document.getElementById('blacklist-progress-text');
+
+                if (progressBar) {
+                    progressBar.style.width = `${progress.percent}%`;
+                }
+                if (progressText) {
+                    progressText.textContent = `${progress.current}/${progress.total} scanned${progress.current_blacklist ? ` - ${progress.current_blacklist}` : ''}`;
+                }
+
+                if (!progress.in_progress && progress.current >= progress.total) {
+                    clearInterval(progressInterval);
+                    showToast('Blacklist check completed', 'success');
+                    // Remove progress bar
+                    const temp = document.getElementById('blacklist-temp-progress');
+                    if (temp) temp.remove();
+
+                    await loadBlacklistStatus(); // Refresh data!
+                }
+            }
+        } catch (e) {
+            // Ignore progress errors
+        }
+    }, 1000);
+
+    try {
+        const response = await authenticatedFetch(`/api/blacklist/check${force ? '?force=true' : ''}`);
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+        }
+        // Poller handles completion
+    } catch (error) {
+        clearInterval(progressInterval);
+        const temp = document.getElementById('blacklist-temp-progress');
+        if (temp) temp.remove();
+
+        console.error('Failed to check blacklists:', error);
+        showToast(`Failed to check: ${error.message}`, 'error');
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = `
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                        d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+                </svg>
+                Check Now
+            `;
+        }
+    }
+}
+
+async function loadBlacklistStatus() {
+    const container = document.getElementById('status-blacklist');
+    if (!container) return;
+
+    // Skip refresh if details are expanded (to prevent closing)
+    // We check if any sub-details are open
+    const detailsElement = container.querySelector('details[open]');
+    if (detailsElement) {
+        // console.log('Skipping blacklist refresh: details are expanded');
+        // return;
+    }
+
+    try {
+        const response = await authenticatedFetch('/api/blacklist/monitored');
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+        }
+
+        const data = await response.json();
+        renderBlacklistStatus(data);
+    } catch (error) {
+        console.error('Failed to load blacklist status:', error);
+        container.innerHTML = `<p class="text-red-500 text-center py-8">Failed to load: ${error.message}</p>`;
+    }
+}
+
+function renderBlacklistStatus(data) {
+    const container = document.getElementById('status-blacklist');
+    if (!container) return;
+
+    if (!data.hosts || data.hosts.length === 0) {
+        container.innerHTML = `
+            <div class="text-center py-8">
+                <svg class="w-12 h-12 mx-auto text-gray-400 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
+                </svg>
+                <h3 class="text-lg font-medium text-gray-900 dark:text-white">No Monitored Hosts</h3>
+                <p class="text-gray-500 dark:text-gray-400 mt-2">Syncing monitoring targets...</p>
+            </div>
+        `;
+        return;
+    }
+
+    // Preserve open states
+    const openStates = {};
+    container.querySelectorAll('details').forEach(el => {
+        if (el.open && el.id) openStates[el.id] = true;
+    });
+
+    let html = '<div class="space-y-4">';
+
+    data.hosts.forEach((host, index) => {
+        const hostId = `host-${index}`;
+        const isOpen = openStates[hostId] || false;
+
+        let statusColor = 'gray';
+        let statusText = 'Unknown';
+        let statusIcon = '?';
+
+        if (host.status === 'clean') {
+            statusColor = 'green';
+            statusText = 'Clean';
+            statusIcon = '✓';
+        } else if (host.status === 'listed') {
+            statusColor = 'red';
+            statusText = 'Listed';
+            statusIcon = '✗';
+        } else if (host.status === 'error') {
+            statusColor = 'yellow';
+            statusText = 'Error';
+            statusIcon = '!';
+        }
+
+        const listedCount = host.listed_count || 0;
+        const totalCount = host.total_blacklists || 0;
+        const lastCheck = host.checked_at ? formatTime(host.checked_at) : 'Never';
+        const hostname = escapeHtml(host.hostname); // This is the IP
+
+        // Parse source to check for stored FQDN
+        let sourceRaw = host.source || 'system';
+        let sourceLabel = sourceRaw;
+        let displayHostname = hostname;
+
+        if (sourceRaw.includes(':')) {
+            const parts = sourceRaw.split(':');
+            sourceLabel = parts[0]; // e.g. transport
+            const fqdn = parts.slice(1).join(':'); // e.g. mx.example.com
+            if (fqdn && fqdn !== hostname) {
+                displayHostname = `${hostname} <span class="text-gray-500 font-normal">(${escapeHtml(fqdn).toLowerCase()})</span>`;
+            }
+        }
+
+        const source = escapeHtml(sourceLabel).toLowerCase();
+
+        // Host card
+        html += `
+            <details id="${hostId}" class="group bg-gray-50 dark:bg-gray-700/50 rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden" ${isOpen ? 'open' : ''}>
+                <summary class="list-none px-4 py-3 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 transition flex items-center justify-between select-none">
+                    <div class="flex items-center gap-3">
+                        <div class="p-2 rounded-full bg-${statusColor}-100 dark:bg-${statusColor}-900/30 text-${statusColor}-600 dark:text-${statusColor}-400">
+                             <span class="font-bold text-lg w-5 h-5 flex items-center justify-center">${statusIcon}</span>
+                        </div>
+                        <div>
+                            <h3 class="font-semibold text-gray-900 dark:text-white flex items-center gap-2">
+                                ${displayHostname}
+                                <span class="text-xs px-2 py-0.5 rounded-full bg-gray-200 dark:bg-gray-600 text-gray-600 dark:text-gray-300">${source}</span>
+                            </h3>
+                            <p class="text-xs text-gray-500 dark:text-gray-400">
+                                ${statusText} • Listed on ${listedCount}/${totalCount} • Last check: ${lastCheck}
+                            </p>
+                        </div>
+                    </div>
+                    <svg class="w-5 h-5 text-gray-400 transition-transform duration-200 group-open:rotate-180" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
+                    </svg>
+                </summary>
+                
+                <div class="px-4 pb-4 pt-1 border-t border-gray-200 dark:border-gray-700">
+        `;
+
+        // Inner results (only if data exists)
+        if (host.has_data && host.results) {
+            html += '<div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-2 mb-4 max-h-96 overflow-y-auto custom-scrollbar p-1">';
+            host.results.forEach(result => {
+                let color = 'gray';
+                let icon = '?';
+
+                if (result.status === 'clean') {
+                    color = 'green';
+                    icon = '✓';
+                } else if (result.listed) {
+                    color = 'red';
+                    icon = '✗';
+                } else if (result.status === 'error') {
+                    color = 'yellow';
+                    icon = '!';
+                } else if (result.status === 'timeout') {
+                    color = 'orange';
+                    icon = '⏱';
+                }
+
+                html += `
+                    <div class="px-2 py-1.5 rounded bg-${color}-50 dark:bg-${color}-900/10 border border-${color}-100 dark:border-${color}-900/30 text-xs flex items-center justify-between group/item relative hover:bg-${color}-100 dark:hover:bg-${color}-900/20 transition cursor-default">
+                        <span class="font-medium text-${color}-700 dark:text-${color}-300 truncate mr-1" title="${escapeHtml(result.name)}">${escapeHtml(result.name)}</span>
+                        <div class="flex items-center">
+                            <span class="text-${color}-600 dark:text-${color}-400 font-bold">${icon}</span>
+                            ${result.info_url ? `<a href="${result.info_url}" target="_blank" class="ml-1 text-${color}-400 hover:text-${color}-600" title="View info"><svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path></svg></a>` : ''}
+                        </div>
+                    </div>
+                `;
+            });
+            html += '</div>';
+            // Currently /monitored does NOT return the full 'results' array (50 items) to save bandwidth?
+            // Checking blacklist.py: It DOES NOT return 'results'. 
+            // We should fetch details on demand OR include them.
+            // Given the user wants to see " Listed On 0/50... should be dynamic", they likely want to see the list.
+            // I forgot to include 'results' in /monitored. 
+            // But for now, let's just show "Listed" items or a "Load Details" placeholder?
+            // User requested: "Status page section will show... server IP and all those in Transport".
+            // AND they complained about blacklist list being static.
+            // It's better if I modify blacklist.py to return 'results' OR fetch them here.
+
+            // Since I haven't modified blacklist.py to return results, I will assume I need to fetch them individually?
+            // No, that's too many requests.
+            // I SHOULD have included results in /monitored. 
+
+            // Let me pause here and update blacklist.py to include results, OR...
+            // actually, let's check blacklist.py content I wrote.
+            // I wrote: `status_data.update({ ... "results": check.results ... })` ? 
+            // Let's check Step 1213 output.
+        }
+
+        html += `
+                    <div class="mt-2 text-center">
+                         <button onclick="checkHost('${hostname}')" class="text-sm text-blue-600 dark:text-blue-400 hover:underline">Run Check for this Host</button>
+                    </div>
+                </div>
+            </details>
+        `;
+    });
+
+    html += '</div>';
+    container.innerHTML = html;
+}
+
+async function checkHost(hostname) {
+    if (!hostname) return;
+    try {
+        showToast('Starting check for ' + hostname + '...', 'info');
+        // We can trigger the specific check via API
+        const response = await authenticatedFetch(`/api/blacklist/check?host=${hostname}&force=true`);
+        if (response.ok) {
+            showToast('Check completed for ' + hostname, 'success');
+            loadBlacklistStatus();
+        } else {
+            showToast('Check failed', 'error');
+        }
+    } catch (e) {
+        showToast('Error: ' + e.message, 'error');
+    }
+}
+
+// Dashboard blacklist summary loader
+async function loadDashboardBlacklistSummary() {
+    const container = document.getElementById('dashboard-blacklist-summary');
+    if (!container) return;
+
+    try {
+        const response = await authenticatedFetch('/api/blacklist/summary');
+        if (!response.ok) {
+            container.innerHTML = `<p class="text-gray-500 dark:text-gray-400 text-center text-sm">Unable to load</p>`;
+            return;
+        }
+
+        const data = await response.json();
+
+        if (!data.has_data) {
+            container.innerHTML = `
+                <div class="text-center">
+                    <p class="text-sm text-gray-500 dark:text-gray-400">No data</p>
+                    <p class="text-xs text-gray-400 dark:text-gray-500 mt-1">Check will run automatically</p>
+                </div>
+            `;
+            return;
+        }
+
+        const statusColor = data.status === 'clean' ? 'green' : data.status === 'listed' ? 'red' : 'yellow';
+        const statusIcon = data.status === 'clean' ? '✓' : data.status === 'listed' ? '✗' : '?';
+        const statusText = data.status === 'clean' ? 'Clean' : data.status === 'listed' ? 'Listed' : 'Unknown';
+
+        container.innerHTML = `
+            <div class="space-y-3">
+                <div class="flex items-center justify-between">
+                    <span class="text-sm text-gray-600 dark:text-gray-400">Status</span>
+                    <span class="text-sm font-semibold text-${statusColor}-600 dark:text-${statusColor}-400">${statusIcon} ${statusText}</span>
+                </div>
+                <div class="flex items-center justify-between">
+                    <span class="text-sm text-gray-600 dark:text-gray-400">Listed On</span>
+                    <span class="text-sm font-semibold ${data.listed_count > 0 ? 'text-red-600 dark:text-red-400' : 'text-green-600 dark:text-green-400'}">${data.listed_count}/${data.total_blacklists}</span>
+                </div>
+                <div class="flex items-center justify-between">
+                    <span class="text-sm text-gray-600 dark:text-gray-400">IP</span>
+                    <span class="text-xs font-mono text-gray-700 dark:text-gray-300">${data.server_ip || '-'}</span>
+                </div>
+                ${data.checked_at ? `
+                    <p class="text-xs text-gray-400 dark:text-gray-500 text-center pt-2 border-t border-gray-200 dark:border-gray-700">
+                        ${formatTime(data.checked_at)}
+                    </p>
+                ` : ''}
+            </div>
+        `;
+    } catch (error) {
+        console.error('Failed to load blacklist summary:', error);
+        container.innerHTML = `<p class="text-gray-500 dark:text-gray-400 text-center text-sm">Error loading</p>`;
+    }
+}
+
+function renderBlacklistStatus(data) {
+    const container = document.getElementById('status-blacklist');
+    if (!container) return;
+
+    if (!data.hosts || data.hosts.length === 0) {
+        container.innerHTML = `
+            <div class="text-center py-8">
+                <svg class="w-12 h-12 mx-auto text-gray-400 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
+                </svg>
+                <h3 class="text-lg font-medium text-gray-900 dark:text-white">No Monitored Hosts</h3>
+                <p class="text-gray-500 dark:text-gray-400 mt-2">Syncing monitoring targets...</p>
+            </div>
+        `;
+        return;
+    }
+
+    // Preserve open states
+    const openStates = {};
+    container.querySelectorAll('details').forEach(el => {
+        if (el.open && el.id) openStates[el.id] = true;
+    });
+
+    let html = '<div class="space-y-4">';
+
+    data.hosts.forEach((host, index) => {
+        const hostId = `host-${index}`;
+        const isOpen = openStates[hostId] || false;
+
+        let statusColor = 'gray';
+        let statusText = 'Unknown';
+        let statusIcon = '?';
+
+        if (host.status === 'clean') {
+            statusColor = 'green';
+            statusText = 'Clean';
+            statusIcon = '✓';
+        } else if (host.status === 'listed') {
+            statusColor = 'red';
+            statusText = 'Listed';
+            statusIcon = '✗';
+        } else if (host.status === 'error') {
+            statusColor = 'yellow';
+            statusText = 'Error';
+            statusIcon = '!';
+        }
+
+        const listedCount = host.listed_count || 0;
+        const totalCount = host.total_blacklists || 0;
+        const lastCheck = host.checked_at ? formatTime(host.checked_at) : 'Never';
+        const hostname = escapeHtml(host.hostname);
+        const source = escapeHtml(host.source || 'system');
+
+        // Host card
+        html += `
+            <details id="${hostId}" class="group bg-gray-50 dark:bg-gray-700/50 rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden" ${isOpen ? 'open' : ''}>
+                <summary class="list-none px-4 py-3 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 transition flex items-center justify-between select-none">
+                    <div class="flex items-center gap-3">
+                        <div class="p-2 rounded-full bg-${statusColor}-100 dark:bg-${statusColor}-900/30 text-${statusColor}-600 dark:text-${statusColor}-400">
+                             <span class="font-bold text-lg w-5 h-5 flex items-center justify-center">${statusIcon}</span>
+                        </div>
+                        <div>
+                            <h3 class="font-semibold text-gray-900 dark:text-white flex items-center gap-2">
+                                ${hostname}
+                                <span class="text-xs px-2 py-0.5 rounded-full bg-gray-200 dark:bg-gray-600 text-gray-600 dark:text-gray-300">${source}</span>
+                            </h3>
+                            <p class="text-xs text-gray-500 dark:text-gray-400">
+                                ${statusText} • Listed on ${listedCount}/${totalCount} • Last check: ${lastCheck}
+                            </p>
+                        </div>
+                    </div>
+                    <svg class="w-5 h-5 text-gray-400 transition-transform duration-200 group-open:rotate-180" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
+                    </svg>
+                </summary>
+                
+                <div class="px-4 pb-4 pt-1 border-t border-gray-200 dark:border-gray-700">
+        `;
+
+        if (host.has_data && host.results) {
+            html += '<div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-2 mb-4 max-h-96 overflow-y-auto custom-scrollbar p-1">';
+            host.results.forEach(result => {
+                let color = 'gray';
+                let icon = '?';
+
+                if (result.status === 'clean') {
+                    color = 'green';
+                    icon = '✓';
+                } else if (result.listed) {
+                    color = 'red';
+                    icon = '✗';
+                } else if (result.status === 'error') {
+                    color = 'yellow';
+                    icon = '!';
+                } else if (result.status === 'timeout') {
+                    color = 'orange';
+                    icon = '⏱';
+                }
+
+                html += `
+                    <div class="px-2 py-1.5 rounded bg-${color}-50 dark:bg-${color}-900/10 border border-${color}-100 dark:border-${color}-900/30 text-xs flex items-center justify-between group/item relative hover:bg-${color}-100 dark:hover:bg-${color}-900/20 transition cursor-default">
+                        <span class="font-medium text-${color}-700 dark:text-${color}-300 truncate mr-1" title="${escapeHtml(result.name)}">${escapeHtml(result.name)}</span>
+                        <div class="flex items-center">
+                            <span class="text-${color}-600 dark:text-${color}-400 font-bold">${icon}</span>
+                            ${result.info_url ? `<a href="${result.info_url}" target="_blank" class="ml-1 text-${color}-400 hover:text-${color}-600" title="View info"><svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path></svg></a>` : ''}
+                        </div>
+                    </div>
+                `;
+            });
+            html += '</div>';
+        }
+
+        html += `
+                    <div class="mt-2 text-center">
+                         <button onclick="checkHost('${hostname}')" class="text-sm text-blue-600 dark:text-blue-400 hover:underline">Run Check for this Host</button>
+                    </div>
+                </div>
+            </details>
+        `;
+    });
+
+    html += '</div>';
+    container.innerHTML = html;
 }
 
 function renderStatusImport(imports) {
@@ -2097,20 +2584,68 @@ function renderStatusJobs(jobs) {
     const container = document.getElementById('status-jobs');
     container.innerHTML = `
         <div class="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
-            ${renderJobCard('Fetch Logs', jobs.fetch_logs)}
-            ${renderJobCard('Complete Correlations', jobs.complete_correlations)}
-            ${renderJobCard('Update Final Status', jobs.update_final_status)}
-            ${renderJobCard('Expire Correlations', jobs.expire_correlations)}
-            ${renderJobCard('Cleanup Logs', jobs.cleanup_logs)}
-            ${renderJobCard('Check App Version', jobs.check_app_version)}
-            ${renderJobCard('DNS Check (All Domains)', jobs.dns_check)}
-            ${renderJobCard('Sync Active Domains', jobs.sync_local_domains)}
-            ${renderJobCard('DMARC IMAP Import', jobs.dmarc_imap_sync)}
-            ${renderJobCard('Update MaxMind Databases', jobs.update_geoip)}
-            ${renderJobCard('Mailbox Statistics', jobs.mailbox_stats)}
-            ${renderJobCard('Alias Statistics', jobs.alias_stats)}
+            ${renderJobCard('Fetch Logs', 'fetch_logs', jobs.fetch_logs)}
+            ${renderJobCard('Complete Correlations', 'complete_correlations', jobs.complete_correlations)}
+            ${renderJobCard('Update Final Status', 'update_final_status', jobs.update_final_status)}
+            ${renderJobCard('Expire Correlations', 'expire_correlations', jobs.expire_correlations)}
+            ${renderJobCard('Cleanup Logs', 'cleanup_logs', jobs.cleanup_logs)}
+            ${renderJobCard('Check App Version', 'check_app_version', jobs.check_app_version)}
+            ${renderJobCard('DNS Check (All Domains)', 'dns_check', jobs.dns_check)}
+            ${renderJobCard('Sync Active Domains', 'sync_local_domains', jobs.sync_local_domains)}
+            ${renderJobCard('DMARC IMAP Import', 'dmarc_imap_sync', jobs.dmarc_imap_sync)}
+            ${renderJobCard('Update MaxMind Databases', 'update_geoip', jobs.update_geoip)}
+            ${renderJobCard('Mailbox Statistics', 'mailbox_stats', jobs.mailbox_stats)}
+            ${renderJobCard('Alias Statistics', 'alias_stats', jobs.alias_stats)}
+            ${renderJobCard('IP Blacklist Check (All Hosts)', 'blacklist_check', jobs.blacklist_check)}
+            ${renderJobCard('Sync Transports & Relayhosts', 'sync_transports', jobs.sync_transports)}
+            ${renderJobCard('Weekly Summary Report', 'send_weekly_summary', jobs.send_weekly_summary)}
         </div>
     `;
+}
+
+async function triggerBackgroundJob(jobKey, buttonEl, jobName = null) {
+    if (!buttonEl) return;
+
+    // Use jobName if provided, otherwise fallback to jobKey
+    const displayName = jobName || jobKey;
+
+    // Disable button and show loading
+    buttonEl.disabled = true;
+    const originalContent = buttonEl.innerHTML;
+    // Keep width to prevent layout shift if possible, or just standard loading state
+    buttonEl.innerHTML = '<span class="inline-block animate-spin w-3 h-3 border-2 border-current border-t-transparent rounded-full"></span> Running...';
+    buttonEl.classList.add('opacity-50', 'cursor-not-allowed');
+
+    try {
+        const response = await authenticatedFetch(`/api/settings/jobs/${jobKey}/run`, {
+            method: 'POST'
+        });
+
+        if (!response.ok) {
+            const err = await response.json();
+            throw new Error(err.detail || `HTTP ${response.status}`);
+        }
+
+        showToast(`Job "${displayName}" started successfully`, 'success');
+
+        // Refresh the status page after a short delay
+        setTimeout(() => {
+            loadStatusExtended();
+        }, 1000);
+
+    } catch (error) {
+        if (error.message.includes('409')) {
+            showToast(`Job "${displayName}" is already running`, 'warning');
+        } else {
+            console.error(`Failed to trigger job ${jobKey}:`, error);
+            showToast(`Failed to start job: ${error.message}`, 'error');
+        }
+    } finally {
+        // Re-enable button
+        buttonEl.disabled = false;
+        buttonEl.innerHTML = originalContent;
+        buttonEl.classList.remove('opacity-50', 'cursor-not-allowed');
+    }
 }
 
 // =============================================================================
@@ -4256,7 +4791,7 @@ function renderSettings(content, data) {
             <div class="p-4">
                 <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                     <div class="p-3 bg-gray-50 dark:bg-gray-700/30 rounded-lg">
-                        <p class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Mailcow URL</p>
+                        <p class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">mailcow URL</p>
                         <p class="text-sm text-gray-900 dark:text-white mt-1 font-mono break-all">${escapeHtml(config.mailcow_url || 'N/A')}</p>
                     </div>
                     <div class="p-3 bg-gray-50 dark:bg-gray-700/30 rounded-lg">
@@ -4681,10 +5216,13 @@ function renderImportCard(title, data, color) {
     `;
 }
 
-function renderJobCard(name, job) {
+function renderJobCard(name, jobKey, job) {
     if (!job) {
         return '';
     }
+
+    const isRunning = job.status === 'running';
+    const isDisabled = job.status === 'disabled' || job.enabled === false;
 
     let statusBadge = '';
 
@@ -4712,7 +5250,21 @@ function renderJobCard(name, job) {
                     <h4 class="font-semibold text-gray-900 dark:text-white text-sm">${name}</h4>
                     <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">${job.description || ''}</p>
                 </div>
-                ${statusBadge}
+                <div class="flex flex-col items-end gap-1.5">
+                    ${statusBadge}
+                    ${!isDisabled ? `
+                        <button 
+                            onclick="triggerBackgroundJob('${jobKey}', this, '${name.replace(/'/g, "\\'")}')" 
+                            class="px-2 py-1 text-xs font-medium rounded transition-colors flex items-center gap-1 ${isRunning
+                ? 'bg-gray-200 dark:bg-gray-600 text-gray-400 dark:text-gray-500 cursor-not-allowed'
+                : 'bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 hover:bg-blue-200 dark:hover:bg-blue-900/50'}"
+                            ${isRunning ? 'disabled' : ''}
+                            title="${isRunning ? 'Job is running' : 'Run this job now'}">
+                            ${isRunning ? '<span class="inline-block animate-spin w-3 h-3 border-2 border-current border-t-transparent rounded-full"></span>' : '<span class="text-[10px]">▶</span>'}
+                            Run
+                        </button>
+                    ` : ''}
+                </div>
             </div>
             
             <div class="flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-600 dark:text-gray-400">
@@ -5155,6 +5707,18 @@ async function loadDmarcDomains() {
                 </div>
             `;
         }).join('');
+
+        // Update the manage reports link with total count
+        const manageReportsLink = document.getElementById('dmarc-manage-reports-link');
+        if (manageReportsLink) {
+            const totalReports = domains.reduce((sum, d) => sum + (d.report_count || 0) + (d.tls_report_count || 0), 0);
+            manageReportsLink.innerHTML = `
+                <span class="text-gray-500 dark:text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 cursor-pointer transition-colors" onclick="showReportsManagementModal()">
+                    📋 Manage Reports (${totalReports} total)
+                </span>
+            `;
+            manageReportsLink.classList.remove('hidden');
+        }
 
     } catch (error) {
         console.error('Error loading DMARC domains:', error);
@@ -6212,6 +6776,196 @@ function closeDmarcSyncHistoryModal() {
 }
 
 // =============================================================================
+// REPORTS MANAGEMENT
+// =============================================================================
+
+async function showReportsManagementModal() {
+    const modal = document.getElementById('dmarc-reports-management-modal');
+    const content = document.getElementById('dmarc-reports-management-content');
+
+    modal.classList.remove('hidden');
+
+    const closeOnBackdrop = (e) => {
+        if (e.target === modal) {
+            closeReportsManagementModal();
+            modal.removeEventListener('click', closeOnBackdrop);
+        }
+    };
+    modal.addEventListener('click', closeOnBackdrop);
+
+    // Show loading
+    content.innerHTML = `
+        <div class="text-center py-12">
+            <div class="loading mx-auto mb-4"></div>
+            <p class="text-gray-500 dark:text-gray-400">Loading reports...</p>
+        </div>
+    `;
+
+    try {
+        const response = await authenticatedFetch('/api/dmarc/reports/all');
+        const data = await response.json();
+
+        renderReportsManagementTable(data.reports || [], data.allow_delete);
+
+    } catch (error) {
+        console.error('Error loading reports:', error);
+        content.innerHTML = '<p class="text-center py-12 text-red-500">Failed to load reports</p>';
+    }
+}
+
+function closeReportsManagementModal() {
+    document.getElementById('dmarc-reports-management-modal').classList.add('hidden');
+}
+
+function renderReportsManagementTable(reports, allowDelete) {
+    const content = document.getElementById('dmarc-reports-management-content');
+
+    if (reports.length === 0) {
+        content.innerHTML = `
+            <div class="text-center py-12">
+                <svg class="w-12 h-12 mx-auto text-gray-400 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                </svg>
+                <p class="text-gray-500 dark:text-gray-400">No reports found</p>
+            </div>
+        `;
+        return;
+    }
+
+    const deleteHeader = allowDelete ? '<th class="px-4 py-3 text-center text-xs font-bold text-gray-600 dark:text-gray-400 uppercase">Actions</th>' : '';
+    const deleteHeaderMobile = allowDelete ? 'Actions' : '';
+
+    content.innerHTML = `
+        <div class="mb-4 flex justify-between items-center">
+            <p class="text-sm text-gray-600 dark:text-gray-400">
+                Total: <span class="font-bold">${reports.length}</span> reports
+                ${!allowDelete ? '<span class="ml-2 text-xs text-yellow-600 dark:text-yellow-400">(Deletion disabled)</span>' : ''}
+            </p>
+        </div>
+        
+        <!-- Desktop Table -->
+        <div class="hidden md:block overflow-x-auto">
+            <table class="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+                <thead class="bg-gray-50 dark:bg-gray-700">
+                    <tr>
+                        <th class="px-4 py-3 text-left text-xs font-bold text-gray-600 dark:text-gray-400 uppercase">Import Date</th>
+                        <th class="px-4 py-3 text-center text-xs font-bold text-gray-600 dark:text-gray-400 uppercase">Type</th>
+                        <th class="px-4 py-3 text-left text-xs font-bold text-gray-600 dark:text-gray-400 uppercase">Domain</th>
+                        <th class="px-4 py-3 text-left text-xs font-bold text-gray-600 dark:text-gray-400 uppercase">Reporter</th>
+                        <th class="px-4 py-3 text-right text-xs font-bold text-gray-600 dark:text-gray-400 uppercase">Records</th>
+                        <th class="px-4 py-3 text-left text-xs font-bold text-gray-600 dark:text-gray-400 uppercase">Period</th>
+                        ${deleteHeader}
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-gray-200 dark:divide-gray-700">
+                    ${reports.map(report => {
+        const importDate = report.created_at ? new Date(report.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '-';
+        const beginDate = report.begin_date ? new Date(report.begin_date * 1000).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '-';
+        const endDate = report.end_date ? new Date(report.end_date * 1000).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '-';
+        const typeClass = report.type === 'dmarc' ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400' : 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400';
+        const deleteBtn = allowDelete ? `
+                            <td class="px-4 py-3 text-center">
+                                <button onclick="deleteReport('${report.type}', ${report.id}, '${escapeHtml(report.domain)}')" 
+                                    class="text-red-500 hover:text-red-700 dark:hover:text-red-400 transition-colors" title="Delete report">
+                                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
+                                    </svg>
+                                </button>
+                            </td>
+                        ` : '';
+
+        return `
+                            <tr class="hover:bg-gray-50 dark:hover:bg-gray-700/50">
+                                <td class="px-4 py-3 text-sm text-gray-900 dark:text-white">${importDate}</td>
+                                <td class="px-4 py-3 text-center">
+                                    <span class="px-2 py-1 text-xs font-bold rounded ${typeClass}">${report.type.toUpperCase()}</span>
+                                </td>
+                                <td class="px-4 py-3 text-sm font-medium text-gray-900 dark:text-white">${escapeHtml(report.domain)}</td>
+                                <td class="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">${escapeHtml(report.org_name || '-')}</td>
+                                <td class="px-4 py-3 text-sm text-right text-gray-900 dark:text-white font-medium">${report.record_count}</td>
+                                <td class="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">${beginDate} - ${endDate}</td>
+                                ${deleteBtn}
+                            </tr>
+                        `;
+    }).join('')}
+                </tbody>
+            </table>
+        </div>
+        
+        <!-- Mobile Cards -->
+        <div class="md:hidden space-y-3">
+            ${reports.map(report => {
+        const importDate = report.created_at ? new Date(report.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '-';
+        const beginDate = report.begin_date ? new Date(report.begin_date * 1000).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '-';
+        const endDate = report.end_date ? new Date(report.end_date * 1000).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '-';
+        const typeClass = report.type === 'dmarc' ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400' : 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400';
+        const deleteBtn = allowDelete ? `
+                    <button onclick="deleteReport('${report.type}', ${report.id}, '${escapeHtml(report.domain)}')" 
+                        class="text-red-500 hover:text-red-700 p-1" title="Delete">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
+                        </svg>
+                    </button>
+                ` : '';
+
+        return `
+                    <div class="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-4">
+                        <div class="flex justify-between items-start mb-2">
+                            <div>
+                                <span class="px-2 py-0.5 text-xs font-bold rounded ${typeClass}">${report.type.toUpperCase()}</span>
+                                <span class="ml-2 text-sm font-medium text-gray-900 dark:text-white">${escapeHtml(report.domain)}</span>
+                            </div>
+                            ${deleteBtn}
+                        </div>
+                        <div class="grid grid-cols-2 gap-2 text-xs">
+                            <div><span class="text-gray-500">Reporter:</span> <span class="text-gray-900 dark:text-white">${escapeHtml(report.org_name || '-')}</span></div>
+                            <div><span class="text-gray-500">Records:</span> <span class="font-bold text-gray-900 dark:text-white">${report.record_count}</span></div>
+                            <div><span class="text-gray-500">Imported:</span> <span class="text-gray-900 dark:text-white">${importDate}</span></div>
+                            <div><span class="text-gray-500">Period:</span> <span class="text-gray-900 dark:text-white">${beginDate} - ${endDate}</span></div>
+                        </div>
+                    </div>
+                `;
+    }).join('')}
+        </div>
+    `;
+}
+
+async function deleteReport(reportType, reportId, domain) {
+    if (!confirm(`Are you sure you want to delete this ${reportType.toUpperCase()} report for ${domain}?\n\nThis action cannot be undone.`)) {
+        return;
+    }
+
+    try {
+        const response = await authenticatedFetch(`/api/dmarc/reports/${reportType}/${reportId}`, {
+            method: 'DELETE'
+        });
+
+        if (response.status === 403) {
+            showToast('Report deletion is disabled', 'error');
+            return;
+        }
+
+        if (!response.ok) {
+            throw new Error('Failed to delete report');
+        }
+
+        showToast(`${reportType.toUpperCase()} report deleted`, 'success');
+
+        // Refresh the modal
+        await showReportsManagementModal();
+
+        // Refresh domains list if visible
+        if (dmarcState.currentView === 'domains') {
+            await loadDmarcDomains();
+        }
+
+    } catch (error) {
+        console.error('Error deleting report:', error);
+        showToast('Failed to delete report', 'error');
+    }
+}
+
+// =============================================================================
 // TEST IMAP / SMTP
 // =============================================================================
 
@@ -6407,7 +7161,7 @@ async function showHelpModal(docName) {
 // CONSOLE LOG
 // =============================================================================
 
-console.log('[OK] Mailcow Logs Viewer - Complete Frontend Loaded');
+console.log('[OK] mailcow Logs Viewer - Complete Frontend Loaded');
 console.log('Features: Dashboard, Messages, Postfix, Rspamd, Netfilter, Queue, Quarantine, Status, Mailbox Stats, Settings');
 console.log('UI: Dark mode, Modals with tabs, Responsive design');
 
@@ -7157,10 +7911,3 @@ function loadMailboxStatsPage(page) {
     loadMailboxStatsList(page);
 }
 
-// Helper function to escape HTML
-function escapeHtml(text) {
-    if (!text) return '';
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
-}

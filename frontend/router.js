@@ -1,6 +1,6 @@
 /**
  * Router module for SPA clean URL navigation
- * Handles History API based routing for the Mailcow Logs Viewer
+ * Handles History API based routing for the mailcow Logs Viewer
  */
 
 // Valid base routes for the SPA

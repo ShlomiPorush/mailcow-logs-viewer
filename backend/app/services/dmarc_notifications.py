@@ -61,7 +61,7 @@ def _create_text_content(failed_emails: List[Dict], sync_id: int) -> str:
         lines.append("")
     
     lines.append("---")
-    lines.append("This is an automated notification from Mailcow Logs Viewer")
+    lines.append("This is an automated notification from mailcow Logs Viewer")
     lines.append(f"DMARC IMAP Sync Service")
     
     return "\n".join(lines)
@@ -150,7 +150,7 @@ def _create_html_content(failed_emails: List[Dict], sync_id: int) -> str:
         </div>
         
         <div class="footer">
-            <p>This is an automated notification from <strong>Mailcow Logs Viewer</strong></p>
+            <p>This is an automated notification from <strong>mailcow Logs Viewer</strong></p>
             <p>DMARC IMAP Sync Service</p>
         </div>
     </div>

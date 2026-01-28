@@ -1,6 +1,6 @@
-# Mailcow Logs Viewer
+# mailcow Logs Viewer
 
-A modern, self-hosted dashboard for viewing and analyzing Mailcow mail server logs. Built for system administrators and technicians who need quick access to mail delivery status, spam analysis, and authentication failures.
+A modern, self-hosted dashboard for viewing and analyzing mailcow mail server logs. Built for system administrators and technicians who need quick access to mail delivery status, spam analysis, and authentication failures.
 
 ![Main](images/Main.png)
 
@@ -54,7 +54,7 @@ A modern, self-hosted dashboard for viewing and analyzing Mailcow mail server lo
 - Filter by IP, username, action
 
 ### 📮 Queue & Quarantine
-- Real-time mail queue from Mailcow API
+- Real-time mail queue from mailcow API
 - Deferred messages with reasons
 - Quarantined emails
 - Search and filter
@@ -62,7 +62,7 @@ A modern, self-hosted dashboard for viewing and analyzing Mailcow mail server lo
 ### 🌐 Domains Overview
 - Complete domains overview with DNS validation
 - SPF validation with DNS lookup counter and server IP authorization check
-- DKIM validation with Mailcow configuration comparison
+- DKIM validation with mailcow configuration comparison
 - DMARC policy checking and recommendations
 - Automated DNS checks every 6 hours
 - Domain info: mailboxes, aliases, storage, relay settings
@@ -112,7 +112,7 @@ A modern, self-hosted dashboard for viewing and analyzing Mailcow mail server lo
 mkdir mailcow-logs-viewer && cd mailcow-logs-viewer
 
 # Download docker-compose.yml and env.example
-# Configure .env with your Mailcow details
+# Configure .env with your mailcow details
 
 docker compose up -d
 # Open http://localhost:8080
@@ -143,8 +143,8 @@ All settings via environment variables. See **[env.example](env.example)** for f
 
 | Variable | Description |
 |----------|-------------|
-| `MAILCOW_URL` | Mailcow instance URL |
-| `MAILCOW_API_KEY` | Mailcow API key |
+| `MAILCOW_URL` | mailcow instance URL |
+| `MAILCOW_API_KEY` | mailcow API key |
 | `POSTGRES_PASSWORD` | Database password |
 
 ### Key Optional Settings
@@ -197,7 +197,7 @@ RESTful API for all functionality:
 ## Requirements
 
 - Docker & Docker Compose
-- Mailcow with API access
+- mailcow with API access
 - 512MB RAM minimum
 - 1GB disk (varies with retention)
 
@@ -246,7 +246,7 @@ AUTH_PASSWORD=your_secure_password
 2. **Pagination**: Most list endpoints support `page` and `limit` parameters
 3. **Filtering**: Filters are applied server-side before pagination
 4. **Export Limits**: CSV exports are limited to `CSV_EXPORT_LIMIT` rows (default: 10,000)
-5. **Real-time Data**: Queue and Quarantine endpoints fetch data directly from Mailcow API
+5. **Real-time Data**: Queue and Quarantine endpoints fetch data directly from mailcow API
 6. **Cached Data**: All other log data is stored in PostgreSQL and updated periodically
 
 ## License

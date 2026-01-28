@@ -164,7 +164,7 @@ v=DMARC1; p=none; rua=mailto:dmarc@example.net;
 ### 2. Parameter Details
 
 * **`p=none` (Monitoring Mode):** The recommended starting point. It ensures no mail is blocked while you collect data to verify that all legitimate sources are correctly authenticated.
-* **`rua=mailto:...`:** This is the feedback loop trigger. Ensure this address is the one configured in the **IMAP Settings** of Mailcow Logs Viewer.
+* **`rua=mailto:...`:** This is the feedback loop trigger. Ensure this address is the one configured in the **IMAP Settings** of mailcow Logs Viewer.
 * **`v=DMARC1`:** Required version prefix.
 
 ### 3. External Domain Reporting (Verification)

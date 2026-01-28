@@ -6,7 +6,7 @@ To maintain high deliverability and robust domain security, **mailcow-logs-viewe
 
 | Protocol | Technical Purpose | System Validation Logic |
 | --- | --- | --- |
-| **SPF** | **Identity Authorization:** Defines which IP addresses/hosts are authorized to send mail for a domain. | Validates against **RFC 7208**, checking the **10-DNS lookup limit**, recursive `include:` mechanisms, and verifying if the Mailcow server IP is explicitly authorized. |
+| **SPF** | **Identity Authorization:** Defines which IP addresses/hosts are authorized to send mail for a domain. | Validates against **RFC 7208**, checking the **10-DNS lookup limit**, recursive `include:` mechanisms, and verifying if the mailcow server IP is explicitly authorized. |
 | **DKIM** | **Message Integrity:** Provides a cryptographic signature to ensure the email content hasn't been altered in transit. | Inspects public keys for **SHA1 (weak hash)**, detects **revoked keys**, and warns if the record is stuck in **Testing Mode (`t=y`)**. |
 | **DMARC** | **Policy Enforcement:** Provides instructions to receivers on how to handle failed SPF/DKIM checks. | Aggregates XML reports via IMAP, performing **Identifier Alignment** analysis and visualizing global mail flow. |
 
@@ -39,7 +39,7 @@ v=DMARC1; p=none; rua=mailto:dmarc@example.net;
 ### 2. Parameter Details
 
 * **`p=none` (Monitoring Mode):** The recommended starting point. It ensures no mail is blocked while you collect data to verify that all legitimate sources are correctly authenticated.
-* **`rua=mailto:...`:** This is the feedback loop trigger. Ensure this address is the one configured in the **IMAP Settings** of Mailcow Logs Viewer.
+* **`rua=mailto:...`:** This is the feedback loop trigger. Ensure this address is the one configured in the **IMAP Settings** of mailcow Logs Viewer.
 * **`v=DMARC1`:** Required version prefix.
 
 ### 3. External Domain Reporting (Verification)

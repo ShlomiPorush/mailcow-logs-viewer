@@ -1,6 +1,6 @@
-# Mailcow Logs Viewer - API Documentation
+# mailcow Logs Viewer - API Documentation
 
-This document describes all available API endpoints for the Mailcow Logs Viewer application.
+This document describes all available API endpoints for the mailcow Logs Viewer application.
 
 **Base URL:** `http://your-server:8080/api`
 
@@ -28,6 +28,7 @@ This document describes all available API endpoints for the Mailcow Logs Viewer 
 12. [Export](#export)
 13. [DMARC](#dmarc)
     - [DMARC IMAP Auto-Import](#dmarc-imap-auto-import)
+14. [Blacklist Monitoring](#blacklist-monitoring)
 
 ---
 
@@ -106,14 +107,14 @@ Application information and configuration.
 **Response:**
 ```json
 {
-  "name": "Mailcow Logs Viewer",
+  "name": "mailcow Logs Viewer",
   "version": "1.5.0",
   "mailcow_url": "https://mail.example.com",
   "local_domains": ["example.com", "mail.example.com"],
   "fetch_interval": 60,
   "retention_days": 7,
   "timezone": "UTC",
-  "app_title": "Mailcow Logs Viewer",
+  "app_title": "mailcow Logs Viewer",
   "app_logo_url": "",
   "blacklist_count": 3,
   "auth_enabled": false
@@ -164,7 +165,7 @@ Job status is accessible through:
 
 | Job Name | Interval | Description |
 |----------|----------|-------------|
-| **Fetch Logs** | 60 seconds | Imports Postfix, Rspamd, and Netfilter logs from Mailcow API |
+| **Fetch Logs** | 60 seconds | Imports Postfix, Rspamd, and Netfilter logs from mailcow API |
 | **Complete Correlations** | 120 seconds (2 min) | Links Postfix logs to message correlations |
 | **Update Final Status** | 120 seconds (2 min) | Updates message delivery status for late-arriving logs |
 | **Expire Correlations** | 60 seconds (1 min) | Marks old incomplete correlations as expired (after 10 minutes) |
@@ -328,7 +329,7 @@ Get list of all domains with statistics and cached DNS validation results.
 - `warnings`: Array of warning messages
 
 **DKIM Validation:**
-- Fetches expected DKIM record from Mailcow API
+- Fetches expected DKIM record from mailcow API
 - Queries DNS for actual DKIM record
 - Compares expected vs actual records
 - `match`: Boolean indicating if records match
@@ -498,7 +499,7 @@ POST /api/domains/example.com/check-dns
   - Maximum 10 lookups enforced (returns error if exceeded)
   - Returns `dns_lookups` field with count
 - **Server IP Authorization**:
-  - Fetches server IP from Mailcow API once on startup
+  - Fetches server IP from mailcow API once on startup
   - Verifies server IP is authorized via:
     - Direct `ip4:` match (including CIDR ranges)
     - `a` record resolution
@@ -509,7 +510,7 @@ POST /api/domains/example.com/check-dns
 - Provides policy-specific warnings and recommendations
 
 **DKIM Validation:**
-- Fetches expected DKIM value from Mailcow API (`/api/v1/get/dkim/{domain}`)
+- Fetches expected DKIM value from mailcow API (`/api/v1/get/dkim/{domain}`)
 - Queries DNS at `{selector}._domainkey.{domain}`
 - Compares expected vs actual records (whitespace-normalized)
 - **Parameter Validation**:
@@ -871,13 +872,13 @@ GET /api/mailbox-stats/all?date_range=30days&active_only=true&hide_zero=true&sor
 |-------|-------------|
 | `username` | Email address of the mailbox |
 | `name` | Display name |
-| `active` | Whether mailbox is active in Mailcow |
+| `active` | Whether mailbox is active in mailcow |
 | `quota` / `quota_used` | Quota in bytes |
 | `percent_in_use` | Quota usage percentage |
 | `messages_in_mailbox` | Number of messages stored |
 | `last_*_login` | Last login timestamps (null if never) |
 | `rl_value` / `rl_frame` | Rate limiting (e.g., 100/m = 100 per minute) |
-| `attributes` | Access permissions from Mailcow |
+| `attributes` | Access permissions from mailcow |
 | `mailbox_counts` | Message statistics for mailbox only |
 | `aliases` | Array of alias statistics |
 | `combined_*` | Combined totals (mailbox + all aliases) |
@@ -1269,7 +1270,7 @@ Get Netfilter authentication failure logs.
 
 ### GET /queue
 
-Get current mail queue from Mailcow (real-time).
+Get current mail queue from mailcow (real-time).
 
 **Response:**
 ```json
@@ -1295,7 +1296,7 @@ Get current mail queue from Mailcow (real-time).
 
 ### GET /quarantine
 
-Get quarantined messages from Mailcow (real-time).
+Get quarantined messages from mailcow (real-time).
 
 **Response:**
 ```json
@@ -1466,7 +1467,7 @@ Get recent message activity stream.
 
 ### GET /status/containers
 
-Get status of all Mailcow containers.
+Get status of all mailcow containers.
 
 **Response:**
 ```json
@@ -1511,7 +1512,7 @@ Get storage/disk usage information.
 
 ### GET /status/version
 
-Get Mailcow version and update status.
+Get mailcow version and update status.
 
 **Response:**
 ```json
@@ -1588,7 +1589,7 @@ Get changelog for a specific app version from GitHub.
 
 ### GET /status/mailcow-connection
 
-Check Mailcow API connection status.
+Check mailcow API connection status.
 
 **Response:**
 ```json
@@ -1604,7 +1605,7 @@ Check Mailcow API connection status.
 
 ### GET /status/mailcow-info
 
-Get Mailcow system information.
+Get mailcow system information.
 
 **Response:**
 ```json
@@ -1671,7 +1672,7 @@ Get system configuration and status information.
     "fetch_count_netfilter": 500,
     "retention_days": 7,
     "timezone": "UTC",
-    "app_title": "Mailcow Logs Viewer",
+    "app_title": "mailcow Logs Viewer",
     "log_level": "WARNING",
     "blacklist_enabled": true,
     "blacklist_count": 3,
@@ -1717,7 +1718,7 @@ Get system configuration and status information.
   "background_jobs": {
     "fetch_logs": {
       "interval": "60 seconds",
-      "description": "Imports logs from Mailcow API",
+      "description": "Imports logs from mailcow API",
       "status": "success",
       "last_run": "2026-01-08T12:14:56Z",
       "error": null
@@ -1813,7 +1814,7 @@ Each background job reports real-time execution status:
 
 **Job Descriptions:**
 
-1. **fetch_logs**: Fetches Postfix, Rspamd, and Netfilter logs from Mailcow API every 60 seconds
+1. **fetch_logs**: Fetches Postfix, Rspamd, and Netfilter logs from mailcow API every 60 seconds
 2. **complete_correlations**: Links Postfix logs to message correlations every 2 minutes
 3. **update_final_status**: Updates message delivery status when late-arriving Postfix logs are found
 4. **expire_correlations**: Marks old incomplete correlations as expired after 10 minutes
@@ -2856,6 +2857,112 @@ The existing DMARC upload endpoint also accepts TLS-RPT reports.
 **Detection:**
 - File is identified as TLS-RPT if JSON contains `"policies"` array
 - TLS-RPT reports use RFC 8460 JSON format
+
+---
+
+## Blacklist Monitoring
+
+### GET /api/blacklist/summary
+
+Get a high-level summary of blacklist status for the main server IP.
+
+**Response:**
+```json
+{
+  "server_ip": "1.2.3.4",
+  "checked_at": "2026-01-25T14:00:00Z",
+  "total_blacklists": 50,
+  "listed_count": 1,
+  "clean_count": 48,
+  "error_count": 1,
+  "status": "listed",
+  "has_data": true
+}
+```
+
+---
+
+### GET /api/blacklist/monitored
+
+Get status of all monitored hosts (system IP and transport configurations).
+
+**Response:**
+```json
+{
+  "hosts": [
+    {
+      "hostname": "1.2.3.4",
+      "source": "system",
+      "active": true,
+      "status": "clean",
+      "checked_at": "2026-01-25T14:00:00Z",
+      "listed_count": 0,
+      "total_blacklists": 50,
+      "results": [...]
+    },
+    {
+      "hostname": "5.6.7.8",
+      "source": "relayhost:smtp.example.com",
+      "active": true,
+      "status": "listed",
+      "checked_at": "2026-01-25T14:00:00Z",
+      "listed_count": 2,
+      "total_blacklists": 50,
+      "results": [...]
+    }
+  ]
+}
+```
+
+---
+
+### GET /api/blacklist/check
+
+Trigger a manual blacklist check.
+
+**Query Parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `host` | string | Optional. Host/IP to check. If omitted, checks ALL monitored hosts in a background batch job. |
+| `force` | bool | Optional. If `true`, ignores cache and forces a fresh DNS lookup. Default: `false`. |
+
+**Response (Batch Mode - No Host):**
+```json
+{
+  "status": "started",
+  "message": "Background check started for all hosts"
+}
+```
+
+**Response (Single Host):**
+```json
+{
+  "server_ip": "1.2.3.4",
+  "status": "clean",
+  ... (full results)
+}
+```
+
+---
+
+### GET /api/blacklist/progress
+
+Get real-time progress of the current blacklist check batch job.
+
+**Response:**
+```json
+{
+  "in_progress": true,
+  "current": 4,
+  "total": 150,
+  "current_blacklist": "Spamhaus ZEN",
+  "percent": 2
+}
+```
+- `current`: Global progress counter across all hosts.
+- `total`: Total items to check (Number of Hosts * Number of Blacklists).
+- `percent`: Integer percentage (0-100).
 
 ---
 

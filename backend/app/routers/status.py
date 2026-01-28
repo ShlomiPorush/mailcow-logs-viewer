@@ -27,7 +27,7 @@ version_cache = {
 @router.get("/status/containers")
 async def get_containers_status():
     """
-    Get status of all Mailcow containers
+    Get status of all mailcow containers
     Returns simplified container info: name (without -mailcow), state, started_at
     """
     try:
@@ -105,7 +105,7 @@ async def get_storage_status():
 @router.get("/status/version")
 async def get_version_status():
     """
-    Get current Mailcow version and check for updates
+    Get current mailcow version and check for updates
     Checks GitHub once per day and caches the result
     """
     try:
@@ -116,7 +116,7 @@ async def get_version_status():
         if (version_cache["checked_at"] is None or 
             now - version_cache["checked_at"] > timedelta(days=1)):
             
-            logger.info("Checking Mailcow version and updates...")
+            logger.info("Checking mailcow version and updates...")
             
             # Get current version
             current_version = await mailcow_api.get_status_version()
@@ -232,7 +232,7 @@ async def get_app_version_status(force: bool = Query(False, description="Force a
 @router.get("/status/mailcow-info")
 async def get_mailcow_info():
     """
-    Get Mailcow system information (domains, mailboxes, aliases)
+    Get mailcow system information (domains, mailboxes, aliases)
     """
     try:
         # Fetch all info in parallel
@@ -263,14 +263,14 @@ async def get_mailcow_info():
             }
         }
     except Exception as e:
-        logger.error(f"Error fetching Mailcow info: {e}")
+        logger.error(f"Error fetching mailcow info: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/status/mailcow-connection")
 async def get_mailcow_connection_status():
     """
-    Check Mailcow API connection status
+    Check mailcow API connection status
     """
     try:
         is_connected = await mailcow_api.test_connection()
@@ -279,7 +279,7 @@ async def get_mailcow_connection_status():
             "timestamp": datetime.utcnow().isoformat()
         }
     except Exception as e:
-        logger.error(f"Error checking Mailcow connection: {e}")
+        logger.error(f"Error checking mailcow connection: {e}")
         return {
             "connected": False,
             "timestamp": datetime.utcnow().isoformat(),

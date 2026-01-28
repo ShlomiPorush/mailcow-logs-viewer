@@ -4,7 +4,7 @@ Shows configuration, last import times, and background job status
 """
 import logging
 import httpx
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, BackgroundTasks, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import func, desc, text, or_
 from datetime import datetime, timezone, timedelta
@@ -13,7 +13,7 @@ from typing import Dict, Any, Optional
 from ..database import get_db
 from ..models import PostfixLog, RspamdLog, NetfilterLog, MessageCorrelation
 from ..config import settings
-from ..scheduler import last_fetch_run_time, get_job_status
+from ..scheduler import last_fetch_run_time, get_job_status, update_job_status
 from ..services.connection_test import test_smtp_connection, test_imap_connection
 from ..services.geoip_downloader import is_license_configured, get_geoip_status
 from .domains import get_cached_server_ip
@@ -150,7 +150,7 @@ async def get_settings_info(db: Session = Depends(get_db)):
             "background_jobs": {
                 "fetch_logs": {
                     "interval": f"{settings.fetch_interval} seconds",
-                    "description": "Imports logs from Mailcow API",
+                    "description": "Imports logs from mailcow API",
                     "status": jobs_status.get('fetch_logs', {}).get('status', 'unknown'),
                     "last_run": format_datetime_utc(jobs_status.get('fetch_logs', {}).get('last_run')),
                     "error": jobs_status.get('fetch_logs', {}).get('error')
@@ -204,7 +204,7 @@ async def get_settings_info(db: Session = Depends(get_db)):
                 },
                 "sync_local_domains": {
                     "interval": "6 hours",
-                    "description": "Syncs active domains list from Mailcow API",
+                    "description": "Syncs active domains list from mailcow API",
                     "status": jobs_status.get('sync_local_domains', {}).get('status', 'unknown'),
                     "last_run": format_datetime_utc(jobs_status.get('sync_local_domains', {}).get('last_run')),
                     "error": jobs_status.get('sync_local_domains', {}).get('error')
@@ -227,17 +227,39 @@ async def get_settings_info(db: Session = Depends(get_db)):
                 },
                 "mailbox_stats": {
                     "interval": "5 minutes",
-                    "description": "Fetches mailbox statistics from Mailcow API",
+                    "description": "Fetches mailbox statistics from mailcow API",
                     "status": jobs_status.get('mailbox_stats', {}).get('status', 'unknown'),
                     "last_run": format_datetime_utc(jobs_status.get('mailbox_stats', {}).get('last_run')),
                     "error": jobs_status.get('mailbox_stats', {}).get('error')
                 },
                 "alias_stats": {
                     "interval": "5 minutes",
-                    "description": "Syncs alias data from Mailcow API",
+                    "description": "Syncs alias data from mailcow API",
                     "status": jobs_status.get('alias_stats', {}).get('status', 'unknown'),
                     "last_run": format_datetime_utc(jobs_status.get('alias_stats', {}).get('last_run')),
                     "error": jobs_status.get('alias_stats', {}).get('error')
+                },
+                "blacklist_check": {
+                    "schedule": "Daily at 5 AM",
+                    "description": "Checks monitored hosts against DNS blacklists",
+                    "status": jobs_status.get('blacklist_check', {}).get('status', 'unknown'),
+                    "last_run": format_datetime_utc(jobs_status.get('blacklist_check', {}).get('last_run')),
+                    "error": jobs_status.get('blacklist_check', {}).get('error')
+                },
+                "sync_transports": {
+                    "interval": "6 hours",
+                    "description": "Sync Transports & Relayhosts from mailcow",
+                    "status": jobs_status.get('sync_transports', {}).get('status', 'unknown'),
+                    "last_run": format_datetime_utc(jobs_status.get('sync_transports', {}).get('last_run')),
+                    "error": jobs_status.get('sync_transports', {}).get('error')
+                },
+                "send_weekly_summary": {
+                    "schedule": "Monday at 9:00 AM" if settings.enable_weekly_summary else "Disabled",
+                    "description": "Sends a weekly summary report via email",
+                    "enabled": settings.enable_weekly_summary,
+                    "status": jobs_status.get('send_weekly_summary', {}).get('status', 'idle') if settings.enable_weekly_summary else 'disabled',
+                    "last_run": format_datetime_utc(jobs_status.get('send_weekly_summary', {}).get('last_run')) if settings.enable_weekly_summary else None,
+                    "error": jobs_status.get('send_weekly_summary', {}).get('error') if settings.enable_weekly_summary else None
                 }
             },
             "smtp_configuration": {
@@ -378,3 +400,103 @@ async def validate_maxmind_license() -> Dict[str, Any]:
                 return {"configured": True, "valid": False, "error": f"Status {response.status_code}"}
     except Exception:
         return {"configured": True, "valid": False, "error": "Connection error"}
+
+
+# =============================================================================
+# MANUAL JOB TRIGGER
+# =============================================================================
+
+@router.post("/settings/jobs/{job_name}/run")
+async def trigger_job(job_name: str, background_tasks: BackgroundTasks):
+    """
+    Manually trigger a background job.
+    
+    Supported jobs:
+    - fetch_logs: Fetch logs from mailcow API
+    - complete_correlations: Link Postfix logs to messages
+    - update_final_status: Update final status for correlations
+    - expire_correlations: Mark old incomplete correlations as expired
+    - cleanup_logs: Remove old logs
+    - check_app_version: Check for app updates
+    - dns_check: Validate DNS records for all domains
+    - sync_local_domains: Sync domains from mailcow API
+    - update_geoip: Update GeoIP databases
+    - mailbox_stats: Fetch mailbox statistics
+    - alias_stats: Sync alias data
+    - blacklist_check: Check server IP against blacklists
+    """
+    # Import job functions here to avoid circular imports
+    from ..scheduler import (
+        fetch_all_logs,
+        complete_incomplete_correlations,
+        update_final_status_for_correlations,
+        expire_old_correlations,
+        cleanup_old_logs,
+        check_app_version_update,
+        check_all_domains_dns_background,
+        sync_local_domains,
+        update_geoip_database,
+        update_mailbox_statistics,
+        update_alias_statistics,
+        check_monitored_hosts_job,
+        sync_transports_job,
+        send_weekly_summary_email_job
+    )
+    
+    # Map job names to functions and their status keys
+    job_mapping = {
+        'fetch_logs': ('fetch_logs', fetch_all_logs),
+        'complete_correlations': ('complete_correlations', complete_incomplete_correlations),
+        'update_final_status': ('update_final_status', update_final_status_for_correlations),
+        'expire_correlations': ('expire_correlations', expire_old_correlations),
+        'cleanup_logs': ('cleanup_logs', cleanup_old_logs),
+        'check_app_version': ('check_app_version', check_app_version_update),
+        'dns_check': ('dns_check', check_all_domains_dns_background),
+        'sync_local_domains': ('sync_local_domains', sync_local_domains),
+        'update_geoip': ('update_geoip', update_geoip_database),
+        'mailbox_stats': ('mailbox_stats', update_mailbox_statistics),
+        'alias_stats': ('alias_stats', update_alias_statistics),
+        'blacklist_check': ('blacklist_check', check_monitored_hosts_job),
+        'sync_transports': ('sync_transports', sync_transports_job),
+        'send_weekly_summary': ('send_weekly_summary', send_weekly_summary_email_job)
+    }
+    
+    if job_name not in job_mapping:
+        raise HTTPException(status_code=404, detail=f"Unknown job: {job_name}")
+    
+    status_key, job_func = job_mapping[job_name]
+    
+    # Check if job is already running
+    current_status = get_job_status().get(status_key, {})
+    if current_status.get('status') == 'running':
+        raise HTTPException(status_code=409, detail=f"Job {job_name} is already running")
+    
+    # Mark job as running immediately
+    update_job_status(status_key, 'running')
+    
+    # Run job in background
+    def run_job_wrapper():
+        try:
+            import asyncio
+            # Handle both sync and async functions
+            if asyncio.iscoroutinefunction(job_func):
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                try:
+                    loop.run_until_complete(job_func())
+                finally:
+                    loop.close()
+            else:
+                job_func()
+            update_job_status(status_key, 'success')
+        except Exception as e:
+            logger.error(f"Manual job {job_name} failed: {e}")
+            update_job_status(status_key, 'failed', str(e))
+    
+    background_tasks.add_task(run_job_wrapper)
+    
+    return {
+        'status': 'started',
+        'job': job_name,
+        'message': f'Job {job_name} started in background'
+    }

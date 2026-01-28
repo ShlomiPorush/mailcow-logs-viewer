@@ -5,7 +5,120 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [2.1.0] - 2026-01-20
+## [2.2.0] - 2026-01-28
+
+### Added
+
+#### Weekly Server Summary Report
+- **Automated Weekly Email Report**: Comprehensive server status report sent every Friday
+  - **System Health**: Mailbox/Alias/Domain counts, Storage usage, Queue & Quarantine stats
+  - **Traffic Overview**: Total Sent/Received messages, Failure rates with visual severity indicators
+  - **Blacklist Status**: Current status of all monitored hosts (shows detailed RBLs if listed)
+  - **DNS Security**: Alerts for domains with critical SPF/DKIM/DMARC configuration errors
+  - **Problem Areas**: "Top 5 Worst Mailboxes" table identifying accounts with high failure rates
+  - Configurable via `ENABLE_WEEKLY_SUMMARY` (default: true) and `ADMIN_EMAIL`
+
+#### IP Blacklist Monitor
+- **DNS Blacklist Checking**: New feature to check mail server IP against ~50 popular DNSBLs
+  - Real-time checking against major blacklists: Spamhaus ZEN/SBL/XBL/PBL, Barracuda, SpamCop, SORBS, UCEPROTECT, and more
+  - Status page section with summary cards (Server IP, Status, Listed Count, Last Check)
+  - Expandable list showing all 50+ blacklist check results
+  - "Check Now" button for manual refresh
+  - Dashboard summary card for quick status overview
+
+- **Automated Daily Checks**: Background scheduler runs daily at 5:00 AM
+  - Results cached for 24 hours to prevent excessive DNS queries
+  - Startup check runs 60 seconds after application start
+  - Job status visible in Background Jobs section on Status page
+
+- **Email Notifications**: Automatic alerts when server is listed on blacklists
+  - Sends detailed HTML email with list of blacklists where server is listed
+  - Includes lookup links for each blacklist
+  - Configurable via `BLACKLIST_ALERT_EMAIL` (falls back to `ADMIN_EMAIL`)
+
+#### DMARC Reports Management
+- **Reports Management Modal**: New popup to view and manage all DMARC and TLS reports
+  - Clickable "Manage Reports" link below the domains table
+  - Mobile-responsive card layout for smaller screens
+  - Color-coded type badges (blue for DMARC, green for TLS)
+
+- **Report Deletion**: Optional ability to delete individual reports
+  - Controlled by `DMARC_ALLOW_REPORT_DELETE` environment variable (default: false)
+  - When enabled, delete button appears for each report
+  - Confirmation dialog before deletion
+  - Cascading delete removes associated records (DMARCRecord/TLSReportPolicy)
+  - Automatically clears DMARC cache after deletion
+  - Refreshes both modal and domains list after successful deletion
+
+### Changes
+
+#### Background Jobs Improvements
+- **Manual Job Execution**: Added "Run Now" buttons to each background job card
+  - Allows manually triggering any of the 13 background jobs
+  - Displays loading state and success/warning toast notifications
+  - Toasts now show human-readable job names (e.g. "Alias Statistics")
+
+- **UI Updates**:
+  - Wrapped "Background Jobs" section in a collapsible accordion (closed by default) to save space
+
+### Fixed
+
+#### SPF Validation
+- **Recursive Redirect Support**: Added full support for SPF `redirect=` mechanism
+  - Now correctly follows redirects to target domains
+  - Recursively validates IP authorization against the redirected policy
+
+#### DKIM Validation
+- **Flexible Tag Parsing**: Improved DKIM record normalization
+  - Now correctly handles spaces between tags (e.g., `v=DKIM1; k=rsa` vs `v=DKIM1;k=rsa`)
+  - Prevents false negatives when DNS providers add optional whitespace
+
+#### Mailbox Stats
+- **Rate Limit Display**: Fixed issue where Rate Limit was displaying as "None" even when configured
+  - Adjusted backend ingestion to correctly parse nested Rate Limit objects from Mailcow API response
+
+#### General
+- **Naming Consistency**: Renamed "Mailcow" to "mailcow" across the application to match the official product name
+  - Updated frontend interface labels and logs
+  - Updated backend logs, API descriptions, and configuration fields
+  - Updated documentation and README
+
+- **Email Subject Quote Display**: Fixed escaped quotes (`\"`) appearing in email subjects
+  - Subjects with double quotes now display correctly without backslashes
+
+- **Job Status Persistence**: Fixed issue where jobs (like `expire_correlations`, `cleanup_logs`) were getting stuck in "running" state if no items were processed.
+
+- **Spam Alias Logic Support**: Enhanced log parsing to correctly handle emails delivered to spam aliases (e.g., `spam@localhost`)
+  - Parses `orig_to` field from Postfix logs to identify the real recipient
+  - Detects deliveries to `rspamd-pipe-spam` command
+  - Marks email status as `SPAM` instead of `CLEAN/Delivered` when routed to spam alias
+  - Correctly associates the log with the original recipient
+
+- **Rspamd SPAM_TRAP Detection**: Added support for `SPAM_TRAP` symbol in Rspamd logs
+  - Automatically marks emails as `SPAM` if the `SPAM_TRAP` symbol is present in the Rspamd result
+  - Updates both the Rspamd log record and the associated correlation status
+
+### Technical
+
+#### New API Endpoints
+```
+GET    /api/dmarc/reports/config  - Get report management configuration
+GET    /api/dmarc/reports/all     - Get all DMARC and TLS reports
+DELETE /api/dmarc/reports/{type}/{id} - Delete a specific report
+GET /api/blacklist/check        - Get blacklist check results (uses cache)
+GET /api/blacklist/check?force=true - Force new check ignoring cache
+GET /api/blacklist/config       - Get blacklist configuration
+GET /api/blacklist/summary      - Get compact summary for dashboard
+POST /api/settings/jobs/{job_name}/run
+```
+
+#### New Environment Variables
+- `DMARC_ALLOW_REPORT_DELETE`: Enable/disable report deletion from UI (default: false)
+- `BLACKLIST_ALERT_EMAIL`: Email address for blacklist alerts (optional, uses `ADMIN_EMAIL` if not set)
+
+---
+
+## [2.1.2] - 2026-01-20
 
 ### Added
 

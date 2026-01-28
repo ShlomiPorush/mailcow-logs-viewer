@@ -71,6 +71,7 @@ docs/_build/
 tmp/
 temp/
 *.tmp
+.gitignore
 
 # OS files
 Thumbs.db

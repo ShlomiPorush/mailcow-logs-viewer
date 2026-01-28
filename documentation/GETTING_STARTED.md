@@ -1,4 +1,4 @@
-# Mailcow Logs Viewer - Getting Started
+# mailcow Logs Viewer - Getting Started
 
 Get up and running in 5 minutes! 🚀
 
@@ -86,8 +86,8 @@ AUTH_PASSWORD=your_secure_password
 ## Prerequisites
 
 - Docker & Docker Compose installed
-- Mailcow instance with API access
-- Mailcow API key (generate from Mailcow admin panel)
+- mailcow instance with API access
+- mailcow API key (generate from mailcow admin panel)
 
 ---
 
@@ -127,8 +127,8 @@ nano .env
 
 | Variable | Description | Example |
 |----------|-------------|---------|
-| `MAILCOW_URL` | Your Mailcow instance URL | `https://mail.example.com` |
-| `MAILCOW_API_KEY` | Your Mailcow API key | `abc123-def456...` |
+| `MAILCOW_URL` | Your mailcow instance URL | `https://mail.example.com` |
+| `MAILCOW_API_KEY` | Your mailcow API key | `abc123-def456...` |
 | `POSTGRES_PASSWORD` | Database password<br>⚠️ Avoid special chars (`@:/?#`) - breaks connection strings<br>💡 Use UUID: `uuidgen` or https://it-tools.tech/uuid-generator | `a7f3c8e2-4b1d-4f9a-8c3e-7d2f1a9b5e4c` |
 | `ADMIN_EMAIL` | Admin email for notifications | `admin@yourdomain.com` |
 
@@ -150,9 +150,9 @@ When enabled:
 - Use strong passwords in production
 - **Important**: Use HTTPS/TLS when exposing over the internet
 
-### Step 4: Get Your Mailcow API Key
+### Step 4: Get Your mailcow API Key
 
-1. Log in to your Mailcow admin panel
+1. Log in to your mailcow admin panel
 2. Navigate to **System** → **Configuration** → **Access**
 3. Extend **API** section
 4. Copy & Enable **Read-Only Access**
@@ -169,7 +169,7 @@ always_add_missing_headers = yes
 
 **Why is this needed?**
 
-This ensures Postfix always adds a Message-ID header when missing. The Mailcow Logs Viewer uses Message-ID to correlate:
+This ensures Postfix always adds a Message-ID header when missing. The mailcow Logs Viewer uses Message-ID to correlate:
 - Rspamd logs (spam filtering)
 - Postfix logs (delivery)
 - Netfilter logs (authentication)
@@ -221,7 +221,7 @@ docker compose logs -f app
 
 You should see:
 ```
-INFO - Starting Mailcow Logs Viewer
+INFO - Starting mailcow Logs Viewer
 INFO - Database initialized successfully
 INFO - Scheduler started
 INFO - ✅ Imported 50 Postfix logs
@@ -354,11 +354,11 @@ DMARC_ERROR_EMAIL=dmarc-alerts@yourdomain.com
 - Check `FETCH_INTERVAL` in `.env` (default: 60 seconds)
 - View logs: `docker compose logs app | grep -i "imported"`
 
-### Cannot connect to Mailcow API?
+### Cannot connect to mailcow API?
 
 - Verify `MAILCOW_URL` is correct (no trailing slash)
 - Check API key is valid and has read access
-- Ensure Mailcow is accessible from the container
+- Ensure mailcow is accessible from the container
 
 ### Database connection failed?
 

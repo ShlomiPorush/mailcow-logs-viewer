@@ -429,7 +429,7 @@ async def get_netfilter_logs(
 @router.get("/queue")
 async def get_queue():
     """
-    Get current mail queue from Mailcow (real-time)
+    Get current mail queue from mailcow (real-time)
     Returns messages sorted by newest first (by arrival_time)
     """
     try:
@@ -455,7 +455,7 @@ async def get_queue():
 @router.get("/quarantine")
 async def get_quarantine():
     """
-    Get quarantined messages from Mailcow (real-time)
+    Get quarantined messages from mailcow (real-time)
     Returns messages sorted by newest first
     """
     try:

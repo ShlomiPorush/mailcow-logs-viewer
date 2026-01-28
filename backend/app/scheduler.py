@@ -6,6 +6,8 @@ import asyncio
 import hashlib
 import re
 import httpx
+import socket
+import ipaddress
 from datetime import datetime, timedelta, timezone
 from typing import Set, Optional, List, Dict, Any
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -18,7 +20,7 @@ from sqlalchemy.exc import IntegrityError
 from .config import settings, set_cached_active_domains
 from .database import get_db_context, SessionLocal
 from .mailcow_api import mailcow_api
-from .models import PostfixLog, RspamdLog, NetfilterLog, MessageCorrelation, DMARCSync, DomainDNSCheck, MailboxStatistics, AliasStatistics
+from .models import PostfixLog, RspamdLog, NetfilterLog, MessageCorrelation, DMARCSync, DomainDNSCheck, MailboxStatistics, AliasStatistics, MonitoredHost, BlacklistCheck
 from .correlation import detect_direction, parse_postfix_message
 from .routers.domains import check_domain_dns, save_dns_check_to_db
 from .services.dmarc_imap_service import sync_dmarc_reports_from_imap
@@ -46,7 +48,10 @@ job_status = {
     'update_geoip': {'last_run': None, 'status': 'idle', 'error': None},
     'dmarc_imap_sync': {'last_run': None, 'status': 'idle', 'error': None},
     'mailbox_stats': {'last_run': None, 'status': 'idle', 'error': None},
-    'alias_stats': {'last_run': None, 'status': 'idle', 'error': None}
+    'alias_stats': {'last_run': None, 'status': 'idle', 'error': None},
+    'blacklist_check': {'last_run': None, 'status': 'idle', 'error': None},
+    'send_weekly_summary': {'last_run': None, 'status': 'idle', 'error': None},
+    'sync_transports': {'last_run': None, 'status': 'idle', 'error': None},
 }
 
 def update_job_status(job_name: str, status: str, error: str = None):
@@ -355,7 +360,10 @@ async def fetch_and_store_rspamd():
                         required_score=log_entry.get('required_score', 15.0),
                         action=log_entry.get('action', 'unknown'),
                         symbols=log_entry.get('symbols', {}),
-                        is_spam=(log_entry.get('action') in ['reject', 'add header', 'rewrite subject']),
+                        is_spam=(
+                            log_entry.get('action') in ['reject', 'add header', 'rewrite subject'] or
+                            'SPAM_TRAP' in log_entry.get('symbols', {})
+                        ),
                         has_auth=('MAILCOW_AUTH' in log_entry.get('symbols', {})),
                         direction=direction,
                         ip=log_entry.get('ip'),
@@ -900,6 +908,7 @@ async def complete_incomplete_correlations():
             ).limit(100).all()
             
             if not incomplete:
+                update_job_status('complete_correlations', 'success')
                 return
             
             completed_count = 0
@@ -960,7 +969,8 @@ async def complete_incomplete_correlations():
             
             if completed_count > 0:
                 logger.info(f"[OK] Completed {completed_count} correlations")
-                update_job_status('complete_correlations', 'success')
+            
+            update_job_status('complete_correlations', 'success')
     
     except Exception as e:
         logger.error(f"[ERROR] Complete correlations error: {e}")
@@ -995,6 +1005,7 @@ async def expire_old_correlations():
             ).all()
             
             if not expired_correlations:
+                update_job_status('expire_correlations', 'success')
                 return
             
             expired_count = 0
@@ -1007,7 +1018,8 @@ async def expire_old_correlations():
             
             if expired_count > 0:
                 logger.info(f"[EXPIRED] Marked {expired_count} correlations as expired (older than {settings.max_correlation_age_minutes}min)")
-                update_job_status('expire_correlations', 'success')
+            
+            update_job_status('expire_correlations', 'success')
     
     except Exception as e:
         logger.error(f"[ERROR] Expire correlations error: {e}")
@@ -1052,6 +1064,7 @@ async def update_final_status_for_correlations():
             ).limit(500).all()  # Increased from 100 to 500
             
             if not correlations_to_check:
+                update_job_status('update_final_status', 'success')
                 return
             
             updated_count = 0
@@ -1118,7 +1131,8 @@ async def update_final_status_for_correlations():
             
             if updated_count > 0:
                 logger.info(f"[STATUS] Updated final_status for {updated_count} correlations")
-                update_job_status('update_final_status', 'success')
+            
+            update_job_status('update_final_status', 'success')
     
     except Exception as e:
         logger.error(f"[ERROR] Update final status error: {e}")
@@ -1149,6 +1163,259 @@ async def update_geoip_database():
     except Exception as e:
         logger.error(f"GeoIP update failed: {e}")
         update_job_status('update_geoip', 'failed', str(e))
+
+
+async def check_monitored_hosts_job(force: bool = False, send_notification: bool = True):
+    """
+    Background job: Check all monitored hosts against DNS blacklists
+    Sends aggregated email notification if any host is listed (and send_notification=True)
+    Args:
+        force: If True, bypass cache and force fresh check
+        send_notification: If True, send email on failure. Defaults to True.
+    """
+    update_job_status('blacklist_check', 'running')
+    
+    try:
+        from .services.blacklist_service import (
+            get_blacklist_check_results, 
+            get_listed_blacklists, 
+            get_cached_blacklist_check,
+            start_batch_scan,
+            end_batch_scan,
+            update_batch_status,
+            mark_host_as_processed_batch,
+            IGNORED_NOTIFICATION_BLACKLISTS
+        )
+        from .services.smtp_service import send_notification_email, get_notification_email
+        from .routers.domains import get_cached_server_ip
+        import dns.asyncresolver
+        
+        logger.info(f"Starting blacklist check job (send_notification={send_notification})...")
+        
+        # Get all monitored hosts and detach fields to avoid DetachedInstanceError in async loop
+        monitored_hosts = []
+        with get_db_context() as db:
+            db_hosts = db.query(MonitoredHost).filter(MonitoredHost.active == True).all()
+            for h in db_hosts:
+                monitored_hosts.append({
+                    'hostname': h.hostname,
+                    'source': h.source
+                })
+        
+        # If no hosts, try to initialize with local IP
+        if not monitored_hosts:
+            server_ip = get_cached_server_ip()
+            if server_ip:
+                with get_db_context() as db:
+                    new_host = MonitoredHost(hostname=server_ip, source="system", active=True, last_seen=datetime.utcnow())
+                    db.add(new_host)
+                    db.commit()
+                    # Add to our local list
+                    monitored_hosts.append({
+                        'hostname': server_ip,
+                        'source': "system"
+                    })
+        
+        if not monitored_hosts:
+            logger.warning("Cannot check blacklists: No monitored hosts available")
+            update_job_status('blacklist_check', 'failed', 'No monitored hosts available')
+            return
+
+        listed_hosts = []
+        total_checks = 0
+
+        # Start Batch Session
+        start_batch_scan(len(monitored_hosts))
+        
+        try:
+            for i, host in enumerate(monitored_hosts):
+                hostname = host['hostname']
+                source = host['source']
+                
+                logger.info(f"Processing host {i+1}/{len(monitored_hosts)}: {hostname} (Source: {source})")
+                target_ip = hostname
+                # Simple IP validation and resolution if needed
+                if not re.match(r"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$", target_ip):
+                    try:
+                        resolver = dns.asyncresolver.Resolver()
+                        resolver.nameservers = ['8.8.8.8', '1.1.1.1']
+                        answers = await resolver.resolve(target_ip, 'A')
+                        if answers:
+                            resolved_ip = str(answers[0])
+                            logger.info(f"Resolved {target_ip} to {resolved_ip}")
+                            target_ip = resolved_ip
+                    except Exception as e:
+                        logger.warning(f"Could not resolve hostname {hostname}: {e}")
+                        continue
+
+                # Check if we have valid cached data (within 24h)
+                cached = get_cached_blacklist_check(target_ip)
+                if cached and not force:
+                    logger.info(f"Blacklist check for {hostname}: Using cached data")
+                    if cached.get('listed_count', 0) > 0:
+                         listed_hosts.append({
+                            'hostname': hostname,
+                            'ip': target_ip,
+                            'source': source,
+                            'results': cached
+                        })
+                    total_checks += 1
+                    mark_host_as_processed_batch()
+                    continue
+                
+                # Run fresh blacklist check
+                logger.info(f"Running fresh blacklist check for {target_ip}...")
+                results = await get_blacklist_check_results(force=True, ip=target_ip)
+                logger.info(f"Finished blacklist check for {target_ip}. Results: listed={results.get('listed_count')}")
+                total_checks += 1
+                
+                listed_cnt = results.get('listed_count', 0)
+                if listed_cnt > 0:
+                    listed_hosts.append({
+                        'hostname': hostname,
+                        'ip': target_ip,
+                        'source': source,
+                        'results': results
+                    })
+                
+                # Sleep between checks to avoid rate limits (if more to come)
+                if i < len(monitored_hosts) - 1:
+                    logger.info("Waiting 10s before next check...")
+                    update_batch_status(f"Cooldown 10s before checking {monitored_hosts[i+1]['hostname']}...")
+                    await asyncio.sleep(10)
+
+            logger.info(f"Blacklist check complete for {total_checks} hosts. {len(listed_hosts)} listed.")
+            
+            # Determine if we should alert
+            should_alert = False
+            if listed_hosts and send_notification:
+                # Check if any listed host has an ACTIONABLE blacklist (not in IGNORED_NOTIFICATION_BLACKLISTS)
+                for host_data in listed_hosts:
+                    results = host_data.get('results', {}).get('results', [])
+                    for res in results:
+                        if res.get('listed'):
+                            bl_name = res.get('name')
+                            if bl_name not in IGNORED_NOTIFICATION_BLACKLISTS:
+                                should_alert = True
+                                break
+                    if should_alert:
+                        break
+                
+                if not should_alert:
+                     logger.info("Hosts are listed, but only on ignored blacklists (e.g. UCEPROTECT). Suppressing notification.")
+
+            # Send notification if ANY server is listed AND notification is enabled AND should_alert is True
+            if listed_hosts and send_notification and should_alert:
+                # Get admin email for notification
+                blacklist_alert_email = settings.blacklist_alert_email if hasattr(settings, 'blacklist_alert_email') else None
+                notification_email = get_notification_email(blacklist_alert_email)
+                
+                logger.info(f"Found listed hosts. Attempting to send alert to: {notification_email} (Source: {blacklist_alert_email})")
+                
+                if notification_email:
+                    # Build aggregated email content
+                    subject = f"⚠️ ALERT: {len(listed_hosts)} Host(s) Listed on Blacklists"
+                    
+                    text_content = f"The following hosts have been detected on one or more blacklists:\n\n"
+                    
+                    html_rows = ""
+                    
+                    for host_data in listed_hosts:
+                        hostname = host_data['hostname']
+                        ip = host_data['ip']
+                        source = host_data.get('source', '')
+                        results = host_data['results']
+                        listed_count = results.get('listed_count', 0)
+                        total_bl = results.get('total_blacklists', 0)
+                        
+                        # Determine display name
+                        display_name = hostname
+                        extra_info = ""
+                        
+                        # If hostname matches IP, try to find a better name in source
+                        if hostname == ip:
+                            # Source format is often "type:fqdn"
+                            if ':' in source:
+                                _, fqdn = source.split(':', 1)
+                                if fqdn and fqdn != ip:
+                                    extra_info = f" ({fqdn})"
+                            elif source and source != 'system' and source != ip:
+                                extra_info = f" ({source})"
+                        else:
+                             if hostname != ip:
+                                extra_info = f" ({ip})"
+
+                        # Get specific blacklists
+                        listed_bls = [r for r in results.get('results', []) if r.get('listed')]
+                        bl_text_list = "\n".join([f"  - {bl['name']} ({bl['zone']})" for bl in listed_bls])
+                        
+                        text_content += f"Host: {display_name}{extra_info}\n"
+                        text_content += f"Listed on: {listed_count}/{total_bl} blacklists\n"
+                        text_content += f"Blacklists:\n{bl_text_list}\n\n"
+                        
+                        # HTML Row
+                        bl_html_list = "".join([f'<li><strong>{bl["name"]}</strong> - {bl["zone"]} (<a href="{bl.get("info_url", "#")}">lookup</a>)</li>' for bl in listed_bls])
+                        
+                        html_rows += f"""
+                        <div style="margin-bottom: 30px; border-bottom: 1px solid #eee; padding-bottom: 20px;">
+                            <h3 style="margin: 0 0 10px 0;">{display_name} <span style="font-weight: normal; font-size: 14px; color: #666;">{extra_info}</span></h3>
+                            <div style="background-color: #fef2f2; border: 1px solid #fee2e2; border-radius: 4px; padding: 10px; margin-bottom: 10px;">
+                                <strong style="color: #dc2626;">Listed on {listed_count} blacklist(s)</strong>
+                            </div>
+                            <ul style="margin-top: 5px;">
+                                {bl_html_list}
+                            </ul>
+                        </div>
+                        """
+
+                    text_content += "Action Required:\nPlease investigate and request removal from these blacklists to ensure email deliverability.\n\n"
+                    text_content += "This is an automated notification from mailcow Logs Viewer."
+                    
+                    html_content = f"""
+    <html>
+    <body style="font-family: Arial, sans-serif; padding: 20px; line-height: 1.5;">
+    <h2 style="color: #dc2626;">⚠️ Blacklist Alert</h2>
+    <p>The following hosts have been detected on blacklists:</p>
+
+    {html_rows}
+
+    <p style="color: #666; margin-top: 20px;">Please investigate and request removal from these blacklists to ensure email deliverability.</p>
+    <hr style="margin-top: 30px;">
+    <p style="color: #999; font-size: 12px;">This is an automated notification from mailcow Logs Viewer.</p>
+    </body>
+    </html>
+    """
+                    
+                    # Send notification
+                    logger.info("Calling send_notification_email...")
+                    sent = send_notification_email(notification_email, subject, text_content, html_content)
+                    if sent:
+                        logger.info(f"Blacklist alert sent to {notification_email}")
+                    else:
+                        logger.error(f"Failed to send blacklist alert to {notification_email}. Check SMTP settings.")
+                        # Try to debug more info if possible
+                        from .services.smtp_service import SmtpService
+                        svc = SmtpService()
+                        logger.warning(f"SMTP Configured: {svc.is_configured()}")
+                        logger.warning(f"SMTP Host: {svc.host}:{svc.port}, User: {svc.user}, From: {svc.from_address}")
+                else:
+                    logger.error("Blacklist alert: No notification email configured (both blacklist_alert_email and admin_email are missing)")
+            elif listed_hosts and not send_notification:
+                logger.info(f"Blacklist check completed with listed hosts ({len(listed_hosts)}), but notification is suppressed (by job param).")
+            
+            
+            update_job_status('blacklist_check', 'success')
+
+        finally:
+            end_batch_scan()
+        
+    except Exception as e:
+        logger.error(f"Blacklist check failed: {e}")
+        update_job_status('blacklist_check', 'failed', str(e))
+        try:
+            end_batch_scan()
+        except:
+            pass
 
 
 async def dmarc_imap_sync_job():
@@ -1242,7 +1509,8 @@ async def cleanup_old_logs():
             
             if total > 0:
                 logger.info(f"[CLEANUP] Cleaned up {total} old entries")
-                update_job_status('cleanup_logs', 'success')
+            
+            update_job_status('cleanup_logs', 'success')
     
     except Exception as e:
         logger.error(f"[ERROR] Cleanup error: {e}")
@@ -1382,7 +1650,7 @@ async def check_all_domains_dns_background():
 
 async def sync_local_domains():
     """
-    Sync local domains from Mailcow API
+    Sync local domains from mailcow API
     Runs every 6 hours
     """
 
@@ -1450,19 +1718,19 @@ def safe_float(value, default=0.0):
 
 async def update_mailbox_statistics():
     """
-    Fetch mailbox statistics from Mailcow API and update the database.
+    Fetch mailbox statistics from mailcow API and update the database.
     Runs every 5 minutes.
-    Also removes mailboxes that no longer exist in Mailcow.
+    Also removes mailboxes that no longer exist in mailcow.
     """
     update_job_status('mailbox_stats', 'running')
     logger.info("Starting mailbox statistics update...")
     
     try:
-        # Fetch mailboxes from Mailcow API
+        # Fetch mailboxes from mailcow API
         mailboxes = await mailcow_api.get_mailboxes()
         
         if not mailboxes:
-            logger.warning("No mailboxes retrieved from Mailcow API")
+            logger.warning("No mailboxes retrieved from mailcow API")
             update_job_status('mailbox_stats', 'success')
             return
         
@@ -1474,7 +1742,7 @@ async def update_mailbox_statistics():
             created = 0
             deleted = 0
             
-            # First, mark mailboxes that no longer exist in Mailcow as inactive
+            # First, mark mailboxes that no longer exist in mailcow as inactive
             db_mailboxes = db.query(MailboxStatistics).all()
             for db_mb in db_mailboxes:
                 if db_mb.username not in api_mailbox_usernames:
@@ -1500,11 +1768,17 @@ async def update_mailbox_statistics():
                     
                     # Prepare data - safely convert values
                     attributes = mb.get('attributes', {})
-                    rl_value_raw = mb.get('rl_value')
+                    # Handle Rate Limit (can be flat or nested unique to Mailcow version)
+                    rl_data = mb.get('rl')
+                    if isinstance(rl_data, dict):
+                        rl_value_raw = rl_data.get('value')
+                        rl_frame_raw = rl_data.get('frame')
+                    else:
+                        rl_value_raw = mb.get('rl_value')
+                        rl_frame_raw = mb.get('rl_frame')
+
                     rl_value = safe_int(rl_value_raw) if rl_value_raw not in (None, '', '-', '- ') else None
-                    rl_frame = mb.get('rl_frame')
-                    if rl_frame in ('', '-', '- '):
-                        rl_frame = None
+                    rl_frame = rl_frame_raw if rl_frame_raw not in (None, '', '-', '- ') else None
                     
                     if existing:
                         # Update existing record
@@ -1565,20 +1839,20 @@ async def update_mailbox_statistics():
 
 async def update_alias_statistics():
     """
-    Fetch aliases from Mailcow API and update the database.
+    Fetch aliases from mailcow API and update the database.
     Links aliases to their target mailboxes.
     Runs every 5 minutes.
-    Also removes aliases that no longer exist in Mailcow.
+    Also removes aliases that no longer exist in mailcow.
     """
     update_job_status('alias_stats', 'running')
     logger.info("Starting alias statistics update...")
     
     try:
-        # Fetch aliases from Mailcow API
+        # Fetch aliases from mailcow API
         aliases = await mailcow_api.get_aliases()
         
         if not aliases:
-            logger.warning("No aliases retrieved from Mailcow API")
+            logger.warning("No aliases retrieved from mailcow API")
             update_job_status('alias_stats', 'success')
             return
         
@@ -1590,7 +1864,7 @@ async def update_alias_statistics():
             created = 0
             deleted = 0
             
-            # First, mark aliases that no longer exist in Mailcow as inactive
+            # First, mark aliases that no longer exist in mailcow as inactive
             db_aliases = db.query(AliasStatistics).all()
             for db_alias in db_aliases:
                 if db_alias.alias_address not in api_alias_addresses:
@@ -1666,9 +1940,326 @@ async def update_alias_statistics():
         update_job_status('alias_stats', 'failed', str(e))
 
 
+
+# =============================================================================
+# MONITORED HOSTS SYNC
+# =============================================================================
+
+async def sync_transports_job():
+    """
+    Sync transports and relayhosts from mailcow to MonitoredHost table.
+    Runs every 6 hours.
+    """
+    update_job_status('sync_transports', 'running')
+    try:
+        if not settings.mailcow_api_key or not settings.mailcow_host:
+            logger.warning("mailcow API not configured, skipping transport sync")
+            update_job_status('sync_transports', 'failed', 'API not configured')
+            return
+
+        async with httpx.AsyncClient(verify=False, timeout=30) as client:
+            # 1. Fetch Transports
+            transports_data = []
+            try:
+                resp = await client.get(
+                    f"{settings.mailcow_host}/api/v1/get/transport/all",
+                    headers={"X-API-Key": settings.mailcow_api_key}
+                )
+                if resp.status_code == 200:
+                    transports_data = resp.json()
+            except Exception as e:
+                logger.error(f"Failed to fetch transports: {e}")
+
+            # 2. Fetch Relay Hosts
+            relayhosts_data = []
+            try:
+                resp = await client.get(
+                    f"{settings.mailcow_host}/api/v1/get/relayhost/all",
+                    headers={"X-API-Key": settings.mailcow_api_key}
+                )
+                if resp.status_code == 200:
+                    relayhosts_data = resp.json()
+            except Exception as e:
+                logger.error(f"Failed to fetch relayhosts: {e}")
+
+        # Process and Deduplicate
+        hosts_to_monitor = {}  # hostname -> source
+
+        # Process Transports
+        for t in transports_data:
+            if str(t.get('active', '0')) == '1':
+                nexthop = t.get('nexthop', '').strip()
+                if nexthop:
+                    # Remove brackets if present [host]
+                    nexthop = nexthop.strip('[]')
+                    # Remove port if present host:port
+                    if ':' in nexthop:
+                        nexthop = nexthop.split(':')[0]
+                    if nexthop:
+                        hosts_to_monitor[nexthop] = 'transport'
+
+        # Process Relay Hosts
+        for r in relayhosts_data:
+            if str(r.get('active', '0')) == '1':
+                hostname = r.get('hostname', '').strip()
+                if hostname:
+                    # Remove brackets if present [host]
+                    hostname = hostname.strip('[]')
+                    # Remove port if present host:port
+                    if ':' in hostname:
+                        hostname = hostname.split(':')[0]
+                    if hostname:
+                        hosts_to_monitor[hostname] = 'relayhost'
+        
+        # Also ensure local IP is monitored (source='system')
+        from .routers.domains import get_cached_server_ip
+        local_ip = get_cached_server_ip()
+        if local_ip:
+            if local_ip not in hosts_to_monitor:
+                hosts_to_monitor[local_ip] = 'system'
+
+        # Update DB
+        with get_db_context() as db:
+            # Get existing hosts
+            existing_hosts = {h.hostname: h for h in db.query(MonitoredHost).all()}
+            
+            # Update/Add hosts
+            added_count = 0
+            updated_count = 0
+            
+            for hostname, source in hosts_to_monitor.items():
+                if hostname in existing_hosts:
+                    host = existing_hosts[hostname]
+                    if not host.active or host.source != source:
+                        host.active = True
+                        host.source = source
+                        updated_count += 1
+                else:
+                    new_host = MonitoredHost(
+                        hostname=hostname,
+                        source=source,
+                        active=True,
+                        last_seen=datetime.utcnow()
+                    )
+                    db.add(new_host)
+                    added_count += 1
+            
+            # Deactivate missing hosts (optional: or delete them? disabling is safer)
+            deactivated_count = 0
+            for hostname, host in existing_hosts.items():
+                if hostname not in hosts_to_monitor and host.active:
+                    host.active = False
+                    deactivated_count += 1
+            
+            db.commit()
+            
+            summary = f"Synced monitored hosts: {added_count} added, {updated_count} updated, {deactivated_count} deactivated"
+            logger.info(summary)
+            update_job_status('sync_transports', 'success')
+            
+    except Exception as e:
+        logger.error(f"Sync transports failed: {e}")
+        update_job_status('sync_transports', 'failed', str(e))
+
+
+
 # =============================================================================
 # SCHEDULER SETUP
 # =============================================================================
+
+
+# =============================================================================
+# MONITORED HOSTS SYNC
+# =============================================================================
+
+async def sync_transports_job():
+    """
+    Sync transports and relayhosts from mailcow to MonitoredHost table.
+    Resolves FQDNs to IPs and skips private/internal IPs.
+    Stores Original FQDN in source field as 'transport:fqdn' or 'relayhost:fqdn'.
+    Runs every 6 hours.
+    """
+    update_job_status('sync_transports', 'running')
+    try:
+        if not settings.mailcow_api_key or not settings.mailcow_url:
+            logger.warning("mailcow API not configured, skipping transport sync")
+            update_job_status('sync_transports', 'failed', 'API not configured')
+            return
+
+        async with httpx.AsyncClient(verify=False, timeout=30) as client:
+            # 1. Fetch Transports
+            transports_data = []
+            try:
+                resp = await client.get(
+                    f"{settings.mailcow_url}/api/v1/get/transport/all",
+                    headers={"X-API-Key": settings.mailcow_api_key}
+                )
+                if resp.status_code == 200:
+                    transports_data = resp.json()
+            except Exception as e:
+                logger.error(f"Failed to fetch transports: {e}")
+
+            # 2. Fetch Relay Hosts
+            relayhosts_data = []
+            try:
+                resp = await client.get(
+                    f"{settings.mailcow_url}/api/v1/get/relayhost/all",
+                    headers={"X-API-Key": settings.mailcow_api_key}
+                )
+                if resp.status_code == 200:
+                    relayhosts_data = resp.json()
+            except Exception as e:
+                logger.error(f"Failed to fetch relayhosts: {e}")
+
+        # Process and Deduplicate
+        hosts_to_monitor = {}  # ip -> source_string
+
+        def resolve_and_validate(host_input: str, source_type: str) -> Optional[tuple]:
+            """Resolve host to IP, validate public, return (ip, full_source_string)"""
+            host_clean = host_input.strip().lower()
+            # Remove brackets/ports
+            host_clean = host_clean.strip('[]')
+            if ':' in host_clean:
+                host_clean = host_clean.split(':')[0]
+            
+            if not host_clean:
+                return None
+                
+            try:
+                # Is it already an IP?
+                try:
+                    ip_obj = ipaddress.ip_address(host_clean)
+                    ip_str = str(ip_obj)
+                    fqdn = None # IP was provided directly
+                except ValueError:
+                    # It's a domain, resolve it
+                    try:
+                        # Use synchronous socket gethostbyname (simple) or async resolver
+                        # Since we are inside a job, blocking a bit is okay-ish but better use async logic if possible
+                        # but simple socket.gethostbyname is reliable usually.
+                        ip_str = socket.gethostbyname(host_clean)
+                        ip_obj = ipaddress.ip_address(ip_str)
+                        fqdn = host_clean
+                    except Exception:
+                        logger.warning(f"Could not resolve host: {host_clean}")
+                        return None
+                
+                # Check for private IP
+                if ip_obj.is_private or ip_obj.is_loopback:
+                    logger.info(f"Skipping private/loopback IP: {ip_str} ({host_clean})")
+                    return None
+                
+                # Construct source string
+                # If we have an FQDN, store it: "transport:example.com"
+                # If we just have IP, store: "transport"
+                if fqdn:
+                    final_source = f"{source_type}:{fqdn}"
+                else:
+                    final_source = source_type
+                    
+                return (ip_str, final_source)
+                
+            except Exception as e:
+                logger.error(f"Error validating host {host_clean}: {e}")
+                return None
+
+        # Process Transports
+        for t in transports_data:
+            if str(t.get('active', '0')) == '1':
+                nexthop = t.get('nexthop', '').strip()
+                result = resolve_and_validate(nexthop, 'transport')
+                if result:
+                    hosts_to_monitor[result[0]] = result[1]
+
+        # Process Relay Hosts
+        for r in relayhosts_data:
+            if str(r.get('active', '0')) == '1':
+                hostname = r.get('hostname', '').strip()
+                result = resolve_and_validate(hostname, 'relayhost')
+                if result:
+                    hosts_to_monitor[result[0]] = result[1]
+        
+        # Also ensure local IP is monitored
+        from .routers.domains import get_cached_server_ip
+        local_ip = get_cached_server_ip()
+        if local_ip:
+            if local_ip not in hosts_to_monitor:
+                hosts_to_monitor[local_ip] = 'system'
+            # Update local IP source to 'system' regardless if it was found elsewhere, 
+            # or maybe prefer 'system' label? User likes 'system' label.
+            # But if system IP matches a transport IP, we might want to know it's also a transport?
+            # Let's keep 'system' priority if it's the main server.
+            hosts_to_monitor[local_ip] = 'system'
+
+        # Update DB
+        with get_db_context() as db:
+            existing_hosts = {h.hostname: h for h in db.query(MonitoredHost).all()}
+            
+            added_count = 0
+            updated_count = 0
+            
+            for ip_addr, source in hosts_to_monitor.items():
+                if ip_addr in existing_hosts:
+                    host = existing_hosts[ip_addr]
+                    if not host.active or host.source != source:
+                        host.active = True
+                        host.source = source
+                        updated_count += 1
+                else:
+                    new_host = MonitoredHost(
+                        hostname=ip_addr, # Store IP here now!
+                        source=source,
+                        active=True,
+                        last_seen=datetime.utcnow()
+                    )
+                    db.add(new_host)
+                    added_count += 1
+            
+            deactivated_count = 0
+            for hostname, host in existing_hosts.items():
+                if hostname not in hosts_to_monitor and host.active:
+                    host.active = False
+                    deactivated_count += 1
+            
+            db.commit()
+            
+            summary = f"Synced monitored hosts: {added_count} added, {updated_count} updated, {deactivated_count} deactivated (filtered private IPs)"
+            logger.info(summary)
+            summary = f"Synced monitored hosts: {added_count} added, {updated_count} updated, {deactivated_count} deactivated (filtered private IPs)"
+            logger.info(summary)
+            update_job_status('sync_transports', 'success')
+
+            # Trigger immediate blacklist check (smart mode: checks cache headers/validity inside)
+            # This ensures if we added new hosts, they get checked immediately
+            logger.info("Triggering post-sync blacklist check...")
+            await check_monitored_hosts_job(force=False, send_notification=False)
+            
+    except Exception as e:
+        logger.error(f"Sync transports failed: {e}")
+        update_job_status('sync_transports', 'failed', str(e))
+
+
+async def send_weekly_summary_email_job():
+    """
+    Background job to send weekly summary email
+    """
+    from .routers.reporting import generate_and_send_email
+
+    update_job_status('send_weekly_summary', 'running')
+    try:
+        if not settings.enable_weekly_summary:
+            # logger.info("Weekly summary report is disabled, skipping.")
+            update_job_status('send_weekly_summary', 'skipped')
+            return
+
+        # Execute
+        await generate_and_send_email(db=None) 
+        update_job_status('send_weekly_summary', 'success')
+        
+    except Exception as e:
+        logger.error(f"Weekly summary job failed: {e}")
+        update_job_status('send_weekly_summary', 'failed', str(e))
+
 
 def start_scheduler():
     """Start the background scheduler"""
@@ -1681,7 +2272,7 @@ def start_scheduler():
             fetch_all_logs,
             trigger=IntervalTrigger(seconds=settings.fetch_interval),
             id='fetch_logs',
-            name='Fetch Mailcow Logs',
+            name='Fetch mailcow Logs',
             replace_existing=True,
             max_instances=1
         )
@@ -1864,6 +2455,55 @@ def start_scheduler():
         )
         logger.info("Scheduled alias statistics job (interval: 5 minutes)")
 
+        # Job 15: Blacklist Check (daily at 5 AM)
+        # Job 15: Blacklist Check (daily at 5 AM)
+        scheduler.add_job(
+            check_monitored_hosts_job,
+            trigger=CronTrigger(hour=5, minute=0),
+            id='blacklist_check',
+            name='IP Blacklist Check (Daily)',
+            replace_existing=True,
+            max_instances=1
+        )
+        
+        # Run check on startup (after 15 seconds)
+        # This checks cache age (24h) internally, so it efficiently fulfills "check if >24h old"
+        scheduler.add_job(
+            check_monitored_hosts_job,
+            'date',
+            run_date=datetime.now(timezone.utc) + timedelta(seconds=15),
+            id='blacklist_check_startup',
+            name='IP Blacklist Check (Startup)'
+        )
+
+
+        # Job 14: Sync Transports (every 6 hours)
+        scheduler.add_job(
+            sync_transports_job,
+            trigger=IntervalTrigger(hours=6),
+            id='sync_transports',
+            name='Sync Transports & Relayhosts',
+            replace_existing=True
+        )
+
+        # Run sync on startup (after 30 seconds)
+        scheduler.add_job(
+            sync_transports_job,
+            'date',
+            run_date=datetime.now(timezone.utc) + timedelta(seconds=30),
+            id='sync_transports_startup',
+            name='Sync Transports & Relayhosts (Startup)'
+        )
+
+        # Job 15: Weekly Summary Email (Every Monday at 9:00 AM)
+        scheduler.add_job(
+            send_weekly_summary_email_job,
+            trigger=CronTrigger(day_of_week='mon', hour=9, minute=0),
+            id='send_weekly_summary',
+            name='Send Weekly Summary',
+            replace_existing=True
+        )
+
         scheduler.start()
 
         logger.info("[OK] Scheduler started")
@@ -1875,6 +2515,8 @@ def start_scheduler():
         logger.info(f"   [VERSION] Check app version updates: every 6 hours")
         logger.info(f"   [DNS] Check all domains DNS: every 6 hours")
         logger.info("   [GEOIP] Update GeoIP database: weekly (Sunday 3 AM)")
+        logger.info("   [BLACKLIST] Check IP blacklists: daily at 5:00 AM")
+        logger.info("   [REPORT] Weekly Summary: Monday at 9:00 AM")
 
         
         if settings.dmarc_imap_enabled:

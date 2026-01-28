@@ -1,7 +1,7 @@
 # Domains Page - User Guide
 
 ## Overview
-The Domains page displays all email domains configured in your Mailcow server, along with comprehensive DNS validation and domain statistics.
+The Domains page displays all email domains configured in your mailcow server, along with comprehensive DNS validation and domain statistics.
 
 ## Key Features
 
@@ -25,7 +25,7 @@ The system automatically validates three critical DNS records:
 
 #### DKIM (DomainKeys Identified Mail)
 - **Purpose**: Adds a digital signature to outgoing emails
-- **Validation**: Compares your DNS record with Mailcow's configured DKIM key
+- **Validation**: Compares your DNS record with mailcow's configured DKIM key
 - **Status**: Same indicators as SPF
 
 #### DMARC (Domain-based Message Authentication)

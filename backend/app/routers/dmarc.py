@@ -29,17 +29,6 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 # =============================================================================
-# CACHING SYSTEM
-# =============================================================================
-
-# =============================================================================
-# CACHING SYSTEM (Delegated to services.dmarc_cache)
-# =============================================================================
-
-# Cache functions imported from ..services.dmarc_cache
-
-
-# =============================================================================
 # DOMAINS LIST
 # =============================================================================
 
@@ -55,6 +44,144 @@ async def clear_cache(
         return {"status": "success", "message": "Cache cleared"}
     except Exception as e:
         logger.error(f"Error clearing DMARC cache: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# =============================================================================
+# REPORTS MANAGEMENT
+# =============================================================================
+
+@router.get("/dmarc/reports/config")
+async def get_reports_management_config():
+    """
+    Get reports management configuration
+    """
+    return {
+        "allow_delete": settings.dmarc_allow_report_delete
+    }
+
+
+@router.get("/dmarc/reports/all")
+async def get_all_reports(
+    db: Session = Depends(get_db)
+):
+    """
+    Get all DMARC and TLS reports for management view
+    """
+    try:
+        reports = []
+        
+        # Get DMARC reports
+        dmarc_reports = db.query(DMARCReport).order_by(DMARCReport.created_at.desc()).all()
+        
+        for report in dmarc_reports:
+            # Count records for this report
+            record_count = db.query(func.count(DMARCRecord.id)).filter(
+                DMARCRecord.dmarc_report_id == report.id
+            ).scalar() or 0
+            
+            reports.append({
+                "id": report.id,
+                "type": "dmarc",
+                "domain": report.domain,
+                "org_name": report.org_name,
+                "begin_date": report.begin_date,
+                "end_date": report.end_date,
+                "record_count": record_count,
+                "created_at": report.created_at.isoformat() if report.created_at else None,
+                "report_id": report.report_id
+            })
+        
+        # Get TLS reports
+        tls_reports = db.query(TLSReport).order_by(TLSReport.created_at.desc()).all()
+        
+        for report in tls_reports:
+            # Count policies for this report
+            policy_count = db.query(func.count(TLSReportPolicy.id)).filter(
+                TLSReportPolicy.tls_report_id == report.id
+            ).scalar() or 0
+            
+            reports.append({
+                "id": report.id,
+                "type": "tls",
+                "domain": report.policy_domain,
+                "org_name": report.organization_name,
+                "begin_date": int(report.start_datetime.timestamp()) if report.start_datetime else None,
+                "end_date": int(report.end_datetime.timestamp()) if report.end_datetime else None,
+                "record_count": policy_count,
+                "created_at": report.created_at.isoformat() if report.created_at else None,
+                "report_id": report.report_id
+            })
+        
+        # Sort all reports by created_at (newest first)
+        reports.sort(key=lambda x: x["created_at"] or "", reverse=True)
+        
+        return {
+            "reports": reports,
+            "total": len(reports),
+            "allow_delete": settings.dmarc_allow_report_delete
+        }
+        
+    except Exception as e:
+        logger.error(f"Error fetching all reports: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/dmarc/reports/{report_type}/{report_id}")
+async def delete_report(
+    report_type: str,
+    report_id: int,
+    db: Session = Depends(get_db)
+):
+    """
+    Delete a specific DMARC or TLS report
+    """
+    # Check if deletion is allowed
+    if not settings.dmarc_allow_report_delete:
+        raise HTTPException(
+            status_code=403, 
+            detail="Report deletion is disabled. Set DMARC_ALLOW_REPORT_DELETE=true to enable."
+        )
+    
+    try:
+        if report_type == "dmarc":
+            # Delete associated records first
+            db.query(DMARCRecord).filter(
+                DMARCRecord.dmarc_report_id == report_id
+            ).delete()
+            
+            # Delete the report
+            result = db.query(DMARCReport).filter(DMARCReport.id == report_id).delete()
+            
+            if result == 0:
+                raise HTTPException(status_code=404, detail="Report not found")
+                
+        elif report_type == "tls":
+            # Delete associated policies first
+            db.query(TLSReportPolicy).filter(
+                TLSReportPolicy.tls_report_id == report_id
+            ).delete()
+            
+            # Delete the report
+            result = db.query(TLSReport).filter(TLSReport.id == report_id).delete()
+            
+            if result == 0:
+                raise HTTPException(status_code=404, detail="Report not found")
+        else:
+            raise HTTPException(status_code=400, detail="Invalid report type. Use 'dmarc' or 'tls'.")
+        
+        db.commit()
+        
+        # Clear cache
+        clear_dmarc_cache(db)
+        
+        return {"status": "success", "message": f"{report_type.upper()} report deleted"}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error deleting report: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

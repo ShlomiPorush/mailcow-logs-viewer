@@ -43,7 +43,7 @@ Each row provides an immediate snapshot:
 Clicking a row reveals comprehensive details split into three sections:
 
 #### 1. Mailbox Status & Configuration
-Synced directly from Mailcow (every 5 minutes):
+Synced directly from mailcow (every 5 minutes):
 *   **Quota**: Usage vs. Limit (e.g., 10.4 KB / 1.0 GB).
 *   **Messages**: Current count of messages stored in the mailbox.
 *   **Timestamps**: Created date, Modified date, and Last Login times for IMAP/SMTP/POP3.
@@ -75,7 +75,7 @@ A table listing all aliases associated with the mailbox, breaking down traffic p
 
 ### How is data counted?
 *   **Traffic Data** (Sent, Received, Failed, etc.): Aggregated locally from the **MessageCorrelation** table. This means it reflects logs processed by this viewer, offering historical data even if logs are rotated on the mail server. It is strictly tied to the selected **Date Range**.
-*   **Mailbox Status** (Quota, Permissions, Login Times): Fetched directly from the **Mailcow API** via a background job running every 5 minutes. This data reflects the *current state* on the server.
+*   **Mailbox Status** (Quota, Permissions, Login Times): Fetched directly from the **mailcow API** via a background job running every 5 minutes. This data reflects the *current state* on the server.
 
 ### "Internal" vs "Sent"
 *   **Sent**: Includes all outbound traffic.

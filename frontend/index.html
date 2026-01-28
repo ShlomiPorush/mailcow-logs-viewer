@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Mailcow Logs Viewer</title>
+    <title>mailcow Logs Viewer</title>
 
     <!-- Favicon -->
     <link rel="icon" type="image/svg+xml"
@@ -442,10 +442,10 @@
                                 </path>
                             </svg>
                             <h1 id="app-title" class="text-lg sm:text-xl font-bold text-gray-900 dark:text-white">
-                                Mailcow
+                                mailcow
                                 Logs Viewer</h1>
                         </a>
-                        <span id="mailcow-connection-indicator" class="ml-2 hidden" title="Mailcow connection status">
+                        <span id="mailcow-connection-indicator" class="ml-2 hidden" title="mailcow connection status">
                             <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
                                 <path fill-rule="evenodd"
                                     d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
@@ -810,6 +810,29 @@
                             </div>
                         </div>
 
+                        <!-- Blacklist Status -->
+                        <div class="bg-white dark:bg-gray-800 rounded-lg shadow dark:shadow-gray-900/30">
+                            <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+                                <h3 class="text-md font-semibold text-gray-900 dark:text-white flex items-center gap-2">
+                                    <svg class="w-4 h-4 text-blue-500" fill="none" stroke="currentColor"
+                                        viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                            d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z">
+                                        </path>
+                                    </svg>
+                                    Blacklist Status
+                                </h3>
+                            </div>
+                            <div id="dashboard-blacklist-summary" class="p-6">
+                                <div class="text-center py-4">
+                                    <div class="loading mx-auto mb-2"
+                                        style="width: 24px; height: 24px; border-width: 2px;">
+                                    </div>
+                                    <p class="text-xs text-gray-500 dark:text-gray-400">Loading...</p>
+                                </div>
+                            </div>
+                        </div>
+
                         <!-- Containers Summary -->
                         <div class="bg-white dark:bg-gray-800 rounded-lg shadow dark:shadow-gray-900/30">
                             <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
@@ -1061,7 +1084,7 @@
                     <!-- System Info -->
                     <div class="bg-white dark:bg-gray-800 rounded-lg shadow dark:shadow-gray-900/30">
                         <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
-                            <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Mailcow System</h2>
+                            <h2 class="text-lg font-semibold text-gray-900 dark:text-white">mailcow System</h2>
                         </div>
                         <div id="status-system" class="p-6">
                             <div class="text-center py-8">
@@ -1085,7 +1108,40 @@
                     </div>
                 </div>
 
-                <!-- Row 2: Import Status -->
+                <!-- Row 2: IP Blacklist Monitor -->
+                <div class="mb-6">
+                    <div class="bg-white dark:bg-gray-800 rounded-lg shadow dark:shadow-gray-900/30">
+                        <div
+                            class="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center">
+                            <h2 class="text-lg font-semibold text-gray-900 dark:text-white flex items-center gap-2">
+                                <svg class="w-5 h-5 text-blue-500" fill="none" stroke="currentColor"
+                                    viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                        d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z">
+                                    </path>
+                                </svg>
+                                IP Blacklist Monitor
+                            </h2>
+                            <button onclick="checkBlacklists(true)" id="blacklist-check-btn"
+                                class="px-3 py-1.5 text-sm bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 rounded-lg hover:bg-blue-200 dark:hover:bg-blue-800/50 transition flex items-center gap-1">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                        d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15">
+                                    </path>
+                                </svg>
+                                Check Now
+                            </button>
+                        </div>
+                        <div id="status-blacklist" class="p-6">
+                            <div class="text-center py-8">
+                                <div class="loading mx-auto mb-4"></div>
+                                <p class="text-gray-500 dark:text-gray-400">Loading...</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Row 3: Import Status -->
                 <div class="mb-6">
                     <div class="bg-white dark:bg-gray-800 rounded-lg shadow dark:shadow-gray-900/30">
                         <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
@@ -1131,8 +1187,10 @@
 
                 <!-- Row 4: Background Jobs -->
                 <div class="mb-6">
-                    <div class="bg-white dark:bg-gray-800 rounded-lg shadow dark:shadow-gray-900/30">
-                        <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+                    <details
+                        class="group bg-white dark:bg-gray-800 rounded-lg shadow dark:shadow-gray-900/30 overflow-hidden">
+                        <summary
+                            class="list-none px-6 py-4 border-b border-gray-200 dark:border-gray-700 cursor-pointer flex items-center justify-between hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors select-none">
                             <h2 class="text-lg font-semibold text-gray-900 dark:text-white flex items-center gap-2">
                                 <svg class="w-5 h-5 text-orange-500" fill="none" stroke="currentColor"
                                     viewBox="0 0 24 24">
@@ -1141,14 +1199,19 @@
                                 </svg>
                                 Background Jobs
                             </h2>
-                        </div>
+                            <svg class="w-5 h-5 text-gray-400 transition-transform duration-200 group-open:rotate-180"
+                                fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                    d="M19 9l-7 7-7-7"></path>
+                            </svg>
+                        </summary>
                         <div id="status-jobs" class="p-6">
                             <div class="text-center py-8">
                                 <div class="loading mx-auto mb-4"></div>
                                 <p class="text-gray-500 dark:text-gray-400">Loading...</p>
                             </div>
                         </div>
-                    </div>
+                    </details>
                 </div>
             </div>
 
@@ -1272,6 +1335,11 @@
                                 class="block md:table-row-group divide-y divide-gray-200 dark:divide-gray-700">
                             </tbody>
                         </table>
+                    </div>
+
+                    <!-- Manage Reports Link -->
+                    <div id="dmarc-manage-reports-link" class="hidden mt-4 text-center text-sm">
+                        <!-- Populated by JavaScript -->
                     </div>
                 </div>
 
@@ -1750,7 +1818,7 @@
                 <div
                     class="flex flex-col sm:flex-row justify-between items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
                     <div class="flex flex-wrap items-center gap-2 justify-center sm:justify-start">
-                        <span id="app-name-footer">Mailcow Logs Viewer</span>
+                        <span id="app-name-footer">mailcow Logs Viewer</span>
                         <span class="text-gray-400 dark:text-gray-500">•</span>
                         <span id="app-version-footer">v1.4.2</span>
                         <button id="update-badge" onclick="switchTab('settings')"
@@ -1778,7 +1846,7 @@
 
     <!-- JavaScript -->
     <script src="/static/router.js"></script>
-    <script src="/static/app.js"></script>
+    <script src="/static/app.js?v=7"></script>
 
     <!-- DMARC Sync History Modal -->
     <div id="dmarc-sync-history-modal"
@@ -1800,6 +1868,35 @@
                     <div class="text-center py-12">
                         <div class="loading mx-auto mb-4"></div>
                         <p class="text-gray-500 dark:text-gray-400">Loading sync history...</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- DMARC Reports Management Modal -->
+    <div id="dmarc-reports-management-modal"
+        class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+        <div class="bg-white dark:bg-gray-800 rounded-lg max-w-6xl w-full max-h-[85vh] flex flex-col">
+            <div
+                class="flex-shrink-0 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-6 py-4 flex justify-between items-center rounded-t-lg">
+                <div>
+                    <h3 class="text-lg font-semibold text-gray-900 dark:text-white">Manage Reports</h3>
+                    <p class="text-sm text-gray-500 dark:text-gray-400">View and manage all DMARC and TLS reports</p>
+                </div>
+                <button onclick="closeReportsManagementModal()"
+                    class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12">
+                        </path>
+                    </svg>
+                </button>
+            </div>
+            <div class="flex-1 overflow-y-auto p-6">
+                <div id="dmarc-reports-management-content">
+                    <div class="text-center py-12">
+                        <div class="loading mx-auto mb-4"></div>
+                        <p class="text-gray-500 dark:text-gray-400">Loading reports...</p>
                     </div>
                 </div>
             </div>

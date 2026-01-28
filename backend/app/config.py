@@ -13,8 +13,8 @@ _cached_active_domains: Optional[List[str]] = None
 class Settings(BaseSettings):
     """Application settings"""
     
-    mailcow_url: str = Field(..., description="Mailcow instance URL")
-    mailcow_api_key: str = Field(..., description="Mailcow API key")
+    mailcow_url: str = Field(..., description="mailcow instance URL")
+    mailcow_api_key: str = Field(..., description="mailcow API key")
     mailcow_api_timeout: int = Field(default=30, description="API request timeout in seconds")
     
     # Blacklist Configuration
@@ -66,7 +66,7 @@ class Settings(BaseSettings):
         default="UTC",
         description="Timezone"
     )
-    app_title: str = Field(default="Mailcow Logs Viewer", description="Application title")
+    app_title: str = Field(default="mailcow Logs Viewer", description="Application title")
     app_logo_url: str = Field(default="", description="Application logo URL (optional)")
     
     # Advanced Configuration
@@ -99,6 +99,12 @@ class Settings(BaseSettings):
         default=True,
         env='DMARC_MANUAL_UPLOAD_ENABLED',
         description='Allow manual upload of DMARC reports via UI'
+    )
+
+    dmarc_allow_report_delete: bool = Field(
+        default=False,
+        env='DMARC_ALLOW_REPORT_DELETE',
+        description='Allow deleting DMARC/TLS reports from the UI'
     )
 
     # DMARC IMAP Configuration
@@ -236,6 +242,20 @@ class Settings(BaseSettings):
         description='Administrator email for system notifications'
     )
 
+    # Blacklist Alert Email
+    blacklist_alert_email: Optional[str] = Field(
+        default=None,
+        env='BLACKLIST_ALERT_EMAIL',
+        description='Email address for blacklist alerts (defaults to ADMIN_EMAIL if not set)'
+    )
+
+    # Weekly Summary Report
+    enable_weekly_summary: bool = Field(
+        default=True,
+        env='ENABLE_WEEKLY_SUMMARY',
+        description='Enable weekly summary email report'
+    )
+
     @field_validator('smtp_port', 'dmarc_imap_port', 'dmarc_imap_interval', mode='before')
     @classmethod
     def empty_str_to_none(cls, v):
@@ -261,7 +281,7 @@ class Settings(BaseSettings):
     
     @property
     def local_domains_list(self) -> List[str]:
-        """Get active domains from Mailcow API cache"""
+        """Get active domains from mailcow API cache"""
         global _cached_active_domains
         if _cached_active_domains is None:
             logger.warning("Local domains cache not yet populated")
@@ -352,7 +372,7 @@ def set_cached_active_domains(domains: List[str]) -> None:
     """Set the cached active domains list"""
     global _cached_active_domains
     _cached_active_domains = domains
-    logger.info(f"Cached {len(domains)} active domains from Mailcow API")
+    logger.info(f"Cached {len(domains)} active domains from mailcow API")
 
 
 def get_cached_active_domains() -> Optional[List[str]]:

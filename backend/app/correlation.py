@@ -166,10 +166,23 @@ def parse_postfix_message(message: str) -> Dict[str, Any]:
     if dsn_match:
         result['dsn'] = dsn_match.group(1)
     
+    # Extract orig_to (original recipient)
+    orig_to_match = re.search(r'orig_to=<([^>]*)>', message)
+    if orig_to_match:
+        result['orig_to'] = orig_to_match.group(1) if orig_to_match.group(1) else None
+    
     # Extract status
     status_match = re.search(r'status=(\w+)', message)
     if status_match:
         result['status'] = status_match.group(1)
+        
+        # Check for rspamd-pipe-spam delivery
+        # Example: status=sent (delivered to command: /usr/local/bin/rspamd-pipe-spam)
+        if result['status'] == 'sent' and 'rspamd-pipe-spam' in message:
+            result['status'] = 'spam'
+            # If we have orig_to, use it as the recipient because the actual to= is the spam alias
+            if result.get('orig_to'):
+                result['recipient'] = result['orig_to']
     
     return result
 
@@ -397,6 +410,12 @@ def create_correlation_with_all_data(
                 final_status = plog.status
             elif plog.status == 'sent' and not final_status:
                 final_status = 'delivered'
+            elif plog.status == 'spam':
+                final_status = 'spam'
+                # Mark Rspamd log as spam as well (so frontend shows SPAM badge)
+                if rspamd_log:
+                    rspamd_log.is_spam = True
+
     
     # If no status from Postfix, use Rspamd
     if not final_status:
@@ -574,6 +593,11 @@ def update_correlation_with_postfix_log(
                         correlation.final_status = related_log.status
                     elif related_log.status == 'sent' and not correlation.final_status:
                         correlation.final_status = 'delivered'
+                    elif related_log.status == 'spam':
+                        # Priority: bounced > rejected > spam > delivered
+                        if correlation.final_status not in ['bounced', 'rejected']:
+                            correlation.final_status = 'spam'
+
             
             correlation.postfix_log_ids = current_ids
     
@@ -607,6 +631,18 @@ def update_correlation_with_postfix_log(
             correlation.final_status = postfix_log.status
         elif postfix_log.status == 'sent' and not correlation.final_status:
             correlation.final_status = 'delivered'
+        elif postfix_log.status == 'spam':
+            # Priority: bounced > rejected > spam > delivered
+            if correlation.final_status not in ['bounced', 'rejected']:
+                correlation.final_status = 'spam'
+                # Mark Rspamd log as spam as well
+                if correlation.rspamd_log_id:
+                    rspamd_log = db.query(RspamdLog).filter(
+                        RspamdLog.id == correlation.rspamd_log_id
+                    ).first()
+                    if rspamd_log:
+                        rspamd_log.is_spam = True
+
     
     # Mark as complete if we now have Queue-ID and Postfix logs
     if correlation.queue_id and correlation.postfix_log_ids:
@@ -694,6 +730,17 @@ def update_correlation_with_postfix_logs(
                 final_status = plog.status
             elif plog.status == 'sent' and not final_status:
                 final_status = 'delivered'
+            elif plog.status == 'spam':
+                 if final_status not in ['bounced', 'rejected']:
+                    final_status = 'spam'
+                    # Mark Rspamd log as spam as well
+                    if correlation.rspamd_log_id:
+                        rspamd_log = db.query(RspamdLog).filter(
+                            RspamdLog.id == correlation.rspamd_log_id
+                        ).first()
+                        if rspamd_log:
+                            rspamd_log.is_spam = True
+
     
     if final_status:
         correlation.final_status = final_status
