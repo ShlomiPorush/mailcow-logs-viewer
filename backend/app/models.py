@@ -552,3 +552,28 @@ class KnownContainer(Base):
     
     def __repr__(self):
         return f"<KnownContainer(container_name={self.container_name}, display_name={self.display_name}, last_seen={self.last_seen})>"
+
+
+class RawServiceLog(Base):
+    """
+    Raw log entries from any mailcow service (postfix, dovecot, sogo, etc.)
+    Stored as-is from the mailcow API, with the full response in raw_data JSONB.
+    Used by the Live Logs Viewer page.
+    """
+    __tablename__ = "raw_service_logs"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    service = Column(String(50), nullable=False, index=True)
+    time = Column(DateTime, nullable=False, index=True)
+    message_hash = Column(String(64), nullable=False)
+    raw_data = Column(JSONB, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    
+    __table_args__ = (
+        UniqueConstraint('service', 'time', 'message_hash', name='uq_raw_service_log'),
+        Index('idx_raw_log_service_time', 'service', time.desc()),
+        Index('idx_raw_log_time', 'time'),
+    )
+    
+    def __repr__(self):
+        return f"<RawServiceLog(service={self.service}, time={self.time})>"

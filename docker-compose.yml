@@ -27,7 +27,7 @@ services:
       db:
         condition: service_healthy
     ports:
-      - "${APP_PORT:-8080}:8080"
+      - "8080:8080"
     volumes:
       - mailcowlogs_data:/app/data
     networks:

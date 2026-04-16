@@ -15,6 +15,7 @@ from contextlib import asynccontextmanager
 from .config import settings, set_cached_active_domains, reload_settings
 from .database import init_db, check_db_connection
 from .scheduler import start_scheduler, stop_scheduler
+from .raw_logs_worker import start_raw_logs_scheduler, stop_raw_logs_scheduler
 from .mailcow_api import mailcow_api
 from .routers import (
     logs,
@@ -27,6 +28,7 @@ from .routers import (
     blacklist as blacklist_router,
     reporting,
     auth as auth_router,
+    raw_logs as raw_logs_router,
 )
 from .migrations import run_migrations
 from .auth import BasicAuthMiddleware
@@ -163,12 +165,20 @@ async def lifespan(app: FastAPI):
         logger.error(f"Failed to start scheduler: {e}")
         raise
     
+    # Start raw logs worker (separate scheduler)
+    try:
+        start_raw_logs_scheduler()
+    except Exception as e:
+        logger.error(f"Failed to start raw logs scheduler: {e}")
+        # Non-fatal: main app still works without raw logs
+    
     logger.info("Application startup complete")
     
     yield
     
     # Shutdown
     logger.info("Shutting down application")
+    stop_raw_logs_scheduler()
     stop_scheduler()
     logger.info("Application shutdown complete")
 
@@ -210,6 +220,11 @@ app.include_router(dmarc_router.router, prefix="/api", tags=["DMARC"])
 app.include_router(mailbox_stats_router.router, prefix="/api", tags=["Mailbox Stats"])
 app.include_router(documentation.router, prefix="/api", tags=["Documentation"])
 app.include_router(blacklist_router.router, prefix="/api/blacklist", tags=["Blacklist"])
+app.include_router(raw_logs_router.router, prefix="/api", tags=["Raw Logs"])
+
+# WebSocket endpoint needs root-level mount (not under /api prefix)
+# The router contains /ws/raw-logs which should be accessible at ws://host/ws/raw-logs
+app.include_router(raw_logs_router.router, tags=["Raw Logs WebSocket"])
 
 # Mount static files (frontend)
 app.mount("/static", StaticFiles(directory="/app/frontend"), name="static")

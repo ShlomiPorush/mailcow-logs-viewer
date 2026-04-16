@@ -423,6 +423,22 @@ let currentFilters = {
 let currentModalTab = 'overview';
 let currentModalData = null;
 
+// Global RW API key status (shared across all features)
+let mailcowRwConfigured = false;
+
+async function fetchRwStatus() {
+    try {
+        const res = await authenticatedFetch('/api/rw-status');
+        if (res.ok) {
+            const data = await res.json();
+            mailcowRwConfigured = data.rw_configured;
+        }
+    } catch (e) {
+        console.warn('Failed to fetch RW status:', e);
+        mailcowRwConfigured = false;
+    }
+}
+
 // Auto-refresh configuration
 const AUTO_REFRESH_INTERVAL = 30000; // 30 seconds
 let autoRefreshTimer = null;
@@ -460,6 +476,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     loadAppInfo();
     loadMailcowVersionStatus();
+    fetchRwStatus();
 
     // Initialize router and get initial route from URL
     const routeInfo = typeof initRouter === 'function' ? initRouter() : { baseRoute: 'dashboard', params: {} };
@@ -935,9 +952,9 @@ function renderNetfilterData(data) {
                 // Check if IP is in the blacklist (with or without /32)
                 const ipInBlacklist = log.ip && fail2banBlacklist.some(entry => entry === log.ip || entry === log.ip + '/32');
                 // Show unban if: banned OR already in blacklist
-                const showUnban = fail2banRwConfigured && log.ip && (isBan || ipInBlacklist);
+                const showUnban = mailcowRwConfigured && log.ip && (isBan || ipInBlacklist);
                 // Show ban if: warning/unban AND NOT already in blacklist
-                const showBan = fail2banRwConfigured && log.ip && isWarningOrUnban && !ipInBlacklist;
+                const showBan = mailcowRwConfigured && log.ip && isWarningOrUnban && !ipInBlacklist;
                 // GeoIP rendering
                 let geoHtml = '';
                 if (log.country_code) {
@@ -1138,34 +1155,6 @@ async function smartRefreshQuarantine() {
     }
 }
 
-// Render quarantine without loading spinner
-function renderQuarantineData(data) {
-    const container = document.getElementById('quarantine-logs');
-    if (!container) return;
-
-    if (!data.data || data.data.length === 0) {
-        container.innerHTML = '<p class="text-gray-500 dark:text-gray-400 text-center py-8">No quarantined messages</p>';
-        return;
-    }
-
-    container.innerHTML = `
-        <div class="space-y-4">
-            ${data.data.map(item => `
-                <div class="border border-red-200 dark:border-red-900/50 rounded-lg p-4 bg-red-50 dark:bg-red-900/20">
-                    <div class="flex flex-col sm:flex-row sm:justify-between sm:items-start mb-2 gap-2">
-                        <div class="flex-1">
-                            <p class="text-sm font-medium text-gray-900 dark:text-white">${escapeHtml(item.subject || 'No subject')}</p>
-                            <p class="text-sm text-gray-600 dark:text-gray-300">From: ${escapeHtml(item.sender)}</p>
-                        </div>
-                        <span class="text-xs text-gray-500 dark:text-gray-400">${formatTime(item.created)}</span>
-                    </div>
-                    <p class="text-xs text-red-600 dark:text-red-400 mt-2">${item.reason || 'Quarantined'}</p>
-                </div>
-            `).join('')}
-        </div>
-    `;
-}
-
 // Smart refresh for Dashboard
 async function smartRefreshDashboard() {
     try {
@@ -1283,6 +1272,11 @@ function switchTab(tab, params = {}) {
 
     // Load tab data
     console.log('Loading data for tab:', tab);
+    // Disconnect log WebSocket when switching away from logs
+    if (tab !== 'logs' && typeof disconnectLogWebSocket === 'function') {
+        disconnectLogWebSocket();
+    }
+
     switch (tab) {
         case 'dashboard':
             loadDashboard();
@@ -1313,6 +1307,9 @@ function switchTab(tab, params = {}) {
             break;
         case 'mailbox-stats':
             loadMailboxStats();
+            break;
+        case 'logs':
+            loadLogViewer();
             break;
         case 'settings':
             loadSettings();
@@ -1995,7 +1992,6 @@ async function loadNetfilterLogs(page = 1) {
 
 let fail2banSettingsLoaded = false;
 let fail2banActiveBans = null;
-let fail2banRwConfigured = false;
 let fail2banBlacklist = [];
 
 function formatSeconds(seconds) {
@@ -2025,21 +2021,15 @@ async function loadFail2BanSettings() {
     if (!settingsContainer) return;
 
     try {
-        // Fetch both settings and RW status in parallel
-        const [response, rwResponse] = await Promise.all([
-            authenticatedFetch('/api/fail2ban'),
-            authenticatedFetch('/api/fail2ban/rw-status')
-        ]);
+        const response = await authenticatedFetch('/api/fail2ban');
 
         if (!response.ok) {
             throw new Error(`HTTP ${response.status}: ${response.statusText}`);
         }
 
         const data = await response.json();
-        const rwStatus = rwResponse.ok ? await rwResponse.json() : { rw_configured: false };
-        const canEdit = rwStatus.rw_configured;
+        const canEdit = mailcowRwConfigured;
         fail2banSettingsLoaded = true;
-        fail2banRwConfigured = canEdit;
         fail2banActiveBans = data.active_bans || [];
 
         // Store blacklist entries globally for button logic
@@ -2048,7 +2038,7 @@ async function loadFail2BanSettings() {
 
         // Re-render netfilter logs if they were already loaded (race condition fix)
         // Now after blacklist is loaded, so buttons correctly reflect blacklist state
-        if (lastDataCache.netfilter && canEdit) {
+        if (lastDataCache.netfilter && mailcowRwConfigured) {
             renderNetfilterData(lastDataCache.netfilter);
         }
 
@@ -2416,26 +2406,111 @@ function applyQueueFilters() {
         return;
     }
 
+    const canAct = mailcowRwConfigured;
+
     container.innerHTML = `
+        ${canAct ? `
+            <div class="mb-4 flex flex-wrap items-center gap-2">
+                <button onclick="queueSelectAll()" id="queue-select-all-btn"
+                    class="px-3 py-1.5 text-xs font-medium rounded-md border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+                    Select All
+                </button>
+                <button onclick="queueBulkRetry()" id="queue-bulk-retry-btn"
+                    class="hidden px-3 py-1.5 text-xs font-medium rounded-md border border-blue-500 bg-blue-500 text-white hover:bg-blue-600 transition-colors flex items-center gap-1">
+                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+                    Retry Selected
+                </button>
+                <button onclick="queueBulkDelete()" id="queue-bulk-delete-btn"
+                    class="hidden px-3 py-1.5 text-xs font-medium rounded-md border border-red-500 bg-red-500 text-white hover:bg-red-600 transition-colors flex items-center gap-1">
+                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                    Delete Selected
+                </button>
+                <span id="queue-selection-count" class="hidden text-xs text-gray-500 dark:text-gray-400"></span>
+
+                <div class="flex-1"></div>
+
+                <button onclick="queueFlushAll()" id="queue-flush-all-btn"
+                    class="px-3 py-1.5 text-xs font-medium rounded-md border border-blue-500 bg-blue-500 text-white hover:bg-blue-600 transition-colors flex items-center gap-1">
+                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+                    Flush All
+                </button>
+                <button onclick="queueDeleteAll()" id="queue-delete-all-btn"
+                    class="px-3 py-1.5 text-xs font-medium rounded-md border border-red-500 bg-red-500 text-white hover:bg-red-600 transition-colors flex items-center gap-1">
+                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                    Delete All
+                </button>
+            </div>
+        ` : ''}
         <div class="space-y-4">
-            ${filteredData.map(item => `
-                <div class="border border-gray-200 dark:border-gray-700 rounded-lg p-4 bg-gray-50 dark:bg-gray-700/50">
+            ${filteredData.map(item => {
+                const qid = item.queue_id || '';
+                const queueName = (item.queue_name || '').toLowerCase();
+                const isHold = queueName === 'hold';
+                // Status badge colors
+                const statusColors = {
+                    hold: 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-800 dark:text-yellow-300',
+                    deferred: 'bg-orange-100 dark:bg-orange-900/30 text-orange-800 dark:text-orange-300',
+                    active: 'bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300',
+                    incoming: 'bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-300',
+                    bounce: 'bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-300',
+                    corrupt: 'bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-300',
+                };
+                const badgeColor = statusColors[queueName] || 'bg-gray-100 dark:bg-gray-600 text-gray-800 dark:text-gray-200';
+                return `
+                <div class="border border-gray-200 dark:border-gray-700 rounded-lg p-4 bg-gray-50 dark:bg-gray-700/50" data-queue-id="${qid}">
                     <div class="flex flex-col sm:flex-row sm:justify-between sm:items-start mb-2 gap-2">
-                        <div class="flex-1">
-                            <p class="text-sm font-medium text-gray-900 dark:text-white">From: ${copyableText(item.sender)}</p>
-                            <p class="text-sm text-gray-600 dark:text-gray-300">Queue ID: ${copyableText(item.queue_id)}</p>
+                        <div class="flex-1 flex items-start gap-3">
+                            ${canAct ? `
+                                <input type="checkbox" class="queue-checkbox mt-1 flex-shrink-0 w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 dark:focus:ring-blue-600 dark:ring-offset-gray-800 dark:bg-gray-700 dark:border-gray-600 cursor-pointer"
+                                    value="${qid}" onchange="queueUpdateSelection()" />
+                            ` : ''}
+                            <div>
+                                <p class="text-sm font-medium text-gray-900 dark:text-white">From: ${copyableText(item.sender)}</p>
+                                <p class="text-sm text-gray-600 dark:text-gray-300">Queue ID: ${copyableText(qid)}</p>
+                            </div>
                         </div>
-                        <span class="text-xs text-gray-500 dark:text-gray-400">${formatTime(new Date(item.arrival_time * 1000).toISOString())}</span>
+                        <div class="flex items-center gap-2">
+                            <span class="inline-block px-2 py-0.5 text-xs font-semibold rounded ${badgeColor} uppercase">${escapeHtml(item.queue_name || 'unknown')}</span>
+                            <span class="text-xs text-gray-500 dark:text-gray-400">${formatTime(new Date(item.arrival_time * 1000).toISOString())}</span>
+                        </div>
                     </div>
                     <div class="mb-2">
                         <p class="text-sm font-medium text-gray-700 dark:text-gray-300">Recipients:</p>
                         ${item.recipients.map(r => `<p class="text-sm text-gray-600 dark:text-gray-400">${copyableText(r)}</p>`).join('')}
                     </div>
-                    <div class="flex items-center justify-between">
+                    <div class="flex flex-wrap items-center justify-between gap-2">
                         <span class="text-xs text-gray-500 dark:text-gray-400">Size: ${formatSize(item.message_size)}</span>
+                        ${canAct ? `
+                            <div class="flex items-center gap-2 flex-shrink-0">
+                                <button onclick="queueRetry('${qid}')" title="Retry delivery"
+                                    class="queue-action-btn px-2.5 py-1 text-xs font-medium rounded-md border border-blue-300 dark:border-blue-700 text-blue-700 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-900/30 transition-colors flex items-center gap-1">
+                                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+                                    Retry
+                                </button>
+                                ${isHold ? `
+                                    <button onclick="queueUnhold('${qid}')" title="Release from hold"
+                                        class="queue-action-btn px-2.5 py-1 text-xs font-medium rounded-md border border-green-300 dark:border-green-700 text-green-700 dark:text-green-400 hover:bg-green-100 dark:hover:bg-green-900/30 transition-colors flex items-center gap-1">
+                                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                                        Unhold
+                                    </button>
+                                ` : `
+                                    <button onclick="queueHold('${qid}')" title="Hold message"
+                                        class="queue-action-btn px-2.5 py-1 text-xs font-medium rounded-md border border-yellow-300 dark:border-yellow-700 text-yellow-700 dark:text-yellow-400 hover:bg-yellow-100 dark:hover:bg-yellow-900/30 transition-colors flex items-center gap-1">
+                                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                                        Hold
+                                    </button>
+                                `}
+                                <button onclick="queueDeleteItem('${qid}')" title="Delete from queue"
+                                    class="queue-action-btn px-2.5 py-1 text-xs font-medium rounded-md border border-red-300 dark:border-red-700 text-red-700 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-900/30 transition-colors flex items-center gap-1">
+                                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                                    Delete
+                                </button>
+                            </div>
+                        ` : ''}
                     </div>
                 </div>
-            `).join('')}
+            `;
+            }).join('')}
         </div>
     `;
 }
@@ -2444,6 +2519,135 @@ function clearQueueFilters() {
     document.getElementById('queue-filter-search').value = '';
     document.getElementById('queue-filter-queue-id').value = '';
     applyQueueFilters();
+}
+// --- Queue selection helpers ---
+
+function queueUpdateSelection() {
+    const checked = document.querySelectorAll('.queue-checkbox:checked');
+    const bulkRetry = document.getElementById('queue-bulk-retry-btn');
+    const bulkDelete = document.getElementById('queue-bulk-delete-btn');
+    const countLabel = document.getElementById('queue-selection-count');
+
+    if (checked.length > 0) {
+        if (bulkRetry) { bulkRetry.classList.remove('hidden'); bulkRetry.classList.add('inline-flex'); }
+        if (bulkDelete) { bulkDelete.classList.remove('hidden'); bulkDelete.classList.add('inline-flex'); }
+        if (countLabel) { countLabel.classList.remove('hidden'); countLabel.textContent = `${checked.length} selected`; }
+    } else {
+        if (bulkRetry) { bulkRetry.classList.add('hidden'); bulkRetry.classList.remove('inline-flex'); }
+        if (bulkDelete) { bulkDelete.classList.add('hidden'); bulkDelete.classList.remove('inline-flex'); }
+        if (countLabel) { countLabel.classList.add('hidden'); countLabel.textContent = ''; }
+    }
+}
+
+function queueSelectAll() {
+    const checkboxes = document.querySelectorAll('.queue-checkbox');
+    const allChecked = Array.from(checkboxes).every(cb => cb.checked);
+    checkboxes.forEach(cb => { cb.checked = !allChecked; });
+    const btn = document.getElementById('queue-select-all-btn');
+    if (btn) btn.textContent = allChecked ? 'Select All' : 'Deselect All';
+    queueUpdateSelection();
+}
+
+function queueGetSelectedIds() {
+    return Array.from(document.querySelectorAll('.queue-checkbox:checked')).map(cb => cb.value);
+}
+
+async function queueBulkRetry() {
+    const ids = queueGetSelectedIds();
+    if (ids.length === 0) return;
+    if (!confirm(`Retry delivery of ${ids.length} message(s)?`)) return;
+    await queueAction('deliver', ids);
+}
+
+async function queueBulkDelete() {
+    const ids = queueGetSelectedIds();
+    if (ids.length === 0) return;
+    if (!confirm(`Permanently delete ${ids.length} message(s) from the queue?`)) return;
+    await queueDeleteRequest(ids);
+}
+
+// --- Queue action helpers ---
+
+async function queueRetry(qid) {
+    await queueAction('deliver', [String(qid)]);
+}
+
+async function queueHold(qid) {
+    await queueAction('hold', [String(qid)]);
+}
+
+async function queueUnhold(qid) {
+    await queueAction('unhold', [String(qid)]);
+}
+
+async function queueDeleteItem(qid) {
+    if (!confirm('Delete this message from the queue?')) return;
+    await queueDeleteRequest([String(qid)]);
+}
+
+async function queueFlushAll() {
+    if (!confirm('Flush (retry delivery of) ALL messages in the queue?')) return;
+    await queueAction('flush', ['mailqitems-all']);
+}
+
+async function queueDeleteAll() {
+    if (!confirm('Permanently delete ALL messages from the queue? This cannot be undone.')) return;
+    await queueAction('super_delete', ['mailqitems-all']);
+}
+
+async function queueAction(action, itemIds) {
+    document.querySelectorAll('.queue-action-btn, .queue-checkbox, #queue-flush-all-btn, #queue-delete-all-btn, #queue-select-all-btn, #queue-bulk-retry-btn, #queue-bulk-delete-btn')
+        .forEach(el => { el.disabled = true; el.style.opacity = '0.5'; });
+
+    try {
+        const res = await authenticatedFetch('/api/queue/action', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ items: itemIds, action: action })
+        });
+
+        const result = await res.json();
+        if (res.ok && result.status === 'success') {
+            const labels = { deliver: 'Retry delivery', hold: 'Hold', unhold: 'Unhold', flush: 'Flush all', super_delete: 'Delete all' };
+            showToast(result.msg || `${labels[action] || action} completed`, 'success');
+            lastDataCache.queue = null;
+            await loadQueue();
+        } else {
+            showToast(`Queue action failed: ` + (result.msg || result.detail || 'Unknown error'), 'error');
+        }
+    } catch (err) {
+        showToast(`Queue action failed: ` + err.message, 'error');
+    } finally {
+        document.querySelectorAll('.queue-action-btn, .queue-checkbox, #queue-flush-all-btn, #queue-delete-all-btn, #queue-select-all-btn, #queue-bulk-retry-btn, #queue-bulk-delete-btn')
+            .forEach(el => { el.disabled = false; el.style.opacity = ''; });
+    }
+}
+
+async function queueDeleteRequest(itemIds) {
+    document.querySelectorAll('.queue-action-btn, .queue-checkbox, #queue-flush-all-btn, #queue-delete-all-btn, #queue-select-all-btn, #queue-bulk-retry-btn, #queue-bulk-delete-btn')
+        .forEach(el => { el.disabled = true; el.style.opacity = '0.5'; });
+
+    try {
+        const res = await authenticatedFetch('/api/queue/delete', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ items: itemIds })
+        });
+
+        const result = await res.json();
+        if (res.ok && result.status === 'success') {
+            showToast(result.msg || 'Message deleted from queue', 'success');
+            lastDataCache.queue = null;
+            await loadQueue();
+        } else {
+            showToast('Failed to delete from queue: ' + (result.msg || result.detail || 'Unknown error'), 'error');
+        }
+    } catch (err) {
+        showToast('Failed to delete from queue: ' + err.message, 'error');
+    } finally {
+        document.querySelectorAll('.queue-action-btn, .queue-checkbox, #queue-flush-all-btn, #queue-delete-all-btn, #queue-select-all-btn, #queue-bulk-retry-btn, #queue-bulk-delete-btn')
+            .forEach(el => { el.disabled = false; el.style.opacity = ''; });
+    }
 }
 
 // =============================================================================
@@ -2466,7 +2670,7 @@ async function loadQuarantine() {
         const data = await response.json();
         console.log('Quarantine data:', data);
 
-        // ⭐ NEW: Update counter display
+        // Update counter display
         const countEl = document.getElementById('quarantine-count');
         if (countEl) {
             countEl.textContent = data.total ? `(${data.total.toLocaleString()} results)` : '';
@@ -2477,12 +2681,10 @@ async function loadQuarantine() {
             return;
         }
 
-        // ⭐ NEW: Use separate render function
         renderQuarantineData(data);
     } catch (error) {
         console.error('Failed to load quarantine:', error);
         document.getElementById('quarantine-logs').innerHTML = `<p class="text-red-500 text-center py-8">Failed to load quarantine: ${error.message}</p>`;
-        // ⭐ NEW: Clear counter on error
         const countEl = document.getElementById('quarantine-count');
         if (countEl) countEl.textContent = '';
     }
@@ -2504,35 +2706,193 @@ function renderQuarantineData(data) {
         return;
     }
 
+    const canAct = mailcowRwConfigured;
+
     container.innerHTML = `
+        ${!canAct ? '' : `
+            <div class="mb-4 flex flex-wrap items-center gap-2">
+                <button onclick="quarantineSelectAll()" id="quarantine-select-all-btn"
+                    class="px-3 py-1.5 text-xs font-medium rounded-md border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+                    Select All
+                </button>
+                <button onclick="quarantineBulkRelease()" id="quarantine-bulk-release-btn"
+                    class="hidden px-3 py-1.5 text-xs font-medium rounded-md border border-green-500 bg-green-500 text-white hover:bg-green-600 transition-colors flex items-center gap-1">
+                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
+                    Release Selected
+                </button>
+                <button onclick="quarantineBulkDelete()" id="quarantine-bulk-delete-btn"
+                    class="hidden px-3 py-1.5 text-xs font-medium rounded-md border border-red-500 bg-red-500 text-white hover:bg-red-600 transition-colors flex items-center gap-1">
+                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                    Delete Selected
+                </button>
+                <span id="quarantine-selection-count" class="hidden text-xs text-gray-500 dark:text-gray-400"></span>
+
+                <div class="flex-1"></div>
+
+                <button onclick="quarantineReleaseAll()" id="quarantine-release-all-btn"
+                    class="px-3 py-1.5 text-xs font-medium rounded-md border border-green-500 bg-green-500 text-white hover:bg-green-600 transition-colors flex items-center gap-1">
+                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
+                    Release All
+                </button>
+                <button onclick="quarantineDeleteAll()" id="quarantine-delete-all-btn"
+                    class="px-3 py-1.5 text-xs font-medium rounded-md border border-red-500 bg-red-500 text-white hover:bg-red-600 transition-colors flex items-center gap-1">
+                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                    Delete All
+                </button>
+            </div>
+        `}
         <div class="space-y-3">
-            ${data.data.map(item => `
-                <div class="border border-red-200 dark:border-red-900/50 rounded-lg p-4 bg-red-50 dark:bg-red-900/20 hover:bg-red-100 dark:hover:bg-red-900/30 transition">
+            ${data.data.map(item => {
+                const itemId = item.id !== undefined ? item.id : '';
+                return `
+                <div class="border border-red-200 dark:border-red-900/50 rounded-lg p-4 bg-red-50 dark:bg-red-900/20 hover:bg-red-100 dark:hover:bg-red-900/30 transition" data-quarantine-id="${itemId}">
                     <div class="grid grid-cols-1 sm:grid-cols-[1fr_auto] gap-2 mb-2 items-start">
-                        <div class="min-w-0 overflow-hidden">
-                            <div class="flex flex-wrap items-center gap-2 mb-1">
-                                <span class="text-sm font-medium text-gray-900 dark:text-white">${copyableText(item.sender || 'Unknown')}</span>
-                                <svg class="w-4 h-4 text-gray-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
-                                </svg>
-                                <span class="text-sm text-gray-600 dark:text-gray-300">${copyableText(item.rcpt || 'Unknown')}</span>
+                        <div class="min-w-0 overflow-hidden flex items-start gap-3">
+                            ${canAct ? `
+                                <input type="checkbox" class="quarantine-checkbox mt-1 flex-shrink-0 w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 dark:focus:ring-blue-600 dark:ring-offset-gray-800 dark:bg-gray-700 dark:border-gray-600 cursor-pointer"
+                                    value="${itemId}" onchange="quarantineUpdateSelection()" />
+                            ` : ''}
+                            <div class="min-w-0 overflow-hidden">
+                                <div class="flex flex-wrap items-center gap-2 mb-1">
+                                    <span class="text-sm font-medium text-gray-900 dark:text-white">${copyableText(item.sender || 'Unknown')}</span>
+                                    <svg class="w-4 h-4 text-gray-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
+                                    </svg>
+                                    <span class="text-sm text-gray-600 dark:text-gray-300">${copyableText(item.rcpt || 'Unknown')}</span>
+                                </div>
+                                <p class="text-xs text-gray-500 dark:text-gray-400 truncate" title="${escapeHtml(item.subject || 'No subject')}">${escapeHtml(item.subject || 'No subject')}</p>
                             </div>
-                            <p class="text-xs text-gray-500 dark:text-gray-400 truncate" title="${escapeHtml(item.subject || 'No subject')}">${escapeHtml(item.subject || 'No subject')}</p>
                         </div>
                         <div class="flex flex-wrap items-center gap-2 flex-shrink-0 sm:justify-end">
                             <span class="inline-block px-2 py-0.5 text-xs font-medium rounded bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-300">${item.action || 'Quarantined'}</span>
                             ${item.virus_flag ? '<span class="inline-block px-2 py-0.5 text-xs font-medium rounded bg-purple-100 dark:bg-purple-900/30 text-purple-800 dark:text-purple-300">🦠 VIRUS</span>' : ''}
                         </div>
                     </div>
-                    <div class="flex flex-wrap items-center gap-4 text-xs text-gray-600 dark:text-gray-400">
-                        <span>${formatTime(item.created)}</span>
-                        ${item.qid ? `<span class="font-mono" title="Queue ID">Q: ${copyableText(item.qid)}</span>` : ''}
-                        ${item.score !== undefined && item.score !== null ? `<span>Score: <span class="${item.score >= 15 ? 'text-red-600 dark:text-red-400 font-semibold' : 'text-gray-600 dark:text-gray-300'}">${item.score.toFixed(1)}</span></span>` : ''}
+                    <div class="flex flex-wrap items-center justify-between gap-2">
+                        <div class="flex flex-wrap items-center gap-4 text-xs text-gray-600 dark:text-gray-400">
+                            <span>${formatTime(item.created)}</span>
+                            ${item.qid ? `<span class="font-mono" title="Queue ID">Q: ${copyableText(item.qid)}</span>` : ''}
+                            ${item.score !== undefined && item.score !== null ? `<span>Score: <span class="${item.score >= 15 ? 'text-red-600 dark:text-red-400 font-semibold' : 'text-gray-600 dark:text-gray-300'}">${item.score.toFixed(1)}</span></span>` : ''}
+                        </div>
+                        ${canAct ? `
+                            <div class="flex items-center gap-2 flex-shrink-0">
+                                <button onclick="quarantineRelease('${itemId}')" title="Release message"
+                                    class="quarantine-action-btn px-2.5 py-1 text-xs font-medium rounded-md border border-green-300 dark:border-green-700 text-green-700 dark:text-green-400 hover:bg-green-100 dark:hover:bg-green-900/30 transition-colors flex items-center gap-1">
+                                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
+                                    Release
+                                </button>
+                                <button onclick="quarantineDelete('${itemId}')" title="Delete message"
+                                    class="quarantine-action-btn px-2.5 py-1 text-xs font-medium rounded-md border border-red-300 dark:border-red-700 text-red-700 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-900/30 transition-colors flex items-center gap-1">
+                                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                                    Delete
+                                </button>
+                            </div>
+                        ` : ''}
                     </div>
                 </div>
-            `).join('')}
+            `;
+            }).join('')}
         </div>
     `;
+}
+
+// --- Quarantine action helpers ---
+
+function quarantineUpdateSelection() {
+    const checked = document.querySelectorAll('.quarantine-checkbox:checked');
+    const bulkRelease = document.getElementById('quarantine-bulk-release-btn');
+    const bulkDelete = document.getElementById('quarantine-bulk-delete-btn');
+    const countLabel = document.getElementById('quarantine-selection-count');
+
+    if (checked.length > 0) {
+        if (bulkRelease) { bulkRelease.classList.remove('hidden'); bulkRelease.classList.add('inline-flex'); }
+        if (bulkDelete) { bulkDelete.classList.remove('hidden'); bulkDelete.classList.add('inline-flex'); }
+        if (countLabel) { countLabel.classList.remove('hidden'); countLabel.textContent = `${checked.length} selected`; }
+    } else {
+        if (bulkRelease) { bulkRelease.classList.add('hidden'); bulkRelease.classList.remove('inline-flex'); }
+        if (bulkDelete) { bulkDelete.classList.add('hidden'); bulkDelete.classList.remove('inline-flex'); }
+        if (countLabel) { countLabel.classList.add('hidden'); countLabel.textContent = ''; }
+    }
+}
+
+function quarantineSelectAll() {
+    const checkboxes = document.querySelectorAll('.quarantine-checkbox');
+    const allChecked = Array.from(checkboxes).every(cb => cb.checked);
+    checkboxes.forEach(cb => { cb.checked = !allChecked; });
+    const btn = document.getElementById('quarantine-select-all-btn');
+    if (btn) btn.textContent = allChecked ? 'Select All' : 'Deselect All';
+    quarantineUpdateSelection();
+}
+
+function quarantineGetSelectedIds() {
+    return Array.from(document.querySelectorAll('.quarantine-checkbox:checked')).map(cb => cb.value);
+}
+
+async function quarantineRelease(itemId) {
+    await quarantineAction('release', [String(itemId)]);
+}
+
+async function quarantineDelete(itemId) {
+    if (!confirm('Are you sure you want to permanently delete this quarantined message?')) return;
+    await quarantineAction('delete', [String(itemId)]);
+}
+
+async function quarantineBulkRelease() {
+    const ids = quarantineGetSelectedIds();
+    if (ids.length === 0) return;
+    if (!confirm(`Release ${ids.length} quarantined message(s)?`)) return;
+    await quarantineAction('release', ids);
+}
+
+async function quarantineBulkDelete() {
+    const ids = quarantineGetSelectedIds();
+    if (ids.length === 0) return;
+    if (!confirm(`Permanently delete ${ids.length} quarantined message(s)?`)) return;
+    await quarantineAction('delete', ids);
+}
+
+async function quarantineReleaseAll() {
+    const allIds = Array.from(document.querySelectorAll('.quarantine-checkbox')).map(cb => cb.value).filter(Boolean);
+    if (allIds.length === 0) return;
+    if (!confirm(`Release ALL ${allIds.length} quarantined message(s)?`)) return;
+    await quarantineAction('release', allIds);
+}
+
+async function quarantineDeleteAll() {
+    const allIds = Array.from(document.querySelectorAll('.quarantine-checkbox')).map(cb => cb.value).filter(Boolean);
+    if (allIds.length === 0) return;
+    if (!confirm(`Permanently delete ALL ${allIds.length} quarantined message(s)? This cannot be undone.`)) return;
+    await quarantineAction('delete', allIds);
+}
+
+async function quarantineAction(action, itemIds) {
+    // Disable all action buttons while processing
+    document.querySelectorAll('.quarantine-action-btn, .quarantine-checkbox, #quarantine-bulk-release-btn, #quarantine-bulk-delete-btn, #quarantine-select-all-btn, #quarantine-release-all-btn, #quarantine-delete-all-btn')
+        .forEach(el => { el.disabled = true; el.style.opacity = '0.5'; });
+
+    try {
+        const endpoint = action === 'release' ? '/api/quarantine/release' : '/api/quarantine/delete';
+        const res = await authenticatedFetch(endpoint, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ items: itemIds })
+        });
+
+        const result = await res.json();
+        if (res.ok && result.status === 'success') {
+            showToast(result.msg || `Message(s) ${action === 'release' ? 'released' : 'deleted'} successfully`, 'success');
+            // Refresh quarantine list
+            lastDataCache.quarantine = null;
+            await loadQuarantine();
+        } else {
+            showToast(`Failed to ${action} message(s): ` + (result.msg || result.detail || 'Unknown error'), 'error');
+        }
+    } catch (err) {
+        showToast(`Failed to ${action} message(s): ` + err.message, 'error');
+    } finally {
+        document.querySelectorAll('.quarantine-action-btn, .quarantine-checkbox, #quarantine-bulk-release-btn, #quarantine-bulk-delete-btn, #quarantine-select-all-btn, #quarantine-release-all-btn, #quarantine-delete-all-btn')
+            .forEach(el => { el.disabled = false; el.style.opacity = ''; });
+    }
 }
 
 // =============================================================================
@@ -3619,26 +3979,84 @@ function renderStatusCorrelation(correlation, incompleteList) {
 
 function renderStatusJobs(jobs) {
     const container = document.getElementById('status-jobs');
-    container.innerHTML = `
-        <div class="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
-            ${renderJobCard('Fetch Logs', 'fetch_logs', jobs.fetch_logs)}
-            ${renderJobCard('Complete Correlations', 'complete_correlations', jobs.complete_correlations)}
-            ${renderJobCard('Update Final Status', 'update_final_status', jobs.update_final_status)}
-            ${renderJobCard('Expire Correlations', 'expire_correlations', jobs.expire_correlations)}
-            ${renderJobCard('Cleanup Logs', 'cleanup_logs', jobs.cleanup_logs)}
-            ${renderJobCard('Cleanup DMARC Reports', 'cleanup_dmarc_reports', jobs.cleanup_dmarc_reports)}
-            ${renderJobCard('Check App Version', 'check_app_version', jobs.check_app_version)}
-            ${renderJobCard('DNS Check (All Domains)', 'dns_check', jobs.dns_check)}
-            ${renderJobCard('Sync Active Domains', 'sync_local_domains', jobs.sync_local_domains)}
-            ${renderJobCard('DMARC IMAP Import', 'dmarc_imap_sync', jobs.dmarc_imap_sync)}
-            ${renderJobCard('Update MaxMind Databases', 'update_geoip', jobs.update_geoip)}
-            ${renderJobCard('Mailbox Statistics', 'mailbox_stats', jobs.mailbox_stats)}
-            ${renderJobCard('Alias Statistics', 'alias_stats', jobs.alias_stats)}
-            ${renderJobCard('IP Blacklist Check (All Hosts)', 'blacklist_check', jobs.blacklist_check)}
-            ${renderJobCard('Sync Transports & Relayhosts', 'sync_transports', jobs.sync_transports)}
-            ${renderJobCard('Weekly Summary Report', 'send_weekly_summary', jobs.send_weekly_summary)}
-        </div>
-    `;
+    
+    const categories = [
+        {
+            title: 'Log Processing',
+            icon: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4"></path>',
+            jobs: [
+                ['Fetch Logs', 'fetch_logs', jobs.fetch_logs],
+                ['Cleanup Logs', 'cleanup_logs', jobs.cleanup_logs]
+            ]
+        },
+        {
+            title: 'Correlation Engine',
+            icon: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"></path>',
+            jobs: [
+                ['Complete Correlations', 'complete_correlations', jobs.complete_correlations],
+                ['Update Final Status', 'update_final_status', jobs.update_final_status],
+                ['Expire Correlations', 'expire_correlations', jobs.expire_correlations]
+            ]
+        },
+        {
+            title: 'Data Sync',
+            icon: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>',
+            jobs: [
+                ['Sync Active Domains', 'sync_local_domains', jobs.sync_local_domains],
+                ['Mailbox Statistics', 'mailbox_stats', jobs.mailbox_stats],
+                ['Alias Statistics', 'alias_stats', jobs.alias_stats],
+                ['Sync Transports & Relayhosts', 'sync_transports', jobs.sync_transports]
+            ]
+        },
+        {
+            title: 'DMARC & Reports',
+            icon: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"></path>',
+            jobs: [
+                ['DMARC IMAP Import', 'dmarc_imap_sync', jobs.dmarc_imap_sync],
+                ['Cleanup DMARC Reports', 'cleanup_dmarc_reports', jobs.cleanup_dmarc_reports],
+                ['Weekly Summary Report', 'send_weekly_summary', jobs.send_weekly_summary]
+            ]
+        },
+        {
+            title: 'Security & Monitoring',
+            icon: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path>',
+            jobs: [
+                ['DNS Check (All Domains)', 'dns_check', jobs.dns_check],
+                ['IP Blacklist Check (All Hosts)', 'blacklist_check', jobs.blacklist_check]
+            ]
+        },
+        {
+            title: 'System',
+            icon: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>',
+            jobs: [
+                ['Check App Version', 'check_app_version', jobs.check_app_version],
+                ['Update MaxMind Databases', 'update_geoip', jobs.update_geoip]
+            ]
+        },
+        {
+            title: 'Live Logs',
+            icon: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path>',
+            jobs: [
+                ['Fetch Raw Logs', 'fetch_raw_logs', jobs.fetch_raw_logs],
+                ['Cleanup Raw Logs', 'cleanup_raw_logs', jobs.cleanup_raw_logs]
+            ]
+        }
+    ];
+    
+    let html = '';
+    for (const cat of categories) {
+        html += `
+            <div class="mb-6">
+                <div class="flex items-center gap-2 mb-3">
+                    <svg class="w-4 h-4 text-gray-400 dark:text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">${cat.icon}</svg>
+                    <h4 class="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">${cat.title}</h4>
+                </div>
+                <div class="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-3">
+                    ${cat.jobs.map(j => renderJobCard(j[0], j[1], j[2])).join('')}
+                </div>
+            </div>`;
+    }
+    container.innerHTML = html;
 }
 
 async function triggerBackgroundJob(jobKey, buttonEl, jobName = null) {
@@ -5567,6 +5985,130 @@ function formatBytes(bytes) {
 // SETTINGS PAGE
 // =============================================================================
 
+/**
+ * Show a verification modal before enabling Basic Auth.
+ * The user must type the username and password to confirm they know
+ * the credentials. Returns {username, password} on confirm, or null on cancel.
+ */
+function showBasicAuthVerifyModal() {
+    return new Promise((resolve) => {
+        // Remove any existing modal
+        const existing = document.getElementById('basic-auth-verify-modal');
+        if (existing) existing.remove();
+
+        const overlay = document.createElement('div');
+        overlay.id = 'basic-auth-verify-modal';
+        overlay.style.cssText = 'position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.6);backdrop-filter:blur(4px);';
+
+        overlay.innerHTML = `
+            <div style="background:var(--color-bg-primary, #1f2937);border:1px solid var(--color-border, #374151);border-radius:12px;padding:28px;max-width:420px;width:90%;box-shadow:0 25px 50px rgba(0,0,0,0.4);">
+                <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px;">
+                    <div style="width:40px;height:40px;border-radius:10px;background:linear-gradient(135deg,#f59e0b,#d97706);display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+                        <svg width="20" height="20" fill="none" stroke="white" stroke-width="2" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path>
+                        </svg>
+                    </div>
+                    <div>
+                        <h3 style="margin:0;font-size:16px;font-weight:600;color:#f3f4f6;">Verify Credentials</h3>
+                        <p style="margin:4px 0 0;font-size:13px;color:#9ca3af;">Confirm your username and password before enabling Basic Auth</p>
+                    </div>
+                </div>
+                <div style="background:#292524;border:1px solid #44403c;border-radius:8px;padding:14px;margin-bottom:20px;">
+                    <p style="margin:0;font-size:12px;color:#fbbf24;display:flex;align-items:center;gap:6px;">
+                        <svg width="14" height="14" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd"></path></svg>
+                        Type the credentials you configured to verify you can log in after enabling authentication.
+                    </p>
+                </div>
+                <div style="margin-bottom:14px;">
+                    <label style="display:block;font-size:13px;font-weight:500;color:#d1d5db;margin-bottom:6px;">Username</label>
+                    <input type="text" id="verify-auth-username" autocomplete="off" placeholder="Enter username"
+                        style="width:100%;padding:9px 12px;border-radius:6px;border:1px solid #4b5563;background:#111827;color:#f3f4f6;font-size:14px;outline:none;box-sizing:border-box;"
+                        onfocus="this.style.borderColor='#3b82f6';this.style.boxShadow='0 0 0 2px rgba(59,130,246,0.3)'"
+                        onblur="this.style.borderColor='#4b5563';this.style.boxShadow='none'">
+                </div>
+                <div style="margin-bottom:22px;">
+                    <label style="display:block;font-size:13px;font-weight:500;color:#d1d5db;margin-bottom:6px;">Password</label>
+                    <input type="password" id="verify-auth-password" autocomplete="off" placeholder="Enter password"
+                        style="width:100%;padding:9px 12px;border-radius:6px;border:1px solid #4b5563;background:#111827;color:#f3f4f6;font-size:14px;outline:none;box-sizing:border-box;"
+                        onfocus="this.style.borderColor='#3b82f6';this.style.boxShadow='0 0 0 2px rgba(59,130,246,0.3)'"
+                        onblur="this.style.borderColor='#4b5563';this.style.boxShadow='none'">
+                </div>
+                <p id="verify-auth-error" style="display:none;margin:0 0 14px;font-size:12px;color:#ef4444;padding:8px 12px;background:#1c1917;border:1px solid #7f1d1d;border-radius:6px;"></p>
+                <div style="display:flex;justify-content:flex-end;gap:10px;">
+                    <button type="button" id="verify-auth-cancel"
+                        style="padding:9px 18px;border-radius:6px;border:1px solid #4b5563;background:transparent;color:#d1d5db;font-size:13px;font-weight:500;cursor:pointer;transition:all 0.15s;"
+                        onmouseover="this.style.background='#374151'" onmouseout="this.style.background='transparent'">
+                        Cancel
+                    </button>
+                    <button type="button" id="verify-auth-confirm"
+                        style="padding:9px 18px;border-radius:6px;border:none;background:linear-gradient(135deg,#f59e0b,#d97706);color:#1f2937;font-size:13px;font-weight:600;cursor:pointer;transition:all 0.15s;"
+                        onmouseover="this.style.opacity='0.9'" onmouseout="this.style.opacity='1'">
+                        Verify & Enable
+                    </button>
+                </div>
+            </div>
+        `;
+
+        document.body.appendChild(overlay);
+
+        const usernameInput = document.getElementById('verify-auth-username');
+        const passwordInput = document.getElementById('verify-auth-password');
+        const errorEl = document.getElementById('verify-auth-error');
+        const cancelBtn = document.getElementById('verify-auth-cancel');
+        const confirmBtn = document.getElementById('verify-auth-confirm');
+
+        // Focus username field
+        setTimeout(() => usernameInput.focus(), 100);
+
+        function cleanup() {
+            overlay.remove();
+        }
+
+        function doCancel() {
+            cleanup();
+            resolve(null);
+        }
+
+        function doConfirm() {
+            const username = usernameInput.value.trim();
+            const password = passwordInput.value;
+            if (!username) {
+                errorEl.textContent = 'Please enter a username.';
+                errorEl.style.display = 'block';
+                usernameInput.focus();
+                return;
+            }
+            if (!password) {
+                errorEl.textContent = 'Please enter a password.';
+                errorEl.style.display = 'block';
+                passwordInput.focus();
+                return;
+            }
+            cleanup();
+            resolve({ username, password });
+        }
+
+        cancelBtn.addEventListener('click', doCancel);
+        confirmBtn.addEventListener('click', doConfirm);
+
+        // Allow Enter to confirm, Escape to cancel
+        overlay.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                e.preventDefault();
+                doCancel();
+            } else if (e.key === 'Enter') {
+                e.preventDefault();
+                doConfirm();
+            }
+        });
+
+        // Click outside to cancel
+        overlay.addEventListener('click', (e) => {
+            if (e.target === overlay) doCancel();
+        });
+    });
+}
+
 // Per-field descriptions (from env.example comments)
 var SETTINGS_FIELD_DESCRIPTIONS = {
     mailcow_url: 'Your mailcow instance URL (without trailing slash).',
@@ -5636,7 +6178,12 @@ var SETTINGS_FIELD_DESCRIPTIONS = {
     dmarc_imap_batch_size: 'Number of emails to process per batch. Default: 10.',
     dmarc_error_email: 'Email for DMARC error notifications (defaults to Admin email if not set).',
     maxmind_account_id: 'MaxMind Account ID for GeoIP database downloads. Required to download GeoLite2 databases.',
-    maxmind_license_key: 'MaxMind License Key for GeoIP database downloads. Required to download GeoLite2 databases. Keep this secret.'
+    maxmind_license_key: 'MaxMind License Key for GeoIP database downloads. Required to download GeoLite2 databases. Keep this secret.',
+    raw_logs_enabled: 'Enable background raw log collection for the Logs page. When disabled, no logs are fetched and the Logs page shows historical data only.',
+    raw_logs_fetch_interval: 'Seconds between raw log fetch cycles. Lower = more frequent updates. Default: 20.',
+    raw_logs_fetch_count: 'Number of log entries to fetch per service per cycle. Higher values catch more logs but increase API load. Default: 1000.',
+    raw_logs_retention_days: 'Days to keep raw logs in the database. Older logs are automatically deleted at 3:00 AM daily. Default: 2.',
+    raw_logs_services: 'Select which mailcow services to collect logs from. Unchecked services will not be fetched or displayed.'
 };
 
 // Edit form tabs (same order as env.example sections) with descriptions from env.example
@@ -5720,10 +6267,52 @@ var SETTINGS_EDIT_TABS = [
             { label: 'Credentials', keys: ['maxmind_account_id', 'maxmind_license_key'] },
             { label: 'Status', keys: [] }  // Status will be displayed separately, not as editable field
         ]
+    },
+    {
+        id: 'logs', label: 'Logs', description: 'Live log viewer settings. Controls background collection of raw logs from mailcow services. Logs are stored in a separate database table and streamed via WebSocket to the Logs page. Adjust fetch interval and retention to balance freshness vs. storage usage.', groups: [
+            { label: 'Enable', keys: ['raw_logs_enabled'] },
+            { label: 'Fetch Settings', keys: ['raw_logs_fetch_interval', 'raw_logs_fetch_count'] },
+            { label: 'Retention', keys: ['raw_logs_retention_days'] },
+            { label: 'Services', keys: ['raw_logs_services'] }
+        ]
     }
 ];
 
 function renderSettingsEditField(key, value, sensitiveKeys, description, envLocked, defaultValue) {
+    // Special renderer for raw_logs_services — checkboxes
+    if (key === 'raw_logs_services') {
+        const ALL_LOG_SERVICES = [
+            { id: 'acme', label: 'ACME (SSL Certificates)' },
+            { id: 'api', label: 'API (Access Logs)' },
+            { id: 'autodiscover', label: 'Autodiscover' },
+            { id: 'dovecot', label: 'Dovecot (IMAP/POP3)' },
+            { id: 'netfilter', label: 'Netfilter (Firewall)' },
+            { id: 'postfix', label: 'Postfix (MTA)' },
+            { id: 'ratelimited', label: 'Ratelimited' },
+            { id: 'rspamd-history', label: 'Rspamd (Spam Filter)' },
+            { id: 'sogo', label: 'SOGo (Groupware)' },
+            { id: 'watchdog', label: 'Watchdog (Monitoring)' }
+        ];
+        const enabledServices = (value || '').split(',').map(function(s) { return s.trim().toLowerCase(); }).filter(Boolean);
+        const disabledAttr = envLocked ? 'disabled' : '';
+        const envLockedHtml = envLocked ? '<p class="text-xs text-blue-600 dark:text-blue-400 mt-1 flex items-center gap-1"><svg class="w-3 h-3 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clip-rule="evenodd"></path></svg>Controlled by ENV variable.</p>' : '';
+        const descHtml = (description && description.trim()) ? '<p class="text-xs text-gray-500 dark:text-gray-400 mb-2">' + escapeHtml(description) + '</p>' : '';
+        
+        let checkboxesHtml = '<div class="grid grid-cols-1 sm:grid-cols-2 gap-1.5">';
+        ALL_LOG_SERVICES.forEach(function(svc) {
+            const checked = enabledServices.includes(svc.id) ? 'checked' : '';
+            checkboxesHtml += '<label class="flex items-center gap-2 p-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-600/30 cursor-pointer text-sm text-gray-700 dark:text-gray-300">' +
+                '<input type="checkbox" class="raw-logs-service-cb rounded border-gray-300 dark:border-gray-600" data-service="' + svc.id + '" ' + checked + ' ' + disabledAttr + '>' +
+                escapeHtml(svc.label) + '</label>';
+        });
+        checkboxesHtml += '</div>';
+        
+        // Hidden input that holds the comma-separated value
+        checkboxesHtml += '<input type="hidden" id="edit-raw_logs_services" name="raw_logs_services" value="' + escapeHtml(value || '') + '">';
+        
+        return '<div class="' + (envLocked ? 'opacity-60' : '') + '">' + descHtml + checkboxesHtml + envLockedHtml + '</div>';
+    }
+    
     const isBool = typeof value === 'boolean';
     const isNum = typeof value === 'number';
     const sensitive = sensitiveKeys.includes(key);
@@ -6637,6 +7226,17 @@ function renderSettings(content, data) {
             });
         });
 
+        // Raw Logs Services checkboxes — sync checked values to hidden input
+        content.querySelectorAll('.raw-logs-service-cb').forEach(function(cb) {
+            cb.addEventListener('change', function() {
+                const allCbs = content.querySelectorAll('.raw-logs-service-cb');
+                const selected = [];
+                allCbs.forEach(function(c) { if (c.checked) selected.push(c.getAttribute('data-service')); });
+                const hiddenInput = content.querySelector('#edit-raw_logs_services');
+                if (hiddenInput) hiddenInput.value = selected.join(',');
+            });
+        });
+
         const form = content.querySelector('#settings-edit-form');
         const importBtn = content.querySelector('#settings-import-env-btn');
         if (form) {
@@ -6657,6 +7257,32 @@ function renderSettings(content, data) {
                         else payload[key] = val === '' ? '' : val;
                     }
                 }
+
+                // ── Basic Auth lockout prevention ──────────────────────────
+                // Detect if basic_auth_enabled is being turned ON
+                const wasBasicAuthEnabled = data.editable_config.basic_auth_enabled === true ||
+                    (data.configuration && data.configuration.basic_auth_enabled === true);
+                const isEnablingBasicAuth = payload.basic_auth_enabled === true && !wasBasicAuthEnabled;
+
+                if (isEnablingBasicAuth) {
+                    // Check that password is set (not empty and not masked-unchanged)
+                    const passwordEl = form.querySelector('[name="auth_password"]');
+                    const passwordVal = passwordEl ? passwordEl.value : '';
+                    if (!passwordVal || passwordVal === '********' && !data.editable_config.auth_password) {
+                        showToast('Cannot enable Basic Auth without a password. Please set a password first.', 'error');
+                        return;
+                    }
+
+                    // Show verification modal and wait for user input
+                    const verified = await showBasicAuthVerifyModal();
+                    if (!verified) return; // User cancelled
+
+                    // Add verification credentials to payload
+                    payload.verify_username = verified.username;
+                    payload.verify_password = verified.password;
+                }
+                // ──────────────────────────────────────────────────────────
+
                 try {
                     const saveBtn = content.querySelector('#settings-save-btn');
                     if (saveBtn) saveBtn.disabled = true;
@@ -6666,11 +7292,14 @@ function renderSettings(content, data) {
                         throw new Error(err.detail || res.statusText);
                     }
                     if (saveBtn) saveBtn.disabled = false;
+                    if (isEnablingBasicAuth) {
+                        showToast('Basic Auth enabled successfully! You will need to log in on your next visit.', 'success');
+                    }
                     await loadSettings();
                 } catch (err) {
                     const saveBtn = content.querySelector('#settings-save-btn');
                     if (saveBtn) saveBtn.disabled = false;
-                    alert('Failed to save: ' + (err.message || err));
+                    showToast('Failed to save: ' + (err.message || err), 'error');
                 }
             };
         }
@@ -9555,3 +10184,1215 @@ function loadMailboxStatsPage(page) {
     loadMailboxStatsList(page);
 }
 
+// =============================================================================
+// LIVE LOG VIEWER
+// =============================================================================
+
+let logsState = {
+    activeService: 'postfix',
+    isPaused: false,
+    autoScroll: true,
+    fontSize: 12,
+    wordWrap: true,
+    searchQuery: '',
+    activeSmartFilters: [],
+    ws: null,
+    isConnected: false,
+    services: [],
+    smartFilters: [],
+    entryCount: 0,
+    lastUpdateTime: null,
+    allEntries: [],
+    // Pagination state for infinite scroll
+    currentPage: 1,
+    totalPages: 1,
+    totalEntries: 0,
+    isLoadingMore: false,
+    oldestPageLoaded: 1,  // track which page we've loaded up to
+    timeRangeMinutes: '',  // '' = all time, or minutes as string
+};
+
+// Service icon map (SVG paths for inline icons)
+const LOG_SERVICE_ICONS = {
+    mail: 'M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z',
+    inbox: 'M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4',
+    calendar: 'M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z',
+    shield: 'M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z',
+    lock: 'M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z',
+    code: 'M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4',
+    search: 'M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z',
+    eye: 'M15 12a3 3 0 11-6 0 3 3 0 016 0z M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z',
+    clock: 'M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z',
+    filter: 'M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z',
+    file: 'M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z',
+};
+
+async function loadLogViewer() {
+    console.log('[LOGS] Loading log viewer...');
+    
+    try {
+        // Fetch service list
+        const response = await authenticatedFetch('/api/raw-logs/services');
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+        }
+        
+        const data = await response.json();
+        
+        // Check if raw logs feature is disabled
+        if (data.raw_logs_enabled === false) {
+            const output = document.getElementById('logs-output');
+            if (output) {
+                output.innerHTML = `
+                    <div class="flex flex-col items-center justify-center py-16 text-center">
+                        <svg class="w-16 h-16 text-gray-400 dark:text-gray-500 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"></path>
+                        </svg>
+                        <h3 class="text-lg font-semibold text-gray-300 mb-2">Live Log Viewer is Disabled</h3>
+                        <p class="text-sm text-gray-500 max-w-md">
+                            Raw log collection is currently turned off. Enable it in
+                            <a href="#" onclick="event.preventDefault(); navigateTo('settings')" class="text-blue-400 hover:text-blue-300 underline">Settings → Raw Logs</a>
+                            to start viewing live logs.
+                        </p>
+                    </div>
+                `;
+            }
+            // Hide the service sidebar
+            const sidebar = document.getElementById('logs-service-list');
+            if (sidebar) sidebar.innerHTML = '';
+            return;
+        }
+        
+        logsState.services = data.services || [];
+        
+        // Render service sidebar
+        renderLogServiceList(logsState.services);
+        
+        // Select first service or postfix
+        const defaultService = logsState.services.find(s => s.id === 'postfix') || logsState.services[0];
+        if (defaultService) {
+            await selectLogService(defaultService.id);
+        } else {
+            const output = document.getElementById('logs-output');
+            if (output) {
+                output.innerHTML = '<span class="text-yellow-400">No log services available. Enable services in Settings → Raw Logs.</span>';
+            }
+        }
+    } catch (error) {
+        console.error('[LOGS] Failed to load log viewer:', error);
+        const output = document.getElementById('logs-output');
+        if (output) {
+            output.innerHTML = `<span class="text-red-400">Failed to load log services: ${escapeHtml(error.message)}</span>`;
+        }
+    }
+}
+
+function renderLogServiceList(services) {
+    const container = document.getElementById('logs-service-list');
+    if (!container) return;
+    
+    if (services.length === 0) {
+        container.innerHTML = '<p class="text-xs text-gray-500 dark:text-gray-400 text-center py-4">No services enabled</p>';
+        return;
+    }
+    
+    container.innerHTML = services.map(svc => {
+        const iconPath = LOG_SERVICE_ICONS[svc.icon] || LOG_SERVICE_ICONS.file;
+        const isActive = svc.id === logsState.activeService;
+        const countStr = svc.log_count >= 1000 ? (svc.log_count / 1000).toFixed(1) + 'K' : svc.log_count.toString();
+        
+        return `
+            <button onclick="selectLogService('${svc.id}')" 
+                id="log-svc-${svc.id}"
+                class="w-full flex items-center gap-2 px-3 py-2 rounded-md text-left text-sm transition-colors log-service-btn ${
+                    isActive 
+                    ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-700' 
+                    : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
+                }" data-service="${svc.id}">
+                <svg class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="${iconPath}"></path>
+                </svg>
+                <span class="flex-1 truncate font-medium">${escapeHtml(svc.name)}</span>
+                <span class="text-xs text-gray-400 dark:text-gray-500 font-mono">${countStr}</span>
+            </button>
+        `;
+    }).join('');
+}
+
+
+function filterLogServices(query) {
+    const buttons = document.querySelectorAll('.log-service-btn');
+    const q = query.toLowerCase();
+    buttons.forEach(btn => {
+        const service = btn.dataset.service || '';
+        const text = btn.textContent.toLowerCase();
+        btn.style.display = (text.includes(q) || service.includes(q)) ? '' : 'none';
+    });
+}
+
+async function selectLogService(serviceId) {
+    console.log('[LOGS] Selecting service:', serviceId);
+    logsState.activeService = serviceId;
+    logsState.entryCount = 0;
+    
+    // Update sidebar active state
+    document.querySelectorAll('.log-service-btn').forEach(btn => {
+        const isActive = btn.dataset.service === serviceId;
+        if (isActive) {
+            btn.className = btn.className.replace(
+                /text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700/g, ''
+            );
+            btn.classList.add('bg-blue-50', 'dark:bg-blue-900/30', 'text-blue-700', 'dark:text-blue-300', 'border', 'border-blue-200', 'dark:border-blue-700');
+            btn.classList.remove('hover:bg-gray-100', 'dark:hover:bg-gray-700');
+        } else {
+            btn.classList.remove('bg-blue-50', 'dark:bg-blue-900/30', 'text-blue-700', 'dark:text-blue-300', 'border', 'border-blue-200', 'dark:border-blue-700');
+            btn.classList.add('text-gray-700', 'dark:text-gray-300', 'hover:bg-gray-100', 'dark:hover:bg-gray-700');
+        }
+    });
+    
+    // Update status bar
+    const activeServiceEl = document.getElementById('logs-active-service');
+    if (activeServiceEl) activeServiceEl.textContent = serviceId;
+    
+    // Clear output
+    const output = document.getElementById('logs-output');
+    if (output) {
+        output.innerHTML = '<span class="text-gray-500">Loading logs...</span>';
+    }
+    
+    // Reset date range
+    logsState.dateRange = null;
+    logsState.timeRangeMinutes = '';
+    const fromInput = document.getElementById('logs-date-from');
+    const toInput = document.getElementById('logs-date-to');
+    if (fromInput) fromInput.value = '';
+    if (toInput) toInput.value = '';
+    
+    // Load smart filters
+    await loadSmartFilters(serviceId);
+    
+    // Fetch initial logs
+    await fetchInitialLogs(serviceId);
+    
+    // Connect WebSocket
+    await connectLogWebSocket(serviceId);
+}
+
+async function loadSmartFilters(serviceId) {
+    const container = document.getElementById('logs-smart-filters');
+    const chipsContainer = document.getElementById('logs-smart-filter-chips');
+    if (!container || !chipsContainer) return;
+    
+    try {
+        const response = await authenticatedFetch(`/api/raw-logs/${serviceId}/smart-filters`);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        
+        const data = await response.json();
+        logsState.smartFilters = data.filters || [];
+        logsState.activeSmartFilters = [];
+        
+        if (logsState.smartFilters.length === 0) {
+            container.classList.add('hidden');
+            return;
+        }
+        
+        container.classList.remove('hidden');
+        
+        const colorClasses = {
+            red: 'border-red-300 dark:border-red-700 text-red-700 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20',
+            orange: 'border-orange-300 dark:border-orange-700 text-orange-700 dark:text-orange-400 hover:bg-orange-50 dark:hover:bg-orange-900/20',
+            yellow: 'border-yellow-300 dark:border-yellow-700 text-yellow-700 dark:text-yellow-400 hover:bg-yellow-50 dark:hover:bg-yellow-900/20',
+            blue: 'border-blue-300 dark:border-blue-700 text-blue-700 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20',
+        };
+        
+        const activeColorClasses = {
+            red: 'bg-red-500 border-red-500 text-white',
+            orange: 'bg-orange-500 border-orange-500 text-white',
+            yellow: 'bg-yellow-500 border-yellow-500 text-white',
+            blue: 'bg-blue-500 border-blue-500 text-white',
+        };
+        
+        chipsContainer.innerHTML = logsState.smartFilters.map(f => {
+            const colors = colorClasses[f.color] || colorClasses.blue;
+            return `<button onclick="toggleSmartFilter('${f.id}')" 
+                id="smart-filter-${f.id}"
+                class="px-2.5 py-1 text-xs font-medium rounded-full border transition-colors ${colors}"
+                title="${escapeHtml(f.description || '')}"
+                data-filter-id="${f.id}" data-color="${f.color}">
+                ${escapeHtml(f.label)}
+            </button>`;
+        }).join('');
+        
+    } catch (error) {
+        console.error('[LOGS] Failed to load smart filters:', error);
+        container.classList.add('hidden');
+    }
+}
+
+async function toggleSmartFilter(filterId) {
+    const idx = logsState.activeSmartFilters.indexOf(filterId);
+    if (idx >= 0) {
+        logsState.activeSmartFilters.splice(idx, 1);
+    } else {
+        logsState.activeSmartFilters.push(filterId);
+    }
+    
+    // Update chip visual
+    const colorClasses = {
+        red: { inactive: 'border-red-300 dark:border-red-700 text-red-700 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20', active: 'bg-red-500 border-red-500 text-white' },
+        orange: { inactive: 'border-orange-300 dark:border-orange-700 text-orange-700 dark:text-orange-400 hover:bg-orange-50 dark:hover:bg-orange-900/20', active: 'bg-orange-500 border-orange-500 text-white' },
+        yellow: { inactive: 'border-yellow-300 dark:border-yellow-700 text-yellow-700 dark:text-yellow-400 hover:bg-yellow-50 dark:hover:bg-yellow-900/20', active: 'bg-yellow-500 border-yellow-500 text-white' },
+        blue: { inactive: 'border-blue-300 dark:border-blue-700 text-blue-700 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20', active: 'bg-blue-500 border-blue-500 text-white' },
+    };
+    
+    const btn = document.getElementById(`smart-filter-${filterId}`);
+    if (btn) {
+        const color = btn.dataset.color || 'blue';
+        const isActive = logsState.activeSmartFilters.includes(filterId);
+        const classes = colorClasses[color] || colorClasses.blue;
+        
+        // Reset classes
+        btn.className = `px-2.5 py-1 text-xs font-medium rounded-full border transition-colors ${isActive ? classes.active : classes.inactive}`;
+    }
+    
+    // Client-side filter: show/hide existing log lines
+    applyLogFilter();
+}
+
+async function fetchInitialLogs(serviceId) {
+    try {
+        const limit = 500;
+        const countParams = new URLSearchParams({ page: 1, limit: limit, order: 'asc' });
+        
+        const response = await authenticatedFetch(`/api/raw-logs/${serviceId}?${countParams}`);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        
+        const data = await response.json();
+        const total = data.total || 0;
+        const totalPages = Math.max(1, Math.ceil(total / limit));
+        
+        // Store pagination state
+        logsState.totalEntries = total;
+        logsState.totalPages = totalPages;
+        logsState.currentPage = totalPages;
+        logsState.oldestPageLoaded = totalPages;
+        
+        if (totalPages === 1) {
+            // Only one page — use what we already have
+            renderLogEntries(data.data || [], serviceId, true);
+        } else {
+            // Fetch the last page (newest entries)
+            const lastParams = new URLSearchParams({ page: totalPages, limit: limit, order: 'asc' });
+            const lastResp = await authenticatedFetch(`/api/raw-logs/${serviceId}?${lastParams}`);
+            if (!lastResp.ok) throw new Error(`HTTP ${lastResp.status}`);
+            const lastData = await lastResp.json();
+            renderLogEntries(lastData.data || [], serviceId, true);
+        }
+        
+        logsState.entryCount = total;
+        updateLogStatusBar();
+        setupTerminalScrollHandler();
+        
+    } catch (error) {
+        console.error('[LOGS] Failed to fetch logs:', error);
+        const output = document.getElementById('logs-output');
+        if (output) {
+            output.innerHTML = `<span class="text-red-400">Failed to load logs: ${escapeHtml(error.message)}</span>`;
+        }
+    }
+}
+
+async function fetchOlderLogs() {
+    if (logsState.isLoadingMore || logsState.oldestPageLoaded <= 1) return;
+    
+    logsState.isLoadingMore = true;
+    const pageToLoad = logsState.oldestPageLoaded - 1;
+    
+    // Show loading indicator at top
+    const output = document.getElementById('logs-output');
+    let loader = document.getElementById('logs-load-more-indicator');
+    if (!loader && output) {
+        loader = document.createElement('div');
+        loader.id = 'logs-load-more-indicator';
+        loader.className = 'text-center text-blue-400 py-2 text-xs';
+        loader.innerHTML = '⟳ Loading older logs...';
+        output.insertBefore(loader, output.firstChild);
+    }
+    
+    try {
+        const params = new URLSearchParams({
+            page: pageToLoad,
+            limit: 500,
+            order: 'asc'
+        });
+        
+        const response = await authenticatedFetch(`/api/raw-logs/${logsState.activeService}?${params}`);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        
+        const data = await response.json();
+        const entries = data.data || [];
+        
+        if (entries.length > 0) {
+            logsState.oldestPageLoaded = pageToLoad;
+            
+            // Preserve scroll position
+            const terminal = document.getElementById('logs-terminal');
+            const prevScrollHeight = terminal ? terminal.scrollHeight : 0;
+            
+            // Prepend entries
+            renderLogEntries(entries, logsState.activeService, false, true);
+            
+            // Restore scroll position (keep user at same visual point)
+            if (terminal) {
+                const newScrollHeight = terminal.scrollHeight;
+                terminal.scrollTop = newScrollHeight - prevScrollHeight;
+            }
+        }
+        
+        // Remove loader
+        if (loader) loader.remove();
+        
+        // Update status
+        updateLogStatusBar();
+        
+    } catch (error) {
+        console.error('[LOGS] Failed to load older logs:', error);
+        if (loader) loader.textContent = '✕ Failed to load older logs';
+        setTimeout(() => { if (loader) loader.remove(); }, 3000);
+    } finally {
+        logsState.isLoadingMore = false;
+    }
+}
+
+function setupTerminalScrollHandler() {
+    const terminal = document.getElementById('logs-terminal');
+    if (!terminal || terminal._scrollHandlerAttached) return;
+    
+    terminal.addEventListener('scroll', () => {
+        // When scrolled near the top (within 50px), load older entries
+        if (terminal.scrollTop < 50 && !logsState.isLoadingMore && logsState.oldestPageLoaded > 1) {
+            fetchOlderLogs();
+        }
+    });
+    terminal._scrollHandlerAttached = true;
+}
+
+/** Check if an entry matches both search query and active smart filters */
+function entryMatchesFilters(entry) {
+    const searchText = getEntrySearchText(entry).toLowerCase();
+    
+    // Check text search
+    if (logsState.searchQuery) {
+        if (!searchText.includes(logsState.searchQuery.toLowerCase())) {
+            return false;
+        }
+    }
+    
+    // Check smart filters (entry must match at least one active filter)
+    if (logsState.activeSmartFilters.length > 0) {
+        const matchesAnyFilter = logsState.activeSmartFilters.some(filterId => {
+            const filterDef = logsState.smartFilters.find(f => f.id === filterId);
+            if (!filterDef) return false;
+            
+            // Each filter has a 'pattern' and a 'field' (program or message)
+            const pattern = (filterDef.pattern || '').toLowerCase();
+            if (!pattern) return false;
+            
+            const field = filterDef.field || 'message';
+            const fieldValue = (entry[field] || '').toLowerCase();
+            return fieldValue.includes(pattern);
+        });
+        if (!matchesAnyFilter) return false;
+    }
+    
+    return true;
+}
+
+function renderLogEntries(entries, serviceId, replace = false, prepend = false) {
+    const output = document.getElementById('logs-output');
+    if (!output) return;
+    
+    if (replace) {
+        output.innerHTML = '';
+        logsState.allEntries = [];
+    }
+    
+    // Store entries
+    if (prepend) {
+        logsState.allEntries = entries.concat(logsState.allEntries);
+    } else {
+        logsState.allEntries = logsState.allEntries.concat(entries);
+    }
+    
+    if (logsState.allEntries.length === 0 && replace) {
+        output.innerHTML = '<span class="text-gray-500">No log entries found.</span>';
+        return;
+    }
+    
+    const fragment = document.createDocumentFragment();
+    const hasFilters = logsState.searchQuery || logsState.activeSmartFilters.length > 0;
+    
+    entries.forEach(entry => {
+        const line = document.createElement('div');
+        line.className = 'log-line';
+        line.style.padding = '1px 0';
+        
+        // Store the raw entry as data for search
+        line._rawEntry = entry;
+        
+        const formatted = formatLogLine(entry, serviceId);
+        line.innerHTML = formatted;
+        
+        // If there are active filters, check if this entry matches
+        if (hasFilters && !entryMatchesFilters(entry)) {
+            line.style.display = 'none';
+            line.classList.add('log-filtered');
+        }
+        
+        fragment.appendChild(line);
+    });
+    
+    if (prepend) {
+        // Insert at the beginning
+        output.insertBefore(fragment, output.firstChild);
+    } else {
+        output.appendChild(fragment);
+    }
+    
+    // Update filter badge if filters are active
+    if (hasFilters) {
+        const allLines = output.querySelectorAll('.log-line');
+        const visibleCount = output.querySelectorAll('.log-line:not(.log-filtered)').length;
+        updateFilterBadge(true, visibleCount, allLines.length);
+    }
+    
+    // Auto-scroll (only for new entries, not when loading older)
+    if (logsState.autoScroll && !prepend) {
+        const terminal = document.getElementById('logs-terminal');
+        if (terminal) {
+            terminal.scrollTop = terminal.scrollHeight;
+        }
+    }
+}
+
+/** Get searchable text from a raw log entry */
+function getEntrySearchText(entry) {
+    // Build a single string from all fields for searching
+    const parts = [];
+    if (entry.message) parts.push(entry.message);
+    if (entry.program) parts.push(entry.program);
+    if (entry.uri) parts.push(entry.uri);
+    if (entry.method) parts.push(entry.method);
+    if (entry.remote) parts.push(entry.remote);
+    if (entry.data) parts.push(String(entry.data));
+    if (entry.service) parts.push(entry.service);
+    if (entry.priority) parts.push(entry.priority);
+    // Rspamd history fields
+    if (entry.subject) parts.push(entry.subject);
+    if (entry.sender_smtp) parts.push(entry.sender_smtp);
+    if (entry.sender_mime) parts.push(entry.sender_mime);
+    if (entry.rcpt_smtp) parts.push(Array.isArray(entry.rcpt_smtp) ? entry.rcpt_smtp.join(' ') : String(entry.rcpt_smtp));
+    if (entry.rcpt_mime) parts.push(Array.isArray(entry.rcpt_mime) ? entry.rcpt_mime.join(' ') : String(entry.rcpt_mime));
+    if (entry.action) parts.push(entry.action);
+    if (entry.ip) parts.push(entry.ip);
+    if (entry.user) parts.push(entry.user);
+    return parts.join(' ');
+}
+
+function formatLogLine(entry, serviceId) {
+    const timeVal = entry.time || entry.unix_time;
+    const time = timeVal ? formatLogTimestamp(timeVal) : '';
+    
+    // Build the display message based on service type
+    let displayContent = '';
+    let lineColor = 'text-gray-300';
+    let programStr = '';
+    
+    switch (serviceId) {
+        case 'api':
+            // API: { time, uri, method, remote, data }
+            const method = escapeHtml(entry.method || '');
+            const uri = escapeHtml(entry.uri || '');
+            const remote = escapeHtml(entry.remote || '');
+            const data = entry.data ? escapeHtml(String(entry.data).substring(0, 200)) : '';
+            
+            // Color by method
+            const methodColors = { GET: 'text-green-400', POST: 'text-yellow-400', PUT: 'text-blue-400', DELETE: 'text-red-400' };
+            const methodColor = methodColors[entry.method] || 'text-gray-300';
+            
+            displayContent = `<span class="${methodColor} font-bold">${method}</span> <span class="text-gray-200">${uri}</span> <span class="text-gray-500">from</span> <span class="text-purple-400">${remote}</span>`;
+            if (data) {
+                displayContent += ` <span class="text-gray-500">${data}</span>`;
+            }
+            lineColor = methodColor;
+            break;
+            
+        case 'watchdog':
+            // Watchdog: { time, service, lvl, hpnow, hptotal, hpdiff }
+            const wdService = escapeHtml(entry.service || '');
+            const lvl = parseInt(entry.lvl || '0');
+            const hpnow = entry.hpnow || '?';
+            const hptotal = entry.hptotal || '?';
+            const hpdiff = parseInt(entry.hpdiff || '0');
+            
+            // Color by health
+            if (hpdiff < 0 || lvl > 200) {
+                lineColor = 'text-red-400';
+            } else if (lvl > 100) {
+                lineColor = 'text-yellow-400';
+            } else {
+                lineColor = 'text-green-400';
+            }
+            
+            const hpBar = `${hpnow}/${hptotal}`;
+            const diffStr = hpdiff > 0 ? `+${hpdiff}` : String(hpdiff);
+            displayContent = `<span class="text-cyan-400">${wdService}</span> <span class="${lineColor}">HP: ${hpBar}</span> <span class="text-gray-500">(${diffStr})</span> <span class="text-gray-500">lvl:${lvl}</span>`;
+            break;
+            
+        case 'rspamd-history': {
+            // Rspamd history: { unix_time, sender_smtp, rcpt_smtp, subject, score, action, ip, symbols, ... }
+            const score = parseFloat(entry.score || 0);
+            const action = escapeHtml(entry.action || 'unknown');
+            const sender = escapeHtml(entry.sender_smtp || entry.sender_mime || '');
+            const rcpts = (entry.rcpt_smtp || entry.rcpt_mime || []);
+            const recipient = escapeHtml(Array.isArray(rcpts) ? rcpts.join(', ') : String(rcpts));
+            const subject = escapeHtml((entry.subject || '').substring(0, 80));
+            const ip = escapeHtml(entry.ip || '');
+            
+            // Score color: green = ham, yellow = greylist zone, red = spam/reject
+            const rejectThreshold = entry.thresholds?.reject || 15;
+            const addHeaderThreshold = entry.thresholds?.['add header'] || 8;
+            let scoreColor = 'text-green-400';
+            if (score >= rejectThreshold) {
+                scoreColor = 'text-red-400';
+                lineColor = 'text-red-400';
+            } else if (score >= addHeaderThreshold) {
+                scoreColor = 'text-orange-400';
+                lineColor = 'text-yellow-400';
+            } else if (score >= 0) {
+                scoreColor = 'text-yellow-400';
+            } else {
+                scoreColor = 'text-green-400';
+            }
+            
+            // Action color
+            const actionColors = {
+                'reject': 'text-red-400',
+                'greylist': 'text-yellow-400',
+                'add header': 'text-orange-400',
+                'rewrite subject': 'text-orange-400',
+                'soft reject': 'text-yellow-400',
+                'no action': 'text-green-400',
+            };
+            const actionColor = actionColors[entry.action] || 'text-gray-400';
+
+            displayContent = `<span class="text-gray-300">${sender}</span> <span class="text-gray-500">→</span> <span class="text-gray-300">${recipient}</span> <span class="text-gray-500">subj:</span><span class="text-gray-400">${subject}</span> <span class="${scoreColor} font-bold">[${score.toFixed(1)}]</span> <span class="${actionColor}">${action}</span>`;
+            if (ip) {
+                displayContent += ` <span class="text-gray-600">${ip}</span>`;
+            }
+            break;
+        }
+            
+        default:
+            // Standard format: { time, program, priority, message }
+            // Used by: postfix, dovecot, sogo, netfilter, acme, ratelimited
+            const message = escapeHtml(entry.message || '');
+            programStr = escapeHtml(entry.program || '');
+            
+            // Color code based on message content
+            const msgLower = (entry.message || '').toLowerCase();
+            if (msgLower.includes('reject') || msgLower.includes('error') || msgLower.includes('blocked') || 
+                msgLower.includes('denied') || msgLower.includes('failed') || msgLower.includes('fatal')) {
+                lineColor = 'text-red-400';
+            } else if (msgLower.includes('warning') || msgLower.includes('pregreet') || msgLower.includes('timeout')) {
+                lineColor = 'text-yellow-400';
+            } else if (msgLower.includes('sent') || msgLower.includes('connect from') || msgLower.includes('login') ||
+                       msgLower.includes('delivered') || msgLower.includes('success')) {
+                lineColor = 'text-green-400';
+            } else if (msgLower.includes('disconnect') || msgLower.includes('removed') || msgLower.includes('noqueue')) {
+                lineColor = 'text-gray-400';
+            }
+            
+            displayContent = message;
+            break;
+    }
+    
+    // Highlight search terms
+    if (logsState.searchQuery && displayContent) {
+        const regex = new RegExp(`(${escapeRegex(logsState.searchQuery)})`, 'gi');
+        displayContent = displayContent.replace(regex, '<mark class="bg-yellow-500/40 text-yellow-200 rounded px-0.5">$1</mark>');
+    }
+    
+    // Assemble final line
+    if (serviceId === 'api' || serviceId === 'watchdog' || serviceId === 'rspamd-history') {
+        // Custom format — content is already fully formatted
+        return `<span class="text-blue-400">${time}</span> ${displayContent}`;
+    } else if (time && programStr) {
+        return `<span class="text-blue-400">${time}</span> <span class="text-cyan-400">${programStr}</span>: <span class="${lineColor}">${displayContent}</span>`;
+    } else if (time) {
+        return `<span class="text-blue-400">${time}</span> <span class="${lineColor}">${displayContent}</span>`;
+    } else {
+        return `<span class="${lineColor}">${displayContent || escapeHtml(JSON.stringify(entry))}</span>`;
+    }
+}
+
+function formatLogTimestamp(timeVal) {
+    try {
+        let date;
+        const numVal = Number(timeVal);
+        if (!isNaN(numVal) && numVal > 0) {
+            date = new Date(numVal * 1000);
+        } else {
+            date = new Date(timeVal);
+        }
+        
+        if (isNaN(date.getTime())) return String(timeVal);
+        
+        // Use the same format as the Messages page (DD.MM.YYYY, HH:mm:ss)
+        const options = {
+            day: '2-digit',
+            month: '2-digit',
+            year: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit',
+            hour12: false
+        };
+        
+        if (appTimezone && appTimezone !== 'UTC') {
+            options.timeZone = appTimezone;
+        }
+        
+        return date.toLocaleString(undefined, options);
+    } catch {
+        return String(timeVal);
+    }
+}
+
+function escapeRegex(string) {
+    return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+// =============================================================================
+// WEBSOCKET
+// =============================================================================
+
+async function connectLogWebSocket(serviceId) {
+    // Disconnect existing connection
+    disconnectLogWebSocket();
+    
+    if (logsState.isPaused) return;
+    
+    try {
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        let wsUrl = `${protocol}//${window.location.host}/ws/raw-logs?service=${serviceId}`;
+        
+        // Fetch a one-time auth token via the authenticated REST API
+        try {
+            const tokenResp = await authenticatedFetch('/api/raw-logs/ws-token');
+            if (tokenResp.ok) {
+                const tokenData = await tokenResp.json();
+                if (tokenData.token) {
+                    wsUrl += `&token=${encodeURIComponent(tokenData.token)}`;
+                }
+            }
+        } catch (e) {
+            console.warn('[LOGS WS] Could not fetch WS token:', e.message);
+        }
+        
+        console.log('[LOGS WS] Connecting...');
+        logsState.ws = new WebSocket(wsUrl);
+        
+        logsState.ws.onopen = () => {
+            console.log('[LOGS WS] Connected');
+            logsState.isConnected = true;
+            updateWsIndicator(true);
+        };
+        
+        logsState.ws.onmessage = (event) => {
+            try {
+                const data = JSON.parse(event.data);
+                
+                if (data.type === 'new_logs' && data.entries && data.entries.length > 0) {
+                    if (!logsState.isPaused) {
+                        renderLogEntries(data.entries, data.service, false);
+                        logsState.entryCount += data.entries.length;
+                        logsState.totalEntries = logsState.entryCount;
+                        logsState.lastUpdateTime = new Date();
+                        updateLogStatusBar();
+                    }
+                } else if (data.type === 'service_counts' && data.counts) {
+                    // Update all sidebar badges with fresh DB counts
+                    const fmtNum = (n) => n >= 1000 ? (n / 1000).toFixed(1) + 'K' : n.toString();
+                    for (const [svcId, count] of Object.entries(data.counts)) {
+                        const btn = document.getElementById(`log-svc-${svcId}`);
+                        if (!btn) continue;
+                        const badge = btn.querySelector('.font-mono');
+                        if (badge) badge.textContent = fmtNum(count);
+                    }
+                    // Keep active service's totalEntries in sync
+                    if (logsState.activeService && data.counts[logsState.activeService] !== undefined) {
+                        logsState.totalEntries = data.counts[logsState.activeService];
+                        logsState.entryCount = data.counts[logsState.activeService];
+                        updateLogStatusBar();
+                    }
+                } else if (data.type === 'error') {
+                    console.warn('[LOGS WS] Server error:', data.message);
+                    // Don't reconnect on auth errors
+                    if (data.message && data.message.includes('Authentication')) {
+                        logsState._authFailed = true;
+                    }
+                } else if (data.type === 'connected' || data.type === 'subscribed') {
+                    console.log('[LOGS WS]', data.message);
+                }
+            } catch (e) {
+                console.error('[LOGS WS] Message parse error:', e);
+            }
+        };
+        
+        logsState.ws.onclose = (event) => {
+            console.log('[LOGS WS] Disconnected:', event.code, event.reason);
+            logsState.isConnected = false;
+            updateWsIndicator(false);
+            
+            // Don't reconnect on authentication failure
+            if (event.code === 4401 || logsState._authFailed) {
+                console.warn('[LOGS WS] Authentication failed — not reconnecting');
+                logsState._authFailed = false;
+                return;
+            }
+            
+            // Auto-reconnect after 3 seconds (only if still on logs tab)
+            if (currentTab === 'logs' && !logsState.isPaused) {
+                setTimeout(() => {
+                    if (currentTab === 'logs' && !logsState.isPaused) {
+                        connectLogWebSocket(logsState.activeService);
+                    }
+                }, 3000);
+            }
+        };
+        
+        logsState.ws.onerror = (error) => {
+            console.error('[LOGS WS] Error:', error);
+            logsState.isConnected = false;
+            updateWsIndicator(false);
+        };
+        
+    } catch (error) {
+        console.error('[LOGS WS] Connection error:', error);
+        updateWsIndicator(false);
+    }
+}
+
+function disconnectLogWebSocket() {
+    if (logsState.ws) {
+        logsState.ws.onclose = null; // Prevent auto-reconnect
+        logsState.ws.close();
+        logsState.ws = null;
+    }
+    logsState.isConnected = false;
+    updateWsIndicator(false);
+}
+
+function updateWsIndicator(connected) {
+    const indicator = document.getElementById('logs-ws-indicator');
+    const status = document.getElementById('logs-ws-status');
+    
+    if (indicator) {
+        indicator.className = `w-2 h-2 rounded-full ${connected ? 'bg-green-500' : logsState.isPaused ? 'bg-yellow-500' : 'bg-red-500'}`;
+    }
+    if (status) {
+        status.textContent = connected ? 'Connected' : logsState.isPaused ? 'Paused' : 'Disconnected';
+    }
+}
+
+function updateLogStatusBar() {
+    const countEl = document.getElementById('logs-entry-count');
+    const updateEl = document.getElementById('logs-last-update');
+    
+    const fmtNum = (n) => n >= 1000 ? (n / 1000).toFixed(1) + 'K' : n.toString();
+    
+    if (countEl) {
+        const loaded = logsState.allEntries.length;
+        const total = logsState.totalEntries || logsState.entryCount;
+        
+        if (total > loaded) {
+            countEl.textContent = `${fmtNum(loaded)} of ${fmtNum(total)} entries`;
+        } else {
+            countEl.textContent = `${fmtNum(total)} entries`;
+        }
+    }
+    
+    if (updateEl) {
+        if (logsState.lastUpdateTime) {
+            const seconds = Math.floor((new Date() - logsState.lastUpdateTime) / 1000);
+            updateEl.textContent = `Last update: ${seconds}s ago`;
+        } else {
+            updateEl.textContent = 'Last update: just now';
+        }
+    }
+}
+
+// =============================================================================
+// CONTROLS
+// =============================================================================
+
+function toggleLogPause() {
+    logsState.isPaused = !logsState.isPaused;
+    
+    const btn = document.getElementById('logs-pause-btn');
+    const text = document.getElementById('logs-pause-text');
+    const icon = document.getElementById('logs-pause-icon');
+    
+    if (logsState.isPaused) {
+        // Paused → show Resume
+        if (text) text.textContent = 'Resume';
+        if (icon) icon.innerHTML = '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>';
+        if (btn) {
+            btn.classList.add('border-yellow-500', 'bg-yellow-500', 'text-white');
+            btn.classList.remove('border-gray-300', 'dark:border-gray-600', 'text-gray-700', 'dark:text-gray-300');
+        }
+        disconnectLogWebSocket();
+    } else {
+        // Resumed → show Pause
+        if (text) text.textContent = 'Pause';
+        if (icon) icon.innerHTML = '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>';
+        if (btn) {
+            btn.classList.remove('border-yellow-500', 'bg-yellow-500', 'text-white');
+            btn.classList.add('border-gray-300', 'dark:border-gray-600', 'text-gray-700', 'dark:text-gray-300');
+        }
+        connectLogWebSocket(logsState.activeService);
+    }
+    
+    updateWsIndicator(logsState.isConnected);
+}
+
+function toggleAutoScroll() {
+    logsState.autoScroll = !logsState.autoScroll;
+    
+    const btn = document.getElementById('logs-autoscroll-btn');
+    if (btn) {
+        if (logsState.autoScroll) {
+            btn.classList.add('border-blue-500', 'bg-blue-500', 'text-white');
+            btn.classList.remove('border-gray-300', 'dark:border-gray-600', 'text-gray-700', 'dark:text-gray-300');
+        } else {
+            btn.classList.remove('border-blue-500', 'bg-blue-500', 'text-white');
+            btn.classList.add('border-gray-300', 'dark:border-gray-600', 'text-gray-700', 'dark:text-gray-300');
+        }
+    }
+    
+    if (logsState.autoScroll) {
+        const terminal = document.getElementById('logs-terminal');
+        if (terminal) terminal.scrollTop = terminal.scrollHeight;
+    }
+}
+
+function setLogFontSize(size) {
+    logsState.fontSize = parseInt(size);
+    const output = document.getElementById('logs-output');
+    if (output) {
+        output.style.fontSize = `${logsState.fontSize}px`;
+    }
+}
+
+function toggleWordWrap() {
+    logsState.wordWrap = !logsState.wordWrap;
+    
+    const output = document.getElementById('logs-output');
+    const btn = document.getElementById('logs-wrap-btn');
+    
+    if (output) {
+        output.style.whiteSpace = logsState.wordWrap ? 'pre-wrap' : 'pre';
+        output.style.wordWrap = logsState.wordWrap ? 'break-word' : 'normal';
+    }
+    
+    if (btn) {
+        if (logsState.wordWrap) {
+            btn.classList.add('border-blue-500', 'bg-blue-500', 'text-white');
+            btn.classList.remove('border-gray-300', 'dark:border-gray-600', 'text-gray-700', 'dark:text-gray-300');
+        } else {
+            btn.classList.remove('border-blue-500', 'bg-blue-500', 'text-white');
+            btn.classList.add('border-gray-300', 'dark:border-gray-600', 'text-gray-700', 'dark:text-gray-300');
+        }
+    }
+}
+
+function searchLogs() {
+    const input = document.getElementById('logs-search-input');
+    logsState.searchQuery = input ? input.value.trim() : '';
+    
+    // Client-side filter: show/hide existing log lines
+    applyLogFilter();
+}
+
+/** Fill date inputs with a preset (minutes ago → now) */
+function setLogTimePreset(minutes) {
+    const now = new Date();
+    const from = new Date(now.getTime() - minutes * 60 * 1000);
+    
+    // Format for datetime-local input (YYYY-MM-DDTHH:MM)
+    const fmt = (d) => {
+        const pad = (n) => String(n).padStart(2, '0');
+        return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    };
+    
+    const fromInput = document.getElementById('logs-date-from');
+    const toInput = document.getElementById('logs-date-to');
+    if (fromInput) fromInput.value = fmt(from);
+    if (toInput) toInput.value = fmt(now);
+    
+    // Auto-load
+    loadDateRangeLogs();
+}
+
+/** Load ALL logs within the selected date range */
+async function loadDateRangeLogs() {
+    const fromInput = document.getElementById('logs-date-from');
+    const toInput = document.getElementById('logs-date-to');
+    const loadingEl = document.getElementById('logs-range-loading');
+    
+    const startDate = fromInput?.value ? new Date(fromInput.value).toISOString() : null;
+    const endDate = toInput?.value ? new Date(toInput.value).toISOString() : null;
+    
+    if (!startDate) {
+        // No date selected — do nothing
+        return;
+    }
+    
+    // Show loading state
+    if (loadingEl) loadingEl.classList.remove('hidden');
+    const loadBtn = document.getElementById('logs-load-range-btn');
+    if (loadBtn) loadBtn.disabled = true;
+    
+    try {
+        // Store the date range in state
+        logsState.dateRange = { start: startDate, end: endDate };
+        logsState.timeRangeMinutes = '';  // not using minute-based anymore
+        
+        // Mark Live as inactive
+        setLiveButtonActive(false);
+        
+        // Fetch page 1 to know overall total
+        const params = new URLSearchParams({ page: 1, limit: 1000, order: 'asc' });
+        params.set('start_date', startDate);
+        if (endDate) params.set('end_date', endDate);
+        
+        const response = await authenticatedFetch(`/api/raw-logs/${logsState.activeService}?${params}`);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        
+        const data = await response.json();
+        const total = data.total || 0;
+        const limit = 1000;
+        const totalPages = Math.max(1, Math.ceil(total / limit));
+        
+        // Render the first page
+        renderLogEntries(data.data || [], logsState.activeService, true);
+        
+        // Fetch remaining pages
+        for (let page = 2; page <= totalPages; page++) {
+            if (loadingEl) loadingEl.textContent = `Loading page ${page}/${totalPages}...`;
+            
+            const nextParams = new URLSearchParams({ page, limit, order: 'asc' });
+            nextParams.set('start_date', startDate);
+            if (endDate) nextParams.set('end_date', endDate);
+            
+            const nextResp = await authenticatedFetch(`/api/raw-logs/${logsState.activeService}?${nextParams}`);
+            if (!nextResp.ok) break;
+            
+            const nextData = await nextResp.json();
+            renderLogEntries(nextData.data || [], logsState.activeService, false);
+        }
+        
+        // Update state
+        logsState.totalEntries = total;
+        logsState.entryCount = total;
+        logsState.oldestPageLoaded = 1;  // we loaded everything
+        logsState.totalPages = 1;
+        updateLogStatusBar();
+        
+        // Re-apply filters
+        if (logsState.searchQuery || logsState.activeSmartFilters.length > 0) {
+            applyLogFilter();
+        }
+        
+    } catch (error) {
+        console.error('[LOGS] Date range load failed:', error);
+        const output = document.getElementById('logs-output');
+        if (output) {
+            output.innerHTML = `<span class="text-red-400">Failed to load date range: ${escapeHtml(error.message)}</span>`;
+        }
+    } finally {
+        if (loadingEl) {
+            loadingEl.textContent = 'Loading...';
+            loadingEl.classList.add('hidden');
+        }
+        if (loadBtn) loadBtn.disabled = false;
+    }
+}
+
+/** Reset to live mode — load latest entries + reconnect WS */
+async function resetToLiveLogs() {
+    // Clear date range state
+    logsState.dateRange = null;
+    logsState.timeRangeMinutes = '';
+    
+    // Clear date inputs
+    const fromInput = document.getElementById('logs-date-from');
+    const toInput = document.getElementById('logs-date-to');
+    if (fromInput) fromInput.value = '';
+    if (toInput) toInput.value = '';
+    
+    // Mark Live as active
+    setLiveButtonActive(true);
+    
+    // Re-fetch latest logs
+    await fetchInitialLogs(logsState.activeService);
+    
+    // Reconnect WebSocket
+    await connectLogWebSocket(logsState.activeService);
+}
+
+function setLiveButtonActive(active) {
+    const btn = document.getElementById('logs-live-btn');
+    if (!btn) return;
+    
+    if (active) {
+        btn.className = 'inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md border border-green-500 bg-green-500 text-white transition-colors';
+    } else {
+        btn.className = 'inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors';
+    }
+}
+
+function clearLogSearch() {
+    const input = document.getElementById('logs-search-input');
+    if (input) input.value = '';
+    logsState.searchQuery = '';
+    
+    // Also clear smart filters
+    if (logsState.activeSmartFilters.length > 0) {
+        logsState.activeSmartFilters.forEach(filterId => {
+            const btn = document.getElementById(`smart-filter-${filterId}`);
+            if (btn) {
+                const color = btn.dataset.color || 'blue';
+                const inactiveClasses = {
+                    red: 'border-red-300 dark:border-red-700 text-red-700 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20',
+                    orange: 'border-orange-300 dark:border-orange-700 text-orange-700 dark:text-orange-400 hover:bg-orange-50 dark:hover:bg-orange-900/20',
+                    yellow: 'border-yellow-300 dark:border-yellow-700 text-yellow-700 dark:text-yellow-400 hover:bg-yellow-50 dark:hover:bg-yellow-900/20',
+                    blue: 'border-blue-300 dark:border-blue-700 text-blue-700 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20',
+                };
+                btn.className = `px-2.5 py-1 text-xs font-medium rounded-full border transition-colors ${inactiveClasses[color] || inactiveClasses.blue}`;
+            }
+        });
+        logsState.activeSmartFilters = [];
+    }
+    
+    applyLogFilter();
+}
+
+function applyLogFilter() {
+    const output = document.getElementById('logs-output');
+    if (!output) return;
+    
+    const hasFilters = logsState.searchQuery || logsState.activeSmartFilters.length > 0;
+    const lines = output.querySelectorAll('.log-line');
+    let visibleCount = 0;
+    
+    lines.forEach(line => {
+        if (!hasFilters) {
+            // No filters — show all
+            line.style.display = '';
+            line.classList.remove('log-filtered');
+            visibleCount++;
+        } else {
+            const entry = line._rawEntry;
+            if (entry && entryMatchesFilters(entry)) {
+                line.style.display = '';
+                line.classList.remove('log-filtered');
+                visibleCount++;
+            } else if (!entry) {
+                // Fallback for lines without _rawEntry (shouldn't happen but safe)
+                line.style.display = '';
+                line.classList.remove('log-filtered');
+                visibleCount++;
+            } else {
+                line.style.display = 'none';
+                line.classList.add('log-filtered');
+            }
+        }
+    });
+    
+    // Update the filter badge
+    updateFilterBadge(hasFilters, visibleCount, lines.length);
+}
+
+function updateFilterBadge(hasFilters, visible, total) {
+    let badge = document.getElementById('logs-filter-badge');
+    if (!hasFilters) {
+        if (badge) badge.remove();
+        return;
+    }
+    if (!badge) {
+        badge = document.createElement('div');
+        badge.id = 'logs-filter-badge';
+        badge.className = 'absolute bottom-12 left-1/2 -translate-x-1/2 bg-blue-600 text-white text-xs px-3 py-1.5 rounded-full shadow-lg flex items-center gap-2 z-10';
+        const terminal = document.getElementById('logs-terminal');
+        if (terminal) {
+            terminal.style.position = 'relative';
+            terminal.appendChild(badge);
+        }
+    }
+    // Build description of active filters
+    const parts = [];
+    if (logsState.searchQuery) {
+        parts.push(`"${escapeHtml(logsState.searchQuery)}"`);
+    }
+    if (logsState.activeSmartFilters.length > 0) {
+        const filterNames = logsState.activeSmartFilters.map(id => {
+            const f = logsState.smartFilters.find(sf => sf.id === id);
+            return f ? f.label : id;
+        });
+        parts.push(filterNames.join(', '));
+    }
+    badge.innerHTML = `<span>Showing ${visible} of ${total} — filter: <strong>${parts.join(' + ')}</strong></span>` +
+        `<button onclick="clearLogSearch()" class="ml-1 hover:text-yellow-300 font-bold" title="Clear all filters">✕</button>`;
+}
+
+function clearLogDisplay() {
+    // Clear display
+    const output = document.getElementById('logs-output');
+    if (output) {
+        output.innerHTML = '<span class="text-gray-500">Display cleared. New logs will appear here.</span>';
+    }
+    logsState.entryCount = 0;
+    logsState.allEntries = [];
+    
+    // Clear search
+    const searchInput = document.getElementById('logs-search-input');
+    if (searchInput) searchInput.value = '';
+    logsState.searchQuery = '';
+    
+    // Clear smart filters
+    if (logsState.activeSmartFilters.length > 0) {
+        logsState.activeSmartFilters.forEach(filterId => {
+            const chip = document.querySelector(`[data-filter-id="${filterId}"]`);
+            if (chip) {
+                chip.classList.remove('bg-blue-100', 'dark:bg-blue-900/40', 'text-blue-700', 'dark:text-blue-300', 'border-blue-300', 'dark:border-blue-600');
+                chip.classList.add('bg-gray-100', 'dark:bg-gray-700', 'text-gray-600', 'dark:text-gray-400', 'border-gray-300', 'dark:border-gray-600');
+            }
+        });
+        logsState.activeSmartFilters = [];
+    }
+    
+    // Clear date range
+    const fromInput = document.getElementById('logs-date-from');
+    const toInput = document.getElementById('logs-date-to');
+    if (fromInput) fromInput.value = '';
+    if (toInput) toInput.value = '';
+    logsState.dateRange = null;
+    logsState.timeRangeMinutes = '';
+    
+    // Clear filter badge
+    updateFilterBadge(false);
+    
+    updateLogStatusBar();
+}

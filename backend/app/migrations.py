@@ -991,6 +991,9 @@ def run_migrations():
         # Known containers cache
         ensure_known_containers_table(db)
         
+        # Raw service logs (Live Log Viewer)
+        ensure_raw_service_logs_table(db)
+        
         add_geoip_fields_to_dmarc(db)
         add_geoip_fields_to_rspamd(db)
         add_geoip_fields_to_netfilter(db)
@@ -1120,5 +1123,46 @@ def ensure_known_containers_table(db: Session):
             
     except Exception as e:
         logger.error(f"Error ensuring known_containers table: {e}")
+        db.rollback()
+        raise
+
+
+def ensure_raw_service_logs_table(db: Session):
+    """Ensure raw_service_logs table exists for the Live Log Viewer"""
+    try:
+        result = db.execute(text("""
+            SELECT EXISTS (
+                SELECT FROM information_schema.tables 
+                WHERE table_name = 'raw_service_logs'
+            )
+        """))
+        table_exists = result.scalar()
+        
+        if not table_exists:
+            logger.info("Creating raw_service_logs table...")
+            db.execute(text("""
+                CREATE TABLE raw_service_logs (
+                    id SERIAL PRIMARY KEY,
+                    service VARCHAR(50) NOT NULL,
+                    time TIMESTAMP NOT NULL,
+                    message_hash VARCHAR(64) NOT NULL,
+                    raw_data JSONB NOT NULL,
+                    created_at TIMESTAMP DEFAULT NOW(),
+                    CONSTRAINT uq_raw_service_log UNIQUE (service, time, message_hash)
+                )
+            """))
+            
+            # Create indexes
+            db.execute(text("CREATE INDEX IF NOT EXISTS idx_raw_log_service_time ON raw_service_logs(service, time DESC)"))
+            db.execute(text("CREATE INDEX IF NOT EXISTS idx_raw_log_time ON raw_service_logs(time)"))
+            db.execute(text("CREATE INDEX IF NOT EXISTS idx_raw_log_service ON raw_service_logs(service)"))
+            
+            db.commit()
+            logger.info("raw_service_logs table created successfully")
+        else:
+            logger.debug("raw_service_logs table already exists")
+            
+    except Exception as e:
+        logger.error(f"Error ensuring raw_service_logs table: {e}")
         db.rollback()
         raise

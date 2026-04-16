@@ -27,9 +27,31 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+
+def _get_raw_logs_job_status(job_key: str, field: str, enabled: bool):
+    """Get raw logs job status from the separate worker module."""
+    if not enabled:
+        if field == 'status':
+            return 'disabled'
+        return None
+    try:
+        from ..raw_logs_worker import get_raw_logs_job_status
+        status = get_raw_logs_job_status()
+        job = status.get(job_key, {})
+        val = job.get(field)
+        if field == 'last_run' and val:
+            return format_datetime_utc(val)
+        if field == 'status':
+            return val or 'idle'
+        return val
+    except Exception:
+        if field == 'status':
+            return 'unknown'
+        return None
+
 # Keys whose values are masked in GET /api/settings (never returned in plain text)
 _SENSITIVE_SETTING_KEYS = frozenset({
-    "mailcow_api_key", "auth_password", "oauth2_client_secret", "smtp_password",
+    "mailcow_api_key", "mailcow_api_key_rw", "auth_password", "oauth2_client_secret", "smtp_password",
     "dmarc_imap_password", "session_secret_key", "maxmind_license_key"
 })
 MASK_PLACEHOLDER = "********"
@@ -318,6 +340,23 @@ async def get_settings_info(db: Session = Depends(get_db)):
                     "status": jobs_status.get('send_weekly_summary', {}).get('status', 'idle') if settings.enable_weekly_summary else 'disabled',
                     "last_run": format_datetime_utc(jobs_status.get('send_weekly_summary', {}).get('last_run')) if settings.enable_weekly_summary else None,
                     "error": jobs_status.get('send_weekly_summary', {}).get('error') if settings.enable_weekly_summary else None
+                },
+                "fetch_raw_logs": {
+                    "interval": f"{settings.raw_logs_fetch_interval} seconds" if settings.raw_logs_enabled else "Disabled",
+                    "description": "Fetches raw logs from mailcow services for the Logs page",
+                    "enabled": settings.raw_logs_enabled,
+                    "status": _get_raw_logs_job_status('fetch_raw_logs', 'status', settings.raw_logs_enabled),
+                    "last_run": _get_raw_logs_job_status('fetch_raw_logs', 'last_run', settings.raw_logs_enabled),
+                    "error": _get_raw_logs_job_status('fetch_raw_logs', 'error', settings.raw_logs_enabled)
+                },
+                "cleanup_raw_logs": {
+                    "schedule": "Daily at 3:00 AM" if settings.raw_logs_enabled else "Disabled",
+                    "description": "Removes raw logs older than retention period",
+                    "retention": f"{settings.raw_logs_retention_days} days" if settings.raw_logs_enabled else None,
+                    "enabled": settings.raw_logs_enabled,
+                    "status": _get_raw_logs_job_status('cleanup_raw_logs', 'status', settings.raw_logs_enabled),
+                    "last_run": _get_raw_logs_job_status('cleanup_raw_logs', 'last_run', settings.raw_logs_enabled),
+                    "error": _get_raw_logs_job_status('cleanup_raw_logs', 'error', settings.raw_logs_enabled)
                 }
             },
             "smtp_configuration": {
@@ -404,7 +443,10 @@ async def update_settings(body: Dict[str, Any], db: Session = Depends(get_db)):
     """
     Update app settings from UI. Only allowed when SETTINGS_EDIT_VIA_UI_ENABLED is true.
     Accepts only keys in EDITABLE_SETTING_KEYS. Secrets: send empty string to leave unchanged.
+    When enabling basic_auth_enabled, verify_username and verify_password must be provided
+    and must match the credentials being saved, to prevent lockout.
     """
+    import secrets as _secrets
     if not settings.edit_settings_via_ui_enabled:
         raise HTTPException(status_code=403, detail="Editing settings from UI is disabled. Set SETTINGS_EDIT_VIA_UI_ENABLED=true to enable.")
     allowed = {k: v for k, v in body.items() if k in EDITABLE_SETTING_KEYS}
@@ -416,6 +458,61 @@ async def update_settings(body: Dict[str, Any], db: Session = Depends(get_db)):
     if not allowed:
         reload_settings(db)
         return {"settings_edit_via_ui_enabled": True, "settings_migrated": True, "configuration": _effective_config_for_editable(settings)}
+
+    # ── Basic Auth lockout prevention ──────────────────────────────────
+    # When basic_auth_enabled is being turned ON, validate credentials
+    # to ensure the user won't be locked out.
+    _enabling_basic_auth = (
+        allowed.get("basic_auth_enabled") is True
+        and not settings.is_basic_auth_enabled
+    )
+    if _enabling_basic_auth:
+        # Determine effective password: explicit value in payload, or current setting
+        _eff_password = allowed.get("auth_password", settings.auth_password or "")
+        _eff_username = allowed.get("auth_username", settings.auth_username or "admin")
+        if not _eff_password or not str(_eff_password).strip():
+            raise HTTPException(
+                status_code=400,
+                detail="Cannot enable Basic Auth without a password. Please set a password first."
+            )
+        # Require verification credentials from the user
+        _verify_user = body.get("verify_username", "")
+        _verify_pass = body.get("verify_password", "")
+        if not _verify_user or not _verify_pass:
+            raise HTTPException(
+                status_code=400,
+                detail="Credential verification required. Please confirm your username and password to enable Basic Auth."
+            )
+        _user_ok = _secrets.compare_digest(
+            str(_verify_user).encode("utf-8"),
+            str(_eff_username).encode("utf-8"),
+        )
+        _pass_ok = _secrets.compare_digest(
+            str(_verify_pass).encode("utf-8"),
+            str(_eff_password).encode("utf-8"),
+        )
+        if not (_user_ok and _pass_ok):
+            raise HTTPException(
+                status_code=400,
+                detail="Credential verification failed. The username and password you entered do not match the configured credentials."
+            )
+        logger.info("Basic Auth credential verification passed — enabling authentication")
+
+    # Prevent clearing the password while Basic Auth is (or will be) enabled
+    _basic_auth_active = (
+        allowed.get("basic_auth_enabled", settings.is_basic_auth_enabled) is True
+    )
+    _clearing_password = (
+        "auth_password" in allowed
+        and (not allowed["auth_password"] or not str(allowed["auth_password"]).strip())
+    )
+    if _basic_auth_active and _clearing_password:
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot clear the password while Basic Auth is enabled. Disable Basic Auth first, or set a new password."
+        )
+    # ──────────────────────────────────────────────────────────────────
+
     try:
         # Validate by building a Settings copy with current + updates
         current = settings.model_dump()

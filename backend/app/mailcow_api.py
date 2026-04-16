@@ -226,6 +226,49 @@ class MailcowAPI:
             logger.error(f"Failed to fetch Netfilter logs: {e}")
             return []
     
+    # Allowed services for the raw logs viewer
+    ALLOWED_RAW_LOG_SERVICES = frozenset([
+        "acme", "api", "autodiscover", "dovecot", "netfilter",
+        "postfix", "ratelimited", "rspamd-history", "sogo", "watchdog"
+    ])
+
+    async def get_raw_logs(self, service: str, count: int = 1000) -> List[Dict[str, Any]]:
+        """
+        Fetch raw logs for any mailcow service.
+        Used by the Raw Logs Worker for background ingestion.
+        
+        Args:
+            service: Service name (e.g., 'postfix', 'dovecot', 'sogo')
+            count: Number of logs to fetch
+        
+        Returns:
+            List of raw log entries as returned by the mailcow API
+        """
+        if service not in self.ALLOWED_RAW_LOG_SERVICES:
+            logger.warning(f"Unknown raw log service requested: {service}")
+            return []
+        
+        logger.debug(f"Fetching {count} raw logs for service: {service}")
+        try:
+            data = await self._make_request(f"/api/v1/get/logs/{service}/{count}")
+            
+            if isinstance(data, dict):
+                # Some services return a dict when no logs exist (e.g., {"type":"error"})
+                # This is normal — not all services have logs on every mailcow instance
+                logger.debug(f"Service '{service}' returned dict (no logs available), skipping")
+                return []
+            
+            if not isinstance(data, list):
+                logger.warning(f"Unexpected {service} raw log response format: {type(data)}")
+                return []
+            
+            logger.debug(f"Retrieved {len(data)} raw logs for {service}")
+            return data
+            
+        except MailcowAPIError as e:
+            logger.error(f"Failed to fetch raw logs for {service}: {e}")
+            return []
+    
     async def get_queue(self) -> List[Dict[str, Any]]:
         """
         Fetch current mail queue from mailcow (real-time)
@@ -247,6 +290,51 @@ class MailcowAPI:
         except MailcowAPIError as e:
             logger.error(f"Failed to fetch queue: {e}")
             return []
+
+    async def edit_queue(self, item_ids: List[str], action: str) -> Any:
+        """
+        Edit mail queue items on mailcow using the Read-Write API key.
+        
+        Args:
+            item_ids: List of queue item IDs (queue_id) or ["mailqitems-all"] for bulk
+            action: Action to perform - deliver, hold, unhold, flush
+        
+        Returns:
+            Response from mailcow API
+        """
+        logger.info(f"Editing queue items: {item_ids} with action: {action}")
+        payload = {
+            "items": item_ids,
+            "attr": {
+                "action": action
+            }
+        }
+        data = await self._make_rw_request(
+            "/api/v1/edit/mailq",
+            method="POST",
+            json=payload
+        )
+        logger.info(f"Queue edit response: {data}")
+        return data
+
+    async def delete_queue(self, item_ids: List[str]) -> Any:
+        """
+        Delete mail queue items on mailcow using the Read-Write API key.
+        
+        Args:
+            item_ids: List of queue item IDs (queue_id) or ["mailqitems-all"] with super_delete
+        
+        Returns:
+            Response from mailcow API
+        """
+        logger.info(f"Deleting queue items: {item_ids}")
+        data = await self._make_rw_request(
+            "/api/v1/delete/mailq",
+            method="POST",
+            json=item_ids
+        )
+        logger.info(f"Queue delete response: {data}")
+        return data
     
     async def get_quarantine(self) -> List[Dict[str, Any]]:
         """
@@ -714,6 +802,56 @@ class MailcowAPI:
             json=payload
         )
         logger.info(f"Fail2Ban unban response: {data}")
+        return data
+
+    async def release_quarantine(self, item_ids: List[str]) -> Any:
+        """
+        Release quarantined messages on mailcow using the Read-Write API key.
+        
+        Args:
+            item_ids: List of quarantine item ID strings to release
+        
+        Returns:
+            Response from mailcow API
+        
+        Raises:
+            MailcowAPIError: If request fails or RW key is not configured
+        """
+        logger.info(f"Releasing quarantine items: {item_ids}")
+        payload = {
+            "items": item_ids,
+            "attr": {
+                "action": "release"
+            }
+        }
+        data = await self._make_rw_request(
+            "/api/v1/edit/qitem",
+            method="POST",
+            json=payload
+        )
+        logger.info(f"Quarantine release response: {data}")
+        return data
+
+    async def delete_quarantine(self, item_ids: List[str]) -> Any:
+        """
+        Delete quarantined messages on mailcow using the Read-Write API key.
+        
+        Args:
+            item_ids: List of quarantine item ID strings to delete
+        
+        Returns:
+            Response from mailcow API
+        
+        Raises:
+            MailcowAPIError: If request fails or RW key is not configured
+        """
+        logger.info(f"Deleting quarantine items: {item_ids}")
+        data = await self._make_rw_request(
+            "/api/v1/delete/qitem",
+            method="POST",
+            json=item_ids
+        )
+        logger.info(f"Quarantine delete response: {data}")
         return data
 
     @property

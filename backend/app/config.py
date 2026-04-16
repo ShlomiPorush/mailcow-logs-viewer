@@ -17,6 +17,10 @@ _DB_ONLY_KEYS = frozenset({"postgres_host", "postgres_port", "postgres_user", "p
 # Name avoids "settings_" prefix to prevent Pydantic protected namespace warning.
 _EDIT_VIA_UI_FLAG_KEY = "edit_settings_via_ui_enabled"
 
+ALL_RAW_LOG_SERVICES = [
+    'acme', 'api', 'autodiscover', 'dovecot', 'netfilter',
+    'postfix', 'ratelimited', 'rspamd-history', 'sogo', 'watchdog'
+]
 
 class Settings(BaseSettings):
     """Application settings"""
@@ -369,6 +373,33 @@ class Settings(BaseSettings):
         description='Enable weekly summary email report'
     )
 
+    # Raw Logs Viewer Configuration
+    raw_logs_enabled: bool = Field(
+        default=True,
+        env='RAW_LOGS_ENABLED',
+        description='Enable background raw log collection for the Logs page'
+    )
+    raw_logs_fetch_interval: int = Field(
+        default=20,
+        env='RAW_LOGS_FETCH_INTERVAL',
+        description='Seconds between raw log fetch cycles'
+    )
+    raw_logs_fetch_count: int = Field(
+        default=1000,
+        env='RAW_LOGS_FETCH_COUNT',
+        description='Number of logs to fetch per service per cycle'
+    )
+    raw_logs_retention_days: int = Field(
+        default=2,
+        env='RAW_LOGS_RETENTION_DAYS',
+        description='Days to keep raw logs before cleanup'
+    )
+    raw_logs_services: str = Field(
+        default='acme,api,autodiscover,dovecot,netfilter,postfix,ratelimited,rspamd-history,sogo,watchdog',
+        env='RAW_LOGS_SERVICES',
+        description='Comma-separated list of mailcow services to collect raw logs from'
+    )
+
     @field_validator('smtp_port', 'dmarc_imap_port', 'dmarc_imap_interval', mode='before')
     @classmethod
     def empty_str_to_none(cls, v):
@@ -425,6 +456,17 @@ class Settings(BaseSettings):
         if not self.blacklist_emails:
             return []
         return [e.strip().lower() for e in self.blacklist_emails.split(',') if e.strip()]
+    
+    @property
+    def raw_logs_services_list(self) -> List[str]:
+        """Parse raw_logs_services into a list of enabled service names.
+        Supports 'all' as a shortcut for all services."""
+        if not self.raw_logs_services:
+            return []
+        val = self.raw_logs_services.strip()
+        if val.lower() == 'all':
+            return list(ALL_RAW_LOG_SERVICES)
+        return [s.strip().lower() for s in val.split(',') if s.strip()]
     
     @property
     def notification_smtp_configured(self) -> bool:

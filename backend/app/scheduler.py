@@ -103,6 +103,12 @@ def reschedule_interval_jobs():
                 pass
             logger.info(f"Scheduler thread pool updated to {new_workers} workers")
         logger.info(f"Rescheduled interval jobs: fetch={settings.fetch_interval}s, correlation={settings.correlation_check_interval}s")
+        # Also reschedule raw logs worker if active
+        try:
+            from .raw_logs_worker import reschedule_raw_logs_jobs
+            reschedule_raw_logs_jobs()
+        except Exception as e:
+            logger.warning(f"Failed to reschedule raw logs jobs: {e}")
     except Exception as e:
         logger.warning("Failed to reschedule interval jobs: %s", e)
 
@@ -123,6 +129,8 @@ job_status = {
     'blacklist_check': {'last_run': None, 'status': 'idle', 'error': None},
     'send_weekly_summary': {'last_run': None, 'status': 'idle', 'error': None},
     'sync_transports': {'last_run': None, 'status': 'idle', 'error': None},
+    'fetch_raw_logs': {'last_run': None, 'status': 'idle', 'error': None},
+    'cleanup_raw_logs': {'last_run': None, 'status': 'idle', 'error': None},
 }
 
 # Number of hosts that were listed on actionable blacklists in the previous blacklist check run (for "cleared" notification)
@@ -380,18 +388,21 @@ async def fetch_and_store_postfix():
                         raw_data=log_entry
                     )
                     
-                    db.add(postfix_log)
-                    db.flush()
+                    # Use SAVEPOINT so a duplicate-key failure only rolls back
+                    # this single INSERT, not the entire batch.
+                    nested = db.begin_nested()
+                    try:
+                        db.add(postfix_log)
+                        db.flush()
+                        nested.commit()
+                    except IntegrityError:
+                        nested.rollback()
+                        seen_postfix.add(unique_id)
+                        skipped_count += 1
+                        continue
                     
                     seen_postfix.add(unique_id)
                     new_count += 1
-                    
-                except IntegrityError:
-                    # Duplicate log - skip silently
-                    db.rollback()
-                    seen_postfix.add(unique_id)
-                    skipped_count += 1
-                    continue
                     
                 except Exception as e:
                     logger.error(f"Error processing Postfix log: {e}")

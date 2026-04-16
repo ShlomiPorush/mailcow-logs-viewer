@@ -5,6 +5,100 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.4.0] - 2026-04-15
+
+### Added
+
+#### Live Log Viewer
+- **New "Logs" page** — live terminal style log viewer for all mailcow services
+  - **10 mailcow services supported**: Postfix, Dovecot, SOGo, Netfilter, Ratelimited, Rspamd, Watchdog, ACME, API, Autodiscover
+  - **Real-time updates via WebSocket** — new log entries pushed instantly from the server, no polling
+  - **Terminal-style dark output** with color-coded log lines (errors red, warnings yellow, success green)
+  - **Service sidebar** with entry count badges and quick filter
+  - **Postfix Smart Filters** — one-click filter chips for common issues: Postscreen, NOQUEUE Reject, DNSBL Block, Pregreet, Sender/Recipient Restrictions, Relay Denied, Connections
+  - **Full-text search** across log messages with highlighted results
+  - **Controls**: Pause/Resume, Auto-scroll, Font size selector, Word wrap toggle, Clear display
+  - **Status bar**: WebSocket connection indicator (green/red/yellow), entry count, last update time
+  - **Timezone-aware timestamps** — dates formatted consistently with the rest of the app (`DD.MM.YYYY, HH:mm:ss`)
+- **Date Range Analysis** — full forensic log retrieval by date range
+  - **Date Range Picker** with From/To datetime inputs and quick presets (1h, 6h, 24h, 48h)
+  - **Infinite scroll pagination** — automatically loads older pages when scrolling up
+  - **Status bar indicators** — shows `Loaded X of Y entries` for data availability feedback
+- **Live Mode toggle** — dedicated Live button next to Pause with visual active state
+
+#### Background Raw Logs Worker
+- **Separate `AsyncIOScheduler` instance** — completely independent from the main scheduler, ensuring log ingestion never impacts existing correlation processing
+- **Sequential API fetching** — services fetched one at a time to minimize mailcow API load
+- **Pre-check hash deduplication** — queries existing SHA-256 hashes before inserting, preventing duplicate entries without generating database errors
+- **Automatic cleanup** — daily job at 3:00 AM removes entries older than retention period
+- **Raw JSON storage** — full API response stored as-is in JSONB, frontend defines display templates per service
+- **Configurable per-service selection** — users choose which services to collect via checkbox UI in Settings page
+- **Graceful handling of unavailable services** — services returning dict/error responses are silently skipped
+
+#### Settings — Logs Tab
+- **New "Logs" tab in Settings**
+- **Checkbox-based service selection** — choose which mailcow services to collect logs from via checkboxes
+
+#### Status Page — Categorized Background Jobs
+- **Background jobs grouped by category** with section headers and icons:
+
+#### New Configuration Settings
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `RAW_LOGS_ENABLED` | `true` | Enable/disable raw log collection |
+| `RAW_LOGS_FETCH_INTERVAL` | `20` | Seconds between fetch cycles |
+| `RAW_LOGS_FETCH_COUNT` | `1000` | Logs per service per cycle |
+| `RAW_LOGS_RETENTION_DAYS` | `2` | Days before auto-cleanup (48 hours) |
+| `RAW_LOGS_SERVICES` | `all` | Comma-separated list, or `all` for all 10 services |
+
+#### Quarantine Management Actions
+- **Release and delete quarantined emails directly from the UI**: The Quarantine page now supports managing quarantined messages when a Read-Write API key (`MAILCOW_API_KEY_RW`) is configured
+  - **Per-item actions**: Each quarantine entry shows "Release" and "Delete" buttons
+  - **Bulk actions**
+  - **Release All / Delete All**: Toolbar buttons to release or delete all visible quarantine items with confirmation
+  - When no Read-Write API key is configured, the quarantine page remains read-only (no buttons or checkboxes shown)
+
+#### Mail Queue Management Actions
+- **Manage mail queue items directly from the UI**: The Queue page now supports managing queued messages when a Read-Write API key (`MAILCOW_API_KEY_RW`) is configured
+  - **Per-item actions**: Each queue entry shows "Retry" (re-attempt delivery), "Hold"/"Unhold" (context-aware), and "Delete" buttons
+  - **Bulk actions**
+  - Delete and bulk actions require a confirmation dialog
+  - **Queue status badge**: Each item displays a color-coded status badge showing the queue name (active=green, deferred=orange, hold=yellow, bounce/corrupt=red, incoming=blue)
+  - When no Read-Write API key is configured, the queue page remains read-only
+
+### Fixed
+
+#### Basic Auth Lockout Prevention
+- **Credential verification before enabling Basic Auth from UI**: When toggling Basic Auth ON and clicking Save, a **verification modal** now appears asking the user to type their username and password
+  - Credentials are validated both **client-side** and **server-side** (timing-safe comparison)
+  - Enabling Basic Auth without a password configured is now blocked with a clear error message
+- **Clearing password while Basic Auth is enabled is now blocked**: The server now returns `400 Bad Request` if the password is being cleared while Basic Auth is enabled
+
+#### Read-Write API Key Exposure
+- **`MAILCOW_API_KEY_RW` now masked in API responses**: The Read-Write API key was not included in the sensitive keys list. It is now masked with `********` like all other sensitive fields
+
+#### Postfix Log Import Crash on Duplicate Key
+- **`duplicate key value violates unique constraint "uq_postfix_log"` causing batch loss**: Fixed by using SAVEPOINT pattern so a single failed log insertion does not roll back the entire batch
+
+### Technical
+
+#### New API Endpoints
+```
+GET  /api/raw-logs/services              - List enabled services with metadata and entry counts
+GET  /api/raw-logs/{service}             - Query stored logs (paginated, searchable, filterable)
+GET  /api/raw-logs/{service}/smart-filters - Get smart filter definitions for a service
+GET  /api/raw-logs/worker-status         - Worker health and job status
+WS   /ws/raw-logs?service={service}      - WebSocket endpoint for real-time log streaming
+GET  /api/rw-status                      - Check if Read-Write API key is configured
+POST /api/quarantine/release             - Release quarantined messages (requires RW API key)
+POST /api/quarantine/delete              - Delete quarantined messages (requires RW API key)
+POST /api/queue/action                   - Perform queue action: deliver, hold, unhold, flush, super_delete
+POST /api/queue/delete                   - Delete mail queue items (requires RW API key)
+```
+
+#### Settings API Changes
+- `PUT /api/settings`: When `basic_auth_enabled` is being set to `true`, the request body must now include `verify_username` and `verify_password` fields matching the configured credentials
+
 ## [2.3.3] - 2026-03-31
 
 ### Added

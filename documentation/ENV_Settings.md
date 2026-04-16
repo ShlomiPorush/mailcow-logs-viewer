@@ -65,7 +65,6 @@ These settings **must** be configured in your `.env` file:
 
 | Variable | Type | Default | Description |
 |----------|------|---------|-------------|
-| `APP_PORT` | integer | `8080` | Application port (internal container port) |
 | `APP_TITLE` | string | `mailcow Logs Viewer` | Application title (shown in browser tab) |
 | `APP_LOGO_URL` | string | (empty) | Logo URL (optional, leave empty for no logo) |
 | `LOG_LEVEL` | string | `WARNING` | Logging level: `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL` |
@@ -151,6 +150,20 @@ These settings **must** be configured in your `.env` file:
 >     volumes:
 >       - ./data:/app/data
 > ```
+
+---
+
+## Raw Logs Configuration (Live Log Viewer)
+
+Settings for the background raw log collector that powers the Logs page. Logs are fetched from mailcow services and stored in a dedicated database table, then streamed to the UI via WebSocket.
+
+| Variable | Type | Default | Description |
+|----------|------|---------|-------------|
+| `RAW_LOGS_ENABLED` | boolean | `true` | Enable background raw log collection for the Logs page. When disabled, no logs are fetched and the Logs page shows historical data only |
+| `RAW_LOGS_FETCH_INTERVAL` | integer | `20` | Seconds between raw log fetch cycles. Lower = more real-time, higher = less API load |
+| `RAW_LOGS_FETCH_COUNT` | integer | `1000` | Number of log entries to fetch per service per cycle. Higher values catch more logs but increase API load |
+| `RAW_LOGS_RETENTION_DAYS` | integer | `2` | Days to keep raw logs in the database. Older logs are automatically deleted daily at 3:00 AM |
+| `RAW_LOGS_SERVICES` | string | `all` | Which mailcow services to collect logs from. Use `all` for all 10 services, or comma-separated list: `postfix,dovecot,sogo,api`. Available: `acme`, `api`, `autodiscover`, `dovecot`, `netfilter`, `postfix`, `ratelimited`, `rspamd-history`, `sogo`, `watchdog` |
 
 ---
 

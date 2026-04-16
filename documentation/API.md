@@ -36,6 +36,7 @@ When authentication is enabled, all API endpoints (except public endpoints liste
     - [DMARC IMAP Auto-Import](#dmarc-imap-auto-import)
 15. [Blacklist Monitoring](#blacklist-monitoring)
 16. [Reporting](#reporting)
+17. [Raw Logs (Live Log Viewer)](#raw-logs-live-log-viewer)
 
 ---
 
@@ -174,6 +175,27 @@ Application information and configuration.
 - `auth_enabled`: Boolean - Whether any authentication is enabled
 - `basic_auth_enabled`: Boolean - Whether Basic Authentication is enabled
 - `oauth2_enabled`: Boolean - Whether OAuth2/OIDC authentication is enabled
+
+---
+
+### GET /rw-status
+
+Check if a Read-Write API key (`MAILCOW_API_KEY_RW`) is configured. This is a unified endpoint used by all features that require write access (Fail2Ban settings, Quarantine management, etc.).
+
+**Response:**
+```json
+{
+  "rw_configured": true
+}
+```
+
+**Response Fields:**
+- `rw_configured`: Boolean - `true` if `MAILCOW_API_KEY_RW` is set, `false` otherwise
+
+**Notes:**
+- Fetched once by the frontend at startup and cached in a global variable
+- Used to conditionally show/hide edit controls, action buttons, and write-operation UI
+- Does not validate the key — only checks if it is configured
 
 ---
 
@@ -1561,16 +1583,9 @@ Update Fail2Ban configuration on mailcow. Requires the Read-Write API key (`MAIL
 - `403 Forbidden`: Read-Write API key is not configured
 - `503 Service Unavailable`: Could not reach the mailcow API
 
-#### GET /fail2ban/rw-status
+#### RW Status Check
 
-Check whether the Read-Write API key is configured (used by frontend to show/hide edit controls).
-
-**Response:**
-```json
-{
-  "rw_configured": true
-}
-```
+See [GET /rw-status](#get-rw-status) — unified endpoint for checking Read-Write API key availability.
 
 ---
 
@@ -1599,6 +1614,83 @@ Get current mail queue from mailcow (real-time).
   ]
 }
 ```
+---
+
+### POST /queue/action
+
+Perform an action on mail queue items. Requires a Read-Write API key (`MAILCOW_API_KEY_RW`).
+
+**Request Body:**
+```json
+{
+  "items": ["ABC123DEF"],
+  "action": "deliver"
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `items` | string[] | Yes | Array of queue IDs, or `["mailqitems-all"]` for bulk actions |
+| `action` | string | Yes | Action to perform (see table below) |
+
+**Supported Actions:**
+
+| Action | Description |
+|--------|-------------|
+| `deliver` | Retry delivery of the message |
+| `hold` | Put message on hold (pause delivery attempts) |
+| `unhold` | Release a held message |
+| `flush` | Flush (retry) all queued messages. Use with `items: ["mailqitems-all"]` |
+| `super_delete` | Delete all messages from queue. Use with `items: ["mailqitems-all"]` |
+
+**Response (Success):**
+```json
+{
+  "status": "success",
+  "msg": "Queue action 'deliver' completed"
+}
+```
+
+**Error Responses:**
+- `400 Bad Request`: Missing `items` array or invalid action
+- `500 Internal Server Error`: RW API key not configured or mailcow API error
+
+**Notes:**
+- Proxies to mailcow `POST /api/v1/edit/mailq` with `{"items": [...], "attr": {"action": "..."}}`
+- For bulk actions (`flush`, `super_delete`), use `["mailqitems-all"]` as items
+
+---
+
+### POST /queue/delete
+
+Delete specific mail queue items. Requires a Read-Write API key (`MAILCOW_API_KEY_RW`).
+
+**Request Body:**
+```json
+{
+  "items": ["ABC123DEF"]
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `items` | string[] | Yes | Array of queue IDs to delete |
+
+**Response (Success):**
+```json
+{
+  "status": "success",
+  "msg": "Queue item(s) deleted"
+}
+```
+
+**Error Responses:**
+- `400 Bad Request`: Missing `items` array
+- `500 Internal Server Error`: RW API key not configured or mailcow API error
+
+**Notes:**
+- Proxies to mailcow `POST /api/v1/delete/mailq` with queue IDs array
+- For deleting ALL items, use `POST /queue/action` with `action: "super_delete"` instead
 
 ---
 
@@ -1615,13 +1707,106 @@ Get quarantined messages from mailcow (real-time).
       "id": 123,
       "subject": "Suspicious Email",
       "sender": "spammer@evil.com",
-      "recipients": ["user@example.com"],
+      "rcpt": "user@example.com",
       "created": "2025-12-25T10:30:00Z",
-      "reason": "High spam score"
+      "action": "reject",
+      "score": 15.2,
+      "virus_flag": false,
+      "qid": "ABC123DEF"
     }
   ]
 }
 ```
+
+---
+
+### RW Status Check
+
+Quarantine actions require a Read-Write API key. See [GET /rw-status](#get-rw-status) for checking availability.
+
+---
+
+### POST /quarantine/release
+
+Release (approve) quarantined messages on mailcow. Requires a Read-Write API key (`MAILCOW_API_KEY_RW`).
+
+**Request Body:**
+```json
+{
+  "items": ["123", "456"]
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `items` | string[] | Yes | Array of quarantine item ID strings to release |
+
+**Response (Success):**
+```json
+{
+  "status": "success",
+  "msg": "Message(s) released"
+}
+```
+
+**Response (Error):**
+```json
+{
+  "status": "error",
+  "msg": "Release failed"
+}
+```
+
+**Error Responses:**
+- `400 Bad Request`: Missing `items` array
+- `500 Internal Server Error`: RW API key not configured or mailcow API error
+
+**Notes:**
+- Proxies to mailcow `POST /api/v1/edit/qitem` with `{"items": [...], "attr": {"action": "release"}}`
+- Released messages are delivered to the original recipient's mailbox
+- Supports releasing multiple messages in a single request
+
+---
+
+### POST /quarantine/delete
+
+Permanently delete quarantined messages on mailcow. Requires a Read-Write API key (`MAILCOW_API_KEY_RW`).
+
+**Request Body:**
+```json
+{
+  "items": ["123"]
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `items` | string[] | Yes | Array of quarantine item ID strings to delete |
+
+**Response (Success):**
+```json
+{
+  "status": "success",
+  "msg": "Message(s) deleted"
+}
+```
+
+**Response (Error):**
+```json
+{
+  "status": "error",
+  "msg": "Delete failed"
+}
+```
+
+**Error Responses:**
+- `400 Bad Request`: Missing `items` array
+- `500 Internal Server Error`: RW API key not configured or mailcow API error
+
+**Notes:**
+- Proxies to mailcow `POST /api/v1/delete/qitem` with `["id1", "id2"]`
+- Deleted messages are permanently removed and cannot be recovered
+- Supports deleting multiple messages in a single request
 
 ---
 
@@ -2278,8 +2463,32 @@ Updates application settings stored in database. Only available when `SETTINGS_E
 
 **Request Fields:**
 - Any editable setting key (see `GET /api/settings` for full list)
-- Sensitive fields: Send empty string `""` to keep current value unchanged
+- Sensitive fields: Send `********` to keep current value unchanged, send empty string `""` to clear the value
 - Non-sensitive fields: Send `null` or omit to use default value
+
+#### Basic Auth Lockout Prevention
+
+When enabling Basic Auth (`basic_auth_enabled` changing from `false` to `true`), the request must include two additional verification fields:
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `verify_username` | string | Yes (when enabling auth) | The username to verify — must match `auth_username` being saved |
+| `verify_password` | string | Yes (when enabling auth) | The password to verify — must match `auth_password` being saved |
+
+This prevents users from accidentally locking themselves out of the application by enabling authentication without knowing the credentials.
+
+**Example request (enabling Basic Auth):**
+```json
+{
+  "basic_auth_enabled": true,
+  "auth_username": "admin",
+  "auth_password": "my-secure-password",
+  "verify_username": "admin",
+  "verify_password": "my-secure-password"
+}
+```
+
+> **Note:** `verify_username` and `verify_password` are only required when enabling Basic Auth (switching from `false` to `true`). They are not needed when disabling Basic Auth or when Basic Auth is already enabled.
 
 **Response:**
 ```json
@@ -2317,13 +2526,35 @@ Updates application settings stored in database. Only available when `SETTINGS_E
 }
 ```
 
+**400 Bad Request** (No password when enabling Basic Auth):
+```json
+{
+  "detail": "Cannot enable Basic Auth without a password. Please set a password first."
+}
+```
+
+**400 Bad Request** (Missing verification credentials):
+```json
+{
+  "detail": "Credential verification required. Please confirm your username and password to enable Basic Auth."
+}
+```
+
+**400 Bad Request** (Verification credentials mismatch):
+```json
+{
+  "detail": "Credential verification failed. The username and password you entered do not match the configured credentials."
+}
+```
+
 **Notes:**
 - Only editable settings are accepted (PostgreSQL settings are filtered out)
 - Settings are validated using Pydantic before saving
-- Empty strings for sensitive fields are ignored (keeps current value)
+- `********` for sensitive fields means "keep current value" (not changed)
 - Settings are automatically reloaded after saving
 - MailcowAPI configuration is automatically updated
 - Returns updated configuration with masked sensitive fields
+- When enabling Basic Auth, credential verification uses timing-safe comparison (`secrets.compare_digest`)
 
 ---
 
@@ -3714,3 +3945,314 @@ GET /api/status/container-logs?lines=50
   ]
 }
 ```
+
+---
+
+## Raw Logs (Live Log Viewer)
+
+Endpoints for the Live Log Viewer feature. Provides access to raw logs collected from all mailcow services via a background worker. Logs are stored in a dedicated `raw_service_logs` database table and streamed in real-time via WebSocket.
+
+**Supported Services:** `acme`, `api`, `autodiscover`, `dovecot`, `netfilter`, `postfix`, `ratelimited`, `rspamd-history`, `sogo`, `watchdog`
+
+### GET /api/raw-logs/services
+
+List all enabled services with metadata and log entry counts.
+
+**Authentication:** Required
+
+**Example Request:**
+```
+GET /api/raw-logs/services
+```
+
+**Response:**
+```json
+{
+  "services": [
+    {
+      "id": "postfix",
+      "name": "Postfix",
+      "icon": "mail",
+      "description": "Mail transfer agent logs",
+      "has_smart_filters": true,
+      "entry_count": 1523
+    },
+    {
+      "id": "dovecot",
+      "name": "Dovecot",
+      "icon": "inbox",
+      "description": "IMAP/POP3 server logs",
+      "has_smart_filters": false,
+      "entry_count": 980
+    }
+  ]
+}
+```
+
+---
+
+### GET /api/raw-logs/{service}
+
+Query stored logs for a specific service with pagination, search, and time filtering.
+
+**Path Parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `service` | string | Service ID (e.g., `postfix`, `dovecot`, `api`) |
+
+**Query Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `limit` | int | 500 | Number of entries to return (max: 5000) |
+| `offset` | int | 0 | Pagination offset |
+| `search` | string | - | Full-text search across log message content |
+| `since` | ISO 8601 | - | Only return entries newer than this timestamp |
+| `smart_filter` | string | - | Apply a predefined smart filter (Postfix only) |
+
+**Authentication:** Required
+
+**Example Request:**
+```
+GET /api/raw-logs/postfix?limit=100&search=reject&smart_filter=noqueue_reject
+```
+
+**Response:**
+```json
+{
+  "service": "postfix",
+  "entries": [
+    {
+      "id": 12345,
+      "service": "postfix",
+      "time": "2026-04-15T01:21:25Z",
+      "message_hash": "a1b2c3d4...",
+      "raw_data": {
+        "time": "1776189085",
+        "program": "postfix/smtpd",
+        "priority": "info",
+        "message": "NOQUEUE: reject: RCPT from unknown[1.2.3.4]: 554 5.7.1 ..."
+      },
+      "created_at": "2026-04-15T01:21:30Z"
+    }
+  ],
+  "total": 1523,
+  "limit": 100,
+  "offset": 0
+}
+```
+
+---
+
+### GET /api/raw-logs/{service}/smart-filters
+
+Get available smart filter definitions for a specific service. Currently only Postfix has smart filters.
+
+**Path Parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `service` | string | Service ID |
+
+**Authentication:** Required
+
+**Example Request:**
+```
+GET /api/raw-logs/postfix/smart-filters
+```
+
+**Response:**
+```json
+{
+  "service": "postfix",
+  "filters": [
+    {
+      "id": "postscreen",
+      "label": "Postscreen",
+      "description": "Postscreen connection screening",
+      "patterns": ["postscreen"]
+    },
+    {
+      "id": "noqueue_reject",
+      "label": "NOQUEUE Reject",
+      "description": "Rejected before queuing",
+      "patterns": ["NOQUEUE: reject"]
+    },
+    {
+      "id": "dnsbl",
+      "label": "DNSBL Block",
+      "description": "DNS blacklist blocks",
+      "patterns": ["dnsbl", "zen.spamhaus", "bl.spamcop"]
+    },
+    {
+      "id": "pregreet",
+      "label": "Pregreet",
+      "description": "Pregreet detection (bot behavior)",
+      "patterns": ["PREGREET"]
+    },
+    {
+      "id": "sender_restrictions",
+      "label": "Sender Restrictions",
+      "description": "Sender address restrictions",
+      "patterns": ["Sender address rejected", "smtpd_sender_restrictions"]
+    },
+    {
+      "id": "recipient_restrictions",
+      "label": "Recipient Restrictions",
+      "description": "Recipient address restrictions",
+      "patterns": ["Recipient address rejected", "smtpd_recipient_restrictions"]
+    },
+    {
+      "id": "relay_denied",
+      "label": "Relay Denied",
+      "description": "Relay access denied",
+      "patterns": ["Relay access denied"]
+    },
+    {
+      "id": "connections",
+      "label": "Connections",
+      "description": "Connection events",
+      "patterns": ["connect from", "disconnect from"]
+    }
+  ]
+}
+```
+
+---
+
+### GET /api/raw-logs/worker-status
+
+Get the health and status of the raw logs background worker.
+
+**Authentication:** Required
+
+**Example Request:**
+```
+GET /api/raw-logs/worker-status
+```
+
+**Response:**
+```json
+{
+  "enabled": true,
+  "scheduler_running": true,
+  "fetch_interval": 20,
+  "retention_days": 2,
+  "enabled_services": ["postfix", "dovecot", "sogo", "netfilter", "api", "watchdog"],
+  "jobs": {
+    "fetch_raw_logs": {
+      "last_run": "2026-04-15T01:20:00Z",
+      "status": "success",
+      "error": null,
+      "stats": { "postfix": 15, "dovecot": 3, "api": 8 }
+    },
+    "cleanup_raw_logs": {
+      "last_run": "2026-04-15T03:00:00Z",
+      "status": "success",
+      "error": null
+    }
+  }
+}
+```
+
+---
+
+### GET /api/raw-logs/ws-token
+
+Issue a one-time short-lived token for WebSocket authentication. This endpoint is protected by the standard HTTP authentication middleware, so only authenticated users can obtain a token. The token expires after 30 seconds and can only be used once.
+
+**Authentication:** Required
+
+**Example Request:**
+```
+GET /api/raw-logs/ws-token
+```
+
+**Response:**
+```json
+{
+  "token": "a1b2c3d4e5f6...",
+  "ttl": 30
+}
+```
+
+---
+
+### WebSocket: /ws/raw-logs
+
+Real-time log streaming via WebSocket. Connects to receive new log entries as they are ingested by the background worker.
+
+**Authentication Flow:**
+1. Client calls `GET /api/raw-logs/ws-token` (authenticated via HTTP) to obtain a one-time token
+2. Client connects to the WebSocket with the token as a query parameter
+3. Server validates and consumes the token (single use)
+4. If authentication is disabled, the token is accepted but not validated
+
+**Connection URL:**
+```
+ws://your-server:8080/ws/raw-logs?service=postfix&token=<one-time-token>
+```
+
+**Query Parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `service` | string | Initial service to stream (e.g., `postfix`) |
+| `token` | string | One-time auth token from `/api/raw-logs/ws-token` |
+
+**Client → Server Messages:**
+
+Switch to a different service:
+```json
+{"action": "subscribe", "service": "dovecot"}
+```
+
+**Server → Client Messages:**
+
+Connection confirmed:
+```json
+{
+  "type": "connected",
+  "service": "postfix",
+  "message": "Connected to postfix log stream"
+}
+```
+
+New log entries (pushed automatically when worker ingests new data):
+```json
+{
+  "type": "new_logs",
+  "service": "postfix",
+  "entries": [
+    {
+      "time": "1776189085",
+      "program": "postfix/smtpd",
+      "priority": "info",
+      "message": "connect from unknown[1.2.3.4]"
+    }
+  ],
+  "timestamp": "2026-04-15T01:21:25Z"
+}
+```
+
+Authentication error (connection will be closed with code 4401):
+```json
+{
+  "type": "error",
+  "message": "Authentication required"
+}
+```
+
+**Close Codes:**
+
+| Code | Meaning |
+|------|---------|
+| `4401` | Authentication required — invalid or missing token |
+| `1000` | Normal closure |
+
+**Notes:**
+- The WebSocket connection auto-reconnects on drop (3-second delay), except on auth failure (4401)
+- Only entries for the currently selected service are streamed
+- Use `subscribe` action to change services without reconnecting
+- Tokens are single-use and expire after 30 seconds

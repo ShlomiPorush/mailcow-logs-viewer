@@ -567,10 +567,11 @@ async def get_fail2ban():
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/fail2ban/rw-status")
-async def get_fail2ban_rw_status():
+@router.get("/rw-status")
+async def get_rw_status():
     """
-    Check if the Read-Write API key is configured (needed for edit operations)
+    Check if the Read-Write API key is configured.
+    Used by all features that require write access (Fail2Ban, Quarantine, etc.)
     """
     return {"rw_configured": mailcow_api.has_rw_key}
 
@@ -743,6 +744,75 @@ async def get_queue():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.post("/queue/action")
+async def queue_action(request: Request):
+    """
+    Perform an action on mail queue items (requires Read-Write API key).
+    Actions: deliver, hold, unhold, flush (flush uses mailqitems-all).
+    """
+    try:
+        body = await request.json()
+        items = body.get("items", [])
+        action = body.get("action", "")
+        
+        if not items:
+            raise HTTPException(status_code=400, detail="Missing 'items' array")
+        if action not in ("deliver", "hold", "unhold", "flush", "super_delete"):
+            raise HTTPException(status_code=400, detail=f"Invalid action: {action}")
+        
+        # super_delete goes through edit endpoint with special item
+        items = [str(item) for item in items]
+        
+        result = await mailcow_api.edit_queue(items, action)
+        
+        if isinstance(result, list) and len(result) > 0:
+            first = result[0]
+            if first.get("type") == "success":
+                return {"status": "success", "msg": first.get("msg", f"Queue action '{action}' completed")}
+            else:
+                return {"status": "error", "msg": first.get("msg", f"Queue action '{action}' failed")}
+        
+        return {"status": "success", "msg": f"Queue action '{action}' completed", "raw": result}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error performing queue action: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/queue/delete")
+async def delete_queue(request: Request):
+    """
+    Delete mail queue items (requires Read-Write API key).
+    Sends POST to /api/v1/delete/mailq.
+    """
+    try:
+        body = await request.json()
+        items = body.get("items", [])
+        if not items:
+            raise HTTPException(status_code=400, detail="Missing 'items' array")
+        
+        items = [str(item) for item in items]
+        
+        result = await mailcow_api.delete_queue(items)
+        
+        if isinstance(result, list) and len(result) > 0:
+            first = result[0]
+            if first.get("type") == "success":
+                return {"status": "success", "msg": first.get("msg", "Queue item(s) deleted")}
+            else:
+                return {"status": "error", "msg": first.get("msg", "Delete failed")}
+        
+        return {"status": "success", "msg": "Queue item(s) deleted", "raw": result}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting queue items: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/quarantine")
 async def get_quarantine():
     """
@@ -794,6 +864,76 @@ async def get_quarantine():
         }
     except Exception as e:
         logger.error(f"Error fetching quarantine: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+
+
+@router.post("/quarantine/release")
+async def release_quarantine(request: Request):
+    """
+    Release quarantined messages on mailcow (requires Read-Write API key).
+    Sends POST to /api/v1/edit/qitem with action=release.
+    """
+    try:
+        body = await request.json()
+        items = body.get("items", [])
+        if not items:
+            raise HTTPException(status_code=400, detail="Missing 'items' array")
+        
+        # Ensure all items are strings
+        items = [str(item) for item in items]
+        
+        result = await mailcow_api.release_quarantine(items)
+        
+        # mailcow returns a list with status objects
+        if isinstance(result, list) and len(result) > 0:
+            first = result[0]
+            if first.get("type") == "success":
+                return {"status": "success", "msg": first.get("msg", "Message(s) released")}
+            else:
+                return {"status": "error", "msg": first.get("msg", "Release failed")}
+        
+        return {"status": "success", "msg": "Message(s) released", "raw": result}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error releasing quarantine items: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/quarantine/delete")
+async def delete_quarantine(request: Request):
+    """
+    Delete quarantined messages on mailcow (requires Read-Write API key).
+    Sends POST to /api/v1/delete/qitem.
+    """
+    try:
+        body = await request.json()
+        items = body.get("items", [])
+        if not items:
+            raise HTTPException(status_code=400, detail="Missing 'items' array")
+        
+        # Ensure all items are strings
+        items = [str(item) for item in items]
+        
+        result = await mailcow_api.delete_quarantine(items)
+        
+        # mailcow returns a list with status objects
+        if isinstance(result, list) and len(result) > 0:
+            first = result[0]
+            if first.get("type") == "success":
+                return {"status": "success", "msg": first.get("msg", "Message(s) deleted")}
+            else:
+                return {"status": "error", "msg": first.get("msg", "Delete failed")}
+        
+        return {"status": "success", "msg": "Message(s) deleted", "raw": result}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting quarantine items: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
