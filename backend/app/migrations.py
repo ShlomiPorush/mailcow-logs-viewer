@@ -799,20 +799,26 @@ def backfill_geoip_netfilter(db: Session):
         while rows:
             for row in rows:
                 geo = _geoip_service.lookup_ip(row.ip)
-                if geo.get('country_code'):
-                    db.execute(text("""
-                        UPDATE netfilter_logs 
-                        SET country_code = :cc, country_name = :cn, city = :city, asn = :asn, asn_org = :ao
-                        WHERE id = :id
-                    """), {
-                        "cc": geo.get('country_code'),
-                        "cn": geo.get('country_name'),
-                        "city": geo.get('city'),
-                        "asn": geo.get('asn'),
-                        "ao": geo.get('asn_org'),
-                        "id": row.id
-                    })
-                    updated += 1
+                country_code = geo.get('country_code') or 'ZZ'
+
+                db.execute(text("""
+                    UPDATE netfilter_logs
+                    SET country_code = :cc,
+                        country_name = :cn,
+                        city = :city,
+                        asn = :asn,
+                        asn_org = :ao
+                    WHERE id = :id
+                """), {
+                    "cc": country_code,
+                    "cn": geo.get('country_name') or 'Unknown',
+                    "city": geo.get('city'),
+                    "asn": geo.get('asn'),
+                    "ao": geo.get('asn_org'),
+                    "id": row.id
+                })
+
+                updated += 1
             
             db.commit()
             
