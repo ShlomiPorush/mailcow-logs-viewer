@@ -5,6 +5,36 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.6.2] - 2026-06-18
+
+### Fixed
+
+#### Manual Execution of Raw Log Jobs Fails with 404 ([#67](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/67))
+- **Clicking "Run" on "Fetch Raw Logs" or "Cleanup Raw Logs" background jobs returned `Unknown job` error** — the manual job trigger endpoint was missing both raw log jobs from its job mapping
+  - Added `fetch_raw_logs` and `cleanup_raw_logs` to the manual trigger endpoint
+  - Correctly reads job status from the raw logs worker's separate status tracking (not the main scheduler)
+
+#### DMARC IMAP Reports with Non-English Subjects Not Imported ([#66](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/66))
+- **DMARC reports from providers using non-English subjects were silently skipped** — the IMAP search only matched English subject patterns like "Report Domain:", "DMARC", "Report-ID:"
+  - Added new setting `DMARC_IMAP_SCAN_ALL_UNSEEN` (default: off) — when enabled, scans all unread emails for DMARC/TLS-RPT attachments, not just subject-matched ones
+  - Recommended for dedicated DMARC mailboxes that receive reports from international providers
+
+#### Scheduler Stability ([#63](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/63))
+- **Background jobs skipping with warnings** (`maximum number of running instances reached`, `Run time of job was missed`) after prolonged uptime
+  - Added `misfire_grace_time=30` and `coalesce=True` to both schedulers to tolerate delayed jobs and prevent pileups
+  - Cached log discovery results for 5 minutes to reduce API calls during fetch cycles
+  - Increased default `RAW_LOGS_FETCH_INTERVAL` from 20 to 30 seconds
+
+#### DMARC Daily Reports Not Split by Reporter ([#41](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/41))
+- **DMARC report details merged all reporters into a single row** per source IP — when multiple providers (Google, Microsoft, Yahoo, etc.) reported on the same sending IP, only the first reporter was shown
+  - Reports are now split by reporter so each provider gets its own row with independent statistics
+
+#### Noisy Error Traceback on Shutdown
+- **`CancelledError` traceback logged during graceful shutdown** — APScheduler raised an unhandled exception when `fetch_all_logs` was interrupted mid-cycle by the event loop shutting down
+  - `asyncio.CancelledError` is now caught explicitly and logged as a INFO message instead of ERROR traceback
+
+---
+
 ## [2.6.1] - 2026-05-17
 
 ### Fixed

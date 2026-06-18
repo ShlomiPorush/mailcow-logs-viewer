@@ -7163,6 +7163,7 @@ var SETTINGS_FIELD_DESCRIPTIONS = {
     dmarc_imap_interval: 'Interval between IMAP syncs in seconds. Default: 3600 (1 hour).',
     dmarc_imap_run_on_startup: 'Run IMAP sync once on application startup. Default: true.',
     dmarc_imap_batch_size: 'Number of emails to process per batch. Default: 10.',
+    dmarc_imap_scan_all_unseen: 'Scan all unread emails for DMARC/TLS-RPT attachments, not just those matching known subject patterns. Enable if you receive reports from providers that use non-English subjects. Only recommended for dedicated DMARC mailboxes.',
     dmarc_error_email: 'Email for DMARC error notifications (defaults to Admin email if not set).',
     maxmind_account_id: 'MaxMind Account ID for GeoIP database downloads. Required to download GeoLite2 databases.',
     maxmind_license_key: 'MaxMind License Key for GeoIP database downloads. Required to download GeoLite2 databases. Keep this secret.',
@@ -7277,7 +7278,7 @@ var SETTINGS_EDIT_TABS = [
             { label: 'Enable', keys: ['dmarc_imap_enabled'] },
             { label: 'Connection', keys: ['dmarc_imap_host', 'dmarc_imap_port', 'dmarc_imap_use_ssl'] },
             { label: 'Authentication', keys: ['dmarc_imap_user', 'dmarc_imap_password'] },
-            { label: 'Settings', keys: ['dmarc_imap_folder', 'dmarc_imap_delete_after', 'dmarc_imap_interval', 'dmarc_imap_run_on_startup', 'dmarc_imap_batch_size'] }
+            { label: 'Settings', keys: ['dmarc_imap_folder', 'dmarc_imap_delete_after', 'dmarc_imap_interval', 'dmarc_imap_run_on_startup', 'dmarc_imap_batch_size', 'dmarc_imap_scan_all_unseen'] }
         ]
     },
     {

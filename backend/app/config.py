@@ -286,6 +286,12 @@ class Settings(BaseSettings):
         description='Number of emails to process per batch (prevents memory issues with large mailboxes)'
     )
 
+    dmarc_imap_scan_all_unseen: bool = Field(
+        default=False,
+        env='DMARC_IMAP_SCAN_ALL_UNSEEN',
+        description='Scan all unread emails for DMARC/TLS-RPT attachments, not just those matching known subject patterns. Enable if you receive reports from providers that use non-English subjects.'
+    )
+
     dmarc_error_email: Optional[str] = Field(
         default=None,
         env='DMARC_ERROR_EMAIL',
@@ -388,7 +394,7 @@ class Settings(BaseSettings):
         description='Enable background raw log collection for the Logs page'
     )
     raw_logs_fetch_interval: int = Field(
-        default=20,
+        default=30,
         env='RAW_LOGS_FETCH_INTERVAL',
         description='Seconds between raw log fetch cycles'
     )

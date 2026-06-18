@@ -30,7 +30,12 @@ from .models import RawServiceLog
 logger = logging.getLogger(__name__)
 
 # Separate scheduler instance for raw logs (independent from main scheduler)
-raw_logs_scheduler = AsyncIOScheduler()
+raw_logs_scheduler = AsyncIOScheduler(
+    job_defaults={
+        'misfire_grace_time': 30,
+        'coalesce': True,
+    }
+)
 
 # All supported mailcow log services
 ALL_SERVICES = [

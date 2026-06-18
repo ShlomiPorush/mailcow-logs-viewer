@@ -12,6 +12,7 @@ import json
 from datetime import datetime, timezone
 from typing import List, Dict, Optional, Tuple
 from email.message import EmailMessage
+from email.header import decode_header as decode_rfc2047
 
 from ..config import settings
 from ..database import SessionLocal
@@ -25,6 +26,29 @@ from ..services.dmarc_cache import clear_dmarc_cache
 logger = logging.getLogger(__name__)
 
 
+def _decode_subject(raw_subject: str) -> str:
+    """Decode an RFC 2047 encoded email subject to plain text.
+    
+    Handles encoded headers like:
+    - =?iso-2022-jp?B?...?=  (Japanese)
+    - =?utf-8?Q?...?=        (UTF-8 quoted-printable)
+    - Plain ASCII subjects    (returned as-is)
+    """
+    if not raw_subject:
+        return ''
+    try:
+        parts = decode_rfc2047(raw_subject)
+        decoded_parts = []
+        for content, charset in parts:
+            if isinstance(content, bytes):
+                decoded_parts.append(content.decode(charset or 'utf-8', errors='replace'))
+            else:
+                decoded_parts.append(content)
+        return ' '.join(decoded_parts)
+    except Exception:
+        return raw_subject
+
+
 class DMARCImapService:
     """Service to fetch DMARC reports from IMAP inbox"""
     
@@ -36,6 +60,7 @@ class DMARCImapService:
         self.password = settings.dmarc_imap_password
         self.folder = settings.dmarc_imap_folder
         self.delete_after = settings.dmarc_imap_delete_after
+        self.scan_all_unseen = settings.dmarc_imap_scan_all_unseen
         self.connection = None
         
     def connect(self) -> bool:
@@ -88,21 +113,16 @@ class DMARCImapService:
     
     def search_report_emails(self) -> List[bytes]:
         """
-        Search for DMARC and TLS-RPT report emails
+        Search for DMARC and TLS-RPT report emails.
         
-        Looking for emails with subject containing:
-        - "Report Domain:" (DMARC)
-        - "DMARC" (DMARC)
-        - "Report-ID:" (DMARC)
-        - "TLS-RPT" (TLS-RPT)
-        - "TLS Report" (TLS-RPT)
+        Phase 1 (always): Search by known subject keywords (fast path).
+        Phase 2 (when scan_all_unseen=True): Search all remaining UNSEEN
+        emails to catch reports with non-English subjects.
         
-        Returns list of email IDs
+        Returns list of email UIDs.
         """
         try:
-            # Search for emails with DMARC or TLS-RPT related subjects
-            # Using OR to be more flexible
-            # UNSEEN ensures we don't re-process emails that were already handled (marked as Seen)
+            # Phase 1: Subject-based search (covers most DMARC/TLS-RPT providers)
             search_criteria = '(UNSEEN (OR (SUBJECT "Report Domain:") (OR (SUBJECT "DMARC") (OR (SUBJECT "Report-ID:") (OR (SUBJECT "TLS-RPT") (SUBJECT "TLS Report"))))))'
             
             status, messages = self.connection.uid('SEARCH', None, search_criteria)
@@ -112,7 +132,22 @@ class DMARCImapService:
                 return []
             
             email_ids = messages[0].split()
-            logger.info(f"Found {len(email_ids)} potential DMARC/TLS-RPT emails")
+            logger.info(f"[Phase 1] Found {len(email_ids)} subject-matched DMARC/TLS-RPT emails")
+            
+            # Phase 2: Scan all remaining UNSEEN emails (opt-in)
+            # This catches reports from providers that use non-English subjects
+            if self.scan_all_unseen:
+                subject_matched_set = set(email_ids)
+                
+                status2, messages2 = self.connection.uid('SEARCH', None, '(UNSEEN)')
+                if status2 == 'OK':
+                    all_unseen = messages2[0].split()
+                    new_ids = [uid for uid in all_unseen if uid not in subject_matched_set]
+                    if new_ids:
+                        logger.info(f"[Phase 2] Scanning {len(new_ids)} additional unseen emails for DMARC attachments")
+                        email_ids.extend(new_ids)
+                    else:
+                        logger.debug("[Phase 2] No additional unseen emails to scan")
             
             return email_ids
             
@@ -137,7 +172,7 @@ class DMARCImapService:
         Primary validation is the attachment (.xml.gz or .zip with DMARC content)
         """
         try:
-            subject = msg.get('subject', '').lower()
+            subject = _decode_subject(msg.get('subject', '')).lower()
             
             # Check for compressed DMARC attachments FIRST (most reliable indicator)
             has_dmarc_attachment = False
@@ -199,7 +234,7 @@ class DMARCImapService:
         - Some providers send with generic subjects like "Report Domain: ..."
         """
         try:
-            subject = msg.get('subject', '').lower()
+            subject = _decode_subject(msg.get('subject', '')).lower()
             
             # Check for JSON/ZIP attachments
             has_json_attachment = False

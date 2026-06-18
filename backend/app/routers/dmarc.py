@@ -615,10 +615,12 @@ async def get_report_details(
             
             for record in records:
                 ip = record.source_ip
+                # Aggregate by (IP + reporter) so each reporter gets its own row
+                key = (ip, report.org_name)
                 
-                if ip not in sources:
+                if key not in sources:
                     source_data = enrich_dmarc_record({'source_ip': ip})
-                    sources[ip] = {
+                    sources[key] = {
                         'source_ip': ip,
                         'source_name': source_data.get('asn_org', 'Unknown'),
                         'country_code': source_data.get('country_code'),
@@ -636,21 +638,21 @@ async def get_report_details(
                         'dkim_pass': 0
                     }
                 
-                sources[ip]['volume'] += record.count
+                sources[key]['volume'] += record.count
                 total_messages += record.count
                 
                 if record.spf_result == 'pass' and record.dkim_result == 'pass':
-                    sources[ip]['dmarc_pass'] += record.count
+                    sources[key]['dmarc_pass'] += record.count
                     dmarc_pass_count += record.count
                 else:
-                    sources[ip]['dmarc_fail'] += record.count
+                    sources[key]['dmarc_fail'] += record.count
                 
                 if record.spf_result == 'pass':
-                    sources[ip]['spf_pass'] += record.count
+                    sources[key]['spf_pass'] += record.count
                     spf_pass_count += record.count
                 
                 if record.dkim_result == 'pass':
-                    sources[ip]['dkim_pass'] += record.count
+                    sources[key]['dkim_pass'] += record.count
                     dkim_pass_count += record.count
         
         sources_list = []
@@ -827,8 +829,11 @@ async def get_source_details(
             envelope = record.envelope_from
             reporters.add(report.org_name)
             
-            if envelope not in envelope_from_groups:
-                envelope_from_groups[envelope] = {
+            # Aggregate by (envelope_from + reporter) so each reporter gets its own row
+            key = (envelope, report.org_name)
+            
+            if key not in envelope_from_groups:
+                envelope_from_groups[key] = {
                     'envelope_from': envelope,
                     'header_from': record.header_from,
                     'reporter': report.org_name,
@@ -841,21 +846,21 @@ async def get_source_details(
                     'dkim_result': record.dkim_result
                 }
             
-            envelope_from_groups[envelope]['volume'] += record.count
+            envelope_from_groups[key]['volume'] += record.count
             total_messages += record.count
             
             if record.spf_result == 'pass' and record.dkim_result == 'pass':
-                envelope_from_groups[envelope]['dmarc_pass'] += record.count
+                envelope_from_groups[key]['dmarc_pass'] += record.count
                 dmarc_pass_count += record.count
             else:
-                envelope_from_groups[envelope]['dmarc_fail'] += record.count
+                envelope_from_groups[key]['dmarc_fail'] += record.count
             
             if record.spf_result == 'pass':
-                envelope_from_groups[envelope]['spf_aligned'] += record.count
+                envelope_from_groups[key]['spf_aligned'] += record.count
                 spf_pass_count += record.count
             
             if record.dkim_result == 'pass':
-                envelope_from_groups[envelope]['dkim_aligned'] += record.count
+                envelope_from_groups[key]['dkim_aligned'] += record.count
                 dkim_pass_count += record.count
         
         envelope_list = sorted(envelope_from_groups.values(), key=lambda x: x['volume'], reverse=True)

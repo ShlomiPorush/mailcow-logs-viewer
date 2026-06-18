@@ -135,6 +135,7 @@ These settings **must** be configured in your `.env` file:
 | `DMARC_IMAP_INTERVAL` | integer | `3600` | Interval between IMAP syncs in seconds (default: 3600 = 1 hour) |
 | `DMARC_IMAP_RUN_ON_STARTUP` | boolean | `true` | Run IMAP sync once on application startup |
 | `DMARC_IMAP_BATCH_SIZE` | integer | `10` | Number of emails to process per batch (prevents memory issues with large mailboxes) |
+| `DMARC_IMAP_SCAN_ALL_UNSEEN` | boolean | `false` | Scan all unread emails for DMARC/TLS-RPT attachments, not just those matching known subject patterns. Enable if you receive reports from providers that use non-English subjects. Only recommended for dedicated DMARC mailboxes |
 
 ---
 

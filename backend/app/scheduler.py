@@ -338,7 +338,12 @@ def get_app_version_cache():
     """Get app version cache (for API endpoint)"""
     return app_version_cache
 
-scheduler = AsyncIOScheduler()
+scheduler = AsyncIOScheduler(
+    job_defaults={
+        'misfire_grace_time': 30,
+        'coalesce': True,
+    }
+)
 
 seen_postfix: Set[str] = set()
 seen_rspamd: Set[str] = set()
@@ -382,12 +387,19 @@ def is_blacklisted(email: Optional[str]) -> bool:
     return is_blocked
 
 
+# Cache for log discovery results to avoid expensive binary search on every cycle
+_log_count_cache: Dict[str, tuple] = {}  # log_type -> (count, cached_at)
+_LOG_COUNT_CACHE_TTL = 300  # seconds (5 minutes)
+
+
 async def _discover_total_logs(log_type: str) -> int:
     """
     Discover total number of available logs using progressive probing.
     
     Uses decreasing step sizes (100k -> 10k -> 1k) to narrow down the
     total log count with minimal API calls (~30 probes max).
+    Results are cached for 5 minutes to avoid repeating the expensive
+    binary search on every fetch cycle.
     
     Args:
         log_type: 'postfix' or 'rspamd-history'
@@ -395,6 +407,15 @@ async def _discover_total_logs(log_type: str) -> int:
     Returns:
         Approximate total log count (accurate within 1000)
     """
+    # Check cache first
+    cached = _log_count_cache.get(log_type)
+    if cached:
+        count, cached_at = cached
+        age = (datetime.now(timezone.utc) - cached_at).total_seconds()
+        if age < _LOG_COUNT_CACHE_TTL:
+            logger.debug(f"[{log_type.upper()}] Using cached log count: {count} (age: {int(age)}s)")
+            return count
+
     position = 0
     try:
         for step in [100000, 10000, 1000, 100, 10, 1]:
@@ -411,6 +432,9 @@ async def _discover_total_logs(log_type: str) -> int:
     except Exception as e:
         logger.warning(f"[{log_type.upper()}] Log discovery failed: {e}")
         return 0
+
+    # Cache the result
+    _log_count_cache[log_type] = (position, datetime.now(timezone.utc))
     return position
 
 
@@ -1010,10 +1034,14 @@ async def fetch_all_logs():
         
         logger.debug("[FETCH] Completed fetch_all_logs")
         update_job_status('fetch_logs', 'success')
-        
+    
+    except asyncio.CancelledError:
+        logger.info("[FETCH] Log fetch cancelled (application shutting down)")
+        return
     except Exception as e:
         update_job_status('fetch_logs', 'failed', str(e))
         logger.error(f"[ERROR] Fetch all logs error: {e}", exc_info=True)
+
 
 
 async def cleanup_blacklisted_queues():

@@ -910,6 +910,8 @@ async def trigger_job(job_name: str, background_tasks: BackgroundTasks):
     - mailbox_stats: Fetch mailbox statistics
     - alias_stats: Sync alias data
     - blacklist_check: Check server IP against blacklists
+    - fetch_raw_logs: Fetch raw logs from mailcow services
+    - cleanup_raw_logs: Remove raw logs older than retention period
     """
     # Import job functions here to avoid circular imports
     from ..scheduler import (
@@ -934,43 +936,53 @@ async def trigger_job(job_name: str, background_tasks: BackgroundTasks):
         process_quarantine_rules_job,
         cleanup_deferred_queue_job
     )
+    from ..raw_logs_worker import fetch_raw_service_logs, cleanup_raw_service_logs
     
-    # Map job names to functions and their status keys
+    # Map job names to (status_key, function, self_managing_status)
+    # self_managing_status=True means the function updates its own status tracking
+    # (raw log jobs use their own raw_logs_job_status dict)
     job_mapping = {
-        'fetch_logs': ('fetch_logs', fetch_all_logs),
-        'complete_correlations': ('complete_correlations', complete_incomplete_correlations),
-        'update_final_status': ('update_final_status', update_final_status_for_correlations),
-        'expire_correlations': ('expire_correlations', expire_old_correlations),
-        'cleanup_logs': ('cleanup_logs', cleanup_old_logs),
-        'cleanup_dmarc_reports': ('cleanup_dmarc_reports', cleanup_old_dmarc_reports),
-        'check_app_version': ('check_app_version', check_app_version_update),
-        'dns_check': ('dns_check', check_all_domains_dns_background),
-        'sync_local_domains': ('sync_local_domains', sync_local_domains),
-        'update_geoip': ('update_geoip', update_geoip_database),
-        'mailbox_stats': ('mailbox_stats', update_mailbox_statistics),
-        'alias_stats': ('alias_stats', update_alias_statistics),
-        'blacklist_check': ('blacklist_check', check_monitored_hosts_job),
-        'sync_transports': ('sync_transports', sync_transports_job),
-        'send_weekly_summary': ('send_weekly_summary', send_weekly_summary_email_job),
-        'detect_suppressions': ('detect_suppressions', detect_suppressions_job),
-        'sync_suppressions': ('sync_suppressions', sync_suppressions_to_rspamd_job),
-        'expire_suppressions': ('expire_suppressions', expire_suppressions_job),
-        'process_quarantine_rules': ('process_quarantine_rules', process_quarantine_rules_job),
-        'cleanup_deferred_queue': ('cleanup_deferred_queue', cleanup_deferred_queue_job)
+        'fetch_logs': ('fetch_logs', fetch_all_logs, False),
+        'complete_correlations': ('complete_correlations', complete_incomplete_correlations, False),
+        'update_final_status': ('update_final_status', update_final_status_for_correlations, False),
+        'expire_correlations': ('expire_correlations', expire_old_correlations, False),
+        'cleanup_logs': ('cleanup_logs', cleanup_old_logs, False),
+        'cleanup_dmarc_reports': ('cleanup_dmarc_reports', cleanup_old_dmarc_reports, False),
+        'check_app_version': ('check_app_version', check_app_version_update, False),
+        'dns_check': ('dns_check', check_all_domains_dns_background, False),
+        'sync_local_domains': ('sync_local_domains', sync_local_domains, False),
+        'update_geoip': ('update_geoip', update_geoip_database, False),
+        'mailbox_stats': ('mailbox_stats', update_mailbox_statistics, False),
+        'alias_stats': ('alias_stats', update_alias_statistics, False),
+        'blacklist_check': ('blacklist_check', check_monitored_hosts_job, False),
+        'sync_transports': ('sync_transports', sync_transports_job, False),
+        'send_weekly_summary': ('send_weekly_summary', send_weekly_summary_email_job, False),
+        'detect_suppressions': ('detect_suppressions', detect_suppressions_job, False),
+        'sync_suppressions': ('sync_suppressions', sync_suppressions_to_rspamd_job, False),
+        'expire_suppressions': ('expire_suppressions', expire_suppressions_job, False),
+        'process_quarantine_rules': ('process_quarantine_rules', process_quarantine_rules_job, False),
+        'cleanup_deferred_queue': ('cleanup_deferred_queue', cleanup_deferred_queue_job, False),
+        'fetch_raw_logs': ('fetch_raw_logs', fetch_raw_service_logs, True),
+        'cleanup_raw_logs': ('cleanup_raw_logs', cleanup_raw_service_logs, True),
     }
     
     if job_name not in job_mapping:
         raise HTTPException(status_code=404, detail=f"Unknown job: {job_name}")
     
-    status_key, job_func = job_mapping[job_name]
+    status_key, job_func, self_managing = job_mapping[job_name]
     
-    # Check if job is already running
-    current_status = get_job_status().get(status_key, {})
+    # Check if job is already running — check both main and raw logs status
+    if self_managing:
+        from ..raw_logs_worker import get_raw_logs_job_status
+        current_status = get_raw_logs_job_status().get(status_key, {})
+    else:
+        current_status = get_job_status().get(status_key, {})
     if current_status.get('status') == 'running':
         raise HTTPException(status_code=409, detail=f"Job {job_name} is already running")
     
-    # Mark job as running immediately
-    update_job_status(status_key, 'running')
+    # Mark job as running immediately (only for non-self-managing jobs)
+    if not self_managing:
+        update_job_status(status_key, 'running')
     
     # Run job in background
     def run_job_wrapper():
@@ -986,10 +998,13 @@ async def trigger_job(job_name: str, background_tasks: BackgroundTasks):
                     loop.close()
             else:
                 job_func()
-            update_job_status(status_key, 'success')
+            # Self-managing jobs update their own status internally
+            if not self_managing:
+                update_job_status(status_key, 'success')
         except Exception as e:
             logger.error(f"Manual job {job_name} failed: {e}")
-            update_job_status(status_key, 'failed', str(e))
+            if not self_managing:
+                update_job_status(status_key, 'failed', str(e))
     
     background_tasks.add_task(run_job_wrapper)
     
