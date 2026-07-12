@@ -138,7 +138,7 @@ async def get_summary_report(db: Session = Depends(get_db)):
     return await get_system_summary_data(db)
 
 @router.post("/system/summary/email")
-async def send_summary_report_email(
+def send_summary_report_email(
     background_tasks: BackgroundTasks, 
     db: Session = Depends(get_db), 
     force: bool = False
@@ -427,11 +427,15 @@ async def generate_and_send_email(db: Session = None):
         if recipient:
             # FIX: Subject date format
             subject = f"Weekly Server Summary - {current_date}"
-            send_notification_email(
-                recipient=recipient,
-                subject=subject,
-                text_content="Please view this email in an HTML-compatible client.",
-                html_content=html_content
+            # Send in executor — smtplib blocks the event loop
+            import asyncio
+            await asyncio.get_running_loop().run_in_executor(
+                None,
+                send_notification_email,
+                recipient,
+                subject,
+                "Please view this email in an HTML-compatible client.",
+                html_content
             )
             logger.info(f"Weekly summary report sent to {recipient}")
         else:

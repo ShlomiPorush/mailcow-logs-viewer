@@ -28,7 +28,7 @@ _state_store: Dict[str, str] = {}
 
 
 @router.get("/auth/verify")
-async def verify_basic_auth():
+def verify_basic_auth():
     """
     Verify Basic Auth credentials.
     Not in public_paths: middleware validates credentials and returns 401 if invalid.
@@ -38,7 +38,7 @@ async def verify_basic_auth():
 
 
 @router.get("/auth/provider-info")
-async def get_provider_info():
+def get_provider_info():
     """Get authentication provider information for frontend"""
     return {
         "oauth2_enabled": settings.is_oauth2_enabled,
@@ -180,7 +180,7 @@ async def oauth2_callback(
 
 
 @router.get("/auth/logout")
-async def oauth2_logout(request: Request):
+def oauth2_logout(request: Request):
     """
     Logout and clear session
     """
@@ -201,7 +201,7 @@ async def oauth2_logout(request: Request):
 
 
 @router.get("/auth/status")
-async def auth_status(request: Request):
+def auth_status(request: Request):
     """
     Check authentication status
     Returns current user info if authenticated

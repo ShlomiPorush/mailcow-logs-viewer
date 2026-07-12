@@ -14,6 +14,8 @@ from typing import Optional, List
 from ..database import get_db
 from ..models import MailboxStatistics, AliasStatistics, MessageCorrelation
 
+from ..utils import format_datetime_for_api as format_datetime_utc
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
@@ -58,18 +60,6 @@ def clear_stats_cache():
     global _stats_cache
     _stats_cache = {}
     logger.info("Stats cache cleared")
-
-
-def format_datetime_utc(dt: Optional[datetime]) -> Optional[str]:
-    """Format datetime for API response with proper UTC timezone"""
-    if dt is None:
-        return None
-    
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
-    
-    dt_utc = dt.astimezone(timezone.utc)
-    return dt_utc.replace(microsecond=0).isoformat().replace('+00:00', 'Z')
 
 
 def format_bytes(bytes_value) -> str:
@@ -576,7 +566,7 @@ async def get_all_mailbox_stats(
 
 
 @router.get("/mailbox-stats/domains")
-async def get_mailbox_domains(db: Session = Depends(get_db)):
+def get_mailbox_domains(db: Session = Depends(get_db)):
     """
     Get list of all domains for filtering
     """
@@ -602,7 +592,7 @@ async def get_mailbox_domains(db: Session = Depends(get_db)):
 
 
 @router.get("/mailbox-stats/refresh")
-async def refresh_mailbox_stats(db: Session = Depends(get_db)):
+def refresh_mailbox_stats(db: Session = Depends(get_db)):
     """
     Get last update time for mailbox statistics
     """

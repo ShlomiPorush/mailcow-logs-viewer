@@ -13,6 +13,7 @@ from ..version import __version__
 from ..scheduler import check_app_version_update, get_app_version_cache
 from ..database import get_db
 from ..models import KnownContainer
+from ..utils import internal_error
 
 logger = logging.getLogger(__name__)
 
@@ -129,7 +130,7 @@ async def _get_containers_status_internal(db: Session):
         # Try to rollback if there's a DB error
         try:
             db.rollback()
-        except:
+        except Exception:
             pass
         # Re-raise the exception - let the caller handle HTTPException
         raise
@@ -254,7 +255,7 @@ async def get_version_status(force: bool = Query(False, description="Force a fre
         }
     except Exception as e:
         logger.error(f"Error fetching version status: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise internal_error(e)
 
 
 @router.get("/status/app-version")
@@ -345,7 +346,7 @@ async def get_mailcow_info():
         }
     except Exception as e:
         logger.error(f"Error fetching mailcow info: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise internal_error(e)
 
 
 @router.get("/status/mailcow-connection")
@@ -444,11 +445,11 @@ async def get_status_summary(db: Session = Depends(get_db)):
         }
     except Exception as e:
         logger.error(f"Error fetching status summary: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise internal_error(e)
 
 
 @router.get("/status/container-logs")
-async def get_container_logs(lines: int = Query(100, ge=10, le=1000, description="Number of lines to fetch")):
+def get_container_logs(lines: int = Query(100, ge=10, le=1000, description="Number of lines to fetch")):
     """
     Get the application container logs from the log file
     """

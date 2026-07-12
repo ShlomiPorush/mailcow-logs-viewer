@@ -519,7 +519,10 @@ class MonitoredHost(Base):
     
     id = Column(Integer, primary_key=True, index=True)
     hostname = Column(String(255), unique=True, index=True, nullable=False)
-    source = Column(String(50))  # 'system', 'transport', 'relayhost'
+    # 'system', 'transport', 'relayhost', or prefixed FQDN like 'relayhost:<fqdn>'
+    # TEXT because a prefixed FQDN can reach 263 chars ('relayhost:' + 253-char
+    # DNS max) and crashed the old VARCHAR(50) (issue #70)
+    source = Column(Text)
     active = Column(Boolean, default=True, index=True)
     last_seen = Column(DateTime)
     

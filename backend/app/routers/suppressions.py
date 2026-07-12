@@ -21,6 +21,7 @@ from ..database import get_db
 from ..config import settings
 from ..models import SpamSuppression
 from ..mailcow_api import mailcow_api, MailcowAPIError
+from ..utils import internal_error
 
 logger = logging.getLogger(__name__)
 
@@ -153,7 +154,7 @@ async def _cleanup_queue_for_email(email: str):
 # =========================================================================
 
 @router.get("/suppressions")
-async def list_suppressions(
+def list_suppressions(
     db: Session = Depends(get_db),
     page: int = Query(1, ge=1),
     per_page: int = Query(50, ge=1, le=200),
@@ -221,7 +222,7 @@ async def list_suppressions(
 
 
 @router.get("/suppressions/stats")
-async def get_suppression_stats(db: Session = Depends(get_db)):
+def get_suppression_stats(db: Session = Depends(get_db)):
     """Get suppression statistics."""
     now = datetime.utcnow()
     
@@ -273,7 +274,7 @@ async def get_suppression_stats(db: Session = Depends(get_db)):
 
 
 @router.get("/suppressions/config")
-async def get_suppression_config():
+def get_suppression_config():
     """Get suppression feature configuration."""
     return {
         "suppression_enabled": settings.suppression_enabled,
@@ -356,7 +357,7 @@ async def create_suppression(body: SuppressionCreateRequest, db: Session = Depen
 
 
 @router.put("/suppressions/{suppression_id}")
-async def update_suppression(suppression_id: int, body: SuppressionUpdateRequest, db: Session = Depends(get_db)):
+def update_suppression(suppression_id: int, body: SuppressionUpdateRequest, db: Session = Depends(get_db)):
     """Update a suppression entry (toggle active, edit notes, change expiry)."""
     suppression = db.query(SpamSuppression).filter(SpamSuppression.id == suppression_id).first()
     if not suppression:
@@ -386,7 +387,7 @@ async def update_suppression(suppression_id: int, body: SuppressionUpdateRequest
 
 
 @router.delete("/suppressions/{suppression_id}")
-async def delete_suppression(suppression_id: int, db: Session = Depends(get_db)):
+def delete_suppression(suppression_id: int, db: Session = Depends(get_db)):
     """Permanently remove a suppression entry."""
     suppression = db.query(SpamSuppression).filter(SpamSuppression.id == suppression_id).first()
     if not suppression:
@@ -474,7 +475,7 @@ async def import_suppressions(file: UploadFile = File(...), db: Session = Depend
 
 
 @router.get("/suppressions/export")
-async def export_suppressions(db: Session = Depends(get_db)):
+def export_suppressions(db: Session = Depends(get_db)):
     """Export all suppressions as CSV."""
     suppressions = db.query(SpamSuppression).order_by(SpamSuppression.created_at).all()
     
@@ -524,10 +525,10 @@ async def manual_sync_to_rspamd(db: Session = Depends(get_db)):
         result = await sync_suppressions_to_rspamd(db)
         return result
     except MailcowAPIError as e:
-        raise HTTPException(status_code=502, detail=str(e))
+        raise internal_error(e, status_code=502)
     except Exception as e:
         logger.error(f"Sync failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise internal_error(e)
 
 
 async def sync_suppressions_to_rspamd(db: Session) -> dict:

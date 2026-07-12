@@ -24,6 +24,7 @@ from ..services.dmarc_cache import (
 from ..config import settings
 from ..scheduler import update_job_status
 from .domains import get_cached_dns_check, check_dmarc_record, parse_dmarc_record_tags
+from ..utils import internal_error
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +35,7 @@ router = APIRouter()
 # =============================================================================
 
 @router.post("/dmarc/cache/clear")
-async def clear_cache(
+def clear_cache(
     db: Session = Depends(get_db)
 ):
     """
@@ -45,7 +46,7 @@ async def clear_cache(
         return {"status": "success", "message": "Cache cleared"}
     except Exception as e:
         logger.error(f"Error clearing DMARC cache: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise internal_error(e)
 
 
 # =============================================================================
@@ -53,7 +54,7 @@ async def clear_cache(
 # =============================================================================
 
 @router.get("/dmarc/reports/config")
-async def get_reports_management_config():
+def get_reports_management_config():
     """
     Get reports management configuration
     """
@@ -63,7 +64,7 @@ async def get_reports_management_config():
 
 
 @router.get("/dmarc/reports/all")
-async def get_all_reports(
+def get_all_reports(
     db: Session = Depends(get_db)
 ):
     """
@@ -125,11 +126,11 @@ async def get_all_reports(
         
     except Exception as e:
         logger.error(f"Error fetching all reports: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise internal_error(e)
 
 
 @router.delete("/dmarc/reports/{report_type}/{report_id}")
-async def delete_report(
+def delete_report(
     report_type: str,
     report_id: int,
     db: Session = Depends(get_db)
@@ -183,11 +184,11 @@ async def delete_report(
     except Exception as e:
         db.rollback()
         logger.error(f"Error deleting report: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise internal_error(e)
 
 
 @router.get("/dmarc/domains")
-async def get_domains_list(
+def get_domains_list(
     db: Session = Depends(get_db)
 ):
     """
@@ -339,7 +340,7 @@ async def get_domains_list(
         
     except Exception as e:
         logger.error(f"Error fetching domains list: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise internal_error(e)
 
 
 
@@ -462,7 +463,7 @@ async def get_domain_overview(
         
     except Exception as e:
         logger.error(f"Error fetching domain overview: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise internal_error(e)
 
 
 # =============================================================================
@@ -470,7 +471,7 @@ async def get_domain_overview(
 # =============================================================================
 
 @router.get("/dmarc/domains/{domain}/reports")
-async def get_domain_reports(
+def get_domain_reports(
     domain: str,
     days: int = 30,
     page: int = 1,
@@ -566,7 +567,7 @@ async def get_domain_reports(
         
     except Exception as e:
         logger.error(f"Error fetching domain reports: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise internal_error(e)
 
 
 # =============================================================================
@@ -574,7 +575,7 @@ async def get_domain_reports(
 # =============================================================================
 
 @router.get("/dmarc/domains/{domain}/reports/{report_date}/details")
-async def get_report_details(
+def get_report_details(
     domain: str,
     report_date: str,
     db: Session = Depends(get_db)
@@ -688,7 +689,7 @@ async def get_report_details(
         raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD")
     except Exception as e:
         logger.error(f"Error fetching report details: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise internal_error(e)
 
 
 # =============================================================================
@@ -696,7 +697,7 @@ async def get_report_details(
 # =============================================================================
 
 @router.get("/dmarc/domains/{domain}/sources")
-async def get_domain_sources(
+def get_domain_sources(
     domain: str,
     days: int = 30,
     page: int = 1,
@@ -781,7 +782,7 @@ async def get_domain_sources(
         
     except Exception as e:
         logger.error(f"Error fetching domain sources: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise internal_error(e)
 
 
 # =============================================================================
@@ -789,7 +790,7 @@ async def get_domain_sources(
 # =============================================================================
 
 @router.get("/dmarc/domains/{domain}/sources/{source_ip}/details")
-async def get_source_details(
+def get_source_details(
     domain: str,
     source_ip: str,
     days: int = 30,
@@ -890,13 +891,13 @@ async def get_source_details(
         
     except Exception as e:
         logger.error(f"Error fetching source details: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise internal_error(e)
 # =============================================================================
 # TLS-RPT REPORTS
 # =============================================================================
 
 @router.get("/dmarc/domains/{domain}/tls-reports")
-async def get_domain_tls_reports(
+def get_domain_tls_reports(
     domain: str,
     days: int = 30,
     page: int = 1,
@@ -981,11 +982,11 @@ async def get_domain_tls_reports(
         
     except Exception as e:
         logger.error(f"Error fetching TLS reports for domain {domain}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise internal_error(e)
 
 
 @router.get("/dmarc/domains/{domain}/tls-reports/daily")
-async def get_domain_tls_daily_reports(
+def get_domain_tls_daily_reports(
     domain: str,
     days: int = 30,
     page: int = 1,
@@ -1089,11 +1090,11 @@ async def get_domain_tls_daily_reports(
         
     except Exception as e:
         logger.error(f"Error fetching TLS daily reports for domain {domain}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise internal_error(e)
 
 
 @router.get("/dmarc/domains/{domain}/tls-reports/{report_date}/details")
-async def get_tls_report_details(
+def get_tls_report_details(
     domain: str,
     report_date: str,
     db: Session = Depends(get_db)
@@ -1181,7 +1182,7 @@ async def get_tls_report_details(
         raise
     except Exception as e:
         logger.error(f"Error fetching TLS report details for {domain}/{report_date}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise internal_error(e)
 
 
 # =============================================================================
@@ -1189,7 +1190,7 @@ async def get_tls_report_details(
 # =============================================================================
 
 @router.get("/dmarc/imap/status")
-async def get_imap_status(db: Session = Depends(get_db)):
+def get_imap_status(db: Session = Depends(get_db)):
     """
     Get IMAP sync configuration and status
     """
@@ -1243,7 +1244,7 @@ async def get_imap_status(db: Session = Depends(get_db)):
         
     except Exception as e:
         logger.error(f"Error fetching IMAP status: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise internal_error(e)
 
 
 # =============================================================================
@@ -1251,7 +1252,7 @@ async def get_imap_status(db: Session = Depends(get_db)):
 # =============================================================================
 
 @router.post("/dmarc/imap/sync")
-async def trigger_manual_sync(background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+def trigger_manual_sync(background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     """
     Manually trigger IMAP sync and update global job status for UI visibility
     """
@@ -1308,7 +1309,7 @@ async def trigger_manual_sync(background_tasks: BackgroundTasks, db: Session = D
 # =============================================================================
 
 @router.get("/dmarc/imap/history")
-async def get_sync_history(
+def get_sync_history(
     limit: int = 20,
     page: int = 1,
     db: Session = Depends(get_db)
@@ -1352,7 +1353,7 @@ async def get_sync_history(
         
     except Exception as e:
         logger.error(f"Error fetching sync history: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise internal_error(e)
 
 # =============================================================================
 # UPLOAD
@@ -1377,7 +1378,15 @@ async def upload_report(
         )
 
     try:
-        file_content = await file.read()
+        from ..services.safe_decompress import MAX_COMPRESSED_BYTES
+        # Read at most the limit + 1 byte so an oversized upload is rejected
+        # without ever buffering the whole file in memory
+        file_content = await file.read(MAX_COMPRESSED_BYTES + 1)
+        if len(file_content) > MAX_COMPRESSED_BYTES:
+            raise HTTPException(
+                status_code=413,
+                detail=f"File too large (max {MAX_COMPRESSED_BYTES // (1024 * 1024)} MB)"
+            )
         filename = file.filename.lower()
         
         # Detect file type based on extension
@@ -1396,7 +1405,7 @@ async def upload_report(
     except Exception as e:
         db.rollback()
         logger.error(f"Error uploading report: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise internal_error(e)
 
 
 async def _upload_dmarc_report(file_content: bytes, filename: str, db: Session):

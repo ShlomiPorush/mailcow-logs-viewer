@@ -13,33 +13,15 @@ from ..models import PostfixLog, RspamdLog, NetfilterLog, MessageCorrelation
 from ..mailcow_api import mailcow_api
 from ..config import settings
 from ..services import geoip_service
+from ..utils import internal_error, format_datetime_for_api as format_datetime_utc
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
 
-def format_datetime_utc(dt: Optional[datetime]) -> Optional[str]:
-    """
-    Format datetime for API response with proper UTC timezone
-    Always returns ISO format with 'Z' suffix so browser knows it's UTC
-    """
-    if dt is None:
-        return None
-    
-    # If naive (no timezone), assume UTC
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
-    
-    # Convert to UTC if not already
-    dt_utc = dt.astimezone(timezone.utc)
-    
-    # Format as ISO string with 'Z' suffix for UTC
-    return dt_utc.replace(microsecond=0).isoformat().replace('+00:00', 'Z')
-
-
 @router.get("/logs/postfix/by-queue/{queue_id}")
-async def get_postfix_logs_by_queue(
+def get_postfix_logs_by_queue(
     queue_id: str,
     db: Session = Depends(get_db)
 ):
@@ -107,11 +89,11 @@ async def get_postfix_logs_by_queue(
         raise
     except Exception as e:
         logger.error(f"Error fetching Postfix logs by queue: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise internal_error(e)
 
 
 @router.get("/logs/postfix")
-async def get_postfix_logs(
+def get_postfix_logs(
     page: int = Query(1, ge=1, description="Page number"),
     limit: int = Query(50, ge=1, le=500, description="Items per page"),
     search: Optional[str] = Query(None, description="Search query"),
@@ -168,20 +150,37 @@ async def get_postfix_logs(
         if end_date:
             base_query = base_query.filter(PostfixLog.time <= end_date)
         
-        # Get all queue IDs that match filters
-        queue_ids = [row[0] for row in base_query.with_entities(PostfixLog.queue_id).distinct().all()]
-        
-        # For each queue_id, get aggregated data
+        # Paginate at the queue level in SQL (one row per queue, newest activity
+        # first) instead of loading every matching queue and paginating in
+        # Python — the old approach issued one query per queue_id (N+1).
+        grouped = base_query.with_entities(
+            PostfixLog.queue_id
+        ).group_by(PostfixLog.queue_id)
+
+        total = grouped.count()
+
+        page_queue_ids = [
+            row[0] for row in grouped
+            .order_by(func.max(PostfixLog.time).desc())
+            .offset((page - 1) * limit)
+            .limit(limit)
+            .all()
+        ]
+
+        # Fetch all logs for this page's queues in a single query
+        logs_by_queue = {}
+        if page_queue_ids:
+            for log in db.query(PostfixLog).filter(
+                PostfixLog.queue_id.in_(page_queue_ids)
+            ).order_by(PostfixLog.time).all():
+                logs_by_queue.setdefault(log.queue_id, []).append(log)
+
         results = []
-        for qid in queue_ids:
-            # Get all logs for this queue_id
-            queue_logs = db.query(PostfixLog).filter(
-                PostfixLog.queue_id == qid
-            ).order_by(PostfixLog.time).all()
-            
+        for qid in page_queue_ids:
+            queue_logs = logs_by_queue.get(qid)
             if not queue_logs:
                 continue
-            
+
             # Aggregate data from all logs
             aggregated = {
                 "id": queue_logs[0].id,
@@ -219,34 +218,28 @@ async def get_postfix_logs(
                     aggregated["status"] = log.status
             
             results.append(aggregated)
-        
-        # Sort by time descending
+
+        # Sort the page by display time descending
         results.sort(key=lambda x: x["time"], reverse=True)
-        
-        # Apply pagination
-        total = len(results)
-        start_idx = (page - 1) * limit
-        end_idx = start_idx + limit
-        paginated_results = results[start_idx:end_idx]
-        
+
         # Convert time to ISO format
-        for result in paginated_results:
+        for result in results:
             result["time"] = result["time"].isoformat()
-        
+
         return {
             "total": total,
             "page": page,
             "limit": limit,
             "pages": (total + limit - 1) // limit if total > 0 else 0,
-            "data": paginated_results
+            "data": results
         }
     except Exception as e:
         logger.error(f"Error fetching Postfix logs: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise internal_error(e)
 
 
 @router.get("/logs/rspamd")
-async def get_rspamd_logs(
+def get_rspamd_logs(
     page: int = Query(1, ge=1),
     limit: int = Query(50, ge=1, le=500),
     search: Optional[str] = Query(None),
@@ -338,11 +331,11 @@ async def get_rspamd_logs(
         }
     except Exception as e:
         logger.error(f"Error fetching Rspamd logs: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise internal_error(e)
 
 
 @router.get("/logs/netfilter/countries")
-async def get_netfilter_countries(db: Session = Depends(get_db)):
+def get_netfilter_countries(db: Session = Depends(get_db)):
     """
     Get distinct country codes from netfilter logs for the filter dropdown
     """
@@ -361,7 +354,7 @@ async def get_netfilter_countries(db: Session = Depends(get_db)):
 
 
 @router.get("/logs/netfilter/stats/by-country")
-async def get_netfilter_stats_by_country(
+def get_netfilter_stats_by_country(
     days: int = Query(30, ge=1, le=365, description="Number of days to look back"),
     db: Session = Depends(get_db)
 ):
@@ -450,11 +443,11 @@ async def get_netfilter_stats_by_country(
         }
     except Exception as e:
         logger.error(f"Error fetching netfilter stats by country: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise internal_error(e)
 
 
 @router.get("/logs/netfilter")
-async def get_netfilter_logs(
+def get_netfilter_logs(
     page: int = Query(1, ge=1),
     limit: int = Query(50, ge=1, le=500),
     search: Optional[str] = Query(None),
@@ -545,7 +538,7 @@ async def get_netfilter_logs(
         }
     except Exception as e:
         logger.error(f"Error fetching Netfilter logs: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise internal_error(e)
 
 
 @router.get("/fail2ban")
@@ -564,11 +557,11 @@ async def get_fail2ban():
         raise
     except Exception as e:
         logger.error(f"Error fetching Fail2Ban configuration: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise internal_error(e)
 
 
 @router.get("/rw-status")
-async def get_rw_status():
+def get_rw_status():
     """
     Check if the Read-Write API key is configured.
     Used by all features that require write access (Fail2Ban, Quarantine, etc.)
@@ -601,7 +594,7 @@ async def edit_fail2ban(request: Request):
         raise
     except Exception as e:
         logger.error(f"Error updating Fail2Ban configuration: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise internal_error(e)
 
 
 @router.post("/fail2ban/unban")
@@ -631,7 +624,7 @@ async def unban_fail2ban(request: Request):
         raise
     except Exception as e:
         logger.error(f"Error unbanning IP from Fail2Ban: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise internal_error(e)
 
 
 @router.post("/fail2ban/ban")
@@ -702,11 +695,11 @@ async def ban_fail2ban(request: Request):
         raise
     except Exception as e:
         logger.error(f"Error banning IP in Fail2Ban: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise internal_error(e)
 
 
 @router.get("/geoip/{ip}")
-async def lookup_geoip(ip: str):
+def lookup_geoip(ip: str):
     """
     Lookup GeoIP information for an IP address.
     Returns country, city, ASN info when MaxMind databases are available.
@@ -741,7 +734,7 @@ async def get_queue():
         }
     except Exception as e:
         logger.error(f"Error fetching queue: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise internal_error(e)
 
 
 @router.post("/queue/action")
@@ -778,7 +771,7 @@ async def queue_action(request: Request):
         raise
     except Exception as e:
         logger.error(f"Error performing queue action: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise internal_error(e)
 
 
 @router.post("/queue/delete")
@@ -810,7 +803,7 @@ async def delete_queue(request: Request):
         raise
     except Exception as e:
         logger.error(f"Error deleting queue items: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise internal_error(e)
 
 
 @router.get("/quarantine")
@@ -864,7 +857,7 @@ async def get_quarantine():
         }
     except Exception as e:
         logger.error(f"Error fetching quarantine: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise internal_error(e)
 
 
 
@@ -900,7 +893,7 @@ async def release_quarantine(request: Request):
         raise
     except Exception as e:
         logger.error(f"Error releasing quarantine items: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise internal_error(e)
 
 
 @router.post("/quarantine/delete")
@@ -934,7 +927,7 @@ async def delete_quarantine(request: Request):
         raise
     except Exception as e:
         logger.error(f"Error deleting quarantine items: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise internal_error(e)
 
 
 @router.post("/quarantine/learnham")
@@ -966,7 +959,7 @@ async def learnham_quarantine(request: Request):
         raise
     except Exception as e:
         logger.error(f"Error learning ham for quarantine items: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise internal_error(e)
 
 
 @router.post("/quarantine/learnspam")
@@ -998,7 +991,7 @@ async def learnspam_quarantine(request: Request):
         raise
     except Exception as e:
         logger.error(f"Error learning spam for quarantine items: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise internal_error(e)
 
 
 @router.get("/quarantine/{item_id}/details")
@@ -1013,11 +1006,11 @@ async def get_quarantine_details(item_id: str):
         return result
     except Exception as e:
         logger.error(f"Error fetching quarantine details for item {item_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise internal_error(e)
 
 
 @router.get("/message/{correlation_key}")
-async def get_message_details(
+def get_message_details(
     correlation_key: str,
     db: Session = Depends(get_db)
 ):
@@ -1097,4 +1090,4 @@ async def get_message_details(
         raise
     except Exception as e:
         logger.error(f"Error fetching message details: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise internal_error(e)

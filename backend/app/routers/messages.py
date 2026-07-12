@@ -13,29 +13,11 @@ from typing import Optional
 from ..database import get_db
 from ..models import MessageCorrelation, PostfixLog, RspamdLog, NetfilterLog
 from ..config import settings
+from ..utils import internal_error, format_datetime_for_api as format_datetime_utc
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
-
-
-def format_datetime_utc(dt: Optional[datetime]) -> Optional[str]:
-    """
-    Format datetime for API response with proper UTC timezone
-    Always returns ISO format with 'Z' suffix so browser knows it's UTC
-    """
-    if dt is None:
-        return None
-    
-    # If naive (no timezone), assume UTC
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
-    
-    # Convert to UTC if not already
-    dt_utc = dt.astimezone(timezone.utc)
-    
-    # Format as ISO string with 'Z' suffix for UTC
-    return dt_utc.replace(microsecond=0).isoformat().replace('+00:00', 'Z')
 
 
 def is_blacklisted(email: str) -> bool:
@@ -104,7 +86,7 @@ def _group_postfix_by_recipient(postfix_logs) -> dict:
 
 
 @router.get("/messages")
-async def get_unified_messages(
+def get_unified_messages(
     page: int = Query(1, ge=1, description="Page number"),
     limit: int = Query(50, ge=1, le=500, description="Items per page"),
     search: Optional[str] = Query(None, description="Search query"),
@@ -260,11 +242,11 @@ async def get_unified_messages(
         }
     except Exception as e:
         logger.error(f"Error fetching unified messages: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise internal_error(e)
 
 
 @router.get("/message/{correlation_key}/details")
-async def get_message_full_details(
+def get_message_full_details(
     correlation_key: str,
     db: Session = Depends(get_db)
 ):
@@ -315,14 +297,18 @@ async def get_message_full_details(
                 deduplicated_postfix_logs.append(log)
         postfix_logs = deduplicated_postfix_logs
         
-        # Get Netfilter logs by IP from Rspamd
-        # Simply filter by IP without time restrictions to show all security events
+        # Get Netfilter logs by IP from Rspamd, limited to ±1 hour around the
+        # message (issue #68) — the Security tab explicitly promises "events
+        # within 1 hour of this message"; unrelated events from days earlier
+        # were confusing
         netfilter_logs = []
-        if rspamd_log and rspamd_log.ip:
-            # Get all Netfilter logs for this IP (no time window restriction)
+        if rspamd_log and rspamd_log.ip and rspamd_log.time:
+            window = timedelta(hours=1)
             netfilter_logs = db.query(NetfilterLog).filter(
-                NetfilterLog.ip == rspamd_log.ip
-            ).order_by(NetfilterLog.time.desc()).limit(100).all()  # Limit to 100 most recent to avoid too many results
+                NetfilterLog.ip == rspamd_log.ip,
+                NetfilterLog.time >= rspamd_log.time - window,
+                NetfilterLog.time <= rspamd_log.time + window,
+            ).order_by(NetfilterLog.time.desc()).limit(100).all()
         
         # Get all recipients - from Rspamd (primary source) or from Postfix logs
         recipients = []
@@ -402,4 +388,4 @@ async def get_message_full_details(
         raise
     except Exception as e:
         logger.error(f"Error fetching message details: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise internal_error(e)

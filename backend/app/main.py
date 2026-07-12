@@ -44,15 +44,12 @@ from .services.geoip_downloader import (
 
 logger = logging.getLogger(__name__)
 
-try:
-    from .routers import status as status_router
-    from .routers import messages as messages_router
-    from .routers import settings as settings_router
-except ImportError as e:
-    logger.warning(f"Optional routers not available: {e}")
-    status_router = None
-    messages_router = None
-    settings_router = None
+# These are first-party routers — an ImportError here is a bug that should
+# crash startup, not silently ship a container missing its Settings/Status/
+# Messages APIs (which is what the old try/except ImportError did).
+from .routers import status as status_router
+from .routers import messages as messages_router
+from .routers import settings as settings_router
 
 
 @asynccontextmanager
@@ -195,14 +192,43 @@ app = FastAPI(
 # This ensures ALL requests are authenticated when enabled
 app.add_middleware(BasicAuthMiddleware)
 
-# CORS middleware (allow all origins for now)
+# CORS middleware — allow all origins because the app runs behind a reverse proxy in Docker.
+# The reverse proxy (nginx/traefik) handles origin restrictions.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["*"],  # nosemgrep: python.fastapi.security.wildcard-cors.wildcard-cors
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Security headers on every response.
+# CSP notes: the frontend relies on inline event handlers and inline <script>
+# blocks, so script-src needs 'unsafe-inline' (and 'unsafe-eval' for the local
+# Tailwind runtime). The CSP still blocks loading scripts from external hosts,
+# which is the main escalation path for any injected HTML. ws:/wss: are needed
+# for the live log viewer ('self' does not reliably cover WebSocket schemes).
+_CSP = (
+    "default-src 'self'; "
+    "script-src 'self' 'unsafe-inline' 'unsafe-eval'; "
+    "style-src 'self' 'unsafe-inline'; "
+    "img-src 'self' data: https:; "
+    "font-src 'self' data:; "
+    "connect-src 'self' ws: wss:; "
+    "object-src 'none'; "
+    "base-uri 'self'; "
+    "frame-ancestors 'none'"
+)
+
+
+@app.middleware("http")
+async def security_headers_middleware(request: Request, call_next):
+    response = await call_next(request)
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("Referrer-Policy", "same-origin")
+    response.headers.setdefault("Content-Security-Policy", _CSP)
+    return response
 
 # Include routers
 app.include_router(auth_router.router, prefix="/api", tags=["Authentication"])
@@ -226,7 +252,7 @@ app.include_router(suppressions_router.router, prefix="/api", tags=["Suppression
 app.include_router(quarantine_rules_router.router, tags=["Quarantine Rules"])
 
 # WebSocket endpoint needs root-level mount (not under /api prefix)
-# The router contains /ws/raw-logs which should be accessible at ws://host/ws/raw-logs
+# The router contains /ws/raw-logs which should be accessible at wss://host/ws/raw-logs  # nosemgrep: javascript.lang.security.detect-insecure-websocket.detect-insecure-websocket
 app.include_router(raw_logs_router.router, tags=["Raw Logs WebSocket"])
 
 # Mount static files (frontend)
@@ -263,42 +289,50 @@ async def root():
 
 @app.get("/api/health")
 async def health_check():
-    """Health check endpoint for monitoring"""
+    """Health check endpoint for Docker monitoring.
+
+    Publicly reachable — intentionally returns no configuration details.
+    """
     db_ok = check_db_connection()
-    
+
     return {
         "status": "healthy" if db_ok else "unhealthy",
         "database": "connected" if db_ok else "disconnected",
-        "version": __version__,
-        "config": {
-            "fetch_interval": settings.fetch_interval,
-            "retention_days": settings.retention_days,
-            "mailcow_url": settings.mailcow_url,
-            "blacklist_enabled": len(settings.blacklist_emails_list) > 0,
-            "auth_enabled": settings.is_authentication_enabled
-        }
     }
 
 
 @app.get("/api/info")
-async def app_info():
-    """Application information endpoint"""
-    return {
+async def app_info(request: Request):
+    """Application information endpoint.
+
+    This endpoint is reachable without authentication (the login page needs
+    the title/auth flags), so infrastructure details (mailcow URL, hosted
+    domains, version) are only included for authenticated requests.
+    """
+    from .auth import is_request_authenticated
+
+    info = {
         "name": "mailcow Logs Viewer",
-        "version": __version__,
-        "mailcow_url": settings.mailcow_url,
-        "local_domains": settings.local_domains_list,
-        "fetch_interval": settings.fetch_interval,
-        "retention_days": settings.retention_days,
-        "timezone": settings.tz,
         "app_title": settings.app_title,
         "app_logo_url": settings.app_logo_url,
-        "blacklist_count": len(settings.blacklist_emails_list),
         "auth_enabled": settings.is_authentication_enabled,
         "basic_auth_enabled": settings.is_basic_auth_enabled,
         "oauth2_enabled": settings.is_oauth2_enabled,
-        "disabled_features": sorted(settings.disabled_features_set),
     }
+
+    if is_request_authenticated(request):
+        info.update({
+            "version": __version__,
+            "mailcow_url": settings.mailcow_url,
+            "local_domains": settings.local_domains_list,
+            "fetch_interval": settings.fetch_interval,
+            "retention_days": settings.retention_days,
+            "timezone": settings.tz,
+            "blacklist_count": len(settings.blacklist_emails_list),
+            "disabled_features": sorted(settings.disabled_features_set),
+        })
+
+    return info
 
 
 @app.exception_handler(Exception)

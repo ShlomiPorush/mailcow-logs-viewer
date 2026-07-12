@@ -3,12 +3,18 @@ TLS-RPT (SMTP TLS Reporting) Parser
 Handles parsing of TLS-RPT reports in JSON format
 """
 import json
-import gzip
 import zipfile
 import logging
 from typing import Dict, Any, Optional
 from datetime import datetime
 from io import BytesIO
+
+from .safe_decompress import (
+    DecompressionLimitError,
+    MAX_COMPRESSED_BYTES,
+    gzip_decompress_limited,
+    zip_read_limited,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +32,11 @@ def parse_tls_rpt_file(file_content: bytes, filename: str) -> Optional[Dict[str,
     """
     try:
         filename_lower = filename.lower()
-        
+
+        if len(file_content) > MAX_COMPRESSED_BYTES:
+            logger.error(f"TLS-RPT file {filename} exceeds compressed size limit, rejecting")
+            return None
+
         # Handle ZIP files (.json.zip)
         if filename_lower.endswith('.zip'):
             try:
@@ -36,16 +46,18 @@ def parse_tls_rpt_file(file_content: bytes, filename: str) -> Optional[Dict[str,
                     if not json_files:
                         logger.error(f"No JSON file found in ZIP: {filename}")
                         return None
-                    
+
                     # Read the first JSON file
-                    json_content = zf.read(json_files[0]).decode('utf-8')
+                    json_content = zip_read_limited(zf, json_files[0], source=filename).decode('utf-8')
             except zipfile.BadZipFile as e:
                 logger.error(f"Invalid ZIP file {filename}: {e}")
                 return None
         # Handle GZIP files (.json.gz)
         elif filename_lower.endswith('.gz'):
             try:
-                json_content = gzip.decompress(file_content).decode('utf-8')
+                json_content = gzip_decompress_limited(file_content, source=filename).decode('utf-8')
+            except DecompressionLimitError:
+                raise
             except Exception as e:
                 logger.error(f"Failed to decompress gzip TLS-RPT file: {e}")
                 return None
@@ -61,7 +73,10 @@ def parse_tls_rpt_file(file_content: bytes, filename: str) -> Optional[Dict[str,
                 return None
         
         return parse_tls_rpt_json(json_content)
-        
+
+    except DecompressionLimitError as e:
+        logger.error(f"Rejected oversized TLS-RPT file {filename}: {e}")
+        return None
     except Exception as e:
         logger.error(f"Error parsing TLS-RPT file {filename}: {e}")
         return None

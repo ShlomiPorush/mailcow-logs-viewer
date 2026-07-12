@@ -2,12 +2,19 @@
 DMARC Report Parser
 Handles parsing of DMARC aggregate reports in XML format (GZ or ZIP compressed)
 """
-import gzip
 import zipfile
 import xml.etree.ElementTree as ET
+import defusedxml.ElementTree as DET
 import logging
 from typing import Dict, List, Any, Optional
 from io import BytesIO
+
+from .safe_decompress import (
+    DecompressionLimitError,
+    MAX_COMPRESSED_BYTES,
+    gzip_decompress_limited,
+    zip_read_limited,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -24,21 +31,24 @@ def parse_dmarc_file(file_content: bytes, filename: str) -> Optional[Dict[str, A
         Parsed DMARC data or None if parsing failed
     """
     try:
+        if len(file_content) > MAX_COMPRESSED_BYTES:
+            logger.error(f"DMARC file {filename} exceeds compressed size limit, rejecting")
+            return None
+
         # Determine file type and extract XML
         xml_content = None
-        
+
         if filename.endswith('.gz'):
             # Gzip compressed
-            with gzip.open(BytesIO(file_content), 'rb') as f:
-                xml_content = f.read()
-                
+            xml_content = gzip_decompress_limited(file_content, source=filename)
+
         elif filename.endswith('.zip'):
             # ZIP compressed (Google uses this)
             with zipfile.ZipFile(BytesIO(file_content)) as z:
                 # Get first XML file in zip
                 xml_files = [name for name in z.namelist() if name.endswith('.xml')]
                 if xml_files:
-                    xml_content = z.read(xml_files[0])
+                    xml_content = zip_read_limited(z, xml_files[0], source=filename)
                 else:
                     logger.error(f"No XML file found in ZIP: {filename}")
                     return None
@@ -52,7 +62,10 @@ def parse_dmarc_file(file_content: bytes, filename: str) -> Optional[Dict[str, A
         
         # Parse XML
         return parse_dmarc_xml(xml_content.decode('utf-8'), xml_content.decode('utf-8'))
-        
+
+    except DecompressionLimitError as e:
+        logger.error(f"Rejected oversized DMARC file {filename}: {e}")
+        return None
     except Exception as e:
         logger.error(f"Error parsing DMARC file {filename}: {e}")
         return None
@@ -121,7 +134,8 @@ def parse_dmarc_xml(xml_string: str, raw_xml: str) -> Dict[str, Any]:
         Dictionary with parsed DMARC data
     """
     try:
-        root = ET.fromstring(xml_string)
+        # defusedxml blocks entity-expansion attacks (billion laughs / quadratic blowup)
+        root = DET.fromstring(xml_string)
         
         # Parse report metadata (try with and without namespace)
         metadata = find_element(root, 'report_metadata', DMARC_NAMESPACES)

@@ -146,7 +146,7 @@ function renderRspamdMapsList(maps, rwKeyConfigured) {
                         const displayDesc = _getMapMetaDescription(m.filename) || m.description || '';
                         return `
                         <div class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg hover:border-blue-300 dark:hover:border-blue-600 transition cursor-pointer"
-                             onclick="openMapEditor('${escapeHtml(m.filename)}')">
+                             onclick="openMapEditor('${escapeJsArg(m.filename)}')">
                             <div class="p-4 flex items-center justify-between">
                                 <div class="flex-1 min-w-0">
                                     <div class="flex items-center gap-2 mb-1">
@@ -271,17 +271,17 @@ async function openMapEditor(filename) {
                     <textarea id="map-editor-content" 
                         class="w-full h-64 font-mono text-sm border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-lg p-4 focus:ring-blue-500 focus:border-blue-500"
                         placeholder="Enter entries, one per line..."
-                        oninput="onMapContentChange('${escapeHtml(filename)}')">${escapeHtml(data.content || '')}</textarea>
+                        oninput="onMapContentChange('${escapeJsArg(filename)}')">${escapeHtml(data.content || '')}</textarea>
                     <div id="map-validation-errors" class="mt-2 hidden"></div>
                     <div class="flex items-center justify-between mt-4">
                         <p class="text-xs text-gray-400 dark:text-gray-500">
                             Lines starting with # are comments. Empty lines are ignored.
                         </p>
                         <div class="flex items-center gap-2">
-                            <button onclick="validateMapContent('${escapeHtml(filename)}')" class="px-4 py-2 text-sm bg-gray-200 hover:bg-gray-300 dark:bg-gray-600 dark:hover:bg-gray-500 text-gray-700 dark:text-gray-300 rounded-lg">
+                            <button onclick="validateMapContent('${escapeJsArg(filename)}')" class="px-4 py-2 text-sm bg-gray-200 hover:bg-gray-300 dark:bg-gray-600 dark:hover:bg-gray-500 text-gray-700 dark:text-gray-300 rounded-lg">
                                 Validate
                             </button>
-                            <button onclick="saveMapContent('${escapeHtml(filename)}')" id="map-save-btn" class="px-4 py-2 text-sm bg-blue-600 hover:bg-blue-700 text-white rounded-lg disabled:opacity-50 disabled:cursor-not-allowed">
+                            <button onclick="saveMapContent('${escapeJsArg(filename)}')" id="map-save-btn" class="px-4 py-2 text-sm bg-blue-600 hover:bg-blue-700 text-white rounded-lg disabled:opacity-50 disabled:cursor-not-allowed">
                                 Save Changes
                             </button>
                         </div>
@@ -512,7 +512,7 @@ function renderSuppressionItem(s) {
                     <button onclick="toggleSuppression(${s.id}, ${!s.active})" class="px-2 py-1 text-xs rounded ${s.active ? 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-300 hover:bg-yellow-200' : 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 hover:bg-green-200'}" title="${s.active ? 'Deactivate' : 'Reactivate'}">
                         ${s.active ? 'Disable' : 'Enable'}
                     </button>
-                    <button onclick="deleteSuppression(${s.id}, '${escapeHtml(s.email)}')" class="px-2 py-1 text-xs rounded bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 hover:bg-red-200" title="Delete permanently">
+                    <button onclick="deleteSuppression(${s.id}, '${escapeJsArg(s.email)}')" class="px-2 py-1 text-xs rounded bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 hover:bg-red-200" title="Delete permanently">
                         Delete
                     </button>
                 </div>

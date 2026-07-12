@@ -23,6 +23,8 @@ from .domains import get_cached_server_ip
 from ..mailcow_api import mailcow_api
 from ..services.oauth2_client import oauth2_client
 
+from ..utils import format_datetime_for_api as format_datetime_utc
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
@@ -91,18 +93,8 @@ def _get_field_defaults() -> Dict[str, Any]:
     return defaults
 
 
-def format_datetime_utc(dt: Optional[datetime]) -> Optional[str]:
-    """Format datetime with UTC timezone indicator"""
-    if dt is None:
-        return None
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
-    dt_utc = dt.astimezone(timezone.utc)
-    return dt_utc.replace(microsecond=0).isoformat().replace('+00:00', 'Z')
-
-
 @router.get("/settings/info")
-async def get_settings_info(db: Session = Depends(get_db)):
+def get_settings_info(db: Session = Depends(get_db)):
     """
     Get system configuration and status information
     
@@ -474,7 +466,7 @@ async def get_settings_info(db: Session = Depends(get_db)):
 
 
 @router.get("/settings")
-async def get_editable_settings(db: Session = Depends(get_db)):
+def get_editable_settings(db: Session = Depends(get_db)):
     """
     Get effective configuration for editing (editable keys only; secrets masked).
     Includes settings_edit_via_ui_enabled so frontend can show/hide edit form.
@@ -495,7 +487,7 @@ async def get_editable_settings(db: Session = Depends(get_db)):
 
 
 @router.put("/settings")
-async def update_settings(body: Dict[str, Any], db: Session = Depends(get_db)):
+def update_settings(body: Dict[str, Any], db: Session = Depends(get_db)):
     """
     Update app settings from UI. Only allowed when SETTINGS_EDIT_VIA_UI_ENABLED is true.
     Accepts only keys in EDITABLE_SETTING_KEYS. Secrets: send empty string to leave unchanged.
@@ -624,7 +616,7 @@ _FEATURE_TABLES = {
 
 
 @router.post("/settings/purge-feature-data")
-async def purge_feature_data(body: Dict[str, Any], db: Session = Depends(get_db)):
+def purge_feature_data(body: Dict[str, Any], db: Session = Depends(get_db)):
     """
     Delete all database data associated with a disabled feature.
     Body: { "feature": "<feature-id>" }
@@ -642,11 +634,17 @@ async def purge_feature_data(body: Dict[str, Any], db: Session = Depends(get_db)
 
     tables = _FEATURE_TABLES[feature]
     deleted_counts = {}
+    # Allowed table name pattern (alphanumeric + underscores only) to satisfy static analysis
+    import re
+    _TABLE_NAME_RE = re.compile(r'^[a-z_][a-z0-9_]*$')
     try:
         for table_name in tables:
-            # Count rows first
+            if not _TABLE_NAME_RE.match(table_name):
+                raise ValueError(f"Invalid table name: {table_name}")
+            # nosemgrep: python.sqlalchemy.security.audit.avoid-sqlalchemy-text.avoid-sqlalchemy-text
             count = db.execute(text(f"SELECT COUNT(*) FROM {table_name}")).scalar() or 0
             if count > 0:
+                # nosemgrep: python.sqlalchemy.security.audit.avoid-sqlalchemy-text.avoid-sqlalchemy-text
                 db.execute(text(f"TRUNCATE TABLE {table_name} CASCADE"))
             deleted_counts[table_name] = count
         db.commit()
@@ -664,7 +662,7 @@ async def purge_feature_data(body: Dict[str, Any], db: Session = Depends(get_db)
 
 
 @router.post("/settings/import-from-env")
-async def import_settings_from_env(db: Session = Depends(get_db)):
+def import_settings_from_env(db: Session = Depends(get_db)):
     """
     Import current effective configuration (defaults + ENV + existing DB) into DB.
     Only allowed when SETTINGS_EDIT_VIA_UI_ENABLED is true.
@@ -693,20 +691,23 @@ async def import_settings_from_env(db: Session = Depends(get_db)):
     }
 
 
+# NOTE: these are plain `def` on purpose — FastAPI runs sync endpoints in a
+# threadpool, so the blocking smtplib/imaplib connection tests (10-30s timeouts)
+# don't freeze the shared event loop.
 @router.post("/settings/test/smtp")
-async def test_smtp():
+def test_smtp():
     """Test SMTP connection with detailed logging"""
     result = test_smtp_connection()
     return result
 
 @router.post("/settings/test/imap")
-async def test_imap():
+def test_imap():
     """Test IMAP connection with detailed logging"""
     result = test_imap_connection()
     return result
 
 @router.get("/settings/health")
-async def get_health_detailed(db: Session = Depends(get_db)):
+def get_health_detailed(db: Session = Depends(get_db)):
     """
     Detailed health check with timing information
     """
@@ -804,7 +805,7 @@ def _run_async_in_background(coro_func):
 
 
 @router.get("/settings/geoip/status")
-async def get_geoip_detailed_status():
+def get_geoip_detailed_status():
     """
     Get detailed GeoIP status for frontend polling.
     Returns license validity, DB file info, and DB health validation status.
@@ -832,7 +833,7 @@ async def get_geoip_detailed_status():
 
 
 @router.post("/settings/geoip/download")
-async def trigger_geoip_download(background_tasks: BackgroundTasks):
+def trigger_geoip_download(background_tasks: BackgroundTasks):
     """
     Trigger GeoIP database download in background.
     Called by the setup modal when credentials are valid but DB files are missing.
@@ -859,7 +860,7 @@ async def validate_maxmind_license_endpoint(db: Session = Depends(get_db)):
 
 
 @router.post("/settings/geoip/validate")
-async def validate_geoip_db():
+def validate_geoip_db():
     """
     Validate GeoIP database integrity by running test IP lookups.
     Called by the setup modal after download completes.
@@ -892,7 +893,7 @@ async def validate_geoip_db():
 # =============================================================================
 
 @router.post("/settings/jobs/{job_name}/run")
-async def trigger_job(job_name: str, background_tasks: BackgroundTasks):
+def trigger_job(job_name: str, background_tasks: BackgroundTasks):
     """
     Manually trigger a background job.
     

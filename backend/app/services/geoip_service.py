@@ -105,7 +105,7 @@ def get_country_emoji(country_code: str) -> str:
     try:
         code_points = [127462 + ord(c) - ord('A') for c in country_code.upper()]
         return ''.join(chr(c) for c in code_points)
-    except:
+    except Exception:
         return '🌍'
 
 
@@ -282,14 +282,14 @@ def reload_geoip_readers():
     if _city_reader:
         try:
             _city_reader.close()
-        except:
+        except Exception:
             pass
         _city_reader = None
     
     if _asn_reader:
         try:
             _asn_reader.close()
-        except:
+        except Exception:
             pass
         _asn_reader = None
     

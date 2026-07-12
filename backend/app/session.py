@@ -21,13 +21,24 @@ _session_store: Dict[str, Dict[str, Any]] = {}
 SESSION_COOKIE_NAME = "session_id"
 
 
+# Fallback key when SESSION_SECRET_KEY is unset — generated ONCE per process.
+# (Generating a fresh key per call would sign and verify with different keys,
+# silently invalidating every OAuth2 session.) Sessions still won't survive a
+# restart without a configured key, matching the in-memory session store.
+_generated_secret_key: str = ""
+
+
 def get_session_secret_key() -> str:
-    """Get or generate session secret key"""
+    """Get the configured session secret key, or a stable per-process fallback"""
+    global _generated_secret_key
     if not settings.session_secret_key:
-        # Generate a random key if not configured
-        # This is not ideal for production but allows the app to start
-        logger.warning("SESSION_SECRET_KEY not configured, generating temporary key")
-        return secrets.token_urlsafe(32)
+        if not _generated_secret_key:
+            logger.warning(
+                "SESSION_SECRET_KEY not configured — using a temporary key. "
+                "Sessions will not survive a restart; set SESSION_SECRET_KEY in production."
+            )
+            _generated_secret_key = secrets.token_urlsafe(32)
+        return _generated_secret_key
     return settings.session_secret_key
 
 

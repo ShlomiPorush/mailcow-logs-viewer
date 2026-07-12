@@ -1,6 +1,6 @@
 """
 Test script for DNS resolver with DoH fallback.
-Run inside the container: python -m app.services.test_dns_resolver
+Run inside the container: python -m app.services.dns_resolver_check
 """
 import asyncio
 import logging

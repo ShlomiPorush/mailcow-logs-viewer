@@ -12,6 +12,7 @@
 
     <script src="/static/assets/libs/tailwindcss.min.js"></script>
     <script src="/static/assets/libs/marked.min.js"></script>
+    <script src="/static/assets/libs/purify.min.js"></script>
     <script src="/static/assets/libs/chart.umd.min.js"></script>
     <link rel="stylesheet" href="/static/assets/libs/github-markdown.min.css">
     <script>
@@ -2214,6 +2215,16 @@
                                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 14l-7 7m0 0l-7-7m7 7V3"></path>
                                     </svg>
                                     Auto-scroll
+                                </button>
+
+                                <!-- Sort Order (issue #69) -->
+                                <button onclick="toggleLogSortOrder()" id="logs-sort-btn"
+                                    class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 transition-colors"
+                                    title="Toggle sort order (newest at bottom / newest at top)">
+                                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path id="logs-sort-icon" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4h13M3 8h9m-9 4h9m5-4v12m0 0l-4-4m4 4l4-4"></path>
+                                    </svg>
+                                    <span id="logs-sort-text">Newest last</span>
                                 </button>
 
                                 <!-- Font Size -->

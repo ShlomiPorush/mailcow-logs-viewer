@@ -131,7 +131,7 @@ async def check_blacklists(
         }
 
 @router.get("/progress")
-async def get_progress() -> Dict[str, Any]:
+def get_progress() -> Dict[str, Any]:
     """
     Get current blacklist check progress (for UI progress bar)
     """
@@ -145,7 +145,7 @@ async def get_progress() -> Dict[str, Any]:
     }
 
 @router.get("/config")
-async def get_blacklist_config() -> Dict[str, Any]:
+def get_blacklist_config() -> Dict[str, Any]:
     """
     Get blacklist check configuration and status
     """
@@ -163,7 +163,7 @@ async def get_blacklist_config() -> Dict[str, Any]:
     }
 
 @router.get("/summary")
-async def get_blacklist_summary() -> Dict[str, Any]:
+def get_blacklist_summary() -> Dict[str, Any]:
     """
     Get compact blacklist status summary for dashboard
     """

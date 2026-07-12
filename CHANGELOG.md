@@ -5,6 +5,37 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.6.3] - 2026-07-12
+
+### Security
+
+- **Decompression bomb protection** — a malicious compressed DMARC/TLS-RPT report (emailed or uploaded) could exhaust memory and crash the container; size limits are now enforced
+- **XSS fixes** — malicious data inside DMARC reports could execute scripts in the browser via inline `onclick` handlers; markdown content (docs, changelogs) is now also sanitized with DOMPurify
+- **Hardened XML parsing** — DMARC reports are parsed with `defusedxml` to block entity-expansion attacks
+- **Security headers** added to all responses (`Content-Security-Policy`, `X-Frame-Options`, `X-Content-Type-Options`, `Referrer-Policy`)
+- **Brute-force protection** — after 10 failed login attempts within 15 minutes, further attempts are blocked temporarily
+- **Less info exposed without login** — `/api/info` and `/api/health` no longer reveal the mailcow URL, hosted domains, or configuration to unauthenticated visitors
+
+### Fixed
+
+- **"Sync Transports & Relayhosts" job crashed** when a relayhost hostname was long (e.g. Microsoft 365 relays) — the database column was too short ([#70](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/70))
+- **Security tab showed old, unrelated events** — now limited to 1 hour around the message, as the tab always claimed ([#68](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/68))
+- **"Test SMTP" / "Test IMAP" buttons refreshed the page** instead of showing the test results
+- **Some logs were silently lost** when a large backlog was imported across multiple fetch cycles
+- **OAuth2 login always failed** when `SESSION_SECRET_KEY` was not configured
+- **App froze during slow operations** — database queries, email sending, and SMTP/IMAP connection tests no longer block the entire application
+- **Postfix logs page was slow on large databases** — replaced hundreds of queries per page view with a single paginated query
+- **Live log viewer memory leak** — the page now keeps at most 5,000 log lines, so leaving the Logs tab open no longer slows the browser
+- **Error responses leaked internal details** — 500 errors now return a generic message (full errors still go to the server log)
+- Internal cleanups: removed a duplicate background-job definition and a duplicate migration, deduplicated helper functions, stricter exception handling
+
+### Added
+
+- **Log Viewer sort order toggle** — choose between newest entries at the bottom (default) or at the top; the choice is remembered ([#69](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/69))
+- **Automated tests + CI** — pytest suite for the backend and a GitHub Actions workflow that runs on every push/PR
+
+---
+
 ## [2.6.2] - 2026-06-18
 
 ### Fixed

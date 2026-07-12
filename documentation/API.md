@@ -4589,7 +4589,7 @@ Real-time log streaming via WebSocket. Connects to receive new log entries as th
 
 **Connection URL:**
 ```
-ws://your-server:8080/ws/raw-logs?service=postfix&token=<one-time-token>
+wss://your-server/ws/raw-logs?service=postfix&token=<one-time-token>
 ```
 
 **Query Parameters:**

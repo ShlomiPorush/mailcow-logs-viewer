@@ -14,6 +14,7 @@ import pandas as pd
 from ..database import get_db
 from ..models import PostfixLog, RspamdLog, NetfilterLog, MessageCorrelation
 from ..config import settings
+from ..utils import internal_error
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +22,7 @@ router = APIRouter()
 
 
 @router.get("/export/postfix/csv")
-async def export_postfix_csv(
+def export_postfix_csv(
     search: Optional[str] = Query(None),
     sender: Optional[str] = Query(None),
     recipient: Optional[str] = Query(None),
@@ -107,11 +108,11 @@ async def export_postfix_csv(
         raise
     except Exception as e:
         logger.error(f"Error exporting Postfix logs: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise internal_error(e)
 
 
 @router.get("/export/rspamd/csv")
-async def export_rspamd_csv(
+def export_rspamd_csv(
     search: Optional[str] = Query(None),
     sender: Optional[str] = Query(None),
     direction: Optional[str] = Query(None),
@@ -205,11 +206,11 @@ async def export_rspamd_csv(
         raise
     except Exception as e:
         logger.error(f"Error exporting Rspamd logs: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise internal_error(e)
 
 
 @router.get("/export/netfilter/csv")
-async def export_netfilter_csv(
+def export_netfilter_csv(
     search: Optional[str] = Query(None),
     ip: Optional[str] = Query(None),
     username: Optional[str] = Query(None),
@@ -285,11 +286,11 @@ async def export_netfilter_csv(
         raise
     except Exception as e:
         logger.error(f"Error exporting Netfilter logs: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise internal_error(e)
 
 
 @router.get("/export/messages/csv")
-async def export_messages_csv(
+def export_messages_csv(
     search: Optional[str] = Query(None),
     sender: Optional[str] = Query(None),
     recipient: Optional[str] = Query(None),
@@ -400,4 +401,4 @@ async def export_messages_csv(
         raise
     except Exception as e:
         logger.error(f"Error exporting Messages: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise internal_error(e)

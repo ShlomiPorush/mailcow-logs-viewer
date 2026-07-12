@@ -118,7 +118,7 @@ def _find_matching_rule(rules, sender: str, sender_domain: str, rcpt: str, subje
 # parameterized routes (/{rule_id}) to avoid FastAPI matching "logs" as a rule_id.
 
 @router.get("")
-async def list_rules():
+def list_rules():
     """List all quarantine rules."""
     _require_rw_key()
     
@@ -134,7 +134,7 @@ async def list_rules():
 
 
 @router.post("")
-async def create_rule(body: RuleCreate):
+def create_rule(body: RuleCreate):
     """Create a new quarantine rule."""
     _require_rw_key()
     
@@ -165,7 +165,7 @@ async def create_rule(body: RuleCreate):
 # ---- Action History (must be before /{rule_id}) ----
 
 @router.get("/logs")
-async def get_rule_logs(
+def get_rule_logs(
     limit: int = Query(default=50, le=200),
     offset: int = Query(default=0, ge=0),
     rule_id: Optional[int] = Query(default=None),
@@ -266,7 +266,7 @@ async def test_rules():
 # ---- Parameterized routes (/{rule_id}) ----
 
 @router.put("/{rule_id}")
-async def update_rule(rule_id: int, body: RuleUpdate):
+def update_rule(rule_id: int, body: RuleUpdate):
     """Update an existing quarantine rule."""
     _require_rw_key()
     
@@ -312,7 +312,7 @@ async def update_rule(rule_id: int, body: RuleUpdate):
 
 
 @router.delete("/{rule_id}")
-async def delete_rule(rule_id: int):
+def delete_rule(rule_id: int):
     """Delete a quarantine rule."""
     _require_rw_key()
     
@@ -330,7 +330,7 @@ async def delete_rule(rule_id: int):
 
 
 @router.post("/{rule_id}/toggle")
-async def toggle_rule(rule_id: int):
+def toggle_rule(rule_id: int):
     """Toggle a rule's enabled/disabled state."""
     _require_rw_key()
     

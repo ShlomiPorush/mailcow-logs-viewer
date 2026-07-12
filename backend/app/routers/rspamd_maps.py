@@ -15,6 +15,7 @@ from typing import Optional, List, Dict, Any
 
 from ..config import settings
 from ..mailcow_api import mailcow_api, MailcowAPIError
+from ..utils import internal_error
 
 logger = logging.getLogger(__name__)
 
@@ -175,7 +176,7 @@ def validate_map_content(content: str) -> List[Dict[str, Any]]:
 
 
 @router.get("/rspamd/config")
-async def get_rspamd_config():
+def get_rspamd_config():
     """
     Check Rspamd integration configuration status.
     Returns whether Rspamd password and RW key are configured.
@@ -286,7 +287,7 @@ async def get_map_content(filename: str):
         
     except MailcowAPIError as e:
         logger.error(f"Failed to read map {filename}: {e}")
-        raise HTTPException(status_code=502, detail=str(e))
+        raise internal_error(e, status_code=502)
 
 
 @router.put("/rspamd/maps/{filename}")
@@ -332,11 +333,11 @@ async def update_map_content(filename: str, body: MapContentRequest):
         
     except MailcowAPIError as e:
         logger.error(f"Failed to update map {filename}: {e}")
-        raise HTTPException(status_code=502, detail=str(e))
+        raise internal_error(e, status_code=502)
 
 
 @router.post("/rspamd/validate")
-async def validate_map(body: MapValidationRequest):
+def validate_map(body: MapValidationRequest):
     """
     Validate map content without saving.
     Returns validation errors if any regex patterns are invalid.

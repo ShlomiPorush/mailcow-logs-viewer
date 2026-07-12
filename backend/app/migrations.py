@@ -953,6 +953,36 @@ def ensure_mailbox_statistics_table(db: Session):
         raise
 
 
+def widen_monitored_hosts_source(db: Session):
+    """
+    Widen monitored_hosts.source from VARCHAR(50) to TEXT (issue #70).
+    Values like 'relayhost:<long-fqdn>' (e.g. Microsoft 365 EOP relays) exceed
+    50 characters and crashed the Sync Transports & Relayhosts job. TEXT
+    because 'relayhost:' + a max-length DNS name (253) exceeds even 255.
+    """
+    try:
+        result = db.execute(text("""
+            SELECT character_maximum_length
+            FROM information_schema.columns
+            WHERE table_name='monitored_hosts'
+            AND column_name='source'
+        """)).fetchone()
+
+        # character_maximum_length is NULL for TEXT — any limit means migrate
+        if result and result[0] is not None:
+            logger.info(f"Widening monitored_hosts.source from VARCHAR({result[0]}) to TEXT...")
+            db.execute(text("""
+                ALTER TABLE monitored_hosts
+                ALTER COLUMN source TYPE TEXT
+            """))
+            db.commit()
+            logger.info("monitored_hosts.source widened to TEXT")
+
+    except Exception as e:
+        logger.error(f"Failed to widen monitored_hosts.source: {e}")
+        db.rollback()
+
+
 def run_migrations():
     """
     Run all database migrations and maintenance tasks
@@ -1002,8 +1032,11 @@ def run_migrations():
         
         # Spam suppressions table
         ensure_spam_suppressions_table(db)
-        
-        add_geoip_fields_to_dmarc(db)
+
+        # Widen monitored_hosts.source (issue #70)
+        widen_monitored_hosts_source(db)
+
+        # (add_geoip_fields_to_dmarc already ran above)
         add_geoip_fields_to_rspamd(db)
         add_geoip_fields_to_netfilter(db)
         backfill_geoip_netfilter(db)

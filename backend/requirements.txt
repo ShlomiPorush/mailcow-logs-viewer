@@ -34,6 +34,9 @@ tenacity==8.2.3
 # DNS Queries - Required for domains management
 dnspython[doh]==2.6.1
 
+# Secure XML parsing (DMARC reports are untrusted input)
+defusedxml>=0.7.1
+
 # MaxMind
 geoip2>=4.7.0
 maxminddb>=2.4.0
@@ -44,5 +47,5 @@ authlib>=1.2.0
 itsdangerous>=2.1.0
 
 # Testing (optional, for development)
-pytest>=9.0.3
-pytest-asyncio==0.23.3
+pytest>=8.0.0
+pytest-asyncio>=0.23.3

@@ -38,13 +38,24 @@ def format_datetime_for_api(dt: Optional[datetime]) -> Optional[str]:
 def ensure_timezone_aware(dt: datetime) -> datetime:
     """
     Ensure datetime is timezone-aware (has tzinfo)
-    
+
     Args:
         dt: datetime object
-        
+
     Returns:
         Timezone-aware datetime (assumes UTC if naive)
     """
     if dt.tzinfo is None:
         return dt.replace(tzinfo=timezone.utc)
     return dt
+
+
+def internal_error(e: Exception, status_code: int = 500):
+    """
+    Build an HTTPException that hides internal error details from clients
+    unless DEBUG is enabled. Callers should log the full exception first.
+    """
+    from fastapi import HTTPException
+    from .config import settings
+    detail = str(e) if settings.debug else "Internal server error"
+    return HTTPException(status_code=status_code, detail=detail)

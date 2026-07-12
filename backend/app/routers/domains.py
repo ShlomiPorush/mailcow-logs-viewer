@@ -17,6 +17,7 @@ from app.models import DomainDNSCheck
 from app.utils import format_datetime_for_api
 from app.config import settings
 from app.mailcow_api import mailcow_api
+from ..utils import internal_error
 
 logger = logging.getLogger(__name__)
 
@@ -298,7 +299,7 @@ async def check_ip_in_spf(domain: str, ip_to_check: str, spf_record: str, resolv
                 else:
                     if ip_to_check == ip_spec:
                         return True, f'ip4:{ip_spec}'
-            except:
+            except Exception:
                 pass
         
         elif clean_part in ['a'] or clean_part.startswith('a:'):
@@ -308,7 +309,7 @@ async def check_ip_in_spf(domain: str, ip_to_check: str, spf_record: str, resolv
                 for rdata in a_records:
                     if str(rdata) == ip_to_check:
                         return True, f'a:{check_domain}' if clean_part.startswith('a:') else 'a'
-            except:
+            except Exception:
                 pass
         
         elif clean_part in ['mx'] or clean_part.startswith('mx:'):
@@ -321,9 +322,9 @@ async def check_ip_in_spf(domain: str, ip_to_check: str, spf_record: str, resolv
                         for rdata in mx_a_records:
                             if str(rdata) == ip_to_check:
                                 return True, f'mx:{check_domain}' if clean_part.startswith('mx:') else 'mx'
-                    except:
+                    except Exception:
                         pass
-            except:
+            except Exception:
                 pass
         
         elif clean_part.startswith('include:'):
@@ -343,7 +344,7 @@ async def check_ip_in_spf(domain: str, ip_to_check: str, spf_record: str, resolv
                         )
                         if authorized:
                             return True, f'include:{include_domain} ({method})'
-            except:
+            except Exception:
                 pass
         
         elif clean_part.startswith('redirect='):
@@ -363,7 +364,7 @@ async def check_ip_in_spf(domain: str, ip_to_check: str, spf_record: str, resolv
                         )
                         if authorized:
                             return True, f'redirect:{redirect_domain} ({method})'
-            except:
+            except Exception:
                 pass
     
     return False, None
@@ -408,7 +409,7 @@ async def count_spf_dns_lookups(domain: str, spf_record: str, resolver=None, vis
                         )
                         lookup_count += nested_count
                         break
-            except:
+            except Exception:
                 pass
         
         elif clean_part in ['a'] or clean_part.startswith('a:'):
@@ -936,7 +937,7 @@ async def get_all_domains_with_dns(db: Session = Depends(get_db)):
         
     except Exception as e:
         logger.error(f"Error fetching domains: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise internal_error(e)
 
 
 @router.get("/domains/{domain}/dns-check")
@@ -955,7 +956,7 @@ async def check_single_domain_dns(domain: str):
         return dns_data
     except Exception as e:
         logger.error(f"Error checking DNS for {domain}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise internal_error(e)
 
 
 async def save_dns_check_to_db(db: Session, domain_name: str, dns_data: Dict[str, Any], is_full_check: bool = False):
@@ -1057,7 +1058,7 @@ async def check_all_domains_dns_manual(db: Session = Depends(get_db)):
         
     except Exception as e:
         logger.error(f"Error in manual DNS check: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise internal_error(e)
 
 
 @router.post("/domains/{domain}/check-dns")
@@ -1075,4 +1076,4 @@ async def check_single_domain_dns_manual(domain: str, db: Session = Depends(get_
         
     except Exception as e:
         logger.error(f"Error checking DNS for {domain}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise internal_error(e)

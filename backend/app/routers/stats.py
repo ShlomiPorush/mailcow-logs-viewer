@@ -11,32 +11,15 @@ from typing import Optional
 from ..database import get_db
 from ..models import PostfixLog, RspamdLog, NetfilterLog, MessageCorrelation
 
+from ..utils import format_datetime_for_api as format_datetime_utc
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
 
-def format_datetime_utc(dt: Optional[datetime]) -> Optional[str]:
-    """
-    Format datetime for API response with proper UTC timezone
-    Always returns ISO format with 'Z' suffix so browser knows it's UTC
-    """
-    if dt is None:
-        return None
-    
-    # If naive (no timezone), assume UTC
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
-    
-    # Convert to UTC if not already
-    dt_utc = dt.astimezone(timezone.utc)
-    
-    # Format as ISO string with 'Z' suffix for UTC
-    return dt_utc.replace(microsecond=0).isoformat().replace('+00:00', 'Z')
-
-
 @router.get("/stats/dashboard")
-async def get_dashboard_stats(db: Session = Depends(get_db)):
+def get_dashboard_stats(db: Session = Depends(get_db)):
     """
     Get main dashboard statistics
     """
@@ -164,7 +147,7 @@ async def get_dashboard_stats(db: Session = Depends(get_db)):
 
 
 @router.get("/stats/timeline")
-async def get_timeline_stats(
+def get_timeline_stats(
     hours: int = 24,
     db: Session = Depends(get_db)
 ):
@@ -205,7 +188,7 @@ async def get_timeline_stats(
 
 
 @router.get("/stats/top-spam-triggers")
-async def get_top_spam_triggers(
+def get_top_spam_triggers(
     limit: int = 10,
     db: Session = Depends(get_db)
 ):
@@ -249,7 +232,7 @@ async def get_top_spam_triggers(
 
 
 @router.get("/stats/top-blocked-ips")
-async def get_top_blocked_ips(
+def get_top_blocked_ips(
     limit: int = 10,
     db: Session = Depends(get_db)
 ):
@@ -287,7 +270,7 @@ async def get_top_blocked_ips(
 
 
 @router.get("/stats/recent-activity")
-async def get_recent_activity(
+def get_recent_activity(
     limit: int = 20,
     db: Session = Depends(get_db)
 ):

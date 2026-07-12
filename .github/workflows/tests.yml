@@ -1,0 +1,63 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  backend-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install dependencies
+        run: pip install -r backend/requirements.txt
+
+      - name: Run tests
+        working-directory: backend
+        run: pytest
+
+      - name: Verify app imports
+        working-directory: backend
+        env:
+          MAILCOW_URL: https://mail.example.com
+          MAILCOW_API_KEY: ci-dummy
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: ci
+        run: |
+          mkdir -p /tmp/frontend-stub
+          python -c "
+          import unittest.mock as m, sys
+          # /app/frontend does not exist in CI — stub the static mount path check
+          import starlette.staticfiles as sf
+          orig = sf.StaticFiles.__init__
+          def patched(self, *a, **kw):
+              kw['check_dir'] = False
+              return orig(self, *a, **kw)
+          sf.StaticFiles.__init__ = patched
+          from app.main import app
+          print('app imports OK,', len(app.routes), 'routes')
+          "
+
+  frontend-syntax:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Syntax-check frontend scripts
+        run: |
+          node --check frontend/app.js
+          node --check frontend/router.js
+          node --check frontend/spam_filter.js

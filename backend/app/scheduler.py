@@ -611,9 +611,11 @@ async def fetch_and_store_postfix():
             offset += len(logs)
         
         else:
-            # Loop completed without break
+            # Loop completed without break. `offset` was already advanced by
+            # len(logs) each page, so it points at the first unfetched log —
+            # adding page_size here would silently skip a whole page.
             if pages_to_fetch < total_pages_needed:
-                _resume_offset['postfix'] = offset + page_size
+                _resume_offset['postfix'] = offset
                 logger.info(f"[POSTFIX] Completed {pages_to_fetch}/{total_pages_needed} pages, will resume from offset {_resume_offset['postfix']} next cycle")
             else:
                 _resume_offset['postfix'] = 0
@@ -816,9 +818,10 @@ async def fetch_and_store_rspamd():
             offset += len(logs)
         
         else:
-            # Loop completed without break
+            # Loop completed without break. `offset` already points at the
+            # first unfetched log — adding page_size would skip a whole page.
             if pages_to_fetch < total_pages_needed:
-                _resume_offset['rspamd'] = offset + page_size
+                _resume_offset['rspamd'] = offset
                 logger.info(f"[RSPAMD] Completed {pages_to_fetch}/{total_pages_needed} pages, will resume from offset {_resume_offset['rspamd']} next cycle")
             else:
                 _resume_offset['rspamd'] = 0
@@ -1856,9 +1859,12 @@ async def check_monitored_hosts_job(force: bool = False, send_notification: bool
     </html>
     """
                     
-                    # Send notification
+                    # Send notification (in executor — smtplib blocks the event loop)
                     logger.info("Calling send_notification_email...")
-                    sent = send_notification_email(notification_email, subject, text_content, html_content)
+                    sent = await asyncio.get_running_loop().run_in_executor(
+                        _thread_pool_executor,
+                        send_notification_email, notification_email, subject, text_content, html_content
+                    )
                     if sent:
                         logger.info(f"Blacklist alert sent to {notification_email}")
                     else:
@@ -1920,7 +1926,10 @@ async def check_monitored_hosts_job(force: bool = False, send_notification: bool
     </body>
     </html>
     """
-                    sent = send_notification_email(notification_email, subject, text_content, html_content)
+                    sent = await asyncio.get_running_loop().run_in_executor(
+                        _thread_pool_executor,
+                        send_notification_email, notification_email, subject, text_content, html_content
+                    )
                     if sent:
                         logger.info(f"Blacklist count change notification sent to {notification_email} (was {prev_listed}, now {actionable_count})")
                     else:
@@ -1939,7 +1948,7 @@ async def check_monitored_hosts_job(force: bool = False, send_notification: bool
         logger.info("Blacklist check cancelled by shutdown")
         try:
             end_batch_scan()
-        except:
+        except Exception:
             pass
         return
     except Exception as e:
@@ -1947,7 +1956,7 @@ async def check_monitored_hosts_job(force: bool = False, send_notification: bool
         update_job_status('blacklist_check', 'failed', str(e))
         try:
             end_batch_scan()
-        except:
+        except Exception:
             pass
 
 
@@ -1998,7 +2007,10 @@ async def dmarc_imap_sync_job():
             failed_emails = result.get('failed_emails')
             if failed_emails and settings.notification_smtp_configured:
                 try:
-                    send_dmarc_error_notification(failed_emails, result.get('sync_id'))
+                    await asyncio.get_running_loop().run_in_executor(
+                        _thread_pool_executor,
+                        send_dmarc_error_notification, failed_emails, result.get('sync_id')
+                    )
                 except Exception as e:
                     logger.error(f"Failed to send error notification: {e}")
         elif result.get('status') == 'disabled':
@@ -2574,6 +2586,8 @@ async def update_alias_statistics():
 async def sync_transports_job():
     """
     Sync transports and relayhosts from mailcow to MonitoredHost table.
+    Resolves FQDNs to IPs and skips private/internal IPs.
+    Stores Original FQDN in source field as 'transport:fqdn' or 'relayhost:fqdn'.
     Runs every 6 hours.
     """
     if not settings.is_feature_enabled('domains'):
@@ -2591,127 +2605,19 @@ async def sync_transports_job():
         relayhosts_data = await mailcow_api.get_relayhosts()
 
         # Process and Deduplicate
-        hosts_to_monitor = {}  # hostname -> source
-
-        # Process Transports
-        for t in transports_data:
-            if str(t.get('active', '0')) == '1':
-                nexthop = t.get('nexthop', '').strip()
-                if nexthop:
-                    # Remove brackets if present [host]
-                    nexthop = nexthop.strip('[]')
-                    # Remove port if present host:port
-                    if ':' in nexthop:
-                        nexthop = nexthop.split(':')[0]
-                    if nexthop:
-                        hosts_to_monitor[nexthop] = 'transport'
-
-        # Process Relay Hosts
-        for r in relayhosts_data:
-            if str(r.get('active', '0')) == '1':
-                hostname = r.get('hostname', '').strip()
-                if hostname:
-                    # Remove brackets if present [host]
-                    hostname = hostname.strip('[]')
-                    # Remove port if present host:port
-                    if ':' in hostname:
-                        hostname = hostname.split(':')[0]
-                    if hostname:
-                        hosts_to_monitor[hostname] = 'relayhost'
-        
-        # Also ensure local IP is monitored (source='system')
-        from .routers.domains import get_cached_server_ip
-        local_ip = get_cached_server_ip()
-        if local_ip:
-            if local_ip not in hosts_to_monitor:
-                hosts_to_monitor[local_ip] = 'system'
-
-        # Update DB
-        with get_db_context() as db:
-            # Get existing hosts
-            existing_hosts = {h.hostname: h for h in db.query(MonitoredHost).all()}
-            
-            # Update/Add hosts
-            added_count = 0
-            updated_count = 0
-            
-            for hostname, source in hosts_to_monitor.items():
-                if hostname in existing_hosts:
-                    host = existing_hosts[hostname]
-                    if not host.active or host.source != source:
-                        host.active = True
-                        host.source = source
-                        updated_count += 1
-                else:
-                    new_host = MonitoredHost(
-                        hostname=hostname,
-                        source=source,
-                        active=True,
-                        last_seen=datetime.utcnow()
-                    )
-                    db.add(new_host)
-                    added_count += 1
-            
-            # Deactivate missing hosts (optional: or delete them? disabling is safer)
-            deactivated_count = 0
-            for hostname, host in existing_hosts.items():
-                if hostname not in hosts_to_monitor and host.active:
-                    host.active = False
-                    deactivated_count += 1
-            
-            db.commit()
-            
-            summary = f"Synced monitored hosts: {added_count} added, {updated_count} updated, {deactivated_count} deactivated"
-            logger.info(summary)
-            update_job_status('sync_transports', 'success')
-            
-    except Exception as e:
-        logger.error(f"Sync transports failed: {e}")
-        update_job_status('sync_transports', 'failed', str(e))
-
-
-
-# =============================================================================
-# SCHEDULER SETUP
-# =============================================================================
-
-
-# =============================================================================
-# MONITORED HOSTS SYNC
-# =============================================================================
-
-async def sync_transports_job():
-    """
-    Sync transports and relayhosts from mailcow to MonitoredHost table.
-    Resolves FQDNs to IPs and skips private/internal IPs.
-    Stores Original FQDN in source field as 'transport:fqdn' or 'relayhost:fqdn'.
-    Runs every 6 hours.
-    """
-    update_job_status('sync_transports', 'running')
-    try:
-        if not settings.mailcow_api_key or not settings.mailcow_url:
-            logger.warning("mailcow API not configured, skipping transport sync")
-            update_job_status('sync_transports', 'failed', 'API not configured')
-            return
-
-        # Fetch Transports and Relay Hosts using mailcow_api
-        transports_data = await mailcow_api.get_transports()
-        relayhosts_data = await mailcow_api.get_relayhosts()
-
-        # Process and Deduplicate
         hosts_to_monitor = {}  # ip -> source_string
 
-        def resolve_and_validate(host_input: str, source_type: str) -> Optional[tuple]:
+        async def resolve_and_validate(host_input: str, source_type: str) -> Optional[tuple]:
             """Resolve host to IP, validate public, return (ip, full_source_string)"""
             host_clean = host_input.strip().lower()
             # Remove brackets/ports
             host_clean = host_clean.strip('[]')
             if ':' in host_clean:
                 host_clean = host_clean.split(':')[0]
-            
+
             if not host_clean:
                 return None
-                
+
             try:
                 # Is it already an IP?
                 try:
@@ -2719,12 +2625,11 @@ async def sync_transports_job():
                     ip_str = str(ip_obj)
                     fqdn = None # IP was provided directly
                 except ValueError:
-                    # It's a domain, resolve it
+                    # It's a domain, resolve it in a worker thread so a slow DNS
+                    # lookup doesn't block the shared event loop
                     try:
-                        # Use synchronous socket gethostbyname (simple) or async resolver
-                        # Since we are inside a job, blocking a bit is okay-ish but better use async logic if possible
-                        # but simple socket.gethostbyname is reliable usually.
-                        ip_str = socket.gethostbyname(host_clean)
+                        loop = asyncio.get_running_loop()
+                        ip_str = await loop.run_in_executor(None, socket.gethostbyname, host_clean)
                         ip_obj = ipaddress.ip_address(ip_str)
                         fqdn = host_clean
                     except Exception:
@@ -2743,7 +2648,7 @@ async def sync_transports_job():
                     final_source = f"{source_type}:{fqdn}"
                 else:
                     final_source = source_type
-                    
+
                 return (ip_str, final_source)
                 
             except Exception as e:
@@ -2754,7 +2659,7 @@ async def sync_transports_job():
         for t in transports_data:
             if str(t.get('active', '0')) == '1':
                 nexthop = t.get('nexthop', '').strip()
-                result = resolve_and_validate(nexthop, 'transport')
+                result = await resolve_and_validate(nexthop, 'transport')
                 if result:
                     hosts_to_monitor[result[0]] = result[1]
 
@@ -2762,7 +2667,7 @@ async def sync_transports_job():
         for r in relayhosts_data:
             if str(r.get('active', '0')) == '1':
                 hostname = r.get('hostname', '').strip()
-                result = resolve_and_validate(hostname, 'relayhost')
+                result = await resolve_and_validate(hostname, 'relayhost')
                 if result:
                     hosts_to_monitor[result[0]] = result[1]
         
@@ -2810,8 +2715,6 @@ async def sync_transports_job():
             
             db.commit()
             
-            summary = f"Synced monitored hosts: {added_count} added, {updated_count} updated, {deactivated_count} deactivated (filtered private IPs)"
-            logger.info(summary)
             summary = f"Synced monitored hosts: {added_count} added, {updated_count} updated, {deactivated_count} deactivated (filtered private IPs)"
             logger.info(summary)
             update_job_status('sync_transports', 'success')

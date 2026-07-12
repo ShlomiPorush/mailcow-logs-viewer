@@ -29,6 +29,7 @@ from ..raw_logs_worker import (
     set_ws_broadcast_fn,
     set_ws_broadcast_all_fn,
 )
+from ..utils import internal_error
 
 logger = logging.getLogger(__name__)
 
@@ -131,7 +132,7 @@ set_ws_broadcast_all_fn(log_stream_manager.broadcast_to_all)
 
 
 @router.get("/raw-logs/ws-token")
-async def get_ws_token():
+def get_ws_token():
     """
     Issue a one-time short-lived token for WebSocket authentication.
     This endpoint is protected by the existing HTTP auth middleware,
@@ -157,7 +158,7 @@ async def websocket_raw_logs(
     WebSocket endpoint for real-time log streaming.
     
     1. Client calls GET /api/raw-logs/ws-token (authenticated) to get a one-time token
-    2. Client connects: ws://host/ws/raw-logs?service=postfix&token=<one-time-token>
+    2. Client connects: wss://host/ws/raw-logs?service=postfix&token=<one-time-token>  # nosemgrep: javascript.lang.security.detect-insecure-websocket.detect-insecure-websocket
     
     Client can send messages to switch service:
       {"action": "subscribe", "service": "dovecot"}
@@ -238,7 +239,7 @@ async def websocket_raw_logs(
 # =============================================================================
 
 @router.get("/raw-logs/services")
-async def get_services():
+def get_services():
     """
     List available log services with metadata.
     Only returns services that are enabled in settings.
@@ -280,7 +281,7 @@ async def get_services():
 
 
 @router.get("/raw-logs/worker-status")
-async def get_worker_status():
+def get_worker_status():
     """Worker health check — last fetch time, stats, errors"""
     status = get_raw_logs_job_status()
     return {
@@ -295,7 +296,7 @@ async def get_worker_status():
 
 
 @router.get("/raw-logs/{service}")
-async def get_raw_logs(
+def get_raw_logs(
     service: str = Path(..., description="Service name (e.g., postfix, dovecot)"),
     page: int = Query(default=1, ge=1, description="Page number"),
     limit: int = Query(default=200, ge=1, le=1000, description="Results per page"),
@@ -400,11 +401,11 @@ async def get_raw_logs(
         raise
     except Exception as e:
         logger.error(f"Error querying raw logs for {service}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise internal_error(e)
 
 
 @router.get("/raw-logs/{service}/smart-filters")
-async def get_smart_filters(
+def get_smart_filters(
     service: str = Path(..., description="Service name"),
 ):
     """

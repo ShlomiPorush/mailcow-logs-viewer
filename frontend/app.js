@@ -730,7 +730,7 @@ function showMarkdownModal(title, markdownContent) {
                 breaks: true,
                 gfm: true
             });
-            htmlContent = marked.parse(markdownContent);
+            htmlContent = renderMarkdown(markdownContent);
         }
     } catch (e) {
         console.error('Failed to parse markdown:', e);
@@ -1078,8 +1078,8 @@ function renderNetfilterData(data) {
                         </div>
                         <div class="flex items-center gap-2">
                             <span class="text-xs text-gray-500 dark:text-gray-400">${formatTime(log.time)}</span>
-                            ${showUnban ? `<button onclick="unbanIP('${escapeHtml(log.ip)}', this)" class="inline-flex items-center gap-1.5 px-3 py-1 text-xs font-semibold rounded-md bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-400 hover:bg-green-200 dark:hover:bg-green-800/60 border border-green-300 dark:border-green-700 transition-colors cursor-pointer" title="Unban ${escapeHtml(log.ip)}/32"><svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 11V7a4 4 0 118 0m-4 8v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2z"></path></svg>Unban</button>` : ''}
-                            ${showBan ? `<button onclick="banIP('${escapeHtml(log.ip)}', this)" class="inline-flex items-center gap-1.5 px-3 py-1 text-xs font-semibold rounded-md bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-400 hover:bg-red-200 dark:hover:bg-red-800/60 border border-red-300 dark:border-red-700 transition-colors cursor-pointer" title="Ban ${escapeHtml(log.ip)}/32"><svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path></svg>Ban</button>` : ''}
+                            ${showUnban ? `<button onclick="unbanIP('${escapeJsArg(log.ip)}', this)" class="inline-flex items-center gap-1.5 px-3 py-1 text-xs font-semibold rounded-md bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-400 hover:bg-green-200 dark:hover:bg-green-800/60 border border-green-300 dark:border-green-700 transition-colors cursor-pointer" title="Unban ${escapeHtml(log.ip)}/32"><svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 11V7a4 4 0 118 0m-4 8v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2z"></path></svg>Unban</button>` : ''}
+                            ${showBan ? `<button onclick="banIP('${escapeJsArg(log.ip)}', this)" class="inline-flex items-center gap-1.5 px-3 py-1 text-xs font-semibold rounded-md bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-400 hover:bg-red-200 dark:hover:bg-red-800/60 border border-red-300 dark:border-red-700 transition-colors cursor-pointer" title="Ban ${escapeHtml(log.ip)}/32"><svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path></svg>Ban</button>` : ''}
                         </div>
                     </div>
                     <p class="text-sm text-gray-700 dark:text-gray-300 break-words">${escapeHtml(log.message || '-')}</p>
@@ -1699,7 +1699,7 @@ async function loadPostfixLogs(page = 1) {
 
         const data = await response.json();
         const loadTime = ((performance.now() - startTime) / 1000).toFixed(2);
-        console.log(`Postfix data loaded in ${loadTime}s:`, data);
+        console.log(`Postfix data loaded in ${loadTime}s:`, data); // nosemgrep: javascript.lang.security.audit.unsafe-formatstring.unsafe-formatstring
 
         if (!data.data || data.data.length === 0) {
             container.innerHTML = '<p class="text-gray-500 dark:text-gray-400 text-center py-8">No logs found</p>';
@@ -2362,7 +2362,7 @@ async function loadFail2BanSettings() {
                                         ${ban.queued_for_unban ? `<span class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400">Unbanning...</span>` : ''}
                                     </div>
                                     ${canEdit && !ban.queued_for_unban ? `
-                                        <button type="button" onclick="unbanIP('${escapeHtml(ban.ip || ban.network)}', this)"
+                                        <button type="button" onclick="unbanIP('${escapeJsArg(ban.ip || ban.network)}', this)"
                                             class="px-2.5 py-1 text-xs font-medium rounded-md border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-400 hover:bg-red-50 hover:border-red-300 hover:text-red-700 dark:hover:bg-red-900/20 dark:hover:border-red-700 dark:hover:text-red-400 transition-colors">
                                             Unban
                                         </button>
@@ -2697,7 +2697,7 @@ function applyQueueFilters() {
                             ${item.recipients.map(r => {
                                 const emailOnly = r.split(' ')[0].replace(/[<>]/g, '');
                                 return `
-                                <button onclick="showAddSuppressionModal('${escapeHtml(emailOnly)}')" title="Suppress ${escapeHtml(emailOnly)}"
+                                <button onclick="showAddSuppressionModal('${escapeJsArg(emailOnly)}')" title="Suppress ${escapeHtml(emailOnly)}"
                                     class="px-2.5 py-1 text-xs font-medium rounded-md border border-purple-300 dark:border-purple-700 text-purple-700 dark:text-purple-400 hover:bg-purple-100 dark:hover:bg-purple-900/30 transition-colors flex items-center gap-1">
                                     <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"></path></svg>
                                     Suppress
@@ -3009,7 +3009,7 @@ function renderQuarantineData(data) {
                                     <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"></path></svg>
                                     Spam
                                 </button>
-                                <button onclick="showAddRuleFromQuarantine('${escapeHtml((item.sender || '').replace(/'/g, "\\\\'"))}', '${escapeHtml((item.rcpt || '').replace(/'/g, "\\\\'"))}', '${escapeHtml((item.subject || '').replace(/'/g, "\\\\'"))}')" title="Create auto-rule from this email"
+                                <button onclick="showAddRuleFromQuarantine('${escapeJsArg(item.sender || '')}', '${escapeJsArg(item.rcpt || '')}', '${escapeJsArg(item.subject || '')}')" title="Create auto-rule from this email"
                                     class="quarantine-action-btn px-2 py-1 text-xs font-medium rounded-md border border-amber-300 dark:border-amber-700 text-amber-700 dark:text-amber-400 hover:bg-amber-100 dark:hover:bg-amber-900/30 transition-colors flex items-center justify-center gap-1">
                                     <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path></svg>
                                     Rule
@@ -3411,7 +3411,7 @@ async function loadQuarantineRules() {
                             class="p-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-700 transition text-gray-400 hover:text-blue-500">
                             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg>
                         </button>
-                        <button onclick="deleteQuarantineRule(${rule.id}, '${escapeHtml(rule.name)}')" title="Delete"
+                        <button onclick="deleteQuarantineRule(${rule.id}, '${escapeJsArg(rule.name)}')" title="Delete"
                             class="p-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-700 transition text-gray-400 hover:text-red-500">
                             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
                         </button>
@@ -3459,11 +3459,11 @@ function _showQuarantineRuleModal(rule, prefill) {
         <div class="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-3 mb-4">
             <p class="text-xs font-medium text-blue-700 dark:text-blue-300 mb-2">Quick fill from email:</p>
             <div class="flex flex-wrap gap-1.5">
-                <button type="button" onclick="qrulePrefill('sender', '${escapeHtml(prefill.sender)}')"
+                <button type="button" onclick="qrulePrefill('sender', '${escapeJsArg(prefill.sender)}')"
                     class="px-2 py-1 text-xs rounded bg-blue-100 dark:bg-blue-800 text-blue-700 dark:text-blue-300 hover:bg-blue-200 dark:hover:bg-blue-700 transition">Sender: ${escapeHtml(prefill.sender)}</button>
-                ${prefill.senderDomain ? `<button type="button" onclick="qrulePrefill('sender_domain', '${escapeHtml(prefill.senderDomain)}')"
+                ${prefill.senderDomain ? `<button type="button" onclick="qrulePrefill('sender_domain', '${escapeJsArg(prefill.senderDomain)}')"
                     class="px-2 py-1 text-xs rounded bg-blue-100 dark:bg-blue-800 text-blue-700 dark:text-blue-300 hover:bg-blue-200 dark:hover:bg-blue-700 transition">Domain: ${escapeHtml(prefill.senderDomain)}</button>` : ''}
-                <button type="button" onclick="qrulePrefill('recipient', '${escapeHtml(prefill.recipient)}')"
+                <button type="button" onclick="qrulePrefill('recipient', '${escapeJsArg(prefill.recipient)}')"
                     class="px-2 py-1 text-xs rounded bg-blue-100 dark:bg-blue-800 text-blue-700 dark:text-blue-300 hover:bg-blue-200 dark:hover:bg-blue-700 transition">Recipient: ${escapeHtml(prefill.recipient)}</button>
             </div>
         </div>
@@ -3536,7 +3536,7 @@ function _showQuarantineRuleModal(rule, prefill) {
         </div>
     </div>`;
     
-    document.body.insertAdjacentHTML('beforeend', html);
+    document.body.insertAdjacentHTML('beforeend', html); // nosemgrep: typescript.react.security.audit.react-unsanitized-method.react-unsanitized-method
     updateQRuleMatchHelp();
 }
 
@@ -4987,7 +4987,7 @@ async function triggerBackgroundJob(jobKey, buttonEl, jobName = null) {
         if (error.message.includes('409')) {
             showToast(`Job "${displayName}" is already running`, 'warning');
         } else {
-            console.error(`Failed to trigger job ${jobKey}:`, error);
+            console.error(`Failed to trigger job ${jobKey}:`, error); // nosemgrep: javascript.lang.security.audit.unsafe-formatstring.unsafe-formatstring
             showToast(`Failed to start job: ${error.message}`, 'error');
         }
     } finally {
@@ -5728,7 +5728,7 @@ function showChangelogModal(changelog) {
                 breaks: true,
                 gfm: true
             });
-            content.innerHTML = marked.parse(changelog);
+            content.innerHTML = renderMarkdown(changelog);
         } else {
             content.textContent = changelog || 'No changelog available';
         }
@@ -5999,8 +5999,8 @@ function copyableText(text, extraClasses) {
     if (!text || text === '-') return escapeHtml(text || '-');
     const cls = extraClasses ? ' ' + extraClasses : '';
     const escaped = escapeHtml(text);
-    // Use double-escaped quotes for the onclick attribute
-    const safeText = text.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+    // escapeJsArg handles both the JS-string and HTML-attribute contexts
+    const safeText = escapeJsArg(text);
     return `<span class="copyable${cls}" onclick="copyToClipboard('${safeText}', event)" title="Click to copy">${escaped}<svg class="copy-icon w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg></span>`;
 }
 
@@ -6103,6 +6103,35 @@ function escapeHtml(text) {
         "'": '&#039;'
     };
     return cleanText.replace(/[&<>"']/g, function (m) { return map[m]; });
+}
+
+// Render markdown to sanitized HTML. marked passes raw HTML through
+// unchanged, so DOMPurify strips any script vectors before innerHTML.
+function renderMarkdown(markdownText) {
+    const html = marked.parse(markdownText || '');
+    if (typeof DOMPurify !== 'undefined') {
+        return DOMPurify.sanitize(html);
+    }
+    // Library failed to load — fail safe by escaping rather than injecting
+    return escapeHtml(markdownText || '');
+}
+
+// Escape a value embedded as a JS single-quoted string inside an inline HTML
+// event handler, e.g. onclick="fn('${escapeJsArg(value)}')". escapeHtml is NOT
+// safe there: the browser HTML-decodes the attribute (&#039; -> ') before the
+// JS parser runs, letting a quote break out of the string. \xNN escapes leave
+// no HTML-special characters, so the result is safe in both contexts.
+function escapeJsArg(text) {
+    if (text === null || text === undefined) return '';
+    return String(text)
+        .replace(/\\/g, '\\\\')
+        .replace(/'/g, "\\'")
+        .replace(/"/g, '\\x22')
+        .replace(/</g, '\\x3c')
+        .replace(/>/g, '\\x3e')
+        .replace(/&/g, '\\x26')
+        .replace(/\r/g, '\\r')
+        .replace(/\n/g, '\\n');
 }
 
 // =============================================================================
@@ -6590,7 +6619,7 @@ function renderDomainAccordionRow(domain) {
                                 </p>
                             </div>
                             <button 
-                                onclick="event.stopPropagation(); checkSingleDomainDNS('${escapeHtml(domain.domain_name)}')"
+                                onclick="event.stopPropagation(); checkSingleDomainDNS('${escapeJsArg(domain.domain_name)}')"
                                 class="px-3 py-1.5 text-xs bg-blue-600 hover:bg-blue-700 text-white rounded transition flex items-center gap-1.5"
                                 title="Check DNS for this domain">
                                 <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -7715,7 +7744,7 @@ function updateVersionInfoUI(versionInfo) {
                     const changelogEl = messageDiv.querySelector('.update-changelog-content');
                     if (changelogEl && versionInfo.changelog) {
                         // Use the full changelog text directly
-                        changelogEl.innerHTML = marked.parse(versionInfo.changelog);
+                        changelogEl.innerHTML = renderMarkdown(versionInfo.changelog);
                     }
                 }
             }
@@ -8002,7 +8031,7 @@ function renderSettings(content, data) {
                     tabsHtml += '<div class="mb-6 p-4 bg-gray-50 dark:bg-gray-700/30 rounded-lg"><h4 class="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">Status</h4><div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">';
                     tabsHtml += '<div class="p-4 bg-white dark:bg-gray-800 rounded-lg"><p class="text-xs font-medium text-gray-500 dark:text-gray-400 mb-2">SMTP Enabled</p><div class="flex items-center gap-2 flex-wrap">';
                     tabsHtml += data.smtp_configuration.enabled ? '<span class="inline-flex items-center px-2 py-1 rounded text-xs font-medium bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400"><svg class="w-3 h-3 mr-1" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path></svg>Enabled</span>' : '<span class="inline-flex items-center px-2 py-1 rounded text-xs font-medium bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-400">Disabled</span>';
-                    tabsHtml += '<button onclick="testSmtpConnection()" class="px-3 py-1.5 bg-blue-500 hover:bg-blue-600 text-white rounded text-xs font-medium transition-colors duration-200 flex items-center gap-1.5"><svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg><span>Test SMTP</span></button></div></div>';
+                    tabsHtml += '<button type="button" onclick="testSmtpConnection()" class="px-3 py-1.5 bg-blue-500 hover:bg-blue-600 text-white rounded text-xs font-medium transition-colors duration-200 flex items-center gap-1.5"><svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg><span>Test SMTP</span></button></div></div>';
                     if (data.smtp_configuration.enabled) {
                         tabsHtml += '<div class="p-4 bg-white dark:bg-gray-800 rounded-lg"><p class="text-xs font-medium text-gray-500 dark:text-gray-400 mb-2">Server</p><p class="text-sm text-gray-900 dark:text-white font-mono">' + escapeHtml(data.smtp_configuration.host) + ':' + escapeHtml(data.smtp_configuration.port) + '</p></div>';
                         tabsHtml += '<div class="p-4 bg-white dark:bg-gray-800 rounded-lg"><p class="text-xs font-medium text-gray-500 dark:text-gray-400 mb-2">Admin Email</p><p class="text-sm text-gray-900 dark:text-white font-mono">' + escapeHtml(data.smtp_configuration.admin_email || 'N/A') + '</p></div>';
@@ -8015,7 +8044,7 @@ function renderSettings(content, data) {
                     tabsHtml += '<div class="mb-6 p-4 bg-gray-50 dark:bg-gray-700/30 rounded-lg"><h4 class="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">Status</h4><div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">';
                     tabsHtml += '<div class="p-4 bg-white dark:bg-gray-800 rounded-lg"><p class="text-xs font-medium text-gray-500 dark:text-gray-400 mb-2">IMAP Auto-Import</p><div class="flex items-center gap-2 flex-wrap">';
                     tabsHtml += data.dmarc_configuration.imap_sync_enabled ? '<span class="inline-flex items-center px-2 py-1 rounded text-xs font-medium bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400"><svg class="w-3 h-3 mr-1" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path></svg>Enabled</span>' : '<span class="inline-flex items-center px-2 py-1 rounded text-xs font-medium bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-400">Disabled</span>';
-                    tabsHtml += '<button onclick="testImapConnection()" class="px-3 py-1.5 bg-blue-500 hover:bg-blue-600 text-white rounded text-xs font-medium transition-colors duration-200 flex items-center gap-1.5"><svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg><span>Test IMAP</span></button></div></div>';
+                    tabsHtml += '<button type="button" onclick="testImapConnection()" class="px-3 py-1.5 bg-blue-500 hover:bg-blue-600 text-white rounded text-xs font-medium transition-colors duration-200 flex items-center gap-1.5"><svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg><span>Test IMAP</span></button></div></div>';
                     tabsHtml += '<div class="p-4 bg-white dark:bg-gray-800 rounded-lg"><p class="text-xs font-medium text-gray-500 dark:text-gray-400 mb-2">Manual Upload</p><p class="text-sm text-gray-900 dark:text-white">';
                     tabsHtml += data.dmarc_configuration.manual_upload_enabled ? '<span class="inline-flex items-center px-2 py-1 rounded text-xs font-medium bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400"><svg class="w-3 h-3 mr-1" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path></svg>Enabled</span>' : '<span class="inline-flex items-center px-2 py-1 rounded text-xs font-medium bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400">Disabled</span>';
                     tabsHtml += '</p></div>';
@@ -8139,7 +8168,7 @@ function renderSettings(content, data) {
                                 </span>` :
                 `<span class="inline-flex items-center px-2 py-1 rounded text-xs font-medium bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-400">Disabled</span>`
             }
-                            <button onclick="testSmtpConnection()" class="px-3 py-1.5 bg-blue-500 hover:bg-blue-600 text-white rounded text-xs font-medium transition-colors duration-200 flex items-center gap-1.5">
+                            <button type="button" onclick="testSmtpConnection()" class="px-3 py-1.5 bg-blue-500 hover:bg-blue-600 text-white rounded text-xs font-medium transition-colors duration-200 flex items-center gap-1.5">
                                 <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
                                 </svg>
@@ -8185,7 +8214,7 @@ function renderSettings(content, data) {
                                 </span>` :
                 `<span class="inline-flex items-center px-2 py-1 rounded text-xs font-medium bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-400">Disabled</span>`
             }
-                            <button onclick="testImapConnection()" class="px-3 py-1.5 bg-blue-500 hover:bg-blue-600 text-white rounded text-xs font-medium transition-colors duration-200 flex items-center gap-1.5">
+                            <button type="button" onclick="testImapConnection()" class="px-3 py-1.5 bg-blue-500 hover:bg-blue-600 text-white rounded text-xs font-medium transition-colors duration-200 flex items-center gap-1.5">
                                 <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
                                 </svg>
@@ -8259,7 +8288,7 @@ function renderSettings(content, data) {
             // Use the changelog directly from versionInfo object
             const changelogText = versionInfo.changelog;
             if (changelogText) {
-                el.innerHTML = marked.parse(changelogText);
+                el.innerHTML = renderMarkdown(changelogText);
             }
         });
     }
@@ -8521,7 +8550,7 @@ function renderSettings(content, data) {
                                         body: JSON.stringify({ feature })
                                     });
                                 } catch (purgeErr) {
-                                    console.warn(`Failed to purge data for feature '${feature}':`, purgeErr);
+                                    console.warn(`Failed to purge data for feature '${feature}':`, purgeErr); // nosemgrep: javascript.lang.security.audit.unsafe-formatstring.unsafe-formatstring
                                 }
                             }
                         }
@@ -9520,7 +9549,7 @@ async function loadDmarcDomains() {
             const tlsBadge = hasTls && !hasDmarc ? '<span class="ml-2 inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-medium rounded bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400"><svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path></svg>TLS</span>' : '';
 
             return `
-                <tr class="hidden md:table-row hover:bg-gray-50 dark:hover:bg-gray-700/30 cursor-pointer transition-colors" onclick="loadDomainOverview('${escapeHtml(domain.domain)}')">
+                <tr class="hidden md:table-row hover:bg-gray-50 dark:hover:bg-gray-700/30 cursor-pointer transition-colors" onclick="loadDomainOverview('${escapeJsArg(domain.domain)}')">
                     <td class="px-6 py-4 border-r border-gray-200 dark:border-gray-700/50 text-base font-bold text-blue-600 dark:text-blue-400 hover:underline">
                         ${escapeHtml(domain.domain)}${tlsBadge}
                     </td>
@@ -9563,7 +9592,7 @@ async function loadDmarcDomains() {
                 </tr>
 
                 <div class="md:hidden block mb-4 mx-2 rounded-2xl p-5 hover:opacity-90 cursor-pointer transition-all shadow-lg bg-gray-100 dark:bg-gray-800" 
-                    onclick="loadDomainOverview('${escapeHtml(domain.domain)}')">
+                    onclick="loadDomainOverview('${escapeJsArg(domain.domain)}')">
                     
                     <div class="flex justify-between items-center mb-1">
                         <div class="text-base font-bold text-blue-600 dark:text-blue-400">${escapeHtml(domain.domain)}${tlsBadge}</div>
@@ -9801,7 +9830,7 @@ async function loadDomainReports(domain) {
             const passColor = passPct >= 95 ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400' : 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400';
 
             return `
-                <div class="bg-gray-50 dark:bg-gray-700/50 border border-gray-100 dark:border-gray-700 rounded-xl p-3 mb-4 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors" onclick="loadReportDetails('${escapeHtml(domain)}', '${report.date}')">
+                <div class="bg-gray-50 dark:bg-gray-700/50 border border-gray-100 dark:border-gray-700 rounded-xl p-3 mb-4 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors" onclick="loadReportDetails('${escapeJsArg(domain)}', '${report.date}')">
                     
                     <div class="flex items-center justify-between">
                         <div class="flex items-center gap-3">
@@ -9870,7 +9899,7 @@ async function loadDomainSources(domain) {
 
             return `
                     <div class="bg-gray-50 dark:bg-gray-700/50 border border-gray-100 dark:border-gray-700 rounded-xl p-4 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors shadow-sm" 
-                         onclick="loadSourceDetails('${escapeHtml(domain)}', '${escapeHtml(s.source_ip)}')">
+                         onclick="loadSourceDetails('${escapeJsArg(domain)}', '${escapeJsArg(s.source_ip)}')">
                         
                         <div class="flex items-start justify-between gap-3">
                             <div class="flex items-center gap-3 min-w-0 flex-1">
@@ -10008,7 +10037,7 @@ async function loadDomainTLSReports(domain) {
             const barColor = day.success_rate >= 95 ? 'bg-green-500' : day.success_rate >= 80 ? 'bg-yellow-500' : 'bg-red-500';
 
             return `
-                        <div class="bg-gray-50 dark:bg-gray-700/50 border border-gray-100 dark:border-gray-700 rounded-xl p-4 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors" onclick="loadTLSReportDetails('${escapeHtml(domain)}', '${day.date}')">
+                        <div class="bg-gray-50 dark:bg-gray-700/50 border border-gray-100 dark:border-gray-700 rounded-xl p-4 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors" onclick="loadTLSReportDetails('${escapeJsArg(domain)}', '${day.date}')">
                             <div class="flex items-start justify-between gap-3 mb-3">
                                 <div class="flex items-center gap-3 min-w-0 flex-1">
                                     <div class="p-2 bg-white dark:bg-gray-800 rounded-lg shadow-sm flex-shrink-0">
@@ -10095,7 +10124,7 @@ async function loadTLSReportDetails(domain, reportDate) {
         tlsList.innerHTML = `
             <!-- Back Button -->
             <div class="mb-6">
-                <button onclick="loadDomainTLSReports('${escapeHtml(domain)}')" class="flex items-center gap-2 text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300 transition-colors">
+                <button onclick="loadDomainTLSReports('${escapeJsArg(domain)}')" class="flex items-center gap-2 text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300 transition-colors">
                     <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path>
                     </svg>
@@ -10197,7 +10226,7 @@ async function loadTLSReportDetails(domain, reportDate) {
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
                 </svg>
                 <p class="text-red-500 text-sm">Failed to load TLS report details.</p>
-                <button onclick="loadDomainTLSReports('${escapeHtml(domain)}')" class="mt-4 text-blue-600 hover:underline">Back to Daily Reports</button>
+                <button onclick="loadDomainTLSReports('${escapeJsArg(domain)}')" class="mt-4 text-blue-600 hover:underline">Back to Daily Reports</button>
             </div>`;
     }
 }
@@ -10280,7 +10309,7 @@ async function loadReportDetails(domain, reportDate, updateUrl = true) {
                 : `<svg class="w-6 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01"></path></svg>`;
 
             return `
-                        <tr class="hover:bg-gray-50 dark:hover:bg-gray-700/50 cursor-pointer" onclick="loadSourceDetails('${escapeHtml(domain)}', '${escapeHtml(s.source_ip)}')">
+                        <tr class="hover:bg-gray-50 dark:hover:bg-gray-700/50 cursor-pointer" onclick="loadSourceDetails('${escapeJsArg(domain)}', '${escapeJsArg(s.source_ip)}')">
                             <td class="px-6 py-4">
                                 <div class="flex items-center gap-2">
                                     ${iconHtml}
@@ -10789,7 +10818,7 @@ function renderReportsManagementTable(reports, allowDelete) {
         const typeClass = report.type === 'dmarc' ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400' : 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400';
         const deleteBtn = allowDelete ? `
                             <td class="px-4 py-3 text-center">
-                                <button onclick="deleteReport('${report.type}', ${report.id}, '${escapeHtml(report.domain)}')" 
+                                <button onclick="deleteReport('${report.type}', ${report.id}, '${escapeJsArg(report.domain)}')" 
                                     class="text-red-500 hover:text-red-700 dark:hover:text-red-400 transition-colors" title="Delete report">
                                     <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
@@ -10824,7 +10853,7 @@ function renderReportsManagementTable(reports, allowDelete) {
         const endDate = report.end_date ? new Date(report.end_date * 1000).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '-';
         const typeClass = report.type === 'dmarc' ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400' : 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400';
         const deleteBtn = allowDelete ? `
-                    <button onclick="deleteReport('${report.type}', ${report.id}, '${escapeHtml(report.domain)}')" 
+                    <button onclick="deleteReport('${report.type}', ${report.id}, '${escapeJsArg(report.domain)}')" 
                         class="text-red-500 hover:text-red-700 p-1" title="Delete">
                         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
@@ -11302,7 +11331,7 @@ function renderMailboxStatsAccordion(mailboxes, page = 1, totalPages = 1) {
         return `
             <div class="bg-white dark:bg-gray-800 rounded-lg shadow overflow-hidden mb-2">
                 <!-- Accordion Header -->
-                <div onclick="toggleMailboxAccordion('${escapeHtml(mb.username)}')" 
+                <div onclick="toggleMailboxAccordion('${escapeJsArg(mb.username)}')" 
                      class="cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
                     <div class="px-4 py-3">
                         <!-- Desktop: 3-column grid | Mobile: stacked layout -->
@@ -11460,17 +11489,17 @@ function renderMailboxStatsAccordion(mailboxes, page = 1, totalPages = 1) {
                         <!-- Direction Stats Row -->
                         <div class="grid grid-cols-3 gap-2 mb-4">
                             <div class="p-3 ${getDirectionBgClass('outbound')} rounded-lg text-center cursor-pointer hover:opacity-80 transition-opacity"
-                                 onclick="event.stopPropagation(); navigateToMessagesWithFilter({ email: '${escapeHtml(mb.username)}', filterType: 'search', direction: 'outbound' })">
+                                 onclick="event.stopPropagation(); navigateToMessagesWithFilter({ email: '${escapeJsArg(mb.username)}', filterType: 'search', direction: 'outbound' })">
                                 <div class="text-xl font-bold ${getDirectionTextClass('outbound')}">${mb.combined_sent || 0}</div>
                                 <div class="text-xs text-gray-500 dark:text-gray-400 mt-1">Sent</div>
                             </div>
                             <div class="p-3 ${getDirectionBgClass('inbound')} rounded-lg text-center cursor-pointer hover:opacity-80 transition-opacity"
-                                 onclick="event.stopPropagation(); navigateToMessagesWithFilter({ email: '${escapeHtml(mb.username)}', filterType: 'search', direction: 'inbound' })">
+                                 onclick="event.stopPropagation(); navigateToMessagesWithFilter({ email: '${escapeJsArg(mb.username)}', filterType: 'search', direction: 'inbound' })">
                                 <div class="text-xl font-bold ${getDirectionTextClass('inbound')}">${mb.combined_received || 0}</div>
                                 <div class="text-xs text-gray-500 dark:text-gray-400 mt-1">Received</div>
                             </div>
                             <div class="p-3 ${getDirectionBgClass('internal')} rounded-lg text-center cursor-pointer hover:opacity-80 transition-opacity"
-                                 onclick="event.stopPropagation(); navigateToMessagesWithFilter({ email: '${escapeHtml(mb.username)}', filterType: 'search', direction: 'internal' })">
+                                 onclick="event.stopPropagation(); navigateToMessagesWithFilter({ email: '${escapeJsArg(mb.username)}', filterType: 'search', direction: 'internal' })">
                                 <div class="text-xl font-bold ${getDirectionTextClass('internal')}">${mb.combined_internal || 0}</div>
                                 <div class="text-xs text-gray-500 dark:text-gray-400 mt-1">Internal</div>
                             </div>
@@ -11479,22 +11508,22 @@ function renderMailboxStatsAccordion(mailboxes, page = 1, totalPages = 1) {
                         <!-- Status Stats Row -->
                         <div class="grid grid-cols-4 gap-2">
                             <div class="p-3 ${getStatusBgClass('delivered')} rounded-lg text-center cursor-pointer hover:opacity-80 transition-opacity"
-                                 onclick="event.stopPropagation(); navigateToMessagesWithFilter({ email: '${escapeHtml(mb.username)}', filterType: 'search', status: 'delivered' })">
+                                 onclick="event.stopPropagation(); navigateToMessagesWithFilter({ email: '${escapeJsArg(mb.username)}', filterType: 'search', status: 'delivered' })">
                                 <div class="text-xl font-bold ${getStatusTextClass('delivered')}">${mb.combined_delivered || 0}</div>
                                 <div class="text-xs text-gray-500 dark:text-gray-400 mt-1">Delivered</div>
                             </div>
                             <div class="p-3 ${getStatusBgClass('deferred')} rounded-lg text-center cursor-pointer hover:opacity-80 transition-opacity"
-                                 onclick="event.stopPropagation(); navigateToMessagesWithFilter({ email: '${escapeHtml(mb.username)}', filterType: 'search', status: 'deferred' })">
+                                 onclick="event.stopPropagation(); navigateToMessagesWithFilter({ email: '${escapeJsArg(mb.username)}', filterType: 'search', status: 'deferred' })">
                                 <div class="text-xl font-bold ${getStatusTextClass('deferred')}">${(mb.mailbox_counts?.sent_deferred || 0) + (mb.aliases || []).reduce((sum, a) => sum + (a.sent_deferred || 0), 0)}</div>
                                 <div class="text-xs text-gray-500 dark:text-gray-400 mt-1">Deferred</div>
                             </div>
                             <div class="p-3 ${getStatusBgClass('bounced')} rounded-lg text-center cursor-pointer hover:opacity-80 transition-opacity"
-                                 onclick="event.stopPropagation(); navigateToMessagesWithFilter({ email: '${escapeHtml(mb.username)}', filterType: 'search', status: 'bounced' })">
+                                 onclick="event.stopPropagation(); navigateToMessagesWithFilter({ email: '${escapeJsArg(mb.username)}', filterType: 'search', status: 'bounced' })">
                                 <div class="text-xl font-bold ${getStatusTextClass('bounced')}">${(mb.mailbox_counts?.sent_bounced || 0) + (mb.aliases || []).reduce((sum, a) => sum + (a.sent_bounced || 0), 0)}</div>
                                 <div class="text-xs text-gray-500 dark:text-gray-400 mt-1">Bounced</div>
                             </div>
                             <div class="p-3 ${getStatusBgClass('rejected')} rounded-lg text-center cursor-pointer hover:opacity-80 transition-opacity"
-                                 onclick="event.stopPropagation(); navigateToMessagesWithFilter({ email: '${escapeHtml(mb.username)}', filterType: 'search', status: 'rejected' })">
+                                 onclick="event.stopPropagation(); navigateToMessagesWithFilter({ email: '${escapeJsArg(mb.username)}', filterType: 'search', status: 'rejected' })">
                                 <div class="text-xl font-bold ${getStatusTextClass('rejected')}">${(mb.mailbox_counts?.sent_rejected || 0) + (mb.aliases || []).reduce((sum, a) => sum + (a.sent_rejected || 0), 0)}</div>
                                 <div class="text-xs text-gray-500 dark:text-gray-400 mt-1">Rejected</div>
                             </div>
@@ -11535,13 +11564,13 @@ function renderMailboxStatsAccordion(mailboxes, page = 1, totalPages = 1) {
                                                             ${!alias.active ? '<span class="px-1.5 py-0.5 text-xs bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400 rounded">inactive</span>' : ''}
                                                         </div>
                                                     </td>
-                                                    <td class="text-center py-2 px-2 ${getDirectionTextClass('outbound')} cursor-pointer hover:underline" onclick="event.stopPropagation(); navigateToMessagesWithFilter({ email: '${escapeHtml(alias.alias_address)}', filterType: 'search', direction: 'outbound' })">${alias.sent_total || 0}</td>
-                                                    <td class="text-center py-2 px-2 ${getDirectionTextClass('inbound')} cursor-pointer hover:underline" onclick="event.stopPropagation(); navigateToMessagesWithFilter({ email: '${escapeHtml(alias.alias_address)}', filterType: 'search', direction: 'inbound' })">${alias.received_total || 0}</td>
-                                                    <td class="text-center py-2 px-2 ${getDirectionTextClass('internal')} cursor-pointer hover:underline" onclick="event.stopPropagation(); navigateToMessagesWithFilter({ email: '${escapeHtml(alias.alias_address)}', filterType: 'search', direction: 'internal' })">${alias.direction_internal || 0}</td>
-                                                    <td class="text-center py-2 px-2 ${getStatusTextClass('delivered')} cursor-pointer hover:underline" onclick="event.stopPropagation(); navigateToMessagesWithFilter({ email: '${escapeHtml(alias.alias_address)}', filterType: 'search', status: 'delivered' })">${alias.sent_delivered || 0}</td>
-                                                    <td class="text-center py-2 px-2 ${getStatusTextClass('deferred')} cursor-pointer hover:underline" onclick="event.stopPropagation(); navigateToMessagesWithFilter({ email: '${escapeHtml(alias.alias_address)}', filterType: 'search', status: 'deferred' })">${alias.sent_deferred || 0}</td>
-                                                    <td class="text-center py-2 px-2 ${getStatusTextClass('bounced')} cursor-pointer hover:underline" onclick="event.stopPropagation(); navigateToMessagesWithFilter({ email: '${escapeHtml(alias.alias_address)}', filterType: 'search', status: 'bounced' })">${alias.sent_bounced || 0}</td>
-                                                    <td class="text-center py-2 px-2 ${getStatusTextClass('rejected')} cursor-pointer hover:underline" onclick="event.stopPropagation(); navigateToMessagesWithFilter({ email: '${escapeHtml(alias.alias_address)}', filterType: 'search', status: 'rejected' })">${alias.sent_rejected || 0}</td>
+                                                    <td class="text-center py-2 px-2 ${getDirectionTextClass('outbound')} cursor-pointer hover:underline" onclick="event.stopPropagation(); navigateToMessagesWithFilter({ email: '${escapeJsArg(alias.alias_address)}', filterType: 'search', direction: 'outbound' })">${alias.sent_total || 0}</td>
+                                                    <td class="text-center py-2 px-2 ${getDirectionTextClass('inbound')} cursor-pointer hover:underline" onclick="event.stopPropagation(); navigateToMessagesWithFilter({ email: '${escapeJsArg(alias.alias_address)}', filterType: 'search', direction: 'inbound' })">${alias.received_total || 0}</td>
+                                                    <td class="text-center py-2 px-2 ${getDirectionTextClass('internal')} cursor-pointer hover:underline" onclick="event.stopPropagation(); navigateToMessagesWithFilter({ email: '${escapeJsArg(alias.alias_address)}', filterType: 'search', direction: 'internal' })">${alias.direction_internal || 0}</td>
+                                                    <td class="text-center py-2 px-2 ${getStatusTextClass('delivered')} cursor-pointer hover:underline" onclick="event.stopPropagation(); navigateToMessagesWithFilter({ email: '${escapeJsArg(alias.alias_address)}', filterType: 'search', status: 'delivered' })">${alias.sent_delivered || 0}</td>
+                                                    <td class="text-center py-2 px-2 ${getStatusTextClass('deferred')} cursor-pointer hover:underline" onclick="event.stopPropagation(); navigateToMessagesWithFilter({ email: '${escapeJsArg(alias.alias_address)}', filterType: 'search', status: 'deferred' })">${alias.sent_deferred || 0}</td>
+                                                    <td class="text-center py-2 px-2 ${getStatusTextClass('bounced')} cursor-pointer hover:underline" onclick="event.stopPropagation(); navigateToMessagesWithFilter({ email: '${escapeJsArg(alias.alias_address)}', filterType: 'search', status: 'bounced' })">${alias.sent_bounced || 0}</td>
+                                                    <td class="text-center py-2 px-2 ${getStatusTextClass('rejected')} cursor-pointer hover:underline" onclick="event.stopPropagation(); navigateToMessagesWithFilter({ email: '${escapeJsArg(alias.alias_address)}', filterType: 'search', status: 'rejected' })">${alias.sent_rejected || 0}</td>
                                                     <td class="text-center py-2 pl-2 ${alias.failure_rate >= 5 ? 'text-red-600 dark:text-red-400' : 'text-gray-500'}">${alias.failure_rate || 0}%</td>
                                                 </tr>
                                             `).join('');
@@ -11904,6 +11933,9 @@ let logsState = {
     activeService: 'postfix',
     isPaused: false,
     autoScroll: true,
+    // Display order (issue #69): false = newest at the bottom (classic tail -f),
+    // true = newest at the top. allEntries stays chronological either way.
+    newestFirst: localStorage.getItem('logsNewestFirst') === 'true',
     fontSize: 12,
     wordWrap: true,
     searchQuery: '',
@@ -12172,6 +12204,8 @@ async function toggleSmartFilter(filterId) {
 }
 
 async function fetchInitialLogs(serviceId) {
+    // Reflect the persisted sort order on the toolbar button
+    updateLogSortButton();
     try {
         const limit = 500;
         const countParams = new URLSearchParams({ page: 1, limit: limit, order: 'asc' });
@@ -12220,7 +12254,8 @@ async function fetchOlderLogs() {
     logsState.isLoadingMore = true;
     const pageToLoad = logsState.oldestPageLoaded - 1;
     
-    // Show loading indicator at top
+    // Show loading indicator at the history edge (top normally, bottom in
+    // newest-first mode)
     const output = document.getElementById('logs-output');
     let loader = document.getElementById('logs-load-more-indicator');
     if (!loader && output) {
@@ -12228,7 +12263,11 @@ async function fetchOlderLogs() {
         loader.id = 'logs-load-more-indicator';
         loader.className = 'text-center text-blue-400 py-2 text-xs';
         loader.innerHTML = '⟳ Loading older logs...';
-        output.insertBefore(loader, output.firstChild);
+        if (logsState.newestFirst) {
+            output.appendChild(loader);
+        } else {
+            output.insertBefore(loader, output.firstChild);
+        }
     }
     
     try {
@@ -12251,11 +12290,13 @@ async function fetchOlderLogs() {
             const terminal = document.getElementById('logs-terminal');
             const prevScrollHeight = terminal ? terminal.scrollHeight : 0;
             
-            // Prepend entries
+            // Insert older entries (top normally, bottom in newest-first mode)
             renderLogEntries(entries, logsState.activeService, false, true);
-            
-            // Restore scroll position (keep user at same visual point)
-            if (terminal) {
+
+            // Restore scroll position (keep user at same visual point).
+            // Only needed when history is inserted at the top — appending at
+            // the bottom (newest-first mode) doesn't move the viewport.
+            if (terminal && !logsState.newestFirst) {
                 const newScrollHeight = terminal.scrollHeight;
                 terminal.scrollTop = newScrollHeight - prevScrollHeight;
             }
@@ -12281,8 +12322,13 @@ function setupTerminalScrollHandler() {
     if (!terminal || terminal._scrollHandlerAttached) return;
     
     terminal.addEventListener('scroll', () => {
-        // When scrolled near the top (within 50px), load older entries
-        if (terminal.scrollTop < 50 && !logsState.isLoadingMore && logsState.oldestPageLoaded > 1) {
+        // Load older entries when scrolled near the history edge (within
+        // 50px): the top normally, the bottom in newest-first mode
+        if (logsState.isLoadingMore || logsState.oldestPageLoaded <= 1) return;
+        const nearHistoryEdge = logsState.newestFirst
+            ? terminal.scrollTop + terminal.clientHeight > terminal.scrollHeight - 50
+            : terminal.scrollTop < 50;
+        if (nearHistoryEdge) {
             fetchOlderLogs();
         }
     });
@@ -12320,6 +12366,11 @@ function entryMatchesFilters(entry) {
     return true;
 }
 
+// Cap on live-stream entries kept in memory/DOM. Without it the WebSocket
+// stream grows the page unboundedly and a busy server degrades the tab
+// within hours. Oldest lines are dropped; auto-scroll favors the tail anyway.
+const MAX_LIVE_LOG_ENTRIES = 5000;
+
 function renderLogEntries(entries, serviceId, replace = false, prepend = false) {
     const output = document.getElementById('logs-output');
     if (!output) return;
@@ -12343,47 +12394,90 @@ function renderLogEntries(entries, serviceId, replace = false, prepend = false) 
     
     const fragment = document.createDocumentFragment();
     const hasFilters = logsState.searchQuery || logsState.activeSmartFilters.length > 0;
-    
-    entries.forEach(entry => {
+
+    // In newest-first mode the DOM is the exact reverse of chronological
+    // order, so each batch is built reversed before insertion
+    const domEntries = logsState.newestFirst ? entries.slice().reverse() : entries;
+
+    domEntries.forEach(entry => {
         const line = document.createElement('div');
         line.className = 'log-line';
         line.style.padding = '1px 0';
-        
+
         // Store the raw entry as data for search
         line._rawEntry = entry;
-        
+
         const formatted = formatLogLine(entry, serviceId);
         line.innerHTML = formatted;
-        
+
         // If there are active filters, check if this entry matches
         if (hasFilters && !entryMatchesFilters(entry)) {
             line.style.display = 'none';
             line.classList.add('log-filtered');
         }
-        
+
         fragment.appendChild(line);
     });
-    
-    if (prepend) {
-        // Insert at the beginning
+
+    // prepend = older history; otherwise newer entries. Where each goes in
+    // the DOM depends on the display order.
+    const insertAtTop = logsState.newestFirst ? !prepend : prepend;
+    if (insertAtTop && output.firstChild) {
         output.insertBefore(fragment, output.firstChild);
     } else {
         output.appendChild(fragment);
     }
-    
+
+    // Trim oldest entries beyond the cap (live stream only — prepend means
+    // the user is deliberately paging back through history). The oldest
+    // lines sit at the top normally, at the bottom in newest-first mode.
+    if (!prepend && logsState.allEntries.length > MAX_LIVE_LOG_ENTRIES) {
+        const excess = logsState.allEntries.length - MAX_LIVE_LOG_ENTRIES;
+        logsState.allEntries.splice(0, excess);
+        for (let i = 0; i < excess; i++) {
+            const victim = logsState.newestFirst ? output.lastChild : output.firstChild;
+            if (!victim) break;
+            output.removeChild(victim);
+        }
+    }
+
     // Update filter badge if filters are active
     if (hasFilters) {
         const allLines = output.querySelectorAll('.log-line');
         const visibleCount = output.querySelectorAll('.log-line:not(.log-filtered)').length;
         updateFilterBadge(true, visibleCount, allLines.length);
     }
-    
-    // Auto-scroll (only for new entries, not when loading older)
+
+    // Auto-scroll to the newest entry (only for new entries, not when
+    // loading older) — bottom normally, top in newest-first mode
     if (logsState.autoScroll && !prepend) {
         const terminal = document.getElementById('logs-terminal');
         if (terminal) {
-            terminal.scrollTop = terminal.scrollHeight;
+            terminal.scrollTop = logsState.newestFirst ? 0 : terminal.scrollHeight;
         }
+    }
+}
+
+/** Toggle log display order (issue #69) and re-render from stored entries */
+function toggleLogSortOrder() {
+    logsState.newestFirst = !logsState.newestFirst;
+    localStorage.setItem('logsNewestFirst', logsState.newestFirst ? 'true' : 'false');
+    updateLogSortButton();
+    // Re-render the current buffer in the new order (copy: replace resets allEntries)
+    renderLogEntries(logsState.allEntries.slice(), logsState.activeService, true);
+}
+
+function updateLogSortButton() {
+    const label = document.getElementById('logs-sort-text');
+    if (label) {
+        label.textContent = logsState.newestFirst ? 'Newest first' : 'Newest last';
+    }
+    // Arrow points to where the newest entry lives: up = top, down = bottom
+    const icon = document.getElementById('logs-sort-icon');
+    if (icon) {
+        icon.setAttribute('d', logsState.newestFirst
+            ? 'M3 4h13M3 8h9m-9 4h6m4 0l4-4m0 0l4 4m-4-4v12'   // bars + arrow up
+            : 'M3 4h13M3 8h9m-9 4h9m5-4v12m0 0l-4-4m4 4l4-4'); // bars + arrow down
     }
 }
 
