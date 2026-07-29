@@ -18,6 +18,7 @@ from app.services.blacklist_service import (
 from app.routers.domains import get_cached_server_ip, init_server_ip
 from app.database import get_db_context
 from app.models import MonitoredHost, BlacklistCheck
+from app.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -40,8 +41,8 @@ async def get_monitored_hosts() -> Dict[str, Any]:
         with get_db_context() as db:
             # Get all active hosts
             hosts = db.query(MonitoredHost).filter(MonitoredHost.active == True).all()
-            # If no hosts, try to initialize with local IP
-            if not hosts:
+            # If no hosts, try to initialize with local IP (only if that source is enabled)
+            if not hosts and settings.blacklist_source_server_ip:
                 ip = get_cached_server_ip()
                 if ip:
                     db.add(MonitoredHost(hostname=ip, source="system", active=True, last_seen=datetime.utcnow()))

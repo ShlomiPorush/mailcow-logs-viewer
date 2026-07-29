@@ -7177,6 +7177,12 @@ var SETTINGS_FIELD_DESCRIPTIONS = {
     smtp_relay_mode: 'Relay mode: for local relay servers that do not require authentication. When enabled, username and password are not required.',
     admin_email: 'Administrator email for system notifications.',
     blacklist_alert_email: 'Email for IP blacklist alerts (uses Admin email if not set).',
+    blacklist_source_server_ip: 'Uses the public server IP reported by the mailcow status API.',
+    blacklist_source_transports: 'Adds all public IPv4 addresses resolved from active mailcow transport nexthops.',
+    blacklist_source_relayhosts: 'Adds all public IPv4 addresses resolved from active mailcow relayhosts.',
+    domain_spf_source_server_ip: 'Validates whether the public mailcow server IP is authorized by the domain SPF record.',
+    domain_spf_source_transports: 'Validates all public IPv4 addresses resolved from active transport nexthops.',
+    domain_spf_source_relayhosts: 'Validates all public IPv4 addresses resolved from active relayhosts.',
     dmarc_retention_days: 'DMARC reports retention in days. Default: 60.',
     dmarc_manual_upload_enabled: 'Allow manual upload of DMARC reports via the UI. Default: true.',
     dmarc_allow_report_delete: 'Allow deleting DMARC/TLS reports from the UI. Default: false.',
@@ -7263,8 +7269,9 @@ var SETTINGS_EDIT_TABS = [
         ]
     },
     {
-        id: 'blacklist', label: 'Blacklist', description: 'Comma-separated email addresses to hide from logs (e.g. BCC archive, monitoring addresses). These emails are not stored in the database.', groups: [
-            { label: 'Settings', keys: ['blacklist_emails'] }
+        id: 'blacklist', label: 'Blacklist', description: 'Comma-separated email addresses to hide from logs (e.g. BCC archive, monitoring addresses). These emails are not stored in the database. Blacklist IP Sources controls which mailcow IPs are monitored for DNS blacklisting.', groups: [
+            { label: 'Settings', keys: ['blacklist_emails'] },
+            { label: 'Blacklist IP Sources', keys: ['blacklist_source_server_ip', 'blacklist_source_transports', 'blacklist_source_relayhosts'] }
         ]
     },
     {
@@ -7294,6 +7301,11 @@ var SETTINGS_EDIT_TABS = [
     {
         id: 'notifications', label: 'Alerts', description: 'Email addresses for system notifications and alerts. Admin email is used for general notifications; other emails override for specific alert types.', groups: [
             { label: 'Addresses', keys: ['admin_email', 'blacklist_alert_email', 'dmarc_error_email', 'enable_weekly_summary'] }
+        ]
+    },
+    {
+        id: 'domains', label: 'Domains', description: 'Domain SPF validation: which mailcow IP sources are checked against each domain\'s SPF record.', groups: [
+            { label: 'Domain SPF Validation Sources', keys: ['domain_spf_source_server_ip', 'domain_spf_source_transports', 'domain_spf_source_relayhosts'] }
         ]
     },
     {

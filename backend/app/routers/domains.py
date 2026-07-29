@@ -6,7 +6,7 @@ import re
 import asyncio
 import ipaddress
 from fastapi import APIRouter, HTTPException, Depends
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 import dns.resolver
 import dns.asyncresolver
 from datetime import datetime, timezone
@@ -17,6 +17,7 @@ from app.models import DomainDNSCheck
 from app.utils import format_datetime_for_api
 from app.config import settings
 from app.mailcow_api import mailcow_api
+from app.services.mailcow_host_resolver import resolve_public_ipv4_addresses, normalize_postfix_nexthop, is_mailcow_active
 from ..utils import internal_error
 
 logger = logging.getLogger(__name__)
@@ -80,7 +81,72 @@ async def resolve_dns_with_fallback(query: str, record_type: str = 'TXT', timeou
     return await resolve(query, record_type, timeout)
 
 
-async def check_spf_record(domain: str) -> Dict[str, Any]:
+async def get_spf_source_ips() -> List[Dict[str, str]]:
+    """
+    Resolve the enabled SPF-check sending IP sources (server IP / transports /
+    relayhosts) into a flat, deduplicated list of {ip, source}.
+
+    Only calls the mailcow API for a source when its setting is enabled.
+    Errors on one source are logged and skipped, they never abort the others.
+    """
+    sources: List[Dict[str, str]] = []
+    seen_ips = set()
+
+    if settings.domain_spf_source_server_ip:
+        global _server_ip_cache
+        server_ip = _server_ip_cache
+        if not server_ip:
+            server_ip = await init_server_ip()
+        if server_ip and server_ip not in seen_ips:
+            sources.append({'ip': server_ip, 'source': 'server_ip'})
+            seen_ips.add(server_ip)
+
+    if settings.domain_spf_source_transports:
+        try:
+            transports = await mailcow_api.get_transports()
+        except Exception as e:
+            logger.warning(f"[SPF] Failed to fetch transports: {e}")
+            transports = []
+        for t in transports:
+            if not is_mailcow_active(t.get('active', '0')):
+                continue
+            nexthop = (t.get('nexthop') or '').strip()
+            try:
+                ips = await resolve_public_ipv4_addresses(nexthop)
+            except Exception as e:
+                logger.warning(f"[SPF] Could not resolve transport nexthop {nexthop!r}: {e}")
+                continue
+            label = normalize_postfix_nexthop(nexthop) or nexthop
+            for ip in ips:
+                if ip not in seen_ips:
+                    sources.append({'ip': ip, 'source': f'transport:{label}'})
+                    seen_ips.add(ip)
+
+    if settings.domain_spf_source_relayhosts:
+        try:
+            relayhosts = await mailcow_api.get_relayhosts()
+        except Exception as e:
+            logger.warning(f"[SPF] Failed to fetch relayhosts: {e}")
+            relayhosts = []
+        for r in relayhosts:
+            if not is_mailcow_active(r.get('active', '0')):
+                continue
+            hostname = (r.get('hostname') or '').strip()
+            try:
+                ips = await resolve_public_ipv4_addresses(hostname)
+            except Exception as e:
+                logger.warning(f"[SPF] Could not resolve relayhost {hostname!r}: {e}")
+                continue
+            label = normalize_postfix_nexthop(hostname) or hostname
+            for ip in ips:
+                if ip not in seen_ips:
+                    sources.append({'ip': ip, 'source': f'relayhost:{label}'})
+                    seen_ips.add(ip)
+
+    return sources
+
+
+async def check_spf_record(domain: str, spf_source_ips: Optional[List[Dict[str, str]]] = None) -> Dict[str, Any]:
     """
     Check SPF record for a domain with full validation
     """
@@ -172,21 +238,35 @@ async def check_spf_record(domain: str) -> Dict[str, Any]:
         includes = [m.replace('include:', '') for m in mechanisms if m.startswith('include:')]
         
         dns_lookup_count = await count_spf_dns_lookups(domain, spf_record, None)
-        
-        global _server_ip_cache
-        server_ip = _server_ip_cache
-        
-        if not server_ip:
-            server_ip = await init_server_ip()
-        
-        server_authorized = False
-        authorization_method = None
-        
-        if server_ip:
-            server_authorized, authorization_method = await check_ip_in_spf(domain, server_ip, spf_record, None)
-        
+
+        if spf_source_ips is None:
+            spf_source_ips = await get_spf_source_ips()
+
+        checked_ips: List[Dict[str, Any]] = []
+        for entry in spf_source_ips:
+            ip = entry['ip']
+            authorized, method = await check_ip_in_spf(domain, ip, spf_record, None)
+            checked_ips.append({
+                'ip': ip,
+                'source': entry['source'],
+                'authorized': authorized,
+                'authorization_method': method
+            })
+
+        total_checked = len(checked_ips)
+        authorized_count = sum(1 for c in checked_ips if c['authorized'])
+        all_authorized = total_checked > 0 and authorized_count == total_checked
+        some_authorized = 0 < authorized_count < total_checked
+        none_authorized = total_checked > 0 and authorized_count == 0
+        no_sources_enabled = not (
+            settings.domain_spf_source_server_ip
+            or settings.domain_spf_source_transports
+            or settings.domain_spf_source_relayhosts
+        )
+        sources_enabled_no_ips = total_checked == 0 and not no_sources_enabled
+
         warnings = []
-        
+
         if dns_lookup_count > 10:
             status = 'error'
             message = f'SPF has too many DNS lookups ({dns_lookup_count}). Maximum is 10'
@@ -195,17 +275,22 @@ async def check_spf_record(domain: str) -> Dict[str, Any]:
             status = 'error'
             message = 'SPF uses +all (allows any server). This provides no protection!'
             warnings = ['+all allows anyone to send email as your domain']
-        elif not server_authorized and server_ip:
+        elif none_authorized:
             status = 'error'
-            message = f'Server IP {server_ip} is NOT authorized in SPF record'
+            if total_checked == 1:
+                message = f"Server IP {checked_ips[0]['ip']} is NOT authorized in SPF record"
+            else:
+                message = f'None of the {total_checked} checked sending IP addresses are authorized in the SPF record'
             warnings = ['Mail server IP not found in SPF record']
         elif has_strict_all:
             status = 'success'
-            message = f'SPF configured correctly with strict -all policy{f". Server IP authorized via {authorization_method}" if server_authorized else ""}'
+            auth_note = f". {authorized_count}/{total_checked} sending IP(s) authorized" if total_checked else ""
+            message = f'SPF configured correctly with strict -all policy{auth_note}'
             warnings = []
         elif has_soft_fail:
             status = 'success'
-            message = f'SPF uses ~all (soft fail){f". Server IP authorized via {authorization_method}" if server_authorized else ""}. Consider using -all for stricter policy'
+            auth_note = f". {authorized_count}/{total_checked} sending IP(s) authorized" if total_checked else ""
+            message = f'SPF uses ~all (soft fail){auth_note}. Consider using -all for stricter policy'
             warnings = []
         elif has_neutral:
             status = 'warning'
@@ -213,20 +298,35 @@ async def check_spf_record(domain: str) -> Dict[str, Any]:
             warnings = ['Using ?all provides minimal protection']
         elif has_redirect:
             redirect_domain = next((m.split('=', 1)[1] for m in mechanisms if m.startswith('redirect=')), 'unknown')
-            
-            if server_authorized:
+
+            if all_authorized:
                 status = 'success'
-                message = f'SPF redirects to {redirect_domain} (Server authorized via {authorization_method})'
+                message = f'SPF redirects to {redirect_domain} (sending IPs authorized)'
                 warnings = []
             else:
                 status = 'warning'
                 message = f'SPF redirects to {redirect_domain}'
-                warnings = [f'Server IP {server_ip} not authorized by redirected SPF'] if server_ip else []
+                warnings = [f'{authorized_count}/{total_checked} sending IPs authorized via redirect'] if total_checked else []
         else:
             status = 'success'
             message = 'SPF record found'
             warnings = []
-        
+
+        # Downgrade a mechanism-level "success" when the multi-IP authorization
+        # result is incomplete. Never runs for the error branches above, which
+        # already take priority regardless of source configuration.
+        if status == 'success':
+            if some_authorized:
+                status = 'warning'
+                message += f' ({authorized_count}/{total_checked} sending IPs authorized)'
+                warnings = warnings + ['Not all configured sending IPs are authorized in the SPF record']
+            elif no_sources_enabled:
+                status = 'warning'
+                message = 'SPF record syntax checked, but no sending IP sources are enabled.'
+            elif sources_enabled_no_ips:
+                status = 'warning'
+                message = 'No IPv4 addresses could be resolved from the enabled SPF sources.'
+
         return {
             'status': status,
             'message': message,
@@ -235,7 +335,8 @@ async def check_spf_record(domain: str) -> Dict[str, Any]:
             'includes_mx': includes_mx,
             'includes': includes,
             'warnings': warnings,
-            'dns_lookups': dns_lookup_count
+            'dns_lookups': dns_lookup_count,
+            'checked_ips': checked_ips
         }
         
     except dns.resolver.NXDOMAIN:
@@ -841,20 +942,24 @@ async def check_dmarc_record(domain: str) -> Dict[str, Any]:
         }
 
 
-async def check_domain_dns(domain: str) -> Dict[str, Any]:
+async def check_domain_dns(domain: str, spf_source_ips: Optional[List[Dict[str, str]]] = None) -> Dict[str, Any]:
     """
     Check all DNS records (SPF, DKIM, DMARC) for a domain
-    
+
     Args:
         domain: Domain name to check
-        
+        spf_source_ips: Pre-resolved SPF sending IP sources (see get_spf_source_ips()).
+            When None, check_spf_record() resolves them itself. Callers checking many
+            domains in one batch should resolve once and pass the result here to avoid
+            redundant mailcow API/DNS calls per domain.
+
     Returns:
         Dictionary with all DNS check results
     """
     try:
         # Run all checks in parallel
         spf_result, dkim_result, dmarc_result = await asyncio.gather(
-            check_spf_record(domain),
+            check_spf_record(domain, spf_source_ips),
             check_dkim_record(domain),
             check_dmarc_record(domain)
         )
@@ -1031,17 +1136,21 @@ async def check_all_domains_dns_manual(db: Session = Depends(get_db)):
             }
         
         active_domains = [d for d in domains if d.get('active', 0) == 1]
-        
+
         checked_count = 0
         errors = []
-        
+
+        # Resolve SPF sending IP sources once for the whole batch instead of
+        # once per domain (sources don't depend on the domain being checked).
+        spf_source_ips = await get_spf_source_ips()
+
         for domain_data in active_domains:
             domain_name = domain_data.get('domain_name')
             if not domain_name:
                 continue
-            
+
             try:
-                dns_data = await check_domain_dns(domain_name)
+                dns_data = await check_domain_dns(domain_name, spf_source_ips)
                 await save_dns_check_to_db(db, domain_name, dns_data, is_full_check=True)
                 checked_count += 1
             except Exception as e:

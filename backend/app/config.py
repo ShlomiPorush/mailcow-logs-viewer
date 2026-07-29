@@ -380,6 +380,40 @@ class Settings(BaseSettings):
         description='Email address for blacklist alerts (defaults to ADMIN_EMAIL if not set)'
     )
 
+    # Blacklist IP Monitoring Sources
+    blacklist_source_server_ip: bool = Field(
+        default=True,
+        env='BLACKLIST_SOURCE_SERVER_IP',
+        description='Uses the public server IP reported by the mailcow status API for blacklist monitoring'
+    )
+    blacklist_source_transports: bool = Field(
+        default=True,
+        env='BLACKLIST_SOURCE_TRANSPORTS',
+        description='Adds all public IPv4 addresses resolved from active mailcow transport nexthops to blacklist monitoring'
+    )
+    blacklist_source_relayhosts: bool = Field(
+        default=True,
+        env='BLACKLIST_SOURCE_RELAYHOSTS',
+        description='Adds all public IPv4 addresses resolved from active mailcow relayhosts to blacklist monitoring'
+    )
+
+    # Domain SPF Validation IP Sources
+    domain_spf_source_server_ip: bool = Field(
+        default=True,
+        env='DOMAIN_SPF_SOURCE_SERVER_IP',
+        description='Validates whether the public mailcow server IP is authorized by the domain SPF record'
+    )
+    domain_spf_source_transports: bool = Field(
+        default=False,
+        env='DOMAIN_SPF_SOURCE_TRANSPORTS',
+        description='Validates all public IPv4 addresses resolved from active transport nexthops against the domain SPF record'
+    )
+    domain_spf_source_relayhosts: bool = Field(
+        default=False,
+        env='DOMAIN_SPF_SOURCE_RELAYHOSTS',
+        description='Validates all public IPv4 addresses resolved from active relayhosts against the domain SPF record'
+    )
+
     # Weekly Summary Report
     enable_weekly_summary: bool = Field(
         default=True,

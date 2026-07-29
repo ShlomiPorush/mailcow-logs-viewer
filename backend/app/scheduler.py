@@ -6,8 +6,6 @@ import asyncio
 import hashlib
 import re
 import httpx
-import socket
-import ipaddress
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from typing import Set, Optional, List, Dict, Any
@@ -23,13 +21,14 @@ from .database import get_db_context, SessionLocal
 from .mailcow_api import mailcow_api
 from .models import PostfixLog, RspamdLog, NetfilterLog, MessageCorrelation, DMARCSync, DomainDNSCheck, MailboxStatistics, AliasStatistics, MonitoredHost, BlacklistCheck, DMARCReport, DMARCRecord, TLSReport, TLSReportPolicy, SpamSuppression
 from .correlation import detect_direction, parse_postfix_message
-from .routers.domains import check_domain_dns, save_dns_check_to_db
+from .routers.domains import check_domain_dns, save_dns_check_to_db, get_spf_source_ips
 from .services.dmarc_imap_service import sync_dmarc_reports_from_imap
 from .services.dmarc_notifications import send_dmarc_error_notification
 from .services import geoip_service
 
 from .services.geoip_downloader import is_license_configured
 from .services.dmarc_cache import clear_dmarc_cache
+from .services.mailcow_host_resolver import resolve_public_ipv4_addresses, normalize_postfix_nexthop, is_mailcow_active
 
 logger = logging.getLogger(__name__)
 
@@ -1680,8 +1679,8 @@ async def check_monitored_hosts_job(force: bool = False, send_notification: bool
                     'source': h.source
                 })
         
-        # If no hosts, try to initialize with local IP
-        if not monitored_hosts:
+        # If no hosts, try to initialize with local IP (only if that source is enabled)
+        if not monitored_hosts and settings.blacklist_source_server_ip:
             server_ip = get_cached_server_ip()
             if server_ip:
                 with get_db_context() as db:
@@ -2243,17 +2242,21 @@ async def check_all_domains_dns_background():
         
         if not domains:
             return
-        
+
         checked_count = 0
-        
+
+        # Resolve SPF sending IP sources once for the whole batch instead of
+        # once per domain (sources don't depend on the domain being checked).
+        spf_source_ips = await get_spf_source_ips()
+
         for domain_data in domains:
             domain_name = domain_data.get('domain_name')
             if not domain_name or domain_data.get('active', 0) != 1:
                 continue
-            
+
             try:
-                dns_data = await check_domain_dns(domain_name)
-                
+                dns_data = await check_domain_dns(domain_name, spf_source_ips)
+
                 with get_db_context() as db:
                     await save_dns_check_to_db(db, domain_name, dns_data, is_full_check=True)
                 
@@ -2585,13 +2588,16 @@ async def update_alias_statistics():
 
 async def sync_transports_job():
     """
-    Sync transports and relayhosts from mailcow to MonitoredHost table.
-    Resolves FQDNs to IPs and skips private/internal IPs.
+    Sync transports and relayhosts from mailcow to MonitoredHost table for
+    blacklist monitoring. Resolves FQDNs to all public A-record IPs and
+    skips private/internal IPs.
     Stores Original FQDN in source field as 'transport:fqdn' or 'relayhost:fqdn'.
+    Which sources are used is controlled independently via
+    settings.blacklist_source_server_ip/_transports/_relayhosts.
     Runs every 6 hours.
     """
-    if not settings.is_feature_enabled('domains'):
-        logger.debug("[TRANSPORTS] Domains feature disabled, skipping transport sync")
+    if not settings.is_feature_enabled('blacklist'):
+        logger.debug("[TRANSPORTS] Blacklist feature disabled, skipping transport sync")
         return
     update_job_status('sync_transports', 'running')
     try:
@@ -2600,88 +2606,55 @@ async def sync_transports_job():
             update_job_status('sync_transports', 'failed', 'API not configured')
             return
 
-        # Fetch Transports and Relay Hosts using mailcow_api
-        transports_data = await mailcow_api.get_transports()
-        relayhosts_data = await mailcow_api.get_relayhosts()
-
         # Process and Deduplicate
-        hosts_to_monitor = {}  # ip -> source_string
+        hosts_to_monitor: Dict[str, str] = {}  # ip -> source_string
 
-        async def resolve_and_validate(host_input: str, source_type: str) -> Optional[tuple]:
-            """Resolve host to IP, validate public, return (ip, full_source_string)"""
-            host_clean = host_input.strip().lower()
-            # Remove brackets/ports
-            host_clean = host_clean.strip('[]')
-            if ':' in host_clean:
-                host_clean = host_clean.split(':')[0]
-
-            if not host_clean:
-                return None
-
+        if settings.blacklist_source_transports:
             try:
-                # Is it already an IP?
-                try:
-                    ip_obj = ipaddress.ip_address(host_clean)
-                    ip_str = str(ip_obj)
-                    fqdn = None # IP was provided directly
-                except ValueError:
-                    # It's a domain, resolve it in a worker thread so a slow DNS
-                    # lookup doesn't block the shared event loop
-                    try:
-                        loop = asyncio.get_running_loop()
-                        ip_str = await loop.run_in_executor(None, socket.gethostbyname, host_clean)
-                        ip_obj = ipaddress.ip_address(ip_str)
-                        fqdn = host_clean
-                    except Exception:
-                        logger.warning(f"Could not resolve host: {host_clean}")
-                        return None
-                
-                # Check for private IP
-                if ip_obj.is_private or ip_obj.is_loopback:
-                    logger.info(f"Skipping private/loopback IP: {ip_str} ({host_clean})")
-                    return None
-                
-                # Construct source string
-                # If we have an FQDN, store it: "transport:example.com"
-                # If we just have IP, store: "transport"
-                if fqdn:
-                    final_source = f"{source_type}:{fqdn}"
-                else:
-                    final_source = source_type
-
-                return (ip_str, final_source)
-                
+                transports_data = await mailcow_api.get_transports()
             except Exception as e:
-                logger.error(f"Error validating host {host_clean}: {e}")
-                return None
+                logger.error(f"[TRANSPORTS] Failed to fetch transports: {e}")
+                transports_data = []
 
-        # Process Transports
-        for t in transports_data:
-            if str(t.get('active', '0')) == '1':
-                nexthop = t.get('nexthop', '').strip()
-                result = await resolve_and_validate(nexthop, 'transport')
-                if result:
-                    hosts_to_monitor[result[0]] = result[1]
+            for t in transports_data:
+                if not is_mailcow_active(t.get('active', '0')):
+                    continue
+                nexthop = (t.get('nexthop') or '').strip()
+                try:
+                    ips = await resolve_public_ipv4_addresses(nexthop)
+                except Exception as e:
+                    logger.warning(f"[TRANSPORTS] Could not resolve transport nexthop {nexthop!r}: {e}")
+                    continue
+                label = normalize_postfix_nexthop(nexthop) or nexthop
+                for ip in ips:
+                    hosts_to_monitor[ip] = f"transport:{label}"
 
-        # Process Relay Hosts
-        for r in relayhosts_data:
-            if str(r.get('active', '0')) == '1':
-                hostname = r.get('hostname', '').strip()
-                result = await resolve_and_validate(hostname, 'relayhost')
-                if result:
-                    hosts_to_monitor[result[0]] = result[1]
-        
-        # Also ensure local IP is monitored
-        from .routers.domains import get_cached_server_ip
-        local_ip = get_cached_server_ip()
-        if local_ip:
-            if local_ip not in hosts_to_monitor:
+        if settings.blacklist_source_relayhosts:
+            try:
+                relayhosts_data = await mailcow_api.get_relayhosts()
+            except Exception as e:
+                logger.error(f"[TRANSPORTS] Failed to fetch relayhosts: {e}")
+                relayhosts_data = []
+
+            for r in relayhosts_data:
+                if not is_mailcow_active(r.get('active', '0')):
+                    continue
+                hostname = (r.get('hostname') or '').strip()
+                try:
+                    ips = await resolve_public_ipv4_addresses(hostname)
+                except Exception as e:
+                    logger.warning(f"[TRANSPORTS] Could not resolve relayhost {hostname!r}: {e}")
+                    continue
+                label = normalize_postfix_nexthop(hostname) or hostname
+                for ip in ips:
+                    hosts_to_monitor[ip] = f"relayhost:{label}"
+
+        # Also ensure local IP is monitored (system IP takes priority on collision)
+        if settings.blacklist_source_server_ip:
+            from .routers.domains import get_cached_server_ip
+            local_ip = get_cached_server_ip()
+            if local_ip:
                 hosts_to_monitor[local_ip] = 'system'
-            # Update local IP source to 'system' regardless if it was found elsewhere, 
-            # or maybe prefer 'system' label? User likes 'system' label.
-            # But if system IP matches a transport IP, we might want to know it's also a transport?
-            # Let's keep 'system' priority if it's the main server.
-            hosts_to_monitor[local_ip] = 'system'
 
         # Update DB
         with get_db_context() as db:
@@ -3137,8 +3110,8 @@ def start_scheduler():
             logger.info("   [FEATURE] IP Blacklist feature disabled — skipping blacklist check jobs")
 
 
-        # Job 14: Sync Transports (every 6 hours)
-        if settings.is_feature_enabled('domains'):
+        # Job 14: Sync Transports (every 6 hours) - feeds blacklist monitoring
+        if settings.is_feature_enabled('blacklist'):
             scheduler.add_job(
                 sync_transports_job,
                 trigger=IntervalTrigger(hours=6),
