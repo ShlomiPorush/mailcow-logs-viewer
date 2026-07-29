@@ -9,11 +9,11 @@ from fastapi import APIRouter, HTTPException, Depends
 from typing import Dict, Any, List, Optional
 import dns.resolver
 import dns.asyncresolver
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from sqlalchemy.orm import Session
-from sqlalchemy import text
+from sqlalchemy import text, func
 from app.database import get_db
-from app.models import DomainDNSCheck
+from app.models import DomainDNSCheck, DMARCReport, DMARCRecord
 from app.utils import format_datetime_for_api
 from app.config import settings
 from app.mailcow_api import mailcow_api
@@ -162,6 +162,55 @@ async def get_spf_source_ips() -> List[Dict[str, str]]:
     return sources
 
 
+def get_recent_dmarc_passing_source_ips(domain: str, days: int = 30, limit: int = 20) -> Dict[str, Any]:
+    """
+    Real IPs that recently delivered mail for `domain` with a passing SPF
+    result per DMARC aggregate reports (ground truth from receiving servers).
+    Self-updating: re-validates that previously-working IPs are still
+    authorized by the CURRENT SPF record, without pinning anything.
+
+    Also reports data freshness (reports_found / most_recent_report_days_ago)
+    so the caller can warn the user when this source has nothing to
+    contribute (no reports yet) or its data may be outdated (stale).
+    """
+    from app.database import get_db_context
+
+    try:
+        with get_db_context() as db:
+            most_recent_end_date = db.query(func.max(DMARCReport.end_date)).filter(
+                DMARCReport.domain == domain
+            ).scalar()
+
+            cutoff_timestamp = int((datetime.now(timezone.utc) - timedelta(days=days)).timestamp())
+            rows = db.query(
+                DMARCRecord.source_ip,
+                func.sum(DMARCRecord.count).label('total_count')
+            ).join(
+                DMARCReport, DMARCRecord.dmarc_report_id == DMARCReport.id
+            ).filter(
+                DMARCReport.domain == domain,
+                DMARCReport.begin_date >= cutoff_timestamp,
+                DMARCRecord.spf_result == 'pass'
+            ).group_by(
+                DMARCRecord.source_ip
+            ).order_by(
+                func.sum(DMARCRecord.count).desc()
+            ).limit(limit).all()
+    except Exception as e:
+        logger.warning(f"[SPF] Error querying DMARC history for {domain}: {e}")
+        return {'ips': [], 'reports_found': False, 'most_recent_report_days_ago': None}
+
+    most_recent_days_ago = None
+    if most_recent_end_date:
+        most_recent_days_ago = round((datetime.now(timezone.utc).timestamp() - most_recent_end_date) / 86400)
+
+    return {
+        'ips': [{'ip': ip, 'count': count} for ip, count in rows],
+        'reports_found': most_recent_end_date is not None,
+        'most_recent_report_days_ago': most_recent_days_ago
+    }
+
+
 async def check_spf_record(domain: str, spf_source_ips: Optional[List[Dict[str, str]]] = None) -> Dict[str, Any]:
     """
     Check SPF record for a domain with full validation
@@ -258,6 +307,33 @@ async def check_spf_record(domain: str, spf_source_ips: Optional[List[Dict[str, 
         if spf_source_ips is None:
             spf_source_ips = await get_spf_source_ips()
 
+        dmarc_history_warnings: List[str] = []
+
+        if settings.domain_spf_source_dmarc_history:
+            try:
+                dmarc_data = get_recent_dmarc_passing_source_ips(domain)
+            except Exception as e:
+                logger.warning(f"[SPF] Could not fetch DMARC-observed source IPs for {domain}: {e}")
+                dmarc_data = {'ips': [], 'reports_found': False, 'most_recent_report_days_ago': None}
+
+            seen = {c['ip'] for c in spf_source_ips}
+            extra = [{'ip': d['ip'], 'source': 'dmarc_history'} for d in dmarc_data['ips'] if d['ip'] not in seen]
+            if extra:
+                spf_source_ips = spf_source_ips + extra  # new list, never mutate the shared batch list
+
+            DMARC_STALE_THRESHOLD_DAYS = 7  # most large providers send daily aggregate reports;
+                                             # a week of silence for an actively-sending domain is notable
+            if not dmarc_data['reports_found']:
+                dmarc_history_warnings.append(
+                    "DMARC History source is enabled, but no DMARC reports have been imported for this domain yet "
+                    "- this source is not currently contributing to the SPF check."
+                )
+            elif dmarc_data['most_recent_report_days_ago'] is not None and dmarc_data['most_recent_report_days_ago'] > DMARC_STALE_THRESHOLD_DAYS:
+                dmarc_history_warnings.append(
+                    f"DMARC History source: most recent DMARC report for this domain is "
+                    f"{dmarc_data['most_recent_report_days_ago']} day(s) old - data may not reflect current sending activity."
+                )
+
         checked_ips: List[Dict[str, Any]] = []
         for entry in spf_source_ips:
             ip = entry['ip']
@@ -279,6 +355,7 @@ async def check_spf_record(domain: str, spf_source_ips: Optional[List[Dict[str, 
             or settings.domain_spf_source_transports
             or settings.domain_spf_source_relayhosts
             or settings.domain_spf_source_manual_hosts_list
+            or settings.domain_spf_source_dmarc_history
         )
         sources_enabled_no_ips = total_checked == 0 and not no_sources_enabled
 
@@ -343,6 +420,11 @@ async def check_spf_record(domain: str, spf_source_ips: Optional[List[Dict[str, 
             elif sources_enabled_no_ips:
                 status = 'warning'
                 message = 'No IPv4 addresses could be resolved from the enabled SPF sources.'
+
+        # DMARC History freshness notices are purely informational - appended
+        # regardless of which branch above determined status/warnings, so
+        # they never influence the authorization result itself.
+        warnings = warnings + dmarc_history_warnings
 
         return {
             'status': status,

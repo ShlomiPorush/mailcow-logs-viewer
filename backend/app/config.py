@@ -423,6 +423,11 @@ class Settings(BaseSettings):
         env='DOMAIN_SPF_SOURCE_MANUAL_HOSTS',
         description='Advanced: comma-separated list of additional public IPv4 addresses or hostnames to validate against the domain SPF record, independent of the sources above. Only use this if you know exactly which hosts you are adding.'
     )
+    domain_spf_source_dmarc_history: bool = Field(
+        default=False,
+        env='DOMAIN_SPF_SOURCE_DMARC_HISTORY',
+        description='Validates recently observed sending IPs from DMARC aggregate reports (last 30 days, SPF-pass only) against the current SPF record'
+    )
 
     # Weekly Summary Report
     enable_weekly_summary: bool = Field(

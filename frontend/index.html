@@ -10,6 +10,11 @@
     <link rel="icon" type="image/svg+xml"
         href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%233b82f6' stroke-width='2'><path stroke-linecap='round' stroke-linejoin='round' d='M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z'/></svg>">
 
+    <!-- Tailwind below is the runtime JS compiler - it needs a moment after
+         load to scan the DOM and inject utility styles. Define .hidden
+         natively so hidden-by-default elements (e.g. modals) don't flash
+         visible during that window on a cold page load. -->
+    <style>.hidden { display: none; }</style>
     <script src="/static/assets/libs/tailwindcss.min.js"></script>
     <script src="/static/assets/libs/marked.min.js"></script>
     <script src="/static/assets/libs/purify.min.js"></script>

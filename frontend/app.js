@@ -7191,6 +7191,7 @@ var SETTINGS_FIELD_DESCRIPTIONS = {
     domain_spf_source_transports: 'Validates all public IPv4 addresses resolved from active transport nexthops.',
     domain_spf_source_relayhosts: 'Validates all public IPv4 addresses resolved from active relayhosts.',
     domain_spf_source_manual_hosts: 'Advanced. Comma-separated (e.g., relay1.example.com, 45.33.32.10). Additional public IPv4 addresses or hostnames to validate against the domain SPF record, independent of the sources above (works even if all three are disabled). Only set this if you are certain which hosts you are adding — incorrect entries can produce misleading SPF results.',
+    domain_spf_source_dmarc_history: 'Validates recently observed sending IPs from imported DMARC aggregate reports (last 30 days, only entries that already passed SPF) against the current SPF record. Self-updating, no manual entry needed.',
     dmarc_retention_days: 'DMARC reports retention in days. Default: 60.',
     dmarc_manual_upload_enabled: 'Allow manual upload of DMARC reports via the UI. Default: true.',
     dmarc_allow_report_delete: 'Allow deleting DMARC/TLS reports from the UI. Default: false.',
@@ -7231,6 +7232,15 @@ var SETTINGS_FIELD_DESCRIPTIONS = {
     quarantine_rules_log_retention_days: 'Days to keep quarantine auto-rule action history. Older action logs are automatically cleaned up. Default: 30.',
     queue_cleanup_enabled: 'Automatically monitor the mail queue for deferred emails. If an email has been stuck longer than the threshold, it is deleted from the queue and the recipient is suppressed.',
     queue_cleanup_threshold_minutes: 'How long (in minutes) a deferred email must be stuck in the queue before it is automatically deleted and the recipient suppressed. Default: 60 (1 hour).'
+};
+
+// Longer explanations shown via a hover info-icon next to the field label
+// (kept separate from SETTINGS_FIELD_DESCRIPTIONS, which is always-visible
+// and stays short). Only fields that need extra context get an entry here.
+const SETTINGS_FIELD_INFO_TOOLTIPS = {
+    blacklist_source_manual_hosts: 'Only hostnames with their own A record work here (e.g. real mail servers). SPF-only policy hosts published via a provider\'s include: mechanism (e.g. some ESP delivery-pool targets) typically have no A record and will resolve to zero IPs here.',
+    domain_spf_source_manual_hosts: 'Only hostnames with their own A record work here (e.g. real mail servers). SPF-only policy hosts published via a provider\'s include: mechanism (e.g. some ESP delivery-pool targets) typically have no A record and will resolve to zero IPs. Check the domain\'s own SPF record ("View Record") to confirm the include: is present instead, or use "Check DMARC history" below for real observed sending IPs.',
+    domain_spf_source_dmarc_history: 'Looks at the last 30 days of imported DMARC aggregate reports for this domain, takes only entries that already passed SPF at the time (per the receiving server\'s own evaluation), and re-checks each of those IPs against the CURRENT SPF record. Self-updating: reflects whichever IPs actually sent mail recently, no manual IP entry needed. Requires DMARC reports to already be imported for this domain (IMAP sync or manual upload) - if none exist yet, or the most recent report is older than 7 days, this domain\'s SPF check result will show a warning explaining that this source isn\'t currently contributing reliable data.'
 };
 
 // Predefined options for settings fields (renders as dropdown instead of text input)
@@ -7313,7 +7323,7 @@ var SETTINGS_EDIT_TABS = [
     },
     {
         id: 'domains', label: 'Domains', description: 'Domain SPF validation: which mailcow IP sources are checked against each domain\'s SPF record.', groups: [
-            { label: 'Domain SPF Validation Sources', keys: ['domain_spf_source_server_ip', 'domain_spf_source_transports', 'domain_spf_source_relayhosts', 'domain_spf_source_manual_hosts'] }
+            { label: 'Domain SPF Validation Sources', keys: ['domain_spf_source_server_ip', 'domain_spf_source_transports', 'domain_spf_source_relayhosts', 'domain_spf_source_manual_hosts', 'domain_spf_source_dmarc_history'] }
         ]
     },
     {
@@ -7461,6 +7471,11 @@ function renderSettingsEditField(key, value, sensitiveKeys, description, envLock
     const disabledAttr = envLocked ? 'disabled' : '';
     const envLockedHtml = envLocked ? '<p class="text-xs text-blue-600 dark:text-blue-400 mt-1 flex items-center gap-1"><svg class="w-3 h-3 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clip-rule="evenodd"></path></svg>Controlled by ENV variable - cannot be changed from here.</p>' : '';
     const labelLockIcon = envLocked ? ' <svg class="w-3.5 h-3.5 inline-block text-blue-500 dark:text-blue-400" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clip-rule="evenodd"></path></svg>' : '';
+    // Optional hover info-icon for fields needing a longer explanation than
+    // the always-visible description (reuses the info-circle icon/pattern
+    // already used elsewhere in the app, e.g. the version info panel).
+    const infoTooltip = SETTINGS_FIELD_INFO_TOOLTIPS[key];
+    const infoIconHtml = infoTooltip ? ' <svg class="w-3.5 h-3.5 inline-block text-gray-400 dark:text-gray-500 cursor-help" fill="none" stroke="currentColor" viewBox="0 0 24 24" title="' + escapeHtml(infoTooltip) + '"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>' : '';
 
     // Determine if changed from default
     const hasDefault = defaultValue !== null && defaultValue !== undefined;
@@ -7512,7 +7527,7 @@ function renderSettingsEditField(key, value, sensitiveKeys, description, envLock
         return '<div class="flex items-center justify-between gap-2 p-2 ' + (envLocked ? 'bg-gray-100 dark:bg-gray-800/50 opacity-60' : (isChanged ? 'bg-amber-50 dark:bg-amber-900/10 border border-amber-300 dark:border-amber-700 rounded' : 'bg-gray-50 dark:bg-gray-700/30')) + ' rounded">' +
             '<div class="flex items-center gap-2">' +
             '<input type="checkbox" id="edit-' + key + '" name="' + key + '" ' + (displayVal ? 'checked' : '') + ' ' + disabledAttr + ' class="rounded border-gray-300 dark:border-gray-600">' +
-            '<div><label for="edit-' + key + '" class="text-sm font-medium text-gray-700 dark:text-gray-300">' + escapeHtml(label) + labelLockIcon + '</label>' + descHtml + envLockedHtml + '</div></div>' +
+            '<div><label for="edit-' + key + '" class="text-sm font-medium text-gray-700 dark:text-gray-300">' + escapeHtml(label) + labelLockIcon + infoIconHtml + '</label>' + descHtml + envLockedHtml + '</div></div>' +
             clearBtnHtml + '</div>';
     }
 
@@ -7524,7 +7539,7 @@ function renderSettingsEditField(key, value, sensitiveKeys, description, envLock
             const selected = String(displayVal) === opt.value ? 'selected' : '';
             optionsHtml += '<option value="' + escapeHtml(opt.value) + '" ' + selected + '>' + escapeHtml(opt.label) + '</option>';
         });
-        return '<div class="' + (envLocked ? 'opacity-60' : '') + '"><label for="edit-' + key + '" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">' + escapeHtml(label) + labelLockIcon + '</label>' +
+        return '<div class="' + (envLocked ? 'opacity-60' : '') + '"><label for="edit-' + key + '" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">' + escapeHtml(label) + labelLockIcon + infoIconHtml + '</label>' +
             descHtml +
             '<select id="edit-' + key + '" name="' + key + '" ' + disabledAttr + ' ' +
             'class="w-full rounded border ' + (envLocked ? 'border-gray-200 dark:border-gray-700 bg-gray-100 dark:bg-gray-800 text-gray-400 dark:text-gray-500 cursor-not-allowed' : (changedBorder ? changedBorder + ' bg-white dark:bg-gray-700 text-gray-900 dark:text-white' : 'border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white')) + ' px-3 py-2 text-sm">' +
@@ -7536,7 +7551,7 @@ function renderSettingsEditField(key, value, sensitiveKeys, description, envLock
     const inputType = sensitive ? 'password' : (isNum ? 'number' : 'text');
     const placeholder = envLocked ? 'Controlled by ENV' : '';
     const valAttr = (isBool ? '' : displayVal);
-    return '<div class="' + (envLocked ? 'opacity-60' : '') + '"><label for="edit-' + key + '" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">' + escapeHtml(label) + labelLockIcon + '</label>' +
+    return '<div class="' + (envLocked ? 'opacity-60' : '') + '"><label for="edit-' + key + '" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">' + escapeHtml(label) + labelLockIcon + infoIconHtml + '</label>' +
         descHtml +
         '<input type="' + inputType + '" id="edit-' + key + '" name="' + key + '" value="' + escapeHtml(valAttr) + '" placeholder="' + escapeHtml(placeholder) + '" ' + disabledAttr + ' ' +
         'class="w-full rounded border ' + (envLocked ? 'border-gray-200 dark:border-gray-700 bg-gray-100 dark:bg-gray-800 text-gray-400 dark:text-gray-500 cursor-not-allowed' : (changedBorder ? changedBorder + ' bg-white dark:bg-gray-700 text-gray-900 dark:text-white' : 'border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white')) + ' px-3 py-2 text-sm">' +
