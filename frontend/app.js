@@ -6663,6 +6663,25 @@ function toggleDomainDetails(domainId) {
     }
 }
 
+// Maps an SPF checked_ips[].source value (e.g. 'server_ip', 'transport:host',
+// 'relayhost:host', 'manual:host', 'dmarc_history') to a readable label and
+// badge color. dmarc_history gets its own distinct color so IPs sourced from
+// real observed DMARC activity are immediately recognizable in the list.
+function getSpfSourceBadge(source) {
+    if (!source) return { label: 'Unknown', class: 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400' };
+    const colonIdx = source.indexOf(':');
+    const prefix = colonIdx === -1 ? source : source.slice(0, colonIdx);
+    const detail = colonIdx === -1 ? null : source.slice(colonIdx + 1);
+    const map = {
+        server_ip: { label: 'Server IP', class: 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300' },
+        transport: { label: detail ? `Transport: ${detail}` : 'Transport', class: 'bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300' },
+        relayhost: { label: detail ? `Relayhost: ${detail}` : 'Relayhost', class: 'bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300' },
+        manual: { label: detail ? `Manual: ${detail}` : 'Manual', class: 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300' },
+        dmarc_history: { label: 'DMARC History', class: 'bg-teal-100 dark:bg-teal-900/30 text-teal-700 dark:text-teal-300' }
+    };
+    return map[prefix] || { label: source, class: 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400' };
+}
+
 function renderDNSCheck(type, check) {
     const statusColors = {
         'success': 'border-green-500 bg-green-50 dark:bg-green-900/20',
@@ -6711,7 +6730,29 @@ function renderDNSCheck(type, check) {
                     </div>
                 </details>
             ` : ''}
-            
+
+            ${check.checked_ips && check.checked_ips.length > 0 ? `
+                <details class="mt-3">
+                    <summary class="text-xs text-gray-600 dark:text-gray-400 cursor-pointer hover:text-gray-900 dark:hover:text-gray-200 font-medium">
+                        View Checked IPs (${check.checked_ips.length})
+                    </summary>
+                    <div class="mt-2 p-2 bg-white dark:bg-gray-900 rounded border border-gray-200 dark:border-gray-700 space-y-1.5">
+                        ${check.checked_ips.map(c => {
+                            const badge = getSpfSourceBadge(c.source);
+                            return `
+                            <div class="flex flex-wrap items-center justify-between gap-x-2 gap-y-1 text-xs">
+                                <div class="flex items-center gap-2 min-w-0">
+                                    <span class="${c.authorized ? 'text-green-500' : 'text-red-500'} flex-shrink-0" title="${c.authorized ? 'Authorized' : 'Not authorized'}">${c.authorized ? '✓' : '✗'}</span>
+                                    <span class="font-mono text-gray-700 dark:text-gray-300">${escapeHtml(c.ip)}</span>
+                                    <span class="px-1.5 py-0.5 rounded ${badge.class} text-[10px] font-medium whitespace-nowrap">${escapeHtml(badge.label)}</span>
+                                </div>
+                                ${c.authorized && c.authorization_method ? `<span class="text-gray-400 dark:text-gray-500 truncate" title="${escapeHtml(c.authorization_method)}">via ${escapeHtml(c.authorization_method)}</span>` : ''}
+                            </div>`;
+                        }).join('')}
+                    </div>
+                </details>
+            ` : ''}
+
             ${check.warnings && check.warnings.length > 0 ? `
                 <div class="mt-3 space-y-1">
                     ${check.warnings.map(warning => `
