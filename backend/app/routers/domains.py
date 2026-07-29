@@ -84,9 +84,11 @@ async def resolve_dns_with_fallback(query: str, record_type: str = 'TXT', timeou
 async def get_spf_source_ips() -> List[Dict[str, str]]:
     """
     Resolve the enabled SPF-check sending IP sources (server IP / transports /
-    relayhosts) into a flat, deduplicated list of {ip, source}.
+    relayhosts / manual) into a flat, deduplicated list of {ip, source}.
 
     Only calls the mailcow API for a source when its setting is enabled.
+    The manual hosts list (advanced) is always processed, independent of the
+    other three settings.
     Errors on one source are logged and skipped, they never abort the others.
     """
     sources: List[Dict[str, str]] = []
@@ -142,6 +144,20 @@ async def get_spf_source_ips() -> List[Dict[str, str]]:
                 if ip not in seen_ips:
                     sources.append({'ip': ip, 'source': f'relayhost:{label}'})
                     seen_ips.add(ip)
+
+    # Advanced: manually configured hosts, independent of the 3 sources
+    # above - resolved even if all three are disabled.
+    for entry in settings.domain_spf_source_manual_hosts_list:
+        try:
+            ips = await resolve_public_ipv4_addresses(entry)
+        except Exception as e:
+            logger.warning(f"[SPF] Could not resolve manual host {entry!r}: {e}")
+            continue
+        label = normalize_postfix_nexthop(entry) or entry
+        for ip in ips:
+            if ip not in seen_ips:
+                sources.append({'ip': ip, 'source': f'manual:{label}'})
+                seen_ips.add(ip)
 
     return sources
 
@@ -262,6 +278,7 @@ async def check_spf_record(domain: str, spf_source_ips: Optional[List[Dict[str, 
             settings.domain_spf_source_server_ip
             or settings.domain_spf_source_transports
             or settings.domain_spf_source_relayhosts
+            or settings.domain_spf_source_manual_hosts_list
         )
         sources_enabled_no_ips = total_checked == 0 and not no_sources_enabled
 

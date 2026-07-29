@@ -146,14 +146,16 @@ async def lifespan(app: FastAPI):
                     logger.warning("No active domains found in mailcow - check your configuration")
             except Exception as e:
                 logger.error(f"Failed to fetch active domains: {e}")
-            # Initialize server IP cache (used by blacklist sync and/or SPF checks,
-            # only fetched if at least one of those sources is actually enabled)
-            if settings.blacklist_source_server_ip or settings.domain_spf_source_server_ip:
-                try:
-                    from app.routers.domains import init_server_ip
-                    await init_server_ip()
-                except Exception as e:
-                    logger.warning(f"Failed to initialize server IP cache: {e}")
+            # Initialize server IP cache. Always fetched: besides blacklist sync
+            # and SPF checks (which respect their own source settings), the
+            # cached value is also used unconditionally by dashboard/summary
+            # endpoints (blacklist summary/config, settings info) regardless
+            # of whether those two sources are enabled.
+            try:
+                from app.routers.domains import init_server_ip
+                await init_server_ip()
+            except Exception as e:
+                logger.warning(f"Failed to initialize server IP cache: {e}")
     except Exception as e:
         logger.error(f"mailcow API test failed: {e}")
     

@@ -396,6 +396,11 @@ class Settings(BaseSettings):
         env='BLACKLIST_SOURCE_RELAYHOSTS',
         description='Adds all public IPv4 addresses resolved from active mailcow relayhosts to blacklist monitoring'
     )
+    blacklist_source_manual_hosts: str = Field(
+        default='',
+        env='BLACKLIST_SOURCE_MANUAL_HOSTS',
+        description='Advanced: comma-separated list of additional public IPv4 addresses or hostnames to include in blacklist monitoring, independent of the sources above. Only use this if you know exactly which hosts you are adding.'
+    )
 
     # Domain SPF Validation IP Sources
     domain_spf_source_server_ip: bool = Field(
@@ -412,6 +417,11 @@ class Settings(BaseSettings):
         default=False,
         env='DOMAIN_SPF_SOURCE_RELAYHOSTS',
         description='Validates all public IPv4 addresses resolved from active relayhosts against the domain SPF record'
+    )
+    domain_spf_source_manual_hosts: str = Field(
+        default='',
+        env='DOMAIN_SPF_SOURCE_MANUAL_HOSTS',
+        description='Advanced: comma-separated list of additional public IPv4 addresses or hostnames to validate against the domain SPF record, independent of the sources above. Only use this if you know exactly which hosts you are adding.'
     )
 
     # Weekly Summary Report
@@ -587,7 +597,21 @@ class Settings(BaseSettings):
         if not self.blacklist_emails:
             return []
         return [e.strip().lower() for e in self.blacklist_emails.split(',') if e.strip()]
-    
+
+    @property
+    def blacklist_source_manual_hosts_list(self) -> List[str]:
+        """Parse manually configured blacklist monitoring hosts into a list"""
+        if not self.blacklist_source_manual_hosts:
+            return []
+        return [h.strip().lower() for h in self.blacklist_source_manual_hosts.split(',') if h.strip()]
+
+    @property
+    def domain_spf_source_manual_hosts_list(self) -> List[str]:
+        """Parse manually configured SPF sending IP sources into a list"""
+        if not self.domain_spf_source_manual_hosts:
+            return []
+        return [h.strip().lower() for h in self.domain_spf_source_manual_hosts.split(',') if h.strip()]
+
     @property
     def raw_logs_services_list(self) -> List[str]:
         """Parse raw_logs_services into a list of enabled service names.

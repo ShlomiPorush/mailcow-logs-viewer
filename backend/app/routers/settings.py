@@ -326,12 +326,12 @@ def get_settings_info(db: Session = Depends(get_db)):
                     "error": jobs_status.get('blacklist_check', {}).get('error') if settings.is_feature_enabled('blacklist') else None
                 },
                 "sync_transports": {
-                    "interval": "6 hours" if settings.is_feature_enabled('domains') else "Disabled (feature off)",
-                    "description": "Sync Transports & Relayhosts from mailcow",
-                    "feature_disabled": not settings.is_feature_enabled('domains'),
-                    "status": jobs_status.get('sync_transports', {}).get('status', 'unknown') if settings.is_feature_enabled('domains') else 'disabled',
-                    "last_run": format_datetime_utc(jobs_status.get('sync_transports', {}).get('last_run')) if settings.is_feature_enabled('domains') else None,
-                    "error": jobs_status.get('sync_transports', {}).get('error') if settings.is_feature_enabled('domains') else None
+                    "interval": "6 hours" if settings.is_feature_enabled('blacklist') else "Disabled (feature off)",
+                    "description": "Sync Transports & Relayhosts from mailcow for blacklist monitoring",
+                    "feature_disabled": not settings.is_feature_enabled('blacklist'),
+                    "status": jobs_status.get('sync_transports', {}).get('status', 'unknown') if settings.is_feature_enabled('blacklist') else 'disabled',
+                    "last_run": format_datetime_utc(jobs_status.get('sync_transports', {}).get('last_run')) if settings.is_feature_enabled('blacklist') else None,
+                    "error": jobs_status.get('sync_transports', {}).get('error') if settings.is_feature_enabled('blacklist') else None
                 },
                 "send_weekly_summary": {
                     "schedule": "Monday at 9:00 AM" if settings.enable_weekly_summary else "Disabled",

@@ -166,26 +166,62 @@ def get_blacklist_config() -> Dict[str, Any]:
 @router.get("/summary")
 def get_blacklist_summary() -> Dict[str, Any]:
     """
-    Get compact blacklist status summary for dashboard
+    Get compact blacklist status summary for dashboard.
+
+    Aggregated across all actively monitored hosts (server IP, transports,
+    relayhosts - whichever sources are enabled via the blacklist_source_*
+    settings), not just the server IP.
     """
-    ip = get_cached_server_ip()
-    cached = get_cached_blacklist_check(ip) if ip else None
-    
-    if not cached:
-        return {
-            "has_data": False,
-            "server_ip": ip,
-            "status": "unknown",
-            "listed_count": 0,
-            "total_blacklists": len(BLACKLISTS),
-            "checked_at": None
-        }
-    
+    with get_db_context() as db:
+        hostnames = [
+            h.hostname for h in
+            db.query(MonitoredHost).filter(MonitoredHost.active == True).all()
+        ]
+
+    total_hosts = len(hostnames)
+    empty_result = {
+        "has_data": False,
+        "status": "unknown",
+        "total_hosts": total_hosts,
+        "hosts_checked": 0,
+        "hosts_listed": 0,
+        "listed_count": 0,
+        "total_blacklists": len(BLACKLISTS),
+        "checked_at": None,
+        "hostnames": hostnames
+    }
+
+    if total_hosts == 0:
+        return empty_result
+
+    hosts_checked = 0
+    hosts_listed = 0
+    listed_count = 0
+    latest_checked_at = None
+
+    for hostname in hostnames:
+        cached = get_cached_blacklist_check(hostname)
+        if not cached:
+            continue
+        hosts_checked += 1
+        listed_count += cached.get("listed_count", 0)
+        if cached.get("status") == "listed":
+            hosts_listed += 1
+        checked_at = cached.get("checked_at")
+        if checked_at and (latest_checked_at is None or checked_at > latest_checked_at):
+            latest_checked_at = checked_at
+
+    if hosts_checked == 0:
+        return empty_result
+
     return {
         "has_data": True,
-        "server_ip": cached.get("server_ip"),
-        "status": cached.get("status", "unknown"),
-        "listed_count": cached.get("listed_count", 0),
-        "total_blacklists": cached.get("total_blacklists", len(BLACKLISTS)),
-        "checked_at": cached.get("checked_at")
+        "status": "listed" if hosts_listed > 0 else "clean",
+        "total_hosts": total_hosts,
+        "hosts_checked": hosts_checked,
+        "hosts_listed": hosts_listed,
+        "listed_count": listed_count,
+        "total_blacklists": len(BLACKLISTS),
+        "checked_at": latest_checked_at,
+        "hostnames": hostnames
     }

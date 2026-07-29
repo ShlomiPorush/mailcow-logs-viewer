@@ -2593,7 +2593,8 @@ async def sync_transports_job():
     skips private/internal IPs.
     Stores Original FQDN in source field as 'transport:fqdn' or 'relayhost:fqdn'.
     Which sources are used is controlled independently via
-    settings.blacklist_source_server_ip/_transports/_relayhosts.
+    settings.blacklist_source_server_ip/_transports/_relayhosts, plus an
+    always-on advanced settings.blacklist_source_manual_hosts_list.
     Runs every 6 hours.
     """
     if not settings.is_feature_enabled('blacklist'):
@@ -2648,6 +2649,18 @@ async def sync_transports_job():
                 label = normalize_postfix_nexthop(hostname) or hostname
                 for ip in ips:
                     hosts_to_monitor[ip] = f"relayhost:{label}"
+
+        # Advanced: manually configured hosts, independent of the 3 sources
+        # above - resolved even if all three are disabled.
+        for entry in settings.blacklist_source_manual_hosts_list:
+            try:
+                ips = await resolve_public_ipv4_addresses(entry)
+            except Exception as e:
+                logger.warning(f"[TRANSPORTS] Could not resolve manual host {entry!r}: {e}")
+                continue
+            label = normalize_postfix_nexthop(entry) or entry
+            for ip in ips:
+                hosts_to_monitor[ip] = f"manual:{label}"
 
         # Also ensure local IP is monitored (system IP takes priority on collision)
         if settings.blacklist_source_server_ip:

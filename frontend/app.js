@@ -4619,10 +4619,11 @@ async function loadDashboardBlacklistSummary() {
         const data = await response.json();
 
         if (!data.has_data) {
+            const hint = data.total_hosts > 0 ? 'Check will run automatically' : 'No hosts monitored yet';
             container.innerHTML = `
                 <div class="text-center">
                     <p class="text-sm text-gray-500 dark:text-gray-400">No data</p>
-                    <p class="text-xs text-gray-400 dark:text-gray-500 mt-1">Check will run automatically</p>
+                    <p class="text-xs text-gray-400 dark:text-gray-500 mt-1">${hint}</p>
                 </div>
             `;
             return;
@@ -4631,6 +4632,11 @@ async function loadDashboardBlacklistSummary() {
         const statusColor = data.status === 'clean' ? 'green' : data.status === 'listed' ? 'red' : 'yellow';
         const statusIcon = data.status === 'clean' ? '✓' : data.status === 'listed' ? '✗' : '?';
         const statusText = data.status === 'clean' ? 'Clean' : data.status === 'listed' ? 'Listed' : 'Unknown';
+        // Single monitored host: show its IP directly. Multiple: show the count
+        // (per-host breakdown is on the dedicated Blacklist page).
+        const monitoredLabel = (data.hostnames && data.hostnames.length === 1)
+            ? data.hostnames[0]
+            : `${data.total_hosts} host${data.total_hosts === 1 ? '' : 's'}`;
 
         container.innerHTML = `
             <div class="space-y-3">
@@ -4639,12 +4645,12 @@ async function loadDashboardBlacklistSummary() {
                     <span class="text-sm font-semibold text-${statusColor}-600 dark:text-${statusColor}-400">${statusIcon} ${statusText}</span>
                 </div>
                 <div class="flex items-center justify-between">
-                    <span class="text-sm text-gray-600 dark:text-gray-400">Listed On</span>
-                    <span class="text-sm font-semibold ${data.listed_count > 0 ? 'text-red-600 dark:text-red-400' : 'text-green-600 dark:text-green-400'}">${data.listed_count}/${data.total_blacklists}</span>
+                    <span class="text-sm text-gray-600 dark:text-gray-400">Hosts Listed</span>
+                    <span class="text-sm font-semibold ${data.hosts_listed > 0 ? 'text-red-600 dark:text-red-400' : 'text-green-600 dark:text-green-400'}">${data.hosts_listed}/${data.total_hosts}</span>
                 </div>
                 <div class="flex items-center justify-between">
-                    <span class="text-sm text-gray-600 dark:text-gray-400">IP</span>
-                    <span class="text-xs font-mono text-gray-700 dark:text-gray-300">${data.server_ip || '-'}</span>
+                    <span class="text-sm text-gray-600 dark:text-gray-400">Monitored</span>
+                    <span class="text-xs font-mono text-gray-700 dark:text-gray-300">${escapeHtml(monitoredLabel)}</span>
                 </div>
                 ${data.checked_at ? `
                     <p class="text-xs text-gray-400 dark:text-gray-500 text-center pt-2 border-t border-gray-200 dark:border-gray-700">
@@ -7180,9 +7186,11 @@ var SETTINGS_FIELD_DESCRIPTIONS = {
     blacklist_source_server_ip: 'Uses the public server IP reported by the mailcow status API.',
     blacklist_source_transports: 'Adds all public IPv4 addresses resolved from active mailcow transport nexthops.',
     blacklist_source_relayhosts: 'Adds all public IPv4 addresses resolved from active mailcow relayhosts.',
+    blacklist_source_manual_hosts: 'Advanced. Comma-separated (e.g., relay1.example.com, 45.33.32.10). Additional public IPv4 addresses or hostnames to add to blacklist monitoring, independent of the sources above (works even if all three are disabled). Only set this if you are certain which hosts you are adding — incorrect entries can produce misleading results.',
     domain_spf_source_server_ip: 'Validates whether the public mailcow server IP is authorized by the domain SPF record.',
     domain_spf_source_transports: 'Validates all public IPv4 addresses resolved from active transport nexthops.',
     domain_spf_source_relayhosts: 'Validates all public IPv4 addresses resolved from active relayhosts.',
+    domain_spf_source_manual_hosts: 'Advanced. Comma-separated (e.g., relay1.example.com, 45.33.32.10). Additional public IPv4 addresses or hostnames to validate against the domain SPF record, independent of the sources above (works even if all three are disabled). Only set this if you are certain which hosts you are adding — incorrect entries can produce misleading SPF results.',
     dmarc_retention_days: 'DMARC reports retention in days. Default: 60.',
     dmarc_manual_upload_enabled: 'Allow manual upload of DMARC reports via the UI. Default: true.',
     dmarc_allow_report_delete: 'Allow deleting DMARC/TLS reports from the UI. Default: false.',
@@ -7271,7 +7279,7 @@ var SETTINGS_EDIT_TABS = [
     {
         id: 'blacklist', label: 'Blacklist', description: 'Comma-separated email addresses to hide from logs (e.g. BCC archive, monitoring addresses). These emails are not stored in the database. Blacklist IP Sources controls which mailcow IPs are monitored for DNS blacklisting.', groups: [
             { label: 'Settings', keys: ['blacklist_emails'] },
-            { label: 'Blacklist IP Sources', keys: ['blacklist_source_server_ip', 'blacklist_source_transports', 'blacklist_source_relayhosts'] }
+            { label: 'Blacklist IP Sources', keys: ['blacklist_source_server_ip', 'blacklist_source_transports', 'blacklist_source_relayhosts', 'blacklist_source_manual_hosts'] }
         ]
     },
     {
@@ -7305,7 +7313,7 @@ var SETTINGS_EDIT_TABS = [
     },
     {
         id: 'domains', label: 'Domains', description: 'Domain SPF validation: which mailcow IP sources are checked against each domain\'s SPF record.', groups: [
-            { label: 'Domain SPF Validation Sources', keys: ['domain_spf_source_server_ip', 'domain_spf_source_transports', 'domain_spf_source_relayhosts'] }
+            { label: 'Domain SPF Validation Sources', keys: ['domain_spf_source_server_ip', 'domain_spf_source_transports', 'domain_spf_source_relayhosts', 'domain_spf_source_manual_hosts'] }
         ]
     },
     {
