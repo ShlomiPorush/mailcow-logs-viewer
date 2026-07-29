@@ -1179,11 +1179,48 @@ def correlate_single_message(db: Session, rspamd_log: RspamdLog) -> Optional[Mes
     ).first()
     
     if existing:
-        # Just update the rspamd log with correlation key
+        # Link the new rspamd log to the correlation and always bump last_seen -
+        # a retried delivery (e.g. after greylisting) shows up as further calls here
+        # for the same message_id, not just the first one.
         rspamd_log.correlation_key = existing.correlation_key
-        if not existing.rspamd_log_id:
-            existing.rspamd_log_id = rspamd_log.id
-            existing.last_seen = datetime.now(timezone.utc)
+        existing.rspamd_log_id = rspamd_log.id
+        existing.last_seen = datetime.now(timezone.utc)
+
+        if existing.final_status not in ('bounced', 'rejected'):
+            # Re-derive from ALL Postfix logs sharing this message_id (not just the queue_id
+            # captured when the correlation was first created) - Postfix assigns a NEW
+            # queue_id per retry, so a later attempt would otherwise never be picked up.
+            # 'bounced'/'rejected' are the only truly final outcomes and skip this; a prior
+            # 'delivered' is still re-checked so a later bounce under the same message_id
+            # (e.g. a duplicate submission) isn't masked by an earlier successful attempt.
+            postfix_with_msgid = db.query(PostfixLog).filter(
+                PostfixLog.message_id == message_id
+            ).all()
+
+            if postfix_with_msgid:
+                # Rank-based, order-independent: a later 'sent' must win over an earlier
+                # 'deferred' regardless of row iteration order.
+                status_rank = {'bounced': 3, 'rejected': 3, 'sent': 2, 'deferred': 1}
+                best_status, best_rank = None, -1
+                for plog in postfix_with_msgid:
+                    rank = status_rank.get(plog.status, -1)
+                    if rank > best_rank:
+                        best_rank = rank
+                        best_status = 'delivered' if plog.status == 'sent' else plog.status
+                if best_status:
+                    existing.final_status = best_status
+
+                existing.postfix_log_ids = [plog.id for plog in postfix_with_msgid]
+                latest_with_queue = max(
+                    (plog for plog in postfix_with_msgid if plog.queue_id),
+                    key=lambda p: p.time,
+                    default=None
+                )
+                if latest_with_queue:
+                    existing.queue_id = latest_with_queue.queue_id
+                for plog in postfix_with_msgid:
+                    plog.correlation_key = existing.correlation_key
+
         db.commit()
         return existing
     
@@ -1495,13 +1532,15 @@ async def update_final_status_for_correlations():
             )
             
             # Find correlations that:
-            # 1. Are within the correlation age limit
+            # 1. Were still active within the correlation age limit (last_seen, not created_at -
+            #    a correlation kept alive by retries under the same message_id should stay
+            #    in this window even if it was first created long ago)
             # 2. Have a queue_id (so we can check Postfix logs)
             # 3. Don't have a definitive final_status yet
             #    We exclude 'delivered', 'bounced', 'rejected', 'expired' as these are final
             #    We check None, 'deferred', 'spam', and other non-final statuses
             correlations_to_check = db.query(MessageCorrelation).filter(
-                MessageCorrelation.created_at >= cutoff_time,
+                MessageCorrelation.last_seen >= cutoff_time,
                 MessageCorrelation.queue_id.isnot(None),
                 or_(
                     MessageCorrelation.final_status.is_(None),
