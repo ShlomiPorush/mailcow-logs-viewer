@@ -7475,7 +7475,11 @@ function renderSettingsEditField(key, value, sensitiveKeys, description, envLock
     // the always-visible description (reuses the info-circle icon/pattern
     // already used elsewhere in the app, e.g. the version info panel).
     const infoTooltip = SETTINGS_FIELD_INFO_TOOLTIPS[key];
-    const infoIconHtml = infoTooltip ? ' <svg class="w-3.5 h-3.5 inline-block text-gray-400 dark:text-gray-500 cursor-help" fill="none" stroke="currentColor" viewBox="0 0 24 24" title="' + escapeHtml(infoTooltip) + '"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>' : '';
+    // data-info-key (not the raw text) avoids HTML-attribute escaping headaches
+    // for text containing quotes/apostrophes; showSettingsFieldInfo() looks it
+    // up. onclick stops propagation so it doesn't toggle/focus the field via
+    // the enclosing <label> - title stays as a quick hover hint on desktop.
+    const infoIconHtml = infoTooltip ? ' <svg class="w-3.5 h-3.5 inline-block text-gray-400 dark:text-gray-500 hover:text-blue-500 dark:hover:text-blue-400 cursor-pointer" fill="none" stroke="currentColor" viewBox="0 0 24 24" title="' + escapeHtml(infoTooltip) + '" data-info-key="' + key + '" onclick="showSettingsFieldInfo(event, this)"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>' : '';
 
     // Determine if changed from default
     const hasDefault = defaultValue !== null && defaultValue !== undefined;
@@ -9178,7 +9182,7 @@ function renderJobCard(name, jobKey, job) {
     `;
 }
 
-function showToast(message, type = 'info') {
+function showToast(message, type = 'info', duration = 4000) {
     // Remove existing toast if any
     const existingToast = document.getElementById('toast-notification');
     if (existingToast) {
@@ -9212,14 +9216,29 @@ function showToast(message, type = 'info') {
 
     document.body.appendChild(toast);
 
-    // Auto-remove after 4 seconds
+    // Auto-remove after `duration` ms (default 4s; longer explanatory
+    // messages, e.g. settings field info, can pass a longer duration)
     setTimeout(() => {
         if (toast.parentElement) {
             toast.style.opacity = '0';
             toast.style.transition = 'opacity 0.3s';
             setTimeout(() => toast.remove(), 300);
         }
-    }, 4000);
+    }, duration);
+}
+
+// Shows the longer explanation for a settings field (see
+// SETTINGS_FIELD_INFO_TOOLTIPS) via a toast. Called from the info-icon next
+// to a field's label; stops the click from bubbling to the enclosing
+// <label>, which would otherwise toggle/focus the field itself.
+function showSettingsFieldInfo(event, el) {
+    event.preventDefault();
+    event.stopPropagation();
+    const key = el.getAttribute('data-info-key');
+    const text = SETTINGS_FIELD_INFO_TOOLTIPS[key];
+    if (text) {
+        showToast(escapeHtml(text), 'info', 10000);
+    }
 }
 
 /**
