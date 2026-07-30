@@ -17,8 +17,19 @@ from app.database import init_db, SessionLocal
 from app.models import DMARCReport, DMARCRecord
 
 
+def _postgres_available() -> bool:
+    try:
+        from app.database import engine
+        with engine.connect():
+            return True
+    except Exception:
+        return False
+
+
 @pytest.fixture()
 def seeded_domain():
+    if not _postgres_available():
+        pytest.skip('PostgreSQL not available')
     init_db()
     db = SessionLocal()
     domain = "passrate-test.example"
