@@ -427,7 +427,7 @@ async def generate_and_send_email(db: Session = None):
         if recipient:
             # FIX: Subject date format
             subject = f"Weekly Server Summary - {current_date}"
-            # Send in executor — smtplib blocks the event loop
+            # Send in executor - smtplib blocks the event loop
             import asyncio
             await asyncio.get_running_loop().run_in_executor(
                 None,

@@ -1,12 +1,14 @@
 """
 Database migrations and maintenance utilities
 
-SIMPLIFIED VERSION:
-- Clean up duplicate correlations by Message-ID (not Queue-ID)
-- Merge duplicates into the oldest one
-- Update all related logs
+FROZEN as of v2.6.3: everything in this file is the legacy, pre-Alembic
+migration path and must not grow. New schema changes go into Alembic
+revisions under backend/alembic/versions/ (see backend/alembic/README.md).
+run_alembic_upgrade() at the bottom of this file applies them on startup.
 """
 import logging
+from pathlib import Path
+
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
@@ -968,7 +970,7 @@ def widen_monitored_hosts_source(db: Session):
             AND column_name='source'
         """)).fetchone()
 
-        # character_maximum_length is NULL for TEXT — any limit means migrate
+        # character_maximum_length is NULL for TEXT - any limit means migrate
         if result and result[0] is not None:
             logger.info(f"Widening monitored_hosts.source from VARCHAR({result[0]}) to TEXT...")
             db.execute(text("""
@@ -1262,3 +1264,26 @@ def ensure_spam_suppressions_table(db: Session):
         logger.error(f"Error ensuring spam_suppressions table: {e}")
         db.rollback()
         raise
+
+
+def run_alembic_upgrade():
+    """
+    Bring the schema to the latest Alembic revision (the forward migration
+    path from v2.6.4 on). Runs after the frozen legacy migrations above.
+    """
+    from alembic import command
+    from alembic.config import Config as AlembicConfig
+
+    # backend/alembic.ini locally, /app/alembic.ini in the container
+    ini_path = Path(__file__).resolve().parent.parent / "alembic.ini"
+    if not ini_path.exists():
+        raise FileNotFoundError(f"alembic.ini not found at {ini_path}")
+
+    cfg = AlembicConfig(str(ini_path))
+    cfg.set_main_option("script_location", str(ini_path.parent / "alembic"))
+    # ConfigParser treats % as interpolation - escape it (passwords may contain %)
+    from .config import settings
+    cfg.set_main_option("sqlalchemy.url", settings.database_url.replace("%", "%%"))
+
+    command.upgrade(cfg, "head")
+    logger.info("Alembic schema is up to date")

@@ -2,6 +2,8 @@
 Configuration management using Pydantic Settings
 """
 import os
+import re
+import ipaddress
 from pydantic_settings import BaseSettings
 from pydantic import Field, validator, field_validator, model_validator
 from typing import List, Optional, Any, Dict
@@ -21,6 +23,63 @@ ALL_RAW_LOG_SERVICES = [
     'acme', 'api', 'autodiscover', 'dovecot', 'netfilter',
     'postfix', 'ratelimited', 'rspamd-history', 'sogo', 'watchdog'
 ]
+
+_HOSTNAME_RE = re.compile(
+    r'^(?=.{1,253}$)[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?'
+    r'(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*$'
+)
+
+
+def _validate_manual_hosts_value(v: str, field_name: str) -> str:
+    """Every entry must be an IPv4/IPv6 literal or a plausible hostname."""
+    if not v or not v.strip():
+        return ''
+    entries = [e.strip() for e in v.split(',') if e.strip()]
+    normalized = []
+    invalid = []
+    for entry in entries:
+        try:
+            ipaddress.ip_address(entry)
+            normalized.append(entry)
+            continue
+        except ValueError:
+            pass
+        lowered = entry.lower()
+        if _HOSTNAME_RE.match(lowered):
+            normalized.append(lowered)
+        else:
+            invalid.append(entry)
+    if invalid:
+        raise ValueError(
+            f"{field_name} contains invalid entries: {', '.join(invalid)}. "
+            "Provide a comma-separated list of IPv4/IPv6 addresses or hostnames."
+        )
+    return ','.join(normalized)
+
+
+def _lenient_manual_hosts_list(value: str, setting_name: str) -> List[str]:
+    """Use-time parsing: invalid entries are skipped with a warning
+    (the field validator rejects them on save; this protects against
+    values that bypassed validation, e.g. old DB overrides)."""
+    if not value:
+        return []
+    result = []
+    for entry in value.split(','):
+        entry = entry.strip()
+        if not entry:
+            continue
+        try:
+            ipaddress.ip_address(entry)
+            result.append(entry)
+            continue
+        except ValueError:
+            pass
+        lowered = entry.lower()
+        if _HOSTNAME_RE.match(lowered):
+            result.append(lowered)
+        else:
+            logger.warning(f"Ignoring invalid entry in {setting_name}: {entry}")
+    return result
 
 class Settings(BaseSettings):
     """Application settings"""
@@ -366,6 +425,184 @@ class Settings(BaseSettings):
         description='Relay mode - send emails without authentication (for local relay servers)'
     )
 
+    # Webhook Notifications
+    webhook_enabled: bool = Field(
+        default=False,
+        env='WEBHOOK_ENABLED',
+        description='Enable webhook notifications (sent alongside email alerts)'
+    )
+    webhook_type: str = Field(
+        default='generic',
+        env='WEBHOOK_TYPE',
+        description='Webhook format: slack, discord, telegram, ntfy, gotify, or generic (JSON POST)'
+    )
+    webhook_url: Optional[str] = Field(
+        default=None,
+        env='WEBHOOK_URL',
+        description='Webhook URL. Telegram: https://api.telegram.org/bot<TOKEN>/sendMessage; ntfy: topic URL; gotify: https://host/message?token=<token>'
+    )
+    webhook_telegram_chat_id: Optional[str] = Field(
+        default=None,
+        env='WEBHOOK_TELEGRAM_CHAT_ID',
+        description='Telegram chat ID (only used when webhook_type=telegram)'
+    )
+
+    # Anomaly Detection (compromised mailbox / auth attack alerts)
+    anomaly_detection_enabled: bool = Field(
+        default=False,
+        env='ANOMALY_DETECTION_ENABLED',
+        description='Enable anomaly detection: outbound volume spikes per mailbox and auth-failure bursts'
+    )
+    anomaly_check_interval: int = Field(
+        default=15,
+        env='ANOMALY_CHECK_INTERVAL',
+        description='Minutes between anomaly detection runs'
+    )
+    anomaly_volume_multiplier: float = Field(
+        default=5.0,
+        env='ANOMALY_VOLUME_MULTIPLIER',
+        description='Alert when a mailbox sends more than this multiple of its hourly baseline'
+    )
+    anomaly_volume_min_messages: int = Field(
+        default=30,
+        env='ANOMALY_VOLUME_MIN_MESSAGES',
+        description='Minimum messages in the window before a volume spike can alert (noise floor)'
+    )
+    anomaly_baseline_days: int = Field(
+        default=7,
+        env='ANOMALY_BASELINE_DAYS',
+        description='Days of history used to compute the per-mailbox sending baseline'
+    )
+    anomaly_auth_failure_threshold: int = Field(
+        default=20,
+        env='ANOMALY_AUTH_FAILURE_THRESHOLD',
+        description='Alert when a username accumulates this many auth failures within the check window'
+    )
+    anomaly_alert_cooldown_hours: int = Field(
+        default=6,
+        env='ANOMALY_ALERT_COOLDOWN_HOURS',
+        description='Suppress repeat alerts for the same mailbox/type within this many hours'
+    )
+
+    # DNS change alerts
+    dns_change_alerts_enabled: bool = Field(
+        default=True,
+        env='DNS_CHANGE_ALERTS_ENABLED',
+        description='Alert when a domain SPF, DKIM, DMARC or TLSA record changes (sent to email and notification destinations)'
+    )
+
+    # Blacklist (RBL) checks
+    blacklist_dns_servers: str = Field(
+        default='',
+        env='BLACKLIST_DNS_SERVERS',
+        description='Comma-separated DNS resolvers for blacklist (RBL) lookups. Spamhaus rejects queries from public resolvers, so this should be your own recursive resolver (in mailcow: 172.22.1.254). Leave empty to use the container resolver.'
+    )
+
+    # Blacklist monitoring sources
+    blacklist_source_server_ip: bool = Field(
+        default=True,
+        env='BLACKLIST_SOURCE_SERVER_IP',
+        description='Monitor the auto-detected WAN IP (from the mailcow status API) on spam blacklists (RBLs). Disable when outbound mail leaves through a relay host.'
+    )
+    blacklist_source_transports: bool = Field(
+        default=True,
+        env='BLACKLIST_SOURCE_TRANSPORTS',
+        description='Monitor the public IPs resolved from active mailcow transport nexthops on spam blacklists.'
+    )
+    blacklist_source_relayhosts: bool = Field(
+        default=True,
+        env='BLACKLIST_SOURCE_RELAYHOSTS',
+        description='Monitor the public IPs resolved from active mailcow relayhosts on spam blacklists.'
+    )
+    blacklist_source_manual_hosts: str = Field(
+        default='',
+        env='BLACKLIST_SOURCE_MANUAL_HOSTS',
+        description='Comma-separated IPv4/IPv6 addresses and hostnames to monitor on spam blacklists in addition to the sources above. May also be hosts unrelated to this mailcow server.'
+    )
+
+    # Domain SPF check sources (which IPs must pass each domain SPF record)
+    domain_spf_source_server_ip: bool = Field(
+        default=True,
+        env='DOMAIN_SPF_SOURCE_SERVER_IP',
+        description='SPF checks validate the auto-detected WAN IP against each domain SPF record. Disable when outbound mail leaves through a relay host.'
+    )
+    domain_spf_source_transports: bool = Field(
+        default=False,
+        env='DOMAIN_SPF_SOURCE_TRANSPORTS',
+        description='SPF checks also validate the public IPs resolved from active mailcow transport nexthops against each domain SPF record.'
+    )
+    domain_spf_source_relayhosts: bool = Field(
+        default=False,
+        env='DOMAIN_SPF_SOURCE_RELAYHOSTS',
+        description='SPF checks also validate the public IPs resolved from active mailcow relayhosts against each domain SPF record.'
+    )
+    domain_spf_source_manual_hosts: str = Field(
+        default='',
+        env='DOMAIN_SPF_SOURCE_MANUAL_HOSTS',
+        description='Comma-separated IPv4/IPv6 addresses and hostnames that must pass each domain SPF check, e.g. the relay IP outbound mail leaves from. Outbound sending addresses only: every entry must pass the SPF check, so do not add addresses that never send mail.'
+    )
+    domain_spf_source_dmarc_history: bool = Field(
+        default=False,
+        env='DOMAIN_SPF_SOURCE_DMARC_HISTORY',
+        description='SPF checks also validate source IPs observed with a passing SPF result in the last 30 days of imported DMARC aggregate reports for the domain. Caution: with relaxed alignment, an ESP subdomain IP can appear as an aligned pass without being in the domain own SPF record, causing a false warning.'
+    )
+
+    @field_validator('blacklist_source_manual_hosts', 'domain_spf_source_manual_hosts', mode='after')
+    @classmethod
+    def validate_manual_hosts(cls, v: str, info) -> str:
+        return _validate_manual_hosts_value(v, info.field_name)
+
+    # SMTP Abuse Protection (automatic enforcement)
+    # Detection alerts (above) never act on their own; this is the enforcement
+    # layer: a hard outbound ceiling that disables SMTP for the mailbox.
+    smtp_abuse_enabled: bool = Field(
+        default=False,
+        env='SMTP_ABUSE_ENABLED',
+        description='Automatically disable SMTP for mailboxes exceeding the outbound threshold (requires a Read-Write mailcow API key)'
+    )
+    smtp_abuse_threshold: int = Field(
+        default=100,
+        env='SMTP_ABUSE_THRESHOLD',
+        description='Outbound messages allowed per mailbox within the rolling window before SMTP is disabled'
+    )
+    smtp_abuse_window_minutes: int = Field(
+        default=60,
+        env='SMTP_ABUSE_WINDOW_MINUTES',
+        description='Rolling window (minutes) used to count outbound messages for abuse protection'
+    )
+    smtp_abuse_revoke_app_passwords: bool = Field(
+        default=True,
+        env='SMTP_ABUSE_REVOKE_APP_PASSWORDS',
+        description='Also revoke the mailbox app passwords when SMTP is disabled (recommended: a compromised mailbox usually sends via an app password)'
+    )
+    smtp_abuse_unblock_grace_minutes: int = Field(
+        default=60,
+        env='SMTP_ABUSE_UNBLOCK_GRACE_MINUTES',
+        description='After an operator re-enables SMTP, do not auto-block that mailbox again for this many minutes'
+    )
+    smtp_abuse_help_address: str = Field(
+        default='',
+        env='SMTP_ABUSE_HELP_ADDRESS',
+        description='Support address included in the notification sent to a blocked mailbox'
+    )
+
+    # DMARC Insights (policy recommendations)
+    dmarc_insights_window_days: int = Field(
+        default=28,
+        env='DMARC_INSIGHTS_WINDOW_DAYS',
+        description='Days of DMARC report data used for policy recommendations'
+    )
+    dmarc_insights_pass_threshold: float = Field(
+        default=99.5,
+        env='DMARC_INSIGHTS_PASS_THRESHOLD',
+        description='Minimum DMARC pass rate (%) before recommending a stricter policy'
+    )
+    dmarc_insights_min_volume: int = Field(
+        default=100,
+        env='DMARC_INSIGHTS_MIN_VOLUME',
+        description='Minimum reported messages in the window before recommending a stricter policy'
+    )
+
     # Global Admin Email
     admin_email: Optional[str] = Field(
         default=None,
@@ -415,6 +652,11 @@ class Settings(BaseSettings):
     )
 
     # Rspamd Integration
+    rspamd_url: str = Field(
+        default='',
+        env='RSPAMD_URL',
+        description="Address of the Rspamd controller. Leave empty to reach it through mailcow (MAILCOW_URL/rspamd) - correct for most setups, including remote deployments. Only set it when this app has direct network access to Rspamd and the path through mailcow fails, e.g. http://rspamd-mailcow:11334 on the same Docker network."
+    )
     rspamd_password: Optional[str] = Field(
         default=None,
         env='RSPAMD_PASSWORD',
@@ -555,6 +797,16 @@ class Settings(BaseSettings):
         return [e.strip().lower() for e in self.blacklist_emails.split(',') if e.strip()]
     
     @property
+    def blacklist_source_manual_hosts_list(self) -> List[str]:
+        """Manually configured blacklist monitoring hosts (IPs and hostnames)."""
+        return _lenient_manual_hosts_list(self.blacklist_source_manual_hosts, 'blacklist_source_manual_hosts')
+
+    @property
+    def domain_spf_source_manual_hosts_list(self) -> List[str]:
+        """Manually configured SPF check hosts (IPs and hostnames)."""
+        return _lenient_manual_hosts_list(self.domain_spf_source_manual_hosts, 'domain_spf_source_manual_hosts')
+
+    @property
     def raw_logs_services_list(self) -> List[str]:
         """Parse raw_logs_services into a list of enabled service names.
         Supports 'all' as a shortcut for all services."""
@@ -586,6 +838,11 @@ class Settings(BaseSettings):
         """Check if Rspamd integration is configured (password set)"""
         return self.rspamd_password is not None and bool(self.rspamd_password)
     
+    @property
+    def notification_webhook_configured(self) -> bool:
+        """Check if webhook notifications are properly configured"""
+        return bool(self.webhook_enabled and self.webhook_url)
+
     @property
     def notification_smtp_configured(self) -> bool:
         """Check if SMTP is properly configured for notifications"""
@@ -639,7 +896,13 @@ class Settings(BaseSettings):
 
 def _get_editable_setting_keys() -> frozenset:
     """All Settings field names that are editable from UI (excludes DB keys, UI-edit flag, and deprecated/legacy fields)."""
-    excluded = _DB_ONLY_KEYS | {_EDIT_VIA_UI_FLAG_KEY, "auth_enabled", "tz", "app_port"}  # auth_enabled deprecated, tz legacy, app_port is Docker-level
+    # auth_enabled deprecated, tz legacy, app_port is Docker-level.
+    # webhook_* are legacy single-webhook settings, superseded by the
+    # notification channels UI (they are migrated into a channel on upgrade).
+    excluded = _DB_ONLY_KEYS | {
+        _EDIT_VIA_UI_FLAG_KEY, "auth_enabled", "tz", "app_port",
+        "webhook_enabled", "webhook_type", "webhook_url", "webhook_telegram_chat_id",
+    }
     keys = set(Settings.model_fields.keys()) - excluded
     return frozenset(keys)
 
@@ -680,7 +943,7 @@ def _is_env_key_set(key: str) -> bool:
 def get_env_locked_keys() -> frozenset:
     """Return the set of editable keys where an ENV variable is explicitly set.
 
-    These keys are "locked" — their effective value comes from ENV, not DB.
+    These keys are "locked" - their effective value comes from ENV, not DB.
     """
     return frozenset(k for k in EDITABLE_SETTING_KEYS if _is_env_key_set(k))
 

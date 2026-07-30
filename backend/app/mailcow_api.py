@@ -5,6 +5,7 @@ Handles authentication and API calls to mailcow instance
 import asyncio
 import httpx
 import logging
+from urllib.parse import quote
 from typing import List, Dict, Any, Optional
 from datetime import datetime
 from tenacity import retry, stop_after_attempt, wait_exponential
@@ -357,7 +358,7 @@ class MailcowAPI:
             
             if isinstance(data, dict):
                 # Some services return a dict when no logs exist (e.g., {"type":"error"})
-                # This is normal — not all services have logs on every mailcow instance
+                # This is normal - not all services have logs on every mailcow instance
                 logger.debug(f"Service '{service}' returned dict (no logs available), skipping")
                 return []
             
@@ -656,7 +657,38 @@ class MailcowAPI:
         except MailcowAPIError as e:
             logger.error(f"Failed to fetch mailboxes: {e}")
             return []
-    
+
+    async def edit_mailbox(self, mailbox: str, attributes: Dict[str, Any]) -> Any:
+        """
+        Update mailbox attributes (Read-Write API key required).
+
+        Args:
+            mailbox: Mailbox address
+            attributes: Attributes to set, e.g. {"smtp_access": "0"}
+        """
+        return await self._make_rw_request(
+            "/api/v1/edit/mailbox",
+            method="POST",
+            json={"attr": attributes, "items": [mailbox]}
+        )
+
+    async def get_app_passwords(self, mailbox: str) -> List[Dict[str, Any]]:
+        """List app passwords for a mailbox."""
+        data = await self._make_request(
+            f"/api/v1/get/app-passwd/all/{quote(mailbox, safe='@')}"
+        )
+        return data if isinstance(data, list) else []
+
+    async def delete_app_passwords(self, ids: List[str]) -> Any:
+        """Delete app passwords by id (Read-Write API key required)."""
+        if not ids:
+            return []
+        return await self._make_rw_request(
+            "/api/v1/delete/app-passwd",
+            method="POST",
+            json=ids
+        )
+
     async def get_aliases(self) -> List[Dict[str, Any]]:
         """
         Fetch all aliases from mailcow
@@ -1055,7 +1087,20 @@ class MailcowAPI:
                 "Set the Rspamd UI password in Settings to use Rspamd map features."
             )
         
-        url = f"{self.base_url}{endpoint}"
+        # By default Rspamd is reached through the mailcow proxy
+        # (MAILCOW_URL/rspamd/...). Some deployments - typically when this app
+        # runs outside mailcow's Docker network, behind another reverse proxy -
+        # get a 302 from that proxy before the Password header is ever checked.
+        # RSPAMD_URL points straight at the Rspamd controller instead.
+        rspamd_base = (settings.rspamd_url or '').strip().rstrip('/')
+        if rspamd_base:
+            direct_endpoint = endpoint
+            if direct_endpoint.startswith('/rspamd'):
+                direct_endpoint = direct_endpoint[len('/rspamd'):] or '/'
+            url = f"{rspamd_base}{direct_endpoint}"
+        else:
+            url = f"{self.base_url}{endpoint}"
+
         headers = {"Password": rspamd_pw}
         if extra_headers:
             headers.update(extra_headers)
@@ -1071,6 +1116,12 @@ class MailcowAPI:
                 return response
                 
             except httpx.HTTPStatusError as e:
+                if e.response.status_code in (301, 302, 303, 307, 308) and not rspamd_base:
+                    raise MailcowAPIError(
+                        f"Rspamd API request was redirected ({e.response.status_code}) by the mailcow proxy "
+                        "before authentication. Set RSPAMD_URL to reach the Rspamd controller directly, "
+                        "e.g. http://rspamd-mailcow:11334"
+                    )
                 raise MailcowAPIError(f"Rspamd API request failed with status {e.response.status_code}")
             except httpx.RequestError as e:
                 raise MailcowAPIError(f"Rspamd API request failed: {str(e)}")

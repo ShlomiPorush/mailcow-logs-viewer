@@ -103,11 +103,102 @@ These settings **must** be configured in your `.env` file:
 
 ---
 
+## Notification Destinations
+
+Alerts (blacklist listings, DMARC processing errors, security alerts) are delivered by email and to any number of **notification destinations** - Slack, Discord, Telegram, ntfy, Gotify, or a custom JSON endpoint.
+
+Destinations are **configured in the web UI**, not through environment variables: go to **Settings -> Notifications -> Add destination**, pick the service, and fill in only the fields that service needs (Telegram asks for a bot token and chat ID, ntfy for a server and topic, Slack for its incoming-webhook URL). The endpoint URL is assembled for you. Each destination has a **Send test** button, can be enabled/disabled individually, and shows whether the last delivery succeeded.
+
+You can add as many destinations as you like, and choose **which alerts each one receives**:
+
+| Alert type | Sent when |
+|------------|-----------|
+| **Security** | A mailbox looks compromised (outbound spike), an authentication attack is detected, or SMTP is disabled by abuse protection |
+| **IP blacklist** | Your server IP appears on a spam blacklist, or is no longer listed |
+| **DNS record changes** | A domain's SPF, DKIM, DMARC or TLSA record changed |
+| **DMARC processing errors** | A DMARC report could not be imported or parsed |
+
+A destination with all types ticked receives everything. Destinations created before this existed keep receiving all alerts.
+
+| Setting | Where | Description |
+|---------|-------|-------------|
+| Destinations | Settings -> Notifications | Add/edit/remove Slack, Discord, Telegram, ntfy, Gotify or custom webhook targets |
+| `ADMIN_EMAIL` | ENV or Settings | Email address for general alerts (see Admin & Notification Configuration above) |
+
+> **Upgrading from the old single-webhook settings?** Nothing to do. `WEBHOOK_ENABLED`, `WEBHOOK_TYPE`, `WEBHOOK_URL` and `WEBHOOK_TELEGRAM_CHAT_ID` are migrated automatically into a destination on first start, and are not used afterwards.
+
+---
+
+## Security Monitoring & Abuse Protection
+
+Two complementary layers for detecting and stopping a compromised mailbox:
+
+- **Anomaly detection** - *alerts only*. Compares each mailbox against **its own** recent sending baseline, so it catches an account takeover even at low volumes. Never takes action on its own.
+- **SMTP abuse protection** - *acts*. Applies a **hard** outbound limit and disables SMTP for a mailbox that crosses it.
+
+Both write to the same security alert feed (dashboard banner) and notify through email + webhook.
+
+### Anomaly Detection
+
+| Variable | Type | Default | Description |
+|----------|------|---------|-------------|
+| `ANOMALY_DETECTION_ENABLED` | boolean | `false` | Enable anomaly detection (outbound volume spikes and authentication-failure bursts) |
+| `ANOMALY_CHECK_INTERVAL` | integer | `15` | Minutes between detection runs. Also the length of the window each run examines |
+| `ANOMALY_VOLUME_MULTIPLIER` | float | `5.0` | Alert when a mailbox's current sending rate exceeds this multiple of its own baseline (e.g. `5.0` = five times its normal rate) |
+| `ANOMALY_VOLUME_MIN_MESSAGES` | integer | `30` | Noise floor: a mailbox must send at least this many messages in the window before a spike can alert |
+| `ANOMALY_BASELINE_DAYS` | integer | `7` | Days of history used to compute each mailbox's normal sending rate |
+| `ANOMALY_AUTH_FAILURE_THRESHOLD` | integer | `20` | Alert when a username accumulates this many authentication failures within the window (brute-force / credential stuffing) |
+| `ANOMALY_ALERT_COOLDOWN_HOURS` | integer | `6` | Suppress repeat alerts for the same mailbox and alert type within this many hours |
+
+> Alerts appear as a banner on the Dashboard and can be dismissed there. No mailbox is ever blocked by this feature.
+
+### SMTP Abuse Protection
+
+Automatically disables **sending** for a mailbox that exceeds a hard outbound limit - the usual signature of a compromised account. **Receiving (IMAP) is never affected**, so the user keeps access to their mail. Manage blocked mailboxes and the whitelist under **Security → Abuse Protection**.
+
+| Variable | Type | Default | Description |
+|----------|------|---------|-------------|
+| `SMTP_ABUSE_ENABLED` | boolean | `false` | Enable automatic SMTP blocking |
+| `SMTP_ABUSE_THRESHOLD` | integer | `100` | Outbound messages a mailbox may send within the rolling window before SMTP is disabled |
+| `SMTP_ABUSE_WINDOW_MINUTES` | integer | `60` | Length of the rolling window in minutes |
+| `SMTP_ABUSE_REVOKE_APP_PASSWORDS` | boolean | `true` | Also revoke the mailbox's app passwords when blocking (a compromised mailbox usually sends via an app password) |
+| `SMTP_ABUSE_UNBLOCK_GRACE_MINUTES` | integer | `60` | After an operator re-enables SMTP, do not auto-block that mailbox again for this many minutes. Prevents the mailbox from being re-blocked immediately while old messages are still inside the rolling window |
+| `SMTP_ABUSE_HELP_ADDRESS` | string | (empty) | Support address included in the notification sent to the blocked mailbox (falls back to `ADMIN_EMAIL`) |
+
+> **Prerequisites:**
+> - `MAILCOW_API_KEY_RW` - **required**; blocking uses the mailcow edit API. Without it the feature stays inactive
+> - Whitelist mailboxes that legitimately send in bursts (newsletters, ticketing, monitoring) under Security → Abuse Protection
+> - Set `SMTP_ENABLED` / `ADMIN_EMAIL` (or a webhook) to be notified when a mailbox is blocked
+>
+> **Tip:** start with a threshold well above your busiest legitimate mailbox's hourly volume, watch the Security page for a few days, then tighten it.
+
+---
+
 ## Blacklist Configuration
 
 | Variable | Type | Default | Description |
 |----------|------|---------|-------------|
+| `DNS_CHANGE_ALERTS_ENABLED` | boolean | `true` | Alert when a domain's SPF, DKIM, DMARC or TLSA (DANE) record changes. The alert names the domain and shows the old and new value, so you can update the records at your registrar. A failed DNS lookup is never treated as a change, so a temporary resolver problem cannot cause a false alarm |
+| `BLACKLIST_DNS_SERVERS` | string | (empty) | DNS resolvers used for IP blacklist (RBL) lookups, comma-separated. **Spamhaus rejects queries that arrive through public resolvers** (Google, Cloudflare, Quad9 and all DoH endpoints) and answers with a `127.255.255.x` rejection code instead of a real result. Point this at your own recursive resolver - in a mailcow deployment: `172.22.1.254` (unbound-mailcow). Leave empty to use the container's own resolver, which is correct in most setups |
+| `BLACKLIST_SOURCE_SERVER_IP` | boolean | `true` | Monitor the auto-detected WAN IP (reported by the mailcow status API) on spam blacklists (RBLs). Set to `false` when outbound mail goes through a relay host: the auto-detected WAN entry is deactivated (not deleted) and only the other enabled sources are monitored |
+| `BLACKLIST_SOURCE_TRANSPORTS` | boolean | `true` | Monitor the public IPs of active mailcow transports on spam blacklists. Each transport nexthop is resolved to **all** of its public IPs, so relay pools with several addresses are fully covered |
+| `BLACKLIST_SOURCE_RELAYHOSTS` | boolean | `true` | Monitor the public IPs of active mailcow relayhosts (sender-dependent transports) on spam blacklists |
+| `BLACKLIST_SOURCE_MANUAL_HOSTS` | string | (empty) | Additional hosts to monitor on spam blacklists, comma-separated, e.g. `203.0.113.10,2001:db8::10,relay.example.com`. Accepts IPv4/IPv6 addresses and hostnames (a hostname is resolved to all of its public IPs, source `config`). Monitored **in addition** to the sources above - these may also be hosts unrelated to this mailcow server. Invalid entries are rejected on save |
 | `BLACKLIST_EMAILS` | string | (empty) | Comma-separated list of email addresses to hide from logs (no spaces). These emails will NOT be stored in the database. Use cases: BCC addresses that receive all outbound mail, monitoring/health check addresses, internal system addresses. Example: `bcc-archive@example.com,monitor@example.com` |
+
+---
+
+## Domain SPF Check Configuration
+
+Which sending IPs must pass each domain's SPF record on the Domains page. With a relay setup the relay IPs matter, not the auto-detected WAN IP.
+
+| Variable | Type | Default | Description |
+|----------|------|---------|-------------|
+| `DOMAIN_SPF_SOURCE_SERVER_IP` | boolean | `true` | Validate the auto-detected WAN IP against each domain's SPF record. Set to `false` when outbound mail leaves through a relay host and the WAN IP is not supposed to be in your SPF records |
+| `DOMAIN_SPF_SOURCE_TRANSPORTS` | boolean | `false` | Also validate the public IPs resolved from active mailcow transport nexthops against each domain's SPF record |
+| `DOMAIN_SPF_SOURCE_RELAYHOSTS` | boolean | `false` | Also validate the public IPs resolved from active mailcow relayhosts against each domain's SPF record |
+| `DOMAIN_SPF_SOURCE_MANUAL_HOSTS` | string | (empty) | Additional hosts that must pass each domain's SPF check, comma-separated. Accepts IPv4/IPv6 addresses and hostnames. **Outbound sending addresses only** - every entry must pass the SPF check, so do not add addresses that never send mail (such as an inbound-only MX). Invalid entries are rejected on save |
+| `DOMAIN_SPF_SOURCE_DMARC_HISTORY` | boolean | `false` | Also validate source IPs observed with a passing SPF result in the last 30 days of imported DMARC aggregate reports for each domain (up to 20 IPs per domain). Caution: with relaxed SPF alignment, an IP sending from an ESP subdomain can appear as an aligned pass without being listed in the domain's own SPF record, which then shows up as a false warning |
 
 ---
 
@@ -119,6 +210,18 @@ These settings **must** be configured in your `.env` file:
 | `DMARC_MANUAL_UPLOAD_ENABLED` | boolean | `true` | Allow manual upload of DMARC reports via UI |
 | `DMARC_ALLOW_REPORT_DELETE` | boolean | `false` | Allow deleting DMARC/TLS reports from the UI |
 | `DMARC_ERROR_EMAIL` | string | (empty) | Email address for DMARC error notifications (defaults to `ADMIN_EMAIL` if not set) |
+
+### DMARC Insights (Policy Recommendations)
+
+Turns collected DMARC report data into advice: when a domain's pass rate and volume are healthy under a lax policy, the DMARC page suggests tightening it (`p=none` → `p=quarantine` → `p=reject`), and it flags source IPs that only recently started sending for a domain **and** are failing DMARC (possible spoofing).
+
+| Variable | Type | Default | Description |
+|----------|------|---------|-------------|
+| `DMARC_INSIGHTS_WINDOW_DAYS` | integer | `28` | Days of DMARC report data used for recommendations |
+| `DMARC_INSIGHTS_PASS_THRESHOLD` | float | `99.5` | Minimum DMARC pass rate (%) before a stricter policy is recommended |
+| `DMARC_INSIGHTS_MIN_VOLUME` | integer | `100` | Minimum reported messages in the window before any recommendation is made (avoids advice based on a handful of messages) |
+
+> Read-only: this feature never changes DNS records - it only shows recommendations on the DMARC page.
 
 ### DMARC IMAP Auto-Import Configuration
 
@@ -174,6 +277,7 @@ Settings for the background raw log collector that powers the Logs page. Logs ar
 
 | Variable | Type | Default | Description |
 |----------|------|---------|-------------|
+| `RSPAMD_URL` | string | (empty) | Address of the Rspamd controller. **Leave empty** to reach Rspamd through mailcow itself (`MAILCOW_URL/rspamd`) - this is correct for most setups, including when this app runs on a different server, because mailcow's own web server proxies the request. Only set it when this app has **direct network access** to the Rspamd controller *and* the path through mailcow fails - for example a reverse proxy in front of mailcow that redirects (302) `/rspamd` before the `Password` header is evaluated. Value depends on where the app runs: on the same Docker network as mailcow use `http://rspamd-mailcow:11334`; from another host you would first have to expose that port, which mailcow does not do by default |
 | `RSPAMD_PASSWORD` | string | (empty) | Rspamd UI/API password for reading and writing Rspamd map data. Found in mailcow's `mailcow.conf` as `RSPAMD_PASSWORD` or via the mailcow admin UI. Required for the Spam Filter maps editor |
 
 ---

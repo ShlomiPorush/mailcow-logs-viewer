@@ -145,7 +145,7 @@ async def _cleanup_queue_for_email(email: str):
                 f"for suppressed address: {email}"
             )
     except Exception as e:
-        # Queue cleanup is best-effort — don't fail the suppression
+        # Queue cleanup is best-effort - don't fail the suppression
         logger.warning(f"[SUPPRESSION] Queue cleanup failed for {email}: {e}")
 
 

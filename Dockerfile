@@ -20,6 +20,10 @@ RUN pip install --no-cache-dir --upgrade pip && \
 # Copy backend application code
 COPY backend/app/ /app/app/
 
+# Copy Alembic migrations (applied on startup; CLI usable inside the container)
+COPY backend/alembic.ini /app/alembic.ini
+COPY backend/alembic/ /app/alembic/
+
 # Copy frontend files
 COPY frontend/ /app/frontend/
 

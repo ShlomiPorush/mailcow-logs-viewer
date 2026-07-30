@@ -54,7 +54,8 @@ def _get_raw_logs_job_status(job_key: str, field: str, enabled: bool):
 # Keys whose values are masked in GET /api/settings (never returned in plain text)
 _SENSITIVE_SETTING_KEYS = frozenset({
     "mailcow_api_key", "mailcow_api_key_rw", "auth_password", "oauth2_client_secret", "smtp_password",
-    "dmarc_imap_password", "session_secret_key", "maxmind_license_key", "rspamd_password"
+    "dmarc_imap_password", "session_secret_key", "maxmind_license_key", "rspamd_password",
+    "webhook_url",  # may embed bot tokens (Telegram/Gotify/Slack)
 })
 MASK_PLACEHOLDER = "********"
 
@@ -326,12 +327,12 @@ def get_settings_info(db: Session = Depends(get_db)):
                     "error": jobs_status.get('blacklist_check', {}).get('error') if settings.is_feature_enabled('blacklist') else None
                 },
                 "sync_transports": {
-                    "interval": "6 hours" if settings.is_feature_enabled('domains') else "Disabled (feature off)",
+                    "interval": "6 hours" if settings.is_feature_enabled('blacklist') else "Disabled (feature off)",
                     "description": "Sync Transports & Relayhosts from mailcow",
-                    "feature_disabled": not settings.is_feature_enabled('domains'),
-                    "status": jobs_status.get('sync_transports', {}).get('status', 'unknown') if settings.is_feature_enabled('domains') else 'disabled',
-                    "last_run": format_datetime_utc(jobs_status.get('sync_transports', {}).get('last_run')) if settings.is_feature_enabled('domains') else None,
-                    "error": jobs_status.get('sync_transports', {}).get('error') if settings.is_feature_enabled('domains') else None
+                    "feature_disabled": not settings.is_feature_enabled('blacklist'),
+                    "status": jobs_status.get('sync_transports', {}).get('status', 'unknown') if settings.is_feature_enabled('blacklist') else 'disabled',
+                    "last_run": format_datetime_utc(jobs_status.get('sync_transports', {}).get('last_run')) if settings.is_feature_enabled('blacklist') else None,
+                    "error": jobs_status.get('sync_transports', {}).get('error') if settings.is_feature_enabled('blacklist') else None
                 },
                 "send_weekly_summary": {
                     "schedule": "Monday at 9:00 AM" if settings.enable_weekly_summary else "Disabled",
@@ -404,6 +405,22 @@ def get_settings_info(db: Session = Depends(get_db)):
                     "status": jobs_status.get('cleanup_deferred_queue', {}).get('status', 'idle') if (settings.is_feature_enabled('spam-filter') and settings.suppression_enabled and settings.queue_cleanup_enabled) else 'disabled',
                     "last_run": format_datetime_utc(jobs_status.get('cleanup_deferred_queue', {}).get('last_run')) if (settings.is_feature_enabled('spam-filter') and settings.suppression_enabled and settings.queue_cleanup_enabled) else None,
                     "error": jobs_status.get('cleanup_deferred_queue', {}).get('error') if (settings.is_feature_enabled('spam-filter') and settings.suppression_enabled and settings.queue_cleanup_enabled) else None
+                },
+                "anomaly_detection": {
+                    "interval": f"{settings.anomaly_check_interval} minutes" if settings.anomaly_detection_enabled else "Disabled (anomaly detection off)",
+                    "description": "Detects outbound volume spikes and auth-failure bursts, and raises security alerts",
+                    "enabled": settings.anomaly_detection_enabled,
+                    "status": jobs_status.get('anomaly_detection', {}).get('status', 'idle') if settings.anomaly_detection_enabled else 'disabled',
+                    "last_run": format_datetime_utc(jobs_status.get('anomaly_detection', {}).get('last_run')) if settings.anomaly_detection_enabled else None,
+                    "error": jobs_status.get('anomaly_detection', {}).get('error') if settings.anomaly_detection_enabled else None
+                },
+                "smtp_abuse": {
+                    "interval": "1 minute" if (settings.smtp_abuse_enabled and mailcow_api.has_rw_key) else ("Disabled (abuse protection off)" if not settings.smtp_abuse_enabled else "Disabled (no RW API key)"),
+                    "description": f"Disables SMTP for mailboxes sending > {settings.smtp_abuse_threshold} messages / {settings.smtp_abuse_window_minutes}m",
+                    "enabled": settings.smtp_abuse_enabled and mailcow_api.has_rw_key,
+                    "status": jobs_status.get('smtp_abuse', {}).get('status', 'idle') if (settings.smtp_abuse_enabled and mailcow_api.has_rw_key) else 'disabled',
+                    "last_run": format_datetime_utc(jobs_status.get('smtp_abuse', {}).get('last_run')) if (settings.smtp_abuse_enabled and mailcow_api.has_rw_key) else None,
+                    "error": jobs_status.get('smtp_abuse', {}).get('error') if (settings.smtp_abuse_enabled and mailcow_api.has_rw_key) else None
                 }
             },
             "smtp_configuration": {
@@ -475,7 +492,7 @@ def get_editable_settings(db: Session = Depends(get_db)):
     """
     if settings.edit_settings_via_ui_enabled:
         reload_settings(db)
-    # Keys where ENV is explicitly set — these are locked (ENV wins over DB).
+    # Keys where ENV is explicitly set - these are locked (ENV wins over DB).
     env_locked = sorted(get_env_locked_keys()) if settings.edit_settings_via_ui_enabled else []
     return {
         "settings_edit_via_ui_enabled": settings.edit_settings_via_ui_enabled,
@@ -544,7 +561,7 @@ def update_settings(body: Dict[str, Any], db: Session = Depends(get_db)):
                 status_code=400,
                 detail="Credential verification failed. The username and password you entered do not match the configured credentials."
             )
-        logger.info("Basic Auth credential verification passed — enabling authentication")
+        logger.info("Basic Auth credential verification passed - enabling authentication")
 
     # Prevent clearing the password while Basic Auth is (or will be) enabled
     _basic_auth_active = (
@@ -589,11 +606,29 @@ def update_settings(body: Dict[str, Any], db: Session = Depends(get_db)):
         Settings.model_validate(current)
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Validation error: {e}")
+    prev_sync_sources = (settings.blacklist_source_transports, settings.blacklist_source_relayhosts)
     save_config_overrides_to_db(db, allowed)
     reload_settings(db)
     mailcow_api.reload_config()
     oauth2_client.reload_config()
     reschedule_interval_jobs()
+
+    # A transports/relayhosts source that was just switched on should populate
+    # the monitored list now, not at the next 6-hour sync
+    new_sync_sources = (settings.blacklist_source_transports, settings.blacklist_source_relayhosts)
+    if (settings.is_feature_enabled('blacklist')
+            and any(new and not old for old, new in zip(prev_sync_sources, new_sync_sources))):
+        try:
+            from datetime import datetime, timedelta, timezone
+            from ..scheduler import scheduler as _scheduler, sync_transports_job
+            _scheduler.add_job(
+                sync_transports_job, 'date',
+                run_date=datetime.now(timezone.utc) + timedelta(seconds=1),
+                id='sync_transports_on_enable', replace_existing=True
+            )
+            logger.info("Transports/relayhosts source enabled - triggering immediate sync")
+        except Exception as e:
+            logger.warning(f"Could not trigger immediate transports sync: {e}")
 
     # Invalidate MaxMind license cache when credentials change
     if 'maxmind_license_key' in allowed or 'maxmind_account_id' in allowed:
@@ -691,7 +726,7 @@ def import_settings_from_env(db: Session = Depends(get_db)):
     }
 
 
-# NOTE: these are plain `def` on purpose — FastAPI runs sync endpoints in a
+# NOTE: these are plain `def` on purpose - FastAPI runs sync endpoints in a
 # threadpool, so the blocking smtplib/imaplib connection tests (10-30s timeouts)
 # don't freeze the shared event loop.
 @router.post("/settings/test/smtp")
@@ -935,7 +970,9 @@ def trigger_job(job_name: str, background_tasks: BackgroundTasks):
         sync_suppressions_to_rspamd_job,
         expire_suppressions_job,
         process_quarantine_rules_job,
-        cleanup_deferred_queue_job
+        cleanup_deferred_queue_job,
+        anomaly_detection_job,
+        smtp_abuse_job
     )
     from ..raw_logs_worker import fetch_raw_service_logs, cleanup_raw_service_logs
     
@@ -963,6 +1000,8 @@ def trigger_job(job_name: str, background_tasks: BackgroundTasks):
         'expire_suppressions': ('expire_suppressions', expire_suppressions_job, False),
         'process_quarantine_rules': ('process_quarantine_rules', process_quarantine_rules_job, False),
         'cleanup_deferred_queue': ('cleanup_deferred_queue', cleanup_deferred_queue_job, False),
+        'anomaly_detection': ('anomaly_detection', anomaly_detection_job, False),
+        'smtp_abuse': ('smtp_abuse', smtp_abuse_job, False),
         'fetch_raw_logs': ('fetch_raw_logs', fetch_raw_service_logs, True),
         'cleanup_raw_logs': ('cleanup_raw_logs', cleanup_raw_service_logs, True),
     }
@@ -972,7 +1011,7 @@ def trigger_job(job_name: str, background_tasks: BackgroundTasks):
     
     status_key, job_func, self_managing = job_mapping[job_name]
     
-    # Check if job is already running — check both main and raw logs status
+    # Check if job is already running - check both main and raw logs status
     if self_managing:
         from ..raw_logs_worker import get_raw_logs_job_status
         current_status = get_raw_logs_job_status().get(status_key, {})

@@ -152,7 +152,7 @@ def get_postfix_logs(
         
         # Paginate at the queue level in SQL (one row per queue, newest activity
         # first) instead of loading every matching queue and paginating in
-        # Python — the old approach issued one query per queue_id (N+1).
+        # Python - the old approach issued one query per queue_id (N+1).
         grouped = base_query.with_entities(
             PostfixLog.queue_id
         ).group_by(PostfixLog.queue_id)
@@ -426,7 +426,7 @@ def get_netfilter_stats_by_country(
                 countries[code]["unban"] += 1
             elif action == 'warning':
                 countries[code]["warning"] += 1
-            # Skip 'info' and 'other' — not interesting for chart
+            # Skip 'info' and 'other' - not interesting for chart
             else:
                 continue
             countries[code]["total"] += 1

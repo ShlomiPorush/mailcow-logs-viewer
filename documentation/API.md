@@ -5222,3 +5222,319 @@ Get quarantine rule action history (paginated).
 **Notes:**
 - Logs are automatically pruned based on `QUARANTINE_RULES_LOG_RETENTION_DAYS` (default: 30)
 - Each entry represents one automated action taken by the scheduler
+---
+
+## Security Alerts (Anomaly Detection)
+
+Alerts raised by anomaly detection (outbound volume spikes, authentication-failure bursts) and by SMTP abuse protection. Surfaced as a banner on the Dashboard.
+
+### GET /api/security-alerts
+
+List security alerts, newest first.
+
+**Query Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `acknowledged` | boolean | (none) | Filter by acknowledged state (`false` = outstanding only) |
+| `limit` | integer | `50` | Max results (max: 500) |
+
+**Response:**
+```json
+{
+  "enabled": true,
+  "unacknowledged_count": 2,
+  "alerts": [
+    {
+      "id": 12,
+      "alert_type": "volume_spike",
+      "severity": "critical",
+      "subject": "user@example.com",
+      "title": "Outbound volume spike: user@example.com",
+      "detail": "Mailbox user@example.com sent 240 messages in the last 15 minutes...",
+      "metric_value": 240.0,
+      "baseline_value": 4.2,
+      "acknowledged": false,
+      "created_at": "2026-07-14T09:12:00Z"
+    }
+  ]
+}
+```
+
+**Alert types:** `volume_spike`, `auth_failure_burst`, `smtp_abuse_block`
+
+### POST /api/security-alerts/{alert_id}/acknowledge
+
+Mark a single alert as acknowledged (removes it from the dashboard banner).
+
+### POST /api/security-alerts/acknowledge-all
+
+Acknowledge every outstanding alert.
+
+**Response:**
+```json
+{ "status": "success", "acknowledged": 3 }
+```
+
+---
+
+## SMTP Abuse Protection
+
+Automatic and manual control of outbound (SMTP) access per mailbox. Receiving over IMAP is never affected.
+
+> **Requires:** `MAILCOW_API_KEY_RW`. All write endpoints return `403` when `SMTP_ABUSE_ENABLED=false` and `503` when no Read-Write key is configured.
+
+### GET /api/smtp-abuse/status
+
+Current outbound activity per mailbox, block state and whitelist.
+
+**Query Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `limit` | integer | `200` | Max mailboxes to return (max: 1000) |
+
+**Response:**
+```json
+{
+  "enabled": true,
+  "rw_key_configured": true,
+  "threshold": 100,
+  "window_minutes": 60,
+  "unblock_grace_minutes": 60,
+  "mailboxes": [
+    {
+      "email": "user@example.com",
+      "message_count": 152,
+      "outbound_count": 152,
+      "over_threshold": true,
+      "whitelisted": false,
+      "smtp_access": false,
+      "blocked_by_protection": true
+    }
+  ],
+  "whitelist": ["newsletter@example.com"]
+}
+```
+
+**Notes:**
+- `blocked_by_protection` distinguishes mailboxes **this system** blocked from mailboxes that simply have SMTP disabled in mailcow (e.g. an incoming-only DMARC report mailbox), which are not listed as abuse cases
+
+### GET /api/smtp-abuse/whitelist
+
+Active whitelist entries. Whitelisted mailboxes are never blocked automatically.
+
+**Response:**
+```json
+[ { "email": "newsletter@example.com", "notes": "Marketing sender", "active": true } ]
+```
+
+### POST /api/smtp-abuse/whitelist
+
+Add (or re-activate) a single whitelist entry.
+
+**Request Body:**
+```json
+{ "email": "newsletter@example.com", "notes": "Marketing sender" }
+```
+
+### PUT /api/smtp-abuse/whitelist
+
+Replace the whole whitelist (used by the "one address per line" editor in the UI). Addresses are lowercased; an invalid address returns `422`.
+
+**Request Body:**
+```json
+{ "emails": ["newsletter@example.com", "monitoring@example.com"] }
+```
+
+**Response:**
+```json
+{ "active": ["monitoring@example.com", "newsletter@example.com"], "count": 2 }
+```
+
+### DELETE /api/smtp-abuse/whitelist/{email}
+
+Deactivate a whitelist entry. Returns `404` if the address is not on the list.
+
+### POST /api/smtp-abuse/mailboxes/{email}/block
+
+Disable SMTP for a mailbox immediately. Also revokes its app passwords (when `SMTP_ABUSE_REVOKE_APP_PASSWORDS=true`), records a security alert, and notifies the operator and the mailbox owner.
+
+**Response:**
+```json
+{
+  "email": "user@example.com",
+  "smtp_access": false,
+  "app_passwords_revoked": 2,
+  "message_count": 152
+}
+```
+
+### POST /api/smtp-abuse/mailboxes/{email}/unblock
+
+Re-enable SMTP for a mailbox. Starts the grace period (`SMTP_ABUSE_UNBLOCK_GRACE_MINUTES`) during which automatic blocking is paused for that mailbox, so it is not re-blocked while old messages are still inside the rolling window.
+
+**Response:**
+```json
+{ "email": "user@example.com", "smtp_access": true }
+```
+
+### GET /api/smtp-abuse/history
+
+Audit trail of block/unblock actions.
+
+**Query Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `limit` | integer | `50` | Max results (max: 500) |
+
+**Response:**
+```json
+[
+  {
+    "email": "user@example.com",
+    "action": "blocked",
+    "message_count": 152,
+    "threshold": 100,
+    "window_minutes": 60,
+    "automatic": true,
+    "operator": "smtp-abuse",
+    "app_passwords_revoked": 2,
+    "created_at": "2026-07-14T09:15:00Z"
+  }
+]
+```
+
+---
+
+## DMARC Insights
+
+### GET /api/dmarc/insights
+
+Policy recommendations and new-source (possible spoofing) detection, computed from collected DMARC reports. Read-only - never changes DNS.
+
+**Query Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `domain` | string | (none) | Return insights for a single domain; omit for all domains with data |
+
+**Response (all domains):**
+```json
+{
+  "window_days": 28,
+  "domain_count": 1,
+  "insights": [
+    {
+      "domain": "example.com",
+      "has_data": true,
+      "current_policy": "none",
+      "total_messages": 5400,
+      "pass_rate": 99.8,
+      "recommendations": [
+        {
+          "type": "tighten_policy",
+          "severity": "success",
+          "message": "example.com has a 99.8% DMARC pass rate over 5400 messages under p=none. It looks safe to move to p=quarantine.",
+          "current_policy": "none",
+          "recommended_policy": "quarantine"
+        }
+      ],
+      "new_sources": [
+        { "source_ip": "45.66.77.88", "failing_messages": 80, "first_seen_window_days": 7 }
+      ]
+    }
+  ]
+}
+```
+
+**Recommendation types:** `tighten_policy`, `low_pass_rate`, `monitor`, `insufficient_volume`, `already_strict`
+
+---
+
+## Settings - Connection Tests
+
+## Notification Destinations
+
+Manage where alerts are delivered. Multiple destinations can be configured; every alert goes to all enabled ones.
+
+### GET /api/notifications/types
+
+Field specification per service type - used by the settings UI to render only the relevant inputs.
+
+```json
+{
+  "types": [
+    {
+      "id": "telegram",
+      "label": "Telegram",
+      "help": "Create a bot with @BotFather to get the token...",
+      "fields": [
+        {"key": "bot_token", "label": "Bot token", "type": "text", "required": true, "secret": true},
+        {"key": "chat_id", "label": "Chat ID", "type": "text", "required": true}
+      ]
+    }
+  ]
+}
+```
+
+**Types:** `slack`, `discord`, `telegram`, `ntfy`, `gotify`, `webhook`
+
+### GET /api/notifications/channels
+
+List configured destinations. Secret fields are returned masked as `********`.
+
+```json
+{
+  "channels": [
+    {
+      "id": 1,
+      "name": "Ops Slack",
+      "channel_type": "slack",
+      "config": {"webhook_url": "********"},
+      "enabled": true,
+      "last_status": "success",
+      "last_error": null,
+      "last_sent_at": "2026-07-27T09:00:00Z"
+    }
+  ]
+}
+```
+
+### POST /api/notifications/channels
+
+Create a destination. Returns `422` if a required field for that type is missing.
+
+```json
+{
+  "name": "Ops Telegram",
+  "channel_type": "telegram",
+  "config": {"bot_token": "123:ABC", "chat_id": "456"},
+  "enabled": true
+}
+```
+
+### PUT /api/notifications/channels/{id}
+
+Update a destination. Send a secret field back as `********` to keep the stored value unchanged.
+
+### DELETE /api/notifications/channels/{id}
+
+Remove a destination.
+
+### POST /api/notifications/channels/{id}/test
+
+Send a test notification to a saved destination.
+
+```json
+{ "success": true, "logs": ["Channel: Ops Slack (slack)", "Sending test notification...", "Delivered successfully"] }
+```
+
+### POST /api/notifications/test
+
+Test a configuration **before** saving it (the Send test button in the editor).
+
+```json
+{ "channel_type": "ntfy", "config": {"server_url": "https://ntfy.sh", "topic": "mailcow-alerts"} }
+```

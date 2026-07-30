@@ -36,10 +36,21 @@ Base = declarative_base()
 
 
 @event.listens_for(engine, "connect")
-def set_sqlite_pragma(dbapi_conn, connection_record):
-    """Set database connection parameters"""
-    # This is primarily for PostgreSQL but can be extended
-    pass
+def set_session_timezone(dbapi_conn, connection_record):
+    """Pin every DB session to UTC (issue #19).
+
+    The log tables use TIMESTAMP WITHOUT TIME ZONE columns while ingest binds
+    timezone-aware UTC datetimes. PostgreSQL converts such values to the
+    SESSION timezone before dropping the offset - so when the postgres
+    container runs with e.g. TZ=Europe/Berlin (baked in at initdb), UTC 07:15
+    is stored as 08:15, later serialized as "08:15Z", and the browser adds
+    the local offset a second time. Displayed times end up ahead by exactly
+    the UTC offset (1h CET, 2h CEST). Forcing the session to UTC makes the
+    conversion an identity regardless of how the DB container is configured.
+    """
+    cursor = dbapi_conn.cursor()
+    cursor.execute("SET TIME ZONE 'UTC'")
+    cursor.close()
 
 
 def get_db():

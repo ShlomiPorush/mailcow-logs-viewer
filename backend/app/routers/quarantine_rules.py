@@ -208,7 +208,7 @@ def get_rule_logs(
 async def test_rules():
     """
     Test all rules against current quarantine items (dry-run).
-    No actions are taken — just returns what would match.
+    No actions are taken - just returns what would match.
     Includes disabled rules in results, marked as rule_enabled=false.
     """
     _require_rw_key()

@@ -1,5 +1,5 @@
 """
-Raw Logs Worker — Separate background scheduler for fetching raw logs from all mailcow services.
+Raw Logs Worker - Separate background scheduler for fetching raw logs from all mailcow services.
 
 This module runs independently from the main scheduler to avoid impacting
 the core log processing pipeline (Postfix/Rspamd/Netfilter correlation).
@@ -97,14 +97,14 @@ def compute_message_hash(service: str, time_val: Any, raw_data: dict) -> str:
 
 async def fetch_raw_service_logs():
     """
-    Main fetch job — runs every RAW_LOGS_FETCH_INTERVAL seconds.
+    Main fetch job - runs every RAW_LOGS_FETCH_INTERVAL seconds.
     Sequentially fetches logs from each enabled service and stores in DB.
     After storing, broadcasts new entries via WebSocket.
     """
     raw_logs_job_status['fetch_raw_logs']['status'] = 'running'
     raw_logs_job_status['fetch_raw_logs']['last_run'] = datetime.now(timezone.utc)
     
-    # Runtime feature check — skip if logs feature was disabled after startup
+    # Runtime feature check - skip if logs feature was disabled after startup
     if not settings.is_feature_enabled('logs') or not settings.raw_logs_enabled:
         raw_logs_job_status['fetch_raw_logs']['status'] = 'success'
         return
@@ -131,7 +131,7 @@ async def fetch_raw_service_logs():
                 logs = await mailcow_api.get_raw_logs(service, count=count)
                 
                 if logs is None:
-                    # Service returned an error — mark as unavailable
+                    # Service returned an error - mark as unavailable
                     _unavailable_services.add(service)
                     logger.warning(f"[RAW LOGS] Service '{service}' is not available on this mailcow instance, skipping in future runs")
                     continue
@@ -148,7 +148,7 @@ async def fetch_raw_service_logs():
                     for log_entry in logs:
                         try:
                             time_val = log_entry.get('time') or log_entry.get('unix_time', 0)
-                            # mailcow API often returns time as a string — cast to number
+                            # mailcow API often returns time as a string - cast to number
                             try:
                                 time_val = int(time_val)
                             except (ValueError, TypeError):
@@ -268,7 +268,7 @@ async def _broadcast_service_counts():
 
 async def cleanup_raw_service_logs():
     """
-    Daily cleanup job — removes raw logs older than RAW_LOGS_RETENTION_DAYS.
+    Daily cleanup job - removes raw logs older than RAW_LOGS_RETENTION_DAYS.
     Runs at 3:00 AM (offset from main cleanup at 2:00 AM).
     """
     raw_logs_job_status['cleanup_raw_logs']['status'] = 'running'
@@ -310,7 +310,7 @@ def start_raw_logs_scheduler():
         return
     
     try:
-        # Fetch job — every RAW_LOGS_FETCH_INTERVAL seconds
+        # Fetch job - every RAW_LOGS_FETCH_INTERVAL seconds
         raw_logs_scheduler.add_job(
             fetch_raw_service_logs,
             trigger=IntervalTrigger(seconds=settings.raw_logs_fetch_interval),
@@ -320,7 +320,7 @@ def start_raw_logs_scheduler():
             max_instances=1
         )
         
-        # Cleanup job — daily at 3:00 AM
+        # Cleanup job - daily at 3:00 AM
         raw_logs_scheduler.add_job(
             cleanup_raw_service_logs,
             trigger=CronTrigger(hour=3, minute=0),

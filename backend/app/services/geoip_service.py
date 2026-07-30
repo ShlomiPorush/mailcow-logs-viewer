@@ -16,7 +16,7 @@ _asn_reader = None
 _geoip_available = None
 _geoip_db_valid = None  # None = not checked, True = validated, False = corrupt
 
-# Well-known IPs for validation (Google DNS — always returns valid GeoIP data)
+# Well-known IPs for validation (Google DNS - always returns valid GeoIP data)
 _VALIDATION_IPS = ['8.8.8.8', '1.1.1.1']
 
 

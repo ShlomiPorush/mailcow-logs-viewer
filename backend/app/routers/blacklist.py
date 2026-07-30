@@ -32,21 +32,20 @@ def format_datetime(dt: datetime) -> str:
     return dt.astimezone(timezone.utc).isoformat().replace('+00:00', 'Z')
 
 @router.get("/monitored")
-async def get_monitored_hosts() -> Dict[str, Any]:
+def get_monitored_hosts() -> Dict[str, Any]:
     """
-    Get list of all monitored hosts and their latest status
+    Get list of all monitored hosts and their latest status.
+    Sync def: the reconcile + per-host queries run in the threadpool,
+    off the event loop.
     """
     try:
         with get_db_context() as db:
-            # Get all active hosts
+            # Align with current settings first, so a just-saved blacklist
+            # source toggle or manual-hosts change is reflected immediately
+            # instead of waiting for the next scheduled scan
+            from app.services.blacklist_service import reconcile_monitored_hosts
+            reconcile_monitored_hosts(db)
             hosts = db.query(MonitoredHost).filter(MonitoredHost.active == True).all()
-            # If no hosts, try to initialize with local IP
-            if not hosts:
-                ip = get_cached_server_ip()
-                if ip:
-                    db.add(MonitoredHost(hostname=ip, source="system", active=True, last_seen=datetime.utcnow()))
-                    db.commit()
-                    hosts = db.query(MonitoredHost).filter(MonitoredHost.active == True).all()
             results = []
             for host in hosts:
                 # Get latest check for this host
@@ -101,9 +100,12 @@ async def check_blacklists(
         asyncio.create_task(check_monitored_hosts_job(force=force))
         return {"status": "started", "message": "Background check started for all hosts"}
         
-    # If host specified, check single host
-    import re
-    if not re.match(r"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$", target_ip):
+    # If host specified, check single host.
+    # IP literals (IPv4 or IPv6) are used as-is; hostnames are resolved.
+    import ipaddress
+    try:
+        ipaddress.ip_address(target_ip)
+    except ValueError:
          try:
             from app.services.dns_resolver import resolve
             answers = await resolve(target_ip, 'A', timeout=5)
@@ -117,10 +119,11 @@ async def check_blacklists(
         return results
     except Exception as e:
         logger.error(f"Error checking blacklists: {type(e).__name__} - {str(e)}")
+        from app.services.blacklist_service import applicable_blacklists
         return {
             "server_ip": target_ip,
             "checked_at": datetime.now(timezone.utc).isoformat() + 'Z',
-            "total_blacklists": len(BLACKLISTS),
+            "total_blacklists": len(applicable_blacklists(target_ip)) if target_ip else len(BLACKLISTS),
             "listed_count": 0,
             "clean_count": 0,
             "error_count": 1,
@@ -165,26 +168,57 @@ def get_blacklist_config() -> Dict[str, Any]:
 @router.get("/summary")
 def get_blacklist_summary() -> Dict[str, Any]:
     """
-    Get compact blacklist status summary for dashboard
+    Get compact blacklist status summary for dashboard.
+
+    Aggregates the latest check of every ACTIVE monitored host (WAN IP,
+    manual hosts, transports/relayhosts) instead of only the auto-detected
+    WAN IP, so the card still has data when the server IP source is
+    disabled. Sync def on purpose: DB work runs in the threadpool,
+    off the event loop.
     """
-    ip = get_cached_server_ip()
-    cached = get_cached_blacklist_check(ip) if ip else None
-    
-    if not cached:
-        return {
-            "has_data": False,
-            "server_ip": ip,
-            "status": "unknown",
-            "listed_count": 0,
-            "total_blacklists": len(BLACKLISTS),
-            "checked_at": None
-        }
-    
-    return {
-        "has_data": True,
-        "server_ip": cached.get("server_ip"),
-        "status": cached.get("status", "unknown"),
-        "listed_count": cached.get("listed_count", 0),
-        "total_blacklists": cached.get("total_blacklists", len(BLACKLISTS)),
-        "checked_at": cached.get("checked_at")
-    }
+    from sqlalchemy import func
+    from app.services.blacklist_service import aggregate_blacklist_summary
+
+    host_rows = []
+    try:
+        with get_db_context() as db:
+            hosts = db.query(MonitoredHost.hostname, MonitoredHost.source).filter(
+                MonitoredHost.active == True
+            ).order_by(MonitoredHost.id).all()
+
+            latest_by_ip = {}
+            hostnames = [h.hostname for h in hosts]
+            if hostnames:
+                # Latest check per host in ONE query (window function) and
+                # only the summary columns - the full results JSONB is never
+                # loaded here.
+                rn = func.row_number().over(
+                    partition_by=BlacklistCheck.server_ip,
+                    order_by=desc(BlacklistCheck.checked_at)
+                ).label("rn")
+                subq = db.query(
+                    BlacklistCheck.server_ip,
+                    BlacklistCheck.status,
+                    BlacklistCheck.listed_count,
+                    BlacklistCheck.total_blacklists,
+                    BlacklistCheck.checked_at,
+                    rn
+                ).filter(BlacklistCheck.server_ip.in_(hostnames)).subquery()
+                for row in db.query(subq).filter(subq.c.rn == 1).all():
+                    latest_by_ip[row.server_ip] = row
+
+            for h in hosts:
+                check = latest_by_ip.get(h.hostname)
+                host_rows.append({
+                    "hostname": h.hostname,
+                    "source": h.source,
+                    "status": check.status if check else None,
+                    "listed_count": check.listed_count if check else None,
+                    "total_blacklists": check.total_blacklists if check else None,
+                    "checked_at": check.checked_at if check else None
+                })
+    except Exception as e:
+        logger.error(f"Error building blacklist summary: {e}")
+        host_rows = []
+
+    return aggregate_blacklist_summary(host_rows, server_ip=get_cached_server_ip())

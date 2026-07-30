@@ -301,7 +301,7 @@ async def get_mailbox_stats_summary(
         # Count total messages for all local emails (case-insensitive)
         total_sent = 0
         total_received = 0
-        total_failed = 0
+        total_sent_failed = 0
         
         if all_local_emails:
             # Sent messages (case-insensitive)

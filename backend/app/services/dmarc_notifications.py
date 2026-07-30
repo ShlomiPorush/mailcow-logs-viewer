@@ -7,7 +7,8 @@ from typing import List, Dict
 from datetime import datetime
 
 from ..config import settings
-from .smtp_service import send_notification_email, get_notification_email
+from .smtp_service import get_notification_email
+from .notification_service import notify, any_channel_configured
 
 logger = logging.getLogger(__name__)
 
@@ -27,20 +28,20 @@ def send_dmarc_error_notification(failed_emails: List[Dict], sync_id: int) -> bo
     if not failed_emails:
         return True
     
-    # Get recipient: DMARC_ERROR_EMAIL or fallback to ADMIN_EMAIL
+    # Recipient: DMARC_ERROR_EMAIL or fallback to ADMIN_EMAIL (webhook, if
+    # configured, is notified regardless of email configuration)
     recipient = get_notification_email(settings.dmarc_error_email)
-    
-    if not recipient:
-        logger.warning("No recipient configured (DMARC_ERROR_EMAIL or ADMIN_EMAIL)")
+    if not recipient and not any_channel_configured():
+        logger.warning("No notification channel configured (DMARC_ERROR_EMAIL/ADMIN_EMAIL or webhook)")
         return False
-    
-    # Build email content
+
     subject = f"DMARC Processing Errors - Sync #{sync_id}"
     text_content = _create_text_content(failed_emails, sync_id)
     html_content = _create_html_content(failed_emails, sync_id)
-    
-    # Send via global SMTP service
-    return send_notification_email(recipient, subject, text_content, html_content)
+
+    results = notify(subject, text_content, html_content, email_recipient=recipient,
+                     alert_type="dmarc_errors")
+    return results['email'] or results['channels_sent'] > 0
 
 
 def _create_text_content(failed_emails: List[Dict], sync_id: int) -> str:

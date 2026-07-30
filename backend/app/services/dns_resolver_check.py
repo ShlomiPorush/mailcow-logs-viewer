@@ -32,7 +32,7 @@ async def test_udp_path():
 async def test_doh_path():
     """Test 2: Force DoH by passing empty UDP server list"""
     print("\n" + "="*60)
-    print("TEST 2: DoH Resolution (forced — empty UDP list)")
+    print("TEST 2: DoH Resolution (forced - empty UDP list)")
     print("="*60)
     try:
         # Pass empty UDP list to force DoH fallback
@@ -120,9 +120,9 @@ async def main():
     if passed == len(results):
         print("\n🎉 All tests passed!")
     elif results[0][1] == False and results[1][1] == True:
-        print("\n⚠️  UDP blocked but DoH works — fallback is functioning correctly!")
+        print("\n⚠️  UDP blocked but DoH works - fallback is functioning correctly!")
     else:
-        print("\n⚠️  Some tests failed — check output above")
+        print("\n⚠️  Some tests failed - check output above")
 
 
 if __name__ == "__main__":

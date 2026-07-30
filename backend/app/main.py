@@ -10,6 +10,7 @@ from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.datastructures import MutableHeaders
 from contextlib import asynccontextmanager
 
 from .config import settings, set_cached_active_domains, reload_settings
@@ -32,6 +33,9 @@ from .routers import (
     rspamd_maps as rspamd_maps_router,
     suppressions as suppressions_router,
     quarantine_rules as quarantine_rules_router,
+    security_alerts as security_alerts_router,
+    smtp_abuse as smtp_abuse_router,
+    notifications as notifications_router,
 )
 from .migrations import run_migrations
 from .auth import BasicAuthMiddleware
@@ -44,7 +48,7 @@ from .services.geoip_downloader import (
 
 logger = logging.getLogger(__name__)
 
-# These are first-party routers — an ImportError here is a bug that should
+# These are first-party routers - an ImportError here is a bug that should
 # crash startup, not silently ship a container missing its Settings/Status/
 # Messages APIs (which is what the old try/except ImportError did).
 from .routers import status as status_router
@@ -68,6 +72,11 @@ async def lifespan(app: FastAPI):
         # Run migrations and cleanup
         logger.info("Running database migrations and cleanup...")
         run_migrations()
+
+        # Apply Alembic revisions (the forward migration path from v2.6.4 on;
+        # run_migrations above is the frozen pre-Alembic legacy path)
+        from .migrations import run_alembic_upgrade
+        run_alembic_upgrade()
 
         # Load settings overrides from DB (if UI editing is enabled and overrides exist)
         if settings.edit_settings_via_ui_enabled:
@@ -119,12 +128,12 @@ async def lifespan(app: FastAPI):
                 from .services import geoip_service
                 geoip_service.reload_geoip_readers()
                 if geoip_service.get_geoip_db_valid():
-                    logger.info("GeoIP databases loaded and validated — ready for use")
+                    logger.info("GeoIP databases loaded and validated - ready for use")
                 else:
-                    logger.warning("GeoIP databases found but validation failed — will re-download in background")
+                    logger.warning("GeoIP databases found but validation failed - will re-download in background")
                 logger.info("GeoIP update check will run in background (60s after startup)")
             else:
-                logger.info("GeoIP databases not yet downloaded — will download in background (60s after startup)")
+                logger.info("GeoIP databases not yet downloaded - will download in background (60s after startup)")
         else:
             logger.info("MaxMind license key not configured, GeoIP features disabled")
             logger.info("To enable: Set MAXMIND_ACCOUNT_ID and MAXMIND_LICENSE_KEY environment variables")
@@ -192,7 +201,7 @@ app = FastAPI(
 # This ensures ALL requests are authenticated when enabled
 app.add_middleware(BasicAuthMiddleware)
 
-# CORS middleware — allow all origins because the app runs behind a reverse proxy in Docker.
+# CORS middleware - allow all origins because the app runs behind a reverse proxy in Docker.
 # The reverse proxy (nginx/traefik) handles origin restrictions.
 app.add_middleware(
     CORSMiddleware,
@@ -221,14 +230,38 @@ _CSP = (
 )
 
 
-@app.middleware("http")
-async def security_headers_middleware(request: Request, call_next):
-    response = await call_next(request)
-    response.headers.setdefault("X-Content-Type-Options", "nosniff")
-    response.headers.setdefault("X-Frame-Options", "DENY")
-    response.headers.setdefault("Referrer-Policy", "same-origin")
-    response.headers.setdefault("Content-Security-Policy", _CSP)
-    return response
+class SecurityHeadersMiddleware:
+    """Add security headers to HTTP responses.
+
+    Deliberately a PURE ASGI middleware, not Starlette's BaseHTTPMiddleware
+    (``@app.middleware("http")``): BaseHTTPMiddleware is known to interfere
+    with WebSocket connections behind reverse/auth proxies (the /ws/raw-logs
+    upgrade would hang). This implementation touches only ``http`` responses
+    and passes ``websocket`` (and ``lifespan``) scopes through untouched.
+    """
+
+    def __init__(self, app, csp: str):
+        self.app = app
+        self.csp = csp
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        async def send_with_headers(message):
+            if message["type"] == "http.response.start":
+                headers = MutableHeaders(scope=message)
+                headers.setdefault("X-Content-Type-Options", "nosniff")
+                headers.setdefault("X-Frame-Options", "DENY")
+                headers.setdefault("Referrer-Policy", "same-origin")
+                headers.setdefault("Content-Security-Policy", self.csp)
+            await send(message)
+
+        await self.app(scope, receive, send_with_headers)
+
+
+app.add_middleware(SecurityHeadersMiddleware, csp=_CSP)
 
 # Include routers
 app.include_router(auth_router.router, prefix="/api", tags=["Authentication"])
@@ -250,6 +283,9 @@ app.include_router(raw_logs_router.router, prefix="/api", tags=["Raw Logs"])
 app.include_router(rspamd_maps_router.router, prefix="/api", tags=["Rspamd Maps"])
 app.include_router(suppressions_router.router, prefix="/api", tags=["Suppressions"])
 app.include_router(quarantine_rules_router.router, tags=["Quarantine Rules"])
+app.include_router(security_alerts_router.router, prefix="/api", tags=["Security Alerts"])
+app.include_router(smtp_abuse_router.router, prefix="/api", tags=["SMTP Abuse Protection"])
+app.include_router(notifications_router.router, prefix="/api", tags=["Notifications"])
 
 # WebSocket endpoint needs root-level mount (not under /api prefix)
 # The router contains /ws/raw-logs which should be accessible at wss://host/ws/raw-logs  # nosemgrep: javascript.lang.security.detect-insecure-websocket.detect-insecure-websocket
@@ -291,7 +327,7 @@ async def root():
 async def health_check():
     """Health check endpoint for Docker monitoring.
 
-    Publicly reachable — intentionally returns no configuration details.
+    Publicly reachable - intentionally returns no configuration details.
     """
     db_ok = check_db_connection()
 

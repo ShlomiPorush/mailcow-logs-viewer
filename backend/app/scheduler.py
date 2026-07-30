@@ -6,7 +6,6 @@ import asyncio
 import hashlib
 import re
 import httpx
-import socket
 import ipaddress
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
@@ -107,9 +106,56 @@ def reschedule_interval_jobs():
 
         # Reschedule suppression jobs based on current settings
         _reschedule_suppression_jobs()
+        _reschedule_smtp_abuse_job()
+        _reschedule_anomaly_job()
 
     except Exception as e:
         logger.warning("Failed to reschedule interval jobs: %s", e)
+
+
+def _reschedule_smtp_abuse_job():
+    """Add or remove the SMTP abuse job when settings are reloaded."""
+    if not scheduler.running:
+        return
+    if settings.smtp_abuse_enabled and mailcow_api.has_rw_key:
+        scheduler.add_job(
+            smtp_abuse_job,
+            trigger=IntervalTrigger(minutes=1),
+            id='smtp_abuse',
+            name='SMTP Abuse Protection',
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+        )
+        logger.info("   [SMTP ABUSE] Protection scheduled (every minute; threshold: %s/%s min)",
+                    settings.smtp_abuse_threshold, settings.smtp_abuse_window_minutes)
+    else:
+        try:
+            scheduler.remove_job('smtp_abuse')
+        except Exception:
+            pass
+
+
+def _reschedule_anomaly_job():
+    """Add or remove the anomaly detection job when settings are reloaded."""
+    if not scheduler.running:
+        return
+    if settings.anomaly_detection_enabled:
+        scheduler.add_job(
+            anomaly_detection_job,
+            trigger=IntervalTrigger(minutes=settings.anomaly_check_interval),
+            id='anomaly_detection',
+            name='Anomaly Detection',
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+        )
+        logger.info("   [ANOMALY] Detection scheduled (every %s min)", settings.anomaly_check_interval)
+    else:
+        try:
+            scheduler.remove_job('anomaly_detection')
+        except Exception:
+            pass
 
 
 def _reschedule_suppression_jobs():
@@ -211,10 +257,13 @@ job_status = {
     'expire_suppressions': {'last_run': None, 'status': 'idle', 'error': None},
     'process_quarantine_rules': {'last_run': None, 'status': 'idle', 'error': None},
     'cleanup_deferred_queue': {'last_run': None, 'status': 'idle', 'error': None},
+    'anomaly_detection': {'last_run': None, 'status': 'idle', 'error': None},
+    'smtp_abuse': {'last_run': None, 'status': 'idle', 'error': None},
 }
 
 # Number of hosts that were listed on actionable blacklists in the previous blacklist check run (for "cleared" notification)
 _blacklist_last_listed_actionable_count = 0
+_blacklist_check_lock = asyncio.Lock()
 
 def update_job_status(job_name: str, status: str, error: str = None):
     """Update job execution status"""
@@ -439,7 +488,7 @@ async def _discover_total_logs(log_type: str) -> int:
 
 
 async def fetch_and_store_postfix():
-    """Fetch Postfix logs from API and store in DB (paginated — fetches all available logs)"""
+    """Fetch Postfix logs from API and store in DB (paginated - fetches all available logs)"""
     last_fetch_run_time['postfix'] = datetime.now(timezone.utc)
     
     page_size = settings.fetch_count_postfix
@@ -604,7 +653,7 @@ async def fetch_and_store_postfix():
             
             # Early stop: no new imports means we've caught up (duplicates + blacklisted = processed)
             if page_new == 0:
-                logger.info(f"[POSTFIX] Page {page_num}/{pages_to_fetch}: all duplicates/blacklisted, caught up — stopping early")
+                logger.info(f"[POSTFIX] Page {page_num}/{pages_to_fetch}: all duplicates/blacklisted, caught up - stopping early")
                 _resume_offset['postfix'] = 0
                 break
             
@@ -612,7 +661,7 @@ async def fetch_and_store_postfix():
         
         else:
             # Loop completed without break. `offset` was already advanced by
-            # len(logs) each page, so it points at the first unfetched log —
+            # len(logs) each page, so it points at the first unfetched log -
             # adding page_size here would silently skip a whole page.
             if pages_to_fetch < total_pages_needed:
                 _resume_offset['postfix'] = offset
@@ -636,7 +685,7 @@ async def fetch_and_store_postfix():
 
 
 async def fetch_and_store_rspamd():
-    """Fetch Rspamd logs from API and store in DB (paginated — fetches all available logs)"""
+    """Fetch Rspamd logs from API and store in DB (paginated - fetches all available logs)"""
     last_fetch_run_time['rspamd'] = datetime.now(timezone.utc)
     
     page_size = settings.fetch_count_rspamd
@@ -811,7 +860,7 @@ async def fetch_and_store_rspamd():
             
             # Early stop: no new imports means we've caught up (duplicates + blacklisted = processed)
             if page_new == 0:
-                logger.info(f"[RSPAMD] Page {page_num}/{pages_to_fetch}: all duplicates/blacklisted, caught up — stopping early")
+                logger.info(f"[RSPAMD] Page {page_num}/{pages_to_fetch}: all duplicates/blacklisted, caught up - stopping early")
                 _resume_offset['rspamd'] = 0
                 break
             
@@ -819,7 +868,7 @@ async def fetch_and_store_rspamd():
         
         else:
             # Loop completed without break. `offset` already points at the
-            # first unfetched log — adding page_size would skip a whole page.
+            # first unfetched log - adding page_size would skip a whole page.
             if pages_to_fetch < total_pages_needed:
                 _resume_offset['rspamd'] = offset
                 logger.info(f"[RSPAMD] Completed {pages_to_fetch}/{total_pages_needed} pages, will resume from offset {_resume_offset['rspamd']} next cycle")
@@ -1617,7 +1666,7 @@ async def update_geoip_database():
                 geoip_service.reload_geoip_readers()
             update_job_status('update_geoip', 'success')
         
-        # Successful download implies valid license — persist to DB
+        # Successful download implies valid license - persist to DB
         # so the settings page shows "License Valid" without a manual check
         if status['City']['available'] or status['ASN']['available']:
             try:
@@ -1652,48 +1701,44 @@ async def check_monitored_hosts_job(force: bool = False, send_notification: bool
         logger.debug("[BLACKLIST] Feature disabled, skipping")
         return
     global _blacklist_last_listed_actionable_count
+    # Multiple entry points can trigger this job (cron, startup, post-sync,
+    # API). Overlapping runs corrupt the shared batch/progress state and the
+    # listed-count used for cleared/improved notifications - never overlap.
+    if _blacklist_check_lock.locked():
+        logger.info("[BLACKLIST] Check already in progress, skipping this trigger")
+        return
+    async with _blacklist_check_lock:
+        await _run_check_monitored_hosts(force, send_notification)
+
+
+async def _run_check_monitored_hosts(force: bool, send_notification: bool):
+    global _blacklist_last_listed_actionable_count
     update_job_status('blacklist_check', 'running')
-    
+
     try:
         from .services.blacklist_service import (
-            get_blacklist_check_results, 
-            get_listed_blacklists, 
+            get_blacklist_check_results,
+            get_listed_blacklists,
             get_cached_blacklist_check,
             start_batch_scan,
             end_batch_scan,
             update_batch_status,
             mark_host_as_processed_batch,
+            reconcile_monitored_hosts,
             IGNORED_NOTIFICATION_BLACKLISTS
         )
         from .services.smtp_service import send_notification_email, get_notification_email
-        from .routers.domains import get_cached_server_ip
-        
+
         logger.info(f"Starting blacklist check job (send_notification={send_notification})...")
-        
-        # Get all monitored hosts and detach fields to avoid DetachedInstanceError in async loop
+
+        # Align rows with the current source settings, then detach fields to
+        # avoid DetachedInstanceError in the async loop
         monitored_hosts = []
         with get_db_context() as db:
+            reconcile_monitored_hosts(db)
             db_hosts = db.query(MonitoredHost).filter(MonitoredHost.active == True).all()
-            for h in db_hosts:
-                monitored_hosts.append({
-                    'hostname': h.hostname,
-                    'source': h.source
-                })
-        
-        # If no hosts, try to initialize with local IP
-        if not monitored_hosts:
-            server_ip = get_cached_server_ip()
-            if server_ip:
-                with get_db_context() as db:
-                    new_host = MonitoredHost(hostname=server_ip, source="system", active=True, last_seen=datetime.utcnow())
-                    db.add(new_host)
-                    db.commit()
-                    # Add to our local list
-                    monitored_hosts.append({
-                        'hostname': server_ip,
-                        'source': "system"
-                    })
-        
+            monitored_hosts = [{'hostname': h.hostname, 'source': h.source} for h in db_hosts]
+
         if not monitored_hosts:
             logger.warning("Cannot check blacklists: No monitored hosts available")
             update_job_status('blacklist_check', 'failed', 'No monitored hosts available')
@@ -1712,8 +1757,10 @@ async def check_monitored_hosts_job(force: bool = False, send_notification: bool
                 
                 logger.info(f"Processing host {i+1}/{len(monitored_hosts)}: {hostname} (Source: {source})")
                 target_ip = hostname
-                # Simple IP validation and resolution if needed
-                if not re.match(r"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$", target_ip):
+                # IP literal (IPv4 or IPv6)? Otherwise resolve the hostname
+                try:
+                    ipaddress.ip_address(target_ip)
+                except ValueError:
                     try:
                         from app.services.dns_resolver import resolve as dns_resolve
                         answers = await dns_resolve(target_ip, 'A', timeout=5)
@@ -1782,10 +1829,12 @@ async def check_monitored_hosts_job(force: bool = False, send_notification: bool
                 # Get admin email for notification
                 blacklist_alert_email = settings.blacklist_alert_email if hasattr(settings, 'blacklist_alert_email') else None
                 notification_email = get_notification_email(blacklist_alert_email)
-                
+                from .services.notification_service import any_channel_configured
+
                 logger.info(f"Found listed hosts. Attempting to send alert to: {notification_email} (Source: {blacklist_alert_email})")
-                
-                if notification_email:
+
+                # Notification destinations must fire even with no email configured
+                if notification_email or any_channel_configured():
                     # Build aggregated email content
                     subject = f"⚠️ ALERT: {len(listed_hosts)} Host(s) Listed on Blacklists"
                     
@@ -1859,12 +1908,14 @@ async def check_monitored_hosts_job(force: bool = False, send_notification: bool
     </html>
     """
                     
-                    # Send notification (in executor — smtplib blocks the event loop)
-                    logger.info("Calling send_notification_email...")
-                    sent = await asyncio.get_running_loop().run_in_executor(
+                    # Send notification (in executor - smtplib/requests block the event loop)
+                    logger.info("Sending blacklist alert (email + webhook)...")
+                    from .services.notification_service import notify
+                    results = await asyncio.get_running_loop().run_in_executor(
                         _thread_pool_executor,
-                        send_notification_email, notification_email, subject, text_content, html_content
+                        notify, subject, text_content, html_content, notification_email, "blacklist"
                     )
+                    sent = results['email'] or results['channels_sent'] > 0
                     if sent:
                         logger.info(f"Blacklist alert sent to {notification_email}")
                     else:
@@ -1883,9 +1934,10 @@ async def check_monitored_hosts_job(force: bool = False, send_notification: bool
             if prev_listed > actionable_count and send_notification:
                 blacklist_alert_email = settings.blacklist_alert_email if hasattr(settings, 'blacklist_alert_email') else None
                 notification_email = get_notification_email(blacklist_alert_email)
-                if notification_email:
+                from .services.notification_service import any_channel_configured
+                if notification_email or any_channel_configured():
                     if actionable_count == 0:
-                        subject = "✅ Blacklist Cleared – All Monitored Hosts Are Off Blacklists"
+                        subject = "✅ Blacklist Cleared - All Monitored Hosts Are Off Blacklists"
                         host_list = ", ".join(h["hostname"] for h in monitored_hosts)
                         text_content = (
                             "All monitored hosts are no longer listed on any (actionable) blacklists.\n\n"
@@ -1904,7 +1956,7 @@ async def check_monitored_hosts_job(force: bool = False, send_notification: bool
     </html>
     """
                     else:
-                        subject = f"📉 Blacklist Improved – {prev_listed} → {actionable_count} Host(s) Listed"
+                        subject = f"📉 Blacklist Improved - {prev_listed} → {actionable_count} Host(s) Listed"
                         still_listed = ", ".join(h["hostname"] for h in actionable_listed_hosts)
                         text_content = (
                             f"Fewer hosts are now listed on (actionable) blacklists.\n\n"
@@ -1926,10 +1978,12 @@ async def check_monitored_hosts_job(force: bool = False, send_notification: bool
     </body>
     </html>
     """
-                    sent = await asyncio.get_running_loop().run_in_executor(
+                    from .services.notification_service import notify
+                    results = await asyncio.get_running_loop().run_in_executor(
                         _thread_pool_executor,
-                        send_notification_email, notification_email, subject, text_content, html_content
+                        notify, subject, text_content, html_content, notification_email, "blacklist"
                     )
+                    sent = results['email'] or results['channels_sent'] > 0
                     if sent:
                         logger.info(f"Blacklist count change notification sent to {notification_email} (was {prev_listed}, now {actionable_count})")
                     else:
@@ -2243,17 +2297,21 @@ async def check_all_domains_dns_background():
         
         if not domains:
             return
-        
+
         checked_count = 0
-        
+
+        # Sources do not depend on the domain: resolve once per batch
+        from .routers.domains import get_spf_source_ips
+        spf_source_ips = await get_spf_source_ips()
+
         for domain_data in domains:
             domain_name = domain_data.get('domain_name')
             if not domain_name or domain_data.get('active', 0) != 1:
                 continue
-            
+
             try:
-                dns_data = await check_domain_dns(domain_name)
-                
+                dns_data = await check_domain_dns(domain_name, spf_source_ips)
+
                 with get_db_context() as db:
                     await save_dns_check_to_db(db, domain_name, dns_data, is_full_check=True)
                 
@@ -2583,15 +2641,36 @@ async def update_alias_statistics():
 # MONITORED HOSTS SYNC
 # =============================================================================
 
+def parse_nexthop_host(host_input: str) -> str:
+    """Extract the bare host from Postfix nexthop syntax.
+
+    Handles: host, host:port, [host], [host]:port. A plain strip('[]') is
+    wrong for '[relay.example.com]:587' - it only strips at the string
+    edges, leaving 'relay.example.com]'.
+    """
+    host_clean = host_input.strip().lower()
+    bracket_match = re.match(r'^\[([^\]]+)\](?::\d+)?$', host_clean)
+    if bracket_match:
+        return bracket_match.group(1)
+    # No brackets: split off an optional :port (an unbracketed IPv6 literal
+    # is not valid Postfix nexthop syntax, so a colon here can only
+    # introduce a port)
+    return host_clean.split(':')[0]
+
+
 async def sync_transports_job():
     """
-    Sync transports and relayhosts from mailcow to MonitoredHost table.
-    Resolves FQDNs to IPs and skips private/internal IPs.
-    Stores Original FQDN in source field as 'transport:fqdn' or 'relayhost:fqdn'.
+    Sync blacklist-monitored hosts from the enabled sources (transports,
+    relayhosts, manual hosts, WAN IP) to the MonitoredHost table.
+    Resolves FQDNs to all public IPs and skips private/internal IPs.
+    Stores the original FQDN in the source field as 'transport:fqdn',
+    'relayhost:fqdn' or 'config:fqdn'.
     Runs every 6 hours.
     """
-    if not settings.is_feature_enabled('domains'):
-        logger.debug("[TRANSPORTS] Domains feature disabled, skipping transport sync")
+    # Gated on the blacklist feature, not domains: this sync only feeds
+    # blacklist monitoring, so disabling the Domains page must not stop it
+    if not settings.is_feature_enabled('blacklist'):
+        logger.debug("[TRANSPORTS] Blacklist feature disabled, skipping transport sync")
         return
     update_job_status('sync_transports', 'running')
     try:
@@ -2600,88 +2679,94 @@ async def sync_transports_job():
             update_job_status('sync_transports', 'failed', 'API not configured')
             return
 
-        # Fetch Transports and Relay Hosts using mailcow_api
-        transports_data = await mailcow_api.get_transports()
-        relayhosts_data = await mailcow_api.get_relayhosts()
+        # Fetch Transports and Relay Hosts using mailcow_api (per-source toggles)
+        transports_data = await mailcow_api.get_transports() if settings.blacklist_source_transports else []
+        relayhosts_data = await mailcow_api.get_relayhosts() if settings.blacklist_source_relayhosts else []
 
         # Process and Deduplicate
         hosts_to_monitor = {}  # ip -> source_string
 
-        async def resolve_and_validate(host_input: str, source_type: str) -> Optional[tuple]:
-            """Resolve host to IP, validate public, return (ip, full_source_string)"""
-            host_clean = host_input.strip().lower()
-            # Remove brackets/ports
-            host_clean = host_clean.strip('[]')
-            if ':' in host_clean:
-                host_clean = host_clean.split(':')[0]
+        async def resolve_and_validate(host_input: str, source_type: str) -> List[tuple]:
+            """Resolve host to ALL its public IPs, return [(ip, source_string)].
 
+            A relay hostname often has several A records (round-robin pool)
+            and mail can leave from any of them - monitoring only the first
+            would leave blind spots on the others.
+            """
+            host_clean = parse_nexthop_host(host_input)
             if not host_clean:
-                return None
+                return []
 
             try:
                 # Is it already an IP?
                 try:
-                    ip_obj = ipaddress.ip_address(host_clean)
-                    ip_str = str(ip_obj)
-                    fqdn = None # IP was provided directly
+                    ip_objs = [ipaddress.ip_address(host_clean)]
+                    fqdn = None  # IP was provided directly
                 except ValueError:
-                    # It's a domain, resolve it in a worker thread so a slow DNS
-                    # lookup doesn't block the shared event loop
+                    # It's a domain - resolve every A record through the
+                    # project resolver (honors BLACKLIST_DNS_SERVERS), not
+                    # gethostbyname which returns a single address only
+                    from .services.dns_resolver import resolve as dns_resolve
                     try:
-                        loop = asyncio.get_running_loop()
-                        ip_str = await loop.run_in_executor(None, socket.gethostbyname, host_clean)
-                        ip_obj = ipaddress.ip_address(ip_str)
+                        answers = await dns_resolve(host_clean, 'A')
+                        ip_objs = [ipaddress.ip_address(str(rr)) for rr in answers]
                         fqdn = host_clean
                     except Exception:
                         logger.warning(f"Could not resolve host: {host_clean}")
-                        return None
-                
-                # Check for private IP
-                if ip_obj.is_private or ip_obj.is_loopback:
-                    logger.info(f"Skipping private/loopback IP: {ip_str} ({host_clean})")
-                    return None
-                
-                # Construct source string
-                # If we have an FQDN, store it: "transport:example.com"
-                # If we just have IP, store: "transport"
-                if fqdn:
-                    final_source = f"{source_type}:{fqdn}"
-                else:
-                    final_source = source_type
+                        return []
 
-                return (ip_str, final_source)
-                
+                final_source = f"{source_type}:{fqdn}" if fqdn else source_type
+                results = []
+                for ip_obj in ip_objs:
+                    if ip_obj.is_private or ip_obj.is_loopback:
+                        logger.info(f"Skipping private/loopback IP: {ip_obj} ({host_clean})")
+                        continue
+                    results.append((str(ip_obj), final_source))
+                return results
+
             except Exception as e:
                 logger.error(f"Error validating host {host_clean}: {e}")
-                return None
+                return []
 
         # Process Transports
         for t in transports_data:
             if str(t.get('active', '0')) == '1':
                 nexthop = t.get('nexthop', '').strip()
-                result = await resolve_and_validate(nexthop, 'transport')
-                if result:
-                    hosts_to_monitor[result[0]] = result[1]
+                for ip_addr, source in await resolve_and_validate(nexthop, 'transport'):
+                    hosts_to_monitor[ip_addr] = source
 
         # Process Relay Hosts
         for r in relayhosts_data:
             if str(r.get('active', '0')) == '1':
                 hostname = r.get('hostname', '').strip()
-                result = await resolve_and_validate(hostname, 'relayhost')
-                if result:
-                    hosts_to_monitor[result[0]] = result[1]
+                for ip_addr, source in await resolve_and_validate(hostname, 'relayhost'):
+                    hosts_to_monitor[ip_addr] = source
         
-        # Also ensure local IP is monitored
-        from .routers.domains import get_cached_server_ip
-        local_ip = get_cached_server_ip()
-        if local_ip:
-            if local_ip not in hosts_to_monitor:
-                hosts_to_monitor[local_ip] = 'system'
-            # Update local IP source to 'system' regardless if it was found elsewhere, 
-            # or maybe prefer 'system' label? User likes 'system' label.
-            # But if system IP matches a transport IP, we might want to know it's also a transport?
-            # Let's keep 'system' priority if it's the main server.
-            hosts_to_monitor[local_ip] = 'system'
+        # Manual hosts: IP literals go in as-is; hostnames are resolved to all
+        # public IPs ('config:<hostname>'), falling back to a bare hostname row
+        # when resolution fails so the check job can retry at check time
+        for entry in settings.blacklist_source_manual_hosts_list:
+            try:
+                ipaddress.ip_address(entry)
+                hosts_to_monitor[entry] = 'config'
+                continue
+            except ValueError:
+                pass
+            resolved = await resolve_and_validate(entry, 'config')
+            if resolved:
+                for ip_addr, source in resolved:
+                    hosts_to_monitor[ip_addr] = source
+            else:
+                hosts_to_monitor[entry] = 'config'
+
+        # The auto-detected WAN IP, when that source is enabled. When disabled
+        # the entry is simply not included here, so the deactivation loop below
+        # turns the existing 'system' row off without deleting it.
+        if settings.blacklist_source_server_ip:
+            from .routers.domains import get_cached_server_ip
+            wan_ip = get_cached_server_ip()
+            if wan_ip and wan_ip not in hosts_to_monitor:
+                hosts_to_monitor[wan_ip] = 'system'
 
         # Update DB
         with get_db_context() as db:
@@ -2693,6 +2778,10 @@ async def sync_transports_job():
             for ip_addr, source in hosts_to_monitor.items():
                 if ip_addr in existing_hosts:
                     host = existing_hosts[ip_addr]
+                    # last_seen marks the host as currently confirmed by sync;
+                    # reconcile uses it to decide if a row is fresh enough to
+                    # reactivate when its source toggle is switched back on
+                    host.last_seen = datetime.utcnow()
                     if not host.active or host.source != source:
                         host.active = True
                         host.source = source
@@ -2719,14 +2808,53 @@ async def sync_transports_job():
             logger.info(summary)
             update_job_status('sync_transports', 'success')
 
-            # Trigger immediate blacklist check (smart mode: checks cache headers/validity inside)
-            # This ensures if we added new hosts, they get checked immediately
-            logger.info("Triggering post-sync blacklist check...")
-            await check_monitored_hosts_job(force=False, send_notification=False)
-            
+        # Trigger immediate blacklist check for newly added hosts. Outside the
+        # DB context: the check runs for minutes (10s sleep per host + DNS) and
+        # must not pin a pooled connection for its whole duration.
+        logger.info("Triggering post-sync blacklist check...")
+        await check_monitored_hosts_job(force=False, send_notification=False)
+
     except Exception as e:
         logger.error(f"Sync transports failed: {e}")
         update_job_status('sync_transports', 'failed', str(e))
+
+
+async def smtp_abuse_job():
+    """
+    SMTP abuse protection: disable SMTP for mailboxes over the hard outbound
+    limit. Enforcement counterpart to anomaly detection (which only alerts).
+    """
+    if not settings.smtp_abuse_enabled or not mailcow_api.has_rw_key:
+        return
+    update_job_status('smtp_abuse', 'running')
+    try:
+        from .services.smtp_abuse_service import run_abuse_protection
+        result = await run_abuse_protection()
+        update_job_status('smtp_abuse', 'success')
+        return result
+    except asyncio.CancelledError:
+        update_job_status('smtp_abuse', 'success')
+        raise
+    except Exception as e:
+        logger.error(f"[SMTP ABUSE] Job failed: {e}", exc_info=True)
+        update_job_status('smtp_abuse', 'failed', str(e))
+
+
+async def anomaly_detection_job():
+    """Run anomaly detection off the event loop (DB + blocking notify)."""
+    if not settings.anomaly_detection_enabled:
+        return
+    update_job_status('anomaly_detection', 'running')
+    try:
+        from .services.anomaly_service import run_anomaly_detection
+        result = await asyncio.get_running_loop().run_in_executor(
+            _thread_pool_executor, run_anomaly_detection
+        )
+        update_job_status('anomaly_detection', 'success')
+        return result
+    except Exception as e:
+        logger.error(f"Anomaly detection job failed: {e}")
+        update_job_status('anomaly_detection', 'failed', str(e))
 
 
 async def send_weekly_summary_email_job():
@@ -2756,7 +2884,7 @@ async def cleanup_deferred_queue_job():
     QUEUE_CLEANUP_THRESHOLD_MINUTES.  For each stuck item:
       1. Delete from queue via mailcow API
       2. Suppress the recipient(s) using suppression_base_expiry_days
-    Completely stateless — only looks at arrival_time vs now.
+    Completely stateless - only looks at arrival_time vs now.
     """
     if not settings.is_feature_enabled('spam-filter'):
         return
@@ -2797,7 +2925,7 @@ async def cleanup_deferred_queue_job():
             if not queue_id:
                 continue
 
-            # This item has been deferred longer than threshold — collect for deletion
+            # This item has been deferred longer than threshold - collect for deletion
             items_to_delete.append(queue_id)
 
             # Collect recipients for suppression
@@ -2813,7 +2941,7 @@ async def cleanup_deferred_queue_job():
             age_min = int(age_seconds / 60)
             logger.info(
                 f"[QUEUE CLEANUP] Deferred item {queue_id} stuck for {age_min}m "
-                f"(threshold: {settings.queue_cleanup_threshold_minutes}m) — "
+                f"(threshold: {settings.queue_cleanup_threshold_minutes}m) - "
                 f"recipients: {', '.join(r.split(' ')[0].strip('<>') for r in (item.get('recipients') or []))}"
             )
 
@@ -2845,7 +2973,7 @@ async def cleanup_deferred_queue_job():
                         existing.bounce_count = (existing.bounce_count or 0) + 1
                         existing.soft_bounce_count = (existing.soft_bounce_count or 0) + 1
                         existing.reason = 'deferred_stuck'
-                        existing.last_bounce_message = f'Deferred in queue > {settings.queue_cleanup_threshold_minutes}m — auto-cleaned'
+                        existing.last_bounce_message = f'Deferred in queue > {settings.queue_cleanup_threshold_minutes}m - auto-cleaned'
                         existing.updated_at = datetime.utcnow()
 
                         if not existing.active or (existing.expires_at and existing.expires_at < datetime.utcnow()):
@@ -2868,7 +2996,7 @@ async def cleanup_deferred_queue_job():
                             hard_bounce_count=0,
                             soft_bounce_count=1,
                             last_bounce_dsn='4.x.x',
-                            last_bounce_message=f'Deferred in queue > {settings.queue_cleanup_threshold_minutes}m — auto-cleaned',
+                            last_bounce_message=f'Deferred in queue > {settings.queue_cleanup_threshold_minutes}m - auto-cleaned',
                             active=True,
                             synced_to_rspamd=False,
                             expires_at=datetime.utcnow() + timedelta(days=settings.suppression_base_expiry_days),
@@ -2980,7 +3108,7 @@ def start_scheduler():
                 replace_existing=True
             )
         else:
-            logger.info("   [FEATURE] DMARC feature disabled — skipping DMARC cleanup job")
+            logger.info("   [FEATURE] DMARC feature disabled - skipping DMARC cleanup job")
         
         # Job 7: Check app version updates (every 6 hours, starting immediately)
         scheduler.add_job(
@@ -2993,6 +3121,38 @@ def start_scheduler():
             next_run_time=datetime.now(timezone.utc)
         )
         
+        # Job 7c: SMTP abuse protection (enforcement - needs a RW API key)
+        if settings.smtp_abuse_enabled and mailcow_api.has_rw_key:
+            scheduler.add_job(
+                smtp_abuse_job,
+                trigger=IntervalTrigger(minutes=1),
+                id='smtp_abuse',
+                name='SMTP Abuse Protection',
+                replace_existing=True,
+                max_instances=1,
+                coalesce=True
+            )
+            logger.info("   [SMTP ABUSE] Protection: every minute (threshold: %s msgs / %s min)",
+                        settings.smtp_abuse_threshold, settings.smtp_abuse_window_minutes)
+        elif settings.smtp_abuse_enabled:
+            logger.warning("   [SMTP ABUSE] Enabled but MAILCOW_API_KEY_RW is missing - protection inactive")
+        else:
+            logger.info("   [SMTP ABUSE] Protection disabled")
+
+        # Job 7b: Anomaly detection (compromised mailbox / auth attack)
+        if settings.anomaly_detection_enabled:
+            scheduler.add_job(
+                anomaly_detection_job,
+                trigger=IntervalTrigger(minutes=settings.anomaly_check_interval),
+                id='anomaly_detection',
+                name='Anomaly Detection',
+                replace_existing=True,
+                max_instances=1,
+                coalesce=True
+            )
+        else:
+            logger.info("   [FEATURE] Anomaly detection disabled - skipping job")
+
         # Job 8: DNS Check
         if settings.is_feature_enabled('domains'):
             scheduler.add_job(
@@ -3013,7 +3173,7 @@ def start_scheduler():
                 name='DNS Check (Startup)'
             )
         else:
-            logger.info("   [FEATURE] Domains feature disabled — skipping DNS check jobs")
+            logger.info("   [FEATURE] Domains feature disabled - skipping DNS check jobs")
 
         # Job 9: Sync local domains (every 6 hours)
         scheduler.add_job(
@@ -3112,7 +3272,7 @@ def start_scheduler():
             )
             logger.info("Scheduled alias statistics job (interval: 5 minutes)")
         else:
-            logger.info("   [FEATURE] Mailbox Stats feature disabled — skipping mailbox/alias stats jobs")
+            logger.info("   [FEATURE] Mailbox Stats feature disabled - skipping mailbox/alias stats jobs")
 
         # Job 15: Blacklist Check (daily at 5 AM)
         if settings.is_feature_enabled('blacklist'):
@@ -3134,11 +3294,11 @@ def start_scheduler():
                 name='IP Blacklist Check (Startup)'
             )
         else:
-            logger.info("   [FEATURE] IP Blacklist feature disabled — skipping blacklist check jobs")
+            logger.info("   [FEATURE] IP Blacklist feature disabled - skipping blacklist check jobs")
 
 
-        # Job 14: Sync Transports (every 6 hours)
-        if settings.is_feature_enabled('domains'):
+        # Job 14: Sync Transports (every 6 hours) - feeds blacklist monitoring
+        if settings.is_feature_enabled('blacklist'):
             scheduler.add_job(
                 sync_transports_job,
                 trigger=IntervalTrigger(hours=6),
@@ -3307,7 +3467,7 @@ async def detect_suppressions_job():
             whitelist = settings.suppression_whitelist_domains_list
             new_count = 0
             updated_count = 0
-            emails_for_queue_cleanup = []  # Only hard bounces — deferred/soft should be retried by Postfix
+            emails_for_queue_cleanup = []  # Only hard bounces - deferred/soft should be retried by Postfix
             
             for log in bounce_logs:
                 # Skip DSN bounce notifications:
@@ -3335,7 +3495,7 @@ async def detect_suppressions_job():
                     continue
                 
                 # Only clean queue for hard bounces (permanent failures)
-                # Deferred/soft bounces are temporary — Postfix should keep retrying
+                # Deferred/soft bounces are temporary - Postfix should keep retrying
                 if is_hard:
                     emails_for_queue_cleanup.append(recipient)
                 

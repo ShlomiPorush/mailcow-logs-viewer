@@ -335,7 +335,7 @@ async function validateMapContent(filename) {
             errorsEl.innerHTML = data.errors.map(e => `
                 <div class="text-xs text-red-600 dark:text-red-400 flex items-start gap-2 py-1">
                     <span class="font-mono text-gray-500 dark:text-gray-400 flex-shrink-0">Line ${e.line}:</span>
-                    <span>${escapeHtml(e.error)} — <code class="bg-red-50 dark:bg-red-900/30 px-1 rounded">${escapeHtml(e.content)}</code></span>
+                    <span>${escapeHtml(e.error)} - <code class="bg-red-50 dark:bg-red-900/30 px-1 rounded">${escapeHtml(e.content)}</code></span>
                 </div>
             `).join('');
         }
@@ -907,7 +907,7 @@ async function deleteSuppression(id, email) {
 
 /**
  * Fix #4: Auto-sync suppressions to Rspamd in the background after changes.
- * Does not show UI feedback beyond a quiet toast — the manual sync button
+ * Does not show UI feedback beyond a quiet toast - the manual sync button
  * provides a more verbose experience.
  */
 async function autoSyncToRspamd() {
@@ -1060,7 +1060,7 @@ function _cleanRegexDomain(email) {
 }
 
 /**
- * Regex Wizard — toggle panel visibility
+ * Regex Wizard - toggle panel visibility
  */
 function toggleRegexWizard() {
     const panel = document.getElementById('regex-wizard-panel');
@@ -1076,7 +1076,7 @@ function toggleRegexWizard() {
 }
 
 /**
- * Regex Wizard — update input label, placeholder, and preview based on selected type
+ * Regex Wizard - update input label, placeholder, and preview based on selected type
  */
 function updateRegexWizardPreview() {
     const type = document.getElementById('regex-wizard-type').value;
@@ -1116,7 +1116,7 @@ function updateRegexWizardPreview() {
     
     switch (type) {
         case 'email':
-            // Plain email — no regex needed
+            // Plain email - no regex needed
             pattern = value.toLowerCase();
             explanation = `Blocks exactly: ${value}`;
             break;
@@ -1144,7 +1144,7 @@ function updateRegexWizardPreview() {
 }
 
 /**
- * Regex Wizard — add the generated pattern to the textarea
+ * Regex Wizard - add the generated pattern to the textarea
  */
 function regexWizardAdd() {
     const result = document.getElementById('regex-wizard-result');

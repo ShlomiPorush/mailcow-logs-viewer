@@ -5,6 +5,7 @@ Results are persisted in database for 24 hours.
 """
 import logging
 import asyncio
+import ipaddress
 import dns.asyncresolver
 from datetime import datetime, timezone, timedelta
 from typing import Dict, Any, List, Optional
@@ -14,26 +15,19 @@ logger = logging.getLogger(__name__)
 
 # Blacklist zones to check
 BLACKLISTS = [
-    # Major blacklists
-    {"name": "Spamhaus ZEN", "zone": "zen.spamhaus.org", "info_url": "https://www.spamhaus.org/lookup/"},
-    {"name": "Spamhaus SBL", "zone": "sbl.spamhaus.org", "info_url": "https://www.spamhaus.org/lookup/"},
-    {"name": "Spamhaus XBL", "zone": "xbl.spamhaus.org", "info_url": "https://www.spamhaus.org/lookup/"},
+    # Major blacklists.
+    # "ipv6": True marks zones known to answer IPv6 (nibble-reversed) queries;
+    # every other zone is IPv4-only and is skipped for IPv6 addresses so an
+    # NXDOMAIN from a zone that cannot even hold an IPv6 listing is never
+    # reported as "clean".
+    {"name": "Spamhaus ZEN", "zone": "zen.spamhaus.org", "info_url": "https://www.spamhaus.org/lookup/", "ipv6": True},
+    {"name": "Spamhaus SBL", "zone": "sbl.spamhaus.org", "info_url": "https://www.spamhaus.org/lookup/", "ipv6": True},
+    {"name": "Spamhaus XBL", "zone": "xbl.spamhaus.org", "info_url": "https://www.spamhaus.org/lookup/", "ipv6": True},
     {"name": "Spamhaus PBL", "zone": "pbl.spamhaus.org", "info_url": "https://www.spamhaus.org/lookup/"},
     {"name": "Barracuda", "zone": "b.barracudacentral.org", "info_url": "https://www.barracudacentral.org/lookups"},
     {"name": "SpamCop", "zone": "bl.spamcop.net", "info_url": "https://www.spamcop.net/bl.shtml"},
-    {"name": "Composite Blocking List", "zone": "cbl.abuseat.org", "info_url": "https://www.abuseat.org/lookup.cgi"},
-    
-    # SORBS
-    {"name": "SORBS DNSBL", "zone": "dnsbl.sorbs.net", "info_url": "http://www.sorbs.net/lookup.shtml"},
-    {"name": "SORBS HTTP", "zone": "http.dnsbl.sorbs.net", "info_url": "http://www.sorbs.net/lookup.shtml"},
-    {"name": "SORBS SOCKS", "zone": "socks.dnsbl.sorbs.net", "info_url": "http://www.sorbs.net/lookup.shtml"},
-    {"name": "SORBS MISC", "zone": "misc.dnsbl.sorbs.net", "info_url": "http://www.sorbs.net/lookup.shtml"},
-    {"name": "SORBS SMTP", "zone": "smtp.dnsbl.sorbs.net", "info_url": "http://www.sorbs.net/lookup.shtml"},
-    {"name": "SORBS WEB", "zone": "web.dnsbl.sorbs.net", "info_url": "http://www.sorbs.net/lookup.shtml"},
-    {"name": "SORBS SPAM", "zone": "spam.dnsbl.sorbs.net", "info_url": "http://www.sorbs.net/lookup.shtml"},
-    {"name": "SORBS ZOMBIE", "zone": "zombie.dnsbl.sorbs.net", "info_url": "http://www.sorbs.net/lookup.shtml"},
-    {"name": "SORBS DUL", "zone": "dul.dnsbl.sorbs.net", "info_url": "http://www.sorbs.net/lookup.shtml"},
-    
+    # SORBS shut down in 2024 (zones removed); CBL was absorbed into Spamhaus XBL.
+
     # UCEPROTECT
     {"name": "UCEPROTECT Level 1", "zone": "dnsbl-1.uceprotect.net", "info_url": "https://www.uceprotect.net/en/rblcheck.php"},
     {"name": "UCEPROTECT Level 2", "zone": "dnsbl-2.uceprotect.net", "info_url": "https://www.uceprotect.net/en/rblcheck.php"},
@@ -51,7 +45,7 @@ BLACKLISTS = [
     {"name": "Mailspike BL", "zone": "bl.mailspike.net", "info_url": "https://www.mailspike.org/"},
     {"name": "Mailspike Z", "zone": "z.mailspike.net", "info_url": "https://www.mailspike.org/"},
 
-    {"name": "s5h.net", "zone": "all.s5h.net", "info_url": "http://www.s5h.net/"},
+    {"name": "s5h.net", "zone": "all.s5h.net", "info_url": "http://www.s5h.net/", "ipv6": True},
     {"name": "Blocklist.de", "zone": "bl.blocklist.de", "info_url": "https://www.blocklist.de/en/search.html"},
     {"name": "SURBL", "zone": "multi.surbl.org", "info_url": "https://www.surbl.org/"},
     {"name": "0spam", "zone": "bl.0spam.org", "info_url": "https://www.0spam.org/"},
@@ -67,6 +61,22 @@ BLACKLISTS = [
     {"name": "SEM FRESH", "zone": "fresh.spameatingmonkey.net", "info_url": "https://spameatingmonkey.com/"},
     {"name": "SEM URIRED", "zone": "urired.spameatingmonkey.net", "info_url": "https://spameatingmonkey.com/"},
 ]
+
+def applicable_blacklists(ip: str) -> List[Dict[str, str]]:
+    """The zones that can actually hold a listing for this address.
+
+    IPv6 addresses are only checked against zones known to serve IPv6; most
+    DNSBLs are IPv4-only and would return NXDOMAIN for any IPv6 query, which
+    would show up as a meaningless "clean".
+    """
+    try:
+        import ipaddress
+        if ipaddress.ip_address(ip).version == 6:
+            return [bl for bl in BLACKLISTS if bl.get("ipv6")]
+    except ValueError:
+        pass  # hostname or invalid literal - use the full list
+    return BLACKLISTS
+
 
 # Blacklists that should NOT trigger a notification if they are the ONLY ones listed
 # (e.g. because they are paid removal / unremovable / broad policy)
@@ -137,83 +147,254 @@ def mark_host_as_processed_batch():
         _check_progress["current"] = _batch_state["processed_hosts"] * len(BLACKLISTS)
 
 def reverse_ip(ip: str) -> str:
-    """Reverse IP address for DNSBL lookup (1.2.3.4 -> 4.3.2.1)"""
-    parts = ip.split('.')
-    return '.'.join(reversed(parts))
+    """
+    Reverse an IP address for DNSBL lookup.
 
-def get_cached_blacklist_check(ip: str) -> Optional[Dict[str, Any]]:
+    IPv4: 1.2.3.4 -> 4.3.2.1
+    IPv6 (RFC 5782 nibble format): 2001:db8::1 ->
+         1.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.8.b.d.0.1.0.0.2
     """
-    Get cached blacklist check from database if still valid (within 24h)
-    """
-    from app.database import get_db_context
-    from app.models import BlacklistCheck
-    
     try:
-        with get_db_context() as db:
-            # Find most recent check for this IP
-            check = db.query(BlacklistCheck).filter(
-                BlacklistCheck.server_ip == ip
-            ).order_by(desc(BlacklistCheck.checked_at)).first()
-            
-            if not check:
-                return None
-            
-            # Check if still valid (within 24 hours)
-            age = datetime.now(timezone.utc) - check.checked_at.replace(tzinfo=timezone.utc)
-            if age > timedelta(hours=CACHE_TTL_HOURS):
-                return None
-            
-            # Check if configuration changed (number of blacklists)
-            if check.total_blacklists != len(BLACKLISTS):
-                logger.info(f"Blacklist configuration changed (stored: {check.total_blacklists}, current: {len(BLACKLISTS)}). Invalidating cache.")
-                return None
-            
-            # Return cached data
-            return {
-                "server_ip": check.server_ip,
-                "checked_at": check.checked_at.isoformat() + 'Z',
-                "total_blacklists": check.total_blacklists,
-                "listed_count": check.listed_count,
-                "clean_count": check.clean_count,
-                "error_count": check.error_count,
-                "timeout_count": check.timeout_count,
-                "status": check.status,
-                "results": check.results or []
-            }
-    except Exception as e:
-        logger.error(f"Error getting cached blacklist check: {e}")
+        ip_obj = ipaddress.ip_address(ip)
+    except ValueError:
+        # Not a literal IP - keep legacy dotted reversal behavior
+        return '.'.join(reversed(ip.split('.')))
+    if ip_obj.version == 6:
+        nibbles = ip_obj.exploded.replace(':', '')
+        return '.'.join(reversed(nibbles))
+    return '.'.join(reversed(ip.split('.')))
+
+
+def is_config_source(source) -> bool:
+    """'config' rows come from blacklist_source_manual_hosts.
+
+    A direct entry (IP literal or hostname) is stored with source 'config'
+    and the entry itself as hostname; an IP resolved from a manual hostname
+    by the transports sync is stored as 'config:<hostname>' (mirroring
+    'transport:<fqdn>' / 'relayhost:<fqdn>').
+    """
+    return bool(source) and (source == 'config' or source.startswith('config:'))
+
+
+def config_row_origin(row) -> str:
+    """The manual-hosts entry a 'config' row belongs to."""
+    if row.source and row.source.startswith('config:'):
+        return row.source.split(':', 1)[1]
+    return row.hostname
+
+
+def get_auto_monitor_entries() -> List[tuple]:
+    """
+    (host, source) pairs that should be monitored based on settings, without
+    any DNS resolution (safe to call from sync read paths).
+
+    - Manual hosts (blacklist_source_manual_hosts) get source 'config'.
+      Hostname entries stay hostname rows here; the transports sync resolves
+      them to all public IPs (stored as 'config:<hostname>').
+    - The auto-detected WAN IP gets source 'system' while
+      blacklist_source_server_ip is enabled (relay users can turn it off).
+    """
+    from app.config import settings
+    from app.routers.domains import get_cached_server_ip
+
+    entries = []
+    for host in settings.blacklist_source_manual_hosts_list:
+        entries.append((host, 'config'))
+    if settings.blacklist_source_server_ip:
+        wan_ip = get_cached_server_ip()
+        if wan_ip and all(existing != wan_ip for existing, _ in entries):
+            entries.append((wan_ip, 'system'))
+    else:
+        logger.debug("blacklist_source_server_ip disabled - auto-detected WAN IP is not monitored on blacklists")
+    return entries
+
+def _synced_source_toggled(row, prefix: str, enabled: bool) -> bool:
+    """Does this transport/relayhost row need flipping to match its toggle?
+
+    Disabling is unconditional. Re-enabling only reactivates rows confirmed
+    by a recent sync (last_seen within 48h) - older rows may belong to hosts
+    long removed from mailcow, and the next sync re-adds live ones anyway.
+    """
+    from datetime import datetime, timedelta
+    if not row.source or not row.source.startswith(prefix):
+        return False
+    if row.active and not enabled:
+        return True
+    if (not row.active and enabled and row.last_seen
+            and row.last_seen >= datetime.utcnow() - timedelta(hours=48)):
+        return True
+    return False
+
+
+def reconcile_monitored_hosts(db) -> bool:
+    """Align monitored_hosts rows with the current settings.
+
+    A just-saved source toggle or manual-hosts change must show up in the
+    monitored list immediately, not only after the next scheduled scan - so
+    this runs whenever the list is read. Rows are only activated/deactivated,
+    never deleted. Returns True when anything changed.
+    """
+    from datetime import datetime
+    from app.config import settings
+    from app.models import MonitoredHost
+    from app.routers.domains import get_cached_server_ip
+
+    manual_hosts = settings.blacklist_source_manual_hosts_list
+    wan_ip = get_cached_server_ip()
+    changed = False
+    rows = db.query(MonitoredHost).all()
+    by_host = {row.hostname: row for row in rows}
+    # Manual hostnames already represented by sync-resolved IP rows do not
+    # need (or get) a bare hostname row of their own
+    resolved_hostnames = {
+        row.source.split(':', 1)[1] for row in rows
+        if row.active and row.source and row.source.startswith('config:')
+    }
+
+    for row in rows:
+        if row.source == 'system' and not settings.blacklist_source_server_ip and row.active:
+            row.active = False
+            changed = True
+        elif (row.source == 'system' and settings.blacklist_source_server_ip
+              and not row.active and wan_ip is None):
+            # WAN monitoring was re-enabled but detection has not succeeded
+            # (yet) this run - the stored row is the best known WAN address.
+            # A stale row is cleaned up by the transports sync once detection
+            # works again.
+            row.active = True
+            changed = True
+        elif (is_config_source(row.source) and row.active
+              and config_row_origin(row) not in manual_hosts):
+            row.active = False
+            changed = True
+        elif _synced_source_toggled(row, 'transport', settings.blacklist_source_transports):
+            row.active = not row.active
+            changed = True
+        elif _synced_source_toggled(row, 'relayhost', settings.blacklist_source_relayhosts):
+            row.active = not row.active
+            changed = True
+
+    for host, source in get_auto_monitor_entries():
+        if source == 'config' and host in resolved_hostnames:
+            continue
+        existing = by_host.get(host)
+        if existing:
+            if not existing.active or existing.source != source:
+                existing.active = True
+                existing.source = source
+                changed = True
+        else:
+            db.add(MonitoredHost(hostname=host, source=source, active=True,
+                                 last_seen=datetime.utcnow()))
+            changed = True
+
+    if changed:
+        db.commit()
+    return changed
+
+
+def _format_checked_at(dt: Optional[datetime]) -> Optional[str]:
+    """Format a (possibly naive UTC) datetime as an ISO string with Z suffix"""
+    if not dt:
         return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc).isoformat().replace('+00:00', '') + 'Z'
 
-def save_blacklist_check(data: Dict[str, Any]) -> None:
-    """
-    Save blacklist check results to database
-    """
-    from app.database import get_db_context
-    from app.models import BlacklistCheck
-    
-    try:
-        with get_db_context() as db:
-            check = BlacklistCheck(
-                server_ip=data["server_ip"],
-                total_blacklists=data["total_blacklists"],
-                listed_count=data["listed_count"],
-                clean_count=data["clean_count"],
-                error_count=data["error_count"],
-                timeout_count=data["timeout_count"],
-                status=data["status"],
-                results=data["results"],
-                checked_at=datetime.now(timezone.utc)
-            )
-            db.add(check)
-            db.commit()
-            logger.info(f"Saved blacklist check to DB: {data['status']} ({data['listed_count']} listed)")
-    except Exception as e:
-        logger.error(f"Error saving blacklist check: {e}")
 
-def reverse_ip(ip: str) -> str:
-    """Reverse IP address for DNSBL lookup (1.2.3.4 -> 4.3.2.1)"""
-    parts = ip.split('.')
-    return '.'.join(reversed(parts))
+def aggregate_blacklist_summary(host_rows: List[Dict[str, Any]],
+                                server_ip: Optional[str] = None,
+                                now: Optional[datetime] = None) -> Dict[str, Any]:
+    """Build the dashboard /summary payload from the latest check per host.
+
+    Aggregates across ALL active monitored hosts instead of only the
+    auto-detected WAN IP, so the dashboard card keeps working when
+    the server IP source is disabled and only relay/transport IPs are monitored.
+
+    host_rows: one entry per active monitored host, with its LATEST check:
+        {hostname, source, status, listed_count, total_blacklists, checked_at}
+    The check fields are None for hosts that have never been checked.
+    checked_at may be naive (stored as UTC) or timezone-aware.
+
+    Rules:
+    - A host's latest check only counts while fresh (CACHE_TTL_HOURS), which
+      preserves the old single-host summary behavior of has_data dropping to
+      False once the cache expires.
+    - Overall status precedence: "listed" if any host is listed, else "error"
+      if any host's latest fresh check errored, else "clean" if at least one
+      host has fresh data, else "unknown".
+    - listed_count / total_blacklists are SUMS across hosts with fresh data,
+      so the legacy "Listed On X/Y" ratio stays meaningful for consumers of
+      the old single-host schema.
+    - checked_at is the most recent check across all hosts.
+    """
+    if now is None:
+        now = datetime.now(timezone.utc)
+    ttl = timedelta(hours=CACHE_TTL_HOURS)
+
+    hosts_out: List[Dict[str, Any]] = []
+    fresh_statuses: List[str] = []
+    listed_count = 0
+    total_blacklists = 0
+    hosts_listed = 0
+    latest_checked_at: Optional[datetime] = None
+
+    for row in host_rows:
+        checked_at = row.get("checked_at")
+        aware_checked_at = None
+        if checked_at is not None:
+            aware_checked_at = checked_at if checked_at.tzinfo else checked_at.replace(tzinfo=timezone.utc)
+            if latest_checked_at is None or aware_checked_at > latest_checked_at:
+                latest_checked_at = aware_checked_at
+
+        is_fresh = aware_checked_at is not None and (now - aware_checked_at) <= ttl
+        host_status = (row.get("status") or "unknown") if is_fresh else "unknown"
+        host_listed = (row.get("listed_count") or 0) if is_fresh else 0
+
+        if is_fresh:
+            fresh_statuses.append(host_status)
+            listed_count += host_listed
+            total_blacklists += row.get("total_blacklists") or 0
+            if host_status == "listed":
+                hosts_listed += 1
+
+        hosts_out.append({
+            "hostname": row.get("hostname"),
+            "source": row.get("source"),
+            "status": host_status,
+            "listed_count": host_listed,
+            "checked_at": _format_checked_at(checked_at)
+        })
+
+    has_data = len(fresh_statuses) > 0
+    if "listed" in fresh_statuses:
+        status = "listed"
+    elif "error" in fresh_statuses:
+        status = "error"
+    elif fresh_statuses:
+        status = "clean"
+    else:
+        status = "unknown"
+
+    # server_ip kept for backward compatibility: the auto-detected WAN IP as
+    # before; when unavailable (server IP source off) fall back to the single
+    # monitored host so single-host UIs still show an address.
+    if not server_ip and len(hosts_out) == 1:
+        server_ip = hosts_out[0]["hostname"]
+
+    return {
+        "has_data": has_data,
+        "server_ip": server_ip,
+        "status": status,
+        # Sum across hosts with fresh data (see docstring)
+        "listed_count": listed_count,
+        "total_blacklists": total_blacklists if has_data else len(BLACKLISTS),
+        "checked_at": _format_checked_at(latest_checked_at),
+        "hosts": hosts_out,
+        "hosts_total": len(hosts_out),
+        "hosts_listed": hosts_listed
+    }
+
 
 def get_cached_blacklist_check(ip: str) -> Optional[Dict[str, Any]]:
     """
@@ -237,9 +418,11 @@ def get_cached_blacklist_check(ip: str) -> Optional[Dict[str, Any]]:
             if age > timedelta(hours=CACHE_TTL_HOURS):
                 return None
             
-            # Check if configuration changed (number of blacklists)
-            if check.total_blacklists != len(BLACKLISTS):
-                logger.info(f"Blacklist configuration changed (stored: {check.total_blacklists}, current: {len(BLACKLISTS)}). Invalidating cache.")
+            # Check if configuration changed (number of blacklists applicable
+            # to THIS address - IPv6 hosts are checked against fewer zones)
+            expected_total = len(applicable_blacklists(ip))
+            if check.total_blacklists != expected_total:
+                logger.info(f"Blacklist configuration changed (stored: {check.total_blacklists}, current: {expected_total}). Invalidating cache.")
                 return None
             
             # Return cached data
@@ -317,15 +500,21 @@ async def check_ip_in_blacklist(ip: str, blacklist: Dict[str, str], index: int) 
         response_ips = [str(rdata) for rdata in answers]
         response = response_ips[0] if response_ips else None
         
-        # Spamhaus returns 127.255.255.x codes to indicate blocked queries
+        # 127.255.255.x means the RBL REJECTED the query, not that the IP is
+        # listed. Spamhaus returns these when the query arrives via a public
+        # resolver (Google/Cloudflare/Quad9/DoH) - set BLACKLIST_DNS_SERVERS to
+        # your own recursive resolver (mailcow: 172.22.1.254) to fix it.
         if response and response.startswith('127.255.'):
-            error_msg = "Query blocked/limited"
-            if response == "127.255.255.254":
-                error_msg = "Query rate limited - cannot determine status"
+            if response == "127.255.255.252":
+                error_msg = "Query rejected (typing error in the zone name) - status unknown"
+            elif response == "127.255.255.254":
+                error_msg = ("Query rejected: sent via a public/open DNS resolver. "
+                             "Set BLACKLIST_DNS_SERVERS to your own recursive resolver "
+                             "(mailcow: 172.22.1.254) - status unknown")
             elif response == "127.255.255.255":
-                error_msg = "Query blocked - cannot determine status"
+                error_msg = "Query rejected: too many queries from this resolver - status unknown"
             else:
-                error_msg = f"Query blocked ({response}) - cannot determine status"
+                error_msg = f"Query rejected ({response}) - status unknown"
             
             logger.warning(f"{blacklist['name']}: {error_msg}")
             return {
@@ -391,18 +580,21 @@ async def check_all_blacklists(ip: str) -> Dict[str, Any]:
         Dict with all results and summary
     """
     global _check_progress, _batch_state
-    
+
+    # IPv6 addresses are checked only against zones that actually serve IPv6
+    blacklists = applicable_blacklists(ip)
+
     # Only reset progress if NOT in batch mode
     if not _batch_state.get("active", False):
         _check_progress["in_progress"] = True
         _check_progress["current"] = 0
-        _check_progress["total"] = len(BLACKLISTS)
-    
-    logger.info(f"Starting blacklist check for IP: {ip}")
-    
+        _check_progress["total"] = len(blacklists)
+
+    logger.info(f"Starting blacklist check for IP: {ip} ({len(blacklists)} zones)")
+
     try:
         # Run all checks concurrently with index for progress tracking
-        tasks = [check_ip_in_blacklist(ip, bl, i) for i, bl in enumerate(BLACKLISTS)]
+        tasks = [check_ip_in_blacklist(ip, bl, i) for i, bl in enumerate(blacklists)]
         results = await asyncio.gather(*tasks, return_exceptions=True)
         
         # Process results
@@ -440,18 +632,31 @@ async def check_all_blacklists(ip: str) -> Dict[str, Any]:
             x["name"]
         ))
         
-        # Determine overall status
+        # Determine overall status.
+        # A failed Spamhaus lookup must never be reported as "clean": Spamhaus
+        # is the RBL that actually matters for deliverability, so if its zones
+        # could not be checked the honest answer is "unknown".
+        spamhaus_failed = [
+            r for r in processed_results
+            if 'spamhaus' in r.get('zone', '').lower() and r.get('status') in ('error', 'timeout')
+        ]
         if listed_count > 0:
             status = "listed"
-        elif error_count + timeout_count > len(BLACKLISTS) / 2:
+        elif spamhaus_failed:
+            status = "error"
+            logger.warning(
+                "Blacklist check for %s: %d Spamhaus zone(s) could not be checked - "
+                "reporting status 'error' rather than 'clean'", ip, len(spamhaus_failed)
+            )
+        elif error_count + timeout_count > len(blacklists) / 2:
             status = "error"
         else:
             status = "clean"
-        
+
         data = {
             "server_ip": ip,
             "checked_at": datetime.now(timezone.utc).isoformat() + 'Z',
-            "total_blacklists": len(BLACKLISTS),
+            "total_blacklists": len(blacklists),
             "listed_count": listed_count,
             "clean_count": clean_count,
             "error_count": error_count,
@@ -470,7 +675,7 @@ async def check_all_blacklists(ip: str) -> Dict[str, Any]:
     finally:
         if not _batch_state.get("active", False):
             _check_progress["in_progress"] = False
-            _check_progress["current"] = len(BLACKLISTS)
+            _check_progress["current"] = len(blacklists)
             _check_progress["current_blacklist"] = None
         else:
             # Batch mode: Mark this host as done

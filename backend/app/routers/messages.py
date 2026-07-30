@@ -298,7 +298,7 @@ def get_message_full_details(
         postfix_logs = deduplicated_postfix_logs
         
         # Get Netfilter logs by IP from Rspamd, limited to ±1 hour around the
-        # message (issue #68) — the Security tab explicitly promises "events
+        # message (issue #68) - the Security tab explicitly promises "events
         # within 1 hour of this message"; unrelated events from days earlier
         # were confusing
         netfilter_logs = []

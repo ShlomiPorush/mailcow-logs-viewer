@@ -1,12 +1,12 @@
 """
-Raw Logs Router — REST API endpoints and WebSocket for the Live Log Viewer.
+Raw Logs Router - REST API endpoints and WebSocket for the Live Log Viewer.
 
 Endpoints:
-- GET  /api/raw-logs/services         — List available services
-- GET  /api/raw-logs/worker-status    — Worker health info
-- GET  /api/raw-logs/{service}        — Query stored logs (paginated)
-- GET  /api/raw-logs/{service}/smart-filters — Postfix smart filter definitions
-- WS   /ws/raw-logs                   — WebSocket for real-time log streaming
+- GET  /api/raw-logs/services         - List available services
+- GET  /api/raw-logs/worker-status    - Worker health info
+- GET  /api/raw-logs/{service}        - Query stored logs (paginated)
+- GET  /api/raw-logs/{service}/smart-filters - Postfix smart filter definitions
+- WS   /ws/raw-logs                   - WebSocket for real-time log streaming
 """
 import logging
 import json
@@ -40,9 +40,10 @@ _ws_tokens: Dict[str, float] = {}  # token -> expiry timestamp
 _WS_TOKEN_TTL = 30  # seconds
 
 def _cleanup_expired_tokens():
-    """Remove expired tokens"""
+    """Remove expired tokens. Iterate over a snapshot so a concurrent
+    mutation of _ws_tokens can never raise 'dictionary changed size'."""
     now = time.time()
-    expired = [t for t, exp in _ws_tokens.items() if exp < now]
+    expired = [t for t, exp in list(_ws_tokens.items()) if exp < now]
     for t in expired:
         _ws_tokens.pop(t, None)
 
@@ -132,11 +133,16 @@ set_ws_broadcast_all_fn(log_stream_manager.broadcast_to_all)
 
 
 @router.get("/raw-logs/ws-token")
-def get_ws_token():
+async def get_ws_token():
     """
     Issue a one-time short-lived token for WebSocket authentication.
     This endpoint is protected by the existing HTTP auth middleware,
     so only authenticated users can obtain a token.
+
+    MUST stay ``async`` (run on the event loop): it mutates the in-memory
+    ``_ws_tokens`` store that the async WebSocket endpoint also reads/pops.
+    Running it in a threadpool (plain ``def``) races that store against the
+    event loop and intermittently drops WebSocket connections under load.
     """
     _cleanup_expired_tokens()
     token = secrets.token_urlsafe(32)
@@ -207,7 +213,7 @@ async def websocket_raw_logs(
             try:
                 data = await websocket.receive_text()
                 msg = json.loads(data)
-                
+
                 if msg.get("action") == "subscribe":
                     new_service = msg.get("service", "").lower()
                     if new_service in enabled and new_service != current_service:
@@ -282,7 +288,7 @@ def get_services():
 
 @router.get("/raw-logs/worker-status")
 def get_worker_status():
-    """Worker health check — last fetch time, stats, errors"""
+    """Worker health check - last fetch time, stats, errors"""
     status = get_raw_logs_job_status()
     return {
         "enabled": settings.raw_logs_enabled,
@@ -314,11 +320,11 @@ def get_raw_logs(
     enabled = settings.raw_logs_services_list
     if service not in enabled and service not in ALL_SERVICES:
         raise HTTPException(status_code=404, detail=f"Service '{service}' not found")
-    
+
     try:
         with get_db_context() as db:
             query = db.query(RawServiceLog).filter(RawServiceLog.service == service)
-            
+
             # Date range filter
             if start_date:
                 try:
@@ -338,7 +344,7 @@ def get_raw_logs(
             if search:
                 search_term = f"%{search}%"
                 if service == "rspamd-history":
-                    # Rspamd history has subject, sender_smtp, sender_mime, ip — no 'message' field
+                    # Rspamd history has subject, sender_smtp, sender_mime, ip - no 'message' field
                     query = query.filter(
                         or_(
                             cast(RawServiceLog.raw_data['subject'], String).ilike(search_term),

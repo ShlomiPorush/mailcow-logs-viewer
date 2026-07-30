@@ -5,34 +5,77 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.7.0] - 2026-07-30
+
+### Added
+
+- **Per-check IP sources for blacklist monitoring and SPF checks** ([#76](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/76), [#23](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/23)) - each check now has its own configurable IP sources instead of one global list. Blacklist monitoring: toggle the auto-detected WAN IP, mailcow transports and relayhosts independently (`BLACKLIST_SOURCE_SERVER_IP` / `_TRANSPORTS` / `_RELAYHOSTS`), plus `BLACKLIST_SOURCE_MANUAL_HOSTS` for extra IPs or hostnames - including hosts unrelated to this mailcow server. Domain SPF checks: choose which IPs must pass each domain's SPF record (`DOMAIN_SPF_SOURCE_SERVER_IP` / `_TRANSPORTS` / `_RELAYHOSTS` / `_MANUAL_HOSTS`), so relay setups validate the relay IPs instead of the WAN IP. A new `DOMAIN_SPF_SOURCE_DMARC_HISTORY` source additionally validates the SPF-passing sender IPs observed in the last 30 days of DMARC aggregate reports. IPv6 is supported end to end (including `ip6:` mechanisms, AAAA lookups and nibble-reversed RBL queries). Configuration model and the DMARC-history idea from [PR #77](https://github.com/ShlomiPorush/mailcow-logs-viewer/pull/77) by [@Meeppoo](https://github.com/Meeppoo)
+- **Sort quarantine by score** ([#75](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/75)) - the Quarantine page can now sort by spam score in both directions (highest first to spot extreme spam, lowest first to find false positives). The chosen sort survives refreshes and message actions
+- **Notification destinations** - send alerts to Slack, Discord, Telegram, ntfy, Gotify or a custom JSON endpoint, alongside email. Add **as many destinations as you like** under Settings → Notifications; each one asks only for the fields that service actually needs (Telegram: bot token + chat ID, ntfy: server + topic) and the endpoint URL is built for you. Per-destination enable/disable, "Send test", and last-delivery status. An existing single-webhook configuration is migrated automatically
+- **Choose which alerts each destination receives** - every notification now belongs to a named type (Security, IP blacklist, DNS record changes, DMARC processing errors), each with a short explanation in the UI, so it is clear what the app sends and where. Tick the types per destination, e.g. security alerts to your phone and everything else to a team channel. Existing destinations keep receiving all alerts
+- **Anomaly detection (beta)** - background job that flags likely compromised mailboxes (a mailbox sending far above its own baseline) and auth-failure bursts (brute-force / credential stuffing). Alerts appear as a dashboard banner and are sent via email + webhook. Tunable under Settings → Anomaly Detection; off by default. **Beta**: this feature has seen limited real-world testing - please report issues
+- **SMTP abuse protection (beta)** - automatically disables SMTP (sending) for a mailbox that exceeds a hard outbound limit, the usual signature of a compromised account. Receiving over IMAP is never affected, app passwords are revoked, and both the operator and the mailbox owner are notified. Includes a whitelist, manual disable/re-enable controls under Security → Abuse Protection, and an audit trail. Requires a Read-Write mailcow API key; off by default. **Beta**: this feature has seen limited real-world testing - please report issues. **Contributed by [@jongautur](https://github.com/jongautur) ([#73](https://github.com/ShlomiPorush/mailcow-logs-viewer/pull/73))**
+- **TLSA (DANE) checks and DNS change alerts** ([#72](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/72)) - the Domains page now also checks the TLSA (DANE) records published for each domain's mail servers, alongside SPF, DKIM and DMARC. When any of those four records changes, an alert naming the domain and showing the old and new value is sent by email and to your notification destinations, so you can update the records at your registrar. A failed DNS lookup is never treated as a change
+- **DMARC insights** - the DMARC page now shows policy recommendations (e.g. "safe to move from p=none to p=quarantine" when pass rate and volume are healthy) and flags new sending sources that are failing DMARC (possible spoofing)
+- **Documentation** for all of the above: new environment variables in `ENV_Settings.md`, new endpoints in `API.md`, and an in-app help page for Abuse Protection
+
+### Fixed
+
+- **Blacklist alerts never reached notification destinations when no email was configured** - both blacklist alert paths (new listing, cleared/improved) were skipped entirely unless an admin email was set, so webhook-only setups received nothing. Alerts now fire when either an email or at least one notification destination is configured
+- **Times shown ahead by 1-2 hours** ([#19](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/19)) - when the PostgreSQL container ran with a non-UTC `TZ` (e.g. `Europe/Berlin`), timestamps were shifted to local wall time at insert, then labeled UTC and shifted again in the browser - showing times ahead by exactly the UTC offset (1h in winter, 2h in summer). Every DB session is now pinned to UTC, so the database container's timezone no longer matters. Entries stored before the fix keep the old shift until they age out with `RETENTION_DAYS`
+- **Relay hosts in `[host]:port` form were never monitored** - Postfix bracket syntax (e.g. `[relay.example.com]:587`) was parsed incorrectly, leaving a stray `]` that made DNS resolution fail silently. Thanks to @Meeppoo for spotting it
+- **Relay pools are now fully monitored** - a relay hostname with multiple A records (round-robin pool) had only its first IP monitored; all public IPs are now resolved (honoring `BLACKLIST_DNS_SERVERS`) and monitored, so a listing on any pool member is caught
+- **Blacklist host sync no longer stops when the Domains page is disabled** - the transports/relayhosts sync only feeds blacklist monitoring, so it is now gated on the blacklist feature instead
+- **Dashboard blacklist card covers all monitored hosts** - the summary card previously reflected only the auto-detected WAN IP; it now aggregates every monitored host (configured outbound IPs, transports, relayhosts) and shows how many are listed. Idea from [PR #77](https://github.com/ShlomiPorush/mailcow-logs-viewer/pull/77) by [@Meeppoo](https://github.com/Meeppoo)
+- **SPF check transparency** - the Domains page SPF card gained an expandable "Checked IPs" section showing exactly which IPs were validated, where each came from (configured or auto-detected) and its per-IP verdict. Idea from [PR #77](https://github.com/ShlomiPorush/mailcow-logs-viewer/pull/77) by [@Meeppoo](https://github.com/Meeppoo)
+- **Modal flash on page load fixed** and the transports sync status card now follows the blacklist feature flag. Both from [PR #77](https://github.com/ShlomiPorush/mailcow-logs-viewer/pull/77) by [@Meeppoo](https://github.com/Meeppoo)
+- **Spamhaus blacklist checks stopped working** - Spamhaus rejects DNSBL queries that arrive through public resolvers (Google, Cloudflare, Quad9, DoH), answering with a `127.255.255.x` rejection code. The app queried only public resolvers, and a 2.3.2 refactor had removed the retry that used to work around it, so all four Spamhaus zones silently returned "error". RBL lookups now use your own resolver first (configurable via `BLACKLIST_DNS_SERVERS`), retry other resolvers when a query is rejected, explain the rejection in the UI, and a host whose Spamhaus zones could not be checked is reported as **unknown instead of clean**
+- **Live Log Viewer WebSocket dropped intermittently (regression in 2.6.3)** - `get_ws_token` was mistakenly converted from `async def` to `def` in the 2.6.3 endpoint-threadpooling change, moving it to a worker thread while the async WebSocket endpoint kept reading/mutating the same in-memory token store on the event loop. Under load (busy server + reconnect loop) this raced the token store and dropped connections (1006). Restored to `async` and made the token cleanup snapshot-safe
+- **Mailbox stats summary crashed on an empty database** (`total_sent_failed` variable-name mismatch) - affected fresh installs before the first stats sync
+- Removed sourcemap references from vendored chart.js/DOMPurify (harmless 404s for `.map` files in the logs)
+- **DMARC pass rate was drastically understated** - the domains table, top summary and per-domain charts counted a message as passing DMARC only when BOTH aligned SPF and aligned DKIM passed. Per RFC 7489 either one is sufficient, and common legitimate flows pass only one (forwarding breaks SPF but DKIM survives). All views now use the correct either-passes rule, matching the Insights panel
+- **Confirmation dialogs and toasts now HTML-escape their message** - user-influenced values (channel names, rule names, email addresses, domains) were interpolated into `innerHTML` unescaped, allowing stored HTML/script injection by anyone able to influence those names
+
+### Changed
+
+- **Blacklist zone list cleaned up and made IPv6-honest** - removed the 9 SORBS zones (SORBS shut down in 2024, so those checks were meaningless) and the CBL zone (absorbed into Spamhaus XBL). IPv6 addresses are now checked only against zones that actually serve IPv6 (Spamhaus, s5h.net) instead of reporting a false "clean" from ~26 IPv4-only lists that cannot even hold an IPv6 listing. Cached results are re-scanned once after upgrading because the zone count changed
+- **Rspamd maps failed with a 302 behind a reverse proxy** ([#71](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/71)) - when the app runs outside mailcow's Docker network, the proxy in front of mailcow can redirect `/rspamd` before the password header is evaluated. New `RSPAMD_URL` setting points straight at the Rspamd controller (e.g. `http://rspamd-mailcow:11334`); the 302 error message now names it too. Thanks to [@curiosity71](https://github.com/curiosity71) for the diagnosis
+- **Settings reorganised** - excluded email addresses moved to the Fetch tab (they are excluded during fetching), OAuth2 merged into the Authentication tab, and the Blacklist tab is now clearly the IP blacklist (RBL) monitor
+- **Settings navigation on mobile** - the category list is replaced by a single sticky picker that stays visible while scrolling, so switching category no longer means scrolling back to the top. The desktop sidebar is unchanged
+- **Settings "Edit configuration" redesigned** - the 17 categories that used to wrap across several rows of tabs are now a grouped vertical sidebar (Connection / Notifications / Security / Email Data / Features & Advanced), with the fields on the right. Categories for disabled features are hidden and their group header collapses when empty. Also fixes a pre-existing quirk where the highlighted tab could be a skipped/empty one. No change to the fields, saving, or ENV-lock behavior
+- Security-headers middleware reimplemented as a pure ASGI middleware (was `@app.middleware("http")` / `BaseHTTPMiddleware`), which by construction never touches WebSocket connections - hardening against proxy/WebSocket edge cases
+- **Schema migrations moved to Alembic** - new schema changes are now versioned Alembic revisions (`backend/alembic/`) applied automatically on startup; existing installs adopt it transparently via a no-op baseline, and the legacy startup migrations are frozen at their 2.6.3 state
+- **Frontend split into modules** - the monolithic `app.js` was split into per-page scripts (`utils.js`, `settings.js`, `domains.js`, `dmarc.js`, `logs-viewer.js`, `mailbox-stats.js`, `notifications.js`, `smtp-abuse.js`). No behavior change; relevant if you carry local frontend patches
+---
+
 ## [2.6.3] - 2026-07-12
 
 ### Security
 
-- **Decompression bomb protection** — a malicious compressed DMARC/TLS-RPT report (emailed or uploaded) could exhaust memory and crash the container; size limits are now enforced
-- **XSS fixes** — malicious data inside DMARC reports could execute scripts in the browser via inline `onclick` handlers; markdown content (docs, changelogs) is now also sanitized with DOMPurify
-- **Hardened XML parsing** — DMARC reports are parsed with `defusedxml` to block entity-expansion attacks
+- **Decompression bomb protection** - a malicious compressed DMARC/TLS-RPT report (emailed or uploaded) could exhaust memory and crash the container; size limits are now enforced
+- **XSS fixes** - malicious data inside DMARC reports could execute scripts in the browser via inline `onclick` handlers; markdown content (docs, changelogs) is now also sanitized with DOMPurify
+- **Hardened XML parsing** - DMARC reports are parsed with `defusedxml` to block entity-expansion attacks
 - **Security headers** added to all responses (`Content-Security-Policy`, `X-Frame-Options`, `X-Content-Type-Options`, `Referrer-Policy`)
-- **Brute-force protection** — after 10 failed login attempts within 15 minutes, further attempts are blocked temporarily
-- **Less info exposed without login** — `/api/info` and `/api/health` no longer reveal the mailcow URL, hosted domains, or configuration to unauthenticated visitors
+- **Brute-force protection** - after 10 failed login attempts within 15 minutes, further attempts are blocked temporarily
+- **Less info exposed without login** - `/api/info` and `/api/health` no longer reveal the mailcow URL, hosted domains, or configuration to unauthenticated visitors
 
 ### Fixed
 
-- **"Sync Transports & Relayhosts" job crashed** when a relayhost hostname was long (e.g. Microsoft 365 relays) — the database column was too short ([#70](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/70))
-- **Security tab showed old, unrelated events** — now limited to 1 hour around the message, as the tab always claimed ([#68](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/68))
+- **"Sync Transports & Relayhosts" job crashed** when a relayhost hostname was long (e.g. Microsoft 365 relays) - the database column was too short ([#70](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/70))
+- **Security tab showed old, unrelated events** - now limited to 1 hour around the message, as the tab always claimed ([#68](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/68))
 - **"Test SMTP" / "Test IMAP" buttons refreshed the page** instead of showing the test results
 - **Some logs were silently lost** when a large backlog was imported across multiple fetch cycles
 - **OAuth2 login always failed** when `SESSION_SECRET_KEY` was not configured
-- **App froze during slow operations** — database queries, email sending, and SMTP/IMAP connection tests no longer block the entire application
-- **Postfix logs page was slow on large databases** — replaced hundreds of queries per page view with a single paginated query
-- **Live log viewer memory leak** — the page now keeps at most 5,000 log lines, so leaving the Logs tab open no longer slows the browser
-- **Error responses leaked internal details** — 500 errors now return a generic message (full errors still go to the server log)
+- **App froze during slow operations** - database queries, email sending, and SMTP/IMAP connection tests no longer block the entire application
+- **Postfix logs page was slow on large databases** - replaced hundreds of queries per page view with a single paginated query
+- **Live log viewer memory leak** - the page now keeps at most 5,000 log lines, so leaving the Logs tab open no longer slows the browser
+- **Error responses leaked internal details** - 500 errors now return a generic message (full errors still go to the server log)
 - Internal cleanups: removed a duplicate background-job definition and a duplicate migration, deduplicated helper functions, stricter exception handling
 
 ### Added
 
-- **Log Viewer sort order toggle** — choose between newest entries at the bottom (default) or at the top; the choice is remembered ([#69](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/69))
-- **Automated tests + CI** — pytest suite for the backend and a GitHub Actions workflow that runs on every push/PR
+- **Log Viewer sort order toggle** - choose between newest entries at the bottom (default) or at the top; the choice is remembered ([#69](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/69))
+- **Automated tests + CI** - pytest suite for the backend and a GitHub Actions workflow that runs on every push/PR
 
 ---
 

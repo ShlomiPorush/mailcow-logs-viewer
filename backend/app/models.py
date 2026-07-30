@@ -198,6 +198,7 @@ class DomainDNSCheck(Base):
     spf_check = Column(JSONB)
     dkim_check = Column(JSONB)
     dmarc_check = Column(JSONB)
+    tlsa_check = Column(JSONB)      # DANE/TLSA records for the domain's MX hosts
     
     checked_at = Column(DateTime, nullable=False)
     is_full_check = Column(Boolean, default=False)
@@ -691,3 +692,109 @@ class QuarantineRuleLog(Base):
         Index('idx_qrule_log_rule', 'rule_id'),
         Index('idx_qrule_log_created', 'created_at'),
     )
+
+class SecurityAlert(Base):
+    """
+    Anomaly-detection alerts: outbound volume spikes (possible compromised
+    mailbox) and auth-failure bursts. Surfaced on the dashboard and sent via
+    the notification service. Added in v2.6.4 (first Alembic-managed table).
+    """
+    __tablename__ = "security_alerts"
+
+    id = Column(Integer, primary_key=True, index=True)
+    alert_type = Column(String(40), nullable=False, index=True)  # 'volume_spike' | 'auth_failure_burst'
+    severity = Column(String(20), default='warning', index=True)  # 'info' | 'warning' | 'critical'
+    subject = Column(String(255))                # mailbox/username the alert is about
+    title = Column(String(255), nullable=False)  # short human-readable headline
+    detail = Column(Text)                        # longer explanation
+    metric_value = Column(Float)                 # observed value (messages, failures, ...)
+    baseline_value = Column(Float)               # expected/baseline value for context
+    acknowledged = Column(Boolean, default=False, index=True)
+
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+
+    __table_args__ = (
+        Index('idx_security_alert_type_subject', 'alert_type', 'subject'),
+        Index('idx_security_alert_created', 'created_at'),
+    )
+
+    def __repr__(self):
+        return f"<SecurityAlert(type={self.alert_type}, subject={self.subject}, severity={self.severity})>"
+
+
+class SMTPAbuseWhitelist(Base):
+    """
+    Mailboxes exempt from SMTP abuse auto-blocking (newsletters, monitoring,
+    ticketing systems - anything that legitimately sends in bursts).
+
+    """
+    __tablename__ = "smtp_abuse_whitelist"
+
+    id = Column(Integer, primary_key=True, index=True)
+    email = Column(String(255), unique=True, nullable=False, index=True)
+    notes = Column(Text)
+    active = Column(Boolean, default=True, nullable=False, index=True)
+
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    def __repr__(self):
+        return f"<SMTPAbuseWhitelist(email={self.email}, active={self.active})>"
+
+
+class SMTPAbuseAction(Base):
+    """
+    Audit trail of SMTP abuse actions. The most recent row per mailbox is also
+    the current state (blocked / unblocked), and drives both the UI and the
+    post-unblock grace period that stops the job re-blocking immediately.
+
+    """
+    __tablename__ = "smtp_abuse_actions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    email = Column(String(255), nullable=False, index=True)
+    message_count = Column(Integer, nullable=False)
+    threshold = Column(Integer, nullable=False)
+    window_minutes = Column(Integer, nullable=False)
+    action = Column(String(30), nullable=False, default="blocked")   # 'blocked' | 'unblocked'
+    automatic = Column(Boolean, nullable=False, default=True)
+    operator = Column(String(255))
+    app_passwords_revoked = Column(Integer, default=0)
+
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+
+    __table_args__ = (
+        Index('idx_smtp_abuse_email_created', 'email', 'created_at'),
+    )
+
+    def __repr__(self):
+        return f"<SMTPAbuseAction(email={self.email}, action={self.action}, count={self.message_count})>"
+
+
+class NotificationChannel(Base):
+    """
+    A configured destination for alerts (Slack, Telegram, ntfy, ...).
+
+    Multiple channels can be active at once; every alert is delivered to all
+    enabled channels. Service-specific settings (bot token, topic, server URL)
+    live in ``config`` so each type only stores the fields it actually needs.
+    """
+    __tablename__ = "notification_channels"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(100), nullable=False)          # user label, e.g. "Ops Slack"
+    channel_type = Column(String(30), nullable=False)   # slack | discord | telegram | ntfy | gotify | webhook
+    config = Column(JSONB, nullable=False, default=dict)
+    # Alert topics this channel receives. Empty/NULL = every alert.
+    alert_types = Column(JSONB)
+    enabled = Column(Boolean, default=True, nullable=False, index=True)
+
+    last_status = Column(String(20))                    # 'success' | 'failed' | None
+    last_error = Column(Text)
+    last_sent_at = Column(DateTime)
+
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    def __repr__(self):
+        return f"<NotificationChannel(name={self.name}, type={self.channel_type}, enabled={self.enabled})>"

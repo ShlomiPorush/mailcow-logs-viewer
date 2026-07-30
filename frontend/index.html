@@ -10,10 +10,12 @@
     <link rel="icon" type="image/svg+xml"
         href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%233b82f6' stroke-width='2'><path stroke-linecap='round' stroke-linejoin='round' d='M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z'/></svg>">
 
+    <!-- Native .hidden rule prevents modals flashing before Tailwind's runtime compiler runs -->
+    <style>.hidden{display:none}</style>
     <script src="/static/assets/libs/tailwindcss.min.js"></script>
     <script src="/static/assets/libs/marked.min.js"></script>
-    <script src="/static/assets/libs/purify.min.js"></script>
-    <script src="/static/assets/libs/chart.umd.min.js"></script>
+    <script src="/static/assets/libs/purify.min.js?v=2"></script>
+    <script src="/static/assets/libs/chart.umd.min.js?v=2"></script>
     <link rel="stylesheet" href="/static/assets/libs/github-markdown.min.css">
     <script>
         tailwind.config = {
@@ -776,6 +778,8 @@
 
             <!-- Dashboard Tab -->
             <div id="content-dashboard" class="tab-content">
+                <!-- Security alerts banner (anomaly detection) - hidden until alerts exist -->
+                <div id="dashboard-security-alerts" class="mb-6 hidden"></div>
                 <!-- Stats Grid -->
                 <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6 mb-6">
                     <div class="bg-white dark:bg-gray-800 rounded-lg shadow dark:shadow-gray-900/30 p-4 sm:p-6">
@@ -1178,6 +1182,48 @@
                     </details>
                 </div>
 
+                <!-- SMTP Abuse Protection -->
+                <div class="mb-4">
+                    <details
+                        class="group bg-white dark:bg-gray-800 rounded-lg shadow dark:shadow-gray-900/30 overflow-hidden">
+                        <summary
+                            class="list-none px-6 py-4 border-b border-gray-200 dark:border-gray-700 cursor-pointer flex items-center justify-between hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors select-none">
+                            <h2 class="text-lg font-semibold text-gray-900 dark:text-white flex items-center gap-2">
+                                <svg class="w-5 h-5 text-red-500" fill="none" stroke="currentColor"
+                                    viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                        d="M12 9v2m0 4h.01M5.07 19h13.86c1.54 0 2.5-1.67 1.73-3L13.73 4a2 2 0 00-3.46 0L3.34 16c-.77 1.33.19 3 1.73 3z">
+                                    </path>
+                                </svg>
+                                Abuse Protection
+                                <span class="px-1.5 py-0.5 text-xs font-semibold rounded bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200"
+                                    title="This feature is new - please report any issues on GitHub">Beta</span>
+                                <button type="button"
+                                    onclick="event.preventDefault(); event.stopPropagation(); showHelpModal('Abuse_Protection')"
+                                    class="text-gray-400 hover:text-blue-500 dark:hover:text-blue-400 transition-colors"
+                                    title="Help - Abuse Protection">
+                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                            d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z">
+                                        </path>
+                                    </svg>
+                                </button>
+                            </h2>
+                            <svg class="w-5 h-5 text-gray-400 transition-transform duration-200 group-open:rotate-180"
+                                fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                    d="M19 9l-7 7-7-7"></path>
+                            </svg>
+                        </summary>
+                        <div id="smtp-abuse-panel" class="p-4 sm:p-6">
+                            <div class="text-center py-6">
+                                <div class="loading mx-auto mb-4"></div>
+                                <p class="text-gray-500 dark:text-gray-400">Loading abuse protection...</p>
+                            </div>
+                        </div>
+                    </details>
+                </div>
+
                 <!-- Filters -->
                 <div class="bg-white dark:bg-gray-800 rounded-lg shadow dark:shadow-gray-900/30 p-4 mb-4">
                 <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
@@ -1361,11 +1407,17 @@
                 </div>
 
                 <div class="bg-white dark:bg-gray-800 rounded-lg shadow dark:shadow-gray-900/30">
-                    <div class="px-4 sm:px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+                    <div class="px-4 sm:px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex flex-wrap items-center justify-between gap-2">
                         <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Quarantined Messages <span
                                 id="quarantine-count"
                                 class="text-sm font-normal text-gray-500 dark:text-gray-400"></span>
                         </h2>
+                        <select id="quarantine-sort" onchange="applyQuarantineSort()"
+                            class="px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-lg">
+                            <option value="newest">Newest first</option>
+                            <option value="score_desc">Score: high to low</option>
+                            <option value="score_asc">Score: low to high</option>
+                        </select>
                     </div>
                     <div id="quarantine-logs" class="p-4 sm:p-6">
                         <div class="text-center py-8">
@@ -1751,6 +1803,9 @@
                 <div id="dmarc-domains-view">
                     <!-- Stats Cards -->
                     <div id="dmarc-main-stats-container"></div>
+
+                    <!-- Insights (policy recommendations + new-source detection) -->
+                    <div id="dmarc-insights-container" class="mb-6 hidden"></div>
 
                     <!-- Domains Table -->
                     <div
@@ -2200,7 +2255,7 @@
                                 <!-- Live -->
                                 <button onclick="resetToLiveLogs()" id="logs-live-btn"
                                     class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md border border-green-500 bg-green-500 text-white transition-colors"
-                                    title="Live mode — show latest logs">
+                                    title="Live mode - show latest logs">
                                     <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
                                     </svg>
@@ -2542,9 +2597,17 @@
     </div> <!-- Close app-content div -->
 
     <!-- JavaScript -->
+    <script src="/static/utils.js?v=2"></script>
     <script src="/static/router.js"></script>
-    <script src="/static/app.js?v=7"></script>
-    <script src="/static/spam_filter.js?v=1"></script>
+    <script src="/static/app.js?v=14"></script>
+    <script src="/static/dmarc.js?v=2"></script>
+    <script src="/static/logs-viewer.js?v=1"></script>
+    <script src="/static/settings.js?v=14"></script>
+    <script src="/static/domains.js?v=4"></script>
+    <script src="/static/mailbox-stats.js?v=1"></script>
+    <script src="/static/smtp-abuse.js?v=1"></script>
+    <script src="/static/notifications.js?v=3"></script>
+    <script src="/static/spam_filter.js?v=2"></script>
 
     <!-- DMARC Sync History Modal -->
     <div id="dmarc-sync-history-modal"

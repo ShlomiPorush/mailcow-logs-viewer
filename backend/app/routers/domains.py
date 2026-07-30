@@ -6,14 +6,14 @@ import re
 import asyncio
 import ipaddress
 from fastapi import APIRouter, HTTPException, Depends
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 import dns.resolver
 import dns.asyncresolver
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from sqlalchemy.orm import Session
-from sqlalchemy import text
+from sqlalchemy import text, func
 from app.database import get_db
-from app.models import DomainDNSCheck
+from app.models import DomainDNSCheck, DMARCReport, DMARCRecord
 from app.utils import format_datetime_for_api
 from app.config import settings
 from app.mailcow_api import mailcow_api
@@ -80,9 +80,165 @@ async def resolve_dns_with_fallback(query: str, record_type: str = 'TXT', timeou
     return await resolve(query, record_type, timeout)
 
 
-async def check_spf_record(domain: str) -> Dict[str, Any]:
+async def _resolve_public_host_ips(host: str) -> List[str]:
+    """Resolve a hostname to all its public A-record IPs (private/loopback
+    skipped). IP literals are returned as-is when public."""
+    try:
+        ip_obj = ipaddress.ip_address(host)
+        if ip_obj.is_private or ip_obj.is_loopback:
+            return []
+        return [str(ip_obj)]
+    except ValueError:
+        pass
+    try:
+        answers = await resolve_dns_with_fallback(host, 'A', timeout=5)
+    except Exception as e:
+        logger.warning(f"[SPF] Could not resolve {host}: {e}")
+        return []
+    ips = []
+    for rr in answers:
+        try:
+            ip_obj = ipaddress.ip_address(str(rr))
+        except ValueError:
+            continue
+        if ip_obj.is_private or ip_obj.is_loopback:
+            continue
+        ips.append(str(ip_obj))
+    return ips
+
+
+async def get_spf_source_ips() -> List[Dict[str, str]]:
     """
-    Check SPF record for a domain with full validation
+    Resolve the enabled SPF check sources (server IP / transports /
+    relayhosts / manual hosts) into a deduplicated list of {ip, source}.
+    A failure in one source never aborts the others.
+
+    Batch callers checking many domains should call this once and pass the
+    result to check_spf_record / check_domain_dns.
+    """
+    entries: List[Dict[str, str]] = []
+    seen = set()
+
+    def add(ip, source):
+        if ip and ip not in seen:
+            seen.add(ip)
+            entries.append({'ip': ip, 'source': source})
+
+    if settings.domain_spf_source_server_ip:
+        server_ip = get_cached_server_ip()
+        if not server_ip:
+            server_ip = await init_server_ip()
+        add(server_ip, 'auto-detected')
+
+    if settings.domain_spf_source_transports or settings.domain_spf_source_relayhosts:
+        from app.scheduler import parse_nexthop_host
+        if settings.domain_spf_source_transports:
+            try:
+                transports = await mailcow_api.get_transports()
+            except Exception as e:
+                logger.warning(f"[SPF] Failed to fetch transports: {e}")
+                transports = []
+            for t in transports:
+                if str(t.get('active', '0')) != '1':
+                    continue
+                host = parse_nexthop_host(t.get('nexthop') or '')
+                if not host:
+                    continue
+                for ip in await _resolve_public_host_ips(host):
+                    add(ip, 'transport')
+        if settings.domain_spf_source_relayhosts:
+            try:
+                relayhosts = await mailcow_api.get_relayhosts()
+            except Exception as e:
+                logger.warning(f"[SPF] Failed to fetch relayhosts: {e}")
+                relayhosts = []
+            for r in relayhosts:
+                if str(r.get('active', '0')) != '1':
+                    continue
+                host = parse_nexthop_host(r.get('hostname') or '')
+                if not host:
+                    continue
+                for ip in await _resolve_public_host_ips(host):
+                    add(ip, 'relayhost')
+
+    for entry in settings.domain_spf_source_manual_hosts_list:
+        try:
+            # Literals are checked as given (the operator asked for them)
+            ipaddress.ip_address(entry)
+            add(entry, 'configured')
+            continue
+        except ValueError:
+            pass
+        for ip in await _resolve_public_host_ips(entry):
+            add(ip, 'configured')
+
+    return entries
+
+
+DMARC_HISTORY_DAYS = 30
+DMARC_HISTORY_MAX_IPS = 20
+DMARC_HISTORY_STALE_DAYS = 7
+
+
+def get_recent_dmarc_passing_source_ips(domain: str, days: int = DMARC_HISTORY_DAYS,
+                                        limit: int = DMARC_HISTORY_MAX_IPS) -> Dict[str, Any]:
+    """
+    Distinct source IPs that recently delivered mail for `domain` with a
+    passing policy-evaluated SPF result, per imported DMARC aggregate reports.
+    Also reports data freshness so the caller can warn when the source has
+    nothing to contribute (no reports) or its data may be outdated.
+
+    Sync DB work: event-loop callers must wrap this in asyncio.to_thread.
+    """
+    from app.database import get_db_context
+    try:
+        with get_db_context() as db:
+            newest_end_date = db.query(func.max(DMARCReport.end_date)).filter(
+                DMARCReport.domain == domain
+            ).scalar()
+            cutoff = int((datetime.now(timezone.utc) - timedelta(days=days)).timestamp())
+            rows = db.query(DMARCRecord.source_ip).join(
+                DMARCReport, DMARCRecord.dmarc_report_id == DMARCReport.id
+            ).filter(
+                DMARCReport.domain == domain,
+                DMARCReport.begin_date >= cutoff,
+                DMARCRecord.spf_result == 'pass'
+            ).distinct().limit(limit).all()
+    except Exception as e:
+        logger.warning(f"[SPF] Error querying DMARC history for {domain}: {e}")
+        return {'ips': [], 'reports_found': False, 'newest_report_age_days': None}
+
+    age_days = None
+    if newest_end_date:
+        age_days = (datetime.now(timezone.utc).timestamp() - newest_end_date) / 86400
+    return {
+        'ips': [row[0] for row in rows],
+        'reports_found': newest_end_date is not None,
+        'newest_report_age_days': age_days
+    }
+
+
+def dmarc_history_notes(dmarc_data: Dict[str, Any]) -> List[str]:
+    """Informational freshness notes for the DMARC-history SPF source.
+    Purely additive: never influences the authorization verdict."""
+    notes = []
+    if not dmarc_data.get('reports_found'):
+        notes.append('DMARC history source is enabled but no reports are available yet')
+    else:
+        age = dmarc_data.get('newest_report_age_days')
+        if age is not None and age > DMARC_HISTORY_STALE_DAYS:
+            notes.append(
+                f'DMARC history source: newest report for this domain is {int(age)} days old '
+                '- data may not reflect current sending activity'
+            )
+    return notes
+
+
+async def check_spf_record(domain: str, spf_source_ips: Optional[List[Dict[str, str]]] = None) -> Dict[str, Any]:
+    """
+    Check SPF record for a domain with full validation.
+    spf_source_ips: pre-resolved sources from get_spf_source_ips();
+    resolved here when None.
     """
     try:
         answers = await resolve_dns_with_fallback(domain, 'TXT', timeout=5)
@@ -172,19 +328,49 @@ async def check_spf_record(domain: str) -> Dict[str, Any]:
         includes = [m.replace('include:', '') for m in mechanisms if m.startswith('include:')]
         
         dns_lookup_count = await count_spf_dns_lookups(domain, spf_record, None)
-        
-        global _server_ip_cache
-        server_ip = _server_ip_cache
-        
-        if not server_ip:
-            server_ip = await init_server_ip()
-        
+
+        if spf_source_ips is None:
+            spf_source_ips = await get_spf_source_ips()
+
+        history_notes: List[str] = []
+        if settings.domain_spf_source_dmarc_history:
+            dmarc_data = await asyncio.to_thread(get_recent_dmarc_passing_source_ips, domain)
+            already = {e['ip'] for e in spf_source_ips}
+            extra = [{'ip': ip, 'source': 'dmarc-history'}
+                     for ip in dmarc_data['ips'] if ip not in already]
+            if extra:
+                # New list: batch callers share spf_source_ips across domains
+                spf_source_ips = spf_source_ips + extra
+            history_notes = dmarc_history_notes(dmarc_data)
+
         server_authorized = False
         authorization_method = None
-        
-        if server_ip:
-            server_authorized, authorization_method = await check_ip_in_spf(domain, server_ip, spf_record, None)
-        
+        unauthorized_ips = []
+        checked_ips = []
+
+        if spf_source_ips:
+            methods = []
+            for source_entry in spf_source_ips:
+                check_ip = source_entry['ip']
+                ip_authorized, ip_method = await check_ip_in_spf(domain, check_ip, spf_record, None)
+                checked_ips.append({
+                    'ip': check_ip,
+                    'source': source_entry['source'],
+                    'authorized': ip_authorized
+                })
+                if ip_authorized:
+                    if ip_method:
+                        methods.append(ip_method)
+                else:
+                    unauthorized_ips.append(check_ip)
+            server_authorized = not unauthorized_ips
+            if server_authorized and methods:
+                # Deduplicate while preserving order
+                authorization_method = ', '.join(dict.fromkeys(methods))
+
+        unauthorized_label = ', '.join(unauthorized_ips)
+        ip_word = 'IPs' if len(unauthorized_ips) > 1 else 'IP'
+
         warnings = []
         
         if dns_lookup_count > 10:
@@ -195,9 +381,9 @@ async def check_spf_record(domain: str) -> Dict[str, Any]:
             status = 'error'
             message = 'SPF uses +all (allows any server). This provides no protection!'
             warnings = ['+all allows anyone to send email as your domain']
-        elif not server_authorized and server_ip:
+        elif not server_authorized and checked_ips:
             status = 'error'
-            message = f'Server IP {server_ip} is NOT authorized in SPF record'
+            message = f'Server {ip_word} {unauthorized_label} {"are" if len(unauthorized_ips) > 1 else "is"} NOT authorized in SPF record'
             warnings = ['Mail server IP not found in SPF record']
         elif has_strict_all:
             status = 'success'
@@ -221,12 +407,15 @@ async def check_spf_record(domain: str) -> Dict[str, Any]:
             else:
                 status = 'warning'
                 message = f'SPF redirects to {redirect_domain}'
-                warnings = [f'Server IP {server_ip} not authorized by redirected SPF'] if server_ip else []
+                warnings = [f'Server {ip_word} {unauthorized_label} not authorized by redirected SPF'] if unauthorized_ips else []
         else:
             status = 'success'
             message = 'SPF record found'
             warnings = []
-        
+
+        if history_notes:
+            warnings = warnings + history_notes
+
         return {
             'status': status,
             'message': message,
@@ -235,7 +424,9 @@ async def check_spf_record(domain: str) -> Dict[str, Any]:
             'includes_mx': includes_mx,
             'includes': includes,
             'warnings': warnings,
-            'dns_lookups': dns_lookup_count
+            'dns_lookups': dns_lookup_count,
+            # Cached rows written before this field existed lack the key
+            'checked_ips': checked_ips
         }
         
     except dns.resolver.NXDOMAIN:
@@ -270,58 +461,71 @@ async def check_spf_record(domain: str) -> Dict[str, Any]:
 
 async def check_ip_in_spf(domain: str, ip_to_check: str, spf_record: str, resolver=None, visited_domains: set = None, depth: int = 0) -> tuple:
     """
-    Check if IP is authorized in SPF record recursively
+    Check if IP (IPv4 or IPv6) is authorized in SPF record recursively
     Returns: (authorized: bool, method: str or None)
     """
     if depth > 10:
         return False, None
-    
+
     if visited_domains is None:
         visited_domains = set()
-    
+
     if domain in visited_domains:
         return False, None
-    
+
     visited_domains.add(domain)
-    
+
+    try:
+        target_ip = ipaddress.ip_address(ip_to_check)
+    except ValueError:
+        logger.warning(f"check_ip_in_spf: '{ip_to_check}' is not a valid IP address")
+        return False, None
+
+    # IPv6 targets must be compared against AAAA records for a/mx mechanisms
+    address_record_type = 'AAAA' if target_ip.version == 6 else 'A'
+
     parts = spf_record.split()
-    
+
     for part in parts:
         clean_part = part.lstrip('+-~?')
-        
-        if clean_part.startswith('ip4:'):
-            ip_spec = clean_part.replace('ip4:', '')
+
+        if clean_part.startswith('ip4:') or clean_part.startswith('ip6:'):
+            mech_prefix = clean_part[:4]   # 'ip4:' / 'ip6:'
+            ip_spec = clean_part[4:]
             try:
-                if '/' in ip_spec:
-                    network = ipaddress.ip_network(ip_spec, strict=False)
-                    if ipaddress.ip_address(ip_to_check) in network:
-                        return True, f'ip4:{ip_spec}'
-                else:
-                    if ip_to_check == ip_spec:
-                        return True, f'ip4:{ip_spec}'
+                # ip_network handles both plain addresses (/32 or /128) and CIDR
+                network = ipaddress.ip_network(ip_spec, strict=False)
+                if target_ip.version == network.version and target_ip in network:
+                    return True, f'{mech_prefix}{ip_spec}'
             except Exception:
                 pass
-        
+
         elif clean_part in ['a'] or clean_part.startswith('a:'):
             check_domain = domain if clean_part == 'a' else clean_part.split(':', 1)[1]
             try:
-                a_records = await resolve_dns_with_fallback(check_domain, 'A', timeout=5)
+                a_records = await resolve_dns_with_fallback(check_domain, address_record_type, timeout=5)
                 for rdata in a_records:
-                    if str(rdata) == ip_to_check:
-                        return True, f'a:{check_domain}' if clean_part.startswith('a:') else 'a'
+                    try:
+                        if ipaddress.ip_address(str(rdata)) == target_ip:
+                            return True, f'a:{check_domain}' if clean_part.startswith('a:') else 'a'
+                    except ValueError:
+                        continue
             except Exception:
                 pass
-        
+
         elif clean_part in ['mx'] or clean_part.startswith('mx:'):
             check_domain = domain if clean_part == 'mx' else clean_part.split(':', 1)[1]
             try:
                 mx_records = await resolve_dns_with_fallback(check_domain, 'MX', timeout=5)
                 for mx in mx_records:
                     try:
-                        mx_a_records = await resolve_dns_with_fallback(str(mx.exchange), 'A', timeout=5)
+                        mx_a_records = await resolve_dns_with_fallback(str(mx.exchange), address_record_type, timeout=5)
                         for rdata in mx_a_records:
-                            if str(rdata) == ip_to_check:
-                                return True, f'mx:{check_domain}' if clean_part.startswith('mx:') else 'mx'
+                            try:
+                                if ipaddress.ip_address(str(rdata)) == target_ip:
+                                    return True, f'mx:{check_domain}' if clean_part.startswith('mx:') else 'mx'
+                            except ValueError:
+                                continue
                     except Exception:
                         pass
             except Exception:
@@ -841,29 +1045,153 @@ async def check_dmarc_record(domain: str) -> Dict[str, Any]:
         }
 
 
-async def check_domain_dns(domain: str) -> Dict[str, Any]:
+async def check_tlsa_record(domain: str) -> Dict[str, Any]:
     """
-    Check all DNS records (SPF, DKIM, DMARC) for a domain
-    
+    Check TLSA (DANE) records for a domain's mail servers.
+
+    DANE for SMTP publishes TLSA records under the MX hostname, not the domain
+    itself: _25._tcp.<mx-host>. So we resolve MX first, then look up each host.
+
+    Returns the same shape as the other checks (status/message/record/warnings).
+    """
+    try:
+        # 1. Which mail servers does this domain use?
+        null_mx = False
+        try:
+            mx_answers = await resolve_dns_with_fallback(domain, 'MX', timeout=5)
+            hosts = set()
+            for r in mx_answers:
+                exchange = str(getattr(r, 'exchange', '') or '').rstrip('.').strip()
+                if not exchange:
+                    # RFC 7505 "null MX" (0 .) - the domain accepts no mail at all
+                    null_mx = True
+                    continue
+                hosts.add(exchange)
+            mx_hosts = sorted(hosts)
+        except Exception:
+            mx_hosts = []
+
+        if not mx_hosts:
+            return {
+                'status': 'unknown',
+                'message': ('Domain does not accept mail (null MX) - DANE/TLSA does not apply'
+                            if null_mx else
+                            'No MX records found - cannot check DANE/TLSA'),
+                'record': None,
+                'records': [],
+                'mx_hosts': [],
+                'warnings': [],
+            }
+
+        # 2. Look for TLSA records under each mail server
+        all_records = []
+        hosts_with_tlsa = []
+        for host in mx_hosts:
+            query = f"_25._tcp.{host}"
+            try:
+                answers = await resolve_dns_with_fallback(query, 'TLSA', timeout=5)
+                host_records = []
+                for rdata in answers:
+                    usage = getattr(rdata, 'usage', None)
+                    selector = getattr(rdata, 'selector', None)
+                    mtype = getattr(rdata, 'mtype', None)
+                    cert = getattr(rdata, 'cert', b'')
+                    cert_hex = cert.hex() if isinstance(cert, (bytes, bytearray)) else str(cert)
+                    host_records.append({
+                        'host': host,
+                        'usage': usage,
+                        'selector': selector,
+                        'matching_type': mtype,
+                        'certificate': cert_hex,
+                        'record': f"{usage} {selector} {mtype} {cert_hex}",
+                    })
+                if host_records:
+                    hosts_with_tlsa.append(host)
+                    all_records.extend(host_records)
+            except Exception:
+                # No TLSA for this host (NXDOMAIN/NoAnswer) - normal when DANE is off
+                continue
+
+        if not all_records:
+            return {
+                'status': 'warning',
+                'message': f'No DANE/TLSA records published for {", ".join(mx_hosts)}',
+                'record': None,
+                'records': [],
+                'mx_hosts': mx_hosts,
+                'warnings': [
+                    'DANE is optional. If you publish TLSA records, senders can verify your '
+                    'TLS certificate through DNSSEC. Requires a DNSSEC-signed zone.'
+                ],
+            }
+
+        # 3. Assess what was published
+        warnings = []
+        missing = [h for h in mx_hosts if h not in hosts_with_tlsa]
+        if missing:
+            warnings.append(
+                f'No TLSA record for: {", ".join(missing)}. Every MX host should publish one, '
+                'or senders may fail to deliver.'
+            )
+        # 3 1 1 (DANE-EE / SPKI / SHA-256) is the recommended combination for SMTP
+        if not any(r['usage'] == 3 and r['selector'] == 1 and r['matching_type'] == 1
+                   for r in all_records):
+            warnings.append(
+                'None of the records use the recommended "3 1 1" combination '
+                '(DANE-EE, SPKI, SHA-256), which is what mailcow publishes by default.'
+            )
+
+        status = 'success' if not warnings else 'warning'
+        return {
+            'status': status,
+            'message': f'{len(all_records)} TLSA record(s) found for {len(hosts_with_tlsa)} mail server(s)',
+            # `record` keeps the flat text form so change detection can diff it
+            'record': ' | '.join(sorted(r['record'] for r in all_records)),
+            'records': all_records,
+            'mx_hosts': mx_hosts,
+            'warnings': warnings,
+        }
+
+    except Exception as e:
+        logger.error(f"Error checking TLSA for {domain}: {e}")
+        return {
+            'status': 'error',
+            'message': f'Failed to check TLSA: {str(e)}',
+            'record': None,
+            'records': [],
+            'mx_hosts': [],
+            'warnings': [],
+        }
+
+
+async def check_domain_dns(domain: str, spf_source_ips: Optional[List[Dict[str, str]]] = None) -> Dict[str, Any]:
+    """
+    Check all DNS records (SPF, DKIM, DMARC, TLSA) for a domain
+
     Args:
         domain: Domain name to check
-        
+        spf_source_ips: pre-resolved SPF sources (see get_spf_source_ips).
+            Batch callers should resolve once and pass them here to avoid
+            redundant mailcow API/DNS calls per domain.
+
     Returns:
         Dictionary with all DNS check results
     """
     try:
         # Run all checks in parallel
-        spf_result, dkim_result, dmarc_result = await asyncio.gather(
-            check_spf_record(domain),
+        spf_result, dkim_result, dmarc_result, tlsa_result = await asyncio.gather(
+            check_spf_record(domain, spf_source_ips),
             check_dkim_record(domain),
-            check_dmarc_record(domain)
+            check_dmarc_record(domain),
+            check_tlsa_record(domain)
         )
-        
+
         return {
             'domain': domain,
             'spf': spf_result,
             'dkim': dkim_result,
             'dmarc': dmarc_result,
+            'tlsa': tlsa_result,
             'checked_at': format_datetime_for_api(datetime.now(timezone.utc))
         }
         
@@ -959,19 +1287,111 @@ async def check_single_domain_dns(domain: str):
         raise internal_error(e)
 
 
+def _record_value(check: Optional[Dict[str, Any]]) -> Optional[str]:
+    """The published DNS value from a check result, or None."""
+    if not isinstance(check, dict):
+        return None
+    value = check.get('record')
+    return value.strip() if isinstance(value, str) and value.strip() else None
+
+
+def _definitely_absent(check: Optional[Dict[str, Any]]) -> bool:
+    """True when the lookup succeeded and the record genuinely does not exist.
+
+    A DNS timeout or resolver failure must NOT count as "removed", otherwise a
+    transient network problem would fire a false alarm.
+    """
+    if not isinstance(check, dict):
+        return False
+    if _record_value(check) is not None:
+        return False
+    message = (check.get('message') or '').lower()
+    return 'not found' in message or 'no dane' in message or 'not published' in message
+
+
+def detect_dns_changes(previous: Optional[DomainDNSCheck],
+                       dns_data: Dict[str, Any]) -> List[Dict[str, str]]:
+    """Compare a fresh check against the stored one and list real changes.
+
+    Only reports a change when we are sure: both values present and different,
+    or a value that existed is now definitively gone. Failed lookups are
+    ignored so DNS hiccups never trigger an alert.
+    """
+    if not previous:
+        return []   # first check for this domain - nothing to compare against
+
+    changes = []
+    for key, label, column in (
+        ('spf', 'SPF', 'spf_check'),
+        ('dkim', 'DKIM', 'dkim_check'),
+        ('dmarc', 'DMARC', 'dmarc_check'),
+        ('tlsa', 'TLSA (DANE)', 'tlsa_check'),
+    ):
+        old_check = getattr(previous, column, None)
+        new_check = dns_data.get(key)
+        old_value = _record_value(old_check)
+        new_value = _record_value(new_check)
+
+        if old_value and new_value and old_value != new_value:
+            changes.append({'type': label, 'old': old_value, 'new': new_value})
+        elif old_value and new_value is None and _definitely_absent(new_check):
+            changes.append({'type': label, 'old': old_value, 'new': '(removed)'})
+        elif old_value is None and new_value and _definitely_absent(old_check):
+            changes.append({'type': label, 'old': '(none)', 'new': new_value})
+    return changes
+
+
+def notify_dns_changes(domain_name: str, changes: List[Dict[str, str]]) -> None:
+    """Send a DNS-change alert (email + notification destinations)."""
+    if not changes:
+        return
+    try:
+        from ..services.notification_service import notify
+
+        types = ', '.join(c['type'] for c in changes)
+        subject = f"DNS records changed for {domain_name}: {types}"
+        lines = [
+            f"The following DNS records changed for {domain_name}:",
+            "",
+        ]
+        for change in changes:
+            lines.append(f"{change['type']}")
+            lines.append(f"  before: {change['old']}")
+            lines.append(f"  now:    {change['new']}")
+            lines.append("")
+        lines.append(
+            "If you did not expect this, check the domain at your DNS provider. "
+            "If mailcow generated new values (for example a new DKIM key), update "
+            "the records at your registrar so mail keeps authenticating."
+        )
+        notify(subject, "\n".join(lines), alert_type="dns_changes")
+        logger.info(f"DNS change alert sent for {domain_name}: {types}")
+    except Exception as e:
+        logger.error(f"Could not send DNS change alert for {domain_name}: {e}")
+
+
 async def save_dns_check_to_db(db: Session, domain_name: str, dns_data: Dict[str, Any], is_full_check: bool = False):
-    """Save DNS check results to database (upsert)"""
+    """Save DNS check results to database (upsert), alerting on real changes."""
     try:
         checked_at = datetime.now(timezone.utc)
-        
+
         existing = db.query(DomainDNSCheck).filter(
             DomainDNSCheck.domain_name == domain_name
         ).first()
-        
+
+        # Compare against the stored values BEFORE overwriting them
+        changes = []
+        if settings.dns_change_alerts_enabled:
+            try:
+                changes = detect_dns_changes(existing, dns_data)
+            except Exception as e:
+                logger.error(f"Could not compare DNS records for {domain_name}: {e}")
+
         if existing:
             existing.spf_check = dns_data.get('spf')
             existing.dkim_check = dns_data.get('dkim')
             existing.dmarc_check = dns_data.get('dmarc')
+            existing.tlsa_check = dns_data.get('tlsa')
             existing.checked_at = checked_at
             existing.updated_at = checked_at
             existing.is_full_check = is_full_check
@@ -981,13 +1401,18 @@ async def save_dns_check_to_db(db: Session, domain_name: str, dns_data: Dict[str
                 spf_check=dns_data.get('spf'),
                 dkim_check=dns_data.get('dkim'),
                 dmarc_check=dns_data.get('dmarc'),
+                tlsa_check=dns_data.get('tlsa'),
                 checked_at=checked_at,
                 is_full_check=is_full_check
             )
             db.add(new_check)
-        
+
         db.commit()
         logger.info(f"Saved DNS check for {domain_name}")
+
+        if changes:
+            logger.warning(f"[DNS CHANGE] {domain_name}: {', '.join(c['type'] for c in changes)}")
+            await asyncio.to_thread(notify_dns_changes, domain_name, changes)
         
     except Exception as e:
         logger.error(f"Error saving DNS check for {domain_name}: {e}")
@@ -1007,6 +1432,7 @@ def get_cached_dns_check(db: Session, domain_name: str) -> Dict[str, Any]:
                 'spf': cached.spf_check,
                 'dkim': cached.dkim_check,
                 'dmarc': cached.dmarc_check,
+                'tlsa': cached.tlsa_check,
                 'checked_at': format_datetime_for_api(cached.checked_at) if cached.checked_at else None
             }
         return None
@@ -1031,17 +1457,20 @@ async def check_all_domains_dns_manual(db: Session = Depends(get_db)):
             }
         
         active_domains = [d for d in domains if d.get('active', 0) == 1]
-        
+
         checked_count = 0
         errors = []
-        
+
+        # Sources do not depend on the domain: resolve once per batch
+        spf_source_ips = await get_spf_source_ips()
+
         for domain_data in active_domains:
             domain_name = domain_data.get('domain_name')
             if not domain_name:
                 continue
-            
+
             try:
-                dns_data = await check_domain_dns(domain_name)
+                dns_data = await check_domain_dns(domain_name, spf_source_ips)
                 await save_dns_check_to_db(db, domain_name, dns_data, is_full_check=True)
                 checked_count += 1
             except Exception as e:

@@ -49,6 +49,25 @@ def clear_cache(
         raise internal_error(e)
 
 
+@router.get("/dmarc/insights")
+def get_dmarc_insights(
+    domain: Optional[str] = None,
+    db: Session = Depends(get_db)
+):
+    """
+    DMARC policy recommendations and new-source (spoofing) detection.
+    Pass ?domain= for a single domain, or omit for all domains with data.
+    """
+    try:
+        from ..services.dmarc_insights import compute_domain_insights, compute_all_insights
+        if domain:
+            return compute_domain_insights(db, domain)
+        return compute_all_insights(db)
+    except Exception as e:
+        logger.error(f"Error computing DMARC insights: {e}")
+        raise internal_error(e)
+
+
 # =============================================================================
 # REPORTS MANAGEMENT
 # =============================================================================
@@ -267,7 +286,7 @@ def get_domains_list(
                     func.count(func.distinct(DMARCRecord.source_ip)).label('unique_ips'),
                     func.sum(
                         case(
-                            (and_(DMARCRecord.spf_result == 'pass', DMARCRecord.dkim_result == 'pass'), DMARCRecord.count),
+                            (or_(DMARCRecord.spf_result == 'pass', DMARCRecord.dkim_result == 'pass'), DMARCRecord.count),
                             else_=0
                         )
                     ).label('dmarc_pass_count')
@@ -423,7 +442,7 @@ async def get_domain_overview(
                 
                 daily_data[report_date]['total'] += record.count
                 
-                if record.spf_result == 'pass' and record.dkim_result == 'pass':
+                if record.spf_result == 'pass' or record.dkim_result == 'pass':
                     daily_data[report_date]['dmarc_pass'] += record.count
                 else:
                     daily_data[report_date]['dmarc_fail'] += record.count
@@ -514,7 +533,7 @@ def get_domain_reports(
             ).all()
             
             total_for_report = sum(r.count for r in records)
-            dmarc_pass_for_report = sum(r.count for r in records if r.spf_result == 'pass' and r.dkim_result == 'pass')
+            dmarc_pass_for_report = sum(r.count for r in records if r.spf_result == 'pass' or r.dkim_result == 'pass')
             spf_pass_for_report = sum(r.count for r in records if r.spf_result == 'pass')
             dkim_pass_for_report = sum(r.count for r in records if r.dkim_result == 'pass')
             
@@ -642,7 +661,7 @@ def get_report_details(
                 sources[key]['volume'] += record.count
                 total_messages += record.count
                 
-                if record.spf_result == 'pass' and record.dkim_result == 'pass':
+                if record.spf_result == 'pass' or record.dkim_result == 'pass':
                     sources[key]['dmarc_pass'] += record.count
                     dmarc_pass_count += record.count
                 else:
@@ -716,7 +735,7 @@ def get_domain_sources(
             func.sum(DMARCRecord.count).label('total_count'),
             func.sum(
                 case(
-                    (and_(DMARCRecord.spf_result == 'pass', DMARCRecord.dkim_result == 'pass'), DMARCRecord.count),
+                    (or_(DMARCRecord.spf_result == 'pass', DMARCRecord.dkim_result == 'pass'), DMARCRecord.count),
                     else_=0
                 )
             ).label('dmarc_pass_count'),
@@ -850,7 +869,7 @@ def get_source_details(
             envelope_from_groups[key]['volume'] += record.count
             total_messages += record.count
             
-            if record.spf_result == 'pass' and record.dkim_result == 'pass':
+            if record.spf_result == 'pass' or record.dkim_result == 'pass':
                 envelope_from_groups[key]['dmarc_pass'] += record.count
                 dmarc_pass_count += record.count
             else:

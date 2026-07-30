@@ -16,6 +16,7 @@ ALLOWED_DOCS = {
     "IP_Blacklist_Monitor": "IP_Blacklist_Monitor.md",
     "Spam_Filter": "Spam_Filter.md",
     "Quarantine": "Quarantine.md",
+    "Abuse_Protection": "Abuse_Protection.md",
 }
 
 @router.get("/docs/{doc_name}", response_class=PlainTextResponse)

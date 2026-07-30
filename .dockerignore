@@ -1,0 +1,7 @@
+**/__pycache__
+**/*.pyc
+.git
+.github
+backend/tests
+documentation
+*.md
