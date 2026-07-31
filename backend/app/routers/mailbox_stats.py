@@ -137,6 +137,7 @@ def _empty_counts() -> dict:
     return {
         "sent_total": 0, "sent_delivered": 0, "sent_bounced": 0,
         "sent_rejected": 0, "sent_deferred": 0, "sent_expired": 0,
+        "sent_linked": 0, "sent_pending": 0,
         "sent_failed": 0, "received_total": 0, "total_messages": 0,
         "failure_rate": 0.0,
         "direction_inbound": 0, "direction_outbound": 0, "direction_internal": 0
@@ -144,7 +145,16 @@ def _empty_counts() -> dict:
 
 
 def _counts_from_raw(sent_by_status: dict, received_total: int, direction_counts: dict) -> dict:
-    """Build a counts dict from pre-aggregated data"""
+    """
+    Build a counts dict from pre-aggregated data.
+
+    Messages with no final_status yet are bucketed as 'linked' or 'pending'
+    (see get_bulk_message_counts) rather than a single opaque 'unknown', to
+    match the same is_complete-aware distinction the message list already
+    shows ("Linked" vs "Pending") - otherwise these messages were silently
+    counted in sent_total/total_messages without appearing in any breakdown
+    bucket at all.
+    """
     sent_total = sum(sent_by_status.values())
     sent_failed = sent_by_status.get('bounced', 0) + sent_by_status.get('rejected', 0)
     total = sent_total + received_total
@@ -156,6 +166,8 @@ def _counts_from_raw(sent_by_status: dict, received_total: int, direction_counts
         "sent_rejected": sent_by_status.get('rejected', 0),
         "sent_deferred": sent_by_status.get('deferred', 0),
         "sent_expired": sent_by_status.get('expired', 0),
+        "sent_linked": sent_by_status.get('linked', 0),
+        "sent_pending": sent_by_status.get('pending', 0),
         "sent_failed": sent_failed,
         "received_total": received_total,
         "total_messages": total,
@@ -179,10 +191,11 @@ def get_bulk_message_counts(db: Session, emails: list, start_date: datetime, end
 
     emails_lower = list({e.lower() for e in emails})
 
-    # --- Query 1: Sent stats (group by sender + status + direction) ---
+    # --- Query 1: Sent stats (group by sender + status + is_complete + direction) ---
     sent_rows = db.query(
         func.lower(MessageCorrelation.sender).label('email'),
         MessageCorrelation.final_status,
+        MessageCorrelation.is_complete,
         MessageCorrelation.direction,
         func.count(MessageCorrelation.id).label('cnt')
     ).filter(
@@ -192,6 +205,7 @@ def get_bulk_message_counts(db: Session, emails: list, start_date: datetime, end
     ).group_by(
         func.lower(MessageCorrelation.sender),
         MessageCorrelation.final_status,
+        MessageCorrelation.is_complete,
         MessageCorrelation.direction
     ).all()
 
@@ -216,7 +230,10 @@ def get_bulk_message_counts(db: Session, emails: list, start_date: datetime, end
     dir_data_sent = {}
     for row in sent_rows:
         em = row.email
-        status = row.final_status or 'unknown'
+        # No final_status yet: mirror the message list's is_complete-aware
+        # labels ("Linked" vs "Pending", frontend/utils.js getCorrelationStatusDisplay)
+        # instead of collapsing both into one opaque 'unknown' bucket.
+        status = row.final_status or ('linked' if row.is_complete else 'pending')
         direction = row.direction or 'unknown'
         sent_data.setdefault(em, {})
         sent_data[em][status] = sent_data[em].get(status, 0) + row.cnt
