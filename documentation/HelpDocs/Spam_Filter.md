@@ -10,13 +10,14 @@ Manage a list of email addresses that should be blocked from receiving outbound 
 
 #### How It Works
 - **Automatic Detection**: The system monitors your Postfix logs for bounced and rejected emails
-- **Smart Filtering**: Only real outbound messages are processed — bounce notifications (DSN messages from MAILER-DAEMON) are automatically skipped to prevent your own sender addresses from being suppressed
+- **Smart Filtering**: Only real outbound messages are processed - bounce notifications (DSN messages from MAILER-DAEMON) are automatically skipped to prevent your own sender addresses from being suppressed
 - **Progressive Blocking**: Each repeated bounce extends the suppression duration:
   - 1st bounce → 7 days (configurable)
   - 2nd bounce → 14 days
   - 3rd bounce → 21 days
   - Capped at the configured maximum (default: 90 days)
-- **Rspamd Sync**: Active suppressions are automatically synced to Rspamd's recipient denylist
+- **Accurate Counting**: If the same recipient bounces several times within a single scan, all of those bounces are consolidated into **one** suppression entry with an accurate bounce count - no duplicate entries are created, and the progressive expiry is based on the real total
+- **Rspamd Sync**: Active suppressions are automatically synced to Rspamd's recipient denylist. The sync **only writes when the managed entries actually changed** - in steady state nothing is rewritten, so Rspamd is not forced to truncate and reload the map on every run
 - **Auto-Refresh**: The suppressions list refreshes automatically to show real-time changes
 
 #### Bounce Types & Queue Behavior
@@ -25,7 +26,7 @@ Manage a list of email addresses that should be blocked from receiving outbound 
 | **Hard Bounce** | 5.x.x | Postfix logs (every 5 min) | ✅ Stuck queue items deleted immediately |
 | **Soft Bounce / Deferred** | 4.x.x | Live queue scan (every 5 min) | ✅ Deleted after threshold (default: 60 min) |
 
-> **How it works:** Hard bounces are detected from Postfix log entries. Deferred emails are detected by scanning the live mail queue — if an email has been stuck longer than the configurable threshold, it is automatically deleted from the queue and the recipient is suppressed. This is more reliable than log-based detection on busy servers.
+> **How it works:** Hard bounces are detected from Postfix log entries. Deferred emails are detected by scanning the live mail queue - if an email has been stuck longer than the configurable threshold, it is automatically deleted from the queue and the recipient is suppressed. This is more reliable than log-based detection on busy servers.
 
 #### Managing Suppressions
 - **Add Manually**: Click "Add Suppression" to manually block an email address or domain
@@ -87,7 +88,7 @@ The map editor includes a built-in **Regex Pattern Generator** that lets you cre
    | **Domain** | `example.com` | `/.+example\.com/i` |
    | **TLD** | `xyz` | `/.+\.xyz$/i` |
    | **Keyword** | `sale` | `/.*sale.*/i` |
-3. Type your value — the regex pattern is generated live with an explanation
+3. Type your value - the regex pattern is generated live with an explanation
 4. Click **"Add"** to insert it into the editor
 
 > The "Domain" type follows mailcow's standard regex format (`/.+example\.com/i`) which matches the domain and all its subdomains.
@@ -95,59 +96,61 @@ The map editor includes a built-in **Regex Pattern Generator** that lets you cre
 #### Important Notes
 - The Recipient Denylist is partially auto-managed by the Suppression feature
 - Manual entries above the managed section marker are preserved during sync
-- Changes require a Read-Write API key (`MAILCOW_API_KEY_RW`)
+- Changes require a Read-Write API key (**Settings → Mailcow → Connection**)
 - Lines starting with `#` are comments, empty lines are ignored
 
 ---
 
 ## Configuration
 
-Configure these settings in **Settings → Spam Filter**:
+Configure these settings in **Settings → Spam Filter** (the Rspamd connection itself - password and address - is configured under **Settings → Mailcow → Rspamd**):
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| `RSPAMD_PASSWORD` | — | Rspamd UI password (required for map reading) |
-| `SUPPRESSION_ENABLED` | `false` | Master switch for the suppression system |
-| `SUPPRESSION_AUTO_DETECT` | `true` | Auto-detect hard bounces from Postfix logs |
-| `SUPPRESSION_RSPAMD_SYNC` | `true` | Auto-sync suppression list to Rspamd |
-| `SUPPRESSION_WHITELIST_DOMAINS` | — | Domains that should never be suppressed |
-| `SUPPRESSION_HARD_BOUNCE_ACTION` | `suppress` | Hard bounces (5.x.x): `suppress` or `ignore` |
-| `SUPPRESSION_SOFT_BOUNCE_ACTION` | `count` | Soft bounces in logs (4.x.x): `suppress`, `count`, or `ignore` |
-| `SUPPRESSION_SOFT_BOUNCE_THRESHOLD` | `3` | Soft bounces before suppression (when action=`count`) |
-| `SUPPRESSION_BASE_EXPIRY_DAYS` | `7` | Block duration in days (× bounce count for repeats) |
-| `SUPPRESSION_MAX_EXPIRY_DAYS` | `90` | Maximum block duration cap |
-| `QUEUE_CLEANUP_ENABLED` | `true` | Auto-delete stuck deferred emails from queue |
-| `QUEUE_CLEANUP_THRESHOLD_MINUTES` | `60` | Minutes before a stuck deferred email is deleted |
+| Suppression → **Suppression Enabled** | `false` | Master switch for the suppression system |
+| Suppression → **Suppression Auto Detect** | `true` | Auto-detect hard bounces from Postfix logs |
+| Suppression → **Suppression Rspamd Sync** | `true` | Auto-sync suppression list to Rspamd |
+| Whitelist → **Suppression Whitelist Domains** | - | Domains that should never be suppressed |
+| Hard Bounces (5.x.x) → **Suppression Hard Bounce Action** | `suppress` | Hard bounces (5.x.x): `suppress` or `ignore` |
+| Soft Bounces (4.x.x) - Log Detection → **Suppression Soft Bounce Action** | `count` | Soft bounces in logs (4.x.x): `suppress`, `count`, or `ignore` |
+| Soft Bounces (4.x.x) - Log Detection → **Suppression Soft Bounce Threshold** | `3` | Soft bounces before suppression (when action=`count`) |
+| Block Duration → **Suppression Base Expiry Days** | `7` | Block duration in days (× bounce count for repeats) |
+| Block Duration → **Suppression Max Expiry Days** | `90` | Maximum block duration cap |
+| Deferred Queue Cleanup → **Queue Cleanup Enabled** | `true` | Auto-delete stuck deferred emails from queue |
+| Deferred Queue Cleanup → **Queue Cleanup Threshold Minutes** | `60` | Minutes before a stuck deferred email is deleted |
+
+> [!NOTE]
+> Settings are edited on the **Settings** page (requires `SETTINGS_EDIT_VIA_UI_ENABLED=true`). Every setting can also be provided as an environment variable - see [ENV_Settings.md](../ENV_Settings.md).
 
 ---
 
 ## Prerequisites
 
-1. **Rspamd Password**: Set `RSPAMD_PASSWORD` to enable map reading
-2. **Read-Write API Key**: Set `MAILCOW_API_KEY_RW` to enable map editing, queue management, and sync
-3. **Suppression Enabled**: Set `SUPPRESSION_ENABLED=true` to activate auto-detection
+1. **Rspamd Password**: Set it under **Settings → Mailcow → Rspamd** to enable map reading
+2. **Read-Write API Key**: Set it under **Settings → Mailcow → Connection** to enable map editing, queue management, and sync
+3. **Suppression Enabled**: Switch it on under **Settings → Spam Filter → Suppression** to activate auto-detection
 
 ## Troubleshooting
 
 ### "Rspamd Not Configured"
-- Set the `RSPAMD_PASSWORD` in Settings → Spam Filter → Rspamd
+- Set the Rspamd password under **Settings → Mailcow → Rspamd**
 - This is the Rspamd web UI password, not the mailcow admin password
 
 ### Suppressions Not Syncing
-- Verify both `RSPAMD_PASSWORD` and `MAILCOW_API_KEY_RW` are configured
+- Verify both the Rspamd password (**Settings → Mailcow → Rspamd**) and the Read-Write API key (**Settings → Mailcow → Connection**) are configured
 - Check the Status page → Background Jobs → Spam Filter for job errors
 - Use the manual "Sync to Rspamd" button to trigger an immediate sync
 
 ### Own Sender Addresses Being Suppressed
-- This was a known issue that has been fixed. The system now filters out bounce notification (DSN) entries by checking the sender field — bounce notifications always have an empty sender or `MAILER-DAEMON`
+- This was a known issue that has been fixed. The system now filters out bounce notification (DSN) entries by checking the sender field - bounce notifications always have an empty sender or `MAILER-DAEMON`
 - Only recipients of real outbound messages are considered for suppression
 
 ### Deferred Emails Stay in Queue Too Long
-- Check that `QUEUE_CLEANUP_ENABLED=true` and `SUPPRESSION_ENABLED=true`
-- The default threshold is 60 minutes — adjust via `QUEUE_CLEANUP_THRESHOLD_MINUTES`
-- Requires a Read-Write API key (`MAILCOW_API_KEY_RW`) to delete queue items
+- Check that both **Queue Cleanup Enabled** (Settings → Spam Filter → Deferred Queue Cleanup) and **Suppression Enabled** (Settings → Spam Filter → Suppression) are switched on
+- The default threshold is 60 minutes - adjust **Queue Cleanup Threshold Minutes** in the same group
+- Requires a Read-Write API key (**Settings → Mailcow → Connection**) to delete queue items
 - Check the Status page → Background Jobs → Spam Filter for the "Cleanup Deferred Queue" job status
 
 ### Map Save Errors
-- Ensure `MAILCOW_API_KEY_RW` is configured with write permissions
+- Ensure a Read-Write API key with write permissions is configured (**Settings → Mailcow → Connection**)
 - Check regex patterns for syntax errors using the "Validate" button

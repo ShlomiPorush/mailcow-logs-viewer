@@ -202,7 +202,7 @@ Check if a Read-Write API key (`MAILCOW_API_KEY_RW`) is configured. This is a un
 **Notes:**
 - Fetched once by the frontend at startup and cached in a global variable
 - Used to conditionally show/hide edit controls, action buttons, and write-operation UI
-- Does not validate the key — only checks if it is configured
+- Does not validate the key - only checks if it is configured
 
 ---
 
@@ -493,7 +493,10 @@ Get list of all domains with statistics and cached DNS validation results.
           "includes_mx": true,
           "includes": ["_spf.google.com"],
           "warnings": [],
-          "dns_lookups": 3
+          "dns_lookups": 3,
+          "checked_ips": [
+            {"ip": "1.2.3.4", "source": "auto-detected", "authorized": true}
+          ]
         },
         "dkim": {
           "status": "success",
@@ -561,7 +564,7 @@ Get list of all domains with statistics and cached DNS validation results.
 
 **SPF Status Indicators:**
 - **DNS Lookup Limit**: Error if >10 lookups (RFC 7208)
-- **Server IP Authorization**: Error if mail server IP not found in SPF
+- **Source IP Authorization**: Error if any validated source IP is not authorized by the SPF record (see `checked_ips`)
 - **Multiple Records**: Error (only one SPF record allowed per domain)
 - **Invalid Syntax**: Error (must start with `v=spf1 ` with space)
 - **Invalid Mechanisms**: Error (only valid mechanisms allowed)
@@ -574,6 +577,11 @@ Get list of all domains with statistics and cached DNS validation results.
 **New SPF Fields:**
 - `dns_lookups`: Integer count of DNS lookups (0-999)
 - `warnings`: Array of warning messages
+- `checked_ips`: Array of every source IP validated against the record. Each entry has:
+  - `ip`: The IP address that was checked
+  - `source`: Where the IP came from - one of `auto-detected` (WAN IP), `transport`, `relayhost`, `configured` (manual entry), `dmarc-history`
+  - `authorized`: Boolean per-IP verdict
+  - The set of validated sources is controlled by the `DOMAIN_SPF_SOURCE_*` settings; the overall check fails if any IP is not authorized. Cached results written before this field existed lack the key
 
 **DKIM Validation:**
 - Fetches expected DKIM record from mailcow API
@@ -683,7 +691,10 @@ POST /api/domains/example.com/check-dns
       "includes_mx": true,
       "includes": ["_spf.google.com"],
       "warnings": [],
-      "dns_lookups": 3
+      "dns_lookups": 3,
+      "checked_ips": [
+        {"ip": "1.2.3.4", "source": "auto-detected", "authorized": true}
+      ]
     },
     "dkim": {
       "status": "success",
@@ -745,15 +756,15 @@ POST /api/domains/example.com/check-dns
   - Counts `a`, `mx`, `exists:`, `redirect=`, and `include:` mechanisms
   - Maximum 10 lookups enforced (returns error if exceeded)
   - Returns `dns_lookups` field with count
-- **Server IP Authorization**:
-  - Fetches server IP from mailcow API once on startup
-  - Verifies server IP is authorized via:
+- **Source IP Authorization**:
+  - Validates a configurable set of source IPs (see `checked_ips`): the auto-detected WAN IP, public IPs of active mailcow transports and relayhosts, manually configured hosts, and optionally IPs seen with a passing SPF result in recent DMARC reports (`DOMAIN_SPF_SOURCE_*` settings)
+  - Verifies each IP is authorized via:
     - Direct `ip4:` match (including CIDR ranges)
     - `a` record resolution
     - `mx` record resolution
     - Recursive `include:` checking (up to 10 levels)
   - Returns authorization method in message (e.g., "Server IP authorized via ip4:X.X.X.X")
-  - Returns error if server IP not found in SPF record
+  - Returns error if any validated IP is not found in the SPF record
 - Provides policy-specific warnings and recommendations
 
 **DKIM Validation:**
@@ -1598,7 +1609,7 @@ Update Fail2Ban configuration on mailcow. Requires the Read-Write API key (`MAIL
 
 #### RW Status Check
 
-See [GET /rw-status](#get-rw-status) — unified endpoint for checking Read-Write API key availability.
+See [GET /rw-status](#get-rw-status) - unified endpoint for checking Read-Write API key availability.
 
 ---
 
@@ -2627,8 +2638,8 @@ When enabling Basic Auth (`basic_auth_enabled` changing from `false` to `true`),
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `verify_username` | string | Yes (when enabling auth) | The username to verify — must match `auth_username` being saved |
-| `verify_password` | string | Yes (when enabling auth) | The password to verify — must match `auth_password` being saved |
+| `verify_username` | string | Yes (when enabling auth) | The username to verify - must match `auth_username` being saved |
+| `verify_password` | string | Yes (when enabling auth) | The password to verify - must match `auth_password` being saved |
 
 This prevents users from accidentally locking themselves out of the application by enabling authentication without knowing the credentials.
 
@@ -2838,7 +2849,7 @@ When a feature is disabled, this endpoint permanently deletes all stored data fr
 - Tables are truncated with `CASCADE` to handle foreign key relationships
 - The frontend automatically calls this endpoint after saving settings with newly disabled features
 - A confirmation dialog warns the user before disabling a feature that data will be deleted
-- Features without database tables (e.g., `queue`) are not purgeable — the endpoint returns 400 for unknown features
+- Features without database tables (e.g., `queue`) are not purgeable - the endpoint returns 400 for unknown features
 
 ---
 
@@ -2949,12 +2960,12 @@ Get detailed GeoIP status for frontend polling during setup/download.
 ```
 
 **Response Fields:**
-- `configured`: Boolean — whether MaxMind Account ID and License Key are set
-- `db_valid`: Boolean or null — `true` if DB validated, `false` if corrupt, `null` if not yet checked
-- `databases`: Object — file-level info for City and ASN databases (size, age, availability)
-- `job_status`: String — last GeoIP update job status: `idle`, `running`, `success`, `failed`
-- `job_error`: String or null — error message if last job failed
-- `job_last_run`: String or null — ISO timestamp of last job execution
+- `configured`: Boolean - whether MaxMind Account ID and License Key are set
+- `db_valid`: Boolean or null - `true` if DB validated, `false` if corrupt, `null` if not yet checked
+- `databases`: Object - file-level info for City and ASN databases (size, age, availability)
+- `job_status`: String - last GeoIP update job status: `idle`, `running`, `success`, `failed`
+- `job_error`: String or null - error message if last job failed
+- `job_last_run`: String or null - ISO timestamp of last job execution
 
 **Notes:**
 - Used by the GeoIP Setup Modal to poll download progress
@@ -3021,9 +3032,9 @@ Validate MaxMind license key on-demand. Result is persisted to database.
 ```
 
 **Response Fields:**
-- `configured`: Boolean — whether a MaxMind license key is present
-- `valid`: Boolean — whether the license key passed MaxMind's validation API
-- `error`: String or null — error description if validation failed (`"Invalid"`, `"Connection error"`, `"Status {code}"`)
+- `configured`: Boolean - whether a MaxMind license key is present
+- `valid`: Boolean - whether the license key passed MaxMind's validation API
+- `error`: String or null - error description if validation failed (`"Invalid"`, `"Connection error"`, `"Status {code}"`)
 
 **Notes:**
 - Validates against MaxMind's `secret-scanning.maxmind.com` API with a 5-second timeout
@@ -3051,10 +3062,10 @@ Validate GeoIP database integrity by running test IP lookups.
 ```
 
 **Response Fields:**
-- `valid`: Boolean — overall validation result
-- `city_ok`: Boolean — City database passed lookup test
-- `asn_ok`: Boolean — ASN database passed lookup test
-- `db_valid`: Boolean or null — current `_geoip_db_valid` state after reload
+- `valid`: Boolean - overall validation result
+- `city_ok`: Boolean - City database passed lookup test
+- `asn_ok`: Boolean - ASN database passed lookup test
+- `db_valid`: Boolean or null - current `_geoip_db_valid` state after reload
 
 **Error Response (DB not found):**
 ```json
@@ -3345,7 +3356,7 @@ Get list of all domains with DMARC statistics.
 - `domain`: Domain name
 - `total_messages`: Total messages for this domain
 - `unique_ips`: Number of unique source IPs
-- `dmarc_pass_pct`: Percentage of messages passing both SPF and DKIM
+- `dmarc_pass_pct`: Percentage of messages passing DMARC (aligned SPF or aligned DKIM passed, per RFC 7489)
 - `spf_pass_pct`: SPF pass rate
 - `dkim_pass_pct`: DKIM pass rate
 - `policy_p`: Published DMARC policy (none, quarantine, reject)
@@ -3402,7 +3413,7 @@ Get detailed overview for a specific domain with daily breakdown.
 - `total_messages`: Total messages in period
 - `unique_ips`: Number of unique source IPs
 - `unique_reporters`: Number of unique organizations sending reports
-- `dmarc_pass_pct`: DMARC pass rate (SPF + DKIM aligned)
+- `dmarc_pass_pct`: DMARC pass rate (aligned SPF or aligned DKIM passed)
 - `spf_pass_pct`: SPF pass rate
 - `dkim_pass_pct`: DKIM pass rate
 - `policy`: Published DMARC policy object
@@ -4087,21 +4098,47 @@ The existing DMARC upload endpoint also accepts TLS-RPT reports.
 
 ### GET /api/blacklist/summary
 
-Get a high-level summary of blacklist status for the main server IP.
+Get a high-level blacklist summary for the dashboard, aggregated across ALL active monitored hosts (WAN IP, transports, relayhosts, manual hosts) instead of only the auto-detected server IP.
 
 **Response:**
 ```json
 {
+  "has_data": true,
   "server_ip": "1.2.3.4",
-  "checked_at": "2026-01-25T14:00:00Z",
-  "total_blacklists": 50,
-  "listed_count": 1,
-  "clean_count": 48,
-  "error_count": 1,
   "status": "listed",
-  "has_data": true
+  "listed_count": 1,
+  "total_blacklists": 60,
+  "checked_at": "2026-01-25T14:00:00Z",
+  "hosts": [
+    {
+      "hostname": "1.2.3.4",
+      "source": "system",
+      "status": "listed",
+      "listed_count": 1,
+      "checked_at": "2026-01-25T14:00:00Z"
+    },
+    {
+      "hostname": "5.6.7.8",
+      "source": "relayhost:smtp.example.com",
+      "status": "clean",
+      "listed_count": 0,
+      "checked_at": "2026-01-25T14:00:00Z"
+    }
+  ],
+  "hosts_total": 2,
+  "hosts_listed": 1
 }
 ```
+
+**Response Fields:**
+- `has_data`: `true` when at least one host has a check fresher than 24 hours
+- `server_ip`: The auto-detected WAN IP (kept for backward compatibility); falls back to the single monitored host when unavailable
+- `status`: `listed` if any host is listed, else `error` if any fresh check errored, else `clean` if at least one host has fresh data, else `unknown`
+- `listed_count` / `total_blacklists`: Sums across hosts with fresh (under 24h) data
+- `checked_at`: Most recent check across all hosts
+- `hosts`: One entry per active monitored host. A host's `status` is `unknown` and its `listed_count` is `0` when its latest check is older than 24 hours
+- `hosts_total`: Number of active monitored hosts
+- `hosts_listed`: Number of hosts currently listed (fresh data only)
 
 ---
 
@@ -4136,7 +4173,7 @@ Get status of all monitored hosts (system IP and transport configurations).
       "status": "clean",
       "checked_at": "2026-01-25T14:00:00Z",
       "listed_count": 0,
-      "total_blacklists": 50,
+      "total_blacklists": 30,
       "results": [...]
     },
     {
@@ -4146,7 +4183,7 @@ Get status of all monitored hosts (system IP and transport configurations).
       "status": "listed",
       "checked_at": "2026-01-25T14:00:00Z",
       "listed_count": 2,
-      "total_blacklists": 50,
+      "total_blacklists": 30,
       "results": [...]
     }
   ]
@@ -4646,7 +4683,7 @@ Authentication error (connection will be closed with code 4401):
 
 | Code | Meaning |
 |------|---------|
-| `4401` | Authentication required — invalid or missing token |
+| `4401` | Authentication required - invalid or missing token |
 | `1000` | Normal closure |
 
 **Notes:**
@@ -4660,8 +4697,8 @@ Authentication error (connection will be closed with code 4401):
 ## Spam Filter
 
 The Spam Filter feature provides two capabilities:
-1. **Rspamd Maps** — Direct editor for Rspamd map files
-2. **Suppressions** — Email suppression list with automatic bounce detection
+1. **Rspamd Maps** - Direct editor for Rspamd map files
+2. **Suppressions** - Email suppression list with automatic bounce detection
 
 ### Rspamd Maps
 
@@ -4911,14 +4948,14 @@ Create a new suppression entry.
 
 | Field | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
-| `email` | string | Yes | — | Email address, domain, or regex pattern |
+| `email` | string | Yes | - | Email address, domain, or regex pattern |
 | `type` | string | No | `email` | `email` or `domain` |
 | `reason` | string | No | `manual` | `manual`, `hard_bounce`, `soft_bounce`, `rejected` |
 | `notes` | string | No | `null` | Free text notes |
 | `permanent` | boolean | No | `true` | `true` = never expires, `false` = uses `expires_at` |
 | `expires_at` | string | No | `null` | ISO 8601 datetime (used when `permanent=false`) |
 
-**Response:** `200 OK` — Returns the created suppression object (same format as list item)
+**Response:** `200 OK` - Returns the created suppression object (same format as list item)
 
 **Error Responses:**
 - `409 Conflict`: Email already exists in suppression list
@@ -4959,7 +4996,7 @@ Update an existing suppression entry.
 | `expires_at` | string | ISO datetime to set expiry, or `"null"` / `""` to make permanent |
 
 **Notes:**
-- All fields are optional — only provided fields are updated
+- All fields are optional - only provided fields are updated
 - Setting `expires_at` to `"null"` or `""` clears the expiry (permanent block)
 - Changing `active` sets `synced_to_rspamd = false` to trigger re-sync
 
@@ -5461,7 +5498,7 @@ Manage where alerts are delivered. Multiple destinations can be configured; ever
 
 ### GET /api/notifications/types
 
-Field specification per service type - used by the settings UI to render only the relevant inputs.
+Field specification per service type - used by the settings UI to render only the relevant inputs - plus the list of alert types a destination can subscribe to.
 
 ```json
 {
@@ -5475,11 +5512,19 @@ Field specification per service type - used by the settings UI to render only th
         {"key": "chat_id", "label": "Chat ID", "type": "text", "required": true}
       ]
     }
+  ],
+  "alert_types": [
+    {"id": "security", "label": "Security", "description": "Compromised mailbox detected, authentication attacks, SMTP disabled by abuse protection"},
+    {"id": "blacklist", "label": "IP blacklist", "description": "Your server IP was listed on a spam blacklist, or is listed no more"},
+    {"id": "dns_changes", "label": "DNS record changes", "description": "A domain SPF, DKIM, DMARC or TLSA record changed"},
+    {"id": "dmarc_errors", "label": "DMARC processing errors", "description": "A DMARC report could not be imported or parsed"}
   ]
 }
 ```
 
 **Types:** `slack`, `discord`, `telegram`, `ntfy`, `gotify`, `webhook`
+
+**Alert types:** `security`, `blacklist`, `dns_changes`, `dmarc_errors`
 
 ### GET /api/notifications/channels
 
@@ -5493,6 +5538,7 @@ List configured destinations. Secret fields are returned masked as `********`.
       "name": "Ops Slack",
       "channel_type": "slack",
       "config": {"webhook_url": "********"},
+      "alert_types": [],
       "enabled": true,
       "last_status": "success",
       "last_error": null,
@@ -5502,22 +5548,27 @@ List configured destinations. Secret fields are returned masked as `********`.
 }
 ```
 
+- `alert_types`: The alert types this destination is subscribed to. An empty array means the destination receives **every** alert.
+
 ### POST /api/notifications/channels
 
-Create a destination. Returns `422` if a required field for that type is missing.
+Create a destination. Returns `422` if a required field for that type is missing, or if `alert_types` contains an unknown id.
 
 ```json
 {
   "name": "Ops Telegram",
   "channel_type": "telegram",
   "config": {"bot_token": "123:ABC", "chat_id": "456"},
+  "alert_types": ["security", "blacklist"],
   "enabled": true
 }
 ```
 
+- `alert_types` is optional: omit it (or subscribe to all types) to receive every alert.
+
 ### PUT /api/notifications/channels/{id}
 
-Update a destination. Send a secret field back as `********` to keep the stored value unchanged.
+Update a destination. Send a secret field back as `********` to keep the stored value unchanged. Send `alert_types` to change which alerts the destination receives.
 
 ### DELETE /api/notifications/channels/{id}
 

@@ -164,7 +164,7 @@ v=DMARC1; p=none; rua=mailto:dmarc@example.net;
 ### 2. Parameter Details
 
 * **`p=none` (Monitoring Mode):** The recommended starting point. It ensures no mail is blocked while you collect data to verify that all legitimate sources are correctly authenticated.
-* **`rua=mailto:...`:** This is the feedback loop trigger. Ensure this address is the one configured in the **IMAP Settings** of mailcow Logs Viewer.
+* **`rua=mailto:...`:** This is the feedback loop trigger. Ensure this address is the mailbox configured under **Settings → DMARC IMAP** in mailcow Logs Viewer.
 * **`v=DMARC1`:** Required version prefix.
 
 ### 3. External Domain Reporting (Verification)
@@ -235,8 +235,11 @@ When using email services (marketing, support desk, etc.):
 - **Subdomains**: Check if subdomain policy is needed
 
 ## Report Retention
-- Reports are stored according to your configured retention period (`DMARC_RETENTION_DAYS`)
+- Reports are stored according to your configured retention period (**Settings → DMARC → Retention**)
 - Default: 60 days
+
+> [!NOTE]
+> Settings are edited on the **Settings** page (requires `SETTINGS_EDIT_VIA_UI_ENABLED=true`). Every setting can also be provided as an environment variable - see [ENV_Settings.md](../ENV_Settings.md).
 - Older DMARC and TLS reports are automatically deleted daily (cleanup job runs at 2:15 AM) to save space
 - Export reports before they're deleted if long-term analysis is needed
 

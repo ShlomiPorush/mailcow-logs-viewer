@@ -13,15 +13,29 @@ The Domains page displays all email domains configured in your mailcow server, a
 - **Storage**: Total storage used and quota (if applicable)
 
 ### DNS Security Validation
-The system automatically validates three critical DNS records:
+The system automatically validates four critical DNS record types:
 
 #### SPF (Sender Policy Framework)
 - **Purpose**: Specifies which mail servers can send email on behalf of your domain
+- **Source IP Validation**: The check does not only parse the record - it verifies that every IP your mail can actually leave from is authorized. Which IPs are validated is configurable under **Settings → Domains → SPF check sources**:
+  - Auto-detected WAN IP (on by default)
+  - Public IPs of active mailcow transports
+  - Public IPs of active mailcow relayhosts
+  - Manually configured IPs or hostnames
+  - Source IPs observed with a passing SPF result in the last 30 days of imported DMARC aggregate reports (the DMARC history source)
+- If **any** validated IP is not authorized by the record, the SPF check reports an error naming the offending IP(s)
+- **Checked IPs**: The SPF card contains an expandable **Checked IPs** list showing every validated IP, where it came from (Auto-detected WAN, Transport, Relay host, Configured, DMARC history) and a per-IP **Authorized** / **Not authorized** verdict
 - **Status Indicators**:
   - ✓ **Success**: SPF record exists and is properly configured
   - ⚠ **Warning**: SPF record exists but may need optimization
   - ✗ **Error**: SPF record is missing or incorrect
   - ? **Unknown**: Not yet checked
+
+> [!NOTE]
+> The DMARC history source is off by default. With relaxed alignment, an ESP subdomain IP can appear as an aligned pass in DMARC reports without being in your domain's own SPF record - enabling this source can then cause a false warning.
+
+> [!NOTE]
+> Settings are edited on the **Settings** page (requires `SETTINGS_EDIT_VIA_UI_ENABLED=true`). Every setting can also be provided as an environment variable - see [ENV_Settings.md](../ENV_Settings.md).
 
 #### DKIM (DomainKeys Identified Mail)
 - **Purpose**: Adds a digital signature to outgoing emails
@@ -35,6 +49,12 @@ The system automatically validates three critical DNS records:
   - `quarantine`: Moderate protection
   - `none`: Monitoring only (weakest)
 - **Status**: Same indicators as SPF
+
+#### TLSA (DANE)
+- **Purpose**: DANE lets senders verify your mail server's TLS certificate through DNS, preventing TLS downgrade and man-in-the-middle attacks
+- **Where the records live**: For SMTP, TLSA records are published under each MX hostname (`_25._tcp.<mx-host>`), not under the domain itself - the check resolves your MX hosts and looks there
+- **Validation**: Warns when some MX hosts have no TLSA record, or when no record uses the recommended `3 1 1` form (DANE-EE, SPKI, SHA-256 - mailcow's default)
+- **Optional**: DANE requires a DNSSEC-signed zone. A domain without TLSA records gets an informational warning, never an error. Domains that do not accept mail (null MX) are skipped
 
 ---
 
@@ -58,8 +78,15 @@ The system automatically validates three critical DNS records:
 When you expand a domain, the DNS Security section shows:
 - Detailed status message for each record type
 - The actual DNS record value (for DKIM and DMARC)
+- The expandable **Checked IPs** list on the SPF card (every validated IP with its source and verdict)
 - Specific warnings or recommendations
 - Time of last validation
+
+### DNS Change Alerts
+When a scheduled or manual check finds that a domain's SPF, DKIM, DMARC or TLSA record has **changed** since the previous check, an alert is sent by email and to your notification destinations (alert type "DNS record changes").
+- Only definite changes trigger an alert: a value that is present and different, or a record that verifiably disappeared
+- Failed lookups and timeouts are ignored, so a DNS hiccup never fires a false alarm
+- Controlled by the **DNS Change Alerts Enabled** toggle under **Settings → Notifications → Alert types** (on by default)
 
 ---
 
