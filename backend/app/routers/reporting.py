@@ -1,6 +1,7 @@
 """
 API endpoints for system reports and summary
 """
+import asyncio
 import logging
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from sqlalchemy.orm import Session
@@ -36,7 +37,10 @@ async def get_system_summary_data(db: Session) -> Dict[str, Any]:
     storage_data = await get_storage_status()
     
     # 4. Blacklist Status
-    blacklist_data = await get_monitored_hosts()
+    # get_monitored_hosts() is a sync function (FastAPI runs it in the
+    # threadpool); awaiting it directly raised TypeError and broke every
+    # weekly summary (#81). Run it off the event loop the same way.
+    blacklist_data = await asyncio.to_thread(get_monitored_hosts)
     
     # Aggregate blacklist status
     hosts = blacklist_data.get('hosts', [])
@@ -106,7 +110,6 @@ async def get_system_summary_data(db: Session) -> Dict[str, Any]:
     # 7. Queue and Quarantine
     try:
         from ..mailcow_api import mailcow_api
-        import asyncio
         queue_data, quarantine_data = await asyncio.gather(
             mailcow_api.get_queue(),
             mailcow_api.get_quarantine()
@@ -428,7 +431,6 @@ async def generate_and_send_email(db: Session = None):
             # FIX: Subject date format
             subject = f"Weekly Server Summary - {current_date}"
             # Send in executor - smtplib blocks the event loop
-            import asyncio
             await asyncio.get_running_loop().run_in_executor(
                 None,
                 send_notification_email,
