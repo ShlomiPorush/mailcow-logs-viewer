@@ -942,6 +942,7 @@ def trigger_job(job_name: str, background_tasks: BackgroundTasks):
     - check_app_version: Check for app updates
     - dns_check: Validate DNS records for all domains
     - sync_local_domains: Sync domains from mailcow API
+    - dmarc_imap_sync: Import DMARC reports from the IMAP mailbox
     - update_geoip: Update GeoIP databases
     - mailbox_stats: Fetch mailbox statistics
     - alias_stats: Sync alias data
@@ -960,6 +961,7 @@ def trigger_job(job_name: str, background_tasks: BackgroundTasks):
         check_app_version_update,
         check_all_domains_dns_background,
         sync_local_domains,
+        dmarc_imap_sync_job,
         update_geoip_database,
         update_mailbox_statistics,
         update_alias_statistics,
@@ -989,6 +991,7 @@ def trigger_job(job_name: str, background_tasks: BackgroundTasks):
         'check_app_version': ('check_app_version', check_app_version_update, False),
         'dns_check': ('dns_check', check_all_domains_dns_background, False),
         'sync_local_domains': ('sync_local_domains', sync_local_domains, False),
+        'dmarc_imap_sync': ('dmarc_imap_sync', dmarc_imap_sync_job, False),
         'update_geoip': ('update_geoip', update_geoip_database, False),
         'mailbox_stats': ('mailbox_stats', update_mailbox_statistics, False),
         'alias_stats': ('alias_stats', update_alias_statistics, False),
