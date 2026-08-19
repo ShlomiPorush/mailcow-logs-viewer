@@ -14,7 +14,13 @@ env:
   DOCKER_HUB_REPO: shlomip/mailcow-logs-viewer
 
 jobs:
+  # The image is only published when CI passes on the tagged commit.
+  # A broken release must never reach ghcr.io / Docker Hub as `latest`.
+  checks:
+    uses: ./.github/workflows/ci.yml
+
   build-and-push:
+    needs: checks
     runs-on: ubuntu-latest
     permissions:
       contents: read
