@@ -1,0 +1,113 @@
+# CI: runs on every pull request and, via workflow_call, in front of the
+# image publish on version tags (see docker-publish.yml). It does not run
+# on pushes to main: main only changes through merged PRs and releases,
+# and both of those are already covered.
+#
+# Three jobs, each catching a different class of failure:
+#   backend-tests   unit + database tests against a real PostgreSQL. A test
+#                   that skips for lack of a database is treated as a failure,
+#                   so the suite cannot quietly go green by skipping.
+#   frontend-syntax node --check over every frontend script (no build step).
+#   image-smoke     builds the Docker image and boots it against PostgreSQL:
+#                   health, SPA, static assets, Alembic head, and the manual
+#                   job runner accepting every job the Status page lists
+#                   (.github/scripts/smoke.sh).
+name: CI
+
+on:
+  pull_request:
+  workflow_call:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend-tests:
+    name: Backend tests (PostgreSQL)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: ci
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      MAILCOW_URL: https://mail.example.com
+      MAILCOW_API_KEY: ci-placeholder
+      POSTGRES_HOST: localhost
+      POSTGRES_PORT: "5432"
+      POSTGRES_USER: ci
+      POSTGRES_PASSWORD: ci
+      POSTGRES_DB: ci
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install dependencies
+        run: pip install -r backend/requirements.txt
+
+      - name: Run tests
+        working-directory: backend
+        run: |
+          set -o pipefail
+          python -m pytest -q -rs -p no:warnings 2>&1 | tee pytest.log
+
+      - name: Fail if any test skipped for lack of a database
+        working-directory: backend
+        run: |
+          if grep -q "PostgreSQL not available" pytest.log; then
+            echo "::error::tests skipped because PostgreSQL was not reachable; the database service is misconfigured"
+            grep "PostgreSQL not available" pytest.log
+            exit 1
+          fi
+
+  frontend-syntax:
+    name: Frontend syntax
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "24"
+
+      - name: Syntax-check frontend scripts
+        run: |
+          for f in frontend/*.js; do
+            node --check "$f"
+          done
+
+  image-smoke:
+    name: Image build and smoke test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build image (amd64, not pushed)
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          load: true
+          tags: mailcow-logs-viewer:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Boot the image against PostgreSQL and exercise it
+        run: bash .github/scripts/smoke.sh mailcow-logs-viewer:ci
