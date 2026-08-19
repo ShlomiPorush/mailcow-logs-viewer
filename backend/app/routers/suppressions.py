@@ -576,7 +576,41 @@ async def sync_suppressions_to_rspamd(db: Session) -> dict:
     active_suppressions = db.query(SpamSuppression).filter(
         SpamSuppression.active == True
     ).order_by(SpamSuppression.email).all()
-    
+
+    # Skip the write when the managed entries are already exactly what we
+    # would write. Every save makes Rspamd truncate + rewrite the file and
+    # reload the map (its write is not atomic - see issue #80), so identical
+    # content must not be pushed every sync just to refresh a timestamp.
+    current_managed = []
+    in_managed = False
+    for line in current_content.split('\n'):
+        if MANAGED_MARKER_START in line or '# === MANAGED BY MAILCOW LOGS VIEWER' in line:
+            in_managed = True
+            continue
+        if MANAGED_MARKER_END in line:
+            break
+        if in_managed and line.strip() and not line.strip().startswith('#'):
+            current_managed.append(line.strip())
+
+    desired_emails = [s.email for s in active_suppressions]
+    if current_content and sorted(current_managed) == sorted(desired_emails):
+        synced_count = 0
+        for s in active_suppressions:
+            if not s.synced_to_rspamd:
+                s.synced_to_rspamd = True
+                s.updated_at = datetime.utcnow()
+                synced_count += 1
+        db.commit()
+        logger.debug("[SUPPRESSION] Rspamd map already up to date - skipping write")
+        return {
+            "success": True,
+            "synced": len(active_suppressions),
+            "newly_synced": synced_count,
+            "manual_entries_preserved": len([l for l in manual_lines if l.strip() and not l.strip().startswith('#')]),
+            "sync_time": None,
+            "skipped": True,
+        }
+
     # 4. Build new map content
     parts = []
     
