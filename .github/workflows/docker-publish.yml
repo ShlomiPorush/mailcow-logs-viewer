@@ -67,3 +67,30 @@ jobs:
           platforms: linux/amd64,linux/arm64
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+
+  # Issues with a merged fix stay open until the release that ships it.
+  # Once the image is published, close every open issue labelled
+  # `fix available` (the label is applied only after the fix is merged to
+  # main, so everything it marks is in this release).
+  close-shipped-issues:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      TAG: ${{ github.ref_name }}
+    steps:
+      - name: Close issues labelled "fix available"
+        run: |
+          issues=$(gh issue list --state open --label "fix available" --limit 100 --json number -q '.[].number')
+          if [ -z "$issues" ]; then
+            echo "No open issues labelled 'fix available'."
+            exit 0
+          fi
+          for n in $issues; do
+            gh issue comment "$n" --body "Shipped in ${TAG}."
+            gh issue close "$n" --reason completed
+            echo "closed #$n"
+          done
