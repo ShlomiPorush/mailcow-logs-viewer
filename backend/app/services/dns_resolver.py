@@ -46,9 +46,9 @@ DOH_URLS = [
 # resolver is a public one.
 BLACKLIST_UDP_DNS_SERVERS = [
     [],                                   # system resolver (/etc/resolv.conf) - preferred
-    ['9.9.9.9', '149.112.112.112'],       # Quad9      (public - rejected by Spamhaus)
-    ['1.1.1.1', '1.0.0.1'],               # Cloudflare (public - rejected by Spamhaus)
-    ['8.8.8.8', '8.8.4.4'],               # Google     (public - rejected by Spamhaus)
+    ['9.9.9.9', '149.112.112.112'],       # Quad9      (serves real Spamhaus data)
+    ['1.1.1.1', '1.0.0.1'],               # Cloudflare (Spamhaus rejects: 127.255.255.254)
+    ['8.8.8.8', '8.8.4.4'],               # Google     (Spamhaus returns false NXDOMAIN - keep last)
 ]
 
 # DoH is a public endpoint by definition, so it can never satisfy Spamhaus.
@@ -142,7 +142,11 @@ async def resolve_for_blacklist(query: str, rdtype: str = 'A', timeout: int = 10
         try:
             resolver = dns.asyncresolver.Resolver()
             resolver.nameservers = [doh_url]
-            return await resolver.resolve(query, rdtype, tcp=True)
+            answer = await resolver.resolve(query, rdtype, tcp=True)
+            if _is_blocked_answer(answer):
+                blocked_answer = answer
+                continue
+            return answer
         except (dns.resolver.NXDOMAIN, dns.resolver.NoAnswer):
             raise
         except Exception as e:

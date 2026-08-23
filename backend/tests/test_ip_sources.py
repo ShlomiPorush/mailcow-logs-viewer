@@ -877,6 +877,44 @@ def test_reconcile_never_reactivates_sync_deactivated_rows(monkeypatch):
     assert changed is False and not db.added
 
 
+def test_non_dnsbl_answer_is_never_reported_as_listed(monkeypatch):
+    """A resolver that rewrites NXDOMAIN (ISP ad server, captive portal)
+    returns a non-127.x address - that must be 'error', not a listing."""
+    import asyncio
+
+    class FakeAnswer:
+        def __init__(self, ips): self._ips = ips
+        def __iter__(self): return iter(self._ips)
+
+    async def fake_resolve(query, rdtype='A', timeout=10):
+        return FakeAnswer(['92.242.140.2'])
+
+    import app.services.dns_resolver as dnsr
+    monkeypatch.setattr(dnsr, 'resolve_for_blacklist', fake_resolve)
+    result = asyncio.run(blacklist_service.check_ip_in_blacklist(
+        '203.0.113.5', {'name': 'Test RBL', 'zone': 'rbl.test', 'info_url': ''}, 0))
+    assert result['listed'] is False
+    assert result['status'] == 'error'
+    assert 'rewrite' in result['response']
+
+
+def test_real_127_answer_still_reported_as_listed(monkeypatch):
+    import asyncio
+
+    class FakeAnswer:
+        def __init__(self, ips): self._ips = ips
+        def __iter__(self): return iter(self._ips)
+
+    async def fake_resolve(query, rdtype='A', timeout=10):
+        return FakeAnswer(['127.0.0.2'])
+
+    import app.services.dns_resolver as dnsr
+    monkeypatch.setattr(dnsr, 'resolve_for_blacklist', fake_resolve)
+    result = asyncio.run(blacklist_service.check_ip_in_blacklist(
+        '203.0.113.5', {'name': 'Test RBL', 'zone': 'rbl.test', 'info_url': ''}, 0))
+    assert result['listed'] is True and result['response'] == '127.0.0.2'
+
+
 def test_cleanup_purges_only_long_inactive_monitored_hosts():
     """Inactive hosts unseen for 30+ days are deleted; fresh-inactive and
     active-but-old rows survive."""
@@ -911,3 +949,47 @@ def test_cleanup_purges_only_long_inactive_monitored_hosts():
             MonitoredHost.hostname.like('purge-test-%')).delete(synchronize_session=False)
         db.commit()
     assert remaining == {'purge-test-recent', 'purge-test-active'}, remaining
+
+
+@pytest.mark.parametrize('answer,expected_listed,expected_status', [
+    ('127.0.0.1', False, 'error'),     # DNS blocker answer, never a listing
+    ('127.0.0.2', True, 'listed'),     # documented Spamhaus code
+    ('127.0.0.11', True, 'listed'),    # PBL upper bound
+    ('127.0.0.99', False, 'error'),    # not a documented Spamhaus code
+    ('127.1.2.3', False, 'error'),     # inside 127/8 but not a Spamhaus range
+])
+def test_spamhaus_answers_validated_against_documented_codes(monkeypatch, answer,
+                                                             expected_listed, expected_status):
+    import asyncio
+
+    class FakeAnswer:
+        def __init__(self, ips): self._ips = ips
+        def __iter__(self): return iter(self._ips)
+
+    async def fake_resolve(query, rdtype='A', timeout=10):
+        return FakeAnswer([answer])
+
+    import app.services.dns_resolver as dnsr
+    monkeypatch.setattr(dnsr, 'resolve_for_blacklist', fake_resolve)
+    result = asyncio.run(blacklist_service.check_ip_in_blacklist(
+        '203.0.113.5', {'name': 'Spamhaus ZEN', 'zone': 'zen.spamhaus.org', 'info_url': ''}, 0))
+    assert result['listed'] is expected_listed
+    assert result['status'] == expected_status
+
+
+def test_non_spamhaus_zone_keeps_generic_127_semantics(monkeypatch):
+    """Other RBLs use their own 127.x codes - only 127.0.0.1 is universally bogus."""
+    import asyncio
+
+    class FakeAnswer:
+        def __init__(self, ips): self._ips = ips
+        def __iter__(self): return iter(self._ips)
+
+    async def fake_resolve(query, rdtype='A', timeout=10):
+        return FakeAnswer(['127.0.0.2'])
+
+    import app.services.dns_resolver as dnsr
+    monkeypatch.setattr(dnsr, 'resolve_for_blacklist', fake_resolve)
+    result = asyncio.run(blacklist_service.check_ip_in_blacklist(
+        '203.0.113.5', {'name': 'SpamCop', 'zone': 'bl.spamcop.net', 'info_url': ''}, 0))
+    assert result['listed'] is True

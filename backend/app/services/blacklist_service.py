@@ -522,6 +522,61 @@ async def check_ip_in_blacklist(ip: str, blacklist: Dict[str, str], index: int) 
                 "response": error_msg
             }
         
+        # RFC 5782: 127.0.0.1 must never be listed in any DNSBL - it is the
+        # classic answer of a DNS blocker (Pi-hole, router adblock, ISP
+        # filter) intercepting the RBL domain itself.
+        if response == '127.0.0.1':
+            logger.warning(f"{blacklist['name']}: got 127.0.0.1 - the resolver is "
+                           "blocking/rewriting the RBL domain, status unknown")
+            return {
+                "name": blacklist["name"],
+                "zone": blacklist["zone"],
+                "info_url": blacklist.get("info_url", ""),
+                "status": "error",
+                "listed": False,
+                "response": "Invalid answer (127.0.0.1): the DNS resolver appears to "
+                            "block or rewrite this RBL domain - status unknown"
+            }
+
+        # Spamhaus documents its listing codes as 127.0.0.2-11; anything else
+        # from a spamhaus zone is not a listing
+        if (response and blacklist['zone'].endswith('spamhaus.org')
+                and response.startswith('127.')):
+            try:
+                last_octet = int(response.rsplit('.', 1)[1])
+                valid = response.startswith('127.0.0.') and 2 <= last_octet <= 11
+            except (ValueError, IndexError):
+                valid = False
+            if not valid:
+                logger.warning(f"{blacklist['name']}: unexpected Spamhaus answer "
+                               f"{response} - status unknown")
+                return {
+                    "name": blacklist["name"],
+                    "zone": blacklist["zone"],
+                    "info_url": blacklist.get("info_url", ""),
+                    "status": "error",
+                    "listed": False,
+                    "response": f"Unexpected Spamhaus answer ({response}) - not a "
+                                "documented listing code - status unknown"
+                }
+
+        # RFC 5782: a genuine DNSBL listing answer is always inside
+        # 127.0.0.0/8. Anything else is a broken/hijacking resolver
+        # (NXDOMAIN redirection to an ad server, captive portal, ...) and
+        # must never be reported as a listing.
+        if response and not response.startswith('127.'):
+            logger.warning(f"{blacklist['name']}: non-DNSBL answer {response} - "
+                           "resolver is rewriting NXDOMAIN, status unknown")
+            return {
+                "name": blacklist["name"],
+                "zone": blacklist["zone"],
+                "info_url": blacklist.get("info_url", ""),
+                "status": "error",
+                "listed": False,
+                "response": f"Invalid DNSBL answer ({response}) - the DNS resolver "
+                            "appears to rewrite NXDOMAIN responses - status unknown"
+            }
+
         # Valid listing response (127.0.0.x for most blacklists)
         return {
             "name": blacklist["name"],
