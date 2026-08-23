@@ -852,7 +852,11 @@ def test_reconcile_deactivates_transport_and_relayhost_rows_when_toggled_off(mon
     assert wan.active is True
 
 
-def test_reconcile_reactivates_recently_synced_rows_when_toggled_back_on(monkeypatch):
+def test_reconcile_never_reactivates_sync_deactivated_rows(monkeypatch):
+    """Regression: a relayhost deleted in mailcow is deactivated by the sync,
+    but reconcile used to reactivate it on the next page load (it cannot tell
+    toggle-off from removed-in-mailcow). Re-adding rows is the sync's job -
+    reconcile must leave inactive transport/relayhost rows alone."""
     from datetime import datetime, timedelta
     monkeypatch.setattr(settings._inner, 'blacklist_source_server_ip', False)
     monkeypatch.setattr(settings._inner, 'blacklist_source_transports', True)
@@ -860,13 +864,50 @@ def test_reconcile_reactivates_recently_synced_rows_when_toggled_back_on(monkeyp
     monkeypatch.setattr(settings._inner, 'blacklist_source_manual_hosts', '')
     monkeypatch.setattr(domains, '_server_ip_cache', None)
 
-    fresh = _host_row('9.9.9.9', 'transport:pool.relay.example', active=False)
-    fresh.last_seen = datetime.utcnow() - timedelta(hours=1)
-    stale = _host_row('9.9.9.10', 'relayhost', active=False)
+    deleted_in_mailcow = _host_row('9.9.9.9', 'relayhost:old.relay.example', active=False)
+    deleted_in_mailcow.last_seen = datetime.utcnow() - timedelta(hours=1)
+    stale = _host_row('9.9.9.10', 'transport', active=False)
     stale.last_seen = datetime.utcnow() - timedelta(days=30)
-    db = _FakeDB([fresh, stale])
+    db = _FakeDB([deleted_in_mailcow, stale])
     changed = blacklist_service.reconcile_monitored_hosts(db)
 
-    assert changed
-    assert fresh.active is True, "recently synced row must come back immediately"
-    assert stale.active is False, "long-dead row must wait for the sync to confirm it"
+    assert deleted_in_mailcow.active is False, \
+        "row deactivated by sync must stay inactive until sync itself re-adds it"
+    assert stale.active is False
+    assert changed is False and not db.added
+
+
+def test_cleanup_purges_only_long_inactive_monitored_hosts():
+    """Inactive hosts unseen for 30+ days are deleted; fresh-inactive and
+    active-but-old rows survive."""
+    if not _postgres_available():
+        pytest.skip('PostgreSQL not available')
+    import asyncio
+    from datetime import datetime, timedelta
+    from app.database import init_db, get_db_context
+    from app.models import MonitoredHost
+    from app.scheduler import cleanup_old_logs
+
+    init_db()
+    old = datetime.utcnow() - timedelta(days=45)
+    fresh = datetime.utcnow() - timedelta(days=2)
+    with get_db_context() as db:
+        db.query(MonitoredHost).filter(
+            MonitoredHost.hostname.like('purge-test-%')).delete(synchronize_session=False)
+        db.add(MonitoredHost(hostname='purge-test-dead', source='relayhost',
+                             active=False, last_seen=old))
+        db.add(MonitoredHost(hostname='purge-test-recent', source='transport',
+                             active=False, last_seen=fresh))
+        db.add(MonitoredHost(hostname='purge-test-active', source='system',
+                             active=True, last_seen=old))
+        db.commit()
+
+    asyncio.run(cleanup_old_logs())
+
+    with get_db_context() as db:
+        remaining = {h.hostname for h in db.query(MonitoredHost).filter(
+            MonitoredHost.hostname.like('purge-test-%')).all()}
+        db.query(MonitoredHost).filter(
+            MonitoredHost.hostname.like('purge-test-%')).delete(synchronize_session=False)
+        db.commit()
+    assert remaining == {'purge-test-recent', 'purge-test-active'}, remaining
