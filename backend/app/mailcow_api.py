@@ -5,6 +5,7 @@ Handles authentication and API calls to mailcow instance
 import asyncio
 import httpx
 import logging
+import weakref
 from urllib.parse import quote
 from typing import List, Dict, Any, Optional
 from datetime import datetime
@@ -24,8 +25,51 @@ class MailcowAPI:
     """Client for interacting with mailcow API"""
     
     def __init__(self):
+        # One persistent HTTP client per event loop (issue #84): a fresh
+        # client per request meant a fresh TCP connection - and a fresh
+        # A/AAAA lookup of the mailcow host - for every single API call.
+        # Keyed weakly by loop because manually triggered jobs run in their
+        # own short-lived loop; a client must never be shared across loops.
+        self._clients = weakref.WeakKeyDictionary()
         self._update_config()
         logger.info(f"mailcow API client initialized for {self.base_url} (SSL verification: {self.verify_ssl})")
+
+    def _get_client(self) -> httpx.AsyncClient:
+        """Return the persistent client for the running event loop."""
+        loop = asyncio.get_running_loop()
+        client = self._clients.get(loop)
+        if client is None or client.is_closed:
+            client = httpx.AsyncClient(
+                timeout=self.timeout,
+                verify=self.verify_ssl,
+                # Keep idle connections long enough to bridge the polling
+                # jobs (raw logs every ~60s, log fetch every ~30s), so
+                # steady-state polling reuses one connection instead of
+                # resolving and reconnecting every time
+                limits=httpx.Limits(max_connections=20,
+                                    max_keepalive_connections=10,
+                                    keepalive_expiry=300),
+            )
+            self._clients[loop] = client
+        return client
+
+    def _drop_clients(self):
+        """Close all cached clients (config changed). Safe from any thread."""
+        for loop, client in list(self._clients.items()):
+            try:
+                if not loop.is_closed():
+                    loop.call_soon_threadsafe(
+                        lambda c=client, l=loop: l.create_task(c.aclose()))
+            except RuntimeError:
+                pass
+        self._clients = weakref.WeakKeyDictionary()
+
+    async def aclose(self):
+        """Close the client of the current loop (app shutdown)."""
+        loop = asyncio.get_running_loop()
+        client = self._clients.pop(loop, None)
+        if client is not None and not client.is_closed:
+            await client.aclose()
     
     def _update_config(self):
         """Update configuration from settings (supports dynamic reload)"""
@@ -53,7 +97,10 @@ class MailcowAPI:
     def reload_config(self):
         """Reload configuration from settings (call after settings are updated)"""
         old_url = self.base_url
+        old_conn = (self.timeout, self.verify_ssl)
         self._update_config()
+        if old_conn != (self.timeout, self.verify_ssl) or old_url != self.base_url:
+            self._drop_clients()
         if old_url != self.base_url:
             logger.info(f"mailcow API client configuration reloaded: {old_url} -> {self.base_url}")
     
@@ -83,26 +130,26 @@ class MailcowAPI:
         """
         url = f"{self.base_url}{endpoint}"
         
-        async with httpx.AsyncClient(timeout=self.timeout, verify=self.verify_ssl) as client:
-            try:
-                response = await client.request(
-                    method=method,
-                    url=url,
-                    headers=self.headers,
-                    **kwargs
-                )
-                response.raise_for_status()
-                return response.json()
+        client = self._get_client()
+        try:
+            response = await client.request(
+                method=method,
+                url=url,
+                headers=self.headers,
+                **kwargs
+            )
+            response.raise_for_status()
+            return response.json()
                 
-            except httpx.HTTPStatusError as e:
-                logger.error(f"HTTP error {e.response.status_code} for {url}: {e}")
-                raise MailcowAPIError(f"API returned status {e.response.status_code}")
-            except httpx.RequestError as e:
-                logger.error(f"Request error for {url}: {e}")
-                raise MailcowAPIError(f"Failed to connect to mailcow API: {e}")
-            except Exception as e:
-                logger.error(f"Unexpected error for {url}: {e}")
-                raise MailcowAPIError(f"Unexpected error: {e}")
+        except httpx.HTTPStatusError as e:
+            logger.error(f"HTTP error {e.response.status_code} for {url}: {e}")
+            raise MailcowAPIError(f"API returned status {e.response.status_code}")
+        except httpx.RequestError as e:
+            logger.error(f"Request error for {url}: {e}")
+            raise MailcowAPIError(f"Failed to connect to mailcow API: {e}")
+        except Exception as e:
+            logger.error(f"Unexpected error for {url}: {e}")
+            raise MailcowAPIError(f"Unexpected error: {e}")
     
     @retry(
         stop=stop_after_attempt(3),
@@ -132,31 +179,31 @@ class MailcowAPI:
         
         url = f"{self.base_url}{endpoint}"
         
-        async with httpx.AsyncClient(timeout=self.timeout, verify=self.verify_ssl) as client:
-            try:
-                response = await client.request(
-                    method,
-                    url,
-                    headers=self.headers_rw,
-                    **kwargs
-                )
+        client = self._get_client()
+        try:
+            response = await client.request(
+                method,
+                url,
+                headers=self.headers_rw,
+                **kwargs
+            )
                 
-                if response.status_code == 401:
-                    raise MailcowAPIError("Read-Write API key authentication failed (401)")
+            if response.status_code == 401:
+                raise MailcowAPIError("Read-Write API key authentication failed (401)")
                 
-                if response.status_code == 403:
-                    raise MailcowAPIError("Read-Write API key does not have sufficient permissions (403)")
+            if response.status_code == 403:
+                raise MailcowAPIError("Read-Write API key does not have sufficient permissions (403)")
                 
-                response.raise_for_status()
+            response.raise_for_status()
                 
-                if response.headers.get('content-type', '').startswith('application/json'):
-                    return response.json()
-                return response.text
+            if response.headers.get('content-type', '').startswith('application/json'):
+                return response.json()
+            return response.text
                 
-            except httpx.HTTPStatusError as e:
-                raise MailcowAPIError(f"RW API request failed with status {e.response.status_code}: {e.response.text}")
-            except httpx.RequestError as e:
-                raise MailcowAPIError(f"RW API request failed: {str(e)}")
+        except httpx.HTTPStatusError as e:
+            raise MailcowAPIError(f"RW API request failed with status {e.response.status_code}: {e.response.text}")
+        except httpx.RequestError as e:
+            raise MailcowAPIError(f"RW API request failed: {str(e)}")
 
     async def get_postfix_logs(self, count: int = 500) -> List[Dict[str, Any]]:
         """
@@ -1044,24 +1091,24 @@ class MailcowAPI:
         """
         url = f"{self.base_url}/inc/ajax/qitem_details.php?id={item_id}"
         
-        async with httpx.AsyncClient(timeout=self.timeout, verify=self.verify_ssl) as client:
-            try:
-                response = await client.get(
-                    url,
-                    headers=self.headers
-                )
-                response.raise_for_status()
+        client = self._get_client()
+        try:
+            response = await client.get(
+                url,
+                headers=self.headers
+            )
+            response.raise_for_status()
                 
-                data = response.json()
-                # The response is a list with a single element
-                if isinstance(data, list) and len(data) > 0:
-                    return data[0]
-                return data
+            data = response.json()
+            # The response is a list with a single element
+            if isinstance(data, list) and len(data) > 0:
+                return data[0]
+            return data
                 
-            except httpx.HTTPStatusError as e:
-                raise MailcowAPIError(f"Failed to get quarantine details: HTTP {e.response.status_code}")
-            except Exception as e:
-                raise MailcowAPIError(f"Failed to get quarantine details: {str(e)}")
+        except httpx.HTTPStatusError as e:
+            raise MailcowAPIError(f"Failed to get quarantine details: HTTP {e.response.status_code}")
+        except Exception as e:
+            raise MailcowAPIError(f"Failed to get quarantine details: {str(e)}")
 
     async def _make_rspamd_request(self, endpoint: str, method: str = "GET", extra_headers: dict = None, **kwargs) -> Any:
         """
@@ -1105,26 +1152,26 @@ class MailcowAPI:
         if extra_headers:
             headers.update(extra_headers)
         
-        async with httpx.AsyncClient(timeout=self.timeout, verify=self.verify_ssl) as client:
-            try:
-                response = await client.request(method, url, headers=headers, **kwargs)
+        client = self._get_client()
+        try:
+            response = await client.request(method, url, headers=headers, **kwargs)
                 
-                if response.status_code == 401 or response.status_code == 403:
-                    raise MailcowAPIError("Rspamd password authentication failed. Check RSPAMD_PASSWORD setting.")
+            if response.status_code == 401 or response.status_code == 403:
+                raise MailcowAPIError("Rspamd password authentication failed. Check RSPAMD_PASSWORD setting.")
                 
-                response.raise_for_status()
-                return response
+            response.raise_for_status()
+            return response
                 
-            except httpx.HTTPStatusError as e:
-                if e.response.status_code in (301, 302, 303, 307, 308) and not rspamd_base:
-                    raise MailcowAPIError(
-                        f"Rspamd API request was redirected ({e.response.status_code}) by the mailcow proxy "
-                        "before authentication. Set RSPAMD_URL to reach the Rspamd controller directly, "
-                        "e.g. http://rspamd-mailcow:11334"
-                    )
-                raise MailcowAPIError(f"Rspamd API request failed with status {e.response.status_code}")
-            except httpx.RequestError as e:
-                raise MailcowAPIError(f"Rspamd API request failed: {str(e)}")
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code in (301, 302, 303, 307, 308) and not rspamd_base:
+                raise MailcowAPIError(
+                    f"Rspamd API request was redirected ({e.response.status_code}) by the mailcow proxy "
+                    "before authentication. Set RSPAMD_URL to reach the Rspamd controller directly, "
+                    "e.g. http://rspamd-mailcow:11334"
+                )
+            raise MailcowAPIError(f"Rspamd API request failed with status {e.response.status_code}")
+        except httpx.RequestError as e:
+            raise MailcowAPIError(f"Rspamd API request failed: {str(e)}")
 
     async def get_rspamd_maps(self) -> List[Dict[str, Any]]:
         """

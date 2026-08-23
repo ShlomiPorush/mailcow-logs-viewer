@@ -186,6 +186,7 @@ async def lifespan(app: FastAPI):
     logger.info("Shutting down application")
     stop_raw_logs_scheduler()
     stop_scheduler()
+    await mailcow_api.aclose()
     logger.info("Application shutdown complete")
 
 
