@@ -452,7 +452,7 @@ var SETTINGS_EDIT_TABS = [
         ]
     },
     {
-        id: 'anomaly', label: 'Anomaly Detection (Beta)', description: 'Beta - please report issues on GitHub. Detect compromised mailboxes and auth attacks. Alerts when a mailbox sends far above its own baseline (possible account takeover) or when a username accumulates many auth failures. Alerts go to email + webhook and appear on the dashboard.', groups: [
+        id: 'anomaly', label: 'Anomaly Detection (Beta)', description: 'Beta - please report issues on GitHub. Detect compromised mailboxes and auth attacks. Alerts when a mailbox sends far above its own baseline (possible account takeover). Daily send patterns are learned automatically - a mailbox that sends a big batch at the same hour every day will not alert unless it bursts off-schedule or far above its usual size or when a username accumulates many auth failures. Alerts go to email + webhook and appear on the dashboard.', groups: [
             { label: 'Enable', keys: ['anomaly_detection_enabled'] },
             { label: 'Volume Spike', keys: ['anomaly_volume_multiplier', 'anomaly_volume_min_messages', 'anomaly_baseline_days'] },
             { label: 'Auth Failures', keys: ['anomaly_auth_failure_threshold'] },
