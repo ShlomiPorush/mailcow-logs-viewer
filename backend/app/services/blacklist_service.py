@@ -208,22 +208,18 @@ def get_auto_monitor_entries() -> List[tuple]:
         logger.debug("blacklist_source_server_ip disabled - auto-detected WAN IP is not monitored on blacklists")
     return entries
 
-def _synced_source_toggled(row, prefix: str, enabled: bool) -> bool:
-    """Does this transport/relayhost row need flipping to match its toggle?
+def _synced_source_disabled(row, prefix: str, enabled: bool) -> bool:
+    """Active transport/relayhost row whose source toggle is now off.
 
-    Disabling is unconditional. Re-enabling only reactivates rows confirmed
-    by a recent sync (last_seen within 48h) - older rows may belong to hosts
-    long removed from mailcow, and the next sync re-adds live ones anyway.
+    Only DISABLING is handled here (must hide on the next page load).
+    Re-enabling is deliberately left to the sync job (triggered immediately
+    on settings save): reconcile cannot tell a row deactivated by the toggle
+    from one deactivated because the host was removed in mailcow - blindly
+    reactivating resurrects deleted relayhosts. The sync reads the live
+    mailcow state, so only hosts that still exist come back.
     """
-    from datetime import datetime, timedelta
-    if not row.source or not row.source.startswith(prefix):
-        return False
-    if row.active and not enabled:
-        return True
-    if (not row.active and enabled and row.last_seen
-            and row.last_seen >= datetime.utcnow() - timedelta(hours=48)):
-        return True
-    return False
+    return bool(row.source and row.source.startswith(prefix)
+                and row.active and not enabled)
 
 
 def reconcile_monitored_hosts(db) -> bool:
@@ -267,11 +263,11 @@ def reconcile_monitored_hosts(db) -> bool:
               and config_row_origin(row) not in manual_hosts):
             row.active = False
             changed = True
-        elif _synced_source_toggled(row, 'transport', settings.blacklist_source_transports):
-            row.active = not row.active
+        elif _synced_source_disabled(row, 'transport', settings.blacklist_source_transports):
+            row.active = False
             changed = True
-        elif _synced_source_toggled(row, 'relayhost', settings.blacklist_source_relayhosts):
-            row.active = not row.active
+        elif _synced_source_disabled(row, 'relayhost', settings.blacklist_source_relayhosts):
+            row.active = False
             changed = True
 
     for host, source in get_auto_monitor_entries():

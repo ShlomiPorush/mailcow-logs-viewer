@@ -2112,10 +2112,22 @@ async def cleanup_old_logs():
             correlation_deleted = db.query(MessageCorrelation).filter(
                 MessageCorrelation.first_seen < cutoff_date
             ).delete()
-            
+
+            # Monitored hosts that were deactivated (removed in mailcow or
+            # from the source settings) and not seen by any sync for 30 days
+            # are purged for good. Active rows refresh last_seen every sync,
+            # so they can never age out.
+            stale_hosts_cutoff = datetime.now(timezone.utc) - timedelta(days=30)
+            stale_hosts_deleted = db.query(MonitoredHost).filter(
+                MonitoredHost.active == False,
+                MonitoredHost.last_seen.isnot(None),
+                MonitoredHost.last_seen < stale_hosts_cutoff
+            ).delete()
+
             db.commit()
-            
-            total = postfix_deleted + rspamd_deleted + netfilter_deleted + correlation_deleted
+
+            total = (postfix_deleted + rspamd_deleted + netfilter_deleted
+                     + correlation_deleted + stale_hosts_deleted)
             
             if total > 0:
                 logger.info(f"[CLEANUP] Cleaned up {total} old entries")
