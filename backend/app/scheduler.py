@@ -3468,6 +3468,11 @@ async def detect_suppressions_job():
             new_count = 0
             updated_count = 0
             emails_for_queue_cleanup = []  # Only hard bounces - deferred/soft should be retried by Postfix
+            # Entries created in THIS run, by email: the session has
+            # autoflush=False, so a DB query cannot see them - a recipient
+            # bouncing several times in one batch must update the pending
+            # entry, not insert a duplicate (unique index on email)
+            pending_entries = {}
             
             for log in bounce_logs:
                 # Skip DSN bounce notifications:
@@ -3499,11 +3504,13 @@ async def detect_suppressions_job():
                 if is_hard:
                     emails_for_queue_cleanup.append(recipient)
                 
-                # Check if already exists
+                # Check if already exists (in the DB or pending in this run)
                 existing = db.query(SpamSuppression).filter(
                     SpamSuppression.email == recipient
                 ).first()
-                
+                if existing is None:
+                    existing = pending_entries.get(recipient)
+
                 if existing:
                     # Update bounce counts
                     existing.bounce_count = (existing.bounce_count or 0) + 1
@@ -3561,8 +3568,9 @@ async def detect_suppressions_job():
                     )
                     
                     db.add(new_entry)
+                    pending_entries[recipient] = new_entry
                     new_count += 1
-            
+
             db.commit()
             
             if new_count > 0 or updated_count > 0:
