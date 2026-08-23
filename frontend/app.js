@@ -4293,7 +4293,11 @@ async function loadStatusExtended() {
     }
 }
 
-async function checkBlacklists(force = false) {
+function checkHost(hostname) {
+    return checkBlacklists(true, hostname);
+}
+
+async function checkBlacklists(force = false, host = null) {
     const btn = document.getElementById('blacklist-check-btn');
     const container = document.getElementById('status-blacklist');
 
@@ -4368,11 +4372,23 @@ async function checkBlacklists(force = false) {
     }, 1000);
 
     try {
-        const response = await authenticatedFetch(`/api/blacklist/check${force ? '?force=true' : ''}`);
+        const params = new URLSearchParams();
+        if (force) params.set('force', 'true');
+        if (host) params.set('host', host);
+        const qs = params.toString();
+        const response = await authenticatedFetch(`/api/blacklist/check${qs ? '?' + qs : ''}`);
         if (!response.ok) {
             throw new Error(`HTTP ${response.status}`);
         }
-        // Poller handles completion
+        if (host) {
+            // Single-host checks return the finished result directly - the
+            // all-hosts path returns immediately and the poller finishes up
+            clearInterval(progressInterval);
+            const temp = document.getElementById('blacklist-temp-progress');
+            if (temp) temp.remove();
+            showToast(`Check completed for ${host}`, 'success');
+            await loadBlacklistStatus();
+        }
     } catch (error) {
         clearInterval(progressInterval);
         const temp = document.getElementById('blacklist-temp-progress');
@@ -4589,11 +4605,16 @@ function renderBlacklistStatus(data) {
                     icon = '⏱';
                 }
 
+                // The raw DNS answer distinguishes a real listing (127.0.0.x)
+                // from resolver interference - surface it on hover
+                const detail = result.response
+                    ? `${result.name}: ${result.response}`
+                    : result.name;
                 html += `
                     <div class="px-2 py-1.5 rounded bg-${color}-50 dark:bg-${color}-900/10 border border-${color}-100 dark:border-${color}-900/30 text-xs flex items-center justify-between group/item relative hover:bg-${color}-100 dark:hover:bg-${color}-900/20 transition cursor-default">
-                        <span class="font-medium text-${color}-700 dark:text-${color}-300 truncate mr-1" title="${escapeHtml(result.name)}">${escapeHtml(result.name)}</span>
+                        <span class="font-medium text-${color}-700 dark:text-${color}-300 truncate mr-1" title="${escapeHtml(detail)}">${escapeHtml(result.name)}</span>
                         <div class="flex items-center">
-                            <span class="text-${color}-600 dark:text-${color}-400 font-bold">${icon}</span>
+                            <span class="text-${color}-600 dark:text-${color}-400 font-bold" title="${escapeHtml(detail)}">${icon}</span>
                             ${result.info_url ? `<a href="${result.info_url}" target="_blank" class="ml-1 text-${color}-400 hover:text-${color}-600" title="View info"><svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path></svg></a>` : ''}
                         </div>
                     </div>
