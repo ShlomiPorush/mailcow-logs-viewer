@@ -69,6 +69,36 @@ def _record_and_notify(db, pending, alert_type, severity, subject, title, detail
     pending.append((title, detail))
 
 
+def _is_recurring_daily_pattern(db, sender: str, recent_count: int,
+                                now: datetime, window_minutes: int) -> bool:
+    """Did this sender produce similar volume in the same time-of-day slot
+    on at least two past days?
+
+    The slot is the current check window shifted back N whole days, padded
+    by an hour on each side so cron drift and processing time do not break
+    the match. "Similar" = at least half of today's burst - so if the usual
+    daily batch suddenly doubles or more, past slots fall below the bar and
+    the alert still fires.
+    """
+    tolerance = timedelta(minutes=60)
+    window = timedelta(minutes=window_minutes)
+    recurring_days = 0
+    for day_back in range(1, settings.anomaly_baseline_days + 1):
+        slot_end = now - timedelta(days=day_back) + tolerance
+        slot_start = now - timedelta(days=day_back) - window - tolerance
+        slot_count = db.query(func.count(MessageCorrelation.id)).filter(
+            MessageCorrelation.direction == "outbound",
+            MessageCorrelation.first_seen >= slot_start,
+            MessageCorrelation.first_seen <= slot_end,
+            func.lower(MessageCorrelation.sender) == sender,
+        ).scalar() or 0
+        if slot_count >= recent_count * 0.5:
+            recurring_days += 1
+            if recurring_days >= 2:
+                return True
+    return False
+
+
 def detect_volume_spikes(db, pending) -> int:
     """Alert on mailboxes sending far above their own baseline. Returns count."""
     window_minutes = settings.anomaly_check_interval
@@ -116,6 +146,16 @@ def detect_volume_spikes(db, pending) -> int:
             continue
 
         if _recently_alerted(db, "volume_spike", sender, settings.anomaly_alert_cooldown_hours):
+            continue
+
+        # A mailbox that bursts at the same time every day (scheduled
+        # reports, digests) is following its own routine, not compromised.
+        # A whitelist would blind us to off-schedule bursts - instead the
+        # detector compares against the same time-of-day slot on past days:
+        # recurring similar volume there means "scheduled", while a burst at
+        # an unusual hour finds near-empty slots and still alerts.
+        if _is_recurring_daily_pattern(db, sender, recent_count, now, window_minutes):
+            logger.info(f"[ANOMALY] {sender}: burst matches its daily send pattern - not alerting")
             continue
 
         ratio = round(recent_rate / effective_baseline, 1)
