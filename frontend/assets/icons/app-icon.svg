@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title desc">
+  <title id="title">mailcow Logs Viewer</title>
+  <desc id="desc">Log lines under a search lens</desc>
+  <rect x="3" y="3" width="58" height="58" rx="14" fill="#0f172a"/>
+  <rect x="12" y="15" width="31" height="5" rx="2.5" fill="#e2e8f0"/>
+  <rect x="12" y="26" width="26" height="5" rx="2.5" fill="#94a3b8"/>
+  <rect x="12" y="37" width="20" height="5" rx="2.5" fill="#64748b"/>
+  <circle cx="39" cy="38" r="12" fill="#0f172a" stroke="#22c55e" stroke-width="5"/>
+  <path d="M48 47l8 8" fill="none" stroke="#22c55e" stroke-width="6" stroke-linecap="round"/>
+  <circle cx="39" cy="38" r="3" fill="#f8fafc"/>
+</svg>

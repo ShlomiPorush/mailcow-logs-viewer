@@ -279,7 +279,7 @@ var SETTINGS_FIELD_DESCRIPTIONS = {
     log_level: 'Log level: DEBUG, INFO, WARNING, ERROR, CRITICAL. Default: WARNING.',
     tz: 'Timezone for log display (e.g. Europe/London, America/New_York). Default: UTC.',
     app_title: 'Application title (shown in browser tab).',
-    app_logo_url: 'Logo URL (optional; leave empty for no logo).',
+    app_logo_url: 'Logo URL (optional; leave empty to use the default project icon).',
     debug: 'Enable debug mode (shows detailed errors). Use only for development. Never enable in production. Default: false.',
     max_search_results: 'Maximum records to return in search results. Default: 1000.',
     csv_export_limit: 'CSV export row limit. Default: 10000.',
