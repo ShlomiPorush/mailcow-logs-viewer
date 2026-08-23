@@ -6,9 +6,13 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>mailcow Logs Viewer</title>
 
-    <!-- Favicon -->
-    <link rel="icon" type="image/svg+xml"
-        href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%233b82f6' stroke-width='2'><path stroke-linecap='round' stroke-linejoin='round' d='M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z'/></svg>">
+    <!-- App icons -->
+    <link rel="icon" href="/static/assets/icons/favicon.ico" sizes="any">
+    <link rel="icon" type="image/svg+xml" href="/static/assets/icons/app-icon.svg">
+    <link rel="icon" type="image/png" sizes="32x32" href="/static/assets/icons/favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="/static/assets/icons/favicon-16x16.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="/static/assets/icons/apple-touch-icon.png">
+    <meta name="theme-color" content="#0f172a">
 
     <!-- Native .hidden rule prevents modals flashing before Tailwind's runtime compiler runs -->
     <style>.hidden{display:none}</style>
@@ -470,13 +474,9 @@
                     <div class="flex items-center">
                         <a href="/" onclick="navigateTo('dashboard'); return false;"
                             class="flex items-center cursor-pointer hover:opacity-80 transition-opacity">
-                            <img id="app-logo" src="" alt="Logo" class="h-8 w-8 mr-3 hidden">
-                            <svg id="default-logo" class="h-8 w-8 text-blue-600 dark:text-blue-400 mr-3" fill="none"
-                                stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                    d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z">
-                                </path>
-                            </svg>
+                            <img id="app-logo" src="" alt="" class="h-8 w-8 mr-3 hidden object-contain">
+                            <img id="default-logo" src="/static/assets/icons/app-icon.svg" alt=""
+                                class="h-8 w-8 mr-3">
                             <h1 id="app-title" class="text-lg sm:text-xl font-bold text-gray-900 dark:text-white">
                                 mailcow
                                 Logs Viewer</h1>
