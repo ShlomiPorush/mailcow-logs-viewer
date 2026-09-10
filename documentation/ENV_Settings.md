@@ -67,7 +67,7 @@ These settings **must** be configured in your `.env` file:
 | Variable | Type | Default | Description |
 |----------|------|---------|-------------|
 | `APP_TITLE` | string | `mailcow Logs Viewer` | Application title (shown in browser tab) |
-| `APP_LOGO_URL` | string | (empty) | Logo URL (optional, leave empty for no logo) |
+| `APP_LOGO_URL` | string | (empty) | Logo URL (optional, leave empty to use the default project icon) |
 | `LOG_LEVEL` | string | `WARNING` | Logging level: `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL` |
 | `DEBUG` | boolean | `false` | Enable debug mode (shows detailed errors, use only for development). ⚠️ **WARNING: Never enable in production!** |
 | `MAX_SEARCH_RESULTS` | integer | `1000` | Maximum records to return in search results |

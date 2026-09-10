@@ -5,8 +5,13 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Login - mailcow Logs Viewer</title>
     
-    <!-- Favicon -->
-    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%233b82f6' stroke-width='2'><path stroke-linecap='round' stroke-linejoin='round' d='M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z'/></svg>">
+    <!-- App icons -->
+    <link rel="icon" href="/static/assets/icons/favicon.ico" sizes="any">
+    <link rel="icon" type="image/svg+xml" href="/static/assets/icons/app-icon.svg">
+    <link rel="icon" type="image/png" sizes="32x32" href="/static/assets/icons/favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="/static/assets/icons/favicon-16x16.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="/static/assets/icons/apple-touch-icon.png">
+    <meta name="theme-color" content="#0f172a">
     
     <script src="/static/assets/libs/tailwindcss.min.js"></script>
     <script>
@@ -35,9 +40,8 @@
 <body class="h-full bg-gray-50 dark:bg-gray-900 flex items-center justify-center">
     <div class="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full p-8 mx-4">
         <div class="text-center mb-6">
-            <svg class="w-16 h-16 text-blue-600 dark:text-blue-400 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path>
-            </svg>
+            <img id="app-logo" src="" alt="" class="w-16 h-16 mx-auto mb-4 hidden object-contain">
+            <img id="default-logo" src="/static/assets/icons/app-icon.svg" alt="" class="w-16 h-16 mx-auto mb-4">
             <h1 id="app-title" class="text-2xl font-bold text-gray-900 dark:text-white mb-2">mailcow Logs Viewer</h1>
             <p class="text-gray-600 dark:text-gray-400">Please enter your credentials to continue</p>
         </div>
@@ -135,56 +139,19 @@
         // Initialize dark mode immediately
         initDarkMode();
         
-        // Authentication functions
-        let authCredentials = null;
-
-        function loadAuthCredentials() {
-            try {
-                const saved = sessionStorage.getItem('auth_credentials');
-                if (saved) {
-                    authCredentials = JSON.parse(saved);
+        // The credentials are used once, here, to obtain a session cookie.
+        // Nothing about them is kept in the browser: the cookie the backend
+        // sets is HttpOnly, so no script on the page (or injected into it) can
+        // read it, and there is no password in sessionStorage to steal.
+        async function startSession(username, password) {
+            const response = await fetch('/api/auth/session', {
+                method: 'POST',
+                credentials: 'include',
+                headers: {
+                    'Authorization': `Basic ${btoa(`${username}:${password}`)}`
                 }
-            } catch (e) {
-                console.error('Failed to load auth credentials:', e);
-                authCredentials = null;
-            }
-        }
-
-        function saveAuthCredentials(username, password) {
-            try {
-                authCredentials = { username, password };
-                sessionStorage.setItem('auth_credentials', JSON.stringify(authCredentials));
-            } catch (e) {
-                console.error('Failed to save auth credentials:', e);
-            }
-        }
-
-        function getAuthHeader() {
-            if (!authCredentials) return {};
-            const credentials = btoa(`${authCredentials.username}:${authCredentials.password}`);
-            return {
-                'Authorization': `Basic ${credentials}`
-            };
-        }
-
-        async function authenticatedFetch(url, options = {}) {
-            const headers = {
-                ...options.headers,
-                ...getAuthHeader()
-            };
-            
-            const response = await fetch(url, {
-                ...options,
-                headers
             });
-            
-            if (response.status === 401) {
-                sessionStorage.removeItem('auth_credentials');
-                authCredentials = null;
-                throw new Error('Authentication required');
-            }
-            
-            return response;
+            return response.ok;
         }
 
         async function handleLogin(event) {
@@ -207,13 +174,7 @@
             if (submitBtn) submitBtn.disabled = true;
             
             try {
-                // Save credentials
-                saveAuthCredentials(username, password);
-                
-                // Test authentication (use /api/auth/verify so wrong credentials return 401)
-                const response = await authenticatedFetch('/api/auth/verify');
-                
-                if (response.ok) {
+                if (await startSession(username, password)) {
                     // Success - redirect to main app using replace to avoid loop
                     window.location.replace('/');
                 } else {
@@ -231,10 +192,6 @@
                 // Clear password field
                 const passwordField = document.getElementById('login-password');
                 if (passwordField) passwordField.value = '';
-                
-                // Clear credentials
-                sessionStorage.removeItem('auth_credentials');
-                authCredentials = null;
             } finally {
                 // Hide loading
                 if (submitText) submitText.classList.remove('hidden');
@@ -350,9 +307,9 @@
                 }
             }
             
-            // Check if already authenticated via OAuth2 (session cookie)
+            // Already signed in? Both login methods end up with a session cookie.
             try {
-                const statusResponse = await fetch('/api/auth/status');
+                const statusResponse = await fetch('/api/auth/status', { credentials: 'include' });
                 if (statusResponse.ok) {
                     const statusData = await statusResponse.json();
                     if (statusData.authenticated) {
@@ -364,23 +321,7 @@
                 // Not authenticated, continue
             }
             
-            loadAuthCredentials();
-            
-            // If already authenticated via Basic Auth, redirect to main app
-            if (authCredentials) {
-                try {
-                    const response = await authenticatedFetch('/api/info');
-                    if (response.ok) {
-                        // Use replace to avoid redirect loop
-                        window.location.replace('/');
-                        return;
-                    }
-                } catch (e) {
-                    // Not authenticated, stay on login page
-                }
-            }
-            
-            // Load app title
+            // Load app branding
             try {
                 const response = await fetch('/api/info');
                 if (response.ok) {
@@ -388,6 +329,12 @@
                     if (data.app_title) {
                         document.getElementById('app-title').textContent = data.app_title;
                         document.title = `Login - ${data.app_title}`;
+                    }
+                    if (data.app_logo_url) {
+                        const logoImg = document.getElementById('app-logo');
+                        logoImg.src = data.app_logo_url;
+                        logoImg.classList.remove('hidden');
+                        document.getElementById('default-logo').classList.add('hidden');
                     }
                 }
             } catch (e) {

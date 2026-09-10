@@ -694,8 +694,14 @@ async function createSuppression() {
     if (type === 'domain') {
         // If user entered a raw domain, convert to regex
         if (!email.startsWith('/')) {
-            const escapedDomain = email.replace(/\./g, '\\.');
-            email = `/.+@${escapedDomain}/i`;
+            // Only a plain hostname can be turned into a pattern safely. Escaping
+            // just the dots left every other metacharacter (and the / delimiter)
+            // free to change the regex that ends up in the Rspamd map.
+            if (!/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/i.test(email)) {
+                showToast('Enter a plain domain name, for example example.com', 'error');
+                return;
+            }
+            email = `/.+@${escapeRegex(email)}/i`;
         }
     }
     

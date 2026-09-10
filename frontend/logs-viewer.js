@@ -586,7 +586,7 @@ function getEntrySearchText(entry) {
 
 function formatLogLine(entry, serviceId) {
     const timeVal = entry.time || entry.unix_time;
-    const time = timeVal ? formatLogTimestamp(timeVal) : '';
+    const time = timeVal ? escapeHtml(formatLogTimestamp(timeVal)) : '';
     
     // Build the display message based on service type
     let displayContent = '';
@@ -616,8 +616,8 @@ function formatLogLine(entry, serviceId) {
             // Watchdog: { time, service, lvl, hpnow, hptotal, hpdiff }
             const wdService = escapeHtml(entry.service || '');
             const lvl = parseInt(entry.lvl || '0');
-            const hpnow = entry.hpnow || '?';
-            const hptotal = entry.hptotal || '?';
+            const hpnow = escapeHtml(entry.hpnow || '?');
+            const hptotal = escapeHtml(entry.hptotal || '?');
             const hpdiff = parseInt(entry.hpdiff || '0');
             
             // Color by health

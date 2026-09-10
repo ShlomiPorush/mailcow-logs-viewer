@@ -524,14 +524,14 @@ function renderJobCard(name, jobKey, job) {
         <div class="p-3 bg-gray-50 dark:bg-gray-700/30 rounded-lg ${isFeatureOff ? 'opacity-50' : ''}">
             <div class="flex items-start justify-between gap-3 mb-2">
                 <div class="flex-1 min-w-0">
-                    <h4 class="font-semibold text-gray-900 dark:text-white text-sm">${name}</h4>
-                    <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">${job.description || ''}</p>
+                    <h4 class="font-semibold text-gray-900 dark:text-white text-sm">${escapeHtml(name)}</h4>
+                    <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">${escapeHtml(job.description || '')}</p>
                 </div>
                 <div class="flex flex-col items-end gap-1.5">
                     ${statusBadge}
                     ${!isDisabled ? `
                         <button 
-                            onclick="triggerBackgroundJob('${jobKey}', this, '${name.replace(/'/g, "\\'")}')" 
+                            onclick="triggerBackgroundJob('${escapeJsArg(jobKey)}', this, '${escapeJsArg(name)}')" 
                             class="px-2 py-1 text-xs font-medium rounded transition-colors flex items-center gap-1 ${isRunning
                 ? 'bg-gray-200 dark:bg-gray-600 text-gray-400 dark:text-gray-500 cursor-not-allowed'
                 : 'bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 hover:bg-blue-200 dark:hover:bg-blue-900/50'}"

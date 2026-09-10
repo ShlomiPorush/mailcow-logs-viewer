@@ -19,6 +19,11 @@ on:
   workflow_call:
   workflow_dispatch:
 
+# Least privilege for every job in this workflow; nothing here writes to the
+# repository. A job that needs more must ask for it explicitly.
+permissions:
+  contents: read
+
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true

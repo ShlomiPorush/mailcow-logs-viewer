@@ -279,7 +279,7 @@ var SETTINGS_FIELD_DESCRIPTIONS = {
     log_level: 'Log level: DEBUG, INFO, WARNING, ERROR, CRITICAL. Default: WARNING.',
     tz: 'Timezone for log display (e.g. Europe/London, America/New_York). Default: UTC.',
     app_title: 'Application title (shown in browser tab).',
-    app_logo_url: 'Logo URL (optional; leave empty for no logo).',
+    app_logo_url: 'Logo URL (optional; leave empty to use the default project icon).',
     debug: 'Enable debug mode (shows detailed errors). Use only for development. Never enable in production. Default: false.',
     max_search_results: 'Maximum records to return in search results. Default: 1000.',
     csv_export_limit: 'CSV export row limit. Default: 10000.',
@@ -794,7 +794,7 @@ async function loadSettings() {
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
                 </svg>
                 <p class="text-red-500">Failed to load settings</p>
-                <p class="text-sm text-gray-500 dark:text-gray-400 mt-2">${error.message}</p>
+                <p class="text-sm text-gray-500 dark:text-gray-400 mt-2">${escapeHtml(error.message)}</p>
             </div>
         `;
     }

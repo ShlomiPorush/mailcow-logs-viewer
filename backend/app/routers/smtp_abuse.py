@@ -23,7 +23,22 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/smtp-abuse")
 
-_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+# Bounded quantifiers keep the match linear: the original
+# ^[^@\s]+@[^@\s]+\.[^@\s]+$ let the two + classes overlap on the dot, so a
+# long non-matching local part backtracked quadratically and stalled the event
+# loop. The lengths follow RFC 5321 (64-octet local part, 63-octet labels).
+_EMAIL_RE = re.compile(r"^[^@\s]{1,64}@[^@\s.]{1,63}(?:\.[^@\s.]{1,63})+$")
+
+# RFC 5321 caps a path at 256 octets; reject longer input before matching.
+_MAX_EMAIL_LENGTH = 254
+
+# Upper bound on a bulk whitelist replace, so one request cannot pin a worker.
+_MAX_WHITELIST_ENTRIES = 5000
+
+
+def is_valid_email(value: str) -> bool:
+    """Length-capped email syntax check (single source of truth for the API)."""
+    return len(value) <= _MAX_EMAIL_LENGTH and _EMAIL_RE.match(value) is not None
 
 
 class WhitelistRequest(BaseModel):
@@ -34,7 +49,7 @@ class WhitelistRequest(BaseModel):
     @classmethod
     def validate_email(cls, value: str) -> str:
         value = (value or "").strip().lower()
-        if not _EMAIL_RE.match(value):
+        if not is_valid_email(value):
             raise ValueError("Invalid email format")
         return value
 
@@ -144,12 +159,17 @@ def add_whitelist(request: WhitelistRequest):
 def replace_whitelist(request: WhitelistBulkRequest):
     """Replace the whole whitelist (one address per line in the UI)."""
     require_control_access()
+    if len(request.emails) > _MAX_WHITELIST_ENTRIES:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Too many entries: the whitelist holds at most {_MAX_WHITELIST_ENTRIES} addresses",
+        )
     emails = []
     for value in request.emails:
         email = (value or "").strip().lower()
         if not email:
             continue
-        if not _EMAIL_RE.match(email):
+        if not is_valid_email(email):
             raise HTTPException(status_code=422, detail=f"Invalid email format: {value}")
         emails.append(email)
     try:

@@ -74,167 +74,48 @@ function navigateToMessagesWithFilter(options) {
 // AUTHENTICATION SYSTEM
 // =============================================================================
 
-// Authentication state
-let authCredentials = null;
 // DMARC imap
 let dmarcImapStatus = null;
 let dmarcConfiguration = null;
 
-// Load saved credentials from sessionStorage
-function loadAuthCredentials() {
-    try {
-        const saved = sessionStorage.getItem('auth_credentials');
-        if (saved) {
-            authCredentials = JSON.parse(saved);
-        }
-    } catch (e) {
-        console.error('Failed to load auth credentials:', e);
-        authCredentials = null;
-    }
+// Send the browser to the login page, dropping any client-side state.
+function redirectToLogin() {
+    window.location.replace('/login');
 }
 
-// Save credentials to sessionStorage
-function saveAuthCredentials(username, password) {
-    try {
-        authCredentials = { username, password };
-        sessionStorage.setItem('auth_credentials', JSON.stringify(authCredentials));
-    } catch (e) {
-        console.error('Failed to save auth credentials:', e);
-    }
-}
-
-// Clear credentials
-function clearAuthCredentials() {
-    authCredentials = null;
-    try {
-        sessionStorage.removeItem('auth_credentials');
-    } catch (e) {
-        console.error('Failed to clear auth credentials:', e);
-    }
-}
-
-// Create Basic Auth header
-function getAuthHeader() {
-    if (!authCredentials) return {};
-    const credentials = btoa(`${authCredentials.username}:${authCredentials.password}`);
-    return {
-        'Authorization': `Basic ${credentials}`
-    };
-}
-
-// Enhanced fetch with authentication
-// Supports both OAuth2 (session cookies) and Basic Auth
+// Enhanced fetch with authentication.
+// Both login methods (OAuth2 and Basic Auth) end up with the same HttpOnly
+// session cookie, which the browser attaches automatically. No credential is
+// held in JavaScript, so an XSS in the page has nothing to read.
 async function authenticatedFetch(url, options = {}) {
-    // For OAuth2, cookies are automatically sent by browser
-    // For Basic Auth, we need to add the header
     const headers = {
         ...options.headers,
     };
 
-    // Only add Basic Auth header if we have credentials (not for OAuth2 sessions)
-    // OAuth2 sessions use cookies which are sent automatically
-    const authHeader = getAuthHeader();
-    if (Object.keys(authHeader).length > 0) {
-        Object.assign(headers, authHeader);
-    }
-
     const response = await fetch(url, {
         ...options,
         headers,
-        credentials: 'include' // Include cookies for OAuth2 sessions
+        credentials: 'include' // Send the session cookie
     });
 
-    // Handle 401 Unauthorized
+    // Handle 401 Unauthorized - the session expired or the server restarted
     if (response.status === 401) {
-        clearAuthCredentials();
-        showLoginModal();
+        redirectToLogin();
         throw new Error('Authentication required');
     }
 
     return response;
 }
 
-// Handle login form submission (not used in main app, only in login.html)
-async function handleLogin(event) {
-    event.preventDefault();
-
-    const username = document.getElementById('login-username').value;
-    const password = document.getElementById('login-password').value;
-    const errorDiv = document.getElementById('login-error');
-    const errorText = document.getElementById('login-error-text');
-    const submitBtn = document.getElementById('login-submit');
-    const submitText = document.getElementById('login-submit-text');
-    const submitLoading = document.getElementById('login-submit-loading');
-
-    // Hide error
-    if (errorDiv) errorDiv.classList.add('hidden');
-
-    // Show loading
-    if (submitText) submitText.classList.add('hidden');
-    if (submitLoading) submitLoading.classList.remove('hidden');
-    if (submitBtn) submitBtn.disabled = true;
-
-    try {
-        // Save credentials
-        saveAuthCredentials(username, password);
-
-        // Test authentication (use /api/auth/verify so wrong credentials return 401)
-        const response = await authenticatedFetch('/api/auth/verify');
-
-        if (response.ok) {
-            // Success - redirect to main app
-            window.location.href = '/';
-        } else {
-            throw new Error('Authentication failed');
-        }
-    } catch (error) {
-        // Show error (always show user-friendly message for failed login)
-        if (errorDiv) {
-            errorDiv.classList.remove('hidden');
-            if (errorText) {
-                errorText.textContent = 'Invalid username or password';
-            }
-        }
-
-        // Clear password field
-        const passwordField = document.getElementById('login-password');
-        if (passwordField) passwordField.value = '';
-
-        // Clear credentials
-        clearAuthCredentials();
-    } finally {
-        // Hide loading
-        if (submitText) submitText.classList.remove('hidden');
-        if (submitLoading) submitLoading.classList.add('hidden');
-        if (submitBtn) submitBtn.disabled = false;
-    }
+// Handle logout - one path for both login methods, since both are backed by
+// the same server-side session.
+function handleLogout() {
+    window.location.href = '/api/auth/logout';
 }
 
-// Handle logout
-async function handleLogout() {
-    // Check if OAuth2 is being used
-    try {
-        const statusResponse = await fetch('/api/auth/status', { credentials: 'include' });
-        if (statusResponse.ok) {
-            const statusData = await statusResponse.json();
-            if (statusData.auth_type === 'oauth2') {
-                // OAuth2 logout - call logout endpoint
-                window.location.href = '/api/auth/logout';
-                return;
-            }
-        }
-    } catch (e) {
-        // Fall through to Basic Auth logout
-    }
-
-    // Basic Auth logout
-    clearAuthCredentials();
-    // Redirect to login page
-    window.location.href = '/login';
-}
-
-// Check authentication on page load
-// Supports both OAuth2 (session cookies) and Basic Auth
+// Check authentication on page load.
+// OAuth2 and Basic Auth both end up with a session cookie, so one check
+// covers them: no session means the browser goes back to the login page.
 async function checkAuthentication() {
     // First check if authentication is enabled
     try {
@@ -251,50 +132,22 @@ async function checkAuthentication() {
         console.warn('Could not check auth status, assuming enabled');
     }
 
-    // Check OAuth2 session first (if enabled)
     try {
         const statusResponse = await fetch('/api/auth/status', { credentials: 'include' });
         if (statusResponse.ok) {
             const statusData = await statusResponse.json();
-            if (statusData.authenticated && statusData.auth_type === 'oauth2') {
-                // OAuth2 session is valid
+            if (statusData.authenticated) {
                 const logoutBtn = document.getElementById('logout-btn');
                 if (logoutBtn) logoutBtn.classList.remove('hidden');
                 return true;
             }
         }
     } catch (e) {
-        // OAuth2 check failed, fall through to Basic Auth
+        // Could not reach the status endpoint - treat as not authenticated
     }
 
-    // Fall back to Basic Auth
-    // Authentication is enabled, check credentials
-    loadAuthCredentials();
-
-    if (!authCredentials) {
-        // No credentials saved, redirect to login
-        window.location.href = '/login';
-        return false;
-    }
-
-    try {
-        // Test if credentials are still valid
-        const response = await authenticatedFetch('/api/info');
-        if (response.ok) {
-            // Show logout button if auth is enabled
-            const logoutBtn = document.getElementById('logout-btn');
-            if (logoutBtn) logoutBtn.classList.remove('hidden');
-            return true;
-        } else {
-            // Invalid credentials, redirect to login
-            window.location.href = '/login';
-            return false;
-        }
-    } catch (error) {
-        // Authentication error, redirect to login
-        window.location.href = '/login';
-        return false;
-    }
+    redirectToLogin();
+    return false;
 }
 
 // =============================================================================
@@ -1592,7 +1445,7 @@ async function loadRecentActivity() {
         `).join('');
     } catch (error) {
         console.error('Failed to load recent activity:', error);
-        document.getElementById('recent-activity').innerHTML = `<p class="text-red-500 text-center py-8">Failed to load activity: ${error.message}</p>`;
+        document.getElementById('recent-activity').innerHTML = `<p class="text-red-500 text-center py-8">Failed to load activity: ${escapeHtml(error.message)}</p>`;
     }
 }
 
@@ -1715,7 +1568,7 @@ async function loadPostfixLogs(page = 1) {
         currentPage.postfix = page;
     } catch (error) {
         console.error('Failed to load Postfix logs:', error);
-        document.getElementById('postfix-logs').innerHTML = `<p class="text-red-500 text-center py-8">Failed to load logs: ${error.message}</p>`;
+        document.getElementById('postfix-logs').innerHTML = `<p class="text-red-500 text-center py-8">Failed to load logs: ${escapeHtml(error.message)}</p>`;
     }
 }
 
@@ -1817,7 +1670,7 @@ async function loadRspamdLogs(page = 1) {
         currentPage.rspamd = page;
     } catch (error) {
         console.error('Failed to load Rspamd logs:', error);
-        document.getElementById('rspamd-logs').innerHTML = `<p class="text-red-500 text-center py-8">Failed to load logs: ${error.message}</p>`;
+        document.getElementById('rspamd-logs').innerHTML = `<p class="text-red-500 text-center py-8">Failed to load logs: ${escapeHtml(error.message)}</p>`;
     }
 }
 
@@ -2093,7 +1946,7 @@ async function loadNetfilterLogs(page = 1) {
         currentPage.netfilter = page;
     } catch (error) {
         console.error('Failed to load Netfilter logs:', error);
-        document.getElementById('netfilter-logs').innerHTML = `<p class="text-red-500 text-center py-8">Failed to load logs: ${error.message}</p>`;
+        document.getElementById('netfilter-logs').innerHTML = `<p class="text-red-500 text-center py-8">Failed to load logs: ${escapeHtml(error.message)}</p>`;
         const countEl = document.getElementById('security-count');
         if (countEl) countEl.textContent = '';
     }
@@ -2463,7 +2316,7 @@ async function loadFail2BanSettings() {
         }
     } catch (error) {
         console.error('Failed to load Fail2Ban settings:', error);
-        settingsContainer.innerHTML = `<p class="text-red-500 text-center py-4">Failed to load Fail2Ban settings: ${error.message}</p>`;
+        settingsContainer.innerHTML = `<p class="text-red-500 text-center py-4">Failed to load Fail2Ban settings: ${escapeHtml(error.message)}</p>`;
         if (ipListsContainer) {
             ipListsContainer.innerHTML = `<p class="text-red-500 text-center py-4">Failed to load IP lists</p>`;
         }
@@ -2500,7 +2353,7 @@ async function loadQueue() {
         applyQueueFilters();
     } catch (error) {
         console.error('Failed to load queue:', error);
-        document.getElementById('queue-logs').innerHTML = `<p class="text-red-500 text-center py-8">Failed to load queue: ${error.message}</p>`;
+        document.getElementById('queue-logs').innerHTML = `<p class="text-red-500 text-center py-8">Failed to load queue: ${escapeHtml(error.message)}</p>`;
         const countEl = document.getElementById('queue-count');
         if (countEl) countEl.textContent = '';
     }
@@ -2870,7 +2723,7 @@ async function loadQuarantine() {
         renderQuarantineData(data);
     } catch (error) {
         console.error('Failed to load quarantine:', error);
-        document.getElementById('quarantine-logs').innerHTML = `<p class="text-red-500 text-center py-8">Failed to load quarantine: ${error.message}</p>`;
+        document.getElementById('quarantine-logs').innerHTML = `<p class="text-red-500 text-center py-8">Failed to load quarantine: ${escapeHtml(error.message)}</p>`;
         const countEl = document.getElementById('quarantine-count');
         if (countEl) countEl.textContent = '';
     }
@@ -3413,7 +3266,7 @@ async function loadQuarantineRules() {
         }).join('');
     } catch (err) {
         console.error('Failed to load quarantine rules:', err);
-        container.innerHTML = `<p class="text-red-500 text-center py-4 text-sm">Failed to load rules: ${err.message}</p>`;
+        container.innerHTML = `<p class="text-red-500 text-center py-4 text-sm">Failed to load rules: ${escapeHtml(err.message)}</p>`;
     }
 }
 
@@ -3756,7 +3609,7 @@ async function loadQuarantineRuleHistory() {
             </div>
         `).join('');
     } catch (err) {
-        container.innerHTML = `<p class="text-red-500 text-xs text-center py-2">Failed: ${err.message}</p>`;
+        container.innerHTML = `<p class="text-red-500 text-xs text-center py-2">Failed: ${escapeHtml(err.message)}</p>`;
     }
 }
 
@@ -4008,7 +3861,7 @@ async function loadMessages(page = 1) {
         currentPage.messages = page;
     } catch (error) {
         console.error('Failed to load messages:', error);
-        document.getElementById('messages-logs').innerHTML = `<p class="text-red-500 text-center py-8">Failed to load messages: ${error.message}</p>`;
+        document.getElementById('messages-logs').innerHTML = `<p class="text-red-500 text-center py-8">Failed to load messages: ${escapeHtml(error.message)}</p>`;
         const countEl = document.getElementById('messages-count');
         if (countEl) countEl.textContent = '';
     }
@@ -4181,7 +4034,7 @@ async function loadStatusSystem() {
         `;
     } catch (error) {
         console.error('Failed to load system info:', error);
-        document.getElementById('status-system').innerHTML = `<p class="text-red-500 text-center py-8">Failed to load system info: ${error.message}</p>`;
+        document.getElementById('status-system').innerHTML = `<p class="text-red-500 text-center py-8">Failed to load system info: ${escapeHtml(error.message)}</p>`;
     }
 }
 
@@ -4259,7 +4112,7 @@ async function loadStatusStorage() {
         `;
     } catch (error) {
         console.error('Failed to load storage info:', error);
-        document.getElementById('status-storage').innerHTML = `<p class="text-red-500 text-center py-8">Failed to load storage info: ${error.message}</p>`;
+        document.getElementById('status-storage').innerHTML = `<p class="text-red-500 text-center py-8">Failed to load storage info: ${escapeHtml(error.message)}</p>`;
     }
 }
 
@@ -4287,9 +4140,9 @@ async function loadStatusExtended() {
 
     } catch (error) {
         console.error('Failed to load extended status:', error);
-        document.getElementById('status-import').innerHTML = `<p class="text-red-500 text-center py-8">Failed to load: ${error.message}</p>`;
-        document.getElementById('status-correlation').innerHTML = `<p class="text-red-500 text-center py-8">Failed to load: ${error.message}</p>`;
-        document.getElementById('status-jobs').innerHTML = `<p class="text-red-500 text-center py-8">Failed to load: ${error.message}</p>`;
+        document.getElementById('status-import').innerHTML = `<p class="text-red-500 text-center py-8">Failed to load: ${escapeHtml(error.message)}</p>`;
+        document.getElementById('status-correlation').innerHTML = `<p class="text-red-500 text-center py-8">Failed to load: ${escapeHtml(error.message)}</p>`;
+        document.getElementById('status-jobs').innerHTML = `<p class="text-red-500 text-center py-8">Failed to load: ${escapeHtml(error.message)}</p>`;
     }
 }
 
@@ -4432,7 +4285,7 @@ async function loadBlacklistStatus() {
         renderBlacklistStatus(data);
     } catch (error) {
         console.error('Failed to load blacklist status:', error);
-        container.innerHTML = `<p class="text-red-500 text-center py-8">Failed to load: ${error.message}</p>`;
+        container.innerHTML = `<p class="text-red-500 text-center py-8">Failed to load: ${escapeHtml(error.message)}</p>`;
     }
 }
 
@@ -4934,7 +4787,7 @@ async function viewPostfixDetails(queueId) {
         }
     } catch (error) {
         console.error('Failed to load Postfix details:', error);
-        content.innerHTML = `<p class="text-red-500 text-center py-8">Failed to load Postfix details: ${error.message}</p>`;
+        content.innerHTML = `<p class="text-red-500 text-center py-8">Failed to load Postfix details: ${escapeHtml(error.message)}</p>`;
     }
 }
 
@@ -5023,7 +4876,7 @@ async function viewMessageDetails(correlationKey) {
         renderModalTab('overview', data);
     } catch (error) {
         console.error('Failed to load message details:', error);
-        content.innerHTML = `<p class="text-red-500 text-center py-8">Failed to load message details: ${error.message}</p>`;
+        content.innerHTML = `<p class="text-red-500 text-center py-8">Failed to load message details: ${escapeHtml(error.message)}</p>`;
     }
 }
 

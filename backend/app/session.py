@@ -152,42 +152,58 @@ def get_session_from_request(request: Request) -> Optional[Dict[str, Any]]:
     return get_session(session_id)
 
 
-def set_session_cookie(response: Response, session_id: str) -> None:
+def is_secure_request(request: Optional[Request]) -> bool:
+    """Whether this request reached us over HTTPS.
+
+    The Secure flag has to follow the actual deployment: a Secure cookie is
+    silently dropped by the browser on plain HTTP, which would lock out every
+    self-hosted instance served over http:// on a LAN. Behind a reverse proxy
+    the scheme arrives in X-Forwarded-Proto.
+    """
+    if request is None:
+        # No request context: assume HTTPS unless the app runs in debug mode.
+        return settings.debug is False
+    forwarded = request.headers.get("x-forwarded-proto", "")
+    if forwarded:
+        return forwarded.split(",")[0].strip().lower() == "https"
+    return request.url.scheme == "https"
+
+
+def set_session_cookie(
+    response: Response, session_id: str, request: Optional[Request] = None
+) -> None:
     """
     Set session cookie in response
     
     Args:
         response: FastAPI response object
         session_id: Signed session ID
+        request: Incoming request, used to decide on the Secure flag
     """
-    # Determine if we should use Secure flag (HTTPS)
-    # Check if the app is likely running over HTTPS
-    # In production, you should set this based on actual deployment
-    secure = settings.debug is False  # Use Secure in production
-    
     response.set_cookie(
         key=SESSION_COOKIE_NAME,
         value=session_id,
         max_age=settings.session_expiry_hours * 3600,
         httponly=True,
-        secure=secure,
+        secure=is_secure_request(request),
         samesite="lax",  # Lax for CSRF protection while allowing navigation
         path="/",
     )
 
 
-def clear_session_cookie(response: Response) -> None:
+def clear_session_cookie(response: Response, request: Optional[Request] = None) -> None:
     """
     Clear session cookie in response
     
     Args:
         response: FastAPI response object
+        request: Incoming request, used to decide on the Secure flag
     """
     response.delete_cookie(
         key=SESSION_COOKIE_NAME,
         path="/",
         httponly=True,
-        secure=settings.debug is False,
+        secure=is_secure_request(request),
         samesite="lax",
     )
 

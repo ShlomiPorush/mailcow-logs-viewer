@@ -17,6 +17,8 @@ jobs:
   # The image is only published when CI passes on the tagged commit.
   # A broken release must never reach ghcr.io / Docker Hub as `latest`.
   checks:
+    permissions:
+      contents: read
     uses: ./.github/workflows/ci.yml
 
   build-and-push:
