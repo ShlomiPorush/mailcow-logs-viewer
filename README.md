@@ -183,6 +183,7 @@ All settings via environment variables or the **web UI** (when `SETTINGS_EDIT_VI
 | [API Documentation](documentation/API.md) | REST API reference |
 | [Settings UI](documentation/Settings_UI.md) | Web-based settings editor guide |
 | [OAuth2 Configuration](documentation/OAuth2_Configuration.md) | OAuth2/OIDC setup guide |
+| [Reverse Proxy](documentation/Reverse_Proxy.md) | Serving the viewer over HTTPS, including mailcow's own nginx |
 | [Upgrade to V2](documentation/UpdateV2.md) | Migration guide from V1 |
 | [Changelog](CHANGELOG.md) | Version history |
 
