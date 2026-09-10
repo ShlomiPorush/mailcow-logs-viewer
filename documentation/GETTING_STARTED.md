@@ -135,7 +135,7 @@ When enabled:
 - All pages and API endpoints require authentication
 - Users are redirected to a login page if not authenticated
 - Use strong passwords in production
-- **Important**: Use HTTPS/TLS when exposing over the internet
+- **Important**: Use HTTPS/TLS when exposing over the internet - see the [Reverse Proxy guide](Reverse_Proxy.md), which covers serving the viewer through mailcow's own nginx without installing anything extra
 
 > **💡 Tip:** Authentication can also be configured via the Settings UI when `SETTINGS_EDIT_VIA_UI_ENABLED=true`.
 
