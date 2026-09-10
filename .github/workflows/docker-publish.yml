@@ -70,6 +70,43 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
 
+  # The release notes are the changelog section for this version, so a release
+  # can never describe something the changelog does not. Runs after the image is
+  # pushed: no release without an image behind it.
+  publish-release:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      TAG: ${{ github.ref_name }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Publish the GitHub release from the changelog
+        run: |
+          VERSION="${TAG#v}"
+          awk -v want="## [${VERSION}]" '
+            index($0, want) == 1 { inside = 1; print; next }
+            inside && /^## \[/ { exit }
+            inside { print }
+          ' CHANGELOG.md > notes.md
+          if [ ! -s notes.md ]; then
+            echo "::error::CHANGELOG.md has no '## [${VERSION}]' section - refusing to publish a release with an empty body"
+            exit 1
+          fi
+          echo "Release notes ($(wc -l < notes.md) lines):"
+          cat notes.md
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release ${TAG} already exists - updating its notes"
+            gh release edit "$TAG" --notes-file notes.md --latest
+          else
+            gh release create "$TAG" --title "$VERSION" --notes-file notes.md --latest
+          fi
+
   # Issues with a merged fix stay open until the release that ships it.
   # Once the image is published, close every open issue labelled
   # `fix available` (the label is applied only after the fix is merged to
