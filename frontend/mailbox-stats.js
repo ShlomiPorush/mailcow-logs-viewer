@@ -84,7 +84,7 @@ async function loadMailboxStats() {
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
                     </svg>
                     <p class="text-red-500 mb-2">Failed to load mailbox statistics</p>
-                    <p class="text-gray-500 dark:text-gray-400 text-sm">${error.message}</p>
+                    <p class="text-gray-500 dark:text-gray-400 text-sm">${escapeHtml(error.message)}</p>
                     <button onclick="loadMailboxStats()" class="mt-4 px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">Retry</button>
                 </div>
             `;

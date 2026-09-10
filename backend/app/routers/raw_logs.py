@@ -35,6 +35,12 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+# The WebSocket route is mounted at the application root (no /api prefix), so it
+# lives on its own router. Mounting the whole router twice would also publish
+# every HTTP route here under /raw-logs/..., which the auth middleware lets
+# through unauthenticated because it only guards paths under /api/.
+ws_router = APIRouter()
+
 # ── WebSocket Auth Tokens (in-memory, short-lived) ─────────────────────────
 _ws_tokens: Dict[str, float] = {}  # token -> expiry timestamp
 _WS_TOKEN_TTL = 30  # seconds
@@ -154,7 +160,7 @@ async def get_ws_token():
 # WEBSOCKET ENDPOINT
 # =============================================================================
 
-@router.websocket("/ws/raw-logs")
+@ws_router.websocket("/ws/raw-logs")
 async def websocket_raw_logs(
     websocket: WebSocket,
     service: str = Query(default="postfix"),

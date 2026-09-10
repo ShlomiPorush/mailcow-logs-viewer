@@ -287,9 +287,12 @@ app.include_router(security_alerts_router.router, prefix="/api", tags=["Security
 app.include_router(smtp_abuse_router.router, prefix="/api", tags=["SMTP Abuse Protection"])
 app.include_router(notifications_router.router, prefix="/api", tags=["Notifications"])
 
-# WebSocket endpoint needs root-level mount (not under /api prefix)
-# The router contains /ws/raw-logs which should be accessible at wss://host/ws/raw-logs  # nosemgrep: javascript.lang.security.detect-insecure-websocket.detect-insecure-websocket
-app.include_router(raw_logs_router.router, tags=["Raw Logs WebSocket"])
+# WebSocket endpoint needs root-level mount (not under /api prefix) so it is
+# reachable at wss://host/ws/raw-logs  # nosemgrep: javascript.lang.security.detect-insecure-websocket.detect-insecure-websocket
+# Only ws_router is mounted here: including the full raw-logs router would also
+# publish its HTTP routes outside /api, where the auth middleware does not guard
+# them (see backend/tests/test_route_exposure.py).
+app.include_router(raw_logs_router.ws_router, tags=["Raw Logs WebSocket"])
 
 # Mount static files (frontend)
 app.mount("/static", StaticFiles(directory="/app/frontend"), name="static")

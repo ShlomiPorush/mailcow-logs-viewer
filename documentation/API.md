@@ -63,7 +63,8 @@ The application supports two authentication methods that can be enabled independ
 - `GET /api/auth/callback` - OAuth2 callback handler
 
 **Protected Endpoints (Authentication Required):**
-- `GET /api/auth/verify` - Verify Basic Auth credentials (used by login form; returns 401 if invalid)
+- `GET /api/auth/verify` - Verify Basic Auth credentials (returns 401 if invalid)
+- `POST /api/auth/session` - Exchange Basic Auth credentials for a session cookie (used by the login form)
 - All other `/api/*` endpoints
 
 ### Authentication Methods
@@ -85,6 +86,27 @@ Or with explicit header:
 curl -H "Authorization: Basic $(echo -n 'username:password' | base64)" \
   http://your-server:8080/api/info
 ```
+
+**Session cookie (what the web UI uses):**
+
+The browser sends the password once, to `POST /api/auth/session`, and gets back an
+`HttpOnly` session cookie that authenticates every later request. No credential is
+stored in the browser, so a script running in the page cannot read it. The cookie is
+marked `Secure` when the request arrives over HTTPS (directly, or through a reverse
+proxy that sets `X-Forwarded-Proto`), and `SameSite=lax` in all cases.
+
+```bash
+# Log in once and keep the cookie
+curl -u username:password -c cookies.txt -X POST http://your-server:8080/api/auth/session
+
+# Every later call needs only the cookie
+curl -b cookies.txt http://your-server:8080/api/info
+```
+
+Sessions live in the application's memory, so restarting the container signs
+everyone out. `GET /api/auth/logout` ends the session and clears the cookie.
+API clients that prefer to send `Authorization: Basic` on every request can keep
+doing that; nothing about it changed.
 
 #### OAuth2/OIDC Authentication
 
