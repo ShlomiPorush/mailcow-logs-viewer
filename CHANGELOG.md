@@ -5,7 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [2.7.1] - 2026-09-10
+
+### Added
+
+- **The viewer has its own icon** - a project icon now appears as the browser favicon, in the application header and on the login page, with Android and Apple touch icon sizes and a theme colour for mobile browsers. Setting `APP_LOGO_URL` still replaces it with your own logo; leaving it empty now shows the project icon instead of nothing
 
 ### Security
 
@@ -15,7 +19,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **A crafted address could stall the server** - the address check used by the abuse-protection whitelist slowed down with the square of the input length on certain crafted values, so a single request could freeze the application for seconds. Addresses are now length-capped and matched with a pattern that cannot backtrack, and a bulk whitelist update is limited to 5000 entries
 - **Domain suppressions built a safer pattern** - adding a domain to the suppression list turned it into a regular expression by escaping only the dots, so an unusual domain name could change the resulting Rspamd rule. Only plain domain names are accepted now, and every special character is escaped
 - **Tighter Spamhaus zone matching** - a blacklist zone whose name merely ended with `spamhaus.org` (for example a lookalike domain) was treated as a genuine Spamhaus zone. Only real subdomains of `spamhaus.org` count now
-- **GitHub Actions run with least privilege** - the CI and publish workflows now declare exactly the permissions they need instead of inheriting the default write access
+
+### Fixed
+
+- **Excessive DNS queries to the mailcow host** ([#84](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/84)) - every call to the mailcow API opened a new connection, so the background jobs re-resolved the mailcow hostname hundreds of times per hour and ignored the record TTL, which showed up as a tenfold increase in DNS traffic. The API client is now reused and keeps idle connections alive between polls. Thanks to [@sOliverBa](https://github.com/sOliverBa) for the unbound measurements that pinned it down
+- **Rspamd map rewritten every sync even when nothing changed** ([#80](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/80)) - the suppression sync embedded a timestamp comment in `global_rcpt_blacklist.map`, so every 10-minute sync produced "new" content, forcing Rspamd to truncate, rewrite and reload the map each time - occasionally logging a harmless "regexp map is empty" warning when it re-read mid-write. The map is now only written when the suppression entries actually changed, so the warning can appear at most on real updates. Thanks to [@Neocridas](https://github.com/Neocridas) for the accurate diagnosis
+- **Weekly Summary Report was never sent since 2.7.0** ([#81](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/81)) - scheduled and on-demand summaries failed with "object dict can't be used in 'await' expression" before the email step, because the blacklist helper became a plain function in 2.7.0 while the report still awaited it. The report builds and sends again. Thanks to [@piperino721](https://github.com/piperino721) for confirming the scheduled runs were affected too
+- **"Run" on the DMARC IMAP Sync job returned 404** ([#82](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/82)) - the job was listed on the Status page but missing from the manual job runner. It can now be started from the Status page like every other job, and a test keeps the two lists in sync
+- **Detect Suppressions crashed when a recipient bounced more than once per scan** - each bounce log line created its own suppression insert, and duplicates within one batch violated the unique email index, failing the whole job (no suppressions were saved). Repeated bounces now update the pending entry, so the recipient is suppressed once with an accurate bounce count
+- **"Run Check for this Host" button did nothing** - the per-host check button on the Status page referenced a function that was removed back around v2.3, throwing a console error on every click. It now runs a forced check for that host with the same progress bar as the main Check button
+- **Deleted relayhosts/transports came back after sync** - the immediate settings reconcile could not tell a host deactivated by its source toggle from one removed in mailcow, and reactivated it on the next page load. Re-adding rows is now exclusively the sync job's responsibility (which reads the live mailcow state)
+- **DNSBL answers outside 127.0.0.0/8 are no longer treated as listings** - a resolver that rewrites NXDOMAIN (ISP ad redirection, captive portal) can answer RBL queries with arbitrary addresses; per RFC 5782 those are now reported as "unknown" with an explanation instead of a false "listed". Also hardened the DoH fallback against Spamhaus rejection codes
+- **False Spamhaus listings from filtering resolvers** ([#78](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/78)) - a local DNS blocker (router adblock, Pi-hole, ISP filter) that intercepts the RBL domain can answer with `127.0.0.1`, which counted as "listed". Per RFC 5782 `127.0.0.1` is never a valid listing; additionally, answers from Spamhaus zones are validated against Spamhaus's documented return codes (`127.0.0.2-11`) - anything else is reported as "unknown" with the raw answer shown
+
+### Changed
+
+- **Anomaly detection learns daily send patterns** - a mailbox that sends a large batch at the same time every day (scheduled reports, digests) no longer triggers a daily volume-spike alert. The detector compares the burst against the same time-of-day slot on previous days: recurring similar volume there means "scheduled", while a burst at an unusual hour - or one far above the usual batch size - still alerts. No whitelist needed, so off-schedule abuse of the same mailbox is still caught
+- **Blacklist zone cards show the raw DNS answer on hover** - hovering a listed/error entry now reveals the actual DNSBL response code (e.g. `127.0.0.3`), which distinguishes a genuine listing from resolver interference when comparing with the RBL's own lookup page
+- **Deactivated monitored hosts are purged after 30 days** - hosts removed from mailcow or from the source settings are kept (inactive) for 30 days in case they return, then deleted by the daily cleanup job. Active hosts are never affected
 
 ## [2.7.0] - 2026-07-30
 
@@ -58,6 +79,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Security-headers middleware reimplemented as a pure ASGI middleware (was `@app.middleware("http")` / `BaseHTTPMiddleware`), which by construction never touches WebSocket connections - hardening against proxy/WebSocket edge cases
 - **Schema migrations moved to Alembic** - new schema changes are now versioned Alembic revisions (`backend/alembic/`) applied automatically on startup; existing installs adopt it transparently via a no-op baseline, and the legacy startup migrations are frozen at their 2.6.3 state
 - **Frontend split into modules** - the monolithic `app.js` was split into per-page scripts (`utils.js`, `settings.js`, `domains.js`, `dmarc.js`, `logs-viewer.js`, `mailbox-stats.js`, `notifications.js`, `smtp-abuse.js`). No behavior change; relevant if you carry local frontend patches
+
 ---
 
 ## [2.6.3] - 2026-07-12
