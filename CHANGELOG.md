@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Security
+
+- **Live log endpoints were reachable without logging in** - the raw-logs router was mounted twice, once under `/api` and once at the site root so the WebSocket had a clean address. The second mount also published its regular endpoints at `/raw-logs/...`, where the authentication check does not apply, and one of them hands out the token that opens the live log stream. Anyone who could reach the web interface could read the mail server logs without credentials. Only the WebSocket route is mounted at the root now, and a test fails if any other endpoint ever escapes `/api` again. **If your instance is reachable from the internet, upgrade.**
+- **The mailcow password is no longer stored in the browser** - signing in used to keep the username and password in the browser session storage in clear text, where any script on the page could read them. The password is now sent once, at login, and the server replies with a session cookie that JavaScript cannot read at all. Nothing changes in how you log in. Two notes: restarting the container signs everyone out (sessions are held in memory), and API scripts that send the password on every request keep working unchanged
+- **Log lines could inject HTML into the viewer** - four values shown on the Logs page (the watchdog health counters and an unparsable timestamp) were written into the page without escaping. Mail server log content is influenced from outside, so a crafted value could have run script in the browser of whoever was watching the page. Every value on that page is escaped now, along with the error messages shown when a page fails to load
+- **A crafted address could stall the server** - the address check used by the abuse-protection whitelist slowed down with the square of the input length on certain crafted values, so a single request could freeze the application for seconds. Addresses are now length-capped and matched with a pattern that cannot backtrack, and a bulk whitelist update is limited to 5000 entries
+- **Domain suppressions built a safer pattern** - adding a domain to the suppression list turned it into a regular expression by escaping only the dots, so an unusual domain name could change the resulting Rspamd rule. Only plain domain names are accepted now, and every special character is escaped
+- **Tighter Spamhaus zone matching** - a blacklist zone whose name merely ended with `spamhaus.org` (for example a lookalike domain) was treated as a genuine Spamhaus zone. Only real subdomains of `spamhaus.org` count now
+- **GitHub Actions run with least privilege** - the CI and publish workflows now declare exactly the permissions they need instead of inheriting the default write access
+
 ## [2.7.0] - 2026-07-30
 
 ### Added

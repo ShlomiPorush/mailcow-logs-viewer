@@ -2,10 +2,12 @@
 OAuth2/OIDC Authentication Router
 Handles OAuth2 login flow, callbacks, logout, and status
 """
+import base64
+import binascii
 import logging
 import secrets
 from fastapi import APIRouter, Request, Response, HTTPException, status
-from fastapi.responses import RedirectResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from typing import Dict, Any
 
 from ..config import settings
@@ -35,6 +37,39 @@ def verify_basic_auth():
     Used by the login form to test username/password before redirecting.
     """
     return {"verified": True}
+
+
+@router.post("/auth/session")
+def create_basic_auth_session(request: Request):
+    """
+    Exchange verified Basic Auth credentials for a session cookie.
+
+    Not in public_paths, so the middleware has already checked the
+    Authorization header by the time this runs: reaching this function means
+    the credentials are valid. The password is never stored in the browser -
+    the login form sends it once, here, and from then on the HttpOnly session
+    cookie authenticates every request.
+    """
+    if not settings.is_basic_auth_enabled:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Basic authentication is not enabled",
+        )
+
+    username = settings.auth_username
+    authorization = request.headers.get("Authorization", "")
+    if authorization.startswith("Basic "):
+        try:
+            decoded = base64.b64decode(authorization[6:]).decode("utf-8")
+            username = decoded.split(":", 1)[0] or username
+        except (binascii.Error, UnicodeDecodeError, ValueError):
+            pass
+
+    session_id = create_session({"username": username, "auth_method": "basic"})
+    response = JSONResponse(content={"authenticated": True, "auth_type": "basic"})
+    set_session_cookie(response, session_id, request)
+    logger.info("Basic Auth session created")
+    return response
 
 
 @router.get("/auth/provider-info")
@@ -83,7 +118,7 @@ async def oauth2_login(request: Request):
         logger.error(f"OAuth2 login error: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"OAuth2 configuration error: {str(e)}"
+            detail="OAuth2 is not configured correctly - see the application logs"
         )
     except Exception as e:
         logger.error(f"Unexpected error during OAuth2 login: {e}", exc_info=True)
@@ -160,7 +195,7 @@ async def oauth2_callback(
         )
         
         # Set session cookie
-        set_session_cookie(response, session_id)
+        set_session_cookie(response, session_id, request)
         
         logger.info(f"OAuth2 login successful for user: {user_info.get('email', 'unknown')}")
         return response
@@ -194,7 +229,7 @@ def oauth2_logout(request: Request):
         status_code=status.HTTP_302_FOUND
     )
     
-    clear_session_cookie(response)
+    clear_session_cookie(response, request)
     
     logger.info("User logged out")
     return response
@@ -206,13 +241,14 @@ def auth_status(request: Request):
     Check authentication status
     Returns current user info if authenticated
     """
-    # Check OAuth2 session
+    # Session cookie (OAuth2 login, or Basic Auth exchanged for a session)
     session_data = get_session_from_request(request)
     if session_data:
+        user_info = session_data.get("user_info", {})
         return {
             "authenticated": True,
-            "auth_type": "oauth2",
-            "user": session_data.get("user_info", {}),
+            "auth_type": user_info.get("auth_method", "oauth2"),
+            "user": user_info,
         }
     
     # Check Basic Auth (if enabled)

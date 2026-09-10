@@ -62,6 +62,18 @@ BLACKLISTS = [
     {"name": "SEM URIRED", "zone": "urired.spameatingmonkey.net", "info_url": "https://spameatingmonkey.com/"},
 ]
 
+_SPAMHAUS_DOMAIN = "spamhaus.org"
+
+
+def _is_spamhaus_zone(zone: str) -> bool:
+    """True only for zones actually under spamhaus.org.
+
+    A plain suffix match also accepts a lookalike such as evilspamhaus.org,
+    and a substring match accepts anything with "spamhaus" in the name.
+    """
+    zone = (zone or "").strip().rstrip(".").lower()
+    return zone == _SPAMHAUS_DOMAIN or zone.endswith("." + _SPAMHAUS_DOMAIN)
+
 def applicable_blacklists(ip: str) -> List[Dict[str, str]]:
     """The zones that can actually hold a listing for this address.
 
@@ -540,7 +552,7 @@ async def check_ip_in_blacklist(ip: str, blacklist: Dict[str, str], index: int) 
 
         # Spamhaus documents its listing codes as 127.0.0.2-11; anything else
         # from a spamhaus zone is not a listing
-        if (response and blacklist['zone'].endswith('spamhaus.org')
+        if (response and _is_spamhaus_zone(blacklist['zone'])
                 and response.startswith('127.')):
             try:
                 last_octet = int(response.rsplit('.', 1)[1])
@@ -689,7 +701,7 @@ async def check_all_blacklists(ip: str) -> Dict[str, Any]:
         # could not be checked the honest answer is "unknown".
         spamhaus_failed = [
             r for r in processed_results
-            if 'spamhaus' in r.get('zone', '').lower() and r.get('status') in ('error', 'timeout')
+            if _is_spamhaus_zone(r.get('zone', '')) and r.get('status') in ('error', 'timeout')
         ]
         if listed_count > 0:
             status = "listed"

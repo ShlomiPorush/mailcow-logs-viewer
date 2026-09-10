@@ -139,56 +139,19 @@
         // Initialize dark mode immediately
         initDarkMode();
         
-        // Authentication functions
-        let authCredentials = null;
-
-        function loadAuthCredentials() {
-            try {
-                const saved = sessionStorage.getItem('auth_credentials');
-                if (saved) {
-                    authCredentials = JSON.parse(saved);
+        // The credentials are used once, here, to obtain a session cookie.
+        // Nothing about them is kept in the browser: the cookie the backend
+        // sets is HttpOnly, so no script on the page (or injected into it) can
+        // read it, and there is no password in sessionStorage to steal.
+        async function startSession(username, password) {
+            const response = await fetch('/api/auth/session', {
+                method: 'POST',
+                credentials: 'include',
+                headers: {
+                    'Authorization': `Basic ${btoa(`${username}:${password}`)}`
                 }
-            } catch (e) {
-                console.error('Failed to load auth credentials:', e);
-                authCredentials = null;
-            }
-        }
-
-        function saveAuthCredentials(username, password) {
-            try {
-                authCredentials = { username, password };
-                sessionStorage.setItem('auth_credentials', JSON.stringify(authCredentials));
-            } catch (e) {
-                console.error('Failed to save auth credentials:', e);
-            }
-        }
-
-        function getAuthHeader() {
-            if (!authCredentials) return {};
-            const credentials = btoa(`${authCredentials.username}:${authCredentials.password}`);
-            return {
-                'Authorization': `Basic ${credentials}`
-            };
-        }
-
-        async function authenticatedFetch(url, options = {}) {
-            const headers = {
-                ...options.headers,
-                ...getAuthHeader()
-            };
-            
-            const response = await fetch(url, {
-                ...options,
-                headers
             });
-            
-            if (response.status === 401) {
-                sessionStorage.removeItem('auth_credentials');
-                authCredentials = null;
-                throw new Error('Authentication required');
-            }
-            
-            return response;
+            return response.ok;
         }
 
         async function handleLogin(event) {
@@ -211,13 +174,7 @@
             if (submitBtn) submitBtn.disabled = true;
             
             try {
-                // Save credentials
-                saveAuthCredentials(username, password);
-                
-                // Test authentication (use /api/auth/verify so wrong credentials return 401)
-                const response = await authenticatedFetch('/api/auth/verify');
-                
-                if (response.ok) {
+                if (await startSession(username, password)) {
                     // Success - redirect to main app using replace to avoid loop
                     window.location.replace('/');
                 } else {
@@ -235,10 +192,6 @@
                 // Clear password field
                 const passwordField = document.getElementById('login-password');
                 if (passwordField) passwordField.value = '';
-                
-                // Clear credentials
-                sessionStorage.removeItem('auth_credentials');
-                authCredentials = null;
             } finally {
                 // Hide loading
                 if (submitText) submitText.classList.remove('hidden');
@@ -354,9 +307,9 @@
                 }
             }
             
-            // Check if already authenticated via OAuth2 (session cookie)
+            // Already signed in? Both login methods end up with a session cookie.
             try {
-                const statusResponse = await fetch('/api/auth/status');
+                const statusResponse = await fetch('/api/auth/status', { credentials: 'include' });
                 if (statusResponse.ok) {
                     const statusData = await statusResponse.json();
                     if (statusData.authenticated) {
@@ -366,22 +319,6 @@
                 }
             } catch (e) {
                 // Not authenticated, continue
-            }
-            
-            loadAuthCredentials();
-            
-            // If already authenticated via Basic Auth, redirect to main app
-            if (authCredentials) {
-                try {
-                    const response = await authenticatedFetch('/api/info');
-                    if (response.ok) {
-                        // Use replace to avoid redirect loop
-                        window.location.replace('/');
-                        return;
-                    }
-                } catch (e) {
-                    // Not authenticated, stay on login page
-                }
             }
             
             // Load app branding

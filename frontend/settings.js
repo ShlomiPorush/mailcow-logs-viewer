@@ -794,7 +794,7 @@ async function loadSettings() {
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
                 </svg>
                 <p class="text-red-500">Failed to load settings</p>
-                <p class="text-sm text-gray-500 dark:text-gray-400 mt-2">${error.message}</p>
+                <p class="text-sm text-gray-500 dark:text-gray-400 mt-2">${escapeHtml(error.message)}</p>
             </div>
         `;
     }

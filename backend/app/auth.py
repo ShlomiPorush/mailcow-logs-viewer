@@ -144,12 +144,14 @@ class BasicAuthMiddleware(BaseHTTPMiddleware):
         if any(path == p or path.startswith(p) for p in public_paths):
             return await call_next(request)
         
-        # Check OAuth2 session first (if enabled)
-        if settings.is_oauth2_enabled:
-            session_data = get_session_from_request(request)
-            if session_data:
-                # OAuth2 session is valid, proceed
-                return await call_next(request)
+        # A valid session cookie is accepted for both authentication methods:
+        # OAuth2 logins get one from the callback, Basic Auth logins from
+        # POST /api/auth/session. The cookie is HttpOnly, so no script in the
+        # page can read it - which is why the password is never stored client
+        # side any more.
+        session_data = get_session_from_request(request)
+        if session_data:
+            return await call_next(request)
         
         # If OAuth2 is enabled but Basic Auth is not, require OAuth2
         if settings.is_oauth2_enabled and not settings.is_basic_auth_enabled:
