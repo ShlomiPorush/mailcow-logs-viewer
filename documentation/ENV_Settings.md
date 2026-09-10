@@ -357,7 +357,7 @@ Settings for the automatic quarantine rule processing feature. When rules are de
 | `OAUTH2_REDIRECT_URI` | string | (empty) | OAuth2 Redirect URI (callback URL). Must match the redirect URI configured in your OAuth2 provider. Example: `https://your-logs-viewer.example.com/api/auth/callback` |
 | `OAUTH2_SCOPES` | string | `openid profile email` | OAuth2 scopes to request |
 | `OAUTH2_USE_OIDC_DISCOVERY` | boolean | `true` | Enable OIDC discovery (uses `.well-known/openid-configuration`). Default: `true` (if `OAUTH2_ISSUER_URL` is set) |
-| `SESSION_SECRET_KEY` | string | (empty) | Secret key for signing session cookies. **REQUIRED if `OAUTH2_ENABLED=true`**. Generate a random secret: `openssl rand -hex 32`. ⚠️ **WARNING: Use a strong random secret in production!** |
+| `SESSION_SECRET_KEY` | string | (empty) | Secret key for signing session cookies. **REQUIRED if `OAUTH2_ENABLED=true`**. Also used for Basic Auth logins since 2.7.1: without it a new key is generated on every start, so restarting the container signs everyone out and they log in again. Generate a random secret: `openssl rand -hex 32`. ⚠️ **WARNING: Use a strong random secret in production!** |
 | `SESSION_EXPIRY_HOURS` | integer | `24` | Session expiration time in hours |
 
 ---
