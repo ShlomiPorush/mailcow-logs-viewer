@@ -50,6 +50,12 @@ The system automatically validates four critical DNS record types:
   - `none`: Monitoring only (weakest)
 - **Status**: Same indicators as SPF
 
+### Alias Domains
+Domains configured in mailcow as **alias domains** (a domain whose mail is delivered to the mailboxes of another domain) are shown inside their target domain's expanded view, each with its own DNS validation summary.
+- Alias domains need their own SPF, DKIM and DMARC records - mail sent as `user@alias.tld` is authenticated against `alias.tld`, not against the target domain
+- Alias domains are included in the scheduled and manual "Check All DNS" runs
+- The mapping is synced from mailcow automatically (every 5 minutes, together with the domain list)
+
 #### TLSA (DANE)
 - **Purpose**: DANE lets senders verify your mail server's TLS certificate through DNS, preventing TLS downgrade and man-in-the-middle attacks
 - **Where the records live**: For SMTP, TLSA records are published under each MX hostname (`_25._tcp.<mx-host>`), not under the domain itself - the check resolves your MX hosts and looks there

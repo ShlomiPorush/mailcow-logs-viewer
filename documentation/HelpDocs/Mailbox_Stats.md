@@ -17,7 +17,7 @@ The top section displays aggregated metrics for **all mailboxes** matching your 
 Use the toolbar to drill down into specific data:
 1.  **Search**: Filter by email address, username, or alias.
 2.  **Date Range**: Select a preset (Today, 7 Days, 30 Days) or define a custom range.
-3.  **Domain**: Filter to show mailboxes from a specific domain only.
+3.  **Domain**: Filter to show mailboxes from a specific domain only. mailcow alias domains are listed too and resolve to their target domain's mailboxes.
 4.  **Sort**: Order the list by Sent count, Quota usage, Failure rate, etc.
 5.  **Toggles**:
     *   **Active Only**: Hides deleted mailboxes that still have historical data.
@@ -68,6 +68,7 @@ Colored cards showing the breakdown of message flow.
 A table listing all aliases associated with the mailbox, breaking down traffic per alias.
 *   Columns: Sent, Received, Internal, Delivered, Deferred, Bounced, Rejected.
 *   **Interactive**: Click the numbers to view the specific logs for that alias.
+*   **Domain aliases**: If a mailcow alias domain points at the mailbox's domain, traffic for `user@alias.tld` is attributed to the mailbox `user@target.tld`. Such addresses appear here as rows with a "domain alias" badge (only when they had traffic in the selected period) and count into the mailbox's combined totals exactly once.
 
 ---
 

@@ -18,6 +18,8 @@ from ..utils import format_datetime_for_api as format_datetime_utc
 
 logger = logging.getLogger(__name__)
 
+from app.services.alias_domains import get_alias_domain_map, expand_address
+
 router = APIRouter()
 
 # =============================================================================
@@ -297,6 +299,12 @@ async def get_mailbox_stats_summary(
         mailbox_emails = [m.username.lower() for m in db.query(MailboxStatistics.username).all()]
         alias_emails = [a.alias_address.lower() for a in db.query(AliasStatistics.alias_address).all()]
         all_local_emails = set(mailbox_emails + alias_emails)
+        # A mailcow alias domain mirrors every address of its target domain, so
+        # user@alias.tld is the same mailbox as user@target.tld (issue #92)
+        alias_domain_map = get_alias_domain_map(db)
+        if alias_domain_map:
+            for email in list(all_local_emails):
+                all_local_emails.update(expand_address(email, alias_domain_map))
         
         # Count total messages for all local emails (case-insensitive)
         total_sent = 0
@@ -391,9 +399,11 @@ async def get_all_mailbox_stats(
         
         query = db.query(MailboxStatistics)
         
-        # Apply domain filter
+        # Apply domain filter. Selecting an alias domain shows the mailboxes of
+        # its target domain, since those are the mailboxes it delivers to
         if domain:
-            query = query.filter(MailboxStatistics.domain == domain)
+            target = get_alias_domain_map(db).get(domain.lower(), domain)
+            query = query.filter(MailboxStatistics.domain == target)
         
         # Apply active filter
         if active_only:
@@ -428,11 +438,19 @@ async def get_all_mailbox_stats(
         for alias in all_aliases:
             aliases_by_mailbox.setdefault(alias.primary_mailbox, []).append(alias)
         
-        # Collect ALL emails (mailboxes + aliases) for bulk counting
+        # Collect ALL emails (mailboxes + aliases) for bulk counting.
+        # Alias-domain variants (user@alias.tld for user@target.tld) are
+        # counted too and shown as their own alias rows (issue #92)
+        alias_domain_map = get_alias_domain_map(db)
+        domain_alias_addresses = {}   # mailbox username -> [variant addresses]
         all_emails = [mb.username for mb in mailboxes]
         for mb in mailboxes:
+            variants = list(expand_address(mb.username, alias_domain_map))
             for alias in aliases_by_mailbox.get(mb.username, []):
                 all_emails.append(alias.alias_address)
+                variants.extend(expand_address(alias.alias_address, alias_domain_map))
+            domain_alias_addresses[mb.username] = variants
+            all_emails.extend(variants)
         
         # Run bulk message counts (2 SQL queries total instead of 3×N)
         bulk_counts = get_bulk_message_counts(db, all_emails, parsed_start, parsed_end)
@@ -466,6 +484,26 @@ async def get_all_mailbox_stats(
                     **alias_counts
                 })
             
+            # Addresses on an alias domain belong to this mailbox too. They are
+            # listed as alias rows (not folded into the mailbox count), so the
+            # combined totals below count each message exactly once
+            for variant in domain_alias_addresses.get(mb.username, []):
+                variant_counts = bulk_counts.get(variant, _empty_counts())
+                if variant_counts['sent_total'] == 0 and variant_counts['received_total'] == 0:
+                    continue
+                alias_sent_total += variant_counts['sent_total']
+                alias_received_total += variant_counts['received_total']
+                alias_failed_total += variant_counts['sent_failed']
+                alias_internal_total += variant_counts['direction_internal']
+                alias_delivered_total += variant_counts['sent_delivered']
+                alias_list.append({
+                    "alias_address": variant,
+                    "active": True,
+                    "is_catch_all": False,
+                    "is_domain_alias": True,
+                    **variant_counts
+                })
+
             # Calculate combined totals (mailbox + all aliases)
             combined_sent = counts['sent_total'] + alias_sent_total
             combined_received = counts['received_total'] + alias_received_total
@@ -580,12 +618,21 @@ def get_mailbox_domains(db: Session = Depends(get_db)):
             MailboxStatistics.domain
         ).all()
         
-        return {
-            "domains": [
-                {"domain": d.domain, "mailbox_count": d.count}
-                for d in domains
-            ]
-        }
+        entries = [
+            {"domain": d.domain, "mailbox_count": d.count}
+            for d in domains
+        ]
+        # Alias domains appear as their own entries so they can be selected;
+        # they carry their target's mailbox count
+        alias_domain_map = get_alias_domain_map(db)
+        counts_by_domain = {d.domain: d.count for d in domains}
+        for alias in sorted(alias_domain_map):
+            target = alias_domain_map[alias]
+            if target in counts_by_domain and alias not in counts_by_domain:
+                entries.append({"domain": alias, "mailbox_count": counts_by_domain[target],
+                                "alias_of": target})
+        entries.sort(key=lambda x: x["domain"])
+        return {"domains": entries}
     except Exception as e:
         logger.error(f"Error fetching mailbox domains: {e}")
         return {"error": str(e), "domains": []}

@@ -143,7 +143,9 @@ function populateMailboxStatsDomainFilter(domains) {
     domains.forEach(d => {
         const option = document.createElement('option');
         option.value = d.domain;
-        option.textContent = `${d.domain} (${d.mailbox_count})`;
+        option.textContent = d.alias_of
+            ? `${d.domain} (alias of ${d.alias_of})`
+            : `${d.domain} (${d.mailbox_count})`;
         select.appendChild(option);
     });
 }
@@ -468,6 +470,7 @@ function renderMailboxStatsAccordion(mailboxes, page = 1, totalPages = 1) {
                                                         <div class="flex items-center gap-2">
                                                             <span class="text-gray-900 dark:text-white">${escapeHtml(alias.alias_address)}</span>
                                                             ${alias.is_catch_all ? '<span class="px-1.5 py-0.5 text-xs bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300 rounded">catch-all</span>' : ''}
+                                                            ${alias.is_domain_alias ? '<span class="px-1.5 py-0.5 text-xs bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300 rounded" title="Address on a mailcow alias domain that points at this mailbox">domain alias</span>' : ''}
                                                             ${!alias.active ? '<span class="px-1.5 py-0.5 text-xs bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400 rounded">inactive</span>' : ''}
                                                         </div>
                                                     </td>

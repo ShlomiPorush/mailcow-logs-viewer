@@ -424,6 +424,14 @@ function renderDomainAccordionRow(domain) {
                         ${renderDNSCheck('TLSA', tlsa)}
                         ${renderDNSCheck('MTA-STS', mtaSts)}
                     </div>
+
+                    ${(domain.alias_domains || []).length ? `
+                    <div class="mt-6">
+                        <h4 class="text-sm font-semibold text-gray-900 dark:text-white mb-1">Alias domains</h4>
+                        <p class="text-xs text-gray-500 dark:text-gray-400 mb-3">These domains deliver to the same mailboxes and send with their own DNS records</p>
+                        ${domain.alias_domains.map(ad => renderAliasDomain(ad)).join('')}
+                    </div>
+                    ` : ''}
                 </div>
             </div>
         </div>
@@ -485,6 +493,50 @@ function renderSpfCheckedIps(check) {
             </div>
         </details>
     `;
+}
+
+function renderAliasDomain(aliasDomain) {
+    const dns = aliasDomain.dns_checks || {};
+    const spf = dns.spf || { status: 'unknown', message: 'Not checked yet' };
+    const dkim = dns.dkim || { status: 'unknown', message: 'Not checked yet' };
+    const dmarc = dns.dmarc || { status: 'unknown', message: 'Not checked yet' };
+    const tlsa = dns.tlsa || { status: 'unknown', message: 'Not checked yet' };
+    const mtaSts = dns.mta_sts || { status: 'unknown', message: 'Not checked yet' };
+    const detailsId = `alias-domain-${aliasDomain.domain_name.replace(/[^a-z0-9]/gi, '-')}`;
+    return `
+        <div class="border border-gray-200 dark:border-gray-700 rounded-lg mb-2">
+            <div class="flex items-center justify-between px-4 py-2 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700/30"
+                 onclick="document.getElementById('${detailsId}').classList.toggle('hidden')">
+                <div class="flex items-center gap-2">
+                    <span class="font-medium text-gray-900 dark:text-white text-sm">${escapeHtml(aliasDomain.domain_name)}</span>
+                    <span class="px-1.5 py-0.5 text-xs bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300 rounded">alias</span>
+                </div>
+                <div class="flex items-center gap-3 text-sm">
+                    <span>SPF ${getAliasStatusIcon(spf.status)}</span>
+                    <span>DKIM ${getAliasStatusIcon(dkim.status)}</span>
+                    <span>DMARC ${getAliasStatusIcon(dmarc.status)}</span>
+                    <span>TLSA ${getAliasStatusIcon(tlsa.status)}</span>
+                    <span>MTA-STS ${getAliasStatusIcon(mtaSts.status)}</span>
+                </div>
+            </div>
+            <div id="${detailsId}" class="hidden px-4 pb-4">
+                <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 mt-2">
+                    ${renderDNSCheck('SPF', spf)}
+                    ${renderDNSCheck('DKIM', dkim)}
+                    ${renderDNSCheck('DMARC', dmarc)}
+                    ${renderDNSCheck('TLSA', tlsa)}
+                    ${renderDNSCheck('MTA-STS', mtaSts)}
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+function getAliasStatusIcon(status) {
+    if (status === 'success') return '<span class="text-green-500">✓</span>';
+    if (status === 'warning') return '<span class="text-amber-500">⚠</span>';
+    if (status === 'error') return '<span class="text-red-500">✗</span>';
+    return '<span class="text-gray-400">?</span>';
 }
 
 function renderDNSCheck(type, check) {

@@ -31,10 +31,17 @@ logger = logging.getLogger(__name__)
 
 
 def _local_addresses(db) -> set:
-    """Lowercased set of all local mailbox + alias addresses."""
+    """Lowercased set of all local mailbox + alias addresses, including their
+    alias-domain variants (user@alias.tld for user@target.tld, issue #92)."""
+    from .alias_domains import get_alias_domain_map, expand_address
     mailboxes = [m[0].lower() for m in db.query(MailboxStatistics.username).all() if m[0]]
     aliases = [a[0].lower() for a in db.query(AliasStatistics.alias_address).all() if a[0]]
-    return set(mailboxes) | set(aliases)
+    addresses = set(mailboxes) | set(aliases)
+    mapping = get_alias_domain_map(db)
+    if mapping:
+        for address in list(addresses):
+            addresses.update(expand_address(address, mapping))
+    return addresses
 
 
 def _recently_alerted(db, alert_type: str, subject: str, cooldown_hours: int) -> bool:

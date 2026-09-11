@@ -547,7 +547,18 @@ Get list of all domains with statistics and cached DNS validation results.
           "warnings": []
         },
         "checked_at": "2026-01-08T01:34:08Z"
-      }
+      },
+      "alias_domains": [
+        {
+          "domain_name": "alias-of-example.com",
+          "dns_checks": {
+            "spf": {"status": "success", "message": "..."},
+            "dkim": {"status": "success", "message": "..."},
+            "dmarc": {"status": "warning", "message": "..."},
+            "checked_at": "2026-01-08T01:34:08Z"
+          }
+        }
+      ]
     }
   ]
 }
@@ -577,6 +588,7 @@ Get list of all domains with statistics and cached DNS validation results.
 - `relay_all_recipients`: Boolean - true if relaying all recipients
 - `relay_unknown_only`: Boolean - true if relaying only unknown recipients
 - `dns_checks`: DNS validation results (cached from database)
+- `alias_domains`: Array of the domain's mailcow alias domains, each with its own `domain_name` and cached `dns_checks`. Empty array when the domain has no alias domains
 
 **DNS Check Status Values:**
 - `success`: Check passed with no issues
@@ -673,7 +685,7 @@ Performs DNS checks (SPF, DKIM, DMARC) for all active domains and updates the gl
 ```
 
 **Notes:**
-- Only checks active domains
+- Checks active domains and their mailcow alias domains
 - Updates `is_full_check=true` flag in database
 - Updates global `last_dns_check` timestamp
 - Frontend shows progress with toast notifications
@@ -1056,7 +1068,7 @@ Get all mailbox statistics with message counts and aliases (paginated).
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
-| `domain` | string | Filter by domain name |
+| `domain` | string | Filter by domain name. A mailcow alias domain is accepted and resolves to its target domain |
 | `active_only` | bool | Only show active mailboxes (default: `true`) |
 | `hide_zero` | bool | Hide mailboxes with zero activity (default: `false`) |
 | `search` | string | Search mailbox username, name, or alias address |
@@ -1131,9 +1143,23 @@ GET /api/mailbox-stats/all?date_range=30days&active_only=true&hide_zero=true&sor
           "sent_failed": 2,
           "received_total": 100,
           "failure_rate": 4.0
+        },
+        {
+          "alias_address": "user@alias-of-example.com",
+          "active": true,
+          "is_catch_all": false,
+          "is_domain_alias": true,
+          "sent_total": 12,
+          "sent_delivered": 12,
+          "sent_bounced": 0,
+          "sent_deferred": 0,
+          "sent_rejected": 0,
+          "sent_failed": 0,
+          "received_total": 4,
+          "failure_rate": 0.0
         }
       ],
-      "alias_count": 1,
+      "alias_count": 2,
       "combined_sent": 200,
       "combined_received": 420,
       "combined_total": 620,
@@ -1160,8 +1186,8 @@ GET /api/mailbox-stats/all?date_range=30days&active_only=true&hide_zero=true&sor
 | `rl_value` / `rl_frame` | Rate limiting (e.g., 100/m = 100 per minute) |
 | `attributes` | Access permissions from mailcow |
 | `mailbox_counts` | Message statistics for mailbox only |
-| `aliases` | Array of alias statistics |
-| `combined_*` | Combined totals (mailbox + all aliases) |
+| `aliases` | Array of alias statistics. Addresses on a mailcow alias domain (user@alias.tld for user@target.tld) appear here as rows with `is_domain_alias: true`; they are listed only when they have traffic in the selected range |
+| `combined_*` | Combined totals (mailbox + all aliases, including alias-domain addresses) |
 | `created` / `modified` | Mailbox creation and last update timestamps |
 
 ---
@@ -1181,10 +1207,18 @@ Get list of domains with mailbox counts for filter dropdown.
     {
       "domain": "company.org",
       "mailbox_count": 10
+    },
+    {
+      "domain": "alias-of-example.com",
+      "mailbox_count": 15,
+      "alias_of": "example.com"
     }
   ]
 }
 ```
+
+**Notes:**
+- mailcow alias domains are listed too, marked with `alias_of` (their target domain) and showing the target's mailbox count. Selecting one filters to the target domain's mailboxes
 
 ### Caching
 
