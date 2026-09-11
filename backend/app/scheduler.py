@@ -529,6 +529,8 @@ async def fetch_and_store_postfix():
                 break
             
             page_new = 0
+            # Queue ids whose outcome changed on this page - see refresh below
+            page_status_queue_ids = set()
             page_skipped = 0
             page_blacklisted = 0
             
@@ -636,12 +638,34 @@ async def fetch_and_store_postfix():
                         db.add(postfix_log)
                         seen_postfix.add(unique_id)
                         page_new += 1
+
+                        if queue_id and parsed.get('status') in PUSH_TRIGGER_STATUSES:
+                            page_status_queue_ids.add(queue_id)
                         
                     except Exception as e:
                         logger.error(f"Error processing Postfix log: {e}")
                         continue
                 
                 db.commit()
+
+                # The outcome of these queues just changed. Refresh only those
+                # correlations, so a delivery that lands after the correlation age
+                # window is still recorded without re-polling anything else.
+                # Failing here must never lose the logs that were just stored.
+                if page_status_queue_ids:
+                    try:
+                        refreshed, skipped_refresh = refresh_correlations_for_queue_ids(
+                            db, page_status_queue_ids)
+                        if refreshed or skipped_refresh:
+                            db.commit()
+                            logger.info(
+                                f"[STATUS] Refreshed {refreshed} correlation(s) from "
+                                f"{len(page_status_queue_ids)} arriving queue(s), "
+                                f"skipped {skipped_refresh}"
+                            )
+                    except Exception as e:
+                        db.rollback()
+                        logger.warning(f"[STATUS] Correlation refresh failed for this page: {e}")
             
             total_new += page_new
             total_skipped += page_skipped
@@ -1522,6 +1546,146 @@ async def expire_old_correlations():
         update_job_status('expire_correlations', 'failed', str(e))
 
 
+# The statuses a correlation never moves away from once it has them.
+TERMINAL_FINAL_STATUSES = ('delivered', 'bounced', 'rejected', 'expired')
+
+# The push path additionally refuses to touch a spam verdict. routers/stats.py
+# counts final_status 'spam' as blocked mail, and a late delivery line would
+# otherwise overwrite it and quietly deflate that number.
+PUSH_SKIP_FINAL_STATUSES = TERMINAL_FINAL_STATUSES + ('spam',)
+
+# Postfix gives up on a queue after maximal_queue_lifetime (5 days by default),
+# so a genuine retry cannot arrive later than that. A queue id that matches an
+# older correlation is far more likely to be a reused short id.
+LATE_STATUS_MAX_CORRELATION_AGE = timedelta(days=5)
+
+# Postfix statuses worth reacting to on arrival. Anything else carries no
+# outcome, so pushing on it would be pure overhead.
+PUSH_TRIGGER_STATUSES = ('sent', 'bounced', 'deferred')
+
+
+def _recompute_correlation_from_postfix(db: Session, correlation: MessageCorrelation) -> bool:
+    """Re-derive final_status and postfix_log_ids for one correlation from every
+    Postfix log sharing its queue_id. Returns True when something was written.
+
+    Does not commit; the caller owns the transaction.
+    """
+    # Without this guard a correlation with no queue_id turns the filter below into
+    # "queue_id IS NULL", which matches the majority of postfix_logs (617,987 of
+    # 1,122,822 rows on a real instance) and would stamp one correlation_key across
+    # all of them. The poller avoids it with a filter; the helper must not rely on
+    # every future caller remembering that.
+    if not correlation.queue_id:
+        return False
+
+    all_postfix = db.query(PostfixLog).filter(
+        PostfixLog.queue_id == correlation.queue_id
+    ).all()
+
+    if not all_postfix:
+        return False
+
+    # Determine best final status from all Postfix logs
+    # Priority: bounced > rejected > sent (delivered) > deferred
+    new_final_status = correlation.final_status
+
+    for plog in all_postfix:
+        if plog.status:
+            if plog.status in ['bounced', 'rejected']:
+                new_final_status = plog.status
+                break  # Highest priority, stop here
+            elif plog.status == 'sent':
+                # 'sent' (delivered) is better than 'deferred' or None
+                if new_final_status not in ['bounced', 'rejected', 'delivered']:
+                    new_final_status = 'delivered'
+            elif plog.status == 'deferred' and new_final_status not in ['bounced', 'rejected', 'delivered']:
+                new_final_status = 'deferred'
+
+    # Add any Postfix logs this correlation does not know about yet
+    current_ids = list(correlation.postfix_log_ids or [])
+    ids_added = 0
+    for plog in all_postfix:
+        if plog.id and plog.id not in current_ids:
+            current_ids.append(plog.id)
+            ids_added += 1
+
+    if ids_added > 0:
+        correlation.postfix_log_ids = current_ids
+
+    # Point every Postfix log of this queue at the correlation
+    for plog in all_postfix:
+        if not plog.correlation_key or plog.correlation_key != correlation.correlation_key:
+            plog.correlation_key = correlation.correlation_key
+
+    if (new_final_status and new_final_status != correlation.final_status) or ids_added > 0:
+        old_status = correlation.final_status
+        correlation.final_status = new_final_status
+        correlation.last_seen = datetime.now(timezone.utc)
+        logger.debug(
+            f"Recomputed correlation {correlation.id} from queue {correlation.queue_id}: "
+            f"{old_status} -> {new_final_status}, {ids_added} log ids added"
+        )
+        return True
+
+    return False
+
+
+def refresh_correlations_for_queue_ids(db: Session, queue_ids) -> tuple:
+    """Re-derive the status of the correlations behind the given Postfix queue ids.
+
+    Called right after a page of Postfix logs is stored, so the work follows the
+    log lines that actually arrived instead of re-polling every open correlation
+    on a timer. That is what lets a delivery which succeeds long after the
+    correlation age window still be recorded.
+
+    Returns (updated, skipped). Does not commit; the caller owns the transaction.
+    """
+    queue_ids = [q for q in set(queue_ids or []) if q]
+    if not queue_ids:
+        return (0, 0)
+
+    updated = 0
+    skipped = 0
+    horizon = datetime.utcnow() - LATE_STATUS_MAX_CORRELATION_AGE
+
+    # Chunked so a large page cannot build an unbounded IN clause
+    for start in range(0, len(queue_ids), 500):
+        chunk = queue_ids[start:start + 500]
+        rows = db.query(MessageCorrelation).filter(
+            MessageCorrelation.queue_id.in_(chunk)
+        ).all()
+
+        by_queue = {}
+        for row in rows:
+            by_queue.setdefault(row.queue_id, []).append(row)
+
+        for queue_id, correlations in by_queue.items():
+            # A queue id shared by two correlations is ambiguous: Postfix reuses
+            # short queue ids, so we cannot tell which message the new line
+            # belongs to. Guessing would rewrite an unrelated message's status.
+            if len(correlations) > 1:
+                skipped += len(correlations)
+                logger.warning(
+                    f"[STATUS] Queue {queue_id} maps to {len(correlations)} correlations - "
+                    "not attributing the new log line to either"
+                )
+                continue
+
+            correlation = correlations[0]
+
+            if correlation.final_status in PUSH_SKIP_FINAL_STATUSES:
+                continue
+
+            if correlation.created_at and correlation.created_at < horizon:
+                skipped += 1
+                continue
+
+            if _recompute_correlation_from_postfix(db, correlation):
+                updated += 1
+
+    return (updated, skipped)
+
+
 async def update_final_status_for_correlations():
     """
     Background job to update final_status for correlations that don't have one yet.
@@ -1555,7 +1719,7 @@ async def update_final_status_for_correlations():
                 MessageCorrelation.queue_id.isnot(None),
                 or_(
                     MessageCorrelation.final_status.is_(None),
-                    MessageCorrelation.final_status.notin_(['delivered', 'bounced', 'rejected', 'expired'])
+                    MessageCorrelation.final_status.notin_(TERMINAL_FINAL_STATUSES)
                 )
             ).limit(500).all()  # Increased from 100 to 500
             
@@ -1567,58 +1731,8 @@ async def update_final_status_for_correlations():
             
             for correlation in correlations_to_check:
                 try:
-                    # Get all Postfix logs for this queue_id
-                    all_postfix = db.query(PostfixLog).filter(
-                        PostfixLog.queue_id == correlation.queue_id
-                    ).all()
-                    
-                    if not all_postfix:
-                        continue
-                    
-                    # Determine best final status from all Postfix logs
-                    # Priority: bounced > rejected > sent (delivered) > deferred
-                    new_final_status = correlation.final_status
-                    
-                    for plog in all_postfix:
-                        if plog.status:
-                            if plog.status in ['bounced', 'rejected']:
-                                new_final_status = plog.status
-                                break  # Highest priority, stop here
-                            elif plog.status == 'sent':
-                                # 'sent' (delivered) is better than 'deferred' or None
-                                if new_final_status not in ['bounced', 'rejected', 'delivered']:
-                                    new_final_status = 'delivered'
-                            elif plog.status == 'deferred' and new_final_status not in ['bounced', 'rejected', 'delivered']:
-                                new_final_status = 'deferred'
-                    
-                    # FIX #1: Update postfix_log_ids - add any missing logs
-                    current_ids = list(correlation.postfix_log_ids or [])
-                    ids_added = 0
-                    for plog in all_postfix:
-                        if plog.id and plog.id not in current_ids:
-                            current_ids.append(plog.id)
-                            ids_added += 1
-                    
-                    if ids_added > 0:
-                        correlation.postfix_log_ids = current_ids
-                    
-                    # FIX #2: Update correlation_key in ALL Postfix logs
-                    for plog in all_postfix:
-                        if not plog.correlation_key or plog.correlation_key != correlation.correlation_key:
-                            plog.correlation_key = correlation.correlation_key
-                    
-                    # Update if we found a better status or added logs
-                    if (new_final_status and new_final_status != correlation.final_status) or ids_added > 0:
-                        old_status = correlation.final_status
-                        correlation.final_status = new_final_status
-                        correlation.last_seen = datetime.now(timezone.utc)
+                    if _recompute_correlation_from_postfix(db, correlation):
                         updated_count += 1
-                        
-                        if ids_added > 0:
-                            logger.debug(f"Updated correlation {correlation.id}: added {ids_added} logs, status {old_status} -> {new_final_status}")
-                        else:
-                            logger.debug(f"Updated final_status for correlation {correlation.id} ({correlation.message_id[:40] if correlation.message_id else 'no-id'}...): {old_status} -> {new_final_status}")
-                
                 except Exception as e:
                     logger.warning(f"Failed to update final_status for correlation {correlation.id}: {e}")
                     continue

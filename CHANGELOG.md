@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **A message that was deferred and then delivered kept showing "Deferred"** ([#114](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/114)) - when a delivery was temporarily deferred (greylisting is the usual cause) and Postfix succeeded on a later retry, the Messages view never caught up. The job that picks up late delivery logs only looked at messages correlated in the last 10 minutes, so anything slower than that stayed wrong forever. Correlations are now refreshed when a delivery log for them actually arrives, instead of on a timer, so a delivery that succeeds an hour later is still recorded - and the app does no more background work than before, only less
+
+
 ## [2.7.1] - 2026-09-10
 
 ### Added
