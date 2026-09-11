@@ -1,0 +1,79 @@
+name: Build and Publish Dev Image
+
+# Manual only. Publishes a preview image of whatever ref it is run on, for
+# testing merged work before a release. It never touches `latest`, never
+# creates a release and never closes issues - those belong to the version-tag
+# workflow (docker-publish.yml).
+on:
+  workflow_dispatch:
+
+env:
+  GH_REGISTRY: ghcr.io
+  DOCKER_HUB_REPO: shlomip/mailcow-logs-viewer
+
+jobs:
+  # A dev image is for testing, but a broken build helps nobody.
+  checks:
+    permissions:
+      contents: read
+    uses: ./.github/workflows/ci.yml
+
+  build-and-push-dev:
+    needs: checks
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Mark the in-app version as a dev build
+        # PEP 440 local-version form (2.7.1+dev.abc1234): the app's update
+        # check parses it with packaging.version, which rejects a dash form,
+        # and a later real release still counts as newer for these users.
+        run: |
+          base=$(tr -d '[:space:]' < VERSION)
+          printf '%s+dev.%s' "$base" "${GITHUB_SHA::7}" > VERSION
+          echo "Dev image version: $(cat VERSION)"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.GH_REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_HUB_USERNAME }}
+          password: ${{ secrets.DOCKER_HUB_TOKEN }}
+
+      - name: Extract metadata for Docker
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: |
+            ${{ env.GH_REGISTRY }}/${{ github.repository }}
+            ${{ env.DOCKER_HUB_REPO }}
+          # A moving `dev` tag plus an immutable per-commit tag, so a specific
+          # build can be named in a bug report and rolled back to.
+          tags: |
+            type=raw,value=dev
+            type=sha,prefix=dev-
+          flavor: |
+            latest=false
+
+      - name: Build and push dev image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
