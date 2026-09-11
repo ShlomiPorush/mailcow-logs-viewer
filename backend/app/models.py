@@ -199,6 +199,7 @@ class DomainDNSCheck(Base):
     dkim_check = Column(JSONB)
     dmarc_check = Column(JSONB)
     tlsa_check = Column(JSONB)      # DANE/TLSA records for the domain's MX hosts
+    mta_sts_check = Column(JSONB)   # MTA-STS record + policy (RFC 8461)
     
     checked_at = Column(DateTime, nullable=False)
     is_full_check = Column(Boolean, default=False)

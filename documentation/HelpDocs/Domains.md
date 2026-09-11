@@ -56,6 +56,12 @@ The system automatically validates four critical DNS record types:
 - **Validation**: Warns when some MX hosts have no TLSA record, or when no record uses the recommended `3 1 1` form (DANE-EE, SPKI, SHA-256 - mailcow's default)
 - **Optional**: DANE requires a DNSSEC-signed zone. A domain without TLSA records gets an informational warning, never an error. Domains that do not accept mail (null MX) are skipped
 
+#### MTA-STS
+- **Purpose**: MTA-STS (RFC 8461) lets your domain tell sending servers to require TLS and verified certificates when delivering mail to you, closing the TLS-downgrade gap without DNSSEC
+- **How it works**: A TXT record at `_mta-sts.<domain>` points senders at a policy file served from `https://mta-sts.<domain>/.well-known/mta-sts.txt`. The check validates both, and verifies that your MX hosts are covered by the policy
+- **Statuses**: `enforce` mode with covered MX hosts is a pass. `testing` and `none` modes are warnings - the policy exists but does not protect delivery. A published record whose policy file cannot be fetched is an error, because enforcing senders treat that as a hard failure. An MX host missing from an enforced policy is an error - those senders will refuse to deliver through it
+- **Optional**: A domain without MTA-STS gets an informational warning, never an error
+
 ---
 
 ## How to Use
@@ -83,7 +89,7 @@ When you expand a domain, the DNS Security section shows:
 - Time of last validation
 
 ### DNS Change Alerts
-When a scheduled or manual check finds that a domain's SPF, DKIM, DMARC or TLSA record has **changed** since the previous check, an alert is sent by email and to your notification destinations (alert type "DNS record changes").
+When a scheduled or manual check finds that a domain's SPF, DKIM, DMARC, TLSA or MTA-STS record has **changed** since the previous check, an alert is sent by email and to your notification destinations (alert type "DNS record changes").
 - Only definite changes trigger an alert: a value that is present and different, or a record that verifiably disappeared
 - Failed lookups and timeouts are ignored, so a DNS hiccup never fires a false alarm
 - Controlled by the **DNS Change Alerts Enabled** toggle under **Settings → Notifications → Alert types** (on by default)

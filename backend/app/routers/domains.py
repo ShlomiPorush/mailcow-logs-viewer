@@ -8,6 +8,7 @@ import ipaddress
 from fastapi import APIRouter, HTTPException, Depends
 from typing import Dict, Any, List, Optional
 import dns.resolver
+import httpx
 import dns.asyncresolver
 from datetime import datetime, timezone, timedelta
 from sqlalchemy.orm import Session
@@ -1164,9 +1165,209 @@ async def check_tlsa_record(domain: str) -> Dict[str, Any]:
         }
 
 
+MTA_STS_POLICY_TIMEOUT = 10          # seconds for the HTTPS policy fetch
+MTA_STS_POLICY_MAX_BYTES = 64 * 1024  # RFC 8461 policies are a few lines; cap reads
+
+
+async def _fetch_mta_sts_policy(domain: str) -> str:
+    """Fetch https://mta-sts.<domain>/.well-known/mta-sts.txt.
+
+    Kept as a module-level function so tests can inject a fake fetcher, the
+    same way resolve_dns_with_fallback is injected for DNS.
+
+    RFC 8461: the policy host must present a valid certificate and HTTP
+    redirects must not be followed.
+    """
+    url = f"https://mta-sts.{domain}/.well-known/mta-sts.txt"
+    async with httpx.AsyncClient(timeout=MTA_STS_POLICY_TIMEOUT,
+                                 follow_redirects=False, verify=True) as client:
+        response = await client.get(url)
+        response.raise_for_status()
+        if len(response.content) > MTA_STS_POLICY_MAX_BYTES:
+            raise ValueError("policy file larger than expected")
+        return response.text
+
+
+def _parse_mta_sts_policy(text: str) -> Dict[str, Any]:
+    """Parse the key/value policy file. Returns {version, mode, max_age, mx: []}."""
+    policy: Dict[str, Any] = {'mx': []}
+    for line in text.replace('\r\n', '\n').split('\n'):
+        line = line.strip()
+        if not line or ':' not in line:
+            continue
+        key, _, value = line.partition(':')
+        key = key.strip().lower()
+        value = value.strip()
+        if key == 'mx':
+            policy['mx'].append(value)
+        elif key in ('version', 'mode', 'max_age'):
+            policy[key] = value
+    return policy
+
+
+def _mx_matches_policy(mx_host: str, patterns: List[str]) -> bool:
+    """RFC 8461 MX matching: exact host, or *.example.com matching one label."""
+    host = mx_host.lower().rstrip('.')
+    for pattern in patterns:
+        pat = pattern.lower().rstrip('.')
+        if pat.startswith('*.'):
+            suffix = pat[1:]              # ".example.com"
+            if host.endswith(suffix) and '.' not in host[:-len(suffix)]:
+                return True
+        elif host == pat:
+            return True
+    return False
+
+
+async def check_mta_sts_record(domain: str) -> Dict[str, Any]:
+    """
+    Check MTA-STS (RFC 8461) for a domain: the _mta-sts TXT record and the
+    policy file it points at, including whether the domain's MX hosts are
+    covered by the policy.
+
+    Returns the same shape as the other checks (status/message/record/warnings).
+    MTA-STS is optional, so a domain without it is a warning, not an error -
+    same convention as TLSA.
+    """
+    try:
+        # 1. The DNS record: exactly one v=STSv1 TXT at _mta-sts.<domain>
+        sts_records = []
+        try:
+            answers = await resolve_dns_with_fallback(f'_mta-sts.{domain}', 'TXT', timeout=5)
+            for rdata in answers:
+                txt = ''.join(
+                    s.decode() if isinstance(s, bytes) else str(s)
+                    for s in getattr(rdata, 'strings', [])
+                ) or str(rdata).strip('"')
+                if txt.lower().startswith('v=stsv1'):
+                    sts_records.append(txt)
+        except (dns.resolver.NXDOMAIN, dns.resolver.NoAnswer):
+            pass
+        except Exception as e:
+            return {
+                'status': 'unknown',
+                'message': f'Could not check MTA-STS record: {e}',
+                'record': None,
+                'warnings': [],
+            }
+
+        if not sts_records:
+            return {
+                'status': 'warning',
+                'message': 'MTA-STS record not published',
+                'record': None,
+                'warnings': [],
+                'info': ['Publish a TXT record at _mta-sts.' + domain +
+                         ' and a policy file to let senders require TLS for this domain'],
+            }
+
+        if len(sts_records) > 1:
+            return {
+                'status': 'error',
+                'message': f'{len(sts_records)} MTA-STS records published - senders ignore the record unless there is exactly one',
+                'record': '; '.join(sts_records),
+                'warnings': [],
+            }
+
+        record = sts_records[0]
+        id_match = re.search(r'id\s*=\s*([^;\s]+)', record)
+        policy_id = id_match.group(1) if id_match else None
+
+        # 2. The policy file behind the record
+        try:
+            policy_text = await _fetch_mta_sts_policy(domain)
+        except Exception as e:
+            return {
+                'status': 'error',
+                'message': f'MTA-STS record exists but the policy file could not be fetched: {e}',
+                'record': record,
+                'warnings': ['Senders that support MTA-STS treat a published record '
+                             'with an unreachable policy as a hard failure'],
+            }
+
+        policy = _parse_mta_sts_policy(policy_text)
+        warnings = []
+        info = []
+        mode = (policy.get('mode') or '').lower()
+
+        if (policy.get('version') or '').upper() != 'STSV1':
+            return {
+                'status': 'error',
+                'message': 'MTA-STS policy file is missing "version: STSv1"',
+                'record': record,
+                'warnings': [],
+            }
+        if mode not in ('enforce', 'testing', 'none'):
+            return {
+                'status': 'error',
+                'message': f'MTA-STS policy has an invalid mode: {policy.get("mode")!r}',
+                'record': record,
+                'warnings': [],
+            }
+
+        info.append(f'Mode: {mode}')
+        if policy_id:
+            info.append(f'Policy id: {policy_id}')
+        if policy.get('max_age'):
+            info.append(f'Max age: {policy["max_age"]} seconds')
+        if policy['mx']:
+            info.append('Policy MX: ' + ', '.join(policy['mx']))
+
+        # 3. Are the domain's actual MX hosts covered by the policy?
+        unmatched = []
+        try:
+            mx_answers = await resolve_dns_with_fallback(domain, 'MX', timeout=5)
+            mx_hosts = sorted({
+                str(getattr(r, 'exchange', '') or '').rstrip('.').strip()
+                for r in mx_answers
+            } - {''})
+            unmatched = [h for h in mx_hosts if not _mx_matches_policy(h, policy['mx'])]
+        except Exception:
+            mx_hosts = []   # MX lookup failure is not an MTA-STS problem
+
+        if unmatched:
+            missing = ', '.join(unmatched)
+            if mode == 'enforce':
+                return {
+                    'status': 'error',
+                    'message': f'MX not covered by the enforced MTA-STS policy: {missing} - senders will refuse to deliver through it',
+                    'record': record,
+                    'warnings': [],
+                    'info': info,
+                }
+            warnings.append(f'MX not covered by the policy: {missing}')
+
+        if mode == 'enforce':
+            status = 'success' if not warnings else 'warning'
+            message = 'MTA-STS enforced'
+        elif mode == 'testing':
+            status = 'warning'
+            message = 'MTA-STS policy is in testing mode - failures are reported but delivery is not protected'
+        else:
+            status = 'warning'
+            message = 'MTA-STS policy mode is "none" - the policy is effectively disabled'
+
+        return {
+            'status': status,
+            'message': message,
+            'record': record,
+            'warnings': warnings,
+            'info': info,
+        }
+
+    except Exception as e:
+        logger.error(f"Error checking MTA-STS for {domain}: {e}")
+        return {
+            'status': 'unknown',
+            'message': f'MTA-STS check failed: {str(e)}',
+            'record': None,
+            'warnings': [],
+        }
+
+
 async def check_domain_dns(domain: str, spf_source_ips: Optional[List[Dict[str, str]]] = None) -> Dict[str, Any]:
     """
-    Check all DNS records (SPF, DKIM, DMARC, TLSA) for a domain
+    Check all DNS records (SPF, DKIM, DMARC, TLSA, MTA-STS) for a domain
 
     Args:
         domain: Domain name to check
@@ -1179,11 +1380,12 @@ async def check_domain_dns(domain: str, spf_source_ips: Optional[List[Dict[str, 
     """
     try:
         # Run all checks in parallel
-        spf_result, dkim_result, dmarc_result, tlsa_result = await asyncio.gather(
+        spf_result, dkim_result, dmarc_result, tlsa_result, mta_sts_result = await asyncio.gather(
             check_spf_record(domain, spf_source_ips),
             check_dkim_record(domain),
             check_dmarc_record(domain),
-            check_tlsa_record(domain)
+            check_tlsa_record(domain),
+            check_mta_sts_record(domain)
         )
 
         return {
@@ -1192,6 +1394,7 @@ async def check_domain_dns(domain: str, spf_source_ips: Optional[List[Dict[str, 
             'dkim': dkim_result,
             'dmarc': dmarc_result,
             'tlsa': tlsa_result,
+            'mta_sts': mta_sts_result,
             'checked_at': format_datetime_for_api(datetime.now(timezone.utc))
         }
         
@@ -1326,6 +1529,7 @@ def detect_dns_changes(previous: Optional[DomainDNSCheck],
         ('dkim', 'DKIM', 'dkim_check'),
         ('dmarc', 'DMARC', 'dmarc_check'),
         ('tlsa', 'TLSA (DANE)', 'tlsa_check'),
+        ('mta_sts', 'MTA-STS', 'mta_sts_check'),
     ):
         old_check = getattr(previous, column, None)
         new_check = dns_data.get(key)
@@ -1392,6 +1596,7 @@ async def save_dns_check_to_db(db: Session, domain_name: str, dns_data: Dict[str
             existing.dkim_check = dns_data.get('dkim')
             existing.dmarc_check = dns_data.get('dmarc')
             existing.tlsa_check = dns_data.get('tlsa')
+            existing.mta_sts_check = dns_data.get('mta_sts')
             existing.checked_at = checked_at
             existing.updated_at = checked_at
             existing.is_full_check = is_full_check
@@ -1402,6 +1607,7 @@ async def save_dns_check_to_db(db: Session, domain_name: str, dns_data: Dict[str
                 dkim_check=dns_data.get('dkim'),
                 dmarc_check=dns_data.get('dmarc'),
                 tlsa_check=dns_data.get('tlsa'),
+                mta_sts_check=dns_data.get('mta_sts'),
                 checked_at=checked_at,
                 is_full_check=is_full_check
             )
@@ -1433,6 +1639,7 @@ def get_cached_dns_check(db: Session, domain_name: str) -> Dict[str, Any]:
                 'dkim': cached.dkim_check,
                 'dmarc': cached.dmarc_check,
                 'tlsa': cached.tlsa_check,
+                'mta_sts': cached.mta_sts_check,
                 'checked_at': format_datetime_for_api(cached.checked_at) if cached.checked_at else None
             }
         return None

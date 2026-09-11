@@ -5538,7 +5538,7 @@ Field specification per service type - used by the settings UI to render only th
   "alert_types": [
     {"id": "security", "label": "Security", "description": "Compromised mailbox detected, authentication attacks, SMTP disabled by abuse protection"},
     {"id": "blacklist", "label": "IP blacklist", "description": "Your server IP was listed on a spam blacklist, or is listed no more"},
-    {"id": "dns_changes", "label": "DNS record changes", "description": "A domain SPF, DKIM, DMARC or TLSA record changed"},
+    {"id": "dns_changes", "label": "DNS record changes", "description": "A domain SPF, DKIM, DMARC, TLSA or MTA-STS record changed"},
     {"id": "dmarc_errors", "label": "DMARC processing errors", "description": "A DMARC report could not be imported or parsed"}
   ]
 }
