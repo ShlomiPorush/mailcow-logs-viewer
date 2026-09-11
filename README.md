@@ -128,6 +128,8 @@ docker compose up -d
 # Open http://localhost:8080
 ```
 
+> **Image tags:** use `latest` (or a version tag like `2.7.1`). A `dev` tag also exists on the registries; it is an untested preview built between releases - do not run it on a production server.
+
 📖 **Full installation guide:** [Getting Started](documentation/GETTING_STARTED.md)
 
 📘 **Technical Overview: Email Authentication & Monitoring:** How can **mailcow-logs-viewer** help you with this [Read more](documentation/Email_Authentication_Monitoring.md)
