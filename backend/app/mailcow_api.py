@@ -9,7 +9,7 @@ import weakref
 from urllib.parse import quote
 from typing import List, Dict, Any, Optional
 from datetime import datetime
-from tenacity import retry, stop_after_attempt, wait_exponential
+from tenacity import retry, stop_after_attempt, wait_exponential, RetryError
 
 from .config import settings
 
@@ -329,6 +329,54 @@ class MailcowAPI:
             logger.error(f"Failed to fetch Rspamd logs page (offset={offset}): {e}")
             return []
     
+    async def get_raw_logs_range(self, service: str, offset: int, page_size: int) -> List[Dict[str, Any]]:
+        """
+        Fetch one page of raw logs for a service by position, newest first.
+
+        Used by the raw logs worker to page deeper than the newest N when it has
+        to catch up (first start, downtime, a burst larger than one page).
+
+        The range form is 1-based on the Redis-list services (1-4 equals the
+        newest 4) but 0-based on rspamd-history (1-4 starts at the second newest,
+        and 0-x is rejected); verified against a live instance. Requesting
+        start = offset, where offset is the number of lines already taken from
+        the head, never skips a line on either base: at worst it repeats the
+        previous page's last line, which the caller's hash dedup removes.
+
+        Args:
+            service: Service name from ALLOWED_RAW_LOG_SERVICES
+            offset: Number of lines already taken from the head (>= 1)
+            page_size: Lines to request
+
+        Returns:
+            List of raw log entries, or an empty list past the end of the list.
+
+        Raises:
+            ValueError for a bad service or offset.
+            MailcowAPIError when the request fails after the client's retries.
+        """
+        if service not in self.ALLOWED_RAW_LOG_SERVICES:
+            raise ValueError(f"Unknown raw log service: {service}")
+        if offset < 1 or page_size < 1:
+            raise ValueError("offset and page_size must be positive")
+
+        start = offset
+        end = offset + page_size - 1
+        endpoint = f"/api/v1/get/logs/{service}/{start}-{end}"
+        logger.debug(f"Fetching raw log range for {service}: {start}-{end}")
+        try:
+            data = await self._make_request(endpoint)
+        except RetryError as e:
+            # _make_request's retry decorator does not re-raise the original
+            # exception, so callers would otherwise have to know about tenacity.
+            last = e.last_attempt.exception() if e.last_attempt else None
+            raise MailcowAPIError(f"Range fetch failed for {service} {start}-{end}: {last}") from e
+
+        if isinstance(data, list):
+            return data
+        # mailcow answers {} past the end of the list and when a service has no logs
+        return []
+
     async def probe_log_position(self, log_type: str, position: int) -> bool:
         """
         Check if a log exists at the given position.

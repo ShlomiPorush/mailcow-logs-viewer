@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **Live Logs could miss lines during a burst or after downtime** - the Logs page collector only ever asked mailcow for the newest 1000 lines per service, so anything that arrived beyond that between two 30-second cycles, or while the app was stopped, was never collected. For Postfix and Rspamd it now notices when a whole page is new, pages deeper with mailcow's range form until it reaches lines it already has or the end of mailcow's buffer, and spreads a long catch-up over several cycles. A quiet server does exactly the same single request per service as before; extra requests happen only when there is something to recover
+
+
 ## [2.7.1] - 2026-09-10
 
 ### Added
