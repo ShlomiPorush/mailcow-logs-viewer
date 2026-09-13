@@ -5033,26 +5033,48 @@ function renderDovecotTimeline(dovecot) {
     `;
 }
 
-function renderRelatedDeliveries(deliveries) {
-    // A forwarded or otherwise re-submitted message is delivered twice under
-    // one Message-ID (issue #36). Each delivery is a Messages entry of its
-    // own; this links them so neither leg reads as the whole story.
-    if (!deliveries || deliveries.length === 0) return '';
+function renderRelatedDeliveries(data) {
+    // A forwarded or otherwise re-submitted message is delivered several
+    // times under one Message-ID (issue #36). Shown as one chronological
+    // journey - the current leg included - so the sequence of deliveries
+    // explains itself.
+    const others = data.related_deliveries;
+    if (!others || others.length === 0) return '';
+
+    const legs = others.concat([{
+        correlation_key: data.correlation_key,
+        sender: data.sender,
+        recipient: data.recipient,
+        direction: data.direction,
+        final_status: data.final_status,
+        first_seen: data.first_seen,
+        queue_id: data.queue_id,
+        dovecot_status: data.dovecot ? data.dovecot.status : null,
+        dovecot_mailbox: data.dovecot ? data.dovecot.mailbox : null,
+        current: true
+    }]).sort((a, b) => (a.first_seen || '9') < (b.first_seen || '9') ? -1 : 1);
 
     return `
         <div class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-3 sm:p-4 mt-3">
-            <div class="flex items-center justify-between mb-3">
-                <h4 class="text-sm sm:text-md font-semibold text-gray-900 dark:text-white">Related deliveries of this message</h4>
-                <span class="text-xs text-gray-500 dark:text-gray-400">${deliveries.length}</span>
-            </div>
+            <h4 class="text-sm sm:text-md font-semibold text-gray-900 dark:text-white">Delivery journey</h4>
+            <p class="text-xs text-gray-500 dark:text-gray-400 mt-1 mb-3">This message went through the server ${legs.length} times. The original delivery, a forward, a copy or a quarantine release each count as a delivery of their own.</p>
             <div class="space-y-2">
-                ${deliveries.map(leg => `
-                    <div class="p-3 bg-gray-50 dark:bg-gray-700/50 rounded hover:bg-gray-100 dark:hover:bg-gray-700 transition cursor-pointer" onclick="viewMessageDetails('${escapeHtml(leg.correlation_key)}')">
+                ${legs.map((leg, i) => `
+                    <div class="p-3 rounded ${leg.current
+                        ? 'bg-blue-50 dark:bg-blue-900/20 border border-blue-300 dark:border-blue-700'
+                        : 'bg-gray-50 dark:bg-gray-700/50 hover:bg-gray-100 dark:hover:bg-gray-700 transition cursor-pointer'}"
+                        ${leg.current ? '' : `onclick="viewMessageDetails('${escapeHtml(leg.correlation_key)}')"`}>
                         <div class="flex justify-between items-start gap-2 flex-wrap">
-                            <span class="text-sm text-gray-900 dark:text-white break-all">${escapeHtml(leg.sender || '-')} =&gt; ${escapeHtml(leg.recipient || '-')}</span>
+                            <div class="flex items-center gap-2 min-w-0">
+                                <span class="text-xs font-semibold text-gray-400 dark:text-gray-500 flex-shrink-0">${i + 1}.</span>
+                                <span class="text-sm text-gray-900 dark:text-white break-all">${escapeHtml(leg.sender || '-')} =&gt; ${escapeHtml(leg.recipient || '-')}</span>
+                                ${leg.current ? '<span class="text-xs px-2 py-0.5 rounded bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 flex-shrink-0">viewing</span>' : ''}
+                            </div>
                             <div class="flex items-center gap-2 flex-wrap">
-                                ${leg.final_status ? `<span class="text-xs px-2 py-0.5 rounded ${getStatusClass(leg.final_status)}">${escapeHtml(leg.final_status)}</span>` : ''}
-                                ${leg.direction ? `<span class="text-xs px-2 py-0.5 rounded ${getDirectionClass(leg.direction)}">${escapeHtml(leg.direction)}</span>` : ''}
+                                ${leg.final_status
+                                    ? `<span class="text-xs px-2 py-0.5 rounded ${getStatusClass(leg.final_status)}">${escapeHtml(leg.final_status)}</span>`
+                                    : '<span class="text-xs px-2 py-0.5 rounded bg-gray-200 dark:bg-gray-600 text-gray-600 dark:text-gray-300" title="This delivery attempt never reached a final outcome">no final status</span>'}
+                                ${leg.dovecot_status === 'stored' && leg.dovecot_mailbox ? `<span class="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded bg-gray-200 dark:bg-gray-600 text-gray-600 dark:text-gray-300">${folderIconSvg('w-3 h-3')}${escapeHtml(leg.dovecot_mailbox)}</span>` : ''}
                                 <span class="text-xs font-mono text-gray-500 dark:text-gray-400">${formatTime(leg.first_seen)}</span>
                             </div>
                         </div>
@@ -5162,7 +5184,7 @@ function renderOverviewTab(content, data) {
                         </div>
                     </div>
                 </div>
-                ${renderRelatedDeliveries(data.related_deliveries)}
+                ${renderRelatedDeliveries(data)}
                 ${renderDovecotSummary(data.dovecot)}
                 ${data.rspamd ? `
                     <div class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-3 sm:p-4 mt-1">

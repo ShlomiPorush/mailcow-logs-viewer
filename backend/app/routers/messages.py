@@ -397,6 +397,9 @@ def get_message_full_details(
                     "direction": leg.direction,
                     "final_status": leg.final_status,
                     "first_seen": format_datetime_utc(leg.first_seen),
+                    "queue_id": leg.queue_id,
+                    "dovecot_status": leg.dovecot_status,
+                    "dovecot_mailbox": leg.dovecot_mailbox,
                 }
                 for leg in other_legs
             ]

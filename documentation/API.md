@@ -1341,7 +1341,10 @@ Get complete message details with all related logs.
       "recipient": "forward-target@example.org",
       "direction": "outbound",
       "final_status": "rejected",
-      "first_seen": "2025-12-25T10:30:07Z"
+      "first_seen": "2025-12-25T10:30:07Z",
+      "queue_id": "5D9C86E1234",
+      "dovecot_status": null,
+      "dovecot_mailbox": null
     }
   ],
   "rspamd": {
