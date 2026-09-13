@@ -709,6 +709,7 @@ function renderMessagesData(data) {
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
                                 </svg>
                                 <span class="text-sm text-gray-600 dark:text-gray-300">${escapeHtml(msg.recipient || 'Unknown')}</span>
+                                ${renderDeliveriesChip(msg)}
                             </div>
                             <p class="text-xs text-gray-500 dark:text-gray-400 truncate" title="${escapeHtml(msg.subject || 'No subject')}">${escapeHtml(msg.subject || 'No subject')}</p>
                         </div>
@@ -722,7 +723,6 @@ function renderMessagesData(data) {
         })()}
                             ${msg.direction ? `<span class="inline-block px-2 py-0.5 text-xs font-medium rounded ${getDirectionClass(msg.direction)}">${msg.direction}</span>` : ''}
                             ${msg.is_spam !== null ? `<span class="inline-block px-2 py-0.5 text-xs font-medium rounded ${msg.is_spam ? 'bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-300' : 'bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300'}">${msg.is_spam ? 'SPAM' : 'CLEAN'}</span>` : ''}
-                            ${renderDeliveriesChip(msg)}
                         </div>
                     </div>
                     <div class="flex flex-wrap items-center gap-4 text-xs text-gray-500 dark:text-gray-400">
@@ -3831,6 +3831,7 @@ async function loadMessages(page = 1) {
                                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
                                     </svg>
                                     <span class="text-sm text-gray-600 dark:text-gray-300">${escapeHtml(msg.recipient || 'Unknown')}</span>
+                                    ${renderDeliveriesChip(msg)}
                                 </div>
                                 <p class="text-xs text-gray-500 dark:text-gray-400 truncate" title="${escapeHtml(msg.subject || 'No subject')}">${escapeHtml(msg.subject || 'No subject')}</p>
                             </div>
@@ -3844,7 +3845,6 @@ async function loadMessages(page = 1) {
             })()}
                                 ${msg.direction ? `<span class="inline-block px-2 py-0.5 text-xs font-medium rounded ${getDirectionClass(msg.direction)}">${msg.direction}</span>` : ''}
                                 ${msg.is_spam !== null ? `<span class="inline-block px-2 py-0.5 text-xs font-medium rounded ${msg.is_spam ? 'bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-300' : 'bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300'}">${msg.is_spam ? 'SPAM' : 'CLEAN'}</span>` : ''}
-                                ${renderDeliveriesChip(msg)}
                             </div>
                         </div>
                         <div class="flex flex-wrap items-center gap-4 text-xs text-gray-500 dark:text-gray-400">
@@ -5092,10 +5092,17 @@ function renderRelatedDeliveries(data) {
         current: true
     }]).sort((a, b) => (a.first_seen || '9') < (b.first_seen || '9') ? -1 : 1);
 
+    const statusCounts = {};
+    legs.forEach(leg => {
+        const s = leg.final_status || 'never completed';
+        statusCounts[s] = (statusCounts[s] || 0) + 1;
+    });
+    const statusSummary = Object.entries(statusCounts).map(([s, n]) => `${n} ${escapeHtml(s)}`).join(', ');
+
     return `
         <div class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-3 sm:p-4 mt-3">
             <h4 class="text-sm sm:text-md font-semibold text-gray-900 dark:text-white">Delivery journey</h4>
-            <p class="text-xs text-gray-500 dark:text-gray-400 mt-1 mb-3">This message went through the server ${legs.length} times. The original delivery, a forward, a copy or a quarantine release each count as a delivery of their own.</p>
+            <p class="text-xs text-gray-500 dark:text-gray-400 mt-1 mb-3">This message passed through the server ${legs.length} times: ${statusSummary}.</p>
             <div class="space-y-2">
                 ${legs.map((leg, i) => `
                     <div class="p-3 rounded ${leg.current
@@ -5112,7 +5119,7 @@ function renderRelatedDeliveries(data) {
                                 ${leg.final_status
                                     ? `<span class="text-xs px-2 py-0.5 rounded ${getStatusClass(leg.final_status)}">${escapeHtml(leg.final_status)}</span>`
                                     : '<span class="text-xs px-2 py-0.5 rounded bg-gray-200 dark:bg-gray-600 text-gray-600 dark:text-gray-300" title="This delivery attempt never reached a final outcome">no final status</span>'}
-                                ${leg.dovecot_status === 'stored' && leg.dovecot_mailbox ? `<span class="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded bg-gray-200 dark:bg-gray-600 text-gray-600 dark:text-gray-300">${folderIconSvg('w-3 h-3')}${escapeHtml(leg.dovecot_mailbox)}</span>` : ''}
+                                ${leg.dovecot_status === 'stored' && leg.dovecot_mailbox ? `<span class="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded bg-amber-100 dark:bg-amber-900/30 text-amber-800 dark:text-amber-300">${folderIconSvg('w-3 h-3')}${escapeHtml(leg.dovecot_mailbox)}</span>` : ''}
                                 <span class="text-xs font-mono text-gray-500 dark:text-gray-400">${formatTime(leg.first_seen)}</span>
                             </div>
                         </div>
