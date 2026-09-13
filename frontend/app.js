@@ -4909,7 +4909,7 @@ function renderMailboxFolderHint(msg) {
     if (msg.dovecot_status !== 'stored') return '';
     const folder = msg.dovecot_mailbox;
     if (!folder) return '';
-    return `<span class="inline-flex items-center gap-1">${folderIconSvg('w-3 h-3')}${escapeHtml(folder)}</span>`;
+    return `<span>Folder: ${escapeHtml(folder)}</span>`;
 }
 
 function folderIconSvg(sizeClasses) {
@@ -5005,29 +5005,56 @@ function renderDovecotSummary(dovecot) {
     `;
 }
 
-function renderDovecotTimeline(dovecot) {
-    if (!dovecot || !dovecot.logs || dovecot.logs.length === 0) return '';
+function renderDovecotTimelineRow(log) {
+    return `
+        <div class="p-3 bg-gray-50 dark:bg-gray-700/50 rounded hover:bg-gray-100 dark:hover:bg-gray-700 transition">
+            <div class="flex justify-between items-start mb-1">
+                <div class="flex items-center gap-2 flex-wrap">
+                    <span class="text-xs font-mono text-gray-600 dark:text-gray-300">${formatTime(log.time)}</span>
+                    <span class="text-xs px-2 py-0.5 rounded bg-purple-100 dark:bg-purple-900/30 text-purple-800 dark:text-purple-300">dovecot</span>
+                    ${log.recipient ? `<span class="text-xs text-gray-500 dark:text-gray-400">=> ${escapeHtml(log.recipient)}</span>` : ''}
+                </div>
+                ${log.verdict && DOVECOT_VERDICTS[log.verdict] ? `<span class="text-xs px-2 py-0.5 rounded ${getStatusClass(log.verdict === 'stored' ? 'delivered' : log.verdict)}">${log.verdict}</span>` : ''}
+            </div>
+            <p class="text-xs font-mono text-gray-700 dark:text-gray-300 break-all">${escapeHtml(log.message || '')}</p>
+        </div>
+    `;
+}
+
+function renderPostfixTimelineRow(log) {
+    return `
+        <div class="p-3 bg-gray-50 dark:bg-gray-700/50 rounded hover:bg-gray-100 dark:hover:bg-gray-700 transition">
+            <div class="flex justify-between items-start mb-1">
+                <div class="flex items-center gap-2 flex-wrap">
+                    <span class="text-xs font-mono text-gray-600 dark:text-gray-300">${formatTime(log.time)}</span>
+                    ${log.program ? `<span class="text-xs px-2 py-0.5 rounded bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-300">${log.program}</span>` : ''}
+                    ${log.recipient ? `<span class="text-xs text-gray-500 dark:text-gray-400">=> ${escapeHtml(log.recipient)}</span>` : ''}
+                </div>
+                ${log.status ? `<span class="inline-block px-2 py-0.5 text-xs font-medium rounded ${getStatusClass(log.status)}">${log.status}</span>` : ''}
+            </div>
+            <p class="text-xs text-gray-700 dark:text-gray-300 font-mono break-all leading-relaxed">${escapeHtml(log.message)}</p>
+            ${log.relay ? `<p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Relay: ${escapeHtml(log.relay)}</p>` : ''}
+            ${log.delay ? `<p class="text-xs text-gray-500 dark:text-gray-400">Delay: ${log.delay.toFixed(2)}s</p>` : ''}
+        </div>
+    `;
+}
+
+// One chronological timeline for the whole delivery: Postfix lines and the
+// Dovecot LMTP lines of the last hop, interleaved by time - each line already
+// carries its program tag, so no separate section is needed.
+function renderLogTimeline(postfixLogs, dovecotLogs) {
+    const entries = (postfixLogs || []).map(log => ({ dovecot: false, log }))
+        .concat((dovecotLogs || []).map(log => ({ dovecot: true, log })))
+        .sort((a, b) => ((a.log.time || '') < (b.log.time || '') ? -1 : 1));
 
     return `
         <div>
             <div class="flex items-center justify-between mb-3">
-                <h4 class="text-md font-semibold text-gray-900 dark:text-white">Dovecot Delivery (LMTP)</h4>
-                <span class="text-xs text-gray-500 dark:text-gray-400">${dovecot.logs.length} entries</span>
+                <h4 class="text-md font-semibold text-gray-900 dark:text-white">Complete Log Timeline</h4>
+                <span class="text-xs text-gray-500 dark:text-gray-400">${entries.length} entries</span>
             </div>
             <div class="space-y-2 max-h-96 overflow-y-auto">
-                ${dovecot.logs.map(log => `
-                    <div class="p-3 bg-gray-50 dark:bg-gray-700/50 rounded hover:bg-gray-100 dark:hover:bg-gray-700 transition">
-                        <div class="flex justify-between items-start mb-1">
-                            <div class="flex items-center gap-2 flex-wrap">
-                                <span class="text-xs font-mono text-gray-600 dark:text-gray-300">${formatTime(log.time)}</span>
-                                <span class="text-xs px-2 py-0.5 rounded bg-purple-100 dark:bg-purple-900/30 text-purple-800 dark:text-purple-300">dovecot</span>
-                                ${log.recipient ? `<span class="text-xs text-gray-500 dark:text-gray-400">=> ${escapeHtml(log.recipient)}</span>` : ''}
-                            </div>
-                            ${log.verdict && DOVECOT_VERDICTS[log.verdict] ? `<span class="text-xs px-2 py-0.5 rounded ${getStatusClass(log.verdict === 'stored' ? 'delivered' : log.verdict)}">${log.verdict}</span>` : ''}
-                        </div>
-                        <p class="text-xs font-mono text-gray-700 dark:text-gray-300 break-all">${escapeHtml(log.message || '')}</p>
-                    </div>
-                `).join('')}
+                ${entries.map(e => e.dovecot ? renderDovecotTimelineRow(e.log) : renderPostfixTimelineRow(e.log)).join('')}
             </div>
         </div>
     `;
@@ -5109,7 +5136,7 @@ function renderOverviewTab(content, data) {
                                     <div class="flex items-center gap-2 flex-wrap">
                                         ${data.final_status ? `<span class="inline-block px-3 py-1 text-xs font-medium rounded ${getStatusClass(data.final_status)}">${data.final_status}</span>` : ''}
                                         ${data.direction ? `<span class="inline-block px-3 py-1 text-xs font-medium rounded ${getDirectionClass(data.direction)}">${data.direction}</span>` : ''}
-                                        ${data.dovecot && data.dovecot.status === 'stored' && data.dovecot.mailbox ? `<span class="inline-flex items-center gap-1.5 px-3 py-1 text-xs font-medium rounded bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300">${folderIconSvg('w-3.5 h-3.5')}${escapeHtml(data.dovecot.mailbox)}</span>` : ''}
+                                        ${data.dovecot && data.dovecot.status === 'stored' && data.dovecot.mailbox ? `<span class="inline-flex items-center gap-1.5 px-3 py-1 text-xs font-medium rounded bg-amber-100 dark:bg-amber-900/30 text-amber-800 dark:text-amber-300">${folderIconSvg('w-3.5 h-3.5')}${escapeHtml(data.dovecot.mailbox)}</span>` : ''}
                                     </div>
                                 </div>
                             ` : ''}
@@ -5199,15 +5226,15 @@ function renderOverviewTab(content, data) {
 }
 
 function renderPostfixTab(content, data) {
-    // Dovecot handles the hop after Postfix, so its lines belong in this
-    // timeline as well - and they can exist even when Postfix logs do not.
-    const dovecotTimeline = renderDovecotTimeline(data.dovecot);
+    // Dovecot handles the hop after Postfix, so its lines are part of the
+    // same delivery timeline, interleaved by time and tagged per line.
+    const dovecotLogs = (data.dovecot && data.dovecot.logs) ? data.dovecot.logs : [];
 
     if (!data.postfix || data.postfix.length === 0) {
-        content.innerHTML = dovecotTimeline ? `
+        content.innerHTML = dovecotLogs.length ? `
             <div class="space-y-6">
                 <p class="text-sm text-gray-500 dark:text-gray-400">No Postfix delivery logs available</p>
-                ${dovecotTimeline}
+                ${renderLogTimeline([], dovecotLogs)}
             </div>
         ` : `
             <div class="text-center py-12">
@@ -5374,30 +5401,7 @@ function renderPostfixTab(content, data) {
             ` : ''}
             
             <!-- Complete Log Timeline - ALWAYS show all logs -->
-            <div>
-                <div class="flex items-center justify-between mb-3">
-                    <h4 class="text-md font-semibold text-gray-900 dark:text-white">Complete Log Timeline</h4>
-                    <span class="text-xs text-gray-500 dark:text-gray-400">${data.postfix.length} entries</span>
-                </div>
-                <div class="space-y-2 max-h-96 overflow-y-auto">
-                    ${data.postfix.map(log => `
-                        <div class="p-3 bg-gray-50 dark:bg-gray-700/50 rounded hover:bg-gray-100 dark:hover:bg-gray-700 transition">
-                            <div class="flex justify-between items-start mb-1">
-                                <div class="flex items-center gap-2 flex-wrap">
-                                    <span class="text-xs font-mono text-gray-600 dark:text-gray-300">${formatTime(log.time)}</span>
-                                    ${log.program ? `<span class="text-xs px-2 py-0.5 rounded bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-300">${log.program}</span>` : ''}
-                                    ${log.recipient ? `<span class="text-xs text-gray-500 dark:text-gray-400">=> ${escapeHtml(log.recipient)}</span>` : ''}
-                                </div>
-                                ${log.status ? `<span class="inline-block px-2 py-0.5 text-xs font-medium rounded ${getStatusClass(log.status)}">${log.status}</span>` : ''}
-                            </div>
-                            <p class="text-xs text-gray-700 dark:text-gray-300 font-mono break-all leading-relaxed">${escapeHtml(log.message)}</p>
-                            ${log.relay ? `<p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Relay: ${escapeHtml(log.relay)}</p>` : ''}
-                            ${log.delay ? `<p class="text-xs text-gray-500 dark:text-gray-400">Delay: ${log.delay.toFixed(2)}s</p>` : ''}
-                        </div>
-                    `).join('')}
-                </div>
-            </div>
-            ${dovecotTimeline}
+            ${renderLogTimeline(data.postfix, dovecotLogs)}
         </div>
     `;
 }
