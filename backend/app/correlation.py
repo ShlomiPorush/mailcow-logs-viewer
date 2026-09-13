@@ -819,8 +819,15 @@ def update_correlation_with_rspamd(
         correlation.subject = rspamd_log.subject
     
     if not correlation.direction:
-        correlation.direction = rspamd_log.direction
-    
+        direction = rspamd_log.direction
+        if direction == 'internal' and not origin_is_local(rspamd_log):
+            # A stored 'internal' from the earlier, laxer classification that
+            # ignored the origin - re-derive instead of inheriting it
+            direction = 'outbound' if (rspamd_log.has_auth or (
+                rspamd_log.user and rspamd_log.user != 'unknown')) else 'inbound'
+            rspamd_log.direction = direction
+        correlation.direction = direction
+
     # Update status if Rspamd has stronger verdict
     if rspamd_log.action == 'reject':
         correlation.final_status = 'rejected'
