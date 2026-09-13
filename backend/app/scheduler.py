@@ -2430,20 +2430,26 @@ async def check_all_domains_dns_background():
         from .routers.domains import get_spf_source_ips
         spf_source_ips = await get_spf_source_ips()
 
-        for domain_data in domains:
-            domain_name = domain_data.get('domain_name')
-            if not domain_name or domain_data.get('active', 0) != 1:
-                continue
+        # Alias domains are real sending domains with their own DNS records
+        # (issue #92): check them too, right after their targets
+        names = [d.get('domain_name') for d in domains
+                 if d.get('domain_name') and d.get('active', 0) == 1]
+        try:
+            alias_map = await mailcow_api.get_alias_domain_map()
+            names.extend(a for a in sorted(alias_map.keys()) if a not in names)
+        except Exception as e:
+            logger.warning(f"[DNS] Could not fetch alias domains for the check: {e}")
 
+        for domain_name in names:
             try:
                 dns_data = await check_domain_dns(domain_name, spf_source_ips)
 
                 with get_db_context() as db:
                     await save_dns_check_to_db(db, domain_name, dns_data, is_full_check=True)
-                
+
                 checked_count += 1
                 await asyncio.sleep(0.5)
-                
+
             except asyncio.CancelledError:
                 logger.info("DNS check interrupted by shutdown")
                 return
@@ -2473,11 +2479,23 @@ async def sync_local_domains():
     
     try:
         active_domains = await mailcow_api.get_active_domains()
-        alias_domains = await mailcow_api.get_alias_domains()
+        alias_map = await mailcow_api.get_alias_domain_map()
+        alias_domains = sorted(alias_map.keys())
         # Merge: primary domains + alias domains (no duplicates)
         all_domains = list(dict.fromkeys((active_domains or []) + (alias_domains or [])))
         if all_domains:
             set_cached_active_domains(all_domains)
+            # Persist which primary domain each alias points at, so mailbox
+            # statistics and the Domains page can use the mapping (issue #92)
+            try:
+                from .services.alias_domains import (persist_alias_domain_map,
+                                                     set_cached_alias_domain_map)
+                with get_db_context() as db:
+                    persist_alias_domain_map(db, alias_map)
+                    db.commit()
+                set_cached_alias_domain_map(alias_map)
+            except Exception as e:
+                logger.warning(f"Could not persist the alias domain map: {e}")
             logger.info(f"✓ Local domains synced: {len(active_domains or [])} primary, {len(alias_domains or [])} alias → {len(all_domains)} total")
             update_job_status('sync_local_domains', 'success')
             return True

@@ -724,6 +724,30 @@ class MailcowAPI:
             if active:
                 logger.info(f"Found {len(active)} active alias domains: {', '.join(active)}")
             return active
+
+        except MailcowAPIError as e:
+            logger.error(f"Failed to fetch alias domains: {e}")
+            return []
+
+    async def get_alias_domain_map(self) -> Dict[str, str]:
+        """
+        Fetch active alias domains WITH their targets: {alias_domain: target_domain}.
+
+        get_alias_domains() above returns only the names (enough for direction
+        classification); mailbox attribution and the Domains page need to know
+        which primary domain each alias points at.
+        """
+        logger.info("Fetching alias domain map")
+        try:
+            data = await self._make_request("/api/v1/get/alias-domain/all")
+            if not isinstance(data, list):
+                return {}
+            return {
+                item['alias_domain'].lower(): item['target_domain'].lower()
+                for item in data
+                if item.get('active', 0) == 1
+                and item.get('alias_domain') and item.get('target_domain')
+            }
         except MailcowAPIError as e:
             logger.error(f"Failed to fetch alias domains: {e}")
             return []

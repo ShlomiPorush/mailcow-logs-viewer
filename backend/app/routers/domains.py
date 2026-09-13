@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import text, func
 from app.database import get_db
 from app.models import DomainDNSCheck, DMARCReport, DMARCRecord
+from app.services.alias_domains import get_alias_domain_map, aliases_of_domain
 from app.utils import format_datetime_for_api
 from app.config import settings
 from app.mailcow_api import mailcow_api
@@ -1428,6 +1429,8 @@ async def get_all_domains_with_dns(db: Session = Depends(get_db)):
                 'last_dns_check': format_datetime_for_api(last_check.checked_at) if (last_check and last_check.checked_at) else None
             }
         
+        alias_domain_map = get_alias_domain_map(db)
+
         result_domains = []
         for domain_data in domains:
             domain_name = domain_data.get('domain_name')
@@ -1436,6 +1439,16 @@ async def get_all_domains_with_dns(db: Session = Depends(get_db)):
             
             # Get cached DNS check
             dns_checks = get_cached_dns_check(db, domain_name)
+
+            # Alias domains of this domain, with their own cached checks
+            # (issue #92) - they are real sending domains with their own DNS
+            alias_entries = [
+                {
+                    'domain_name': alias_name,
+                    'dns_checks': get_cached_dns_check(db, alias_name) or {},
+                }
+                for alias_name in aliases_of_domain(domain_name, alias_domain_map)
+            ]
             
             result_domains.append({
                 'domain_name': domain_name,
@@ -1454,7 +1467,8 @@ async def get_all_domains_with_dns(db: Session = Depends(get_db)):
                 'backupmx': domain_data.get('backupmx', 0) == 1,
                 'relay_all_recipients': domain_data.get('relay_all_recipients', 0) == 1,
                 'relay_unknown_only': domain_data.get('relay_unknown_only', 0) == 1,
-                'dns_checks': dns_checks or {}
+                'dns_checks': dns_checks or {},
+                'alias_domains': alias_entries
             })
         
         active_count = sum(1 for d in result_domains if d.get('active'))
@@ -1671,10 +1685,11 @@ async def check_all_domains_dns_manual(db: Session = Depends(get_db)):
         # Sources do not depend on the domain: resolve once per batch
         spf_source_ips = await get_spf_source_ips()
 
-        for domain_data in active_domains:
-            domain_name = domain_data.get('domain_name')
-            if not domain_name:
-                continue
+        names = [d.get('domain_name') for d in active_domains if d.get('domain_name')]
+        # Alias domains are real sending domains: check them too (issue #92)
+        names.extend(a for a in sorted(get_alias_domain_map(db).keys()) if a not in names)
+
+        for domain_name in names:
 
             try:
                 dns_data = await check_domain_dns(domain_name, spf_source_ips)
@@ -1683,7 +1698,7 @@ async def check_all_domains_dns_manual(db: Session = Depends(get_db)):
             except Exception as e:
                 errors.append(f"{domain_name}: {str(e)}")
         
-        status = 'success' if checked_count == len(active_domains) else 'partial'
+        status = 'success' if checked_count == len(names) else 'partial'
         
         return {
             'status': status,
