@@ -130,6 +130,36 @@ def test_tainted_stored_internal_is_rederived(env):
         assert rlog.direction == 'inbound'
 
 
+def test_leg_created_before_its_scan_is_corrected(env):
+    """A leg created from Postfix lines alone reads as internal (no scan =
+    host-local); when the real Rspamd scan attaches and shows an outside
+    origin, the classification must be corrected."""
+    from app.database import get_db_context
+    from app.models import PostfixLog, RspamdLog
+    from app.correlation import correlate_postfix_log
+    with get_db_context() as db:
+        now = datetime.utcnow()
+        msgid = f'late-scan-{MARK}@relay.example'
+        queue = uuid.uuid4().hex[:11].upper()
+        plog = PostfixLog(time=now, program='postfix/lmtp', message=f'{queue}: seeded',
+                          queue_id=queue, message_id=msgid,
+                          sender=f'user@{LOCAL_A}', recipient=f'someone@{LOCAL_B}',
+                          status='sent', relay='dovecot')
+        db.add(plog)
+        db.commit()
+        rlog = RspamdLog(time=now, message_id=msgid,
+                         sender_smtp=f'user@{LOCAL_A}',
+                         recipients_smtp=[f'someone@{LOCAL_B}'],
+                         action='no action', is_spam=False, direction='inbound',
+                         ip='212.199.162.78', user='unknown', has_auth=False)
+        db.add(rlog)
+        db.commit()
+        c = correlate_rspamd_log(db, rlog)
+        assert c is not None
+        assert c.direction != 'internal', \
+            'the late-arriving external-origin scan must win over the no-scan assumption'
+
+
 def test_origin_helper_edge_cases():
     from app.correlation import origin_is_local
     class Stub:

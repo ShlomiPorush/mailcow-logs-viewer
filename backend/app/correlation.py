@@ -827,6 +827,13 @@ def update_correlation_with_rspamd(
                 rspamd_log.user and rspamd_log.user != 'unknown')) else 'inbound'
             rspamd_log.direction = direction
         correlation.direction = direction
+    elif correlation.direction == 'internal' and not origin_is_local(rspamd_log):
+        # The leg was classified before its Rspamd evidence existed (created
+        # from Postfix lines alone, where a missing scan reads as host-local).
+        # The scan that just arrived shows an outside origin - correct it.
+        correlation.direction = 'outbound' if (rspamd_log.has_auth or (
+            rspamd_log.user and rspamd_log.user != 'unknown')) else 'inbound'
+        rspamd_log.direction = correlation.direction
 
     # Update status if Rspamd has stronger verdict
     if rspamd_log.action == 'reject':
