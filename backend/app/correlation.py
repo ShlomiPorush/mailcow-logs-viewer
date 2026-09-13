@@ -9,6 +9,7 @@ Now that every message has a Message-ID, we can simplify:
 
 BLACKLIST filtering is done at import time (in scheduler.py)
 """
+import ipaddress
 import logging
 import re
 import hashlib
@@ -21,6 +22,35 @@ from .models import MessageCorrelation, PostfixLog, RspamdLog
 from .config import settings
 
 logger = logging.getLogger(__name__)
+
+
+def origin_is_local(rspamd_log: Optional[RspamdLog]) -> bool:
+    """
+    Whether the message entered the server from the inside.
+
+    A locally hosted sender domain is not enough to call a message internal:
+    mail for a hosted domain can arrive from an outside relay (for example a
+    message sent through Microsoft 365 carries a local sender address but
+    enters from the internet). The origin counts as local when the submission
+    was authenticated (SMTP auth / MAILCOW_AUTH) or came from a private or
+    loopback address; a message that never passed Rspamd was generated on the
+    host itself.
+    """
+    if rspamd_log is None:
+        return True
+    if getattr(rspamd_log, 'has_auth', False):
+        return True
+    user = getattr(rspamd_log, 'user', None)
+    if user and user != 'unknown':
+        return True
+    ip = getattr(rspamd_log, 'ip', None)
+    if not ip:
+        return True
+    try:
+        addr = ipaddress.ip_address(ip)
+    except ValueError:
+        return False
+    return addr.is_private or addr.is_loopback
 
 
 def extract_domain(email: str) -> Optional[str]:
@@ -672,8 +702,9 @@ def create_correlation_with_all_data(
     else:
         all_recipients_local = False
     
-    # Only mark as internal if: relay=dovecot AND sender is local AND all recipients are local
-    if sender_is_local and all_recipients_local:
+    # Internal needs relay=dovecot, local sender, local recipients AND a local
+    # origin - a hosted sender domain arriving from an outside relay is inbound
+    if sender_is_local and all_recipients_local and origin_is_local(rspamd_log):
         for plog in postfix_logs:
             if plog.relay and 'dovecot' in plog.relay.lower():
                 direction = 'internal'
@@ -887,14 +918,16 @@ def update_correlation_with_postfix_log(
         sender_is_local = sender_domain and is_local_domain(sender_domain)
         recipient_is_local = recipient_domain and is_local_domain(recipient_domain)
         
-        # Only mark as internal if both sender and recipient are local domains
+        # Internal needs local sender, local recipient AND a local origin - a
+        # hosted sender domain arriving from an outside relay is inbound
         if sender_is_local and recipient_is_local:
-            correlation.direction = 'internal'
-            # Also update Rspamd log if it exists
+            rspamd_log = None
             if correlation.rspamd_log_id:
                 rspamd_log = db.query(RspamdLog).filter(
                     RspamdLog.id == correlation.rspamd_log_id
                 ).first()
+            if origin_is_local(rspamd_log):
+                correlation.direction = 'internal'
                 if rspamd_log:
                     rspamd_log.direction = 'internal'
     
@@ -984,14 +1017,16 @@ def update_correlation_with_postfix_logs(
                 is_internal = True
                 break
     
-    # Update direction to internal if all conditions met
+    # Update direction to internal if all conditions met, including a local
+    # origin - a hosted sender domain arriving from an outside relay is inbound
     if is_internal:
-        correlation.direction = 'internal'
-        # Also update Rspamd log if it exists
+        rspamd_log = None
         if correlation.rspamd_log_id:
             rspamd_log = db.query(RspamdLog).filter(
                 RspamdLog.id == correlation.rspamd_log_id
             ).first()
+        if origin_is_local(rspamd_log):
+            correlation.direction = 'internal'
             if rspamd_log:
                 rspamd_log.direction = 'internal'
     
