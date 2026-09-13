@@ -1262,7 +1262,7 @@ Get unified messages view combining Postfix and Rspamd data.
 | `sender` | string | Filter by sender email |
 | `recipient` | string | Filter by recipient email |
 | `direction` | string | Filter by direction: `inbound`, `outbound`, `internal` |
-| `status` | string | Filter by status: `delivered`, `bounced`, `deferred`, `rejected`, `spam`<br>**Note:** `spam` filter checks both `final_status='spam'` and `is_spam=True` from Rspamd |
+| `status` | string | Filter by status: `delivered`, `bounced`, `deferred`, `rejected`, `spam`, `discarded`, `expired`<br>**Note:** `spam` filter checks both `final_status='spam'` and `is_spam=True` from Rspamd. `discarded` means a Dovecot Sieve rule dropped the message after Postfix handed it over (issue #65) |
 | `user` | string | Filter by authenticated user |
 | `ip` | string | Filter by source IP address |
 | `start_date` | datetime | Start date (ISO format) |
@@ -1293,6 +1293,8 @@ GET /api/messages?page=1&limit=50&direction=outbound&sender=user@example.com
       "is_complete": true,
       "first_seen": "2025-12-25T10:30:00Z",
       "last_seen": "2025-12-25T10:30:05Z",
+      "dovecot_status": "stored",
+      "dovecot_mailbox": "INBOX",
       "spam_score": 0.5,
       "is_spam": false,
       "user": "user@example.com",
@@ -1301,6 +1303,8 @@ GET /api/messages?page=1&limit=50&direction=outbound&sender=user@example.com
   ]
 }
 ```
+
+**Dovecot delivery fields (issue #65):** `dovecot_status` is the outcome of the final LMTP hop as reported by Dovecot - one of `stored`, `discarded`, `rejected`, `forwarded`, `failed`, or `null` when no Dovecot information is available (raw log collection disabled, or the message left the server). `dovecot_mailbox` names the folder the message was filed into (e.g. `INBOX`, `Junk`). A message dropped by a Sieve `discard` rule gets `final_status` `discarded` instead of a false `delivered`.
 
 ---
 
@@ -1346,6 +1350,21 @@ Get complete message details with all related logs.
     "has_auth": true,
     "size": 1024
   },
+  "dovecot": {
+    "status": "stored",
+    "mailbox": "Junk",
+    "detail": null,
+    "logs": [
+      {
+        "time": "2025-12-25T10:30:06Z",
+        "priority": "info",
+        "message": "lmtp(recipient@gmail.com)<123><AbCdEf>: sieve: msgid=<unique-id@example.com>: stored mail into mailbox 'Junk'",
+        "verdict": "stored",
+        "recipient": "recipient@gmail.com",
+        "mailbox": "Junk"
+      }
+    ]
+  },
   "postfix": [
     {
       "time": "2025-12-25T10:30:00Z",
@@ -1376,6 +1395,8 @@ Get complete message details with all related logs.
   "netfilter": []
 }
 ```
+
+**`dovecot` object (issue #65):** the mailbox-delivery outcome reported by Dovecot for the final LMTP hop. `status` is one of `stored`, `discarded`, `rejected`, `forwarded`, `failed`; `mailbox` is the target folder; `detail` carries the reject reason, forward target or storage error; `logs` lists the matching raw Dovecot lines (available while raw log retention keeps them). The whole object is `null` when no Dovecot information exists for the message.
 
 ---
 

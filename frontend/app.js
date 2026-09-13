@@ -729,6 +729,7 @@ function renderMessagesData(data) {
                         ${msg.queue_id ? `<span class="font-mono" title="Queue ID">Q: ${msg.queue_id}</span>` : ''}
                         ${msg.message_id ? `<span class="font-mono truncate max-w-xs" title="Message ID: ${escapeHtml(msg.message_id)}">MID: ${escapeHtml(msg.message_id.substring(0, 20))}${msg.message_id.length > 20 ? '...' : ''}</span>` : ''}
                         ${msg.spam_score !== null ? `<span>Score: <span class="${msg.spam_score >= 15 ? 'text-red-600 dark:text-red-400 font-semibold' : 'text-gray-600 dark:text-gray-300'}">${msg.spam_score.toFixed(1)}</span></span>` : ''}
+                        ${renderMailboxFolderHint(msg)}
                         ${msg.user ? `<span>User: ${escapeHtml(msg.user)}</span>` : ''}
                         ${msg.ip ? `<span>IP: ${msg.ip}</span>` : ''}
                     </div>
@@ -3849,6 +3850,7 @@ async function loadMessages(page = 1) {
                             ${msg.queue_id ? `<span class="font-mono" title="Queue ID">Q: ${msg.queue_id}</span>` : ''}
                             ${msg.message_id ? `<span class="font-mono truncate max-w-xs" title="Message ID: ${escapeHtml(msg.message_id)}">MID: ${escapeHtml(msg.message_id.substring(0, 20))}${msg.message_id.length > 20 ? '...' : ''}</span>` : ''}
                             ${msg.spam_score !== null ? `<span>Score: <span class="${msg.spam_score >= 15 ? 'text-red-600 dark:text-red-400 font-semibold' : 'text-gray-600 dark:text-gray-300'}">${msg.spam_score.toFixed(1)}</span></span>` : ''}
+                            ${renderMailboxFolderHint(msg)}
                             ${msg.user ? `<span>User: ${escapeHtml(msg.user)}</span>` : ''}
                             ${msg.ip ? `<span>IP: ${msg.ip}</span>` : ''}
                         </div>
@@ -4573,7 +4575,8 @@ function renderStatusJobs(jobs) {
             jobs: [
                 ['Complete Correlations', 'complete_correlations', jobs.complete_correlations],
                 ['Update Final Status', 'update_final_status', jobs.update_final_status],
-                ['Expire Correlations', 'expire_correlations', jobs.expire_correlations]
+                ['Expire Correlations', 'expire_correlations', jobs.expire_correlations],
+                ['Dovecot Deliveries', 'correlate_dovecot', jobs.correlate_dovecot]
             ]
         },
         {
@@ -4899,6 +4902,131 @@ function renderModalTab(tab, data) {
     }
 }
 
+// Where Dovecot actually filed a message, shown in the message list when a
+// Sieve rule put it somewhere other than the inbox - the usual explanation for
+// "the mail never arrived" when Rspamd did not flag it as spam (issue #65).
+function renderMailboxFolderHint(msg) {
+    if (msg.dovecot_status !== 'stored') return '';
+    const folder = msg.dovecot_mailbox;
+    if (!folder || folder.toUpperCase() === 'INBOX') return '';
+    return `<span title="Dovecot filed this message into this folder">Folder: ${escapeHtml(folder)}</span>`;
+}
+
+// Delivery outcome Dovecot reported for the last hop (issue #65).
+// Postfix logs status=sent as soon as it hands the message to Dovecot over
+// LMTP, so what happened afterwards - stored, filed into Junk, forwarded or
+// dropped by a Sieve rule - is only visible here.
+const DOVECOT_VERDICTS = {
+    discarded: {
+        icon: '⊘',
+        label: 'Discarded by Sieve',
+        fallback: 'A Sieve rule dropped this message - it never reached the mailbox.',
+        box: 'bg-slate-50 dark:bg-slate-900/40 border-slate-300 dark:border-slate-600',
+        title: 'text-slate-800 dark:text-slate-200',
+        body: 'text-slate-600 dark:text-slate-400'
+    },
+    rejected: {
+        icon: '✗',
+        label: 'Rejected by Sieve',
+        fallback: 'A Sieve rule refused this message and reported it back to the sender.',
+        box: 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800',
+        title: 'text-red-800 dark:text-red-300',
+        body: 'text-red-600 dark:text-red-400'
+    },
+    failed: {
+        icon: '!',
+        label: 'Delivery to mailbox failed',
+        fallback: 'Dovecot could not store this message.',
+        box: 'bg-orange-50 dark:bg-orange-900/20 border-orange-200 dark:border-orange-800',
+        title: 'text-orange-800 dark:text-orange-300',
+        body: 'text-orange-600 dark:text-orange-400'
+    },
+    forwarded: {
+        icon: '→',
+        label: 'Forwarded by Sieve',
+        fallback: 'A Sieve rule redirected this message.',
+        box: 'bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800',
+        title: 'text-blue-800 dark:text-blue-300',
+        body: 'text-blue-600 dark:text-blue-400'
+    },
+    stored: {
+        icon: '✓',
+        label: 'Stored in mailbox',
+        fallback: 'Dovecot wrote this message to the mailbox.',
+        box: 'bg-emerald-50 dark:bg-emerald-900/20 border-emerald-200 dark:border-emerald-800',
+        title: 'text-emerald-800 dark:text-emerald-300',
+        body: 'text-emerald-600 dark:text-emerald-400'
+    }
+};
+
+function getDovecotVerdictText(dovecot) {
+    const verdict = DOVECOT_VERDICTS[dovecot.status];
+    switch (dovecot.status) {
+        case 'stored':
+            return dovecot.mailbox
+                ? `Stored in the folder "${dovecot.mailbox}".`
+                : verdict.fallback;
+        case 'forwarded':
+            return dovecot.detail
+                ? `Redirected to ${dovecot.detail}.`
+                : verdict.fallback;
+        case 'failed':
+            return dovecot.detail
+                ? `${dovecot.detail}${dovecot.mailbox ? ` (target folder: ${dovecot.mailbox})` : ''}`
+                : verdict.fallback;
+        case 'rejected':
+            return dovecot.detail ? `Reason: ${dovecot.detail}` : verdict.fallback;
+        default:
+            return verdict.fallback;
+    }
+}
+
+function renderDovecotSummary(dovecot) {
+    if (!dovecot || !dovecot.status || !DOVECOT_VERDICTS[dovecot.status]) return '';
+    const verdict = DOVECOT_VERDICTS[dovecot.status];
+
+    return `
+        <div class="border ${verdict.box} rounded-lg p-4 mt-3">
+            <div class="flex items-start gap-3">
+                <span class="text-lg leading-none ${verdict.title}">${verdict.icon}</span>
+                <div class="min-w-0">
+                    <p class="text-sm font-semibold ${verdict.title}">Mailbox delivery: ${verdict.label}</p>
+                    <p class="text-xs ${verdict.body} mt-1 break-words">${escapeHtml(getDovecotVerdictText(dovecot))}</p>
+                    <p class="text-[10px] text-gray-500 dark:text-gray-400 mt-1">Reported by Dovecot (LMTP) - the step after Postfix</p>
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+function renderDovecotTimeline(dovecot) {
+    if (!dovecot || !dovecot.logs || dovecot.logs.length === 0) return '';
+
+    return `
+        <div>
+            <div class="flex items-center justify-between mb-3">
+                <h4 class="text-md font-semibold text-gray-900 dark:text-white">Dovecot Delivery (LMTP)</h4>
+                <span class="text-xs text-gray-500 dark:text-gray-400">${dovecot.logs.length} entries</span>
+            </div>
+            <div class="space-y-2 max-h-96 overflow-y-auto">
+                ${dovecot.logs.map(log => `
+                    <div class="p-3 bg-gray-50 dark:bg-gray-700/50 rounded hover:bg-gray-100 dark:hover:bg-gray-700 transition">
+                        <div class="flex justify-between items-start mb-1">
+                            <div class="flex items-center gap-2 flex-wrap">
+                                <span class="text-xs font-mono text-gray-600 dark:text-gray-300">${formatTime(log.time)}</span>
+                                <span class="text-xs px-2 py-0.5 rounded bg-purple-100 dark:bg-purple-900/30 text-purple-800 dark:text-purple-300">dovecot</span>
+                                ${log.recipient ? `<span class="text-xs text-gray-500 dark:text-gray-400">=> ${escapeHtml(log.recipient)}</span>` : ''}
+                            </div>
+                            ${log.verdict && DOVECOT_VERDICTS[log.verdict] ? `<span class="text-xs px-2 py-0.5 rounded ${getStatusClass(log.verdict === 'stored' ? 'delivered' : log.verdict)}">${log.verdict}</span>` : ''}
+                        </div>
+                        <p class="text-xs font-mono text-gray-700 dark:text-gray-300 break-all">${escapeHtml(log.message || '')}</p>
+                    </div>
+                `).join('')}
+            </div>
+        </div>
+    `;
+}
+
 function renderOverviewTab(content, data) {
     // Collect recipients from Postfix logs if available (these have full addresses including +)
     let recipientsFromPostfix = new Set();
@@ -4997,6 +5125,7 @@ function renderOverviewTab(content, data) {
                         </div>
                     </div>
                 </div>
+                ${renderDovecotSummary(data.dovecot)}
                 ${data.rspamd ? `
                     <div class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-3 sm:p-4 mt-1">
                         <h4 class="text-sm sm:text-md font-semibold text-gray-900 dark:text-white mb-3">Quick Spam Summary</h4>
@@ -5063,8 +5192,17 @@ function renderOverviewTab(content, data) {
 }
 
 function renderPostfixTab(content, data) {
+    // Dovecot handles the hop after Postfix, so its lines belong in this
+    // timeline as well - and they can exist even when Postfix logs do not.
+    const dovecotTimeline = renderDovecotTimeline(data.dovecot);
+
     if (!data.postfix || data.postfix.length === 0) {
-        content.innerHTML = `
+        content.innerHTML = dovecotTimeline ? `
+            <div class="space-y-6">
+                <p class="text-sm text-gray-500 dark:text-gray-400">No Postfix delivery logs available</p>
+                ${dovecotTimeline}
+            </div>
+        ` : `
             <div class="text-center py-12">
                 <svg class="w-16 h-16 mx-auto text-gray-400 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4"></path>
@@ -5252,6 +5390,7 @@ function renderPostfixTab(content, data) {
                     `).join('')}
                 </div>
             </div>
+            ${dovecotTimeline}
         </div>
     `;
 }
