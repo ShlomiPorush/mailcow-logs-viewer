@@ -4902,14 +4902,14 @@ function renderModalTab(tab, data) {
     }
 }
 
-// Where Dovecot actually filed a message, shown in the message list when a
-// Sieve rule put it somewhere other than the inbox - the usual explanation for
-// "the mail never arrived" when Rspamd did not flag it as spam (issue #65).
+// The folder Dovecot actually delivered a message into. A folder other than
+// the inbox is the usual explanation for "the mail never arrived" when Rspamd
+// did not flag it as spam (issue #65).
 function renderMailboxFolderHint(msg) {
     if (msg.dovecot_status !== 'stored') return '';
     const folder = msg.dovecot_mailbox;
-    if (!folder || folder.toUpperCase() === 'INBOX') return '';
-    return `<span title="Dovecot filed this message into this folder">Folder: ${escapeHtml(folder)}</span>`;
+    if (!folder) return '';
+    return `<span title="Dovecot delivered this message into this folder">&#128193; ${escapeHtml(folder)}</span>`;
 }
 
 // Delivery outcome Dovecot reported for the last hop (issue #65).
@@ -4992,7 +4992,6 @@ function renderDovecotSummary(dovecot) {
                 <div class="min-w-0">
                     <p class="text-sm font-semibold ${verdict.title}">Mailbox delivery: ${verdict.label}</p>
                     <p class="text-xs ${verdict.body} mt-1 break-words">${escapeHtml(getDovecotVerdictText(dovecot))}</p>
-                    <p class="text-[10px] text-gray-500 dark:text-gray-400 mt-1">Reported by Dovecot (LMTP) - the step after Postfix</p>
                 </div>
             </div>
         </div>
@@ -5103,6 +5102,7 @@ function renderOverviewTab(content, data) {
                                     <div class="flex items-center gap-2 flex-wrap">
                                         ${data.final_status ? `<span class="inline-block px-3 py-1 text-xs font-medium rounded ${getStatusClass(data.final_status)}">${data.final_status}</span>` : ''}
                                         ${data.direction ? `<span class="inline-block px-3 py-1 text-xs font-medium rounded ${getDirectionClass(data.direction)}">${data.direction}</span>` : ''}
+                                        ${data.dovecot && data.dovecot.status === 'stored' && data.dovecot.mailbox ? `<span class="inline-block px-3 py-1 text-xs font-medium rounded bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300" title="Dovecot delivered this message into this folder">&#128193; ${escapeHtml(data.dovecot.mailbox)}</span>` : ''}
                                     </div>
                                 </div>
                             ` : ''}
