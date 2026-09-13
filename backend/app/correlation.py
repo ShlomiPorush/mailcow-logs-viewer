@@ -711,7 +711,13 @@ def create_correlation_with_all_data(
                 # Also update Rspamd log
                 rspamd_log.direction = 'internal'
                 break
-    
+    elif direction == 'internal':
+        # The stored direction came from the earlier, laxer classification
+        # that ignored the origin - re-derive instead of inheriting it
+        direction = 'outbound' if (rspamd_log.has_auth or (
+            rspamd_log.user and rspamd_log.user != 'unknown')) else 'inbound'
+        rspamd_log.direction = direction
+
     correlation = MessageCorrelation(
         correlation_key=correlation_key,
         message_id=message_id,

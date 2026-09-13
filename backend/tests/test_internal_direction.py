@@ -104,6 +104,32 @@ def test_private_origin_is_internal(env):
         assert c.direction == 'internal'
 
 
+def test_tainted_stored_internal_is_rederived(env):
+    """Rspamd rows classified 'internal' by the old rule keep that value in
+    the database; a re-correlation must not inherit it blindly."""
+    from app.database import get_db_context
+    from app.models import PostfixLog, RspamdLog
+    with get_db_context() as db:
+        now = datetime.utcnow()
+        msgid = f'tainted-{MARK}@relay.example'
+        queue = uuid.uuid4().hex[:11].upper()
+        db.add(PostfixLog(time=now, program='postfix/lmtp', message=f'{queue}: seeded',
+                          queue_id=queue, message_id=msgid,
+                          sender=f'user@{LOCAL_A}', recipient=f'someone@{LOCAL_B}',
+                          status='sent', relay='dovecot'))
+        rlog = RspamdLog(time=now, message_id=msgid,
+                         sender_smtp=f'user@{LOCAL_A}',
+                         recipients_smtp=[f'someone@{LOCAL_B}'],
+                         action='no action', is_spam=False,
+                         direction='internal',
+                         ip='212.199.162.78', user='unknown', has_auth=False)
+        db.add(rlog)
+        db.commit()
+        c = correlate_rspamd_log(db, rlog)
+        assert c.direction == 'inbound'
+        assert rlog.direction == 'inbound'
+
+
 def test_origin_helper_edge_cases():
     from app.correlation import origin_is_local
     class Stub:
