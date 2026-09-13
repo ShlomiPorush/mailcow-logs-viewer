@@ -6,7 +6,7 @@ FIXED: All timestamps now sent with proper UTC timezone ('Z' suffix)
 import logging
 from fastapi import APIRouter, Depends, Query, HTTPException
 from sqlalchemy.orm import Session
-from sqlalchemy import or_, and_, desc, select
+from sqlalchemy import or_, and_, desc, func, select
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
@@ -257,13 +257,53 @@ def get_unified_messages(
                 )
             query = query.filter(RspamdLog.ip.ilike(f"%{ip}%"))
         
-        # Get total count (before blacklist filter)
-        total_before_filter = query.count()
-        
+        # One row per message, not one per delivery leg (issue #36). The filters
+        # above select legs; the legs are then grouped by Message-ID and the
+        # earliest matching leg represents its message in the list, so a search
+        # always shows the leg that matched it. A correlation without a
+        # Message-ID falls back to its own key and is never merged with another.
+        group_key = func.coalesce(
+            MessageCorrelation.message_id, MessageCorrelation.correlation_key
+        )
+        legs = query.with_entities(
+            MessageCorrelation.id.label("leg_id"),
+            MessageCorrelation.first_seen.label("first_seen"),
+            func.row_number().over(
+                partition_by=group_key,
+                order_by=(
+                    MessageCorrelation.first_seen.asc(),
+                    MessageCorrelation.id.asc()
+                )
+            ).label("leg_rank")
+        ).subquery()
+
+        # Count messages, not legs: exactly one leg per message has rank 1
+        total_before_filter = db.query(func.count()).select_from(legs).filter(
+            legs.c.leg_rank == 1
+        ).scalar() or 0
+
         # Apply pagination
         offset = (page - 1) * limit
-        messages = query.order_by(desc(MessageCorrelation.first_seen)).offset(offset).limit(limit * 2).all()
-        
+        messages = db.query(MessageCorrelation).join(
+            legs, MessageCorrelation.id == legs.c.leg_id
+        ).filter(
+            legs.c.leg_rank == 1
+        ).order_by(desc(legs.c.first_seen)).offset(offset).limit(limit * 2).all()
+
+        # How many deliveries the message has in total, which is what the row
+        # reports - not only the legs the current filters matched
+        message_ids = {msg.message_id for msg in messages if msg.message_id}
+        leg_counts = {}
+        if message_ids:
+            leg_counts = dict(
+                db.query(
+                    MessageCorrelation.message_id,
+                    func.count(MessageCorrelation.id)
+                ).filter(
+                    MessageCorrelation.message_id.in_(message_ids)
+                ).group_by(MessageCorrelation.message_id).all()
+            )
+
         # Filter out blacklisted emails and build response
         result_messages = []
         for msg in messages:
@@ -292,6 +332,7 @@ def get_unified_messages(
                 "last_seen": format_datetime_utc(msg.last_seen),
                 "dovecot_status": msg.dovecot_status,
                 "dovecot_mailbox": msg.dovecot_mailbox,
+                "deliveries": leg_counts.get(msg.message_id, 1),
                 "spam_score": rspamd_log.score if rspamd_log else None,
                 "is_spam": rspamd_log.is_spam if rspamd_log else None,
                 "user": rspamd_log.user if rspamd_log else None,

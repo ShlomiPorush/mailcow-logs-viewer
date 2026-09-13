@@ -722,6 +722,7 @@ function renderMessagesData(data) {
         })()}
                             ${msg.direction ? `<span class="inline-block px-2 py-0.5 text-xs font-medium rounded ${getDirectionClass(msg.direction)}">${msg.direction}</span>` : ''}
                             ${msg.is_spam !== null ? `<span class="inline-block px-2 py-0.5 text-xs font-medium rounded ${msg.is_spam ? 'bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-300' : 'bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300'}">${msg.is_spam ? 'SPAM' : 'CLEAN'}</span>` : ''}
+                            ${renderDeliveriesChip(msg)}
                         </div>
                     </div>
                     <div class="flex flex-wrap items-center gap-4 text-xs text-gray-500 dark:text-gray-400">
@@ -3843,6 +3844,7 @@ async function loadMessages(page = 1) {
             })()}
                                 ${msg.direction ? `<span class="inline-block px-2 py-0.5 text-xs font-medium rounded ${getDirectionClass(msg.direction)}">${msg.direction}</span>` : ''}
                                 ${msg.is_spam !== null ? `<span class="inline-block px-2 py-0.5 text-xs font-medium rounded ${msg.is_spam ? 'bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-300' : 'bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300'}">${msg.is_spam ? 'SPAM' : 'CLEAN'}</span>` : ''}
+                                ${renderDeliveriesChip(msg)}
                             </div>
                         </div>
                         <div class="flex flex-wrap items-center gap-4 text-xs text-gray-500 dark:text-gray-400">
@@ -4910,6 +4912,15 @@ function renderMailboxFolderHint(msg) {
     const folder = msg.dovecot_mailbox;
     if (!folder) return '';
     return `<span class="inline-flex items-center gap-1">${folderIconSvg('w-3 h-3')}${escapeHtml(folder)}</span>`;
+}
+
+// A message that was delivered more than once - forwarded, copied or released
+// from quarantine - is one row in the list (issue #36). The chip says how many
+// deliveries it has; the dialog shows them as a journey.
+function renderDeliveriesChip(msg) {
+    const deliveries = msg.deliveries || 1;
+    if (deliveries < 2) return '';
+    return `<span class="inline-block px-2 py-0.5 text-xs font-medium rounded bg-indigo-100 dark:bg-indigo-900/30 text-indigo-800 dark:text-indigo-300">${deliveries} deliveries</span>`;
 }
 
 function folderIconSvg(sizeClasses) {

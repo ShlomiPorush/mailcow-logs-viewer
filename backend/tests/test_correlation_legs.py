@@ -68,6 +68,8 @@ def _cleanup():
             RspamdLog.message_id.like(f'%{MARKER}%')).delete(synchronize_session=False)
         db.query(MessageCorrelation).filter(
             MessageCorrelation.message_id.like(f'%{MARKER}%')).delete(synchronize_session=False)
+        db.query(MessageCorrelation).filter(
+            MessageCorrelation.correlation_key.like(f'%{MARKER}%')).delete(synchronize_session=False)
         db.query(SystemSetting).filter(
             SystemSetting.key == DOVECOT_WATERMARK_KEY).delete(synchronize_session=False)
         db.commit()
@@ -163,6 +165,30 @@ def _seed_forward_scenario():
     rspamd_b = _add_rspamd(msgid, t1, LOCAL_USER, [OTHER_USER], action='reject')
 
     return msgid, queue_a, queue_b, rspamd_a, rspamd_b
+
+
+def _seed_single_delivery(recipient=None, when=None):
+    """One plain inbound delivery. Returns (msgid, correlation_key)."""
+    msgid = _msgid()
+    queue = _queue()
+    t0 = when or (datetime.utcnow() - timedelta(minutes=2))
+    _add_postfix(queue, t0, program='postfix/cleanup', msgid=msgid, sender=REMOTE)
+    _add_postfix(queue, t0 + timedelta(seconds=1), program='postfix/lmtp',
+                 recipient=recipient or LOCAL_USER, status='sent', relay='dovecot')
+    key = _correlate(_add_rspamd(msgid, t0, REMOTE, [recipient or LOCAL_USER]))
+    return msgid, key
+
+
+def _list_messages(**overrides):
+    """Call the Messages list endpoint the way FastAPI calls it."""
+    from app.database import get_db_context
+    from app.routers.messages import get_unified_messages
+    params = dict(page=1, limit=50, search=MARKER, sender=None, recipient=None,
+                  direction=None, status=None, user=None, ip=None,
+                  start_date=None, end_date=None)
+    params.update(overrides)
+    with get_db_context() as db:
+        return get_unified_messages(db=db, **params)
 
 
 # ---------- the regression ----------
@@ -366,6 +392,78 @@ def test_details_endpoint_has_no_related_deliveries_for_a_single_delivery(env):
 
     payload = TestClient(app).get(f'/api/message/{key}/details').json()
     assert payload['related_deliveries'] == []
+
+
+# ---------- the list shows one row per message ----------
+
+def test_list_shows_one_row_per_message(env):
+    """A forwarded message is one email, so it is one row - with a count of
+    how many times it was delivered."""
+    msgid, queue_a, queue_b, rspamd_a, rspamd_b = _seed_forward_scenario()
+    _correlate(rspamd_a)
+    _correlate(rspamd_b)
+    single_msgid, single_key = _seed_single_delivery()
+
+    payload = _list_messages()
+    rows = {row['correlation_key']: row for row in payload['data']}
+
+    assert payload['total'] == 2
+    assert len(payload['data']) == 2
+
+    legs = {leg.queue_id: leg for leg in _legs(msgid)}
+    forwarded = rows[legs[queue_a].correlation_key]
+    assert forwarded['message_id'] == msgid
+    assert forwarded['queue_id'] == queue_a, 'the earliest leg represents the message'
+    assert (forwarded['sender'], forwarded['recipient']) == (REMOTE, LOCAL_USER)
+    assert forwarded['deliveries'] == 2
+    assert legs[queue_b].correlation_key not in rows
+
+    assert rows[single_key]['message_id'] == single_msgid
+    assert rows[single_key]['deliveries'] == 1
+
+
+def test_list_row_is_the_leg_the_search_matched(env):
+    """Searching for the forward target must not answer with the leg that has
+    nothing to do with the search."""
+    msgid, queue_a, queue_b, rspamd_a, rspamd_b = _seed_forward_scenario()
+    _correlate(rspamd_a)
+    _correlate(rspamd_b)
+
+    payload = _list_messages(search=OTHER_USER)
+    legs = {leg.queue_id: leg for leg in _legs(msgid)}
+
+    assert payload['total'] == 1
+    assert len(payload['data']) == 1
+    row = payload['data'][0]
+    assert row['correlation_key'] == legs[queue_b].correlation_key
+    assert (row['sender'], row['recipient']) == (LOCAL_USER, OTHER_USER)
+    # The count still covers every delivery, not only the matching one
+    assert row['deliveries'] == 2
+
+
+def test_list_does_not_group_correlations_without_a_message_id(env):
+    """Nothing says two messages without a Message-ID are the same message."""
+    from app.database import get_db_context
+    from app.models import MessageCorrelation
+
+    t0 = datetime.utcnow() - timedelta(minutes=3)
+    keys = [f'nomsgid-{uuid.uuid4().hex}-{MARKER}' for _ in range(2)]
+    with get_db_context() as db:
+        for index, key in enumerate(keys):
+            db.add(MessageCorrelation(
+                correlation_key=key, message_id=None, queue_id=_queue(),
+                sender=REMOTE, recipient=LOCAL_USER,
+                subject=f'no message id {MARKER}', direction='inbound',
+                final_status='delivered', is_complete=True,
+                first_seen=t0 + timedelta(seconds=index),
+                last_seen=t0 + timedelta(seconds=index)))
+        db.commit()
+
+    payload = _list_messages()
+
+    assert payload['total'] == 2
+    assert sorted(row['correlation_key'] for row in payload['data']) == sorted(keys)
+    assert [row['deliveries'] for row in payload['data']] == [1, 1]
 
 
 # ---------- maintenance jobs must not merge the legs back together ----------
