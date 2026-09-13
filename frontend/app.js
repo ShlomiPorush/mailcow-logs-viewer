@@ -5206,7 +5206,7 @@ function renderOverviewTab(content, data) {
                                     <div class="flex items-center gap-2 flex-wrap">
                                         ${data.final_status ? `<span class="inline-block px-3 py-1 text-xs font-medium rounded ${getStatusClass(data.final_status)}">${data.final_status}</span>` : ''}
                                         ${data.direction ? `<span class="inline-block px-3 py-1 text-xs font-medium rounded ${getDirectionClass(data.direction)}">${data.direction}</span>` : ''}
-                                        ${data.dovecot && data.dovecot.status === 'stored' && data.dovecot.mailbox ? `<span class="inline-flex items-center gap-1.5 px-3 py-1 text-xs font-medium rounded bg-amber-100 dark:bg-amber-900/30 text-amber-800 dark:text-amber-300">${folderIconSvg('w-3.5 h-3.5')}${escapeHtml(data.dovecot.mailbox)}</span>` : ''}
+                                        ${data.dovecot && data.dovecot.status === 'stored' && data.dovecot.mailbox ? `<span class="inline-flex items-center gap-1.5 px-3 py-1 text-xs font-medium rounded bg-amber-100 dark:bg-amber-500/10 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-500/20">${folderIconSvg('w-3.5 h-3.5')}${escapeHtml(data.dovecot.mailbox)}</span>` : ''}
                                     </div>
                                 </div>
                             ` : ''}
