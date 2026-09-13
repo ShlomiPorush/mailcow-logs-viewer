@@ -5060,7 +5060,7 @@ function renderLogTimeline(postfixLogs, dovecotLogs) {
 
     const sources = [...new Set(entries.map(e => timelineSource(e)))];
     const filterBar = sources.length > 1 ? `
-        <div class="flex flex-wrap items-center gap-1.5 mb-3" id="log-timeline-filters">
+        <div class="flex flex-wrap items-center gap-1.5 mb-3 flex-shrink-0" id="log-timeline-filters">
             <button data-source="" onclick="filterLogTimeline(this)"
                 class="px-2.5 py-1 text-xs rounded border bg-blue-100 dark:bg-blue-500/10 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-500/20">All</button>
             ${sources.map(s => `
@@ -5071,15 +5071,13 @@ function renderLogTimeline(postfixLogs, dovecotLogs) {
     ` : '';
 
     return `
-        <div>
-            <div class="flex items-center justify-between mb-3">
+        <div class="flex-1 min-h-0 flex flex-col">
+            <div class="flex items-center justify-between mb-3 flex-shrink-0">
                 <h4 class="text-md font-semibold text-gray-900 dark:text-white">Complete Log Timeline</h4>
                 <span class="text-xs text-gray-500 dark:text-gray-400" id="log-timeline-count">${entries.length} entries</span>
             </div>
             ${filterBar}
-            <!-- Same layout as the Spam tab: the header and filters stay put,
-                 only the log entries scroll -->
-            <div class="space-y-2 max-h-[29rem] overflow-y-auto" id="log-timeline-entries">
+            <div class="space-y-2 flex-1 min-h-0 overflow-y-auto" id="log-timeline-entries">
                 ${entries.map(e => `<div data-log-source="${escapeHtml(timelineSource(e))}">${e.dovecot ? renderDovecotTimelineRow(e.log) : renderPostfixTimelineRow(e.log)}</div>`).join('')}
             </div>
         </div>
@@ -5435,7 +5433,7 @@ function renderPostfixTab(content, data) {
     ` : '';
 
     content.innerHTML = `
-        <div class="space-y-6">
+        <div class="h-full flex flex-col min-h-0 gap-6">
             ${errorSummaryHtml}
             <!-- Mail Details Header -->
             <div class="bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-gray-800 dark:to-gray-700 p-4 rounded-lg">
@@ -5512,7 +5510,8 @@ function renderPostfixTab(content, data) {
                 </div>
             ` : ''}
             
-            <!-- Complete Log Timeline - ALWAYS show all logs -->
+            <!-- Complete Log Timeline - the header and filters stay put, the
+                 entry list takes the remaining height and scrolls alone -->
             ${renderLogTimeline(data.postfix, dovecotLogs)}
         </div>
     `;
