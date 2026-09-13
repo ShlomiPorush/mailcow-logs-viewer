@@ -5058,16 +5058,29 @@ function renderLogTimeline(postfixLogs, dovecotLogs) {
         .concat((dovecotLogs || []).map(log => ({ dovecot: true, log })))
         .sort((a, b) => ((a.log.time || '') < (b.log.time || '') ? -1 : 1));
 
+    const sources = [...new Set(entries.map(e => timelineSource(e)))];
+    const filterBar = sources.length > 1 ? `
+        <div class="flex flex-wrap items-center gap-1.5 mb-3" id="log-timeline-filters">
+            <button data-source="" onclick="filterLogTimeline(this)"
+                class="px-2.5 py-1 text-xs rounded border bg-blue-100 dark:bg-blue-500/10 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-500/20">All</button>
+            ${sources.map(s => `
+                <button data-source="${escapeHtml(s)}" onclick="filterLogTimeline(this)"
+                    class="px-2.5 py-1 text-xs rounded border bg-gray-100 dark:bg-gray-700/50 text-gray-600 dark:text-gray-300 border-gray-200 dark:border-gray-600">${escapeHtml(s)}</button>
+            `).join('')}
+        </div>
+    ` : '';
+
     return `
         <div>
             <div class="flex items-center justify-between mb-3">
                 <h4 class="text-md font-semibold text-gray-900 dark:text-white">Complete Log Timeline</h4>
-                <span class="text-xs text-gray-500 dark:text-gray-400">${entries.length} entries</span>
+                <span class="text-xs text-gray-500 dark:text-gray-400" id="log-timeline-count">${entries.length} entries</span>
             </div>
+            ${filterBar}
             <!-- No inner height cap: the dialog body scrolls, so the timeline
                  runs to its end instead of nesting a second scrollbar -->
-            <div class="space-y-2">
-                ${entries.map(e => e.dovecot ? renderDovecotTimelineRow(e.log) : renderPostfixTimelineRow(e.log)).join('')}
+            <div class="space-y-2" id="log-timeline-entries">
+                ${entries.map(e => `<div data-log-source="${escapeHtml(timelineSource(e))}">${e.dovecot ? renderDovecotTimelineRow(e.log) : renderPostfixTimelineRow(e.log)}</div>`).join('')}
             </div>
         </div>
     `;
@@ -5130,6 +5143,30 @@ function renderRelatedDeliveries(data) {
             </div>
         </div>
     `;
+}
+
+function timelineSource(entry) {
+    return entry.dovecot ? 'dovecot' : (entry.log.program || 'postfix');
+}
+
+// Filter the dialog's log timeline by source. One source at a time; the
+// empty source is "All".
+function filterLogTimeline(button) {
+    const source = button.dataset.source;
+    const active = 'px-2.5 py-1 text-xs rounded border bg-blue-100 dark:bg-blue-500/10 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-500/20';
+    const idle = 'px-2.5 py-1 text-xs rounded border bg-gray-100 dark:bg-gray-700/50 text-gray-600 dark:text-gray-300 border-gray-200 dark:border-gray-600';
+    document.querySelectorAll('#log-timeline-filters button').forEach(b => {
+        b.className = b === button ? active : idle;
+    });
+    let shown = 0, total = 0;
+    document.querySelectorAll('#log-timeline-entries > [data-log-source]').forEach(row => {
+        total += 1;
+        const match = !source || row.dataset.logSource === source;
+        row.classList.toggle('hidden', !match);
+        if (match) shown += 1;
+    });
+    const count = document.getElementById('log-timeline-count');
+    if (count) count.textContent = source ? `${shown} of ${total} entries` : `${total} entries`;
 }
 
 function renderOverviewTab(content, data) {
