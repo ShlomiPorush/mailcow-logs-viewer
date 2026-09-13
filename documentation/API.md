@@ -1334,6 +1334,16 @@ Get complete message details with all related logs.
   "is_complete": true,
   "first_seen": "2025-12-25T10:30:00Z",
   "last_seen": "2025-12-25T10:30:05Z",
+  "related_deliveries": [
+    {
+      "correlation_key": "789abc012def...",
+      "sender": "recipient@gmail.com",
+      "recipient": "forward-target@example.org",
+      "direction": "outbound",
+      "final_status": "rejected",
+      "first_seen": "2025-12-25T10:30:07Z"
+    }
+  ],
   "rspamd": {
     "time": "2025-12-25T10:30:00Z",
     "score": 0.5,
@@ -1395,6 +1405,8 @@ Get complete message details with all related logs.
   "netfilter": []
 }
 ```
+
+**`related_deliveries` (issue #36):** a Message-ID can map to several correlations, one per delivery leg. A forward, a Sieve redirect or any other re-submission delivers the same message a second time through its own Postfix queue chain, with its own sender, recipient, direction and status, and each leg is a separate entry in `GET /messages` with its own `correlation_key`. This list holds the other legs of the same Message-ID, ordered by `first_seen`, and is empty for the vast majority of messages. The first leg of a message keeps the historical `correlation_key` (SHA256 of `msgid:<message-id>`), so links created before this change keep resolving; an additional leg is keyed by SHA256 of `msgid:<message-id>:queue:<queue-id>`.
 
 **`dovecot` object (issue #65):** the mailbox-delivery outcome reported by Dovecot for the final LMTP hop. `status` is one of `stored`, `discarded`, `rejected`, `forwarded`, `failed`; `mailbox` is the target folder; `detail` carries the reject reason, forward target or storage error; `logs` lists the matching raw Dovecot lines (available while raw log retention keeps them). The whole object is `null` when no Dovecot information exists for the message.
 

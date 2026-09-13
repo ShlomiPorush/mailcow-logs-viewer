@@ -5027,6 +5027,36 @@ function renderDovecotTimeline(dovecot) {
     `;
 }
 
+function renderRelatedDeliveries(deliveries) {
+    // A forwarded or otherwise re-submitted message is delivered twice under
+    // one Message-ID (issue #36). Each delivery is a Messages entry of its
+    // own; this links them so neither leg reads as the whole story.
+    if (!deliveries || deliveries.length === 0) return '';
+
+    return `
+        <div class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-3 sm:p-4 mt-3">
+            <div class="flex items-center justify-between mb-3">
+                <h4 class="text-sm sm:text-md font-semibold text-gray-900 dark:text-white">Related deliveries of this message</h4>
+                <span class="text-xs text-gray-500 dark:text-gray-400">${deliveries.length}</span>
+            </div>
+            <div class="space-y-2">
+                ${deliveries.map(leg => `
+                    <div class="p-3 bg-gray-50 dark:bg-gray-700/50 rounded hover:bg-gray-100 dark:hover:bg-gray-700 transition cursor-pointer" onclick="viewMessageDetails('${escapeHtml(leg.correlation_key)}')">
+                        <div class="flex justify-between items-start gap-2 flex-wrap">
+                            <span class="text-sm text-gray-900 dark:text-white break-all">${escapeHtml(leg.sender || '-')} =&gt; ${escapeHtml(leg.recipient || '-')}</span>
+                            <div class="flex items-center gap-2 flex-wrap">
+                                ${leg.final_status ? `<span class="text-xs px-2 py-0.5 rounded ${getStatusClass(leg.final_status)}">${escapeHtml(leg.final_status)}</span>` : ''}
+                                ${leg.direction ? `<span class="text-xs px-2 py-0.5 rounded ${getDirectionClass(leg.direction)}">${escapeHtml(leg.direction)}</span>` : ''}
+                                <span class="text-xs font-mono text-gray-500 dark:text-gray-400">${formatTime(leg.first_seen)}</span>
+                            </div>
+                        </div>
+                    </div>
+                `).join('')}
+            </div>
+        </div>
+    `;
+}
+
 function renderOverviewTab(content, data) {
     // Collect recipients from Postfix logs if available (these have full addresses including +)
     let recipientsFromPostfix = new Set();
@@ -5125,6 +5155,7 @@ function renderOverviewTab(content, data) {
                         </div>
                     </div>
                 </div>
+                ${renderRelatedDeliveries(data.related_deliveries)}
                 ${renderDovecotSummary(data.dovecot)}
                 ${data.rspamd ? `
                     <div class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-3 sm:p-4 mt-1">

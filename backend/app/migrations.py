@@ -20,49 +20,58 @@ logger = logging.getLogger(__name__)
 
 def cleanup_duplicate_correlations(db: Session) -> int:
     """
-    Clean up duplicate correlations that share the same Message-ID
-    
-    With the new Message-ID-based approach, there should be only ONE
-    correlation per Message-ID. This function merges any duplicates.
-    
+    Clean up duplicate correlations of the same delivery
+
+    A delivery is identified by (Message-ID, Postfix queue chain), so two legs
+    of one message - a forward, a Sieve redirect, any re-submission - are two
+    real deliveries and NOT duplicates (issue #36). Only rows that describe the
+    same leg are merged.
+
     Strategy:
-    1. Find Message-IDs with multiple correlations
+    1. Find (Message-ID, Queue-ID) pairs with multiple correlations
     2. For each, keep the oldest correlation
     3. Merge postfix_log_ids and rspamd_log_id from duplicates
     4. Update all related logs to point to the kept correlation
     5. Delete the duplicates
-    
+
     Returns:
         Number of duplicate correlations removed
     """
-    logger.info("Checking for duplicate correlations by Message-ID...")
-    
+    logger.info("Checking for duplicate correlations by Message-ID and Queue-ID...")
+
     try:
-        # Find Message-IDs with multiple correlations
+        # Find deliveries recorded more than once. Queue-less rows of one
+        # Message-ID group together (GROUP BY treats NULLs as equal), which is
+        # right: those are all the same not-yet-delivered message.
         query = text("""
-            SELECT message_id, array_agg(correlation_key ORDER BY first_seen) as keys, COUNT(*) as count
+            SELECT message_id, queue_id, array_agg(correlation_key ORDER BY first_seen) as keys, COUNT(*) as count
             FROM message_correlations
             WHERE message_id IS NOT NULL AND message_id != ''
-            GROUP BY message_id
+            GROUP BY message_id, queue_id
             HAVING COUNT(*) > 1
         """)
-        
+
         result = db.execute(query)
         duplicates = result.fetchall()
-        
+
         if not duplicates:
             logger.info("No duplicate correlations found")
             return 0
-        
-        logger.info(f"Found {len(duplicates)} Message-IDs with duplicate correlations")
-        
+
+        logger.info(f"Found {len(duplicates)} deliveries with duplicate correlations")
+
         total_removed = 0
-        for message_id, correlation_keys, count in duplicates:
-            # Get all correlations for this Message-ID (ordered by first_seen)
+        for message_id, queue_id, correlation_keys, count in duplicates:
+            # Get all correlations for this delivery (ordered by first_seen)
+            leg_filter = (
+                MessageCorrelation.queue_id == queue_id if queue_id
+                else MessageCorrelation.queue_id.is_(None)
+            )
             correlations = db.query(MessageCorrelation).filter(
-                MessageCorrelation.message_id == message_id
+                MessageCorrelation.message_id == message_id,
+                leg_filter
             ).order_by(MessageCorrelation.first_seen).all()
-            
+
             if len(correlations) <= 1:
                 continue
             
