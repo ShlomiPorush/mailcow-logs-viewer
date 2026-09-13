@@ -709,7 +709,6 @@ function renderMessagesData(data) {
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
                                 </svg>
                                 <span class="text-sm text-gray-600 dark:text-gray-300">${escapeHtml(msg.recipient || 'Unknown')}</span>
-                                ${renderDeliveriesChip(msg)}
                             </div>
                             <p class="text-xs text-gray-500 dark:text-gray-400 truncate" title="${escapeHtml(msg.subject || 'No subject')}">${escapeHtml(msg.subject || 'No subject')}</p>
                         </div>
@@ -731,6 +730,7 @@ function renderMessagesData(data) {
                         ${msg.message_id ? `<span class="font-mono truncate max-w-xs" title="Message ID: ${escapeHtml(msg.message_id)}">MID: ${escapeHtml(msg.message_id.substring(0, 20))}${msg.message_id.length > 20 ? '...' : ''}</span>` : ''}
                         ${msg.spam_score !== null ? `<span>Score: <span class="${msg.spam_score >= 15 ? 'text-red-600 dark:text-red-400 font-semibold' : 'text-gray-600 dark:text-gray-300'}">${msg.spam_score.toFixed(1)}</span></span>` : ''}
                         ${renderMailboxFolderHint(msg)}
+                        ${renderDeliveriesChip(msg)}
                         ${msg.user ? `<span>User: ${escapeHtml(msg.user)}</span>` : ''}
                         ${msg.ip ? `<span>IP: ${msg.ip}</span>` : ''}
                     </div>
@@ -3831,7 +3831,6 @@ async function loadMessages(page = 1) {
                                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
                                     </svg>
                                     <span class="text-sm text-gray-600 dark:text-gray-300">${escapeHtml(msg.recipient || 'Unknown')}</span>
-                                    ${renderDeliveriesChip(msg)}
                                 </div>
                                 <p class="text-xs text-gray-500 dark:text-gray-400 truncate" title="${escapeHtml(msg.subject || 'No subject')}">${escapeHtml(msg.subject || 'No subject')}</p>
                             </div>
@@ -3853,6 +3852,7 @@ async function loadMessages(page = 1) {
                             ${msg.message_id ? `<span class="font-mono truncate max-w-xs" title="Message ID: ${escapeHtml(msg.message_id)}">MID: ${escapeHtml(msg.message_id.substring(0, 20))}${msg.message_id.length > 20 ? '...' : ''}</span>` : ''}
                             ${msg.spam_score !== null ? `<span>Score: <span class="${msg.spam_score >= 15 ? 'text-red-600 dark:text-red-400 font-semibold' : 'text-gray-600 dark:text-gray-300'}">${msg.spam_score.toFixed(1)}</span></span>` : ''}
                             ${renderMailboxFolderHint(msg)}
+                            ${renderDeliveriesChip(msg)}
                             ${msg.user ? `<span>User: ${escapeHtml(msg.user)}</span>` : ''}
                             ${msg.ip ? `<span>IP: ${msg.ip}</span>` : ''}
                         </div>
@@ -4915,12 +4915,12 @@ function renderMailboxFolderHint(msg) {
 }
 
 // A message that was delivered more than once - forwarded, copied or released
-// from quarantine - is one row in the list (issue #36). The chip says how many
-// deliveries it has; the dialog shows them as a journey.
+// from quarantine - is one row in the list (issue #36). Shown as a plain
+// metadata entry; the dialog shows the deliveries as a journey.
 function renderDeliveriesChip(msg) {
     const deliveries = msg.deliveries || 1;
     if (deliveries < 2) return '';
-    return `<span class="inline-block px-2 py-0.5 text-xs font-medium rounded bg-indigo-100 dark:bg-indigo-900/30 text-indigo-800 dark:text-indigo-300">${deliveries} deliveries</span>`;
+    return `<span>Deliveries: ${deliveries}</span>`;
 }
 
 function folderIconSvg(sizeClasses) {
@@ -5119,7 +5119,7 @@ function renderRelatedDeliveries(data) {
                                 ${leg.final_status
                                     ? `<span class="text-xs px-2 py-0.5 rounded ${getStatusClass(leg.final_status)}">${escapeHtml(leg.final_status)}</span>`
                                     : '<span class="text-xs px-2 py-0.5 rounded bg-gray-200 dark:bg-gray-600 text-gray-600 dark:text-gray-300" title="This delivery attempt never reached a final outcome">no final status</span>'}
-                                ${leg.dovecot_status === 'stored' && leg.dovecot_mailbox ? `<span class="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded bg-amber-100 dark:bg-amber-900/30 text-amber-800 dark:text-amber-300">${folderIconSvg('w-3 h-3')}${escapeHtml(leg.dovecot_mailbox)}</span>` : ''}
+                                ${leg.dovecot_status === 'stored' && leg.dovecot_mailbox ? `<span class="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded bg-amber-100 dark:bg-amber-500/10 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-500/20">${folderIconSvg('w-3 h-3')}${escapeHtml(leg.dovecot_mailbox)}</span>` : ''}
                                 <span class="text-xs font-mono text-gray-500 dark:text-gray-400">${formatTime(leg.first_seen)}</span>
                             </div>
                         </div>
