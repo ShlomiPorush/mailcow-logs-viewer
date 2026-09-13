@@ -45,7 +45,7 @@ ALERT_TYPES: List[Dict] = [
     {
         "id": "dns_changes",
         "label": "DNS record changes",
-        "description": "A domain SPF, DKIM, DMARC or TLSA record changed",
+        "description": "A domain SPF, DKIM, DMARC, TLSA or MTA-STS record changed",
     },
     {
         "id": "dmarc_errors",

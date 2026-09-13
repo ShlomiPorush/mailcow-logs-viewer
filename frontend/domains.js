@@ -235,6 +235,7 @@ function renderDomainAccordionRow(domain) {
     const dkim = dns.dkim || { status: 'unknown', message: 'Not checked' };
     const dmarc = dns.dmarc || { status: 'unknown', message: 'Not checked' };
     const tlsa = dns.tlsa || { status: 'unknown', message: 'Not checked' };
+    const mtaSts = dns.mta_sts || { status: 'unknown', message: 'Not checked' };
 
     // Status icons for inline display
     const getStatusIcon = (status) => {
@@ -416,11 +417,12 @@ function renderDomainAccordionRow(domain) {
                             </button>
                         </div>
                     </div>
-                    <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+                    <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
                         ${renderDNSCheck('SPF', spf)}
                         ${renderDNSCheck('DKIM', dkim)}
                         ${renderDNSCheck('DMARC', dmarc)}
                         ${renderDNSCheck('TLSA', tlsa)}
+                        ${renderDNSCheck('MTA-STS', mtaSts)}
                     </div>
                 </div>
             </div>
@@ -655,6 +657,7 @@ async function checkSingleDomainDNS(domainName) {
                         const dkim = dns.dkim || { status: 'unknown', message: 'Not checked' };
                         const dmarc = dns.dmarc || { status: 'unknown', message: 'Not checked' };
                         const tlsa = dns.tlsa || { status: 'unknown', message: 'Not checked' };
+                        const mtaSts = dns.mta_sts || { status: 'unknown', message: 'Not checked' };
 
                         dnsSection.innerHTML = `
                             <div class="flex items-center justify-between mb-4">
@@ -683,11 +686,12 @@ async function checkSingleDomainDNS(domainName) {
                                     </button>
                                 </div>
                             </div>
-                            <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+                            <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
                                 ${renderDNSCheck('SPF', spf)}
                                 ${renderDNSCheck('DKIM', dkim)}
                                 ${renderDNSCheck('DMARC', dmarc)}
                                 ${renderDNSCheck('TLSA', tlsa)}
+                                ${renderDNSCheck('MTA-STS', mtaSts)}
                             </div>
                         `;
 
