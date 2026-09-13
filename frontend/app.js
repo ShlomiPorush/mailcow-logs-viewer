@@ -5066,9 +5066,9 @@ function renderLogTimeline(postfixLogs, dovecotLogs) {
                 <span class="text-xs text-gray-500 dark:text-gray-400" id="log-timeline-count">${entries.length} entries</span>
             </div>
             ${filterBar}
-            <!-- No inner height cap: the dialog body scrolls, so the timeline
-                 runs to its end instead of nesting a second scrollbar -->
-            <div class="space-y-2" id="log-timeline-entries">
+            <!-- Same layout as the Spam tab: the header and filters stay put,
+                 only the log entries scroll -->
+            <div class="space-y-2 max-h-[29rem] overflow-y-auto" id="log-timeline-entries">
                 ${entries.map(e => `<div data-log-source="${escapeHtml(timelineSource(e))}">${e.dovecot ? renderDovecotTimelineRow(e.log) : renderPostfixTimelineRow(e.log)}</div>`).join('')}
             </div>
         </div>
@@ -5076,7 +5076,9 @@ function renderLogTimeline(postfixLogs, dovecotLogs) {
 }
 
 function timelineSource(entry) {
-    return entry.dovecot ? 'dovecot' : (entry.log.program || 'postfix');
+    // Filtering is by the main source; the per-program detail stays visible
+    // as each line's own tag
+    return entry.dovecot ? 'dovecot' : 'postfix';
 }
 
 // Filter the dialog's log timeline by source. One source at a time; the
