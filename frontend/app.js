@@ -5053,7 +5053,9 @@ function renderLogTimeline(postfixLogs, dovecotLogs) {
                 <h4 class="text-md font-semibold text-gray-900 dark:text-white">Complete Log Timeline</h4>
                 <span class="text-xs text-gray-500 dark:text-gray-400">${entries.length} entries</span>
             </div>
-            <div class="space-y-2 max-h-96 overflow-y-auto">
+            <!-- No inner height cap: the dialog body scrolls, so the timeline
+                 runs to its end instead of nesting a second scrollbar -->
+            <div class="space-y-2">
                 ${entries.map(e => e.dovecot ? renderDovecotTimelineRow(e.log) : renderPostfixTimelineRow(e.log)).join('')}
             </div>
         </div>
