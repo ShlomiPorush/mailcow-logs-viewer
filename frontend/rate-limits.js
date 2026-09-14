@@ -95,18 +95,13 @@ function renderRateLimitActions() {
         <option value="${option.hours}" ${option.hours === rateLimitWindowHours ? 'selected' : ''}>${option.label}</option>
     `).join('');
 
+    // The app header's global Refresh reloads this page too, so the page
+    // itself only carries the window picker
     actions.innerHTML = `
         <select id="rate-limit-window" onchange="changeRateLimitWindow(this.value)"
             class="px-3 py-2 text-sm rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300">
             ${options}
         </select>
-        <button onclick="loadRateLimits()"
-            class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition text-sm font-medium flex items-center gap-2">
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
-            </svg>
-            Refresh
-        </button>
     `;
 }
 
@@ -313,44 +308,49 @@ function renderRateLimitConfigured() {
         `);
     }
 
-    const rows = [
-        ...mailboxes.map(mailbox => renderRateLimitConfigRow(
-            'mailbox', mailbox.username, mailbox.rl_value, mailbox.rl_frame, canWrite)),
-        ...domains.map(domain => renderRateLimitConfigRow(
-            'domain', domain.domain, domain.rl_value, domain.rl_frame, canWrite))
-    ].join('');
+    const limitsTable = rows => `
+        <div class="overflow-x-auto">
+            <table class="w-full">
+                <thead>
+                    <tr class="text-left text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                        <th class="px-4 py-2">Name</th>
+                        <th class="px-4 py-2">Limit</th>
+                        <th class="px-4 py-2"></th>
+                    </tr>
+                </thead>
+                <tbody>${rows}</tbody>
+            </table>
+        </div>
+    `;
+    const emptyBody = text => `
+        <div class="px-4 py-10 text-center">
+            <p class="text-gray-700 dark:text-gray-300 font-medium">Nothing is limited yet</p>
+            <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">${text}</p>
+        </div>
+    `;
 
-    const body = rows
-        ? `
-            <div class="overflow-x-auto">
-                <table class="w-full">
-                    <thead>
-                        <tr class="text-left text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">
-                            <th class="px-4 py-2">Name</th>
-                            <th class="px-4 py-2">Type</th>
-                            <th class="px-4 py-2">Limit</th>
-                            <th class="px-4 py-2"></th>
-                        </tr>
-                    </thead>
-                    <tbody>${rows}</tbody>
-                </table>
-            </div>
-        `
-        : `
-            <div class="px-4 py-10 text-center">
-                <p class="text-gray-700 dark:text-gray-300 font-medium">Nothing is limited yet</p>
-                <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">Mailboxes and domains send without a cap until you set one.</p>
-            </div>
-        `;
+    const mailboxRows = mailboxes.map(mailbox => renderRateLimitConfigRow(
+        'mailbox', mailbox.username, mailbox.rl_value, mailbox.rl_frame, canWrite)).join('');
+    const domainRows = domains.map(domain => renderRateLimitConfigRow(
+        'domain', domain.domain, domain.rl_value, domain.rl_frame, canWrite)).join('');
 
     container.innerHTML = `
-        <div class="bg-white dark:bg-gray-800 rounded-lg shadow border border-gray-200 dark:border-gray-700 overflow-hidden">
-            <div class="px-4 py-3 border-b border-gray-200 dark:border-gray-700">
-                <h3 class="font-semibold text-gray-900 dark:text-white">Configured limits</h3>
-                <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">How much each mailbox and domain is allowed to send</p>
+        <div class="space-y-4">
+            <div class="bg-white dark:bg-gray-800 rounded-lg shadow border border-gray-200 dark:border-gray-700 overflow-hidden">
+                <div class="px-4 py-3 border-b border-gray-200 dark:border-gray-700">
+                    <h3 class="font-semibold text-gray-900 dark:text-white">Mailbox limits</h3>
+                    <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">How much each mailbox is allowed to send</p>
+                </div>
+                ${notices.join('')}
+                ${mailboxRows ? limitsTable(mailboxRows) : emptyBody('Mailboxes send without a cap until you set one.')}
             </div>
-            ${notices.join('')}
-            ${body}
+            <div class="bg-white dark:bg-gray-800 rounded-lg shadow border border-gray-200 dark:border-gray-700 overflow-hidden">
+                <div class="px-4 py-3 border-b border-gray-200 dark:border-gray-700">
+                    <h3 class="font-semibold text-gray-900 dark:text-white">Domain limits</h3>
+                    <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">A domain limit caps all of its mailboxes together</p>
+                </div>
+                ${domainRows ? limitsTable(domainRows) : emptyBody('Domains send without a cap until you set one.')}
+            </div>
         </div>
     `;
 }
@@ -380,7 +380,6 @@ function renderRateLimitConfigRow(kind, name, value, frame, canWrite) {
     const row = `
         <tr class="border-t border-gray-200 dark:border-gray-700">
             <td class="px-4 py-2.5 font-mono text-sm text-gray-900 dark:text-white break-all">${escapeHtml(name)}</td>
-            <td class="px-4 py-2.5 text-sm text-gray-500 dark:text-gray-400">${kind === 'mailbox' ? 'Mailbox' : 'Domain'}</td>
             <td class="px-4 py-2.5">${renderRateLimitBadge(value ? { value: value, frame: frame } : null)}</td>
             <td class="px-4 py-2.5 text-right whitespace-nowrap">${action}</td>
         </tr>
@@ -398,7 +397,7 @@ function renderRateLimitEditForm(kind, name, value, frame) {
 
     return `
         <tr class="bg-gray-50 dark:bg-gray-900/30 border-t border-gray-200 dark:border-gray-700">
-            <td colspan="4" class="px-4 py-3">
+            <td colspan="3" class="px-4 py-3">
                 <div class="flex flex-wrap items-center gap-3">
                     <label for="rate-limit-value" class="text-sm text-gray-600 dark:text-gray-400">Allow</label>
                     <input id="rate-limit-value" type="number" min="0" step="1" value="${value ? escapeHtml(String(value)) : ''}"
