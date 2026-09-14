@@ -79,11 +79,13 @@ def test_unchanged_map_is_not_rewritten(monkeypatch, two_suppressions):
     if others:
         pytest.skip('other active suppressions present in shared test DB')
 
+    from app.routers.suppressions import format_suppression_map_entry
     content = "\n".join([
-        "manual@entry.example", "",
+        format_suppression_map_entry("manual@entry.example"), "",
         MANAGED_MARKER_START,
         "# Last sync: 2026-07-01T00:00:00Z | Active: 2",
-        "skip-a@test.example", "skip-b@test.example",
+        format_suppression_map_entry("skip-a@test.example"),
+        format_suppression_map_entry("skip-b@test.example"),
         MANAGED_MARKER_END,
     ])
     calls, result = _run_sync(monkeypatch, content)
@@ -102,5 +104,6 @@ def test_changed_map_is_rewritten(monkeypatch, two_suppressions):
     ])
     calls, result = _run_sync(monkeypatch, content)
     assert calls["writes"] == 1, "a real change must still be written"
-    assert 'skip-b@test.example' in calls["content"]
+    from app.routers.suppressions import format_suppression_map_entry
+    assert format_suppression_map_entry('skip-b@test.example') in calls["content"]
     assert result.get("skipped") is None or result.get("skipped") is not True
