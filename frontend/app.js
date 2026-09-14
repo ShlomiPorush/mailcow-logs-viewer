@@ -5114,9 +5114,18 @@ function renderRelatedDeliveries(data) {
 
     return `
         <div class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-3 sm:p-4 mt-3">
-            <h4 class="text-sm sm:text-md font-semibold text-gray-900 dark:text-white">Delivery journey</h4>
-            <p class="text-xs text-gray-500 dark:text-gray-400 mt-1 mb-3">This message passed through the server ${legs.length} times: ${statusSummary}.</p>
-            <div class="space-y-2">
+            <!-- Collapsed by default so several legs do not push the rest of
+                 the overview down; the summary line already tells the story -->
+            <div class="flex items-center justify-between cursor-pointer select-none" onclick="toggleDeliveryJourney()">
+                <div>
+                    <h4 class="text-sm sm:text-md font-semibold text-gray-900 dark:text-white">Delivery journey</h4>
+                    <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">This message passed through the server ${legs.length} times: ${statusSummary}.</p>
+                </div>
+                <svg id="delivery-journey-chevron" class="w-4 h-4 text-gray-400 flex-shrink-0 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
+                </svg>
+            </div>
+            <div class="space-y-2 mt-3 hidden" id="delivery-journey-legs">
                 ${legs.map((leg, i) => `
                     <div class="p-3 rounded ${leg.current
                         ? 'bg-blue-50 dark:bg-blue-900/20 border border-blue-300 dark:border-blue-700'
@@ -5167,6 +5176,13 @@ function filterLogTimeline(button) {
     });
     const count = document.getElementById('log-timeline-count');
     if (count) count.textContent = source ? `${shown} of ${total} entries` : `${total} entries`;
+}
+
+function toggleDeliveryJourney() {
+    const legs = document.getElementById('delivery-journey-legs');
+    const chevron = document.getElementById('delivery-journey-chevron');
+    const open = legs.classList.toggle('hidden');
+    if (chevron) chevron.style.transform = open ? '' : 'rotate(180deg)';
 }
 
 function renderOverviewTab(content, data) {
