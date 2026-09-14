@@ -47,9 +47,17 @@ function initMailboxStatsPage() {
 
 
 function mailboxStatsSwitchView(view) {
+    const disabled = window.disabledFeatures || [];
     // The feature can be turned off while the Rate Limits view is open
-    if (view === 'rate-limits' && window.disabledFeatures && window.disabledFeatures.includes('rate-limits')) {
+    if (view === 'rate-limits' && disabled.includes('rate-limits')) {
         view = 'statistics';
+    }
+    // The mirror: Rate Limits does not depend on Mailbox Stats, so with
+    // Mailbox Stats off this page is the Rate Limits page and Statistics is
+    // not a view you can reach - including on first entry. The guard above
+    // runs first, so with both features off nothing bounces back here.
+    if (view === 'statistics' && disabled.includes('mailbox-stats') && !disabled.includes('rate-limits')) {
+        view = 'rate-limits';
     }
     mailboxStatsView = view;
 

@@ -2550,14 +2550,28 @@ def safe_float(value, default=0.0):
     except (ValueError, TypeError):
         return default
 
+def _mailbox_sync_needed() -> bool:
+    """Whether the mailbox sync still has a consumer.
+
+    The sync fills `mailbox_statistics`, and that table feeds two features, not
+    one: Rate Limits reads each mailbox's configured limit (rl_value/rl_frame)
+    from it, looks domains up in it, and mirrors edits into it. So the sync has
+    to keep running while either feature is enabled - otherwise turning Mailbox
+    Stats off would quietly freeze the Rate Limits page on stale data and break
+    it outright for mailboxes created afterwards.
+    """
+    return (settings.is_feature_enabled('mailbox-stats')
+            or settings.is_feature_enabled('rate-limits'))
+
+
 async def update_mailbox_statistics():
     """
     Fetch mailbox statistics from mailcow API and update the database.
     Runs every 5 minutes.
     Also removes mailboxes that no longer exist in mailcow.
     """
-    if not settings.is_feature_enabled('mailbox-stats'):
-        logger.debug("[MAILBOX] Feature disabled, skipping mailbox statistics")
+    if not _mailbox_sync_needed():
+        logger.debug("[MAILBOX] Mailbox Stats and Rate Limits are both disabled, skipping mailbox statistics")
         return
     update_job_status('mailbox_stats', 'running')
     logger.info("Starting mailbox statistics update...")
@@ -3174,11 +3188,76 @@ async def cleanup_deferred_queue_job():
         update_job_status('cleanup_deferred_queue', 'failed', str(e))
 
 
+def _run_disabled_feature_cleanup(db: Session) -> None:
+    """The deletions behind cleanup_disabled_feature_data (see there)."""
+    from .models import SystemSetting
+    from .routers.rate_limits import _RESETS_KEY
+
+    mailbox_stats_off = not settings.is_feature_enabled('mailbox-stats')
+    rate_limits_off = not settings.is_feature_enabled('rate-limits')
+    deleted = {}
+
+    if mailbox_stats_off:
+        # Aliases are shown by Mailbox Stats alone - nothing else reads them
+        removed = db.query(AliasStatistics).delete(synchronize_session=False)
+        if removed:
+            deleted['alias_statistics'] = removed
+
+    if mailbox_stats_off and rate_limits_off:
+        # Shared infrastructure: while Rate Limits is on it still reads the
+        # configured limits out of this table, so it may only go when both are
+        # off (see _mailbox_sync_needed)
+        removed = db.query(MailboxStatistics).delete(synchronize_session=False)
+        if removed:
+            deleted['mailbox_statistics'] = removed
+
+    if rate_limits_off:
+        # The audit of "who reset which counter", kept in system_settings
+        removed = db.query(SystemSetting).filter(
+            SystemSetting.key == _RESETS_KEY).delete(synchronize_session=False)
+        if removed:
+            deleted['rate_limit_resets'] = removed
+
+    db.commit()
+    if deleted:
+        logger.info("[FEATURES] Removed data left behind by disabled features: "
+                    + ", ".join(f"{table}={rows}" for table, rows in deleted.items()))
+
+
+def cleanup_disabled_feature_data(db: Optional[Session] = None) -> None:
+    """Drop the data of features that are currently switched off.
+
+    Turning a feature off should take its data with it instead of leaving rows
+    nobody can reach. The rules are read from the *current* disabled set rather
+    than from a transition, so this is idempotent and safe to run on every
+    startup and after every settings save.
+
+    Never raises: a failure here must not stop the app from starting or a
+    settings save from succeeding.
+    """
+    try:
+        if db is not None:
+            _run_disabled_feature_cleanup(db)
+        else:
+            with get_db_context() as own_db:
+                _run_disabled_feature_cleanup(own_db)
+    except Exception as e:
+        logger.warning(f"[FEATURES] Could not clean up disabled feature data: {e}")
+        if db is not None:
+            try:
+                db.rollback()
+            except Exception:
+                pass
+
+
 def start_scheduler():
     """Start the background scheduler"""
     try:
         # Run one-time blacklist cleanup on startup
         cleanup_blacklisted_data()
+
+        # Features switched off in the meantime should not leave data behind
+        cleanup_disabled_feature_data()
         
         # Job 1: Fetch logs from API (every fetch_interval seconds)
         scheduler.add_job(
@@ -3376,7 +3455,9 @@ def start_scheduler():
             logger.info("Scheduled initial DMARC IMAP sync on startup")
 
         # Job 13: Mailbox Statistics (every 5 minutes)
-        if settings.is_feature_enabled('mailbox-stats'):
+        # Rate Limits reads the configured mailbox limits out of the table this
+        # job fills, so it runs while either feature is enabled.
+        if _mailbox_sync_needed():
             scheduler.add_job(
                 update_mailbox_statistics,
                 IntervalTrigger(minutes=5),
@@ -3385,7 +3466,7 @@ def start_scheduler():
                 replace_existing=True,
                 max_instances=1
             )
-            
+
             # Run once on startup (after 45 seconds)
             scheduler.add_job(
                 update_mailbox_statistics,
@@ -3395,8 +3476,13 @@ def start_scheduler():
                 name='Mailbox Statistics (Startup)'
             )
             logger.info("Scheduled mailbox statistics job (interval: 5 minutes)")
+        else:
+            logger.info("   [FEATURE] Mailbox Stats and Rate Limits both disabled - skipping mailbox stats job")
 
-            # Job 14: Alias Statistics (every 5 minutes)
+        # Job 14: Alias Statistics (every 5 minutes)
+        # Aliases are shown by Mailbox Stats alone, so this one stays gated on
+        # that feature only.
+        if settings.is_feature_enabled('mailbox-stats'):
             scheduler.add_job(
                 update_alias_statistics,
                 IntervalTrigger(minutes=5),
@@ -3405,7 +3491,7 @@ def start_scheduler():
                 replace_existing=True,
                 max_instances=1
             )
-            
+
             # Run once on startup (after 50 seconds)
             scheduler.add_job(
                 update_alias_statistics,
@@ -3416,7 +3502,7 @@ def start_scheduler():
             )
             logger.info("Scheduled alias statistics job (interval: 5 minutes)")
         else:
-            logger.info("   [FEATURE] Mailbox Stats feature disabled - skipping mailbox/alias stats jobs")
+            logger.info("   [FEATURE] Mailbox Stats feature disabled - skipping alias stats job")
 
         # Job 15: Blacklist Check (daily at 5 AM)
         if settings.is_feature_enabled('blacklist'):

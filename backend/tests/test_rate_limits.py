@@ -681,3 +681,202 @@ def test_a_reset_is_recorded_and_marked_on_the_events_row(env, monkeypatch):
     group = next(g for g in data['by_sender'] if g['user'] == SENDER)
     assert group.get('last_reset'), 'the reset must be marked on the row'
 
+
+# ---------- Rate Limits does not depend on Mailbox Stats ----------
+# The page reads each mailbox's configured limit out of `mailbox_statistics`,
+# which only the Mailbox Stats sync job ever fills. Gating that job on Mailbox
+# Stats alone meant switching that feature off quietly froze the Rate Limits
+# page on stale data, so the job is shared by the two features now.
+
+def _sync_needed():
+    from app.scheduler import _mailbox_sync_needed
+    return _mailbox_sync_needed()
+
+
+def test_the_mailbox_sync_runs_when_both_features_are_enabled(monkeypatch):
+    _disable(monkeypatch, '')
+    assert _sync_needed() is True
+
+
+def test_the_mailbox_sync_keeps_running_for_rate_limits_alone(monkeypatch):
+    """The point of the decoupling: Rate Limits still gets fresh limits."""
+    _disable(monkeypatch, 'mailbox-stats')
+    assert _sync_needed() is True
+
+
+def test_the_mailbox_sync_keeps_running_for_mailbox_stats_alone(monkeypatch):
+    _disable(monkeypatch, 'rate-limits')
+    assert _sync_needed() is True
+
+
+def test_the_mailbox_sync_stops_only_when_both_features_are_off(monkeypatch):
+    _disable(monkeypatch, 'mailbox-stats,rate-limits')
+    assert _sync_needed() is False
+
+
+def test_the_mailbox_job_itself_still_runs_with_mailbox_stats_off(monkeypatch):
+    """The job has its own guard, so the registration fix is not enough."""
+    from app import scheduler
+    _disable(monkeypatch, 'mailbox-stats')
+    reached = []
+
+    async def fake_get_mailboxes():
+        reached.append(True)
+        return []
+    monkeypatch.setattr(scheduler.mailcow_api, 'get_mailboxes', fake_get_mailboxes)
+
+    asyncio.run(scheduler.update_mailbox_statistics())
+    assert reached, 'the sync must still run while Rate Limits needs it'
+
+
+def test_the_mailbox_job_stops_when_both_features_are_off(monkeypatch):
+    from app import scheduler
+    _disable(monkeypatch, 'mailbox-stats,rate-limits')
+
+    async def fake_get_mailboxes():
+        raise AssertionError('the mailbox job must not call mailcow')
+    monkeypatch.setattr(scheduler.mailcow_api, 'get_mailboxes', fake_get_mailboxes)
+
+    asyncio.run(scheduler.update_mailbox_statistics())
+
+
+def test_the_alias_job_stays_tied_to_mailbox_stats_alone(monkeypatch):
+    """Rate Limits has no use for aliases, so that job must not be revived."""
+    from app import scheduler
+    _disable(monkeypatch, 'mailbox-stats')
+
+    async def fake_get_aliases():
+        raise AssertionError('the alias job must not call mailcow')
+    monkeypatch.setattr(scheduler.mailcow_api, 'get_aliases', fake_get_aliases)
+
+    asyncio.run(scheduler.update_alias_statistics())
+
+
+# ---------- a disabled feature leaves nothing behind ----------
+# Switching a feature off takes its data with it. The rules read the *current*
+# disabled set rather than a transition, so the cleanup is idempotent and safe
+# to run on every startup and after every settings save.
+
+ALIAS = f'alias-{MARKER}@{DOMAIN}'
+TARGET = f'target-{MARKER}@{DOMAIN}'
+
+
+def _wipe_leftovers():
+    from app.database import get_db_context
+    from app.models import AliasStatistics, MailboxStatistics, SystemSetting
+    with get_db_context() as db:
+        db.query(AliasStatistics).filter(
+            AliasStatistics.domain == DOMAIN).delete(synchronize_session=False)
+        db.query(MailboxStatistics).filter(
+            MailboxStatistics.domain == DOMAIN).delete(synchronize_session=False)
+        db.query(SystemSetting).filter(
+            SystemSetting.key == 'rate_limit_resets').delete(synchronize_session=False)
+        db.commit()
+
+
+@pytest.fixture()
+def leftovers():
+    """One mailbox row, one alias row and one reset-audit entry to clean up."""
+    if not _postgres_available():
+        pytest.skip('PostgreSQL not available')
+    from app.database import init_db, get_db_context
+    from app.models import AliasStatistics, MailboxStatistics, SystemSetting
+    init_db()
+    _wipe_leftovers()
+    with get_db_context() as db:
+        db.add(MailboxStatistics(username=TARGET, domain=DOMAIN, active=True,
+                                 rl_value=100, rl_frame='m'))
+        db.add(AliasStatistics(alias_address=ALIAS, goto=TARGET, domain=DOMAIN,
+                               active=True))
+        db.add(SystemSetting(key='rate_limit_resets', value='{}'))
+        db.commit()
+    yield
+    _wipe_leftovers()
+
+
+def _counts():
+    from app.database import get_db_context
+    from app.models import AliasStatistics, MailboxStatistics, SystemSetting
+    with get_db_context() as db:
+        return {
+            'aliases': db.query(AliasStatistics).count(),
+            'mailboxes': db.query(MailboxStatistics).count(),
+            'resets': db.query(SystemSetting).filter(
+                SystemSetting.key == 'rate_limit_resets').count(),
+        }
+
+
+def _run_cleanup():
+    from app.database import get_db_context
+    from app.scheduler import cleanup_disabled_feature_data
+    with get_db_context() as db:
+        cleanup_disabled_feature_data(db)
+
+
+def test_nothing_is_deleted_while_both_features_are_enabled(leftovers, monkeypatch):
+    _disable(monkeypatch, '')
+    _run_cleanup()
+    after = _counts()
+    assert after['aliases'] >= 1
+    assert after['mailboxes'] >= 1
+    assert after['resets'] == 1
+
+
+def test_disabling_mailbox_stats_drops_the_alias_rows(leftovers, monkeypatch):
+    _disable(monkeypatch, 'mailbox-stats')
+    _run_cleanup()
+    assert _counts()['aliases'] == 0
+
+
+def test_the_mailbox_rows_survive_while_rate_limits_still_reads_them(leftovers, monkeypatch):
+    """The table is shared infrastructure, not Mailbox Stats' private data."""
+    _disable(monkeypatch, 'mailbox-stats')
+    _run_cleanup()
+    assert _counts()['mailboxes'] >= 1
+
+
+def test_the_mailbox_rows_go_once_both_features_are_off(leftovers, monkeypatch):
+    _disable(monkeypatch, 'mailbox-stats,rate-limits')
+    _run_cleanup()
+    after = _counts()
+    assert after['mailboxes'] == 0
+    assert after['aliases'] == 0
+
+
+def test_disabling_rate_limits_drops_the_reset_audit(leftovers, monkeypatch):
+    _disable(monkeypatch, 'rate-limits')
+    _run_cleanup()
+    assert _counts()['resets'] == 0
+
+
+def test_the_reset_audit_survives_while_rate_limits_is_on(leftovers, monkeypatch):
+    _disable(monkeypatch, 'mailbox-stats')
+    _run_cleanup()
+    assert _counts()['resets'] == 1
+
+
+def test_running_the_cleanup_twice_changes_nothing(leftovers, monkeypatch):
+    _disable(monkeypatch, 'mailbox-stats,rate-limits')
+    _run_cleanup()
+    first = _counts()
+    _run_cleanup()
+    assert _counts() == first
+
+
+def test_a_cleanup_failure_never_reaches_the_caller(monkeypatch):
+    """Startup and a settings save must survive a cleanup that blows up."""
+    from app import scheduler
+
+    def boom(db):
+        raise RuntimeError('database on fire')
+    monkeypatch.setattr(scheduler, '_run_disabled_feature_cleanup', boom)
+
+    rolled_back = []
+
+    class _Session:
+        def rollback(self):
+            rolled_back.append(True)
+
+    scheduler.cleanup_disabled_feature_data(_Session())
+    assert rolled_back, 'the caller session must be left usable'
+
