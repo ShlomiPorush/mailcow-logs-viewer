@@ -28,7 +28,8 @@ const RATE_LIMIT_FRAME_LABELS = {
     d: 'day'
 };
 
-let rateLimitWindowHours = 168;
+let rateLimitWindowHours = 720;
+let rateLimitSearch = { mailbox: '', domain: '' };
 let rateLimitEventsData = null;
 let rateLimitConfigData = null;
 // { kind: 'mailbox' | 'domain', name: string } while one row's form is open
@@ -309,19 +310,54 @@ async function resetRateLimitCounter(user, rlHash) {
 
 function renderRateLimitLimitsTable(rows) {
     return `
-        <div class="overflow-x-auto">
-            <table class="w-full">
-                <thead>
-                    <tr class="text-left text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">
-                        <th class="px-4 py-2">Name</th>
-                        <th class="px-4 py-2">Limit</th>
-                        <th class="px-4 py-2"></th>
+        <div class="mobile-scroll overflow-x-auto">
+            <table class="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+                <thead class="bg-gray-50 dark:bg-gray-700">
+                    <tr>
+                        <th class="px-3 sm:px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Name</th>
+                        <th class="px-3 sm:px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Limit</th>
+                        <th class="px-3 sm:px-4 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider"></th>
                     </tr>
                 </thead>
-                <tbody>${rows}</tbody>
+                <tbody class="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
+                    ${rows}
+                    <tr data-rl-noresults class="hidden">
+                        <td colspan="3" class="px-3 sm:px-4 py-8 text-center text-sm text-gray-500 dark:text-gray-400">No matches</td>
+                    </tr>
+                </tbody>
             </table>
         </div>
     `;
+}
+
+
+// One search box per limits tab. Filtering hides rows in place so the input
+// never loses focus while typing.
+function renderRateLimitSearch(kind, subtitle) {
+    return `
+        <div class="px-4 py-3 border-b border-gray-200 dark:border-gray-700 flex flex-wrap items-center justify-between gap-3">
+            <p class="text-sm text-gray-600 dark:text-gray-400">${subtitle}</p>
+            <input type="text" value="${escapeHtml(rateLimitSearch[kind] || '')}" placeholder="Search..."
+                oninput="filterRateLimitRows('${kind}', this.value)"
+                class="w-56 px-3 py-2 text-sm rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300">
+        </div>
+    `;
+}
+
+
+function filterRateLimitRows(kind, query) {
+    rateLimitSearch[kind] = query;
+    const container = document.getElementById(kind === 'mailbox' ? 'rate-limits-tab-mailboxes' : 'rate-limits-tab-domains');
+    if (!container) return;
+    const q = (query || '').trim().toLowerCase();
+    let shown = 0;
+    container.querySelectorAll('tbody tr[data-rl-name]').forEach(tr => {
+        const match = !q || tr.dataset.rlName.includes(q);
+        tr.classList.toggle('hidden', !match);
+        if (match && !tr.hasAttribute('data-rl-editrow')) shown++;
+    });
+    const empty = container.querySelector('[data-rl-noresults]');
+    if (empty) empty.classList.toggle('hidden', shown !== 0);
 }
 
 
@@ -347,12 +383,11 @@ function renderRateLimitMailboxes() {
         'mailbox', mailbox.username, mailbox.rl_value, mailbox.rl_frame, canWrite)).join('');
 
     container.innerHTML = `
-        <div class="px-4 py-3 border-b border-gray-200 dark:border-gray-700">
-            <p class="text-sm text-gray-600 dark:text-gray-400">How much each mailbox is allowed to send</p>
-        </div>
+        ${renderRateLimitSearch('mailbox', 'How much each mailbox is allowed to send')}
         ${renderRateLimitReadOnlyNotice()}
         ${rows ? renderRateLimitLimitsTable(rows) : renderRateLimitEmptyBody('Mailboxes send without a cap until you set one.')}
     `;
+    if (rateLimitSearch.mailbox) filterRateLimitRows('mailbox', rateLimitSearch.mailbox);
 }
 
 
@@ -376,13 +411,12 @@ function renderRateLimitDomains() {
         'domain', domain.domain, domain.rl_value, domain.rl_frame, canWrite)).join('');
 
     container.innerHTML = `
-        <div class="px-4 py-3 border-b border-gray-200 dark:border-gray-700">
-            <p class="text-sm text-gray-600 dark:text-gray-400">A domain limit caps all of its mailboxes together</p>
-        </div>
+        ${renderRateLimitSearch('domain', 'A domain limit caps all of its mailboxes together')}
         ${renderRateLimitReadOnlyNotice()}
         ${domainsError}
         ${rows ? renderRateLimitLimitsTable(rows) : renderRateLimitEmptyBody('Domains send without a cap until you set one.')}
     `;
+    if (rateLimitSearch.domain) filterRateLimitRows('domain', rateLimitSearch.domain);
 }
 
 
@@ -398,27 +432,27 @@ function renderRateLimitConfigRow(kind, name, value, frame, canWrite) {
         && rateLimitEditing.kind === kind
         && rateLimitEditing.name === name;
 
+    // Edit and Cancel share one recipe so the action column never changes size
+    const actionButton = 'px-3 py-1.5 text-xs font-medium rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700';
     const action = !canWrite
         ? ''
         : (editing
             ? `
-                <button type="button" onclick="closeRateLimitEdit()"
-                    class="px-2 py-1 text-xs font-medium rounded border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700">
+                <button type="button" onclick="closeRateLimitEdit()" class="${actionButton}">
                     Cancel
                 </button>
             `
             : `
-                <button type="button" onclick="openRateLimitEdit('${kind}', '${escapeJsArg(name)}')"
-                    class="px-2 py-1 text-xs font-medium rounded border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700">
+                <button type="button" onclick="openRateLimitEdit('${kind}', '${escapeJsArg(name)}')" class="${actionButton}">
                     Edit
                 </button>
             `);
 
     const row = `
-        <tr class="border-t border-gray-200 dark:border-gray-700">
-            <td class="px-4 py-2.5 font-mono text-sm text-gray-900 dark:text-white break-all">${escapeHtml(name)}</td>
-            <td class="px-4 py-2.5">${renderRateLimitBadge(value ? { value: value, frame: frame } : null)}</td>
-            <td class="px-4 py-2.5 text-right whitespace-nowrap">${action}</td>
+        <tr data-rl-name="${escapeHtml(name.toLowerCase())}" class="hover:bg-gray-50 dark:hover:bg-gray-700">
+            <td class="px-3 sm:px-4 py-3 text-xs sm:text-sm font-mono text-gray-900 dark:text-gray-100 break-all">${escapeHtml(name)}</td>
+            <td class="px-3 sm:px-4 py-3">${renderRateLimitBadge(value ? { value: value, frame: frame } : null)}</td>
+            <td class="px-3 sm:px-4 py-3 text-right whitespace-nowrap">${action}</td>
         </tr>
     `;
 
@@ -433,23 +467,23 @@ function renderRateLimitEditForm(kind, name, value, frame) {
     `).join('');
 
     return `
-        <tr class="bg-gray-50 dark:bg-gray-900/30 border-t border-gray-200 dark:border-gray-700">
-            <td colspan="3" class="px-4 py-3">
+        <tr data-rl-name="${escapeHtml(name.toLowerCase())}" data-rl-editrow class="bg-gray-50 dark:bg-gray-900/30">
+            <td colspan="3" class="px-3 sm:px-4 py-3">
                 <div class="flex flex-wrap items-center gap-3">
                     <label for="rate-limit-value" class="text-sm text-gray-600 dark:text-gray-400">Allow</label>
                     <input id="rate-limit-value" type="number" min="0" step="1" value="${value ? escapeHtml(String(value)) : ''}"
                         placeholder="messages"
-                        class="w-32 px-3 py-1.5 text-sm rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white">
+                        class="w-32 px-3 py-1.5 text-sm rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white">
                     <select id="rate-limit-frame"
-                        class="px-3 py-1.5 text-sm rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white">
+                        class="px-3 py-1.5 text-sm rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white">
                         ${frames}
                     </select>
                     <button type="button" onclick="saveRateLimit('${kind}', '${escapeJsArg(name)}')"
-                        class="px-3 py-1.5 text-xs font-medium rounded bg-blue-600 hover:bg-blue-700 text-white">
+                        class="px-3 py-1.5 text-xs font-medium rounded-lg bg-blue-600 hover:bg-blue-700 text-white">
                         Save
                     </button>
                     <button type="button" onclick="removeRateLimit('${kind}', '${escapeJsArg(name)}')"
-                        class="px-3 py-1.5 text-xs font-medium rounded border border-red-300 dark:border-red-500/40 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10">
+                        class="px-3 py-1.5 text-xs font-medium rounded-lg border border-red-300 dark:border-red-500/40 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10">
                         Remove limit
                     </button>
                 </div>
