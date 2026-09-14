@@ -1,0 +1,361 @@
+"""
+Rate Limits API - who is hitting mailcow's sender rate limits, and control
+over the limits themselves.
+
+mailcow enforces sender rate limits in rspamd, which counts every send against
+a Redis key and writes a line to the `ratelimited` log when a sender runs out.
+This app already collects that log into raw_service_logs, so /events reads the
+local table only: the page stays fast and still answers when mailcow is down.
+/limits and all three write endpoints do talk to mailcow.
+
+Two different things can be changed here, and they are easy to confuse:
+  - the LIMIT is configuration (rl_value messages per rl_frame)
+  - the COUNTER is the Redis hash a blocked sender is currently stuck behind;
+    releasing it lets that sender through again without touching the limit
+"""
+import logging
+import re
+import time
+from datetime import datetime, timedelta
+from typing import Any, Dict, List, Optional, Tuple
+
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
+from sqlalchemy import func
+from sqlalchemy.orm import Session
+
+from ..config import get_cached_active_domains
+from ..database import get_db
+from ..mailcow_api import MailcowAPIError, mailcow_api
+from ..models import MailboxStatistics, RawServiceLog
+from ..utils import format_datetime_for_api, internal_error
+
+logger = logging.getLogger(__name__)
+
+router = APIRouter(prefix="/rate-limits")
+
+# rspamd's time frames: second, minute, hour, day
+VALID_FRAMES = ('s', 'm', 'h', 'd')
+
+# Shape of the Redis key rspamd counts against, as it appears in the log
+_RL_HASH_RE = re.compile(r'^RL[A-Za-z0-9]+$')
+
+# Detail rows kept per sender, and the length of the flat feed
+_RECENT_PER_SENDER = 5
+_FLAT_EVENT_LIMIT = 50
+
+# Upper bound on the rows one request will parse, so a long window on a busy
+# server cannot pin a worker. The grouping is still correct for everything read.
+_MAX_EVENT_ROWS = 5000
+
+# Reading the domain limits is one mailcow round trip per domain and the page
+# refreshes often, so the answers are reused in-process for a few minutes.
+_DOMAIN_LIMIT_TTL = 300
+_domain_limit_cache: Dict[str, Any] = {'at': 0.0, 'limits': None}
+
+
+# ---- helpers ----
+
+def _bust_domain_limit_cache() -> None:
+    """Drop the cached domain limits after a write."""
+    _domain_limit_cache['at'] = 0.0
+    _domain_limit_cache['limits'] = None
+
+
+def _require_rw_key() -> None:
+    """Every write here goes through mailcow and needs the Read-Write key."""
+    if not mailcow_api.has_rw_key:
+        raise HTTPException(
+            status_code=503,
+            detail="MAILCOW_API_KEY_RW is required to change rate limits"
+        )
+
+
+def _validate_value(value: Any) -> int:
+    """Rate limit values are whole messages per frame; 0 means no limit."""
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="Rate limit value must be a whole number")
+    if parsed < 0:
+        raise HTTPException(status_code=400, detail="Rate limit value cannot be negative")
+    return parsed
+
+
+def _validate_frame(frame: str) -> str:
+    value = (frame or '').strip().lower()
+    if value not in VALID_FRAMES:
+        raise HTTPException(
+            status_code=400,
+            detail="Time frame must be s (second), m (minute), h (hour) or d (day)"
+        )
+    return value
+
+
+def _limit_value(raw: Any) -> Optional[int]:
+    """mailcow returns the limit as a string; 0 and junk both mean no limit."""
+    try:
+        parsed = int(str(raw).strip())
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed > 0 else None
+
+
+def _known_domains(db: Session) -> set:
+    """Local domain names: the mailcow domain cache, plus the domains we have
+    mailboxes for (so the page keeps working before the cache is populated)."""
+    names = {(d or '').strip().lower() for d in (get_cached_active_domains() or [])}
+    for (domain,) in db.query(MailboxStatistics.domain).distinct().all():
+        names.add((domain or '').strip().lower())
+    names.discard('')
+    return names
+
+
+async def _fetch_domain_limits(db: Session) -> Tuple[List[Dict[str, Any]], Optional[str]]:
+    """Per-domain limits from mailcow, cached in-process for _DOMAIN_LIMIT_TTL."""
+    now = time.monotonic()
+    cached = _domain_limit_cache.get('limits')
+    if cached is not None and (now - _domain_limit_cache['at']) < _DOMAIN_LIMIT_TTL:
+        return cached, None
+
+    limits: List[Dict[str, Any]] = []
+    error: Optional[str] = None
+    for domain in sorted(_known_domains(db)):
+        try:
+            data = await mailcow_api.get_rl_domain(domain)
+        except MailcowAPIError as e:
+            logger.warning(f"Could not read the rate limit of {domain}: {e}")
+            error = str(e)
+            continue
+        limits.append({
+            'domain': domain,
+            'rl_value': _limit_value(data.get('value')),
+            'rl_frame': data.get('frame') or None,
+        })
+
+    # Never cache a partial answer - the next refresh should retry mailcow
+    if error is None:
+        _domain_limit_cache['limits'] = limits
+        _domain_limit_cache['at'] = now
+    return limits, error
+
+
+# ---- request models ----
+
+class MailboxLimitRequest(BaseModel):
+    mailbox: str
+    value: int
+    frame: str
+
+
+class DomainLimitRequest(BaseModel):
+    domain: str
+    value: int
+    frame: str
+
+
+class ReleaseRequest(BaseModel):
+    rl_hash: str
+
+
+# ---- endpoints ----
+
+@router.get("/events")
+def get_rate_limit_events(
+    hours: int = Query(168, ge=1, le=720),
+    db: Session = Depends(get_db)
+):
+    """Senders that hit a rate limit in the window, grouped by sender.
+
+    Reads only the collected `ratelimited` log, so this never waits on mailcow.
+    """
+    since = datetime.utcnow() - timedelta(hours=hours)
+    try:
+        rows = db.query(RawServiceLog).filter(
+            RawServiceLog.service == 'ratelimited',
+            RawServiceLog.time >= since
+        ).order_by(RawServiceLog.time.desc()).limit(_MAX_EVENT_ROWS).all()
+    except Exception as e:
+        logger.error(f"Error reading rate limit events: {e}")
+        raise internal_error(e)
+
+    groups: Dict[str, Dict[str, Any]] = {}
+    events: List[Dict[str, Any]] = []
+    total_events = 0
+
+    # Rows arrive newest first, so the first row seen for a sender is the
+    # latest one - that is where last_seen and last_rl_hash come from.
+    for row in rows:
+        data = row.raw_data if isinstance(row.raw_data, dict) else {}
+        user = (data.get('user') or data.get('from') or '').strip().lower()
+        if not user:
+            continue
+
+        total_events += 1
+        rl_hash = (data.get('rl_hash') or '').strip()
+        detail = {
+            'time': format_datetime_for_api(row.time),
+            'rcpt': data.get('rcpt') or '',
+            'subject': data.get('header_subject') or '',
+            'qid': data.get('qid') or '',
+            'rl_hash': rl_hash,
+        }
+
+        group = groups.get(user)
+        if group is None:
+            group = groups[user] = {
+                'user': user,
+                'events': 0,
+                'last_seen': detail['time'],
+                'last_rl_hash': rl_hash or None,
+                'current_limit': None,
+                'recent': [],
+            }
+        group['events'] += 1
+        if not group['last_rl_hash'] and rl_hash:
+            group['last_rl_hash'] = rl_hash
+        if len(group['recent']) < _RECENT_PER_SENDER:
+            group['recent'].append(detail)
+
+        if len(events) < _FLAT_EVENT_LIMIT:
+            events.append({'user': user, **detail})
+
+    # The configured limit comes from the synced mailbox row, never from a
+    # mailcow call - this endpoint has to stay fast and work offline.
+    if groups:
+        try:
+            configured = db.query(
+                MailboxStatistics.username,
+                MailboxStatistics.rl_value,
+                MailboxStatistics.rl_frame
+            ).filter(func.lower(MailboxStatistics.username).in_(list(groups))).all()
+        except Exception as e:
+            logger.error(f"Error reading configured limits: {e}")
+            raise internal_error(e)
+        for username, rl_value, rl_frame in configured:
+            group = groups.get((username or '').strip().lower())
+            if group is not None and rl_value:
+                group['current_limit'] = {'value': rl_value, 'frame': rl_frame}
+
+    by_sender = sorted(groups.values(), key=lambda g: g['events'], reverse=True)
+    return {
+        'hours': hours,
+        'total_events': total_events,
+        'by_sender': by_sender,
+        'events': events,
+    }
+
+
+@router.get("/limits")
+async def get_configured_limits(db: Session = Depends(get_db)):
+    """Mailboxes that have a limit, and the limit of every local domain."""
+    try:
+        rows = db.query(MailboxStatistics).filter(
+            MailboxStatistics.rl_value.isnot(None),
+            MailboxStatistics.rl_value > 0
+        ).order_by(MailboxStatistics.username).all()
+    except Exception as e:
+        logger.error(f"Error reading mailbox rate limits: {e}")
+        raise internal_error(e)
+
+    mailboxes = [{
+        'username': row.username,
+        'domain': row.domain,
+        'rl_value': row.rl_value,
+        'rl_frame': row.rl_frame,
+        'active': bool(row.active),
+    } for row in rows]
+
+    domains, domains_error = await _fetch_domain_limits(db)
+
+    return {
+        'rw_key_configured': mailcow_api.has_rw_key,
+        'mailboxes': mailboxes,
+        'domains': domains,
+        'domains_error': domains_error,
+    }
+
+
+@router.post("/mailbox")
+async def set_mailbox_limit(request: MailboxLimitRequest, db: Session = Depends(get_db)):
+    """Set the rate limit of one mailbox. A value of 0 removes the limit."""
+    _require_rw_key()
+    mailbox = (request.mailbox or '').strip().lower()
+    value = _validate_value(request.value)
+    frame = _validate_frame(request.frame)
+
+    row = db.query(MailboxStatistics).filter(
+        func.lower(MailboxStatistics.username) == mailbox
+    ).first()
+    if row is None:
+        raise HTTPException(status_code=400, detail=f"Unknown mailbox: {request.mailbox}")
+
+    try:
+        response = await mailcow_api.edit_rl_mbox(row.username, value, frame)
+    except MailcowAPIError as e:
+        logger.error(f"Failed to set the rate limit of {mailbox}: {e}")
+        raise HTTPException(status_code=502, detail=f"mailcow did not apply the change: {e}")
+
+    # Mirror the change locally so the page shows it without waiting for the
+    # next mailbox sync. A failure here is cosmetic, not a failed write.
+    new_value = value or None
+    try:
+        row.rl_value = new_value
+        row.rl_frame = frame if new_value else None
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        logger.warning(f"Rate limit applied in mailcow but not stored locally for {mailbox}: {e}")
+
+    return {
+        'mailbox': row.username,
+        'rl_value': new_value,
+        'rl_frame': frame if new_value else None,
+        'mailcow_response': response,
+    }
+
+
+@router.post("/domain")
+async def set_domain_limit(request: DomainLimitRequest, db: Session = Depends(get_db)):
+    """Set the rate limit of one domain. A value of 0 removes the limit."""
+    _require_rw_key()
+    domain = (request.domain or '').strip().lower()
+    value = _validate_value(request.value)
+    frame = _validate_frame(request.frame)
+
+    if domain not in _known_domains(db):
+        raise HTTPException(status_code=400, detail=f"Unknown domain: {request.domain}")
+
+    try:
+        response = await mailcow_api.edit_rl_domain(domain, value, frame)
+    except MailcowAPIError as e:
+        logger.error(f"Failed to set the rate limit of {domain}: {e}")
+        raise HTTPException(status_code=502, detail=f"mailcow did not apply the change: {e}")
+
+    _bust_domain_limit_cache()
+    return {
+        'domain': domain,
+        'rl_value': value or None,
+        'rl_frame': frame if value else None,
+        'mailcow_response': response,
+    }
+
+
+@router.post("/reset")
+async def release_rate_limit_counter(request: ReleaseRequest):
+    """Release an active counter so a blocked sender can send again now."""
+    _require_rw_key()
+    rl_hash = (request.rl_hash or '').strip()
+    if not _RL_HASH_RE.match(rl_hash):
+        raise HTTPException(
+            status_code=400,
+            detail="That is not a rate limit hash - it must look like RLabc123"
+        )
+
+    try:
+        response = await mailcow_api.delete_rl_hash(rl_hash)
+    except MailcowAPIError as e:
+        logger.error(f"Failed to release the rate limit counter {rl_hash}: {e}")
+        raise HTTPException(status_code=502, detail=f"mailcow did not release the counter: {e}")
+
+    return {'rl_hash': rl_hash, 'mailcow_response': response}

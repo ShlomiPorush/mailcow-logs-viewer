@@ -20,28 +20,29 @@ When authentication is enabled, all API endpoints (except public endpoints liste
 4. [Job Status Tracking](#job-status-tracking)
 5. [Domains](#domains)
 6. [Mailbox Statistics](#mailbox-statistics)
-7. [Messages (Unified View)](#messages-unified-view)
-8. [Logs](#logs)
+7. [Rate Limits](#rate-limits)
+8. [Messages (Unified View)](#messages-unified-view)
+9. [Logs](#logs)
    - [Postfix Logs](#postfix-logs)
    - [Rspamd Logs](#rspamd-logs)
    - [Netfilter Logs](#netfilter-logs)
    - [Fail2Ban Configuration](#fail2ban-configuration)
-9. [Queue & Quarantine](#queue--quarantine)
-10. [Statistics](#statistics)
-11. [Status](#status)
-12. [Settings](#settings)
+10. [Queue & Quarantine](#queue--quarantine)
+11. [Statistics](#statistics)
+12. [Status](#status)
+13. [Settings](#settings)
     - [GeoIP Management](#geoip-management)
     - [SMTP & IMAP Test](#smtp--imap-test)
-13. [Export](#export)
-14. [DMARC](#dmarc)
+14. [Export](#export)
+15. [DMARC](#dmarc)
     - [DMARC IMAP Auto-Import](#dmarc-imap-auto-import)
-15. [Blacklist Monitoring](#blacklist-monitoring)
-16. [Reporting](#reporting)
-17. [Raw Logs (Live Log Viewer)](#raw-logs-live-log-viewer)
-18. [Spam Filter](#spam-filter)
+16. [Blacklist Monitoring](#blacklist-monitoring)
+17. [Reporting](#reporting)
+18. [Raw Logs (Live Log Viewer)](#raw-logs-live-log-viewer)
+19. [Spam Filter](#spam-filter)
     - [Rspamd Maps](#rspamd-maps)
     - [Suppressions](#suppressions)
-19. [Quarantine Auto-Rules](#quarantine-auto-rules)
+20. [Quarantine Auto-Rules](#quarantine-auto-rules)
 
 ---
 
@@ -1243,6 +1244,237 @@ from app.routers.mailbox_stats import clear_stats_cache
 # Clear all stats cache (e.g., after data import)
 clear_stats_cache()
 ```
+
+---
+
+## Rate Limits
+
+mailcow rate-limits senders through rspamd, which counts every send against a Redis key and writes a line to the `ratelimited` log when a sender runs out. These endpoints show who is hitting a limit, release a stuck counter, and change the limits themselves. The write endpoints require a Read-Write API key (`MAILCOW_API_KEY_RW`).
+
+### GET /api/rate-limits/events
+
+List the senders that hit a rate limit in the window, grouped by sender.
+
+**Query Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `hours` | integer | `168` | Size of the window in hours (min: 1, max: 720) |
+
+**Response:**
+```json
+{
+  "hours": 168,
+  "total_events": 12,
+  "by_sender": [
+    {
+      "user": "newsletter@example.com",
+      "events": 9,
+      "last_seen": "2026-09-13T09:14:03Z",
+      "last_rl_hash": "RLwhscgno1zwitb6nif6i83msr",
+      "current_limit": {
+        "value": 100,
+        "frame": "m"
+      },
+      "recent": [
+        {
+          "time": "2026-09-13T09:14:03Z",
+          "rcpt": "someone@remote.example",
+          "subject": "Weekly report",
+          "qid": "03D246E37D5",
+          "rl_hash": "RLwhscgno1zwitb6nif6i83msr"
+        }
+      ]
+    }
+  ],
+  "events": [
+    {
+      "user": "newsletter@example.com",
+      "time": "2026-09-13T09:14:03Z",
+      "rcpt": "someone@remote.example",
+      "subject": "Weekly report",
+      "qid": "03D246E37D5",
+      "rl_hash": "RLwhscgno1zwitb6nif6i83msr"
+    }
+  ]
+}
+```
+
+**Response Fields:**
+- `by_sender`: One entry per sender, sorted by `events` descending
+- `recent`: Up to 5 newest events for that sender
+- `events`: Flat feed of the 50 newest events across all senders
+- `current_limit`: The configured limit, read from the locally synced mailbox row; `null` when the sender has no configured limit
+- `last_rl_hash`: The counter of the most recent event, the value `POST /api/rate-limits/reset` takes
+
+**Notes:**
+- Reads only the collected `ratelimited` log and never calls mailcow, so it stays fast and still answers while mailcow is unreachable
+
+---
+
+### GET /api/rate-limits/limits
+
+Get the configured rate limits: the mailboxes that have one, and every local domain.
+
+**Response:**
+```json
+{
+  "rw_key_configured": true,
+  "mailboxes": [
+    {
+      "username": "sales@example.com",
+      "domain": "example.com",
+      "rl_value": 100,
+      "rl_frame": "m",
+      "active": true
+    }
+  ],
+  "domains": [
+    {
+      "domain": "example.com",
+      "rl_value": 500,
+      "rl_frame": "h"
+    }
+  ],
+  "domains_error": null
+}
+```
+
+**Response Fields:**
+- `rw_key_configured`: Whether a Read-Write API key is available, which is what the write endpoints need
+- `mailboxes`: Only mailboxes that have a limit, read from the local sync
+- `domains`: Every local domain with the limit fetched from mailcow; `rl_value` is `null` when the domain has no limit. Cached in-process for 300 seconds
+- `domains_error`: The mailcow error text when the domain limits could not be read, `null` otherwise
+
+---
+
+### POST /api/rate-limits/mailbox
+
+Set the rate limit of one mailbox.
+
+**Request Body:**
+```json
+{
+  "mailbox": "sales@example.com",
+  "value": 100,
+  "frame": "m"
+}
+```
+
+**Request Fields:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `mailbox` | string | Yes | A known local mailbox |
+| `value` | integer | Yes | Messages allowed per frame; `0` removes the limit |
+| `frame` | string | Yes | `s` (second), `m` (minute), `h` (hour) or `d` (day) |
+
+**Response:**
+```json
+{
+  "mailbox": "sales@example.com",
+  "rl_value": 100,
+  "rl_frame": "m",
+  "mailcow_response": [
+    {
+      "type": "success",
+      "msg": "Rate limit has been modified"
+    }
+  ]
+}
+```
+
+**Notes:**
+- The local mailbox row is updated on success, so the page shows the new limit immediately instead of waiting for the next mailbox sync
+
+**Error Responses:**
+- `400 Bad Request`: Unknown mailbox, negative value, or invalid frame
+- `502 Bad Gateway`: mailcow did not apply the change
+- `503 Service Unavailable`: No Read-Write API key configured
+
+---
+
+### POST /api/rate-limits/domain
+
+Set the rate limit of one domain.
+
+**Request Body:**
+```json
+{
+  "domain": "example.com",
+  "value": 500,
+  "frame": "h"
+}
+```
+
+**Request Fields:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `domain` | string | Yes | A known local domain |
+| `value` | integer | Yes | Messages allowed per frame; `0` removes the limit |
+| `frame` | string | Yes | `s` (second), `m` (minute), `h` (hour) or `d` (day) |
+
+**Response:**
+```json
+{
+  "domain": "example.com",
+  "rl_value": 500,
+  "rl_frame": "h",
+  "mailcow_response": [
+    {
+      "type": "success",
+      "msg": "Rate limit has been modified"
+    }
+  ]
+}
+```
+
+**Notes:**
+- The domain is validated against the local domain list
+- A successful change busts the cached domain limits, so the next `GET /api/rate-limits/limits` reads mailcow again
+
+**Error Responses:**
+- `400 Bad Request`: Unknown domain, negative value, or invalid frame
+- `502 Bad Gateway`: mailcow did not apply the change
+- `503 Service Unavailable`: No Read-Write API key configured
+
+---
+
+### POST /api/rate-limits/reset
+
+Release an active counter so a blocked sender can send again immediately. The configured limit is not changed.
+
+**Request Body:**
+```json
+{
+  "rl_hash": "RLwhscgno1zwitb6nif6i83msr"
+}
+```
+
+**Request Fields:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `rl_hash` | string | Yes | The counter to release, as reported in `last_rl_hash` or `rl_hash` |
+
+**Response:**
+```json
+{
+  "rl_hash": "RLwhscgno1zwitb6nif6i83msr",
+  "mailcow_response": [
+    {
+      "type": "success",
+      "msg": "Rate limit hash has been deleted"
+    }
+  ]
+}
+```
+
+**Error Responses:**
+- `400 Bad Request`: The value is not a rate limit hash (it must match `^RL[A-Za-z0-9]+$`)
+- `502 Bad Gateway`: mailcow did not release the counter
+- `503 Service Unavailable`: No Read-Write API key configured
 
 ---
 

@@ -1201,6 +1201,9 @@ function switchTab(tab, params = {}) {
         case 'mailbox-stats':
             loadMailboxStats();
             break;
+        case 'rate-limits':
+            loadRateLimits();
+            break;
         case 'logs':
             loadLogViewer();
             break;

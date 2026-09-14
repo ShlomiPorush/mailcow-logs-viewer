@@ -619,6 +619,15 @@
                     </svg>
                     Mailbox Stats
                 </button>
+                <button onclick="navigateToMobile('rate-limits')" id="mobile-tab-rate-limits"
+                    class="mobile-menu-item">
+                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                            d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4">
+                        </path>
+                    </svg>
+                    Rate Limits
+                </button>
                 <button onclick="navigateToMobile('logs')" id="mobile-tab-logs" class="mobile-menu-item">
                     <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
@@ -747,6 +756,15 @@
                                 </path>
                             </svg>
                             Mailbox Stats
+                        </button>
+                        <button onclick="navigateTo('rate-limits')" id="tab-rate-limits"
+                            class="py-4 px-2 font-medium text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300 whitespace-nowrap flex items-center gap-1.5">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                    d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4">
+                                </path>
+                            </svg>
+                            Rate Limits
                         </button>
                         <button onclick="navigateTo('logs')" id="tab-logs"
                             class="py-4 px-2 font-medium text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300 whitespace-nowrap flex items-center gap-1.5">
@@ -2216,6 +2234,27 @@
                 </div>
             </div>
 
+            <!-- Rate Limits Tab -->
+            <div id="content-rate-limits" class="tab-content hidden">
+                <div class="mb-6">
+                    <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+                        <div class="text-center lg:text-left">
+                            <h2 class="text-2xl font-bold text-gray-900 dark:text-white">Rate Limits</h2>
+                            <p class="text-gray-600 dark:text-gray-400 mt-1">Who is running into mailcow's sending
+                                limits, and what each mailbox and domain is allowed to send</p>
+                        </div>
+
+                        <div id="rate-limits-actions" class="flex items-center gap-3 justify-center lg:justify-end">
+                        </div>
+                    </div>
+                </div>
+                <div id="rate-limits-loading" class="text-center py-12">
+                    <div class="loading mx-auto mb-4"></div>
+                    <p class="text-gray-500 dark:text-gray-400">Loading rate limits...</p>
+                </div>
+                <div id="rate-limits-content" class="hidden"></div>
+            </div>
+
             <!-- Logs Tab -->
             <div id="content-logs" class="tab-content hidden">
                 <div class="flex flex-col lg:flex-row gap-4" style="min-height: 70vh;">
@@ -2605,6 +2644,7 @@
     <script src="/static/settings.js?v=15"></script>
     <script src="/static/domains.js?v=4"></script>
     <script src="/static/mailbox-stats.js?v=1"></script>
+    <script src="/static/rate-limits.js?v=1"></script>
     <script src="/static/smtp-abuse.js?v=1"></script>
     <script src="/static/notifications.js?v=3"></script>
     <script src="/static/spam_filter.js?v=2"></script>

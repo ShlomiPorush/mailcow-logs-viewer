@@ -15,6 +15,7 @@ const VALID_ROUTES = [
     'domains',
     'dmarc',
     'mailbox-stats',
+    'rate-limits',
     'logs',
     'settings'
 ];
@@ -236,6 +237,7 @@ const TAB_LABELS = {
     'domains': 'Domains',
     'dmarc': 'DMARC',
     'mailbox-stats': 'Mailbox Stats',
+    'rate-limits': 'Rate Limits',
     'logs': 'Logs',
     'settings': 'Settings',
     'spam-filter': 'Spam Filter'
