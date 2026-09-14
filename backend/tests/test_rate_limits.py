@@ -302,6 +302,88 @@ def test_a_short_window_excludes_older_hits(env):
     assert QUIET not in groups or groups[QUIET]['events'] == 0
 
 
+# ---------- the activity chart's buckets ----------
+
+def test_a_day_or_less_is_bucketed_per_hour_and_anything_longer_per_day():
+    """The chart's resolution follows the window, not the other way round."""
+    from app.routers.rate_limits import _bucket_key
+    when = datetime(2025, 9, 14, 17, 43, 12)
+    assert _bucket_key(when, 'hour') == '2025-09-14T17:00'
+    assert _bucket_key(when, 'day') == '2025-09-14'
+
+
+def test_the_bucket_series_is_zero_filled_across_the_whole_window():
+    """A quiet stretch has to show as a gap in the chart, not vanish from it."""
+    from app.routers.rate_limits import _bucket_series
+    since = datetime(2025, 9, 14, 9, 30)
+    until = datetime(2025, 9, 14, 12, 5)
+
+    series = _bucket_series(since, until, 'hour', {'2025-09-14T09:00': 4, '2025-09-14T12:00': 1})
+
+    assert [b['bucket'] for b in series] == [
+        '2025-09-14T09:00', '2025-09-14T10:00', '2025-09-14T11:00', '2025-09-14T12:00']
+    assert [b['count'] for b in series] == [4, 0, 0, 1]
+
+
+def test_the_bucket_series_covers_every_day_of_a_long_window():
+    from app.routers.rate_limits import _bucket_series
+    since = datetime(2025, 9, 8, 23, 50)
+    until = datetime(2025, 9, 14, 0, 10)
+
+    series = _bucket_series(since, until, 'day', {'2025-09-10': 7})
+
+    assert len(series) == 7, 'one bucket per calendar day the window touches'
+    assert series[0]['bucket'] == '2025-09-08'
+    assert series[-1] == {'bucket': '2025-09-14', 'count': 0}
+    assert sum(b['count'] for b in series) == 7
+
+
+def test_a_count_outside_the_generated_range_is_still_returned():
+    """A log written while the request ran must not be silently dropped."""
+    from app.routers.rate_limits import _bucket_series
+    since = datetime(2025, 9, 14, 10, 0)
+    until = datetime(2025, 9, 14, 11, 0)
+
+    series = _bucket_series(since, until, 'hour', {'2025-09-14T12:00': 3})
+
+    assert [b['bucket'] for b in series] == [
+        '2025-09-14T10:00', '2025-09-14T11:00', '2025-09-14T12:00']
+    assert series[-1]['count'] == 3
+
+
+def test_a_short_window_reports_hourly_buckets(env):
+    data = _events(hours=24)
+    assert data['bucket'] == 'hour'
+    buckets = [b['bucket'] for b in data['by_bucket']]
+    assert len(buckets) == 25, 'the window plus the hour it started in'
+    assert buckets == sorted(buckets), 'oldest first'
+    assert len(set(buckets)) == len(buckets), 'no bucket appears twice'
+    assert all(len(b) == len('2025-09-14T17:00') and b[10] == 'T' for b in buckets)
+
+
+def test_a_long_window_reports_daily_buckets(env):
+    data = _events(hours=168)
+    assert data['bucket'] == 'day'
+    buckets = [b['bucket'] for b in data['by_bucket']]
+    assert len(buckets) == 8, 'seven days plus the day the window started in'
+    assert buckets == sorted(buckets)
+    assert all(len(b) == len('2025-09-14') for b in buckets)
+
+
+@pytest.mark.parametrize('hours', [1, 24, 168, 720])
+def test_every_counted_hit_lands_in_exactly_one_bucket(env, hours):
+    """The chart and the headline count must never disagree."""
+    data = _events(hours=hours)
+    assert sum(b['count'] for b in data['by_bucket']) == data['total_events']
+
+
+def test_the_buckets_count_the_seeded_hits(env):
+    """SENDER's six hits are all within the last ten minutes, so they sit in
+    the newest hourly bucket, or split over it and the one before."""
+    counts = [b['count'] for b in _events(hours=24)['by_bucket']]
+    assert counts[-1] + counts[-2] >= 6, 'recent hits belong in the newest buckets'
+
+
 # ---------- write endpoints ----------
 
 class FakeMailcow:

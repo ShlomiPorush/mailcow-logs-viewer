@@ -101,6 +101,46 @@ def _limit_value(raw: Any) -> Optional[int]:
     return parsed if parsed > 0 else None
 
 
+def _bucket_key(when: datetime, kind: str) -> str:
+    """The key one event is counted under. Keys stay UTC, like every other
+    timestamp this API returns - the frontend localises them."""
+    if kind == 'hour':
+        return when.strftime('%Y-%m-%dT%H:00')
+    return when.strftime('%Y-%m-%d')
+
+
+def _bucket_series(since: datetime, until: datetime, kind: str,
+                   counts: Dict[str, int]) -> List[Dict[str, Any]]:
+    """Every bucket of the window, oldest first, zero-filled.
+
+    A quiet stretch has to show as a gap in the chart, not disappear from it,
+    so buckets with no events are returned with a count of 0.
+    """
+    step = timedelta(hours=1) if kind == 'hour' else timedelta(days=1)
+    if kind == 'hour':
+        cursor = since.replace(minute=0, second=0, microsecond=0)
+    else:
+        cursor = since.replace(hour=0, minute=0, second=0, microsecond=0)
+
+    series: List[Dict[str, Any]] = []
+    covered = set()
+    while cursor <= until:
+        key = _bucket_key(cursor, kind)
+        covered.add(key)
+        series.append({'bucket': key, 'count': counts.get(key, 0)})
+        cursor += step
+
+    # A row can sit just outside the generated range (a log written while the
+    # request was running). Keep its count rather than losing it.
+    for key, count in counts.items():
+        if key not in covered:
+            series.append({'bucket': key, 'count': count})
+
+    # Both key shapes sort correctly as plain strings
+    series.sort(key=lambda entry: entry['bucket'])
+    return series
+
+
 def _known_domains(db: Session) -> set:
     """Local domain names: the mailcow domain cache, plus the domains we have
     mailboxes for (so the page keeps working before the cache is populated)."""
@@ -203,11 +243,15 @@ def get_rate_limit_events(
     hours: int = Query(168, ge=1, le=720),
     db: Session = Depends(get_db)
 ):
-    """Senders that hit a rate limit in the window, grouped by sender.
+    """Senders that hit a rate limit in the window, grouped by sender, plus the
+    hits per time bucket for the activity chart.
 
     Reads only the collected `ratelimited` log, so this never waits on mailcow.
     """
-    since = datetime.utcnow() - timedelta(hours=hours)
+    now = datetime.utcnow()
+    since = now - timedelta(hours=hours)
+    # A day of hits reads per hour; anything longer reads per day
+    bucket_kind = 'hour' if hours <= 24 else 'day'
     try:
         rows = db.query(RawServiceLog).filter(
             RawServiceLog.service == 'ratelimited',
@@ -219,6 +263,9 @@ def get_rate_limit_events(
 
     groups: Dict[str, Dict[str, Any]] = {}
     events: List[Dict[str, Any]] = []
+    # Hits per bucket, for the activity chart. Counted from every row read,
+    # not from the capped per-sender detail lists.
+    bucket_counts: Dict[str, int] = {}
     total_events = 0
 
     # Rows arrive newest first, so the first row seen for a sender is the
@@ -230,6 +277,8 @@ def get_rate_limit_events(
             continue
 
         total_events += 1
+        bucket = _bucket_key(row.time, bucket_kind)
+        bucket_counts[bucket] = bucket_counts.get(bucket, 0) + 1
         rl_hash = (data.get('rl_hash') or '').strip()
         detail = {
             'time': format_datetime_for_api(row.time),
@@ -289,6 +338,8 @@ def get_rate_limit_events(
         'total_events': total_events,
         'by_sender': by_sender,
         'events': events,
+        'bucket': bucket_kind,
+        'by_bucket': _bucket_series(since, now, bucket_kind, bucket_counts),
     }
 
 

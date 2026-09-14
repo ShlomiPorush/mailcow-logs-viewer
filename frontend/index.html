@@ -2242,68 +2242,11 @@
                         <p class="text-gray-500 dark:text-gray-400">Loading rate limits...</p>
                     </div>
                     <div id="rate-limits-content" class="hidden">
-                        <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-                            <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-4 border border-gray-200 dark:border-gray-700">
-                                <div class="flex items-center justify-between">
-                                    <div class="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">Senders hitting limits</div>
-                                    <svg class="w-6 h-6 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
-                                    </svg>
-                                </div>
-                                <div id="rate-limits-sum-senders" class="text-3xl font-bold text-gray-900 dark:text-white mt-2">-</div>
-                                <div id="rate-limits-sum-senders-label" class="text-xs text-gray-500 dark:text-gray-400 mt-1">Last 30 days</div>
-                            </div>
-                            <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-4 border border-gray-200 dark:border-gray-700">
-                                <div class="flex items-center justify-between">
-                                    <div class="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">Blocked sends</div>
-                                    <svg class="w-6 h-6 text-orange-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"></path>
-                                    </svg>
-                                </div>
-                                <div id="rate-limits-sum-hits" class="text-3xl font-bold text-gray-900 dark:text-white mt-2">-</div>
-                                <div id="rate-limits-sum-hits-label" class="text-xs text-gray-500 dark:text-gray-400 mt-1">Last 30 days</div>
-                            </div>
-                            <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-4 border border-gray-200 dark:border-gray-700">
-                                <div class="flex items-center justify-between">
-                                    <div class="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">Counters reset</div>
-                                    <svg class="w-6 h-6 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
-                                    </svg>
-                                </div>
-                                <div id="rate-limits-sum-resets" class="text-3xl font-bold text-gray-900 dark:text-white mt-2">-</div>
-                                <div class="text-xs text-gray-500 dark:text-gray-400 mt-1">From this page</div>
-                            </div>
-                            <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-4 border border-gray-200 dark:border-gray-700">
-                                <div class="flex items-center justify-between">
-                                    <div class="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">Configured limits</div>
-                                    <svg class="w-6 h-6 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4"></path>
-                                    </svg>
-                                </div>
-                                <div id="rate-limits-sum-limits" class="text-3xl font-bold text-gray-900 dark:text-white mt-2">-</div>
-                                <div class="text-xs text-gray-500 dark:text-gray-400 mt-1">Mailboxes and domains</div>
-                            </div>
-                        </div>
-                        <div class="bg-white dark:bg-gray-800 rounded-lg shadow">
-                            <div class="border-b border-gray-200 dark:border-gray-700 overflow-x-auto">
-                                <div class="flex space-x-4 px-4 min-w-max">
-                                    <button onclick="rateLimitsSwitchTab('hits')" id="rate-limits-subtab-hits"
-                                        class="modal-tab-sm active">
-                                        Recent hits
-                                    </button>
-                                    <button onclick="rateLimitsSwitchTab('mailboxes')" id="rate-limits-subtab-mailboxes"
-                                        class="modal-tab-sm">
-                                        Mailboxes
-                                    </button>
-                                    <button onclick="rateLimitsSwitchTab('domains')" id="rate-limits-subtab-domains"
-                                        class="modal-tab-sm">
-                                        Domains
-                                    </button>
-                                </div>
-                            </div>
-                            <div id="rate-limits-tab-hits"></div>
-                            <div id="rate-limits-tab-mailboxes" class="hidden"></div>
-                            <div id="rate-limits-tab-domains" class="hidden"></div>
+                        <div class="space-y-6">
+                            <!-- All three cards are rendered by rate-limits.js -->
+                            <div id="rate-limits-activity-card"></div>
+                            <div id="rate-limits-senders-card"></div>
+                            <div id="rate-limits-config-card"></div>
                         </div>
                     </div>
                 </div>
@@ -2698,7 +2641,7 @@
     <script src="/static/settings.js?v=15"></script>
     <script src="/static/domains.js?v=4"></script>
     <script src="/static/mailbox-stats.js?v=2"></script>
-    <script src="/static/rate-limits.js?v=8"></script>
+    <script src="/static/rate-limits.js?v=9"></script>
     <script src="/static/smtp-abuse.js?v=1"></script>
     <script src="/static/notifications.js?v=3"></script>
     <script src="/static/spam_filter.js?v=2"></script>
