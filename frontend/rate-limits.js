@@ -4,7 +4,11 @@
 // Classic script sharing the global scope; loaded after utils.js and app.js
 // in index.html.
 //
-// Two things on this page are easy to confuse:
+// This is a view of the Mailbox Stats page, not a page of its own. The view
+// switcher lives in mailbox-stats.js; the tabs below follow the DMARC sub-tab
+// recipe (index.html) and the Spam Filter switching logic.
+//
+// Two things here are easy to confuse:
 //   the LIMIT is configuration - so many messages per time frame
 //   the COUNTER is what a blocked sender is stuck behind right now; releasing
 //   it lets them send again without changing their limit
@@ -13,6 +17,9 @@
 // subtle border, readable in both themes.
 const RATE_LIMIT_NEUTRAL_BADGE =
     'bg-gray-100 dark:bg-gray-500/10 text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-gray-500/20';
+
+// Badge shape used across the app for status and direction chips
+const RATE_LIMIT_BADGE_SHAPE = 'inline-flex items-center px-2 py-0.5 rounded text-xs font-medium';
 
 const RATE_LIMIT_FRAME_LABELS = {
     s: 'second',
@@ -26,6 +33,7 @@ let rateLimitEventsData = null;
 let rateLimitConfigData = null;
 // { kind: 'mailbox' | 'domain', name: string } while one row's form is open
 let rateLimitEditing = null;
+let rateLimitsTab = 'hits';
 
 
 async function loadRateLimits() {
@@ -57,13 +65,11 @@ async function loadRateLimits() {
         rateLimitEventsData = await eventsResponse.json();
         rateLimitConfigData = await limitsResponse.json();
 
-        renderRateLimitActions();
-        content.innerHTML = `
-            <div id="rate-limits-hits" class="mb-6"></div>
-            <div id="rate-limits-configured"></div>
-        `;
         renderRateLimitHits();
-        renderRateLimitConfigured();
+        renderRateLimitMailboxes();
+        renderRateLimitDomains();
+        // Keep whichever tab was open across reloads
+        rateLimitsSwitchTab(rateLimitsTab);
 
         loading.classList.add('hidden');
         content.classList.remove('hidden');
@@ -83,26 +89,20 @@ async function loadRateLimits() {
 }
 
 
-function renderRateLimitActions() {
-    const actions = document.getElementById('rate-limits-actions');
-    if (!actions) return;
+// The panels are rendered together, so switching only swaps what is visible
+function rateLimitsSwitchTab(tab) {
+    rateLimitsTab = tab;
 
-    const options = [
-        { hours: 24, label: 'Last 24 hours' },
-        { hours: 168, label: 'Last 7 days' },
-        { hours: 720, label: 'Last 30 days' }
-    ].map(option => `
-        <option value="${option.hours}" ${option.hours === rateLimitWindowHours ? 'selected' : ''}>${option.label}</option>
-    `).join('');
+    document.querySelectorAll('[id^="rate-limits-subtab-"]').forEach(btn => {
+        btn.classList.remove('active');
+    });
+    const activeBtn = document.getElementById(`rate-limits-subtab-${tab}`);
+    if (activeBtn) activeBtn.classList.add('active');
 
-    // The app header's global Refresh reloads this page too, so the page
-    // itself only carries the window picker
-    actions.innerHTML = `
-        <select id="rate-limit-window" onchange="changeRateLimitWindow(this.value)"
-            class="px-3 py-2 text-sm rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300">
-            ${options}
-        </select>
-    `;
+    ['hits', 'mailboxes', 'domains'].forEach(name => {
+        const panel = document.getElementById(`rate-limits-tab-${name}`);
+        if (panel) panel.classList.toggle('hidden', name !== tab);
+    });
 }
 
 
@@ -116,22 +116,42 @@ function changeRateLimitWindow(value) {
 
 function renderRateLimitBadge(limit) {
     if (!limit || !limit.value) {
-        return `<span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium ${RATE_LIMIT_NEUTRAL_BADGE} whitespace-nowrap">No limit</span>`;
+        return `<span class="${RATE_LIMIT_BADGE_SHAPE} ${RATE_LIMIT_NEUTRAL_BADGE} whitespace-nowrap">No limit</span>`;
     }
     const frame = limit.frame ? `/${escapeHtml(limit.frame)}` : '';
-    return `<span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium ${getDirectionBadgeClass('outbound')} whitespace-nowrap">${escapeHtml(String(limit.value))}${frame}</span>`;
+    return `<span class="${RATE_LIMIT_BADGE_SHAPE} ${getDirectionBadgeClass('outbound')} whitespace-nowrap">${escapeHtml(String(limit.value))}${frame}</span>`;
+}
+
+
+// Read-only notice shared by both limits tabs
+function renderRateLimitReadOnlyNotice() {
+    const data = rateLimitConfigData || {};
+    if (data.rw_key_configured !== false) return '';
+    return `
+        <div class="px-4 py-2 text-sm text-gray-600 dark:text-gray-400 bg-gray-50 dark:bg-gray-900/30 border-b border-gray-200 dark:border-gray-700">
+            Limits are read only here. Set MAILCOW_API_KEY_RW to change them from the viewer.
+        </div>
+    `;
 }
 
 
 // ---- Recent rate limit hits -------------------------------------------------
 
 function renderRateLimitHits() {
-    const container = document.getElementById('rate-limits-hits');
+    const container = document.getElementById('rate-limits-tab-hits');
     if (!container) return;
 
     const data = rateLimitEventsData || {};
     const senders = data.by_sender || [];
     const canWrite = !rateLimitConfigData || rateLimitConfigData.rw_key_configured !== false;
+
+    const options = [
+        { hours: 24, label: 'Last 24 hours' },
+        { hours: 168, label: 'Last 7 days' },
+        { hours: 720, label: 'Last 30 days' }
+    ].map(option => `
+        <option value="${option.hours}" ${option.hours === rateLimitWindowHours ? 'selected' : ''}>${option.label}</option>
+    `).join('');
 
     const body = senders.length === 0
         ? `
@@ -147,18 +167,19 @@ function renderRateLimitHits() {
         `;
 
     container.innerHTML = `
-        <div class="bg-white dark:bg-gray-800 rounded-lg shadow border border-gray-200 dark:border-gray-700 overflow-hidden">
-            <div class="px-4 py-3 border-b border-gray-200 dark:border-gray-700 flex flex-wrap items-center justify-between gap-3">
-                <div>
-                    <h3 class="font-semibold text-gray-900 dark:text-white">Recent rate limit hits</h3>
-                    <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Mail that mailcow refused because the sender ran out of allowance</p>
-                </div>
-                <span class="px-3 py-1 text-xs font-medium bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-full whitespace-nowrap">
+        <div class="px-4 py-3 border-b border-gray-200 dark:border-gray-700 flex flex-wrap items-center justify-between gap-3">
+            <div class="flex flex-wrap items-center gap-2">
+                <p class="text-sm text-gray-600 dark:text-gray-400">Mail that mailcow refused because the sender ran out of allowance</p>
+                <span class="${RATE_LIMIT_BADGE_SHAPE} ${RATE_LIMIT_NEUTRAL_BADGE} whitespace-nowrap">
                     ${data.total_events || 0} hits from ${senders.length} sender${senders.length === 1 ? '' : 's'}
                 </span>
             </div>
-            ${body}
+            <select id="rate-limit-window" onchange="changeRateLimitWindow(this.value)"
+                class="px-3 py-2 text-sm rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300">
+                ${options}
+            </select>
         </div>
+        ${body}
     `;
 }
 
@@ -207,7 +228,7 @@ function renderRateLimitSenderRow(group, index, canWrite) {
                         <p class="font-mono text-sm text-gray-900 dark:text-white truncate">${escapeHtml(group.user)}</p>
                         <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Last hit ${escapeHtml(formatTime(group.last_seen))}</p>
                     </div>
-                    <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium ${getStatusBadgeClass('rejected')} whitespace-nowrap">
+                    <span class="${RATE_LIMIT_BADGE_SHAPE} ${getStatusBadgeClass('rejected')} whitespace-nowrap">
                         ${group.events} hit${group.events === 1 ? '' : 's'}
                     </span>
                     ${renderRateLimitBadge(group.current_limit)}
@@ -283,32 +304,8 @@ async function releaseRateLimitCounter(user, rlHash) {
 
 // ---- Configured limits ------------------------------------------------------
 
-function renderRateLimitConfigured() {
-    const container = document.getElementById('rate-limits-configured');
-    if (!container) return;
-
-    const data = rateLimitConfigData || {};
-    const mailboxes = data.mailboxes || [];
-    const domains = data.domains || [];
-    const canWrite = data.rw_key_configured !== false;
-
-    const notices = [];
-    if (!canWrite) {
-        notices.push(`
-            <div class="px-4 py-2 text-sm text-gray-600 dark:text-gray-400 bg-gray-50 dark:bg-gray-900/30 border-b border-gray-200 dark:border-gray-700">
-                Limits are read only here. Set MAILCOW_API_KEY_RW to change them from the viewer.
-            </div>
-        `);
-    }
-    if (data.domains_error) {
-        notices.push(`
-            <div class="px-4 py-2 text-sm text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-500/10 border-b border-amber-200 dark:border-amber-500/20">
-                Domain limits could not be read from mailcow: ${escapeHtml(data.domains_error)}
-            </div>
-        `);
-    }
-
-    const limitsTable = rows => `
+function renderRateLimitLimitsTable(rows) {
+    return `
         <div class="overflow-x-auto">
             <table class="w-full">
                 <thead>
@@ -322,37 +319,74 @@ function renderRateLimitConfigured() {
             </table>
         </div>
     `;
-    const emptyBody = text => `
+}
+
+
+function renderRateLimitEmptyBody(text) {
+    return `
         <div class="px-4 py-10 text-center">
             <p class="text-gray-700 dark:text-gray-300 font-medium">Nothing is limited yet</p>
             <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">${text}</p>
         </div>
     `;
+}
 
-    const mailboxRows = mailboxes.map(mailbox => renderRateLimitConfigRow(
+
+function renderRateLimitMailboxes() {
+    const container = document.getElementById('rate-limits-tab-mailboxes');
+    if (!container) return;
+
+    const data = rateLimitConfigData || {};
+    const mailboxes = data.mailboxes || [];
+    const canWrite = data.rw_key_configured !== false;
+
+    const rows = mailboxes.map(mailbox => renderRateLimitConfigRow(
         'mailbox', mailbox.username, mailbox.rl_value, mailbox.rl_frame, canWrite)).join('');
-    const domainRows = domains.map(domain => renderRateLimitConfigRow(
+
+    container.innerHTML = `
+        <div class="px-4 py-3 border-b border-gray-200 dark:border-gray-700">
+            <p class="text-sm text-gray-600 dark:text-gray-400">How much each mailbox is allowed to send</p>
+        </div>
+        ${renderRateLimitReadOnlyNotice()}
+        ${rows ? renderRateLimitLimitsTable(rows) : renderRateLimitEmptyBody('Mailboxes send without a cap until you set one.')}
+    `;
+}
+
+
+function renderRateLimitDomains() {
+    const container = document.getElementById('rate-limits-tab-domains');
+    if (!container) return;
+
+    const data = rateLimitConfigData || {};
+    const domains = data.domains || [];
+    const canWrite = data.rw_key_configured !== false;
+
+    const domainsError = data.domains_error
+        ? `
+            <div class="px-4 py-2 text-sm text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-500/10 border-b border-amber-200 dark:border-amber-500/20">
+                Domain limits could not be read from mailcow: ${escapeHtml(data.domains_error)}
+            </div>
+        `
+        : '';
+
+    const rows = domains.map(domain => renderRateLimitConfigRow(
         'domain', domain.domain, domain.rl_value, domain.rl_frame, canWrite)).join('');
 
     container.innerHTML = `
-        <div class="space-y-4">
-            <div class="bg-white dark:bg-gray-800 rounded-lg shadow border border-gray-200 dark:border-gray-700 overflow-hidden">
-                <div class="px-4 py-3 border-b border-gray-200 dark:border-gray-700">
-                    <h3 class="font-semibold text-gray-900 dark:text-white">Mailbox limits</h3>
-                    <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">How much each mailbox is allowed to send</p>
-                </div>
-                ${notices.join('')}
-                ${mailboxRows ? limitsTable(mailboxRows) : emptyBody('Mailboxes send without a cap until you set one.')}
-            </div>
-            <div class="bg-white dark:bg-gray-800 rounded-lg shadow border border-gray-200 dark:border-gray-700 overflow-hidden">
-                <div class="px-4 py-3 border-b border-gray-200 dark:border-gray-700">
-                    <h3 class="font-semibold text-gray-900 dark:text-white">Domain limits</h3>
-                    <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">A domain limit caps all of its mailboxes together</p>
-                </div>
-                ${domainRows ? limitsTable(domainRows) : emptyBody('Domains send without a cap until you set one.')}
-            </div>
+        <div class="px-4 py-3 border-b border-gray-200 dark:border-gray-700">
+            <p class="text-sm text-gray-600 dark:text-gray-400">A domain limit caps all of its mailboxes together</p>
         </div>
+        ${renderRateLimitReadOnlyNotice()}
+        ${domainsError}
+        ${rows ? renderRateLimitLimitsTable(rows) : renderRateLimitEmptyBody('Domains send without a cap until you set one.')}
     `;
+}
+
+
+// Re-render only the tab that owns the row being edited
+function renderRateLimitConfigured() {
+    renderRateLimitMailboxes();
+    renderRateLimitDomains();
 }
 
 

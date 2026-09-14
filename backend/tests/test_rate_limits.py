@@ -505,3 +505,80 @@ def test_domain_limits_are_cached_between_requests(env, monkeypatch):
         rate_limits._bust_domain_limit_cache()
         asyncio.run(rate_limits.get_configured_limits(db=db))
         assert len(fake.calls) > first, 'busting the cache refetches'
+
+
+# ---------- feature toggle ----------
+# Rate Limits is toggleable like every other feature: the id goes into
+# `disabled_features`, /api/info hands the list to the frontend, and the
+# frontend hides the view. No router in this app gates its own endpoints on a
+# feature flag (dmarc, blacklist and mailbox-stats all keep answering while
+# disabled), so these tests pin the wiring that actually exists.
+
+FEATURE_ID = 'rate-limits'
+
+
+def _disable(monkeypatch, value):
+    """`settings` is a SettingsWrapper that delegates to a swappable inner
+    Settings model, so the field has to be patched on the inner model."""
+    from app.config import settings
+    monkeypatch.setattr(settings._inner, 'disabled_features', value)
+    return settings
+
+
+def test_rate_limits_is_offered_as_a_toggleable_feature():
+    """The valid-id list in the setting's own description is the backend's
+    only feature registry - the Settings UI reads it from documentation."""
+    from app.config import Settings
+    description = Settings.model_fields['disabled_features'].description
+    assert FEATURE_ID in description, description
+
+
+def test_disabling_rate_limits_turns_the_feature_off(monkeypatch):
+    settings = _disable(monkeypatch, 'rate-limits')
+    assert settings.is_feature_enabled(FEATURE_ID) is False
+    assert FEATURE_ID in settings.disabled_features_set
+
+
+def test_rate_limits_is_enabled_when_it_is_not_listed(monkeypatch):
+    settings = _disable(monkeypatch, 'dmarc,logs')
+    assert settings.is_feature_enabled(FEATURE_ID) is True
+    assert FEATURE_ID not in settings.disabled_features_set
+
+
+def test_the_feature_id_survives_spacing_and_case(monkeypatch):
+    settings = _disable(monkeypatch, ' DMARC , Rate-Limits ')
+    assert settings.is_feature_enabled(FEATURE_ID) is False
+
+
+def test_api_info_hands_the_disabled_feature_to_the_frontend(monkeypatch):
+    """This payload is what the frontend gates the view switcher on."""
+    from fastapi.testclient import TestClient
+    from app.main import app
+
+    _disable(monkeypatch, 'rate-limits')
+
+    body = TestClient(app).get('/api/info').json()
+
+    assert FEATURE_ID in body['disabled_features']
+
+
+def test_api_info_omits_the_feature_while_it_is_enabled(monkeypatch):
+    from fastapi.testclient import TestClient
+    from app.main import app
+
+    _disable(monkeypatch, '')
+
+    body = TestClient(app).get('/api/info').json()
+
+    assert body['disabled_features'] == []
+
+
+def test_disabling_the_feature_leaves_the_endpoints_registered(monkeypatch):
+    """Deliberate: gating is UI-side here, exactly as for every other feature.
+    If a router-level guard is ever added it must be added for all of them."""
+    _disable(monkeypatch, 'rate-limits')
+
+    from app.main import app
+    paths = {getattr(route, 'path', '') for route in app.routes}
+    assert '/api/rate-limits/events' in paths
+    assert '/api/rate-limits/limits' in paths

@@ -204,7 +204,7 @@ Application information and configuration.
 - `auth_enabled`: Boolean - Whether any authentication is enabled
 - `basic_auth_enabled`: Boolean - Whether Basic Authentication is enabled
 - `oauth2_enabled`: Boolean - Whether OAuth2/OIDC authentication is enabled
-- `disabled_features`: Array of strings - List of currently disabled feature IDs. Valid values: `netfilter`, `queue`, `quarantine`, `spam-filter`, `domains`, `dmarc`, `mailbox-stats`, `logs`, `blacklist`. Empty array if all features are enabled
+- `disabled_features`: Array of strings - List of currently disabled feature IDs. Valid values: `netfilter`, `queue`, `quarantine`, `spam-filter`, `domains`, `dmarc`, `mailbox-stats`, `rate-limits`, `logs`, `blacklist`. Empty array if all features are enabled
 
 ---
 
@@ -1250,6 +1250,8 @@ clear_stats_cache()
 ## Rate Limits
 
 mailcow rate-limits senders through rspamd, which counts every send against a Redis key and writes a line to the `ratelimited` log when a sender runs out. These endpoints show who is hitting a limit, release a stuck counter, and change the limits themselves. The write endpoints require a Read-Write API key (`MAILCOW_API_KEY_RW`).
+
+These endpoints back the Rate Limits view of the Mailbox Statistics page. They are covered by the `rate-limits` feature id in `disabled_features`: as with every other toggleable feature, disabling it hides the view in the web interface and does not change any response below.
 
 ### GET /api/rate-limits/events
 
@@ -3137,7 +3139,7 @@ When a feature is disabled, this endpoint permanently deletes all stored data fr
 - Tables are truncated with `CASCADE` to handle foreign key relationships
 - The frontend automatically calls this endpoint after saving settings with newly disabled features
 - A confirmation dialog warns the user before disabling a feature that data will be deleted
-- Features without database tables (e.g., `queue`) are not purgeable - the endpoint returns 400 for unknown features
+- Features without database tables (e.g., `queue`, `rate-limits`) are not purgeable - the endpoint returns 400 for unknown features
 
 ---
 
