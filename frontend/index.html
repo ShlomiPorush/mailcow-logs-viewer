@@ -222,6 +222,49 @@
             display: none;
         }
 
+        /* Slim, rounded scrollbars matching both themes instead of the
+           browser default */
+        * {
+            scrollbar-width: thin;
+            scrollbar-color: rgb(156 163 175 / 0.6) transparent;
+        }
+
+        .dark * {
+            scrollbar-color: rgb(75 85 99 / 0.8) transparent;
+        }
+
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background-color: rgb(156 163 175 / 0.6);
+            border-radius: 9999px;
+            border: 2px solid transparent;
+            background-clip: content-box;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background-color: rgb(156 163 175 / 0.9);
+        }
+
+        .dark ::-webkit-scrollbar-thumb {
+            background-color: rgb(75 85 99 / 0.8);
+        }
+
+        .dark ::-webkit-scrollbar-thumb:hover {
+            background-color: rgb(107 114 128 / 0.9);
+        }
+
+        ::-webkit-scrollbar-corner {
+            background: transparent;
+        }
+
         /* Markdown styling for changelog */
         /* GitHub markdown styling for changelog - override background colors */
         .update-changelog-content.markdown-body,
@@ -882,6 +925,7 @@
                                     <option value="deferred">Deferred</option>
                                     <option value="bounced">Bounced</option>
                                     <option value="rejected">Rejected</option>
+                                    <option value="discarded">Discarded (Sieve)</option>
                                     <option value="expired">Expired</option>
                                 </select>
                                 <button onclick="performDashboardSearch()"
@@ -997,6 +1041,7 @@
                             <option value="bounced">Bounced</option>
                             <option value="rejected">Rejected</option>
                             <option value="spam">Spam</option>
+                            <option value="discarded">Discarded (Sieve)</option>
                         </select>
                         <!-- Date Range Picker -->
                         <div class="relative" id="messages-date-range-picker-container">
@@ -2597,9 +2642,9 @@
     </div> <!-- Close app-content div -->
 
     <!-- JavaScript -->
-    <script src="/static/utils.js?v=2"></script>
+    <script src="/static/utils.js?v=3"></script>
     <script src="/static/router.js"></script>
-    <script src="/static/app.js?v=16"></script>
+    <script src="/static/app.js?v=19"></script>
     <script src="/static/dmarc.js?v=2"></script>
     <script src="/static/logs-viewer.js?v=1"></script>
     <script src="/static/settings.js?v=15"></script>

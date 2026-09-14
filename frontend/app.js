@@ -729,6 +729,7 @@ function renderMessagesData(data) {
                         ${msg.queue_id ? `<span class="font-mono" title="Queue ID">Q: ${msg.queue_id}</span>` : ''}
                         ${msg.message_id ? `<span class="font-mono truncate max-w-xs" title="Message ID: ${escapeHtml(msg.message_id)}">MID: ${escapeHtml(msg.message_id.substring(0, 20))}${msg.message_id.length > 20 ? '...' : ''}</span>` : ''}
                         ${msg.spam_score !== null ? `<span>Score: <span class="${msg.spam_score >= 15 ? 'text-red-600 dark:text-red-400 font-semibold' : 'text-gray-600 dark:text-gray-300'}">${msg.spam_score.toFixed(1)}</span></span>` : ''}
+                        ${renderMailboxFolderHint(msg)}
                         ${msg.user ? `<span>User: ${escapeHtml(msg.user)}</span>` : ''}
                         ${msg.ip ? `<span>IP: ${msg.ip}</span>` : ''}
                     </div>
@@ -3849,6 +3850,7 @@ async function loadMessages(page = 1) {
                             ${msg.queue_id ? `<span class="font-mono" title="Queue ID">Q: ${msg.queue_id}</span>` : ''}
                             ${msg.message_id ? `<span class="font-mono truncate max-w-xs" title="Message ID: ${escapeHtml(msg.message_id)}">MID: ${escapeHtml(msg.message_id.substring(0, 20))}${msg.message_id.length > 20 ? '...' : ''}</span>` : ''}
                             ${msg.spam_score !== null ? `<span>Score: <span class="${msg.spam_score >= 15 ? 'text-red-600 dark:text-red-400 font-semibold' : 'text-gray-600 dark:text-gray-300'}">${msg.spam_score.toFixed(1)}</span></span>` : ''}
+                            ${renderMailboxFolderHint(msg)}
                             ${msg.user ? `<span>User: ${escapeHtml(msg.user)}</span>` : ''}
                             ${msg.ip ? `<span>IP: ${msg.ip}</span>` : ''}
                         </div>
@@ -4573,7 +4575,8 @@ function renderStatusJobs(jobs) {
             jobs: [
                 ['Complete Correlations', 'complete_correlations', jobs.complete_correlations],
                 ['Update Final Status', 'update_final_status', jobs.update_final_status],
-                ['Expire Correlations', 'expire_correlations', jobs.expire_correlations]
+                ['Expire Correlations', 'expire_correlations', jobs.expire_correlations],
+                ['Dovecot Deliveries', 'correlate_dovecot', jobs.correlate_dovecot]
             ]
         },
         {
@@ -4899,6 +4902,203 @@ function renderModalTab(tab, data) {
     }
 }
 
+// The folder Dovecot actually delivered a message into. A folder other than
+// the inbox is the usual explanation for "the mail never arrived" when Rspamd
+// did not flag it as spam (issue #65).
+function renderMailboxFolderHint(msg) {
+    if (msg.dovecot_status !== 'stored') return '';
+    const folder = msg.dovecot_mailbox;
+    if (!folder) return '';
+    return `<span>Folder: ${escapeHtml(folder)}</span>`;
+}
+
+function folderIconSvg(sizeClasses) {
+    return `<svg class="${sizeClasses} flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"></path></svg>`;
+}
+
+// Delivery outcome Dovecot reported for the last hop (issue #65).
+// Postfix logs status=sent as soon as it hands the message to Dovecot over
+// LMTP, so what happened afterwards - stored, filed into Junk, forwarded or
+// dropped by a Sieve rule - is only visible here.
+const DOVECOT_VERDICTS = {
+    discarded: {
+        icon: '⊘',
+        label: 'Discarded by Sieve',
+        fallback: 'A Sieve rule dropped this message - it never reached the mailbox.',
+        box: 'bg-slate-50 dark:bg-slate-900/40 border-slate-300 dark:border-slate-600',
+        title: 'text-slate-800 dark:text-slate-200',
+        body: 'text-slate-600 dark:text-slate-400'
+    },
+    rejected: {
+        icon: '✗',
+        label: 'Rejected by Sieve',
+        fallback: 'A Sieve rule refused this message and reported it back to the sender.',
+        box: 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800',
+        title: 'text-red-800 dark:text-red-300',
+        body: 'text-red-600 dark:text-red-400'
+    },
+    failed: {
+        icon: '!',
+        label: 'Delivery to mailbox failed',
+        fallback: 'Dovecot could not store this message.',
+        box: 'bg-orange-50 dark:bg-orange-900/20 border-orange-200 dark:border-orange-800',
+        title: 'text-orange-800 dark:text-orange-300',
+        body: 'text-orange-600 dark:text-orange-400'
+    },
+    forwarded: {
+        icon: '→',
+        label: 'Forwarded by Sieve',
+        fallback: 'A Sieve rule redirected this message.',
+        box: 'bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800',
+        title: 'text-blue-800 dark:text-blue-300',
+        body: 'text-blue-600 dark:text-blue-400'
+    },
+    stored: {
+        icon: '✓',
+        label: 'Stored in mailbox',
+        fallback: 'Dovecot wrote this message to the mailbox.',
+        box: 'bg-emerald-50 dark:bg-emerald-900/20 border-emerald-200 dark:border-emerald-800',
+        title: 'text-emerald-800 dark:text-emerald-300',
+        body: 'text-emerald-600 dark:text-emerald-400'
+    }
+};
+
+function getDovecotVerdictText(dovecot) {
+    const verdict = DOVECOT_VERDICTS[dovecot.status];
+    switch (dovecot.status) {
+        case 'stored':
+            return dovecot.mailbox
+                ? `Stored in the folder "${dovecot.mailbox}".`
+                : verdict.fallback;
+        case 'forwarded':
+            return dovecot.detail
+                ? `Redirected to ${dovecot.detail}.`
+                : verdict.fallback;
+        case 'failed':
+            return dovecot.detail
+                ? `${dovecot.detail}${dovecot.mailbox ? ` (target folder: ${dovecot.mailbox})` : ''}`
+                : verdict.fallback;
+        case 'rejected':
+            return dovecot.detail ? `Reason: ${dovecot.detail}` : verdict.fallback;
+        default:
+            return verdict.fallback;
+    }
+}
+
+function renderDovecotSummary(dovecot) {
+    if (!dovecot || !dovecot.status || !DOVECOT_VERDICTS[dovecot.status]) return '';
+    // A normal store is already shown as the folder chip next to the status;
+    // the callout is reserved for outcomes that need explaining.
+    if (dovecot.status === 'stored') return '';
+    const verdict = DOVECOT_VERDICTS[dovecot.status];
+
+    return `
+        <div class="border ${verdict.box} rounded-lg p-4 mt-3">
+            <div class="flex items-start gap-3">
+                <span class="text-lg leading-none ${verdict.title}">${verdict.icon}</span>
+                <div class="min-w-0">
+                    <p class="text-sm font-semibold ${verdict.title}">Mailbox delivery: ${verdict.label}</p>
+                    <p class="text-xs ${verdict.body} mt-1 break-words">${escapeHtml(getDovecotVerdictText(dovecot))}</p>
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+function renderDovecotTimelineRow(log) {
+    return `
+        <div class="p-3 bg-gray-50 dark:bg-gray-700/50 rounded hover:bg-gray-100 dark:hover:bg-gray-700 transition">
+            <div class="flex justify-between items-start mb-1">
+                <div class="flex items-center gap-2 flex-wrap">
+                    <span class="text-xs font-mono text-gray-600 dark:text-gray-300">${formatTime(log.time)}</span>
+                    <span class="text-xs px-2 py-0.5 rounded bg-purple-100 dark:bg-purple-900/30 text-purple-800 dark:text-purple-300">dovecot</span>
+                    ${log.recipient ? `<span class="text-xs text-gray-500 dark:text-gray-400">=> ${escapeHtml(log.recipient)}</span>` : ''}
+                </div>
+                ${log.verdict && DOVECOT_VERDICTS[log.verdict] ? `<span class="text-xs px-2 py-0.5 rounded ${getStatusClass(log.verdict === 'stored' ? 'delivered' : log.verdict)}">${log.verdict}</span>` : ''}
+            </div>
+            <p class="text-xs font-mono text-gray-700 dark:text-gray-300 break-all">${escapeHtml(log.message || '')}</p>
+        </div>
+    `;
+}
+
+function renderPostfixTimelineRow(log) {
+    return `
+        <div class="p-3 bg-gray-50 dark:bg-gray-700/50 rounded hover:bg-gray-100 dark:hover:bg-gray-700 transition">
+            <div class="flex justify-between items-start mb-1">
+                <div class="flex items-center gap-2 flex-wrap">
+                    <span class="text-xs font-mono text-gray-600 dark:text-gray-300">${formatTime(log.time)}</span>
+                    ${log.program ? `<span class="text-xs px-2 py-0.5 rounded bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-300">${log.program}</span>` : ''}
+                    ${log.recipient ? `<span class="text-xs text-gray-500 dark:text-gray-400">=> ${escapeHtml(log.recipient)}</span>` : ''}
+                </div>
+                ${log.status ? `<span class="inline-block px-2 py-0.5 text-xs font-medium rounded ${getStatusClass(log.status)}">${log.status}</span>` : ''}
+            </div>
+            <p class="text-xs text-gray-700 dark:text-gray-300 font-mono break-all leading-relaxed">${escapeHtml(log.message)}</p>
+            ${log.relay ? `<p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Relay: ${escapeHtml(log.relay)}</p>` : ''}
+            ${log.delay ? `<p class="text-xs text-gray-500 dark:text-gray-400">Delay: ${log.delay.toFixed(2)}s</p>` : ''}
+        </div>
+    `;
+}
+
+// One chronological timeline for the whole delivery: Postfix lines and the
+// Dovecot LMTP lines of the last hop, interleaved by time - each line already
+// carries its program tag, so no separate section is needed.
+function renderLogTimeline(postfixLogs, dovecotLogs) {
+    const entries = (postfixLogs || []).map(log => ({ dovecot: false, log }))
+        .concat((dovecotLogs || []).map(log => ({ dovecot: true, log })))
+        .sort((a, b) => ((a.log.time || '') < (b.log.time || '') ? -1 : 1));
+
+    const sources = [...new Set(entries.map(e => timelineSource(e)))];
+    const filterBar = sources.length > 1 ? `
+        <div class="flex flex-wrap items-center gap-1.5 mb-3 flex-shrink-0" id="log-timeline-filters">
+            <button data-source="" onclick="filterLogTimeline(this)"
+                class="px-2.5 py-1 text-xs rounded border bg-blue-100 dark:bg-blue-500/10 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-500/20">All</button>
+            ${sources.map(s => `
+                <button data-source="${escapeHtml(s)}" onclick="filterLogTimeline(this)"
+                    class="px-2.5 py-1 text-xs rounded border bg-gray-100 dark:bg-gray-700/50 text-gray-600 dark:text-gray-300 border-gray-200 dark:border-gray-600">${escapeHtml(s)}</button>
+            `).join('')}
+        </div>
+    ` : '';
+
+    return `
+        <div class="flex-1 min-h-0 flex flex-col">
+            <div class="flex items-center justify-between mb-3 flex-shrink-0">
+                <h4 class="text-md font-semibold text-gray-900 dark:text-white">Complete Log Timeline</h4>
+                <span class="text-xs text-gray-500 dark:text-gray-400" id="log-timeline-count">${entries.length} entries</span>
+            </div>
+            ${filterBar}
+            <div class="space-y-2 flex-1 min-h-0 overflow-y-auto" id="log-timeline-entries">
+                ${entries.map(e => `<div data-log-source="${escapeHtml(timelineSource(e))}">${e.dovecot ? renderDovecotTimelineRow(e.log) : renderPostfixTimelineRow(e.log)}</div>`).join('')}
+            </div>
+        </div>
+    `;
+}
+
+function timelineSource(entry) {
+    // Filtering is by the main source; the per-program detail stays visible
+    // as each line's own tag
+    return entry.dovecot ? 'dovecot' : 'postfix';
+}
+
+// Filter the dialog's log timeline by source. One source at a time; the
+// empty source is "All".
+function filterLogTimeline(button) {
+    const source = button.dataset.source;
+    const active = 'px-2.5 py-1 text-xs rounded border bg-blue-100 dark:bg-blue-500/10 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-500/20';
+    const idle = 'px-2.5 py-1 text-xs rounded border bg-gray-100 dark:bg-gray-700/50 text-gray-600 dark:text-gray-300 border-gray-200 dark:border-gray-600';
+    document.querySelectorAll('#log-timeline-filters button').forEach(b => {
+        b.className = b === button ? active : idle;
+    });
+    let shown = 0, total = 0;
+    document.querySelectorAll('#log-timeline-entries > [data-log-source]').forEach(row => {
+        total += 1;
+        const match = !source || row.dataset.logSource === source;
+        row.classList.toggle('hidden', !match);
+        if (match) shown += 1;
+    });
+    const count = document.getElementById('log-timeline-count');
+    if (count) count.textContent = source ? `${shown} of ${total} entries` : `${total} entries`;
+}
+
 function renderOverviewTab(content, data) {
     // Collect recipients from Postfix logs if available (these have full addresses including +)
     let recipientsFromPostfix = new Set();
@@ -4975,6 +5175,7 @@ function renderOverviewTab(content, data) {
                                     <div class="flex items-center gap-2 flex-wrap">
                                         ${data.final_status ? `<span class="inline-block px-3 py-1 text-xs font-medium rounded ${getStatusClass(data.final_status)}">${data.final_status}</span>` : ''}
                                         ${data.direction ? `<span class="inline-block px-3 py-1 text-xs font-medium rounded ${getDirectionClass(data.direction)}">${data.direction}</span>` : ''}
+                                        ${data.dovecot && data.dovecot.status === 'stored' && data.dovecot.mailbox ? `<span class="inline-flex items-center gap-1.5 px-3 py-1 text-xs font-medium rounded bg-amber-100 dark:bg-amber-500/10 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-500/20">${folderIconSvg('w-3.5 h-3.5')}${escapeHtml(data.dovecot.mailbox)}</span>` : ''}
                                     </div>
                                 </div>
                             ` : ''}
@@ -4997,6 +5198,7 @@ function renderOverviewTab(content, data) {
                         </div>
                     </div>
                 </div>
+                ${renderDovecotSummary(data.dovecot)}
                 ${data.rspamd ? `
                     <div class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-3 sm:p-4 mt-1">
                         <h4 class="text-sm sm:text-md font-semibold text-gray-900 dark:text-white mb-3">Quick Spam Summary</h4>
@@ -5063,8 +5265,17 @@ function renderOverviewTab(content, data) {
 }
 
 function renderPostfixTab(content, data) {
+    // Dovecot handles the hop after Postfix, so its lines are part of the
+    // same delivery timeline, interleaved by time and tagged per line.
+    const dovecotLogs = (data.dovecot && data.dovecot.logs) ? data.dovecot.logs : [];
+
     if (!data.postfix || data.postfix.length === 0) {
-        content.innerHTML = `
+        content.innerHTML = dovecotLogs.length ? `
+            <div class="space-y-6">
+                <p class="text-sm text-gray-500 dark:text-gray-400">No Postfix delivery logs available</p>
+                ${renderLogTimeline([], dovecotLogs)}
+            </div>
+        ` : `
             <div class="text-center py-12">
                 <svg class="w-16 h-16 mx-auto text-gray-400 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4"></path>
@@ -5151,7 +5362,7 @@ function renderPostfixTab(content, data) {
     ` : '';
 
     content.innerHTML = `
-        <div class="space-y-6">
+        <div class="h-full flex flex-col min-h-0 gap-6">
             ${errorSummaryHtml}
             <!-- Mail Details Header -->
             <div class="bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-gray-800 dark:to-gray-700 p-4 rounded-lg">
@@ -5228,30 +5439,9 @@ function renderPostfixTab(content, data) {
                 </div>
             ` : ''}
             
-            <!-- Complete Log Timeline - ALWAYS show all logs -->
-            <div>
-                <div class="flex items-center justify-between mb-3">
-                    <h4 class="text-md font-semibold text-gray-900 dark:text-white">Complete Log Timeline</h4>
-                    <span class="text-xs text-gray-500 dark:text-gray-400">${data.postfix.length} entries</span>
-                </div>
-                <div class="space-y-2 max-h-96 overflow-y-auto">
-                    ${data.postfix.map(log => `
-                        <div class="p-3 bg-gray-50 dark:bg-gray-700/50 rounded hover:bg-gray-100 dark:hover:bg-gray-700 transition">
-                            <div class="flex justify-between items-start mb-1">
-                                <div class="flex items-center gap-2 flex-wrap">
-                                    <span class="text-xs font-mono text-gray-600 dark:text-gray-300">${formatTime(log.time)}</span>
-                                    ${log.program ? `<span class="text-xs px-2 py-0.5 rounded bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-300">${log.program}</span>` : ''}
-                                    ${log.recipient ? `<span class="text-xs text-gray-500 dark:text-gray-400">=> ${escapeHtml(log.recipient)}</span>` : ''}
-                                </div>
-                                ${log.status ? `<span class="inline-block px-2 py-0.5 text-xs font-medium rounded ${getStatusClass(log.status)}">${log.status}</span>` : ''}
-                            </div>
-                            <p class="text-xs text-gray-700 dark:text-gray-300 font-mono break-all leading-relaxed">${escapeHtml(log.message)}</p>
-                            ${log.relay ? `<p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Relay: ${escapeHtml(log.relay)}</p>` : ''}
-                            ${log.delay ? `<p class="text-xs text-gray-500 dark:text-gray-400">Delay: ${log.delay.toFixed(2)}s</p>` : ''}
-                        </div>
-                    `).join('')}
-                </div>
-            </div>
+            <!-- Complete Log Timeline - the header and filters stay put, the
+                 entry list takes the remaining height and scrolls alone -->
+            ${renderLogTimeline(data.postfix, dovecotLogs)}
         </div>
     `;
 }
