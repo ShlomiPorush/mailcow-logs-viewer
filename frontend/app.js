@@ -5060,7 +5060,7 @@ function renderLogTimeline(postfixLogs, dovecotLogs) {
 
     const sources = [...new Set(entries.map(e => timelineSource(e)))];
     const filterBar = sources.length > 1 ? `
-        <div class="flex flex-wrap items-center gap-1.5 mb-3 flex-shrink-0" id="log-timeline-filters">
+        <div class="flex flex-wrap items-center gap-1.5" id="log-timeline-filters">
             <button data-source="" onclick="filterLogTimeline(this)"
                 class="px-2.5 py-1 text-xs rounded border bg-blue-100 dark:bg-blue-500/10 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-500/20">All</button>
             ${sources.map(s => `
@@ -5072,11 +5072,13 @@ function renderLogTimeline(postfixLogs, dovecotLogs) {
 
     return `
         <div class="flex-1 min-h-0 flex flex-col">
-            <div class="flex items-center justify-between mb-3 flex-shrink-0">
-                <h4 class="text-md font-semibold text-gray-900 dark:text-white">Complete Log Timeline</h4>
-                <span class="text-xs text-gray-500 dark:text-gray-400" id="log-timeline-count">${entries.length} entries</span>
+            <div class="flex items-center justify-between gap-3 mb-3 flex-shrink-0">
+                <div class="flex items-baseline gap-2 min-w-0">
+                    <h4 class="text-md font-semibold text-gray-900 dark:text-white whitespace-nowrap">Complete Log Timeline</h4>
+                    <span class="text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap" id="log-timeline-count">${entries.length} entries</span>
+                </div>
+                ${filterBar}
             </div>
-            ${filterBar}
             <div class="space-y-2 flex-1 min-h-0 overflow-y-auto" id="log-timeline-entries">
                 ${entries.map(e => `<div data-log-source="${escapeHtml(timelineSource(e))}">${e.dovecot ? renderDovecotTimelineRow(e.log) : renderPostfixTimelineRow(e.log)}</div>`).join('')}
             </div>
@@ -5269,16 +5271,20 @@ function renderOverviewTab(content, data) {
                         <!-- Right Column -->
                         <div class="space-y-3">
                             ${recipientsRightColumn}
-                            ${data.queue_id ? `
-                                <div>
-                                    <p class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Queue ID</p>
-                                    <p class="text-xs font-mono text-gray-600 dark:text-gray-400 mt-1">${copyableText(data.queue_id)}</p>
-                                </div>
-                            ` : ''}
-                            ${data.message_id ? `
-                                <div>
-                                    <p class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Message ID</p>
-                                    <p class="text-xs font-mono text-gray-600 dark:text-gray-400 mt-1 break-all">${copyableText(data.message_id)}</p>
+                            ${data.queue_id || data.message_id ? `
+                                <div class="flex gap-4">
+                                    ${data.queue_id ? `
+                                        <div class="flex-shrink-0">
+                                            <p class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Queue ID</p>
+                                            <p class="text-xs font-mono text-gray-600 dark:text-gray-400 mt-1 whitespace-nowrap">${copyableText(data.queue_id)}</p>
+                                        </div>
+                                    ` : ''}
+                                    ${data.message_id ? `
+                                        <div class="min-w-0 flex-1">
+                                            <p class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Message ID</p>
+                                            <p class="text-xs font-mono text-gray-600 dark:text-gray-400 mt-1 truncate" title="${escapeHtml(data.message_id)}">${copyableText(data.message_id)}</p>
+                                        </div>
+                                    ` : ''}
                                 </div>
                             ` : ''}
                         </div>
@@ -5287,8 +5293,8 @@ function renderOverviewTab(content, data) {
                 ${renderRelatedDeliveries(data)}
                 ${renderDovecotSummary(data.dovecot)}
                 ${data.rspamd ? `
-                    <div class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-3 sm:p-4 mt-1">
-                        <div class="flex items-baseline justify-between mb-3">
+                    <div class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-3 sm:p-4 mt-1 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700/30 transition" onclick="switchModalTab('spam')">
+                        <div class="flex items-baseline gap-2 mb-3">
                             <h4 class="text-sm sm:text-md font-semibold text-gray-900 dark:text-white">Quick Spam Summary</h4>
                             <span class="text-[10px] sm:text-xs text-gray-500 dark:text-gray-400">See "Spam Analysis" tab for details</span>
                         </div>
@@ -5556,23 +5562,23 @@ function renderSpamTab(content, data) {
 
     content.innerHTML = `
         <div class="space-y-6">
-            <div class="grid grid-cols-3 gap-2 sm:gap-4">
-                <div class="bg-gray-50 dark:bg-gray-700/50 p-2 sm:p-4 rounded-lg text-center">
-                    <p class="text-[10px] sm:text-xs font-medium text-gray-500 dark:text-gray-400 uppercase mb-1 sm:mb-2 truncate">Score</p>
-                    <p class="text-lg sm:text-3xl font-bold ${data.rspamd.score >= (data.rspamd.required_score || 15) ? 'text-red-600 dark:text-red-400' : 'text-green-600 dark:text-green-400'}">
+            <div class="grid grid-cols-3 gap-2 sm:gap-3">
+                <div class="bg-gray-50 dark:bg-gray-700/50 p-2 sm:p-3 rounded-lg text-center">
+                    <p class="text-[10px] sm:text-xs font-medium text-gray-500 dark:text-gray-400 uppercase mb-0.5 sm:mb-1 truncate">Score</p>
+                    <p class="text-base sm:text-2xl font-bold ${data.rspamd.score >= (data.rspamd.required_score || 15) ? 'text-red-600 dark:text-red-400' : 'text-green-600 dark:text-green-400'}">
                         ${data.rspamd.score.toFixed(2)}
                     </p>
-                    <p class="text-[9px] sm:text-xs text-gray-500 dark:text-gray-400 mt-1">Limit: ${data.rspamd.required_score || 15}</p>
+                    <p class="text-[9px] sm:text-xs text-gray-500 dark:text-gray-400">Limit: ${data.rspamd.required_score || 15}</p>
                 </div>
-                <div class="bg-gray-50 dark:bg-gray-700/50 p-2 sm:p-4 rounded-lg text-center">
-                    <p class="text-[10px] sm:text-xs font-medium text-gray-500 dark:text-gray-400 uppercase mb-1 sm:mb-2 truncate">Action</p>
-                    <p class="text-sm sm:text-xl font-semibold text-gray-900 dark:text-white truncate">
+                <div class="bg-gray-50 dark:bg-gray-700/50 p-2 sm:p-3 rounded-lg text-center">
+                    <p class="text-[10px] sm:text-xs font-medium text-gray-500 dark:text-gray-400 uppercase mb-0.5 sm:mb-1 truncate">Action</p>
+                    <p class="text-sm sm:text-lg font-semibold text-gray-900 dark:text-white truncate">
                         ${data.rspamd.action}
                     </p>
                 </div>
-                <div class="bg-gray-50 dark:bg-gray-700/50 p-2 sm:p-4 rounded-lg text-center">
-                    <p class="text-[10px] sm:text-xs font-medium text-gray-500 dark:text-gray-400 uppercase mb-1 sm:mb-2 truncate">Class</p>
-                    <p class="text-sm sm:text-xl font-semibold ${data.rspamd.is_spam ? 'text-red-600 dark:text-red-400' : 'text-green-600 dark:text-green-400'}">
+                <div class="bg-gray-50 dark:bg-gray-700/50 p-2 sm:p-3 rounded-lg text-center">
+                    <p class="text-[10px] sm:text-xs font-medium text-gray-500 dark:text-gray-400 uppercase mb-0.5 sm:mb-1 truncate">Class</p>
+                    <p class="text-sm sm:text-lg font-semibold ${data.rspamd.is_spam ? 'text-red-600 dark:text-red-400' : 'text-green-600 dark:text-green-400'}">
                         ${data.rspamd.is_spam ? 'SPAM' : 'CLEAN'}
                     </p>
                 </div>
