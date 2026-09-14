@@ -29,7 +29,7 @@ const RATE_LIMIT_FRAME_LABELS = {
 };
 
 let rateLimitWindowHours = 720;
-let rateLimitSearch = { mailbox: '', domain: '' };
+let rateLimitSearch = { hits: '', mailbox: '', domain: '' };
 let rateLimitEventsData = null;
 let rateLimitConfigData = null;
 // { kind: 'mailbox' | 'domain', name: string } while one row's form is open
@@ -66,6 +66,7 @@ async function loadRateLimits() {
         rateLimitEventsData = await eventsResponse.json();
         rateLimitConfigData = await limitsResponse.json();
 
+        updateRateLimitSummary();
         renderRateLimitHits();
         renderRateLimitMailboxes();
         renderRateLimitDomains();
@@ -140,13 +141,35 @@ function renderRateLimitReadOnlyNotice() {
 
 // ---- Recent rate limit hits -------------------------------------------------
 
+function updateRateLimitSummary() {
+    const events = rateLimitEventsData || {};
+    const config = rateLimitConfigData || {};
+    const senders = events.by_sender || [];
+    const windowLabel = rateLimitWindowHours === 24 ? 'Last 24 hours'
+        : rateLimitWindowHours === 168 ? 'Last 7 days' : 'Last 30 days';
+    const set = (id, value) => {
+        const el = document.getElementById(id);
+        if (el) el.textContent = value;
+    };
+    set('rate-limits-sum-senders', senders.length);
+    set('rate-limits-sum-senders-label', windowLabel);
+    set('rate-limits-sum-hits', (events.total_events || 0).toLocaleString());
+    set('rate-limits-sum-hits-label', windowLabel);
+    set('rate-limits-sum-resets', senders.filter(s => s.last_reset).length);
+    set('rate-limits-sum-limits',
+        (config.mailboxes || []).length + (config.domains || []).filter(d => d.rl_value).length);
+}
+
+
 function renderRateLimitHits() {
     const container = document.getElementById('rate-limits-tab-hits');
     if (!container) return;
 
     const data = rateLimitEventsData || {};
-    const senders = data.by_sender || [];
     const canWrite = !rateLimitConfigData || rateLimitConfigData.rw_key_configured !== false;
+    // Recency first: the sender stuck right now outranks last week's noise
+    const senders = (data.by_sender || []).slice()
+        .sort((a, b) => (b.last_seen || '').localeCompare(a.last_seen || ''));
 
     const options = [
         { hours: 24, label: 'Last 24 hours' },
@@ -164,26 +187,43 @@ function renderRateLimitHits() {
             </div>
         `
         : `
-            <div class="divide-y divide-gray-200 dark:divide-gray-700">
-                ${senders.map((group, index) => renderRateLimitSenderRow(group, index, canWrite)).join('')}
+            <div class="mobile-scroll overflow-x-auto">
+                <table class="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+                    <thead class="bg-gray-50 dark:bg-gray-700">
+                        <tr>
+                            <th class="px-3 sm:px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Sender</th>
+                            <th class="px-3 sm:px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Hits</th>
+                            <th class="px-3 sm:px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Last hit</th>
+                            <th class="px-3 sm:px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Limit</th>
+                            <th class="px-3 sm:px-4 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider"></th>
+                        </tr>
+                    </thead>
+                    <tbody class="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
+                        ${senders.map((group, index) => renderRateLimitSenderRow(group, index, canWrite)).join('')}
+                        <tr data-rl-noresults class="hidden">
+                            <td colspan="5" class="px-3 sm:px-4 py-8 text-center text-sm text-gray-500 dark:text-gray-400">No matches</td>
+                        </tr>
+                    </tbody>
+                </table>
             </div>
         `;
 
     container.innerHTML = `
         <div class="px-4 py-3 border-b border-gray-200 dark:border-gray-700 flex flex-wrap items-center justify-between gap-3">
-            <div class="flex flex-wrap items-center gap-2">
-                <p class="text-sm text-gray-600 dark:text-gray-400">Mail that mailcow refused because the sender ran out of allowance</p>
-                <span class="${RATE_LIMIT_BADGE_SHAPE} ${RATE_LIMIT_NEUTRAL_BADGE} whitespace-nowrap">
-                    ${data.total_events || 0} hits from ${senders.length} sender${senders.length === 1 ? '' : 's'}
-                </span>
+            <p class="text-sm text-gray-600 dark:text-gray-400">Mail that mailcow refused because the sender ran out of allowance</p>
+            <div class="flex items-center gap-2">
+                <input type="text" value="${escapeHtml(rateLimitSearch.hits || '')}" placeholder="Search..."
+                    oninput="filterRateLimitRows('hits', this.value)"
+                    class="w-44 px-3 py-2 text-sm rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300">
+                <select id="rate-limit-window" onchange="changeRateLimitWindow(this.value)"
+                    class="px-3 py-2 text-sm rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300">
+                    ${options}
+                </select>
             </div>
-            <select id="rate-limit-window" onchange="changeRateLimitWindow(this.value)"
-                class="px-3 py-2 text-sm rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300">
-                ${options}
-            </select>
         </div>
         ${body}
     `;
+    if (rateLimitSearch.hits) filterRateLimitRows('hits', rateLimitSearch.hits);
 }
 
 
@@ -195,54 +235,56 @@ function renderRateLimitSenderRow(group, index, canWrite) {
         ? `
             <button type="button"
                 onclick="event.stopPropagation(); resetRateLimitCounter('${escapeJsArg(group.user)}', '${escapeJsArg(group.last_rl_hash)}')"
-                class="px-2.5 py-1.5 text-xs font-medium rounded bg-blue-600 hover:bg-blue-700 text-white whitespace-nowrap">
+                class="px-3 py-1.5 text-xs font-medium rounded-lg bg-blue-600 hover:bg-blue-700 text-white whitespace-nowrap">
                 Reset counter
             </button>
         `
         : '';
 
     const details = recent.length === 0
-        ? '<p class="px-4 py-3 text-sm text-gray-500 dark:text-gray-400">No details were recorded for these hits</p>'
+        ? '<p class="px-3 sm:px-4 py-3 text-sm text-gray-500 dark:text-gray-400">No details were recorded for these hits</p>'
         : `
             <div class="overflow-x-auto">
-                <table class="w-full">
+                <table class="min-w-full">
                     <thead>
-                        <tr class="text-left text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">
-                            <th class="px-4 py-2">Time</th>
-                            <th class="px-4 py-2">Recipient</th>
-                            <th class="px-4 py-2">Subject</th>
-                            <th class="px-4 py-2">Queue id</th>
+                        <tr class="text-left text-xs uppercase tracking-wider text-gray-500 dark:text-gray-400">
+                            <th class="px-3 sm:px-4 py-2">Time</th>
+                            <th class="px-3 sm:px-4 py-2">Recipient</th>
+                            <th class="px-3 sm:px-4 py-2">Subject</th>
+                            <th class="px-3 sm:px-4 py-2">Queue id</th>
                         </tr>
                     </thead>
-                    <tbody>${recent.map(renderRateLimitEventRow).join('')}</tbody>
+                    <tbody class="divide-y divide-gray-200 dark:divide-gray-700">${recent.map(renderRateLimitEventRow).join('')}</tbody>
                 </table>
             </div>
         `;
 
     return `
-        <div>
-            <div class="px-4 py-3 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700/30 transition"
-                onclick="toggleRateLimitSender('${rowId}')">
-                <div class="flex flex-wrap items-center gap-3">
+        <tr data-rl-name="${escapeHtml((group.user || '').toLowerCase())}"
+            class="hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer" onclick="toggleRateLimitSender('${rowId}')">
+            <td class="px-3 sm:px-4 py-3">
+                <div class="flex items-center gap-2 min-w-0">
                     <svg id="${rowId}-icon" class="w-4 h-4 text-gray-400 transition-transform flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
                     </svg>
-                    <div class="min-w-0 flex-1">
-                        <p class="font-mono text-sm text-gray-900 dark:text-white truncate">${escapeHtml(group.user)}</p>
-                        <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Last hit ${escapeHtml(formatTime(group.last_seen))}</p>
-                    </div>
-                    <span class="${RATE_LIMIT_BADGE_SHAPE} ${getStatusBadgeClass('rejected')} whitespace-nowrap">
-                        ${group.events} hit${group.events === 1 ? '' : 's'}
-                    </span>
-                    ${renderRateLimitBadge(group.current_limit)}
-                    ${group.last_reset ? `<span class="${RATE_LIMIT_BADGE_SHAPE} ${getStatusBadgeClass('delivered')} whitespace-nowrap">Counter reset ${escapeHtml(formatTime(group.last_reset))}</span>` : ''}
-                    ${resetButton}
+                    <span class="font-mono text-xs sm:text-sm text-gray-900 dark:text-gray-100 truncate">${escapeHtml(group.user)}</span>
                 </div>
-            </div>
-            <div id="${rowId}" class="hidden bg-gray-50 dark:bg-gray-900/30 border-t border-gray-200 dark:border-gray-700">
+            </td>
+            <td class="px-3 sm:px-4 py-3">
+                <span class="${RATE_LIMIT_BADGE_SHAPE} ${getStatusBadgeClass('rejected')} whitespace-nowrap">${group.events}</span>
+            </td>
+            <td class="px-3 sm:px-4 py-3 text-xs sm:text-sm text-gray-900 dark:text-gray-100 whitespace-nowrap">${escapeHtml(formatTime(group.last_seen))}</td>
+            <td class="px-3 sm:px-4 py-3">${renderRateLimitBadge(group.current_limit)}</td>
+            <td class="px-3 sm:px-4 py-3 text-right whitespace-nowrap">
+                ${group.last_reset ? `<span class="${RATE_LIMIT_BADGE_SHAPE} ${getStatusBadgeClass('delivered')} whitespace-nowrap mr-2">Reset ${escapeHtml(formatTime(group.last_reset))}</span>` : ''}
+                ${resetButton}
+            </td>
+        </tr>
+        <tr id="${rowId}" data-rl-name="${escapeHtml((group.user || '').toLowerCase())}" data-rl-detail class="hidden">
+            <td colspan="5" class="p-0 bg-gray-50 dark:bg-gray-900/30">
                 ${details}
-            </div>
-        </div>
+            </td>
+        </tr>
     `;
 }
 
@@ -347,12 +389,22 @@ function renderRateLimitSearch(kind, subtitle) {
 
 function filterRateLimitRows(kind, query) {
     rateLimitSearch[kind] = query;
-    const container = document.getElementById(kind === 'mailbox' ? 'rate-limits-tab-mailboxes' : 'rate-limits-tab-domains');
+    const containerId = kind === 'mailbox' ? 'rate-limits-tab-mailboxes'
+        : kind === 'domain' ? 'rate-limits-tab-domains' : 'rate-limits-tab-hits';
+    const container = document.getElementById(containerId);
     if (!container) return;
     const q = (query || '').trim().toLowerCase();
     let shown = 0;
     container.querySelectorAll('tbody tr[data-rl-name]').forEach(tr => {
         const match = !q || tr.dataset.rlName.includes(q);
+        if (tr.hasAttribute('data-rl-detail')) {
+            // Expanded event details collapse when the filter changes, so the
+            // chevron state can never disagree with what is visible
+            tr.classList.add('hidden');
+            const icon = document.getElementById(`${tr.id}-icon`);
+            if (icon) icon.classList.remove('rotate-90');
+            return;
+        }
         tr.classList.toggle('hidden', !match);
         if (match && !tr.hasAttribute('data-rl-editrow')) shown++;
     });
