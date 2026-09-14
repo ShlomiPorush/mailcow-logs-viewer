@@ -123,13 +123,15 @@ function renderRateLimitBadge(limit) {
 }
 
 
-// Read-only notice shared by both limits tabs
+// Read-only notice shared by both limits tabs - same banner Fail2ban
+// Settings shows when the Read-Write key is missing
 function renderRateLimitReadOnlyNotice() {
     const data = rateLimitConfigData || {};
     if (data.rw_key_configured !== false) return '';
     return `
-        <div class="px-4 py-2 text-sm text-gray-600 dark:text-gray-400 bg-gray-50 dark:bg-gray-900/30 border-b border-gray-200 dark:border-gray-700">
-            Limits are read only here. Set MAILCOW_API_KEY_RW to change them from the viewer.
+        <div class="mx-4 my-3 px-4 py-3 rounded-lg bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 text-yellow-800 dark:text-yellow-300 text-sm flex items-center gap-2">
+            <span class="text-lg">&#128274;</span>
+            <span>Editing requires a <strong>Read-Write API key</strong> (<code>MAILCOW_API_KEY_RW</code>). Configure it in Settings &rarr; Mailcow &rarr; Connection.</span>
         </div>
     `;
 }
