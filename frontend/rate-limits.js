@@ -234,6 +234,7 @@ function renderRateLimitSenderRow(group, index, canWrite) {
                         ${group.events} hit${group.events === 1 ? '' : 's'}
                     </span>
                     ${renderRateLimitBadge(group.current_limit)}
+                    ${group.last_reset ? `<span class="${RATE_LIMIT_BADGE_SHAPE} ${getStatusBadgeClass('delivered')} whitespace-nowrap">Counter reset ${escapeHtml(formatTime(group.last_reset))}</span>` : ''}
                     ${resetButton}
                 </div>
             </div>
@@ -286,7 +287,7 @@ async function resetRateLimitCounter(user, rlHash) {
         const response = await authenticatedFetch('/api/rate-limits/reset', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ rl_hash: rlHash })
+            body: JSON.stringify({ rl_hash: rlHash, user: user })
         });
 
         if (!response.ok) {

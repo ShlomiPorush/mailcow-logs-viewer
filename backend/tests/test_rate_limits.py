@@ -190,6 +190,9 @@ def _cleanup():
             RawServiceLog.message_hash.like(f'{MARKER}%')).delete(synchronize_session=False)
         db.query(MailboxStatistics).filter(
             MailboxStatistics.domain == DOMAIN).delete(synchronize_session=False)
+        from app.models import SystemSetting
+        db.query(SystemSetting).filter(
+            SystemSetting.key == 'rate_limit_resets').delete(synchronize_session=False)
         db.commit()
 
 
@@ -582,3 +585,17 @@ def test_disabling_the_feature_leaves_the_endpoints_registered(monkeypatch):
     paths = {getattr(route, 'path', '') for route in app.routes}
     assert '/api/rate-limits/events' in paths
     assert '/api/rate-limits/limits' in paths
+
+def test_a_reset_is_recorded_and_marked_on_the_events_row(env, monkeypatch):
+    """After a counter reset, the sender's events row carries the marker."""
+    from app.database import get_db_context
+    from app.routers import rate_limits
+    fake = _fake_client(monkeypatch)
+    with get_db_context() as db:
+        result = asyncio.run(rate_limits.reset_rate_limit_counter(
+            rate_limits.ReleaseRequest(rl_hash=NEWEST_HASH, user=SENDER), db=db))
+        assert result['reset'] is True
+        data = rate_limits.get_rate_limit_events(hours=168, db=db)
+    group = next(g for g in data['by_sender'] if g['user'] == SENDER)
+    assert group.get('last_reset'), 'the reset must be marked on the row'
+

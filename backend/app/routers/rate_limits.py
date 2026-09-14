@@ -156,6 +156,44 @@ class DomainLimitRequest(BaseModel):
 
 class ReleaseRequest(BaseModel):
     rl_hash: str
+    user: Optional[str] = None
+
+
+# Audit of counter resets, kept in system_settings as JSON: user -> last reset.
+# Feeds the "counter reset" marker on the events rows.
+_RESETS_KEY = 'rate_limit_resets'
+_RESETS_MAX = 100
+
+
+def _load_resets(db: Session) -> Dict[str, Any]:
+    from ..models import SystemSetting
+    import json
+    try:
+        row = db.query(SystemSetting).filter(SystemSetting.key == _RESETS_KEY).first()
+        return json.loads(row.value) if row and row.value else {}
+    except Exception as e:
+        logger.warning(f"Could not read the rate limit reset audit: {e}")
+        return {}
+
+
+def _record_reset(db: Session, user: str, rl_hash: str) -> None:
+    from ..models import SystemSetting
+    import json
+    resets = _load_resets(db)
+    resets[user.strip().lower()] = {
+        'at': format_datetime_for_api(datetime.utcnow()),
+        'rl_hash': rl_hash,
+    }
+    if len(resets) > _RESETS_MAX:
+        oldest = sorted(resets.items(), key=lambda kv: kv[1].get('at', ''))
+        resets = dict(oldest[len(resets) - _RESETS_MAX:])
+    row = db.query(SystemSetting).filter(SystemSetting.key == _RESETS_KEY).first()
+    value = json.dumps(resets)
+    if row is None:
+        db.add(SystemSetting(key=_RESETS_KEY, value=value))
+    else:
+        row.value = value
+    db.commit()
 
 
 # ---- endpoints ----
@@ -236,6 +274,14 @@ def get_rate_limit_events(
             group = groups.get((username or '').strip().lower())
             if group is not None and rl_value:
                 group['current_limit'] = {'value': rl_value, 'frame': rl_frame}
+
+    # Mark senders whose counter was reset from here (the audit in
+    # system_settings), so the row can show it
+    resets = _load_resets(db)
+    for user_key, group in groups.items():
+        reset = resets.get(user_key)
+        if reset:
+            group['last_reset'] = reset.get('at')
 
     by_sender = sorted(groups.values(), key=lambda g: g['events'], reverse=True)
     return {
@@ -342,7 +388,7 @@ async def set_domain_limit(request: DomainLimitRequest, db: Session = Depends(ge
 
 
 @router.post("/reset")
-async def reset_rate_limit_counter(request: ReleaseRequest):
+async def reset_rate_limit_counter(request: ReleaseRequest, db: Session = Depends(get_db)):
     """Reset an active counter so a blocked sender can send again now."""
     _require_rw_key()
     rl_hash = (request.rl_hash or '').strip()
@@ -359,5 +405,11 @@ async def reset_rate_limit_counter(request: ReleaseRequest):
         raise HTTPException(status_code=502, detail=f"mailcow did not reset the counter: {e}")
 
     # mailcow answers this delete with an empty 200 - reaching here means it
-    # accepted the request
+    # accepted the request. Record who was reset for the row marker.
+    if request.user:
+        try:
+            _record_reset(db, request.user, rl_hash)
+        except Exception as e:
+            logger.warning(f"Counter reset done but not recorded: {e}")
+
     return {'rl_hash': rl_hash, 'reset': True, 'mailcow_response': response}
