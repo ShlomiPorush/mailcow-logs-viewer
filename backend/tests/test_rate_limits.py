@@ -265,7 +265,7 @@ def test_events_are_grouped_by_sender_with_hit_counts(env):
     assert order.index(SENDER) < order.index(QUIET), 'busiest sender must come first'
 
 
-def test_the_latest_hash_is_the_one_offered_for_release(env):
+def test_the_latest_hash_is_the_one_offered_for_reset(env):
     """Releasing the counter must use the newest hash, not an expired one."""
     groups = {g['user']: g for g in _events()['by_sender']}
     assert groups[SENDER]['last_rl_hash'] == NEWEST_HASH
@@ -424,7 +424,7 @@ def test_an_unknown_domain_is_refused(env, monkeypatch):
 
 def _reset(rl_hash, monkeypatch_fake):
     from app.routers import rate_limits
-    return asyncio.run(rate_limits.release_rate_limit_counter(
+    return asyncio.run(rate_limits.reset_rate_limit_counter(
         rate_limits.ReleaseRequest(rl_hash=rl_hash)))
 
 

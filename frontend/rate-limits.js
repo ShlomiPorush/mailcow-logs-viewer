@@ -190,12 +190,12 @@ function renderRateLimitSenderRow(group, index, canWrite) {
     const rowId = `rate-limit-sender-${index}`;
     const recent = group.recent || [];
 
-    const releaseButton = (canWrite && group.last_rl_hash)
+    const resetButton = (canWrite && group.last_rl_hash)
         ? `
             <button type="button"
-                onclick="event.stopPropagation(); releaseRateLimitCounter('${escapeJsArg(group.user)}', '${escapeJsArg(group.last_rl_hash)}')"
+                onclick="event.stopPropagation(); resetRateLimitCounter('${escapeJsArg(group.user)}', '${escapeJsArg(group.last_rl_hash)}')"
                 class="px-2.5 py-1.5 text-xs font-medium rounded bg-blue-600 hover:bg-blue-700 text-white whitespace-nowrap">
-                Release counter
+                Reset counter
             </button>
         `
         : '';
@@ -234,7 +234,7 @@ function renderRateLimitSenderRow(group, index, canWrite) {
                         ${group.events} hit${group.events === 1 ? '' : 's'}
                     </span>
                     ${renderRateLimitBadge(group.current_limit)}
-                    ${releaseButton}
+                    ${resetButton}
                 </div>
             </div>
             <div id="${rowId}" class="hidden bg-gray-50 dark:bg-gray-900/30 border-t border-gray-200 dark:border-gray-700">
@@ -274,11 +274,11 @@ function toggleRateLimitSender(rowId) {
 }
 
 
-async function releaseRateLimitCounter(user, rlHash) {
+async function resetRateLimitCounter(user, rlHash) {
     const confirmed = await showConfirmModal({
-        title: 'Release rate limit counter',
+        title: 'Reset rate limit counter',
         message: `Let ${user} send again straight away? This clears the counter they are stuck behind. Their limit stays as it is.`,
-        confirmText: 'Release counter'
+        confirmText: 'Reset counter'
     });
     if (!confirmed) return;
 
@@ -291,15 +291,15 @@ async function releaseRateLimitCounter(user, rlHash) {
 
         if (!response.ok) {
             const detail = await response.json().catch(() => ({}));
-            showToast(detail.detail || 'Could not release the counter', 'error');
+            showToast(detail.detail || 'Could not reset the counter', 'error');
             return;
         }
 
         showToast(`${user} can send again`, 'success');
         loadRateLimits();
     } catch (error) {
-        console.error('Failed to release rate limit counter:', error);
-        showToast('Could not release the counter', 'error');
+        console.error('Failed to reset rate limit counter:', error);
+        showToast('Could not reset the counter', 'error');
     }
 }
 

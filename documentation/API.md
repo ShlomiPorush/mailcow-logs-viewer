@@ -1249,7 +1249,7 @@ clear_stats_cache()
 
 ## Rate Limits
 
-mailcow rate-limits senders through rspamd, which counts every send against a Redis key and writes a line to the `ratelimited` log when a sender runs out. These endpoints show who is hitting a limit, release a stuck counter, and change the limits themselves. The write endpoints require a Read-Write API key (`MAILCOW_API_KEY_RW`).
+mailcow rate-limits senders through rspamd, which counts every send against a Redis key and writes a line to the `ratelimited` log when a sender runs out. These endpoints show who is hitting a limit, reset a stuck counter, and change the limits themselves. The write endpoints require a Read-Write API key (`MAILCOW_API_KEY_RW`).
 
 These endpoints back the Rate Limits view of the Mailbox Statistics page. They are covered by the `rate-limits` feature id in `disabled_features`: as with every other toggleable feature, disabling it hides the view in the web interface and does not change any response below.
 
@@ -1445,7 +1445,7 @@ Set the rate limit of one domain.
 
 ### POST /api/rate-limits/reset
 
-Release an active counter so a blocked sender can send again immediately. The configured limit is not changed.
+Reset an active counter so a blocked sender can send again immediately. The configured limit is not changed.
 
 **Request Body:**
 ```json
@@ -1458,7 +1458,7 @@ Release an active counter so a blocked sender can send again immediately. The co
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `rl_hash` | string | Yes | The counter to release, as reported in `last_rl_hash` or `rl_hash` |
+| `rl_hash` | string | Yes | The counter to reset, as reported in `last_rl_hash` or `rl_hash` |
 
 **Response:**
 ```json
@@ -1475,7 +1475,7 @@ Release an active counter so a blocked sender can send again immediately. The co
 
 **Error Responses:**
 - `400 Bad Request`: The value is not a rate limit hash (it must match `^RL[A-Za-z0-9]+$`)
-- `502 Bad Gateway`: mailcow did not release the counter
+- `502 Bad Gateway`: mailcow did not reset the counter
 - `503 Service Unavailable`: No Read-Write API key configured
 
 ---

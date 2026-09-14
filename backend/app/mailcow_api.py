@@ -197,9 +197,13 @@ class MailcowAPI:
             response.raise_for_status()
                 
             if response.headers.get('content-type', '').startswith('application/json'):
+                # Some mailcow delete endpoints (delete/rlhash) answer 200 with
+                # an empty body - that is a success, not something to parse
+                if not response.text.strip():
+                    return None
                 return response.json()
             return response.text
-                
+
         except httpx.HTTPStatusError as e:
             raise MailcowAPIError(f"RW API request failed with status {e.response.status_code}: {e.response.text}")
         except httpx.RequestError as e:

@@ -342,8 +342,8 @@ async def set_domain_limit(request: DomainLimitRequest, db: Session = Depends(ge
 
 
 @router.post("/reset")
-async def release_rate_limit_counter(request: ReleaseRequest):
-    """Release an active counter so a blocked sender can send again now."""
+async def reset_rate_limit_counter(request: ReleaseRequest):
+    """Reset an active counter so a blocked sender can send again now."""
     _require_rw_key()
     rl_hash = (request.rl_hash or '').strip()
     if not _RL_HASH_RE.match(rl_hash):
@@ -355,7 +355,9 @@ async def release_rate_limit_counter(request: ReleaseRequest):
     try:
         response = await mailcow_api.delete_rl_hash(rl_hash)
     except MailcowAPIError as e:
-        logger.error(f"Failed to release the rate limit counter {rl_hash}: {e}")
-        raise HTTPException(status_code=502, detail=f"mailcow did not release the counter: {e}")
+        logger.error(f"Failed to reset the rate limit counter {rl_hash}: {e}")
+        raise HTTPException(status_code=502, detail=f"mailcow did not reset the counter: {e}")
 
-    return {'rl_hash': rl_hash, 'mailcow_response': response}
+    # mailcow answers this delete with an empty 200 - reaching here means it
+    # accepted the request
+    return {'rl_hash': rl_hash, 'reset': True, 'mailcow_response': response}
