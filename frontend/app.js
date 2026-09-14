@@ -5435,55 +5435,49 @@ function renderPostfixTab(content, data) {
     content.innerHTML = `
         <div class="h-full flex flex-col min-h-0 gap-6">
             ${errorSummaryHtml}
-            <!-- Mail Details Header -->
-            <div class="bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-gray-800 dark:to-gray-700 p-4 rounded-lg">
-                <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-3">Mail Details</h3>
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <!-- Compact mail summary: one dense strip so the logs get the
+                 room. The full details live in the Overview tab -->
+            <div class="bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-gray-800 dark:to-gray-700 p-3 rounded-lg flex-shrink-0">
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-x-4 gap-y-2">
                     ${sender ? `
-                        <div>
-                            <p class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">From</p>
-                            <p class="text-sm font-semibold text-gray-900 dark:text-white mt-1">${copyableText(sender)}</p>
+                        <div class="min-w-0">
+                            <p class="text-[10px] font-medium text-gray-500 dark:text-gray-400 uppercase">From</p>
+                            <p class="text-xs font-semibold text-gray-900 dark:text-white truncate" title="${escapeHtml(sender)}">${copyableText(sender)}</p>
                         </div>
                     ` : ''}
                     ${recipientsFromPostfix.size > 0 ? `
-                        <div>
-                            <p class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">To (${recipientsFromPostfix.size})</p>
-                            <p class="text-sm font-semibold text-gray-900 dark:text-white mt-1">${recipientsFromPostfix.size === 1 ? copyableText(Array.from(recipientsFromPostfix)[0]) : `${recipientsFromPostfix.size} recipients`}</p>
+                        <div class="min-w-0">
+                            <p class="text-[10px] font-medium text-gray-500 dark:text-gray-400 uppercase">To (${recipientsFromPostfix.size})</p>
+                            <p class="text-xs font-semibold text-gray-900 dark:text-white truncate">${recipientsFromPostfix.size === 1 ? copyableText(Array.from(recipientsFromPostfix)[0]) : `${recipientsFromPostfix.size} recipients`}</p>
                         </div>
                     ` : (data.recipients && data.recipients.length > 0 ? `
-                        <div>
-                            <p class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">To (${data.recipients.length})</p>
-                            <p class="text-sm font-semibold text-gray-900 dark:text-white mt-1">${data.recipients.length === 1 ? copyableText(data.recipients[0]) : `${data.recipients.length} recipients`}</p>
+                        <div class="min-w-0">
+                            <p class="text-[10px] font-medium text-gray-500 dark:text-gray-400 uppercase">To (${data.recipients.length})</p>
+                            <p class="text-xs font-semibold text-gray-900 dark:text-white truncate">${data.recipients.length === 1 ? copyableText(data.recipients[0]) : `${data.recipients.length} recipients`}</p>
                         </div>
                     ` : '')}
-                    ${clientIp ? `
+                    ${finalStatus ? `
                         <div>
-                            <p class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Client IP</p>
-                            <p class="text-sm font-mono font-semibold text-gray-900 dark:text-white mt-1">${copyableText(clientIp)}</p>
+                            <p class="text-[10px] font-medium text-gray-500 dark:text-gray-400 uppercase">Final Status</p>
+                            <span class="inline-block px-2 py-0.5 text-xs font-medium rounded ${getStatusClass(finalStatus)}">${finalStatus}</span>
                         </div>
                     ` : ''}
                     ${queueId ? `
-                        <div>
-                            <p class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Queue ID</p>
-                            <p class="text-sm font-mono font-semibold text-gray-900 dark:text-white mt-1">${copyableText(queueId)}</p>
+                        <div class="min-w-0">
+                            <p class="text-[10px] font-medium text-gray-500 dark:text-gray-400 uppercase">Queue ID</p>
+                            <p class="text-xs font-mono text-gray-900 dark:text-white truncate">${copyableText(queueId)}</p>
                         </div>
                     ` : ''}
-                    ${finalStatus ? `
-                        <div>
-                            <p class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Final Status</p>
-                            <span class="inline-block px-3 py-1 text-sm font-medium rounded ${getStatusClass(finalStatus)} mt-1">${finalStatus}</span>
+                    ${clientIp ? `
+                        <div class="min-w-0">
+                            <p class="text-[10px] font-medium text-gray-500 dark:text-gray-400 uppercase">Client IP</p>
+                            <p class="text-xs font-mono text-gray-900 dark:text-white truncate">${copyableText(clientIp)}</p>
                         </div>
                     ` : ''}
                     ${relay ? `
-                        <div>
-                            <p class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Relay</p>
-                            <p class="text-sm font-mono font-semibold text-gray-900 dark:text-white mt-1 truncate" title="${escapeHtml(relay)}">${escapeHtml(relay)}</p>
-                        </div>
-                    ` : ''}
-                    ${messageId ? `
-                        <div class="md:col-span-2">
-                            <p class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Message ID</p>
-                            <p class="text-xs font-mono text-gray-700 dark:text-gray-300 mt-1 break-all">${copyableText(messageId)}</p>
+                        <div class="min-w-0">
+                            <p class="text-[10px] font-medium text-gray-500 dark:text-gray-400 uppercase">Relay</p>
+                            <p class="text-xs font-mono text-gray-900 dark:text-white truncate" title="${escapeHtml(relay)}">${escapeHtml(relay)}</p>
                         </div>
                     ` : ''}
                 </div>
@@ -5570,8 +5564,12 @@ function renderSpamTab(content, data) {
             
             ${data.rspamd.symbols && Object.keys(data.rspamd.symbols).length > 0 ? `
                 <div>
-                    <h4 class="text-md font-semibold text-gray-900 dark:text-white mb-3">Detection Symbols</h4>
-                    <div class="space-y-2 max-h-[29rem] overflow-y-auto">
+                    <div class="flex items-center justify-between mb-3">
+                        <h4 class="text-md font-semibold text-gray-900 dark:text-white">Detection Symbols</h4>
+                        <button data-hiding="0" onclick="toggleZeroSymbols(this)"
+                            class="px-2.5 py-1 text-xs rounded border bg-gray-100 dark:bg-gray-700/50 text-gray-600 dark:text-gray-300 border-gray-200 dark:border-gray-600">Hide zero scores</button>
+                    </div>
+                    <div class="space-y-2 max-h-[29rem] overflow-y-auto" id="spam-symbols-list">
                         ${Object.entries(data.rspamd.symbols)
                 .sort((a, b) => {
                     const scoreA = a[1].score || a[1].metric_score || 0;
@@ -5588,7 +5586,7 @@ function renderSpamTab(content, data) {
                         score < 0 ? 'text-green-600 dark:text-green-400' :
                             'text-gray-500 dark:text-gray-400';
                     return `
-                                    <div class="flex items-start justify-between p-3 bg-gray-50 dark:bg-gray-700/50 rounded hover:bg-gray-100 dark:hover:bg-gray-700 transition">
+                                    <div data-zero-score="${score === 0 ? '1' : '0'}" class="flex items-start justify-between p-3 bg-gray-50 dark:bg-gray-700/50 rounded hover:bg-gray-100 dark:hover:bg-gray-700 transition">
                                         <div class="flex-1">
                                             <span class="text-sm font-semibold text-gray-900 dark:text-white">${name}</span>
                                             ${description ? `<p class="text-xs text-gray-600 dark:text-gray-400 mt-1">${escapeHtml(description)}</p>` : ''}
@@ -5603,6 +5601,19 @@ function renderSpamTab(content, data) {
             ` : ''}
         </div>
     `;
+}
+
+// Hide or show the zero-score detection symbols in the Spam tab
+function toggleZeroSymbols(button) {
+    const hiding = button.dataset.hiding !== '1';
+    button.dataset.hiding = hiding ? '1' : '0';
+    button.textContent = hiding ? 'Show zero scores' : 'Hide zero scores';
+    button.className = hiding
+        ? 'px-2.5 py-1 text-xs rounded border bg-blue-100 dark:bg-blue-500/10 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-500/20'
+        : 'px-2.5 py-1 text-xs rounded border bg-gray-100 dark:bg-gray-700/50 text-gray-600 dark:text-gray-300 border-gray-200 dark:border-gray-600';
+    document.querySelectorAll('#spam-symbols-list > [data-zero-score="1"]').forEach(row => {
+        row.classList.toggle('hidden', hiding);
+    });
 }
 
 function renderNetfilterTab(content, data) {
