@@ -190,6 +190,7 @@ const TOGGLEABLE_FEATURES = [
     { id: 'domains', label: 'Domains', description: 'Domain DNS analysis and transports' },
     { id: 'dmarc', label: 'DMARC', description: 'DMARC/TLS reports and IMAP sync' },
     { id: 'mailbox-stats', label: 'Mailbox Stats', description: 'Mailbox and alias statistics' },
+    { id: 'rate-limits', label: 'Rate Limits', description: 'Sender rate limit hits and the configured limits' },
     { id: 'logs', label: 'Logs', description: 'Raw service log viewer' },
     { id: 'blacklist', label: 'IP Blacklist Monitor', description: 'DNS blacklist monitoring for your IPs' },
 ];
@@ -228,6 +229,19 @@ function applyFeatureToggles() {
     } else {
         if (blacklistSection) blacklistSection.style.display = '';
         if (dashboardBlacklistCard) dashboardBlacklistCard.style.display = '';
+    }
+
+    // Same for rate-limits - it is a view inside the Mailbox Stats page,
+    // so the feature toggle hides its switcher button instead of a tab
+    const rateLimitsViewBtn = document.getElementById('mailbox-stats-view-rate-limits');
+    if (window.disabledFeatures.includes('rate-limits')) {
+        if (rateLimitsViewBtn) rateLimitsViewBtn.style.display = 'none';
+        // Never leave the user stranded on a view that just disappeared
+        if (typeof mailboxStatsView !== 'undefined' && mailboxStatsView === 'rate-limits') {
+            mailboxStatsSwitchView('statistics');
+        }
+    } else {
+        if (rateLimitsViewBtn) rateLimitsViewBtn.style.display = '';
     }
 }
 
@@ -1199,7 +1213,7 @@ function switchTab(tab, params = {}) {
             handleDmarcRoute(params);
             break;
         case 'mailbox-stats':
-            loadMailboxStats();
+            initMailboxStatsPage();
             break;
         case 'logs':
             loadLogViewer();
