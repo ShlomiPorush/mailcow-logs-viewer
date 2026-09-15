@@ -5434,21 +5434,45 @@ function renderPostfixTab(content, data) {
     const systemLogs = postfixByRecipient['_system'] || [];
     const recipientEntries = Object.entries(postfixByRecipient).filter(([key]) => key !== '_system');
 
-    // Build error summary section
-    const errorSummaryHtml = errorReasons.length > 0 ? `
-        <div class="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-4">
+    // Every retry logs the same error again; one line with an attempt count
+    // says the same thing without crowding the log timeline off the screen
+    const dedupedErrors = [];
+    const errorsSeen = new Map();
+    errorReasons.forEach(err => {
+        const key = `${err.recipient || ''}|${err.status}|${err.reason}`;
+        const existing = errorsSeen.get(key);
+        if (existing) {
+            existing.count++;
+        } else {
+            const entry = { ...err, count: 1 };
+            errorsSeen.set(key, entry);
+            dedupedErrors.push(entry);
+        }
+    });
+
+    // Build error summary section. The list is capped so many distinct errors
+    // scroll inside the box instead of squeezing the timeline below it.
+    const errorSummaryHtml = dedupedErrors.length > 0 ? `
+        <div class="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-4 flex-shrink-0">
             <div class="flex items-start gap-3">
                 <svg class="w-6 h-6 text-red-600 dark:text-red-400 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
                 </svg>
-                <div class="flex-1">
+                <div class="flex-1 min-w-0">
                     <h4 class="text-md font-semibold text-red-800 dark:text-red-300 mb-2">Delivery Error</h4>
-                    ${errorReasons.map(err => `
-                        <div class="mb-2 last:mb-0">
-                            ${err.recipient ? `<p class="text-sm font-medium text-red-700 dark:text-red-400">${escapeHtml(err.recipient)}</p>` : ''}
-                            <p class="text-sm text-red-600 dark:text-red-300 mt-1">${escapeHtml(err.reason)}</p>
-                        </div>
-                    `).join('')}
+                    <div class="max-h-40 overflow-y-auto pr-1">
+                        ${dedupedErrors.map(err => `
+                            <div class="mb-2 last:mb-0">
+                                ${err.recipient || err.count > 1 ? `
+                                    <div class="flex flex-wrap items-center gap-2">
+                                        ${err.recipient ? `<p class="text-sm font-medium text-red-700 dark:text-red-400">${escapeHtml(err.recipient)}</p>` : ''}
+                                        ${err.count > 1 ? `<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-red-100 dark:bg-red-500/10 text-red-700 dark:text-red-300 border border-red-200 dark:border-red-500/20 whitespace-nowrap">${err.count} attempts</span>` : ''}
+                                    </div>
+                                ` : ''}
+                                <p class="text-sm text-red-600 dark:text-red-300 mt-1">${escapeHtml(err.reason)}</p>
+                            </div>
+                        `).join('')}
+                    </div>
                 </div>
             </div>
         </div>
