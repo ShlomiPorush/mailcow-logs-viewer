@@ -197,9 +197,13 @@ class MailcowAPI:
             response.raise_for_status()
                 
             if response.headers.get('content-type', '').startswith('application/json'):
+                # Some mailcow delete endpoints (delete/rlhash) answer 200 with
+                # an empty body - that is a success, not something to parse
+                if not response.text.strip():
+                    return None
                 return response.json()
             return response.text
-                
+
         except httpx.HTTPStatusError as e:
             raise MailcowAPIError(f"RW API request failed with status {e.response.status_code}: {e.response.text}")
         except httpx.RequestError as e:
@@ -808,10 +812,262 @@ class MailcowAPI:
             json=ids
         )
 
+    # ---- Rate limits ----------------------------------------------------
+    # mailcow enforces sender rate limits in rspamd, counting against a Redis
+    # key per mailbox/domain. The limit itself is configuration (rl_value per
+    # rl_frame); the counter that is currently blocking a sender is a separate
+    # Redis hash, released by deleting it.
+
+    async def get_rl_mbox(self, mailbox: str) -> Dict[str, Any]:
+        """
+        Fetch the configured rate limit of a single mailbox.
+
+        Args:
+            mailbox: Mailbox address
+
+        Returns:
+            {"value": "100", "frame": "m"} - an empty dict when no limit is set
+
+        Raises:
+            MailcowAPIError: If the request fails
+        """
+        endpoint = f"/api/v1/get/rl-mbox/{quote(mailbox, safe='@')}"
+        logger.debug(f"Fetching rate limit for mailbox {mailbox}")
+        try:
+            data = await self._make_request(endpoint)
+        except RetryError as e:
+            # _make_request's retry decorator does not re-raise the original
+            # exception, so callers would otherwise have to know about tenacity.
+            last = e.last_attempt.exception() if e.last_attempt else None
+            raise MailcowAPIError(f"Rate limit fetch failed for mailbox {mailbox}: {last}") from e
+
+        if not isinstance(data, dict):
+            logger.warning(f"Unexpected rl-mbox response format for {mailbox}: {type(data)}")
+            return {}
+        return data
+
+    async def get_rl_domain(self, domain: str) -> Dict[str, Any]:
+        """
+        Fetch the configured rate limit of a single domain.
+
+        Args:
+            domain: Domain name
+
+        Returns:
+            {"value": "500", "frame": "h"} - an empty dict when no limit is set
+
+        Raises:
+            MailcowAPIError: If the request fails
+        """
+        endpoint = f"/api/v1/get/rl-domain/{quote(domain, safe='')}"
+        logger.debug(f"Fetching rate limit for domain {domain}")
+        try:
+            data = await self._make_request(endpoint)
+        except RetryError as e:
+            last = e.last_attempt.exception() if e.last_attempt else None
+            raise MailcowAPIError(f"Rate limit fetch failed for domain {domain}: {last}") from e
+
+        if not isinstance(data, dict):
+            logger.warning(f"Unexpected rl-domain response format for {domain}: {type(data)}")
+            return {}
+        return data
+
+    async def edit_rl_mbox(self, mailbox: str, value: Any, frame: str) -> Any:
+        """
+        Set the rate limit of a mailbox (Read-Write API key required).
+
+        A value of "0" (or an empty value) removes the limit.
+
+        Args:
+            mailbox: Mailbox address
+            value: Messages allowed per frame
+            frame: Time frame - s (second), m (minute), h (hour), d (day)
+
+        Returns:
+            Response from mailcow API
+
+        Raises:
+            MailcowAPIError: If the request fails or no RW key is configured
+        """
+        logger.info(f"Setting rate limit for mailbox {mailbox}: {value}/{frame}")
+        payload = {
+            "items": [mailbox],
+            "attr": {
+                "rl_value": str(value),
+                "rl_frame": frame
+            }
+        }
+        try:
+            data = await self._make_rw_request(
+                "/api/v1/edit/rl-mbox/",
+                method="POST",
+                json=payload
+            )
+        except RetryError as e:
+            last = e.last_attempt.exception() if e.last_attempt else None
+            raise MailcowAPIError(f"Rate limit update failed for mailbox {mailbox}: {last}") from e
+
+        logger.info(f"Mailbox rate limit response for {mailbox}: {data}")
+        return data
+
+    async def edit_rl_mboxes(self, mailboxes: List[str], value: Any, frame: str) -> Any:
+        """
+        Set the same rate limit on many mailboxes (Read-Write API key required).
+
+        mailcow's edit endpoint takes a list of items, so applying one limit to
+        a whole filtered selection is a single request no matter how many
+        mailboxes it covers.
+
+        A value of "0" (or an empty value) removes the limit.
+
+        Args:
+            mailboxes: Mailbox addresses
+            value: Messages allowed per frame
+            frame: Time frame - s (second), m (minute), h (hour), d (day)
+
+        Returns:
+            Response from mailcow API
+
+        Raises:
+            MailcowAPIError: If the request fails or no RW key is configured
+        """
+        items = list(mailboxes or [])
+        logger.info(f"Setting rate limit for {len(items)} mailboxes: {value}/{frame}")
+        payload = {
+            "items": items,
+            "attr": {
+                "rl_value": str(value),
+                "rl_frame": frame
+            }
+        }
+        try:
+            data = await self._make_rw_request(
+                "/api/v1/edit/rl-mbox/",
+                method="POST",
+                json=payload
+            )
+        except RetryError as e:
+            last = e.last_attempt.exception() if e.last_attempt else None
+            raise MailcowAPIError(
+                f"Rate limit update failed for {len(items)} mailboxes: {last}") from e
+
+        logger.info(f"Mailbox rate limit response for {len(items)} mailboxes: {data}")
+        return data
+
+    async def edit_rl_domain(self, domain: str, value: Any, frame: str) -> Any:
+        """
+        Set the rate limit of a domain (Read-Write API key required).
+
+        A value of "0" (or an empty value) removes the limit.
+
+        Args:
+            domain: Domain name
+            value: Messages allowed per frame
+            frame: Time frame - s (second), m (minute), h (hour), d (day)
+
+        Returns:
+            Response from mailcow API
+
+        Raises:
+            MailcowAPIError: If the request fails or no RW key is configured
+        """
+        logger.info(f"Setting rate limit for domain {domain}: {value}/{frame}")
+        payload = {
+            "items": [domain],
+            "attr": {
+                "rl_value": str(value),
+                "rl_frame": frame
+            }
+        }
+        try:
+            data = await self._make_rw_request(
+                "/api/v1/edit/rl-domain/",
+                method="POST",
+                json=payload
+            )
+        except RetryError as e:
+            last = e.last_attempt.exception() if e.last_attempt else None
+            raise MailcowAPIError(f"Rate limit update failed for domain {domain}: {last}") from e
+
+        logger.info(f"Domain rate limit response for {domain}: {data}")
+        return data
+
+    async def edit_rl_domains(self, domains: List[str], value: Any, frame: str) -> Any:
+        """
+        Set the same rate limit on many domains (Read-Write API key required).
+
+        One request for the whole list, exactly like edit_rl_mboxes.
+
+        A value of "0" (or an empty value) removes the limit.
+
+        Args:
+            domains: Domain names
+            value: Messages allowed per frame
+            frame: Time frame - s (second), m (minute), h (hour), d (day)
+
+        Returns:
+            Response from mailcow API
+
+        Raises:
+            MailcowAPIError: If the request fails or no RW key is configured
+        """
+        items = list(domains or [])
+        logger.info(f"Setting rate limit for {len(items)} domains: {value}/{frame}")
+        payload = {
+            "items": items,
+            "attr": {
+                "rl_value": str(value),
+                "rl_frame": frame
+            }
+        }
+        try:
+            data = await self._make_rw_request(
+                "/api/v1/edit/rl-domain/",
+                method="POST",
+                json=payload
+            )
+        except RetryError as e:
+            last = e.last_attempt.exception() if e.last_attempt else None
+            raise MailcowAPIError(
+                f"Rate limit update failed for {len(items)} domains: {last}") from e
+
+        logger.info(f"Domain rate limit response for {len(items)} domains: {data}")
+        return data
+
+    async def delete_rl_hash(self, rl_hash: str) -> Any:
+        """
+        Release an active rate limit counter (Read-Write API key required).
+
+        This deletes the Redis hash rspamd counts against, so the sender can
+        send again immediately without the configured limit being changed.
+
+        Args:
+            rl_hash: The RL hash from the ratelimited log (e.g. "RLwhscgno...")
+
+        Returns:
+            Response from mailcow API
+
+        Raises:
+            MailcowAPIError: If the request fails or no RW key is configured
+        """
+        logger.info(f"Releasing rate limit counter {rl_hash}")
+        try:
+            data = await self._make_rw_request(
+                "/api/v1/delete/rlhash",
+                method="POST",
+                json=[rl_hash]
+            )
+        except RetryError as e:
+            last = e.last_attempt.exception() if e.last_attempt else None
+            raise MailcowAPIError(f"Rate limit release failed for {rl_hash}: {last}") from e
+
+        logger.info(f"Rate limit release response for {rl_hash}: {data}")
+        return data
+
     async def get_aliases(self) -> List[Dict[str, Any]]:
         """
         Fetch all aliases from mailcow
-        
+
         Returns:
             List of aliases
         """

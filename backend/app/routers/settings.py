@@ -15,7 +15,7 @@ from ..database import get_db
 from ..models import PostfixLog, RspamdLog, NetfilterLog, MessageCorrelation
 from ..config import settings, EDITABLE_SETTING_KEYS, reload_settings, Settings
 from ..config import _get_field_annotations, get_env_locked_keys
-from ..scheduler import last_fetch_run_time, get_job_status, update_job_status, reschedule_interval_jobs, dovecot_correlation_available
+from ..scheduler import last_fetch_run_time, get_job_status, update_job_status, reschedule_interval_jobs, dovecot_correlation_available, cleanup_disabled_feature_data
 from ..services.settings_store import get_config_overrides_from_db, save_config_overrides_to_db, has_config_overrides_in_db, get_maxmind_validation_status, save_maxmind_validation_status, clear_maxmind_validation_status
 from ..services.connection_test import test_smtp_connection, test_imap_connection
 from ..services.geoip_downloader import is_license_configured, get_geoip_status
@@ -618,6 +618,8 @@ def update_settings(body: Dict[str, Any], db: Session = Depends(get_db)):
     prev_sync_sources = (settings.blacklist_source_transports, settings.blacklist_source_relayhosts)
     save_config_overrides_to_db(db, allowed)
     reload_settings(db)
+    # A feature switched off here should drop its data now, not at the next restart
+    cleanup_disabled_feature_data(db)
     mailcow_api.reload_config()
     oauth2_client.reload_config()
     reschedule_interval_jobs()

@@ -73,7 +73,7 @@ These settings **must** be configured in your `.env` file:
 | `MAX_SEARCH_RESULTS` | integer | `1000` | Maximum records to return in search results |
 | `CSV_EXPORT_LIMIT` | integer | `10000` | CSV export row limit |
 | `SCHEDULER_WORKERS` | integer | `4` | Thread pool size for blocking scheduler jobs (e.g. DMARC IMAP sync). Valid range: 1-64. Higher values allow more blocking jobs to run in parallel |
-| `DISABLED_FEATURES` | string | (empty) | Comma-separated list of features to disable (hides navigation, stops background jobs). Valid values: `netfilter`, `queue`, `quarantine`, `spam-filter`, `domains`, `dmarc`, `mailbox-stats`, `logs`, `blacklist`. Can also be managed from the Settings UI when `SETTINGS_EDIT_VIA_UI_ENABLED=true` |
+| `DISABLED_FEATURES` | string | (empty) | Comma-separated list of features to disable (hides navigation, stops background jobs). Valid values: `netfilter`, `queue`, `quarantine`, `spam-filter`, `domains`, `dmarc`, `mailbox-stats`, `rate-limits`, `logs`, `blacklist`. Can also be managed from the Settings UI when `SETTINGS_EDIT_VIA_UI_ENABLED=true` |
 
 ---
 

@@ -700,8 +700,10 @@
                     <!-- Spacer to balance the hamburger button on the left -->
                     <div class="md:hidden w-6"></div>
 
-                    <!-- Desktop Tabs -->
-                    <div class="hidden md:flex space-x-2 lg:space-x-4">
+                    <!-- Desktop Tabs. overflow-x-auto: between 768px and the
+                         width where all tabs fit, the row scrolls instead of
+                         widening the whole page -->
+                    <div class="hidden md:flex space-x-2 lg:space-x-4 overflow-x-auto">
                         <button onclick="navigateTo('dashboard')" id="tab-dashboard"
                             class="tab-active py-4 px-2 font-medium text-sm whitespace-nowrap flex items-center gap-1.5">
                             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -2016,8 +2018,9 @@
                     <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
                         <div class="text-center lg:text-left">
                             <div class="flex items-center justify-center lg:justify-start gap-2">
-                                <h2 class="text-2xl font-bold text-gray-900 dark:text-white">Mailbox Statistics</h2>
-                                <button onclick="showHelpModal('Mailbox_Stats')"
+                                <h2 id="mailbox-stats-page-title"
+                                    class="text-2xl font-bold text-gray-900 dark:text-white">Mailbox Statistics</h2>
+                                <button onclick="showHelpModal('Mailbox_Stats')" id="mailbox-stats-help-btn"
                                     class="text-gray-400 hover:text-blue-500 dark:hover:text-blue-400 transition-colors"
                                     title="Help - Mailbox Statistics">
                                     <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -2026,8 +2029,8 @@
                                     </svg>
                                 </button>
                             </div>
-                            <p class="text-gray-600 dark:text-gray-400 mt-1">View message statistics per mailbox and
-                                aliases</p>
+                            <p id="mailbox-stats-page-subtitle" class="text-gray-600 dark:text-gray-400 mt-1">View
+                                message statistics per mailbox and aliases</p>
                         </div>
                         <div id="mailbox-stats-header-info"
                             class="flex items-center gap-3 justify-center lg:justify-end"><span
@@ -2036,6 +2039,25 @@
                     </div>
                 </div>
 
+                <!-- View switcher: Statistics | Rate Limits -->
+                <div id="mailbox-stats-views"
+                    class="bg-white dark:bg-gray-800 rounded-lg shadow dark:shadow-gray-900/30 mb-4">
+                    <div class="border-b border-gray-200 dark:border-gray-700 overflow-x-auto">
+                        <div class="flex space-x-4 px-4 min-w-max">
+                            <button onclick="mailboxStatsSwitchView('statistics')" id="mailbox-stats-view-statistics"
+                                class="modal-tab-sm active">
+                                Statistics
+                            </button>
+                            <button onclick="mailboxStatsSwitchView('rate-limits')" id="mailbox-stats-view-rate-limits"
+                                class="modal-tab-sm">
+                                Rate Limits
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Statistics view -->
+                <div id="mailbox-stats-statistics-view">
                 <!-- Summary Cards -->
                 <div id="mailbox-stats-summary" class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
                     <div
@@ -2257,6 +2279,23 @@
                 <div id="mailbox-stats-content" class="hidden space-y-2">
                     <div id="mailbox-stats-list">
                         <!-- Mailbox rows will be rendered here by JavaScript -->
+                    </div>
+                </div>
+                </div>
+
+                <!-- Rate Limits view -->
+                <div id="mailbox-stats-rate-limits-view" class="hidden">
+                    <div id="rate-limits-loading" class="text-center py-12">
+                        <div class="loading mx-auto mb-4"></div>
+                        <p class="text-gray-500 dark:text-gray-400">Loading rate limits...</p>
+                    </div>
+                    <div id="rate-limits-content" class="hidden">
+                        <div class="space-y-6">
+                            <!-- All three cards are rendered by rate-limits.js -->
+                            <div id="rate-limits-activity-card"></div>
+                            <div id="rate-limits-senders-card"></div>
+                            <div id="rate-limits-config-card"></div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -2643,13 +2682,14 @@
 
     <!-- JavaScript -->
     <script src="/static/utils.js?v=3"></script>
-    <script src="/static/router.js"></script>
-    <script src="/static/app.js?v=31"></script>
+    <script src="/static/router.js?v=3"></script>
+    <script src="/static/app.js?v=32"></script>
     <script src="/static/dmarc.js?v=2"></script>
     <script src="/static/logs-viewer.js?v=1"></script>
     <script src="/static/settings.js?v=15"></script>
     <script src="/static/domains.js?v=4"></script>
-    <script src="/static/mailbox-stats.js?v=1"></script>
+    <script src="/static/mailbox-stats.js?v=4"></script>
+    <script src="/static/rate-limits.js?v=21"></script>
     <script src="/static/smtp-abuse.js?v=1"></script>
     <script src="/static/notifications.js?v=3"></script>
     <script src="/static/spam_filter.js?v=3"></script>

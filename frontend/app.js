@@ -190,6 +190,7 @@ const TOGGLEABLE_FEATURES = [
     { id: 'domains', label: 'Domains', description: 'Domain DNS analysis and transports' },
     { id: 'dmarc', label: 'DMARC', description: 'DMARC/TLS reports and IMAP sync' },
     { id: 'mailbox-stats', label: 'Mailbox Stats', description: 'Mailbox and alias statistics' },
+    { id: 'rate-limits', label: 'Rate Limits', description: 'Sender rate limit hits and the configured limits' },
     { id: 'logs', label: 'Logs', description: 'Raw service log viewer' },
     { id: 'blacklist', label: 'IP Blacklist Monitor', description: 'DNS blacklist monitoring for your IPs' },
 ];
@@ -229,6 +230,69 @@ function applyFeatureToggles() {
         if (blacklistSection) blacklistSection.style.display = '';
         if (dashboardBlacklistCard) dashboardBlacklistCard.style.display = '';
     }
+
+    // Same for rate-limits - it is a view inside the Mailbox Stats page,
+    // so the feature toggle hides its switcher button instead of a tab
+    const mailboxStatsOff = window.disabledFeatures.includes('mailbox-stats');
+    const rateLimitsOff = window.disabledFeatures.includes('rate-limits');
+
+    const rateLimitsViewBtn = document.getElementById('mailbox-stats-view-rate-limits');
+    if (rateLimitsOff) {
+        if (rateLimitsViewBtn) rateLimitsViewBtn.style.display = 'none';
+        // Never leave the user stranded on a view that just disappeared
+        if (typeof mailboxStatsView !== 'undefined' && mailboxStatsView === 'rate-limits' && !mailboxStatsOff) {
+            mailboxStatsSwitchView('statistics');
+        }
+    } else {
+        if (rateLimitsViewBtn) rateLimitsViewBtn.style.display = '';
+    }
+
+    // The mirror case: Rate Limits does not depend on Mailbox Stats. With
+    // Mailbox Stats off and Rate Limits on, the page stays reachable and
+    // becomes the Rate Limits page - Statistics is the view that disappears,
+    // and with one view left the switcher itself has nothing to offer.
+    const statsViewBtn = document.getElementById('mailbox-stats-view-statistics');
+    // Not 'mailbox-stats-view-*': that prefix is the switcher's button query
+    const viewSwitcher = document.getElementById('mailbox-stats-views');
+    if (mailboxStatsOff && !rateLimitsOff) {
+        if (statsViewBtn) statsViewBtn.style.display = 'none';
+        if (viewSwitcher) viewSwitcher.style.display = 'none';
+        if (typeof mailboxStatsView !== 'undefined' && mailboxStatsView === 'statistics') {
+            if (currentTab === 'mailbox-stats') {
+                mailboxStatsSwitchView('rate-limits');
+            } else {
+                // Only remember it - switching now would fetch for a hidden page
+                mailboxStatsView = 'rate-limits';
+            }
+        }
+    } else {
+        if (statsViewBtn) statsViewBtn.style.display = '';
+        if (viewSwitcher) viewSwitcher.style.display = '';
+    }
+
+    // The tab is shared by both features, so it only goes when both are off,
+    // and it says what it actually opens
+    const mailboxTabLabel = mailboxStatsOff && !rateLimitsOff ? 'Rate Limits' : 'Mailbox Stats';
+    for (const tabId of ['tab-mailbox-stats', 'mobile-tab-mailbox-stats']) {
+        const tab = document.getElementById(tabId);
+        if (!tab) continue;
+        tab.style.display = mailboxStatsOff && rateLimitsOff ? 'none' : '';
+        setNavTabLabel(tab, mailboxTabLabel);
+    }
+}
+
+// A nav tab is an <svg> icon followed by its label in a bare text node, so the
+// label is swapped on that node and the icon and markup are left alone.
+function setNavTabLabel(tab, label) {
+    for (let i = tab.childNodes.length - 1; i >= 0; i--) {
+        const node = tab.childNodes[i];
+        if (node.nodeType !== Node.TEXT_NODE) continue;
+        const current = node.textContent.trim();
+        if (!current) continue;
+        if (current !== label) node.textContent = node.textContent.replace(current, label);
+        return;
+    }
+    tab.appendChild(document.createTextNode(label));
 }
 
 function updateDisabledFeaturesCheckbox(featureId, isChecked, el) {
@@ -1087,8 +1151,12 @@ async function smartRefreshSettings() {
 function switchTab(tab, params = {}) {
     console.log('Switching to tab:', tab, 'params:', params);
 
-    // Block disabled features - show a "Feature Disabled" page
-    if (window.disabledFeatures.includes(tab)) {
+    // Block disabled features - show a "Feature Disabled" page.
+    // Exception: the Mailbox Stats page also hosts Rate Limits, so it stays
+    // open while that feature is on, even with Mailbox Stats itself off.
+    const hostsEnabledRateLimits = tab === 'mailbox-stats'
+        && !window.disabledFeatures.includes('rate-limits');
+    if (window.disabledFeatures.includes(tab) && !hostsEnabledRateLimits) {
         const feature = TOGGLEABLE_FEATURES.find(f => f.id === tab);
         const featureLabel = feature ? feature.label : tab;
         console.warn(`Feature '${tab}' is disabled`);
@@ -1201,7 +1269,7 @@ function switchTab(tab, params = {}) {
             handleDmarcRoute(params);
             break;
         case 'mailbox-stats':
-            loadMailboxStats();
+            initMailboxStatsPage();
             break;
         case 'logs':
             loadLogViewer();
