@@ -544,7 +544,12 @@ async function resetRateLimitCounter(user, rlHash) {
         }
 
         showToast(`${user} can send again`, 'success');
-        loadRateLimits();
+        // Update in place. A full reload would flash the loading screen and
+        // throw the reader back to the top of the page for a one-row change.
+        const group = ((rateLimitEventsData || {}).by_sender || [])
+            .find(entry => entry.user === user);
+        if (group) group.last_reset = new Date().toISOString();
+        renderRateLimitSendersCard();
     } catch (error) {
         console.error('Failed to reset rate limit counter:', error);
         showToast('Could not reset the counter', 'error');
@@ -818,7 +823,30 @@ async function submitRateLimit(kind, name, value, frame) {
             : `${name} is limited to ${value} per ${frameLabel}`, 'success');
 
         rateLimitEditing = null;
-        loadRateLimits();
+
+        // Update the row in place instead of reloading the whole page - a
+        // save should not flash the loading screen or lose scroll position
+        const newValue = value === 0 ? null : value;
+        const newFrame = value === 0 ? null : frame;
+        const config = rateLimitConfigData || {};
+        const row = kind === 'mailbox'
+            ? (config.mailboxes || []).find(entry => entry.username === name)
+            : (config.domains || []).find(entry => entry.domain === name);
+        if (row) {
+            row.rl_value = newValue;
+            row.rl_frame = newFrame;
+        }
+        renderRateLimitConfigCard();
+
+        // A mailbox's limit also shows on its row in Blocked senders
+        if (kind === 'mailbox') {
+            const group = ((rateLimitEventsData || {}).by_sender || [])
+                .find(entry => entry.user === name.toLowerCase());
+            if (group) {
+                group.current_limit = newValue ? { value: newValue, frame: newFrame } : null;
+                renderRateLimitSendersCard();
+            }
+        }
     } catch (error) {
         console.error('Failed to save rate limit:', error);
         showToast('Could not save the rate limit', 'error');
