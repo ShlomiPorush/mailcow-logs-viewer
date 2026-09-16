@@ -910,6 +910,50 @@ class MailcowAPI:
         logger.info(f"Mailbox rate limit response for {mailbox}: {data}")
         return data
 
+    async def edit_rl_mboxes(self, mailboxes: List[str], value: Any, frame: str) -> Any:
+        """
+        Set the same rate limit on many mailboxes (Read-Write API key required).
+
+        mailcow's edit endpoint takes a list of items, so applying one limit to
+        a whole filtered selection is a single request no matter how many
+        mailboxes it covers.
+
+        A value of "0" (or an empty value) removes the limit.
+
+        Args:
+            mailboxes: Mailbox addresses
+            value: Messages allowed per frame
+            frame: Time frame - s (second), m (minute), h (hour), d (day)
+
+        Returns:
+            Response from mailcow API
+
+        Raises:
+            MailcowAPIError: If the request fails or no RW key is configured
+        """
+        items = list(mailboxes or [])
+        logger.info(f"Setting rate limit for {len(items)} mailboxes: {value}/{frame}")
+        payload = {
+            "items": items,
+            "attr": {
+                "rl_value": str(value),
+                "rl_frame": frame
+            }
+        }
+        try:
+            data = await self._make_rw_request(
+                "/api/v1/edit/rl-mbox/",
+                method="POST",
+                json=payload
+            )
+        except RetryError as e:
+            last = e.last_attempt.exception() if e.last_attempt else None
+            raise MailcowAPIError(
+                f"Rate limit update failed for {len(items)} mailboxes: {last}") from e
+
+        logger.info(f"Mailbox rate limit response for {len(items)} mailboxes: {data}")
+        return data
+
     async def edit_rl_domain(self, domain: str, value: Any, frame: str) -> Any:
         """
         Set the rate limit of a domain (Read-Write API key required).
@@ -946,6 +990,48 @@ class MailcowAPI:
             raise MailcowAPIError(f"Rate limit update failed for domain {domain}: {last}") from e
 
         logger.info(f"Domain rate limit response for {domain}: {data}")
+        return data
+
+    async def edit_rl_domains(self, domains: List[str], value: Any, frame: str) -> Any:
+        """
+        Set the same rate limit on many domains (Read-Write API key required).
+
+        One request for the whole list, exactly like edit_rl_mboxes.
+
+        A value of "0" (or an empty value) removes the limit.
+
+        Args:
+            domains: Domain names
+            value: Messages allowed per frame
+            frame: Time frame - s (second), m (minute), h (hour), d (day)
+
+        Returns:
+            Response from mailcow API
+
+        Raises:
+            MailcowAPIError: If the request fails or no RW key is configured
+        """
+        items = list(domains or [])
+        logger.info(f"Setting rate limit for {len(items)} domains: {value}/{frame}")
+        payload = {
+            "items": items,
+            "attr": {
+                "rl_value": str(value),
+                "rl_frame": frame
+            }
+        }
+        try:
+            data = await self._make_rw_request(
+                "/api/v1/edit/rl-domain/",
+                method="POST",
+                json=payload
+            )
+        except RetryError as e:
+            last = e.last_attempt.exception() if e.last_attempt else None
+            raise MailcowAPIError(
+                f"Rate limit update failed for {len(items)} domains: {last}") from e
+
+        logger.info(f"Domain rate limit response for {len(items)} domains: {data}")
         return data
 
     async def delete_rl_hash(self, rl_hash: str) -> Any:

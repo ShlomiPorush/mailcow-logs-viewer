@@ -20,7 +20,7 @@ from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -52,6 +52,11 @@ _MAX_EVENT_ROWS = 5000
 # refreshes often, so the answers are reused in-process for a few minutes.
 _DOMAIN_LIMIT_TTL = 300
 _domain_limit_cache: Dict[str, Any] = {'at': 0.0, 'limits': None}
+
+# One bulk apply is a single mailcow call per kind, so the only real cost is
+# the size of the payload. This is far above the largest realistic selection
+# (every mailbox of a big server) and keeps a runaway client out.
+_BULK_MAX_ITEMS = 1000
 
 
 # ---- helpers ----
@@ -90,6 +95,22 @@ def _validate_frame(frame: str) -> str:
             detail="Time frame must be s (second), m (minute), h (hour) or d (day)"
         )
     return value
+
+
+def _normalised_names(raw: Optional[List[str]]) -> List[str]:
+    """Lower-cased names in the order they were sent, without blanks or repeats.
+
+    The browser sends whatever the filter currently shows, so the same name can
+    arrive twice; sending it to mailcow twice would be pointless work.
+    """
+    names: List[str] = []
+    seen = set()
+    for name in raw or []:
+        value = (name or '').strip().lower()
+        if value and value not in seen:
+            seen.add(value)
+            names.append(value)
+    return names
 
 
 def _limit_value(raw: Any) -> Optional[int]:
@@ -190,6 +211,13 @@ class MailboxLimitRequest(BaseModel):
 
 class DomainLimitRequest(BaseModel):
     domain: str
+    value: int
+    frame: str
+
+
+class BulkLimitRequest(BaseModel):
+    mailboxes: List[str] = Field(default_factory=list)
+    domains: List[str] = Field(default_factory=list)
     value: int
     frame: str
 
@@ -436,6 +464,97 @@ async def set_domain_limit(request: DomainLimitRequest, db: Session = Depends(ge
         'rl_value': value or None,
         'rl_frame': frame if value else None,
         'mailcow_response': response,
+    }
+
+
+@router.post("/bulk")
+async def set_limits_in_bulk(request: BulkLimitRequest, db: Session = Depends(get_db)):
+    """Set one rate limit on many mailboxes and domains at once. A value of 0
+    removes the limit from all of them.
+
+    This is what "Apply to filtered" on the page sends: everything the search
+    and the type filter currently show, in one request. Each kind is a single
+    mailcow call - a selection of 160 mailboxes must not become 160 round trips.
+
+    A name the server does not know (a stale row in an open browser tab) is
+    reported back in `skipped` rather than failing the whole batch.
+    """
+    _require_rw_key()
+    value = _validate_value(request.value)
+    frame = _validate_frame(request.frame)
+
+    if len(request.mailboxes or []) + len(request.domains or []) > _BULK_MAX_ITEMS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Too many items in one request - at most {_BULK_MAX_ITEMS}"
+        )
+
+    wanted_mailboxes = _normalised_names(request.mailboxes)
+    wanted_domains = _normalised_names(request.domains)
+    if not wanted_mailboxes and not wanted_domains:
+        raise HTTPException(status_code=400, detail="Select at least one mailbox or domain")
+
+    skipped: List[str] = []
+
+    # Mailboxes are matched against the synced rows, exactly like the
+    # single-mailbox endpoint, and written with their stored spelling
+    rows_by_name: Dict[str, Any] = {}
+    if wanted_mailboxes:
+        try:
+            rows = db.query(MailboxStatistics).filter(
+                func.lower(MailboxStatistics.username).in_(wanted_mailboxes)
+            ).all()
+        except Exception as e:
+            logger.error(f"Error reading mailboxes for a bulk rate limit change: {e}")
+            raise internal_error(e)
+        rows_by_name = {(row.username or '').strip().lower(): row for row in rows}
+
+    targets = [rows_by_name[name] for name in wanted_mailboxes if name in rows_by_name]
+    skipped.extend(name for name in wanted_mailboxes if name not in rows_by_name)
+
+    known = _known_domains(db) if wanted_domains else set()
+    domains = [name for name in wanted_domains if name in known]
+    skipped.extend(name for name in wanted_domains if name not in known)
+
+    new_value = value or None
+    new_frame = frame if new_value else None
+
+    mailboxes_updated = 0
+    if targets:
+        try:
+            await mailcow_api.edit_rl_mboxes([row.username for row in targets], value, frame)
+        except MailcowAPIError as e:
+            logger.error(f"Failed to set the rate limit of {len(targets)} mailboxes: {e}")
+            raise HTTPException(status_code=502, detail=f"mailcow did not apply the change: {e}")
+        mailboxes_updated = len(targets)
+
+        # Mirror the change locally so the page shows it without waiting for
+        # the next mailbox sync. A failure here is cosmetic, not a failed write.
+        try:
+            for row in targets:
+                row.rl_value = new_value
+                row.rl_frame = new_frame
+            db.commit()
+        except Exception as e:
+            db.rollback()
+            logger.warning(f"Bulk rate limit applied in mailcow but not stored locally: {e}")
+
+    domains_updated = 0
+    if domains:
+        try:
+            await mailcow_api.edit_rl_domains(domains, value, frame)
+        except MailcowAPIError as e:
+            logger.error(f"Failed to set the rate limit of {len(domains)} domains: {e}")
+            raise HTTPException(status_code=502, detail=f"mailcow did not apply the change: {e}")
+        domains_updated = len(domains)
+        _bust_domain_limit_cache()
+
+    return {
+        'mailboxes_updated': mailboxes_updated,
+        'domains_updated': domains_updated,
+        'skipped': skipped,
+        'value': value,
+        'frame': frame,
     }
 
 

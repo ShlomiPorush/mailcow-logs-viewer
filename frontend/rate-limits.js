@@ -35,6 +35,14 @@ const RATE_LIMIT_CHIP_ACTIVE = 'bg-blue-500 border-blue-500 text-white';
 const RATE_LIMIT_CHIP_INACTIVE =
     'border-blue-300 dark:border-blue-700 text-blue-700 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20';
 
+// Edit, Cancel and Apply to filtered share one recipe so the action column
+// never changes size, and text-sm keeps them exactly as tall as a form's fields
+const RATE_LIMIT_ACTION_BUTTON =
+    'px-3 py-1.5 text-sm font-medium rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700';
+// The one thing a form on this page actually does
+const RATE_LIMIT_SAVE_BUTTON =
+    'px-3 py-1.5 text-sm font-medium rounded-lg border border-transparent bg-blue-600 hover:bg-blue-700 text-white';
+
 let rateLimitWindowHours = 720;
 let rateLimitSenderSearch = '';
 let rateLimitConfigSearch = '';
@@ -44,6 +52,11 @@ let rateLimitEventsData = null;
 let rateLimitConfigData = null;
 // { kind: 'mailbox' | 'domain', name: string } while one row's form is open
 let rateLimitEditing = null;
+// The "Apply to filtered" panel: whether it is open and what was typed into
+// it, kept here so re-rendering the card never loses either
+let rateLimitBulkOpen = false;
+let rateLimitBulkValue = '';
+let rateLimitBulkFrame = 'h';
 // Address of the sender whose detail panel is open, kept across reloads
 let rateLimitSelectedSender = null;
 let rateLimitChart = null;
@@ -61,6 +74,7 @@ async function loadRateLimits() {
     loading.classList.remove('hidden');
     content.classList.add('hidden');
     rateLimitEditing = null;
+    rateLimitBulkOpen = false;
     destroyRateLimitChart();
 
     try {
@@ -635,8 +649,14 @@ function renderRateLimitConfigCard() {
                     <input type="text" value="${escapeHtml(rateLimitConfigSearch)}" placeholder="Search..."
                         oninput="filterRateLimitConfigRows(this.value)"
                         class="w-full sm:w-56 px-3 py-2 text-sm rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300">
+                    ${canWrite && rows ? `
+                        <button type="button" onclick="toggleRateLimitBulkPanel()" class="${RATE_LIMIT_ACTION_BUTTON} whitespace-nowrap">
+                            Apply to filtered
+                        </button>
+                    ` : ''}
                 </div>
             </div>
+            ${renderRateLimitBulkPanel()}
             ${renderRateLimitReadOnlyNotice()}
             ${domainsError}
             ${rows ? table : empty}
@@ -684,6 +704,235 @@ function applyRateLimitConfigFilters() {
 
     const empty = card.querySelector('[data-rl-noresults]');
     if (empty) empty.classList.toggle('hidden', shown !== 0);
+
+    refreshRateLimitBulkPanel();
+}
+
+
+// ---- Apply one limit to everything the filter shows --------------------------
+// Set 100/m on every mailbox of one domain in a single action, instead of
+// opening 40 rows one after another. What gets changed is exactly what the
+// table shows: search plus the type chips, nothing hidden.
+
+// The match applyRateLimitConfigFilters runs on the rows, run against the data
+// instead of the DOM - the counts have to be right even while the table is
+// being rebuilt, and the DOM is only ever a picture of this
+function rateLimitConfigMatches(kind, name) {
+    const q = rateLimitConfigSearch.trim().toLowerCase();
+    const matchesName = !q || (name || '').toLowerCase().includes(q);
+    const matchesKind = rateLimitConfigFilter === 'all' || kind === rateLimitConfigFilter;
+    return matchesName && matchesKind;
+}
+
+
+// The names the configured limits card currently shows, by kind
+function rateLimitFilteredTargets() {
+    const data = rateLimitConfigData || {};
+    return {
+        mailboxes: (data.mailboxes || [])
+            .filter(entry => rateLimitConfigMatches('mailbox', entry.username))
+            .map(entry => entry.username),
+        domains: (data.domains || [])
+            .filter(entry => rateLimitConfigMatches('domain', entry.domain))
+            .map(entry => entry.domain)
+    };
+}
+
+
+// "1 mailbox", "12 mailboxes" - used by the caption, the confirmation and the
+// toast, so the three never disagree
+function rateLimitCountLabel(count, singular, plural) {
+    return `${count} ${count === 1 ? singular : plural}`;
+}
+
+
+// What the action covers, in words. A kind nobody selected is left out rather
+// than shown as "0 domains".
+function rateLimitBulkScope(mailboxes, domains) {
+    const parts = [];
+    if (mailboxes) parts.push(rateLimitCountLabel(mailboxes, 'mailbox', 'mailboxes'));
+    if (domains) parts.push(rateLimitCountLabel(domains, 'domain', 'domains'));
+    return parts.join(' and ');
+}
+
+
+function rateLimitBulkCaption(mailboxes, domains) {
+    if (!mailboxes && !domains) return 'Nothing matches the current filter';
+    return 'Set one limit for everything the filter currently shows: '
+        + `${rateLimitCountLabel(mailboxes, 'mailbox', 'mailboxes')}`
+        + ` and ${rateLimitCountLabel(domains, 'domain', 'domains')}`;
+}
+
+
+function renderRateLimitBulkPanel() {
+    const data = rateLimitConfigData || {};
+    if (!rateLimitBulkOpen || data.rw_key_configured === false) return '';
+
+    const targets = rateLimitFilteredTargets();
+    const nothing = !targets.mailboxes.length && !targets.domains.length;
+
+    const frames = Object.keys(RATE_LIMIT_FRAME_LABELS).map(key => `
+        <option value="${key}" ${key === rateLimitBulkFrame ? 'selected' : ''}>per ${RATE_LIMIT_FRAME_LABELS[key]}</option>
+    `).join('');
+
+    return `
+        <div class="px-4 py-3 bg-gray-50 dark:bg-gray-900/30 border-b border-gray-200 dark:border-gray-700">
+            <p data-rl-bulk-caption class="text-sm text-gray-600 dark:text-gray-400 mb-3">${escapeHtml(rateLimitBulkCaption(targets.mailboxes.length, targets.domains.length))}</p>
+            <div class="flex flex-wrap items-center gap-3">
+                <label for="rate-limit-bulk-value" class="text-sm text-gray-600 dark:text-gray-400">Allow</label>
+                <input id="rate-limit-bulk-value" type="number" min="0" step="1" value="${escapeHtml(rateLimitBulkValue)}"
+                    placeholder="messages" oninput="setRateLimitBulkValue(this.value)"
+                    class="w-32 px-3 py-1.5 text-sm rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white">
+                <select id="rate-limit-bulk-frame" onchange="setRateLimitBulkFrame(this.value)"
+                    class="px-3 py-1.5 text-sm rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white">
+                    ${frames}
+                </select>
+                <button type="button" data-rl-bulk-apply onclick="applyRateLimitBulk()" ${nothing ? 'disabled' : ''}
+                    class="${RATE_LIMIT_SAVE_BUTTON} disabled:opacity-50 disabled:cursor-not-allowed">
+                    Apply
+                </button>
+                <button type="button" onclick="closeRateLimitBulkPanel()" class="${RATE_LIMIT_ACTION_BUTTON}">
+                    Cancel
+                </button>
+            </div>
+        </div>
+    `;
+}
+
+
+// Typing in the search box never re-renders the card (it would lose focus), so
+// the panel's counts are refreshed in place whenever the filter changes
+function refreshRateLimitBulkPanel() {
+    const card = document.getElementById('rate-limits-config-card');
+    const caption = card && card.querySelector('[data-rl-bulk-caption]');
+    if (!caption) return;
+
+    const targets = rateLimitFilteredTargets();
+    const nothing = !targets.mailboxes.length && !targets.domains.length;
+    caption.textContent = rateLimitBulkCaption(targets.mailboxes.length, targets.domains.length);
+
+    const apply = card.querySelector('[data-rl-bulk-apply]');
+    if (apply) apply.disabled = nothing;
+}
+
+
+function setRateLimitBulkValue(value) {
+    rateLimitBulkValue = value || '';
+}
+
+
+function setRateLimitBulkFrame(frame) {
+    rateLimitBulkFrame = frame || 'h';
+}
+
+
+function toggleRateLimitBulkPanel() {
+    rateLimitBulkOpen = !rateLimitBulkOpen;
+    // One open form at a time: a row being edited and a bulk apply above it
+    // are two answers to the same question
+    if (rateLimitBulkOpen) rateLimitEditing = null;
+    renderRateLimitConfigCard();
+}
+
+
+function closeRateLimitBulkPanel() {
+    rateLimitBulkOpen = false;
+    renderRateLimitConfigCard();
+}
+
+
+async function applyRateLimitBulk() {
+    const targets = rateLimitFilteredTargets();
+    if (!targets.mailboxes.length && !targets.domains.length) return;
+
+    const value = parseInt(rateLimitBulkValue, 10);
+    if (!Number.isFinite(value) || value < 0) {
+        showToast('Enter how many messages to allow, as a whole number', 'error');
+        return;
+    }
+
+    const frame = rateLimitBulkFrame;
+    const frameLabel = RATE_LIMIT_FRAME_LABELS[frame] || frame;
+    const scope = rateLimitBulkScope(targets.mailboxes.length, targets.domains.length);
+
+    const confirmed = await showConfirmModal({
+        title: value === 0 ? 'Remove rate limits' : 'Apply rate limit',
+        message: value === 0
+            ? `Remove the limit from ${scope}? They will be able to send without a cap.`
+            : `Set ${value} per ${frameLabel} on ${scope}?`,
+        confirmText: value === 0 ? 'Remove limits' : 'Apply',
+        isDangerous: value === 0
+    });
+    if (!confirmed) return;
+
+    try {
+        const response = await authenticatedFetch('/api/rate-limits/bulk', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                mailboxes: targets.mailboxes,
+                domains: targets.domains,
+                value: value,
+                frame: frame
+            })
+        });
+
+        if (!response.ok) {
+            const detail = await response.json().catch(() => ({}));
+            showToast(detail.detail || 'Could not apply the rate limit', 'error');
+            return;
+        }
+
+        const result = await response.json().catch(() => ({}));
+        // A name the server did not recognise keeps the limit it already had
+        const skipped = (result.skipped || []).map(name => String(name).toLowerCase());
+        const untouched = new Set(skipped);
+        const applied = names => new Set(names.filter(name => !untouched.has(name.toLowerCase())));
+        const mailboxes = applied(targets.mailboxes);
+        const domains = applied(targets.domains);
+
+        // Update the rows in place instead of reloading the whole page - an
+        // apply should not flash the loading screen or lose scroll position
+        const newValue = value === 0 ? null : value;
+        const newFrame = value === 0 ? null : frame;
+        const config = rateLimitConfigData || {};
+        (config.mailboxes || []).forEach(entry => {
+            if (!mailboxes.has(entry.username)) return;
+            entry.rl_value = newValue;
+            entry.rl_frame = newFrame;
+        });
+        (config.domains || []).forEach(entry => {
+            if (!domains.has(entry.domain)) return;
+            entry.rl_value = newValue;
+            entry.rl_frame = newFrame;
+        });
+
+        rateLimitBulkOpen = false;
+        renderRateLimitConfigCard();
+
+        // A mailbox's limit also shows on its row in Blocked senders
+        const senderNames = new Set(Array.from(mailboxes, name => name.toLowerCase()));
+        let sendersChanged = false;
+        ((rateLimitEventsData || {}).by_sender || []).forEach(group => {
+            if (!senderNames.has(group.user)) return;
+            group.current_limit = newValue ? { value: newValue, frame: newFrame } : null;
+            sendersChanged = true;
+        });
+        if (sendersChanged) renderRateLimitSendersCard();
+
+        const changed = rateLimitBulkScope(result.mailboxes_updated || 0, result.domains_updated || 0);
+        const tail = skipped.length ? `, ${skipped.length} skipped` : '';
+        if (!changed) {
+            showToast(`Nothing was changed${tail}`, 'warning');
+            return;
+        }
+        showToast(value === 0
+            ? `Limit removed from ${changed}${tail}`
+            : `Limit set on ${changed}${tail}`, 'success');
+    } catch (error) {
+        console.error('Failed to apply the rate limit in bulk:', error);
+        showToast('Could not apply the rate limit', 'error');
+    }
 }
 
 
@@ -692,19 +941,16 @@ function renderRateLimitConfigRow(kind, name, value, frame, canWrite) {
         && rateLimitEditing.kind === kind
         && rateLimitEditing.name === name;
 
-    // Edit and Cancel share one recipe so the action column never changes
-    // size, and text-sm keeps them exactly as tall as the edit form's fields
-    const actionButton = 'px-3 py-1.5 text-sm font-medium rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700';
     const action = !canWrite
         ? ''
         : (editing
             ? `
-                <button type="button" onclick="closeRateLimitEdit()" class="${actionButton}">
+                <button type="button" onclick="closeRateLimitEdit()" class="${RATE_LIMIT_ACTION_BUTTON}">
                     Cancel
                 </button>
             `
             : `
-                <button type="button" onclick="openRateLimitEdit('${kind}', '${escapeJsArg(name)}')" class="${actionButton}">
+                <button type="button" onclick="openRateLimitEdit('${kind}', '${escapeJsArg(name)}')" class="${RATE_LIMIT_ACTION_BUTTON}">
                     Edit
                 </button>
             `);
@@ -743,7 +989,7 @@ function renderRateLimitEditForm(kind, name, value, frame) {
                         ${frames}
                     </select>
                     <button type="button" onclick="saveRateLimit('${kind}', '${escapeJsArg(name)}')"
-                        class="px-3 py-1.5 text-sm font-medium rounded-lg border border-transparent bg-blue-600 hover:bg-blue-700 text-white">
+                        class="${RATE_LIMIT_SAVE_BUTTON}">
                         Save
                     </button>
                     <button type="button" onclick="removeRateLimit('${kind}', '${escapeJsArg(name)}')"
@@ -759,6 +1005,8 @@ function renderRateLimitEditForm(kind, name, value, frame) {
 
 function openRateLimitEdit(kind, name) {
     rateLimitEditing = { kind: kind, name: name };
+    // One open form at a time, in both directions
+    rateLimitBulkOpen = false;
     renderRateLimitConfigCard();
 }
 

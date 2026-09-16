@@ -96,6 +96,19 @@ Above the table:
 
 > **Note**: A domain limit caps the domain **as a whole**, on top of each mailbox's own limit. A mailbox can be blocked by its domain's limit even when it is well inside its own.
 
+### Apply to filtered
+
+Giving forty mailboxes the same limit one row at a time is a chore, so one limit can be set on the whole current selection at once.
+
+1.  **Filter first.** Narrow the table with the search box and the **All / Mailboxes / Domains** chips until it shows exactly what you want to change - for example search `example.com` with **Mailboxes** selected.
+2.  Click **Apply to filtered**. A panel opens under the header and tells you what it covers, for example *"Set one limit for everything the filter currently shows: 12 mailboxes and 1 domain"*. The count follows the filter, so you can keep narrowing it with the panel open.
+3.  Enter the **Allow** value and the time frame, then **Apply**. You are asked to confirm once, with the same numbers spelled out - that confirmation is the only safety net, so read it.
+4.  A value of **0** removes the limit from everything in the selection instead of setting one. That confirmation is marked as a destructive action.
+
+**Cancel** closes the panel and changes nothing. If the filter matches nothing, **Apply** stays disabled.
+
+The whole selection is sent to mailcow in one request per type, so applying a limit to every mailbox on the server is a single action rather than hundreds. Entries mailcow no longer knows about (a mailbox deleted while this page was open) are **skipped**: they keep their old limit, everything else is still applied, and the message afterwards says how many were skipped.
+
 ### Editing a limit
 
 Click **Edit** to open a form under the row:

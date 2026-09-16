@@ -34,7 +34,7 @@ def test_every_endpoint_is_registered_under_the_api_prefix():
     paths = {getattr(route, 'path', '') for route in app.routes}
     for path in ('/api/rate-limits/events', '/api/rate-limits/limits',
                  '/api/rate-limits/mailbox', '/api/rate-limits/domain',
-                 '/api/rate-limits/reset'):
+                 '/api/rate-limits/bulk', '/api/rate-limits/reset'):
         assert path in paths, f'{path} is not registered'
 
 
@@ -119,6 +119,53 @@ def test_edit_rl_domain_posts_the_items_and_attr_payload(monkeypatch):
     assert seen['json'] == {
         'items': ['example.com'],
         'attr': {'rl_value': '500', 'rl_frame': 'h'},
+    }
+
+
+def test_edit_rl_mboxes_sends_every_mailbox_in_one_call(monkeypatch):
+    """A bulk apply must be one request, not one per mailbox - mailcow's edit
+    endpoint takes the whole list."""
+    api = _client()
+    seen = {}
+
+    async def fake(endpoint, method='POST', **kw):
+        seen.setdefault('calls', 0)
+        seen['calls'] += 1
+        seen['endpoint'] = endpoint
+        seen['json'] = kw.get('json')
+        return [{'type': 'success', 'msg': 'rl_saved'}]
+    monkeypatch.setattr(api, '_make_rw_request', fake)
+
+    asyncio.run(api.edit_rl_mboxes(
+        ['one@example.com', 'two@example.com', 'three@example.net'], 100, 'm'))
+
+    assert seen['calls'] == 1
+    assert seen['endpoint'] == '/api/v1/edit/rl-mbox/'
+    assert seen['json'] == {
+        'items': ['one@example.com', 'two@example.com', 'three@example.net'],
+        'attr': {'rl_value': '100', 'rl_frame': 'm'},
+    }
+
+
+def test_edit_rl_domains_sends_every_domain_in_one_call(monkeypatch):
+    api = _client()
+    seen = {}
+
+    async def fake(endpoint, method='POST', **kw):
+        seen.setdefault('calls', 0)
+        seen['calls'] += 1
+        seen['endpoint'] = endpoint
+        seen['json'] = kw.get('json')
+        return [{'type': 'success', 'msg': 'rl_saved'}]
+    monkeypatch.setattr(api, '_make_rw_request', fake)
+
+    asyncio.run(api.edit_rl_domains(['example.com', 'example.net'], 0, 'h'))
+
+    assert seen['calls'] == 1
+    assert seen['endpoint'] == '/api/v1/edit/rl-domain/'
+    assert seen['json'] == {
+        'items': ['example.com', 'example.net'],
+        'attr': {'rl_value': '0', 'rl_frame': 'h'},
     }
 
 
@@ -406,6 +453,14 @@ class FakeMailcow:
         self.calls.append(('domain', domain, value, frame))
         return [{'type': 'success', 'msg': 'rl_saved'}]
 
+    async def edit_rl_mboxes(self, mailboxes, value, frame):
+        self.calls.append(('mailboxes', tuple(mailboxes), value, frame))
+        return [{'type': 'success', 'msg': 'rl_saved'}]
+
+    async def edit_rl_domains(self, domains, value, frame):
+        self.calls.append(('domains', tuple(domains), value, frame))
+        return [{'type': 'success', 'msg': 'rl_saved'}]
+
     async def delete_rl_hash(self, rl_hash):
         self.calls.append(('reset', rl_hash))
         return [{'type': 'success', 'msg': 'rl_hash_removed'}]
@@ -505,6 +560,126 @@ def test_an_unknown_domain_is_refused(env, monkeypatch):
         _set_domain(500, 'h', domain=f'not-ours-{MARKER}.example')
     assert exc.value.status_code == 400
     assert fake.calls == []
+
+
+# ---------- applying one limit to a whole filtered selection ----------
+# "Apply to filtered" sends everything the page currently shows. The contract
+# that matters: one mailcow call per kind, the local mirror kept in step, and a
+# name the server does not know reported back instead of failing the batch.
+
+def _bulk(value, frame, mailboxes=None, domains=None):
+    from app.database import get_db_context
+    from app.routers import rate_limits
+    with get_db_context() as db:
+        return asyncio.run(rate_limits.set_limits_in_bulk(
+            rate_limits.BulkLimitRequest(
+                mailboxes=mailboxes if mailboxes is not None else [],
+                domains=domains if domains is not None else [],
+                value=value, frame=frame), db=db))
+
+
+def _limit_of(mailbox):
+    from app.database import get_db_context
+    from app.models import MailboxStatistics
+    with get_db_context() as db:
+        row = db.query(MailboxStatistics).filter(
+            MailboxStatistics.username == mailbox).first()
+        return (row.rl_value, row.rl_frame)
+
+
+def test_a_bulk_apply_is_one_mailcow_call_per_kind(env, monkeypatch):
+    """160 mailboxes must not become 160 HTTP round trips."""
+    fake = _fake_client(monkeypatch)
+
+    result = _bulk(250, 'H', mailboxes=[SENDER.upper(), QUIET], domains=[DOMAIN])
+
+    assert fake.calls == [
+        ('mailboxes', (SENDER, QUIET), 250, 'h'),
+        ('domains', (DOMAIN,), 250, 'h'),
+    ], 'one call per kind, addresses and frame normalised'
+    assert result['mailboxes_updated'] == 2
+    assert result['domains_updated'] == 1
+    assert result['skipped'] == []
+    assert result['value'] == 250 and result['frame'] == 'h'
+
+    assert _limit_of(SENDER) == (250, 'h')
+    assert _limit_of(QUIET) == (250, 'h'), 'the local mirror follows the write'
+
+
+def test_a_bulk_value_of_zero_clears_every_limit(env, monkeypatch):
+    fake = _fake_client(monkeypatch)
+
+    result = _bulk(0, 'm', mailboxes=[SENDER, QUIET])
+
+    assert fake.calls == [('mailboxes', (SENDER, QUIET), 0, 'm')]
+    assert result['mailboxes_updated'] == 2
+    assert _limit_of(SENDER) == (None, None), 'removing a limit clears the frame too'
+
+
+def test_an_unknown_name_is_skipped_without_failing_the_others(env, monkeypatch):
+    """A stale row in an open tab must not block the rest of the batch."""
+    fake = _fake_client(monkeypatch)
+    ghost = f'nobody-{MARKER}@{DOMAIN}'
+    stranger = f'not-ours-{MARKER}.example'
+
+    result = _bulk(10, 'm', mailboxes=[SENDER, ghost], domains=[DOMAIN, stranger])
+
+    assert fake.calls == [
+        ('mailboxes', (SENDER,), 10, 'm'),
+        ('domains', (DOMAIN,), 10, 'm'),
+    ], 'only the names we know are sent to mailcow'
+    assert result['mailboxes_updated'] == 1
+    assert result['domains_updated'] == 1
+    assert sorted(result['skipped']) == sorted([ghost, stranger])
+    assert _limit_of(SENDER) == (10, 'm')
+
+
+def test_a_bulk_apply_needs_at_least_one_target(env, monkeypatch):
+    fake = _fake_client(monkeypatch)
+    with pytest.raises(HTTPException) as exc:
+        _bulk(10, 'm')
+    assert exc.value.status_code == 400
+    assert fake.calls == []
+
+
+def test_a_bulk_apply_needs_a_read_write_key(env, monkeypatch):
+    fake = _fake_client(monkeypatch, has_rw_key=False)
+    with pytest.raises(HTTPException) as exc:
+        _bulk(10, 'm', mailboxes=[SENDER])
+    assert exc.value.status_code == 503
+    assert fake.calls == []
+
+
+def test_an_oversized_bulk_request_is_refused(env, monkeypatch):
+    """One apply is one payload; a runaway client does not get to send 5000."""
+    from app.routers import rate_limits
+    fake = _fake_client(monkeypatch)
+    too_many = [f'user{index}-{MARKER}@{DOMAIN}'
+                for index in range(rate_limits._BULK_MAX_ITEMS + 1)]
+
+    with pytest.raises(HTTPException) as exc:
+        _bulk(10, 'm', mailboxes=too_many)
+
+    assert exc.value.status_code == 400
+    assert fake.calls == [], 'the size is refused before anything is looked up'
+
+
+def test_a_bulk_mailcow_failure_leaves_the_local_rows_alone(env, monkeypatch):
+    """Nothing is mirrored for a kind mailcow refused - the page must not show
+    a limit that was never applied."""
+    fake = _fake_client(monkeypatch)
+
+    async def boom(mailboxes, value, frame):
+        raise MailcowAPIError('API returned status 500')
+    fake.edit_rl_mboxes = boom
+
+    with pytest.raises(HTTPException) as exc:
+        _bulk(777, 'd', mailboxes=[SENDER, QUIET], domains=[DOMAIN])
+
+    assert exc.value.status_code == 502
+    assert 'API returned status 500' in str(exc.value.detail)
+    assert _limit_of(SENDER) == (100, 'm'), 'the seeded limit is untouched'
+    assert _limit_of(QUIET) == (None, None)
 
 
 def _reset(rl_hash, monkeypatch_fake):
