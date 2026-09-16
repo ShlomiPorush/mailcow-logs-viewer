@@ -161,13 +161,23 @@ function renderRateLimitActivityCard() {
 
     container.innerHTML = `
         <div class="bg-white dark:bg-gray-800 rounded-lg shadow">
-            <div class="px-4 py-3 border-b border-gray-200 dark:border-gray-700 flex flex-wrap items-center justify-between gap-3">
-                <div>
-                    <h3 class="text-lg font-semibold text-gray-900 dark:text-white">Rate limit activity</h3>
+            <div class="px-4 py-3 border-b border-gray-200 dark:border-gray-700 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                <div class="min-w-0">
+                    <div class="flex items-center gap-2">
+                        <h3 class="text-lg font-semibold text-gray-900 dark:text-white">Rate limit activity</h3>
+                        <button type="button" onclick="showHelpModal('Rate_Limits')"
+                            class="text-gray-400 hover:text-blue-500 dark:hover:text-blue-400 transition-colors"
+                            title="Help - Rate Limits">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                    d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                            </svg>
+                        </button>
+                    </div>
                     <p class="text-sm text-gray-600 dark:text-gray-400">${escapeHtml(subtitle)}</p>
                 </div>
                 <select id="rate-limit-window" onchange="changeRateLimitWindow(this.value)"
-                    class="px-3 py-2 text-sm rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300">
+                    class="w-full sm:w-auto px-3 py-2 text-sm rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300">
                     ${options}
                 </select>
             </div>
@@ -289,15 +299,15 @@ function renderRateLimitSendersCard() {
     const detailMode = !!rateLimitSelectedSender;
 
     const header = `
-        <div class="px-4 py-3 border-b border-gray-200 dark:border-gray-700 flex flex-wrap items-center justify-between gap-3">
-            <div>
+        <div class="px-4 py-3 border-b border-gray-200 dark:border-gray-700 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+            <div class="min-w-0">
                 <h3 class="text-lg font-semibold text-gray-900 dark:text-white">Blocked senders</h3>
                 <p class="text-sm text-gray-600 dark:text-gray-400">Mail that mailcow refused because the sender ran out of allowance</p>
             </div>
             ${senders.length === 0 || detailMode ? '' : `
                 <input type="text" value="${escapeHtml(rateLimitSenderSearch)}" placeholder="Search..."
                     oninput="filterRateLimitSenders(this.value)"
-                    class="w-56 px-3 py-2 text-sm rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300">
+                    class="w-full sm:w-56 px-3 py-2 text-sm rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300">
             `}
         </div>
     `;
@@ -341,13 +351,13 @@ function renderRateLimitSendersTable(senders) {
             <tr data-rl-sender="${escapeHtml((group.user || '').toLowerCase())}"
                 class="hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer"
                 onclick="selectRateLimitSender('${escapeJsArg(group.user)}')">
-                <td class="px-3 sm:px-4 py-3 font-mono text-xs sm:text-sm text-gray-900 dark:text-gray-100 break-all">${escapeHtml(group.user)}</td>
+                <td class="px-3 sm:px-4 py-3 min-w-[170px] font-mono text-xs sm:text-sm text-gray-900 dark:text-gray-100 break-all">${escapeHtml(group.user)}</td>
                 <td class="px-3 sm:px-4 py-3">
                     <span class="${RATE_LIMIT_BADGE_SHAPE} ${getStatusBadgeClass('rejected')} whitespace-nowrap">${group.events}</span>
                 </td>
                 <td class="px-3 sm:px-4 py-3 text-xs sm:text-sm text-gray-900 dark:text-gray-100 whitespace-nowrap">${escapeHtml(formatTime(group.last_seen))}</td>
-                <td class="px-3 sm:px-4 py-3">${renderRateLimitBadge(group.current_limit)}</td>
-                <td class="px-3 sm:px-4 py-3">
+                <td class="px-3 sm:px-4 py-3 hide-mobile">${renderRateLimitBadge(group.current_limit)}</td>
+                <td class="px-3 sm:px-4 py-3 hide-mobile">
                     ${group.last_reset ? `<span class="${RATE_LIMIT_BADGE_SHAPE} ${getStatusBadgeClass('delivered')} whitespace-nowrap">Reset ${escapeHtml(formatTime(group.last_reset))}</span>` : ''}
                 </td>
                 <td class="px-3 sm:px-4 py-3 text-right whitespace-nowrap">${resetButton}</td>
@@ -360,11 +370,11 @@ function renderRateLimitSendersTable(senders) {
             <table class="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
                 <thead class="bg-gray-50 dark:bg-gray-700">
                     <tr>
-                        <th class="px-3 sm:px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Sender</th>
+                        <th class="px-3 sm:px-4 py-3 min-w-[170px] text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Sender</th>
                         <th class="px-3 sm:px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Hits</th>
                         <th class="px-3 sm:px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Last hit</th>
-                        <th class="px-3 sm:px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Limit</th>
-                        <th class="px-3 sm:px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Last reset</th>
+                        <th class="px-3 sm:px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider hide-mobile">Limit</th>
+                        <th class="px-3 sm:px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider hide-mobile">Last reset</th>
                         <th class="px-3 sm:px-4 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider"></th>
                     </tr>
                 </thead>
@@ -422,7 +432,7 @@ function renderRateLimitSenderDetail(group) {
         ? `
             <button type="button"
                 onclick="resetRateLimitCounter('${escapeJsArg(group.user)}', '${escapeJsArg(group.last_rl_hash)}')"
-                class="px-3 py-1.5 text-xs font-medium rounded-lg bg-blue-600 hover:bg-blue-700 text-white whitespace-nowrap">
+                class="self-start px-3 py-1.5 text-xs font-medium rounded-lg bg-blue-600 hover:bg-blue-700 text-white whitespace-nowrap">
                 Reset counter
             </button>
         `
@@ -442,7 +452,7 @@ function renderRateLimitSenderDetail(group) {
                             <th class="px-3 sm:px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Time</th>
                             <th class="px-3 sm:px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Recipient</th>
                             <th class="px-3 sm:px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Subject</th>
-                            <th class="px-3 sm:px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Queue id</th>
+                            <th class="px-3 sm:px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider hide-mobile">Queue id</th>
                         </tr>
                     </thead>
                     <tbody class="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
@@ -453,7 +463,7 @@ function renderRateLimitSenderDetail(group) {
         `;
 
     return `
-        <div class="px-4 py-3 border-b border-gray-200 dark:border-gray-700 flex flex-wrap items-start justify-between gap-3">
+        <div class="px-4 py-3 border-b border-gray-200 dark:border-gray-700 flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
             <div class="min-w-0">
                 <button type="button" onclick="backToRateLimitSenders()"
                     class="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 mb-3">
@@ -482,12 +492,12 @@ function renderRateLimitEventRow(event) {
 
     return `
         <tr class="border-t border-gray-200 dark:border-gray-700">
-            <td class="px-4 py-2 text-sm text-gray-700 dark:text-gray-300 whitespace-nowrap">${escapeHtml(formatTime(event.time))}</td>
-            <td class="px-4 py-2 font-mono text-sm text-gray-700 dark:text-gray-300 break-all">${escapeHtml(event.rcpt)}</td>
-            <td class="px-4 py-2 text-sm text-gray-700 dark:text-gray-300">${shortened
+            <td class="px-3 sm:px-4 py-2 text-xs sm:text-sm text-gray-700 dark:text-gray-300 whitespace-nowrap">${escapeHtml(formatTime(event.time))}</td>
+            <td class="px-3 sm:px-4 py-2 font-mono text-xs sm:text-sm text-gray-700 dark:text-gray-300 break-all">${escapeHtml(event.rcpt)}</td>
+            <td class="px-3 sm:px-4 py-2 text-xs sm:text-sm text-gray-700 dark:text-gray-300">${shortened
                 ? escapeHtml(shortened)
                 : '<span class="text-gray-400">No subject</span>'}</td>
-            <td class="px-4 py-2 font-mono text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap">${escapeHtml(event.qid)}</td>
+            <td class="px-3 sm:px-4 py-2 font-mono text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap hide-mobile">${escapeHtml(event.qid)}</td>
         </tr>
     `;
 }
@@ -566,7 +576,7 @@ function renderRateLimitConfigCard() {
             <table class="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
                 <thead class="bg-gray-50 dark:bg-gray-700">
                     <tr>
-                        <th class="px-3 sm:px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Type</th>
+                        <th class="px-3 sm:px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider hide-mobile">Type</th>
                         <th class="px-3 sm:px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Name</th>
                         <th class="px-3 sm:px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Limit</th>
                         <th class="px-3 sm:px-4 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider"></th>
@@ -591,16 +601,16 @@ function renderRateLimitConfigCard() {
 
     container.innerHTML = `
         <div class="bg-white dark:bg-gray-800 rounded-lg shadow">
-            <div class="px-4 py-3 border-b border-gray-200 dark:border-gray-700 flex flex-wrap items-center justify-between gap-3">
-                <div>
+            <div class="px-4 py-3 border-b border-gray-200 dark:border-gray-700 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                <div class="min-w-0">
                     <h3 class="text-lg font-semibold text-gray-900 dark:text-white">Configured limits</h3>
                     <p class="text-sm text-gray-600 dark:text-gray-400">How much each mailbox and domain is allowed to send</p>
                 </div>
-                <div class="flex flex-wrap items-center gap-2">
+                <div class="flex flex-wrap items-center gap-2 min-w-0">
                     ${chips}
                     <input type="text" value="${escapeHtml(rateLimitConfigSearch)}" placeholder="Search..."
                         oninput="filterRateLimitConfigRows(this.value)"
-                        class="w-56 px-3 py-2 text-sm rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300">
+                        class="w-full sm:w-56 px-3 py-2 text-sm rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300">
                 </div>
             </div>
             ${renderRateLimitReadOnlyNotice()}
@@ -677,7 +687,7 @@ function renderRateLimitConfigRow(kind, name, value, frame, canWrite) {
 
     const row = `
         <tr data-rl-name="${escapeHtml(name.toLowerCase())}" data-rl-kind="${kind}" class="hover:bg-gray-50 dark:hover:bg-gray-700">
-            <td class="px-3 sm:px-4 py-3">
+            <td class="px-3 sm:px-4 py-3 hide-mobile">
                 <span class="${RATE_LIMIT_BADGE_SHAPE} ${RATE_LIMIT_NEUTRAL_BADGE} whitespace-nowrap">${kind === 'domain' ? 'Domain' : 'Mailbox'}</span>
             </td>
             <td class="px-3 sm:px-4 py-3 text-xs sm:text-sm font-mono text-gray-900 dark:text-gray-100 break-all">${escapeHtml(name)}</td>
