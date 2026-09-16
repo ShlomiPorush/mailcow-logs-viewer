@@ -163,17 +163,7 @@ function renderRateLimitActivityCard() {
         <div class="bg-white dark:bg-gray-800 rounded-lg shadow">
             <div class="px-4 py-3 border-b border-gray-200 dark:border-gray-700 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                 <div class="min-w-0">
-                    <div class="flex items-center gap-2">
-                        <h3 class="text-lg font-semibold text-gray-900 dark:text-white">Rate limit activity</h3>
-                        <button type="button" onclick="showHelpModal('Rate_Limits')"
-                            class="text-gray-400 hover:text-blue-500 dark:hover:text-blue-400 transition-colors"
-                            title="Help - Rate Limits">
-                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                    d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                            </svg>
-                        </button>
-                    </div>
+                    <h3 class="text-lg font-semibold text-gray-900 dark:text-white">Rate limit activity</h3>
                     <p class="text-sm text-gray-600 dark:text-gray-400">${escapeHtml(subtitle)}</p>
                 </div>
                 <select id="rate-limit-window" onchange="changeRateLimitWindow(this.value)"

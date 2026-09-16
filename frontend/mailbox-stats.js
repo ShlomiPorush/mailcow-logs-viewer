@@ -73,9 +73,15 @@ function mailboxStatsSwitchView(view) {
     const subtitle = document.getElementById('mailbox-stats-page-subtitle');
     if (subtitle) subtitle.textContent = headings.subtitle;
 
-    // The help doc and the last-update stamp belong to Statistics
+    // The help button next to the title follows the view - each view opens
+    // its own doc. The last-update stamp belongs to Statistics only.
     const helpBtn = document.getElementById('mailbox-stats-help-btn');
-    if (helpBtn) helpBtn.style.display = view === 'statistics' ? '' : 'none';
+    if (helpBtn) {
+        const isRateLimits = view === 'rate-limits';
+        helpBtn.style.display = '';
+        helpBtn.setAttribute('onclick', `showHelpModal('${isRateLimits ? 'Rate_Limits' : 'Mailbox_Stats'}')`);
+        helpBtn.title = isRateLimits ? 'Help - Rate Limits' : 'Help - Mailbox Statistics';
+    }
     const headerInfo = document.getElementById('mailbox-stats-header-info');
     if (headerInfo) headerInfo.style.display = view === 'statistics' ? '' : 'none';
 
