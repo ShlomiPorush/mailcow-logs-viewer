@@ -128,9 +128,17 @@ async function loadDmarc() {
     // Update breadcrumb
     setDmarcBreadcrumb('domains');
 
-    await loadDmarcSettings();
-    await loadDmarcImapStatus();
-    await loadDmarcDomains();
+    // Show a loading placeholder before the data requests start
+    const domainsList = document.getElementById('dmarc-domains-list');
+    if (domainsList) {
+        domainsList.innerHTML = `<tr><td colspan="7" class="px-6 py-12 text-center"><div class="flex justify-center"><div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div></div><div class="mt-3 text-sm text-gray-500 dark:text-gray-400">Loading DMARC reports...</div></td></tr>`;
+    }
+
+    // Run the three requests in parallel - they do not depend on each other
+    await Promise.all([loadDmarcSettings(), loadDmarcImapStatus(), loadDmarcDomains()]);
+
+    // Ordering is not guaranteed in parallel, so refresh the controls once everything settled
+    updateDmarcControls();
 }
 
 /**
@@ -147,13 +155,15 @@ async function handleDmarcRoute(params = {}) {
         return;
     }
 
-    // Load settings first if not loaded
+    // Load settings (only if missing) and IMAP status in parallel
+    const initialLoads = [loadDmarcImapStatus()];
     if (!dmarcConfiguration) {
-        await loadDmarcSettings();
+        initialLoads.push(loadDmarcSettings());
     }
+    await Promise.all(initialLoads);
 
-    // Load IMAP status if not loaded
-    await loadDmarcImapStatus();
+    // Ordering is not guaranteed in parallel, so refresh the controls once everything settled
+    updateDmarcControls();
 
     // If type is specified with an id, load that specific view
     if (params.type && params.id) {
@@ -332,7 +342,7 @@ async function loadDmarcDomains() {
         const domainsList = document.getElementById('dmarc-domains-list');
 
         if (domains.length === 0) {
-            domainsList.innerHTML = `<tr><td colspan="5" class="px-6 py-12 text-center text-gray-500 dark:text-gray-400 text-sm">No domains found in the reporting period.</td></tr>`;
+            domainsList.innerHTML = `<tr><td colspan="7" class="px-6 py-12 text-center text-gray-500 dark:text-gray-400 text-sm">No domains found in the reporting period.</td></tr>`;
             return;
         }
 
@@ -447,6 +457,10 @@ async function loadDmarcDomains() {
 
     } catch (error) {
         console.error('Error loading DMARC domains:', error);
+        const domainsList = document.getElementById('dmarc-domains-list');
+        if (domainsList) {
+            domainsList.innerHTML = `<tr><td colspan="7" class="px-6 py-12 text-center text-sm text-red-500 dark:text-red-400">Failed to load DMARC reports. Refresh the page to try again.</td></tr>`;
+        }
     }
 }
 
