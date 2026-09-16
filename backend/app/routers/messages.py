@@ -11,13 +11,67 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from ..database import get_db
-from ..models import MessageCorrelation, PostfixLog, RspamdLog, NetfilterLog
+from ..models import MessageCorrelation, PostfixLog, RspamdLog, NetfilterLog, RawServiceLog
 from ..config import settings
+from ..services.dovecot_parser import parse_dovecot_message
 from ..utils import internal_error, format_datetime_for_api as format_datetime_utc
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+# How far past the first sighting Dovecot lines are still looked for. The
+# delivery happens seconds after Postfix accepts the message; a few hours of
+# headroom covers a short deferral without scanning a whole day of raw logs.
+DOVECOT_LOOKUP_WINDOW = timedelta(hours=6)
+
+
+def _get_dovecot_logs(db: Session, correlation: MessageCorrelation) -> list:
+    """
+    Fetch the Dovecot LMTP lines belonging to one message (issue #65).
+
+    These come from the raw logs the Live Logs worker collects, so they are only
+    available while that data is retained (RAW_LOGS_RETENTION_DAYS). The verdict
+    itself is stored on the correlation and outlives them.
+    """
+    if not correlation.message_id or not correlation.first_seen:
+        return []
+
+    # LIKE wildcards inside a Message-ID would silently widen the match
+    escaped = (
+        correlation.message_id
+        .replace('\\', '\\\\')
+        .replace('%', '\\%')
+        .replace('_', '\\_')
+    )
+
+    window_start = correlation.first_seen - timedelta(minutes=5)
+    rows = db.query(RawServiceLog).filter(
+        RawServiceLog.service == 'dovecot',
+        RawServiceLog.time >= window_start,
+        RawServiceLog.time <= correlation.first_seen + DOVECOT_LOOKUP_WINDOW,
+        RawServiceLog.raw_data['message'].astext.like(f'%msgid=<{escaped}>%', escape='\\')
+    ).order_by(RawServiceLog.time).limit(100).all()
+
+    entries = []
+    for row in rows:
+        message = (row.raw_data or {}).get('message')
+        parsed = parse_dovecot_message(message)
+        verdict = parsed.get('verdict') if parsed else None
+        # 'discard_pending' only exists to let a later store in the same session
+        # win (see dovecot_parser); on its own line it reads as the discard it
+        # is, and it is not a verdict the UI knows how to label.
+        if verdict == 'discard_pending':
+            verdict = 'discarded'
+        entries.append({
+            "time": format_datetime_utc(row.time),
+            "priority": (row.raw_data or {}).get('priority'),
+            "message": message,
+            "verdict": verdict,
+            "recipient": parsed.get('recipient') if parsed else None,
+            "mailbox": parsed.get('mailbox') if parsed else None,
+        })
+    return entries
 
 
 def is_blacklisted(email: str) -> bool:
@@ -223,6 +277,8 @@ def get_unified_messages(
                 "is_complete": msg.is_complete,
                 "first_seen": format_datetime_utc(msg.first_seen),
                 "last_seen": format_datetime_utc(msg.last_seen),
+                "dovecot_status": msg.dovecot_status,
+                "dovecot_mailbox": msg.dovecot_mailbox,
                 "spam_score": rspamd_log.score if rspamd_log else None,
                 "is_spam": rspamd_log.is_spam if rspamd_log else None,
                 "user": rspamd_log.user if rspamd_log else None,
@@ -309,7 +365,10 @@ def get_message_full_details(
                 NetfilterLog.time >= rspamd_log.time - window,
                 NetfilterLog.time <= rspamd_log.time + window,
             ).order_by(NetfilterLog.time.desc()).limit(100).all()
-        
+
+        # Get the Dovecot delivery lines for the last hop (issue #65)
+        dovecot_logs = _get_dovecot_logs(db, correlation)
+
         # Get all recipients - from Rspamd (primary source) or from Postfix logs
         recipients = []
         if rspamd_log and rspamd_log.recipients_smtp:
@@ -356,6 +415,12 @@ def get_message_full_details(
                 "asn": rspamd_log.asn,
                 "asn_org": rspamd_log.asn_org
             } if rspamd_log else None,
+            "dovecot": {
+                "status": correlation.dovecot_status,
+                "mailbox": correlation.dovecot_mailbox,
+                "detail": correlation.dovecot_detail,
+                "logs": dovecot_logs,
+            } if (correlation.dovecot_status or dovecot_logs) else None,
             "postfix_by_recipient": _group_postfix_by_recipient(postfix_logs),
             "postfix": [
                 {

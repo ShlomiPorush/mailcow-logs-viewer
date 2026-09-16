@@ -20,8 +20,14 @@ from sqlalchemy.exc import IntegrityError
 from .config import settings, set_cached_active_domains
 from .database import get_db_context, SessionLocal
 from .mailcow_api import mailcow_api
-from .models import PostfixLog, RspamdLog, NetfilterLog, MessageCorrelation, DMARCSync, DomainDNSCheck, MailboxStatistics, AliasStatistics, MonitoredHost, BlacklistCheck, DMARCReport, DMARCRecord, TLSReport, TLSReportPolicy, SpamSuppression
+from .models import PostfixLog, RspamdLog, NetfilterLog, MessageCorrelation, DMARCSync, DomainDNSCheck, MailboxStatistics, AliasStatistics, MonitoredHost, BlacklistCheck, DMARCReport, DMARCRecord, TLSReport, TLSReportPolicy, SpamSuppression, RawServiceLog, SystemSetting
 from .correlation import detect_direction, parse_postfix_message
+from .services.dovecot_parser import (
+    NON_DELIVERY_VERDICTS,
+    parse_dovecot_message,
+    pick_worst_verdict,
+    resolve_session_verdicts,
+)
 from .routers.domains import check_domain_dns, save_dns_check_to_db
 from .services.dmarc_imap_service import sync_dmarc_reports_from_imap
 from .services.dmarc_notifications import send_dmarc_error_notification
@@ -108,6 +114,7 @@ def reschedule_interval_jobs():
         _reschedule_suppression_jobs()
         _reschedule_smtp_abuse_job()
         _reschedule_anomaly_job()
+        _reschedule_dovecot_correlation_job()
 
     except Exception as e:
         logger.warning("Failed to reschedule interval jobs: %s", e)
@@ -154,6 +161,31 @@ def _reschedule_anomaly_job():
     else:
         try:
             scheduler.remove_job('anomaly_detection')
+        except Exception:
+            pass
+
+
+def _reschedule_dovecot_correlation_job():
+    """
+    Add or remove the Dovecot correlation job when settings are reloaded - it
+    depends on raw log collection, which can be toggled from the settings UI.
+    """
+    if not scheduler.running:
+        return
+    if dovecot_correlation_available():
+        scheduler.add_job(
+            correlate_dovecot_logs,
+            trigger=IntervalTrigger(seconds=60),
+            id='correlate_dovecot',
+            name='Correlate Dovecot Deliveries',
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+        )
+    else:
+        try:
+            scheduler.remove_job('correlate_dovecot')
+            logger.info("   [DOVECOT] Delivery correlation stopped - raw Dovecot logs no longer collected")
         except Exception:
             pass
 
@@ -239,6 +271,7 @@ job_status = {
     'complete_correlations': {'last_run': None, 'status': 'idle', 'error': None},
     'update_final_status': {'last_run': None, 'status': 'idle', 'error': None},
     'expire_correlations': {'last_run': None, 'status': 'idle', 'error': None},
+    'correlate_dovecot': {'last_run': None, 'status': 'idle', 'error': None},
     'cleanup_logs': {'last_run': None, 'status': 'idle', 'error': None},
     'cleanup_dmarc_reports': {'last_run': None, 'status': 'idle', 'error': None},
     'check_app_version': {'last_run': None, 'status': 'idle', 'error': None},
@@ -1464,15 +1497,17 @@ async def complete_incomplete_correlations():
                     correlation.is_complete = True
                     correlation.last_seen = datetime.now(timezone.utc)
                     
-                    # Update final status
+                    # Update final status. A 'discarded' verdict from Dovecot is kept:
+                    # Postfix logs status=sent for a message Sieve then drops,
+                    # so only a real bounce/reject may override it (issue #65).
                     for plog in all_postfix:
                         if plog.status:
                             if plog.status in ['bounced', 'rejected']:
                                 correlation.final_status = plog.status
                                 break
-                            elif plog.status == 'deferred' and correlation.final_status not in ['bounced', 'rejected']:
+                            elif plog.status == 'deferred' and correlation.final_status not in ['bounced', 'rejected', 'discarded'] and correlation.dovecot_status != 'discarded':
                                 correlation.final_status = plog.status
-                            elif plog.status == 'sent' and not correlation.final_status:
+                            elif plog.status == 'sent' and not correlation.final_status and correlation.dovecot_status != 'discarded':
                                 correlation.final_status = 'delivered'
                     
                     # Update correlation key in Postfix logs
@@ -1531,6 +1566,10 @@ async def expire_old_correlations():
             expired_count = 0
             for corr in expired_correlations:
                 corr.is_complete = True  # Mark as complete so we stop trying
+                # A discarded message already has its definitive outcome from
+                # Dovecot (issue #65) - don't relabel it as expired
+                if corr.final_status == 'discarded' or corr.dovecot_status == 'discarded':
+                    continue
                 corr.final_status = "expired"  # Set status to expired
                 expired_count += 1
             
@@ -1547,7 +1586,9 @@ async def expire_old_correlations():
 
 
 # The statuses a correlation never moves away from once it has them.
-TERMINAL_FINAL_STATUSES = ('delivered', 'bounced', 'rejected', 'expired')
+# 'discarded' is terminal in the same sense: Dovecot already dropped the
+# message via Sieve, and a later Postfix 'sent' line must not resurrect it.
+TERMINAL_FINAL_STATUSES = ('delivered', 'bounced', 'rejected', 'discarded', 'expired')
 
 # The push path additionally refuses to touch a spam verdict. routers/stats.py
 # counts final_status 'spam' as blocked mail, and a late delivery line would
@@ -1600,6 +1641,13 @@ def _recompute_correlation_from_postfix(db: Session, correlation: MessageCorrela
                     new_final_status = 'delivered'
             elif plog.status == 'deferred' and new_final_status not in ['bounced', 'rejected', 'delivered']:
                 new_final_status = 'deferred'
+
+    # A Sieve discard is invisible from Postfix's side: Dovecot answers 2xx and
+    # then drops the message, so Postfix truthfully logs status=sent. Keep the
+    # Dovecot verdict in that case (issue #65). A genuine bounce or reject means
+    # the delivery itself failed and must still win.
+    if correlation.dovecot_status == 'discarded' and new_final_status == 'delivered':
+        new_final_status = 'discarded'
 
     # Add any Postfix logs this correlation does not know about yet
     current_ids = list(correlation.postfix_log_ids or [])
@@ -1747,6 +1795,197 @@ async def update_final_status_for_correlations():
     except Exception as e:
         logger.error(f"[ERROR] Update final status error: {e}")
         update_job_status('update_final_status', 'failed', str(e))
+
+
+# Watermark key in system_settings, so the Dovecot job resumes where it left
+# off across restarts instead of rescanning the whole raw log table.
+DOVECOT_WATERMARK_KEY = 'dovecot_correlation_last_id'
+DOVECOT_BATCH_SIZE = 2000
+# How long a Dovecot line that arrived before its correlation exists is kept
+# around in-process and retried. Matches the pace at which run_correlation
+# turns Rspamd logs into correlations.
+DOVECOT_PENDING_MAX_AGE = timedelta(minutes=15)
+
+# Parsed delivery events whose Message-ID had no correlation yet, keyed by
+# msgid: {'first_seen': datetime, 'events': [...]}. Kept in-process (bounded by
+# the 15-minute prune) so each cycle only retries these instead of re-reading
+# and re-parsing a whole lookback window from the database.
+_dovecot_pending: Dict[str, Dict[str, Any]] = {}
+
+
+def dovecot_correlation_available() -> bool:
+    """
+    Dovecot correlation reads the raw logs the Live Logs worker already ingests,
+    so it is only possible while that worker actually collects Dovecot.
+    """
+    return (
+        settings.is_feature_enabled('logs')
+        and settings.raw_logs_enabled
+        and 'dovecot' in settings.raw_logs_services_list
+    )
+
+
+def _apply_dovecot_verdict(correlation: MessageCorrelation) -> None:
+    """
+    Let the Dovecot verdict override the Postfix-derived final_status (issue #65).
+
+    Only ``discarded`` is applied: on a Sieve reject or a failed store (quota,
+    missing folder) Dovecot returns an error to Postfix, so the Postfix status
+    is already the truthful one. Those verdicts stay in dovecot_status/-_detail
+    and are surfaced as delivery details instead.
+    """
+    if correlation.dovecot_status != 'discarded':
+        return
+    # A message that failed on the Postfix side never reached Dovecot in that
+    # delivery attempt - don't mask a real bounce with a stale Sieve verdict.
+    if correlation.final_status in ('bounced', 'rejected', 'deferred'):
+        return
+    correlation.final_status = 'discarded'
+
+
+async def correlate_dovecot_logs():
+    """
+    Attach the Dovecot LMTP delivery outcome to correlated messages (issue #65).
+
+    Postfix hands the message to Dovecot and logs status=sent; what Dovecot then
+    does with it - store it, file it into Junk, forward it, or drop it via a
+    Sieve ``discard`` - was previously invisible. Every relevant Dovecot line
+    carries ``msgid=``, which is the key the correlations are already built on.
+
+    Reads the Dovecot entries the raw logs worker has already fetched (no extra
+    mailcow API calls), walking forward from a stored id watermark. Lines whose
+    correlation does not exist yet are parked in _dovecot_pending and retried
+    for up to DOVECOT_PENDING_MAX_AGE, so the per-cycle work stays proportional
+    to the new rows plus the pending backlog - never to a whole time window.
+    """
+    update_job_status('correlate_dovecot', 'running')
+
+    if not dovecot_correlation_available():
+        update_job_status('correlate_dovecot', 'success')
+        return
+
+    try:
+        with get_db_context() as db:
+            watermark_row = db.query(SystemSetting).filter(
+                SystemSetting.key == DOVECOT_WATERMARK_KEY
+            ).first()
+            try:
+                watermark = int(watermark_row.value) if watermark_row and watermark_row.value else 0
+            except (TypeError, ValueError):
+                watermark = 0
+
+            # Drop parked events whose correlation never appeared
+            now = datetime.utcnow()
+            for msgid in [m for m, p in _dovecot_pending.items()
+                          if p['first_seen'] < now - DOVECOT_PENDING_MAX_AGE]:
+                del _dovecot_pending[msgid]
+
+            # The watermark walk: strictly new rows, in insertion order, always
+            # advancing - a large backlog is worked off across cycles without
+            # ever starving the newest rows behind a re-scanned window.
+            rows = db.query(RawServiceLog.id, RawServiceLog.time, RawServiceLog.raw_data).filter(
+                RawServiceLog.service == 'dovecot',
+                RawServiceLog.id > watermark,
+                # Only delivery lines carry a Message-ID; skipping the IMAP and
+                # connection noise in SQL keeps the batch size meaningful and
+                # avoids shipping megabytes of irrelevant JSONB per cycle.
+                RawServiceLog.raw_data['message'].astext.like('%msgid=%')
+            ).order_by(RawServiceLog.id).limit(DOVECOT_BATCH_SIZE).all()
+
+            # Group the parsed delivery events by Message-ID
+            events_by_msgid: Dict[str, List[Dict[str, Any]]] = {}
+            max_id = watermark
+            for row_id, row_time, raw_data in rows:
+                if row_id > max_id:
+                    max_id = row_id
+                event = parse_dovecot_message((raw_data or {}).get('message'))
+                if not event:
+                    continue
+                event['time'] = row_time
+                events_by_msgid.setdefault(event['message_id'], []).append(event)
+
+            # Retry the parked events alongside the fresh ones
+            for msgid, parked in _dovecot_pending.items():
+                events_by_msgid.setdefault(msgid, []).extend(parked['events'])
+
+            updated_count = 0
+
+            if events_by_msgid:
+                msgids = list(events_by_msgid.keys())
+                correlations: Dict[str, MessageCorrelation] = {}
+                # Chunked IN() lookups on the indexed message_id column
+                for i in range(0, len(msgids), 500):
+                    chunk = msgids[i:i + 500]
+                    for corr in db.query(MessageCorrelation).filter(
+                        MessageCorrelation.message_id.in_(chunk)
+                    ).all():
+                        correlations[corr.message_id] = corr
+
+                for message_id, events in events_by_msgid.items():
+                    correlation = correlations.get(message_id)
+                    if not correlation:
+                        # No correlation yet (Rspamd log not processed) - park
+                        # the events and retry them on the next cycles.
+                        parked = _dovecot_pending.setdefault(
+                            message_id, {'first_seen': now, 'events': []}
+                        )
+                        parked['events'] = events
+                        continue
+
+                    _dovecot_pending.pop(message_id, None)
+
+                    resolved = resolve_session_verdicts(events)
+                    if not resolved:
+                        continue
+
+                    verdict = pick_worst_verdict([e['verdict'] for e in resolved])
+                    if not verdict:
+                        continue
+
+                    # Prefer the event that produced the winning verdict for the
+                    # mailbox/detail shown next to it.
+                    winner = next((e for e in reversed(resolved) if e['verdict'] == verdict), resolved[-1])
+
+                    previous_status = correlation.dovecot_status
+                    previous_final = correlation.final_status
+
+                    mailbox = winner.get('mailbox')
+                    correlation.dovecot_status = verdict
+                    correlation.dovecot_mailbox = mailbox[:255] if mailbox else None
+                    correlation.dovecot_detail = winner.get('detail')
+
+                    if verdict != 'discarded' and previous_final == 'discarded':
+                        # A later delivery attempt actually stored the message -
+                        # re-derive from Postfix instead of leaving the stale
+                        # override behind.
+                        _recompute_correlation_from_postfix(db, correlation)
+                    else:
+                        _apply_dovecot_verdict(correlation)
+
+                    if previous_status != verdict or previous_final != correlation.final_status:
+                        updated_count += 1
+                        if verdict in NON_DELIVERY_VERDICTS:
+                            logger.info(
+                                f"[DOVECOT] {message_id[:40]} -> {verdict}"
+                                f"{' (' + correlation.dovecot_detail + ')' if correlation.dovecot_detail else ''}"
+                            )
+
+            if max_id > watermark:
+                if watermark_row:
+                    watermark_row.value = str(max_id)
+                else:
+                    db.add(SystemSetting(key=DOVECOT_WATERMARK_KEY, value=str(max_id)))
+
+            db.commit()
+
+            if updated_count > 0:
+                logger.info(f"[DOVECOT] Applied delivery verdict to {updated_count} messages")
+
+        update_job_status('correlate_dovecot', 'success')
+
+    except Exception as e:
+        logger.error(f"[ERROR] Dovecot correlation error: {e}")
+        update_job_status('correlate_dovecot', 'failed', str(e))
 
 
 async def update_geoip_database():
@@ -3232,7 +3471,23 @@ def start_scheduler():
             replace_existing=True,
             max_instances=1
         )
-        
+
+        # Job 5b: Attach the Dovecot delivery outcome (Sieve discard, target
+        # folder, quota errors) to correlated messages - issue #65
+        if dovecot_correlation_available():
+            scheduler.add_job(
+                correlate_dovecot_logs,
+                trigger=IntervalTrigger(seconds=60),
+                id='correlate_dovecot',
+                name='Correlate Dovecot Deliveries',
+                replace_existing=True,
+                max_instances=1,
+                coalesce=True
+            )
+        else:
+            logger.info("   [DOVECOT] Delivery correlation inactive - needs raw log "
+                        "collection with the 'dovecot' service enabled")
+
         # Job 6: Cleanup old logs (daily at 2 AM)
         scheduler.add_job(
             cleanup_old_logs,
