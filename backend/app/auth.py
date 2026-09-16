@@ -15,7 +15,7 @@ import secrets
 import base64
 
 from .config import settings
-from .session import get_session_from_request, SESSION_COOKIE_NAME
+from .session import get_session_from_request
 
 logger = logging.getLogger(__name__)
 
@@ -28,11 +28,13 @@ _auth_failures: Dict[str, Deque[float]] = {}
 
 
 def _client_ip(request: Request) -> str:
-    """Client IP for rate limiting; honors X-Forwarded-For behind the reverse proxy."""
-    forwarded = request.headers.get("X-Forwarded-For", "")
-    if forwarded:
-        return forwarded.split(",")[0].strip()
-    return request.client.host if request.client else "unknown"
+    """Use the transport peer or the client resolved by Uvicorn's trusted proxies.
+
+    Uvicorn applies FORWARDED_ALLOW_IPS before the request reaches us. Reading
+    X-Forwarded-For again would bypass that trust boundary and let a direct
+    caller (or a forged prefix before a real proxy chain) choose its counter.
+    """
+    return (request.client.host if request.client else None) or "unknown"
 
 
 def _is_rate_limited(ip: str) -> bool:
@@ -87,28 +89,55 @@ def verify_credentials(username: str, password: str) -> bool:
     return correct_username and correct_password
 
 
+def _authenticate_basic_request(request: Request) -> bool:
+    """Check Basic credentials through the same failure budget on every route.
+
+    Public routes may use the result to select their response fields, so they
+    must count failed guesses too. A blocked attempt must not check credentials
+    or reveal whether they were correct. Requests without Basic credentials do
+    not consume the budget, keeping public login information available.
+    """
+    authorization = request.headers.get("Authorization", "")
+    if not authorization.startswith("Basic "):
+        return False
+
+    client_ip = _client_ip(request)
+    if _is_rate_limited(client_ip):
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many failed login attempts. Try again later.",
+            headers={"Retry-After": str(_AUTH_WINDOW_SECONDS)},
+        )
+
+    try:
+        decoded = base64.b64decode(authorization[6:]).decode("utf-8")
+        username, password = decoded.split(":", 1)
+    except (ValueError, UnicodeDecodeError):
+        _record_auth_failure(client_ip)
+        return False
+
+    if not verify_credentials(username, password):
+        _record_auth_failure(client_ip)
+        return False
+
+    _clear_auth_failures(client_ip)
+    return True
+
+
 def is_request_authenticated(request: Request) -> bool:
     """
-    Check whether a request carries valid credentials (OAuth2 session or
+    Check whether a request carries valid credentials (session cookie or
     Basic Auth header). Used by public endpoints like /api/info to decide
     how much detail to expose. Returns True when authentication is disabled.
     """
     if not settings.is_authentication_enabled:
         return True
 
-    if settings.is_oauth2_enabled and get_session_from_request(request):
+    if get_session_from_request(request):
         return True
 
     if settings.is_basic_auth_enabled:
-        authorization = request.headers.get("Authorization", "")
-        if authorization.startswith("Basic "):
-            try:
-                encoded = authorization.split(" ")[1]
-                decoded = base64.b64decode(encoded).decode("utf-8")
-                username, password = decoded.split(":", 1)
-                return verify_credentials(username, password)
-            except (ValueError, IndexError, UnicodeDecodeError):
-                return False
+        return _authenticate_basic_request(request)
 
     return False
 
@@ -200,42 +229,20 @@ class BasicAuthMiddleware(BaseHTTPMiddleware):
                 status_code=status.HTTP_401_UNAUTHORIZED,
             )
         
-        # Brute-force protection: reject before even checking credentials
-        client_ip = _client_ip(request)
-        if _is_rate_limited(client_ip):
-            return Response(
-                content="Too many failed login attempts. Try again later.",
-                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                headers={"Retry-After": str(_AUTH_WINDOW_SECONDS)},
-            )
-
         try:
-            # Decode credentials
-            encoded_credentials = authorization.split(" ")[1]
-            decoded_credentials = base64.b64decode(encoded_credentials).decode("utf-8")
-            username, password = decoded_credentials.split(":", 1)
-
-            # Verify credentials
-            if not verify_credentials(username, password):
-                _record_auth_failure(client_ip)
-                # Return 401 without WWW-Authenticate header to prevent browser popup
-                return Response(
-                    content="Incorrect username or password",
-                    status_code=status.HTTP_401_UNAUTHORIZED,
-                )
-
-        except (ValueError, IndexError, UnicodeDecodeError) as e:
-            logger.warning(f"Invalid authorization header: {e}")
-            _record_auth_failure(client_ip)
-            # Return 401 without WWW-Authenticate header to prevent browser popup
+            authenticated = _authenticate_basic_request(request)
+        except HTTPException as exc:
+            # Middleware runs outside FastAPI's HTTPException handler.
             return Response(
-                content="Invalid authorization header",
+                content=exc.detail,
+                status_code=exc.status_code,
+                headers=exc.headers,
+            )
+        if not authenticated:
+            return Response(
+                content="Incorrect username or password",
                 status_code=status.HTTP_401_UNAUTHORIZED,
             )
-
-        # Successful login clears the failure counter
-        _clear_auth_failures(client_ip)
         
         # Credentials are valid, proceed with request
         return await call_next(request)
-

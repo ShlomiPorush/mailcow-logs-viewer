@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- **Login attempt limits apply consistently** ([#130](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/130)) - password checks share one failure counter, and client addresses follow the server's trusted-proxy configuration. Direct access and existing sessions continue to work without new settings. Users behind an untrusted proxy share its counter; see the optional `FORWARDED_ALLOW_IPS` setting in the environment guide for per-client limits. Thanks to [@ShlomiPorush](https://github.com/ShlomiPorush)
+
 ### Added
 
 - **MTA-STS check on the Domains page** ([#83](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/83)) - validates each domain's `_mta-sts` DNS record, policy file and MX coverage, wired into the existing DNS change alerts. Thanks to [@q16marvin](https://github.com/q16marvin)

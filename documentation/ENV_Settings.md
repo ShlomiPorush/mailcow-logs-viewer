@@ -342,6 +342,43 @@ Settings for the automatic quarantine rule processing feature. When rules are de
 | `AUTH_USERNAME` | string | `admin` | Basic auth username |
 | `AUTH_PASSWORD` | string | (empty) | Basic auth password (required if `BASIC_AUTH_ENABLED=true` or `AUTH_ENABLED=true`). ⚠️ **WARNING: Use a strong password in production!** |
 
+### Login attempt limits and reverse proxies
+
+Basic Auth allows 10 failed attempts per client address within 15 minutes. The
+same limit applies to password checks on `/api/info` and protected API endpoints.
+Further attempts return HTTP 429 with `Retry-After`. Public login information
+without credentials and already signed-in sessions remain available.
+
+No new setting is required after upgrading. The application uses the client
+address supplied by Uvicorn, rather than trusting request headers itself:
+
+- **Direct access:** attempts are counted against the connecting client.
+- **An untrusted proxy:** attempts share a counter for the proxy address. Login
+  still works, but repeated failures by one user can temporarily block new Basic
+  Auth attempts by others behind that proxy. Existing sessions remain usable.
+- **A trusted proxy:** Uvicorn resolves `X-Forwarded-For` from right to left,
+  skipping trusted proxy addresses and using the first untrusted address. This
+  supports both one proxy and a chain of proxies without trusting a client-supplied
+  prefix. The proxy must overwrite the header or append its actual connecting peer.
+- **External authentication with app authentication disabled:** these Basic Auth
+  limits do not apply; the external authentication layer remains responsible.
+
+To count clients separately behind trusted proxies, pass Uvicorn's existing
+`FORWARDED_ALLOW_IPS` environment variable to the **app container**. It defaults
+to `127.0.0.1`. In the shipped Compose setup, it can be set in `.env`; recreate the
+app container to apply it. It is a server setting, not a UI setting.
+
+```dotenv
+# Example addresses only: replace with the actual trusted proxy addresses.
+FORWARDED_ALLOW_IPS=192.0.2.10,192.0.2.11
+```
+
+Use the exact IPv4 or IPv6 addresses of proxies in the chain; the bundled Uvicorn
+0.27 does not support CIDR ranges here. Do not use `*` on a service reachable by
+untrusted clients: it trusts every caller's forwarding headers and defeats this
+protection. If a proxy omits `X-Forwarded-For`, its connecting address is used.
+Users behind the same NAT address still share a counter.
+
 ### OAuth2/OIDC Authentication
 
 | Variable | Type | Default | Description |
