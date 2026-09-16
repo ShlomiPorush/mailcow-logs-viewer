@@ -8,6 +8,7 @@ second time without the /api prefix to expose its WebSocket route, publishing
 /raw-logs/ws-token (and the stored log content) to anyone.
 """
 from app.main import app
+from conftest import registered_routes
 
 # Root-level paths that are meant to be reachable without the /api prefix.
 # The SPA page routes serve HTML only; the data behind them still comes from
@@ -34,7 +35,7 @@ ALLOWED_ROOT_PATHS = {
 def test_no_api_route_is_exposed_outside_the_api_prefix():
     allowed = ALLOWED_ROOT_PATHS
     exposed = []
-    for route in app.routes:
+    for route in registered_routes(app):
         path = getattr(route, "path", None)
         if not path or path.startswith("/api/") or path == "/api":
             continue
@@ -51,6 +52,23 @@ def test_no_api_route_is_exposed_outside_the_api_prefix():
 
 
 def test_ws_token_endpoint_is_only_under_api():
-    paths = {getattr(r, "path", "") for r in app.routes}
+    paths = {getattr(r, "path", "") for r in registered_routes(app)}
     assert "/api/raw-logs/ws-token" in paths
     assert "/raw-logs/ws-token" not in paths
+
+
+def test_route_inventory_includes_nested_hidden_and_websocket_routes():
+    from fastapi import APIRouter, FastAPI
+
+    nested = APIRouter()
+    nested.add_api_route("/hidden", lambda: {}, include_in_schema=False)
+    nested.add_api_websocket_route("/socket", lambda websocket: None)
+    parent = APIRouter()
+    parent.include_router(nested, prefix="/nested")
+    isolated = FastAPI()
+    isolated.include_router(parent, prefix="/api")
+    # An accidentally duplicated root include must remain visible to the guard.
+    isolated.include_router(parent)
+    paths = {route.path for route in registered_routes(isolated)}
+    assert {"/api/nested/hidden", "/api/nested/socket",
+            "/nested/hidden", "/nested/socket"} <= paths

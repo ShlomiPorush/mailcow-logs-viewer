@@ -14,7 +14,7 @@ RUN apt-get update && \
 
 # Copy and install Python dependencies
 COPY backend/requirements.txt /app/requirements.txt
-RUN pip install --no-cache-dir --upgrade pip && \
+RUN pip install --no-cache-dir --upgrade pip setuptools==83.0.0 && \
     pip install --no-cache-dir -r requirements.txt
 
 # Copy backend application code
