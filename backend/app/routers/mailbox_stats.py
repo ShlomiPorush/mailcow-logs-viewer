@@ -168,6 +168,48 @@ def _counts_from_raw(sent_by_status: dict, received_total: int, direction_counts
     }
 
 
+# Best outcome first. One message can reach a mailbox through several delivery
+# legs - a forward, a redirect that was refused, a release from quarantine -
+# and the most successful leg is the one that describes what happened to it,
+# so a failed attempt never counts against a mailbox that was delivered later.
+_STATUS_PREFERENCE = ['delivered', 'sent', 'deferred', 'spam',
+                      'discarded', 'bounced', 'rejected', 'expired']
+
+
+def _representative_legs(db: Session, address_column, emails_lower: list,
+                         start_date: datetime, end_date: datetime):
+    """
+    Sub-select of one leg per (mailbox address, message), the most successful one.
+
+    Statistics count messages, not delivery legs (issue #36). Legs of one
+    message are grouped by Message-ID; a correlation without a Message-ID falls
+    back to its own key and is never merged with another. The chosen leg is
+    marked leg_rank = 1 and lends the message its status and direction.
+    """
+    email = func.lower(address_column)
+    message_key = func.coalesce(
+        MessageCorrelation.message_id, MessageCorrelation.correlation_key
+    )
+    status_rank = case(
+        *[(MessageCorrelation.final_status == status, rank)
+          for rank, status in enumerate(_STATUS_PREFERENCE)],
+        else_=99
+    )
+    return db.query(
+        email.label('email'),
+        MessageCorrelation.final_status.label('final_status'),
+        MessageCorrelation.direction.label('direction'),
+        func.row_number().over(
+            partition_by=(email, message_key),
+            order_by=(status_rank, MessageCorrelation.id.asc())
+        ).label('leg_rank')
+    ).filter(
+        email.in_(emails_lower),
+        MessageCorrelation.first_seen >= start_date,
+        MessageCorrelation.first_seen <= end_date
+    ).subquery()
+
+
 def get_bulk_message_counts(db: Session, emails: list, start_date: datetime, end_date: datetime) -> dict:
     """
     Get message counts for ALL emails in a single pass using 2 bulk aggregate queries.
@@ -182,33 +224,33 @@ def get_bulk_message_counts(db: Session, emails: list, start_date: datetime, end
     emails_lower = list({e.lower() for e in emails})
 
     # --- Query 1: Sent stats (group by sender + status + direction) ---
+    sent_legs = _representative_legs(
+        db, MessageCorrelation.sender, emails_lower, start_date, end_date)
     sent_rows = db.query(
-        func.lower(MessageCorrelation.sender).label('email'),
-        MessageCorrelation.final_status,
-        MessageCorrelation.direction,
-        func.count(MessageCorrelation.id).label('cnt')
+        sent_legs.c.email,
+        sent_legs.c.final_status,
+        sent_legs.c.direction,
+        func.count().label('cnt')
     ).filter(
-        func.lower(MessageCorrelation.sender).in_(emails_lower),
-        MessageCorrelation.first_seen >= start_date,
-        MessageCorrelation.first_seen <= end_date
+        sent_legs.c.leg_rank == 1
     ).group_by(
-        func.lower(MessageCorrelation.sender),
-        MessageCorrelation.final_status,
-        MessageCorrelation.direction
+        sent_legs.c.email,
+        sent_legs.c.final_status,
+        sent_legs.c.direction
     ).all()
 
     # --- Query 2: Received stats (group by recipient + direction) ---
+    recv_legs = _representative_legs(
+        db, MessageCorrelation.recipient, emails_lower, start_date, end_date)
     recv_rows = db.query(
-        func.lower(MessageCorrelation.recipient).label('email'),
-        MessageCorrelation.direction,
-        func.count(MessageCorrelation.id).label('cnt')
+        recv_legs.c.email,
+        recv_legs.c.direction,
+        func.count().label('cnt')
     ).filter(
-        func.lower(MessageCorrelation.recipient).in_(emails_lower),
-        MessageCorrelation.first_seen >= start_date,
-        MessageCorrelation.first_seen <= end_date
+        recv_legs.c.leg_rank == 1
     ).group_by(
-        func.lower(MessageCorrelation.recipient),
-        MessageCorrelation.direction
+        recv_legs.c.email,
+        recv_legs.c.direction
     ).all()
 
     # --- Build per-email lookup ---
@@ -312,31 +354,18 @@ async def get_mailbox_stats_summary(
         total_sent_failed = 0
         
         if all_local_emails:
-            # Sent messages (case-insensitive)
-            sent_result = db.query(func.count(MessageCorrelation.id)).filter(
-                func.lower(MessageCorrelation.sender).in_(all_local_emails),
-                MessageCorrelation.first_seen >= parsed_start,
-                MessageCorrelation.first_seen <= parsed_end
-            ).scalar() or 0
-            total_sent = sent_result
-            
-            # Received messages (case-insensitive)
-            received_result = db.query(func.count(MessageCorrelation.id)).filter(
-                func.lower(MessageCorrelation.recipient).in_(all_local_emails),
-                MessageCorrelation.first_seen >= parsed_start,
-                MessageCorrelation.first_seen <= parsed_end
-            ).scalar() or 0
-            total_received = received_result
-            
-            # Failed messages (only sent that bounced/rejected - failures are outbound)
-            failed_result = db.query(func.count(MessageCorrelation.id)).filter(
-                func.lower(MessageCorrelation.sender).in_(all_local_emails),
-                MessageCorrelation.first_seen >= parsed_start,
-                MessageCorrelation.first_seen <= parsed_end,
-                MessageCorrelation.final_status.in_(['bounced', 'rejected'])
-            ).scalar() or 0
-            total_sent_failed = failed_result
-        
+            # Count each message once per mailbox instead of once per delivery
+            # leg (issue #36). The per-mailbox counter already does exactly
+            # that, and reusing it keeps these cards and the mailbox rows
+            # below them telling the same story. Failures are outbound only,
+            # and a message that was delivered on a later leg is not a failure.
+            per_email_counts = get_bulk_message_counts(
+                db, list(all_local_emails), parsed_start, parsed_end)
+            for counts in per_email_counts.values():
+                total_sent += counts['sent_total']
+                total_received += counts['received_total']
+                total_sent_failed += counts['sent_failed']
+
         total_messages = total_sent + total_received
         failure_rate = round((total_sent_failed / total_sent * 100) if total_sent > 0 else 0, 1)
         

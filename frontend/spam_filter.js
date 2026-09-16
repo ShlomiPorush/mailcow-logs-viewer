@@ -326,9 +326,20 @@ async function validateMapContent(filename) {
         
         document.getElementById('map-entry-count').textContent = `${data.entry_count} entries`;
         
+        const warnings = data.warnings || [];
+        const warningHtml = warnings.map(w => `
+            <div class="text-xs text-amber-700 dark:text-amber-300 flex items-start gap-2 py-1">
+                <span class="font-mono text-gray-500 dark:text-gray-400 flex-shrink-0">Line ${w.line}:</span>
+                <span>${escapeHtml(w.error)} - <code class="bg-amber-50 dark:bg-amber-900/30 px-1 rounded">${escapeHtml(w.content)}</code></span>
+            </div>
+        `).join('');
+
         if (data.valid) {
-            statusEl.innerHTML = '<span class="text-green-600 dark:text-green-400 text-xs font-medium">✓ Valid</span>';
-            errorsEl.classList.add('hidden');
+            statusEl.innerHTML = warnings.length
+                ? `<span class="text-amber-600 dark:text-amber-400 text-xs font-medium">✓ Valid, ${warnings.length} warning(s)</span>`
+                : '<span class="text-green-600 dark:text-green-400 text-xs font-medium">✓ Valid</span>';
+            errorsEl.classList.toggle('hidden', warnings.length === 0);
+            errorsEl.innerHTML = warningHtml;
         } else {
             statusEl.innerHTML = `<span class="text-red-600 dark:text-red-400 text-xs font-medium">✗ ${data.errors.length} error(s)</span>`;
             errorsEl.classList.remove('hidden');
@@ -337,7 +348,7 @@ async function validateMapContent(filename) {
                     <span class="font-mono text-gray-500 dark:text-gray-400 flex-shrink-0">Line ${e.line}:</span>
                     <span>${escapeHtml(e.error)} - <code class="bg-red-50 dark:bg-red-900/30 px-1 rounded">${escapeHtml(e.content)}</code></span>
                 </div>
-            `).join('');
+            `).join('') + warningHtml;
         }
     } catch (error) {
         statusEl.innerHTML = '<span class="text-red-600 text-xs">Validation failed</span>';
@@ -384,8 +395,15 @@ async function saveMapContent(filename) {
         }
         
         const result = await response.json();
-        showToast(`Map saved successfully (${result.entry_count} entries)`, 'success');
-        
+        if (result.normalized_entries > 0) {
+            // Bare addresses were anchored server side - reflect the saved form
+            const textarea = document.getElementById('map-editor-content');
+            if (textarea && typeof result.content === 'string') textarea.value = result.content;
+            showToast(`Map saved (${result.entry_count} entries). ${result.normalized_entries} bare address entr${result.normalized_entries === 1 ? 'y was' : 'ies were'} anchored automatically.`, 'success');
+        } else {
+            showToast(`Map saved successfully (${result.entry_count} entries)`, 'success');
+        }
+
         const statusEl = document.getElementById('map-validation-status');
         if (statusEl) statusEl.innerHTML = '<span class="text-green-600 dark:text-green-400 text-xs font-medium">✓ Saved</span>';
         document.getElementById('map-entry-count').textContent = `${result.entry_count} entries`;
@@ -657,7 +675,7 @@ function updateSuppressionInputPlaceholder() {
     if (type === 'domain') {
         label.textContent = 'Domain Name';
         input.placeholder = 'example.com';
-        hint.textContent = 'Enter the domain name only. It will be stored as a regex pattern: /.+@example\\.com/i';
+        hint.textContent = 'Enter the domain name only. It will be stored as a regex pattern: /^.+@example\\.com$/i';
         hint.classList.remove('hidden');
     } else {
         label.textContent = 'Email Address';
@@ -701,7 +719,7 @@ async function createSuppression() {
                 showToast('Enter a plain domain name, for example example.com', 'error');
                 return;
             }
-            email = `/.+@${escapeRegex(email)}/i`;
+            email = `/^.+@${escapeRegex(email)}$/i`;
         }
     }
     
@@ -1056,8 +1074,9 @@ function _getMapMetaDescription(filename) {
  */
 function _cleanRegexDomain(email) {
     if (!email || !email.startsWith('/')) return email;
-    // Match patterns like /.+@example\.com/i or /.+@sub\.example\.com/i
-    const match = email.match(/^\/\.\+@(.+)\/i?$/);
+    // Match both the anchored form /^.+@example\.com$/i (optionally with the
+    // wizard's subdomain group) and the legacy unanchored /.+@example\.com/i
+    const match = email.match(/^\/\^?\.\+@(?:\(\.\+\\\.\)\?)?(.+?)\$?\/i?$/);
     if (match) {
         // Unescape dots: example\.com → example.com
         return match[1].replace(/\\\./g, '.');
@@ -1122,18 +1141,20 @@ function updateRegexWizardPreview() {
     
     switch (type) {
         case 'email':
-            // Plain email - no regex needed
-            pattern = value.toLowerCase();
+            // The map is a regexp map: a bare address would match as a
+            // substring (e@example.com also hits alice@example.com), so an
+            // exact match needs anchors
+            pattern = `/^${value.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$/i`;
             explanation = `Blocks exactly: ${value}`;
             break;
         case 'domain':
-            // mailcow style: /.+example\.com/i
-            pattern = `/.+${escaped}/i`;
+            // Anchored, with the @ boundary and optional subdomain labels
+            pattern = `/^.+@(.+\\.)?${escaped}$/i`;
             explanation = `Blocks: *@${value} and all subdomains (e.g. *@sub.${value})`;
             break;
         case 'tld':
             // Match any address ending in .tld
-            pattern = `/.+\\.${escaped}$/i`;
+            pattern = `/^.+\\.${escaped}$/i`;
             explanation = `Blocks all addresses from .${value} domains`;
             break;
         case 'keyword':

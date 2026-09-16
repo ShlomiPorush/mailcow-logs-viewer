@@ -1496,7 +1496,7 @@ Get unified messages view combining Postfix and Rspamd data.
 | `sender` | string | Filter by sender email |
 | `recipient` | string | Filter by recipient email |
 | `direction` | string | Filter by direction: `inbound`, `outbound`, `internal` |
-| `status` | string | Filter by status: `delivered`, `bounced`, `deferred`, `rejected`, `spam`<br>**Note:** `spam` filter checks both `final_status='spam'` and `is_spam=True` from Rspamd |
+| `status` | string | Filter by status: `delivered`, `bounced`, `deferred`, `rejected`, `spam`, `discarded`, `expired`<br>**Note:** `spam` filter checks both `final_status='spam'` and `is_spam=True` from Rspamd. `discarded` means a Dovecot Sieve rule dropped the message after Postfix handed it over (issue #65) |
 | `user` | string | Filter by authenticated user |
 | `ip` | string | Filter by source IP address |
 | `start_date` | datetime | Start date (ISO format) |
@@ -1527,6 +1527,9 @@ GET /api/messages?page=1&limit=50&direction=outbound&sender=user@example.com
       "is_complete": true,
       "first_seen": "2025-12-25T10:30:00Z",
       "last_seen": "2025-12-25T10:30:05Z",
+      "dovecot_status": "stored",
+      "dovecot_mailbox": "INBOX",
+      "deliveries": 1,
       "spam_score": 0.5,
       "is_spam": false,
       "user": "user@example.com",
@@ -1535,6 +1538,10 @@ GET /api/messages?page=1&limit=50&direction=outbound&sender=user@example.com
   ]
 }
 ```
+
+**One row per message (issue #36):** a message that was delivered more than once - a forward, a BCC copy, a quarantine release - has one correlation per delivery leg, but the list returns a single row for it. Rows are grouped by Message-ID; a correlation without a Message-ID is grouped by its own `correlation_key` and is therefore never merged with another one. The filters apply to the legs first, and the earliest matching leg represents the message, so a search always answers with the leg that matched it. `deliveries` is the total number of legs that message has in the database, including legs the filters did not match, and is `1` for an ordinary message. `total` and `pages` count messages, not legs. The full list of legs, in order, is available as `related_deliveries` in `GET /message/{correlation_key}/details`.
+
+**Dovecot delivery fields (issue #65):** `dovecot_status` is the outcome of the final LMTP hop as reported by Dovecot - one of `stored`, `discarded`, `rejected`, `forwarded`, `failed`, or `null` when no Dovecot information is available (raw log collection disabled, or the message left the server). `dovecot_mailbox` names the folder the message was filed into (e.g. `INBOX`, `Junk`). A message dropped by a Sieve `discard` rule gets `final_status` `discarded` instead of a false `delivered`.
 
 ---
 
@@ -1564,6 +1571,19 @@ Get complete message details with all related logs.
   "is_complete": true,
   "first_seen": "2025-12-25T10:30:00Z",
   "last_seen": "2025-12-25T10:30:05Z",
+  "related_deliveries": [
+    {
+      "correlation_key": "789abc012def...",
+      "sender": "recipient@gmail.com",
+      "recipient": "forward-target@example.org",
+      "direction": "outbound",
+      "final_status": "rejected",
+      "first_seen": "2025-12-25T10:30:07Z",
+      "queue_id": "5D9C86E1234",
+      "dovecot_status": null,
+      "dovecot_mailbox": null
+    }
+  ],
   "rspamd": {
     "time": "2025-12-25T10:30:00Z",
     "score": 0.5,
@@ -1579,6 +1599,21 @@ Get complete message details with all related logs.
     "user": "user@example.com",
     "has_auth": true,
     "size": 1024
+  },
+  "dovecot": {
+    "status": "stored",
+    "mailbox": "Junk",
+    "detail": null,
+    "logs": [
+      {
+        "time": "2025-12-25T10:30:06Z",
+        "priority": "info",
+        "message": "lmtp(recipient@gmail.com)<123><AbCdEf>: sieve: msgid=<unique-id@example.com>: stored mail into mailbox 'Junk'",
+        "verdict": "stored",
+        "recipient": "recipient@gmail.com",
+        "mailbox": "Junk"
+      }
+    ]
   },
   "postfix": [
     {
@@ -1610,6 +1645,10 @@ Get complete message details with all related logs.
   "netfilter": []
 }
 ```
+
+**`related_deliveries` (issue #36):** a Message-ID can map to several correlations, one per delivery leg. A forward, a Sieve redirect or any other re-submission delivers the same message a second time through its own Postfix queue chain, with its own sender, recipient, direction and status, and its own `correlation_key`. `GET /messages` shows all of them as one row, so this list is where the individual legs are read. It holds the other legs of the same Message-ID, ordered by `first_seen`, and is empty for the vast majority of messages. The first leg of a message keeps the historical `correlation_key` (SHA256 of `msgid:<message-id>`), so links created before this change keep resolving; an additional leg is keyed by SHA256 of `msgid:<message-id>:queue:<queue-id>`.
+
+**`dovecot` object (issue #65):** the mailbox-delivery outcome reported by Dovecot for the final LMTP hop. `status` is one of `stored`, `discarded`, `rejected`, `forwarded`, `failed`; `mailbox` is the target folder; `detail` carries the reject reason, forward target or storage error; `logs` lists the matching raw Dovecot lines (available while raw log retention keeps them). The whole object is `null` when no Dovecot information exists for the message.
 
 ---
 

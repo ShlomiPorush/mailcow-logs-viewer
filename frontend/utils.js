@@ -67,6 +67,12 @@ const APP_COLORS = {
             bg: 'bg-fuchsia-100 dark:bg-fuchsia-500/25',
             text: 'text-fuchsia-700 dark:text-fuchsia-400'
         },
+        discarded: {
+            // Slate - dropped by a Dovecot Sieve rule, never reached the mailbox
+            badge: 'bg-slate-100 dark:bg-slate-500/10 text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-500/20',
+            bg: 'bg-slate-100 dark:bg-slate-500/25',
+            text: 'text-slate-700 dark:text-slate-400'
+        },
         expired: {
             // Zinc
             badge: 'bg-zinc-100 dark:bg-zinc-500/10 text-zinc-700 dark:text-zinc-300 border border-zinc-200 dark:border-zinc-500/20',
@@ -133,6 +139,7 @@ function getCorrelationStatusDisplay(msg) {
             'rejected': '✗',
             'deferred': '⏳',
             'spam': '⚠',
+            'discarded': '⊘',
             'expired': '⏸'
         };
         const statusText = {
@@ -142,6 +149,7 @@ function getCorrelationStatusDisplay(msg) {
             'rejected': 'Rejected',
             'deferred': 'Deferred',
             'spam': 'Spam',
+            'discarded': 'Discarded',
             'expired': 'Expired'
         };
         const emoji = statusEmoji[msg.final_status] || '•';
