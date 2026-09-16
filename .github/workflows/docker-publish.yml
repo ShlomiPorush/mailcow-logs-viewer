@@ -57,9 +57,13 @@ jobs:
           images: |
             ${{ env.GH_REGISTRY }}/${{ github.repository }}
             ${{ env.DOCKER_HUB_REPO }}
+          # A prerelease tag (v2.8.0-dev.1) publishes the moving `dev` tag and
+          # its own version, never `latest` - the fleet must not pull a DEV
+          # build by accident. A final tag publishes `latest` as before.
           tags: |
             type=semver,pattern={{version}}
-            type=raw,value=latest
+            type=raw,value=latest,enable=${{ !contains(github.ref_name, '-') }}
+            type=raw,value=dev,enable=${{ contains(github.ref_name, '-') }}
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v7
@@ -89,22 +93,35 @@ jobs:
       - name: Publish the GitHub release from the changelog
         run: |
           VERSION="${TAG#v}"
-          awk -v want="## [${VERSION}]" '
-            index($0, want) == 1 { inside = 1; print; next }
-            inside && /^## \[/ { exit }
-            inside { print }
-          ' CHANGELOG.md > notes.md
+          if [ "${VERSION#*-}" != "$VERSION" ]; then
+            # A prerelease has no changelog section of its own yet - its notes
+            # are whatever Unreleased holds right now, marked as a prerelease
+            # and never as the latest release
+            awk '
+              index($0, "## [Unreleased]") == 1 { inside = 1; print; next }
+              inside && /^## \[/ { exit }
+              inside { print }
+            ' CHANGELOG.md > notes.md
+            RELEASE_FLAGS="--prerelease"
+          else
+            awk -v want="## [${VERSION}]" '
+              index($0, want) == 1 { inside = 1; print; next }
+              inside && /^## \[/ { exit }
+              inside { print }
+            ' CHANGELOG.md > notes.md
+            RELEASE_FLAGS="--latest"
+          fi
           if [ ! -s notes.md ]; then
-            echo "::error::CHANGELOG.md has no '## [${VERSION}]' section - refusing to publish a release with an empty body"
+            echo "::error::CHANGELOG.md has no matching section for '${VERSION}' - refusing to publish a release with an empty body"
             exit 1
           fi
           echo "Release notes ($(wc -l < notes.md) lines):"
           cat notes.md
           if gh release view "$TAG" >/dev/null 2>&1; then
             echo "Release ${TAG} already exists - updating its notes"
-            gh release edit "$TAG" --notes-file notes.md --latest
+            gh release edit "$TAG" --notes-file notes.md $RELEASE_FLAGS
           else
-            gh release create "$TAG" --title "$VERSION" --notes-file notes.md --latest
+            gh release create "$TAG" --title "$VERSION" --notes-file notes.md $RELEASE_FLAGS
           fi
 
   # Issues with a merged fix stay open until the release that ships it.
@@ -113,6 +130,9 @@ jobs:
   # main, so everything it marks is in this release).
   close-shipped-issues:
     needs: build-and-push
+    # A DEV prerelease ships nothing to the fleet - issues close only when a
+    # final release actually delivers the fix
+    if: ${{ !contains(github.ref_name, '-') }}
     runs-on: ubuntu-latest
     permissions:
       issues: write
