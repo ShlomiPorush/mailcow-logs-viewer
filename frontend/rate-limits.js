@@ -35,12 +35,6 @@ const RATE_LIMIT_CHIP_ACTIVE = 'bg-blue-500 border-blue-500 text-white';
 const RATE_LIMIT_CHIP_INACTIVE =
     'border-blue-300 dark:border-blue-700 text-blue-700 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20';
 
-// Sidebar entry of one sender, same recipe as the Logs service list
-const RATE_LIMIT_SENDER_BTN = 'w-full flex items-center gap-2 px-3 py-2 rounded-md text-left text-sm transition-colors';
-const RATE_LIMIT_SENDER_ACTIVE =
-    'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-700';
-const RATE_LIMIT_SENDER_INACTIVE = 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700';
-
 let rateLimitWindowHours = 720;
 let rateLimitSenderSearch = '';
 let rateLimitConfigSearch = '';
@@ -288,10 +282,11 @@ function renderRateLimitSendersCard() {
     if (!container) return;
 
     const senders = rateLimitSenders();
-    // Keep the open sender across reloads, as long as it still has hits
-    if (!senders.some(group => group.user === rateLimitSelectedSender)) {
-        rateLimitSelectedSender = senders.length ? senders[0].user : null;
+    // A sender that fell out of the window closes back to the table
+    if (rateLimitSelectedSender && !senders.some(group => group.user === rateLimitSelectedSender)) {
+        rateLimitSelectedSender = null;
     }
+    const detailMode = !!rateLimitSelectedSender;
 
     const header = `
         <div class="px-4 py-3 border-b border-gray-200 dark:border-gray-700 flex flex-wrap items-center justify-between gap-3">
@@ -299,7 +294,7 @@ function renderRateLimitSendersCard() {
                 <h3 class="text-lg font-semibold text-gray-900 dark:text-white">Blocked senders</h3>
                 <p class="text-sm text-gray-600 dark:text-gray-400">Mail that mailcow refused because the sender ran out of allowance</p>
             </div>
-            ${senders.length === 0 ? '' : `
+            ${senders.length === 0 || detailMode ? '' : `
                 <input type="text" value="${escapeHtml(rateLimitSenderSearch)}" placeholder="Search..."
                     oninput="filterRateLimitSenders(this.value)"
                     class="w-56 px-3 py-2 text-sm rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300">
@@ -307,63 +302,98 @@ function renderRateLimitSendersCard() {
         </div>
     `;
 
-    const body = senders.length === 0
-        ? `
+    let body;
+    if (senders.length === 0) {
+        body = `
             <div class="px-4 py-10 text-center">
                 <p class="text-gray-700 dark:text-gray-300 font-medium">Nobody hit a rate limit in this window</p>
                 <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">Widen the window to look further back.</p>
             </div>
-        `
-        : `
-            <div class="flex flex-col lg:flex-row">
-                <div class="w-full lg:w-80 flex-shrink-0 lg:border-r border-gray-200 dark:border-gray-700">
-                    <div class="space-y-1 p-3">
-                        ${senders.map(renderRateLimitSenderButton).join('')}
-                        <p data-rl-sender-noresults class="hidden px-3 py-6 text-center text-sm text-gray-500 dark:text-gray-400">No matches</p>
-                    </div>
-                </div>
-                <div id="rate-limits-sender-detail" class="flex-1 min-w-0"></div>
-            </div>
         `;
+    } else if (detailMode) {
+        body = renderRateLimitSenderDetail(senders.find(group => group.user === rateLimitSelectedSender));
+    } else {
+        body = renderRateLimitSendersTable(senders);
+    }
 
     container.innerHTML = `<div class="bg-white dark:bg-gray-800 rounded-lg shadow">${header}${body}</div>`;
 
-    if (senders.length) {
-        renderRateLimitSenderDetail();
-        if (rateLimitSenderSearch) filterRateLimitSenders(rateLimitSenderSearch);
+    if (!detailMode && senders.length && rateLimitSenderSearch) {
+        filterRateLimitSenders(rateLimitSenderSearch);
     }
 }
 
 
-function renderRateLimitSenderButton(group) {
-    const isActive = group.user === rateLimitSelectedSender;
+function renderRateLimitSendersTable(senders) {
+    const canWrite = !rateLimitConfigData || rateLimitConfigData.rw_key_configured !== false;
+
+    const rows = senders.map(group => {
+        const resetButton = (canWrite && group.last_rl_hash)
+            ? `
+                <button type="button"
+                    onclick="event.stopPropagation(); resetRateLimitCounter('${escapeJsArg(group.user)}', '${escapeJsArg(group.last_rl_hash)}')"
+                    class="px-3 py-1.5 text-xs font-medium rounded-lg bg-blue-600 hover:bg-blue-700 text-white whitespace-nowrap">
+                    Reset counter
+                </button>
+            `
+            : '';
+        return `
+            <tr data-rl-sender="${escapeHtml((group.user || '').toLowerCase())}"
+                class="hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer"
+                onclick="selectRateLimitSender('${escapeJsArg(group.user)}')">
+                <td class="px-3 sm:px-4 py-3 font-mono text-xs sm:text-sm text-gray-900 dark:text-gray-100 break-all">${escapeHtml(group.user)}</td>
+                <td class="px-3 sm:px-4 py-3">
+                    <span class="${RATE_LIMIT_BADGE_SHAPE} ${getStatusBadgeClass('rejected')} whitespace-nowrap">${group.events}</span>
+                </td>
+                <td class="px-3 sm:px-4 py-3 text-xs sm:text-sm text-gray-900 dark:text-gray-100 whitespace-nowrap">${escapeHtml(formatTime(group.last_seen))}</td>
+                <td class="px-3 sm:px-4 py-3">${renderRateLimitBadge(group.current_limit)}</td>
+                <td class="px-3 sm:px-4 py-3">
+                    ${group.last_reset ? `<span class="${RATE_LIMIT_BADGE_SHAPE} ${getStatusBadgeClass('delivered')} whitespace-nowrap">Reset ${escapeHtml(formatTime(group.last_reset))}</span>` : ''}
+                </td>
+                <td class="px-3 sm:px-4 py-3 text-right whitespace-nowrap">${resetButton}</td>
+            </tr>
+        `;
+    }).join('');
+
     return `
-        <button type="button" onclick="selectRateLimitSender('${escapeJsArg(group.user)}')"
-            data-rl-sender="${escapeHtml((group.user || '').toLowerCase())}"
-            class="rate-limit-sender-btn ${RATE_LIMIT_SENDER_BTN} ${isActive ? RATE_LIMIT_SENDER_ACTIVE : RATE_LIMIT_SENDER_INACTIVE}">
-            <span class="flex-1 truncate font-mono text-xs">${escapeHtml(group.user)}</span>
-            <span class="${RATE_LIMIT_BADGE_SHAPE} ${getStatusBadgeClass('rejected')} flex-shrink-0">${group.events}</span>
-        </button>
+        <div class="mobile-scroll overflow-x-auto">
+            <table class="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+                <thead class="bg-gray-50 dark:bg-gray-700">
+                    <tr>
+                        <th class="px-3 sm:px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Sender</th>
+                        <th class="px-3 sm:px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Hits</th>
+                        <th class="px-3 sm:px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Last hit</th>
+                        <th class="px-3 sm:px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Limit</th>
+                        <th class="px-3 sm:px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Last reset</th>
+                        <th class="px-3 sm:px-4 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider"></th>
+                    </tr>
+                </thead>
+                <tbody class="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
+                    ${rows}
+                    <tr data-rl-sender-noresults class="hidden">
+                        <td colspan="6" class="px-3 sm:px-4 py-8 text-center text-sm text-gray-500 dark:text-gray-400">No matches</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
     `;
 }
 
 
-// Only the detail panel is rebuilt, so the list keeps its scroll position and
-// the search box keeps its focus
+// Clicking a row swaps the whole card body for that sender's detail view
 function selectRateLimitSender(user) {
     rateLimitSelectedSender = user;
-    const selected = (user || '').toLowerCase();
-    document.querySelectorAll('.rate-limit-sender-btn').forEach(btn => {
-        const isActive = btn.dataset.rlSender === selected;
-        btn.className = `rate-limit-sender-btn ${RATE_LIMIT_SENDER_BTN} `
-            + (isActive ? RATE_LIMIT_SENDER_ACTIVE : RATE_LIMIT_SENDER_INACTIVE);
-    });
-    renderRateLimitSenderDetail();
+    renderRateLimitSendersCard();
 }
 
 
-// Hiding entries in place keeps the input focused while typing, and leaves the
-// open sender's detail on screen even when the search hides its entry
+function backToRateLimitSenders() {
+    rateLimitSelectedSender = null;
+    renderRateLimitSendersCard();
+}
+
+
+// Rows are hidden in place, so the search box never loses focus while typing
 function filterRateLimitSenders(query) {
     rateLimitSenderSearch = query || '';
     const card = document.getElementById('rate-limits-senders-card');
@@ -371,9 +401,9 @@ function filterRateLimitSenders(query) {
 
     const q = rateLimitSenderSearch.trim().toLowerCase();
     let shown = 0;
-    card.querySelectorAll('.rate-limit-sender-btn').forEach(btn => {
-        const match = !q || (btn.dataset.rlSender || '').includes(q);
-        btn.classList.toggle('hidden', !match);
+    card.querySelectorAll('tbody tr[data-rl-sender]').forEach(tr => {
+        const match = !q || (tr.dataset.rlSender || '').includes(q);
+        tr.classList.toggle('hidden', !match);
         if (match) shown++;
     });
 
@@ -382,15 +412,8 @@ function filterRateLimitSenders(query) {
 }
 
 
-function renderRateLimitSenderDetail() {
-    const panel = document.getElementById('rate-limits-sender-detail');
-    if (!panel) return;
-
-    const group = rateLimitSenders().find(entry => entry.user === rateLimitSelectedSender);
-    if (!group) {
-        panel.innerHTML = '';
-        return;
-    }
+function renderRateLimitSenderDetail(group) {
+    if (!group) return '';
 
     const canWrite = !rateLimitConfigData || rateLimitConfigData.rw_key_configured !== false;
     const recent = group.recent || [];
@@ -429,9 +452,16 @@ function renderRateLimitSenderDetail() {
             </div>
         `;
 
-    panel.innerHTML = `
+    return `
         <div class="px-4 py-3 border-b border-gray-200 dark:border-gray-700 flex flex-wrap items-start justify-between gap-3">
             <div class="min-w-0">
+                <button type="button" onclick="backToRateLimitSenders()"
+                    class="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 mb-3">
+                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path>
+                    </svg>
+                    All senders
+                </button>
                 <p class="font-mono text-sm text-gray-900 dark:text-gray-100 break-all">${escapeHtml(group.user)}</p>
                 <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">Last hit ${escapeHtml(formatTime(group.last_seen))}</p>
                 <div class="flex flex-wrap items-center gap-2 mt-2">
@@ -628,8 +658,9 @@ function renderRateLimitConfigRow(kind, name, value, frame, canWrite) {
         && rateLimitEditing.kind === kind
         && rateLimitEditing.name === name;
 
-    // Edit and Cancel share one recipe so the action column never changes size
-    const actionButton = 'px-3 py-1.5 text-xs font-medium rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700';
+    // Edit and Cancel share one recipe so the action column never changes
+    // size, and text-sm keeps them exactly as tall as the edit form's fields
+    const actionButton = 'px-3 py-1.5 text-sm font-medium rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700';
     const action = !canWrite
         ? ''
         : (editing
@@ -678,11 +709,11 @@ function renderRateLimitEditForm(kind, name, value, frame) {
                         ${frames}
                     </select>
                     <button type="button" onclick="saveRateLimit('${kind}', '${escapeJsArg(name)}')"
-                        class="px-3 py-1.5 text-xs font-medium rounded-lg bg-blue-600 hover:bg-blue-700 text-white">
+                        class="px-3 py-1.5 text-sm font-medium rounded-lg border border-transparent bg-blue-600 hover:bg-blue-700 text-white">
                         Save
                     </button>
                     <button type="button" onclick="removeRateLimit('${kind}', '${escapeJsArg(name)}')"
-                        class="px-3 py-1.5 text-xs font-medium rounded-lg border border-red-300 dark:border-red-500/40 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10">
+                        class="px-3 py-1.5 text-sm font-medium rounded-lg border border-red-300 dark:border-red-500/40 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10">
                         Remove limit
                     </button>
                 </div>
