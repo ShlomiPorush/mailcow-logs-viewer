@@ -6,12 +6,15 @@ import logging
 root = logging.getLogger()
 root.handlers = []
 
+import asyncio
+import time
+
 from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.datastructures import MutableHeaders
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 
 from .config import settings, set_cached_active_domains, reload_settings
 from .database import init_db, check_db_connection
@@ -54,6 +57,27 @@ logger = logging.getLogger(__name__)
 from .routers import status as status_router
 from .routers import messages as messages_router
 from .routers import settings as settings_router
+
+
+async def _loop_lag_watchdog():
+    """Log when the event loop is blocked.
+
+    Production runs a single uvicorn worker, so any blocking call in a
+    background job stalls every request. A 1s sleep that takes noticeably
+    longer than 1s is the cheapest proof that the stall is in-app rather
+    than in the network/reverse-proxy layer.
+    """
+    while True:
+        try:
+            start = asyncio.get_running_loop().time()
+            await asyncio.sleep(1)
+            lag = asyncio.get_running_loop().time() - start - 1
+            if lag > 1.0:
+                logger.warning(f"[LOOP-LAG] Event loop was blocked for ~{lag:.1f}s - a background job is likely running blocking work")
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            logger.debug(f"Loop lag watchdog iteration failed: {e}")
 
 
 @asynccontextmanager
@@ -178,12 +202,18 @@ async def lifespan(app: FastAPI):
         logger.error(f"Failed to start raw logs scheduler: {e}")
         # Non-fatal: main app still works without raw logs
     
+    # Event loop lag watchdog (diagnostics for occasional request stalls)
+    lag_watchdog_task = asyncio.create_task(_loop_lag_watchdog())
+
     logger.info("Application startup complete")
     
     yield
     
     # Shutdown
     logger.info("Shutting down application")
+    lag_watchdog_task.cancel()
+    with suppress(asyncio.CancelledError):
+        await lag_watchdog_task
     stop_raw_logs_scheduler()
     stop_scheduler()
     await mailcow_api.aclose()
@@ -262,7 +292,37 @@ class SecurityHeadersMiddleware:
         await self.app(scope, receive, send_with_headers)
 
 
+class SlowRequestLogMiddleware:
+    """Log requests that spend more than 3s inside the app.
+
+    Pure ASGI for the same reason as SecurityHeadersMiddleware above:
+    BaseHTTPMiddleware breaks the /ws/raw-logs upgrade. Only ``http``
+    scopes are timed; ``websocket``/``lifespan`` pass through untouched
+    (a long-lived WebSocket would always look "slow").
+    """
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        started = time.monotonic()
+        try:
+            await self.app(scope, receive, send)
+        finally:
+            elapsed = time.monotonic() - started
+            if elapsed > 3.0:
+                logger.warning(f"[SLOW-REQUEST] {scope['method']} {scope['path']} took {elapsed:.1f}s")
+
+
 app.add_middleware(SecurityHeadersMiddleware, csp=_CSP)
+
+# Registered last so it is the outermost middleware: the measured time then
+# covers auth/CORS/security-headers as well, not just the route handler.
+app.add_middleware(SlowRequestLogMiddleware)
 
 # Include routers
 app.include_router(auth_router.router, prefix="/api", tags=["Authentication"])
