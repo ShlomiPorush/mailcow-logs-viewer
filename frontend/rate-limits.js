@@ -165,7 +165,9 @@ function renderRateLimitActivityCard() {
     const options = [
         { hours: 24, label: 'Last 24 hours' },
         { hours: 168, label: 'Last 7 days' },
-        { hours: 720, label: 'Last 30 days' }
+        { hours: 720, label: 'Last 30 days' },
+        { hours: 2160, label: 'Last 90 days' },
+        { hours: 8760, label: 'Last year' }
     ].map(option => `
         <option value="${option.hours}" ${option.hours === rateLimitWindowHours ? 'selected' : ''}>${option.label}</option>
     `).join('');

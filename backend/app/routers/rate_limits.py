@@ -268,7 +268,7 @@ def _record_reset(db: Session, user: str, rl_hash: str) -> None:
 
 @router.get("/events")
 def get_rate_limit_events(
-    hours: int = Query(168, ge=1, le=720),
+    hours: int = Query(168, ge=1, le=8760),
     db: Session = Depends(get_db)
 ):
     """Senders that hit a rate limit in the window, grouped by sender, plus the

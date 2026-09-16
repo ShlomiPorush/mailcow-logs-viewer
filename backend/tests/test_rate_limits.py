@@ -417,7 +417,7 @@ def test_a_long_window_reports_daily_buckets(env):
     assert all(len(b) == len('2025-09-14') for b in buckets)
 
 
-@pytest.mark.parametrize('hours', [1, 24, 168, 720])
+@pytest.mark.parametrize('hours', [1, 24, 168, 720, 2160, 8760])
 def test_every_counted_hit_lands_in_exactly_one_bucket(env, hours):
     """The chart and the headline count must never disagree."""
     data = _events(hours=hours)

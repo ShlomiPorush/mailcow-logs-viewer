@@ -35,7 +35,7 @@ So there are two different fixes for a blocked sender:
 
 The first card shows **blocked sends over time** as a bar chart, so you can see whether this is a one-off or something that happens every day.
 
-*   The **window selector** on the right switches between **Last 24 hours**, **Last 7 days** and **Last 30 days** (the default). It controls this whole page, not just the chart.
+*   The **window selector** on the right switches between **Last 24 hours**, **Last 7 days**, **Last 30 days** (the default), **Last 90 days** and **Last year**. It controls this whole page, not just the chart.
 *   Over the 24 hour window each bar is **one hour**; over 7 and 30 days each bar is **one day**.
 *   Quiet buckets are drawn as gaps at zero rather than skipped, so the shape of the chart is honest.
 *   The subtitle above the chart summarises the window, for example *"1,204 blocked sends from 3 senders"*.
