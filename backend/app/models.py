@@ -146,8 +146,10 @@ class MessageCorrelation(Base):
     Correlation table to link related logs from different sources
     
     SIMPLIFIED APPROACH:
-    - Uses Message-ID as the primary correlation key (SHA256 hashed)
-    - Links all Postfix logs via Queue-ID
+    - One row per delivery leg, that is per (Message-ID, Postfix queue chain)
+    - Uses Message-ID as the primary correlation key (SHA256 hashed); an extra
+      leg of the same Message-ID hashes the Queue-ID in as well (issue #36)
+    - Links all Postfix logs of one leg via Queue-ID
     - Links Rspamd log via Message-ID match
     """
     __tablename__ = "message_correlations"
@@ -155,7 +157,11 @@ class MessageCorrelation(Base):
     id = Column(Integer, primary_key=True, index=True)
     correlation_key = Column(String(64), unique=True, index=True, nullable=False)
     
-    message_id = Column(String(255), index=True, unique=True)
+    # NOT unique (issue #36): a forward or any other re-submission delivers the
+    # same Message-ID through a second Postfix queue chain, and each of those
+    # delivery legs is its own correlation. The plain index lives in
+    # __table_args__ below, so there is exactly one index on this column.
+    message_id = Column(String(255))
     queue_id = Column(String(50), index=True)
     
     postfix_log_ids = Column(JSONB)
@@ -166,7 +172,16 @@ class MessageCorrelation(Base):
     subject = Column(Text)
     direction = Column(String(20))
     final_status = Column(String(50))
-    
+
+    # Outcome of the last hop, from the Dovecot LMTP logs (issue #65). Postfix
+    # only reports "handed over to Dovecot", so a Sieve discard used to show up
+    # as 'delivered'. Kept separate from final_status because the Postfix-driven
+    # jobs recompute that field and would otherwise overwrite the verdict.
+    # One of: stored | discarded | rejected | forwarded | failed
+    dovecot_status = Column(String(30), index=True)
+    dovecot_mailbox = Column(String(255))   # target folder, e.g. 'INBOX' or 'Junk'
+    dovecot_detail = Column(Text)           # reject reason, forward target, quota error
+
     is_complete = Column(Boolean, default=False, index=True)
     
     first_seen = Column(DateTime, index=True)

@@ -4,7 +4,7 @@ API endpoints for statistics and dashboard data
 import logging
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
-from sqlalchemy import func, and_
+from sqlalchemy import func, and_, cast, Integer
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
@@ -162,7 +162,7 @@ def get_timeline_stats(
         timeline = db.query(
             func.date_trunc('hour', RspamdLog.time).label('hour'),
             func.count(RspamdLog.id).label('count'),
-            func.sum(func.cast(RspamdLog.is_spam, func.Integer)).label('spam_count')
+            func.sum(cast(RspamdLog.is_spam, Integer)).label('spam_count')
         ).filter(
             RspamdLog.time >= cutoff
         ).group_by(

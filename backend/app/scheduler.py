@@ -3,7 +3,6 @@ Background scheduler
 """
 import logging
 import asyncio
-import hashlib
 import re
 import httpx
 import ipaddress
@@ -20,8 +19,23 @@ from sqlalchemy.exc import IntegrityError
 from .config import settings, set_cached_active_domains
 from .database import get_db_context, SessionLocal
 from .mailcow_api import mailcow_api
-from .models import PostfixLog, RspamdLog, NetfilterLog, MessageCorrelation, DMARCSync, DomainDNSCheck, MailboxStatistics, AliasStatistics, MonitoredHost, BlacklistCheck, DMARCReport, DMARCRecord, TLSReport, TLSReportPolicy, SpamSuppression
-from .correlation import detect_direction, parse_postfix_message
+from .models import PostfixLog, RspamdLog, NetfilterLog, MessageCorrelation, DMARCSync, DomainDNSCheck, MailboxStatistics, AliasStatistics, MonitoredHost, BlacklistCheck, DMARCReport, DMARCRecord, TLSReport, TLSReportPolicy, SpamSuppression, RawServiceLog, SystemSetting
+from .correlation import (
+    build_correlation_key,
+    detect_direction,
+    ensure_leg,
+    find_legs,
+    find_stub_leg,
+    group_postfix_logs_by_queue,
+    nearest_queue_chain,
+    parse_postfix_message,
+)
+from .services.dovecot_parser import (
+    NON_DELIVERY_VERDICTS,
+    parse_dovecot_message,
+    pick_worst_verdict,
+    resolve_session_verdicts,
+)
 from .routers.domains import check_domain_dns, save_dns_check_to_db
 from .services.dmarc_imap_service import sync_dmarc_reports_from_imap
 from .services.dmarc_notifications import send_dmarc_error_notification
@@ -108,6 +122,7 @@ def reschedule_interval_jobs():
         _reschedule_suppression_jobs()
         _reschedule_smtp_abuse_job()
         _reschedule_anomaly_job()
+        _reschedule_dovecot_correlation_job()
 
     except Exception as e:
         logger.warning("Failed to reschedule interval jobs: %s", e)
@@ -154,6 +169,31 @@ def _reschedule_anomaly_job():
     else:
         try:
             scheduler.remove_job('anomaly_detection')
+        except Exception:
+            pass
+
+
+def _reschedule_dovecot_correlation_job():
+    """
+    Add or remove the Dovecot correlation job when settings are reloaded - it
+    depends on raw log collection, which can be toggled from the settings UI.
+    """
+    if not scheduler.running:
+        return
+    if dovecot_correlation_available():
+        scheduler.add_job(
+            correlate_dovecot_logs,
+            trigger=IntervalTrigger(seconds=60),
+            id='correlate_dovecot',
+            name='Correlate Dovecot Deliveries',
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+        )
+    else:
+        try:
+            scheduler.remove_job('correlate_dovecot')
+            logger.info("   [DOVECOT] Delivery correlation stopped - raw Dovecot logs no longer collected")
         except Exception:
             pass
 
@@ -239,6 +279,7 @@ job_status = {
     'complete_correlations': {'last_run': None, 'status': 'idle', 'error': None},
     'update_final_status': {'last_run': None, 'status': 'idle', 'error': None},
     'expire_correlations': {'last_run': None, 'status': 'idle', 'error': None},
+    'correlate_dovecot': {'last_run': None, 'status': 'idle', 'error': None},
     'cleanup_logs': {'last_run': None, 'status': 'idle', 'error': None},
     'cleanup_dmarc_reports': {'last_run': None, 'status': 'idle', 'error': None},
     'check_app_version': {'last_run': None, 'status': 'idle', 'error': None},
@@ -1236,117 +1277,85 @@ async def run_correlation():
 def correlate_single_message(db: Session, rspamd_log: RspamdLog) -> Optional[MessageCorrelation]:
     """
     Correlate a single Rspamd log with Postfix logs.
-    
+
     Steps:
-    1. Check if correlation already exists for this message_id
-    2. Find Postfix logs with same message_id => get queue_id
-    3. Find ALL Postfix logs with that queue_id
-    4. Create or update correlation
+    1. Find Postfix logs with the same message_id and split them into queue
+       chains - each chain is a delivery leg of its own (issue #36)
+    2. Give every leg a correlation, so a forward or any other re-submission
+       never overwrites the delivery it came from
+    3. Attach this Rspamd verdict to the leg nearest to it in time: every
+       re-submission passes Rspamd separately, seconds from its own chain
+    4. With no Postfix log yet, keep one queue-less correlation that adopts
+       the first chain to arrive
     """
     message_id = rspamd_log.message_id
     if not message_id:
         return None
-    
-    # Step 1: Check if correlation already exists
-    existing = db.query(MessageCorrelation).filter(
-        MessageCorrelation.message_id == message_id
-    ).first()
-    
+
+    # Steps 1-3: one correlation per queue chain
+    postfix_with_msgid = db.query(PostfixLog).filter(
+        PostfixLog.message_id == message_id
+    ).all()
+    chains = group_postfix_logs_by_queue(postfix_with_msgid)
+
+    if chains:
+        target_queue = nearest_queue_chain(chains, rspamd_log.time)
+        correlation = None
+
+        for queue_id in chains:
+            # The whole chain, including the lines that do not repeat the
+            # Message-ID (Postfix only logs it once per queue id)
+            chain_logs = db.query(PostfixLog).filter(
+                PostfixLog.queue_id == queue_id
+            ).all() or chains[queue_id]
+
+            leg = ensure_leg(
+                db, message_id, queue_id, chain_logs,
+                rspamd_log=rspamd_log if queue_id == target_queue else None
+            )
+            if queue_id == target_queue:
+                correlation = leg
+
+        if correlation:
+            rspamd_log.correlation_key = correlation.correlation_key
+            if not correlation.rspamd_log_id:
+                correlation.rspamd_log_id = rspamd_log.id
+            db.commit()
+            logger.debug(
+                f"Correlated {message_id[:40]}... to queue {target_queue} "
+                f"({len(chains)} delivery leg(s))"
+            )
+        return correlation
+
+    # Step 4: no queue chain known yet - reuse the waiting correlation
+    existing = find_stub_leg(db, message_id)
+    if not existing:
+        legs = find_legs(db, message_id)
+        existing = legs[0] if legs else None
+
     if existing:
-        # Just update the rspamd log with correlation key
         rspamd_log.correlation_key = existing.correlation_key
         if not existing.rspamd_log_id:
             existing.rspamd_log_id = rspamd_log.id
             existing.last_seen = datetime.now(timezone.utc)
         db.commit()
         return existing
-    
-    # Step 2: Find Postfix logs with this message_id
-    postfix_with_msgid = db.query(PostfixLog).filter(
-        PostfixLog.message_id == message_id
-    ).all()
-    
-    # Get queue_id from Postfix logs
-    queue_id = None
-    for plog in postfix_with_msgid:
-        if plog.queue_id:
-            queue_id = plog.queue_id
-            break
-    
-    # Step 3: Find ALL Postfix logs with this queue_id
-    all_postfix_logs: List[PostfixLog] = []
-    if queue_id:
-        all_postfix_logs = db.query(PostfixLog).filter(
-            PostfixLog.queue_id == queue_id
-        ).all()
-    
-    # Step 4: Double-check no correlation exists (race condition protection)
-    existing_check = db.query(MessageCorrelation).filter(
-        MessageCorrelation.message_id == message_id
-    ).first()
-    
-    if existing_check:
-        # Another process created it, just link and return
-        rspamd_log.correlation_key = existing_check.correlation_key
-        if not existing_check.rspamd_log_id:
-            existing_check.rspamd_log_id = rspamd_log.id
-        db.commit()
-        return existing_check
-    
-    # Create correlation
-    correlation_key = hashlib.sha256(f"msgid:{message_id}".encode()).hexdigest()
-    
+
+    correlation_key = build_correlation_key(db, message_id, None)
+    if not correlation_key:
+        return None
+
     # Get recipient
     recipients = rspamd_log.recipients_smtp or []
     first_recipient = recipients[0] if recipients else None
-    
-    # Determine final status from Postfix logs
+
+    # Without Postfix logs the Rspamd action is the only verdict there is
     final_status = None
-    for plog in all_postfix_logs:
-        if plog.status:
-            if plog.status in ['bounced', 'rejected']:
-                final_status = plog.status
-                break
-            elif plog.status == 'deferred' and not final_status:
-                final_status = plog.status
-            elif plog.status == 'sent' and not final_status:
-                final_status = 'delivered'
-    
-    # Use Rspamd action if no Postfix status
-    if not final_status:
-        if rspamd_log.action == 'reject':
-            final_status = 'rejected'
-        elif rspamd_log.is_spam:
-            final_status = 'spam'
-    
-    # Check if email was delivered locally (relay=dovecot + both sender and recipient are local domains)
-    # This is the definitive way to determine if email is internal
-    direction = rspamd_log.direction
-    
-    # Check if sender and recipient are both local domains
-    from .correlation import extract_domain, is_local_domain
-    sender_domain = extract_domain(rspamd_log.sender_smtp)
-    recipients = rspamd_log.recipients_smtp or []
-    
-    sender_is_local = sender_domain and is_local_domain(sender_domain)
-    all_recipients_local = True
-    if recipients:
-        for recipient in recipients:
-            recipient_domain = extract_domain(recipient)
-            if not recipient_domain or not is_local_domain(recipient_domain):
-                all_recipients_local = False
-                break
-    else:
-        all_recipients_local = False
-    
-    # Only mark as internal if: relay=dovecot AND sender is local AND all recipients are local
-    if sender_is_local and all_recipients_local:
-        for plog in all_postfix_logs:
-            if plog.relay and 'dovecot' in plog.relay.lower():
-                direction = 'internal'
-                rspamd_log.direction = 'internal'
-                break
-    
+    if rspamd_log.action == 'reject':
+        final_status = 'rejected'
+    elif rspamd_log.is_spam:
+        final_status = 'spam'
+
     # Get earliest timestamp (ensure timezone-aware)
     now = datetime.now(timezone.utc)
     first_seen = rspamd_log.time
@@ -1354,54 +1363,51 @@ def correlate_single_message(db: Session, rspamd_log: RspamdLog) -> Optional[Mes
         first_seen = first_seen.replace(tzinfo=timezone.utc)
     if not first_seen:
         first_seen = now
-    
+
     try:
         # Create correlation
         correlation = MessageCorrelation(
             correlation_key=correlation_key,
             message_id=message_id,
-            queue_id=queue_id,
+            queue_id=None,
             sender=rspamd_log.sender_smtp,
             recipient=first_recipient,
             subject=rspamd_log.subject,
-            direction=direction,
+            direction=rspamd_log.direction,
             final_status=final_status,
             rspamd_log_id=rspamd_log.id,
-            postfix_log_ids=[plog.id for plog in all_postfix_logs] if all_postfix_logs else [],
+            postfix_log_ids=[],
             first_seen=first_seen,
             last_seen=now,
-            is_complete=bool(queue_id and all_postfix_logs)
+            is_complete=False
         )
-        
+
         db.add(correlation)
-        db.flush()  # Try to insert - will fail if duplicate
-        
+        db.flush()  # Try to insert - will fail if the key was just taken
+
         # Update rspamd log with correlation key
         rspamd_log.correlation_key = correlation_key
-        
-        # Update all postfix logs with correlation key
-        for plog in all_postfix_logs:
-            plog.correlation_key = correlation_key
-        
+
         db.commit()
-        
-        logger.debug(f"Created correlation for {message_id[:40]}... (queue: {queue_id}, {len(all_postfix_logs)} postfix logs)")
+
+        logger.debug(f"Created correlation for {message_id[:40]}... (no Postfix logs yet)")
         return correlation
-        
+
     except Exception as e:
         # Handle race condition - another process created the correlation
         db.rollback()
-        
+
         # Try to find and return the existing one
-        existing = db.query(MessageCorrelation).filter(
-            MessageCorrelation.message_id == message_id
-        ).first()
-        
+        existing = find_stub_leg(db, message_id)
+        if not existing:
+            legs = find_legs(db, message_id)
+            existing = legs[0] if legs else None
+
         if existing:
             rspamd_log.correlation_key = existing.correlation_key
             db.commit()
             return existing
-        
+
         # Re-raise if it's a different error
         raise
 
@@ -1435,24 +1441,31 @@ async def complete_incomplete_correlations():
             
             for correlation in incomplete:
                 try:
-                    # Find Postfix logs with this message_id
-                    postfix_with_msgid = db.query(PostfixLog).filter(
-                        PostfixLog.message_id == correlation.message_id
-                    ).all()
-                    
-                    if not postfix_with_msgid:
-                        continue
-                    
-                    # Get queue_id
-                    queue_id = None
-                    for plog in postfix_with_msgid:
-                        if plog.queue_id:
-                            queue_id = plog.queue_id
-                            break
-                    
+                    # A leg that already owns a queue chain completes from that
+                    # chain and no other; only a queue-less correlation may
+                    # adopt one, and then only a chain no other leg of the same
+                    # message has claimed (issue #36).
+                    queue_id = correlation.queue_id
+
+                    if not queue_id:
+                        postfix_with_msgid = db.query(PostfixLog).filter(
+                            PostfixLog.message_id == correlation.message_id
+                        ).all()
+
+                        if not postfix_with_msgid:
+                            continue
+
+                        chains = group_postfix_logs_by_queue(postfix_with_msgid)
+                        claimed = {
+                            leg.queue_id
+                            for leg in find_legs(db, correlation.message_id)
+                            if leg.queue_id
+                        }
+                        queue_id = next((q for q in chains if q not in claimed), None)
+
                     if not queue_id:
                         continue
-                    
+
                     # Find ALL Postfix logs with this queue_id
                     all_postfix = db.query(PostfixLog).filter(
                         PostfixLog.queue_id == queue_id
@@ -1464,15 +1477,17 @@ async def complete_incomplete_correlations():
                     correlation.is_complete = True
                     correlation.last_seen = datetime.now(timezone.utc)
                     
-                    # Update final status
+                    # Update final status. A 'discarded' verdict from Dovecot is kept:
+                    # Postfix logs status=sent for a message Sieve then drops,
+                    # so only a real bounce/reject may override it (issue #65).
                     for plog in all_postfix:
                         if plog.status:
                             if plog.status in ['bounced', 'rejected']:
                                 correlation.final_status = plog.status
                                 break
-                            elif plog.status == 'deferred' and correlation.final_status not in ['bounced', 'rejected']:
+                            elif plog.status == 'deferred' and correlation.final_status not in ['bounced', 'rejected', 'discarded'] and correlation.dovecot_status != 'discarded':
                                 correlation.final_status = plog.status
-                            elif plog.status == 'sent' and not correlation.final_status:
+                            elif plog.status == 'sent' and not correlation.final_status and correlation.dovecot_status != 'discarded':
                                 correlation.final_status = 'delivered'
                     
                     # Update correlation key in Postfix logs
@@ -1531,6 +1546,10 @@ async def expire_old_correlations():
             expired_count = 0
             for corr in expired_correlations:
                 corr.is_complete = True  # Mark as complete so we stop trying
+                # A discarded message already has its definitive outcome from
+                # Dovecot (issue #65) - don't relabel it as expired
+                if corr.final_status == 'discarded' or corr.dovecot_status == 'discarded':
+                    continue
                 corr.final_status = "expired"  # Set status to expired
                 expired_count += 1
             
@@ -1547,7 +1566,9 @@ async def expire_old_correlations():
 
 
 # The statuses a correlation never moves away from once it has them.
-TERMINAL_FINAL_STATUSES = ('delivered', 'bounced', 'rejected', 'expired')
+# 'discarded' is terminal in the same sense: Dovecot already dropped the
+# message via Sieve, and a later Postfix 'sent' line must not resurrect it.
+TERMINAL_FINAL_STATUSES = ('delivered', 'bounced', 'rejected', 'discarded', 'expired')
 
 # The push path additionally refuses to touch a spam verdict. routers/stats.py
 # counts final_status 'spam' as blocked mail, and a late delivery line would
@@ -1600,6 +1621,13 @@ def _recompute_correlation_from_postfix(db: Session, correlation: MessageCorrela
                     new_final_status = 'delivered'
             elif plog.status == 'deferred' and new_final_status not in ['bounced', 'rejected', 'delivered']:
                 new_final_status = 'deferred'
+
+    # A Sieve discard is invisible from Postfix's side: Dovecot answers 2xx and
+    # then drops the message, so Postfix truthfully logs status=sent. Keep the
+    # Dovecot verdict in that case (issue #65). A genuine bounce or reject means
+    # the delivery itself failed and must still win.
+    if correlation.dovecot_status == 'discarded' and new_final_status == 'delivered':
+        new_final_status = 'discarded'
 
     # Add any Postfix logs this correlation does not know about yet
     current_ids = list(correlation.postfix_log_ids or [])
@@ -1747,6 +1775,236 @@ async def update_final_status_for_correlations():
     except Exception as e:
         logger.error(f"[ERROR] Update final status error: {e}")
         update_job_status('update_final_status', 'failed', str(e))
+
+
+# Watermark key in system_settings, so the Dovecot job resumes where it left
+# off across restarts instead of rescanning the whole raw log table.
+DOVECOT_WATERMARK_KEY = 'dovecot_correlation_last_id'
+DOVECOT_BATCH_SIZE = 2000
+# How long a Dovecot line that arrived before its correlation exists is kept
+# around in-process and retried. Matches the pace at which run_correlation
+# turns Rspamd logs into correlations.
+DOVECOT_PENDING_MAX_AGE = timedelta(minutes=15)
+
+# Parsed delivery events whose Message-ID had no correlation yet, keyed by
+# msgid: {'first_seen': datetime, 'events': [...]}. Kept in-process (bounded by
+# the 15-minute prune) so each cycle only retries these instead of re-reading
+# and re-parsing a whole lookback window from the database.
+_dovecot_pending: Dict[str, Dict[str, Any]] = {}
+
+
+def dovecot_correlation_available() -> bool:
+    """
+    Dovecot correlation reads the raw logs the Live Logs worker already ingests,
+    so it is only possible while that worker actually collects Dovecot.
+    """
+    return (
+        settings.is_feature_enabled('logs')
+        and settings.raw_logs_enabled
+        and 'dovecot' in settings.raw_logs_services_list
+    )
+
+
+def _apply_dovecot_verdict(correlation: MessageCorrelation) -> None:
+    """
+    Let the Dovecot verdict override the Postfix-derived final_status (issue #65).
+
+    Only ``discarded`` is applied: on a Sieve reject or a failed store (quota,
+    missing folder) Dovecot returns an error to Postfix, so the Postfix status
+    is already the truthful one. Those verdicts stay in dovecot_status/-_detail
+    and are surfaced as delivery details instead.
+    """
+    if correlation.dovecot_status != 'discarded':
+        return
+    # A message that failed on the Postfix side never reached Dovecot in that
+    # delivery attempt - don't mask a real bounce with a stale Sieve verdict.
+    if correlation.final_status in ('bounced', 'rejected', 'deferred'):
+        return
+    correlation.final_status = 'discarded'
+
+
+def _leg_for_dovecot_event(
+    legs: List[MessageCorrelation],
+    event: Dict[str, Any]
+) -> Optional[MessageCorrelation]:
+    """
+    Pick the delivery leg an LMTP event belongs to (issue #36).
+
+    A Message-ID can map to several legs, and the LMTP line names the mailbox
+    it was delivered to, so the recipient is what tells them apart. With a
+    single leg there is nothing to tell apart. Several legs and no recipient
+    match means the line cannot be attributed - guessing would put a Sieve
+    verdict on a delivery that never saw it.
+    """
+    recipient = (event.get('recipient') or '').strip().lower()
+    if recipient:
+        for leg in legs:
+            if (leg.recipient or '').strip().lower() == recipient:
+                return leg
+    if len(legs) == 1:
+        return legs[0]
+    return None
+
+
+async def correlate_dovecot_logs():
+    """
+    Attach the Dovecot LMTP delivery outcome to correlated messages (issue #65).
+
+    Postfix hands the message to Dovecot and logs status=sent; what Dovecot then
+    does with it - store it, file it into Junk, forward it, or drop it via a
+    Sieve ``discard`` - was previously invisible. Every relevant Dovecot line
+    carries ``msgid=``, which is the key the correlations are already built on.
+
+    Reads the Dovecot entries the raw logs worker has already fetched (no extra
+    mailcow API calls), walking forward from a stored id watermark. Lines whose
+    correlation does not exist yet are parked in _dovecot_pending and retried
+    for up to DOVECOT_PENDING_MAX_AGE, so the per-cycle work stays proportional
+    to the new rows plus the pending backlog - never to a whole time window.
+    """
+    update_job_status('correlate_dovecot', 'running')
+
+    if not dovecot_correlation_available():
+        update_job_status('correlate_dovecot', 'success')
+        return
+
+    try:
+        with get_db_context() as db:
+            watermark_row = db.query(SystemSetting).filter(
+                SystemSetting.key == DOVECOT_WATERMARK_KEY
+            ).first()
+            try:
+                watermark = int(watermark_row.value) if watermark_row and watermark_row.value else 0
+            except (TypeError, ValueError):
+                watermark = 0
+
+            # Drop parked events whose correlation never appeared
+            now = datetime.utcnow()
+            for msgid in [m for m, p in _dovecot_pending.items()
+                          if p['first_seen'] < now - DOVECOT_PENDING_MAX_AGE]:
+                del _dovecot_pending[msgid]
+
+            # The watermark walk: strictly new rows, in insertion order, always
+            # advancing - a large backlog is worked off across cycles without
+            # ever starving the newest rows behind a re-scanned window.
+            rows = db.query(RawServiceLog.id, RawServiceLog.time, RawServiceLog.raw_data).filter(
+                RawServiceLog.service == 'dovecot',
+                RawServiceLog.id > watermark,
+                # Only delivery lines carry a Message-ID; skipping the IMAP and
+                # connection noise in SQL keeps the batch size meaningful and
+                # avoids shipping megabytes of irrelevant JSONB per cycle.
+                RawServiceLog.raw_data['message'].astext.like('%msgid=%')
+            ).order_by(RawServiceLog.id).limit(DOVECOT_BATCH_SIZE).all()
+
+            # Group the parsed delivery events by Message-ID
+            events_by_msgid: Dict[str, List[Dict[str, Any]]] = {}
+            max_id = watermark
+            for row_id, row_time, raw_data in rows:
+                if row_id > max_id:
+                    max_id = row_id
+                event = parse_dovecot_message((raw_data or {}).get('message'))
+                if not event:
+                    continue
+                event['time'] = row_time
+                events_by_msgid.setdefault(event['message_id'], []).append(event)
+
+            # Retry the parked events alongside the fresh ones
+            for msgid, parked in _dovecot_pending.items():
+                events_by_msgid.setdefault(msgid, []).extend(parked['events'])
+
+            updated_count = 0
+
+            if events_by_msgid:
+                msgids = list(events_by_msgid.keys())
+                # A Message-ID can have several delivery legs (issue #36), so
+                # this maps to a list and every event is routed to its own leg.
+                correlations: Dict[str, List[MessageCorrelation]] = {}
+                # Chunked IN() lookups on the indexed message_id column
+                for i in range(0, len(msgids), 500):
+                    chunk = msgids[i:i + 500]
+                    for corr in db.query(MessageCorrelation).filter(
+                        MessageCorrelation.message_id.in_(chunk)
+                    ).order_by(MessageCorrelation.id).all():
+                        correlations.setdefault(corr.message_id, []).append(corr)
+
+                for message_id, events in events_by_msgid.items():
+                    legs = correlations.get(message_id)
+                    if not legs:
+                        # No correlation yet (Rspamd log not processed) - park
+                        # the events and retry them on the next cycles.
+                        parked = _dovecot_pending.setdefault(
+                            message_id, {'first_seen': now, 'events': []}
+                        )
+                        parked['events'] = events
+                        continue
+
+                    _dovecot_pending.pop(message_id, None)
+
+                    # Split the events per delivery leg before resolving them,
+                    # so a Sieve verdict never lands on another leg's delivery.
+                    events_per_leg: Dict[str, Any] = {}
+                    for event in events:
+                        leg = _leg_for_dovecot_event(legs, event)
+                        if leg is None:
+                            logger.debug(
+                                f"[DOVECOT] {message_id[:40]} has {len(legs)} delivery legs and "
+                                f"none matches recipient {event.get('recipient')} - event skipped"
+                            )
+                            continue
+                        events_per_leg.setdefault(leg.correlation_key, (leg, []))[1].append(event)
+
+                    for correlation, leg_events in events_per_leg.values():
+                        resolved = resolve_session_verdicts(leg_events)
+                        if not resolved:
+                            continue
+
+                        verdict = pick_worst_verdict([e['verdict'] for e in resolved])
+                        if not verdict:
+                            continue
+
+                        # Prefer the event that produced the winning verdict for the
+                        # mailbox/detail shown next to it.
+                        winner = next((e for e in reversed(resolved) if e['verdict'] == verdict), resolved[-1])
+
+                        previous_status = correlation.dovecot_status
+                        previous_final = correlation.final_status
+
+                        mailbox = winner.get('mailbox')
+                        correlation.dovecot_status = verdict
+                        correlation.dovecot_mailbox = mailbox[:255] if mailbox else None
+                        correlation.dovecot_detail = winner.get('detail')
+
+                        if verdict != 'discarded' and previous_final == 'discarded':
+                            # A later delivery attempt actually stored the message -
+                            # re-derive from Postfix instead of leaving the stale
+                            # override behind.
+                            _recompute_correlation_from_postfix(db, correlation)
+                        else:
+                            _apply_dovecot_verdict(correlation)
+
+                        if previous_status != verdict or previous_final != correlation.final_status:
+                            updated_count += 1
+                            if verdict in NON_DELIVERY_VERDICTS:
+                                logger.info(
+                                    f"[DOVECOT] {message_id[:40]} -> {verdict}"
+                                    f"{' (' + correlation.dovecot_detail + ')' if correlation.dovecot_detail else ''}"
+                                )
+
+            if max_id > watermark:
+                if watermark_row:
+                    watermark_row.value = str(max_id)
+                else:
+                    db.add(SystemSetting(key=DOVECOT_WATERMARK_KEY, value=str(max_id)))
+
+            db.commit()
+
+            if updated_count > 0:
+                logger.info(f"[DOVECOT] Applied delivery verdict to {updated_count} messages")
+
+        update_job_status('correlate_dovecot', 'success')
+
+    except Exception as e:
+        logger.error(f"[ERROR] Dovecot correlation error: {e}")
+        update_job_status('correlate_dovecot', 'failed', str(e))
 
 
 async def update_geoip_database():
@@ -2550,14 +2808,28 @@ def safe_float(value, default=0.0):
     except (ValueError, TypeError):
         return default
 
+def _mailbox_sync_needed() -> bool:
+    """Whether the mailbox sync still has a consumer.
+
+    The sync fills `mailbox_statistics`, and that table feeds two features, not
+    one: Rate Limits reads each mailbox's configured limit (rl_value/rl_frame)
+    from it, looks domains up in it, and mirrors edits into it. So the sync has
+    to keep running while either feature is enabled - otherwise turning Mailbox
+    Stats off would quietly freeze the Rate Limits page on stale data and break
+    it outright for mailboxes created afterwards.
+    """
+    return (settings.is_feature_enabled('mailbox-stats')
+            or settings.is_feature_enabled('rate-limits'))
+
+
 async def update_mailbox_statistics():
     """
     Fetch mailbox statistics from mailcow API and update the database.
     Runs every 5 minutes.
     Also removes mailboxes that no longer exist in mailcow.
     """
-    if not settings.is_feature_enabled('mailbox-stats'):
-        logger.debug("[MAILBOX] Feature disabled, skipping mailbox statistics")
+    if not _mailbox_sync_needed():
+        logger.debug("[MAILBOX] Mailbox Stats and Rate Limits are both disabled, skipping mailbox statistics")
         return
     update_job_status('mailbox_stats', 'running')
     logger.info("Starting mailbox statistics update...")
@@ -3174,11 +3446,76 @@ async def cleanup_deferred_queue_job():
         update_job_status('cleanup_deferred_queue', 'failed', str(e))
 
 
+def _run_disabled_feature_cleanup(db: Session) -> None:
+    """The deletions behind cleanup_disabled_feature_data (see there)."""
+    from .models import SystemSetting
+    from .routers.rate_limits import _RESETS_KEY
+
+    mailbox_stats_off = not settings.is_feature_enabled('mailbox-stats')
+    rate_limits_off = not settings.is_feature_enabled('rate-limits')
+    deleted = {}
+
+    if mailbox_stats_off:
+        # Aliases are shown by Mailbox Stats alone - nothing else reads them
+        removed = db.query(AliasStatistics).delete(synchronize_session=False)
+        if removed:
+            deleted['alias_statistics'] = removed
+
+    if mailbox_stats_off and rate_limits_off:
+        # Shared infrastructure: while Rate Limits is on it still reads the
+        # configured limits out of this table, so it may only go when both are
+        # off (see _mailbox_sync_needed)
+        removed = db.query(MailboxStatistics).delete(synchronize_session=False)
+        if removed:
+            deleted['mailbox_statistics'] = removed
+
+    if rate_limits_off:
+        # The audit of "who reset which counter", kept in system_settings
+        removed = db.query(SystemSetting).filter(
+            SystemSetting.key == _RESETS_KEY).delete(synchronize_session=False)
+        if removed:
+            deleted['rate_limit_resets'] = removed
+
+    db.commit()
+    if deleted:
+        logger.info("[FEATURES] Removed data left behind by disabled features: "
+                    + ", ".join(f"{table}={rows}" for table, rows in deleted.items()))
+
+
+def cleanup_disabled_feature_data(db: Optional[Session] = None) -> None:
+    """Drop the data of features that are currently switched off.
+
+    Turning a feature off should take its data with it instead of leaving rows
+    nobody can reach. The rules are read from the *current* disabled set rather
+    than from a transition, so this is idempotent and safe to run on every
+    startup and after every settings save.
+
+    Never raises: a failure here must not stop the app from starting or a
+    settings save from succeeding.
+    """
+    try:
+        if db is not None:
+            _run_disabled_feature_cleanup(db)
+        else:
+            with get_db_context() as own_db:
+                _run_disabled_feature_cleanup(own_db)
+    except Exception as e:
+        logger.warning(f"[FEATURES] Could not clean up disabled feature data: {e}")
+        if db is not None:
+            try:
+                db.rollback()
+            except Exception:
+                pass
+
+
 def start_scheduler():
     """Start the background scheduler"""
     try:
         # Run one-time blacklist cleanup on startup
         cleanup_blacklisted_data()
+
+        # Features switched off in the meantime should not leave data behind
+        cleanup_disabled_feature_data()
         
         # Job 1: Fetch logs from API (every fetch_interval seconds)
         scheduler.add_job(
@@ -3232,7 +3569,23 @@ def start_scheduler():
             replace_existing=True,
             max_instances=1
         )
-        
+
+        # Job 5b: Attach the Dovecot delivery outcome (Sieve discard, target
+        # folder, quota errors) to correlated messages - issue #65
+        if dovecot_correlation_available():
+            scheduler.add_job(
+                correlate_dovecot_logs,
+                trigger=IntervalTrigger(seconds=60),
+                id='correlate_dovecot',
+                name='Correlate Dovecot Deliveries',
+                replace_existing=True,
+                max_instances=1,
+                coalesce=True
+            )
+        else:
+            logger.info("   [DOVECOT] Delivery correlation inactive - needs raw log "
+                        "collection with the 'dovecot' service enabled")
+
         # Job 6: Cleanup old logs (daily at 2 AM)
         scheduler.add_job(
             cleanup_old_logs,
@@ -3376,7 +3729,9 @@ def start_scheduler():
             logger.info("Scheduled initial DMARC IMAP sync on startup")
 
         # Job 13: Mailbox Statistics (every 5 minutes)
-        if settings.is_feature_enabled('mailbox-stats'):
+        # Rate Limits reads the configured mailbox limits out of the table this
+        # job fills, so it runs while either feature is enabled.
+        if _mailbox_sync_needed():
             scheduler.add_job(
                 update_mailbox_statistics,
                 IntervalTrigger(minutes=5),
@@ -3385,7 +3740,7 @@ def start_scheduler():
                 replace_existing=True,
                 max_instances=1
             )
-            
+
             # Run once on startup (after 45 seconds)
             scheduler.add_job(
                 update_mailbox_statistics,
@@ -3395,8 +3750,13 @@ def start_scheduler():
                 name='Mailbox Statistics (Startup)'
             )
             logger.info("Scheduled mailbox statistics job (interval: 5 minutes)")
+        else:
+            logger.info("   [FEATURE] Mailbox Stats and Rate Limits both disabled - skipping mailbox stats job")
 
-            # Job 14: Alias Statistics (every 5 minutes)
+        # Job 14: Alias Statistics (every 5 minutes)
+        # Aliases are shown by Mailbox Stats alone, so this one stays gated on
+        # that feature only.
+        if settings.is_feature_enabled('mailbox-stats'):
             scheduler.add_job(
                 update_alias_statistics,
                 IntervalTrigger(minutes=5),
@@ -3405,7 +3765,7 @@ def start_scheduler():
                 replace_existing=True,
                 max_instances=1
             )
-            
+
             # Run once on startup (after 50 seconds)
             scheduler.add_job(
                 update_alias_statistics,
@@ -3416,7 +3776,7 @@ def start_scheduler():
             )
             logger.info("Scheduled alias statistics job (interval: 5 minutes)")
         else:
-            logger.info("   [FEATURE] Mailbox Stats feature disabled - skipping mailbox/alias stats jobs")
+            logger.info("   [FEATURE] Mailbox Stats feature disabled - skipping alias stats job")
 
         # Job 15: Blacklist Check (daily at 5 AM)
         if settings.is_feature_enabled('blacklist'):

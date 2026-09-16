@@ -15,7 +15,7 @@ from ..database import get_db
 from ..models import PostfixLog, RspamdLog, NetfilterLog, MessageCorrelation
 from ..config import settings, EDITABLE_SETTING_KEYS, reload_settings, Settings
 from ..config import _get_field_annotations, get_env_locked_keys
-from ..scheduler import last_fetch_run_time, get_job_status, update_job_status, reschedule_interval_jobs
+from ..scheduler import last_fetch_run_time, get_job_status, update_job_status, reschedule_interval_jobs, dovecot_correlation_available, cleanup_disabled_feature_data
 from ..services.settings_store import get_config_overrides_from_db, save_config_overrides_to_db, has_config_overrides_in_db, get_maxmind_validation_status, save_maxmind_validation_status, clear_maxmind_validation_status
 from ..services.connection_test import test_smtp_connection, test_imap_connection
 from ..services.geoip_downloader import is_license_configured, get_geoip_status
@@ -245,6 +245,15 @@ def get_settings_info(db: Session = Depends(get_db)):
                     "status": jobs_status.get('expire_correlations', {}).get('status', 'unknown'),
                     "last_run": format_datetime_utc(jobs_status.get('expire_correlations', {}).get('last_run')),
                     "error": jobs_status.get('expire_correlations', {}).get('error')
+                },
+                "correlate_dovecot": {
+                    "interval": "60 seconds (1 minute)" if dovecot_correlation_available()
+                               else "Disabled (needs raw log collection with the 'dovecot' service)",
+                    "description": "Adds the Dovecot delivery outcome (Sieve discard, target folder, quota errors) to messages",
+                    "feature_disabled": not dovecot_correlation_available(),
+                    "status": jobs_status.get('correlate_dovecot', {}).get('status', 'unknown'),
+                    "last_run": format_datetime_utc(jobs_status.get('correlate_dovecot', {}).get('last_run')),
+                    "error": jobs_status.get('correlate_dovecot', {}).get('error')
                 },
                 "cleanup_logs": {
                     "schedule": "Daily at 2 AM",
@@ -609,6 +618,8 @@ def update_settings(body: Dict[str, Any], db: Session = Depends(get_db)):
     prev_sync_sources = (settings.blacklist_source_transports, settings.blacklist_source_relayhosts)
     save_config_overrides_to_db(db, allowed)
     reload_settings(db)
+    # A feature switched off here should drop its data now, not at the next restart
+    cleanup_disabled_feature_data(db)
     mailcow_api.reload_config()
     oauth2_client.reload_config()
     reschedule_interval_jobs()
@@ -937,6 +948,7 @@ def trigger_job(job_name: str, background_tasks: BackgroundTasks):
     - complete_correlations: Link Postfix logs to messages
     - update_final_status: Update final status for correlations
     - expire_correlations: Mark old incomplete correlations as expired
+    - correlate_dovecot: Attach the Dovecot delivery outcome to messages
     - cleanup_logs: Remove old logs
     - cleanup_dmarc_reports: Remove old DMARC/TLS reports
     - check_app_version: Check for app updates
@@ -956,6 +968,7 @@ def trigger_job(job_name: str, background_tasks: BackgroundTasks):
         complete_incomplete_correlations,
         update_final_status_for_correlations,
         expire_old_correlations,
+        correlate_dovecot_logs,
         cleanup_old_logs,
         cleanup_old_dmarc_reports,
         check_app_version_update,
@@ -986,6 +999,7 @@ def trigger_job(job_name: str, background_tasks: BackgroundTasks):
         'complete_correlations': ('complete_correlations', complete_incomplete_correlations, False),
         'update_final_status': ('update_final_status', update_final_status_for_correlations, False),
         'expire_correlations': ('expire_correlations', expire_old_correlations, False),
+        'correlate_dovecot': ('correlate_dovecot', correlate_dovecot_logs, False),
         'cleanup_logs': ('cleanup_logs', cleanup_old_logs, False),
         'cleanup_dmarc_reports': ('cleanup_dmarc_reports', cleanup_old_dmarc_reports, False),
         'check_app_version': ('check_app_version', check_app_version_update, False),

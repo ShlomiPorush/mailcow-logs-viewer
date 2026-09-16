@@ -190,6 +190,7 @@ const TOGGLEABLE_FEATURES = [
     { id: 'domains', label: 'Domains', description: 'Domain DNS analysis and transports' },
     { id: 'dmarc', label: 'DMARC', description: 'DMARC/TLS reports and IMAP sync' },
     { id: 'mailbox-stats', label: 'Mailbox Stats', description: 'Mailbox and alias statistics' },
+    { id: 'rate-limits', label: 'Rate Limits', description: 'Sender rate limit hits and the configured limits' },
     { id: 'logs', label: 'Logs', description: 'Raw service log viewer' },
     { id: 'blacklist', label: 'IP Blacklist Monitor', description: 'DNS blacklist monitoring for your IPs' },
 ];
@@ -229,6 +230,69 @@ function applyFeatureToggles() {
         if (blacklistSection) blacklistSection.style.display = '';
         if (dashboardBlacklistCard) dashboardBlacklistCard.style.display = '';
     }
+
+    // Same for rate-limits - it is a view inside the Mailbox Stats page,
+    // so the feature toggle hides its switcher button instead of a tab
+    const mailboxStatsOff = window.disabledFeatures.includes('mailbox-stats');
+    const rateLimitsOff = window.disabledFeatures.includes('rate-limits');
+
+    const rateLimitsViewBtn = document.getElementById('mailbox-stats-view-rate-limits');
+    if (rateLimitsOff) {
+        if (rateLimitsViewBtn) rateLimitsViewBtn.style.display = 'none';
+        // Never leave the user stranded on a view that just disappeared
+        if (typeof mailboxStatsView !== 'undefined' && mailboxStatsView === 'rate-limits' && !mailboxStatsOff) {
+            mailboxStatsSwitchView('statistics');
+        }
+    } else {
+        if (rateLimitsViewBtn) rateLimitsViewBtn.style.display = '';
+    }
+
+    // The mirror case: Rate Limits does not depend on Mailbox Stats. With
+    // Mailbox Stats off and Rate Limits on, the page stays reachable and
+    // becomes the Rate Limits page - Statistics is the view that disappears,
+    // and with one view left the switcher itself has nothing to offer.
+    const statsViewBtn = document.getElementById('mailbox-stats-view-statistics');
+    // Not 'mailbox-stats-view-*': that prefix is the switcher's button query
+    const viewSwitcher = document.getElementById('mailbox-stats-views');
+    if (mailboxStatsOff && !rateLimitsOff) {
+        if (statsViewBtn) statsViewBtn.style.display = 'none';
+        if (viewSwitcher) viewSwitcher.style.display = 'none';
+        if (typeof mailboxStatsView !== 'undefined' && mailboxStatsView === 'statistics') {
+            if (currentTab === 'mailbox-stats') {
+                mailboxStatsSwitchView('rate-limits');
+            } else {
+                // Only remember it - switching now would fetch for a hidden page
+                mailboxStatsView = 'rate-limits';
+            }
+        }
+    } else {
+        if (statsViewBtn) statsViewBtn.style.display = '';
+        if (viewSwitcher) viewSwitcher.style.display = '';
+    }
+
+    // The tab is shared by both features, so it only goes when both are off,
+    // and it says what it actually opens
+    const mailboxTabLabel = mailboxStatsOff && !rateLimitsOff ? 'Rate Limits' : 'Mailbox Stats';
+    for (const tabId of ['tab-mailbox-stats', 'mobile-tab-mailbox-stats']) {
+        const tab = document.getElementById(tabId);
+        if (!tab) continue;
+        tab.style.display = mailboxStatsOff && rateLimitsOff ? 'none' : '';
+        setNavTabLabel(tab, mailboxTabLabel);
+    }
+}
+
+// A nav tab is an <svg> icon followed by its label in a bare text node, so the
+// label is swapped on that node and the icon and markup are left alone.
+function setNavTabLabel(tab, label) {
+    for (let i = tab.childNodes.length - 1; i >= 0; i--) {
+        const node = tab.childNodes[i];
+        if (node.nodeType !== Node.TEXT_NODE) continue;
+        const current = node.textContent.trim();
+        if (!current) continue;
+        if (current !== label) node.textContent = node.textContent.replace(current, label);
+        return;
+    }
+    tab.appendChild(document.createTextNode(label));
 }
 
 function updateDisabledFeaturesCheckbox(featureId, isChecked, el) {
@@ -729,6 +793,8 @@ function renderMessagesData(data) {
                         ${msg.queue_id ? `<span class="font-mono" title="Queue ID">Q: ${msg.queue_id}</span>` : ''}
                         ${msg.message_id ? `<span class="font-mono truncate max-w-xs" title="Message ID: ${escapeHtml(msg.message_id)}">MID: ${escapeHtml(msg.message_id.substring(0, 20))}${msg.message_id.length > 20 ? '...' : ''}</span>` : ''}
                         ${msg.spam_score !== null ? `<span>Score: <span class="${msg.spam_score >= 15 ? 'text-red-600 dark:text-red-400 font-semibold' : 'text-gray-600 dark:text-gray-300'}">${msg.spam_score.toFixed(1)}</span></span>` : ''}
+                        ${renderMailboxFolderHint(msg)}
+                        ${renderDeliveriesChip(msg)}
                         ${msg.user ? `<span>User: ${escapeHtml(msg.user)}</span>` : ''}
                         ${msg.ip ? `<span>IP: ${msg.ip}</span>` : ''}
                     </div>
@@ -1085,8 +1151,12 @@ async function smartRefreshSettings() {
 function switchTab(tab, params = {}) {
     console.log('Switching to tab:', tab, 'params:', params);
 
-    // Block disabled features - show a "Feature Disabled" page
-    if (window.disabledFeatures.includes(tab)) {
+    // Block disabled features - show a "Feature Disabled" page.
+    // Exception: the Mailbox Stats page also hosts Rate Limits, so it stays
+    // open while that feature is on, even with Mailbox Stats itself off.
+    const hostsEnabledRateLimits = tab === 'mailbox-stats'
+        && !window.disabledFeatures.includes('rate-limits');
+    if (window.disabledFeatures.includes(tab) && !hostsEnabledRateLimits) {
         const feature = TOGGLEABLE_FEATURES.find(f => f.id === tab);
         const featureLabel = feature ? feature.label : tab;
         console.warn(`Feature '${tab}' is disabled`);
@@ -1199,7 +1269,7 @@ function switchTab(tab, params = {}) {
             handleDmarcRoute(params);
             break;
         case 'mailbox-stats':
-            loadMailboxStats();
+            initMailboxStatsPage();
             break;
         case 'logs':
             loadLogViewer();
@@ -3849,6 +3919,8 @@ async function loadMessages(page = 1) {
                             ${msg.queue_id ? `<span class="font-mono" title="Queue ID">Q: ${msg.queue_id}</span>` : ''}
                             ${msg.message_id ? `<span class="font-mono truncate max-w-xs" title="Message ID: ${escapeHtml(msg.message_id)}">MID: ${escapeHtml(msg.message_id.substring(0, 20))}${msg.message_id.length > 20 ? '...' : ''}</span>` : ''}
                             ${msg.spam_score !== null ? `<span>Score: <span class="${msg.spam_score >= 15 ? 'text-red-600 dark:text-red-400 font-semibold' : 'text-gray-600 dark:text-gray-300'}">${msg.spam_score.toFixed(1)}</span></span>` : ''}
+                            ${renderMailboxFolderHint(msg)}
+                            ${renderDeliveriesChip(msg)}
                             ${msg.user ? `<span>User: ${escapeHtml(msg.user)}</span>` : ''}
                             ${msg.ip ? `<span>IP: ${msg.ip}</span>` : ''}
                         </div>
@@ -4573,7 +4645,8 @@ function renderStatusJobs(jobs) {
             jobs: [
                 ['Complete Correlations', 'complete_correlations', jobs.complete_correlations],
                 ['Update Final Status', 'update_final_status', jobs.update_final_status],
-                ['Expire Correlations', 'expire_correlations', jobs.expire_correlations]
+                ['Expire Correlations', 'expire_correlations', jobs.expire_correlations],
+                ['Dovecot Deliveries', 'correlate_dovecot', jobs.correlate_dovecot]
             ]
         },
         {
@@ -4899,6 +4972,289 @@ function renderModalTab(tab, data) {
     }
 }
 
+// The folder Dovecot actually delivered a message into. A folder other than
+// the inbox is the usual explanation for "the mail never arrived" when Rspamd
+// did not flag it as spam (issue #65).
+function renderMailboxFolderHint(msg) {
+    if (msg.dovecot_status !== 'stored') return '';
+    const folder = msg.dovecot_mailbox;
+    if (!folder) return '';
+    return `<span>Folder: ${escapeHtml(folder)}</span>`;
+}
+
+// A message that was delivered more than once - forwarded, copied or released
+// from quarantine - is one row in the list (issue #36). Shown as a plain
+// metadata entry; the dialog shows the deliveries as a journey.
+function renderDeliveriesChip(msg) {
+    const deliveries = msg.deliveries || 1;
+    if (deliveries < 2) return '';
+    return `<span>Deliveries: ${deliveries}</span>`;
+}
+
+function folderIconSvg(sizeClasses) {
+    return `<svg class="${sizeClasses} flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"></path></svg>`;
+}
+
+// Delivery outcome Dovecot reported for the last hop (issue #65).
+// Postfix logs status=sent as soon as it hands the message to Dovecot over
+// LMTP, so what happened afterwards - stored, filed into Junk, forwarded or
+// dropped by a Sieve rule - is only visible here.
+const DOVECOT_VERDICTS = {
+    discarded: {
+        icon: '⊘',
+        label: 'Discarded by Sieve',
+        fallback: 'A Sieve rule dropped this message - it never reached the mailbox.',
+        box: 'bg-slate-50 dark:bg-slate-900/40 border-slate-300 dark:border-slate-600',
+        title: 'text-slate-800 dark:text-slate-200',
+        body: 'text-slate-600 dark:text-slate-400'
+    },
+    rejected: {
+        icon: '✗',
+        label: 'Rejected by Sieve',
+        fallback: 'A Sieve rule refused this message and reported it back to the sender.',
+        box: 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800',
+        title: 'text-red-800 dark:text-red-300',
+        body: 'text-red-600 dark:text-red-400'
+    },
+    failed: {
+        icon: '!',
+        label: 'Delivery to mailbox failed',
+        fallback: 'Dovecot could not store this message.',
+        box: 'bg-orange-50 dark:bg-orange-900/20 border-orange-200 dark:border-orange-800',
+        title: 'text-orange-800 dark:text-orange-300',
+        body: 'text-orange-600 dark:text-orange-400'
+    },
+    forwarded: {
+        icon: '→',
+        label: 'Forwarded by Sieve',
+        fallback: 'A Sieve rule redirected this message.',
+        box: 'bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800',
+        title: 'text-blue-800 dark:text-blue-300',
+        body: 'text-blue-600 dark:text-blue-400'
+    },
+    stored: {
+        icon: '✓',
+        label: 'Stored in mailbox',
+        fallback: 'Dovecot wrote this message to the mailbox.',
+        box: 'bg-emerald-50 dark:bg-emerald-900/20 border-emerald-200 dark:border-emerald-800',
+        title: 'text-emerald-800 dark:text-emerald-300',
+        body: 'text-emerald-600 dark:text-emerald-400'
+    }
+};
+
+function getDovecotVerdictText(dovecot) {
+    const verdict = DOVECOT_VERDICTS[dovecot.status];
+    switch (dovecot.status) {
+        case 'stored':
+            return dovecot.mailbox
+                ? `Stored in the folder "${dovecot.mailbox}".`
+                : verdict.fallback;
+        case 'forwarded':
+            return dovecot.detail
+                ? `Redirected to ${dovecot.detail}.`
+                : verdict.fallback;
+        case 'failed':
+            return dovecot.detail
+                ? `${dovecot.detail}${dovecot.mailbox ? ` (target folder: ${dovecot.mailbox})` : ''}`
+                : verdict.fallback;
+        case 'rejected':
+            return dovecot.detail ? `Reason: ${dovecot.detail}` : verdict.fallback;
+        default:
+            return verdict.fallback;
+    }
+}
+
+function renderDovecotSummary(dovecot) {
+    if (!dovecot || !dovecot.status || !DOVECOT_VERDICTS[dovecot.status]) return '';
+    // A normal store is already shown as the folder chip next to the status;
+    // the callout is reserved for outcomes that need explaining.
+    if (dovecot.status === 'stored') return '';
+    const verdict = DOVECOT_VERDICTS[dovecot.status];
+
+    return `
+        <div class="border ${verdict.box} rounded-lg p-4 mt-3">
+            <div class="flex items-start gap-3">
+                <span class="text-lg leading-none ${verdict.title}">${verdict.icon}</span>
+                <div class="min-w-0">
+                    <p class="text-sm font-semibold ${verdict.title}">Mailbox delivery: ${verdict.label}</p>
+                    <p class="text-xs ${verdict.body} mt-1 break-words">${escapeHtml(getDovecotVerdictText(dovecot))}</p>
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+function renderDovecotTimelineRow(log) {
+    return `
+        <div class="p-3 bg-gray-50 dark:bg-gray-700/50 rounded hover:bg-gray-100 dark:hover:bg-gray-700 transition">
+            <div class="flex justify-between items-start mb-1">
+                <div class="flex items-center gap-2 flex-wrap">
+                    <span class="text-xs font-mono text-gray-600 dark:text-gray-300">${formatTime(log.time)}</span>
+                    <span class="text-xs px-2 py-0.5 rounded bg-purple-100 dark:bg-purple-900/30 text-purple-800 dark:text-purple-300">dovecot</span>
+                    ${log.recipient ? `<span class="text-xs text-gray-500 dark:text-gray-400">=> ${escapeHtml(log.recipient)}</span>` : ''}
+                </div>
+                ${log.verdict && DOVECOT_VERDICTS[log.verdict] ? `<span class="text-xs px-2 py-0.5 rounded ${getStatusClass(log.verdict === 'stored' ? 'delivered' : log.verdict)}">${log.verdict}</span>` : ''}
+            </div>
+            <p class="text-xs font-mono text-gray-700 dark:text-gray-300 break-all">${escapeHtml(log.message || '')}</p>
+        </div>
+    `;
+}
+
+function renderPostfixTimelineRow(log) {
+    return `
+        <div class="p-3 bg-gray-50 dark:bg-gray-700/50 rounded hover:bg-gray-100 dark:hover:bg-gray-700 transition">
+            <div class="flex justify-between items-start mb-1">
+                <div class="flex items-center gap-2 flex-wrap">
+                    <span class="text-xs font-mono text-gray-600 dark:text-gray-300">${formatTime(log.time)}</span>
+                    ${log.program ? `<span class="text-xs px-2 py-0.5 rounded bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-300">${log.program}</span>` : ''}
+                    ${log.recipient ? `<span class="text-xs text-gray-500 dark:text-gray-400">=> ${escapeHtml(log.recipient)}</span>` : ''}
+                </div>
+                ${log.status ? `<span class="inline-block px-2 py-0.5 text-xs font-medium rounded ${getStatusClass(log.status)}">${log.status}</span>` : ''}
+            </div>
+            <p class="text-xs text-gray-700 dark:text-gray-300 font-mono break-all leading-relaxed">${escapeHtml(log.message)}</p>
+            ${log.relay ? `<p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Relay: ${escapeHtml(log.relay)}</p>` : ''}
+            ${log.delay ? `<p class="text-xs text-gray-500 dark:text-gray-400">Delay: ${log.delay.toFixed(2)}s</p>` : ''}
+        </div>
+    `;
+}
+
+// One chronological timeline for the whole delivery: Postfix lines and the
+// Dovecot LMTP lines of the last hop, interleaved by time - each line already
+// carries its program tag, so no separate section is needed.
+function renderLogTimeline(postfixLogs, dovecotLogs) {
+    const entries = (postfixLogs || []).map(log => ({ dovecot: false, log }))
+        .concat((dovecotLogs || []).map(log => ({ dovecot: true, log })))
+        .sort((a, b) => ((a.log.time || '') < (b.log.time || '') ? -1 : 1));
+
+    const sources = [...new Set(entries.map(e => timelineSource(e)))];
+    const filterBar = sources.length > 1 ? `
+        <div class="flex flex-wrap items-center gap-1.5" id="log-timeline-filters">
+            <button data-source="" onclick="filterLogTimeline(this)"
+                class="px-2.5 py-1 text-xs rounded border bg-blue-100 dark:bg-blue-500/10 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-500/20">All</button>
+            ${sources.map(s => `
+                <button data-source="${escapeHtml(s)}" onclick="filterLogTimeline(this)"
+                    class="px-2.5 py-1 text-xs rounded border bg-gray-100 dark:bg-gray-700/50 text-gray-600 dark:text-gray-300 border-gray-200 dark:border-gray-600">${escapeHtml(s)}</button>
+            `).join('')}
+        </div>
+    ` : '';
+
+    return `
+        <div class="flex-1 min-h-0 flex flex-col">
+            <div class="flex items-center justify-between gap-3 mb-3 flex-shrink-0">
+                <div class="flex items-baseline gap-2 min-w-0">
+                    <h4 class="text-md font-semibold text-gray-900 dark:text-white whitespace-nowrap">Complete Log Timeline</h4>
+                    <span class="text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap" id="log-timeline-count">${entries.length} entries</span>
+                </div>
+                ${filterBar}
+            </div>
+            <div class="space-y-2 flex-1 min-h-0 overflow-y-auto" id="log-timeline-entries">
+                ${entries.map(e => `<div data-log-source="${escapeHtml(timelineSource(e))}">${e.dovecot ? renderDovecotTimelineRow(e.log) : renderPostfixTimelineRow(e.log)}</div>`).join('')}
+            </div>
+        </div>
+    `;
+}
+
+function renderRelatedDeliveries(data) {
+    // A forwarded or otherwise re-submitted message is delivered several
+    // times under one Message-ID (issue #36). Shown as one chronological
+    // journey - the current leg included - so the sequence of deliveries
+    // explains itself.
+    const others = data.related_deliveries;
+    if (!others || others.length === 0) return '';
+
+    const legs = others.concat([{
+        correlation_key: data.correlation_key,
+        sender: data.sender,
+        recipient: data.recipient,
+        direction: data.direction,
+        final_status: data.final_status,
+        first_seen: data.first_seen,
+        queue_id: data.queue_id,
+        dovecot_status: data.dovecot ? data.dovecot.status : null,
+        dovecot_mailbox: data.dovecot ? data.dovecot.mailbox : null,
+        current: true
+    }]).sort((a, b) => (a.first_seen || '9') < (b.first_seen || '9') ? -1 : 1);
+
+    const statusCounts = {};
+    legs.forEach(leg => {
+        const s = leg.final_status || 'never completed';
+        statusCounts[s] = (statusCounts[s] || 0) + 1;
+    });
+    const statusSummary = Object.entries(statusCounts).map(([s, n]) => `${n} ${escapeHtml(s)}`).join(', ');
+
+    return `
+        <div class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-3 sm:p-4 mt-3">
+            <!-- Collapsed by default so several legs do not push the rest of
+                 the overview down; the summary line already tells the story -->
+            <div class="flex items-center justify-between cursor-pointer select-none" onclick="toggleDeliveryJourney()">
+                <div>
+                    <h4 class="text-sm sm:text-md font-semibold text-gray-900 dark:text-white">Delivery journey</h4>
+                    <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">This message passed through the server ${legs.length} times: ${statusSummary}.</p>
+                </div>
+                <svg id="delivery-journey-chevron" class="w-4 h-4 text-gray-400 flex-shrink-0 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
+                </svg>
+            </div>
+            <div class="space-y-2 mt-3 hidden" id="delivery-journey-legs">
+                ${legs.map((leg, i) => `
+                    <div class="p-3 rounded ${leg.current
+                        ? 'bg-blue-50 dark:bg-blue-900/20 border border-blue-300 dark:border-blue-700'
+                        : 'bg-gray-50 dark:bg-gray-700/50 hover:bg-gray-100 dark:hover:bg-gray-700 transition cursor-pointer'}"
+                        ${leg.current ? '' : `onclick="viewMessageDetails('${escapeHtml(leg.correlation_key)}')"`}>
+                        <div class="flex justify-between items-start gap-2 flex-wrap">
+                            <div class="flex items-center gap-2 min-w-0">
+                                <span class="text-xs font-semibold text-gray-400 dark:text-gray-500 flex-shrink-0">${i + 1}.</span>
+                                <span class="text-sm text-gray-900 dark:text-white break-all">${escapeHtml(leg.sender || '-')} =&gt; ${escapeHtml(leg.recipient || '-')}</span>
+                                ${leg.current ? '<span class="text-xs px-2 py-0.5 rounded bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 flex-shrink-0">viewing</span>' : ''}
+                            </div>
+                            <div class="flex items-center gap-2 flex-wrap">
+                                ${leg.final_status
+                                    ? `<span class="text-xs px-2 py-0.5 rounded ${getStatusClass(leg.final_status)}">${escapeHtml(leg.final_status)}</span>`
+                                    : '<span class="text-xs px-2 py-0.5 rounded bg-gray-200 dark:bg-gray-600 text-gray-600 dark:text-gray-300" title="This delivery attempt never reached a final outcome">no final status</span>'}
+                                ${leg.dovecot_status === 'stored' && leg.dovecot_mailbox ? `<span class="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded bg-amber-100 dark:bg-amber-500/10 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-500/20">${folderIconSvg('w-3 h-3')}${escapeHtml(leg.dovecot_mailbox)}</span>` : ''}
+                                <span class="text-xs font-mono text-gray-500 dark:text-gray-400">${formatTime(leg.first_seen)}</span>
+                            </div>
+                        </div>
+                    </div>
+                `).join('')}
+            </div>
+        </div>
+    `;
+}
+
+function timelineSource(entry) {
+    // Filtering is by the main source; the per-program detail stays visible
+    // as each line's own tag
+    return entry.dovecot ? 'dovecot' : 'postfix';
+}
+
+// Filter the dialog's log timeline by source. One source at a time; the
+// empty source is "All".
+function filterLogTimeline(button) {
+    const source = button.dataset.source;
+    const active = 'px-2.5 py-1 text-xs rounded border bg-blue-100 dark:bg-blue-500/10 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-500/20';
+    const idle = 'px-2.5 py-1 text-xs rounded border bg-gray-100 dark:bg-gray-700/50 text-gray-600 dark:text-gray-300 border-gray-200 dark:border-gray-600';
+    document.querySelectorAll('#log-timeline-filters button').forEach(b => {
+        b.className = b === button ? active : idle;
+    });
+    let shown = 0, total = 0;
+    document.querySelectorAll('#log-timeline-entries > [data-log-source]').forEach(row => {
+        total += 1;
+        const match = !source || row.dataset.logSource === source;
+        row.classList.toggle('hidden', !match);
+        if (match) shown += 1;
+    });
+    const count = document.getElementById('log-timeline-count');
+    if (count) count.textContent = source ? `${shown} of ${total} entries` : `${total} entries`;
+}
+
+function toggleDeliveryJourney() {
+    const legs = document.getElementById('delivery-journey-legs');
+    const chevron = document.getElementById('delivery-journey-chevron');
+    const open = legs.classList.toggle('hidden');
+    if (chevron) chevron.style.transform = open ? '' : 'rotate(180deg)';
+}
+
 function renderOverviewTab(content, data) {
     // Collect recipients from Postfix logs if available (these have full addresses including +)
     let recipientsFromPostfix = new Set();
@@ -4975,6 +5331,7 @@ function renderOverviewTab(content, data) {
                                     <div class="flex items-center gap-2 flex-wrap">
                                         ${data.final_status ? `<span class="inline-block px-3 py-1 text-xs font-medium rounded ${getStatusClass(data.final_status)}">${data.final_status}</span>` : ''}
                                         ${data.direction ? `<span class="inline-block px-3 py-1 text-xs font-medium rounded ${getDirectionClass(data.direction)}">${data.direction}</span>` : ''}
+                                        ${data.dovecot && data.dovecot.status === 'stored' && data.dovecot.mailbox ? `<span class="inline-flex items-center gap-1.5 px-3 py-1 text-xs font-medium rounded bg-amber-100 dark:bg-amber-500/10 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-500/20">${folderIconSvg('w-3.5 h-3.5')}${escapeHtml(data.dovecot.mailbox)}</span>` : ''}
                                     </div>
                                 </div>
                             ` : ''}
@@ -4982,24 +5339,33 @@ function renderOverviewTab(content, data) {
                         <!-- Right Column -->
                         <div class="space-y-3">
                             ${recipientsRightColumn}
-                            ${data.queue_id ? `
-                                <div>
-                                    <p class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Queue ID</p>
-                                    <p class="text-xs font-mono text-gray-600 dark:text-gray-400 mt-1">${copyableText(data.queue_id)}</p>
-                                </div>
-                            ` : ''}
-                            ${data.message_id ? `
-                                <div>
-                                    <p class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Message ID</p>
-                                    <p class="text-xs font-mono text-gray-600 dark:text-gray-400 mt-1 break-all">${copyableText(data.message_id)}</p>
+                            ${data.queue_id || data.message_id ? `
+                                <div class="flex gap-4">
+                                    ${data.queue_id ? `
+                                        <div class="flex-shrink-0">
+                                            <p class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Queue ID</p>
+                                            <p class="text-xs font-mono text-gray-600 dark:text-gray-400 mt-1 whitespace-nowrap">${copyableText(data.queue_id)}</p>
+                                        </div>
+                                    ` : ''}
+                                    ${data.message_id ? `
+                                        <div class="min-w-0 flex-1">
+                                            <p class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Message ID</p>
+                                            <p class="text-xs font-mono text-gray-600 dark:text-gray-400 mt-1 truncate" title="${escapeHtml(data.message_id)}">${copyableText(data.message_id)}</p>
+                                        </div>
+                                    ` : ''}
                                 </div>
                             ` : ''}
                         </div>
                     </div>
                 </div>
+                ${renderRelatedDeliveries(data)}
+                ${renderDovecotSummary(data.dovecot)}
                 ${data.rspamd ? `
-                    <div class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-3 sm:p-4 mt-1">
-                        <h4 class="text-sm sm:text-md font-semibold text-gray-900 dark:text-white mb-3">Quick Spam Summary</h4>
+                    <div class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-3 sm:p-4 mt-1 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700/30 transition" onclick="switchModalTab('spam')">
+                        <div class="flex items-baseline gap-2 mb-3">
+                            <h4 class="text-sm sm:text-md font-semibold text-gray-900 dark:text-white">Quick Spam Summary</h4>
+                            <span class="text-[10px] sm:text-xs text-gray-500 dark:text-gray-400">See "Spam Analysis" tab for details</span>
+                        </div>
                         <div class="grid grid-cols-3 gap-2">
                             <div class="text-center">
                                 <p class="text-lg sm:text-2xl font-bold ${data.rspamd.score >= (data.rspamd.required_score || 15) ? 'text-red-600 dark:text-red-400' : 'text-green-600 dark:text-green-400'}">
@@ -5020,9 +5386,6 @@ function renderOverviewTab(content, data) {
                                 <p class="text-[10px] sm:text-xs text-gray-500 dark:text-gray-400 mt-1">Class</p>
                             </div>
                         </div>
-                        <p class="text-[10px] sm:text-xs text-gray-500 dark:text-gray-400 text-center mt-3">
-                            See "Spam Analysis" tab for details
-                        </p>
                     </div>
                 ` : data.postfix && data.postfix.length > 0 ? `
                     <div class="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4 mt-3">
@@ -5063,8 +5426,17 @@ function renderOverviewTab(content, data) {
 }
 
 function renderPostfixTab(content, data) {
+    // Dovecot handles the hop after Postfix, so its lines are part of the
+    // same delivery timeline, interleaved by time and tagged per line.
+    const dovecotLogs = (data.dovecot && data.dovecot.logs) ? data.dovecot.logs : [];
+
     if (!data.postfix || data.postfix.length === 0) {
-        content.innerHTML = `
+        content.innerHTML = dovecotLogs.length ? `
+            <div class="space-y-6">
+                <p class="text-sm text-gray-500 dark:text-gray-400">No Postfix delivery logs available</p>
+                ${renderLogTimeline([], dovecotLogs)}
+            </div>
+        ` : `
             <div class="text-center py-12">
                 <svg class="w-16 h-16 mx-auto text-gray-400 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4"></path>
@@ -5130,78 +5502,96 @@ function renderPostfixTab(content, data) {
     const systemLogs = postfixByRecipient['_system'] || [];
     const recipientEntries = Object.entries(postfixByRecipient).filter(([key]) => key !== '_system');
 
-    // Build error summary section
-    const errorSummaryHtml = errorReasons.length > 0 ? `
-        <div class="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-4">
+    // Every retry logs the same error again; one line with an attempt count
+    // says the same thing without crowding the log timeline off the screen
+    const dedupedErrors = [];
+    const errorsSeen = new Map();
+    errorReasons.forEach(err => {
+        const key = `${err.recipient || ''}|${err.status}|${err.reason}`;
+        const existing = errorsSeen.get(key);
+        if (existing) {
+            existing.count++;
+        } else {
+            const entry = { ...err, count: 1 };
+            errorsSeen.set(key, entry);
+            dedupedErrors.push(entry);
+        }
+    });
+
+    // Build error summary section. The list is capped so many distinct errors
+    // scroll inside the box instead of squeezing the timeline below it.
+    const errorSummaryHtml = dedupedErrors.length > 0 ? `
+        <div class="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-4 flex-shrink-0">
             <div class="flex items-start gap-3">
                 <svg class="w-6 h-6 text-red-600 dark:text-red-400 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
                 </svg>
-                <div class="flex-1">
+                <div class="flex-1 min-w-0">
                     <h4 class="text-md font-semibold text-red-800 dark:text-red-300 mb-2">Delivery Error</h4>
-                    ${errorReasons.map(err => `
-                        <div class="mb-2 last:mb-0">
-                            ${err.recipient ? `<p class="text-sm font-medium text-red-700 dark:text-red-400">${escapeHtml(err.recipient)}</p>` : ''}
-                            <p class="text-sm text-red-600 dark:text-red-300 mt-1">${escapeHtml(err.reason)}</p>
-                        </div>
-                    `).join('')}
+                    <div class="max-h-40 overflow-y-auto pr-1">
+                        ${dedupedErrors.map(err => `
+                            <div class="mb-2 last:mb-0">
+                                ${err.recipient || err.count > 1 ? `
+                                    <div class="flex flex-wrap items-center gap-2">
+                                        ${err.recipient ? `<p class="text-sm font-medium text-red-700 dark:text-red-400">${escapeHtml(err.recipient)}</p>` : ''}
+                                        ${err.count > 1 ? `<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-red-100 dark:bg-red-500/10 text-red-700 dark:text-red-300 border border-red-200 dark:border-red-500/20 whitespace-nowrap">${err.count} attempts</span>` : ''}
+                                    </div>
+                                ` : ''}
+                                <p class="text-sm text-red-600 dark:text-red-300 mt-1">${escapeHtml(err.reason)}</p>
+                            </div>
+                        `).join('')}
+                    </div>
                 </div>
             </div>
         </div>
     ` : '';
 
     content.innerHTML = `
-        <div class="space-y-6">
+        <div class="h-full flex flex-col min-h-0 gap-6">
             ${errorSummaryHtml}
-            <!-- Mail Details Header -->
-            <div class="bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-gray-800 dark:to-gray-700 p-4 rounded-lg">
-                <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-3">Mail Details</h3>
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <!-- Compact mail summary strip so the logs get the room. The
+                 full details live in the Overview tab -->
+            <div class="bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-gray-800 dark:to-gray-700 p-4 rounded-lg flex-shrink-0">
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-x-5 gap-y-3">
                     ${sender ? `
-                        <div>
+                        <div class="min-w-0">
                             <p class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">From</p>
-                            <p class="text-sm font-semibold text-gray-900 dark:text-white mt-1">${copyableText(sender)}</p>
+                            <p class="text-sm font-semibold text-gray-900 dark:text-white truncate mt-0.5" title="${escapeHtml(sender)}">${copyableText(sender)}</p>
                         </div>
                     ` : ''}
                     ${recipientsFromPostfix.size > 0 ? `
-                        <div>
+                        <div class="min-w-0">
                             <p class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">To (${recipientsFromPostfix.size})</p>
-                            <p class="text-sm font-semibold text-gray-900 dark:text-white mt-1">${recipientsFromPostfix.size === 1 ? copyableText(Array.from(recipientsFromPostfix)[0]) : `${recipientsFromPostfix.size} recipients`}</p>
+                            <p class="text-sm font-semibold text-gray-900 dark:text-white truncate mt-0.5">${recipientsFromPostfix.size === 1 ? copyableText(Array.from(recipientsFromPostfix)[0]) : `${recipientsFromPostfix.size} recipients`}</p>
                         </div>
                     ` : (data.recipients && data.recipients.length > 0 ? `
-                        <div>
+                        <div class="min-w-0">
                             <p class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">To (${data.recipients.length})</p>
-                            <p class="text-sm font-semibold text-gray-900 dark:text-white mt-1">${data.recipients.length === 1 ? copyableText(data.recipients[0]) : `${data.recipients.length} recipients`}</p>
+                            <p class="text-sm font-semibold text-gray-900 dark:text-white truncate mt-0.5">${data.recipients.length === 1 ? copyableText(data.recipients[0]) : `${data.recipients.length} recipients`}</p>
                         </div>
                     ` : '')}
-                    ${clientIp ? `
-                        <div>
-                            <p class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Client IP</p>
-                            <p class="text-sm font-mono font-semibold text-gray-900 dark:text-white mt-1">${copyableText(clientIp)}</p>
-                        </div>
-                    ` : ''}
-                    ${queueId ? `
-                        <div>
-                            <p class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Queue ID</p>
-                            <p class="text-sm font-mono font-semibold text-gray-900 dark:text-white mt-1">${copyableText(queueId)}</p>
-                        </div>
-                    ` : ''}
                     ${finalStatus ? `
                         <div>
                             <p class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Final Status</p>
-                            <span class="inline-block px-3 py-1 text-sm font-medium rounded ${getStatusClass(finalStatus)} mt-1">${finalStatus}</span>
+                            <span class="inline-block px-2.5 py-0.5 text-xs font-medium rounded ${getStatusClass(finalStatus)} mt-0.5">${finalStatus}</span>
+                        </div>
+                    ` : ''}
+                    ${queueId ? `
+                        <div class="min-w-0">
+                            <p class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Queue ID</p>
+                            <p class="text-sm font-mono text-gray-900 dark:text-white truncate mt-0.5">${copyableText(queueId)}</p>
+                        </div>
+                    ` : ''}
+                    ${clientIp ? `
+                        <div class="min-w-0">
+                            <p class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Client IP</p>
+                            <p class="text-sm font-mono text-gray-900 dark:text-white truncate mt-0.5">${copyableText(clientIp)}</p>
                         </div>
                     ` : ''}
                     ${relay ? `
-                        <div>
+                        <div class="min-w-0">
                             <p class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Relay</p>
-                            <p class="text-sm font-mono font-semibold text-gray-900 dark:text-white mt-1 truncate" title="${escapeHtml(relay)}">${escapeHtml(relay)}</p>
-                        </div>
-                    ` : ''}
-                    ${messageId ? `
-                        <div class="md:col-span-2">
-                            <p class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Message ID</p>
-                            <p class="text-xs font-mono text-gray-700 dark:text-gray-300 mt-1 break-all">${copyableText(messageId)}</p>
+                            <p class="text-sm font-mono text-gray-900 dark:text-white truncate mt-0.5" title="${escapeHtml(relay)}">${escapeHtml(relay)}</p>
                         </div>
                     ` : ''}
                 </div>
@@ -5228,30 +5618,9 @@ function renderPostfixTab(content, data) {
                 </div>
             ` : ''}
             
-            <!-- Complete Log Timeline - ALWAYS show all logs -->
-            <div>
-                <div class="flex items-center justify-between mb-3">
-                    <h4 class="text-md font-semibold text-gray-900 dark:text-white">Complete Log Timeline</h4>
-                    <span class="text-xs text-gray-500 dark:text-gray-400">${data.postfix.length} entries</span>
-                </div>
-                <div class="space-y-2 max-h-96 overflow-y-auto">
-                    ${data.postfix.map(log => `
-                        <div class="p-3 bg-gray-50 dark:bg-gray-700/50 rounded hover:bg-gray-100 dark:hover:bg-gray-700 transition">
-                            <div class="flex justify-between items-start mb-1">
-                                <div class="flex items-center gap-2 flex-wrap">
-                                    <span class="text-xs font-mono text-gray-600 dark:text-gray-300">${formatTime(log.time)}</span>
-                                    ${log.program ? `<span class="text-xs px-2 py-0.5 rounded bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-300">${log.program}</span>` : ''}
-                                    ${log.recipient ? `<span class="text-xs text-gray-500 dark:text-gray-400">=> ${escapeHtml(log.recipient)}</span>` : ''}
-                                </div>
-                                ${log.status ? `<span class="inline-block px-2 py-0.5 text-xs font-medium rounded ${getStatusClass(log.status)}">${log.status}</span>` : ''}
-                            </div>
-                            <p class="text-xs text-gray-700 dark:text-gray-300 font-mono break-all leading-relaxed">${escapeHtml(log.message)}</p>
-                            ${log.relay ? `<p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Relay: ${escapeHtml(log.relay)}</p>` : ''}
-                            ${log.delay ? `<p class="text-xs text-gray-500 dark:text-gray-400">Delay: ${log.delay.toFixed(2)}s</p>` : ''}
-                        </div>
-                    `).join('')}
-                </div>
-            </div>
+            <!-- Complete Log Timeline - the header and filters stay put, the
+                 entry list takes the remaining height and scrolls alone -->
+            ${renderLogTimeline(data.postfix, dovecotLogs)}
         </div>
     `;
 }
@@ -5285,23 +5654,23 @@ function renderSpamTab(content, data) {
 
     content.innerHTML = `
         <div class="space-y-6">
-            <div class="grid grid-cols-3 gap-2 sm:gap-4">
-                <div class="bg-gray-50 dark:bg-gray-700/50 p-2 sm:p-4 rounded-lg text-center">
-                    <p class="text-[10px] sm:text-xs font-medium text-gray-500 dark:text-gray-400 uppercase mb-1 sm:mb-2 truncate">Score</p>
-                    <p class="text-lg sm:text-3xl font-bold ${data.rspamd.score >= (data.rspamd.required_score || 15) ? 'text-red-600 dark:text-red-400' : 'text-green-600 dark:text-green-400'}">
+            <div class="grid grid-cols-3 gap-2 sm:gap-3">
+                <div class="bg-gray-50 dark:bg-gray-700/50 p-2 sm:p-3 rounded-lg text-center">
+                    <p class="text-[10px] sm:text-xs font-medium text-gray-500 dark:text-gray-400 uppercase mb-0.5 sm:mb-1 truncate">Score</p>
+                    <p class="text-base sm:text-2xl font-bold ${data.rspamd.score >= (data.rspamd.required_score || 15) ? 'text-red-600 dark:text-red-400' : 'text-green-600 dark:text-green-400'}">
                         ${data.rspamd.score.toFixed(2)}
                     </p>
-                    <p class="text-[9px] sm:text-xs text-gray-500 dark:text-gray-400 mt-1">Limit: ${data.rspamd.required_score || 15}</p>
+                    <p class="text-[9px] sm:text-xs text-gray-500 dark:text-gray-400">Limit: ${data.rspamd.required_score || 15}</p>
                 </div>
-                <div class="bg-gray-50 dark:bg-gray-700/50 p-2 sm:p-4 rounded-lg text-center">
-                    <p class="text-[10px] sm:text-xs font-medium text-gray-500 dark:text-gray-400 uppercase mb-1 sm:mb-2 truncate">Action</p>
-                    <p class="text-sm sm:text-xl font-semibold text-gray-900 dark:text-white truncate">
+                <div class="bg-gray-50 dark:bg-gray-700/50 p-2 sm:p-3 rounded-lg text-center">
+                    <p class="text-[10px] sm:text-xs font-medium text-gray-500 dark:text-gray-400 uppercase mb-0.5 sm:mb-1 truncate">Action</p>
+                    <p class="text-sm sm:text-lg font-semibold text-gray-900 dark:text-white truncate">
                         ${data.rspamd.action}
                     </p>
                 </div>
-                <div class="bg-gray-50 dark:bg-gray-700/50 p-2 sm:p-4 rounded-lg text-center">
-                    <p class="text-[10px] sm:text-xs font-medium text-gray-500 dark:text-gray-400 uppercase mb-1 sm:mb-2 truncate">Class</p>
-                    <p class="text-sm sm:text-xl font-semibold ${data.rspamd.is_spam ? 'text-red-600 dark:text-red-400' : 'text-green-600 dark:text-green-400'}">
+                <div class="bg-gray-50 dark:bg-gray-700/50 p-2 sm:p-3 rounded-lg text-center">
+                    <p class="text-[10px] sm:text-xs font-medium text-gray-500 dark:text-gray-400 uppercase mb-0.5 sm:mb-1 truncate">Class</p>
+                    <p class="text-sm sm:text-lg font-semibold ${data.rspamd.is_spam ? 'text-red-600 dark:text-red-400' : 'text-green-600 dark:text-green-400'}">
                         ${data.rspamd.is_spam ? 'SPAM' : 'CLEAN'}
                     </p>
                 </div>
@@ -5309,8 +5678,12 @@ function renderSpamTab(content, data) {
             
             ${data.rspamd.symbols && Object.keys(data.rspamd.symbols).length > 0 ? `
                 <div>
-                    <h4 class="text-md font-semibold text-gray-900 dark:text-white mb-3">Detection Symbols</h4>
-                    <div class="space-y-2 max-h-[29rem] overflow-y-auto">
+                    <div class="flex items-center justify-between mb-3">
+                        <h4 class="text-md font-semibold text-gray-900 dark:text-white">Detection Symbols</h4>
+                        <button data-hiding="1" onclick="toggleZeroSymbols(this)"
+                            class="px-2.5 py-1 text-xs rounded border bg-blue-100 dark:bg-blue-500/10 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-500/20">Show zero scores</button>
+                    </div>
+                    <div class="space-y-2 max-h-[29rem] overflow-y-auto" id="spam-symbols-list">
                         ${Object.entries(data.rspamd.symbols)
                 .sort((a, b) => {
                     const scoreA = a[1].score || a[1].metric_score || 0;
@@ -5327,7 +5700,7 @@ function renderSpamTab(content, data) {
                         score < 0 ? 'text-green-600 dark:text-green-400' :
                             'text-gray-500 dark:text-gray-400';
                     return `
-                                    <div class="flex items-start justify-between p-3 bg-gray-50 dark:bg-gray-700/50 rounded hover:bg-gray-100 dark:hover:bg-gray-700 transition">
+                                    <div data-zero-score="${score === 0 ? '1' : '0'}" class="flex items-start justify-between p-3 bg-gray-50 dark:bg-gray-700/50 rounded hover:bg-gray-100 dark:hover:bg-gray-700 transition${score === 0 ? ' hidden' : ''}">
                                         <div class="flex-1">
                                             <span class="text-sm font-semibold text-gray-900 dark:text-white">${name}</span>
                                             ${description ? `<p class="text-xs text-gray-600 dark:text-gray-400 mt-1">${escapeHtml(description)}</p>` : ''}
@@ -5342,6 +5715,19 @@ function renderSpamTab(content, data) {
             ` : ''}
         </div>
     `;
+}
+
+// Hide or show the zero-score detection symbols in the Spam tab
+function toggleZeroSymbols(button) {
+    const hiding = button.dataset.hiding !== '1';
+    button.dataset.hiding = hiding ? '1' : '0';
+    button.textContent = hiding ? 'Show zero scores' : 'Hide zero scores';
+    button.className = hiding
+        ? 'px-2.5 py-1 text-xs rounded border bg-blue-100 dark:bg-blue-500/10 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-500/20'
+        : 'px-2.5 py-1 text-xs rounded border bg-gray-100 dark:bg-gray-700/50 text-gray-600 dark:text-gray-300 border-gray-200 dark:border-gray-600';
+    document.querySelectorAll('#spam-symbols-list > [data-zero-score="1"]').forEach(row => {
+        row.classList.toggle('hidden', hiding);
+    });
 }
 
 function renderNetfilterTab(content, data) {

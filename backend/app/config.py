@@ -153,7 +153,7 @@ class Settings(BaseSettings):
     app_logo_url: str = Field(default="", description="Application logo URL (optional)")
     disabled_features: str = Field(
         default="",
-        description="Comma-separated list of features to disable (hides page and stops related jobs). Valid: netfilter, queue, quarantine, spam-filter, domains, dmarc, mailbox-stats, logs, blacklist"
+        description="Comma-separated list of features to disable (hides page and stops related jobs). Valid: netfilter, queue, quarantine, spam-filter, domains, dmarc, mailbox-stats, rate-limits, logs, blacklist"
     )
     
     # Settings UI: allow editing config from web UI (overrides stored in DB). ENV only; default False.

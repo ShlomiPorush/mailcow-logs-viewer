@@ -17,6 +17,89 @@ let mailboxStatsCache = {
     expandedMailboxes: new Set() // Track expanded accordion states
 };
 
+// =============================================================================
+// VIEW SWITCHER - Statistics | Rate Limits
+// =============================================================================
+// Rate Limits is a view of this page rather than a page of its own. The
+// switcher follows the Spam Filter recipe in index.html; the code for the
+// view itself stays in rate-limits.js.
+
+let mailboxStatsView = 'statistics';
+
+const MAILBOX_STATS_VIEW_HEADINGS = {
+    'statistics': {
+        title: 'Mailbox Statistics',
+        subtitle: 'View message statistics per mailbox and aliases'
+    },
+    'rate-limits': {
+        title: 'Rate Limits',
+        subtitle: "Who is running into mailcow's sending limits, and what each mailbox and domain is allowed to send"
+    }
+};
+
+
+// Entry point for the page. Re-entering through the switcher keeps the active
+// view across navigation and makes the header Refresh reload the view you are
+// actually looking at.
+function initMailboxStatsPage() {
+    mailboxStatsSwitchView(mailboxStatsView);
+}
+
+
+function mailboxStatsSwitchView(view) {
+    const disabled = window.disabledFeatures || [];
+    // The feature can be turned off while the Rate Limits view is open
+    if (view === 'rate-limits' && disabled.includes('rate-limits')) {
+        view = 'statistics';
+    }
+    // The mirror: Rate Limits does not depend on Mailbox Stats, so with
+    // Mailbox Stats off this page is the Rate Limits page and Statistics is
+    // not a view you can reach - including on first entry. The guard above
+    // runs first, so with both features off nothing bounces back here.
+    if (view === 'statistics' && disabled.includes('mailbox-stats') && !disabled.includes('rate-limits')) {
+        view = 'rate-limits';
+    }
+    mailboxStatsView = view;
+
+    document.querySelectorAll('[id^="mailbox-stats-view-"]').forEach(btn => {
+        btn.classList.remove('active');
+    });
+    const activeBtn = document.getElementById(`mailbox-stats-view-${view}`);
+    if (activeBtn) activeBtn.classList.add('active');
+
+    const headings = MAILBOX_STATS_VIEW_HEADINGS[view] || MAILBOX_STATS_VIEW_HEADINGS['statistics'];
+    const title = document.getElementById('mailbox-stats-page-title');
+    if (title) title.textContent = headings.title;
+    const subtitle = document.getElementById('mailbox-stats-page-subtitle');
+    if (subtitle) subtitle.textContent = headings.subtitle;
+
+    // The help button next to the title follows the view - each view opens
+    // its own doc. The last-update stamp belongs to Statistics only.
+    const helpBtn = document.getElementById('mailbox-stats-help-btn');
+    if (helpBtn) {
+        const isRateLimits = view === 'rate-limits';
+        helpBtn.style.display = '';
+        helpBtn.setAttribute('onclick', `showHelpModal('${isRateLimits ? 'Rate_Limits' : 'Mailbox_Stats'}')`);
+        helpBtn.title = isRateLimits ? 'Help - Rate Limits' : 'Help - Mailbox Statistics';
+    }
+    const headerInfo = document.getElementById('mailbox-stats-header-info');
+    if (headerInfo) headerInfo.style.display = view === 'statistics' ? '' : 'none';
+
+    const statisticsView = document.getElementById('mailbox-stats-statistics-view');
+    const rateLimitsView = document.getElementById('mailbox-stats-rate-limits-view');
+
+    if (view === 'rate-limits') {
+        if (statisticsView) statisticsView.classList.add('hidden');
+        if (rateLimitsView) rateLimitsView.classList.remove('hidden');
+        loadRateLimits();
+    } else {
+        if (rateLimitsView) rateLimitsView.classList.add('hidden');
+        if (statisticsView) statisticsView.classList.remove('hidden');
+        loadMailboxStats();
+    }
+}
+
+
 async function loadMailboxStats() {
     console.log('Loading mailbox statistics...');
 
