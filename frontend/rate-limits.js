@@ -156,7 +156,7 @@ function renderRateLimitActivityCard() {
 
     const data = rateLimitEventsData || {};
     const hits = data.total_events || 0;
-    const senders = (data.by_sender || []).length;
+    const senders = data.window_senders || 0;
     const subtitle = hits === 0
         ? 'No blocked sends in this window'
         : `${hits.toLocaleString()} blocked ${hits === 1 ? 'send' : 'sends'}`
@@ -340,8 +340,8 @@ function renderRateLimitSendersCard() {
     if (senders.length === 0) {
         body = `
             <div class="px-4 py-10 text-center">
-                <p class="text-gray-700 dark:text-gray-300 font-medium">Nobody hit a rate limit in this window</p>
-                <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">Widen the window to look further back.</p>
+                <p class="text-gray-700 dark:text-gray-300 font-medium">No rate limit hits have been collected</p>
+                <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">Senders that run out of allowance will show up here.</p>
             </div>
         `;
     } else if (detailMode) {

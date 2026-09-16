@@ -342,11 +342,22 @@ def test_the_flat_feed_names_the_sender(env):
     assert flat[0]['subject'] == SUBJECT
 
 
-def test_a_short_window_excludes_older_hits(env):
-    """QUIET's only hit is 90 minutes old; a one hour window must drop it."""
-    groups = {g['user']: g for g in _events(hours=1)['by_sender']}
+def test_the_window_scopes_the_chart_but_never_the_sender_list(env):
+    """QUIET's only hit is 90 minutes old. A one hour window drops it from the
+    chart's numbers, but the Blocked senders list mirrors reality - every
+    collected sender stays visible regardless of the window."""
+    data = _events(hours=1)
+    groups = {g['user']: g for g in data['by_sender']}
     assert SENDER in groups
-    assert QUIET not in groups or groups[QUIET]['events'] == 0
+    assert QUIET in groups, 'the sender list must ignore the window'
+    assert groups[QUIET]['events'] == 1
+
+    # The chart's numbers stay window-scoped and consistent with each other
+    chart_total = sum(b['count'] for b in data['by_bucket'])
+    assert chart_total == data['total_events']
+    wide = _events(hours=168)
+    assert wide['total_events'] >= data['total_events'] + 1, \
+        "QUIET's 90 minute old hit counts in the wide window but not in one hour"
 
 
 # ---------- the activity chart's buckets ----------

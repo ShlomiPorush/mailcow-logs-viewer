@@ -271,8 +271,12 @@ def get_rate_limit_events(
     hours: int = Query(168, ge=1, le=8760),
     db: Session = Depends(get_db)
 ):
-    """Senders that hit a rate limit in the window, grouped by sender, plus the
-    hits per time bucket for the activity chart.
+    """Every sender that ever hit a rate limit (grouped, full collected
+    history), plus the hits per time bucket for the activity chart.
+
+    The `hours` window scopes ONLY the chart. The sender list mirrors reality:
+    everything the viewer has collected, however old - a filter must never
+    hide a sender from it.
 
     Reads only the collected `ratelimited` log, so this never waits on mailcow.
     """
@@ -282,8 +286,7 @@ def get_rate_limit_events(
     bucket_kind = 'hour' if hours <= 24 else 'day'
     try:
         rows = db.query(RawServiceLog).filter(
-            RawServiceLog.service == 'ratelimited',
-            RawServiceLog.time >= since
+            RawServiceLog.service == 'ratelimited'
         ).order_by(RawServiceLog.time.desc()).limit(_MAX_EVENT_ROWS).all()
     except Exception as e:
         logger.error(f"Error reading rate limit events: {e}")
@@ -291,10 +294,11 @@ def get_rate_limit_events(
 
     groups: Dict[str, Dict[str, Any]] = {}
     events: List[Dict[str, Any]] = []
-    # Hits per bucket, for the activity chart. Counted from every row read,
-    # not from the capped per-sender detail lists.
+    # Hits per bucket, for the activity chart. Counted from every row inside
+    # the window, not from the capped per-sender detail lists.
     bucket_counts: Dict[str, int] = {}
     total_events = 0
+    window_senders = set()
 
     # Rows arrive newest first, so the first row seen for a sender is the
     # latest one - that is where last_seen and last_rl_hash come from.
@@ -304,9 +308,12 @@ def get_rate_limit_events(
         if not user:
             continue
 
-        total_events += 1
-        bucket = _bucket_key(row.time, bucket_kind)
-        bucket_counts[bucket] = bucket_counts.get(bucket, 0) + 1
+        # Only the chart is window-scoped
+        if row.time >= since:
+            total_events += 1
+            window_senders.add(user)
+            bucket = _bucket_key(row.time, bucket_kind)
+            bucket_counts[bucket] = bucket_counts.get(bucket, 0) + 1
         rl_hash = (data.get('rl_hash') or '').strip()
         detail = {
             'time': format_datetime_for_api(row.time),
@@ -364,6 +371,7 @@ def get_rate_limit_events(
     return {
         'hours': hours,
         'total_events': total_events,
+        'window_senders': len(window_senders),
         'by_sender': by_sender,
         'events': events,
         'bucket': bucket_kind,

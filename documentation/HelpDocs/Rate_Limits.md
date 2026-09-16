@@ -35,7 +35,7 @@ So there are two different fixes for a blocked sender:
 
 The first card shows **blocked sends over time** as a bar chart, so you can see whether this is a one-off or something that happens every day.
 
-*   The **window selector** on the right switches between **Last 24 hours**, **Last 7 days**, **Last 30 days** (the default), **Last 90 days** and **Last year**. It controls this whole page, not just the chart.
+*   The **window selector** on the right switches between **Last 24 hours**, **Last 7 days**, **Last 30 days** (the default), **Last 90 days** and **Last year**. It scopes the chart and its subtitle only - the **Blocked senders** list below always shows the full collected history.
 *   Over the 24 hour window each bar is **one hour**; over 7 and 30 days each bar is **one day**.
 *   Quiet buckets are drawn as gaps at zero rather than skipped, so the shape of the chart is honest.
 *   The subtitle above the chart summarises the window, for example *"1,204 blocked sends from 3 senders"*.
@@ -44,12 +44,12 @@ If nobody was blocked in the window, the card says so and suggests widening it.
 
 ## Blocked senders
 
-Every sender that mailcow refused during the selected window, most recently blocked first.
+Every sender that mailcow ever refused, over everything this viewer has collected, most recently blocked first. The time window above does not filter this list - it is meant to mirror reality, not a slice of it.
 
 | Column | Meaning |
 |---|---|
 | **Sender** | The address that was refused |
-| **Hits** | How many sends were blocked in this window |
+| **Hits** | How many of this sender's sends were blocked, in total |
 | **Last hit** | When it was last refused |
 | **Limit** | That mailbox's own configured limit, or **No limit** |
 | **Last reset** | A green badge if the counter was reset, with the time |
@@ -57,7 +57,7 @@ Every sender that mailcow refused during the selected window, most recently bloc
 
 Click any row to open that sender's detail.
 
-> **Note**: This list is **history**, built from the logs this viewer has collected. It is not a list of senders who are blocked *right now*. Entries stay visible for the whole window even after you release the sender - that is intentional, so that a recurring problem does not disappear from view.
+> **Note**: This list is **history**, built from the logs this viewer has collected. It is not a list of senders who are blocked *right now*. Entries stay visible after you release the sender - that is intentional, so that a recurring problem does not disappear from view.
 
 ### Sender detail
 
@@ -65,7 +65,7 @@ The detail view replaces the table with everything known about one sender: the a
 
 The queue id is the message's id in the mail logs, useful if you want to trace it on the **Messages** page.
 
-> **Note**: A handful of recent messages is kept per sender, not all of them. The **Hits** count is the real total for the window; the detail table is a sample of the latest ones.
+> **Note**: A handful of recent messages is kept per sender, not all of them. The **Hits** count is the real total; the detail table is a sample of the latest ones.
 
 ### Reset counter
 
