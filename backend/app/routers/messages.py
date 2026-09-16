@@ -6,7 +6,7 @@ FIXED: All timestamps now sent with proper UTC timezone ('Z' suffix)
 import logging
 from fastapi import APIRouter, Depends, Query, HTTPException
 from sqlalchemy.orm import Session
-from sqlalchemy import or_, and_, desc, select
+from sqlalchemy import or_, and_, desc, func, select
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
@@ -26,13 +26,21 @@ router = APIRouter()
 DOVECOT_LOOKUP_WINDOW = timedelta(hours=6)
 
 
-def _get_dovecot_logs(db: Session, correlation: MessageCorrelation) -> list:
+def _get_dovecot_logs(
+    db: Session,
+    correlation: MessageCorrelation,
+    single_leg: bool = True
+) -> list:
     """
     Fetch the Dovecot LMTP lines belonging to one message (issue #65).
 
     These come from the raw logs the Live Logs worker collects, so they are only
     available while that data is retained (RAW_LOGS_RETENTION_DAYS). The verdict
     itself is stored on the correlation and outlives them.
+
+    The lines are found by Message-ID, which a re-submitted message shares with
+    its other delivery legs (issue #36). When there is more than one leg, only
+    the lines addressed to this leg's recipient are kept.
     """
     if not correlation.message_id or not correlation.first_seen:
         return []
@@ -53,10 +61,15 @@ def _get_dovecot_logs(db: Session, correlation: MessageCorrelation) -> list:
         RawServiceLog.raw_data['message'].astext.like(f'%msgid=<{escaped}>%', escape='\\')
     ).order_by(RawServiceLog.time).limit(100).all()
 
+    leg_recipient = (correlation.recipient or '').strip().lower()
+
     entries = []
     for row in rows:
         message = (row.raw_data or {}).get('message')
         parsed = parse_dovecot_message(message)
+        line_recipient = (parsed.get('recipient') or '').strip().lower() if parsed else ''
+        if not single_leg and leg_recipient and line_recipient and line_recipient != leg_recipient:
+            continue
         verdict = parsed.get('verdict') if parsed else None
         # 'discard_pending' only exists to let a later store in the same session
         # win (see dovecot_parser); on its own line it reads as the discard it
@@ -244,13 +257,53 @@ def get_unified_messages(
                 )
             query = query.filter(RspamdLog.ip.ilike(f"%{ip}%"))
         
-        # Get total count (before blacklist filter)
-        total_before_filter = query.count()
-        
+        # One row per message, not one per delivery leg (issue #36). The filters
+        # above select legs; the legs are then grouped by Message-ID and the
+        # earliest matching leg represents its message in the list, so a search
+        # always shows the leg that matched it. A correlation without a
+        # Message-ID falls back to its own key and is never merged with another.
+        group_key = func.coalesce(
+            MessageCorrelation.message_id, MessageCorrelation.correlation_key
+        )
+        legs = query.with_entities(
+            MessageCorrelation.id.label("leg_id"),
+            MessageCorrelation.first_seen.label("first_seen"),
+            func.row_number().over(
+                partition_by=group_key,
+                order_by=(
+                    MessageCorrelation.first_seen.asc(),
+                    MessageCorrelation.id.asc()
+                )
+            ).label("leg_rank")
+        ).subquery()
+
+        # Count messages, not legs: exactly one leg per message has rank 1
+        total_before_filter = db.query(func.count()).select_from(legs).filter(
+            legs.c.leg_rank == 1
+        ).scalar() or 0
+
         # Apply pagination
         offset = (page - 1) * limit
-        messages = query.order_by(desc(MessageCorrelation.first_seen)).offset(offset).limit(limit * 2).all()
-        
+        messages = db.query(MessageCorrelation).join(
+            legs, MessageCorrelation.id == legs.c.leg_id
+        ).filter(
+            legs.c.leg_rank == 1
+        ).order_by(desc(legs.c.first_seen)).offset(offset).limit(limit * 2).all()
+
+        # How many deliveries the message has in total, which is what the row
+        # reports - not only the legs the current filters matched
+        message_ids = {msg.message_id for msg in messages if msg.message_id}
+        leg_counts = {}
+        if message_ids:
+            leg_counts = dict(
+                db.query(
+                    MessageCorrelation.message_id,
+                    func.count(MessageCorrelation.id)
+                ).filter(
+                    MessageCorrelation.message_id.in_(message_ids)
+                ).group_by(MessageCorrelation.message_id).all()
+            )
+
         # Filter out blacklisted emails and build response
         result_messages = []
         for msg in messages:
@@ -279,6 +332,7 @@ def get_unified_messages(
                 "last_seen": format_datetime_utc(msg.last_seen),
                 "dovecot_status": msg.dovecot_status,
                 "dovecot_mailbox": msg.dovecot_mailbox,
+                "deliveries": leg_counts.get(msg.message_id, 1),
                 "spam_score": rspamd_log.score if rspamd_log else None,
                 "is_spam": rspamd_log.is_spam if rspamd_log else None,
                 "user": rspamd_log.user if rspamd_log else None,
@@ -366,8 +420,35 @@ def get_message_full_details(
                 NetfilterLog.time <= rspamd_log.time + window,
             ).order_by(NetfilterLog.time.desc()).limit(100).all()
 
+        # The other delivery legs of the same message (issue #36). A forward or
+        # any other re-submission is a delivery of its own, with its own
+        # sender, recipient and verdict, so neither leg tells the whole story
+        # on its own and the detail view links them.
+        related_deliveries = []
+        if correlation.message_id:
+            other_legs = db.query(MessageCorrelation).filter(
+                MessageCorrelation.message_id == correlation.message_id,
+                MessageCorrelation.correlation_key != correlation.correlation_key
+            ).order_by(MessageCorrelation.first_seen).all()
+            related_deliveries = [
+                {
+                    "correlation_key": leg.correlation_key,
+                    "sender": leg.sender,
+                    "recipient": leg.recipient,
+                    "direction": leg.direction,
+                    "final_status": leg.final_status,
+                    "first_seen": format_datetime_utc(leg.first_seen),
+                    "queue_id": leg.queue_id,
+                    "dovecot_status": leg.dovecot_status,
+                    "dovecot_mailbox": leg.dovecot_mailbox,
+                }
+                for leg in other_legs
+            ]
+
         # Get the Dovecot delivery lines for the last hop (issue #65)
-        dovecot_logs = _get_dovecot_logs(db, correlation)
+        dovecot_logs = _get_dovecot_logs(
+            db, correlation, single_leg=not related_deliveries
+        )
 
         # Get all recipients - from Rspamd (primary source) or from Postfix logs
         recipients = []
@@ -397,6 +478,8 @@ def get_message_full_details(
             "is_complete": correlation.is_complete,
             "first_seen": format_datetime_utc(correlation.first_seen),
             "last_seen": format_datetime_utc(correlation.last_seen),
+            # Other deliveries of the same Message-ID, empty for most messages
+            "related_deliveries": related_deliveries,
             "rspamd": {
                 "time": format_datetime_utc(rspamd_log.time),
                 "score": rspamd_log.score,

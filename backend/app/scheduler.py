@@ -3,7 +3,6 @@ Background scheduler
 """
 import logging
 import asyncio
-import hashlib
 import re
 import httpx
 import ipaddress
@@ -21,7 +20,16 @@ from .config import settings, set_cached_active_domains
 from .database import get_db_context, SessionLocal
 from .mailcow_api import mailcow_api
 from .models import PostfixLog, RspamdLog, NetfilterLog, MessageCorrelation, DMARCSync, DomainDNSCheck, MailboxStatistics, AliasStatistics, MonitoredHost, BlacklistCheck, DMARCReport, DMARCRecord, TLSReport, TLSReportPolicy, SpamSuppression, RawServiceLog, SystemSetting
-from .correlation import detect_direction, parse_postfix_message
+from .correlation import (
+    build_correlation_key,
+    detect_direction,
+    ensure_leg,
+    find_legs,
+    find_stub_leg,
+    group_postfix_logs_by_queue,
+    nearest_queue_chain,
+    parse_postfix_message,
+)
 from .services.dovecot_parser import (
     NON_DELIVERY_VERDICTS,
     parse_dovecot_message,
@@ -1269,117 +1277,85 @@ async def run_correlation():
 def correlate_single_message(db: Session, rspamd_log: RspamdLog) -> Optional[MessageCorrelation]:
     """
     Correlate a single Rspamd log with Postfix logs.
-    
+
     Steps:
-    1. Check if correlation already exists for this message_id
-    2. Find Postfix logs with same message_id => get queue_id
-    3. Find ALL Postfix logs with that queue_id
-    4. Create or update correlation
+    1. Find Postfix logs with the same message_id and split them into queue
+       chains - each chain is a delivery leg of its own (issue #36)
+    2. Give every leg a correlation, so a forward or any other re-submission
+       never overwrites the delivery it came from
+    3. Attach this Rspamd verdict to the leg nearest to it in time: every
+       re-submission passes Rspamd separately, seconds from its own chain
+    4. With no Postfix log yet, keep one queue-less correlation that adopts
+       the first chain to arrive
     """
     message_id = rspamd_log.message_id
     if not message_id:
         return None
-    
-    # Step 1: Check if correlation already exists
-    existing = db.query(MessageCorrelation).filter(
-        MessageCorrelation.message_id == message_id
-    ).first()
-    
+
+    # Steps 1-3: one correlation per queue chain
+    postfix_with_msgid = db.query(PostfixLog).filter(
+        PostfixLog.message_id == message_id
+    ).all()
+    chains = group_postfix_logs_by_queue(postfix_with_msgid)
+
+    if chains:
+        target_queue = nearest_queue_chain(chains, rspamd_log.time)
+        correlation = None
+
+        for queue_id in chains:
+            # The whole chain, including the lines that do not repeat the
+            # Message-ID (Postfix only logs it once per queue id)
+            chain_logs = db.query(PostfixLog).filter(
+                PostfixLog.queue_id == queue_id
+            ).all() or chains[queue_id]
+
+            leg = ensure_leg(
+                db, message_id, queue_id, chain_logs,
+                rspamd_log=rspamd_log if queue_id == target_queue else None
+            )
+            if queue_id == target_queue:
+                correlation = leg
+
+        if correlation:
+            rspamd_log.correlation_key = correlation.correlation_key
+            if not correlation.rspamd_log_id:
+                correlation.rspamd_log_id = rspamd_log.id
+            db.commit()
+            logger.debug(
+                f"Correlated {message_id[:40]}... to queue {target_queue} "
+                f"({len(chains)} delivery leg(s))"
+            )
+        return correlation
+
+    # Step 4: no queue chain known yet - reuse the waiting correlation
+    existing = find_stub_leg(db, message_id)
+    if not existing:
+        legs = find_legs(db, message_id)
+        existing = legs[0] if legs else None
+
     if existing:
-        # Just update the rspamd log with correlation key
         rspamd_log.correlation_key = existing.correlation_key
         if not existing.rspamd_log_id:
             existing.rspamd_log_id = rspamd_log.id
             existing.last_seen = datetime.now(timezone.utc)
         db.commit()
         return existing
-    
-    # Step 2: Find Postfix logs with this message_id
-    postfix_with_msgid = db.query(PostfixLog).filter(
-        PostfixLog.message_id == message_id
-    ).all()
-    
-    # Get queue_id from Postfix logs
-    queue_id = None
-    for plog in postfix_with_msgid:
-        if plog.queue_id:
-            queue_id = plog.queue_id
-            break
-    
-    # Step 3: Find ALL Postfix logs with this queue_id
-    all_postfix_logs: List[PostfixLog] = []
-    if queue_id:
-        all_postfix_logs = db.query(PostfixLog).filter(
-            PostfixLog.queue_id == queue_id
-        ).all()
-    
-    # Step 4: Double-check no correlation exists (race condition protection)
-    existing_check = db.query(MessageCorrelation).filter(
-        MessageCorrelation.message_id == message_id
-    ).first()
-    
-    if existing_check:
-        # Another process created it, just link and return
-        rspamd_log.correlation_key = existing_check.correlation_key
-        if not existing_check.rspamd_log_id:
-            existing_check.rspamd_log_id = rspamd_log.id
-        db.commit()
-        return existing_check
-    
-    # Create correlation
-    correlation_key = hashlib.sha256(f"msgid:{message_id}".encode()).hexdigest()
-    
+
+    correlation_key = build_correlation_key(db, message_id, None)
+    if not correlation_key:
+        return None
+
     # Get recipient
     recipients = rspamd_log.recipients_smtp or []
     first_recipient = recipients[0] if recipients else None
-    
-    # Determine final status from Postfix logs
+
+    # Without Postfix logs the Rspamd action is the only verdict there is
     final_status = None
-    for plog in all_postfix_logs:
-        if plog.status:
-            if plog.status in ['bounced', 'rejected']:
-                final_status = plog.status
-                break
-            elif plog.status == 'deferred' and not final_status:
-                final_status = plog.status
-            elif plog.status == 'sent' and not final_status:
-                final_status = 'delivered'
-    
-    # Use Rspamd action if no Postfix status
-    if not final_status:
-        if rspamd_log.action == 'reject':
-            final_status = 'rejected'
-        elif rspamd_log.is_spam:
-            final_status = 'spam'
-    
-    # Check if email was delivered locally (relay=dovecot + both sender and recipient are local domains)
-    # This is the definitive way to determine if email is internal
-    direction = rspamd_log.direction
-    
-    # Check if sender and recipient are both local domains
-    from .correlation import extract_domain, is_local_domain
-    sender_domain = extract_domain(rspamd_log.sender_smtp)
-    recipients = rspamd_log.recipients_smtp or []
-    
-    sender_is_local = sender_domain and is_local_domain(sender_domain)
-    all_recipients_local = True
-    if recipients:
-        for recipient in recipients:
-            recipient_domain = extract_domain(recipient)
-            if not recipient_domain or not is_local_domain(recipient_domain):
-                all_recipients_local = False
-                break
-    else:
-        all_recipients_local = False
-    
-    # Only mark as internal if: relay=dovecot AND sender is local AND all recipients are local
-    if sender_is_local and all_recipients_local:
-        for plog in all_postfix_logs:
-            if plog.relay and 'dovecot' in plog.relay.lower():
-                direction = 'internal'
-                rspamd_log.direction = 'internal'
-                break
-    
+    if rspamd_log.action == 'reject':
+        final_status = 'rejected'
+    elif rspamd_log.is_spam:
+        final_status = 'spam'
+
     # Get earliest timestamp (ensure timezone-aware)
     now = datetime.now(timezone.utc)
     first_seen = rspamd_log.time
@@ -1387,54 +1363,51 @@ def correlate_single_message(db: Session, rspamd_log: RspamdLog) -> Optional[Mes
         first_seen = first_seen.replace(tzinfo=timezone.utc)
     if not first_seen:
         first_seen = now
-    
+
     try:
         # Create correlation
         correlation = MessageCorrelation(
             correlation_key=correlation_key,
             message_id=message_id,
-            queue_id=queue_id,
+            queue_id=None,
             sender=rspamd_log.sender_smtp,
             recipient=first_recipient,
             subject=rspamd_log.subject,
-            direction=direction,
+            direction=rspamd_log.direction,
             final_status=final_status,
             rspamd_log_id=rspamd_log.id,
-            postfix_log_ids=[plog.id for plog in all_postfix_logs] if all_postfix_logs else [],
+            postfix_log_ids=[],
             first_seen=first_seen,
             last_seen=now,
-            is_complete=bool(queue_id and all_postfix_logs)
+            is_complete=False
         )
-        
+
         db.add(correlation)
-        db.flush()  # Try to insert - will fail if duplicate
-        
+        db.flush()  # Try to insert - will fail if the key was just taken
+
         # Update rspamd log with correlation key
         rspamd_log.correlation_key = correlation_key
-        
-        # Update all postfix logs with correlation key
-        for plog in all_postfix_logs:
-            plog.correlation_key = correlation_key
-        
+
         db.commit()
-        
-        logger.debug(f"Created correlation for {message_id[:40]}... (queue: {queue_id}, {len(all_postfix_logs)} postfix logs)")
+
+        logger.debug(f"Created correlation for {message_id[:40]}... (no Postfix logs yet)")
         return correlation
-        
+
     except Exception as e:
         # Handle race condition - another process created the correlation
         db.rollback()
-        
+
         # Try to find and return the existing one
-        existing = db.query(MessageCorrelation).filter(
-            MessageCorrelation.message_id == message_id
-        ).first()
-        
+        existing = find_stub_leg(db, message_id)
+        if not existing:
+            legs = find_legs(db, message_id)
+            existing = legs[0] if legs else None
+
         if existing:
             rspamd_log.correlation_key = existing.correlation_key
             db.commit()
             return existing
-        
+
         # Re-raise if it's a different error
         raise
 
@@ -1468,24 +1441,31 @@ async def complete_incomplete_correlations():
             
             for correlation in incomplete:
                 try:
-                    # Find Postfix logs with this message_id
-                    postfix_with_msgid = db.query(PostfixLog).filter(
-                        PostfixLog.message_id == correlation.message_id
-                    ).all()
-                    
-                    if not postfix_with_msgid:
-                        continue
-                    
-                    # Get queue_id
-                    queue_id = None
-                    for plog in postfix_with_msgid:
-                        if plog.queue_id:
-                            queue_id = plog.queue_id
-                            break
-                    
+                    # A leg that already owns a queue chain completes from that
+                    # chain and no other; only a queue-less correlation may
+                    # adopt one, and then only a chain no other leg of the same
+                    # message has claimed (issue #36).
+                    queue_id = correlation.queue_id
+
+                    if not queue_id:
+                        postfix_with_msgid = db.query(PostfixLog).filter(
+                            PostfixLog.message_id == correlation.message_id
+                        ).all()
+
+                        if not postfix_with_msgid:
+                            continue
+
+                        chains = group_postfix_logs_by_queue(postfix_with_msgid)
+                        claimed = {
+                            leg.queue_id
+                            for leg in find_legs(db, correlation.message_id)
+                            if leg.queue_id
+                        }
+                        queue_id = next((q for q in chains if q not in claimed), None)
+
                     if not queue_id:
                         continue
-                    
+
                     # Find ALL Postfix logs with this queue_id
                     all_postfix = db.query(PostfixLog).filter(
                         PostfixLog.queue_id == queue_id
@@ -1843,6 +1823,29 @@ def _apply_dovecot_verdict(correlation: MessageCorrelation) -> None:
     correlation.final_status = 'discarded'
 
 
+def _leg_for_dovecot_event(
+    legs: List[MessageCorrelation],
+    event: Dict[str, Any]
+) -> Optional[MessageCorrelation]:
+    """
+    Pick the delivery leg an LMTP event belongs to (issue #36).
+
+    A Message-ID can map to several legs, and the LMTP line names the mailbox
+    it was delivered to, so the recipient is what tells them apart. With a
+    single leg there is nothing to tell apart. Several legs and no recipient
+    match means the line cannot be attributed - guessing would put a Sieve
+    verdict on a delivery that never saw it.
+    """
+    recipient = (event.get('recipient') or '').strip().lower()
+    if recipient:
+        for leg in legs:
+            if (leg.recipient or '').strip().lower() == recipient:
+                return leg
+    if len(legs) == 1:
+        return legs[0]
+    return None
+
+
 async def correlate_dovecot_logs():
     """
     Attach the Dovecot LMTP delivery outcome to correlated messages (issue #65).
@@ -1912,18 +1915,20 @@ async def correlate_dovecot_logs():
 
             if events_by_msgid:
                 msgids = list(events_by_msgid.keys())
-                correlations: Dict[str, MessageCorrelation] = {}
+                # A Message-ID can have several delivery legs (issue #36), so
+                # this maps to a list and every event is routed to its own leg.
+                correlations: Dict[str, List[MessageCorrelation]] = {}
                 # Chunked IN() lookups on the indexed message_id column
                 for i in range(0, len(msgids), 500):
                     chunk = msgids[i:i + 500]
                     for corr in db.query(MessageCorrelation).filter(
                         MessageCorrelation.message_id.in_(chunk)
-                    ).all():
-                        correlations[corr.message_id] = corr
+                    ).order_by(MessageCorrelation.id).all():
+                        correlations.setdefault(corr.message_id, []).append(corr)
 
                 for message_id, events in events_by_msgid.items():
-                    correlation = correlations.get(message_id)
-                    if not correlation:
+                    legs = correlations.get(message_id)
+                    if not legs:
                         # No correlation yet (Rspamd log not processed) - park
                         # the events and retry them on the next cycles.
                         parked = _dovecot_pending.setdefault(
@@ -1934,41 +1939,55 @@ async def correlate_dovecot_logs():
 
                     _dovecot_pending.pop(message_id, None)
 
-                    resolved = resolve_session_verdicts(events)
-                    if not resolved:
-                        continue
-
-                    verdict = pick_worst_verdict([e['verdict'] for e in resolved])
-                    if not verdict:
-                        continue
-
-                    # Prefer the event that produced the winning verdict for the
-                    # mailbox/detail shown next to it.
-                    winner = next((e for e in reversed(resolved) if e['verdict'] == verdict), resolved[-1])
-
-                    previous_status = correlation.dovecot_status
-                    previous_final = correlation.final_status
-
-                    mailbox = winner.get('mailbox')
-                    correlation.dovecot_status = verdict
-                    correlation.dovecot_mailbox = mailbox[:255] if mailbox else None
-                    correlation.dovecot_detail = winner.get('detail')
-
-                    if verdict != 'discarded' and previous_final == 'discarded':
-                        # A later delivery attempt actually stored the message -
-                        # re-derive from Postfix instead of leaving the stale
-                        # override behind.
-                        _recompute_correlation_from_postfix(db, correlation)
-                    else:
-                        _apply_dovecot_verdict(correlation)
-
-                    if previous_status != verdict or previous_final != correlation.final_status:
-                        updated_count += 1
-                        if verdict in NON_DELIVERY_VERDICTS:
-                            logger.info(
-                                f"[DOVECOT] {message_id[:40]} -> {verdict}"
-                                f"{' (' + correlation.dovecot_detail + ')' if correlation.dovecot_detail else ''}"
+                    # Split the events per delivery leg before resolving them,
+                    # so a Sieve verdict never lands on another leg's delivery.
+                    events_per_leg: Dict[str, Any] = {}
+                    for event in events:
+                        leg = _leg_for_dovecot_event(legs, event)
+                        if leg is None:
+                            logger.debug(
+                                f"[DOVECOT] {message_id[:40]} has {len(legs)} delivery legs and "
+                                f"none matches recipient {event.get('recipient')} - event skipped"
                             )
+                            continue
+                        events_per_leg.setdefault(leg.correlation_key, (leg, []))[1].append(event)
+
+                    for correlation, leg_events in events_per_leg.values():
+                        resolved = resolve_session_verdicts(leg_events)
+                        if not resolved:
+                            continue
+
+                        verdict = pick_worst_verdict([e['verdict'] for e in resolved])
+                        if not verdict:
+                            continue
+
+                        # Prefer the event that produced the winning verdict for the
+                        # mailbox/detail shown next to it.
+                        winner = next((e for e in reversed(resolved) if e['verdict'] == verdict), resolved[-1])
+
+                        previous_status = correlation.dovecot_status
+                        previous_final = correlation.final_status
+
+                        mailbox = winner.get('mailbox')
+                        correlation.dovecot_status = verdict
+                        correlation.dovecot_mailbox = mailbox[:255] if mailbox else None
+                        correlation.dovecot_detail = winner.get('detail')
+
+                        if verdict != 'discarded' and previous_final == 'discarded':
+                            # A later delivery attempt actually stored the message -
+                            # re-derive from Postfix instead of leaving the stale
+                            # override behind.
+                            _recompute_correlation_from_postfix(db, correlation)
+                        else:
+                            _apply_dovecot_verdict(correlation)
+
+                        if previous_status != verdict or previous_final != correlation.final_status:
+                            updated_count += 1
+                            if verdict in NON_DELIVERY_VERDICTS:
+                                logger.info(
+                                    f"[DOVECOT] {message_id[:40]} -> {verdict}"
+                                    f"{' (' + correlation.dovecot_detail + ')' if correlation.dovecot_detail else ''}"
+                                )
 
             if max_id > watermark:
                 if watermark_row:
