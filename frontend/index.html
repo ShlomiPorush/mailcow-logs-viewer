@@ -657,8 +657,10 @@
                     <!-- Spacer to balance the hamburger button on the left -->
                     <div class="md:hidden w-6"></div>
 
-                    <!-- Desktop Tabs -->
-                    <div class="hidden md:flex space-x-2 lg:space-x-4">
+                    <!-- Desktop Tabs. overflow-x-auto: between 768px and the
+                         width where all tabs fit, the row scrolls instead of
+                         widening the whole page -->
+                    <div class="hidden md:flex space-x-2 lg:space-x-4 overflow-x-auto">
                         <button onclick="navigateTo('dashboard')" id="tab-dashboard"
                             class="tab-active py-4 px-2 font-medium text-sm whitespace-nowrap flex items-center gap-1.5">
                             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -2642,7 +2644,7 @@
     <script src="/static/settings.js?v=15"></script>
     <script src="/static/domains.js?v=4"></script>
     <script src="/static/mailbox-stats.js?v=3"></script>
-    <script src="/static/rate-limits.js?v=11"></script>
+    <script src="/static/rate-limits.js?v=12"></script>
     <script src="/static/smtp-abuse.js?v=1"></script>
     <script src="/static/notifications.js?v=3"></script>
     <script src="/static/spam_filter.js?v=2"></script>

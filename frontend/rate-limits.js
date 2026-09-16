@@ -204,6 +204,8 @@ function renderRateLimitActivityCard() {
 
 // The API buckets in UTC. An hour bucket is a moment, so it is localised like
 // every other timestamp; a day bucket is a date, so it is labelled verbatim.
+// Labels are numeric (14.09) like every other date in the app, never month
+// names, which would follow the browser language instead of the UI language.
 function rateLimitBucketLabel(bucket, granularity) {
     if (!bucket) return '';
 
@@ -220,9 +222,25 @@ function rateLimitBucketLabel(bucket, granularity) {
         return date.toLocaleTimeString(undefined, options);
     }
 
-    const [year, month, day] = bucket.split('-').map(Number);
-    return new Date(year, (month || 1) - 1, day || 1)
-        .toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+    const [, month, day] = bucket.split('-');
+    return `${day}.${month}`;
+}
+
+
+// Short timestamp for narrow screens: day.month and the time, no year, no
+// seconds. Same timezone handling as formatTime in utils.js.
+function rateLimitShortTime(isoString) {
+    if (!isoString) return '-';
+    const date = new Date(isoString);
+    const options = { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false };
+    try {
+        if (typeof appTimezone !== 'undefined' && appTimezone && appTimezone !== 'UTC') {
+            return new Intl.DateTimeFormat(undefined, { ...options, timeZone: appTimezone }).format(date);
+        }
+    } catch (e) {
+        console.warn('Invalid timezone, using browser local timezone:', appTimezone, e);
+    }
+    return date.toLocaleString(undefined, options);
 }
 
 
@@ -355,12 +373,17 @@ function renderRateLimitSendersTable(senders) {
                 <td class="px-3 sm:px-4 py-3">
                     <span class="${RATE_LIMIT_BADGE_SHAPE} ${getStatusBadgeClass('rejected')} whitespace-nowrap">${group.events}</span>
                 </td>
-                <td class="px-3 sm:px-4 py-3 text-xs sm:text-sm text-gray-900 dark:text-gray-100 whitespace-nowrap">${escapeHtml(formatTime(group.last_seen))}</td>
+                <td class="px-3 sm:px-4 py-3 text-xs sm:text-sm text-gray-900 dark:text-gray-100 whitespace-nowrap">
+                    <span class="sm:hidden">${escapeHtml(rateLimitShortTime(group.last_seen))}</span>
+                    <span class="hidden sm:inline">${escapeHtml(formatTime(group.last_seen))}</span>
+                </td>
                 <td class="px-3 sm:px-4 py-3 hide-mobile">${renderRateLimitBadge(group.current_limit)}</td>
                 <td class="px-3 sm:px-4 py-3 hide-mobile">
                     ${group.last_reset ? `<span class="${RATE_LIMIT_BADGE_SHAPE} ${getStatusBadgeClass('delivered')} whitespace-nowrap">Reset ${escapeHtml(formatTime(group.last_reset))}</span>` : ''}
                 </td>
-                <td class="px-3 sm:px-4 py-3 text-right whitespace-nowrap">${resetButton}</td>
+                <!-- On a phone the action lives in the detail view a tap away;
+                     a button beyond the scroll edge is a button nobody finds -->
+                <td class="px-3 sm:px-4 py-3 text-right whitespace-nowrap hide-mobile">${resetButton}</td>
             </tr>
         `;
     }).join('');
@@ -375,7 +398,7 @@ function renderRateLimitSendersTable(senders) {
                         <th class="px-3 sm:px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Last hit</th>
                         <th class="px-3 sm:px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider hide-mobile">Limit</th>
                         <th class="px-3 sm:px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider hide-mobile">Last reset</th>
-                        <th class="px-3 sm:px-4 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider"></th>
+                        <th class="px-3 sm:px-4 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider hide-mobile"></th>
                     </tr>
                 </thead>
                 <tbody class="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
@@ -690,7 +713,7 @@ function renderRateLimitConfigRow(kind, name, value, frame, canWrite) {
             <td class="px-3 sm:px-4 py-3 hide-mobile">
                 <span class="${RATE_LIMIT_BADGE_SHAPE} ${RATE_LIMIT_NEUTRAL_BADGE} whitespace-nowrap">${kind === 'domain' ? 'Domain' : 'Mailbox'}</span>
             </td>
-            <td class="px-3 sm:px-4 py-3 text-xs sm:text-sm font-mono text-gray-900 dark:text-gray-100 break-all">${escapeHtml(name)}</td>
+            <td class="px-3 sm:px-4 py-3 min-w-[170px] text-xs sm:text-sm font-mono text-gray-900 dark:text-gray-100 break-all">${escapeHtml(name)}</td>
             <td class="px-3 sm:px-4 py-3">${renderRateLimitBadge(value ? { value: value, frame: frame } : null)}</td>
             <td class="px-3 sm:px-4 py-3 text-right whitespace-nowrap">${action}</td>
         </tr>
