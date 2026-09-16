@@ -513,12 +513,18 @@ function renderRateLimitEventRow(event) {
     const subject = event.subject || '';
     const shortened = subject.length > 70 ? `${subject.slice(0, 70)}...` : subject;
 
+    // On a narrow screen every cell keeps its natural width and the table
+    // scrolls sideways inside its card. Squeezed columns that snap addresses
+    // in half are worse than a scroll.
     return `
         <tr class="border-t border-gray-200 dark:border-gray-700">
-            <td class="px-3 sm:px-4 py-2 text-xs sm:text-sm text-gray-700 dark:text-gray-300 whitespace-nowrap">${escapeHtml(formatTime(event.time))}</td>
-            <td class="px-3 sm:px-4 py-2 font-mono text-xs sm:text-sm text-gray-700 dark:text-gray-300 break-all">${escapeHtml(event.rcpt)}</td>
+            <td class="px-3 sm:px-4 py-2 text-xs sm:text-sm text-gray-700 dark:text-gray-300 whitespace-nowrap">
+                <span class="sm:hidden">${escapeHtml(rateLimitShortTime(event.time))}</span>
+                <span class="hidden sm:inline">${escapeHtml(formatTime(event.time))}</span>
+            </td>
+            <td class="px-3 sm:px-4 py-2 font-mono text-xs sm:text-sm text-gray-700 dark:text-gray-300 whitespace-nowrap sm:whitespace-normal sm:break-all">${escapeHtml(event.rcpt)}</td>
             <td class="px-3 sm:px-4 py-2 text-xs sm:text-sm text-gray-700 dark:text-gray-300">${shortened
-                ? escapeHtml(shortened)
+                ? `<div class="truncate max-w-[240px] sm:max-w-none sm:whitespace-normal">${escapeHtml(shortened)}</div>`
                 : '<span class="text-gray-400">No subject</span>'}</td>
             <td class="px-3 sm:px-4 py-2 font-mono text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap hide-mobile">${escapeHtml(event.qid)}</td>
         </tr>
