@@ -369,11 +369,11 @@ function renderRateLimitSendersTable(senders) {
             <tr data-rl-sender="${escapeHtml((group.user || '').toLowerCase())}"
                 class="hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer"
                 onclick="selectRateLimitSender('${escapeJsArg(group.user)}')">
-                <td class="px-3 sm:px-4 py-3 min-w-[170px] font-mono text-xs sm:text-sm text-gray-900 dark:text-gray-100 break-all">${escapeHtml(group.user)}</td>
+                <td class="px-3 sm:px-4 py-3 min-w-[170px] font-mono text-sm text-gray-900 dark:text-gray-100 break-all">${escapeHtml(group.user)}</td>
                 <td class="px-3 sm:px-4 py-3">
                     <span class="${RATE_LIMIT_BADGE_SHAPE} ${getStatusBadgeClass('rejected')} whitespace-nowrap">${group.events}</span>
                 </td>
-                <td class="px-3 sm:px-4 py-3 text-xs sm:text-sm text-gray-900 dark:text-gray-100 whitespace-nowrap">
+                <td class="px-3 sm:px-4 py-3 text-sm text-gray-900 dark:text-gray-100 whitespace-nowrap">
                     <span class="sm:hidden">${escapeHtml(rateLimitShortTime(group.last_seen))}</span>
                     <span class="hidden sm:inline">${escapeHtml(formatTime(group.last_seen))}</span>
                 </td>
@@ -518,12 +518,12 @@ function renderRateLimitEventRow(event) {
     // in half are worse than a scroll.
     return `
         <tr class="border-t border-gray-200 dark:border-gray-700">
-            <td class="px-3 sm:px-4 py-2 text-xs sm:text-sm text-gray-700 dark:text-gray-300 whitespace-nowrap">
+            <td class="px-3 sm:px-4 py-2 text-sm text-gray-700 dark:text-gray-300 whitespace-nowrap">
                 <span class="sm:hidden">${escapeHtml(rateLimitShortTime(event.time))}</span>
                 <span class="hidden sm:inline">${escapeHtml(formatTime(event.time))}</span>
             </td>
-            <td class="px-3 sm:px-4 py-2 font-mono text-xs sm:text-sm text-gray-700 dark:text-gray-300 whitespace-nowrap sm:whitespace-normal sm:break-all">${escapeHtml(event.rcpt)}</td>
-            <td class="px-3 sm:px-4 py-2 text-xs sm:text-sm text-gray-700 dark:text-gray-300">${shortened
+            <td class="px-3 sm:px-4 py-2 font-mono text-sm text-gray-700 dark:text-gray-300 whitespace-nowrap sm:whitespace-normal sm:break-all">${escapeHtml(event.rcpt)}</td>
+            <td class="px-3 sm:px-4 py-2 text-sm text-gray-700 dark:text-gray-300">${shortened
                 ? `<div class="truncate max-w-[240px] sm:max-w-none sm:whitespace-normal">${escapeHtml(shortened)}</div>`
                 : '<span class="text-gray-400">No subject</span>'}</td>
             <td class="px-3 sm:px-4 py-2 font-mono text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap hide-mobile">${escapeHtml(event.qid)}</td>
@@ -719,7 +719,7 @@ function renderRateLimitConfigRow(kind, name, value, frame, canWrite) {
             <td class="px-3 sm:px-4 py-3 hide-mobile">
                 <span class="${RATE_LIMIT_BADGE_SHAPE} ${RATE_LIMIT_NEUTRAL_BADGE} whitespace-nowrap">${kind === 'domain' ? 'Domain' : 'Mailbox'}</span>
             </td>
-            <td class="px-3 sm:px-4 py-3 min-w-[170px] text-xs sm:text-sm font-mono text-gray-900 dark:text-gray-100 break-all">${escapeHtml(name)}</td>
+            <td class="px-3 sm:px-4 py-3 min-w-[170px] text-sm font-mono text-gray-900 dark:text-gray-100 break-all">${escapeHtml(name)}</td>
             <td class="px-3 sm:px-4 py-3">${renderRateLimitBadge(value ? { value: value, frame: frame } : null)}</td>
             <td class="px-3 sm:px-4 py-3 text-right whitespace-nowrap">${action}</td>
         </tr>
