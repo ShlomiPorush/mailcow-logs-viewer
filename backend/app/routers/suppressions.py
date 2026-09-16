@@ -32,6 +32,52 @@ MANAGED_MARKER_START = "# === MANAGED BY MAILCOW LOGS VIEWER - DO NOT EDIT BELOW
 MANAGED_MARKER_END = "# === END MANAGED SECTION ==="
 
 
+def format_suppression_map_entry(email: str) -> str:
+    """
+    One line of the Rspamd map, matching the address exactly.
+
+    global_rcpt_blacklist.map is a regexp map: a bare address like e@example.com
+    is compiled as an unanchored pattern and blocks every recipient that
+    merely CONTAINS it (alice@example.com, joe@example.com, ...). Every
+    entry is therefore written as an anchored, escaped pattern. Stored domain
+    suppressions are already regex strings; ones created before anchoring
+    existed get their anchors added here.
+    """
+    email = (email or '').strip()
+    pattern = re.match(r'^/(.*)/(i?)$', email)
+    if pattern:
+        body, flags = pattern.group(1), pattern.group(2)
+        if not body.startswith('^'):
+            body = '^' + body
+        if not body.endswith('$'):
+            body = body + '$'
+        return f'/{body}/{flags}'
+    return f'/^{re.escape(email)}$/i'
+
+
+# A line that is just an address. Used to auto-migrate dangerous bare
+# entries: in a regexp map they match as substrings. Domain labels exclude
+# the dot so the pattern cannot backtrack polynomially on crafted input, and
+# callers cap the line length - map content is operator-provided.
+_BARE_ADDRESS_MAX_LEN = 320
+_BARE_ADDRESS_RE = re.compile(r'^[^\s/@]+@[^\s/@.]+(?:\.[^\s/@.]+)+$')
+
+
+def migrate_manual_map_line(line: str) -> str:
+    """
+    Anchor a manual map line when it is a bare address; leave everything
+    else (comments, regex patterns, other entry shapes) untouched.
+
+    Operators are not expected to fix their maps by hand - installations in
+    the field carry bare entries added before anchoring existed, and each
+    one silently blocks unrelated recipients until it is anchored.
+    """
+    stripped = line.strip()
+    if len(stripped) <= _BARE_ADDRESS_MAX_LEN and _BARE_ADDRESS_RE.match(stripped):
+        return format_suppression_map_entry(stripped)
+    return line
+
+
 class SuppressionCreateRequest(BaseModel):
     email: str
     type: str = "email"  # 'email' or 'domain'
@@ -571,6 +617,13 @@ async def sync_suppressions_to_rspamd(db: Session) -> dict:
     # Remove trailing blank lines from manual section
     while manual_lines and not manual_lines[-1].strip():
         manual_lines.pop()
+
+    # Auto-migrate dangerous bare addresses among the manual entries - they
+    # match as substrings in this regexp map. The operator never has to edit
+    # the map by hand for this.
+    migrated_manual = [migrate_manual_map_line(l) for l in manual_lines]
+    manual_needs_migration = migrated_manual != manual_lines
+    manual_lines = migrated_manual
     
     # 3. Get active suppressions from DB
     active_suppressions = db.query(SpamSuppression).filter(
@@ -592,8 +645,9 @@ async def sync_suppressions_to_rspamd(db: Session) -> dict:
         if in_managed and line.strip() and not line.strip().startswith('#'):
             current_managed.append(line.strip())
 
-    desired_emails = [s.email for s in active_suppressions]
-    if current_content and sorted(current_managed) == sorted(desired_emails):
+    desired_lines = [format_suppression_map_entry(s.email) for s in active_suppressions]
+    if (current_content and not manual_needs_migration
+            and sorted(current_managed) == sorted(desired_lines)):
         synced_count = 0
         for s in active_suppressions:
             if not s.synced_to_rspamd:
@@ -624,9 +678,8 @@ async def sync_suppressions_to_rspamd(db: Session) -> dict:
     parts.append(MANAGED_MARKER_START)
     parts.append(f"# Last sync: {now_str} | Active: {len(active_suppressions)}")
     
-    for s in active_suppressions:
-        parts.append(s.email)
-    
+    parts.extend(desired_lines)
+
     parts.append(MANAGED_MARKER_END)
     
     new_content = '\n'.join(parts)
