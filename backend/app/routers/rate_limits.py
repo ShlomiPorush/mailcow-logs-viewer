@@ -44,6 +44,11 @@ _RL_HASH_RE = re.compile(r'^RL[A-Za-z0-9]+$')
 _RECENT_PER_SENDER = 5
 _FLAT_EVENT_LIMIT = 50
 
+# One sender's detail view reads its whole history separately. This is far
+# above any realistic sender's collected hits and only guards against a single
+# request rendering a runaway table; `total` still reports the real number.
+_SENDER_EVENTS_MAX = 2000
+
 # Upper bound on the rows one request will parse, so a long window on a busy
 # server cannot pin a worker. The grouping is still correct for everything read.
 _MAX_EVENT_ROWS = 5000
@@ -377,6 +382,57 @@ def get_rate_limit_events(
         'bucket': bucket_kind,
         'by_bucket': _bucket_series(since, now, bucket_kind, bucket_counts),
     }
+
+
+@router.get("/sender-events")
+def get_sender_events(
+    user: str = Query('', description="The sender address to read the history of"),
+    db: Session = Depends(get_db)
+):
+    """One sender's full collected history of refused messages, newest first.
+
+    /events carries only the newest few rows per sender - enough to paint the
+    detail view the moment it opens. This is the rest of it: the page mirrors
+    reality, so an open sender shows everything that was collected about them,
+    not a sample of it.
+    """
+    address = (user or '').strip().lower()
+    if not address:
+        raise HTTPException(status_code=400, detail="A sender address is required")
+
+    # The events builder reads `user` and falls back to `from`, so the match
+    # has to look at both keys - and an empty `user` is not a match
+    matches_sender = func.lower(func.coalesce(
+        func.nullif(RawServiceLog.raw_data['user'].astext, ''),
+        RawServiceLog.raw_data['from'].astext
+    )) == address
+
+    try:
+        # The real number, counted in the database - the list below is capped
+        total = db.query(func.count(RawServiceLog.id)).filter(
+            RawServiceLog.service == 'ratelimited',
+            matches_sender
+        ).scalar() or 0
+        rows = db.query(RawServiceLog).filter(
+            RawServiceLog.service == 'ratelimited',
+            matches_sender
+        ).order_by(RawServiceLog.time.desc()).limit(_SENDER_EVENTS_MAX).all()
+    except Exception as e:
+        logger.error(f"Error reading the rate limit history of {address}: {e}")
+        raise internal_error(e)
+
+    events: List[Dict[str, Any]] = []
+    for row in rows:
+        data = row.raw_data if isinstance(row.raw_data, dict) else {}
+        events.append({
+            'time': format_datetime_for_api(row.time),
+            'rcpt': data.get('rcpt') or '',
+            'subject': data.get('header_subject') or '',
+            'qid': data.get('qid') or '',
+            'rl_hash': (data.get('rl_hash') or '').strip(),
+        })
+
+    return {'user': address, 'total': int(total), 'events': events}
 
 
 @router.get("/limits")

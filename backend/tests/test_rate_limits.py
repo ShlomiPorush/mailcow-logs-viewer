@@ -32,7 +32,8 @@ def test_every_endpoint_is_registered_under_the_api_prefix():
     """Anything outside /api/ is unauthenticated (see test_route_exposure)."""
     from app.main import app
     paths = {getattr(route, 'path', '') for route in app.routes}
-    for path in ('/api/rate-limits/events', '/api/rate-limits/limits',
+    for path in ('/api/rate-limits/events', '/api/rate-limits/sender-events',
+                 '/api/rate-limits/limits',
                  '/api/rate-limits/mailbox', '/api/rate-limits/domain',
                  '/api/rate-limits/bulk', '/api/rate-limits/reset'):
         assert path in paths, f'{path} is not registered'
@@ -358,6 +359,87 @@ def test_the_window_scopes_the_chart_but_never_the_sender_list(env):
     wide = _events(hours=168)
     assert wide['total_events'] >= data['total_events'] + 1, \
         "QUIET's 90 minute old hit counts in the wide window but not in one hour"
+
+
+# ---------- one sender's full history ----------
+# Opening a sender must show everything collected about them, not the handful
+# of rows /events carries for the instant first paint.
+
+def _sender_events(user):
+    from app.database import get_db_context
+    from app.routers.rate_limits import get_sender_events
+    with get_db_context() as db:
+        return get_sender_events(user=user, db=db)
+
+
+def _seed_extra_hits(count, user=SENDER):
+    """More hits for one sender, older than the ones the fixture seeded, so
+    there is more history than the five rows /events keeps."""
+    from app.database import get_db_context
+    now = datetime.utcnow()
+    with get_db_context() as db:
+        for index in range(count):
+            db.add(_log_row(user, 100 + index,
+                            now - timedelta(minutes=10 + index), OLDER_HASH))
+        db.commit()
+
+
+def test_a_senders_whole_history_is_returned_newest_first(env):
+    _seed_extra_hits(4)
+
+    data = _sender_events(SENDER)
+
+    assert data['user'] == SENDER
+    assert data['total'] == 10, 'the real number of collected hits'
+    assert len(data['events']) == 10, 'every one of them, not a sample'
+    times = [event['time'] for event in data['events']]
+    assert times == sorted(times, reverse=True), 'newest first'
+    assert data['events'][0]['subject'] == SUBJECT
+    assert data['events'][0]['rcpt'] == 'rcpt0@remote.example'
+    assert data['events'][0]['qid'] == f'QID0{MARKER}'
+    assert data['events'][0]['rl_hash'] == NEWEST_HASH
+
+
+def test_the_history_holds_more_than_the_five_rows_events_carries(env):
+    """The whole point of the endpoint: the detail view is not capped at five."""
+    _seed_extra_hits(4)
+    groups = {g['user']: g for g in _events()['by_sender']}
+    assert len(groups[SENDER]['recent']) == 5
+    assert len(_sender_events(SENDER)['events']) == 10
+
+
+@pytest.mark.parametrize('blank', ['', '   '])
+def test_a_request_without_a_sender_is_refused(env, blank):
+    with pytest.raises(HTTPException) as exc:
+        _sender_events(blank)
+    assert exc.value.status_code == 400
+
+
+def test_an_unknown_sender_is_an_empty_history_not_an_error(env):
+    data = _sender_events(f'nobody-{MARKER}@{DOMAIN}')
+    assert data['total'] == 0
+    assert data['events'] == []
+
+
+def test_the_sender_is_matched_regardless_of_case(env):
+    """Addresses arrive from the log in whatever case the client sent."""
+    data = _sender_events(f'  {SENDER.upper()}  ')
+    assert data['user'] == SENDER
+    assert data['total'] == 6
+    assert len(data['events']) == 6
+
+
+def test_a_very_long_history_is_capped_but_still_counted(env, monkeypatch):
+    """One sender must not render a runaway table, and the count still has to
+    tell the truth so the page can say "showing 3 of 10"."""
+    from app.routers import rate_limits
+    _seed_extra_hits(4)
+    monkeypatch.setattr(rate_limits, '_SENDER_EVENTS_MAX', 3)
+
+    data = _sender_events(SENDER)
+
+    assert len(data['events']) == 3, 'the newest rows only'
+    assert data['total'] == 10, 'the real total, not the capped length'
 
 
 # ---------- the activity chart's buckets ----------

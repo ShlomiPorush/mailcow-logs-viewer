@@ -59,6 +59,13 @@ let rateLimitBulkValue = '';
 let rateLimitBulkFrame = 'h';
 // Address of the sender whose detail panel is open, kept across reloads
 let rateLimitSelectedSender = null;
+// One sender's full collected history, keyed by address:
+// { events: [...], total: n } once it is read, { failed: true } if the read
+// failed. Kept so stepping in and out of a sender does not fetch it again.
+let rateLimitSenderEvents = {};
+// The address whose history is in flight right now, so re-rendering the open
+// detail does not fire the same request twice
+let rateLimitSenderEventsInFlight = null;
 let rateLimitChart = null;
 
 
@@ -75,6 +82,9 @@ async function loadRateLimits() {
     content.classList.add('hidden');
     rateLimitEditing = null;
     rateLimitBulkOpen = false;
+    // Fresh data means the cached histories are stale
+    rateLimitSenderEvents = {};
+    rateLimitSenderEventsInFlight = null;
     destroyRateLimitChart();
 
     try {
@@ -355,6 +365,9 @@ function renderRateLimitSendersCard() {
     if (!detailMode && senders.length && rateLimitSenderSearch) {
         filterRateLimitSenders(rateLimitSenderSearch);
     }
+    // The detail is painted at once from the rows /events already carried;
+    // the rest of that sender's history arrives after this
+    if (detailMode) loadRateLimitSenderHistory(rateLimitSelectedSender);
 }
 
 
@@ -422,6 +435,10 @@ function renderRateLimitSendersTable(senders) {
 // Clicking a row swaps the whole card body for that sender's detail view
 function selectRateLimitSender(user) {
     rateLimitSelectedSender = user;
+    // A read that failed last time is worth another try when the reader comes
+    // back to this sender
+    const cached = rateLimitSenderEvents[user];
+    if (cached && cached.failed) delete rateLimitSenderEvents[user];
     renderRateLimitSendersCard();
 }
 
@@ -455,7 +472,6 @@ function renderRateLimitSenderDetail(group) {
     if (!group) return '';
 
     const canWrite = !rateLimitConfigData || rateLimitConfigData.rw_key_configured !== false;
-    const recent = group.recent || [];
 
     const resetButton = (canWrite && group.last_rl_hash)
         ? `
@@ -470,26 +486,6 @@ function renderRateLimitSenderDetail(group) {
     const resetBadge = group.last_reset
         ? `<span class="${RATE_LIMIT_BADGE_SHAPE} ${getStatusBadgeClass('delivered')} whitespace-nowrap">Reset ${escapeHtml(formatTime(group.last_reset))}</span>`
         : '';
-
-    const events = recent.length === 0
-        ? '<p class="px-4 py-6 text-sm text-gray-500 dark:text-gray-400">No details were recorded for these hits</p>'
-        : `
-            <div class="mobile-scroll overflow-x-auto">
-                <table class="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
-                    <thead class="bg-gray-50 dark:bg-gray-700">
-                        <tr>
-                            <th class="px-3 sm:px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Time</th>
-                            <th class="px-3 sm:px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Recipient</th>
-                            <th class="px-3 sm:px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Subject</th>
-                            <th class="px-3 sm:px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider hide-mobile">Queue id</th>
-                        </tr>
-                    </thead>
-                    <tbody class="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
-                        ${recent.map(renderRateLimitEventRow).join('')}
-                    </tbody>
-                </table>
-            </div>
-        `;
 
     return `
         <div class="px-4 py-3 border-b border-gray-200 dark:border-gray-700 flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
@@ -510,8 +506,104 @@ function renderRateLimitSenderDetail(group) {
             </div>
             ${resetButton}
         </div>
-        ${events}
+        <div data-rl-sender-events>${renderRateLimitSenderEvents(group)}</div>
     `;
+}
+
+
+// The refused messages of the open sender: the handful /events already carried
+// until the full history lands, then all of it. Only this block is repainted
+// when it does, so the panel above it never flickers.
+function renderRateLimitSenderEvents(group) {
+    const cached = rateLimitSenderEvents[group.user];
+    const loaded = !!(cached && cached.events);
+    const rows = loaded ? cached.events : (group.recent || []);
+
+    if (rows.length === 0) {
+        return '<p class="px-4 py-6 text-sm text-gray-500 dark:text-gray-400">No details were recorded for these hits</p>';
+    }
+
+    // Before the history lands, the hit count from /events is the real total
+    const total = loaded ? cached.total : (group.events || rows.length);
+    const count = loaded && cached.total > rows.length
+        ? `Showing ${rows.length.toLocaleString()} of ${cached.total.toLocaleString()}`
+        : `${total.toLocaleString()} refused ${total === 1 ? 'message' : 'messages'}`;
+
+    // A quiet line rather than a spinner: the rows already on screen stay
+    // readable while the rest is on its way
+    let note = '';
+    if (total > rows.length) {
+        if (cached && cached.failed) {
+            note = `Showing the latest ${rows.length} only - full history failed to load`;
+        } else if (!loaded) {
+            note = 'Loading full history...';
+        }
+    }
+
+    return `
+        <p class="px-4 pt-3 text-sm text-gray-500 dark:text-gray-400">${escapeHtml(count)}</p>
+        <div class="mobile-scroll overflow-x-auto">
+            <table class="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+                <thead class="bg-gray-50 dark:bg-gray-700">
+                    <tr>
+                        <th class="px-3 sm:px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Time</th>
+                        <th class="px-3 sm:px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Recipient</th>
+                        <th class="px-3 sm:px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Subject</th>
+                        <th class="px-3 sm:px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider hide-mobile">Queue id</th>
+                    </tr>
+                </thead>
+                <tbody class="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
+                    ${rows.map(renderRateLimitEventRow).join('')}
+                </tbody>
+            </table>
+        </div>
+        ${note ? `<p class="px-4 py-2 text-sm text-gray-500 dark:text-gray-400">${escapeHtml(note)}</p>` : ''}
+    `;
+}
+
+
+// Everything this viewer collected about one sender, not just the rows the big
+// /events response carries. Read once per sender and kept until the page data
+// is reloaded.
+async function loadRateLimitSenderHistory(user) {
+    if (!user || rateLimitSenderEvents[user] || rateLimitSenderEventsInFlight === user) return;
+    rateLimitSenderEventsInFlight = user;
+
+    try {
+        const response = await authenticatedFetch(
+            `/api/rate-limits/sender-events?user=${encodeURIComponent(user)}`);
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+        }
+        const data = await response.json();
+        const events = data.events || [];
+        rateLimitSenderEvents[user] = {
+            events: events,
+            total: Number.isFinite(data.total) ? data.total : events.length
+        };
+    } catch (error) {
+        console.error('Failed to load the full history of a blocked sender:', error);
+        // The rows already on screen stay; only the note changes
+        rateLimitSenderEvents[user] = { failed: true };
+    } finally {
+        if (rateLimitSenderEventsInFlight === user) rateLimitSenderEventsInFlight = null;
+    }
+
+    // The reader may have gone back, or opened another sender, while this was
+    // in flight - an answer nobody is looking at is dropped
+    if (rateLimitSelectedSender !== user) return;
+    refreshRateLimitSenderEvents(user);
+}
+
+
+function refreshRateLimitSenderEvents(user) {
+    const card = document.getElementById('rate-limits-senders-card');
+    const area = card && card.querySelector('[data-rl-sender-events]');
+    if (!area) return;
+
+    const group = rateLimitSenders().find(entry => entry.user === user);
+    if (!group) return;
+    area.innerHTML = renderRateLimitSenderEvents(group);
 }
 
 

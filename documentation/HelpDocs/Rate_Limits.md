@@ -61,11 +61,15 @@ Click any row to open that sender's detail.
 
 ### Sender detail
 
-The detail view replaces the table with everything known about one sender: the address, the time of the last hit, the current limit, the reset badge if there is one, and a table of the **most recent refused messages** - time, recipient, subject and queue id. **All senders** takes you back to the list.
+The detail view replaces the table with everything known about one sender: the address, the time of the last hit, the current limit, the reset badge if there is one, and a table of **every refused message** collected for that sender - time, recipient, subject and queue id. **All senders** takes you back to the list.
+
+The line above the table says how many there are, for example *"124 refused messages"*, and it matches the **Hits** count on the sender's row.
+
+The five most recent messages appear the moment you click, and the rest of the history loads a moment later - a short *Loading full history...* line under the table says when that is still happening. If it cannot be loaded, the five stay on screen and the line says so.
 
 The queue id is the message's id in the mail logs, useful if you want to trace it on the **Messages** page.
 
-> **Note**: A handful of recent messages is kept per sender, not all of them. The **Hits** count is the real total; the detail table is a sample of the latest ones.
+> **Note**: Only what this viewer has collected is shown, so **log retention** is the real limit on how far the history goes back. An extremely long history is capped at 2,000 rows in the table, and the line above it then says *"Showing 2,000 of ..."*.
 
 ### Reset counter
 
