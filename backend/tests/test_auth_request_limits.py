@@ -1,5 +1,6 @@
 """Exercise credential throttling through real routes and Uvicorn proxy handling."""
 import base64
+from unittest.mock import mock_open, patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -112,7 +113,10 @@ def test_existing_sessions_and_public_login_info_survive_lockout(monkeypatch, oa
     assert client.get("/api/info").status_code == 200
     assert "version" not in client.get("/api/info").json()
     assert client.get("/api/auth/provider-info").status_code == 200
-    assert client.get("/login").status_code == 200
+    # The backend CI job has no /app/frontend/login.html. Only substitute the
+    # file read: the real route and middleware must still allow the login page.
+    with patch("app.main.open", mock_open(read_data="<html>Login</html>"), create=True):
+        assert client.get("/login").status_code == 200
     if oauth_only:
         monkeypatch.setattr(settings._inner, "basic_auth_enabled", False)
         monkeypatch.setattr(settings._inner, "oauth2_enabled", True)
