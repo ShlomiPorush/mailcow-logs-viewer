@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- **Safer report upload parsing** ([#133](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/133)) - update the web framework and form parser to reject oversized text fields and move temporary-file rollover off the request loop. Normal file uploads retain their existing limits. Thanks to [@ShlomiPorush](https://github.com/ShlomiPorush)
+
 - **Login attempt limits apply consistently** ([#130](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/130)) - password checks share one failure counter, and client addresses follow the server's trusted-proxy configuration. Direct access and existing sessions continue to work without new settings. Users behind an untrusted proxy share its counter; see the optional `FORWARDED_ALLOW_IPS` setting in the environment guide for per-client limits. Thanks to [@ShlomiPorush](https://github.com/ShlomiPorush)
 
 ### Added

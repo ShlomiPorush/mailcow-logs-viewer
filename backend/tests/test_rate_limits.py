@@ -3,6 +3,8 @@ collected `ratelimited` log, and the guards on every write.
 
 Nothing here talks to a real mailcow - the API client is exercised through a
 monkeypatched `_make_request`, and the router through a fake client object."""
+from conftest import registered_routes
+
 import asyncio
 import uuid
 from datetime import datetime, timedelta
@@ -31,7 +33,7 @@ OLDER_HASH = f'RLolder{MARKER}'
 def test_every_endpoint_is_registered_under_the_api_prefix():
     """Anything outside /api/ is unauthenticated (see test_route_exposure)."""
     from app.main import app
-    paths = {getattr(route, 'path', '') for route in app.routes}
+    paths = {getattr(route, 'path', '') for route in registered_routes(app)}
     for path in ('/api/rate-limits/events', '/api/rate-limits/sender-events',
                  '/api/rate-limits/limits',
                  '/api/rate-limits/mailbox', '/api/rate-limits/domain',
@@ -934,7 +936,7 @@ def test_disabling_the_feature_leaves_the_endpoints_registered(monkeypatch):
     _disable(monkeypatch, 'rate-limits')
 
     from app.main import app
-    paths = {getattr(route, 'path', '') for route in app.routes}
+    paths = {getattr(route, 'path', '') for route in registered_routes(app)}
     assert '/api/rate-limits/events' in paths
     assert '/api/rate-limits/limits' in paths
 
