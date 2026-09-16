@@ -10,6 +10,8 @@ A modern, self-hosted dashboard for monitoring, analyzing, and managing your mai
 
 ![Message Logs](images/Message_Details_Logs.png)
 
+![Rate Limits](images/Rate_Limits.png)
+
 ![Security](images/Security.png)
 
 ![Domains](images/Domains.png)
