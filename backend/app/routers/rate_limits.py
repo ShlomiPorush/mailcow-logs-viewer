@@ -345,11 +345,12 @@ def get_rate_limit_events(
 
 @router.get("/limits")
 async def get_configured_limits(db: Session = Depends(get_db)):
-    """Mailboxes that have a limit, and the limit of every local domain."""
+    """Every active mailbox with its limit (or none), and the limit of every
+    local domain. Unlimited mailboxes are listed too - that is where a limit
+    gets added in the first place."""
     try:
         rows = db.query(MailboxStatistics).filter(
-            MailboxStatistics.rl_value.isnot(None),
-            MailboxStatistics.rl_value > 0
+            MailboxStatistics.active == True  # noqa: E712 - SQLAlchemy filter
         ).order_by(MailboxStatistics.username).all()
     except Exception as e:
         logger.error(f"Error reading mailbox rate limits: {e}")

@@ -566,7 +566,9 @@ def test_limits_lists_mailbox_and_domain_limits(env, monkeypatch):
     mailboxes = {m['username']: m for m in data['mailboxes']}
     assert mailboxes[SENDER]['rl_value'] == 100
     assert mailboxes[SENDER]['rl_frame'] == 'm'
-    assert QUIET not in mailboxes, 'only mailboxes that actually have a limit'
+    # Unlimited mailboxes are listed too - a limit has to start somewhere
+    assert QUIET in mailboxes
+    assert mailboxes[QUIET]['rl_value'] is None
 
     domains = {d['domain']: d for d in data['domains']}
     assert domains[DOMAIN]['rl_value'] == 500

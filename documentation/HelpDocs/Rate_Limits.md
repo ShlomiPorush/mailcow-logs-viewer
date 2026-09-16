@@ -82,7 +82,7 @@ That badge is the audit trail: it tells you - and the next person looking at thi
 
 ## Configured limits
 
-One table for domains and mailboxes together, so a domain cap and the mailboxes underneath it are visible side by side. It lists **every local domain** (limit or not) and **every mailbox that has a limit**. Mailboxes without one are not listed - they send uncapped and there is nothing to show.
+One table for domains and mailboxes together, so a domain cap and the mailboxes underneath it are visible side by side. It lists **every local domain** and **every active mailbox**, with or without a limit - an uncapped mailbox shows **No limit**, and this is where you give it one.
 
 *   **Type** - Domain or Mailbox.
 *   **Name** - the domain or the mailbox address.
