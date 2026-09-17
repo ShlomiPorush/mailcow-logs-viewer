@@ -6,6 +6,8 @@ import base64
 import binascii
 import logging
 import secrets
+import re
+import time
 from fastapi import APIRouter, Request, Response, HTTPException, status
 from fastapi.responses import JSONResponse, RedirectResponse
 from typing import Dict, Any
@@ -18,6 +20,7 @@ from ..session import (
     set_session_cookie,
     clear_session_cookie,
     SESSION_COOKIE_NAME,
+    is_secure_request,
 )
 from ..services.oauth2_client import oauth2_client, OAuth2ClientError
 
@@ -25,8 +28,27 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-# Store state tokens temporarily (in production, use Redis or database)
-_state_store: Dict[str, str] = {}
+# The application runs one worker; pending authorizations expire after ten minutes.
+OAUTH_STATE_TTL = 600
+MAX_PENDING_OAUTH_STATES = 1024
+OAUTH_COOKIE_PREFIX = "oauth_state_"
+_state_store: Dict[str, tuple[str, float]] = {}
+
+
+def _cleanup_oauth_states() -> None:
+    now = time.monotonic()
+    for token, (_, expires_at) in list(_state_store.items()):
+        if expires_at <= now:
+            del _state_store[token]
+
+
+def _oauth_redirect(url: str, state: str, request: Request) -> RedirectResponse:
+    response = RedirectResponse(url=url, status_code=status.HTTP_302_FOUND)
+    response.delete_cookie(
+        key=OAUTH_COOKIE_PREFIX + state, path="/", httponly=True,
+        secure=is_secure_request(request), samesite="lax",
+    )
+    return response
 
 
 @router.get("/auth/verify")
@@ -104,16 +126,29 @@ async def oauth2_login(request: Request):
         # Initialize client (perform discovery if needed)
         await oauth2_client.initialize()
         
-        # Generate CSRF state token
+        _cleanup_oauth_states()
+        if len(_state_store) >= MAX_PENDING_OAUTH_STATES:
+            raise HTTPException(status_code=503, detail="Too many pending logins. Try again later.")
+
         state = secrets.token_urlsafe(32)
-        _state_store[state] = "pending"
-        
-        # Get authorization URL
+        # Independent random nonce, never an OAuth client secret or user password.
+        browser_nonce = secrets.token_urlsafe(32)
         auth_url = oauth2_client.get_authorization_url(state)
-        
+        response = RedirectResponse(url=auth_url)
+        # A separate cookie per flow permits concurrent logins in different tabs.
+        # Lax allows the provider's top-level GET callback; no Domain scopes it
+        # to this host. Follow the existing session cookie's HTTPS policy.
+        response.set_cookie(
+            key=OAUTH_COOKIE_PREFIX + state, value=browser_nonce,
+            max_age=OAUTH_STATE_TTL, httponly=True,
+            secure=is_secure_request(request), samesite="lax", path="/",
+        )
+        _state_store[state] = (browser_nonce, time.monotonic() + OAUTH_STATE_TTL)
         logger.info(f"Redirecting to OAuth2 provider: {settings.oauth2_provider_name}")
-        return RedirectResponse(url=auth_url)
+        return response
         
+    except HTTPException:
+        raise
     except OAuth2ClientError as e:
         logger.error(f"OAuth2 login error: {e}")
         raise HTTPException(
@@ -144,31 +179,24 @@ async def oauth2_callback(
             detail="OAuth2 authentication is not enabled"
         )
     
-    # Check for errors from provider
-    if error:
-        logger.warning(f"OAuth2 callback error: {error}")
-        return RedirectResponse(
-            url="/login?error=oauth2_error",
-            status_code=status.HTTP_302_FOUND
-        )
-    
-    # Validate state token (CSRF protection)
-    if not state or state not in _state_store:
-        logger.warning("Invalid or missing state token in OAuth2 callback")
-        return RedirectResponse(
-            url="/login?error=invalid_state",
-            status_code=status.HTTP_302_FOUND
-        )
-    
-    # Remove state token (one-time use)
+    _cleanup_oauth_states()
+    pending = _state_store.get(state) if state else None
+    browser_nonce = request.cookies.get(OAUTH_COOKIE_PREFIX + state, "") if pending else ""
+    if (not pending or not re.fullmatch(r"[A-Za-z0-9_-]{43}", browser_nonce)
+            or not secrets.compare_digest(pending[0], browser_nonce)):
+        logger.warning("Invalid, expired or unbound state in OAuth2 callback")
+        return RedirectResponse(url="/login?error=invalid_state", status_code=302)
+
+    # Consume before any await, including on provider errors or missing codes.
+    # A callback from another browser must not consume the owner's state.
     del _state_store[state]
-    
+    if error:
+        logger.warning("OAuth2 provider declined authorization")
+        return _oauth_redirect("/login?error=oauth2_error", state, request)
+
     if not code:
         logger.warning("Missing authorization code in OAuth2 callback")
-        return RedirectResponse(
-            url="/login?error=missing_code",
-            status_code=status.HTTP_302_FOUND
-        )
+        return _oauth_redirect("/login?error=missing_code", state, request)
     
     try:
         # Exchange code for token
@@ -177,10 +205,7 @@ async def oauth2_callback(
         
         if not access_token:
             logger.error("No access token in token response")
-            return RedirectResponse(
-                url="/login?error=no_token",
-                status_code=status.HTTP_302_FOUND
-            )
+            return _oauth_redirect("/login?error=no_token", state, request)
         
         # Get user information
         user_info = await oauth2_client.get_user_info(access_token)
@@ -189,10 +214,7 @@ async def oauth2_callback(
         session_id = create_session(user_info)
         
         # Create response with redirect
-        response = RedirectResponse(
-            url="/",
-            status_code=status.HTTP_302_FOUND
-        )
+        response = _oauth_redirect("/", state, request)
         
         # Set session cookie
         set_session_cookie(response, session_id, request)
@@ -202,16 +224,10 @@ async def oauth2_callback(
         
     except OAuth2ClientError as e:
         logger.error(f"OAuth2 callback error: {e}")
-        return RedirectResponse(
-            url="/login?error=oauth2_error",
-            status_code=status.HTTP_302_FOUND
-        )
+        return _oauth_redirect("/login?error=oauth2_error", state, request)
     except Exception as e:
         logger.error(f"Unexpected error during OAuth2 callback: {e}", exc_info=True)
-        return RedirectResponse(
-            url="/login?error=server_error",
-            status_code=status.HTTP_302_FOUND
-        )
+        return _oauth_redirect("/login?error=server_error", state, request)
 
 
 @router.get("/auth/logout")

@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- **OAuth login stays in the browser that started it** ([#135](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/135)) - callbacks now require a matching temporary browser cookie and expire after ten minutes. Login attempts are single-use, including failed callbacks, and concurrent tabs remain supported. Restart an expired login from the login page. Thanks to [@ShlomiPorush](https://github.com/ShlomiPorush)
+
 - **Safer report upload parsing** ([#133](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/133)) - update the web framework and form parser to reject oversized text fields and move temporary-file rollover off the request loop. Normal file uploads retain their existing limits. Thanks to [@ShlomiPorush](https://github.com/ShlomiPorush)
 
 - **Login attempt limits apply consistently** ([#130](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/130)) - password checks share one failure counter, and client addresses follow the server's trusted-proxy configuration. Direct access and existing sessions continue to work without new settings. Users behind an untrusted proxy share its counter; see the optional `FORWARDED_ALLOW_IPS` setting in the environment guide for per-client limits. Thanks to [@ShlomiPorush](https://github.com/ShlomiPorush)
