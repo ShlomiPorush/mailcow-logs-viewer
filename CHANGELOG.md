@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- **CSV downloads treat formula-like text as text** ([#137](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/137)) - protect all log and suppression exports without changing stored data or negative numeric scores. Suppression exports include an escape marker so importing them restores the original addresses and notes; older CSV files remain supported. Thanks to [@ShlomiPorush](https://github.com/ShlomiPorush)
+
 - **OAuth login stays in the browser that started it** ([#135](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/135)) - callbacks now require a matching temporary browser cookie and expire after ten minutes. Login attempts are single-use, including failed callbacks, and concurrent tabs remain supported. Restart an expired login from the login page. Thanks to [@ShlomiPorush](https://github.com/ShlomiPorush)
 
 - **Safer report upload parsing** ([#133](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/133)) - update the web framework and form parser to reject oversized text fields and move temporary-file rollover off the request loop. Normal file uploads retain their existing limits. Thanks to [@ShlomiPorush](https://github.com/ShlomiPorush)

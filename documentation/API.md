@@ -3538,6 +3538,14 @@ Test IMAP connection with detailed logging for diagnostics.
 
 ## Export
 
+CSV downloads are intended for spreadsheet viewing. Text with a formula-like
+prefix is prefixed with an apostrophe; fields are quoted and embedded quotes are
+escaped. Numeric values, including negative scores, retain their values. This
+changes only the downloaded representation, not stored messages or settings.
+Spreadsheet import settings vary; saving and reopening a CSV can remove text
+escaping. Treat exported content as untrusted when importing into other tools.
+
+
 ### GET /export/postfix/csv
 
 Export Postfix logs to CSV file.
@@ -5372,9 +5380,15 @@ user@example.com,email,manual,Imported entry
 
 #### GET /api/suppressions/export
 
-Export all suppressions as CSV download.
+Export all suppressions as CSV download. The final `_csv_escape_v1` column lists
+which cells received a text prefix. Keep this column when importing the file back
+into the application: the importer restores those values automatically. Older
+files without this column remain supported and are never automatically unescaped.
+Headered files map columns by name; headerless imports retain the four-column
+`email,type,reason,notes` format. As before, imports create active, unsynced entries
+with source `import`; this is a list transfer, not a backup of counts or sync state.
 
-**Response:** CSV file download with headers `email,type,reason,source,notes,active,bounce_count,expires_at,created_at`
+**Response:** CSV file download with headers `email,type,reason,source,notes,bounce_count,hard_bounces,soft_bounces,active,expires_at,created_at,_csv_escape_v1`
 
 ---
 
