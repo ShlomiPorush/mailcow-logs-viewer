@@ -55,14 +55,15 @@ def get_dmarc_cached(key: str, db: Session) -> Optional[Any]:
         except Exception as e:
             logger.error(f"Error checking cache signal: {e}")
 
-    if key in _dmarc_cache:
-        cached_data, cached_time = _dmarc_cache[key]
+    cached = _dmarc_cache.get(key)
+    if cached is not None:
+        cached_data, cached_time = cached
         if now - cached_time < timedelta(seconds=_dmarc_cache_ttl_seconds):
             logger.debug(f"DMARC cache hit for key: {key}")
             return cached_data
         else:
             # Cache expired, remove it
-            del _dmarc_cache[key]
+            _dmarc_cache.pop(key, None)
     return None
 
 
