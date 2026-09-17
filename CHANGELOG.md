@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **Multilingual CSV downloads** - Add a UTF-8 BOM to all CSV exports so spreadsheet applications can recognize non-English text. Issue: [#137](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/137).
+
 ### Security
 
 - **CSV downloads treat formula-like text as text** ([#137](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/137)) - protect all log and suppression exports without changing stored data or negative numeric scores. Downloads omit empty filters and show request errors instead of saving them as CSV. Suppression exports include an escape marker so importing them restores the original addresses and notes; older CSV files remain supported. Thanks to [@ShlomiPorush](https://github.com/ShlomiPorush)

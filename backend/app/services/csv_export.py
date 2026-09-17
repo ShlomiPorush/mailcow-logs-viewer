@@ -50,6 +50,6 @@ def csv_download(rows, filename: str, columns=None, *, escape_metadata=False):
             safe[CSV_ESCAPE_COLUMN] = ",".join(escaped)
         writer.writerow(safe)
     return StreamingResponse(
-        io.BytesIO(output.getvalue().encode("utf-8")), media_type="text/csv",
+        io.BytesIO(output.getvalue().encode("utf-8-sig")), media_type="text/csv",
         headers={"Content-Disposition": f"attachment; filename={filename}"},
     )

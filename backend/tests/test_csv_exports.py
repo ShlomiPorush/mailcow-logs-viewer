@@ -56,7 +56,7 @@ def download(client, path):
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/csv")
     assert "attachment; filename=" in response.headers["content-disposition"]
-    return list(csv.DictReader(io.StringIO(response.text)))
+    return list(csv.DictReader(io.StringIO(response.content.decode("utf-8-sig"))))
 
 
 @pytest.mark.parametrize("path,attribute,column", ROUTES)
@@ -97,7 +97,7 @@ def test_suppression_export_import_preserves_addresses_and_notes(export_client, 
     client, row, db, _ = export_client
     row.email, row.notes, row.type, row.reason = email, notes, "email", "manual"
     response = client.get("/api/suppressions/export")
-    exported = list(csv.DictReader(io.StringIO(response.text)))[0]
+    exported = list(csv.DictReader(io.StringIO(response.content.decode("utf-8-sig"))))[0]
     assert "_csv_escape_v1" in exported
     result = client.post("/api/suppressions/import", files={"file": ("roundtrip.csv", response.content)})
     assert result.status_code == 200
@@ -137,7 +137,7 @@ def test_empty_suppression_export_retains_headers(export_client):
     client, _, _, query = export_client
     query.all.return_value = []
     response = client.get("/api/suppressions/export")
-    reader = csv.DictReader(io.StringIO(response.text))
+    reader = csv.DictReader(io.StringIO(response.content.decode("utf-8-sig")))
     assert reader.fieldnames[0] == "email"
     assert reader.fieldnames[-1] == "_csv_escape_v1"
     assert list(reader) == []
@@ -148,3 +148,20 @@ def test_empty_log_exports_keep_the_existing_404(export_client, path, attribute,
     client, _, _, query = export_client
     query.all.return_value = []
     assert client.get(path).status_code == 404
+
+
+@pytest.mark.parametrize("path,attribute,column", ROUTES)
+def test_downloads_identify_utf8_and_preserve_multilingual_text(export_client, path, attribute, column):
+    client, row, _, _ = export_client
+    text = "\u05e9\u05dc\u05d5\u05dd \u0645\u0631\u062d\u0628\u0627 \u4f60\u597d caf\u00e9 \U0001f600"
+    setattr(row, attribute, text)
+    response = client.get(path)
+    assert response.status_code == 200
+    assert response.content.startswith(b"\xef\xbb\xbf")
+    records = list(csv.DictReader(io.StringIO(response.content.decode("utf-8-sig"))))
+    assert records[0][column] == text
+    assert not next(iter(records[0])).startswith("\ufeff")
+    if path == "/api/suppressions/export":
+        result = client.post("/api/suppressions/import", files={"file": ("unicode.csv", response.content)})
+        assert result.json()["imported"] == 1
+        assert export_client[2].add.call_args.args[0].notes == text
