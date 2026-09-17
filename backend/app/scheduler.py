@@ -2461,6 +2461,13 @@ async def dmarc_imap_sync_job():
 # =============================================================================
 
 async def cleanup_old_logs():
+    """Run retention database work in the configured scheduler worker pool."""
+    await asyncio.get_running_loop().run_in_executor(
+        get_thread_pool_executor(), _cleanup_old_logs_sync
+    )
+
+
+def _cleanup_old_logs_sync():
     """Delete logs older than retention period"""
     update_job_status('cleanup_logs', 'running')
     try:
@@ -2512,6 +2519,13 @@ async def cleanup_old_logs():
 
 
 async def cleanup_old_dmarc_reports():
+    """Run retention database work in the configured scheduler worker pool."""
+    await asyncio.get_running_loop().run_in_executor(
+        get_thread_pool_executor(), _cleanup_old_dmarc_reports_sync
+    )
+
+
+def _cleanup_old_dmarc_reports_sync():
     """Delete DMARC and TLS reports older than DMARC_RETENTION_DAYS"""
     if not settings.is_feature_enabled('dmarc'):
         logger.debug("[DMARC] Feature disabled, skipping report cleanup")
