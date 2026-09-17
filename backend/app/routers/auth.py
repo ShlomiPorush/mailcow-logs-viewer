@@ -131,18 +131,19 @@ async def oauth2_login(request: Request):
             raise HTTPException(status_code=503, detail="Too many pending logins. Try again later.")
 
         state = secrets.token_urlsafe(32)
-        browser_secret = secrets.token_urlsafe(32)
+        # Independent random nonce, never an OAuth client secret or user password.
+        browser_nonce = secrets.token_urlsafe(32)
         auth_url = oauth2_client.get_authorization_url(state)
         response = RedirectResponse(url=auth_url)
         # A separate cookie per flow permits concurrent logins in different tabs.
         # Lax allows the provider's top-level GET callback; no Domain scopes it
         # to this host. Follow the existing session cookie's HTTPS policy.
         response.set_cookie(
-            key=OAUTH_COOKIE_PREFIX + state, value=browser_secret,
+            key=OAUTH_COOKIE_PREFIX + state, value=browser_nonce,
             max_age=OAUTH_STATE_TTL, httponly=True,
             secure=is_secure_request(request), samesite="lax", path="/",
         )
-        _state_store[state] = (browser_secret, time.monotonic() + OAUTH_STATE_TTL)
+        _state_store[state] = (browser_nonce, time.monotonic() + OAUTH_STATE_TTL)
         logger.info(f"Redirecting to OAuth2 provider: {settings.oauth2_provider_name}")
         return response
         
@@ -180,9 +181,9 @@ async def oauth2_callback(
     
     _cleanup_oauth_states()
     pending = _state_store.get(state) if state else None
-    browser_secret = request.cookies.get(OAUTH_COOKIE_PREFIX + state, "") if pending else ""
-    if (not pending or not re.fullmatch(r"[A-Za-z0-9_-]{43}", browser_secret)
-            or not secrets.compare_digest(pending[0], browser_secret)):
+    browser_nonce = request.cookies.get(OAUTH_COOKIE_PREFIX + state, "") if pending else ""
+    if (not pending or not re.fullmatch(r"[A-Za-z0-9_-]{43}", browser_nonce)
+            or not secrets.compare_digest(pending[0], browser_nonce)):
         logger.warning("Invalid, expired or unbound state in OAuth2 callback")
         return RedirectResponse(url="/login?error=invalid_state", status_code=302)
 
