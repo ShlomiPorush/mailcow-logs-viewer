@@ -93,13 +93,16 @@ def get_all_reports(
         reports = []
         
         # Get DMARC reports
-        dmarc_reports = db.query(DMARCReport).order_by(DMARCReport.created_at.desc()).all()
-        
-        for report in dmarc_reports:
-            # Count records for this report
-            record_count = db.query(func.count(DMARCRecord.id)).filter(
-                DMARCRecord.dmarc_report_id == report.id
-            ).scalar() or 0
+        record_counts = db.query(
+            DMARCRecord.dmarc_report_id.label("report_id"),
+            func.count(DMARCRecord.id).label("record_count"),
+        ).group_by(DMARCRecord.dmarc_report_id).subquery()
+        dmarc_reports = db.query(
+            DMARCReport, func.coalesce(record_counts.c.record_count, 0),
+        ).outerjoin(record_counts, record_counts.c.report_id == DMARCReport.id
+        ).order_by(DMARCReport.created_at.desc()).all()
+
+        for report, record_count in dmarc_reports:
             
             reports.append({
                 "id": report.id,
@@ -114,13 +117,16 @@ def get_all_reports(
             })
         
         # Get TLS reports
-        tls_reports = db.query(TLSReport).order_by(TLSReport.created_at.desc()).all()
-        
-        for report in tls_reports:
-            # Count policies for this report
-            policy_count = db.query(func.count(TLSReportPolicy.id)).filter(
-                TLSReportPolicy.tls_report_id == report.id
-            ).scalar() or 0
+        policy_counts = db.query(
+            TLSReportPolicy.tls_report_id.label("report_id"),
+            func.count(TLSReportPolicy.id).label("policy_count"),
+        ).group_by(TLSReportPolicy.tls_report_id).subquery()
+        tls_reports = db.query(
+            TLSReport, func.coalesce(policy_counts.c.policy_count, 0),
+        ).outerjoin(policy_counts, policy_counts.c.report_id == TLSReport.id
+        ).order_by(TLSReport.created_at.desc()).all()
+
+        for report, policy_count in tls_reports:
             
             reports.append({
                 "id": report.id,
