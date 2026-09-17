@@ -2,19 +2,17 @@
 API endpoints for exporting logs to CSV
 """
 import logging
-import io
 from fastapi import APIRouter, Depends, Query, HTTPException
-from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import or_, and_, desc
 from datetime import datetime
 from typing import Optional
-import pandas as pd
 
 from ..database import get_db
 from ..models import PostfixLog, RspamdLog, NetfilterLog, MessageCorrelation
 from ..config import settings
 from ..utils import internal_error
+from ..services.csv_export import csv_download
 
 logger = logging.getLogger(__name__)
 
@@ -70,7 +68,7 @@ def export_postfix_csv(
         if not logs:
             raise HTTPException(status_code=404, detail="No data to export")
         
-        # Convert to DataFrame
+        # Prepare export rows
         data = [
             {
                 "Time": log.time.isoformat(),
@@ -89,20 +87,8 @@ def export_postfix_csv(
             for log in logs
         ]
         
-        df = pd.DataFrame(data)
-        
-        # Create CSV in memory
-        output = io.StringIO()
-        df.to_csv(output, index=False)
-        output.seek(0)
-        
-        # Return as streaming response
-        return StreamingResponse(
-            io.BytesIO(output.getvalue().encode()),
-            media_type="text/csv",
-            headers={
-                "Content-Disposition": f"attachment; filename=postfix_logs_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
-            }
+        return csv_download(
+            data, f"postfix_logs_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
         )
     except HTTPException:
         raise
@@ -166,7 +152,7 @@ def export_rspamd_csv(
         if not logs:
             raise HTTPException(status_code=404, detail="No data to export")
         
-        # Convert to DataFrame
+        # Prepare export rows
         data = [
             {
                 "Time": log.time.isoformat(),
@@ -188,19 +174,8 @@ def export_rspamd_csv(
             for log in logs
         ]
         
-        df = pd.DataFrame(data)
-        
-        # Create CSV
-        output = io.StringIO()
-        df.to_csv(output, index=False)
-        output.seek(0)
-        
-        return StreamingResponse(
-            io.BytesIO(output.getvalue().encode()),
-            media_type="text/csv",
-            headers={
-                "Content-Disposition": f"attachment; filename=rspamd_logs_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
-            }
+        return csv_download(
+            data, f"rspamd_logs_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
         )
     except HTTPException:
         raise
@@ -252,7 +227,7 @@ def export_netfilter_csv(
         if not logs:
             raise HTTPException(status_code=404, detail="No data to export")
         
-        # Convert to DataFrame
+        # Prepare export rows
         data = [
             {
                 "Time": log.time.isoformat(),
@@ -268,19 +243,8 @@ def export_netfilter_csv(
             for log in logs
         ]
         
-        df = pd.DataFrame(data)
-        
-        # Create CSV
-        output = io.StringIO()
-        df.to_csv(output, index=False)
-        output.seek(0)
-        
-        return StreamingResponse(
-            io.BytesIO(output.getvalue().encode()),
-            media_type="text/csv",
-            headers={
-                "Content-Disposition": f"attachment; filename=netfilter_logs_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
-            }
+        return csv_download(
+            data, f"netfilter_logs_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
         )
     except HTTPException:
         raise
@@ -363,7 +327,7 @@ def export_messages_csv(
             rspamd_logs = db.query(RspamdLog).filter(RspamdLog.id.in_(rspamd_ids)).all()
             rspamd_data = {r.id: r for r in rspamd_logs}
         
-        # Convert to DataFrame
+        # Prepare export rows
         data = []
         for msg in messages:
             rspamd = rspamd_data.get(msg.rspamd_log_id)
@@ -383,19 +347,8 @@ def export_messages_csv(
                 "Is Complete": msg.is_complete
             })
         
-        df = pd.DataFrame(data)
-        
-        # Create CSV
-        output = io.StringIO()
-        df.to_csv(output, index=False)
-        output.seek(0)
-        
-        return StreamingResponse(
-            io.BytesIO(output.getvalue().encode()),
-            media_type="text/csv",
-            headers={
-                "Content-Disposition": f"attachment; filename=messages_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
-            }
+        return csv_download(
+            data, f"messages_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
         )
     except HTTPException:
         raise

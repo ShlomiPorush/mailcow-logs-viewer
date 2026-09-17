@@ -11,12 +11,12 @@ import re
 import logging
 from datetime import datetime, timedelta
 from fastapi import APIRouter, HTTPException, Depends, Query, UploadFile, File
-from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, field_validator
 from typing import Optional, List
 from sqlalchemy.orm import Session
 from sqlalchemy import func, or_, desc
 
+from ..services.csv_export import CSV_ESCAPE_COLUMN, csv_download, restore_csv_text
 from ..database import get_db
 from ..config import settings
 from ..models import SpamSuppression
@@ -473,15 +473,41 @@ async def import_suppressions(file: UploadFile = File(...), db: Session = Depend
     skipped = 0
     errors_list = []
     
+    headers = None
     for row_num, row in enumerate(reader, 1):
-        if not row or (row_num == 1 and row[0].lower().strip() in ('email', 'address')):
-            continue  # Skip header row
-        
-        email = row[0].strip().lower() if len(row) > 0 else ""
-        entry_type = row[1].strip() if len(row) > 1 and row[1].strip() in ('email', 'domain') else 'email'
-        reason = row[2].strip() if len(row) > 2 and row[2].strip() in ('hard_bounce', 'soft_bounce', 'rejected', 'manual') else 'manual'
-        notes = row[3].strip() if len(row) > 3 else f"Imported from CSV"
-        
+        if not row:
+            continue
+        if row_num == 1 and row[0].lower().strip() in ('email', 'address'):
+            headers = [name.lower().strip() for name in row]
+            continue
+
+        if headers:
+            values = dict(zip(headers, row))
+            email_value = values.get('email', values.get('address', ''))
+            values['email'] = email_value
+        else:
+            values = dict(zip(('email', 'type', 'reason', 'notes'), row))
+        encoded = headers is not None and CSV_ESCAPE_COLUMN in headers
+        if encoded:
+            try:
+                for field in filter(None, values.get(CSV_ESCAPE_COLUMN, '').split(',')):
+                    if field not in headers or field == CSV_ESCAPE_COLUMN:
+                        raise ValueError("Invalid CSV escape metadata")
+                    values[field] = restore_csv_text(values.get(field, ''))
+            except ValueError:
+                errors_list.append(f"Row {row_num}: invalid CSV escape metadata")
+                continue
+        email = values.get('email', '').strip().lower()
+        entry_type = values.get('type', '').strip()
+        if entry_type not in ('email', 'domain'):
+            entry_type = 'email'
+        reason = values.get('reason', '').strip()
+        if reason not in ('hard_bounce', 'soft_bounce', 'rejected', 'manual'):
+            reason = 'manual'
+        notes = values.get('notes', 'Imported from CSV')
+        if not encoded:
+            notes = notes.strip()
+
         if not email:
             errors_list.append(f"Row {row_num}: empty email")
             continue
@@ -525,25 +551,16 @@ def export_suppressions(db: Session = Depends(get_db)):
     """Export all suppressions as CSV."""
     suppressions = db.query(SpamSuppression).order_by(SpamSuppression.created_at).all()
     
-    output = io.StringIO()
-    writer = csv.writer(output)
-    writer.writerow(['email', 'type', 'reason', 'source', 'notes', 'bounce_count', 
-                     'hard_bounces', 'soft_bounces', 'active', 'expires_at', 'created_at'])
-    
-    for s in suppressions:
-        writer.writerow([
-            s.email, s.type, s.reason, s.source or '', s.notes or '',
-            s.bounce_count, s.hard_bounce_count, s.soft_bounce_count,
-            s.active, s.expires_at.isoformat() if s.expires_at else '',
-            s.created_at.isoformat() if s.created_at else '',
-        ])
-    
-    output.seek(0)
-    return StreamingResponse(
-        io.BytesIO(output.getvalue().encode('utf-8')),
-        media_type="text/csv",
-        headers={"Content-Disposition": "attachment; filename=spam_suppressions.csv"}
-    )
+    columns = ['email', 'type', 'reason', 'source', 'notes', 'bounce_count',
+               'hard_bounces', 'soft_bounces', 'active', 'expires_at', 'created_at']
+    rows = [dict(zip(columns, [
+        s.email, s.type, s.reason, s.source or '', s.notes or '',
+        s.bounce_count, s.hard_bounce_count, s.soft_bounce_count,
+        s.active, s.expires_at.isoformat() if s.expires_at else '',
+        s.created_at.isoformat() if s.created_at else '',
+    ])) for s in suppressions]
+    return csv_download(rows, "spam_suppressions.csv", columns, escape_metadata=True)
+
 
 
 # =========================================================================
