@@ -50,6 +50,12 @@ def _is_rate_limited(ip: str) -> bool:
     return len(failures) >= _AUTH_MAX_FAILURES
 
 
+def cleanup_expired_auth_failures() -> None:
+    """Reclaim idle client counters, retaining every unexpired failure."""
+    for ip in list(_auth_failures):
+        _is_rate_limited(ip)
+
+
 def _record_auth_failure(ip: str) -> None:
     failures = _auth_failures.setdefault(ip, deque())
     failures.append(time.time())

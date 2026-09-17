@@ -105,7 +105,7 @@ def get_session(session_id: str) -> Optional[Dict[str, Any]]:
     expires_at = datetime.fromisoformat(session_data["expires_at"])
     if datetime.utcnow() > expires_at:
         logger.debug(f"Session {unsigned_session_id[:8]}... expired")
-        del _session_store[unsigned_session_id]
+        _session_store.pop(unsigned_session_id, None)
         return None
     
     return session_data
@@ -128,7 +128,7 @@ def delete_session(session_id: str) -> bool:
         return False
     
     if unsigned_session_id in _session_store:
-        del _session_store[unsigned_session_id]
+        _session_store.pop(unsigned_session_id, None)
         logger.debug(f"Deleted session {unsigned_session_id[:8]}...")
         return True
     
@@ -219,13 +219,13 @@ def cleanup_expired_sessions() -> int:
     now = datetime.utcnow()
     expired_sessions = []
     
-    for session_id, session_data in _session_store.items():
+    for session_id, session_data in list(_session_store.items()):
         expires_at = datetime.fromisoformat(session_data["expires_at"])
         if now > expires_at:
             expired_sessions.append(session_id)
     
     for session_id in expired_sessions:
-        del _session_store[session_id]
+        _session_store.pop(session_id, None)
     
     if expired_sessions:
         logger.debug(f"Cleaned up {len(expired_sessions)} expired sessions")
