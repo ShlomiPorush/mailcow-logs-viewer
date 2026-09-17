@@ -9,6 +9,7 @@ Endpoints:
 - WS   /ws/raw-logs                   - WebSocket for real-time log streaming
 """
 import logging
+import asyncio
 import json
 import secrets
 import time
@@ -58,76 +59,89 @@ def _cleanup_expired_tokens():
 # WEBSOCKET MANAGER
 # =============================================================================
 
+WS_SEND_TIMEOUT_SECONDS = 10
+WS_CLOSE_TIMEOUT_SECONDS = 1
+
+
 class LogStreamManager:
-    """Manages WebSocket connections for real-time log streaming"""
-    
+    """Broadcast independently to viewers while serializing each socket's writes."""
+
     def __init__(self):
-        # service -> list of connected WebSocket clients
         self.connections: Dict[str, List[WebSocket]] = {}
-    
+        self._send_locks: Dict[WebSocket, asyncio.Lock] = {}
+
     async def connect(self, websocket: WebSocket, service: str):
-        """Accept a new WebSocket connection for a specific service"""
         await websocket.accept()
-        if service not in self.connections:
-            self.connections[service] = []
-        self.connections[service].append(websocket)
-        logger.debug(f"[WS] Client connected for service '{service}' (total: {len(self.connections[service])})")
-    
+        self._send_locks[websocket] = asyncio.Lock()
+        self.connections.setdefault(service, []).append(websocket)
+
     async def disconnect(self, websocket: WebSocket, service: str):
-        """Remove a WebSocket connection"""
-        if service in self.connections and websocket in self.connections[service]:
-            self.connections[service].remove(websocket)
-            logger.debug(f"[WS] Client disconnected from '{service}' (remaining: {len(self.connections[service])})")
-    
+        clients = self.connections.get(service, [])
+        if websocket in clients:
+            clients.remove(websocket)
+        self._send_locks.pop(websocket, None)
+
     async def switch_service(self, websocket: WebSocket, old_service: str, new_service: str):
-        """Move a WebSocket from one service to another"""
-        await self.disconnect(websocket, old_service)
-        if new_service not in self.connections:
-            self.connections[new_service] = []
-        self.connections[new_service].append(websocket)
-        logger.debug(f"[WS] Client switched from '{old_service}' to '{new_service}'")
-    
-    async def broadcast(self, service: str, entries: List[dict]):
-        """Broadcast new log entries to all clients subscribed to a service"""
-        if service not in self.connections or not self.connections[service]:
+        if websocket not in self._send_locks:
+            return False
+        clients = self.connections.get(old_service, [])
+        if websocket in clients:
+            clients.remove(websocket)
+        self.connections.setdefault(new_service, []).append(websocket)
+        return True
+
+    async def _drop(self, websocket: WebSocket):
+        # A client may have switched service while its write was pending.
+        if self._send_locks.pop(websocket, None) is None:
             return
-        
-        message = json.dumps({
+        for clients in self.connections.values():
+            if websocket in clients:
+                clients.remove(websocket)
+        try:
+            await asyncio.wait_for(websocket.close(code=1013), WS_CLOSE_TIMEOUT_SECONDS)
+        except Exception:
+            pass  # The peer may already be gone or unable to receive a close frame.
+
+    async def _send_text(self, websocket: WebSocket, text: str):
+        lock = self._send_locks.get(websocket)
+        if lock is None:
+            return False
+        try:
+            # Include waiting for an earlier write in this client's time budget.
+            async with asyncio.timeout(WS_SEND_TIMEOUT_SECONDS):
+                async with lock:
+                    if self._send_locks.get(websocket) is not lock:
+                        return False
+                    await websocket.send_text(text)
+            return True
+        except Exception:
+            await self._drop(websocket)
+            return False
+
+    async def send_json(self, websocket: WebSocket, message: dict):
+        return await self._send_text(websocket, json.dumps(message))
+
+    async def _broadcast_text(self, clients, text):
+        await asyncio.gather(*(self._send_text(ws, text) for ws in clients))
+
+    async def broadcast(self, service: str, entries: List[dict]):
+        clients = list(self.connections.get(service, []))
+        if not clients:
+            return
+        text = json.dumps({
             "type": "new_logs",
             "service": service,
             "entries": entries,
-            "timestamp": datetime.now(timezone.utc).isoformat()
+            "timestamp": datetime.now(timezone.utc).isoformat(),
         })
-        
-        dead_connections = []
-        for ws in self.connections[service]:
-            try:
-                await ws.send_text(message)
-            except Exception:
-                dead_connections.append(ws)
-        
-        # Clean up dead connections
-        for ws in dead_connections:
-            if ws in self.connections[service]:
-                self.connections[service].remove(ws)
-    
+        await self._broadcast_text(clients, text)
+
     def get_connection_count(self) -> Dict[str, int]:
-        """Get connection count per service"""
         return {s: len(conns) for s, conns in self.connections.items() if conns}
-    
+
     async def broadcast_to_all(self, message: dict):
-        """Broadcast a message to ALL connected WebSocket clients (all services)"""
-        text = json.dumps(message)
-        dead = []
-        for service, conns in self.connections.items():
-            for ws in conns:
-                try:
-                    await ws.send_text(text)
-                except Exception:
-                    dead.append((service, ws))
-        for service, ws in dead:
-            if service in self.connections and ws in self.connections[service]:
-                self.connections[service].remove(ws)
+        clients = [ws for conns in self.connections.values() for ws in conns]
+        await self._broadcast_text(clients, json.dumps(message))
 
 
 # Module-level instance
@@ -208,7 +222,7 @@ async def websocket_raw_logs(
     
     try:
         # Send initial connection confirmation
-        await websocket.send_json({
+        await log_stream_manager.send_json(websocket, {
             "type": "connected",
             "service": current_service,
             "message": f"Connected to {current_service} log stream"
@@ -223,15 +237,16 @@ async def websocket_raw_logs(
                 if msg.get("action") == "subscribe":
                     new_service = msg.get("service", "").lower()
                     if new_service in enabled and new_service != current_service:
-                        await log_stream_manager.switch_service(websocket, current_service, new_service)
+                        if not await log_stream_manager.switch_service(websocket, current_service, new_service):
+                            break
                         current_service = new_service
-                        await websocket.send_json({
+                        await log_stream_manager.send_json(websocket, {
                             "type": "subscribed",
                             "service": current_service,
                             "message": f"Switched to {current_service} log stream"
                         })
                     elif new_service not in enabled:
-                        await websocket.send_json({
+                        await log_stream_manager.send_json(websocket, {
                             "type": "error",
                             "message": f"Service '{new_service}' is not enabled"
                         })
