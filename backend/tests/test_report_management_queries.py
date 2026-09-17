@@ -28,9 +28,9 @@ def test_report_counts_and_query_budget(size):
             for index in range(size):
                 stamp = datetime(2026, 1, 1) + timedelta(seconds=index)
                 dmarc = DMARCReport(report_id=f"dmarc-{index}", domain="example.com", org_name="Test",
-                                    begin_date=1, end_date=2, created_at=stamp)
+                                    begin_date=1, end_date=2, created_at=stamp, raw_xml="x" * 10000)
                 tls = TLSReport(report_id=f"tls-{index}", policy_domain="example.com", organization_name="Test",
-                                start_datetime=stamp, end_datetime=stamp, created_at=stamp)
+                                start_datetime=stamp, end_datetime=stamp, created_at=stamp, raw_json="x" * 10000)
                 db.add_all([dmarc, tls])
                 db.flush()
                 count = index % 3
@@ -55,6 +55,10 @@ def test_report_counts_and_query_budget(size):
         assert dates == sorted(dates, reverse=True)
         assert all(set(row) == {"id", "type", "domain", "org_name", "begin_date", "end_date",
                                "record_count", "created_at", "report_id"} for row in result["reports"])
+        for statement in statements:
+            assert "raw_xml" not in statement
+            assert "raw_json" not in statement
+            assert "policy_published" not in statement
         assert len(statements) == 2, f"Executed {len(statements)} queries for {size * 2} reports"
     finally:
         isolated.dispose()

@@ -7,7 +7,7 @@ import json
 from typing import List, Optional
 from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, BackgroundTasks
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, load_only
 from sqlalchemy import func, and_, or_, case
 
 from ..database import get_db
@@ -99,7 +99,11 @@ def get_all_reports(
         ).group_by(DMARCRecord.dmarc_report_id).subquery()
         dmarc_reports = db.query(
             DMARCReport, func.coalesce(record_counts.c.record_count, 0),
-        ).outerjoin(record_counts, record_counts.c.report_id == DMARCReport.id
+        ).options(load_only(
+            DMARCReport.id, DMARCReport.domain, DMARCReport.org_name,
+            DMARCReport.begin_date, DMARCReport.end_date, DMARCReport.created_at,
+            DMARCReport.report_id,
+        )).outerjoin(record_counts, record_counts.c.report_id == DMARCReport.id
         ).order_by(DMARCReport.created_at.desc()).all()
 
         for report, record_count in dmarc_reports:
@@ -123,7 +127,11 @@ def get_all_reports(
         ).group_by(TLSReportPolicy.tls_report_id).subquery()
         tls_reports = db.query(
             TLSReport, func.coalesce(policy_counts.c.policy_count, 0),
-        ).outerjoin(policy_counts, policy_counts.c.report_id == TLSReport.id
+        ).options(load_only(
+            TLSReport.id, TLSReport.policy_domain, TLSReport.organization_name,
+            TLSReport.start_datetime, TLSReport.end_datetime, TLSReport.created_at,
+            TLSReport.report_id,
+        )).outerjoin(policy_counts, policy_counts.c.report_id == TLSReport.id
         ).order_by(TLSReport.created_at.desc()).all()
 
         for report, policy_count in tls_reports:
