@@ -156,21 +156,17 @@ Health check endpoint for monitoring and load balancers.
 
 **Authentication:** Not required (public endpoint for Docker health checks)
 
-**Response:**
+**Response:** HTTP 200 when connected; HTTP 503 when the database check fails.
+
 ```json
 {
   "status": "healthy",
-  "database": "connected",
-  "version": "1.5.0",
-  "config": {
-    "fetch_interval": 60,
-    "retention_days": 7,
-    "mailcow_url": "https://mail.example.com",
-    "blacklist_enabled": true,
-    "auth_enabled": false
-  }
+  "database": "connected"
 }
 ```
+
+On HTTP 503, the values are `"unhealthy"` and `"disconnected"`. This public
+endpoint does not expose configuration details.
 
 ---
 
