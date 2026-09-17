@@ -29,27 +29,46 @@ def restore_csv_text(value: str) -> str:
     return value[1:]
 
 
+# Limit buffered CSV text to roughly 64K characters plus the largest row.
+CSV_CHUNK_CHARACTERS = 64 * 1024
+
+
+def _drain_csv_buffer(output):
+    chunk = output.getvalue().encode("utf-8")
+    output.seek(0)
+    output.truncate(0)
+    return chunk
+
+
+def _iter_csv_chunks(rows, columns, escape_metadata):
+    fieldnames = columns + ([CSV_ESCAPE_COLUMN] if escape_metadata else [])
+    with io.StringIO(newline="") as output:
+        writer = csv.DictWriter(output, fieldnames=fieldnames, quoting=csv.QUOTE_ALL,
+                                lineterminator="\n")
+        writer.writeheader()
+        yield b"\xef\xbb\xbf" + _drain_csv_buffer(output)
+        for row in rows:
+            safe = {}
+            escaped = []
+            for key in columns:
+                value = row.get(key)
+                if isinstance(value, float) and math.isnan(value):
+                    value = None
+                safe[key] = escape_csv_text(value)
+                if isinstance(value, str) and safe[key] != value:
+                    escaped.append(key)
+            if escape_metadata:
+                safe[CSV_ESCAPE_COLUMN] = ",".join(escaped)
+            writer.writerow(safe)
+            if output.tell() >= CSV_CHUNK_CHARACTERS:
+                yield _drain_csv_buffer(output)
+        if output.tell():
+            yield _drain_csv_buffer(output)
+
+
 def csv_download(rows, filename: str, columns=None, *, escape_metadata=False):
     columns = list(columns if columns is not None else rows[0].keys())
-    fieldnames = columns + ([CSV_ESCAPE_COLUMN] if escape_metadata else [])
-    output = io.StringIO(newline="")
-    writer = csv.DictWriter(output, fieldnames=fieldnames, quoting=csv.QUOTE_ALL,
-                            lineterminator="\n")
-    writer.writeheader()
-    for row in rows:
-        safe = {}
-        escaped = []
-        for key in columns:
-            value = row.get(key)
-            if isinstance(value, float) and math.isnan(value):
-                value = None
-            safe[key] = escape_csv_text(value)
-            if isinstance(value, str) and safe[key] != value:
-                escaped.append(key)
-        if escape_metadata:
-            safe[CSV_ESCAPE_COLUMN] = ",".join(escaped)
-        writer.writerow(safe)
     return StreamingResponse(
-        io.BytesIO(output.getvalue().encode("utf-8-sig")), media_type="text/csv",
+        _iter_csv_chunks(rows, columns, escape_metadata), media_type="text/csv",
         headers={"Content-Disposition": f"attachment; filename={filename}"},
     )
