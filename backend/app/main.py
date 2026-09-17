@@ -397,10 +397,13 @@ async def health_check():
     """
     db_ok = check_db_connection()
 
-    return {
-        "status": "healthy" if db_ok else "unhealthy",
-        "database": "connected" if db_ok else "disconnected",
-    }
+    return JSONResponse(
+        status_code=200 if db_ok else 503,
+        content={
+            "status": "healthy" if db_ok else "unhealthy",
+            "database": "connected" if db_ok else "disconnected",
+        },
+    )
 
 
 @app.get("/api/info")
