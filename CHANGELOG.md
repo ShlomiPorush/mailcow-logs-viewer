@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **Responsive requests during database health checks** - Run the synchronous health probe in a worker thread so a slow database does not block unrelated requests on the event loop. Issue: [#145](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/145).
+
 - **Responsive live-log broadcasts** - Send updates to viewers independently, disconnect stalled clients after a bounded wait, and preserve message ordering during concurrent broadcasts and service changes. Issue: [#143](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/143).
 
 - **Expired login data cleanup** - Reclaim expired sessions, old failed-login counters and abandoned OAuth states every minute, including when clients never return. Active logins and current rate limits are preserved. Issue: [#141](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/141).
