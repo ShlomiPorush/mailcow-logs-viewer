@@ -95,6 +95,7 @@ jobs:
           for f in frontend/*.js; do
             node --check "$f"
           done
+          node --test .github/tests/*.test.cjs
 
   image-smoke:
     name: Image build and smoke test
