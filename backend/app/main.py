@@ -392,10 +392,11 @@ async def root():
 
 
 @app.get("/api/health")
-async def health_check():
+def health_check():
     """Health check endpoint for Docker monitoring.
 
     Publicly reachable - intentionally returns no configuration details.
+    Keep this synchronous so FastAPI runs the blocking DB probe in its thread pool.
     """
     db_ok = check_db_connection()
 
