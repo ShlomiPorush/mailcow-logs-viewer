@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **Expired login data cleanup** - Reclaim expired sessions, old failed-login counters and abandoned OAuth states every minute, including when clients never return. Active logins and current rate limits are preserved. Issue: [#141](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/141).
+
 - **Accurate database health status** - Return HTTP 503 when the database health check fails so Docker and external monitors can detect the outage. The healthy response remains HTTP 200. Issue: [#139](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/139).
 
 - **Multilingual CSV downloads** - Add a UTF-8 BOM to all CSV exports so spreadsheet applications can recognize non-English text. Issue: [#137](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/137).

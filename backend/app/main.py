@@ -43,6 +43,7 @@ from .routers import (
 )
 from .migrations import run_migrations
 from .auth import BasicAuthMiddleware
+from .services.auth_cleanup import auth_store_maintenance
 from .version import __version__
 
 from .services.geoip_downloader import (
@@ -208,7 +209,8 @@ async def lifespan(app: FastAPI):
 
     logger.info("Application startup complete")
     
-    yield
+    async with auth_store_maintenance():
+        yield
     
     # Shutdown
     logger.info("Shutting down application")
