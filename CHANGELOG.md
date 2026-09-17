@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **Lighter report management queries** - Load only the summary columns needed by the report list, leaving raw XML/JSON report bodies in the database. Counts, ordering and response fields remain unchanged. Issue: [#153](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/153).
+
 - **Fewer report management queries** - Fetch DMARC and TLS report counts in two queries instead of one extra query per report. Reports with no records remain visible, and response fields and ordering stay unchanged. Issue: [#151](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/151).
 
 - **Lower CSV serialization memory usage** - Write CSV downloads in chunks instead of building full text and byte copies before sending them. Unicode support, formula protection and suppression re-import remain unchanged. Source rows are still loaded before serialization. Issue: [#149](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/149).
