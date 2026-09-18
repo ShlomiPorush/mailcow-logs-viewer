@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **Paged report management** - Browse DMARC and TLS report history 50 reports at a time, with page controls and a total count. Existing API calls without a page remain supported. Issue: [#155](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/155).
+
 - **Lighter report management queries** - Load only the summary columns needed by the report list, leaving raw XML/JSON report bodies in the database. Counts, ordering and response fields remain unchanged. Issue: [#153](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/153).
 
 - **Fewer report management queries** - Fetch DMARC and TLS report counts in two queries instead of one extra query per report. Reports with no records remain visible, and response fields and ordering stay unchanged. Issue: [#151](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/151).

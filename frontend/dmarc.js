@@ -1550,19 +1550,21 @@ function closeDmarcSyncHistoryModal() {
 // REPORTS MANAGEMENT
 // =============================================================================
 
+const reportsManagementState = { page: 1, limit: 50, request: 0 };
+
 async function showReportsManagementModal() {
     const modal = document.getElementById('dmarc-reports-management-modal');
-    const content = document.getElementById('dmarc-reports-management-content');
-
     modal.classList.remove('hidden');
-
-    const closeOnBackdrop = (e) => {
-        if (e.target === modal) {
-            closeReportsManagementModal();
-            modal.removeEventListener('click', closeOnBackdrop);
-        }
+    modal.onclick = (event) => {
+        if (event.target === modal) closeReportsManagementModal();
     };
-    modal.addEventListener('click', closeOnBackdrop);
+    await loadReportsManagementPage(1);
+}
+
+async function loadReportsManagementPage(page) {
+    if (!Number.isInteger(page) || page < 1) return;
+    const request = ++reportsManagementState.request;
+    const content = document.getElementById('dmarc-reports-management-content');
 
     // Show loading
     content.innerHTML = `
@@ -1573,22 +1575,27 @@ async function showReportsManagementModal() {
     `;
 
     try {
-        const response = await authenticatedFetch('/api/dmarc/reports/all');
+        const response = await authenticatedFetch(`/api/dmarc/reports/all?page=${page}&limit=${reportsManagementState.limit}`);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const data = await response.json();
-
-        renderReportsManagementTable(data.reports || [], data.allow_delete);
+        if (request !== reportsManagementState.request) return;
+        reportsManagementState.page = data.page;
+        renderReportsManagementTable(data.reports || [], data.allow_delete, data);
 
     } catch (error) {
+        if (request !== reportsManagementState.request) return;
         console.error('Error loading reports:', error);
-        content.innerHTML = '<p class="text-center py-12 text-red-500">Failed to load reports</p>';
+        content.innerHTML = `<div class="text-center py-12"><p class="text-red-500 mb-3">Failed to load reports. Please try again.</p>
+            <button onclick="loadReportsManagementPage(${page})" class="px-3 py-1.5 text-sm text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600 rounded hover:bg-gray-100 dark:hover:bg-gray-700">Retry</button></div>`;
     }
 }
 
 function closeReportsManagementModal() {
+    reportsManagementState.request++;
     document.getElementById('dmarc-reports-management-modal').classList.add('hidden');
 }
 
-function renderReportsManagementTable(reports, allowDelete) {
+function renderReportsManagementTable(reports, allowDelete, { total, page, total_pages: totalPages }) {
     const content = document.getElementById('dmarc-reports-management-content');
 
     if (reports.length === 0) {
@@ -1604,12 +1611,20 @@ function renderReportsManagementTable(reports, allowDelete) {
     }
 
     const deleteHeader = allowDelete ? '<th class="px-4 py-3 text-center text-xs font-bold text-gray-600 dark:text-gray-400 uppercase">Actions</th>' : '';
-    const deleteHeaderMobile = allowDelete ? 'Actions' : '';
+    const pageButton = (label, target, disabled) => `<button onclick="loadReportsManagementPage(${target})" ${disabled ? 'disabled' : ''}
+        class="px-3 py-1.5 text-sm text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600 rounded ${disabled ? 'opacity-50 cursor-not-allowed' : 'hover:bg-gray-100 dark:hover:bg-gray-700'}">${label}</button>`;
+    const pagination = totalPages > 1 ? `<nav aria-label="Report pages" class="flex flex-wrap items-center justify-center gap-2 mt-4">
+        ${pageButton('First', 1, page === 1)}
+        ${pageButton('Previous', page - 1, page === 1)}
+        <span class="text-sm text-gray-700 dark:text-gray-300">Page ${page} of ${totalPages}</span>
+        ${pageButton('Next', page + 1, page === totalPages)}
+        ${pageButton('Last', totalPages, page === totalPages)}
+    </nav>` : '';
 
     content.innerHTML = `
         <div class="mb-4 flex justify-between items-center">
             <p class="text-sm text-gray-600 dark:text-gray-400">
-                Total: <span class="font-bold">${reports.length}</span> reports
+                Total: <span class="font-bold">${total}</span> reports
                 ${!allowDelete ? '<span class="ml-2 text-xs text-yellow-600 dark:text-yellow-400">(Deletion disabled)</span>' : ''}
             </p>
         </div>
@@ -1698,6 +1713,7 @@ function renderReportsManagementTable(reports, allowDelete) {
                 `;
     }).join('')}
         </div>
+        ${pagination}
     `;
 }
 
@@ -1723,7 +1739,9 @@ async function deleteReport(reportType, reportId, domain) {
         showToast(`${reportType.toUpperCase()} report deleted`, 'success');
 
         // Refresh the modal
-        await showReportsManagementModal();
+        if (!document.getElementById('dmarc-reports-management-modal').classList.contains('hidden')) {
+            await loadReportsManagementPage(reportsManagementState.page);
+        }
 
         // Refresh domains list if visible
         if (dmarcState.currentView === 'domains') {

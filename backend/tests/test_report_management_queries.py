@@ -4,9 +4,12 @@ from datetime import datetime, timedelta
 import pytest
 from sqlalchemy import create_engine, event, text
 from sqlalchemy.orm import Session
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 from app.database import engine, Base
+from app.database import get_db
 from app.models import DMARCReport, DMARCRecord, TLSReport, TLSReportPolicy
-from app.routers.dmarc import get_all_reports
+from app.routers.dmarc import get_all_reports, router
 
 
 @pytest.mark.parametrize("size", [0, 1, 100])
@@ -60,6 +63,61 @@ def test_report_counts_and_query_budget(size):
             assert "raw_json" not in statement
             assert "policy_published" not in statement
         assert len(statements) == 2, f"Executed {len(statements)} queries for {size * 2} reports"
+
+        app = FastAPI()
+        app.include_router(router)
+        def session_override():
+            with Session(isolated) as db:
+                yield db
+        app.dependency_overrides[get_db] = session_override
+        with TestClient(app) as client:
+            pages = max(1, (size * 2 + 6) // 7)
+            seen = {}
+            for page in range(1, pages + 1):
+                statements.clear()
+                event.listen(isolated, "before_cursor_execute", capture)
+                try:
+                    response = client.get(f"/dmarc/reports/all?page={page}&limit=7")
+                finally:
+                    event.remove(isolated, "before_cursor_execute", capture)
+                assert response.status_code == 200
+                payload = response.json()
+                assert len(payload["reports"]) <= 7
+                assert payload["total"] == size * 2
+                assert payload["page"] == page
+                assert payload["total_pages"] == pages
+                assert payload["limit"] == 7
+                assert len(statements) <= 4
+                for statement in statements:
+                    assert "raw_xml" not in statement
+                    assert "raw_json" not in statement
+                for row in payload["reports"]:
+                    key = row["type"], row["id"]
+                    assert key not in seen
+                    seen[key] = row["record_count"]
+            assert seen == expected
+            # Equal timestamps across report types must not shuffle between pages.
+            first = client.get("/dmarc/reports/all?page=1&limit=7").json()
+            assert [(r["type"], r["id"]) for r in first["reports"]] == list(seen)[:7]
+            assert client.get("/dmarc/reports/all?page=999&limit=7").json()["page"] == pages
+            for query in ("page=0", "page=-1", "page=one", "page=1&limit=0", "page=1&limit=201"):
+                assert client.get(f"/dmarc/reports/all?{query}").status_code == 422
+            if size:
+                ordered = sorted(result["reports"], key=lambda row: (
+                    -datetime.fromisoformat(row["created_at"]).timestamp(), row["type"], -row["id"]))
+                assert list(seen) == [(row["type"], row["id"]) for row in ordered]
+                # Removing a final page must land on the last remaining page.
+                last_id = ordered[-1]["id"]
+                with Session(isolated) as db:
+                    db.query(DMARCRecord).delete()
+                    db.query(TLSReportPolicy).delete()
+                    db.query(DMARCReport).delete()
+                    db.query(TLSReport).filter(TLSReport.id != last_id).delete()
+                    db.query(TLSReport).update({TLSReport.created_at: None})
+                    db.commit()
+                remaining = client.get(f"/dmarc/reports/all?page={pages}&limit=7").json()
+                assert remaining["page"] == remaining["total_pages"] == remaining["total"] == 1
+                assert remaining["reports"][0]["created_at"] is None
     finally:
         isolated.dispose()
         with engine.begin() as conn:
