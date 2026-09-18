@@ -3,7 +3,7 @@ API endpoints for exporting logs to CSV
 """
 import logging
 from fastapi import APIRouter, Depends, Query, HTTPException
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, load_only
 from sqlalchemy import or_, and_, desc
 from datetime import datetime
 from typing import Optional
@@ -33,7 +33,11 @@ def export_postfix_csv(
     Export Postfix logs to CSV
     """
     try:
-        query = db.query(PostfixLog)
+        query = db.query(PostfixLog).options(load_only(
+            PostfixLog.time, PostfixLog.program, PostfixLog.priority, PostfixLog.queue_id,
+            PostfixLog.message_id, PostfixLog.sender, PostfixLog.recipient, PostfixLog.status,
+            PostfixLog.relay, PostfixLog.delay, PostfixLog.dsn, PostfixLog.message,
+        ))
         
         # Apply same filters as the main API
         if search:
@@ -113,7 +117,12 @@ def export_rspamd_csv(
     Export Rspamd logs to CSV
     """
     try:
-        query = db.query(RspamdLog)
+        query = db.query(RspamdLog).options(load_only(
+            RspamdLog.time, RspamdLog.message_id, RspamdLog.subject, RspamdLog.sender_smtp,
+            RspamdLog.recipients_smtp, RspamdLog.score, RspamdLog.required_score,
+            RspamdLog.action, RspamdLog.direction, RspamdLog.is_spam, RspamdLog.has_auth,
+            RspamdLog.user, RspamdLog.ip, RspamdLog.size, RspamdLog.symbols,
+        ))
         
         # Apply filters
         if search:
@@ -197,7 +206,11 @@ def export_netfilter_csv(
     Export Netfilter logs to CSV
     """
     try:
-        query = db.query(NetfilterLog)
+        query = db.query(NetfilterLog).options(load_only(
+            NetfilterLog.time, NetfilterLog.ip, NetfilterLog.username, NetfilterLog.auth_method,
+            NetfilterLog.action, NetfilterLog.attempts_left, NetfilterLog.rule_id,
+            NetfilterLog.priority, NetfilterLog.message,
+        ))
         
         # Apply filters
         if search:
@@ -270,7 +283,12 @@ def export_messages_csv(
     Export Messages (correlations) to CSV
     """
     try:
-        query = db.query(MessageCorrelation)
+        query = db.query(MessageCorrelation).options(load_only(
+            MessageCorrelation.first_seen, MessageCorrelation.sender, MessageCorrelation.recipient,
+            MessageCorrelation.subject, MessageCorrelation.direction, MessageCorrelation.final_status,
+            MessageCorrelation.queue_id, MessageCorrelation.message_id,
+            MessageCorrelation.rspamd_log_id, MessageCorrelation.is_complete,
+        ))
         
         # Apply filters
         if search:
@@ -324,7 +342,9 @@ def export_messages_csv(
         rspamd_data = {}
         rspamd_ids = [msg.rspamd_log_id for msg in messages if msg.rspamd_log_id]
         if rspamd_ids:
-            rspamd_logs = db.query(RspamdLog).filter(RspamdLog.id.in_(rspamd_ids)).all()
+            rspamd_logs = db.query(RspamdLog).options(load_only(
+                RspamdLog.id, RspamdLog.score, RspamdLog.is_spam, RspamdLog.user, RspamdLog.ip,
+            )).filter(RspamdLog.id.in_(rspamd_ids)).all()
             rspamd_data = {r.id: r for r in rspamd_logs}
         
         # Format one row at a time while the response is consumed.
