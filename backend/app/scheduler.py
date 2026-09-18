@@ -1162,6 +1162,13 @@ async def fetch_all_logs():
 
 
 async def cleanup_blacklisted_queues():
+    """Finish BCC cleanup in the configured worker pool before correlation."""
+    await asyncio.get_running_loop().run_in_executor(
+        get_thread_pool_executor(), _cleanup_blacklisted_queues_sync
+    )
+
+
+def _cleanup_blacklisted_queues_sync():
     """
     Clean up Postfix queues where the recipient is blacklisted.
     

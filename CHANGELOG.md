@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **Responsive BCC queue cleanup** - Run blacklist cleanup before message correlation in the scheduler worker pool so slow database operations do not block unrelated requests. Cleanup rules and the order of correlation steps remain unchanged. Issue: [#157](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/157).
+
 - **Paged report management** - Browse DMARC and TLS report history 50 reports at a time, with page controls and a total count. Existing API calls without a page remain supported. Issue: [#155](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/155).
 
 - **Lighter report management queries** - Load only the summary columns needed by the report list, leaving raw XML/JSON report bodies in the database. Counts, ordering and response fields remain unchanged. Issue: [#153](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/153).
