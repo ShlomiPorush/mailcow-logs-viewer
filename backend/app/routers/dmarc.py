@@ -4,11 +4,11 @@ DMARC Router - Domain-centric view (Cloudflare style)
 import logging
 import hashlib
 import json
-from typing import List, Optional
+from typing import Annotated, List, Optional
 from datetime import datetime, timedelta, timezone
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, BackgroundTasks, Query
 from sqlalchemy.orm import Session, load_only
-from sqlalchemy import func, and_, or_, case
+from sqlalchemy import func, and_, or_, case, literal
 
 from ..database import get_db
 from ..models import DMARCReport, DMARCRecord, DMARCSync, TLSReport, TLSReportPolicy
@@ -84,19 +84,41 @@ def get_reports_management_config():
 
 @router.get("/dmarc/reports/all")
 def get_all_reports(
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    page: Annotated[Optional[int], Query(ge=1)] = None,
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
 ):
     """
-    Get all DMARC and TLS reports for management view
+    Get report summaries. Omit page to preserve the legacy unpaginated response.
     """
     try:
         reports = []
+        selected = None
+        if page is not None:
+            combined = db.query(
+                DMARCReport.id.label("id"), literal("dmarc").label("type"),
+                DMARCReport.created_at.label("created_at"),
+            ).union_all(db.query(
+                TLSReport.id, literal("tls"), TLSReport.created_at,
+            )).subquery()
+            total = db.query(func.count()).select_from(combined).scalar()
+            total_pages = max(1, (total + limit - 1) // limit)
+            page = min(page, total_pages)
+            selected = db.query(combined.c.id, combined.c.type).order_by(
+                combined.c.created_at.desc().nulls_last(),
+                combined.c.type, combined.c.id.desc(),
+            ).offset((page - 1) * limit).limit(limit).all()
+            dmarc_ids = [row.id for row in selected if row.type == "dmarc"]
+            tls_ids = [row.id for row in selected if row.type == "tls"]
         
         # Get DMARC reports
         record_counts = db.query(
             DMARCRecord.dmarc_report_id.label("report_id"),
             func.count(DMARCRecord.id).label("record_count"),
-        ).group_by(DMARCRecord.dmarc_report_id).subquery()
+        )
+        if selected is not None:
+            record_counts = record_counts.filter(DMARCRecord.dmarc_report_id.in_(dmarc_ids))
+        record_counts = record_counts.group_by(DMARCRecord.dmarc_report_id).subquery()
         dmarc_reports = db.query(
             DMARCReport, func.coalesce(record_counts.c.record_count, 0),
         ).options(load_only(
@@ -104,7 +126,10 @@ def get_all_reports(
             DMARCReport.begin_date, DMARCReport.end_date, DMARCReport.created_at,
             DMARCReport.report_id,
         )).outerjoin(record_counts, record_counts.c.report_id == DMARCReport.id
-        ).order_by(DMARCReport.created_at.desc()).all()
+        )
+        if selected is not None:
+            dmarc_reports = dmarc_reports.filter(DMARCReport.id.in_(dmarc_ids))
+        dmarc_reports = dmarc_reports.order_by(DMARCReport.created_at.desc()).all() if selected is None or dmarc_ids else []
 
         for report, record_count in dmarc_reports:
             
@@ -124,7 +149,10 @@ def get_all_reports(
         policy_counts = db.query(
             TLSReportPolicy.tls_report_id.label("report_id"),
             func.count(TLSReportPolicy.id).label("policy_count"),
-        ).group_by(TLSReportPolicy.tls_report_id).subquery()
+        )
+        if selected is not None:
+            policy_counts = policy_counts.filter(TLSReportPolicy.tls_report_id.in_(tls_ids))
+        policy_counts = policy_counts.group_by(TLSReportPolicy.tls_report_id).subquery()
         tls_reports = db.query(
             TLSReport, func.coalesce(policy_counts.c.policy_count, 0),
         ).options(load_only(
@@ -132,7 +160,10 @@ def get_all_reports(
             TLSReport.start_datetime, TLSReport.end_datetime, TLSReport.created_at,
             TLSReport.report_id,
         )).outerjoin(policy_counts, policy_counts.c.report_id == TLSReport.id
-        ).order_by(TLSReport.created_at.desc()).all()
+        )
+        if selected is not None:
+            tls_reports = tls_reports.filter(TLSReport.id.in_(tls_ids))
+        tls_reports = tls_reports.order_by(TLSReport.created_at.desc()).all() if selected is None or tls_ids else []
 
         for report, policy_count in tls_reports:
             
@@ -148,6 +179,15 @@ def get_all_reports(
                 "report_id": report.report_id
             })
         
+        if selected is not None:
+            positions = {(row.type, row.id): index for index, row in enumerate(selected)}
+            reports.sort(key=lambda row: positions[row["type"], row["id"]])
+            return {
+                "reports": reports, "total": total, "page": page,
+                "limit": limit, "total_pages": total_pages,
+                "allow_delete": settings.dmarc_allow_report_delete,
+            }
+
         # Sort all reports by created_at (newest first)
         reports.sort(key=lambda x: x["created_at"] or "", reverse=True)
         

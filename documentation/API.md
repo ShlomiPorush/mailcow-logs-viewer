@@ -3636,6 +3636,19 @@ Export Messages (correlations) to CSV file.
 
 ## DMARC
 
+### Report Management
+
+`GET /api/dmarc/reports/all?page=1&limit=50` returns a combined page of DMARC and TLS report summaries, newest first. Equal import timestamps are ordered by report type and descending ID.
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `page` | omitted | Positive page number. Omit it to retain the legacy unpaginated response. |
+| `limit` | 50 | Reports per page, from 1 to 200. Used when `page` is supplied. |
+
+Paged responses contain `reports`, `total`, `allow_delete`, `page`, `limit`, and `total_pages`. `total` counts all reports of both types. Empty results return page 1 of 1. A page beyond the end is clamped to the last available page, including after deletions. Concurrent imports or deletions may shift reports between requests; reload from page 1 to refresh the history.
+
+Each report contains `id`, `type` (`dmarc` or `tls`), `domain`, `org_name`, `begin_date`, `end_date`, `record_count`, `created_at`, and `report_id`. Unpaginated responses retain only the original top-level fields: `reports`, `total`, and `allow_delete`.
+
 ### Overview
 
 The DMARC module provides comprehensive email authentication monitoring through DMARC (Domain-based Message Authentication, Reporting & Conformance) aggregate reports. It includes automatic report parsing, GeoIP enrichment for source IPs, and detailed analytics.
