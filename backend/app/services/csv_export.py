@@ -3,6 +3,7 @@ import csv
 import io
 import math
 import unicodedata
+from itertools import chain
 from fastapi.responses import StreamingResponse
 
 # Suppression exports carry the exact escaped field names for lossless re-import.
@@ -67,7 +68,13 @@ def _iter_csv_chunks(rows, columns, escape_metadata):
 
 
 def csv_download(rows, filename: str, columns=None, *, escape_metadata=False):
-    columns = list(columns if columns is not None else rows[0].keys())
+    if columns is None:
+        rows = iter(rows)
+        first = next(rows)
+        columns = list(first.keys())
+        rows = chain((first,), rows)
+    else:
+        columns = list(columns)
     return StreamingResponse(
         _iter_csv_chunks(rows, columns, escape_metadata), media_type="text/csv",
         headers={"Content-Disposition": f"attachment; filename={filename}"},

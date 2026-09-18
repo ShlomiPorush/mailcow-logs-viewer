@@ -68,8 +68,8 @@ def export_postfix_csv(
         if not logs:
             raise HTTPException(status_code=404, detail="No data to export")
         
-        # Prepare export rows
-        data = [
+        # Format one row at a time while the response is consumed.
+        data = (
             {
                 "Time": log.time.isoformat(),
                 "Program": log.program,
@@ -85,7 +85,7 @@ def export_postfix_csv(
                 "Message": log.message
             }
             for log in logs
-        ]
+        )
         
         return csv_download(
             data, f"postfix_logs_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
@@ -152,8 +152,8 @@ def export_rspamd_csv(
         if not logs:
             raise HTTPException(status_code=404, detail="No data to export")
         
-        # Prepare export rows
-        data = [
+        # Format one row at a time while the response is consumed.
+        data = (
             {
                 "Time": log.time.isoformat(),
                 "Message ID": log.message_id,
@@ -172,7 +172,7 @@ def export_rspamd_csv(
                 "Top Symbols": ", ".join(list(log.symbols.keys())[:5]) if log.symbols else ""
             }
             for log in logs
-        ]
+        )
         
         return csv_download(
             data, f"rspamd_logs_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
@@ -227,8 +227,8 @@ def export_netfilter_csv(
         if not logs:
             raise HTTPException(status_code=404, detail="No data to export")
         
-        # Prepare export rows
-        data = [
+        # Format one row at a time while the response is consumed.
+        data = (
             {
                 "Time": log.time.isoformat(),
                 "IP": log.ip,
@@ -241,7 +241,7 @@ def export_netfilter_csv(
                 "Message": log.message
             }
             for log in logs
-        ]
+        )
         
         return csv_download(
             data, f"netfilter_logs_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
@@ -327,28 +327,28 @@ def export_messages_csv(
             rspamd_logs = db.query(RspamdLog).filter(RspamdLog.id.in_(rspamd_ids)).all()
             rspamd_data = {r.id: r for r in rspamd_logs}
         
-        # Prepare export rows
-        data = []
-        for msg in messages:
-            rspamd = rspamd_data.get(msg.rspamd_log_id)
-            data.append({
-                "Time": msg.first_seen.isoformat() if msg.first_seen else "",
-                "Sender": msg.sender,
-                "Recipient": msg.recipient,
-                "Subject": msg.subject,
-                "Direction": msg.direction,
-                "Status": msg.final_status,
-                "Queue ID": msg.queue_id,
-                "Message ID": msg.message_id,
-                "Spam Score": rspamd.score if rspamd else "",
-                "Is Spam": rspamd.is_spam if rspamd else "",
-                "User": rspamd.user if rspamd else "",
-                "IP": rspamd.ip if rspamd else "",
-                "Is Complete": msg.is_complete
-            })
-        
+        # Format one row at a time while the response is consumed.
+        def rows():
+            for msg in messages:
+                rspamd = rspamd_data.get(msg.rspamd_log_id)
+                yield {
+                    "Time": msg.first_seen.isoformat() if msg.first_seen else "",
+                    "Sender": msg.sender,
+                    "Recipient": msg.recipient,
+                    "Subject": msg.subject,
+                    "Direction": msg.direction,
+                    "Status": msg.final_status,
+                    "Queue ID": msg.queue_id,
+                    "Message ID": msg.message_id,
+                    "Spam Score": rspamd.score if rspamd else "",
+                    "Is Spam": rspamd.is_spam if rspamd else "",
+                    "User": rspamd.user if rspamd else "",
+                    "IP": rspamd.ip if rspamd else "",
+                    "Is Complete": msg.is_complete
+                }
+
         return csv_download(
-            data, f"messages_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+            rows(), f"messages_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
         )
     except HTTPException:
         raise

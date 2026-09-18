@@ -553,12 +553,12 @@ def export_suppressions(db: Session = Depends(get_db)):
     
     columns = ['email', 'type', 'reason', 'source', 'notes', 'bounce_count',
                'hard_bounces', 'soft_bounces', 'active', 'expires_at', 'created_at']
-    rows = [dict(zip(columns, [
+    rows = (dict(zip(columns, [
         s.email, s.type, s.reason, s.source or '', s.notes or '',
         s.bounce_count, s.hard_bounce_count, s.soft_bounce_count,
         s.active, s.expires_at.isoformat() if s.expires_at else '',
         s.created_at.isoformat() if s.created_at else '',
-    ])) for s in suppressions]
+    ])) for s in suppressions)
     return csv_download(rows, "spam_suppressions.csv", columns, escape_metadata=True)
 
 

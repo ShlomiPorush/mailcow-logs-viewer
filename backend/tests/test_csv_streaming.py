@@ -5,6 +5,22 @@ import io
 from app.services.csv_export import csv_download
 
 
+def test_generator_column_inference_keeps_the_first_row():
+    consumed = []
+    def rows():
+        for number in range(3):
+            consumed.append(number)
+            yield {"number": number, "text": "example"}
+    response = csv_download(rows(), "test.csv")
+    assert consumed == [0]
+    async def run():
+        chunks = [chunk async for chunk in response.body_iterator]
+        records = list(csv.DictReader(io.StringIO(b"".join(chunks).decode("utf-8-sig"))))
+        assert [row["number"] for row in records] == ["0", "1", "2"]
+        assert consumed == [0, 1, 2]
+    asyncio.run(run())
+
+
 def test_csv_produces_header_before_consuming_rows_and_stops_early():
     consumed = []
     def rows():
