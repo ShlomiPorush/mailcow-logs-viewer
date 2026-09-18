@@ -1,6 +1,8 @@
 """Exercise the actual CSV downloads with untrusted text and typed values."""
 import csv
 import io
+import asyncio
+import inspect
 from datetime import datetime
 from types import SimpleNamespace
 from unittest.mock import Mock
@@ -18,6 +20,38 @@ ROUTES = [
     ("/api/export/messages/csv", "subject", "Subject"),
     ("/api/suppressions/export", "notes", "notes"),
 ]
+
+
+@pytest.mark.parametrize("path,attribute,column", ROUTES)
+def test_download_formats_rows_only_as_the_stream_consumes_them(export_client, path, attribute, column):
+    from app.routers import export, suppressions
+    functions = [export.export_postfix_csv, export.export_rspamd_csv, export.export_netfilter_csv,
+                 export.export_messages_csv, suppressions.export_suppressions]
+    endpoint = functions[[route[0] for route in ROUTES].index(path)]
+    _, row, db, query = export_client
+    reads = []
+    class TrackedRow(SimpleNamespace):
+        def __getattribute__(self, name):
+            if name == attribute:
+                reads.append(name)
+            return super().__getattribute__(name)
+    tracked = TrackedRow(**vars(row))
+    setattr(tracked, attribute, "x" * 1024)
+    query.all.return_value = [tracked] * 1000
+    kwargs = {name: None for name in inspect.signature(endpoint).parameters if name != "db"}
+    response = endpoint(db=db, **kwargs)
+    assert len(reads) <= 1, "endpoint formatted the entire export before streaming"
+
+    async def run():
+        header = await anext(response.body_iterator)
+        assert len(reads) <= 1
+        first = await anext(response.body_iterator)
+        assert 1 < len(reads) < 1000
+        chunks = [header, first] + [chunk async for chunk in response.body_iterator]
+        records = list(csv.DictReader(io.StringIO(b"".join(chunks).decode("utf-8-sig"))))
+        assert len(records) == len(reads) == 1000
+        assert all(record[column] == "x" * 1024 for record in records)
+    asyncio.run(run())
 
 
 @pytest.fixture

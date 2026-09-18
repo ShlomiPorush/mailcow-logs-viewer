@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **Lower CSV row preparation memory usage** - Format export rows as the download is written instead of building a second full list of dictionaries. CSV fields, Unicode support, formula protection and suppression re-import remain unchanged. Database results are still loaded before streaming. Issue: [#159](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/159).
+
 - **Responsive BCC queue cleanup** - Run blacklist cleanup before message correlation in the scheduler worker pool so slow database operations do not block unrelated requests. Cleanup rules and the order of correlation steps remain unchanged. Issue: [#157](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/157).
 
 - **Paged report management** - Browse DMARC and TLS report history 50 reports at a time, with page controls and a total count. Existing API calls without a page remain supported. Issue: [#155](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/155).
