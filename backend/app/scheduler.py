@@ -13,7 +13,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 from apscheduler.triggers.cron import CronTrigger
 from sqlalchemy.orm import Session
-from sqlalchemy import desc, or_
+from sqlalchemy import case, desc, or_
 from sqlalchemy.exc import IntegrityError
 
 from .config import settings, set_cached_active_domains
@@ -1520,6 +1520,13 @@ async def complete_incomplete_correlations():
 
 
 async def expire_old_correlations():
+    """Expire old correlations in the configured scheduler worker pool."""
+    await asyncio.get_running_loop().run_in_executor(
+        get_thread_pool_executor(), _expire_old_correlations_sync
+    )
+
+
+def _expire_old_correlations_sync():
     """
     SEPARATE JOB: Mark old incomplete correlations as "expired".
     
@@ -1540,30 +1547,25 @@ async def expire_old_correlations():
                 minutes=settings.max_correlation_age_minutes
             )
             
-            # Find old incomplete correlations and mark them as expired
-            expired_correlations = db.query(MessageCorrelation).filter(
+            # Update in the database without loading every matching correlation.
+            # Preserve a Dovecot discard while completing its tracking work.
+            completed_count = db.query(MessageCorrelation).filter(
                 MessageCorrelation.is_complete == False,
                 MessageCorrelation.created_at < old_cutoff
-            ).all()
-            
-            if not expired_correlations:
-                update_job_status('expire_correlations', 'success')
-                return
-            
-            expired_count = 0
-            for corr in expired_correlations:
-                corr.is_complete = True  # Mark as complete so we stop trying
-                # A discarded message already has its definitive outcome from
-                # Dovecot (issue #65) - don't relabel it as expired
-                if corr.final_status == 'discarded' or corr.dovecot_status == 'discarded':
-                    continue
-                corr.final_status = "expired"  # Set status to expired
-                expired_count += 1
+            ).update({
+                MessageCorrelation.is_complete: True,
+                MessageCorrelation.final_status: case(
+                    (or_(MessageCorrelation.final_status == 'discarded',
+                         MessageCorrelation.dovecot_status == 'discarded'),
+                     MessageCorrelation.final_status),
+                    else_='expired',
+                ),
+            }, synchronize_session=False)
             
             db.commit()
             
-            if expired_count > 0:
-                logger.info(f"[EXPIRED] Marked {expired_count} correlations as expired (older than {settings.max_correlation_age_minutes}min)")
+            if completed_count > 0:
+                logger.info(f"[EXPIRED] Completed tracking for {completed_count} old correlations (older than {settings.max_correlation_age_minutes}min), preserving discard outcomes")
             
             update_job_status('expire_correlations', 'success')
     
