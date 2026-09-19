@@ -4173,6 +4173,13 @@ async def sync_suppressions_to_rspamd_job():
 
 
 async def expire_suppressions_job():
+    """Expire suppressions in the configured scheduler worker pool."""
+    await asyncio.get_running_loop().run_in_executor(
+        get_thread_pool_executor(), _expire_suppressions_sync
+    )
+
+
+def _expire_suppressions_sync():
     """
     Deactivate suppressions that have passed their expiry date.
     """
@@ -4187,19 +4194,19 @@ async def expire_suppressions_job():
         with get_db_context() as db:
             now = datetime.utcnow()
             
-            expired = db.query(SpamSuppression).filter(
+            expired_count = db.query(SpamSuppression).filter(
                 SpamSuppression.active == True,
                 SpamSuppression.expires_at.isnot(None),
                 SpamSuppression.expires_at <= now
-            ).all()
+            ).update({
+                SpamSuppression.active: False,
+                # The next sync removes these entries from Rspamd.
+                SpamSuppression.synced_to_rspamd: False,
+            }, synchronize_session=False)
+            db.commit()
             
-            if expired:
-                for entry in expired:
-                    entry.active = False
-                    entry.synced_to_rspamd = False  # Will be removed from Rspamd on next sync
-                
-                db.commit()
-                logger.info(f"[SUPPRESSION] Expired {len(expired)} suppressions")
+            if expired_count:
+                logger.info(f"[SUPPRESSION] Expired {expired_count} suppressions")
             
             update_job_status('expire_suppressions', 'success')
             

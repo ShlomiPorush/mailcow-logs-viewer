@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **Lighter suppression expiry** - Deactivate expired spam suppressions with one database update in a background worker, keeping other requests responsive. Expiry boundaries and pending Rspamd synchronization remain unchanged. Issue: [#167](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/167).
+
 - **Bounded database reads for CSV downloads** - Fetch export data in batches instead of loading every matching record before sending the file. Message exports include related spam data in the same query. Existing filters, limits, empty-result behavior and CSV formatting are preserved, and database sessions close when downloads finish or disconnect. Issue: [#165](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/165).
 
 - **Lighter CSV database queries** - Load only fields used by CSV downloads, leaving raw log payloads and other unused columns in the database. Export fields, filtering, ordering and limits remain unchanged. Issue: [#163](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/163).
