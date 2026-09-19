@@ -1232,7 +1232,13 @@ async def run_correlation():
     """
     # Step 1: Clean up blacklisted BCC queues before correlating
     await cleanup_blacklisted_queues()
-    
+    await asyncio.get_running_loop().run_in_executor(
+        get_thread_pool_executor(), _run_correlation_sync
+    )
+
+
+def _run_correlation_sync():
+    """Create message correlations with a session owned by the worker."""
     try:
         with get_db_context() as db:
             uncorrelated_rspamd = db.query(RspamdLog).filter(
