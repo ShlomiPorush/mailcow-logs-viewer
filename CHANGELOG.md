@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **Responsive message correlation** - Build Rspamd/Postfix message correlations in a background worker so database work does not block other requests. BCC cleanup still finishes first; blacklist handling, delivery-leg ownership and batch limits are preserved. Issue: [#173](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/173).
+
 - **Responsive correlation completion** - Complete messages with late Postfix logs in a background worker, keeping database work off the request event loop. Queue ownership, status rules, age limits and batch size remain unchanged. Issue: [#171](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/171).
 
 - **Responsive late message status updates** - Run database work for late Postfix status updates in a background worker so it does not block other requests. Status priorities, correlation age limits and batch size remain unchanged. Issue: [#169](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/169).
