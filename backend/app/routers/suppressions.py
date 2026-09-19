@@ -16,7 +16,7 @@ from typing import Optional, List
 from sqlalchemy.orm import Session, load_only
 from sqlalchemy import func, or_, desc
 
-from ..services.csv_export import CSV_ESCAPE_COLUMN, csv_download, restore_csv_text
+from ..services.csv_export import CSV_ESCAPE_COLUMN, csv_download, csv_query_rows, get_csv_db, restore_csv_text
 from ..database import get_db
 from ..config import settings
 from ..models import SpamSuppression
@@ -547,14 +547,14 @@ async def import_suppressions(file: UploadFile = File(...), db: Session = Depend
 
 
 @router.get("/suppressions/export")
-def export_suppressions(db: Session = Depends(get_db)):
+def export_suppressions(db: Session = Depends(get_csv_db)):
     """Export all suppressions as CSV."""
-    suppressions = db.query(SpamSuppression).options(load_only(
+    suppressions = csv_query_rows(db.query(SpamSuppression).options(load_only(
         SpamSuppression.email, SpamSuppression.type, SpamSuppression.reason,
         SpamSuppression.source, SpamSuppression.notes, SpamSuppression.bounce_count,
         SpamSuppression.hard_bounce_count, SpamSuppression.soft_bounce_count,
         SpamSuppression.active, SpamSuppression.expires_at, SpamSuppression.created_at,
-    )).order_by(SpamSuppression.created_at).all()
+    )).order_by(SpamSuppression.created_at), allow_empty=True)
     
     columns = ['email', 'type', 'reason', 'source', 'notes', 'bounce_count',
                'hard_bounces', 'soft_bounces', 'active', 'expires_at', 'created_at']

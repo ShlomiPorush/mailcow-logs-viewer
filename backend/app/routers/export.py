@@ -8,11 +8,10 @@ from sqlalchemy import or_, and_, desc
 from datetime import datetime
 from typing import Optional
 
-from ..database import get_db
 from ..models import PostfixLog, RspamdLog, NetfilterLog, MessageCorrelation
 from ..config import settings
 from ..utils import internal_error
-from ..services.csv_export import csv_download
+from ..services.csv_export import csv_download, csv_query_rows, get_csv_db
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +26,7 @@ def export_postfix_csv(
     status: Optional[str] = Query(None),
     start_date: Optional[datetime] = Query(None),
     end_date: Optional[datetime] = Query(None),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_csv_db)
 ):
     """
     Export Postfix logs to CSV
@@ -67,10 +66,7 @@ def export_postfix_csv(
             query = query.filter(PostfixLog.time <= end_date)
         
         # Limit to prevent massive exports
-        logs = query.order_by(desc(PostfixLog.time)).limit(settings.csv_export_limit).all()
-        
-        if not logs:
-            raise HTTPException(status_code=404, detail="No data to export")
+        logs = csv_query_rows(query.order_by(desc(PostfixLog.time)).limit(settings.csv_export_limit))
         
         # Format one row at a time while the response is consumed.
         data = (
@@ -111,7 +107,7 @@ def export_rspamd_csv(
     is_spam: Optional[bool] = Query(None),
     start_date: Optional[datetime] = Query(None),
     end_date: Optional[datetime] = Query(None),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_csv_db)
 ):
     """
     Export Rspamd logs to CSV
@@ -156,10 +152,7 @@ def export_rspamd_csv(
         if end_date:
             query = query.filter(RspamdLog.time <= end_date)
         
-        logs = query.order_by(desc(RspamdLog.time)).limit(settings.csv_export_limit).all()
-        
-        if not logs:
-            raise HTTPException(status_code=404, detail="No data to export")
+        logs = csv_query_rows(query.order_by(desc(RspamdLog.time)).limit(settings.csv_export_limit))
         
         # Format one row at a time while the response is consumed.
         data = (
@@ -200,7 +193,7 @@ def export_netfilter_csv(
     username: Optional[str] = Query(None),
     start_date: Optional[datetime] = Query(None),
     end_date: Optional[datetime] = Query(None),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_csv_db)
 ):
     """
     Export Netfilter logs to CSV
@@ -235,10 +228,7 @@ def export_netfilter_csv(
         if end_date:
             query = query.filter(NetfilterLog.time <= end_date)
         
-        logs = query.order_by(desc(NetfilterLog.time)).limit(settings.csv_export_limit).all()
-        
-        if not logs:
-            raise HTTPException(status_code=404, detail="No data to export")
+        logs = csv_query_rows(query.order_by(desc(NetfilterLog.time)).limit(settings.csv_export_limit))
         
         # Format one row at a time while the response is consumed.
         data = (
@@ -277,18 +267,20 @@ def export_messages_csv(
     ip: Optional[str] = Query(None),
     start_date: Optional[datetime] = Query(None),
     end_date: Optional[datetime] = Query(None),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_csv_db)
 ):
     """
     Export Messages (correlations) to CSV
     """
     try:
-        query = db.query(MessageCorrelation).options(load_only(
+        query = db.query(MessageCorrelation, RspamdLog).outerjoin(
+            RspamdLog, MessageCorrelation.rspamd_log_id == RspamdLog.id,
+        ).options(load_only(
             MessageCorrelation.first_seen, MessageCorrelation.sender, MessageCorrelation.recipient,
             MessageCorrelation.subject, MessageCorrelation.direction, MessageCorrelation.final_status,
             MessageCorrelation.queue_id, MessageCorrelation.message_id,
             MessageCorrelation.rspamd_log_id, MessageCorrelation.is_complete,
-        ))
+        ), load_only(RspamdLog.id, RspamdLog.score, RspamdLog.is_spam, RspamdLog.user, RspamdLog.ip))
         
         # Apply filters
         if search:
@@ -321,36 +313,18 @@ def export_messages_csv(
         if end_date:
             query = query.filter(MessageCorrelation.first_seen <= end_date)
         
-        # Join with Rspamd for user/ip filters
-        if user or ip:
-            query = query.join(
-                RspamdLog,
-                MessageCorrelation.rspamd_log_id == RspamdLog.id
-            )
-            if user:
-                query = query.filter(RspamdLog.user.ilike(f"%{user}%"))
-            if ip:
-                query = query.filter(RspamdLog.ip.ilike(f"%{ip}%"))
+        # Filtering the joined columns excludes messages without a matching log.
+        if user:
+            query = query.filter(RspamdLog.user.ilike(f"%{user}%"))
+        if ip:
+            query = query.filter(RspamdLog.ip.ilike(f"%{ip}%"))
         
         # Limit and order
-        messages = query.order_by(desc(MessageCorrelation.last_seen)).limit(settings.csv_export_limit).all()
-        
-        if not messages:
-            raise HTTPException(status_code=404, detail="No data to export")
-        
-        # Get Rspamd data for each message
-        rspamd_data = {}
-        rspamd_ids = [msg.rspamd_log_id for msg in messages if msg.rspamd_log_id]
-        if rspamd_ids:
-            rspamd_logs = db.query(RspamdLog).options(load_only(
-                RspamdLog.id, RspamdLog.score, RspamdLog.is_spam, RspamdLog.user, RspamdLog.ip,
-            )).filter(RspamdLog.id.in_(rspamd_ids)).all()
-            rspamd_data = {r.id: r for r in rspamd_logs}
+        messages = csv_query_rows(query.order_by(desc(MessageCorrelation.last_seen)).limit(settings.csv_export_limit))
         
         # Format one row at a time while the response is consumed.
         def rows():
-            for msg in messages:
-                rspamd = rspamd_data.get(msg.rspamd_log_id)
+            for msg, rspamd in messages:
                 yield {
                     "Time": msg.first_seen.isoformat() if msg.first_seen else "",
                     "Sender": msg.sender,

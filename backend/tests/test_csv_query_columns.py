@@ -11,6 +11,7 @@ from sqlalchemy import create_engine, event, text
 from sqlalchemy.orm import Session
 
 from app.database import Base, engine, get_db
+from app.config import settings
 from app.models import PostfixLog, RspamdLog, NetfilterLog, MessageCorrelation, SpamSuppression
 from app.routers import export, suppressions
 
@@ -19,10 +20,10 @@ from app.routers import export, suppressions
     ("/export/postfix/csv", "Message", "Example", 1, 12),
     ("/export/rspamd/csv", "Subject", "Example", 1, 15),
     ("/export/netfilter/csv", "Message", "Example", 1, 9),
-    ("/export/messages/csv", "Subject", "Example", 2, 13),
+    ("/export/messages/csv", "Subject", "Example", 1, 13),
     ("/suppressions/export", "notes", "'=1+1", 1, 12),
 ])
-def test_csv_selects_only_export_columns(path, column, expected, queries, field_count):
+def test_csv_selects_only_export_columns(monkeypatch, path, column, expected, queries, field_count):
     try:
         with engine.connect() as conn:
             conn.execute(text("SELECT 1"))
@@ -86,6 +87,10 @@ def test_csv_selects_only_export_columns(path, column, expected, queries, field_
                     filtered = client.get(path, params={"ip": "192.0.2.10"})
                     rows = list(csv.DictReader(io.StringIO(filtered.content.decode("utf-8-sig"))))
                     assert len(rows) == 1 and rows[0]["Spam Score"] == "-1.5"
+                monkeypatch.setattr(settings._inner, "csv_export_limit", 1)
+                limited = client.get(path)
+                rows = list(csv.DictReader(io.StringIO(limited.content.decode("utf-8-sig"))))
+                assert len(rows) == (2 if path == "/suppressions/export" else 1)
         finally:
             event.remove(isolated, "before_cursor_execute", capture)
     finally:

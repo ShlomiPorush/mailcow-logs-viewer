@@ -76,9 +76,16 @@ def export_client(monkeypatch):
     query.options.return_value = query
     query.filter.return_value = query.order_by.return_value = query.limit.return_value = query
     query.all.return_value = [row]
+    query.yield_per.side_effect = lambda size: (record for record in query.all.return_value)
     query.first.return_value = None
     db = Mock()
-    db.query.return_value = query
+    paired_query = Mock()
+    paired_query.outerjoin.return_value = paired_query.options.return_value = paired_query
+    paired_query.filter.return_value = paired_query.order_by.return_value = paired_query.limit.return_value = paired_query
+    paired_query.yield_per.side_effect = lambda size: iter((record, None) for record in query.all.return_value)
+    db.info = {}
+    query.session = paired_query.session = db
+    db.query.side_effect = lambda *models: paired_query if len(models) == 2 else query
     app.dependency_overrides[get_db] = lambda: db
     try:
         yield TestClient(app), row, db, query

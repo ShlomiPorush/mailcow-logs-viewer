@@ -4,10 +4,39 @@ import io
 import math
 import unicodedata
 from itertools import chain
+from fastapi import Depends, HTTPException
 from fastapi.responses import StreamingResponse
+
+from ..database import get_db
 
 # Suppression exports carry the exact escaped field names for lossless re-import.
 CSV_ESCAPE_COLUMN = "_csv_escape_v1"
+CSV_QUERY_BATCH_SIZE = 500
+
+
+def get_csv_db(db=Depends(get_db)):
+    """Close export cursors before the parent dependency closes the session."""
+    try:
+        yield db
+    finally:
+        for rows in db.info.pop("csv_export_iterators", ()):
+            rows.close()
+
+
+def csv_query_rows(query, *, allow_empty=False):
+    """Fetch bounded batches; the request-scoped dependency owns the session.
+
+    Peek before sending headers so empty log exports retain their HTTP 404.
+    FastAPI closes the session after the response, including on disconnect.
+    """
+    rows = iter(query.yield_per(CSV_QUERY_BATCH_SIZE))
+    query.session.info.setdefault("csv_export_iterators", []).append(rows)
+    first = next(rows, None)
+    if first is None:
+        if not allow_empty:
+            raise HTTPException(status_code=404, detail="No data to export")
+        return iter(())
+    return chain((first,), rows)
 
 
 def escape_csv_text(value):
