@@ -439,6 +439,7 @@ scheduler = AsyncIOScheduler(
 seen_postfix: Set[str] = set()
 seen_rspamd: Set[str] = set()
 seen_netfilter: Set[str] = set()
+_netfilter_ingest_lock = threading.Lock()
 
 # Resume offsets: when max pages is hit, next cycle continues from here
 _resume_offset: Dict[str, int] = {
@@ -1053,6 +1054,17 @@ async def fetch_and_store_netfilter():
         
         logger.debug(f"[NETFILTER] Received {len(logs)} logs from API")
         
+        await asyncio.get_running_loop().run_in_executor(
+            get_thread_pool_executor(), _store_netfilter_logs, logs
+        )
+
+    except Exception as e:
+        logger.error(f"[ERROR] Netfilter fetch error: {e}", exc_info=True)
+
+
+def _store_netfilter_logs(logs):
+    """Serialize batch processing and own the database session in the worker."""
+    with _netfilter_ingest_lock:
         with get_db_context() as db:
             new_count = 0
             skipped_count = 0
@@ -1122,9 +1134,6 @@ async def fetch_and_store_netfilter():
             if len(seen_netfilter) > 10000:
                 logger.debug("[NETFILTER] Clearing seen_netfilter cache (size > 10000)")
                 seen_netfilter.clear()
-    
-    except Exception as e:
-        logger.error(f"[ERROR] Netfilter fetch error: {e}", exc_info=True)
 
 
 async def fetch_all_logs():

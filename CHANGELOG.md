@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **Responsive Netfilter imports** - Keep Netfilter API requests asynchronous while parsing, GeoIP enrichment and database writes run in a background worker. Overlapping batches are serialized to preserve duplicate detection. Issue: [#177](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/177).
+
 - **Responsive Dovecot delivery updates** - Process stored Dovecot delivery events in a background worker, preserving delivery verdicts and retries without blocking other requests. Overlapping runs are serialized to protect pending events and the saved progress marker. Issue: [#175](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/175).
 
 - **Responsive message correlation** - Build Rspamd/Postfix message correlations in a background worker so database work does not block other requests. BCC cleanup still finishes first; blacklist handling, delivery-leg ownership and batch limits are preserved. Issue: [#173](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/173).
