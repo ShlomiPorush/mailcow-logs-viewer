@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **Responsive late message status updates** - Run database work for late Postfix status updates in a background worker so it does not block other requests. Status priorities, correlation age limits and batch size remain unchanged. Issue: [#169](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/169).
+
 - **Lighter suppression expiry** - Deactivate expired spam suppressions with one database update in a background worker, keeping other requests responsive. Expiry boundaries and pending Rspamd synchronization remain unchanged. Issue: [#167](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/167).
 
 - **Bounded database reads for CSV downloads** - Fetch export data in batches instead of loading every matching record before sending the file. Message exports include related spam data in the same query. Existing filters, limits, empty-result behavior and CSV formatting are preserved, and database sessions close when downloads finish or disconnect. Issue: [#165](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/165).
