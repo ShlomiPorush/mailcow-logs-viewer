@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **Responsive correlation completion** - Complete messages with late Postfix logs in a background worker, keeping database work off the request event loop. Queue ownership, status rules, age limits and batch size remain unchanged. Issue: [#171](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/171).
+
 - **Responsive late message status updates** - Run database work for late Postfix status updates in a background worker so it does not block other requests. Status priorities, correlation age limits and batch size remain unchanged. Issue: [#169](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/169).
 
 - **Lighter suppression expiry** - Deactivate expired spam suppressions with one database update in a background worker, keeping other requests responsive. Expiry boundaries and pending Rspamd synchronization remain unchanged. Issue: [#167](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/167).

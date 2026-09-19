@@ -1420,6 +1420,13 @@ def correlate_single_message(db: Session, rspamd_log: RspamdLog) -> Optional[Mes
 
 
 async def complete_incomplete_correlations():
+    """Complete message correlations in the configured scheduler worker pool."""
+    await asyncio.get_running_loop().run_in_executor(
+        get_thread_pool_executor(), _complete_incomplete_correlations_sync
+    )
+
+
+def _complete_incomplete_correlations_sync():
     """
     Complete correlations that are missing Postfix logs.
     
