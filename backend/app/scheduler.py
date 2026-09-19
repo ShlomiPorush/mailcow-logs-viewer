@@ -3,6 +3,7 @@ Background scheduler
 """
 import logging
 import asyncio
+import threading
 import re
 import httpx
 import ipaddress
@@ -1820,6 +1821,7 @@ DOVECOT_PENDING_MAX_AGE = timedelta(minutes=15)
 # the 15-minute prune) so each cycle only retries these instead of re-reading
 # and re-parsing a whole lookback window from the database.
 _dovecot_pending: Dict[str, Dict[str, Any]] = {}
+_dovecot_correlation_lock = threading.Lock()
 
 
 def dovecot_correlation_available() -> bool:
@@ -1876,6 +1878,19 @@ def _leg_for_dovecot_event(
 
 
 async def correlate_dovecot_logs():
+    """Apply Dovecot outcomes without blocking the request event loop."""
+    await asyncio.get_running_loop().run_in_executor(
+        get_thread_pool_executor(), _run_dovecot_correlation_worker
+    )
+
+
+def _run_dovecot_correlation_worker():
+    # Scheduled and manual runs share pending events and one database watermark.
+    with _dovecot_correlation_lock:
+        _correlate_dovecot_logs_sync()
+
+
+def _correlate_dovecot_logs_sync():
     """
     Attach the Dovecot LMTP delivery outcome to correlated messages (issue #65).
 

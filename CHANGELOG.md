@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **Responsive Dovecot delivery updates** - Process stored Dovecot delivery events in a background worker, preserving delivery verdicts and retries without blocking other requests. Overlapping runs are serialized to protect pending events and the saved progress marker. Issue: [#175](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/175).
+
 - **Responsive message correlation** - Build Rspamd/Postfix message correlations in a background worker so database work does not block other requests. BCC cleanup still finishes first; blacklist handling, delivery-leg ownership and batch limits are preserved. Issue: [#173](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/173).
 
 - **Responsive correlation completion** - Complete messages with late Postfix logs in a background worker, keeping database work off the request event loop. Queue ownership, status rules, age limits and batch size remain unchanged. Issue: [#171](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/171).
