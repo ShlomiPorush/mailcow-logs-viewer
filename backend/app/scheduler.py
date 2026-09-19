@@ -1724,6 +1724,13 @@ def refresh_correlations_for_queue_ids(db: Session, queue_ids) -> tuple:
 
 
 async def update_final_status_for_correlations():
+    """Refresh late message outcomes in the configured scheduler worker pool."""
+    await asyncio.get_running_loop().run_in_executor(
+        get_thread_pool_executor(), _update_final_status_for_correlations_sync
+    )
+
+
+def _update_final_status_for_correlations_sync():
     """
     Background job to update final_status for correlations that don't have one yet.
     
