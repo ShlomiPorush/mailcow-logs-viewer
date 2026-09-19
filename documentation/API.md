@@ -3536,7 +3536,7 @@ Test IMAP connection with detailed logging for diagnostics.
 
 CSV downloads use UTF-8 with a byte order mark (BOM) so spreadsheet applications can detect multilingual text when opening the file directly. Programmatic readers should decode with `utf-8-sig` to remove the BOM before parsing headers.
 
-CSV serialization is streamed in chunks. The endpoints still load source rows before serialization; this does not provide database cursor streaming or reduce the frontend download buffer.
+CSV serialization is streamed in chunks. Source rows are fetched in batches of 500 through a database cursor. The cursor and database session close when the download finishes or disconnects. The frontend still buffers the complete download before saving it.
 
 CSV downloads are intended for spreadsheet viewing. Text with a formula-like
 prefix is prefixed with an apostrophe; fields are quoted and embedded quotes are
