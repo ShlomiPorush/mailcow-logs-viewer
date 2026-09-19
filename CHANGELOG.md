@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **Lighter CSV database queries** - Load only fields used by CSV downloads, leaving raw log payloads and other unused columns in the database. Export fields, filtering, ordering and limits remain unchanged. Source rows are still loaded before streaming. Issue: [#163](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/163).
+
 - **Lighter correlation expiry** - Expire old incomplete message correlations with one database update in a background worker, instead of loading and updating every match on the request event loop. Age boundaries, completed correlations and Dovecot discard outcomes are preserved. Issue: [#161](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/161).
 
 - **Lower CSV row preparation memory usage** - Format export rows as the download is written instead of building a second full list of dictionaries. CSV fields, Unicode support, formula protection and suppression re-import remain unchanged. Database results are still loaded before streaming. Issue: [#159](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/159).

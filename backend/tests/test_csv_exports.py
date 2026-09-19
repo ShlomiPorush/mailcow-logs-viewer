@@ -73,6 +73,7 @@ def export_client(monkeypatch):
     row.symbols = {"TEST": {}}
     row.expires_at = row.rspamd_log_id = None
     query = Mock()
+    query.options.return_value = query
     query.filter.return_value = query.order_by.return_value = query.limit.return_value = query
     query.all.return_value = [row]
     query.first.return_value = None
