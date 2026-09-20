@@ -2778,6 +2778,12 @@ def cleanup_blacklisted_data():
         logger.error(f"[BLACKLIST] Cleanup error: {e}")
 
 
+def _store_background_dns_check(domain_name, dns_data):
+    """Own the session in the worker, including the async notification step."""
+    with get_db_context() as db:
+        asyncio.run(save_dns_check_to_db(db, domain_name, dns_data, is_full_check=True))
+
+
 async def check_all_domains_dns_background():
     """Background job to check DNS for all domains"""
     if not settings.is_feature_enabled('domains'):
@@ -2811,8 +2817,9 @@ async def check_all_domains_dns_background():
             try:
                 dns_data = await check_domain_dns(domain_name, spf_source_ips)
 
-                with get_db_context() as db:
-                    await save_dns_check_to_db(db, domain_name, dns_data, is_full_check=True)
+                await asyncio.get_running_loop().run_in_executor(
+                    get_thread_pool_executor(), _store_background_dns_check, domain_name, dns_data
+                )
 
                 checked_count += 1
                 await asyncio.sleep(0.5)
