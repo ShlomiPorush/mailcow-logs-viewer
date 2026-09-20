@@ -2094,6 +2094,18 @@ def _correlate_dovecot_logs_sync():
         update_job_status('correlate_dovecot', 'failed', str(e))
 
 
+def _persist_geoip_license_status():
+    """Keep license-status persistence in a worker-owned database session."""
+    from .services.settings_store import save_maxmind_validation_status
+
+    with get_db_context() as db:
+        save_maxmind_validation_status(db, {
+            "configured": True,
+            "valid": True,
+            "error": None
+        })
+
+
 async def update_geoip_database():
     """Background job: Update GeoIP databases"""
     from .services.geoip_downloader import (
@@ -2129,13 +2141,9 @@ async def update_geoip_database():
         # so the settings page shows "License Valid" without a manual check
         if status['City']['available'] or status['ASN']['available']:
             try:
-                from .services.settings_store import save_maxmind_validation_status
-                with get_db_context() as db:
-                    save_maxmind_validation_status(db, {
-                        "configured": True,
-                        "valid": True,
-                        "error": None
-                    })
+                await asyncio.get_running_loop().run_in_executor(
+                    get_thread_pool_executor(), _persist_geoip_license_status
+                )
             except Exception as e:
                 logger.debug(f"Failed to persist license status after GeoIP update: {e}")
         

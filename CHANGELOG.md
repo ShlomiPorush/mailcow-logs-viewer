@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **Responsive GeoIP status updates** - Save GeoIP license status in a background worker so database delays do not hold up other requests after an update. Download and reader-reload behavior is unchanged. Issue: [#189](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/189).
+
 - **Responsive alias synchronization** - Process alias statistics in a background worker so database work does not delay other requests. Forwarding targets, catch-all flags and inactive-alias tracking retain their existing behavior. Issue: [#187](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/187).
 
 - **Responsive mailbox synchronization** - Process mailbox statistics in a background worker so database work does not delay other requests. Quotas, rate limits and inactive-mailbox tracking retain their existing behavior. Issue: [#185](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/185).
