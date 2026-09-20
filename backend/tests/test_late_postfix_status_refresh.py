@@ -218,11 +218,12 @@ def test_refresh_is_driven_by_arrivals_not_by_scanning(env, monkeypatch):
 
     monkeypatch.setattr(scheduler, 'refresh_correlations_for_queue_ids', spy)
 
-    _ingest(monkeypatch, [_entry(_sent_line())])
+    page = [_entry(_sent_line())]
+    _ingest(monkeypatch, page)
     assert [c for c in calls if c] == [{QUEUE}], 'first ingest must refresh exactly this queue'
 
     # Same page again: every line is already in the database, so nothing new
     # arrives and no correlation may be re-examined.
     calls.clear()
-    _ingest(monkeypatch, [_entry(_sent_line())])
+    _ingest(monkeypatch, page)
     assert [c for c in calls if c] == [], 'a page of duplicates must refresh nothing'
