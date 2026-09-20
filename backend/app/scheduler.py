@@ -2931,6 +2931,102 @@ def _mailbox_sync_needed() -> bool:
             or settings.is_feature_enabled('rate-limits'))
 
 
+def _store_mailbox_statistics(mailboxes):
+    """Process mailbox records with a database session owned by the worker."""
+    # Get set of current mailbox usernames from API
+    api_mailbox_usernames = {mb.get('username') for mb in mailboxes if mb.get('username')}
+
+    with get_db_context() as db:
+        updated = 0
+        created = 0
+        deleted = 0
+
+        # First, mark mailboxes that no longer exist in mailcow as inactive
+        db_mailboxes = db.query(MailboxStatistics).all()
+        for db_mb in db_mailboxes:
+            if db_mb.username not in api_mailbox_usernames:
+                if db_mb.active:  # Only log and count if it was previously active
+                    logger.info(f"Marking deleted mailbox as inactive: {db_mb.username}")
+                    db_mb.active = False
+                    db_mb.updated_at = datetime.now(timezone.utc)
+                    deleted += 1
+
+        for mb in mailboxes:
+            try:
+                username = mb.get('username')
+                if not username:
+                    continue
+
+                # Extract domain from username
+                domain = username.split('@')[-1] if '@' in username else ''
+
+                # Check if mailbox exists
+                existing = db.query(MailboxStatistics).filter(
+                    MailboxStatistics.username == username
+                ).first()
+
+                # Prepare data - safely convert values
+                attributes = mb.get('attributes', {})
+                # Handle Rate Limit (can be flat or nested unique to Mailcow version)
+                rl_data = mb.get('rl')
+                if isinstance(rl_data, dict):
+                    rl_value_raw = rl_data.get('value')
+                    rl_frame_raw = rl_data.get('frame')
+                else:
+                    rl_value_raw = mb.get('rl_value')
+                    rl_frame_raw = mb.get('rl_frame')
+
+                rl_value = safe_int(rl_value_raw) if rl_value_raw not in (None, '', '-', '- ') else None
+                rl_frame = rl_frame_raw if rl_frame_raw not in (None, '', '-', '- ') else None
+
+                if existing:
+                    # Update existing record
+                    existing.domain = domain
+                    existing.name = mb.get('name', '') or ''
+                    existing.quota = safe_int(mb.get('quota'), 0)
+                    existing.quota_used = safe_int(mb.get('quota_used'), 0)
+                    existing.percent_in_use = safe_float(mb.get('percent_in_use'), 0.0)
+                    existing.messages = safe_int(mb.get('messages'), 0)
+                    existing.active = mb.get('active', 1) == 1
+                    existing.last_imap_login = safe_int(mb.get('last_imap_login'), 0) or None
+                    existing.last_pop3_login = safe_int(mb.get('last_pop3_login'), 0) or None
+                    existing.last_smtp_login = safe_int(mb.get('last_smtp_login'), 0) or None
+                    existing.spam_aliases = safe_int(mb.get('spam_aliases'), 0)
+                    existing.rl_value = rl_value
+                    existing.rl_frame = rl_frame
+                    existing.attributes = attributes
+                    existing.updated_at = datetime.now(timezone.utc)
+                    updated += 1
+                else:
+                    # Create new record
+                    new_mailbox = MailboxStatistics(
+                        username=username,
+                        domain=domain,
+                        name=mb.get('name', '') or '',
+                        quota=safe_int(mb.get('quota'), 0),
+                        quota_used=safe_int(mb.get('quota_used'), 0),
+                        percent_in_use=safe_float(mb.get('percent_in_use'), 0.0),
+                        messages=safe_int(mb.get('messages'), 0),
+                        active=mb.get('active', 1) == 1,
+                        last_imap_login=safe_int(mb.get('last_imap_login'), 0) or None,
+                        last_pop3_login=safe_int(mb.get('last_pop3_login'), 0) or None,
+                        last_smtp_login=safe_int(mb.get('last_smtp_login'), 0) or None,
+                        spam_aliases=safe_int(mb.get('spam_aliases'), 0),
+                        rl_value=rl_value,
+                        rl_frame=rl_frame,
+                        attributes=attributes
+                    )
+                    db.add(new_mailbox)
+                    created += 1
+
+            except Exception as e:
+                logger.error(f"Error processing mailbox {mb.get('username', 'unknown')}: {e}")
+                continue
+
+        db.commit()
+    return updated, created, deleted
+
+
 async def update_mailbox_statistics():
     """
     Fetch mailbox statistics from mailcow API and update the database.
@@ -2952,102 +3048,14 @@ async def update_mailbox_statistics():
             update_job_status('mailbox_stats', 'success')
             return
         
-        # Get set of current mailbox usernames from API
-        api_mailbox_usernames = {mb.get('username') for mb in mailboxes if mb.get('username')}
-        
-        with get_db_context() as db:
-            updated = 0
-            created = 0
-            deleted = 0
-            
-            # First, mark mailboxes that no longer exist in mailcow as inactive
-            db_mailboxes = db.query(MailboxStatistics).all()
-            for db_mb in db_mailboxes:
-                if db_mb.username not in api_mailbox_usernames:
-                    if db_mb.active:  # Only log and count if it was previously active
-                        logger.info(f"Marking deleted mailbox as inactive: {db_mb.username}")
-                        db_mb.active = False
-                        db_mb.updated_at = datetime.now(timezone.utc)
-                        deleted += 1
-            
-            for mb in mailboxes:
-                try:
-                    username = mb.get('username')
-                    if not username:
-                        continue
-                    
-                    # Extract domain from username
-                    domain = username.split('@')[-1] if '@' in username else ''
-                    
-                    # Check if mailbox exists
-                    existing = db.query(MailboxStatistics).filter(
-                        MailboxStatistics.username == username
-                    ).first()
-                    
-                    # Prepare data - safely convert values
-                    attributes = mb.get('attributes', {})
-                    # Handle Rate Limit (can be flat or nested unique to Mailcow version)
-                    rl_data = mb.get('rl')
-                    if isinstance(rl_data, dict):
-                        rl_value_raw = rl_data.get('value')
-                        rl_frame_raw = rl_data.get('frame')
-                    else:
-                        rl_value_raw = mb.get('rl_value')
-                        rl_frame_raw = mb.get('rl_frame')
-
-                    rl_value = safe_int(rl_value_raw) if rl_value_raw not in (None, '', '-', '- ') else None
-                    rl_frame = rl_frame_raw if rl_frame_raw not in (None, '', '-', '- ') else None
-                    
-                    if existing:
-                        # Update existing record
-                        existing.domain = domain
-                        existing.name = mb.get('name', '') or ''
-                        existing.quota = safe_int(mb.get('quota'), 0)
-                        existing.quota_used = safe_int(mb.get('quota_used'), 0)
-                        existing.percent_in_use = safe_float(mb.get('percent_in_use'), 0.0)
-                        existing.messages = safe_int(mb.get('messages'), 0)
-                        existing.active = mb.get('active', 1) == 1
-                        existing.last_imap_login = safe_int(mb.get('last_imap_login'), 0) or None
-                        existing.last_pop3_login = safe_int(mb.get('last_pop3_login'), 0) or None
-                        existing.last_smtp_login = safe_int(mb.get('last_smtp_login'), 0) or None
-                        existing.spam_aliases = safe_int(mb.get('spam_aliases'), 0)
-                        existing.rl_value = rl_value
-                        existing.rl_frame = rl_frame
-                        existing.attributes = attributes
-                        existing.updated_at = datetime.now(timezone.utc)
-                        updated += 1
-                    else:
-                        # Create new record
-                        new_mailbox = MailboxStatistics(
-                            username=username,
-                            domain=domain,
-                            name=mb.get('name', '') or '',
-                            quota=safe_int(mb.get('quota'), 0),
-                            quota_used=safe_int(mb.get('quota_used'), 0),
-                            percent_in_use=safe_float(mb.get('percent_in_use'), 0.0),
-                            messages=safe_int(mb.get('messages'), 0),
-                            active=mb.get('active', 1) == 1,
-                            last_imap_login=safe_int(mb.get('last_imap_login'), 0) or None,
-                            last_pop3_login=safe_int(mb.get('last_pop3_login'), 0) or None,
-                            last_smtp_login=safe_int(mb.get('last_smtp_login'), 0) or None,
-                            spam_aliases=safe_int(mb.get('spam_aliases'), 0),
-                            rl_value=rl_value,
-                            rl_frame=rl_frame,
-                            attributes=attributes
-                        )
-                        db.add(new_mailbox)
-                        created += 1
-                
-                except Exception as e:
-                    logger.error(f"Error processing mailbox {mb.get('username', 'unknown')}: {e}")
-                    continue
-            
-            db.commit()
-            logger.info(f"✓ Mailbox statistics updated: {updated} updated, {created} created, {deleted} deactivated")
-            update_job_status('mailbox_stats', 'success')
+        updated, created, deleted = await asyncio.get_running_loop().run_in_executor(
+            get_thread_pool_executor(), _store_mailbox_statistics, mailboxes
+        )
+        logger.info(f"Mailbox statistics updated: {updated} updated, {created} created, {deleted} deactivated")
+        update_job_status('mailbox_stats', 'success')
     
     except Exception as e:
-        logger.error(f"✗ Failed to update mailbox statistics: {e}")
+        logger.error(f"Failed to update mailbox statistics: {e}")
         update_job_status('mailbox_stats', 'failed', str(e))
 
 
