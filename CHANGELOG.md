@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **Responsive alias synchronization** - Process alias statistics in a background worker so database work does not delay other requests. Forwarding targets, catch-all flags and inactive-alias tracking retain their existing behavior. Issue: [#187](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/187).
+
 - **Responsive mailbox synchronization** - Process mailbox statistics in a background worker so database work does not delay other requests. Quotas, rate limits and inactive-mailbox tracking retain their existing behavior. Issue: [#185](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/185).
 
 - **Responsive domain synchronization** - Save alias-domain mappings in a background worker so database delays do not hold up other requests. Domain discovery and cache updates retain their existing behavior. Issue: [#183](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/183).

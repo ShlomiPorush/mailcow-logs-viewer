@@ -3063,6 +3063,87 @@ async def update_mailbox_statistics():
 # ALIAS STATISTICS
 # =============================================================================
 
+def _store_alias_statistics(aliases):
+    """Process alias records with a database session owned by the worker."""
+    # Get set of current alias addresses from API
+    api_alias_addresses = {alias.get('address') for alias in aliases if alias.get('address')}
+
+    with get_db_context() as db:
+        updated = 0
+        created = 0
+        deleted = 0
+
+        # First, mark aliases that no longer exist in mailcow as inactive
+        db_aliases = db.query(AliasStatistics).all()
+        for db_alias in db_aliases:
+            if db_alias.alias_address not in api_alias_addresses:
+                if db_alias.active:  # Only log and count if it was previously active
+                    logger.info(f"Marking deleted alias as inactive: {db_alias.alias_address}")
+                    db_alias.active = False
+                    db_alias.updated_at = datetime.now(timezone.utc)
+                    deleted += 1
+
+        for alias in aliases:
+            try:
+                alias_address = alias.get('address')
+                if not alias_address:
+                    continue
+
+                # Skip if this is a mailbox address (not an alias)
+                if alias.get('is_catch_all') is None and not alias.get('goto'):
+                    continue
+
+                # Extract domain from alias address
+                domain = alias_address.split('@')[-1] if '@' in alias_address else ''
+
+                # Get the target mailbox(es)
+                goto = alias.get('goto', '')
+
+                # Determine primary mailbox (first in goto list)
+                primary_mailbox = None
+                if goto:
+                    goto_list = [g.strip() for g in goto.split(',') if g.strip()]
+                    if goto_list:
+                        primary_mailbox = goto_list[0]
+
+                # Check if alias exists
+                existing = db.query(AliasStatistics).filter(
+                    AliasStatistics.alias_address == alias_address
+                ).first()
+
+                is_catch_all = alias.get('is_catch_all', 0) == 1
+                is_active = alias.get('active', 1) == 1
+
+                if existing:
+                    # Update existing record
+                    existing.goto = goto
+                    existing.domain = domain
+                    existing.active = is_active
+                    existing.is_catch_all = is_catch_all
+                    existing.primary_mailbox = primary_mailbox
+                    existing.updated_at = datetime.now(timezone.utc)
+                    updated += 1
+                else:
+                    # Create new record
+                    new_alias = AliasStatistics(
+                        alias_address=alias_address,
+                        goto=goto,
+                        domain=domain,
+                        active=is_active,
+                        is_catch_all=is_catch_all,
+                        primary_mailbox=primary_mailbox
+                    )
+                    db.add(new_alias)
+                    created += 1
+
+            except Exception as e:
+                logger.error(f"Error processing alias {alias.get('address', 'unknown')}: {e}")
+                continue
+
+        db.commit()
+    return updated, created, deleted
+
+
 async def update_alias_statistics():
     """
     Fetch aliases from mailcow API and update the database.
@@ -3085,87 +3166,14 @@ async def update_alias_statistics():
             update_job_status('alias_stats', 'success')
             return
         
-        # Get set of current alias addresses from API
-        api_alias_addresses = {alias.get('address') for alias in aliases if alias.get('address')}
-        
-        with get_db_context() as db:
-            updated = 0
-            created = 0
-            deleted = 0
-            
-            # First, mark aliases that no longer exist in mailcow as inactive
-            db_aliases = db.query(AliasStatistics).all()
-            for db_alias in db_aliases:
-                if db_alias.alias_address not in api_alias_addresses:
-                    if db_alias.active:  # Only log and count if it was previously active
-                        logger.info(f"Marking deleted alias as inactive: {db_alias.alias_address}")
-                        db_alias.active = False
-                        db_alias.updated_at = datetime.now(timezone.utc)
-                        deleted += 1
-            
-            for alias in aliases:
-                try:
-                    alias_address = alias.get('address')
-                    if not alias_address:
-                        continue
-                    
-                    # Skip if this is a mailbox address (not an alias)
-                    if alias.get('is_catch_all') is None and not alias.get('goto'):
-                        continue
-                    
-                    # Extract domain from alias address
-                    domain = alias_address.split('@')[-1] if '@' in alias_address else ''
-                    
-                    # Get the target mailbox(es)
-                    goto = alias.get('goto', '')
-                    
-                    # Determine primary mailbox (first in goto list)
-                    primary_mailbox = None
-                    if goto:
-                        goto_list = [g.strip() for g in goto.split(',') if g.strip()]
-                        if goto_list:
-                            primary_mailbox = goto_list[0]
-                    
-                    # Check if alias exists
-                    existing = db.query(AliasStatistics).filter(
-                        AliasStatistics.alias_address == alias_address
-                    ).first()
-                    
-                    is_catch_all = alias.get('is_catch_all', 0) == 1
-                    is_active = alias.get('active', 1) == 1
-                    
-                    if existing:
-                        # Update existing record
-                        existing.goto = goto
-                        existing.domain = domain
-                        existing.active = is_active
-                        existing.is_catch_all = is_catch_all
-                        existing.primary_mailbox = primary_mailbox
-                        existing.updated_at = datetime.now(timezone.utc)
-                        updated += 1
-                    else:
-                        # Create new record
-                        new_alias = AliasStatistics(
-                            alias_address=alias_address,
-                            goto=goto,
-                            domain=domain,
-                            active=is_active,
-                            is_catch_all=is_catch_all,
-                            primary_mailbox=primary_mailbox
-                        )
-                        db.add(new_alias)
-                        created += 1
-                
-                except Exception as e:
-                    logger.error(f"Error processing alias {alias.get('address', 'unknown')}: {e}")
-                    continue
-            
-            db.commit()
-            logger.info(f"✓ Alias statistics updated: {updated} updated, {created} created, {deleted} deactivated")
-            update_job_status('alias_stats', 'success')
+        updated, created, deleted = await asyncio.get_running_loop().run_in_executor(
+            get_thread_pool_executor(), _store_alias_statistics, aliases
+        )
+        logger.info(f"Alias statistics updated: {updated} updated, {created} created, {deleted} deactivated")
+        update_job_status('alias_stats', 'success')
     
     except Exception as e:
-        logger.error(f"✗ Failed to update alias statistics: {e}")
+        logger.error(f"Failed to update alias statistics: {e}")
         update_job_status('alias_stats', 'failed', str(e))
 
 
