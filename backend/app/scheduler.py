@@ -3207,6 +3207,47 @@ def parse_nexthop_host(host_input: str) -> str:
     return host_clean.split(':')[0]
 
 
+def _store_monitored_hosts(hosts_to_monitor):
+    """Reconcile monitored hosts with a session owned by the worker."""
+    # Update DB
+    with get_db_context() as db:
+        existing_hosts = {h.hostname: h for h in db.query(MonitoredHost).all()}
+
+        added_count = 0
+        updated_count = 0
+
+        for ip_addr, source in hosts_to_monitor.items():
+            if ip_addr in existing_hosts:
+                host = existing_hosts[ip_addr]
+                # last_seen marks the host as currently confirmed by sync;
+                # reconcile uses it to decide if a row is fresh enough to
+                # reactivate when its source toggle is switched back on
+                host.last_seen = datetime.utcnow()
+                if not host.active or host.source != source:
+                    host.active = True
+                    host.source = source
+                    updated_count += 1
+            else:
+                new_host = MonitoredHost(
+                    hostname=ip_addr, # Store IP here now!
+                    source=source,
+                    active=True,
+                    last_seen=datetime.utcnow()
+                )
+                db.add(new_host)
+                added_count += 1
+
+        deactivated_count = 0
+        for hostname, host in existing_hosts.items():
+            if hostname not in hosts_to_monitor and host.active:
+                host.active = False
+                deactivated_count += 1
+
+        db.commit()
+
+    return added_count, updated_count, deactivated_count
+
+
 async def sync_transports_job():
     """
     Sync blacklist-monitored hosts from the enabled sources (transports,
@@ -3317,45 +3358,13 @@ async def sync_transports_job():
             if wan_ip and wan_ip not in hosts_to_monitor:
                 hosts_to_monitor[wan_ip] = 'system'
 
-        # Update DB
-        with get_db_context() as db:
-            existing_hosts = {h.hostname: h for h in db.query(MonitoredHost).all()}
-            
-            added_count = 0
-            updated_count = 0
-            
-            for ip_addr, source in hosts_to_monitor.items():
-                if ip_addr in existing_hosts:
-                    host = existing_hosts[ip_addr]
-                    # last_seen marks the host as currently confirmed by sync;
-                    # reconcile uses it to decide if a row is fresh enough to
-                    # reactivate when its source toggle is switched back on
-                    host.last_seen = datetime.utcnow()
-                    if not host.active or host.source != source:
-                        host.active = True
-                        host.source = source
-                        updated_count += 1
-                else:
-                    new_host = MonitoredHost(
-                        hostname=ip_addr, # Store IP here now!
-                        source=source,
-                        active=True,
-                        last_seen=datetime.utcnow()
-                    )
-                    db.add(new_host)
-                    added_count += 1
-            
-            deactivated_count = 0
-            for hostname, host in existing_hosts.items():
-                if hostname not in hosts_to_monitor and host.active:
-                    host.active = False
-                    deactivated_count += 1
-            
-            db.commit()
-            
-            summary = f"Synced monitored hosts: {added_count} added, {updated_count} updated, {deactivated_count} deactivated (filtered private IPs)"
-            logger.info(summary)
-            update_job_status('sync_transports', 'success')
+        added_count, updated_count, deactivated_count = await asyncio.get_running_loop().run_in_executor(
+            get_thread_pool_executor(), _store_monitored_hosts, hosts_to_monitor
+        )
+
+        summary = f"Synced monitored hosts: {added_count} added, {updated_count} updated, {deactivated_count} deactivated (filtered private IPs)"
+        logger.info(summary)
+        update_job_status('sync_transports', 'success')
 
         # Trigger immediate blacklist check for newly added hosts. Outside the
         # DB context: the check runs for minutes (10s sleep per host + DNS) and

@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **Responsive monitored-host synchronization** - Save monitored hosts in a background worker so database work does not delay other requests. Source discovery, activation tracking and the subsequent blacklist check retain their existing behavior. Issue: [#191](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/191).
+
 - **Responsive GeoIP status updates** - Save GeoIP license status in a background worker so database delays do not hold up other requests after an update. Download and reader-reload behavior is unchanged. Issue: [#189](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/189).
 
 - **Responsive alias synchronization** - Process alias statistics in a background worker so database work does not delay other requests. Forwarding targets, catch-all flags and inactive-alias tracking retain their existing behavior. Issue: [#187](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/187).
