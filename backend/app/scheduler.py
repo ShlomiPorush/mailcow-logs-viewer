@@ -437,6 +437,7 @@ scheduler = AsyncIOScheduler(
 )
 
 seen_postfix: Set[str] = set()
+_postfix_ingest_lock = threading.Lock()
 seen_rspamd: Set[str] = set()
 seen_netfilter: Set[str] = set()
 _netfilter_ingest_lock = threading.Lock()
@@ -571,145 +572,10 @@ async def fetch_and_store_postfix():
                 _resume_offset['postfix'] = 0
                 break
             
-            page_new = 0
-            # Queue ids whose outcome changed on this page - see refresh below
-            page_status_queue_ids = set()
-            page_skipped = 0
-            page_blacklisted = 0
-            
-            with get_db_context() as db:
-                blacklisted_queue_ids: Set[str] = set()
-                
-                for log_entry in logs:
-                    message = log_entry.get('message', '')
-                    parsed = parse_postfix_message(message)
-                    queue_id = parsed.get('queue_id')
-                    
-                    if not queue_id:
-                        continue
-                    
-                    sender = parsed.get('sender')
-                    recipient = parsed.get('recipient')
-                    
-                    if is_blacklisted(sender) or is_blacklisted(recipient):
-                        blacklisted_queue_ids.add(queue_id)
-                        logger.debug(f"Blacklist: Queue ID {queue_id} marked for deletion (sender={sender}, recipient={recipient})")
-                
-                if blacklisted_queue_ids:
-                    deleted_count = db.query(PostfixLog).filter(
-                        PostfixLog.queue_id.in_(blacklisted_queue_ids)
-                    ).delete(synchronize_session=False)
-                    
-                    db.query(MessageCorrelation).filter(
-                        MessageCorrelation.queue_id.in_(blacklisted_queue_ids)
-                    ).delete(synchronize_session=False)
-                    
-                    if deleted_count > 0:
-                        logger.info(f"[BLACKLIST] Deleted {deleted_count} Postfix logs for {len(blacklisted_queue_ids)} blacklisted queue IDs")
-                    
-                    db.commit()
-                
-                # Batch existence check
-                existing_in_db: Set[str] = set()
-                times_in_batch = set()
-                for log_entry in logs:
-                    times_in_batch.add(datetime.fromtimestamp(int(log_entry.get('time', 0)), tz=timezone.utc))
-                
-                if times_in_batch:
-                    existing_rows = db.query(
-                        PostfixLog.time, PostfixLog.program, PostfixLog.queue_id, PostfixLog.message
-                    ).filter(
-                        PostfixLog.time.in_(list(times_in_batch))
-                    ).all()
-                    for row in existing_rows:
-                        dt = row.time.replace(tzinfo=timezone.utc) if row.time.tzinfo is None else row.time
-                        time_val = int(dt.timestamp())
-                        db_key = f"{time_val}|{row.program or ''}|{row.queue_id or ''}|{row.message or ''}"
-                        existing_in_db.add(db_key)
-                
-                for log_entry in logs:
-                    try:
-                        time_str = str(log_entry.get('time', ''))
-                        message = log_entry.get('message', '')
-                        unique_id = f"{time_str}:{message[:100]}"
-                        
-                        if unique_id in seen_postfix:
-                            page_skipped += 1
-                            continue
-                        
-                        parsed = parse_postfix_message(message)
-                        queue_id = parsed.get('queue_id')
-                        
-                        if queue_id and queue_id in blacklisted_queue_ids:
-                            page_blacklisted += 1
-                            seen_postfix.add(unique_id)
-                            continue
-                        
-                        # Parse timestamp with timezone
-                        timestamp = datetime.fromtimestamp(
-                            int(log_entry.get('time', 0)),
-                            tz=timezone.utc
-                        )
-                        
-                        # Check if already exists in DB (pre-checked batch query)
-                        time_val = int(log_entry.get('time', 0))
-                        db_key = f"{time_val}|{log_entry.get('program', '')}|{queue_id or ''}|{message}"
-                        if db_key in existing_in_db:
-                            seen_postfix.add(unique_id)
-                            page_skipped += 1
-                            continue
-                        
-                        sender = parsed.get('sender')
-                        recipient = parsed.get('recipient')
-                        
-                        postfix_log = PostfixLog(
-                            time=timestamp,
-                            program=log_entry.get('program'),
-                            priority=log_entry.get('priority'),
-                            message=message,
-                            queue_id=queue_id,
-                            message_id=parsed.get('message_id'),
-                            sender=sender,
-                            recipient=recipient,
-                            status=parsed.get('status'),
-                            relay=parsed.get('relay'),
-                            delay=parsed.get('delay'),
-                            dsn=parsed.get('dsn'),
-                            raw_data=log_entry
-                        )
-                        
-                        db.add(postfix_log)
-                        seen_postfix.add(unique_id)
-                        page_new += 1
+            page_new, page_skipped, page_blacklisted = await asyncio.get_running_loop().run_in_executor(
+                get_thread_pool_executor(), _store_postfix_page, logs
+            )
 
-                        if queue_id and parsed.get('status') in PUSH_TRIGGER_STATUSES:
-                            page_status_queue_ids.add(queue_id)
-                        
-                    except Exception as e:
-                        logger.error(f"Error processing Postfix log: {e}")
-                        continue
-                
-                db.commit()
-
-                # The outcome of these queues just changed. Refresh only those
-                # correlations, so a delivery that lands after the correlation age
-                # window is still recorded without re-polling anything else.
-                # Failing here must never lose the logs that were just stored.
-                if page_status_queue_ids:
-                    try:
-                        refreshed, skipped_refresh = refresh_correlations_for_queue_ids(
-                            db, page_status_queue_ids)
-                        if refreshed or skipped_refresh:
-                            db.commit()
-                            logger.info(
-                                f"[STATUS] Refreshed {refreshed} correlation(s) from "
-                                f"{len(page_status_queue_ids)} arriving queue(s), "
-                                f"skipped {skipped_refresh}"
-                            )
-                    except Exception as e:
-                        db.rollback()
-                        logger.warning(f"[STATUS] Correlation refresh failed for this page: {e}")
-            
             total_new += page_new
             total_skipped += page_skipped
             total_blacklisted += page_blacklisted
@@ -744,11 +610,162 @@ async def fetch_and_store_postfix():
                 msg += f" (skipped {total_blacklisted} blacklisted)"
             logger.info(msg)
         
-        if len(seen_postfix) > 10000:
-            seen_postfix.clear()
+        await asyncio.get_running_loop().run_in_executor(
+            get_thread_pool_executor(), _trim_postfix_cache
+        )
     
     except Exception as e:
         logger.error(f"[ERROR] Postfix fetch error: {e}")
+
+
+def _store_postfix_page(logs):
+    """Process one page with a session and duplicate cache owned by the worker."""
+    with _postfix_ingest_lock:
+        page_new = 0
+        # Queue ids whose outcome changed on this page - see refresh below
+        page_status_queue_ids = set()
+        page_skipped = 0
+        page_blacklisted = 0
+
+        with get_db_context() as db:
+            blacklisted_queue_ids: Set[str] = set()
+
+            for log_entry in logs:
+                message = log_entry.get('message', '')
+                parsed = parse_postfix_message(message)
+                queue_id = parsed.get('queue_id')
+
+                if not queue_id:
+                    continue
+
+                sender = parsed.get('sender')
+                recipient = parsed.get('recipient')
+
+                if is_blacklisted(sender) or is_blacklisted(recipient):
+                    blacklisted_queue_ids.add(queue_id)
+                    logger.debug(f"Blacklist: Queue ID {queue_id} marked for deletion (sender={sender}, recipient={recipient})")
+
+            if blacklisted_queue_ids:
+                deleted_count = db.query(PostfixLog).filter(
+                    PostfixLog.queue_id.in_(blacklisted_queue_ids)
+                ).delete(synchronize_session=False)
+
+                db.query(MessageCorrelation).filter(
+                    MessageCorrelation.queue_id.in_(blacklisted_queue_ids)
+                ).delete(synchronize_session=False)
+
+                if deleted_count > 0:
+                    logger.info(f"[BLACKLIST] Deleted {deleted_count} Postfix logs for {len(blacklisted_queue_ids)} blacklisted queue IDs")
+
+                db.commit()
+
+            # Batch existence check
+            existing_in_db: Set[str] = set()
+            times_in_batch = set()
+            for log_entry in logs:
+                times_in_batch.add(datetime.fromtimestamp(int(log_entry.get('time', 0)), tz=timezone.utc))
+
+            if times_in_batch:
+                existing_rows = db.query(
+                    PostfixLog.time, PostfixLog.program, PostfixLog.queue_id, PostfixLog.message
+                ).filter(
+                    PostfixLog.time.in_(list(times_in_batch))
+                ).all()
+                for row in existing_rows:
+                    dt = row.time.replace(tzinfo=timezone.utc) if row.time.tzinfo is None else row.time
+                    time_val = int(dt.timestamp())
+                    db_key = f"{time_val}|{row.program or ''}|{row.queue_id or ''}|{row.message or ''}"
+                    existing_in_db.add(db_key)
+
+            for log_entry in logs:
+                try:
+                    time_str = str(log_entry.get('time', ''))
+                    message = log_entry.get('message', '')
+                    unique_id = f"{time_str}:{message[:100]}"
+
+                    if unique_id in seen_postfix:
+                        page_skipped += 1
+                        continue
+
+                    parsed = parse_postfix_message(message)
+                    queue_id = parsed.get('queue_id')
+
+                    if queue_id and queue_id in blacklisted_queue_ids:
+                        page_blacklisted += 1
+                        seen_postfix.add(unique_id)
+                        continue
+
+                    # Parse timestamp with timezone
+                    timestamp = datetime.fromtimestamp(
+                        int(log_entry.get('time', 0)),
+                        tz=timezone.utc
+                    )
+
+                    # Check if already exists in DB (pre-checked batch query)
+                    time_val = int(log_entry.get('time', 0))
+                    db_key = f"{time_val}|{log_entry.get('program', '')}|{queue_id or ''}|{message}"
+                    if db_key in existing_in_db:
+                        seen_postfix.add(unique_id)
+                        page_skipped += 1
+                        continue
+
+                    sender = parsed.get('sender')
+                    recipient = parsed.get('recipient')
+
+                    postfix_log = PostfixLog(
+                        time=timestamp,
+                        program=log_entry.get('program'),
+                        priority=log_entry.get('priority'),
+                        message=message,
+                        queue_id=queue_id,
+                        message_id=parsed.get('message_id'),
+                        sender=sender,
+                        recipient=recipient,
+                        status=parsed.get('status'),
+                        relay=parsed.get('relay'),
+                        delay=parsed.get('delay'),
+                        dsn=parsed.get('dsn'),
+                        raw_data=log_entry
+                    )
+
+                    db.add(postfix_log)
+                    seen_postfix.add(unique_id)
+                    page_new += 1
+
+                    if queue_id and parsed.get('status') in PUSH_TRIGGER_STATUSES:
+                        page_status_queue_ids.add(queue_id)
+
+                except Exception as e:
+                    logger.error(f"Error processing Postfix log: {e}")
+                    continue
+
+            db.commit()
+
+            # The outcome of these queues just changed. Refresh only those
+            # correlations, so a delivery that lands after the correlation age
+            # window is still recorded without re-polling anything else.
+            # Failing here must never lose the logs that were just stored.
+            if page_status_queue_ids:
+                try:
+                    refreshed, skipped_refresh = refresh_correlations_for_queue_ids(
+                        db, page_status_queue_ids)
+                    if refreshed or skipped_refresh:
+                        db.commit()
+                        logger.info(
+                            f"[STATUS] Refreshed {refreshed} correlation(s) from "
+                            f"{len(page_status_queue_ids)} arriving queue(s), "
+                            f"skipped {skipped_refresh}"
+                        )
+                except Exception as e:
+                    db.rollback()
+                    logger.warning(f"[STATUS] Correlation refresh failed for this page: {e}")
+        return page_new, page_skipped, page_blacklisted
+
+
+def _trim_postfix_cache():
+    with _postfix_ingest_lock:
+        if len(seen_postfix) > 10000:
+            seen_postfix.clear()
 
 
 async def fetch_and_store_rspamd():
