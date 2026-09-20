@@ -2826,6 +2826,15 @@ async def check_all_domains_dns_background():
         update_job_status('dns_check', 'failed', str(e))
 
 
+def _persist_local_domain_aliases(alias_map):
+    """Keep the complete persistence session in a worker thread."""
+    from .services.alias_domains import persist_alias_domain_map
+
+    with get_db_context() as db:
+        persist_alias_domain_map(db, alias_map)
+        db.commit()
+
+
 async def sync_local_domains():
     """
     Sync local domains from mailcow API (primary domains + alias domains).
@@ -2847,11 +2856,10 @@ async def sync_local_domains():
             # Persist which primary domain each alias points at, so mailbox
             # statistics and the Domains page can use the mapping (issue #92)
             try:
-                from .services.alias_domains import (persist_alias_domain_map,
-                                                     set_cached_alias_domain_map)
-                with get_db_context() as db:
-                    persist_alias_domain_map(db, alias_map)
-                    db.commit()
+                from .services.alias_domains import set_cached_alias_domain_map
+                await asyncio.get_running_loop().run_in_executor(
+                    get_thread_pool_executor(), _persist_local_domain_aliases, alias_map
+                )
                 set_cached_alias_domain_map(alias_map)
             except Exception as e:
                 logger.warning(f"Could not persist the alias domain map: {e}")
