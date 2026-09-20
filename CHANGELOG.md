@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **Responsive Rspamd imports** - Process Rspamd history pages, GeoIP enrichment and database writes in a background worker while API pagination stays asynchronous. Spam fields, blacklist cleanup, duplicate detection and resume offsets are preserved. Issue: [#181](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/181).
+
 - **Responsive Postfix imports** - Process each Postfix log page and its message-status updates in a background worker while API pagination remains asynchronous. Resume offsets, blacklist cleanup and duplicate detection are preserved. Issue: [#179](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/179).
 
 - **Responsive Netfilter imports** - Keep Netfilter API requests asynchronous while parsing, GeoIP enrichment and database writes run in a background worker. Overlapping batches are serialized to preserve duplicate detection. Issue: [#177](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/177).

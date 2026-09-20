@@ -439,6 +439,7 @@ scheduler = AsyncIOScheduler(
 seen_postfix: Set[str] = set()
 _postfix_ingest_lock = threading.Lock()
 seen_rspamd: Set[str] = set()
+_rspamd_ingest_lock = threading.Lock()
 seen_netfilter: Set[str] = set()
 _netfilter_ingest_lock = threading.Lock()
 
@@ -809,131 +810,10 @@ async def fetch_and_store_rspamd():
                 _resume_offset['rspamd'] = 0
                 break
             
-            page_new = 0
-            page_skipped = 0
-            page_blacklisted = 0
-            
-            with get_db_context() as db:
-                blacklisted_message_ids: Set[str] = set()
-                
-                # Batch existence check
-                existing_in_db: Set[str] = set()
-                times_in_batch = set()
-                for log_entry in logs:
-                    times_in_batch.add(datetime.fromtimestamp(log_entry.get('unix_time', 0), tz=timezone.utc))
-                
-                if times_in_batch:
-                    existing_rows = db.query(
-                        RspamdLog.time, RspamdLog.message_id
-                    ).filter(
-                        RspamdLog.time.in_(list(times_in_batch))
-                    ).all()
-                    for row in existing_rows:
-                        dt = row.time.replace(tzinfo=timezone.utc) if row.time.tzinfo is None else row.time
-                        time_val = int(dt.timestamp())
-                        db_key = f"{time_val}:{row.message_id if row.message_id else 'no-id'}"
-                        existing_in_db.add(db_key)
-                
-                for log_entry in logs:
-                    try:
-                        unix_time = log_entry.get('unix_time', 0)
-                        message_id = log_entry.get('message-id', '')
-                        if message_id == 'undef' or not message_id:
-                            message_id = None
-                        sender = log_entry.get('sender_smtp')
-                        recipients = log_entry.get('rcpt_smtp', [])
-                        
-                        unique_id = f"{unix_time}:{message_id if message_id else 'no-id'}"
-                        
-                        if unique_id in seen_rspamd or unique_id in existing_in_db:
-                            seen_rspamd.add(unique_id)
-                            page_skipped += 1
-                            continue
-                        
-                        if is_blacklisted(sender):
-                            page_blacklisted += 1
-                            seen_rspamd.add(unique_id)
-                            if message_id:
-                                blacklisted_message_ids.add(message_id)
-                            continue
-                        
-                        if recipients and any(is_blacklisted(r) for r in recipients):
-                            page_blacklisted += 1
-                            seen_rspamd.add(unique_id)
-                            if message_id:
-                                blacklisted_message_ids.add(message_id)
-                            continue
-                        
-                        timestamp = datetime.fromtimestamp(unix_time, tz=timezone.utc)
-                        direction = detect_direction(log_entry)
-                        
-                        rspamd_log = RspamdLog(
-                            time=timestamp,
-                            message_id=message_id,
-                            sender_smtp=sender,
-                            sender_mime=log_entry.get('sender_mime', sender),
-                            recipients_smtp=recipients,
-                            recipients_mime=log_entry.get('rcpt_mime', recipients),
-                            subject=log_entry.get('subject'),
-                            score=log_entry.get('score', 0.0),
-                            required_score=log_entry.get('required_score', 15.0),
-                            action=log_entry.get('action', 'unknown'),
-                            symbols=log_entry.get('symbols', {}),
-                            is_spam=(
-                                log_entry.get('action') in ['reject', 'add header', 'rewrite subject'] or
-                                'SPAM_TRAP' in log_entry.get('symbols', {})
-                            ),
-                            has_auth=('MAILCOW_AUTH' in log_entry.get('symbols', {})),
-                            direction=direction,
-                            ip=log_entry.get('ip'),
-                            user=log_entry.get('user'),
-                            size=log_entry.get('size'),
-                            raw_data=log_entry
-                        )
+            page_new, page_skipped, page_blacklisted = await asyncio.get_running_loop().run_in_executor(
+                get_thread_pool_executor(), _store_rspamd_page, logs
+            )
 
-                        if geoip_service.is_geoip_available() and rspamd_log.ip:
-                            geo_info = geoip_service.lookup_ip(rspamd_log.ip)
-                            rspamd_log.country_code = geo_info.get('country_code')
-                            rspamd_log.country_name = geo_info.get('country_name')
-                            rspamd_log.city = geo_info.get('city')
-                            rspamd_log.asn = geo_info.get('asn')
-                            rspamd_log.asn_org = geo_info.get('asn_org')
-                        
-                        db.add(rspamd_log)
-                        seen_rspamd.add(unique_id)
-                        page_new += 1
-                        
-                    except Exception as e:
-                        logger.error(f"Error processing Rspamd log: {e}")
-                        continue
-                
-                if blacklisted_message_ids:
-                    correlations_to_delete = db.query(MessageCorrelation).filter(
-                        MessageCorrelation.message_id.in_(blacklisted_message_ids)
-                    ).all()
-                    
-                    queue_ids_to_delete = set()
-                    for corr in correlations_to_delete:
-                        if corr.queue_id:
-                            queue_ids_to_delete.add(corr.queue_id)
-                    
-                    deleted_corr = db.query(MessageCorrelation).filter(
-                        MessageCorrelation.message_id.in_(blacklisted_message_ids)
-                    ).delete(synchronize_session=False)
-                    
-                    if queue_ids_to_delete:
-                        deleted_postfix = db.query(PostfixLog).filter(
-                            PostfixLog.queue_id.in_(queue_ids_to_delete)
-                        ).delete(synchronize_session=False)
-                        
-                        if deleted_postfix > 0:
-                            logger.info(f"[BLACKLIST] Deleted {deleted_postfix} Postfix logs linked to blacklisted messages")
-                    
-                    if deleted_corr > 0:
-                        logger.info(f"[BLACKLIST] Deleted {deleted_corr} correlations for blacklisted message IDs")
-                
-                db.commit()
-            
             total_new += page_new
             total_skipped += page_skipped
             total_blacklisted += page_blacklisted
@@ -967,12 +847,149 @@ async def fetch_and_store_rspamd():
                 msg += f" (skipped {total_blacklisted} blacklisted)"
             logger.info(msg)
         
-        if len(seen_rspamd) > 10000:
-            seen_rspamd.clear()
+        await asyncio.get_running_loop().run_in_executor(
+            get_thread_pool_executor(), _trim_rspamd_cache
+        )
     
     except Exception as e:
         logger.error(f"[ERROR] Rspamd fetch error: {e}")
 
+
+
+def _store_rspamd_page(logs):
+    """Process one page with a session and duplicate cache owned by the worker."""
+    with _rspamd_ingest_lock:
+        page_new = 0
+        page_skipped = 0
+        page_blacklisted = 0
+
+        with get_db_context() as db:
+            blacklisted_message_ids: Set[str] = set()
+
+            # Batch existence check
+            existing_in_db: Set[str] = set()
+            times_in_batch = set()
+            for log_entry in logs:
+                times_in_batch.add(datetime.fromtimestamp(log_entry.get('unix_time', 0), tz=timezone.utc))
+
+            if times_in_batch:
+                existing_rows = db.query(
+                    RspamdLog.time, RspamdLog.message_id
+                ).filter(
+                    RspamdLog.time.in_(list(times_in_batch))
+                ).all()
+                for row in existing_rows:
+                    dt = row.time.replace(tzinfo=timezone.utc) if row.time.tzinfo is None else row.time
+                    time_val = int(dt.timestamp())
+                    db_key = f"{time_val}:{row.message_id if row.message_id else 'no-id'}"
+                    existing_in_db.add(db_key)
+
+            for log_entry in logs:
+                try:
+                    unix_time = log_entry.get('unix_time', 0)
+                    message_id = log_entry.get('message-id', '')
+                    if message_id == 'undef' or not message_id:
+                        message_id = None
+                    sender = log_entry.get('sender_smtp')
+                    recipients = log_entry.get('rcpt_smtp', [])
+
+                    unique_id = f"{unix_time}:{message_id if message_id else 'no-id'}"
+
+                    if unique_id in seen_rspamd or unique_id in existing_in_db:
+                        seen_rspamd.add(unique_id)
+                        page_skipped += 1
+                        continue
+
+                    if is_blacklisted(sender):
+                        page_blacklisted += 1
+                        seen_rspamd.add(unique_id)
+                        if message_id:
+                            blacklisted_message_ids.add(message_id)
+                        continue
+
+                    if recipients and any(is_blacklisted(r) for r in recipients):
+                        page_blacklisted += 1
+                        seen_rspamd.add(unique_id)
+                        if message_id:
+                            blacklisted_message_ids.add(message_id)
+                        continue
+
+                    timestamp = datetime.fromtimestamp(unix_time, tz=timezone.utc)
+                    direction = detect_direction(log_entry)
+
+                    rspamd_log = RspamdLog(
+                        time=timestamp,
+                        message_id=message_id,
+                        sender_smtp=sender,
+                        sender_mime=log_entry.get('sender_mime', sender),
+                        recipients_smtp=recipients,
+                        recipients_mime=log_entry.get('rcpt_mime', recipients),
+                        subject=log_entry.get('subject'),
+                        score=log_entry.get('score', 0.0),
+                        required_score=log_entry.get('required_score', 15.0),
+                        action=log_entry.get('action', 'unknown'),
+                        symbols=log_entry.get('symbols', {}),
+                        is_spam=(
+                            log_entry.get('action') in ['reject', 'add header', 'rewrite subject'] or
+                            'SPAM_TRAP' in log_entry.get('symbols', {})
+                        ),
+                        has_auth=('MAILCOW_AUTH' in log_entry.get('symbols', {})),
+                        direction=direction,
+                        ip=log_entry.get('ip'),
+                        user=log_entry.get('user'),
+                        size=log_entry.get('size'),
+                        raw_data=log_entry
+                    )
+
+                    if geoip_service.is_geoip_available() and rspamd_log.ip:
+                        geo_info = geoip_service.lookup_ip(rspamd_log.ip)
+                        rspamd_log.country_code = geo_info.get('country_code')
+                        rspamd_log.country_name = geo_info.get('country_name')
+                        rspamd_log.city = geo_info.get('city')
+                        rspamd_log.asn = geo_info.get('asn')
+                        rspamd_log.asn_org = geo_info.get('asn_org')
+
+                    db.add(rspamd_log)
+                    seen_rspamd.add(unique_id)
+                    page_new += 1
+
+                except Exception as e:
+                    logger.error(f"Error processing Rspamd log: {e}")
+                    continue
+
+            if blacklisted_message_ids:
+                correlations_to_delete = db.query(MessageCorrelation).filter(
+                    MessageCorrelation.message_id.in_(blacklisted_message_ids)
+                ).all()
+
+                queue_ids_to_delete = set()
+                for corr in correlations_to_delete:
+                    if corr.queue_id:
+                        queue_ids_to_delete.add(corr.queue_id)
+
+                deleted_corr = db.query(MessageCorrelation).filter(
+                    MessageCorrelation.message_id.in_(blacklisted_message_ids)
+                ).delete(synchronize_session=False)
+
+                if queue_ids_to_delete:
+                    deleted_postfix = db.query(PostfixLog).filter(
+                        PostfixLog.queue_id.in_(queue_ids_to_delete)
+                    ).delete(synchronize_session=False)
+
+                    if deleted_postfix > 0:
+                        logger.info(f"[BLACKLIST] Deleted {deleted_postfix} Postfix logs linked to blacklisted messages")
+
+                if deleted_corr > 0:
+                    logger.info(f"[BLACKLIST] Deleted {deleted_corr} correlations for blacklisted message IDs")
+
+            db.commit()
+        return page_new, page_skipped, page_blacklisted
+
+
+def _trim_rspamd_cache():
+    with _rspamd_ingest_lock:
+        if len(seen_rspamd) > 10000:
+            seen_rspamd.clear()
 
 
 def parse_netfilter_message(message: str, priority: Optional[str] = None) -> Dict[str, Any]:
