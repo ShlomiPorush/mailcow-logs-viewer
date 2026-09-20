@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **Responsive mailbox synchronization** - Process mailbox statistics in a background worker so database work does not delay other requests. Quotas, rate limits and inactive-mailbox tracking retain their existing behavior. Issue: [#185](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/185).
+
 - **Responsive domain synchronization** - Save alias-domain mappings in a background worker so database delays do not hold up other requests. Domain discovery and cache updates retain their existing behavior. Issue: [#183](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/183).
 
 - **Responsive Rspamd imports** - Process Rspamd history pages, GeoIP enrichment and database writes in a background worker while API pagination stays asynchronous. Spam fields, blacklist cleanup, duplicate detection and resume offsets are preserved. Issue: [#181](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/181).
