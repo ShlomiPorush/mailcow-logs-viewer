@@ -4363,6 +4363,28 @@ def _expire_suppressions_sync():
 
 
 async def process_quarantine_rules_job():
+    """Run quarantine rule processing outside the request event loop."""
+    try:
+        await asyncio.get_running_loop().run_in_executor(
+            get_thread_pool_executor(), _process_quarantine_rules_worker
+        )
+    except Exception as e:
+        logger.error(f"[QUARANTINE RULES] Worker error: {e}", exc_info=True)
+        update_job_status('process_quarantine_rules', 'failed', str(e))
+
+
+def _process_quarantine_rules_worker():
+    """Close the worker loop's HTTP client even when processing fails."""
+    async def run():
+        try:
+            await _process_quarantine_rules_in_worker()
+        finally:
+            await mailcow_api.aclose()
+
+    asyncio.run(run())
+
+
+async def _process_quarantine_rules_in_worker():
     """
     Process quarantine auto-rules:
     1. Fetch quarantine items from mailcow
