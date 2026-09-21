@@ -13,7 +13,7 @@ import dns.asyncresolver
 from datetime import datetime, timezone, timedelta
 from sqlalchemy.orm import Session
 from sqlalchemy import text, func
-from app.database import get_db
+from app.database import get_db, get_db_context
 from app.models import DomainDNSCheck, DMARCReport, DMARCRecord
 from app.services.alias_domains import get_alias_domain_map, aliases_of_domain
 from app.utils import format_datetime_for_api
@@ -1588,6 +1588,17 @@ def notify_dns_changes(domain_name: str, changes: List[Dict[str, str]]) -> None:
         logger.error(f"Could not send DNS change alert for {domain_name}: {e}")
 
 
+def store_dns_check_worker(domain_name, dns_data, is_full_check):
+    """Own the session in the worker, including the async notification step."""
+    with get_db_context() as db:
+        asyncio.run(save_dns_check_to_db(db, domain_name, dns_data, is_full_check=is_full_check))
+
+
+def _load_alias_map_for_dns_checks():
+    with get_db_context() as db:
+        return get_alias_domain_map(db)
+
+
 async def save_dns_check_to_db(db: Session, domain_name: str, dns_data: Dict[str, Any], is_full_check: bool = False):
     """Save DNS check results to database (upsert), alerting on real changes."""
     try:
@@ -1664,7 +1675,7 @@ def get_cached_dns_check(db: Session, domain_name: str) -> Dict[str, Any]:
 
 
 @router.post("/domains/check-all-dns")
-async def check_all_domains_dns_manual(db: Session = Depends(get_db)):
+async def check_all_domains_dns_manual():
     """Manually trigger DNS check for all active domains"""
     try:
         domains = await mailcow_api.get_domains()
@@ -1687,13 +1698,14 @@ async def check_all_domains_dns_manual(db: Session = Depends(get_db)):
 
         names = [d.get('domain_name') for d in active_domains if d.get('domain_name')]
         # Alias domains are real sending domains: check them too (issue #92)
-        names.extend(a for a in sorted(get_alias_domain_map(db).keys()) if a not in names)
+        alias_map = await asyncio.to_thread(_load_alias_map_for_dns_checks)
+        names.extend(a for a in sorted(alias_map.keys()) if a not in names)
 
         for domain_name in names:
 
             try:
                 dns_data = await check_domain_dns(domain_name, spf_source_ips)
-                await save_dns_check_to_db(db, domain_name, dns_data, is_full_check=True)
+                await asyncio.to_thread(store_dns_check_worker, domain_name, dns_data, True)
                 checked_count += 1
             except Exception as e:
                 errors.append(f"{domain_name}: {str(e)}")
@@ -1713,11 +1725,11 @@ async def check_all_domains_dns_manual(db: Session = Depends(get_db)):
 
 
 @router.post("/domains/{domain}/check-dns")
-async def check_single_domain_dns_manual(domain: str, db: Session = Depends(get_db)):
+async def check_single_domain_dns_manual(domain: str):
     """Manually trigger DNS check for a single domain"""
     try:
         dns_data = await check_domain_dns(domain)
-        await save_dns_check_to_db(db, domain, dns_data, is_full_check=False)
+        await asyncio.to_thread(store_dns_check_worker, domain, dns_data, False)
         
         return {
             'status': 'success',

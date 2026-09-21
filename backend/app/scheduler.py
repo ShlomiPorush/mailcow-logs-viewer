@@ -37,7 +37,7 @@ from .services.dovecot_parser import (
     pick_worst_verdict,
     resolve_session_verdicts,
 )
-from .routers.domains import check_domain_dns, save_dns_check_to_db
+from .routers.domains import check_domain_dns, store_dns_check_worker
 from .services.dmarc_imap_service import sync_dmarc_reports_from_imap
 from .services.dmarc_notifications import send_dmarc_error_notification
 from .services import geoip_service
@@ -2778,12 +2778,6 @@ def cleanup_blacklisted_data():
         logger.error(f"[BLACKLIST] Cleanup error: {e}")
 
 
-def _store_background_dns_check(domain_name, dns_data):
-    """Own the session in the worker, including the async notification step."""
-    with get_db_context() as db:
-        asyncio.run(save_dns_check_to_db(db, domain_name, dns_data, is_full_check=True))
-
-
 async def check_all_domains_dns_background():
     """Background job to check DNS for all domains"""
     if not settings.is_feature_enabled('domains'):
@@ -2818,7 +2812,7 @@ async def check_all_domains_dns_background():
                 dns_data = await check_domain_dns(domain_name, spf_source_ips)
 
                 await asyncio.get_running_loop().run_in_executor(
-                    get_thread_pool_executor(), _store_background_dns_check, domain_name, dns_data
+                    get_thread_pool_executor(), store_dns_check_worker, domain_name, dns_data, True
                 )
 
                 checked_count += 1
