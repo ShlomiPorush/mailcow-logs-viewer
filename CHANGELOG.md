@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **Responsive blacklist scans** - Loading monitored hosts, reading cached checks and saving scan results now run outside the request loop, keeping other requests responsive during database work. [#203](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/203)
+
 - **Responsive suppression synchronization** - Manual and background Rspamd map synchronization no longer block other requests during database work. Existing map contents and unchanged-content write checks are preserved. [#201](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/201)
 
 - **Responsive deferred queue cleanup** - Saving recipient suppressions no longer blocks other requests while deferred messages are cleaned up. [#199](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/199)
