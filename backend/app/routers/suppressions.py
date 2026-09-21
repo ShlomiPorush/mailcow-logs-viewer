@@ -5,6 +5,7 @@ Provides CRUD operations for the spam suppression list,
 including auto-detection of bounced/rejected outbound emails
 and syncing to Rspamd's global_rcpt_blacklist.map.
 """
+import asyncio
 import csv
 import io
 import re
@@ -17,7 +18,7 @@ from sqlalchemy.orm import Session, load_only
 from sqlalchemy import func, or_, desc
 
 from ..services.csv_export import CSV_ESCAPE_COLUMN, csv_download, csv_query_rows, get_csv_db, restore_csv_text
-from ..database import get_db
+from ..database import get_db, get_db_context
 from ..config import settings
 from ..models import SpamSuppression
 from ..mailcow_api import mailcow_api, MailcowAPIError
@@ -573,7 +574,7 @@ def export_suppressions(db: Session = Depends(get_csv_db)):
 # =========================================================================
 
 @router.post("/suppressions/sync")
-async def manual_sync_to_rspamd(db: Session = Depends(get_db)):
+async def manual_sync_to_rspamd():
     """
     Manually trigger sync of suppression list to Rspamd global_rcpt_blacklist.map.
     
@@ -590,13 +591,25 @@ async def manual_sync_to_rspamd(db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail="Rspamd password not configured")
     
     try:
-        result = await sync_suppressions_to_rspamd(db)
+        result = await asyncio.to_thread(sync_suppressions_worker)
         return result
     except MailcowAPIError as e:
         raise internal_error(e, status_code=502)
     except Exception as e:
         logger.error(f"Sync failed: {e}")
         raise internal_error(e)
+
+
+def sync_suppressions_worker() -> dict:
+    """Own the sync session and HTTP client on a short-lived worker loop."""
+    async def run():
+        try:
+            with get_db_context() as db:
+                return await sync_suppressions_to_rspamd(db)
+        finally:
+            await mailcow_api.aclose()
+
+    return asyncio.run(run())
 
 
 async def sync_suppressions_to_rspamd(db: Session) -> dict:

@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **Responsive suppression synchronization** - Manual and background Rspamd map synchronization no longer block other requests during database work. Existing map contents and unchanged-content write checks are preserved. [#201](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/201)
+
 - **Responsive deferred queue cleanup** - Saving recipient suppressions no longer blocks other requests while deferred messages are cleaned up. [#199](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/199)
 
 - **Responsive bounce detection** - Scan and save automatically detected suppressions in a background worker. Database sessions now close before Rspamd synchronization and queue cleanup, while existing bounce rules are preserved. Issue: [#197](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/197).
