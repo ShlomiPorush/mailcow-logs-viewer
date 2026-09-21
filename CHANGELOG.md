@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **Responsive bounce detection** - Scan and save automatically detected suppressions in a background worker. Database sessions now close before Rspamd synchronization and queue cleanup, while existing bounce rules are preserved. Issue: [#197](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/197).
+
 - **Responsive manual DNS checks** - Save results and load alias mappings outside the request event loop when checking one or all domains. Manual and background checks share the same worker-owned persistence, preserving responses and notification ordering. Issue: [#195](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/195).
 
 - **Responsive background DNS checks** - Save background DNS results in a worker so database delays do not hold up other requests. DNS-change notifications still follow a successful commit, and failed domains do not stop the remaining checks. Issue: [#193](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/193).
