@@ -40,7 +40,7 @@ def test_persistence_keeps_loop_responsive(monkeypatch, state):
             threads.append(threading.get_ident())
             finished.set()
 
-    monkeypatch.setattr(scheduler, "get_db_context", session)
+    monkeypatch.setattr(domains, "get_db_context", session)
 
     async def run():
         loop_thread = threading.get_ident()
@@ -75,7 +75,7 @@ def test_notification_follows_commit(monkeypatch, state):
         finally:
             events.append("close")
 
-    monkeypatch.setattr(scheduler, "get_db_context", session)
+    monkeypatch.setattr(domains, "get_db_context", session)
     asyncio.run(scheduler.check_all_domains_dns_background())
     assert events == ["commit", "notify", "close"]
 
@@ -90,7 +90,7 @@ def test_failed_save_rolls_back_and_continues_to_alias(monkeypatch, state):
     def session():
         yield db
 
-    monkeypatch.setattr(scheduler, "get_db_context", session)
+    monkeypatch.setattr(domains, "get_db_context", session)
     asyncio.run(scheduler.check_all_domains_dns_background())
     assert db.commit.call_count == 2
     db.rollback.assert_called_once()
