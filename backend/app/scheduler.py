@@ -4074,6 +4074,143 @@ def start_scheduler():
 # SPAM SUPPRESSION SCHEDULER JOBS
 # =============================================================================
 
+def _detect_suppressions_worker():
+    """Scan and persist suppressions with a worker-owned database session."""
+    with get_db_context() as db:
+        # Look for recently imported bounced emails (last 10 minutes by import time)
+        # Uses created_at (DB insert time) instead of time (original mailcow timestamp)
+        # so that historical bounces imported via paginated fetch are still detected
+        cutoff = datetime.utcnow() - timedelta(minutes=10)
+
+        # When queue_cleanup_enabled, soft bounces are handled by
+        # cleanup_deferred_queue_job (checks the live queue directly).
+        # Only scan logs for hard bounces in that case.
+        statuses_to_check = ['bounced']
+        if not settings.queue_cleanup_enabled:
+            statuses_to_check.append('deferred')
+
+        bounce_logs = db.query(PostfixLog).filter(
+            PostfixLog.created_at >= cutoff,
+            PostfixLog.status.in_(statuses_to_check),
+            PostfixLog.recipient.isnot(None),
+            PostfixLog.dsn.isnot(None),
+        ).all()
+
+        if not bounce_logs:
+            return 0, 0, []
+
+        whitelist = settings.suppression_whitelist_domains_list
+        new_count = 0
+        updated_count = 0
+        emails_for_queue_cleanup = []  # Only hard bounces - deferred/soft should be retried by Postfix
+        # Entries created in THIS run, by email: the session has
+        # autoflush=False, so a DB query cannot see them - a recipient
+        # bouncing several times in one batch must update the pending
+        # entry, not insert a duplicate (unique index on email)
+        pending_entries = {}
+
+        for log in bounce_logs:
+            # Skip DSN bounce notifications:
+            # - Regular bounce lines have NO from= field → sender is None → process normally
+            # - DSN messages have from=<> (empty) or from=<MAILER-DAEMON> → skip
+            if log.sender is not None:
+                sender_val = log.sender.lower().strip()
+                if not sender_val or sender_val.startswith('mailer-daemon'):
+                    continue
+
+            recipient = log.recipient.lower().strip()
+
+            # Skip whitelisted domains
+            domain = recipient.split('@')[-1] if '@' in recipient else ''
+            if domain in whitelist:
+                continue
+
+            dsn = log.dsn or ''
+            is_hard = dsn.startswith('5.')
+            is_soft = dsn.startswith('4.')
+
+            if is_hard and settings.suppression_hard_bounce_action == 'ignore':
+                continue
+            if is_soft and settings.suppression_soft_bounce_action == 'ignore':
+                continue
+
+            # Only clean queue for hard bounces (permanent failures)
+            # Deferred/soft bounces are temporary - Postfix should keep retrying
+            if is_hard:
+                emails_for_queue_cleanup.append(recipient)
+
+            # Check if already exists (in the DB or pending in this run)
+            existing = db.query(SpamSuppression).filter(
+                SpamSuppression.email == recipient
+            ).first()
+            if existing is None:
+                existing = pending_entries.get(recipient)
+
+            if existing:
+                # Update bounce counts
+                existing.bounce_count = (existing.bounce_count or 0) + 1
+                if is_hard:
+                    existing.hard_bounce_count = (existing.hard_bounce_count or 0) + 1
+                    existing.reason = 'hard_bounce'
+                elif is_soft:
+                    existing.soft_bounce_count = (existing.soft_bounce_count or 0) + 1
+
+                existing.last_bounce_dsn = dsn
+                existing.last_bounce_message = log.message[:500] if log.message else None
+                existing.updated_at = datetime.utcnow()
+
+                # Re-activate if expired
+                if not existing.active or (existing.expires_at and existing.expires_at < datetime.utcnow()):
+                    existing.active = True
+                    existing.synced_to_rspamd = False
+
+                # Progressive expiry: base_days × bounce_count, capped at max_days
+                expiry_days = min(
+                    settings.suppression_base_expiry_days * existing.bounce_count,
+                    settings.suppression_max_expiry_days
+                )
+                existing.expires_at = datetime.utcnow() + timedelta(days=expiry_days)
+
+                updated_count += 1
+            else:
+                # Determine if we should suppress
+                if is_soft and settings.suppression_soft_bounce_action == 'count':
+                    # For soft bounces with count action, we still create the entry
+                    # but only activate it when threshold is reached
+                    pass
+
+                reason = 'hard_bounce' if is_hard else ('soft_bounce' if is_soft else 'rejected')
+
+                is_active = True
+                # For soft bounces with count action, only activate if threshold reached
+                if is_soft and settings.suppression_soft_bounce_action == 'count':
+                    is_active = False
+
+                new_entry = SpamSuppression(
+                    email=recipient,
+                    type='email',
+                    reason=reason,
+                    source='auto',
+                    bounce_count=1,
+                    hard_bounce_count=1 if is_hard else 0,
+                    soft_bounce_count=1 if is_soft else 0,
+                    last_bounce_dsn=dsn,
+                    last_bounce_message=log.message[:500] if log.message else None,
+                    active=is_active,
+                    synced_to_rspamd=False,
+                    expires_at=datetime.utcnow() + timedelta(days=settings.suppression_base_expiry_days),
+                    correlation_key=None
+                )
+
+                db.add(new_entry)
+                pending_entries[recipient] = new_entry
+                new_count += 1
+
+        db.commit()
+
+    return new_count, updated_count, emails_for_queue_cleanup
+
+
 async def detect_suppressions_job():
     """
     Scan recent postfix logs for bounced/rejected outbound emails
@@ -4083,184 +4220,55 @@ async def detect_suppressions_job():
         return
     if not settings.suppression_enabled or not settings.suppression_auto_detect:
         return
-    
+
     update_job_status('detect_suppressions', 'running')
-    
+
     try:
-        with get_db_context() as db:
-            # Look for recently imported bounced emails (last 10 minutes by import time)
-            # Uses created_at (DB insert time) instead of time (original mailcow timestamp)
-            # so that historical bounces imported via paginated fetch are still detected
-            cutoff = datetime.utcnow() - timedelta(minutes=10)
-            
-            # When queue_cleanup_enabled, soft bounces are handled by
-            # cleanup_deferred_queue_job (checks the live queue directly).
-            # Only scan logs for hard bounces in that case.
-            statuses_to_check = ['bounced']
-            if not settings.queue_cleanup_enabled:
-                statuses_to_check.append('deferred')
-            
-            bounce_logs = db.query(PostfixLog).filter(
-                PostfixLog.created_at >= cutoff,
-                PostfixLog.status.in_(statuses_to_check),
-                PostfixLog.recipient.isnot(None),
-                PostfixLog.dsn.isnot(None),
-            ).all()
-            
-            if not bounce_logs:
-                update_job_status('detect_suppressions', 'success')
-                return
-            
-            whitelist = settings.suppression_whitelist_domains_list
-            new_count = 0
-            updated_count = 0
-            emails_for_queue_cleanup = []  # Only hard bounces - deferred/soft should be retried by Postfix
-            # Entries created in THIS run, by email: the session has
-            # autoflush=False, so a DB query cannot see them - a recipient
-            # bouncing several times in one batch must update the pending
-            # entry, not insert a duplicate (unique index on email)
-            pending_entries = {}
-            
-            for log in bounce_logs:
-                # Skip DSN bounce notifications:
-                # - Regular bounce lines have NO from= field → sender is None → process normally
-                # - DSN messages have from=<> (empty) or from=<MAILER-DAEMON> → skip
-                if log.sender is not None:
-                    sender_val = log.sender.lower().strip()
-                    if not sender_val or sender_val.startswith('mailer-daemon'):
-                        continue
-                
-                recipient = log.recipient.lower().strip()
-                
-                # Skip whitelisted domains
-                domain = recipient.split('@')[-1] if '@' in recipient else ''
-                if domain in whitelist:
-                    continue
-                
-                dsn = log.dsn or ''
-                is_hard = dsn.startswith('5.')
-                is_soft = dsn.startswith('4.')
-                
-                if is_hard and settings.suppression_hard_bounce_action == 'ignore':
-                    continue
-                if is_soft and settings.suppression_soft_bounce_action == 'ignore':
-                    continue
-                
-                # Only clean queue for hard bounces (permanent failures)
-                # Deferred/soft bounces are temporary - Postfix should keep retrying
-                if is_hard:
-                    emails_for_queue_cleanup.append(recipient)
-                
-                # Check if already exists (in the DB or pending in this run)
-                existing = db.query(SpamSuppression).filter(
-                    SpamSuppression.email == recipient
-                ).first()
-                if existing is None:
-                    existing = pending_entries.get(recipient)
+        new_count, updated_count, emails_for_queue_cleanup = await asyncio.get_running_loop().run_in_executor(
+            get_thread_pool_executor(), _detect_suppressions_worker
+        )
 
-                if existing:
-                    # Update bounce counts
-                    existing.bounce_count = (existing.bounce_count or 0) + 1
-                    if is_hard:
-                        existing.hard_bounce_count = (existing.hard_bounce_count or 0) + 1
-                        existing.reason = 'hard_bounce'
-                    elif is_soft:
-                        existing.soft_bounce_count = (existing.soft_bounce_count or 0) + 1
-                    
-                    existing.last_bounce_dsn = dsn
-                    existing.last_bounce_message = log.message[:500] if log.message else None
-                    existing.updated_at = datetime.utcnow()
-                    
-                    # Re-activate if expired
-                    if not existing.active or (existing.expires_at and existing.expires_at < datetime.utcnow()):
-                        existing.active = True
-                        existing.synced_to_rspamd = False
-                    
-                    # Progressive expiry: base_days × bounce_count, capped at max_days
-                    expiry_days = min(
-                        settings.suppression_base_expiry_days * existing.bounce_count,
-                        settings.suppression_max_expiry_days
-                    )
-                    existing.expires_at = datetime.utcnow() + timedelta(days=expiry_days)
-                    
-                    updated_count += 1
-                else:
-                    # Determine if we should suppress
-                    if is_soft and settings.suppression_soft_bounce_action == 'count':
-                        # For soft bounces with count action, we still create the entry
-                        # but only activate it when threshold is reached
-                        pass
-                    
-                    reason = 'hard_bounce' if is_hard else ('soft_bounce' if is_soft else 'rejected')
-                    
-                    is_active = True
-                    # For soft bounces with count action, only activate if threshold reached
-                    if is_soft and settings.suppression_soft_bounce_action == 'count':
-                        is_active = False
-                    
-                    new_entry = SpamSuppression(
-                        email=recipient,
-                        type='email',
-                        reason=reason,
-                        source='auto',
-                        bounce_count=1,
-                        hard_bounce_count=1 if is_hard else 0,
-                        soft_bounce_count=1 if is_soft else 0,
-                        last_bounce_dsn=dsn,
-                        last_bounce_message=log.message[:500] if log.message else None,
-                        active=is_active,
-                        synced_to_rspamd=False,
-                        expires_at=datetime.utcnow() + timedelta(days=settings.suppression_base_expiry_days),
-                        correlation_key=None
-                    )
-                    
-                    db.add(new_entry)
-                    pending_entries[recipient] = new_entry
-                    new_count += 1
+        if new_count > 0 or updated_count > 0:
+            logger.info(f"[SUPPRESSION] Detected {new_count} new, {updated_count} updated suppressions")
 
-            db.commit()
-            
-            if new_count > 0 or updated_count > 0:
-                logger.info(f"[SUPPRESSION] Detected {new_count} new, {updated_count} updated suppressions")
-                
-                # Trigger immediate Rspamd sync so the block takes effect now
-                if settings.suppression_rspamd_sync and settings.is_rspamd_configured:
-                    try:
-                        await sync_suppressions_to_rspamd_job()
-                        logger.info("[SUPPRESSION] Triggered immediate Rspamd sync")
-                    except Exception as e:
-                        logger.warning(f"[SUPPRESSION] Rspamd sync failed (will retry on schedule): {e}")
-            
-            # Clean up queue items for ALL detected bounce recipients
-            # If a message is bouncing/deferred, there's no point keeping it stuck in the queue
-            if emails_for_queue_cleanup and mailcow_api.has_rw_key:
+            # Trigger immediate Rspamd sync so the block takes effect now
+            if settings.suppression_rspamd_sync and settings.is_rspamd_configured:
                 try:
-                    queue = await mailcow_api.get_queue()
-                    if queue:
-                        cleanup_set = set(emails_for_queue_cleanup)
-                        items_to_delete = []
-                        for item in queue:
-                            recipients = item.get('recipients', [])
-                            queue_id = item.get('queue_id')
-                            if not queue_id or not recipients:
-                                continue
-                            for rcpt in recipients:
-                                rcpt_email = rcpt.split(' ')[0].strip('<>').lower()
-                                if rcpt_email in cleanup_set:
-                                    items_to_delete.append(queue_id)
-                                    break
-                        
-                        if items_to_delete:
-                            await mailcow_api.delete_queue(items_to_delete)
-                            logger.info(
-                                f"[SUPPRESSION] Cleaned up {len(items_to_delete)} queue item(s) "
-                                f"for {len(cleanup_set)} bounced address(es)"
-                            )
+                    await sync_suppressions_to_rspamd_job()
+                    logger.info("[SUPPRESSION] Triggered immediate Rspamd sync")
                 except Exception as e:
-                    logger.warning(f"[SUPPRESSION] Queue cleanup failed: {e}")
-            
-            update_job_status('detect_suppressions', 'success')
-            
+                    logger.warning(f"[SUPPRESSION] Rspamd sync failed (will retry on schedule): {e}")
+
+        # Clean up queue items for ALL detected bounce recipients
+        # If a message is bouncing/deferred, there's no point keeping it stuck in the queue
+        if emails_for_queue_cleanup and mailcow_api.has_rw_key:
+            try:
+                queue = await mailcow_api.get_queue()
+                if queue:
+                    cleanup_set = set(emails_for_queue_cleanup)
+                    items_to_delete = []
+                    for item in queue:
+                        recipients = item.get('recipients', [])
+                        queue_id = item.get('queue_id')
+                        if not queue_id or not recipients:
+                            continue
+                        for rcpt in recipients:
+                            rcpt_email = rcpt.split(' ')[0].strip('<>').lower()
+                            if rcpt_email in cleanup_set:
+                                items_to_delete.append(queue_id)
+                                break
+
+                    if items_to_delete:
+                        await mailcow_api.delete_queue(items_to_delete)
+                        logger.info(
+                            f"[SUPPRESSION] Cleaned up {len(items_to_delete)} queue item(s) "
+                            f"for {len(cleanup_set)} bounced address(es)"
+                        )
+            except Exception as e:
+                logger.warning(f"[SUPPRESSION] Queue cleanup failed: {e}")
+
+        update_job_status('detect_suppressions', 'success')
+
     except Exception as e:
         logger.error(f"[SUPPRESSION] Detection error: {e}", exc_info=True)
         update_job_status('detect_suppressions', 'failed', str(e))
