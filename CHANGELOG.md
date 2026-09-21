@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **Responsive deferred queue cleanup** - Saving recipient suppressions no longer blocks other requests while deferred messages are cleaned up. [#199](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/199)
+
 - **Responsive bounce detection** - Scan and save automatically detected suppressions in a background worker. Database sessions now close before Rspamd synchronization and queue cleanup, while existing bounce rules are preserved. Issue: [#197](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/197).
 
 - **Responsive manual DNS checks** - Save results and load alias mappings outside the request event loop when checking one or all domains. Manual and background checks share the same worker-owned persistence, preserving responses and notification ordering. Issue: [#195](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/195).

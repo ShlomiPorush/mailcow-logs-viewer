@@ -3437,6 +3437,58 @@ async def send_weekly_summary_email_job():
         logger.error(f"Weekly summary job failed: {e}")
         update_job_status('send_weekly_summary', 'failed', str(e))
 
+def _store_deferred_suppressions_worker(recipients_to_suppress):
+    """Persist deferred recipients within a worker-owned database session."""
+    unique_recipients = set(recipients_to_suppress)
+    suppress_count = 0
+
+    with get_db_context() as db:
+        for email in unique_recipients:
+            existing = db.query(SpamSuppression).filter(
+                SpamSuppression.email == email
+            ).first()
+
+            if existing:
+                existing.bounce_count = (existing.bounce_count or 0) + 1
+                existing.soft_bounce_count = (existing.soft_bounce_count or 0) + 1
+                existing.reason = 'deferred_stuck'
+                existing.last_bounce_message = f'Deferred in queue > {settings.queue_cleanup_threshold_minutes}m - auto-cleaned'
+                existing.updated_at = datetime.utcnow()
+
+                if not existing.active or (existing.expires_at and existing.expires_at < datetime.utcnow()):
+                    existing.active = True
+                    existing.synced_to_rspamd = False
+
+                # Extend expiry
+                expiry_days = min(
+                    settings.suppression_base_expiry_days * existing.bounce_count,
+                    settings.suppression_max_expiry_days
+                )
+                existing.expires_at = datetime.utcnow() + timedelta(days=expiry_days)
+            else:
+                new_entry = SpamSuppression(
+                    email=email,
+                    type='email',
+                    reason='deferred_stuck',
+                    source='auto',
+                    bounce_count=1,
+                    hard_bounce_count=0,
+                    soft_bounce_count=1,
+                    last_bounce_dsn='4.x.x',
+                    last_bounce_message=f'Deferred in queue > {settings.queue_cleanup_threshold_minutes}m - auto-cleaned',
+                    active=True,
+                    synced_to_rspamd=False,
+                    expires_at=datetime.utcnow() + timedelta(days=settings.suppression_base_expiry_days),
+                    correlation_key=None
+                )
+                db.add(new_entry)
+            suppress_count += 1
+
+        db.commit()
+
+    return suppress_count
+
+
 async def cleanup_deferred_queue_job():
     """
     Periodically scan the mail queue for deferred items stuck longer than
@@ -3519,52 +3571,11 @@ async def cleanup_deferred_queue_job():
 
         # Suppress recipients
         if recipients_to_suppress:
-            unique_recipients = set(recipients_to_suppress)
-            suppress_count = 0
-
-            with get_db_context() as db:
-                for email in unique_recipients:
-                    existing = db.query(SpamSuppression).filter(
-                        SpamSuppression.email == email
-                    ).first()
-
-                    if existing:
-                        existing.bounce_count = (existing.bounce_count or 0) + 1
-                        existing.soft_bounce_count = (existing.soft_bounce_count or 0) + 1
-                        existing.reason = 'deferred_stuck'
-                        existing.last_bounce_message = f'Deferred in queue > {settings.queue_cleanup_threshold_minutes}m - auto-cleaned'
-                        existing.updated_at = datetime.utcnow()
-
-                        if not existing.active or (existing.expires_at and existing.expires_at < datetime.utcnow()):
-                            existing.active = True
-                            existing.synced_to_rspamd = False
-
-                        # Extend expiry
-                        expiry_days = min(
-                            settings.suppression_base_expiry_days * existing.bounce_count,
-                            settings.suppression_max_expiry_days
-                        )
-                        existing.expires_at = datetime.utcnow() + timedelta(days=expiry_days)
-                    else:
-                        new_entry = SpamSuppression(
-                            email=email,
-                            type='email',
-                            reason='deferred_stuck',
-                            source='auto',
-                            bounce_count=1,
-                            hard_bounce_count=0,
-                            soft_bounce_count=1,
-                            last_bounce_dsn='4.x.x',
-                            last_bounce_message=f'Deferred in queue > {settings.queue_cleanup_threshold_minutes}m - auto-cleaned',
-                            active=True,
-                            synced_to_rspamd=False,
-                            expires_at=datetime.utcnow() + timedelta(days=settings.suppression_base_expiry_days),
-                            correlation_key=None
-                        )
-                        db.add(new_entry)
-                    suppress_count += 1
-
-                db.commit()
+            suppress_count = await asyncio.get_running_loop().run_in_executor(
+                get_thread_pool_executor(),
+                _store_deferred_suppressions_worker,
+                recipients_to_suppress,
+            )
 
             logger.info(
                 f"[QUEUE CLEANUP] Suppressed {suppress_count} recipient(s) for "
