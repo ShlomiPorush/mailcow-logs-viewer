@@ -2178,6 +2178,16 @@ async def check_monitored_hosts_job(force: bool = False, send_notification: bool
         await _run_check_monitored_hosts(force, send_notification)
 
 
+def _load_blacklist_hosts_worker():
+    """Reconcile monitored hosts and return detached fields from one session."""
+    from .services.blacklist_service import reconcile_monitored_hosts
+
+    with get_db_context() as db:
+        reconcile_monitored_hosts(db)
+        db_hosts = db.query(MonitoredHost).filter(MonitoredHost.active == True).all()
+        return [{'hostname': h.hostname, 'source': h.source} for h in db_hosts]
+
+
 async def _run_check_monitored_hosts(force: bool, send_notification: bool):
     global _blacklist_last_listed_actionable_count
     update_job_status('blacklist_check', 'running')
@@ -2191,20 +2201,15 @@ async def _run_check_monitored_hosts(force: bool, send_notification: bool):
             end_batch_scan,
             update_batch_status,
             mark_host_as_processed_batch,
-            reconcile_monitored_hosts,
             IGNORED_NOTIFICATION_BLACKLISTS
         )
         from .services.smtp_service import send_notification_email, get_notification_email
 
         logger.info(f"Starting blacklist check job (send_notification={send_notification})...")
 
-        # Align rows with the current source settings, then detach fields to
-        # avoid DetachedInstanceError in the async loop
-        monitored_hosts = []
-        with get_db_context() as db:
-            reconcile_monitored_hosts(db)
-            db_hosts = db.query(MonitoredHost).filter(MonitoredHost.active == True).all()
-            monitored_hosts = [{'hostname': h.hostname, 'source': h.source} for h in db_hosts]
+        monitored_hosts = await asyncio.get_running_loop().run_in_executor(
+            get_thread_pool_executor(), _load_blacklist_hosts_worker
+        )
 
         if not monitored_hosts:
             logger.warning("Cannot check blacklists: No monitored hosts available")
@@ -2240,7 +2245,9 @@ async def _run_check_monitored_hosts(force: bool, send_notification: bool):
                         continue
 
                 # Check if we have valid cached data (within 24h)
-                cached = get_cached_blacklist_check(target_ip)
+                cached = await asyncio.get_running_loop().run_in_executor(
+                    get_thread_pool_executor(), get_cached_blacklist_check, target_ip
+                )
                 if cached and not force:
                     logger.info(f"Blacklist check for {hostname}: Using cached data")
                     if cached.get('listed_count', 0) > 0:

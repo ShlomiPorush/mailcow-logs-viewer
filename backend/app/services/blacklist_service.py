@@ -729,7 +729,7 @@ async def check_all_blacklists(ip: str) -> Dict[str, Any]:
         }
         
         # Save to database
-        save_blacklist_check(data)
+        await asyncio.to_thread(save_blacklist_check, data)
         
         logger.info(f"Blacklist check complete: {listed_count} listed, {clean_count} clean, {error_count} errors")
         
@@ -786,7 +786,7 @@ async def get_blacklist_check_results(force: bool = False, ip: Optional[str] = N
     
     # Check DB cache first (unless force)
     if not force:
-        cached = get_cached_blacklist_check(ip)
+        cached = await asyncio.to_thread(get_cached_blacklist_check, ip)
         if cached:
             logger.debug("Returning cached blacklist results from DB")
             return cached
