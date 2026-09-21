@@ -4300,12 +4300,13 @@ async def sync_suppressions_to_rspamd_job():
     update_job_status('sync_suppressions', 'running')
     
     try:
-        with get_db_context() as db:
-            from app.routers.suppressions import sync_suppressions_to_rspamd
-            result = await sync_suppressions_to_rspamd(db)
-            
-            logger.info(f"[SUPPRESSION] Rspamd sync complete: {result.get('synced', 0)} active entries")
-            update_job_status('sync_suppressions', 'success')
+        from app.routers.suppressions import sync_suppressions_worker
+        result = await asyncio.get_running_loop().run_in_executor(
+            get_thread_pool_executor(), sync_suppressions_worker
+        )
+
+        logger.info(f"[SUPPRESSION] Rspamd sync complete: {result.get('synced', 0)} active entries")
+        update_job_status('sync_suppressions', 'success')
     except Exception as e:
         logger.error(f"[SUPPRESSION] Sync error: {e}", exc_info=True)
         update_job_status('sync_suppressions', 'failed', str(e))
