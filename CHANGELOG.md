@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **Responsive quarantine rule testing** - Loading rules for a dry run no longer blocks other requests. Disabled-rule visibility and matching priority are preserved. [#207](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/207)
+
 - **Responsive quarantine rules** - Automatic quarantine rule matching and action-log storage now run outside the request loop, preserving action priority, limits and retention. [#205](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/205)
 
 - **Responsive blacklist scans** - Loading monitored hosts, reading cached checks and saving scan results now run outside the request loop, keeping other requests responsive during database work. [#203](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/203)
