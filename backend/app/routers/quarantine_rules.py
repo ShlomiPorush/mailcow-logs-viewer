@@ -3,6 +3,7 @@ Quarantine Auto-Rules API
 CRUD endpoints for quarantine rules and action history.
 Requires Read-Write API key (MAILCOW_API_KEY_RW) for all operations.
 """
+import asyncio
 import re
 import logging
 from datetime import datetime, timedelta
@@ -204,15 +205,8 @@ def get_rule_logs(
 
 # ---- Dry-Run Test (must be before /{rule_id}) ----
 
-@router.post("/test")
-async def test_rules():
-    """
-    Test all rules against current quarantine items (dry-run).
-    No actions are taken - just returns what would match.
-    Includes disabled rules in results, marked as rule_enabled=false.
-    """
-    _require_rw_key()
-    
+def _load_preview_rules_worker():
+    """Load detached rule fields with a worker-owned database session."""
     # Load ALL rules (enabled + disabled) and convert to plain objects
     with get_db_context() as db:
         db_rules = db.query(QuarantineRule).all()
@@ -224,6 +218,20 @@ async def test_rules():
                 'action': r.action, 'enabled': r.enabled
             })())
     
+    return rules
+
+
+@router.post("/test")
+async def test_rules():
+    """
+    Test all rules against current quarantine items (dry-run).
+    No actions are taken - just returns what would match.
+    Includes disabled rules in results, marked as rule_enabled=false.
+    """
+    _require_rw_key()
+
+    rules = await asyncio.to_thread(_load_preview_rules_worker)
+
     if not rules:
         return {"matches": [], "total_matches": 0, "total_quarantine": 0, "message": "No rules to test"}
     
