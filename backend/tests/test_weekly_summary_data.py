@@ -46,7 +46,7 @@ def test_every_awaited_helper_in_reporting_is_a_coroutine_function():
 def test_system_summary_data_builds_with_sync_blacklist_helper(monkeypatch):
     """Behavioural guard: the summary aggregates the blacklist section from
     the sync get_monitored_hosts() result instead of crashing."""
-    async def fake_mailbox_summary(date_range, db):
+    def fake_mailbox_summary(date_range, db):
         return {"total_messages": 1}
 
     async def fake_mailcow_info():
@@ -61,7 +61,7 @@ def test_system_summary_data_builds_with_sync_blacklist_helper(monkeypatch):
             {"host": "relay.example.com", "status": "clean"},
         ]}
 
-    async def fake_all_mailbox_stats(**kwargs):
+    def fake_all_mailbox_stats(**kwargs):
         return {"mailboxes": [{"username": "a@example.com", "combined_failed": 3}]}
 
     async def fake_domains(db):

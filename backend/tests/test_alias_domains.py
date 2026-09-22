@@ -121,10 +121,10 @@ def _get_all(domain=None):
     from app.database import get_db_context
     from app.routers.mailbox_stats import get_all_mailbox_stats
     with get_db_context() as db:
-        return asyncio.run(get_all_mailbox_stats(
+        return get_all_mailbox_stats(
             domain=domain, active_only=False, hide_zero=False, search=None,
             date_range='7days', start_date=None, end_date=None,
-            sort_by='sent_total', sort_order='desc', page=1, page_size=100, db=db))
+            sort_by='sent_total', sort_order='desc', page=1, page_size=100, db=db)
 
 
 def test_alias_domain_traffic_is_attributed_to_the_mailbox(env):
@@ -147,8 +147,8 @@ def test_summary_counts_alias_domain_traffic(env):
     from app.database import get_db_context
     from app.routers.mailbox_stats import get_mailbox_stats_summary
     with get_db_context() as db:
-        summary = asyncio.run(get_mailbox_stats_summary(
-            date_range='7days', start_date=None, end_date=None, db=db))
+        summary = get_mailbox_stats_summary(
+            date_range='7days', start_date=None, end_date=None, db=db)
     assert summary['total_sent'] >= 5
     assert summary['total_received'] >= 1
 

@@ -106,10 +106,10 @@ def _mailboxes():
     from app.routers.mailbox_stats import clear_stats_cache, get_all_mailbox_stats
     clear_stats_cache()
     with get_db_context() as db:
-        payload = asyncio.run(get_all_mailbox_stats(
+        payload = get_all_mailbox_stats(
             domain=DOMAIN, active_only=False, hide_zero=False, search=None,
             date_range='7days', start_date=None, end_date=None,
-            sort_by='sent_total', sort_order='desc', page=1, page_size=100, db=db))
+            sort_by='sent_total', sort_order='desc', page=1, page_size=100, db=db)
     assert 'error' not in payload, payload.get('error')
     return {mb['username']: mb for mb in payload['mailboxes']}
 
@@ -118,8 +118,8 @@ def _summary():
     from app.database import get_db_context
     from app.routers.mailbox_stats import get_mailbox_stats_summary
     with get_db_context() as db:
-        payload = asyncio.run(get_mailbox_stats_summary(
-            date_range='7days', start_date=None, end_date=None, db=db))
+        payload = get_mailbox_stats_summary(
+            date_range='7days', start_date=None, end_date=None, db=db)
     assert 'error' not in payload, payload.get('error')
     return payload
 

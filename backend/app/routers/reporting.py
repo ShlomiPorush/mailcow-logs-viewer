@@ -27,7 +27,7 @@ async def get_system_summary_data(db: Session) -> Dict[str, Any]:
     Aggregate system summary data using existing API endpoints logic
     """
     # 1. Traffic Stats (7 Days)
-    traffic_data = await get_mailbox_stats_summary(date_range="7days", db=db)
+    traffic_data = await asyncio.to_thread(get_mailbox_stats_summary, date_range="7days", db=db)
     
     # 2. System Status (Domains, Mailboxes, Aliases)
     # Using get_mailcow_info to get Active/Total counts
@@ -54,7 +54,8 @@ async def get_system_summary_data(db: Session) -> Dict[str, Any]:
 
     # 5. Top 5 Mailboxes with Failures
     # /api/mailbox-stats/all?date_range=7days&sort_by=failure_rate&sort_order=desc&page=1&page_size=5&active_only=true&hide_zero=true
-    top_failures_response = await get_all_mailbox_stats(
+    top_failures_response = await asyncio.to_thread(
+        get_all_mailbox_stats,
         date_range="7days",
         sort_by="failure_rate",
         sort_order="desc",

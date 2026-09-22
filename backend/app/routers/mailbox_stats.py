@@ -5,6 +5,7 @@ Shows per-mailbox/per-alias message statistics from MessageCorrelation table
 import logging
 import hashlib
 import json
+from threading import Lock
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import func, case, and_, or_
@@ -28,6 +29,7 @@ router = APIRouter()
 
 # In-memory cache for mailbox stats
 _stats_cache = {}
+_stats_cache_lock = Lock()
 _cache_ttl_seconds = 300  # 5 minutes cache TTL
 
 
@@ -40,27 +42,29 @@ def _get_cache_key(prefix: str, **params) -> str:
 
 def _get_cached(key: str):
     """Get cached value if not expired"""
-    if key in _stats_cache:
-        cached_data, cached_time = _stats_cache[key]
-        if datetime.now(timezone.utc) - cached_time < timedelta(seconds=_cache_ttl_seconds):
-            logger.debug(f"Cache hit for key: {key}")
-            return cached_data
-        else:
-            # Cache expired, remove it
-            del _stats_cache[key]
+    with _stats_cache_lock:
+        if key in _stats_cache:
+            cached_data, cached_time = _stats_cache[key]
+            if datetime.now(timezone.utc) - cached_time < timedelta(seconds=_cache_ttl_seconds):
+                logger.debug(f"Cache hit for key: {key}")
+                return cached_data
+            else:
+                # Cache expired, remove it
+                del _stats_cache[key]
     return None
 
 
 def _set_cache(key: str, data):
     """Set cached value with current timestamp"""
-    _stats_cache[key] = (data, datetime.now(timezone.utc))
+    with _stats_cache_lock:
+        _stats_cache[key] = (data, datetime.now(timezone.utc))
     logger.debug(f"Cache set for key: {key}")
 
 
 def clear_stats_cache():
     """Clear all stats cache - call after data changes"""
-    global _stats_cache
-    _stats_cache = {}
+    with _stats_cache_lock:
+        _stats_cache.clear()
     logger.info("Stats cache cleared")
 
 
@@ -304,7 +308,7 @@ def get_message_counts_for_email(db: Session, email: str, start_date: datetime, 
 
 
 @router.get("/mailbox-stats/summary")
-async def get_mailbox_stats_summary(
+def get_mailbox_stats_summary(
     date_range: str = Query("30days", description="Date range: today, 7days, 30days, 90days, custom"),
     start_date: Optional[str] = Query(None, description="Custom start date (YYYY-MM-DD) - required when date_range is 'custom'"),
     end_date: Optional[str] = Query(None, description="Custom end date (YYYY-MM-DD) - required when date_range is 'custom'"),
@@ -386,7 +390,7 @@ async def get_mailbox_stats_summary(
 
 
 @router.get("/mailbox-stats/all")
-async def get_all_mailbox_stats(
+def get_all_mailbox_stats(
     domain: Optional[str] = None,
     active_only: bool = True,  # Changed default to True
     hide_zero: bool = False,  # Filter out mailboxes with zero activity
