@@ -5,7 +5,7 @@ import os
 import re
 import ipaddress
 from pydantic_settings import BaseSettings
-from pydantic import Field, validator, field_validator, model_validator
+from pydantic import TypeAdapter, Field, validator, field_validator, model_validator
 from typing import List, Optional, Any, Dict
 import logging
 
@@ -206,6 +206,11 @@ class Settings(BaseSettings):
         description="Basic auth password (required if basic_auth_enabled=True)"
     )
     
+    auth_max_failure_clients: int = Field(
+        default=10000, ge=1,
+        description="Maximum tracked Basic Auth failure clients per process"
+    )
+
     # OAuth2/OIDC Authentication Configuration
     oauth2_enabled: bool = Field(
         default=False,
@@ -258,6 +263,11 @@ class Settings(BaseSettings):
     session_expiry_hours: int = Field(
         default=24,
         description="Session expiration time in hours"
+    )
+
+    session_max_entries: int = Field(
+        default=10000, ge=1,
+        description="Maximum live authentication sessions per process"
     )
 
     # DMARC configuration
@@ -976,6 +986,17 @@ def build_settings(db: Optional[Any] = None) -> Settings:
                    if k in EDITABLE_SETTING_KEYS and k not in env_locked}
         if not allowed:
             return base
+        # model_copy bypasses validators: validate security capacity bounds first.
+        for key in ("session_max_entries", "auth_max_failure_clients"):
+            if key in allowed:
+                try:
+                    value = TypeAdapter(int).validate_python(allowed[key])
+                    if value < 1:
+                        raise ValueError("Capacity must be positive")
+                    allowed[key] = value
+                except (ValueError, TypeError):
+                    logger.warning("Ignoring invalid authentication capacity override for %s", key)
+                    allowed.pop(key)
         merged = base.model_copy(update=allowed)
         # model_copy skips validators. Apply them manually on affected fields.
         # (We can't use Settings.model_validate() because BaseSettings re-reads ENV on init)

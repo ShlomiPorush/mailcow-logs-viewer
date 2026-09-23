@@ -338,6 +338,8 @@ Settings for the automatic quarantine rule processing feature. When rules are de
 
 | Variable | Type | Default | Description |
 |----------|------|---------|-------------|
+| `AUTH_MAX_FAILURE_CLIENTS` | integer | `10000` | Maximum client addresses tracked for failed Basic Auth attempts per process. Must be positive. At capacity, Basic Auth from untracked addresses receives 429 before credential verification; existing sessions remain usable. Expired counters are reclaimed automatically. |
+| `SESSION_MAX_ENTRIES` | integer | `10000` | Maximum live Basic Auth and OAuth2 sessions per process. Must be positive. New sessions are refused at capacity until a session expires or is logged out. Existing sessions are never evicted. |
 | `BASIC_AUTH_ENABLED` | boolean | `false` | Enable Basic HTTP authentication. When enabled, ALL pages and API endpoints require Basic Auth. If both `BASIC_AUTH_ENABLED` and `OAUTH2_ENABLED` are true, both methods are available |
 | `AUTH_USERNAME` | string | `admin` | Basic auth username |
 | `AUTH_PASSWORD` | string | (empty) | Basic auth password (required if `BASIC_AUTH_ENABLED=true` or `AUTH_ENABLED=true`). ⚠️ **WARNING: Use a strong password in production!** |
