@@ -474,22 +474,56 @@ async def get_configured_limits():
     }
 
 
+def _load_mailbox_name_worker(mailbox: str) -> Optional[str]:
+    with SessionLocal() as db:
+        row = db.query(MailboxStatistics).filter(
+            func.lower(MailboxStatistics.username) == mailbox
+        ).first()
+        return row.username if row is not None else None
+
+
+def _load_bulk_mailboxes_worker(wanted: List[str]) -> Dict[str, str]:
+    with SessionLocal() as db:
+        rows = db.query(MailboxStatistics).filter(
+            func.lower(MailboxStatistics.username).in_(wanted)
+        ).all()
+        return {(row.username or '').strip().lower(): row.username for row in rows}
+
+
+def _store_mailbox_limits_worker(usernames: List[str], value: Optional[int], frame: Optional[str]) -> None:
+    with SessionLocal() as db:
+        try:
+            rows = db.query(MailboxStatistics).filter(
+                MailboxStatistics.username.in_(usernames)
+            ).all()
+            for row in rows:
+                row.rl_value = value
+                row.rl_frame = frame
+            db.commit()
+        except Exception:
+            db.rollback()
+            raise
+
+
+def _record_reset_worker(user: str, rl_hash: str) -> None:
+    with SessionLocal() as db:
+        _record_reset(db, user, rl_hash)
+
+
 @router.post("/mailbox")
-async def set_mailbox_limit(request: MailboxLimitRequest, db: Session = Depends(get_db)):
+async def set_mailbox_limit(request: MailboxLimitRequest):
     """Set the rate limit of one mailbox. A value of 0 removes the limit."""
     _require_rw_key()
     mailbox = (request.mailbox or '').strip().lower()
     value = _validate_value(request.value)
     frame = _validate_frame(request.frame)
 
-    row = db.query(MailboxStatistics).filter(
-        func.lower(MailboxStatistics.username) == mailbox
-    ).first()
-    if row is None:
+    username = await asyncio.to_thread(_load_mailbox_name_worker, mailbox)
+    if username is None:
         raise HTTPException(status_code=400, detail=f"Unknown mailbox: {request.mailbox}")
 
     try:
-        response = await mailcow_api.edit_rl_mbox(row.username, value, frame)
+        response = await mailcow_api.edit_rl_mbox(username, value, frame)
     except MailcowAPIError as e:
         logger.error(f"Failed to set the rate limit of {mailbox}: {e}")
         raise HTTPException(status_code=502, detail=f"mailcow did not apply the change: {e}")
@@ -498,15 +532,14 @@ async def set_mailbox_limit(request: MailboxLimitRequest, db: Session = Depends(
     # next mailbox sync. A failure here is cosmetic, not a failed write.
     new_value = value or None
     try:
-        row.rl_value = new_value
-        row.rl_frame = frame if new_value else None
-        db.commit()
+        await asyncio.to_thread(
+            _store_mailbox_limits_worker, [username], new_value, frame if new_value else None
+        )
     except Exception as e:
-        db.rollback()
         logger.warning(f"Rate limit applied in mailcow but not stored locally for {mailbox}: {e}")
 
     return {
-        'mailbox': row.username,
+        'mailbox': username,
         'rl_value': new_value,
         'rl_frame': frame if new_value else None,
         'mailcow_response': response,
@@ -514,14 +547,14 @@ async def set_mailbox_limit(request: MailboxLimitRequest, db: Session = Depends(
 
 
 @router.post("/domain")
-async def set_domain_limit(request: DomainLimitRequest, db: Session = Depends(get_db)):
+async def set_domain_limit(request: DomainLimitRequest):
     """Set the rate limit of one domain. A value of 0 removes the limit."""
     _require_rw_key()
     domain = (request.domain or '').strip().lower()
     value = _validate_value(request.value)
     frame = _validate_frame(request.frame)
 
-    if domain not in _known_domains(db):
+    if domain not in await asyncio.to_thread(_load_known_domains_worker):
         raise HTTPException(status_code=400, detail=f"Unknown domain: {request.domain}")
 
     try:
@@ -540,7 +573,7 @@ async def set_domain_limit(request: DomainLimitRequest, db: Session = Depends(ge
 
 
 @router.post("/bulk")
-async def set_limits_in_bulk(request: BulkLimitRequest, db: Session = Depends(get_db)):
+async def set_limits_in_bulk(request: BulkLimitRequest):
     """Set one rate limit on many mailboxes and domains at once. A value of 0
     removes the limit from all of them.
 
@@ -570,21 +603,18 @@ async def set_limits_in_bulk(request: BulkLimitRequest, db: Session = Depends(ge
 
     # Mailboxes are matched against the synced rows, exactly like the
     # single-mailbox endpoint, and written with their stored spelling
-    rows_by_name: Dict[str, Any] = {}
+    names_by_key: Dict[str, str] = {}
     if wanted_mailboxes:
         try:
-            rows = db.query(MailboxStatistics).filter(
-                func.lower(MailboxStatistics.username).in_(wanted_mailboxes)
-            ).all()
+            names_by_key = await asyncio.to_thread(_load_bulk_mailboxes_worker, wanted_mailboxes)
         except Exception as e:
             logger.error(f"Error reading mailboxes for a bulk rate limit change: {e}")
             raise internal_error(e)
-        rows_by_name = {(row.username or '').strip().lower(): row for row in rows}
 
-    targets = [rows_by_name[name] for name in wanted_mailboxes if name in rows_by_name]
-    skipped.extend(name for name in wanted_mailboxes if name not in rows_by_name)
+    targets = [names_by_key[name] for name in wanted_mailboxes if name in names_by_key]
+    skipped.extend(name for name in wanted_mailboxes if name not in names_by_key)
 
-    known = _known_domains(db) if wanted_domains else set()
+    known = await asyncio.to_thread(_load_known_domains_worker) if wanted_domains else set()
     domains = [name for name in wanted_domains if name in known]
     skipped.extend(name for name in wanted_domains if name not in known)
 
@@ -594,7 +624,7 @@ async def set_limits_in_bulk(request: BulkLimitRequest, db: Session = Depends(ge
     mailboxes_updated = 0
     if targets:
         try:
-            await mailcow_api.edit_rl_mboxes([row.username for row in targets], value, frame)
+            await mailcow_api.edit_rl_mboxes(targets, value, frame)
         except MailcowAPIError as e:
             logger.error(f"Failed to set the rate limit of {len(targets)} mailboxes: {e}")
             raise HTTPException(status_code=502, detail=f"mailcow did not apply the change: {e}")
@@ -603,12 +633,8 @@ async def set_limits_in_bulk(request: BulkLimitRequest, db: Session = Depends(ge
         # Mirror the change locally so the page shows it without waiting for
         # the next mailbox sync. A failure here is cosmetic, not a failed write.
         try:
-            for row in targets:
-                row.rl_value = new_value
-                row.rl_frame = new_frame
-            db.commit()
+            await asyncio.to_thread(_store_mailbox_limits_worker, targets, new_value, new_frame)
         except Exception as e:
-            db.rollback()
             logger.warning(f"Bulk rate limit applied in mailcow but not stored locally: {e}")
 
     domains_updated = 0
@@ -631,7 +657,7 @@ async def set_limits_in_bulk(request: BulkLimitRequest, db: Session = Depends(ge
 
 
 @router.post("/reset")
-async def reset_rate_limit_counter(request: ReleaseRequest, db: Session = Depends(get_db)):
+async def reset_rate_limit_counter(request: ReleaseRequest):
     """Reset an active counter so a blocked sender can send again now."""
     _require_rw_key()
     rl_hash = (request.rl_hash or '').strip()
@@ -651,7 +677,7 @@ async def reset_rate_limit_counter(request: ReleaseRequest, db: Session = Depend
     # accepted the request. Record who was reset for the row marker.
     if request.user:
         try:
-            _record_reset(db, request.user, rl_hash)
+            await asyncio.to_thread(_record_reset_worker, request.user, rl_hash)
         except Exception as e:
             logger.warning(f"Counter reset done but not recorded: {e}")
 
