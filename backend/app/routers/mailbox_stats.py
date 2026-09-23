@@ -386,7 +386,7 @@ def get_mailbox_stats_summary(
         }
     except Exception as e:
         logger.error(f"Error fetching mailbox stats summary: {e}")
-        return {"error": str(e), "total_mailboxes": 0}
+        return {"error": "Unable to load mailbox statistics. Check the application logs.", "total_mailboxes": 0}
 
 
 @router.get("/mailbox-stats/all")
@@ -633,7 +633,7 @@ def get_all_mailbox_stats(
         return response
     except Exception as e:
         logger.error(f"Error fetching all mailbox stats: {e}")
-        return {"error": str(e), "total": 0, "mailboxes": []}
+        return {"error": "Unable to load mailbox statistics. Check the application logs.", "total": 0, "mailboxes": []}
 
 
 @router.get("/mailbox-stats/domains")
@@ -668,7 +668,7 @@ def get_mailbox_domains(db: Session = Depends(get_db)):
         return {"domains": entries}
     except Exception as e:
         logger.error(f"Error fetching mailbox domains: {e}")
-        return {"error": str(e), "domains": []}
+        return {"error": "Unable to load mailbox statistics. Check the application logs.", "domains": []}
 
 
 @router.get("/mailbox-stats/refresh")
@@ -686,4 +686,4 @@ def refresh_mailbox_stats(db: Session = Depends(get_db)):
         }
     except Exception as e:
         logger.error(f"Error getting refresh info: {e}")
-        return {"error": str(e)}
+        return {"error": "Unable to load mailbox statistics. Check the application logs."}

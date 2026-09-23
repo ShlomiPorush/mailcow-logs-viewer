@@ -6,6 +6,7 @@ import asyncio
 import logging
 import os
 import httpx
+from pydantic import ValidationError
 from fastapi import APIRouter, Depends, BackgroundTasks, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import func, desc, text, or_
@@ -483,7 +484,7 @@ def get_settings_info(db: Session = Depends(get_db)):
     except Exception as e:
         logger.error(f"Error fetching settings info: {e}")
         return {
-            "error": str(e),
+            "error": "Unable to load settings status. Check the application logs.",
             "settings_edit_via_ui_enabled": getattr(settings, "edit_settings_via_ui_enabled", False),
             "configuration": {},
             "import_status": {},
@@ -614,8 +615,17 @@ def update_settings(body: Dict[str, Any], db: Session = Depends(get_db)):
             elif effective == bool or effective is bool:
                 current[k] = False
         Settings.model_validate(current)
+    except ValidationError as e:
+        fields = sorted({
+            str(error["loc"][0]) for error in e.errors(include_input=False, include_context=False)
+            if error["loc"] and error["loc"][0] in Settings.model_fields
+        })
+        detail = "Invalid settings. Check the submitted values."
+        if fields:
+            detail = "Invalid settings for: " + ", ".join(fields)
+        raise HTTPException(status_code=400, detail=detail) from e
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Validation error: {e}")
+        raise HTTPException(status_code=400, detail="Invalid settings. Check the submitted values.") from e
     prev_sync_sources = (settings.blacklist_source_transports, settings.blacklist_source_relayhosts)
     save_config_overrides_to_db(db, allowed)
     reload_settings(db)
@@ -705,7 +715,7 @@ def purge_feature_data(body: Dict[str, Any], db: Session = Depends(get_db)):
     except Exception as e:
         db.rollback()
         logger.error(f"Failed to purge data for feature '{feature}': {e}")
-        raise HTTPException(status_code=500, detail=f"Purge failed: {e}")
+        raise HTTPException(status_code=500, detail="Purge failed. Check the application logs.")
 
 
 @router.post("/settings/import-from-env")
@@ -801,7 +811,7 @@ def get_health_detailed(db: Session = Depends(get_db)):
         return {
             "status": "unhealthy",
             "timestamp": format_datetime_utc(datetime.now(timezone.utc)),
-            "error": str(e)
+            "error": "Unable to load settings status. Check the application logs."
         }
 
 async def validate_maxmind_license() -> Dict[str, Any]:

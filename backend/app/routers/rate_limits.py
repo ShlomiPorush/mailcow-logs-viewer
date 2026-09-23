@@ -197,7 +197,7 @@ async def _fetch_domain_limits() -> Tuple[List[Dict[str, Any]], Optional[str]]:
             data = await mailcow_api.get_rl_domain(domain)
         except MailcowAPIError as e:
             logger.warning(f"Could not read the rate limit of {domain}: {e}")
-            error = str(e)
+            error = "Could not read domain rate limits. Check the application logs."
             continue
         limits.append({
             'domain': domain,
@@ -526,7 +526,7 @@ async def set_mailbox_limit(request: MailboxLimitRequest):
         response = await mailcow_api.edit_rl_mbox(username, value, frame)
     except MailcowAPIError as e:
         logger.error(f"Failed to set the rate limit of {mailbox}: {e}")
-        raise HTTPException(status_code=502, detail=f"mailcow did not apply the change: {e}")
+        raise HTTPException(status_code=502, detail="mailcow did not apply the change. Check the application logs.")
 
     # Mirror the change locally so the page shows it without waiting for the
     # next mailbox sync. A failure here is cosmetic, not a failed write.
@@ -561,7 +561,7 @@ async def set_domain_limit(request: DomainLimitRequest):
         response = await mailcow_api.edit_rl_domain(domain, value, frame)
     except MailcowAPIError as e:
         logger.error(f"Failed to set the rate limit of {domain}: {e}")
-        raise HTTPException(status_code=502, detail=f"mailcow did not apply the change: {e}")
+        raise HTTPException(status_code=502, detail="mailcow did not apply the change. Check the application logs.")
 
     _bust_domain_limit_cache()
     return {
@@ -627,7 +627,7 @@ async def set_limits_in_bulk(request: BulkLimitRequest):
             await mailcow_api.edit_rl_mboxes(targets, value, frame)
         except MailcowAPIError as e:
             logger.error(f"Failed to set the rate limit of {len(targets)} mailboxes: {e}")
-            raise HTTPException(status_code=502, detail=f"mailcow did not apply the change: {e}")
+            raise HTTPException(status_code=502, detail="mailcow did not apply the change. Check the application logs.")
         mailboxes_updated = len(targets)
 
         # Mirror the change locally so the page shows it without waiting for
@@ -643,7 +643,7 @@ async def set_limits_in_bulk(request: BulkLimitRequest):
             await mailcow_api.edit_rl_domains(domains, value, frame)
         except MailcowAPIError as e:
             logger.error(f"Failed to set the rate limit of {len(domains)} domains: {e}")
-            raise HTTPException(status_code=502, detail=f"mailcow did not apply the change: {e}")
+            raise HTTPException(status_code=502, detail="mailcow did not apply the change. Check the application logs.")
         domains_updated = len(domains)
         _bust_domain_limit_cache()
 
@@ -671,7 +671,7 @@ async def reset_rate_limit_counter(request: ReleaseRequest):
         response = await mailcow_api.delete_rl_hash(rl_hash)
     except MailcowAPIError as e:
         logger.error(f"Failed to reset the rate limit counter {rl_hash}: {e}")
-        raise HTTPException(status_code=502, detail=f"mailcow did not reset the counter: {e}")
+        raise HTTPException(status_code=502, detail="mailcow did not reset the counter. Check the application logs.")
 
     # mailcow answers this delete with an empty 200 - reaching here means it
     # accepted the request. Record who was reset for the row marker.

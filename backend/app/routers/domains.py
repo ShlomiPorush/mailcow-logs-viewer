@@ -453,7 +453,7 @@ async def check_spf_record(domain: str, spf_source_ips: Optional[List[Dict[str, 
         logger.error(f"Error checking SPF for {domain}: {e}")
         return {
             'status': 'error',
-            'message': f'Failed to check SPF: {str(e)}',
+            'message': 'Failed to check SPF. Check the application logs.',
             'record': None,
             'has_strict_all': False,
             'includes_mx': False,
@@ -896,7 +896,7 @@ async def check_dkim_record(domain: str) -> Dict[str, Any]:
         logger.error(f"Unexpected error checking DKIM for {domain}: {type(e).__name__} - {str(e)}")
         return {
             'status': 'error',
-            'message': f'Failed to check DKIM: {type(e).__name__}',
+            'message': 'Failed to check DKIM. Check the application logs.',
             'selector': None,
             'expected_record': None,
             'actual_record': None,
@@ -1038,7 +1038,7 @@ async def check_dmarc_record(domain: str) -> Dict[str, Any]:
         logger.error(f"Error checking DMARC for {domain}: {e}")
         return {
             'status': 'error',
-            'message': f'Failed to check DMARC: {str(e)}',
+            'message': 'Failed to check DMARC. Check the application logs.',
             'record': None,
             'policy': None,
             'is_strong': False,
@@ -1158,7 +1158,7 @@ async def check_tlsa_record(domain: str) -> Dict[str, Any]:
         logger.error(f"Error checking TLSA for {domain}: {e}")
         return {
             'status': 'error',
-            'message': f'Failed to check TLSA: {str(e)}',
+            'message': 'Failed to check TLSA. Check the application logs.',
             'record': None,
             'records': [],
             'mx_hosts': [],
@@ -1245,9 +1245,10 @@ async def check_mta_sts_record(domain: str) -> Dict[str, Any]:
         except (dns.resolver.NXDOMAIN, dns.resolver.NoAnswer):
             pass
         except Exception as e:
+            logger.error("Could not check MTA-STS record for %s: %s", domain, e)
             return {
                 'status': 'unknown',
-                'message': f'Could not check MTA-STS record: {e}',
+                'message': 'Could not check MTA-STS record. Check the application logs.',
                 'record': None,
                 'warnings': [],
             }
@@ -1278,9 +1279,10 @@ async def check_mta_sts_record(domain: str) -> Dict[str, Any]:
         try:
             policy_text = await _fetch_mta_sts_policy(domain)
         except Exception as e:
+            logger.error("Could not fetch MTA-STS policy for %s: %s", domain, e)
             return {
                 'status': 'error',
-                'message': f'MTA-STS record exists but the policy file could not be fetched: {e}',
+                'message': 'MTA-STS record exists but the policy file could not be fetched.',
                 'record': record,
                 'warnings': ['Senders that support MTA-STS treat a published record '
                              'with an unreachable policy as a hard failure'],
@@ -1360,7 +1362,7 @@ async def check_mta_sts_record(domain: str) -> Dict[str, Any]:
         logger.error(f"Error checking MTA-STS for {domain}: {e}")
         return {
             'status': 'unknown',
-            'message': f'MTA-STS check failed: {str(e)}',
+            'message': 'MTA-STS check failed. Check the application logs.',
             'record': None,
             'warnings': [],
         }
@@ -1403,7 +1405,7 @@ async def check_domain_dns(domain: str, spf_source_ips: Optional[List[Dict[str, 
         logger.error(f"Error checking DNS for {domain}: {e}")
         return {
             'domain': domain,
-            'error': str(e),
+            'error': 'Unable to check DNS. Check the application logs.',
             'checked_at': format_datetime_for_api(datetime.now(timezone.utc))
         }
 
@@ -1657,6 +1659,25 @@ async def save_dns_check_to_db(db: Session, domain_name: str, dns_data: Dict[str
         raise
 
 
+def _public_cached_dns_result(result):
+    """Hide legacy exception suffixes without changing saved DNS diagnostics."""
+    if not isinstance(result, dict):
+        return result
+    message = result.get('message')
+    prefixes = (
+        'Failed to check SPF:', 'Failed to check DKIM:',
+        'Failed to check DMARC:', 'Failed to check TLSA:',
+        'Could not check MTA-STS record:',
+        'MTA-STS record exists but the policy file could not be fetched:',
+        'MTA-STS check failed:',
+    )
+    if isinstance(message, str):
+        for prefix in prefixes:
+            if message.startswith(prefix):
+                return {**result, 'message': prefix[:-1] + '. Check the application logs.'}
+    return result
+
+
 def get_cached_dns_check(db: Session, domain_name: str) -> Dict[str, Any]:
     """Get cached DNS check from database"""
     try:
@@ -1666,11 +1687,11 @@ def get_cached_dns_check(db: Session, domain_name: str) -> Dict[str, Any]:
         
         if cached:
             return {
-                'spf': cached.spf_check,
-                'dkim': cached.dkim_check,
-                'dmarc': cached.dmarc_check,
-                'tlsa': cached.tlsa_check,
-                'mta_sts': cached.mta_sts_check,
+                'spf': _public_cached_dns_result(cached.spf_check),
+                'dkim': _public_cached_dns_result(cached.dkim_check),
+                'dmarc': _public_cached_dns_result(cached.dmarc_check),
+                'tlsa': _public_cached_dns_result(cached.tlsa_check),
+                'mta_sts': _public_cached_dns_result(cached.mta_sts_check),
                 'checked_at': format_datetime_for_api(cached.checked_at) if cached.checked_at else None
             }
         return None
@@ -1714,7 +1735,8 @@ async def check_all_domains_dns_manual():
                 await asyncio.to_thread(store_dns_check_worker, domain_name, dns_data, True)
                 checked_count += 1
             except Exception as e:
-                errors.append(f"{domain_name}: {str(e)}")
+                logger.error("DNS check failed for %s: %s", domain_name, e)
+                errors.append(f"{domain_name}: DNS check failed. Check the application logs.")
         
         status = 'success' if checked_count == len(names) else 'partial'
         

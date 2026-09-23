@@ -238,7 +238,8 @@ async def test_rules():
     try:
         quarantine = await mailcow_api.get_quarantine()
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to fetch quarantine: {e}")
+        logger.error("Failed to fetch quarantine for rule preview: %s", e)
+        raise HTTPException(status_code=500, detail="Failed to fetch quarantine. Check the application logs.")
     
     if not quarantine:
         return {"matches": [], "total_matches": 0, "total_quarantine": 0, "message": "Quarantine is empty"}

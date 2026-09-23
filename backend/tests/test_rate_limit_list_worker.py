@@ -87,7 +87,7 @@ def test_partial_domain_response_is_retried_then_cached(monkeypatch):
 
     async def run():
         partial, error = await rate_limits._fetch_domain_limits()
-        assert len(partial) == 1 and error == "Unavailable"
+        assert len(partial) == 1 and error == "Could not read domain rate limits. Check the application logs."
         assert rate_limits._domain_limit_cache["limits"] is None
         complete, error = await rate_limits._fetch_domain_limits()
         assert error is None and len(complete) == 2
