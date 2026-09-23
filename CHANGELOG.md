@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **Responsive DMARC domain overviews** - Reading cached DNS results and report statistics now runs outside the request loop. Database connections close before live DNS lookups, keeping other requests responsive during database waits. [#225](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/225)
+
 - **Responsive manual suppressions** - Adding or reactivating a suppression now saves it outside the request loop, then closes its database connection before queue cleanup. [#223](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/223)
 
 - **Duplicate addresses in suppression imports** - Repeated addresses or domains within one CSV are now skipped instead of failing the entire import. The first occurrence is kept, including when later entries differ only in letter case or surrounding spaces. [#220](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/220)

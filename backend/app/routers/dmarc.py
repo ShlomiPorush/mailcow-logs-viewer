@@ -1,6 +1,7 @@
 """
 DMARC Router - Domain-centric view (Cloudflare style)
 """
+import asyncio
 import logging
 import hashlib
 import json
@@ -10,7 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Backgro
 from sqlalchemy.orm import Session, load_only
 from sqlalchemy import func, and_, or_, case, literal
 
-from ..database import get_db
+from ..database import SessionLocal, get_db
 from ..models import DMARCReport, DMARCRecord, DMARCSync, TLSReport, TLSReportPolicy
 from ..services.dmarc_parser import parse_dmarc_file
 from ..services.geoip_service import enrich_dmarc_record
@@ -422,25 +423,33 @@ def get_domains_list(
 # =============================================================================
 
 @router.get("/dmarc/domains/{domain}/overview")
-async def get_domain_overview(
-    domain: str,
-    days: int = 30,
-    db: Session = Depends(get_db)
-):
-    """
-    Get overview for specific domain with daily aggregated stats
-    Includes data for charts similar to Cloudflare and current DMARC DNS record status/settings.
-    """
+async def get_domain_overview(domain: str, days: int = 30):
+    """Get daily domain statistics and cached or live DMARC DNS status."""
     try:
-        # Resolve DMARC record from DNS: use cache first, else live check
+        dmarc_record = await asyncio.to_thread(_load_overview_dns, domain)
+        if dmarc_record is None:
+            dmarc_record = await check_dmarc_record(domain)
+        return await asyncio.to_thread(_load_domain_overview, domain, days, dmarc_record)
+    except Exception as e:
+        logger.error(f"Error fetching domain overview: {e}")
+        raise internal_error(e)
+
+
+def _load_overview_dns(domain: str):
+    """Close the cache session before any live DNS lookup."""
+    with SessionLocal() as db:
         dns_checks = get_cached_dns_check(db, domain)
         if dns_checks and dns_checks.get('dmarc'):
-            dmarc_record = dns_checks['dmarc'].copy()
-            if 'settings' not in dmarc_record and dmarc_record.get('record'):
-                dmarc_record['settings'] = parse_dmarc_record_tags(dmarc_record['record'])
-        else:
-            dmarc_record = await check_dmarc_record(domain)
+            record = dns_checks['dmarc'].copy()
+            if 'settings' not in record and record.get('record'):
+                record['settings'] = parse_dmarc_record_tags(record['record'])
+            return record
+    return None
 
+
+def _load_domain_overview(domain: str, days: int, dmarc_record: dict):
+    """Read and aggregate reports entirely within a worker-owned session."""
+    with SessionLocal() as db:
         cutoff_timestamp = int((datetime.now() - timedelta(days=days)).timestamp())
         
         reports = db.query(DMARCReport).filter(
@@ -533,10 +542,6 @@ async def get_domain_overview(
             },
             'dmarc_record': dmarc_record
         }
-        
-    except Exception as e:
-        logger.error(f"Error fetching domain overview: {e}")
-        raise internal_error(e)
 
 
 # =============================================================================
