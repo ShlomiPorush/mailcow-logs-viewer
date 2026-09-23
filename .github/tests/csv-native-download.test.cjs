@@ -33,7 +33,7 @@ function harness(status = 200, contentType = 'text/csv; charset=utf-8') {
         },
         showToast(message, type) { toasts.push({ message, type }); },
     });
-    vm.runInContext(readFileSync(join(__dirname, '..', 'export.js'), 'utf8'), context);
+    vm.runInContext(readFileSync(join(__dirname, '../../frontend/export.js'), 'utf8'), context);
     return { context, requests, downloads, toasts };
 }
 
