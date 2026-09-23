@@ -2127,14 +2127,14 @@ async def update_geoip_database():
         if status['City']['updated'] or status['ASN']['updated']:
             # Reload the GeoIP readers so the cached _geoip_available flag
             # and reader objects are refreshed with the new database files
-            geoip_service.reload_geoip_readers()
+            await asyncio.to_thread(geoip_service.reload_geoip_readers)
             logger.info("GeoIP readers reloaded after database update")
             update_job_status('update_geoip', 'success')
         else:
             # Ensure readers are loaded and validated even when no download was needed
             # (handles case where DB exists but validation hasn't run yet)
             if geoip_service.get_geoip_db_valid() is not True:
-                geoip_service.reload_geoip_readers()
+                await asyncio.to_thread(geoip_service.reload_geoip_readers)
             update_job_status('update_geoip', 'success')
         
         # Successful download implies valid license - persist to DB
@@ -2500,17 +2500,7 @@ async def dmarc_imap_sync_job():
         logger.debug("DMARC IMAP sync is disabled, skipping")
         return
     
-    # Global cleanup to ensure no other job is stuck in 'running' state
-    try:
-        # Assuming you have a way to get a DB session here
-        with SessionLocal() as db:
-            db.query(DMARCSync).filter(DMARCSync.status == 'running').update({
-                "status": "failed",
-                "error_message": "Stale job cleaned by scheduler"
-            })
-            db.commit()
-    except Exception as cleanup_err:
-        logger.warning(f"Background cleanup failed: {cleanup_err}")
+    await asyncio.to_thread(_cleanup_stale_dmarc_syncs)
 
     # Start the current job
     update_job_status('dmarc_imap_sync', 'running')
@@ -2561,6 +2551,19 @@ async def dmarc_imap_sync_job():
 # =============================================================================
 # CLEANUP
 # =============================================================================
+
+def _cleanup_stale_dmarc_syncs():
+    """Keep best-effort stale-sync cleanup within a worker-owned session."""
+    try:
+        with SessionLocal() as db:
+            db.query(DMARCSync).filter(DMARCSync.status == 'running').update({
+                "status": "failed",
+                "error_message": "Stale job cleaned by scheduler"
+            })
+            db.commit()
+    except Exception as cleanup_err:
+        logger.warning(f"Background cleanup failed: {cleanup_err}")
+
 
 async def cleanup_old_logs():
     """Run retention database work in the configured scheduler worker pool."""
@@ -3437,7 +3440,7 @@ async def send_weekly_summary_email_job():
             return
 
         # Execute
-        await generate_and_send_email(db=None) 
+        await generate_and_send_email()
         update_job_status('send_weekly_summary', 'success')
         
     except Exception as e:
