@@ -37,4 +37,3 @@ async function exportCSV(type) {
         showToast(error.message || 'Could not export CSV. Please try again.', 'error');
     }
 }
-
