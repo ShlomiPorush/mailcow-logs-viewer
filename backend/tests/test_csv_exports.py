@@ -3,6 +3,7 @@ import csv
 import io
 import asyncio
 import inspect
+from contextlib import nullcontext
 from datetime import datetime
 from types import SimpleNamespace
 from unittest.mock import Mock
@@ -86,6 +87,8 @@ def export_client(monkeypatch):
     db.info = {}
     query.session = paired_query.session = db
     db.query.side_effect = lambda *models: paired_query if len(models) == 2 else query
+    from app.routers import suppressions
+    monkeypatch.setattr(suppressions, "SessionLocal", lambda: nullcontext(db))
     app.dependency_overrides[get_db] = lambda: db
     try:
         yield TestClient(app), row, db, query

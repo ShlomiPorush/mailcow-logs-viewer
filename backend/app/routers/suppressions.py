@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session, load_only
 from sqlalchemy import func, or_, desc
 
 from ..services.csv_export import CSV_ESCAPE_COLUMN, csv_download, csv_query_rows, get_csv_db, restore_csv_text
-from ..database import get_db, get_db_context
+from ..database import SessionLocal, get_db, get_db_context
 from ..config import settings
 from ..models import SpamSuppression
 from ..mailcow_api import mailcow_api, MailcowAPIError
@@ -458,7 +458,7 @@ def delete_suppression(suppression_id: int, db: Session = Depends(get_db)):
 # =========================================================================
 
 @router.post("/suppressions/import")
-async def import_suppressions(file: UploadFile = File(...), db: Session = Depends(get_db)):
+async def import_suppressions(file: UploadFile = File(...)):
     """
     Bulk import suppressions from CSV file.
     CSV format: email, type (optional), reason (optional), notes (optional)
@@ -467,84 +467,89 @@ async def import_suppressions(file: UploadFile = File(...), db: Session = Depend
         raise HTTPException(status_code=400, detail="File must be a CSV")
     
     content = await file.read()
-    text = content.decode('utf-8-sig')  # handle BOM
-    reader = csv.reader(io.StringIO(text))
-    
-    imported = 0
-    skipped = 0
-    errors_list = []
-    
-    headers = None
-    for row_num, row in enumerate(reader, 1):
-        if not row:
-            continue
-        if row_num == 1 and row[0].lower().strip() in ('email', 'address'):
-            headers = [name.lower().strip() for name in row]
-            continue
+    return await asyncio.to_thread(_import_suppressions_worker, content)
 
-        if headers:
-            values = dict(zip(headers, row))
-            email_value = values.get('email', values.get('address', ''))
-            values['email'] = email_value
-        else:
-            values = dict(zip(('email', 'type', 'reason', 'notes'), row))
-        encoded = headers is not None and CSV_ESCAPE_COLUMN in headers
-        if encoded:
-            try:
-                for field in filter(None, values.get(CSV_ESCAPE_COLUMN, '').split(',')):
-                    if field not in headers or field == CSV_ESCAPE_COLUMN:
-                        raise ValueError("Invalid CSV escape metadata")
-                    values[field] = restore_csv_text(values.get(field, ''))
-            except ValueError:
-                errors_list.append(f"Row {row_num}: invalid CSV escape metadata")
+
+def _import_suppressions_worker(content: bytes):
+    with SessionLocal() as db:
+        text = content.decode('utf-8-sig')  # handle BOM
+        reader = csv.reader(io.StringIO(text))
+
+        imported = 0
+        skipped = 0
+        errors_list = []
+
+        headers = None
+        for row_num, row in enumerate(reader, 1):
+            if not row:
                 continue
-        email = values.get('email', '').strip().lower()
-        entry_type = values.get('type', '').strip()
-        if entry_type not in ('email', 'domain'):
-            entry_type = 'email'
-        reason = values.get('reason', '').strip()
-        if reason not in ('hard_bounce', 'soft_bounce', 'rejected', 'manual'):
-            reason = 'manual'
-        notes = values.get('notes', 'Imported from CSV')
-        if not encoded:
-            notes = notes.strip()
+            if row_num == 1 and row[0].lower().strip() in ('email', 'address'):
+                headers = [name.lower().strip() for name in row]
+                continue
 
-        if not email:
-            errors_list.append(f"Row {row_num}: empty email")
-            continue
-        
-        # Check for duplicate
-        existing = db.query(SpamSuppression).filter(SpamSuppression.email == email).first()
-        if existing:
-            skipped += 1
-            continue
-        
-        try:
-            suppression = SpamSuppression(
-                email=email,
-                type=entry_type,
-                reason=reason,
-                source='import',
-                notes=notes,
-                bounce_count=0,
-                hard_bounce_count=0,
-                soft_bounce_count=0,
-                active=True,
-                synced_to_rspamd=False,
-                expires_at=None,
-            )
-            db.add(suppression)
-            imported += 1
-        except Exception as e:
-            errors_list.append(f"Row {row_num}: {str(e)}")
-    
-    db.commit()
-    
-    return {
-        "imported": imported,
-        "skipped": skipped,
-        "errors": errors_list,
-    }
+            if headers:
+                values = dict(zip(headers, row))
+                email_value = values.get('email', values.get('address', ''))
+                values['email'] = email_value
+            else:
+                values = dict(zip(('email', 'type', 'reason', 'notes'), row))
+            encoded = headers is not None and CSV_ESCAPE_COLUMN in headers
+            if encoded:
+                try:
+                    for field in filter(None, values.get(CSV_ESCAPE_COLUMN, '').split(',')):
+                        if field not in headers or field == CSV_ESCAPE_COLUMN:
+                            raise ValueError("Invalid CSV escape metadata")
+                        values[field] = restore_csv_text(values.get(field, ''))
+                except ValueError:
+                    errors_list.append(f"Row {row_num}: invalid CSV escape metadata")
+                    continue
+            email = values.get('email', '').strip().lower()
+            entry_type = values.get('type', '').strip()
+            if entry_type not in ('email', 'domain'):
+                entry_type = 'email'
+            reason = values.get('reason', '').strip()
+            if reason not in ('hard_bounce', 'soft_bounce', 'rejected', 'manual'):
+                reason = 'manual'
+            notes = values.get('notes', 'Imported from CSV')
+            if not encoded:
+                notes = notes.strip()
+
+            if not email:
+                errors_list.append(f"Row {row_num}: empty email")
+                continue
+
+            # Check for duplicate
+            existing = db.query(SpamSuppression).filter(SpamSuppression.email == email).first()
+            if existing:
+                skipped += 1
+                continue
+
+            try:
+                suppression = SpamSuppression(
+                    email=email,
+                    type=entry_type,
+                    reason=reason,
+                    source='import',
+                    notes=notes,
+                    bounce_count=0,
+                    hard_bounce_count=0,
+                    soft_bounce_count=0,
+                    active=True,
+                    synced_to_rspamd=False,
+                    expires_at=None,
+                )
+                db.add(suppression)
+                imported += 1
+            except Exception as e:
+                errors_list.append(f"Row {row_num}: {str(e)}")
+
+        db.commit()
+
+        return {
+            "imported": imported,
+            "skipped": skipped,
+            "errors": errors_list,
+        }
 
 
 @router.get("/suppressions/export")
