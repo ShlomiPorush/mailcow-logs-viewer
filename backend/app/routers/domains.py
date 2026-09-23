@@ -1408,12 +1408,9 @@ async def check_domain_dns(domain: str, spf_source_ips: Optional[List[Dict[str, 
         }
 
 
-@router.get("/domains/all")
-async def get_all_domains_with_dns(db: Session = Depends(get_db)):
-    """Get all domains with cached DNS checks"""
-    try:
-        domains = await mailcow_api.get_domains()
-        
+def _build_domain_list_worker(domains):
+    """Build detached domain and DNS results in a worker-owned session."""
+    with get_db_context() as db:
         # Get last DNS check time FIRST
         last_check = db.query(DomainDNSCheck).filter(
         DomainDNSCheck.is_full_check == True
@@ -1479,7 +1476,16 @@ async def get_all_domains_with_dns(db: Session = Depends(get_db)):
             'active': active_count,
             'last_dns_check': format_datetime_for_api(last_check.checked_at) if (last_check and last_check.checked_at) else None
         }
+
+
+@router.get("/domains/all")
+async def get_all_domains_with_dns():
+    """Get all domains with cached DNS checks"""
+    try:
+        domains = await mailcow_api.get_domains()
         
+        return await asyncio.to_thread(_build_domain_list_worker, domains)
+
     except Exception as e:
         logger.error(f"Error fetching domains: {e}")
         raise internal_error(e)
