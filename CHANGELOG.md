@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **Reachable system summary API** - The documented system summary and summary email endpoints are now registered. Reading a summary returns JSON instead of the application page, and sending a summary retains authentication and the existing weekly-summary setting. [#237](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/237)
+
 - **Responsive summary and settings requests** - Weekly summaries and MaxMind validation now create and close database sessions inside workers. Serving application HTML also keeps file reads outside the request loop. [#231](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/231)
 
 - **Maintainable message correlation** - Message correlation creation, completion, expiry and late-delivery reconciliation now live in a dedicated service. Scheduled jobs and delivery outcomes remain unchanged. [#235](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/235)
