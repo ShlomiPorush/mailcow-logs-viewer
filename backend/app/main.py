@@ -331,6 +331,7 @@ app.add_middleware(SlowRequestLogMiddleware)
 app.include_router(auth_router.router, prefix="/api", tags=["Authentication"])
 app.include_router(logs.router, prefix="/api", tags=["Logs"])
 app.include_router(stats.router, prefix="/api", tags=["Statistics"])
+app.include_router(reporting.router, prefix="/api", tags=["Reporting"])
 app.include_router(export_router.router, prefix="/api", tags=["Export"])
 if status_router:
     app.include_router(status_router.router, prefix="/api", tags=["Status"])
