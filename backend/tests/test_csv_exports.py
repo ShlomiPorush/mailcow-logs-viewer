@@ -40,6 +40,8 @@ def test_download_formats_rows_only_as_the_stream_consumes_them(export_client, p
     setattr(tracked, attribute, "x" * 1024)
     query.all.return_value = [tracked] * 1000
     kwargs = {name: None for name in inspect.signature(endpoint).parameters if name != "db"}
+    if "request" in kwargs:
+        kwargs["request"] = SimpleNamespace(method="GET")
     response = endpoint(db=db, **kwargs)
     assert len(reads) <= 1, "endpoint formatted the entire export before streaming"
 
@@ -102,6 +104,67 @@ def download(client, path):
     assert response.headers["content-type"].startswith("text/csv")
     assert "attachment; filename=" in response.headers["content-disposition"]
     return list(csv.DictReader(io.StringIO(response.content.decode("utf-8-sig"))))
+
+
+@pytest.mark.parametrize("path,attribute,column", ROUTES[:4])
+def test_head_checks_download_without_serializing_rows(export_client, monkeypatch, path, attribute, column):
+    client, row, db, query = export_client
+    consumed = []
+    closed = []
+
+    def records():
+        try:
+            for _ in range(1000):
+                consumed.append(True)
+                yield (row, None) if "/messages/" in path else row
+        finally:
+            closed.append("cursor")
+
+    def session():
+        try:
+            yield db
+        finally:
+            closed.append("session")
+
+    from app.models import MessageCorrelation, RspamdLog
+    selected_query = db.query(MessageCorrelation, RspamdLog) if "/messages/" in path else query
+    selected_query.yield_per.side_effect = lambda size: records()
+    app.dependency_overrides[get_db] = session
+    from app.services import csv_export
+    monkeypatch.setattr(csv_export, "_iter_csv_chunks", Mock(side_effect=AssertionError("HEAD serialized CSV")))
+    response = client.head(path + "?sender=user%40example.com")
+    assert response.status_code == 200
+    assert response.content == b""
+    assert response.headers["content-type"].startswith("text/csv")
+    assert response.headers["content-disposition"].startswith("attachment; filename=")
+    assert "content-length" not in response.headers
+    assert "csv_export_iterators" not in db.info
+    assert len(consumed) == 1
+    assert closed == ["cursor", "session"]
+
+
+@pytest.mark.parametrize("path,attribute,column", ROUTES[:4])
+def test_head_preserves_empty_and_invalid_filter_errors(export_client, path, attribute, column):
+    client, row, db, query = export_client
+    assert client.head(path + "?start_date=not-a-date").status_code == 422
+    query.all.return_value = []
+    assert client.head(path).status_code == 404
+    assert "csv_export_iterators" not in db.info
+
+
+@pytest.mark.parametrize("path,attribute,column", ROUTES[:4])
+def test_head_requires_authentication(export_client, monkeypatch, path, attribute, column):
+    client, row, db, query = export_client
+    monkeypatch.setattr(settings._inner, "auth_enabled", True)
+    monkeypatch.setattr(settings._inner, "basic_auth_enabled", True)
+    monkeypatch.setattr(settings._inner, "auth_password", "export-test-password")
+    monkeypatch.setattr(settings._inner, "auth_username", "export-test-user")
+    assert client.head(path).status_code == 401
+    credentials = ("export-test-user", "export-test-password")
+    assert client.head(path, auth=credentials).status_code == 200
+    assert client.post("/api/auth/session", auth=credentials).status_code == 200
+    assert client.head(path).status_code == 200
+    client.get("/api/auth/logout")
 
 
 @pytest.mark.parametrize("path,attribute,column", ROUTES)

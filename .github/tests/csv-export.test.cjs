@@ -5,7 +5,7 @@ const vm = require('node:vm');
 const { test } = require('node:test');
 
 // Exercise the shipped handler, without booting unrelated page modules.
-const source = fs.readFileSync(path.join(__dirname, '../../frontend/app.js'), 'utf8');
+const source = fs.readFileSync(path.join(__dirname, '../../frontend/export.js'), 'utf8');
 const handler = source.match(/async function exportCSV\(type\) \{[\s\S]*?\n\}/)?.[0];
 assert.ok(handler, 'The CSV download handler must be present');
 
@@ -23,7 +23,7 @@ function harness(filters, status = 200, contentType = 'text/csv; charset=utf-8')
         window: { URL: { createObjectURL: () => 'blob:test', revokeObjectURL: () => {} } },
         document: {
             body: { appendChild: () => {}, removeChild: () => {} },
-            createElement: () => ({ click: () => { result.downloads++; } })
+            createElement: () => ({ click: () => { result.downloads++; }, remove: () => {} })
         },
         showToast: (message, type) => result.notices.push({ message, type }),
         alert: message => result.notices.push({ message }),
