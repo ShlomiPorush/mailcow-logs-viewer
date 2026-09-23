@@ -1,5 +1,5 @@
 """Reject oversized form fields before upload handlers process untrusted input."""
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import Mock
 import threading
 import tempfile
 
@@ -21,7 +21,7 @@ def client(monkeypatch):
     monkeypatch.setattr(settings._inner, "dmarc_manual_upload_enabled", True)
     db = Mock()
     app.dependency_overrides[get_db] = lambda: db
-    monkeypatch.setattr(dmarc, "_upload_dmarc_report", AsyncMock(return_value={"status": "success"}))
+    monkeypatch.setattr(dmarc, "_upload_report_worker", Mock(return_value={"status": "success"}))
     try:
         yield TestClient(app)
     finally:
@@ -39,7 +39,7 @@ def test_oversized_text_part_is_rejected_before_handler(client, path, filename):
     })
     assert response.status_code == 400
     assert "maximum size" in response.json()["detail"].lower()
-    dmarc._upload_dmarc_report.assert_not_awaited()
+    dmarc._upload_report_worker.assert_not_called()
     app.dependency_overrides[get_db]().commit.assert_not_called()
 
 
@@ -69,7 +69,7 @@ def test_dmarc_file_limit_still_applies(client):
         "file": ("report.xml", b"x" * (MAX_COMPRESSED_BYTES + 1)),
     })
     assert response.status_code == 413
-    dmarc._upload_dmarc_report.assert_not_awaited()
+    dmarc._upload_report_worker.assert_not_called()
 
 
 def test_large_file_rollover_runs_off_the_event_loop(client, monkeypatch):
