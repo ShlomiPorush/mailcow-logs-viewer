@@ -340,67 +340,68 @@ def get_suppression_config():
 
 
 @router.post("/suppressions")
-async def create_suppression(body: SuppressionCreateRequest, db: Session = Depends(get_db)):
-    """Add a manual suppression entry."""
-    # Check for duplicate
-    existing = db.query(SpamSuppression).filter(
-        SpamSuppression.email == body.email
-    ).first()
-    
-    if existing:
-        if existing.active:
-            raise HTTPException(status_code=409, detail=f"Address '{body.email}' is already suppressed")
-        else:
-            # Reactivate expired entry
-            existing.active = True
-            existing.reason = body.reason
-            existing.source = 'manual'
-            existing.notes = body.notes
-            existing.bounce_count += 1
-            existing.synced_to_rspamd = False
-            existing.expires_at = None  # Manual entries don't expire
-            existing.updated_at = datetime.utcnow()
-            db.commit()
-            db.refresh(existing)
-            
-            # Clean up queue items for this address
-            await _cleanup_queue_for_email(body.email)
-            
-            return _serialize_suppression(existing, datetime.utcnow())
-    
-    # Determine expiry
-    expires_at_val = None
-    if not body.permanent:
-        if body.expires_at:
-            try:
-                expires_at_val = datetime.fromisoformat(body.expires_at.replace('Z', '+00:00'))
-            except ValueError:
-                raise HTTPException(status_code=400, detail="Invalid date format for expires_at")
-        else:
-            # Default: base_expiry_days from settings
-            expires_at_val = datetime.utcnow() + timedelta(days=settings.suppression_base_expiry_days)
-    
-    suppression = SpamSuppression(
-        email=body.email,
-        type=body.type,
-        reason=body.reason,
-        source='manual',
-        notes=body.notes,
-        bounce_count=1 if body.reason != 'manual' else 0,
-        hard_bounce_count=0,
-        soft_bounce_count=0,
-        active=True,
-        synced_to_rspamd=False,
-        expires_at=expires_at_val,
-    )
-    db.add(suppression)
-    db.commit()
-    db.refresh(suppression)
-    
-    # Clean up queue items for this address
+async def create_suppression(body: SuppressionCreateRequest):
+    """Save a manual suppression before cleaning up matching queue items."""
+    result = await asyncio.to_thread(_create_suppression_worker, body)
     await _cleanup_queue_for_email(body.email)
-    
-    return _serialize_suppression(suppression, datetime.utcnow())
+    return result
+
+
+def _create_suppression_worker(body: SuppressionCreateRequest) -> dict:
+    with SessionLocal() as db:
+        # Check for duplicate
+        existing = db.query(SpamSuppression).filter(
+            SpamSuppression.email == body.email
+        ).first()
+
+        if existing:
+            if existing.active:
+                raise HTTPException(status_code=409, detail=f"Address '{body.email}' is already suppressed")
+            else:
+                # Reactivate expired entry
+                existing.active = True
+                existing.reason = body.reason
+                existing.source = 'manual'
+                existing.notes = body.notes
+                existing.bounce_count += 1
+                existing.synced_to_rspamd = False
+                existing.expires_at = None  # Manual entries don't expire
+                existing.updated_at = datetime.utcnow()
+                db.commit()
+                db.refresh(existing)
+
+                return _serialize_suppression(existing, datetime.utcnow())
+
+        # Determine expiry
+        expires_at_val = None
+        if not body.permanent:
+            if body.expires_at:
+                try:
+                    expires_at_val = datetime.fromisoformat(body.expires_at.replace('Z', '+00:00'))
+                except ValueError:
+                    raise HTTPException(status_code=400, detail="Invalid date format for expires_at")
+            else:
+                # Default: base_expiry_days from settings
+                expires_at_val = datetime.utcnow() + timedelta(days=settings.suppression_base_expiry_days)
+
+        suppression = SpamSuppression(
+            email=body.email,
+            type=body.type,
+            reason=body.reason,
+            source='manual',
+            notes=body.notes,
+            bounce_count=1 if body.reason != 'manual' else 0,
+            hard_bounce_count=0,
+            soft_bounce_count=0,
+            active=True,
+            synced_to_rspamd=False,
+            expires_at=expires_at_val,
+        )
+        db.add(suppression)
+        db.commit()
+        db.refresh(suppression)
+
+        return _serialize_suppression(suppression, datetime.utcnow())
 
 
 @router.put("/suppressions/{suppression_id}")
