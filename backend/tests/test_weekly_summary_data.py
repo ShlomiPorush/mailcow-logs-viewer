@@ -9,6 +9,7 @@ import ast
 import asyncio
 import inspect
 import pathlib
+from contextlib import nullcontext
 
 import pytest
 
@@ -76,12 +77,13 @@ def test_system_summary_data_builds_with_sync_blacklist_helper(monkeypatch):
     monkeypatch.setattr(reporting, "get_monitored_hosts", fake_monitored_hosts)
     monkeypatch.setattr(reporting, "get_all_mailbox_stats", fake_all_mailbox_stats)
     monkeypatch.setattr(reporting, "get_all_domains_with_dns", fake_domains)
+    monkeypatch.setattr(reporting, "get_db_context", lambda: nullcontext(None))
 
     from app import mailcow_api as mailcow_api_module
     monkeypatch.setattr(mailcow_api_module.mailcow_api, "get_queue", fake_list)
     monkeypatch.setattr(mailcow_api_module.mailcow_api, "get_quarantine", fake_list)
 
-    data = asyncio.run(reporting.get_system_summary_data(db=None))
+    data = asyncio.run(reporting.get_system_summary_data())
 
     assert data["blacklist"]["status"] == "listed"
     assert data["blacklist"]["listed_count"] == 1
