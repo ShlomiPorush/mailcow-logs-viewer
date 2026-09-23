@@ -618,3 +618,23 @@ function renderImportCard(title, data, color) {
         </div>
     `;
 }
+
+// Shared message-list metadata.
+// The folder Dovecot actually delivered a message into. A folder other than
+// the inbox is the usual explanation for "the mail never arrived" when Rspamd
+// did not flag it as spam (issue #65).
+function renderMailboxFolderHint(msg) {
+    if (msg.dovecot_status !== 'stored') return '';
+    const folder = msg.dovecot_mailbox;
+    if (!folder) return '';
+    return `<span>Folder: ${escapeHtml(folder)}</span>`;
+}
+
+// A message that was delivered more than once - forwarded, copied or released
+// from quarantine - is one row in the list (issue #36). Shown as a plain
+// metadata entry; the dialog shows the deliveries as a journey.
+function renderDeliveriesChip(msg) {
+    const deliveries = msg.deliveries || 1;
+    if (deliveries < 2) return '';
+    return `<span>Deliveries: ${deliveries}</span>`;
+}
