@@ -5,6 +5,7 @@ Protects ALL endpoints when authentication is enabled
 """
 import logging
 import time
+from threading import RLock
 from collections import deque
 from typing import Dict, Deque
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -25,6 +26,21 @@ logger = logging.getLogger(__name__)
 _AUTH_MAX_FAILURES = 10
 _AUTH_WINDOW_SECONDS = 15 * 60
 _auth_failures: Dict[str, Deque[float]] = {}
+_auth_lock = RLock()
+_next_capacity_cleanup = 0.0
+
+
+def _failure_capacity_reached(ip: str) -> bool:
+    """Preserve tracked clients, rejecting new identities when storage is full."""
+    with _auth_lock:
+        global _next_capacity_cleanup
+        if ip in _auth_failures or len(_auth_failures) < settings.auth_max_failure_clients:
+            return False
+        now = time.monotonic()
+        if now >= _next_capacity_cleanup:
+            cleanup_expired_auth_failures()
+            _next_capacity_cleanup = now + 1.0
+        return len(_auth_failures) >= settings.auth_max_failure_clients
 
 
 def _client_ip(request: Request) -> str:
@@ -38,37 +54,43 @@ def _client_ip(request: Request) -> str:
 
 
 def _is_rate_limited(ip: str) -> bool:
-    failures = _auth_failures.get(ip)
-    if not failures:
-        return False
-    cutoff = time.time() - _AUTH_WINDOW_SECONDS
-    while failures and failures[0] < cutoff:
-        failures.popleft()
-    if not failures:
-        _auth_failures.pop(ip, None)
-        return False
-    return len(failures) >= _AUTH_MAX_FAILURES
+    with _auth_lock:
+        failures = _auth_failures.get(ip)
+        if not failures:
+            return False
+        cutoff = time.time() - _AUTH_WINDOW_SECONDS
+        while failures and failures[0] < cutoff:
+            failures.popleft()
+        if not failures:
+            _auth_failures.pop(ip, None)
+            return False
+        return len(failures) >= _AUTH_MAX_FAILURES
 
 
 def cleanup_expired_auth_failures() -> None:
     """Reclaim idle client counters, retaining every unexpired failure."""
-    for ip in list(_auth_failures):
-        _is_rate_limited(ip)
+    with _auth_lock:
+        for ip in list(_auth_failures):
+            _is_rate_limited(ip)
 
 
 def _record_auth_failure(ip: str) -> None:
-    failures = _auth_failures.setdefault(ip, deque())
-    failures.append(time.time())
-    # Bound total memory: drop oldest entries beyond the threshold
-    while len(failures) > _AUTH_MAX_FAILURES:
-        failures.popleft()
-    if len(failures) == _AUTH_MAX_FAILURES:
-        logger.warning(f"Auth rate limit reached for {ip} "
-                       f"({_AUTH_MAX_FAILURES} failures in {_AUTH_WINDOW_SECONDS // 60}m)")
+    with _auth_lock:
+        if _failure_capacity_reached(ip):
+            return
+        failures = _auth_failures.setdefault(ip, deque())
+        failures.append(time.time())
+        # Bound each client counter to the lockout threshold
+        while len(failures) > _AUTH_MAX_FAILURES:
+            failures.popleft()
+        if len(failures) == _AUTH_MAX_FAILURES:
+            logger.warning(f"Auth rate limit reached for {ip} "
+                           f"({_AUTH_MAX_FAILURES} failures in {_AUTH_WINDOW_SECONDS // 60}m)")
 
 
 def _clear_auth_failures(ip: str) -> None:
-    _auth_failures.pop(ip, None)
+    with _auth_lock:
+        _auth_failures.pop(ip, None)
 
 
 def verify_credentials(username: str, password: str) -> bool:
@@ -103,31 +125,32 @@ def _authenticate_basic_request(request: Request) -> bool:
     or reveal whether they were correct. Requests without Basic credentials do
     not consume the budget, keeping public login information available.
     """
-    authorization = request.headers.get("Authorization", "")
-    if not authorization.startswith("Basic "):
-        return False
+    with _auth_lock:
+        authorization = request.headers.get("Authorization", "")
+        if not authorization.startswith("Basic "):
+            return False
 
-    client_ip = _client_ip(request)
-    if _is_rate_limited(client_ip):
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail="Too many failed login attempts. Try again later.",
-            headers={"Retry-After": str(_AUTH_WINDOW_SECONDS)},
-        )
+        client_ip = _client_ip(request)
+        if _is_rate_limited(client_ip) or _failure_capacity_reached(client_ip):
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="Too many failed login attempts. Try again later.",
+                headers={"Retry-After": str(_AUTH_WINDOW_SECONDS)},
+            )
 
-    try:
-        decoded = base64.b64decode(authorization[6:]).decode("utf-8")
-        username, password = decoded.split(":", 1)
-    except (ValueError, UnicodeDecodeError):
-        _record_auth_failure(client_ip)
-        return False
+        try:
+            decoded = base64.b64decode(authorization[6:]).decode("utf-8")
+            username, password = decoded.split(":", 1)
+        except (ValueError, UnicodeDecodeError):
+            _record_auth_failure(client_ip)
+            return False
 
-    if not verify_credentials(username, password):
-        _record_auth_failure(client_ip)
-        return False
+        if not verify_credentials(username, password):
+            _record_auth_failure(client_ip)
+            return False
 
-    _clear_auth_failures(client_ip)
-    return True
+        _clear_auth_failures(client_ip)
+        return True
 
 
 def is_request_authenticated(request: Request) -> bool:

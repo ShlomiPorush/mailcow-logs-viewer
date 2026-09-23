@@ -4,6 +4,8 @@ Uses HTTP-only cookies with server-side session storage
 """
 import logging
 import secrets
+import time
+from threading import RLock
 from typing import Dict, Optional, Any
 from datetime import datetime, timedelta
 from fastapi import Request, Response
@@ -16,6 +18,13 @@ logger = logging.getLogger(__name__)
 # In-memory session store
 # In production, consider using Redis for scalability
 _session_store: Dict[str, Dict[str, Any]] = {}
+_session_lock = RLock()
+_next_capacity_cleanup = 0.0
+
+
+class SessionCapacityError(Exception):
+    """No new sessions can be admitted without removing a live session."""
+
 
 # Session cookie name
 SESSION_COOKIE_NAME = "session_id"
@@ -30,16 +39,17 @@ _generated_secret_key: str = ""
 
 def get_session_secret_key() -> str:
     """Get the configured session secret key, or a stable per-process fallback"""
-    global _generated_secret_key
-    if not settings.session_secret_key:
-        if not _generated_secret_key:
-            logger.warning(
-                "SESSION_SECRET_KEY not configured - using a temporary key. "
-                "Sessions will not survive a restart; set SESSION_SECRET_KEY in production."
-            )
-            _generated_secret_key = secrets.token_urlsafe(32)
-        return _generated_secret_key
-    return settings.session_secret_key
+    with _session_lock:
+        global _generated_secret_key
+        if not settings.session_secret_key:
+            if not _generated_secret_key:
+                logger.warning(
+                    "SESSION_SECRET_KEY not configured - using a temporary key. "
+                    "Sessions will not survive a restart; set SESSION_SECRET_KEY in production."
+                )
+                _generated_secret_key = secrets.token_urlsafe(32)
+            return _generated_secret_key
+        return settings.session_secret_key
 
 
 def get_serializer() -> URLSafeTimedSerializer:
@@ -50,105 +60,116 @@ def get_serializer() -> URLSafeTimedSerializer:
 def create_session(user_info: Dict[str, Any]) -> str:
     """
     Create a new session and return session ID
-    
+
     Args:
         user_info: User information from OAuth2 provider
-        
+
     Returns:
         Session ID (signed)
     """
-    session_id = secrets.token_urlsafe(32)
-    expires_at = datetime.utcnow() + timedelta(hours=settings.session_expiry_hours)
-    
-    session_data = {
-        "user_info": user_info,
-        "created_at": datetime.utcnow().isoformat(),
-        "expires_at": expires_at.isoformat(),
-    }
-    
-    _session_store[session_id] = session_data
-    
-    # Sign the session ID
-    serializer = get_serializer()
-    signed_session_id = serializer.dumps(session_id)
-    
-    logger.debug(f"Created session {session_id[:8]}... for user {user_info.get('email', 'unknown')}")
-    
-    return signed_session_id
+    with _session_lock:
+        global _next_capacity_cleanup
+        if len(_session_store) >= settings.session_max_entries:
+            now = time.monotonic()
+            if now >= _next_capacity_cleanup:
+                cleanup_expired_sessions()
+                _next_capacity_cleanup = now + 1.0
+            if len(_session_store) >= settings.session_max_entries:
+                raise SessionCapacityError("Login capacity reached. Try again later.")
+        session_id = secrets.token_urlsafe(32)
+        expires_at = datetime.utcnow() + timedelta(hours=settings.session_expiry_hours)
+
+        session_data = {
+            "user_info": user_info,
+            "created_at": datetime.utcnow().isoformat(),
+            "expires_at": expires_at.isoformat(),
+        }
+
+        _session_store[session_id] = session_data
+
+        # Sign the session ID
+        serializer = get_serializer()
+        signed_session_id = serializer.dumps(session_id)
+
+        logger.debug(f"Created session {session_id[:8]}... for user {user_info.get('email', 'unknown')}")
+
+        return signed_session_id
 
 
 def get_session(session_id: str) -> Optional[Dict[str, Any]]:
     """
     Get session data by session ID
-    
+
     Args:
         session_id: Signed session ID from cookie
-        
+
     Returns:
         Session data or None if invalid/expired
     """
-    try:
-        # Verify and unsign the session ID
-        serializer = get_serializer()
-        unsigned_session_id = serializer.loads(session_id, max_age=settings.session_expiry_hours * 3600)
-    except (BadSignature, SignatureExpired) as e:
-        logger.debug(f"Invalid session signature: {e}")
-        return None
-    
-    # Get session from store
-    session_data = _session_store.get(unsigned_session_id)
-    if not session_data:
-        logger.debug(f"Session {unsigned_session_id[:8]}... not found in store")
-        return None
-    
-    # Check expiration
-    expires_at = datetime.fromisoformat(session_data["expires_at"])
-    if datetime.utcnow() > expires_at:
-        logger.debug(f"Session {unsigned_session_id[:8]}... expired")
-        _session_store.pop(unsigned_session_id, None)
-        return None
-    
-    return session_data
+    with _session_lock:
+        try:
+            # Verify and unsign the session ID
+            serializer = get_serializer()
+            unsigned_session_id = serializer.loads(session_id, max_age=settings.session_expiry_hours * 3600)
+        except (BadSignature, SignatureExpired) as e:
+            logger.debug(f"Invalid session signature: {e}")
+            return None
+
+        # Get session from store
+        session_data = _session_store.get(unsigned_session_id)
+        if not session_data:
+            logger.debug(f"Session {unsigned_session_id[:8]}... not found in store")
+            return None
+
+        # Check expiration
+        expires_at = datetime.fromisoformat(session_data["expires_at"])
+        if datetime.utcnow() > expires_at:
+            logger.debug(f"Session {unsigned_session_id[:8]}... expired")
+            _session_store.pop(unsigned_session_id, None)
+            return None
+
+        return session_data
 
 
 def delete_session(session_id: str) -> bool:
     """
     Delete a session
-    
+
     Args:
         session_id: Signed session ID from cookie
-        
+
     Returns:
         True if session was deleted, False otherwise
     """
-    try:
-        serializer = get_serializer()
-        unsigned_session_id = serializer.loads(session_id, max_age=settings.session_expiry_hours * 3600)
-    except (BadSignature, SignatureExpired):
+    with _session_lock:
+        try:
+            serializer = get_serializer()
+            unsigned_session_id = serializer.loads(session_id, max_age=settings.session_expiry_hours * 3600)
+        except (BadSignature, SignatureExpired):
+            return False
+
+        if unsigned_session_id in _session_store:
+            _session_store.pop(unsigned_session_id, None)
+            logger.debug(f"Deleted session {unsigned_session_id[:8]}...")
+            return True
+
         return False
-    
-    if unsigned_session_id in _session_store:
-        _session_store.pop(unsigned_session_id, None)
-        logger.debug(f"Deleted session {unsigned_session_id[:8]}...")
-        return True
-    
-    return False
 
 
 def get_session_from_request(request: Request) -> Optional[Dict[str, Any]]:
     """
     Get session data from request cookie
-    
+
     Args:
         request: FastAPI request object
-        
+
     Returns:
         Session data or None if not found/invalid
     """
     session_id = request.cookies.get(SESSION_COOKIE_NAME)
     if not session_id:
         return None
-    
+
     return get_session(session_id)
 
 
@@ -174,7 +195,7 @@ def set_session_cookie(
 ) -> None:
     """
     Set session cookie in response
-    
+
     Args:
         response: FastAPI response object
         session_id: Signed session ID
@@ -194,7 +215,7 @@ def set_session_cookie(
 def clear_session_cookie(response: Response, request: Optional[Request] = None) -> None:
     """
     Clear session cookie in response
-    
+
     Args:
         response: FastAPI response object
         request: Incoming request, used to decide on the Secure flag
@@ -212,22 +233,23 @@ def cleanup_expired_sessions() -> int:
     """
     Clean up expired sessions from store
     Call this periodically to prevent memory leaks
-    
+
     Returns:
         Number of sessions cleaned up
     """
-    now = datetime.utcnow()
-    expired_sessions = []
-    
-    for session_id, session_data in list(_session_store.items()):
-        expires_at = datetime.fromisoformat(session_data["expires_at"])
-        if now > expires_at:
-            expired_sessions.append(session_id)
-    
-    for session_id in expired_sessions:
-        _session_store.pop(session_id, None)
-    
-    if expired_sessions:
-        logger.debug(f"Cleaned up {len(expired_sessions)} expired sessions")
-    
-    return len(expired_sessions)
+    with _session_lock:
+        now = datetime.utcnow()
+        expired_sessions = []
+
+        for session_id, session_data in list(_session_store.items()):
+            expires_at = datetime.fromisoformat(session_data["expires_at"])
+            if now > expires_at:
+                expired_sessions.append(session_id)
+
+        for session_id in expired_sessions:
+            _session_store.pop(session_id, None)
+
+        if expired_sessions:
+            logger.debug(f"Cleaned up {len(expired_sessions)} expired sessions")
+
+        return len(expired_sessions)

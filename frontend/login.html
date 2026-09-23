@@ -151,7 +151,7 @@
                     'Authorization': `Basic ${btoa(`${username}:${password}`)}`
                 }
             });
-            return response.ok;
+            return response;
         }
 
         async function handleLogin(event) {
@@ -174,18 +174,29 @@
             if (submitBtn) submitBtn.disabled = true;
             
             try {
-                if (await startSession(username, password)) {
+                const response = await startSession(username, password);
+                if (response.ok) {
                     // Success - redirect to main app using replace to avoid loop
                     window.location.replace('/');
                 } else {
-                    throw new Error('Authentication failed');
+                    const message = response.status === 429
+                        ? 'Too many login attempts. Please try again later.'
+                        : response.status === 503
+                            ? 'Login capacity reached. Please try again later.'
+                            : response.status === 401
+                                ? 'Invalid username or password'
+                                : 'Unable to sign in. Please try again later.';
+                    const error = new Error(message);
+                    error.loginResponse = true;
+                    throw error;
                 }
             } catch (error) {
                 // Show error (always show user-friendly message for failed login)
                 if (errorDiv) {
                     errorDiv.classList.remove('hidden');
                     if (errorText) {
-                        errorText.textContent = 'Invalid username or password';
+                        errorText.textContent = error.loginResponse
+                            ? error.message : 'Unable to connect. Check your connection and try again.';
                     }
                 }
                 
@@ -226,6 +237,9 @@
                             break;
                         case 'no_token':
                             errorMessage = 'Failed to obtain access token. Please try again.';
+                            break;
+                        case 'session_capacity':
+                            errorMessage = 'Login capacity reached. Please try again later.';
                             break;
                         case 'server_error':
                             errorMessage = 'Server error during authentication. Please try again.';

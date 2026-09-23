@@ -15,6 +15,7 @@ from typing import Dict, Any
 from ..config import settings
 from ..session import (
     create_session,
+    SessionCapacityError,
     get_session_from_request,
     delete_session,
     set_session_cookie,
@@ -87,7 +88,13 @@ def create_basic_auth_session(request: Request):
         except (binascii.Error, UnicodeDecodeError, ValueError):
             pass
 
-    session_id = create_session({"username": username, "auth_method": "basic"})
+    try:
+        session_id = create_session({"username": username, "auth_method": "basic"})
+    except SessionCapacityError:
+        raise HTTPException(
+            status_code=503, detail="Login capacity reached. Try again later.",
+            headers={"Retry-After": "60"},
+        )
     response = JSONResponse(content={"authenticated": True, "auth_type": "basic"})
     set_session_cookie(response, session_id, request)
     logger.info("Basic Auth session created")
@@ -222,6 +229,8 @@ async def oauth2_callback(
         logger.info(f"OAuth2 login successful for user: {user_info.get('email', 'unknown')}")
         return response
         
+    except SessionCapacityError:
+        return _oauth_redirect("/login?error=session_capacity", state, request)
     except OAuth2ClientError as e:
         logger.error(f"OAuth2 callback error: {e}")
         return _oauth_redirect("/login?error=oauth2_error", state, request)
