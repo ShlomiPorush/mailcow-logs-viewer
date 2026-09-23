@@ -1439,8 +1439,7 @@ def get_sync_history(
 
 @router.post("/dmarc/upload")
 async def upload_report(
-    file: UploadFile = File(...),
-    db: Session = Depends(get_db)
+    file: UploadFile = File(...)
 ):
     """
     Upload and parse DMARC or TLS-RPT report file
@@ -1465,28 +1464,29 @@ async def upload_report(
                 status_code=413,
                 detail=f"File too large (max {MAX_COMPRESSED_BYTES // (1024 * 1024)} MB)"
             )
-        filename = file.filename.lower()
-        
-        # Detect file type based on extension
-        # TLS-RPT files: .json, .json.gz, .json.zip
-        is_tls_rpt = filename.endswith('.json') or filename.endswith('.json.gz') or filename.endswith('.json.zip')
-        
-        if is_tls_rpt:
-            # Process TLS-RPT report
-            return await _upload_tls_rpt_report(file_content, file.filename, db)
-        else:
-            # Process DMARC report (default)
-            return await _upload_dmarc_report(file_content, file.filename, db)
+        return await asyncio.to_thread(_upload_report_worker, file_content, file.filename)
         
     except HTTPException:
         raise
     except Exception as e:
-        db.rollback()
         logger.error(f"Error uploading report: {e}", exc_info=True)
         raise internal_error(e)
 
 
-async def _upload_dmarc_report(file_content: bytes, filename: str, db: Session):
+def _upload_report_worker(file_content: bytes, filename: str):
+    """Own parsing, persistence, rollback, and response construction in one worker."""
+    with SessionLocal() as db:
+        try:
+            name = filename.lower()
+            if name.endswith(('.json', '.json.gz', '.json.zip')):
+                return _upload_tls_rpt_report(file_content, filename, db)
+            return _upload_dmarc_report(file_content, filename, db)
+        except Exception:
+            db.rollback()
+            raise
+
+
+def _upload_dmarc_report(file_content: bytes, filename: str, db: Session):
     """Handle DMARC report upload"""
     parsed_data = parse_dmarc_file(file_content, filename)
     
@@ -1531,7 +1531,7 @@ async def _upload_dmarc_report(file_content: bytes, filename: str, db: Session):
     }
 
 
-async def _upload_tls_rpt_report(file_content: bytes, filename: str, db: Session):
+def _upload_tls_rpt_report(file_content: bytes, filename: str, db: Session):
     """Handle TLS-RPT report upload"""
     from ..services.tls_rpt_parser import parse_tls_rpt_file
     
