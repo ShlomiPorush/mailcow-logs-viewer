@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **Responsive domain lists** - Loading cached DNS results for domains and their aliases now runs outside the request loop, keeping other requests responsive during database access. [#211](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/211)
+
 - **Responsive mailbox statistics** - Summary and mailbox-list database work now runs outside the request loop. Weekly reports use the same calculations, and concurrent cache access is synchronized. [#209](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/209)
 
 - **Responsive quarantine rule testing** - Loading rules for a dry run no longer blocks other requests. Disabled-rule visibility and matching priority are preserved. [#207](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/207)

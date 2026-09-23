@@ -71,7 +71,7 @@ async def get_system_summary_data(db: Session) -> Dict[str, Any]:
     
     # 6. DNS Issues
     # /api/domains/all
-    domains_response = await get_all_domains_with_dns(db=db)
+    domains_response = await get_all_domains_with_dns()
     all_domains = domains_response.get('domains', [])
     
     issues_list = []

@@ -64,7 +64,7 @@ def test_system_summary_data_builds_with_sync_blacklist_helper(monkeypatch):
     def fake_all_mailbox_stats(**kwargs):
         return {"mailboxes": [{"username": "a@example.com", "combined_failed": 3}]}
 
-    async def fake_domains(db):
+    async def fake_domains():
         return {"domains": []}
 
     async def fake_list():
