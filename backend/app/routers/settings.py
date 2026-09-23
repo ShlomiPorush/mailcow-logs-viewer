@@ -2,6 +2,7 @@
 API endpoints for settings and system information
 Shows configuration, last import times, and background job status
 """
+import asyncio
 import logging
 import os
 import httpx
@@ -11,7 +12,7 @@ from sqlalchemy import func, desc, text, or_
 from datetime import datetime, timezone, timedelta
 from typing import Dict, Any, Optional
 
-from ..database import get_db
+from ..database import get_db, get_db_context
 from ..models import PostfixLog, RspamdLog, NetfilterLog, MessageCorrelation
 from ..config import settings, EDITABLE_SETTING_KEYS, reload_settings, Settings
 from ..config import _get_field_annotations, get_env_locked_keys
@@ -803,17 +804,14 @@ def get_health_detailed(db: Session = Depends(get_db)):
             "error": str(e)
         }
 
-async def validate_maxmind_license(db=None) -> Dict[str, Any]:
+async def validate_maxmind_license() -> Dict[str, Any]:
     """Validate MaxMind license key against MaxMind's API.
     Called on-demand only (user clicks 'Validate License' or before GeoIP download).
-    Stores the result in DB so it persists across restarts.
     """
     license_key = settings.maxmind_license_key
     
     if not license_key:
         result = {"configured": False, "valid": False, "error": None}
-        if db:
-            save_maxmind_validation_status(db, result)
         return result
     
     try:
@@ -834,9 +832,13 @@ async def validate_maxmind_license(db=None) -> Dict[str, Any]:
     except Exception:
         result = {"configured": True, "valid": False, "error": "Connection error"}
     
-    if db:
-        save_maxmind_validation_status(db, result)
     return result
+
+
+def _persist_maxmind_validation_worker(result: Dict[str, Any]) -> None:
+    """Create, use, and close the persistence session in the same worker."""
+    with get_db_context() as db:
+        save_maxmind_validation_status(db, result)
 
 
 
@@ -895,13 +897,14 @@ def trigger_geoip_download(background_tasks: BackgroundTasks):
 
 
 @router.post("/settings/maxmind/validate")
-async def validate_maxmind_license_endpoint(db: Session = Depends(get_db)):
+async def validate_maxmind_license_endpoint():
     """
     Validate MaxMind license key on-demand.
     Called when the user clicks 'Validate License' in settings.
     Persists the result to DB.
     """
-    result = await validate_maxmind_license(db=db)
+    result = await validate_maxmind_license()
+    await asyncio.to_thread(_persist_maxmind_validation_worker, result)
     return result
 
 

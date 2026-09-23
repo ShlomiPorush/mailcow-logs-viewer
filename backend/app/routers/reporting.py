@@ -3,12 +3,11 @@ API endpoints for system reports and summary
 """
 import asyncio
 import logging
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
-from sqlalchemy.orm import Session
+from fastapi import APIRouter, HTTPException, BackgroundTasks
 from datetime import datetime, timezone
 from typing import Dict, Any, List
 
-from ..database import get_db
+from ..database import get_db_context
 from ..config import settings
 from ..services.smtp_service import send_notification_email
 
@@ -22,12 +21,29 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-async def get_system_summary_data(db: Session) -> Dict[str, Any]:
+def _get_summary_statistics_worker():
+    """Materialize both database snapshots within a worker-owned session."""
+    with get_db_context() as db:
+        traffic = get_mailbox_stats_summary(date_range="7days", db=db)
+        failures = get_all_mailbox_stats(
+            date_range="7days",
+            sort_by="failure_rate",
+            sort_order="desc",
+            page=1,
+            page_size=20,
+            active_only=True,
+            hide_zero=True,
+            db=db,
+        )
+        return traffic, failures
+
+
+async def get_system_summary_data() -> Dict[str, Any]:
     """
     Aggregate system summary data using existing API endpoints logic
     """
     # 1. Traffic Stats (7 Days)
-    traffic_data = await asyncio.to_thread(get_mailbox_stats_summary, date_range="7days", db=db)
+    traffic_data, top_failures_response = await asyncio.to_thread(_get_summary_statistics_worker)
     
     # 2. System Status (Domains, Mailboxes, Aliases)
     # Using get_mailcow_info to get Active/Total counts
@@ -54,17 +70,6 @@ async def get_system_summary_data(db: Session) -> Dict[str, Any]:
 
     # 5. Top 5 Mailboxes with Failures
     # /api/mailbox-stats/all?date_range=7days&sort_by=failure_rate&sort_order=desc&page=1&page_size=5&active_only=true&hide_zero=true
-    top_failures_response = await asyncio.to_thread(
-        get_all_mailbox_stats,
-        date_range="7days",
-        sort_by="failure_rate",
-        sort_order="desc",
-        page=1,
-        page_size=20, # Fetch more to filter locally for actual failures > 0
-        active_only=True,
-        hide_zero=True,
-        db=db
-    )
     # Filter to only show mailboxes with combined_failed > 0
     raw_top_failures = top_failures_response.get('mailboxes', [])
     top_failures = [m for m in raw_top_failures if m.get('combined_failed', 0) > 0][:5]
@@ -135,16 +140,15 @@ async def get_system_summary_data(db: Session) -> Dict[str, Any]:
     }
 
 @router.get("/system/summary")
-async def get_summary_report(db: Session = Depends(get_db)):
+async def get_summary_report():
     """
     Get the weekly summary report data
     """
-    return await get_system_summary_data(db)
+    return await get_system_summary_data()
 
 @router.post("/system/summary/email")
 def send_summary_report_email(
     background_tasks: BackgroundTasks, 
-    db: Session = Depends(get_db), 
     force: bool = False
 ):
     """
@@ -154,24 +158,16 @@ def send_summary_report_email(
         return {"status": "skipped", "reason": "Weekly summary disabled"}
         
     # Run in background to not block the request
-    background_tasks.add_task(generate_and_send_email, db)
+    background_tasks.add_task(generate_and_send_email)
     return {"status": "queued", "message": "Weekly summary email generation started"}
 
-async def generate_and_send_email(db: Session = None):
+async def generate_and_send_email():
     """
     Generate and send the weekly summary email
     """
-    should_close = False
-    
-    # If no DB session provided (e.g. from scheduler), create a new one
-    if db is None:
-        from ..database import SessionLocal
-        db = SessionLocal()
-        should_close = True
-        
     try:
         # Get all data
-        data = await get_system_summary_data(db)
+        data = await get_system_summary_data()
         
         system = data['system']
         traffic = data['traffic']
@@ -446,6 +442,3 @@ async def generate_and_send_email(db: Session = None):
 
     except Exception as e:
         logger.error(f"Failed to generate/send weekly summary: {e}", exc_info=True)
-    finally:
-        if should_close:
-            db.close()
