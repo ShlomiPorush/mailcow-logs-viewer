@@ -183,7 +183,7 @@ def test_db_reload_rejects_invalid_capacity(monkeypatch, key):
     monkeypatch.setenv("SETTINGS_EDIT_VIA_UI_ENABLED", "true")
     monkeypatch.delenv(key.upper(), raising=False)
     monkeypatch.setattr("app.services.settings_store.get_config_overrides_from_db", lambda *args: {key: -1})
-    assert getattr(build_settings(object()), key) == 10000
+    assert getattr(build_settings(object()), key) == (50 if key == "session_max_entries" else 10000)
 
 
 def test_oauth_capacity_consumes_state_and_returns_specific_error(monkeypatch):

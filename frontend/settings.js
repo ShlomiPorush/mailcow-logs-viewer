@@ -302,7 +302,7 @@ var SETTINGS_FIELD_DESCRIPTIONS = {
     oauth2_use_oidc_discovery: 'Enable OIDC discovery (uses .well-known/openid-configuration). Default: true.',
     session_secret_key: 'Secret key for signing session cookies. REQUIRED if OAuth2 enabled. Generate: openssl rand -hex 32. Use a strong secret in production.',
     session_expiry_hours: 'Session expiration in hours. Default: 24.',
-    session_max_entries: 'Maximum active login sessions per process. At capacity, new logins wait until a session expires or a user signs out. Existing sessions stay signed in. Default: 10000.',
+    session_max_entries: 'Maximum active login sessions per process. At capacity, new logins wait until a session expires or a user signs out. Existing sessions stay signed in. Default: 50.',
     auth_max_failure_clients: 'Maximum client addresses tracked for failed Basic Auth attempts per process. At capacity, new addresses must wait before trying Basic Auth. Existing sessions remain usable. Default: 10000.',
     smtp_enabled: 'Enable SMTP for sending notifications (alerts, weekly summary).',
     smtp_host: 'SMTP server hostname.',

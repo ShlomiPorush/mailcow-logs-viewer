@@ -266,7 +266,7 @@ class Settings(BaseSettings):
     )
 
     session_max_entries: int = Field(
-        default=10000, ge=1,
+        default=50, ge=1,
         description="Maximum live authentication sessions per process"
     )
 
