@@ -364,7 +364,7 @@ app.mount("/static", StaticFiles(directory="/app/frontend"), name="static")
 
 
 @app.get("/login", response_class=HTMLResponse)
-async def login_page():
+def login_page():
     """Serve the login page"""
     try:
         with open("/app/frontend/login.html", "r") as f:
@@ -377,7 +377,7 @@ async def login_page():
 
 
 @app.get("/", response_class=HTMLResponse)
-async def root():
+def root():
     """Serve the main HTML page - requires authentication"""
     # Authentication is handled by middleware
     # If user reaches here, they are authenticated
@@ -459,7 +459,7 @@ async def global_exception_handler(request: Request, exc: Exception):
 # SPA catch-all route - must be AFTER all other routes and exception handlers
 # Returns index.html for all frontend routes (e.g., /dashboard, /messages, /dmarc)
 @app.get("/{full_path:path}", response_class=HTMLResponse)
-async def spa_catch_all(full_path: str):
+def spa_catch_all(full_path: str):
     """Serve the SPA for all frontend routes - enables clean URLs"""
     # API and static routes are handled by their respective routers/mounts
     # This catch-all only receives unmatched routes
