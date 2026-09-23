@@ -569,19 +569,15 @@ def _fake_client(monkeypatch, **kwargs):
 
 
 def _set_mailbox(value, frame, mailbox=SENDER):
-    from app.database import get_db_context
     from app.routers import rate_limits
-    with get_db_context() as db:
-        return asyncio.run(rate_limits.set_mailbox_limit(
-            rate_limits.MailboxLimitRequest(mailbox=mailbox, value=value, frame=frame), db=db))
+    return asyncio.run(rate_limits.set_mailbox_limit(
+        rate_limits.MailboxLimitRequest(mailbox=mailbox, value=value, frame=frame)))
 
 
 def _set_domain(value, frame, domain=DOMAIN):
-    from app.database import get_db_context
     from app.routers import rate_limits
-    with get_db_context() as db:
-        return asyncio.run(rate_limits.set_domain_limit(
-            rate_limits.DomainLimitRequest(domain=domain, value=value, frame=frame), db=db))
+    return asyncio.run(rate_limits.set_domain_limit(
+        rate_limits.DomainLimitRequest(domain=domain, value=value, frame=frame)))
 
 
 def test_setting_a_mailbox_limit_reaches_mailcow_and_updates_the_local_row(env, monkeypatch):
@@ -663,14 +659,12 @@ def test_an_unknown_domain_is_refused(env, monkeypatch):
 # name the server does not know reported back instead of failing the batch.
 
 def _bulk(value, frame, mailboxes=None, domains=None):
-    from app.database import get_db_context
     from app.routers import rate_limits
-    with get_db_context() as db:
-        return asyncio.run(rate_limits.set_limits_in_bulk(
-            rate_limits.BulkLimitRequest(
-                mailboxes=mailboxes if mailboxes is not None else [],
-                domains=domains if domains is not None else [],
-                value=value, frame=frame), db=db))
+    return asyncio.run(rate_limits.set_limits_in_bulk(
+        rate_limits.BulkLimitRequest(
+            mailboxes=mailboxes if mailboxes is not None else [],
+            domains=domains if domains is not None else [],
+            value=value, frame=frame)))
 
 
 def _limit_of(mailbox):
@@ -943,7 +937,7 @@ def test_a_reset_is_recorded_and_marked_on_the_events_row(env, monkeypatch):
     fake = _fake_client(monkeypatch)
     with get_db_context() as db:
         result = asyncio.run(rate_limits.reset_rate_limit_counter(
-            rate_limits.ReleaseRequest(rl_hash=NEWEST_HASH, user=SENDER), db=db))
+            rate_limits.ReleaseRequest(rl_hash=NEWEST_HASH, user=SENDER)))
         assert result['reset'] is True
         data = rate_limits.get_rate_limit_events(hours=168, db=db)
     group = next(g for g in data['by_sender'] if g['user'] == SENDER)
