@@ -826,12 +826,10 @@ def test_a_mailcow_failure_is_reported_not_swallowed(env, monkeypatch):
 # ---------- configured limits ----------
 
 def test_limits_lists_mailbox_and_domain_limits(env, monkeypatch):
-    from app.database import get_db_context
     from app.routers import rate_limits
     fake = _fake_client(monkeypatch)
 
-    with get_db_context() as db:
-        data = asyncio.run(rate_limits.get_configured_limits(db=db))
+    data = asyncio.run(rate_limits.get_configured_limits())
 
     mailboxes = {m['username']: m for m in data['mailboxes']}
     assert mailboxes[SENDER]['rl_value'] == 100
@@ -849,19 +847,17 @@ def test_limits_lists_mailbox_and_domain_limits(env, monkeypatch):
 def test_domain_limits_are_cached_between_requests(env, monkeypatch):
     """One mailcow round trip per domain is expensive; the page refreshes a
     lot, so a second read must not hit mailcow again."""
-    from app.database import get_db_context
     from app.routers import rate_limits
     fake = _fake_client(monkeypatch)
 
-    with get_db_context() as db:
-        asyncio.run(rate_limits.get_configured_limits(db=db))
-        first = len(fake.calls)
-        asyncio.run(rate_limits.get_configured_limits(db=db))
-        assert len(fake.calls) == first, 'second read served from the cache'
+    asyncio.run(rate_limits.get_configured_limits())
+    first = len(fake.calls)
+    asyncio.run(rate_limits.get_configured_limits())
+    assert len(fake.calls) == first, 'second read served from the cache'
 
-        rate_limits._bust_domain_limit_cache()
-        asyncio.run(rate_limits.get_configured_limits(db=db))
-        assert len(fake.calls) > first, 'busting the cache refetches'
+    rate_limits._bust_domain_limit_cache()
+    asyncio.run(rate_limits.get_configured_limits())
+    assert len(fake.calls) > first, 'busting the cache refetches'
 
 
 # ---------- feature toggle ----------

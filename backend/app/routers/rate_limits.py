@@ -13,6 +13,7 @@ Two different things can be changed here, and they are easy to confuse:
   - the COUNTER is the Redis hash a blocked sender is currently stuck behind;
     releasing it lets that sender through again without touching the limit
 """
+import asyncio
 import logging
 import re
 import time
@@ -25,7 +26,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from ..config import get_cached_active_domains
-from ..database import get_db
+from ..database import SessionLocal, get_db
 from ..mailcow_api import MailcowAPIError, mailcow_api
 from ..models import MailboxStatistics, RawServiceLog
 from ..utils import format_datetime_for_api, internal_error
@@ -177,7 +178,12 @@ def _known_domains(db: Session) -> set:
     return names
 
 
-async def _fetch_domain_limits(db: Session) -> Tuple[List[Dict[str, Any]], Optional[str]]:
+def _load_known_domains_worker() -> set:
+    with SessionLocal() as db:
+        return _known_domains(db)
+
+
+async def _fetch_domain_limits() -> Tuple[List[Dict[str, Any]], Optional[str]]:
     """Per-domain limits from mailcow, cached in-process for _DOMAIN_LIMIT_TTL."""
     now = time.monotonic()
     cached = _domain_limit_cache.get('limits')
@@ -186,7 +192,7 @@ async def _fetch_domain_limits(db: Session) -> Tuple[List[Dict[str, Any]], Optio
 
     limits: List[Dict[str, Any]] = []
     error: Optional[str] = None
-    for domain in sorted(_known_domains(db)):
+    for domain in sorted(await asyncio.to_thread(_load_known_domains_worker)):
         try:
             data = await mailcow_api.get_rl_domain(domain)
         except MailcowAPIError as e:
@@ -435,28 +441,30 @@ def get_sender_events(
     return {'user': address, 'total': int(total), 'events': events}
 
 
+def _load_configured_mailboxes_worker() -> List[Dict[str, Any]]:
+    with SessionLocal() as db:
+        try:
+            rows = db.query(MailboxStatistics).filter(
+                MailboxStatistics.active == True  # noqa: E712 - SQLAlchemy filter
+            ).order_by(MailboxStatistics.username).all()
+        except Exception as e:
+            logger.error(f"Error reading mailbox rate limits: {e}")
+            raise internal_error(e)
+
+        return [{
+            'username': row.username,
+            'domain': row.domain,
+            'rl_value': row.rl_value,
+            'rl_frame': row.rl_frame,
+            'active': bool(row.active),
+        } for row in rows]
+
+
 @router.get("/limits")
-async def get_configured_limits(db: Session = Depends(get_db)):
-    """Every active mailbox with its limit (or none), and the limit of every
-    local domain. Unlimited mailboxes are listed too - that is where a limit
-    gets added in the first place."""
-    try:
-        rows = db.query(MailboxStatistics).filter(
-            MailboxStatistics.active == True  # noqa: E712 - SQLAlchemy filter
-        ).order_by(MailboxStatistics.username).all()
-    except Exception as e:
-        logger.error(f"Error reading mailbox rate limits: {e}")
-        raise internal_error(e)
-
-    mailboxes = [{
-        'username': row.username,
-        'domain': row.domain,
-        'rl_value': row.rl_value,
-        'rl_frame': row.rl_frame,
-        'active': bool(row.active),
-    } for row in rows]
-
-    domains, domains_error = await _fetch_domain_limits(db)
+async def get_configured_limits():
+    """List active mailboxes and domain limits without blocking other requests."""
+    mailboxes = await asyncio.to_thread(_load_configured_mailboxes_worker)
+    domains, domains_error = await _fetch_domain_limits()
 
     return {
         'rw_key_configured': mailcow_api.has_rw_key,
