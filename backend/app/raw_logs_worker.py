@@ -237,7 +237,7 @@ def _page_is_history(candidates: List[tuple], stored: Dict[str, datetime],
 
 
 async def _walk(db, service: str, page_size: int, offset: int, known: Set[str],
-                boundary_before: datetime, budget: int) -> tuple:
+                boundary_before: datetime, budget: int, fetch) -> tuple:
     """Page deeper from `offset` until a page is entirely rows stored before
     `boundary_before`, or the end of mailcow's list, or `budget` pages.
 
@@ -254,7 +254,7 @@ async def _walk(db, service: str, page_size: int, offset: int, known: Set[str],
     pages = 0
     while pages < budget:
         try:
-            page = await mailcow_api.get_raw_logs_range(service, offset, page_size)
+            page = await fetch('get_raw_logs_range', service, offset, page_size)
         except MailcowAPIError as e:
             logger.warning(f"[RAW LOGS] {service}: range fetch at {offset} failed, "
                            f"resuming there next cycle: {e}")
@@ -276,6 +276,28 @@ async def _walk(db, service: str, page_size: int, offset: int, known: Set[str],
 
 
 async def _collect_service(service: str, page_size: int) -> tuple:
+    """Keep the transaction on a worker and pooled HTTP on the application loop."""
+    return await asyncio.to_thread(
+        _collect_service_worker, service, page_size, asyncio.get_running_loop()
+    )
+
+
+def _collect_service_worker(service: str, page_size: int, request_loop) -> tuple:
+    async def fetch(method, *args, **kwargs):
+        # Reuse the application's persistent HTTP client across polling cycles.
+        # Only database work and response preparation belong to the worker loop.
+        future = asyncio.run_coroutine_threadsafe(
+            getattr(mailcow_api, method)(*args, **kwargs), request_loop
+        )
+        try:
+            return await asyncio.wrap_future(future)
+        finally:
+            if not future.done():
+                future.cancel()
+    return asyncio.run(_collect_service_in_worker(service, page_size, fetch))
+
+
+async def _collect_service_in_worker(service: str, page_size: int, fetch) -> tuple:
     """Fetch and store one service for this cycle.
 
     Returns (head_entries, deeper_entries, pages, pending_state); head_entries
@@ -289,7 +311,7 @@ async def _collect_service(service: str, page_size: int) -> tuple:
     caller's commit (None to clear). It is returned rather than written here so
     a failed commit leaves the previous resume position in place.
     """
-    logs = await mailcow_api.get_raw_logs(service, count=page_size)
+    logs = await fetch('get_raw_logs', service, count=page_size)
     if logs is None:
         return (None, [], 0, _catchup_state.get(service))
     if not logs:
@@ -321,7 +343,7 @@ async def _collect_service(service: str, page_size: int) -> tuple:
                 # cycle's head were never requested: close that gap first, from
                 # just below the head, stopping at rows stored before this cycle.
                 gap, used, rest, _ = await _walk(db, service, page_size, page_size, known,
-                                                 cycle_started, budget)
+                                                 cycle_started, budget, fetch)
                 deeper.extend(gap)
                 pages += used
                 budget -= used
@@ -344,7 +366,7 @@ async def _collect_service(service: str, page_size: int) -> tuple:
                         f"overlap - paging deeper to close the gap"
                     )
                 found, used, rest, empty_at = await _walk(db, service, page_size, offset, known,
-                                                          started_at, budget)
+                                                          started_at, budget, fetch)
                 deeper.extend(found)
                 pages += used
                 if rest is None:
@@ -461,6 +483,11 @@ async def fetch_raw_service_logs():
 
 async def _broadcast_service_counts():
     """Query DB for per-service log counts and broadcast to all WS clients."""
+    counts = await asyncio.to_thread(_load_service_counts)
+    await _ws_broadcast_all_fn({"type": "service_counts", "counts": counts})
+
+
+def _load_service_counts():
     from sqlalchemy import func
     
     with get_db_context() as db:
@@ -469,15 +496,15 @@ async def _broadcast_service_counts():
             func.count(RawServiceLog.id)
         ).group_by(RawServiceLog.service).all()
     
-    counts = {row[0]: row[1] for row in rows}
-    
-    await _ws_broadcast_all_fn({
-        "type": "service_counts",
-        "counts": counts,
-    })
+    return {row[0]: row[1] for row in rows}
 
 
 async def cleanup_raw_service_logs():
+    """Run raw-log retention and its session cleanup outside the event loop."""
+    await asyncio.to_thread(_cleanup_raw_service_logs_worker)
+
+
+def _cleanup_raw_service_logs_worker():
     """
     Daily cleanup job - removes raw logs older than RAW_LOGS_RETENTION_DAYS.
     Runs at 3:00 AM (offset from main cleanup at 2:00 AM).

@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **Responsive background maintenance** - Raw-log collection, counts and retention, stale DMARC sync cleanup, and GeoIP reader reloads now keep blocking work outside the request loop. Raw-log catch-up state and WebSocket delivery are preserved. [#232](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/232)
+
 - **Responsive report uploads** - DMARC and TLS-RPT uploads now parse and save reports outside the request loop, keeping other requests responsive during processing. File limits, duplicate handling, and report results are unchanged. [#227](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/227)
 
 - **Responsive DMARC domain overviews** - Reading cached DNS results and report statistics now runs outside the request loop. Database connections close before live DNS lookups, keeping other requests responsive during database waits. [#225](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/225)
