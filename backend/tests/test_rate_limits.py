@@ -766,7 +766,8 @@ def test_a_bulk_mailcow_failure_leaves_the_local_rows_alone(env, monkeypatch):
         _bulk(777, 'd', mailboxes=[SENDER, QUIET], domains=[DOMAIN])
 
     assert exc.value.status_code == 502
-    assert 'API returned status 500' in str(exc.value.detail)
+    assert 'API returned status 500' not in str(exc.value.detail)
+    assert 'mailcow did not apply the change' in str(exc.value.detail)
     assert _limit_of(SENDER) == (100, 'm'), 'the seeded limit is untouched'
     assert _limit_of(QUIET) == (None, None)
 
@@ -814,7 +815,8 @@ def test_a_mailcow_failure_is_reported_not_swallowed(env, monkeypatch):
     with pytest.raises(HTTPException) as exc:
         _set_mailbox(10, 'm')
     assert exc.value.status_code == 502
-    assert 'API returned status 500' in str(exc.value.detail)
+    assert 'API returned status 500' not in str(exc.value.detail)
+    assert 'mailcow did not apply the change' in str(exc.value.detail)
 
 
 # ---------- configured limits ----------
@@ -1141,4 +1143,3 @@ def test_a_cleanup_failure_never_reaches_the_caller(monkeypatch):
 
     scheduler.cleanup_disabled_feature_data(_Session())
     assert rolled_back, 'the caller session must be left usable'
-

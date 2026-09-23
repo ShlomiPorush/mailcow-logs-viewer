@@ -549,7 +549,8 @@ def _import_suppressions_worker(content: bytes):
                 accepted_emails.add(email)
                 imported += 1
             except Exception as e:
-                errors_list.append(f"Row {row_num}: {str(e)}")
+                logger.error("Suppression import failed on row %s: %s", row_num, e)
+                errors_list.append(f"Row {row_num}: Import failed. Check the application logs.")
 
         db.commit()
 

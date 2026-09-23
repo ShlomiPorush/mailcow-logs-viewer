@@ -129,7 +129,7 @@ async def check_blacklists(
             "error_count": 1,
             "timeout_count": 0,
             "status": "error",
-            "error": str(e),
+            "error": "Unable to check blacklists. Check the application logs.",
             "results": []
         }
 

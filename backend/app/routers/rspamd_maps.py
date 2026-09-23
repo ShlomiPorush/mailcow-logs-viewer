@@ -260,7 +260,7 @@ async def list_rspamd_maps():
         logger.error(f"Failed to list Rspamd maps: {e}")
         return {
             "configured": True,
-            "error": str(e),
+            "error": "Unable to load Rspamd maps. Check the application logs.",
             "maps": RSPAMD_MAPS,
         }
 

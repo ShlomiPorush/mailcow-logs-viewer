@@ -137,7 +137,7 @@ def get_dashboard_stats(db: Session = Depends(get_db)):
     except Exception as e:
         logger.error(f"Error fetching dashboard stats: {e}")
         return {
-            "error": str(e),
+            "error": "Unable to load statistics. Check the application logs.",
             "messages": {"24h": 0, "7d": 0, "30d": 0},
             "blocked": {"24h": 0, "7d": 0, "percentage_24h": 0},
             "deferred": {"24h": 0, "7d": 0},
@@ -184,7 +184,7 @@ def get_timeline_stats(
         }
     except Exception as e:
         logger.error(f"Error fetching timeline stats: {e}")
-        return {"timeline": [], "error": str(e)}
+        return {"timeline": [], "error": "Unable to load statistics. Check the application logs."}
 
 
 @router.get("/stats/top-spam-triggers")
@@ -228,7 +228,7 @@ def get_top_spam_triggers(
         }
     except Exception as e:
         logger.error(f"Error fetching spam triggers: {e}")
-        return {"triggers": [], "error": str(e)}
+        return {"triggers": [], "error": "Unable to load statistics. Check the application logs."}
 
 
 @router.get("/stats/top-blocked-ips")
@@ -266,7 +266,7 @@ def get_top_blocked_ips(
         }
     except Exception as e:
         logger.error(f"Error fetching blocked IPs: {e}")
-        return {"blocked_ips": [], "error": str(e)}
+        return {"blocked_ips": [], "error": "Unable to load statistics. Check the application logs."}
 
 
 @router.get("/stats/recent-activity")
@@ -298,4 +298,4 @@ def get_recent_activity(
         }
     except Exception as e:
         logger.error(f"Error fetching recent activity: {e}")
-        return {"activity": [], "error": str(e)}
+        return {"activity": [], "error": "Unable to load statistics. Check the application logs."}

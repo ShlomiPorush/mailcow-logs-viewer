@@ -148,7 +148,8 @@ async def get_containers_status():
     try:
         return await _get_containers_status_internal()
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to fetch container status: {str(e)}")
+        logger.error("Failed to fetch container status: %s", e)
+        raise HTTPException(status_code=500, detail="Failed to fetch container status. Check the application logs.")
 
 
 @router.get("/status/storage")
@@ -176,7 +177,7 @@ async def get_storage_status():
         
     except Exception as e:
         logger.error(f"Error fetching storage status: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Failed to fetch storage status: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to fetch storage status. Check the application logs.")
 
 @router.get("/status/version")
 async def get_version_status(force: bool = Query(False, description="Force a fresh version check")):
@@ -309,7 +310,7 @@ async def get_app_version_status(force: bool = Query(False, description="Force a
             "update_available": False,
             "changelog": None,
             "last_checked": None,
-            "error": str(e)
+            "error": "Unable to load system status. Check the application logs."
         }
 
 
@@ -367,7 +368,7 @@ async def get_mailcow_connection_status():
         return {
             "connected": False,
             "timestamp": datetime.utcnow().isoformat(),
-            "error": str(e)
+            "error": "Unable to load system status. Check the application logs."
         }
 
 
@@ -404,7 +405,7 @@ async def get_app_version_changelog(version: str):
         logger.error(f"Failed to fetch changelog for version {version}: {e}")
         return {
             "version": version,
-            "changelog": f"Failed to fetch changelog: {str(e)}"
+            "changelog": "Failed to fetch changelog. Check the application logs."
         }
 
 
@@ -472,4 +473,4 @@ def get_container_logs(lines: int = Query(100, ge=10, le=1000, description="Numb
         
     except Exception as e:
         logger.error(f"Error reading container logs: {e}")
-        return {"logs": [f"Error reading logs: {str(e)}"]}
+        return {"logs": ["Error reading logs. Check the container output."]}
