@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **Duplicate addresses in suppression imports** - Repeated addresses or domains within one CSV are now skipped instead of failing the entire import. The first occurrence is kept, including when later entries differ only in letter case or surrounding spaces. [#220](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/220)
+
 - **Responsive container status** - Container status and dashboard refreshes now update the known-container cache outside the request loop, preserving missing-container tracking and fallback behavior. [#213](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/213)
 
 - **Responsive domain lists** - Loading cached DNS results for domains and their aliases now runs outside the request loop, keeping other requests responsive during database access. [#211](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/211)
