@@ -11,7 +11,7 @@ import pytest
 from fastapi import FastAPI
 from sqlalchemy import create_engine, event, text
 from sqlalchemy.orm import Session
-from starlette.requests import ClientDisconnect
+from starlette.requests import ClientDisconnect, Request
 
 from app.database import Base, engine, get_db
 from app.models import PostfixLog, RspamdLog, NetfilterLog, MessageCorrelation, SpamSuppression
@@ -76,6 +76,8 @@ def test_exports_fetch_bounded_batches(isolated_engine, model, endpoint):
     try:
         with Session(isolated_engine) as db:
             kwargs = {name: None for name in inspect.signature(endpoint).parameters if name != "db"}
+            if "request" in kwargs:
+                kwargs["request"] = Request({"type": "http", "method": "GET"})
             response = endpoint(db=db, **kwargs)
             assert 0 < len(loaded) <= 500, "export loaded all source records before streaming"
             async def consume():
