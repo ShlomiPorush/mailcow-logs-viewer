@@ -2,7 +2,7 @@
 API endpoints for exporting logs to CSV
 """
 import logging
-from fastapi import APIRouter, Depends, Query, HTTPException
+from fastapi import APIRouter, Depends, Query, HTTPException, Request
 from sqlalchemy.orm import Session, load_only
 from sqlalchemy import or_, and_, desc
 from datetime import datetime
@@ -18,8 +18,10 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+@router.head("/export/postfix/csv", include_in_schema=False)
 @router.get("/export/postfix/csv")
 def export_postfix_csv(
+    request: Request,
     search: Optional[str] = Query(None),
     sender: Optional[str] = Query(None),
     recipient: Optional[str] = Query(None),
@@ -88,7 +90,8 @@ def export_postfix_csv(
         )
         
         return csv_download(
-            data, f"postfix_logs_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+            data, f"postfix_logs_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+            head_only=request.method == "HEAD",
         )
     except HTTPException:
         raise
@@ -97,8 +100,10 @@ def export_postfix_csv(
         raise internal_error(e)
 
 
+@router.head("/export/rspamd/csv", include_in_schema=False)
 @router.get("/export/rspamd/csv")
 def export_rspamd_csv(
+    request: Request,
     search: Optional[str] = Query(None),
     sender: Optional[str] = Query(None),
     direction: Optional[str] = Query(None),
@@ -177,7 +182,8 @@ def export_rspamd_csv(
         )
         
         return csv_download(
-            data, f"rspamd_logs_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+            data, f"rspamd_logs_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+            head_only=request.method == "HEAD",
         )
     except HTTPException:
         raise
@@ -186,8 +192,10 @@ def export_rspamd_csv(
         raise internal_error(e)
 
 
+@router.head("/export/netfilter/csv", include_in_schema=False)
 @router.get("/export/netfilter/csv")
 def export_netfilter_csv(
+    request: Request,
     search: Optional[str] = Query(None),
     ip: Optional[str] = Query(None),
     username: Optional[str] = Query(None),
@@ -247,7 +255,8 @@ def export_netfilter_csv(
         )
         
         return csv_download(
-            data, f"netfilter_logs_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+            data, f"netfilter_logs_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+            head_only=request.method == "HEAD",
         )
     except HTTPException:
         raise
@@ -256,8 +265,10 @@ def export_netfilter_csv(
         raise internal_error(e)
 
 
+@router.head("/export/messages/csv", include_in_schema=False)
 @router.get("/export/messages/csv")
 def export_messages_csv(
+    request: Request,
     search: Optional[str] = Query(None),
     sender: Optional[str] = Query(None),
     recipient: Optional[str] = Query(None),
@@ -342,7 +353,8 @@ def export_messages_csv(
                 }
 
         return csv_download(
-            rows(), f"messages_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+            rows(), f"messages_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+            head_only=request.method == "HEAD",
         )
     except HTTPException:
         raise

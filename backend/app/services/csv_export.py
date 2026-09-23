@@ -5,7 +5,7 @@ import math
 import unicodedata
 from itertools import chain
 from fastapi import Depends, HTTPException
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 
 from ..database import get_db
 
@@ -96,7 +96,14 @@ def _iter_csv_chunks(rows, columns, escape_metadata):
             yield _drain_csv_buffer(output)
 
 
-def csv_download(rows, filename: str, columns=None, *, escape_metadata=False):
+def csv_download(rows, filename: str, columns=None, *, escape_metadata=False, head_only=False):
+    headers = {"Content-Disposition": f"attachment; filename={filename}"}
+    if head_only:
+        # Routes have already validated filters and checked for an initial row.
+        # No CSV serialization or remaining cursor consumption is needed.
+        response = Response(media_type="text/csv", headers=headers)
+        del response.headers["content-length"]
+        return response
     if columns is None:
         rows = iter(rows)
         first = next(rows)
@@ -106,5 +113,5 @@ def csv_download(rows, filename: str, columns=None, *, escape_metadata=False):
         columns = list(columns)
     return StreamingResponse(
         _iter_csv_chunks(rows, columns, escape_metadata), media_type="text/csv",
-        headers={"Content-Disposition": f"attachment; filename={filename}"},
+        headers=headers,
     )

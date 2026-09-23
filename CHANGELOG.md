@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Responsive background maintenance** - Raw-log collection, counts and retention, stale DMARC sync cleanup, and GeoIP reader reloads now keep blocking work outside the request loop. Raw-log catch-up state and WebSocket delivery are preserved. [#232](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/232)
 - **Bounded authentication memory** - Session and failed-login client storage now have configurable limits in Authentication settings. Existing sessions stay signed in when storage is full, and new logins show a temporary capacity message. [#229](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/229)
+- **Streamed browser CSV downloads** - Log exports now save through the browser download manager without first buffering the entire file in the page. Filters and sign-in are checked before the download starts. [#230](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/230)
 
 - **Responsive report uploads** - DMARC and TLS-RPT uploads now parse and save reports outside the request loop, keeping other requests responsive during processing. File limits, duplicate handling, and report results are unchanged. [#227](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/227)
 
