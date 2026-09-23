@@ -479,6 +479,7 @@ def _import_suppressions_worker(content: bytes):
         skipped = 0
         errors_list = []
 
+        accepted_emails = set()
         headers = None
         for row_num, row in enumerate(reader, 1):
             if not row:
@@ -518,6 +519,11 @@ def _import_suppressions_worker(content: bytes):
                 errors_list.append(f"Row {row_num}: empty email")
                 continue
 
+            # Pending rows are invisible to queries because autoflush is disabled.
+            if email in accepted_emails:
+                skipped += 1
+                continue
+
             # Check for duplicate
             existing = db.query(SpamSuppression).filter(SpamSuppression.email == email).first()
             if existing:
@@ -539,6 +545,7 @@ def _import_suppressions_worker(content: bytes):
                     expires_at=None,
                 )
                 db.add(suppression)
+                accepted_emails.add(email)
                 imported += 1
             except Exception as e:
                 errors_list.append(f"Row {row_num}: {str(e)}")
