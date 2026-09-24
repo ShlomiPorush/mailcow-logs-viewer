@@ -7,137 +7,87 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-- **Private API error details** - Mailbox statistics and related API error responses now keep internal exception details in server diagnostics instead of returning them to the browser. Settings validation identifies invalid fields without exposing their values. [#243](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/243)
+### Added
 
-- **Reachable system summary API** - The documented system summary and summary email endpoints are now registered. Reading a summary returns JSON instead of the application page, and sending a summary retains authentication and the existing weekly-summary setting. [#237](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/237)
-
-- **Responsive summary and settings requests** - Weekly summaries and MaxMind validation now create and close database sessions inside workers. Serving application HTML also keeps file reads outside the request loop. [#231](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/231)
-
-- **Maintainable message correlation** - Message correlation creation, completion, expiry and late-delivery reconciliation now live in a dedicated service. Scheduled jobs and delivery outcomes remain unchanged. [#235](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/235)
-
-- **Responsive background maintenance** - Raw-log collection, counts and retention, stale DMARC sync cleanup, and GeoIP reader reloads now keep blocking work outside the request loop. Raw-log catch-up state and WebSocket delivery are preserved. [#232](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/232)
-- **Bounded authentication memory** - Session and failed-login client storage now have configurable limits in Authentication settings. Existing sessions stay signed in when storage is full, and new logins show a temporary capacity message. [#229](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/229)
-- **Streamed browser CSV downloads** - Log exports now save through the browser download manager without first buffering the entire file in the page. Filters and sign-in are checked before the download starts. [#230](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/230)
-- **Message details maintenance** - Message details now live in a dedicated frontend module, making future fixes easier to isolate. Tabs, delivery history, log filters, and existing actions are unchanged. [#233](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/233)
-
-- **Responsive report uploads** - DMARC and TLS-RPT uploads now parse and save reports outside the request loop, keeping other requests responsive during processing. File limits, duplicate handling, and report results are unchanged. [#227](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/227)
-
-- **Responsive DMARC domain overviews** - Reading cached DNS results and report statistics now runs outside the request loop. Database connections close before live DNS lookups, keeping other requests responsive during database waits. [#225](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/225)
-
-- **Responsive manual suppressions** - Adding or reactivating a suppression now saves it outside the request loop, then closes its database connection before queue cleanup. [#223](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/223)
-
-- **Duplicate addresses in suppression imports** - Repeated addresses or domains within one CSV are now skipped instead of failing the entire import. The first occurrence is kept, including when later entries differ only in letter case or surrounding spaces. [#220](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/220)
-
-- **Responsive container status** - Container status and dashboard refreshes now update the known-container cache outside the request loop, preserving missing-container tracking and fallback behavior. [#213](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/213)
-
-- **Responsive domain lists** - Loading cached DNS results for domains and their aliases now runs outside the request loop, keeping other requests responsive during database access. [#211](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/211)
-
-- **Responsive mailbox statistics** - Summary and mailbox-list database work now runs outside the request loop. Weekly reports use the same calculations, and concurrent cache access is synchronized. [#209](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/209)
-
-- **Responsive quarantine rule testing** - Loading rules for a dry run no longer blocks other requests. Disabled-rule visibility and matching priority are preserved. [#207](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/207)
-
-- **Responsive quarantine rules** - Automatic quarantine rule matching and action-log storage now run outside the request loop, preserving action priority, limits and retention. [#205](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/205)
-
-- **Responsive blacklist scans** - Loading monitored hosts, reading cached checks and saving scan results now run outside the request loop, keeping other requests responsive during database work. [#203](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/203)
-
-- **Responsive suppression synchronization** - Manual and background Rspamd map synchronization no longer block other requests during database work. Existing map contents and unchanged-content write checks are preserved. [#201](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/201)
-
-- **Responsive deferred queue cleanup** - Saving recipient suppressions no longer blocks other requests while deferred messages are cleaned up. [#199](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/199)
-
-- **Responsive bounce detection** - Scan and save automatically detected suppressions in a background worker. Database sessions now close before Rspamd synchronization and queue cleanup, while existing bounce rules are preserved. Issue: [#197](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/197).
-
-- **Responsive manual DNS checks** - Save results and load alias mappings outside the request event loop when checking one or all domains. Manual and background checks share the same worker-owned persistence, preserving responses and notification ordering. Issue: [#195](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/195).
-
-- **Responsive background DNS checks** - Save background DNS results in a worker so database delays do not hold up other requests. DNS-change notifications still follow a successful commit, and failed domains do not stop the remaining checks. Issue: [#193](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/193).
-
-- **Responsive monitored-host synchronization** - Save monitored hosts in a background worker so database work does not delay other requests. Source discovery, activation tracking and the subsequent blacklist check retain their existing behavior. Issue: [#191](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/191).
-
-- **Responsive GeoIP status updates** - Save GeoIP license status in a background worker so database delays do not hold up other requests after an update. Download and reader-reload behavior is unchanged. Issue: [#189](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/189).
-
-- **Responsive alias synchronization** - Process alias statistics in a background worker so database work does not delay other requests. Forwarding targets, catch-all flags and inactive-alias tracking retain their existing behavior. Issue: [#187](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/187).
-
-- **Responsive mailbox synchronization** - Process mailbox statistics in a background worker so database work does not delay other requests. Quotas, rate limits and inactive-mailbox tracking retain their existing behavior. Issue: [#185](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/185).
-
-- **Responsive domain synchronization** - Save alias-domain mappings in a background worker so database delays do not hold up other requests. Domain discovery and cache updates retain their existing behavior. Issue: [#183](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/183).
-
-- **Responsive Rspamd imports** - Process Rspamd history pages, GeoIP enrichment and database writes in a background worker while API pagination stays asynchronous. Spam fields, blacklist cleanup, duplicate detection and resume offsets are preserved. Issue: [#181](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/181).
-
-- **Responsive Postfix imports** - Process each Postfix log page and its message-status updates in a background worker while API pagination remains asynchronous. Resume offsets, blacklist cleanup and duplicate detection are preserved. Issue: [#179](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/179).
-
-- **Responsive Netfilter imports** - Keep Netfilter API requests asynchronous while parsing, GeoIP enrichment and database writes run in a background worker. Overlapping batches are serialized to preserve duplicate detection. Issue: [#177](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/177).
-
-- **Responsive Dovecot delivery updates** - Process stored Dovecot delivery events in a background worker, preserving delivery verdicts and retries without blocking other requests. Overlapping runs are serialized to protect pending events and the saved progress marker. Issue: [#175](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/175).
-
-- **Responsive message correlation** - Build Rspamd/Postfix message correlations in a background worker so database work does not block other requests. BCC cleanup still finishes first; blacklist handling, delivery-leg ownership and batch limits are preserved. Issue: [#173](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/173).
-
-- **Responsive correlation completion** - Complete messages with late Postfix logs in a background worker, keeping database work off the request event loop. Queue ownership, status rules, age limits and batch size remain unchanged. Issue: [#171](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/171).
-
-- **Responsive late message status updates** - Run database work for late Postfix status updates in a background worker so it does not block other requests. Status priorities, correlation age limits and batch size remain unchanged. Issue: [#169](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/169).
-
-- **Lighter suppression expiry** - Deactivate expired spam suppressions with one database update in a background worker, keeping other requests responsive. Expiry boundaries and pending Rspamd synchronization remain unchanged. Issue: [#167](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/167).
-
-- **Bounded database reads for CSV downloads** - Fetch export data in batches instead of loading every matching record before sending the file. Message exports include related spam data in the same query. Existing filters, limits, empty-result behavior and CSV formatting are preserved, and database sessions close when downloads finish or disconnect. Issue: [#165](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/165).
-
-- **Lighter CSV database queries** - Load only fields used by CSV downloads, leaving raw log payloads and other unused columns in the database. Export fields, filtering, ordering and limits remain unchanged. Issue: [#163](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/163).
-
-- **Lighter correlation expiry** - Expire old incomplete message correlations with one database update in a background worker, instead of loading and updating every match on the request event loop. Age boundaries, completed correlations and Dovecot discard outcomes are preserved. Issue: [#161](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/161).
-
-- **Lower CSV row preparation memory usage** - Format export rows as the download is written instead of building a second full list of dictionaries. CSV fields, Unicode support, formula protection and suppression re-import remain unchanged. Database results are still loaded before streaming. Issue: [#159](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/159).
-
-- **Responsive BCC queue cleanup** - Run blacklist cleanup before message correlation in the scheduler worker pool so slow database operations do not block unrelated requests. Cleanup rules and the order of correlation steps remain unchanged. Issue: [#157](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/157).
-
-- **Paged report management** - Browse DMARC and TLS report history 50 reports at a time, with page controls and a total count. Existing API calls without a page remain supported. Issue: [#155](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/155).
-
-- **Lighter report management queries** - Load only the summary columns needed by the report list, leaving raw XML/JSON report bodies in the database. Counts, ordering and response fields remain unchanged. Issue: [#153](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/153).
-
-- **Fewer report management queries** - Fetch DMARC and TLS report counts in two queries instead of one extra query per report. Reports with no records remain visible, and response fields and ordering stay unchanged. Issue: [#151](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/151).
-
-- **Lower CSV serialization memory usage** - Write CSV downloads in chunks instead of building full text and byte copies before sending them. Unicode support, formula protection and suppression re-import remain unchanged. Source rows are still loaded before serialization. Issue: [#149](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/149).
-
-- **Responsive retention cleanup** - Run log and DMARC/TLS retention cleanup in the configured scheduler worker pool so database deletes do not block the event loop. Retention periods and deletion rules stay unchanged. Issue: [#147](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/147).
-
-- **Responsive requests during database health checks** - Run the synchronous health probe in a worker thread so a slow database does not block unrelated requests on the event loop. Issue: [#145](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/145).
-
-- **Responsive live-log broadcasts** - Send updates to viewers independently, disconnect stalled clients after a bounded wait, and preserve message ordering during concurrent broadcasts and service changes. Issue: [#143](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/143).
-
-- **Expired login data cleanup** - Reclaim expired sessions, old failed-login counters and abandoned OAuth states every minute, including when clients never return. Active logins and current rate limits are preserved. Issue: [#141](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/141).
-
-- **Accurate database health status** - Return HTTP 503 when the database health check fails so Docker and external monitors can detect the outage. The healthy response remains HTTP 200. Issue: [#139](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/139).
-
-- **Multilingual CSV downloads** - Add a UTF-8 BOM to all CSV exports so spreadsheet applications can recognize non-English text. Issue: [#137](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/137).
+- **Rate Limits** - View sending activity and per-sender history, edit mailbox and domain limits individually or in bulk, and reset counters with an audit trail. Works independently of Mailbox Stats.
+- **MTA-STS checks** - Validate domain records, policy files and MX coverage, with DNS change alerts. [#83](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/83). Thanks to [@q16marvin](https://github.com/q16marvin).
+- **Sieve delivery outcomes** - Show discarded messages, destination folders, forwards and rejection reasons in message details. Requires the `dovecot` raw log service. [#65](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/65). Thanks to [@mrclschstr](https://github.com/mrclschstr) and [@Meeppoo](https://github.com/Meeppoo).
+- **Alias domains** - Count alias traffic toward target mailboxes and check alias-domain DNS records. [#92](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/92). Thanks to [@Neocridas](https://github.com/Neocridas).
+- Add pagination and total counts to DMARC and TLS report management. [#155](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/155)
 
 ### Security
 
-- **CSV downloads treat formula-like text as text** ([#137](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/137)) - protect all log and suppression exports without changing stored data or negative numeric scores. Downloads omit empty filters and show request errors instead of saving them as CSV. Suppression exports include an escape marker so importing them restores the original addresses and notes; older CSV files remain supported. Thanks to [@ShlomiPorush](https://github.com/ShlomiPorush)
+- **OAuth browser binding** - Login callbacks require the browser that started the flow; attempts expire after ten minutes and are single-use. [#135](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/135). Thanks to [@ShlomiPorush](https://github.com/ShlomiPorush).
+- **Consistent login limits** - Password checks share a failure counter and honor trusted-proxy settings; use `FORWARDED_ALLOW_IPS` for per-client limits behind a trusted proxy. [#130](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/130). Thanks to [@ShlomiPorush](https://github.com/ShlomiPorush).
+- **Safer CSV exports** - Treat formula-like values as text while preserving numeric scores and suppression re-import compatibility. [#137](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/137). Thanks to [@ShlomiPorush](https://github.com/ShlomiPorush).
+- **Safer report uploads** - Update request parsing to reject oversized text fields and avoid blocking during temporary-file handling. [#133](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/133). Thanks to [@ShlomiPorush](https://github.com/ShlomiPorush).
+- **Precise suppression matching** - Anchor and escape recipient patterns so suppressing one address cannot block others; existing maps migrate automatically.
+- Add configurable session and failed-login storage limits without evicting active sessions. [#229](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/229)
+- Hide internal exception details in API errors and sensitive values in settings validation. [#243](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/243)
 
-- **OAuth login stays in the browser that started it** ([#135](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/135)) - callbacks now require a matching temporary browser cookie and expire after ten minutes. Login attempts are single-use, including failed callbacks, and concurrent tabs remain supported. Restart an expired login from the login page. Thanks to [@ShlomiPorush](https://github.com/ShlomiPorush)
+### Performance
 
-- **Safer report upload parsing** ([#133](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/133)) - update the web framework and form parser to reject oversized text fields and move temporary-file rollover off the request loop. Normal file uploads retain their existing limits. Thanks to [@ShlomiPorush](https://github.com/ShlomiPorush)
+- **More responsive requests** - Move blocking database and file work into workers across imports, statistics, DNS checks, suppressions and maintenance.
+- **Lower export memory use** - Read, prepare and serialize CSV data incrementally.
+- Download CSV files through the browser without buffering the entire file in memory. [#230](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/230)
 
-- **Login attempt limits apply consistently** ([#130](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/130)) - password checks share one failure counter, and client addresses follow the server's trusted-proxy configuration. Direct access and existing sessions continue to work without new settings. Users behind an untrusted proxy share its counter; see the optional `FORWARDED_ALLOW_IPS` setting in the environment guide for per-client limits. Thanks to [@ShlomiPorush](https://github.com/ShlomiPorush)
+### Fixes and maintenance
 
-### Added
-
-- **MTA-STS check on the Domains page** ([#83](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/83)) - validates each domain's `_mta-sts` DNS record, policy file and MX coverage, wired into the existing DNS change alerts. Thanks to [@q16marvin](https://github.com/q16marvin)
-- **Sieve discards show "Discarded" instead of a false "Delivered"** ([#65](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/65)) - Dovecot LMTP lines are correlated into each message, and the dialog shows the mailbox outcome (folder, forward, reject reason). Requires the `dovecot` raw log service. Thanks to [@mrclschstr](https://github.com/mrclschstr) and [@Meeppoo](https://github.com/Meeppoo)
-- **mailcow alias domains are recognized** ([#92](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/92)) - alias traffic counts toward the target mailbox in Mailbox Statistics, and alias domains get their own DNS checks. Thanks to [@Neocridas](https://github.com/Neocridas)
-- **Rate Limits view** - who is hitting mailcow's sending limits (activity chart, per-sender history), one-click counter reset with an audit badge, and every mailbox and domain limit viewable and editable, including a bulk apply on the filtered selection. Feature id `rate-limits`, works independently of Mailbox Stats
-- **DMARC page shows a loading state** on its first load, and slow requests are logged for diagnosis
-
-### Changed
-
-- **Disabling Mailbox Stats or Rate Limits now removes their leftover data** - alias statistics, the counter-reset audit, and the shared mailbox table once both are off
-
-### Fixed
-
-- **A suppressed address could block innocent recipients** - suppression map entries were compiled as unanchored regexes, so suppressing e@example.com also rejected every address containing it. Entries are now anchored and escaped, and existing maps migrate automatically
-- **Dashboard message timeline was silently empty** - an invalid query expression made the endpoint always fail. Spotted in [@Meeppoo](https://github.com/Meeppoo)'s branch for #65
-- **Mail from outside between two hosted domains was mislabeled "internal"** - internal now also requires a local origin
-- **Live Logs could miss lines during a burst or after downtime** - the collector now pages deeper until it reaches lines it already has, instead of only taking the newest 1000
-- **A forwarded message hid the delivery it came from** ([#36](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/36)) - every delivery of a message is now tracked on its own, and the dialog links the related deliveries. Thanks to [@piperino721](https://github.com/piperino721)
-- **Mailbox Statistics counted a forwarded message several times** ([#36](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/36)) - a message now counts once per mailbox, by its most successful delivery
-- **A message that was deferred and then delivered kept showing "Deferred"** ([#114](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/114)) - late delivery logs now refresh the message whenever they arrive
-
+- Show a loading state on the first DMARC page load and log slow requests for diagnosis.
+- Remove leftover Mailbox Stats and Rate Limits data when disabled, preserving shared data while either feature needs it.
+- Restore the dashboard message timeline. Thanks to [@Meeppoo](https://github.com/Meeppoo) for spotting it in the #65 branch.
+- Classify mail between hosted domains as internal only when it also has a local origin.
+- Catch up on live-log bursts and downtime by paging beyond the newest 1,000 lines.
+- Track forwarded deliveries separately and link related deliveries in message details. [#36](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/36). Thanks to [@piperino721](https://github.com/piperino721).
+- Count each message once per mailbox using its most successful delivery. [#36](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/36).
+- Refresh deferred messages when late delivery logs arrive. [#114](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/114).
+- Restore the documented system summary and summary email endpoints. [#237](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/237)
+- Keep summaries, MaxMind validation and application page loads responsive during I/O. [#231](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/231)
+- Separate message correlation from scheduling for easier maintenance. [#235](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/235)
+- Keep raw-log collection, retention and background maintenance responsive. [#232](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/232)
+- Move message details into a dedicated frontend module. [#233](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/233)
+- Process DMARC and TLS-RPT uploads without blocking other requests. [#227](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/227)
+- Keep DMARC domain overviews responsive during database and DNS checks. [#225](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/225)
+- Save manual suppressions without blocking other requests. [#223](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/223)
+- Skip duplicate addresses within a suppression CSV import. [#220](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/220)
+- Refresh container status without blocking other requests. [#213](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/213)
+- Load domain lists and cached DNS results without blocking other requests. [#211](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/211)
+- Load mailbox statistics without blocking other requests. [#209](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/209)
+- Load quarantine rule previews without blocking other requests. [#207](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/207)
+- Process automatic quarantine rules without blocking other requests. [#205](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/205)
+- Read and save blacklist scans without blocking other requests. [#203](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/203)
+- Synchronize suppression maps without blocking other requests or rewriting unchanged content. [#201](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/201)
+- Keep requests responsive during deferred queue cleanup. [#199](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/199)
+- Detect and save bounced-recipient suppressions without blocking other requests. [#197](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/197)
+- Save manual DNS checks without blocking other requests. [#195](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/195)
+- Save background DNS checks without blocking other requests. [#193](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/193)
+- Synchronize monitored hosts without blocking other requests. [#191](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/191)
+- Save GeoIP license status without blocking other requests. [#189](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/189)
+- Synchronize alias statistics without blocking other requests. [#187](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/187)
+- Synchronize mailbox statistics without blocking other requests. [#185](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/185)
+- Synchronize alias-domain mappings without blocking other requests. [#183](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/183)
+- Process Rspamd imports without blocking other requests. [#181](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/181)
+- Process Postfix imports without blocking other requests. [#179](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/179)
+- Process Netfilter imports without blocking requests or duplicating overlapping batches. [#177](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/177)
+- Process Dovecot delivery updates without blocking other requests. [#175](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/175)
+- Correlate messages without blocking other requests. [#173](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/173)
+- Complete correlations with late Postfix logs without blocking other requests. [#171](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/171)
+- Apply late message status updates without blocking other requests. [#169](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/169)
+- Expire suppressions in one database update without blocking other requests. [#167](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/167)
+- Read CSV export data in batches and release database sessions after downloads. [#165](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/165)
+- Fetch only the database fields needed by CSV exports. [#163](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/163)
+- Expire incomplete correlations in one database update without blocking requests. [#161](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/161)
+- Prepare CSV rows incrementally to reduce memory usage. [#159](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/159)
+- Keep requests responsive during BCC queue cleanup. [#157](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/157)
+- Exclude raw report bodies from report-list queries. [#153](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/153)
+- Fetch report counts in two queries instead of querying each report separately. [#151](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/151)
+- Serialize CSV downloads in chunks to reduce memory usage. [#149](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/149)
+- Run retention cleanup without blocking other requests. [#147](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/147)
+- Keep requests responsive during database health checks. [#145](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/145)
+- Prevent slow live-log viewers from delaying other viewers. [#143](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/143)
+- Clean up expired sessions, login counters and abandoned OAuth states every minute. [#141](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/141)
+- Return HTTP 503 when the database health check fails. [#139](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/139)
+- Preserve non-English text in spreadsheet CSV downloads. [#137](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/137)
 
 ## [2.7.1] - 2026-09-10
 
