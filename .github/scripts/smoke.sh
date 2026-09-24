@@ -43,30 +43,38 @@ for i in $(seq 1 30); do
     [ "$i" -eq 30 ] && fail "PostgreSQL did not become ready"
 done
 
-step "Start the application (${IMAGE})"
+# Start the application; extra arguments are passed to docker run (-e ...).
 # mailcow is a placeholder: nothing in this smoke test needs a reachable
 # mailcow, and every job must cope with an unreachable one without crashing.
-docker run -d --name "${APP}" --network "${NET}" -p "${PORT}:8080" \
-    -e MAILCOW_URL=https://mail.example.com \
-    -e MAILCOW_API_KEY=ci-placeholder \
-    -e POSTGRES_HOST="${DB}" -e POSTGRES_PORT=5432 \
-    -e POSTGRES_USER=ci -e POSTGRES_PASSWORD=ci -e POSTGRES_DB=ci \
-    -e SETTINGS_EDIT_VIA_UI_ENABLED=true \
-    "${IMAGE}" >/dev/null
+start_app() {
+    docker run -d --name "${APP}" --network "${NET}" -p "${PORT}:8080" \
+        -e MAILCOW_URL=https://mail.example.com \
+        -e MAILCOW_API_KEY=ci-placeholder \
+        -e POSTGRES_HOST="${DB}" -e POSTGRES_PORT=5432 \
+        -e POSTGRES_USER=ci -e POSTGRES_PASSWORD=ci -e POSTGRES_DB=ci \
+        "$@" "${IMAGE}" >/dev/null
+}
+
+wait_healthy() {
+    local healthy=0
+    for i in $(seq 1 60); do
+        if body=$(curl -fsS "${BASE}/api/health" 2>/dev/null); then
+            if echo "${body}" | grep -q '"status": *"healthy"'; then healthy=1; break; fi
+        fi
+        if [ "$(docker inspect -f '{{.State.Running}}' "${APP}" 2>/dev/null)" != "true" ]; then
+            fail "application container exited during startup"
+        fi
+        sleep 2
+    done
+    [ "${healthy}" -eq 1 ] || fail "/api/health did not report healthy within 120s"
+    echo "health: ${body}"
+}
+
+step "Start the application (${IMAGE})"
+start_app -e SETTINGS_EDIT_VIA_UI_ENABLED=true
 
 step "Wait for /api/health"
-healthy=0
-for i in $(seq 1 60); do
-    if body=$(curl -fsS "${BASE}/api/health" 2>/dev/null); then
-        if echo "${body}" | grep -q '"status": *"healthy"'; then healthy=1; break; fi
-    fi
-    if [ "$(docker inspect -f '{{.State.Running}}' "${APP}" 2>/dev/null)" != "true" ]; then
-        fail "application container exited during startup"
-    fi
-    sleep 2
-done
-[ "${healthy}" -eq 1 ] || fail "/api/health did not report healthy within 120s"
-echo "health: ${body}"
+wait_healthy
 
 step "SPA and static assets are served"
 code=$(curl -s -o ${WORK}/index.html -w '%{http_code}' "${BASE}/")
@@ -135,17 +143,31 @@ if [ "${UI_SMOKE:-0}" = "1" ]; then
     MSYS_NO_PATHCONV=1 docker exec -i -w /app "${APP}" python - < "$(dirname "$0")/smoke_seed.py" \
         || fail "seeding the smoke database failed"
 
-    step "Browser pass over every page"
     # Headless Chromium from the pinned Playwright image; the Python package is
     # pinned to the same release so it uses the browsers the image ships.
     PW_VERSION="1.56.0"
     PW_IMAGE="mcr.microsoft.com/playwright/python:v${PW_VERSION}-noble"
     SCRIPTS="$(cd "$(dirname "$0")" && (pwd -W 2>/dev/null || pwd))"
-    MSYS_NO_PATHCONV=1 docker run --rm --network "${NET}" --ipc=host \
-        -v "${SCRIPTS}:/scripts:ro" "${PW_IMAGE}" \
-        sh -c "pip install -q --disable-pip-version-check --root-user-action=ignore --break-system-packages playwright==${PW_VERSION} \
-               && python /scripts/ui_smoke.py http://${APP}:8080" \
-        || fail "browser pass found problems (see FAIL lines above)"
+    browser_pass() {
+        MSYS_NO_PATHCONV=1 docker run --rm --network "${NET}" --ipc=host \
+            -v "${SCRIPTS}:/scripts:ro" "${PW_IMAGE}" \
+            sh -c "pip install -q --disable-pip-version-check --root-user-action=ignore --break-system-packages playwright==${PW_VERSION} \
+                   && python /scripts/ui_smoke.py http://${APP}:8080" \
+            || fail "browser pass ($1) found problems (see FAIL lines above)"
+    }
+
+    step "Browser pass over every page (all features on, settings editable)"
+    browser_pass "open"
+
+    # The same data with every feature turned off and settings read-only, so the
+    # "is disabled" pages, hidden tabs and read-only Settings render at least once
+    # (see "Gated and conditional states" in documentation/UI_Behavior_Catalog.md).
+    step "Browser pass over every page (every feature off, settings read-only)"
+    docker rm -f "${APP}" >/dev/null
+    start_app -e SETTINGS_EDIT_VIA_UI_ENABLED=false \
+        -e DISABLED_FEATURES=netfilter,queue,quarantine,spam-filter,domains,dmarc,mailbox-stats,rate-limits,logs,blacklist
+    wait_healthy
+    browser_pass "locked"
 fi
 
 echo
