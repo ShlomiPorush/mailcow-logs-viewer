@@ -76,7 +76,7 @@ test('right-to-left mail content keeps its own direction', async () => {
     const h = harness({ ...message(), subject: rtl });
     await h.context.viewMessageDetails('example-key');
     const html = h.element('message-modal-content').innerHTML;
-    assert.match(html, new RegExp(`dir="auto"[^>]*>${rtl.replace(/[()]/g, '\\$&')}</p>`));
+    assert.ok(html.includes(`dir="auto" title="${rtl}">${rtl}</p>`));
     assert.match(html, /<bdi>sender@example\.com<\/bdi>/);
 });
 
