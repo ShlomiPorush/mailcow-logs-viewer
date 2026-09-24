@@ -94,7 +94,7 @@ def seed_security(db):
 
 
 def seed_dmarc(db):
-    for i, (org, fail) in enumerate([('google.com', False), ('outlook.com', True)]):
+    for i, (org, fail) in enumerate([('reporter-a.example.net', False), ('reporter-b.example.net', True)]):
         begin = int(ago(days=2 + i).timestamp())
         rep = m.DMARCReport(
             report_id=f'smoke-dmarc-{i}', domain='example.com', org_name=org, email=f'noreply-dmarc@{org}',
