@@ -22,6 +22,10 @@ Pages, modals, actions, handler functions and API calls are also guarded automat
 - **Escaping.** Anything that comes from the server or from mail headers is rendered through `escapeHtml`, and values placed inside inline handlers through `escapeJsArg` (see `frontend/utils.js`). New markup must keep this; mail headers are attacker-controlled.
 - **Country flags are PNG images, never emoji.** Most use is on desktop, and Windows does not render flag emoji (it shows two letters instead). The images live in `frontend/assets/flags/` in three sizes.
 - **Markdown keeps its styling.** Help pages and changelogs are rendered by `renderMarkdown` (marked, then DOMPurify, `frontend/utils.js`) into a `.markdown-body` element inside `#changelog-content` or `.update-changelog-content`. Their look comes from the local `github-markdown.min.css` plus the overrides in the `<style>` block of `index.html` (the `.markdown-body` rules, about lines 270 to 470), which also carry the dark theme. A redesign that renames these containers or drops those rules breaks every help page and changelog, even though nothing else changes.
+- **Dates follow the app timezone.** Times are formatted with `Intl.DateTimeFormat` in `appTimezone`, which the backend reports (`formatTime` in `frontend/utils.js`, and `frontend/rate-limits.js`), not in the browser's timezone. Counts use thousands separators (`toLocaleString()`).
+- **Custom branding.** The header title and logo come from settings (`app_title`, `app_logo_url`, see `/api/info`): a custom logo replaces the default icon (`#app-logo`, `#default-logo`) and the title can differ per installation. The footer repeats the title.
+- **Header and footer indicators.** The header shows the mailcow connection indicator (`#mailcow-connection-indicator`), a "mailcow update available" button (`#mailcow-update-icon`), the theme toggle, Refresh and Logout. The footer shows the app version, the mailcow version, an "Update Available" badge that opens Settings, the GitHub link and the container logs button. Each is easy to lose in a new layout.
+- **Status indicators inside tabs.** The Security tab of the message details shows a red or green dot for whether the message has security events.
 - **Badges** use the recipes in `APP_COLORS` (soft fill plus a subtle border, squared corners, not rounded pills).
 - **Cache busting.** Every changed frontend file gets a new `?v=` in `index.html`, or browsers keep the old copy.
 
@@ -35,6 +39,11 @@ Pages, modals, actions, handler functions and API calls are also guarded automat
 | Confirmation dialogs | Every action listed here still asks first, with the same title and message, and Escape/Enter still work where noted under keyboard handling. |
 | Country flags | The flag image appears next to IP addresses where listed, at the listed size, with no emoji fallback and no external image source. Check on Windows. |
 | Markdown | Open a help page, the changelog from the footer, and the update changelog in Settings, in light and dark theme. Headings, paragraphs, nested lists (three levels), inline code, code blocks, tables, block quotes and links all look as before, the background stays transparent, and nothing is unreadable in dark mode. |
+| Controls wired in JavaScript | Each listed button, tab or form still reacts. These are invisible to the automatic inventory test. |
+| Filters and view options | Every drop-down keeps its options in the same order and wording, and filtering or sorting still changes the list. |
+| Charts | The chart renders with data, hover shows its tooltip, and it is readable in both themes. |
+| Colour thresholds | The value changes colour at the listed threshold (for example storage above 75% and above 90%). |
+| Dates and numbers | Times match the timezone set in the app, not the browser's; large counts keep their separators. |
 | Help topics | Each help button opens the listed topic. |
 | Empty states | An empty list shows its sentence, not a blank area or a broken table. |
 | Loading states | A spinner or "Loading..." appears while data loads; the page never shows stale data without an indicator. |
@@ -43,10 +52,15 @@ Pages, modals, actions, handler functions and API calls are also guarded automat
 | Address bar | The URL changes as listed, so the view can be bookmarked, shared and reloaded. |
 | Keyboard | The listed keys still close or confirm the dialog. |
 
+## How this catalog was checked
+
+The tables are generated from the code. On 2026-09-24 the catalog was also compared against a running instance with real data: every page, every sub-tab and view switch, the Settings tabs and the detail views were opened in a headless browser (read-only: no save, delete, ban, release or run). That pass added the controls wired in JavaScript, the drop-down options, charts, colour thresholds, tooltips set from JavaScript, and the timezone, header and footer invariants. No data from that instance is recorded here.
+
 ## Open questions and findings
 
 - **Dead code: the old Postfix and Rspamd log lists.** `loadPostfixLogs` and `loadRspamdLogs` (`frontend/app.js`) render into `#postfix-logs` and `#rspamd-logs`, which have not existed in `index.html` at any point in the repository history. Nothing reaches them: the only callers are their own pagination (rendered inside them) and `applyPostfixFilters`, `clearPostfixFilters`, `applyRspamdFilters` and `clearRspamdFilters`, which nothing calls. Their rows are listed under "Not rendered (possible dead code)". Remove them rather than port them.
 - **Dead code: `getFlagEmoji`** (`frontend/dmarc.js`) is defined and never called, in line with the PNG-only rule above.
+- **Right-to-left mail content.** Subjects, names and addresses can be in Hebrew or Arabic, but nothing in the UI sets `dir="auto"`, so such text is laid out left to right (punctuation and brackets land on the wrong side). A redesign is a good moment to render mail content with `dir="auto"`; it is a change in behavior, so decide it explicitly.
 
 <!-- generated:start (node .github/scripts/ui-catalog.cjs --write) -->
 
@@ -57,11 +71,15 @@ Generated from the code. Do not edit by hand; run `node .github/scripts/ui-catal
 | Behaviour | Count |
 |---|---|
 | [Click to copy](#click-to-copy) | 34 |
-| [Tooltips](#tooltips) | 99 |
+| [Tooltips](#tooltips) | 107 |
 | [Toasts](#toasts) | 133 |
 | [Confirmation dialogs](#confirmation-dialogs) | 27 |
 | [Country flags](#country-flags) | 5 |
 | [Markdown rendering](#markdown-rendering) | 4 |
+| [Controls wired in JavaScript](#controls-wired-in-javascript) | 27 |
+| [Filters, sorting and view options](#filters-sorting-and-view-options) | 11 |
+| [Charts](#charts) | 3 |
+| [Colour thresholds](#colour-thresholds) | 54 |
 | [Help topics](#help-topics) | 8 |
 | [Empty states](#empty-states) | 37 |
 | [Loading states](#loading-states) | 20 |
@@ -121,6 +139,13 @@ Native `title` tooltips. Dynamic ones show the expression that builds the text.
 | Shell | "mailcow connection status" | `frontend/index.html:527` |
 | Shell | "mailcow update available" | `frontend/index.html:536` |
 | Shell | "View Container Logs" | `frontend/index.html:2630` |
+| Shell | set in JS: dynamic: `data.app_title` | `frontend/app.js:406` (loadAppInfo) |
+| Shell | set in JS: "Connected to mailcow" | `frontend/app.js:476` (loadMailcowConnectionStatus) |
+| Shell | set in JS: "Not connected to mailcow" | `frontend/app.js:485` (loadMailcowConnectionStatus) |
+| Shell | set in JS: "Connection status unknown" | `frontend/app.js:500` (loadMailcowConnectionStatus) |
+| Shell | set in JS: dynamic: ``Update available: v${data.latest_version}`` | `frontend/app.js:520` (loadAppVersionStatus) |
+| Shell | set in JS: dynamic: ``Update available: ${data.latest_version}`` | `frontend/app.js:599` (loadMailcowVersionStatus) |
+| Shell | set in JS: dynamic: ``Update available: ${data.latest_version}`` | `frontend/app.js:606` (loadMailcowVersionStatus) |
 | Dashboard | "Dismiss" | `frontend/app.js:1359` (loadDashboardSecurityAlerts) |
 | Dashboard | dynamic: `${escapeHtml(msg.subject \|\| 'No subject')}` | `frontend/app.js:1501` (loadRecentActivity) |
 | Messages | dynamic: `${escapeHtml(msg.subject \|\| 'No subject')}` | `frontend/app.js:773` (renderMessagesData) |
@@ -194,6 +219,7 @@ Native `title` tooltips. Dynamic ones show the expression that builds the text.
 | DMARC | "Help - DMARC Information" | `frontend/index.html:1803` |
 | Mailbox stats | "Help - Mailbox Statistics" | `frontend/index.html:2025` |
 | Mailbox stats | "Address on a mailcow alias domain that points at this mailbox" | `frontend/mailbox-stats.js:556` (renderMailboxStatsAccordion) |
+| Mailbox stats | set in JS: dynamic: `isRateLimits ? 'Help - Rate Limits' : 'Help - Mailbox Statistics'` | `frontend/mailbox-stats.js:83` (mailboxStatsSwitchView) |
 | Logs | "Pause/Resume live updates" | `frontend/index.html:2332` |
 | Logs | "Live mode - show latest logs" | `frontend/index.html:2342` |
 | Logs | "Auto-scroll to new entries" | `frontend/index.html:2352` |
@@ -414,6 +440,129 @@ Places that render Markdown (help pages, changelogs) through `renderMarkdown` (m
 | Settings | renders `changelogText` | `frontend/settings.js:1541` (renderSettings) |
 | Modal: changelog-modal | renders `markdownContent` | `frontend/app.js:545` (showMarkdownModal) |
 | Modal: changelog-modal | renders `changelog` | `frontend/app.js:4793` (showChangelogModal) |
+
+### Controls wired in JavaScript
+
+Buttons, tabs and fields whose behavior is attached with `addEventListener` instead of an inline handler. The automatic inventory test does not see these, so they need a manual check.
+
+| Page | What | Code |
+|---|---|---|
+| Shell | click on `document` | `frontend/router.js:317` |
+| Messages | click on `document` | `frontend/app.js:3831` |
+| Message details | click on `messageModal` | `frontend/message-details.js:1017` |
+| Message details | click on `modalContent` | `frontend/message-details.js:1027` |
+| Security | click on `editSettingsBtn` | `frontend/app.js:2254` (loadFail2BanSettings) |
+| Security | click on `editIpBtn` | `frontend/app.js:2270` (loadFail2BanSettings) |
+| Security | submit on `settingsForm` | `frontend/app.js:2281` (loadFail2BanSettings) |
+| Security | submit on `ipForm` | `frontend/app.js:2334` (loadFail2BanSettings) |
+| Spam filter | click on `document` | `frontend/spam_filter.js:1037` (renderSuppressionItem) |
+| DMARC | click on `modal` | `frontend/dmarc.js:1484` (showDmarcSyncHistory) |
+| Mailbox stats | click on `document` | `frontend/mailbox-stats.js:671` (toggleDateRangePicker) |
+| Settings | click on `cancelBtn` | `frontend/settings.js:114` (showBasicAuthVerifyModal) |
+| Settings | click on `confirmBtn` | `frontend/settings.js:115` (showBasicAuthVerifyModal) |
+| Settings | click on `overlay` | `frontend/settings.js:129` (showBasicAuthVerifyModal) |
+| Settings | click on `cancelBtn` | `frontend/settings.js:204` (showFeatureDisableConfirmModal) |
+| Settings | click on `confirmBtn` | `frontend/settings.js:205` (showFeatureDisableConfirmModal) |
+| Settings | click on `overlay` | `frontend/settings.js:212` (showFeatureDisableConfirmModal) |
+| Settings | click on `btn` | `frontend/settings.js:1678` (renderSettings) |
+| Settings | change on `tabSelect` | `frontend/settings.js:1685` (renderSettings) |
+| Settings | click on `btn` | `frontend/settings.js:1692` (renderSettings) |
+| Settings | change on `cb` | `frontend/settings.js:1722` (renderSettings) |
+| Settings | click on `closeBtn` | `frontend/settings.js:1938` (showGeoIPSetupModal) |
+| Settings | click on `modal` | `frontend/settings.js:2392` (showConnectionTestModal) |
+| Shared | click on `cancelBtn` | `frontend/utils.js:493` (showConfirmModal) |
+| Shared | click on `okBtn` | `frontend/utils.js:494` (showConfirmModal) |
+| app.js (mixed) | click on `changelogModal` | `frontend/app.js:4994` |
+| app.js (mixed) | click on `changelogContent` | `frontend/app.js:5002` |
+
+### Filters, sorting and view options
+
+Drop-down lists in the page markup with their options. The option wording and order are part of the product.
+
+| Page | What | Code |
+|---|---|---|
+| Dashboard | `dashboard-search-status`: All Statuses / Delivered / Sent / Deferred / Bounced / Rejected / Discarded (Sieve) / Expired | `frontend/index.html:922` |
+| Messages | `messages-filter-direction`: All Directions / Inbound / Outbound / Internal | `frontend/index.html:1031` |
+| Messages | `messages-filter-status`: All Statuses / Delivered / Deferred / Bounced / Rejected / Spam / Discarded (Sieve) | `frontend/index.html:1038` |
+| Security | `netfilter-filter-action`: All Actions / BAN / UNBAN / Warning / Info | `frontend/index.html:1283` |
+| Security | `netfilter-filter-country`: All Countries | `frontend/index.html:1291` |
+| Quarantine | `quarantine-sort`: Newest first / Score: high to low / Score: low to high | `frontend/index.html:1462` |
+| Spam filter | `suppression-filter-reason`: All Reasons / Hard Bounce / Soft Bounce / Deferred Stuck / Rejected / Manual | `frontend/index.html:1536` |
+| Spam filter | `suppression-filter-active`: Active Only / All / Inactive / Expired | `frontend/index.html:1546` |
+| Mailbox stats | `mailbox-stats-domain-filter`: All Domains | `frontend/index.html:2229` |
+| Mailbox stats | `mailbox-stats-sort`: Sent (High to Low) / Received (High to Low) / Failure Rate (High to Low) / Quota Used (High to Low) / Username (A-Z) | `frontend/index.html:2233` |
+| Logs | `logs-fontsize`: 10px / 11px / 12px / 13px / 14px / 16px | `frontend/index.html:2370` |
+
+### Charts
+
+Chart.js charts (local library). Check hover tooltips, legend and both themes.
+
+| Page | What | Code |
+|---|---|---|
+| Security | bar chart on `ctx` | `frontend/app.js:1894` (loadSecurityCountryChart) |
+| DMARC | line chart on `ctx` | `frontend/dmarc.js:601` (renderDmarcChart) |
+| Mailbox stats | bar chart on `canvas.getContext('2d')` | `frontend/rate-limits.js:281` (renderRateLimitChart) |
+
+### Colour thresholds
+
+Values whose colour changes at a threshold (for example storage turns yellow and red, a high spam score turns red).
+
+| Page | What | Code |
+|---|---|---|
+| Dashboard | `containers.stopped > 0` turns red | `frontend/app.js:1421` (loadDashboardStatusSummary) |
+| Dashboard | `usedPercent > 90` turns red | `frontend/app.js:1432` (loadDashboardStatusSummary) |
+| Dashboard | `usedPercent > 75` turns yellow | `frontend/app.js:1433` (loadDashboardStatusSummary) |
+| Dashboard | `usedPercent > 90` turns red | `frontend/app.js:1446` (loadDashboardStatusSummary) |
+| Dashboard | `usedPercent > 75` turns yellow | `frontend/app.js:1446` (loadDashboardStatusSummary) |
+| Messages | `msg.spam_score >= 15` turns red | `frontend/app.js:791` (renderMessagesData) |
+| Messages | `msg.spam_score >= 15` turns red | `frontend/app.js:3917` (loadMessages) |
+| Message details | `score > 0` turns red | `frontend/message-details.js:905` (renderSpamTab) |
+| Message details | `score < 0` turns green | `frontend/message-details.js:906` (renderSpamTab) |
+| Quarantine | `item.score >= 15` turns red | `frontend/app.js:2894` (renderQuarantineData) |
+| Quarantine | `sc > 0` turns red | `frontend/app.js:3135` (renderQuarantineDetailContent) |
+| Quarantine | `sc < 0` turns green | `frontend/app.js:3136` (renderQuarantineDetailContent) |
+| Status | `usedPercent > 90` turns red | `frontend/app.js:4142` (loadStatusStorage) |
+| Status | `usedPercent > 75` turns yellow | `frontend/app.js:4143` (loadStatusStorage) |
+| Status | `usedPercent > 90` turns red | `frontend/app.js:4145` (loadStatusStorage) |
+| Status | `usedPercent > 75` turns yellow | `frontend/app.js:4146` (loadStatusStorage) |
+| DMARC | `passRate >= 95` turns green | `frontend/dmarc.js:354` (loadDmarcDomains) |
+| DMARC | `passRate >= 80` turns yellow | `frontend/dmarc.js:354` (loadDmarcDomains) |
+| DMARC | `passRate >= 95` turns green | `frontend/dmarc.js:355` (loadDmarcDomains) |
+| DMARC | `passRate >= 80` turns yellow | `frontend/dmarc.js:355` (loadDmarcDomains) |
+| DMARC | `passRate >= 95` turns green | `frontend/dmarc.js:356` (loadDmarcDomains) |
+| DMARC | `stats.tls_success_pct >= 95` turns green | `frontend/dmarc.js:399` (loadDmarcDomains) |
+| DMARC | `stats.tls_success_pct >= 80` turns yellow | `frontend/dmarc.js:399` (loadDmarcDomains) |
+| DMARC | `stats.tls_success_pct >= 95` turns green | `frontend/dmarc.js:401` (loadDmarcDomains) |
+| DMARC | `stats.tls_success_pct >= 80` turns yellow | `frontend/dmarc.js:401` (loadDmarcDomains) |
+| DMARC | `passRate >= 95` turns green | `frontend/dmarc.js:413` (loadDmarcDomains) |
+| DMARC | `passPct >= 95` turns green | `frontend/dmarc.js:648` (loadDomainReports) |
+| DMARC | `passPct >= 95` turns green | `frontend/dmarc.js:711` (loadDomainSources) |
+| DMARC | `s.spf_pass_pct >= 95` turns green | `frontend/dmarc.js:750` (loadDomainSources) |
+| DMARC | `s.dkim_pass_pct >= 95` turns green | `frontend/dmarc.js:755` (loadDomainSources) |
+| DMARC | `successRate >= 95` turns green | `frontend/dmarc.js:825` (loadDomainTLSReports) |
+| DMARC | `successRate >= 80` turns yellow | `frontend/dmarc.js:825` (loadDomainTLSReports) |
+| DMARC | `day.success_rate >= 95` turns green | `frontend/dmarc.js:852` (loadDomainTLSReports) |
+| DMARC | `day.success_rate >= 80` turns yellow | `frontend/dmarc.js:853` (loadDomainTLSReports) |
+| DMARC | `day.success_rate >= 95` turns green | `frontend/dmarc.js:855` (loadDomainTLSReports) |
+| DMARC | `day.success_rate >= 80` turns yellow | `frontend/dmarc.js:855` (loadDomainTLSReports) |
+| DMARC | `successRate >= 95` turns green | `frontend/dmarc.js:940` (loadTLSReportDetails) |
+| DMARC | `successRate >= 80` turns yellow | `frontend/dmarc.js:940` (loadTLSReportDetails) |
+| DMARC | `p.success_rate >= 95` turns green | `frontend/dmarc.js:1001` (loadTLSReportDetails) |
+| DMARC | `p.success_rate >= 80` turns yellow | `frontend/dmarc.js:1001` (loadTLSReportDetails) |
+| DMARC | `p.success_rate >= 95` turns green | `frontend/dmarc.js:1021` (loadTLSReportDetails) |
+| DMARC | `p.success_rate >= 80` turns yellow | `frontend/dmarc.js:1021` (loadTLSReportDetails) |
+| DMARC | `s.dmarc_pass_pct >= 95` turns green | `frontend/dmarc.js:1120` (loadReportDetails) |
+| DMARC | `s.spf_pass_pct >= 95` turns green | `frontend/dmarc.js:1121` (loadReportDetails) |
+| DMARC | `s.dkim_pass_pct >= 95` turns green | `frontend/dmarc.js:1122` (loadReportDetails) |
+| DMARC | `dmarcPct >= 95` turns green | `frontend/dmarc.js:1239` (loadSourceDetails) |
+| DMARC | `spfPct >= 95` turns green | `frontend/dmarc.js:1240` (loadSourceDetails) |
+| DMARC | `dkimPct >= 95` turns green | `frontend/dmarc.js:1241` (loadSourceDetails) |
+| DMARC | `sync.reports_failed > 0` turns red | `frontend/dmarc.js:1529` (showDmarcSyncHistory) |
+| Mailbox stats | `mb.combined_failure_rate >= 10` turns red | `frontend/mailbox-stats.js:315` (renderMailboxStatsAccordion) |
+| Mailbox stats | `mb.combined_failure_rate >= 5` turns yellow | `frontend/mailbox-stats.js:316` (renderMailboxStatsAccordion) |
+| Mailbox stats | `quotaPercent >= 90` turns red | `frontend/mailbox-stats.js:321` (renderMailboxStatsAccordion) |
+| Mailbox stats | `quotaPercent >= 75` turns yellow | `frontend/mailbox-stats.js:321` (renderMailboxStatsAccordion) |
+| Mailbox stats | `alias.failure_rate >= 5` turns red | `frontend/mailbox-stats.js:567` (renderMailboxStatsAccordion) |
 
 ### Help topics
 

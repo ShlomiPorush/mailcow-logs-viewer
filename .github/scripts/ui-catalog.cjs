@@ -275,6 +275,9 @@ function collect() {
             return { what: m[2].includes('${') ? `dynamic: \`${short(m[2], 80)}\`` : `"${short(m[2])}"` };
         }) });
 
+    // Tooltips assigned from JavaScript (el.title = ...).
+    cats[cats.length - 1].rows.push(...matches(files, /\.title\s*=\s*([^;\n]+);/g, m => ({ what: `set in JS: ${show(m[1].trim())}` })));
+
     cats.push({ title: 'Toasts', note: 'Transient notifications from `showToast(message, type)` (utils.js). Type defaults to info.',
         rows: calls(files, 'showToast', a => ({ what: `${show(a[0])} [${literal(a[1] || "'info'") || short(a[1], 20)}]` })) });
 
@@ -288,6 +291,24 @@ function collect() {
 
     cats.push({ title: 'Markdown rendering', note: 'Places that render Markdown (help pages, changelogs) through `renderMarkdown` (marked, then DOMPurify) into a `.markdown-body` element.',
         rows: calls(files, 'renderMarkdown', a => ({ what: `renders \`${short(a[0], 60)}\`` })) });
+
+    cats.push({ title: 'Controls wired in JavaScript', note: 'Buttons, tabs and fields whose behavior is attached with `addEventListener` instead of an inline handler. The automatic inventory test does not see these, so they need a manual check.',
+        rows: matches(files, /([A-Za-z_$][\w$.\[\]'"()-]*?)\.addEventListener\(\s*['"](click|change|input|submit)['"]/g,
+            m => ({ what: `${m[2]} on \`${short(m[1], 60)}\`` })) });
+
+    const html = files.find(f => f.name === 'index.html');
+    cats.push({ title: 'Filters, sorting and view options', note: 'Drop-down lists in the page markup with their options. The option wording and order are part of the product.',
+        rows: [...html.text.matchAll(/<select\b[^>]*\bid="([^"]+)"[^>]*>([\s\S]*?)<\/select>/g).map(m => ({
+            page: htmlPageAt(html.text, m.index), where: where(html, m.index),
+            what: `\`${m[1]}\`: ${[...m[2].matchAll(/<option\b[^>]*>([^<]*)<\/option>/g)].map(o => clean(o[1])).filter(Boolean).join(' / ') || '(options filled at runtime)'}`,
+        }))] });
+
+    cats.push({ title: 'Charts', note: 'Chart.js charts (local library). Check hover tooltips, legend and both themes.',
+        rows: matches(files, /new Chart\(\s*([^,]+),\s*\{[\s\S]{0,400}?type:\s*['"](\w+)['"]/g, m => ({ what: `${m[2]} chart on \`${short(m[1], 50)}\`` })) });
+
+    cats.push({ title: 'Colour thresholds', note: 'Values whose colour changes at a threshold (for example storage turns yellow and red, a high spam score turns red).',
+        rows: matches(files, /([A-Za-z_$][\w$.]*)\s*(>=|<=|>|<)\s*(\d+(?:\.\d+)?)\s*\?\s*['"`][^'"`]*?\b(?:bg|text)-(red|yellow|orange|green|amber)-\d+/g,
+            m => ({ what: `\`${m[1]} ${m[2]} ${m[3]}\` turns ${m[4]}` })) });
 
     cats.push({ title: 'Help topics', note: 'In-app help buttons; the topic is the Markdown file name under documentation/HelpDocs.',
         rows: calls(files, 'showHelpModal', a => ({ what: `topic ${show(a[0])}` })) });
