@@ -27,6 +27,8 @@ MESSAGES = [
     ('promo@newsletter.test', 'maya@example.com', 'You have won a prize', 'inbound', 'rejected', 24.0, 'reject', 'reject', '5.7.1'),
     ('billing@newsletter.test', 'sam@example.com', 'Invoice overdue', 'inbound', 'delivered', 9.1, 'add header', 'sent', '2.0.0'),
     ('hr@example.com', 'sales@example.org', 'Holiday schedule', 'internal', 'delivered', -19.9, 'no action', 'sent', '2.0.0'),
+    # Right-to-left subject (Hebrew, written as escapes to keep the source ASCII)
+    ('dana@example.com', 'noa@example.org', '\u05d3\u05d5\u05d7 \u05e8\u05d1\u05e2\u05d5\u05e0\u05d9 (Q3)', 'internal', 'delivered', -20.5, 'no action', 'sent', '2.0.0'),
 ]
 
 

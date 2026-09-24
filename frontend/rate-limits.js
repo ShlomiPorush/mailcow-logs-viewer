@@ -622,7 +622,7 @@ function renderRateLimitEventRow(event) {
             </td>
             <td class="px-3 sm:px-4 py-2 font-mono text-sm text-gray-700 dark:text-gray-300 whitespace-nowrap sm:whitespace-normal sm:break-all">${escapeHtml(event.rcpt)}</td>
             <td class="px-3 sm:px-4 py-2 text-sm text-gray-700 dark:text-gray-300">${shortened
-                ? `<div class="truncate max-w-[240px] sm:max-w-none sm:whitespace-normal">${escapeHtml(shortened)}</div>`
+                ? `<div class="truncate max-w-[240px] sm:max-w-none sm:whitespace-normal" dir="auto">${escapeHtml(shortened)}</div>`
                 : '<span class="text-gray-400">No subject</span>'}</td>
             <td class="px-3 sm:px-4 py-2 font-mono text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap hide-mobile">${escapeHtml(event.qid)}</td>
         </tr>

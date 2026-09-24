@@ -766,7 +766,7 @@ function renderMessagesData(data) {
                                 </svg>
                                 <span class="text-sm text-gray-600 dark:text-gray-300">${escapeHtml(msg.recipient || 'Unknown')}</span>
                             </div>
-                            <p class="text-xs text-gray-500 dark:text-gray-400 truncate" title="${escapeHtml(msg.subject || 'No subject')}">${escapeHtml(msg.subject || 'No subject')}</p>
+                            <p class="text-xs text-gray-500 dark:text-gray-400 truncate" dir="auto" title="${escapeHtml(msg.subject || 'No subject')}">${escapeHtml(msg.subject || 'No subject')}</p>
                         </div>
                         <div class="flex flex-wrap items-center gap-2 flex-shrink-0 sm:justify-end">
                             ${(() => {
@@ -1494,7 +1494,7 @@ async function loadRecentActivity() {
                         </svg>
                         <span class="text-sm text-gray-600 dark:text-gray-300">${escapeHtml(msg.recipient || 'Unknown')}</span>
                     </div>
-                    <p class="text-xs text-gray-500 dark:text-gray-400 truncate" title="${escapeHtml(msg.subject || 'No subject')}">${escapeHtml(msg.subject || 'No subject')}</p>
+                    <p class="text-xs text-gray-500 dark:text-gray-400 truncate" dir="auto" title="${escapeHtml(msg.subject || 'No subject')}">${escapeHtml(msg.subject || 'No subject')}</p>
                 </div>
                 <div class="flex flex-col items-end gap-1 flex-shrink-0">
                     <div class="flex items-center gap-2">
@@ -2673,7 +2673,7 @@ function renderQuarantineData(data) {
                                     </svg>
                                     <span class="text-sm text-gray-600 dark:text-gray-300">${copyableText(item.rcpt || 'Unknown')}</span>
                                 </div>
-                                <p class="text-xs text-gray-500 dark:text-gray-400 truncate cursor-pointer hover:text-blue-500 dark:hover:text-blue-400 transition-colors" title="Click to view details" onclick="showQuarantineDetails('${itemId}')">${escapeHtml(item.subject || 'No subject')}</p>
+                                <p class="text-xs text-gray-500 dark:text-gray-400 truncate cursor-pointer hover:text-blue-500 dark:hover:text-blue-400 transition-colors" dir="auto" title="Click to view details" onclick="showQuarantineDetails('${itemId}')">${escapeHtml(item.subject || 'No subject')}</p>
                             </div>
                         </div>
                         <div class="flex flex-wrap items-center gap-2 flex-shrink-0 sm:justify-end">
@@ -3091,14 +3091,14 @@ async function loadQuarantineRules() {
                 <div class="flex items-center justify-between gap-3">
                     <div class="flex-1 min-w-0">
                         <div class="flex items-center gap-2 mb-1 flex-wrap">
-                            <span class="font-medium text-sm text-gray-900 dark:text-white">${escapeHtml(rule.name)}</span>
+                            <span class="font-medium text-sm text-gray-900 dark:text-white" dir="auto">${escapeHtml(rule.name)}</span>
                             <span class="px-2 py-0.5 text-xs rounded-full bg-${actionColor}-100 dark:bg-${actionColor}-900/30 text-${actionColor}-700 dark:text-${actionColor}-300">${actionLabel}</span>
                             ${rule.is_regex ? '<span class="px-2 py-0.5 text-xs rounded-full bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300">Regex</span>' : ''}
                             ${!rule.enabled ? '<span class="px-2 py-0.5 text-xs rounded-full bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400">Disabled</span>' : ''}
                         </div>
                         <p class="text-xs text-gray-500 dark:text-gray-400">
                             <span class="font-medium">${matchLabels[rule.match_type] || rule.match_type}:</span> 
-                            <code class="bg-gray-100 dark:bg-gray-700 px-1 rounded">${escapeHtml(rule.match_value)}</code>
+                            <code class="bg-gray-100 dark:bg-gray-700 px-1 rounded" dir="auto">${escapeHtml(rule.match_value)}</code>
                         </p>
                         <p class="text-xs text-gray-400 dark:text-gray-500 mt-1">
                             Hits: ${rule.hit_count}${rule.last_hit_at ? ' · Last: ' + formatTime(rule.last_hit_at) : ''}
@@ -3378,14 +3378,14 @@ async function testQuarantineRules() {
             const itemsHtml = group.items.map(m => `
                 <div class="py-1.5 pl-3 border-l-2 ${group.rule_enabled ? 'border-' + actionColor + '-300 dark:border-' + actionColor + '-700' : 'border-gray-300 dark:border-gray-600'}">
                     <div class="text-xs text-gray-700 dark:text-gray-300">${escapeHtml(m.sender || '?')} → ${escapeHtml(m.recipient || '?')}</div>
-                    <div class="text-xs text-gray-400 dark:text-gray-500 truncate" title="${escapeHtml(m.subject || '')}">${escapeHtml((m.subject || 'No subject').substring(0, 80))}</div>
+                    <div class="text-xs text-gray-400 dark:text-gray-500 truncate" dir="auto" title="${escapeHtml(m.subject || '')}">${escapeHtml((m.subject || 'No subject').substring(0, 80))}</div>
                 </div>
             `).join('');
             
             return `
             <div class="mb-4 ${!group.rule_enabled ? 'opacity-50' : ''}">
                 <div class="flex items-center gap-2 mb-1.5 flex-wrap">
-                    <span class="font-medium text-sm text-gray-900 dark:text-white">${escapeHtml(group.rule_name)}</span>
+                    <span class="font-medium text-sm text-gray-900 dark:text-white" dir="auto">${escapeHtml(group.rule_name)}</span>
                     <span class="px-1.5 py-0.5 text-xs rounded bg-${actionColor}-100 dark:bg-${actionColor}-900/30 text-${actionColor}-700 dark:text-${actionColor}-300">${group.action}</span>
                     ${!group.rule_enabled ? '<span class="px-1.5 py-0.5 text-xs rounded bg-gray-200 dark:bg-gray-700 text-gray-500 dark:text-gray-400">Disabled - will not execute</span>' : ''}
                     <span class="text-xs text-gray-400 ml-auto">${group.items.length} match${group.items.length !== 1 ? 'es' : ''}</span>
@@ -3690,7 +3690,7 @@ async function loadMessages(page = 1) {
                                     </svg>
                                     <span class="text-sm text-gray-600 dark:text-gray-300">${escapeHtml(msg.recipient || 'Unknown')}</span>
                                 </div>
-                                <p class="text-xs text-gray-500 dark:text-gray-400 truncate" title="${escapeHtml(msg.subject || 'No subject')}">${escapeHtml(msg.subject || 'No subject')}</p>
+                                <p class="text-xs text-gray-500 dark:text-gray-400 truncate" dir="auto" title="${escapeHtml(msg.subject || 'No subject')}">${escapeHtml(msg.subject || 'No subject')}</p>
                             </div>
                             <div class="flex flex-wrap items-center gap-2 flex-shrink-0 sm:justify-end">
                                 ${(() => {

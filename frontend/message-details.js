@@ -444,7 +444,7 @@ function renderOverviewTab(content, data) {
                             ${data.subject && data.subject !== 'Postfix Log Details' ? `
                                 <div class="min-w-0">
                                     <p class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Subject</p>
-                                    <p class="text-sm text-gray-900 dark:text-white mt-1 truncate" title="${escapeHtml(data.subject)}">${escapeHtml(data.subject)}</p>
+                                    <p class="text-sm text-gray-900 dark:text-white mt-1 truncate" dir="auto" title="${escapeHtml(data.subject)}">${escapeHtml(data.subject)}</p>
                                 </div>
                             ` : ''}
                             ${data.final_status || data.direction ? `
