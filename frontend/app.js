@@ -192,24 +192,28 @@ function isFeatureDisabled(featureId) {
 }
 
 function applyFeatureToggles() {
-    // Hide desktop and mobile tabs for disabled features
+    // Hide the sidebar, sheet and phone tab bar entries of disabled features
+    const navIds = feature => [`tab-${feature}`, `mobile-tab-${feature}`, `tabbar-${feature}`];
     for (const feature of window.disabledFeatures) {
-        // Desktop tab
-        const tab = document.getElementById(`tab-${feature}`);
-        if (tab) tab.style.display = 'none';
-        // Mobile tab
-        const mobileTab = document.getElementById(`mobile-tab-${feature}`);
-        if (mobileTab) mobileTab.style.display = 'none';
+        for (const id of navIds(feature)) {
+            const el = document.getElementById(id);
+            if (el) el.style.display = 'none';
+        }
     }
     // Ensure enabled features are visible (in case of settings change)
     for (const feature of TOGGLEABLE_FEATURES) {
         if (!window.disabledFeatures.includes(feature.id)) {
-            const tab = document.getElementById(`tab-${feature.id}`);
-            if (tab) tab.style.display = '';
-            const mobileTab = document.getElementById(`mobile-tab-${feature.id}`);
-            if (mobileTab) mobileTab.style.display = '';
+            for (const id of navIds(feature.id)) {
+                const el = document.getElementById(id);
+                if (el) el.style.display = '';
+            }
         }
     }
+    // A navigation group whose pages are all off loses its heading too
+    document.querySelectorAll('[data-nav-group]').forEach(group => {
+        const visible = [...group.querySelectorAll('button')].some(btn => btn.style.display !== 'none');
+        group.style.display = visible ? '' : 'none';
+    });
     
     // Special handling for blacklist feature - it doesn't have its own tab,
     // it's a section inside the Domains page
@@ -273,9 +277,15 @@ function applyFeatureToggles() {
     }
 }
 
-// A nav tab is an <svg> icon followed by its label in a bare text node, so the
-// label is swapped on that node and the icon and markup are left alone.
+// A nav tab is an <svg> icon followed by its label, in a .ui-nav-label span
+// (or, in older markup, a bare text node), so only the label text changes.
 function setNavTabLabel(tab, label) {
+    const span = tab.querySelector('.ui-nav-label');
+    if (span) {
+        if (span.textContent !== label) span.textContent = label;
+        tab.title = label;
+        return;
+    }
     for (let i = tab.childNodes.length - 1; i >= 0; i--) {
         const node = tab.childNodes[i];
         if (node.nodeType !== Node.TEXT_NODE) continue;
@@ -1191,16 +1201,15 @@ function switchTab(tab, params = {}) {
 
     currentTab = tab;
 
-    // Update active tab button (desktop)
-    document.querySelectorAll('[id^="tab-"]').forEach(btn => {
-        btn.classList.remove('tab-active');
-        btn.classList.add('text-gray-500', 'dark:text-gray-400');
-    });
-    const activeBtn = document.getElementById(`tab-${tab}`);
-    if (activeBtn) {
-        activeBtn.classList.add('tab-active');
-        activeBtn.classList.remove('text-gray-500', 'dark:text-gray-400');
+    // Mark the current page in the sidebar and in the phone tab bar; "More"
+    // is marked when the page is only reachable through the sheet
+    document.querySelectorAll('[id^="tab-"], [id^="tabbar-"]').forEach(btn => btn.removeAttribute('aria-current'));
+    for (const id of [`tab-${tab}`, `tabbar-${tab}`]) {
+        const btn = document.getElementById(id);
+        if (btn) btn.setAttribute('aria-current', 'page');
     }
+    const moreBtn = document.getElementById('hamburger-btn');
+    if (moreBtn) moreBtn.classList.toggle('ui-more-current', !document.getElementById(`tabbar-${tab}`));
 
     // Update mobile menu state and label
     if (typeof updateMobileMenuActiveState === 'function') {

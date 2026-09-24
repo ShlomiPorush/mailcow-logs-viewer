@@ -21,7 +21,7 @@
     <script src="/static/assets/libs/purify.min.js?v=2"></script>
     <script src="/static/assets/libs/chart.umd.min.js?v=2"></script>
     <link rel="stylesheet" href="/static/assets/libs/github-markdown.min.css">
-    <link rel="stylesheet" href="/static/assets/css/ui.css?v=1">
+    <link rel="stylesheet" href="/static/assets/css/ui.css?v=3">
     <script>
         tailwind.config = {
             darkMode: 'class',
@@ -112,111 +112,6 @@
 
         .mobile-scroll {
             -webkit-overflow-scrolling: touch;
-        }
-
-        /* Hamburger animation when active */
-        #hamburger-btn.active .hamburger-line:nth-child(1) {
-            transform: rotate(45deg) translate(5px, 5px);
-        }
-
-        #hamburger-btn.active .hamburger-line:nth-child(2) {
-            opacity: 0;
-        }
-
-        #hamburger-btn.active .hamburger-line:nth-child(3) {
-            transform: rotate(-45deg) translate(5px, -5px);
-        }
-
-        /* Mobile Menu Styles */
-        .mobile-menu {
-            display: none;
-        }
-
-        @media (max-width: 767px) {
-            .mobile-menu {
-                display: block;
-                position: fixed;
-                top: 112px;
-                /* Below nav (64px) + tabs bar (48px) */
-                left: 0;
-                right: 0;
-                bottom: 0;
-                background-color: rgba(0, 0, 0, 0.5);
-                z-index: 40;
-                opacity: 0;
-                visibility: hidden;
-                transition: all 0.3s ease;
-            }
-
-            .mobile-menu.active {
-                opacity: 1;
-                visibility: visible;
-            }
-
-            .mobile-menu-content {
-                position: absolute;
-                top: 0;
-                left: 0;
-                width: 280px;
-                max-width: 80%;
-                height: 100%;
-                background-color: white;
-                transform: translateX(-100%);
-                transition: transform 0.3s ease;
-                overflow-y: auto;
-                box-shadow: 2px 0 10px rgba(0, 0, 0, 0.1);
-                padding-top: 8px;
-            }
-
-            .dark .mobile-menu-content {
-                background-color: #1f2937;
-            }
-
-            .mobile-menu.active .mobile-menu-content {
-                transform: translateX(0);
-            }
-
-            .mobile-menu-item {
-                display: flex;
-                align-items: center;
-                width: 100%;
-                padding: 16px 20px;
-                font-size: 16px;
-                font-weight: 500;
-                color: #4b5563;
-                border: none;
-                background: none;
-                border-bottom: 1px solid #e5e7eb;
-                transition: all 0.2s ease;
-                text-align: left;
-                cursor: pointer;
-            }
-
-            .dark .mobile-menu-item {
-                color: #9ca3af;
-                border-bottom-color: #374151;
-            }
-
-            .mobile-menu-item:hover {
-                background-color: #f3f4f6;
-            }
-
-            .dark .mobile-menu-item:hover {
-                background-color: #374151;
-            }
-
-            .mobile-menu-item.active {
-                color: #3b82f6;
-                background-color: rgba(59, 130, 246, 0.1);
-                border-left: 4px solid #3b82f6;
-            }
-
-            .mobile-menu-item svg {
-                width: 20px;
-                height: 20px;
-                margin-right: 12px;
-                flex-shrink: 0;
-            }
         }
 
         #recent-activity::-webkit-scrollbar {
@@ -514,32 +409,26 @@
     </style>
 </head>
 
-<body class="min-h-screen bg-gray-50 dark:bg-gray-900 flex flex-col">
+<body class="min-h-screen">
     <!-- Main App Content -->
-    <div id="app-content" class="flex flex-col flex-1">
-        <!-- Navigation -->
-        <nav class="bg-white dark:bg-gray-800 shadow dark:shadow-gray-900/30">
-            <div class="max-w-[1400px] mx-auto px-4 sm:px-6 lg:px-8">
-                <div class="flex justify-between h-16">
-                    <div class="flex items-center">
-                        <a href="/" onclick="navigateTo('dashboard'); return false;"
-                            class="flex items-center cursor-pointer hover:opacity-80 transition-opacity">
-                            <img id="app-logo" src="" alt="" class="h-8 w-8 mr-3 hidden object-contain">
-                            <img id="default-logo" src="/static/assets/icons/app-icon.svg" alt=""
-                                class="h-8 w-8 mr-3">
-                            <h1 id="app-title" class="text-lg sm:text-xl font-bold text-gray-900 dark:text-white">
-                                mailcow
-                                Logs Viewer</h1>
-                        </a>
-                        <span id="mailcow-connection-indicator" class="ml-2 hidden" title="mailcow connection status">
+    <div id="app-content" class="ui-shell">
+        <!-- Top bar: brand, connection and update indicators, page actions -->
+        <header class="ui-topbar">
+            <a href="/" onclick="navigateTo('dashboard'); return false;" class="ui-brand">
+                <img id="app-logo" src="" alt="" class="hidden">
+                <img id="default-logo" src="/static/assets/icons/app-icon.svg" alt="">
+                <span id="app-title">mailcow Logs Viewer</span>
+            </a>
+            <span id="current-tab-label" class="ui-page-label">Dashboard</span>
+            <span id="mailcow-connection-indicator" class="hidden" title="mailcow connection status">
                             <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
                                 <path fill-rule="evenodd"
                                     d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
                                     clip-rule="evenodd"></path>
                             </svg>
                         </span>
-                        <button id="mailcow-update-icon"
-                            class="ml-2 hidden text-blue-500 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 transition-colors"
+            <button id="mailcow-update-icon"
+                            class="ui-icon-btn hidden text-blue-500 dark:text-blue-400"
                             title="mailcow update available">
                             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
@@ -547,10 +436,8 @@
                                 </path>
                             </svg>
                         </button>
-                    </div>
-                    <div class="flex items-center space-x-2 sm:space-x-4">
-                        <button id="theme-toggle" onclick="toggleDarkMode()"
-                            class="p-2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 rounded-lg">
+            <div class="ui-topbar-actions">
+                <button id="theme-toggle" onclick="toggleDarkMode()" class="ui-icon-btn" title="Switch theme" aria-label="Switch theme">
                             <svg id="theme-toggle-dark-icon" class="w-5 h-5 hidden" fill="currentColor"
                                 viewBox="0 0 20 20">
                                 <path d="M17.293 13.293A8 8 0 016.707 2.707a8.001 8.001 0 1010.586 10.586z"></path>
@@ -562,269 +449,87 @@
                                     fill-rule="evenodd" clip-rule="evenodd"></path>
                             </svg>
                         </button>
-                        <button onclick="refreshAllData()"
-                            class="px-3 py-2 bg-blue-600 hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600 text-white rounded-lg transition text-sm font-medium">
-                            <svg class="w-4 h-4 inline mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <button onclick="refreshAllData()" class="ui-btn ui-btn-primary" title="Refresh"><svg class="w-4 h-4 inline mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                                     d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15">
                                 </path>
-                            </svg>
-                            <span class="hidden sm:inline">Refresh</span>
-                        </button>
-                        <button onclick="handleLogout()" id="logout-btn"
-                            class="hidden px-3 py-2 text-sm bg-red-600 hover:bg-red-700 dark:bg-red-500 dark:hover:bg-red-600 text-white rounded-lg transition font-medium">
-                            <svg class="w-4 h-4 inline mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            </svg><span class="ui-hide-phone">Refresh</span></button>
+                <button onclick="handleLogout()" id="logout-btn" class="hidden ui-btn" title="Logout"><svg class="w-4 h-4 inline mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                                     d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1">
                                 </path>
-                            </svg>
-                            <span class="hidden sm:inline">Logout</span>
-                        </button>
-                    </div>
-                </div>
+                            </svg><span class="ui-hide-phone">Logout</span></button>
+            </div>
+        </header>
+
+        <!-- Sidebar navigation (desktop: labels, tablet: icon rail, phone: hidden) -->
+        <nav class="ui-sidenav" aria-label="Main">
+            <div class="ui-nav-group" data-nav-group>
+                <button onclick="navigateTo('dashboard')" id="tab-dashboard" class="ui-nav-item" aria-current="page" title="Dashboard"><svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"> <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z"> </path> </svg><span class="ui-nav-label">Dashboard</span></button>
+            </div>
+            <div class="ui-nav-group" data-nav-group>
+                <div class="ui-nav-group-label">Mail</div>
+                <button onclick="navigateTo('messages')" id="tab-messages" class="ui-nav-item" title="Messages"><svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"> <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"> </path> </svg><span class="ui-nav-label">Messages</span></button>
+                <button onclick="navigateTo('queue')" id="tab-queue" class="ui-nav-item" title="Queue"><svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"> <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"> </path> </svg><span class="ui-nav-label">Queue</span></button>
+                <button onclick="navigateTo('quarantine')" id="tab-quarantine" class="ui-nav-item" title="Quarantine"><svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"> <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"> </path> </svg><span class="ui-nav-label">Quarantine</span></button>
+            </div>
+            <div class="ui-nav-group" data-nav-group>
+                <div class="ui-nav-group-label">Protection</div>
+                <button onclick="navigateTo('netfilter')" id="tab-netfilter" class="ui-nav-item" title="Security"><svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"> <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"> </path> </svg><span class="ui-nav-label">Security</span></button>
+                <button onclick="navigateTo('spam-filter')" id="tab-spam-filter" class="ui-nav-item" title="Spam Filter"><svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"> <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z"> </path> </svg><span class="ui-nav-label">Spam Filter</span></button>
+                <button onclick="navigateTo('dmarc')" id="tab-dmarc" class="ui-nav-item" title="DMARC"><svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"> <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path> </svg><span class="ui-nav-label">DMARC</span></button>
+            </div>
+            <div class="ui-nav-group" data-nav-group>
+                <div class="ui-nav-group-label">Server</div>
+                <button onclick="navigateTo('status')" id="tab-status" class="ui-nav-item" title="Status"><svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"> <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"> </path> </svg><span class="ui-nav-label">Status</span></button>
+                <button onclick="navigateTo('domains')" id="tab-domains" class="ui-nav-item" title="Domains"><svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"> <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9"> </path> </svg><span class="ui-nav-label">Domains</span></button>
+                <button onclick="navigateTo('mailbox-stats')" id="tab-mailbox-stats" class="ui-nav-item" title="Mailbox Stats"><svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"> <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 8v8m-4-5v5m-4-2v2m-2 4h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"> </path> </svg><span class="ui-nav-label">Mailbox Stats</span></button>
+                <button onclick="navigateTo('logs')" id="tab-logs" class="ui-nav-item" title="Logs"><svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"> <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"> </path> </svg><span class="ui-nav-label">Logs</span></button>
+            </div>
+            <div class="ui-nav-group" data-nav-group>
+                <button onclick="navigateTo('settings')" id="tab-settings" class="ui-nav-item" title="Settings"><svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"> <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"> </path> <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path> </svg><span class="ui-nav-label">Settings</span></button>
             </div>
         </nav>
 
-        <!-- Mobile Menu Overlay -->
+        <!-- Phone: bottom tab bar; "More" opens every page in a sheet -->
+        <nav class="ui-tabbar" aria-label="Main">
+            <button onclick="navigateToMobile('dashboard')" id="tabbar-dashboard" class="ui-tabbar-item" aria-current="page"><svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"> <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z"> </path> </svg><span>Dashboard</span></button>
+            <button onclick="navigateToMobile('messages')" id="tabbar-messages" class="ui-tabbar-item"><svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"> <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"> </path> </svg><span>Messages</span></button>
+            <button onclick="navigateToMobile('netfilter')" id="tabbar-netfilter" class="ui-tabbar-item"><svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"> <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"> </path> </svg><span>Security</span></button>
+            <button onclick="navigateToMobile('status')" id="tabbar-status" class="ui-tabbar-item"><svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"> <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"> </path> </svg><span>Status</span></button>
+            <button id="hamburger-btn" class="ui-tabbar-item" onclick="toggleMobileMenu()" aria-label="All pages"><svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"></path></svg><span>More</span></button>
+        </nav>
         <div id="mobile-menu" class="mobile-menu">
-            <div class="mobile-menu-content">
-                <button onclick="navigateToMobile('dashboard')" id="mobile-tab-dashboard"
-                    class="mobile-menu-item active">
-                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                            d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z">
-                        </path>
-                    </svg>
-                    Dashboard
-                </button>
-                <button onclick="navigateToMobile('messages')" id="mobile-tab-messages" class="mobile-menu-item">
-                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                            d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z">
-                        </path>
-                    </svg>
-                    Messages
-                </button>
-                <button onclick="navigateToMobile('netfilter')" id="mobile-tab-netfilter" class="mobile-menu-item">
-                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                            d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z">
-                        </path>
-                    </svg>
-                    Security
-                </button>
-                <button onclick="navigateToMobile('queue')" id="mobile-tab-queue" class="mobile-menu-item">
-                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                            d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10">
-                        </path>
-                    </svg>
-                    Queue
-                </button>
-                <button onclick="navigateToMobile('quarantine')" id="mobile-tab-quarantine" class="mobile-menu-item">
-                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                            d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z">
-                        </path>
-                    </svg>
-                    Quarantine
-                </button>
-                <button onclick="navigateToMobile('spam-filter')" id="mobile-tab-spam-filter" class="mobile-menu-item">
-                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                            d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z">
-                        </path>
-                    </svg>
-                    Spam Filter
-                </button>
-                <button onclick="navigateToMobile('status')" id="mobile-tab-status" class="mobile-menu-item">
-                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                            d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z">
-                        </path>
-                    </svg>
-                    Status
-                </button>
-                <button onclick="navigateToMobile('domains')" id="mobile-tab-domains" class="mobile-menu-item">
-                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                            d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9">
-                        </path>
-                    </svg>
-                    Domains
-                </button>
-                <button onclick="navigateToMobile('dmarc')" id="mobile-tab-dmarc" class="mobile-menu-item">
-                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                            d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                    </svg>
-                    DMARC
-                </button>
-                <button onclick="navigateToMobile('mailbox-stats')" id="mobile-tab-mailbox-stats"
-                    class="mobile-menu-item">
-                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                            d="M16 8v8m-4-5v5m-4-2v2m-2 4h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z">
-                        </path>
-                    </svg>
-                    Mailbox Stats
-                </button>
-                <button onclick="navigateToMobile('logs')" id="mobile-tab-logs" class="mobile-menu-item">
-                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                            d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z">
-                        </path>
-                    </svg>
-                    Logs
-                </button>
-                <button onclick="navigateToMobile('settings')" id="mobile-tab-settings" class="mobile-menu-item">
-                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                            d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z">
-                        </path>
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                            d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
-                    </svg>
-                    Settings
-                </button>
+            <div class="mobile-menu-content" role="dialog" aria-label="All pages">
+            <div class="ui-nav-group" data-nav-group>
+                <button onclick="navigateToMobile('dashboard')" id="mobile-tab-dashboard" class="mobile-menu-item active"><svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"> <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z"> </path> </svg><span class="ui-nav-label">Dashboard</span></button>
+            </div>
+            <div class="ui-nav-group" data-nav-group>
+                <div class="ui-nav-group-label">Mail</div>
+                <button onclick="navigateToMobile('messages')" id="mobile-tab-messages" class="mobile-menu-item"><svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"> <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"> </path> </svg><span class="ui-nav-label">Messages</span></button>
+                <button onclick="navigateToMobile('queue')" id="mobile-tab-queue" class="mobile-menu-item"><svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"> <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"> </path> </svg><span class="ui-nav-label">Queue</span></button>
+                <button onclick="navigateToMobile('quarantine')" id="mobile-tab-quarantine" class="mobile-menu-item"><svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"> <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"> </path> </svg><span class="ui-nav-label">Quarantine</span></button>
+            </div>
+            <div class="ui-nav-group" data-nav-group>
+                <div class="ui-nav-group-label">Protection</div>
+                <button onclick="navigateToMobile('netfilter')" id="mobile-tab-netfilter" class="mobile-menu-item"><svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"> <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"> </path> </svg><span class="ui-nav-label">Security</span></button>
+                <button onclick="navigateToMobile('spam-filter')" id="mobile-tab-spam-filter" class="mobile-menu-item"><svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"> <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z"> </path> </svg><span class="ui-nav-label">Spam Filter</span></button>
+                <button onclick="navigateToMobile('dmarc')" id="mobile-tab-dmarc" class="mobile-menu-item"><svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"> <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path> </svg><span class="ui-nav-label">DMARC</span></button>
+            </div>
+            <div class="ui-nav-group" data-nav-group>
+                <div class="ui-nav-group-label">Server</div>
+                <button onclick="navigateToMobile('status')" id="mobile-tab-status" class="mobile-menu-item"><svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"> <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"> </path> </svg><span class="ui-nav-label">Status</span></button>
+                <button onclick="navigateToMobile('domains')" id="mobile-tab-domains" class="mobile-menu-item"><svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"> <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9"> </path> </svg><span class="ui-nav-label">Domains</span></button>
+                <button onclick="navigateToMobile('mailbox-stats')" id="mobile-tab-mailbox-stats" class="mobile-menu-item"><svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"> <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 8v8m-4-5v5m-4-2v2m-2 4h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"> </path> </svg><span class="ui-nav-label">Mailbox Stats</span></button>
+                <button onclick="navigateToMobile('logs')" id="mobile-tab-logs" class="mobile-menu-item"><svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"> <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"> </path> </svg><span class="ui-nav-label">Logs</span></button>
+            </div>
+            <div class="ui-nav-group" data-nav-group>
+                <button onclick="navigateToMobile('settings')" id="mobile-tab-settings" class="mobile-menu-item"><svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"> <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"> </path> <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path> </svg><span class="ui-nav-label">Settings</span></button>
+            </div>
             </div>
         </div>
 
-        <!-- Tabs -->
-        <div class="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
-            <div class="max-w-[1400px] mx-auto px-4 sm:px-6 lg:px-8">
-                <div class="flex items-center md:justify-start">
-                    <!-- Hamburger Button for Mobile -->
-                    <button id="hamburger-btn"
-                        class="flex md:hidden flex-col justify-around w-6 h-5 bg-transparent border-none cursor-pointer p-0 z-40 text-gray-500 dark:text-gray-400"
-                        onclick="toggleMobileMenu()">
-                        <span class="hamburger-line block w-6 h-0.5 bg-current rounded transition-all"></span>
-                        <span class="hamburger-line block w-6 h-0.5 bg-current rounded transition-all"></span>
-                        <span class="hamburger-line block w-6 h-0.5 bg-current rounded transition-all"></span>
-                    </button>
-                    <span id="current-tab-label"
-                        class="md:hidden py-4 flex-1 text-center font-medium text-sm text-blue-600 dark:text-blue-400">Dashboard</span>
-                    <!-- Spacer to balance the hamburger button on the left -->
-                    <div class="md:hidden w-6"></div>
-
-                    <!-- Desktop Tabs. overflow-x-auto: between 768px and the
-                         width where all tabs fit, the row scrolls instead of
-                         widening the whole page -->
-                    <div class="hidden md:flex space-x-2 lg:space-x-4 overflow-x-auto">
-                        <button onclick="navigateTo('dashboard')" id="tab-dashboard"
-                            class="tab-active py-4 px-2 font-medium text-sm whitespace-nowrap flex items-center gap-1.5">
-                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                    d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z">
-                                </path>
-                            </svg>
-                            Dashboard
-                        </button>
-                        <button onclick="navigateTo('messages')" id="tab-messages"
-                            class="py-4 px-2 font-medium text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300 whitespace-nowrap flex items-center gap-1.5">
-                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                    d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z">
-                                </path>
-                            </svg>
-                            Messages
-                        </button>
-                        <button onclick="navigateTo('netfilter')" id="tab-netfilter"
-                            class="py-4 px-2 font-medium text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300 whitespace-nowrap flex items-center gap-1.5">
-                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                    d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z">
-                                </path>
-                            </svg>
-                            Security
-                        </button>
-                        <button onclick="navigateTo('queue')" id="tab-queue"
-                            class="py-4 px-2 font-medium text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300 whitespace-nowrap flex items-center gap-1.5">
-                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                    d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10">
-                                </path>
-                            </svg>
-                            Queue
-                        </button>
-                        <button onclick="navigateTo('quarantine')" id="tab-quarantine"
-                            class="py-4 px-2 font-medium text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300 whitespace-nowrap flex items-center gap-1.5">
-                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                    d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z">
-                                </path>
-                            </svg>
-                            Quarantine
-                        </button>
-                        <button onclick="navigateTo('spam-filter')" id="tab-spam-filter"
-                            class="py-4 px-2 font-medium text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300 whitespace-nowrap flex items-center gap-1.5">
-                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                    d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z">
-                                </path>
-                            </svg>
-                            Spam Filter
-                        </button>
-                        <button onclick="navigateTo('status')" id="tab-status"
-                            class="py-4 px-2 font-medium text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300 whitespace-nowrap flex items-center gap-1.5">
-                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                    d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z">
-                                </path>
-                            </svg>
-                            Status
-                        </button>
-                        <button onclick="navigateTo('domains')" id="tab-domains"
-                            class="py-4 px-2 font-medium text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300 whitespace-nowrap flex items-center gap-1.5">
-                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                    d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9">
-                                </path>
-                            </svg>
-                            Domains
-                        </button>
-                        <button onclick="navigateTo('dmarc')" id="tab-dmarc"
-                            class="py-4 px-2 font-medium text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300 whitespace-nowrap flex items-center gap-1.5">
-                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                    d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                            </svg>
-                            DMARC
-                        </button>
-                        <button onclick="navigateTo('mailbox-stats')" id="tab-mailbox-stats"
-                            class="py-4 px-2 font-medium text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300 whitespace-nowrap flex items-center gap-1.5">
-                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                    d="M16 8v8m-4-5v5m-4-2v2m-2 4h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z">
-                                </path>
-                            </svg>
-                            Mailbox Stats
-                        </button>
-                        <button onclick="navigateTo('logs')" id="tab-logs"
-                            class="py-4 px-2 font-medium text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300 whitespace-nowrap flex items-center gap-1.5">
-                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                    d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z">
-                                </path>
-                            </svg>
-                            Logs
-                        </button>
-                        <button onclick="navigateTo('settings')" id="tab-settings"
-                            class="py-4 px-2 font-medium text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300 whitespace-nowrap flex items-center gap-1.5">
-                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                    d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z">
-                                </path>
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                    d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
-                            </svg>
-                            Settings
-                        </button>
-                    </div>
-                </div>
-            </div>
-        </div>
-
+        <div class="ui-main">
         <!-- Main Content -->
         <div class="max-w-[1400px] mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-6 flex-1 w-full">
 
@@ -2602,10 +2307,10 @@
         </div>
 
         <!-- Footer -->
-        <footer id="app-footer" class="bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 mt-6">
+        <footer id="app-footer" class="ui-footer">
             <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
                 <div
-                    class="flex flex-col sm:flex-row justify-between items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
+                    class="flex flex-col sm:flex-row justify-between items-center gap-2">
                     <div class="flex flex-wrap items-center gap-2 justify-center sm:justify-start">
                         <span id="app-name-footer">mailcow Logs Viewer</span>
                         <span id="app-version-footer">v1.4.2</span>
@@ -2685,12 +2390,13 @@
                 </div>
             </div>
         </footer>
+        </div>
     </div> <!-- Close app-content div -->
 
     <!-- JavaScript -->
     <script src="/static/utils.js?v=5"></script>
     <script src="/static/router.js?v=3"></script>
-    <script src="/static/app.js?v=37"></script>
+    <script src="/static/app.js?v=38"></script>
     <script src="/static/export.js?v=1"></script>
     <script src="/static/message-details.js?v=3"></script>
     <script src="/static/dmarc.js?v=5"></script>
