@@ -1,0 +1,247 @@
+/*
+ * mailcow Logs Viewer design system (v3).
+ *
+ * Tokens (CSS custom properties) for the light theme on :root and the dark
+ * theme on .dark (the class the theme toggle sets on <html>), plus a small set
+ * of components. Every class is prefixed with "ui-" so it never collides with
+ * a Tailwind utility of the same name (.table, .grid, .hidden) while both are
+ * loaded during the migration.
+ *
+ * Fonts are served from frontend/assets/fonts (SIL Open Font License, see the
+ * OFL-*.txt files there). Onest covers Latin and Cyrillic, Noto Sans Hebrew
+ * covers Hebrew, IBM Plex Mono is used for addresses, IDs and IPs. Each file
+ * carries a unicode-range, so a browser only downloads the scripts a page uses.
+ */
+
+/* ---------- Fonts ---------- */
+
+@font-face { font-family: 'Onest'; font-style: normal; font-weight: 100 900; font-display: swap;
+    src: url('../fonts/onest-latin.woff2') format('woff2');
+    unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD; }
+@font-face { font-family: 'Onest'; font-style: normal; font-weight: 100 900; font-display: swap;
+    src: url('../fonts/onest-latin-ext.woff2') format('woff2');
+    unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF; }
+@font-face { font-family: 'Onest'; font-style: normal; font-weight: 100 900; font-display: swap;
+    src: url('../fonts/onest-cyrillic.woff2') format('woff2');
+    unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116; }
+@font-face { font-family: 'Onest'; font-style: normal; font-weight: 100 900; font-display: swap;
+    src: url('../fonts/onest-cyrillic-ext.woff2') format('woff2');
+    unicode-range: U+0460-052F, U+1C80-1C8A, U+20B4, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F; }
+
+@font-face { font-family: 'Noto Sans Hebrew'; font-style: normal; font-weight: 100 900; font-display: swap;
+    src: url('../fonts/noto-sans-hebrew-hebrew.woff2') format('woff2');
+    unicode-range: U+0307-0308, U+0590-05FF, U+200C-2010, U+20AA, U+25CC, U+FB1D-FB4F; }
+
+@font-face { font-family: 'IBM Plex Mono'; font-style: normal; font-weight: 400; font-display: swap;
+    src: url('../fonts/ibm-plex-mono-latin-400.woff2') format('woff2');
+    unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD; }
+@font-face { font-family: 'IBM Plex Mono'; font-style: normal; font-weight: 400; font-display: swap;
+    src: url('../fonts/ibm-plex-mono-latin-ext-400.woff2') format('woff2');
+    unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF; }
+@font-face { font-family: 'IBM Plex Mono'; font-style: normal; font-weight: 400; font-display: swap;
+    src: url('../fonts/ibm-plex-mono-cyrillic-400.woff2') format('woff2');
+    unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116; }
+@font-face { font-family: 'IBM Plex Mono'; font-style: normal; font-weight: 400; font-display: swap;
+    src: url('../fonts/ibm-plex-mono-cyrillic-ext-400.woff2') format('woff2');
+    unicode-range: U+0460-052F, U+1C80-1C8A, U+20B4, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F; }
+@font-face { font-family: 'IBM Plex Mono'; font-style: normal; font-weight: 500; font-display: swap;
+    src: url('../fonts/ibm-plex-mono-latin-500.woff2') format('woff2');
+    unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD; }
+@font-face { font-family: 'IBM Plex Mono'; font-style: normal; font-weight: 500; font-display: swap;
+    src: url('../fonts/ibm-plex-mono-latin-ext-500.woff2') format('woff2');
+    unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF; }
+@font-face { font-family: 'IBM Plex Mono'; font-style: normal; font-weight: 500; font-display: swap;
+    src: url('../fonts/ibm-plex-mono-cyrillic-500.woff2') format('woff2');
+    unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116; }
+@font-face { font-family: 'IBM Plex Mono'; font-style: normal; font-weight: 500; font-display: swap;
+    src: url('../fonts/ibm-plex-mono-cyrillic-ext-500.woff2') format('woff2');
+    unicode-range: U+0460-052F, U+1C80-1C8A, U+20B4, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F; }
+
+/* ---------- Tokens ---------- */
+
+:root {
+    --ui-font: 'Onest', 'Noto Sans Hebrew', system-ui, sans-serif;
+    --ui-mono: 'IBM Plex Mono', 'Noto Sans Hebrew', ui-monospace, monospace;
+
+    /* Type and spacing (compact) */
+    --ui-fs: 14px;
+    --ui-fs-sm: 12.5px;
+    --ui-h1: 28px;
+    --ui-radius: 12px;
+    --ui-radius-sm: 8px;
+    --ui-pad-y: 9px;
+    --ui-pad-x: 16px;
+    --ui-gap: 14px;
+    --ui-ctl-h: 34px;
+
+    /* Surfaces and text */
+    --ui-bg: #FFFFFF;
+    --ui-panel: #F4F6F5;
+    --ui-raise: #FFFFFF;
+    --ui-ink: #111814;
+    --ui-muted: #5E6863;
+    --ui-line: #E3E7E5;
+    --ui-accent: #111814;
+    --ui-on-accent: #FFFFFF;
+    --ui-focus: #1F5FBF;
+
+    /* Status */
+    --ui-ok: #12803F;
+    --ui-warn: #9A6200;
+    --ui-fail: #C42B1C;
+    --ui-spam: #A62A63;
+    --ui-info: #1F5FBF;
+
+    /* Navigation */
+    --ui-side: #FFFFFF;
+    --ui-side-ink: #1B2420;
+    --ui-side-muted: #6B7671;
+    --ui-side-card: #F4F6F5;
+    --ui-side-on: #111814;
+    --ui-side-on-ink: #FFFFFF;
+}
+
+.dark {
+    --ui-bg: #0E1110;
+    --ui-panel: #171B19;
+    --ui-raise: #0E1110;
+    --ui-ink: #F2F5F3;
+    --ui-muted: #97A29C;
+    --ui-line: #262C29;
+    --ui-accent: #F2F5F3;
+    --ui-on-accent: #0E1110;
+    --ui-focus: #7DB3FF;
+
+    --ui-ok: #3FCF7F;
+    --ui-warn: #F0B03F;
+    --ui-fail: #FF6B61;
+    --ui-spam: #F07FB0;
+    --ui-info: #7DB3FF;
+
+    --ui-side: #0E1110;
+    --ui-side-ink: #E9EEEB;
+    --ui-side-muted: #86918B;
+    --ui-side-card: #171B19;
+    --ui-side-on: #F2F5F3;
+    --ui-side-on-ink: #0E1110;
+}
+
+/* ---------- Base ---------- */
+
+.ui { font-family: var(--ui-font); font-size: var(--ui-fs); color: var(--ui-ink); background: var(--ui-bg); }
+.ui-mono { font-family: var(--ui-mono); font-size: .9em; }
+.ui-muted { color: var(--ui-muted); }
+.ui-num { font-variant-numeric: tabular-nums; }
+.ui-h1 { margin: 0; font-size: var(--ui-h1); line-height: 1.1; font-weight: 800; letter-spacing: -.035em; }
+.ui-h2 { margin: 0; font-size: 16px; font-weight: 650; letter-spacing: -.01em; }
+:where(.ui) :focus-visible { outline: 2px solid var(--ui-focus); outline-offset: 2px; }
+
+/* ---------- Panel ---------- */
+
+.ui-panel { background: var(--ui-panel); border-radius: var(--ui-radius); overflow: hidden; }
+.ui-panel-head { display: flex; align-items: center; gap: 10px; padding: 13px var(--ui-pad-x) 9px; font-size: 15px; font-weight: 650; }
+.ui-panel-head .ui-count { color: var(--ui-muted); font-weight: 500; }
+.ui-panel-head .ui-more { margin-inline-start: auto; font-size: 13px; font-weight: 600; text-decoration: underline; }
+.ui-row { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; padding: var(--ui-pad-y) var(--ui-pad-x); border-top: 1px solid var(--ui-line); }
+.ui-row > * { min-width: 0; overflow-wrap: anywhere; }
+
+/* ---------- Buttons ---------- */
+
+.ui-btn { display: inline-flex; align-items: center; justify-content: center; gap: 7px; height: var(--ui-ctl-h); padding: 0 13px;
+    border-radius: var(--ui-radius-sm); border: 1px solid var(--ui-line); background: var(--ui-raise); color: var(--ui-ink);
+    font: inherit; font-size: 13px; font-weight: 600; white-space: nowrap; cursor: pointer; }
+.ui-btn:hover { border-color: var(--ui-muted); }
+.ui-btn:disabled, .ui-btn[aria-disabled="true"] { opacity: .5; cursor: not-allowed; }
+.ui-btn-primary { background: var(--ui-accent); border-color: var(--ui-accent); color: var(--ui-on-accent); }
+.ui-btn-danger { color: var(--ui-fail); }
+.ui-btn-sm { height: 28px; padding: 0 10px; font-size: 12.5px; }
+
+/* ---------- Form fields ---------- */
+
+.ui-input, .ui-select, .ui-textarea { width: 100%; height: var(--ui-ctl-h); padding: 0 12px; border-radius: var(--ui-radius-sm);
+    border: 1px solid var(--ui-line); background: var(--ui-bg); color: var(--ui-ink); font: inherit; }
+.ui-textarea { height: auto; min-height: 90px; padding: 8px 12px; }
+.ui-input:focus, .ui-select:focus, .ui-textarea:focus { outline: none; border-color: var(--ui-accent); }
+.ui-input:disabled, .ui-select:disabled, .ui-textarea:disabled { opacity: .6; cursor: not-allowed; }
+.ui-label { display: block; margin-bottom: 5px; color: var(--ui-muted); font-size: var(--ui-fs-sm); font-weight: 600; }
+
+/* ---------- Tags (status) and chips (filters) ---------- */
+
+.ui-tag { display: inline-block; padding: 2px 8px; border-radius: 6px; font-size: 12px; font-weight: 700; line-height: 1.4;
+    color: var(--ui-muted); background: color-mix(in srgb, var(--ui-muted) 14%, transparent); }
+.ui-tag-ok { color: var(--ui-ok); background: color-mix(in srgb, var(--ui-ok) 14%, transparent); }
+.ui-tag-warn { color: var(--ui-warn); background: color-mix(in srgb, var(--ui-warn) 15%, transparent); }
+.ui-tag-fail { color: var(--ui-fail); background: color-mix(in srgb, var(--ui-fail) 14%, transparent); }
+.ui-tag-spam { color: var(--ui-spam); background: color-mix(in srgb, var(--ui-spam) 14%, transparent); }
+.ui-tag-info { color: var(--ui-info); background: color-mix(in srgb, var(--ui-info) 14%, transparent); }
+
+.ui-chip { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 11px; border-radius: 999px;
+    border: 1px solid var(--ui-line); background: var(--ui-raise); color: var(--ui-ink); font: inherit; font-size: 13px; font-weight: 500; white-space: nowrap; cursor: pointer; }
+.ui-chip small { color: var(--ui-muted); font-variant-numeric: tabular-nums; }
+.ui-chip[aria-pressed="true"] { background: var(--ui-accent); border-color: var(--ui-accent); color: var(--ui-on-accent); }
+.ui-chip[aria-pressed="true"] small { color: inherit; opacity: .8; }
+
+/* ---------- Table (grid rows; set --ui-cols on .ui-table) ---------- */
+
+/* Scrolls sideways instead of cutting columns when the screen is narrower
+   than --ui-table-min; pages can switch to stacked rows on phones instead. */
+.ui-table { background: var(--ui-panel); border-radius: var(--ui-radius); overflow-x: auto; }
+.ui-tr { display: grid; grid-template-columns: var(--ui-cols); gap: 12px; align-items: center; min-width: var(--ui-table-min, 560px);
+    padding: var(--ui-pad-y) var(--ui-pad-x); border-top: 1px solid var(--ui-line); }
+.ui-tr-head { border-top: 0; color: var(--ui-muted); font-size: var(--ui-fs-sm); font-weight: 600; }
+.ui-tr[data-href], .ui-tr[onclick] { cursor: pointer; }
+.ui-tr[data-href]:hover, .ui-tr[onclick]:hover { background: color-mix(in srgb, var(--ui-accent) 5%, transparent); }
+.ui-td { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ui-td-end { text-align: end; font-variant-numeric: tabular-nums; }
+
+/* ---------- Key figures ---------- */
+
+.ui-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 1px; background: var(--ui-line); border: 1px solid var(--ui-line); border-radius: var(--ui-radius); overflow: hidden; }
+.ui-kpi { background: var(--ui-bg); padding: 11px var(--ui-pad-x); color: var(--ui-muted); font-size: var(--ui-fs-sm); }
+.ui-kpi b { display: block; color: var(--ui-ink); font-size: 22px; line-height: 1.2; font-weight: 750; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+.ui-kpi b.ui-fail { color: var(--ui-fail); }
+.ui-kpi b.ui-warn { color: var(--ui-warn); }
+
+.ui-meter { height: 6px; border-radius: 6px; background: color-mix(in srgb, var(--ui-ink) 10%, transparent); overflow: hidden; }
+.ui-meter > i { display: block; height: 100%; background: var(--ui-ok); }
+.ui-meter.ui-warn > i { background: var(--ui-warn); }
+.ui-meter.ui-fail > i { background: var(--ui-fail); }
+
+/* ---------- Banners ---------- */
+
+.ui-banner { display: flex; gap: 12px; align-items: flex-start; padding: 12px var(--ui-pad-x); border-radius: var(--ui-radius);
+    color: var(--ui-info); background: color-mix(in srgb, var(--ui-info) 12%, transparent); font-weight: 600; }
+.ui-banner p { margin: 2px 0 0; color: var(--ui-ink); font-weight: 400; opacity: .85; }
+.ui-banner-ok { color: var(--ui-ok); background: color-mix(in srgb, var(--ui-ok) 13%, transparent); }
+.ui-banner-warn { color: var(--ui-warn); background: color-mix(in srgb, var(--ui-warn) 14%, transparent); }
+.ui-banner-fail { color: var(--ui-fail); background: color-mix(in srgb, var(--ui-fail) 13%, transparent); }
+
+/*
+ * Locked area: shown instead of controls that need something the installation
+ * does not have (a Read-Write API key, a password, a licence key, a feature
+ * that is off). It always says what is missing and where to set it, so a
+ * control never disappears without an explanation.
+ *
+ *   <div class="ui-locked">
+ *     <svg class="ui-locked-icon">...</svg>
+ *     <div><b>Title</b><p>What is missing and why it matters.</p></div>
+ *     <a class="ui-btn ui-btn-sm" href="/settings">Where to set it</a>
+ *   </div>
+ */
+.ui-locked { display: grid; grid-template-columns: 20px minmax(0, 1fr) auto; align-items: center; gap: 4px 14px;
+    padding: 14px var(--ui-pad-x); border-radius: var(--ui-radius);
+    border: 1px dashed color-mix(in srgb, var(--ui-muted) 55%, transparent); background: color-mix(in srgb, var(--ui-muted) 7%, transparent); }
+.ui-locked-icon { width: 20px; height: 20px; color: var(--ui-muted); }
+.ui-locked b { display: block; font-weight: 650; }
+.ui-locked p { margin: 2px 0 0; color: var(--ui-muted); }
+
+/* ---------- Empty state ---------- */
+
+.ui-empty { padding: 36px var(--ui-pad-x); color: var(--ui-muted); text-align: center; }
+.ui-empty b { display: block; color: var(--ui-ink); font-weight: 650; margin-bottom: 4px; }
+
+/* Phones: the action moves under the text, still next to the icon column */
+@media (max-width: 760px) {
+    .ui-locked { grid-template-columns: 20px minmax(0, 1fr); align-items: start; }
+    .ui-locked > :nth-child(3) { grid-column: 2; justify-self: start; margin-top: 8px; }
+}
