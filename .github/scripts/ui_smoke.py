@@ -2,7 +2,8 @@
 """Browser pass over every page of a running mailcow Logs Viewer.
 
 Opens each SPA route in headless Chromium, clicks every control that only
-switches what is shown (sub-tabs, views, date presets) and fails on:
+switches what is shown (sub-tabs, views, date presets, filters), opens the
+detail views of the seeded data (smoke_seed.py) and fails on:
 
   - an uncaught JavaScript error,
   - an inline handler (onclick="fn()" and friends) whose function does not
@@ -33,6 +34,16 @@ SAFE_CLICK = re.compile(
     r'(?:\w*[Ss]witch\w*(?:Tab|View)|selectDatePreset|selectMessagesDatePreset|setLogTimePreset'
     r'|(?:apply|clear|reset)\w*Filters|toggle\w*DateRangePicker|toggleDarkMode)\s*\(')
 
+# Controls that open a detail view of seeded data (read-only). Each function is
+# clicked at most OPEN_CAP times per page, so a long list does not dominate.
+OPEN_CLICK = re.compile(
+    r'^\s*(?:event\.stopPropagation\(\);?\s*)?'
+    r'(?:viewMessageDetails|viewPostfixDetails|loadDomainOverview|loadSourceDetails)\s*\(')
+OPEN_CAP = 2
+
+# View switches wired with addEventListener instead of an inline handler.
+SAFE_SELECTORS = '.settings-edit-tab'
+
 # API errors that are the correct answer in the smoke environment, where
 # mailcow is an unreachable placeholder. Each entry: (method, path regex, status, reason).
 MAILCOW_DOWN = 'reads from mailcow, which is an unreachable placeholder in the smoke test'
@@ -42,7 +53,38 @@ EXPECTED_ERRORS = [
     ('GET', r'^/api/domains/all$', 500, MAILCOW_DOWN),
 ]
 
-MAX_CLICKS_PER_PAGE = 40
+MAX_CLICKS_PER_PAGE = 60
+
+# Runs in the page: clicks the next not-yet-clicked, visible control that is
+# safe to press, and returns its key (or null when there is none left).
+CLICK_NEXT_JS = r"""([safePattern, openPattern, selectors, openCap]) => {
+    const state = (window.__uiSmoke ||= { seen: new Set(), perFn: {} });
+    const safe = new RegExp(safePattern), open = new RegExp(openPattern);
+    const visible = el => {
+        const r = el.getBoundingClientRect();
+        return r.width > 0 && r.height > 0 && getComputedStyle(el).visibility !== 'hidden';
+    };
+    const candidates = [];
+    for (const el of document.querySelectorAll('[onclick]')) {
+        const v = el.getAttribute('onclick');
+        if (safe.test(v)) candidates.push([el, v, null]);
+        else if (open.test(v)) candidates.push([el, v, v.match(/(viewMessageDetails|viewPostfixDetails|loadDomainOverview|loadSourceDetails)/)[1]]);
+    }
+    for (const el of document.querySelectorAll(selectors)) {
+        candidates.push([el, 'selector:' + (el.dataset.tab || el.textContent.trim()), null]);
+    }
+    for (const [el, key, fn] of candidates) {
+        if (state.seen.has(key) || !visible(el)) continue;
+        if (fn) {
+            if ((state.perFn[fn] || 0) >= openCap) continue;
+            state.perFn[fn] = (state.perFn[fn] || 0) + 1;
+        }
+        state.seen.add(key);
+        el.click();
+        return key;
+    }
+    return null;
+}"""
 
 # Runs in the page: every inline handler must resolve to a function. Uses the
 # Function constructor so top-level const/let functions are visible too.
@@ -144,28 +186,20 @@ def main():
 
             clicked = set()
             for _ in range(MAX_CLICKS_PER_PAGE):
-                # Re-query each time: a click may re-render the page.
-                target = page.evaluate(r"""(pattern) => {
-                    const re = new RegExp(pattern);
-                    for (const el of document.querySelectorAll('[onclick]')) {
-                        const v = el.getAttribute('onclick');
-                        if (!re.test(v) || window.__uiSmokeClicked?.has(v)) continue;
-                        const r = el.getBoundingClientRect();
-                        if (!r.width || !r.height || getComputedStyle(el).visibility === 'hidden') continue;
-                        (window.__uiSmokeClicked ||= new Set()).add(v);
-                        el.setAttribute('data-ui-smoke-target', '1');
-                        return v;
-                    }
-                    return null;
-                }""", SAFE_CLICK.pattern)
+                # Re-query each time: a click may re-render the page. The click
+                # is dispatched on the element itself so an open modal or
+                # overlay cannot swallow it; handler exceptions still surface
+                # as 'pageerror'.
+                target = page.evaluate(CLICK_NEXT_JS, [SAFE_CLICK.pattern, OPEN_CLICK.pattern, SAFE_SELECTORS, OPEN_CAP])
                 if not target:
                     break
                 clicked.add(target)
-                page.click('[data-ui-smoke-target]', timeout=10000)
-                page.evaluate("() => document.querySelectorAll('[data-ui-smoke-target]').forEach(e => e.removeAttribute('data-ui-smoke-target'))")
                 page.wait_for_load_state('networkidle', timeout=30000)
+                page.wait_for_timeout(150)
                 check_handlers()
-            print(f'  {route}: loaded, {len(clicked)} view controls clicked')
+            opened = sorted({k.split('(')[0].split(';')[-1].strip() for k in clicked if OPEN_CLICK.match(k)})
+            print(f'  {route}: loaded, {len(clicked)} controls clicked'
+                  + (f", opened: {', '.join(opened)}" if opened else ''))
 
         browser.close()
 

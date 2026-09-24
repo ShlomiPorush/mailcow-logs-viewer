@@ -125,6 +125,12 @@ if docker logs "${APP}" 2>&1 | grep -E "(TypeError|AttributeError|NameError|Impo
     fail "a job raised a programming error (see log lines above)"
 fi
 
+step "Seed fake data for the browser pass"
+# Through the app's own models, so detail views (message details, DMARC
+# domains, blocklist results) have something to render.
+MSYS_NO_PATHCONV=1 docker exec -i -w /app "${APP}" python - < "$(dirname "$0")/smoke_seed.py" \
+    || fail "seeding the smoke database failed"
+
 step "Browser pass over every page"
 # Headless Chromium from the pinned Playwright image; the Python package is
 # pinned to the same release so it uses the browsers the image ships.
