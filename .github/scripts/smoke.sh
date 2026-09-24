@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Boot the built image against a real PostgreSQL and prove the application
 # actually works: health, SPA, static assets, Alembic head, and the manual
-# job runner accepting every job the Status page lists.
+# job runner accepting every job the Status page lists, and a headless
+# browser pass over every page (ui_smoke.py).
 #
 # Usage: smoke.sh <image tag>
 # Runs in CI (ubuntu runner) and locally (Git Bash / WSL) against any image.
@@ -123,6 +124,18 @@ curl -fsS "${BASE}/api/health" | grep -q '"status": *"healthy"' || fail "health 
 if docker logs "${APP}" 2>&1 | grep -E "(TypeError|AttributeError|NameError|ImportError):" ; then
     fail "a job raised a programming error (see log lines above)"
 fi
+
+step "Browser pass over every page"
+# Headless Chromium from the pinned Playwright image; the Python package is
+# pinned to the same release so it uses the browsers the image ships.
+PW_VERSION="1.56.0"
+PW_IMAGE="mcr.microsoft.com/playwright/python:v${PW_VERSION}-noble"
+SCRIPTS="$(cd "$(dirname "$0")" && (pwd -W 2>/dev/null || pwd))"
+MSYS_NO_PATHCONV=1 docker run --rm --network "${NET}" --ipc=host \
+    -v "${SCRIPTS}:/scripts:ro" "${PW_IMAGE}" \
+    sh -c "pip install -q --disable-pip-version-check --root-user-action=ignore --break-system-packages playwright==${PW_VERSION} \
+           && python /scripts/ui_smoke.py http://${APP}:8080" \
+    || fail "browser pass found problems (see FAIL lines above)"
 
 echo
 echo "SMOKE OK"
