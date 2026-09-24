@@ -671,7 +671,7 @@ function formatLogLine(entry, serviceId) {
             };
             const actionColor = actionColors[entry.action] || 'text-gray-400';
 
-            displayContent = `<span class="text-gray-300">${sender}</span> <span class="text-gray-500">→</span> <span class="text-gray-300">${recipient}</span> <span class="text-gray-500">subj:</span><span class="text-gray-400">${subject}</span> <span class="${scoreColor} font-bold">[${score.toFixed(1)}]</span> <span class="${actionColor}">${action}</span>`;
+            displayContent = `<span class="text-gray-300">${sender}</span> <span class="text-gray-500">→</span> <span class="text-gray-300">${recipient}</span> <span class="text-gray-500">subj:</span><span class="text-gray-400" dir="auto">${subject}</span> <span class="${scoreColor} font-bold">[${score.toFixed(1)}]</span> <span class="${actionColor}">${action}</span>`;
             if (ip) {
                 displayContent += ` <span class="text-gray-600">${ip}</span>`;
             }

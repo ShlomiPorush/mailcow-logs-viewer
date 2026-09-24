@@ -70,6 +70,16 @@ test('message entry point and all four tabs preserve content and actions', async
     assert.equal(h.element('modal-tab-netfilter').innerHTML, '<span class="text-sm font-medium">Security</span>');
 });
 
+test('right-to-left mail content keeps its own direction', async () => {
+    // Written as escapes so the source stays ASCII; renders as a Hebrew subject
+    const rtl = '\u05e9\u05dc\u05d5\u05dd (1)';
+    const h = harness({ ...message(), subject: rtl });
+    await h.context.viewMessageDetails('example-key');
+    const html = h.element('message-modal-content').innerHTML;
+    assert.ok(html.includes(`dir="auto" title="${rtl}">${rtl}</p>`));
+    assert.match(html, /<bdi>sender@example\.com<\/bdi>/);
+});
+
 test('empty analysis and security records retain their empty states', () => {
     const h = harness({});
     h.context.renderSpamTab(h.element('content'), {});

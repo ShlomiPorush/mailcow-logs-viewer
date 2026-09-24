@@ -504,6 +504,12 @@
         .copyable .copy-icon.copied {
             opacity: 1;
         }
+
+        /* Mail content (subjects, rule values) reads in its own direction via
+           dir="auto" but stays aligned with its label in the LTR layout */
+        [dir="auto"] {
+            text-align: left;
+        }
     </style>
 </head>
 
@@ -2681,17 +2687,17 @@
     </div> <!-- Close app-content div -->
 
     <!-- JavaScript -->
-    <script src="/static/utils.js?v=4"></script>
+    <script src="/static/utils.js?v=5"></script>
     <script src="/static/router.js?v=3"></script>
-    <script src="/static/app.js?v=36"></script>
+    <script src="/static/app.js?v=37"></script>
     <script src="/static/export.js?v=1"></script>
-    <script src="/static/message-details.js?v=2"></script>
+    <script src="/static/message-details.js?v=3"></script>
     <script src="/static/dmarc.js?v=5"></script>
-    <script src="/static/logs-viewer.js?v=1"></script>
+    <script src="/static/logs-viewer.js?v=2"></script>
     <script src="/static/settings.js?v=17"></script>
     <script src="/static/domains.js?v=4"></script>
     <script src="/static/mailbox-stats.js?v=4"></script>
-    <script src="/static/rate-limits.js?v=21"></script>
+    <script src="/static/rate-limits.js?v=22"></script>
     <script src="/static/smtp-abuse.js?v=1"></script>
     <script src="/static/notifications.js?v=3"></script>
     <script src="/static/spam_filter.js?v=3"></script>
