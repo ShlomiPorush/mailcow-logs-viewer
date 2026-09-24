@@ -12,7 +12,7 @@ This catalog lists them, so that a redesign keeps every one of them on purpose o
 4. Check the invariants below on every page.
 5. When the code changes, regenerate the tables: `node .github/scripts/ui-catalog.cjs --write`. A row that disappears from the tables without a decision is a regression.
 
-Pages, modals, actions, handler functions and API calls are also guarded automatically by `.github/tests/ui-inventory.test.cjs` against `ui-inventory.baseline.json`. This catalog covers what that test cannot: how things look and behave.
+Pages, modals, actions, handler functions, API calls, form fields, drop-down options and the settings on the Settings page are also guarded automatically by `.github/tests/ui-inventory.test.cjs` against `ui-inventory.baseline.json`, and `backend/tests/test_settings_ui_coverage.py` fails when an editable setting has no place on the Settings page. This catalog covers what those tests cannot: how things look and behave, and what the UI shows when a feature is off or not configured.
 
 ## Invariants for every page
 
@@ -52,6 +52,94 @@ Pages, modals, actions, handler functions and API calls are also guarded automat
 | Auto refresh | The page refreshes on its own at the listed interval, and stops when you leave it. |
 | Address bar | The URL changes as listed, so the view can be bookmarked, shared and reloaded. |
 | Keyboard | The listed keys still close or confirm the dialog. |
+| Gated states | Each state in the next section still appears under its condition, with the same explanation and the same way out (a link or the place to configure it). Run the browser pass in both modes (see below). |
+
+## Gated and conditional states
+
+Many parts of the UI change with the configuration: a feature can be turned off, a key or password can be missing, settings can be read-only. These states are easy to miss in a redesign because a normal test instance never shows them. Each row names the condition, what the user sees and where it is rendered.
+
+### Global (navigation, header, footer)
+
+| Condition | What the user sees | Rendered by |
+|---|---|---|
+| A feature is listed in `disabled_features` (`/api/info`; env `DISABLED_FEATURES`: netfilter, queue, quarantine, spam-filter, domains, dmarc, mailbox-stats, rate-limits, logs, blacklist) | Its tab disappears from the desktop and mobile navigation | `applyFeatureToggles` (`tab-<id>`, `mobile-tab-<id>`) |
+| Only `mailbox-stats` is disabled, `rate-limits` is on | The tab stays and is relabelled "Rate Limits"; the Statistics view and the view switcher are hidden | `applyFeatureToggles`, `setNavTabLabel` |
+| Both `mailbox-stats` and `rate-limits` are disabled | The tab is hidden | `applyFeatureToggles` |
+| `rate-limits` is disabled | The Rate Limits view button is hidden and the page falls back to Statistics | `applyFeatureToggles`, `mailboxStatsSwitchView` |
+| The URL of a disabled feature is opened directly | The page is replaced by "{Label} is disabled", "This feature has been turned off by the administrator in Settings → Application → Features." and a Go to Dashboard button; the URL stays | `switchTab` |
+| `auth_enabled` | The Logout button is shown; without it the auth check is skipped | `checkAuthentication`, `#logout-btn` |
+| mailcow connection (`/api/status/mailcow-connection`) | Header indicator: green "Connected to mailcow", red "Not connected to mailcow", or grey "Connection status unknown" | `#mailcow-connection-indicator` |
+| App update available (`/api/status/app-version`) | Footer badge "Update Available" that opens the changelog modal | `#update-badge` |
+| mailcow update available (`/api/status/version`) | Header icon and footer badge with the title "Update available: {version}", both open the mailcow update modal | `#mailcow-update-icon`, `#mailcow-update-badge` |
+
+### Login page (`login.html`)
+
+| Condition | What the user sees | Rendered by |
+|---|---|---|
+| Authentication is off | Redirect to the app | inline script |
+| `oauth2_enabled` (`/api/auth/provider-info`) | The OAuth2 button with the provider name | `#oauth2-section` |
+| `basic_auth_enabled` is false | The username and password form is hidden | `#login-form` |
+| Both methods on | An "OR" separator between them | `#auth-separator` |
+| `?error=` in the URL | A red error box, with its own text for `oauth2_error`, `invalid_state`, `missing_code`, `no_token`, `session_capacity` ("Login capacity reached...") and `server_error` | `#login-error` |
+
+### Missing Read-Write mailcow API key (`MAILCOW_API_KEY_RW`)
+
+The same missing key is handled in two ways today. Some pages explain it; others hide their controls without a word.
+
+| Page | What the user sees | Rendered by |
+|---|---|---|
+| Security, Fail2ban | Yellow lock banner: editing requires a Read-Write API key, configure it in Settings → Mailcow → Connection. Edit buttons removed, fields stay disabled, Unban hidden | `loadFail2BanSettings` |
+| Security, netfilter log | Ban and Unban buttons are removed from the rows, **with no explanation** | `renderNetfilterData` |
+| Security, Abuse protection | Overlay "Abuse protection controls are locked" with the reason ("SMTP abuse protection is disabled" and/or "a Read-Write mailcow API key is not configured"); all actions hidden | `renderSmtpAbusePanel` |
+| Queue | Toolbar, checkboxes and Retry/Hold/Unhold/Delete are gone, **with no explanation** | `loadQueue` |
+| Quarantine | Bulk and per-item Release/Delete/Learn, the details modal actions and the whole Auto-Rules section are hidden, **with no explanation** | `renderQuarantineData`, `initQuarantineRules` |
+| Spam Filter | Blue banner "Read-Only Mode: MAILCOW_API_KEY_RW is not configured. You can view maps but cannot save changes." (the Save button of the map editor itself is not gated) | `renderRspamdMapsList` |
+| Mailbox Stats, Rate Limits | Yellow lock banner; Edit, Apply to filtered, the bulk panel and Reset counter are hidden | `renderRateLimitReadOnlyNotice` |
+
+The v3 redesign replaces these with one consistent locked-area component that says what is missing and where to configure it (decided 2026-09-25).
+
+### Features that are off or not configured
+
+| Page | Condition | What the user sees | Rendered by |
+|---|---|---|---|
+| Dashboard | `blacklist` disabled | The blacklist card is hidden | `#dashboard-blacklist-card` |
+| Dashboard | Unacknowledged security alerts | Red banner "Security Alerts (N)" with severity chips, Dismiss and Dismiss all | `loadDashboardSecurityAlerts` |
+| Message details | `netfilter` disabled | The Security tab of the modal is hidden | `#modal-tab-netfilter` |
+| Security | SMTP abuse protection off | "Automatic protection is off. Enable it under Settings → SMTP Abuse." | `renderSmtpAbusePanel` |
+| Security | No GeoIP data | "No GeoIP data available. Configure MaxMind to enable country statistics." (also shown when MaxMind is configured but there is no data yet) | `#country-chart-empty` |
+| Spam Filter | `RSPAMD_PASSWORD` missing | Yellow card "Rspamd Not Configured" with a Go to Settings button | `loadRspamdMaps` |
+| DMARC | Manual upload disabled | The Upload Report button is hidden | `updateDmarcControls` |
+| DMARC | IMAP sync disabled | The Sync from IMAP block and the last sync line are hidden | `updateDmarcControls` |
+| DMARC | Report deletion disabled | "(Deletion disabled)" and no delete column or buttons | `renderReportsManagementTable` |
+| DMARC | Policy insights available | Blue banner "DMARC Insights (N)" | `loadDmarcInsights` |
+| Mailbox Stats | Domain limits unreadable | Amber strip "Domain limits could not be read from mailcow: {error}" | `renderRateLimitConfigCard` |
+| Logs | Raw log collection off | "Live Log Viewer is Disabled" with the place to enable it (Settings → Raw Logs) | `loadLogViewer` |
+| Logs | No services enabled | "No log services available. Enable services in Settings → Raw Logs." | `loadLogViewer` |
+| Logs | WebSocket state | Green, yellow or red dot with Connected, Paused or Disconnected | `updateWsIndicator` |
+| Status | `blacklist` disabled | The IP Blacklist Monitor section is hidden | `#blacklist-section` |
+| Status | A job's feature is off | Job card faded with a "feature off" badge, no Run button | `renderJobCard` |
+| Status | A job is disabled for another reason | The Run button is hidden, **with no explanation** | `renderJobCard` |
+| Status | A job is running | Run button disabled, "Job is running" | `renderJobCard` |
+
+### Settings
+
+| Condition | What the user sees | Rendered by |
+|---|---|---|
+| `SETTINGS_EDIT_VIA_UI_ENABLED` is off | Read-only cards with the current values, **with no explanation** of how to enable editing | `renderSettings` |
+| Editing is on | "Edit configuration" with the note "Priority: Default → DB → ENV. Environment variables always override DB values and cannot be changed from here." | `renderSettings` |
+| Settings not migrated yet | Only a "Migrate Settings from ENV" button, no Save button | `renderSettings` |
+| A key is set by an environment variable | The field is disabled, with a lock icon and "Controlled by ENV variable - cannot be changed from here." | `renderSettingsEditField` |
+| `DISABLED_FEATURES` or `RAW_LOGS_SERVICES` set by the environment | Checkboxes disabled, "Locked by ENV (DISABLED_FEATURES)" or "Controlled by ENV variable." | `renderSettingsEditField` |
+| A value differs from its default | Amber highlight with "Reset to default" or "Clear" | `renderSettingsEditField` |
+| A feature is disabled | Its Settings tab is hidden | `SETTINGS_TAB_FEATURE_MAP` |
+| MaxMind | "Not checked", "Not configured", "License Valid" or a red error; database "DB Healthy", "DB Corrupt" with Repair, or "Downloading..." | `renderMaxMindStatus`, `renderGeoIPDbStatus` |
+| Turning Basic Auth on without a password | A toast, then the "Verify Credentials" modal | `renderSettings` |
+| Disabling a feature that has data | The warning "Disabling a feature permanently deletes its stored data." and a confirmation modal before the purge | `showFeatureDisableConfirmModal` |
+| Notification destination disabled or failing | Faded card with a "disabled" tag, a coloured status dot and the last error | `renderNotificationChannels` |
+
+### Checking the gated states in a browser
+
+`UI_SMOKE=1 bash .github/scripts/smoke.sh <image>` runs the browser pass twice: once with every feature on and settings editable, and once locked, with every feature in `DISABLED_FEATURES` and `SETTINGS_EDIT_VIA_UI_ENABLED` off. Both runs have no Read-Write key, no Rspamd password and no MaxMind key, so the locked banners above render in both.
 
 ## How this catalog was checked
 

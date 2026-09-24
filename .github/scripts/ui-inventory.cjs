@@ -4,7 +4,8 @@
 //   - every inline handler (onclick="fn(...)" and friends) names a function
 //     that is actually defined somewhere in the frontend, and
 //   - nothing listed in the committed baseline silently disappears, so a
-//     redesign cannot drop a page, button, modal or API call by accident.
+//     redesign cannot drop a page, button, modal, API call, form field,
+//     drop-down option or setting by accident.
 //
 // Usage:
 //   node .github/scripts/ui-inventory.cjs               print the inventory (Markdown)
@@ -123,6 +124,69 @@ function modals(files) {
     return [...html.matchAll(/\sid="([^"]*modal[^"]*)"/gi)].map(m => m[1]).sort();
 }
 
+// The fixed id in a tag's attributes, or null. The value must close with the
+// quote it opened with, so id="edit-' + key + '" (built at runtime) is skipped.
+function fixedId(attrs) {
+    const m = attrs.match(/\bid\s*=\s*\\?(["'])([^"'\\]+)\\?\1/);
+    return m && !m[2].includes('${') ? m[2] : null;
+}
+
+function addTo(map, key, file) {
+    if (!map.has(key)) map.set(key, new Set());
+    map.get(key).add(file);
+}
+
+// Form fields with a fixed id (input, select, textarea), in index.html and in
+// markup rendered from JavaScript. Ids built at runtime (id="x-${n}") are skipped.
+function controls(files) {
+    const out = new Map();
+    const tag = /<(?:input|select|textarea)\b([^>]*)>/g;
+    for (const f of files) {
+        for (const m of f.text.matchAll(tag)) {
+            const id = fixedId(m[1]);
+            if (id) addTo(out, id, f.name);
+        }
+    }
+    return out;
+}
+
+// Every fixed option of every drop-down, as "select-id=value", plus the
+// predefined choices of Settings fields (SETTINGS_FIELD_OPTIONS in settings.js)
+// as "setting:key=value".
+function options(files) {
+    const out = new Map();
+    const select = /<select\b([^>]*)>([\s\S]*?)<\/select>/g;
+    for (const f of files) {
+        for (const m of f.text.matchAll(select)) {
+            const id = fixedId(m[1]);
+            if (!id) continue;
+            for (const o of m[2].matchAll(/<option\b[^>]*\bvalue\s*=\s*\\?(["'])([^"'\\]*)\\?\1/g)) {
+                if (!o[2].includes('${')) addTo(out, `${id}=${o[2]}`, f.name);
+            }
+        }
+    }
+    const settings = files.find(f => f.name === 'settings.js');
+    const block = settings && settings.text.match(/const SETTINGS_FIELD_OPTIONS = \{([\s\S]*?)\n\};/);
+    if (block) {
+        for (const field of block[1].matchAll(/(\w+):\s*\[([\s\S]*?)\]/g)) {
+            for (const v of field[2].matchAll(/value:\s*'([^']*)'/g)) addTo(out, `setting:${field[1]}=${v[1]}`, 'settings.js');
+        }
+    }
+    return out;
+}
+
+// Every setting the Settings page offers, from the tab definitions in settings.js
+// (groups: [{ label, keys: ['smtp_host', ...] }]).
+function settingsKeys(files) {
+    const settings = files.find(f => f.name === 'settings.js');
+    if (!settings) return [];
+    const keys = new Set();
+    for (const m of settings.text.matchAll(/\bkeys:\s*\[([^\]]*)\]/g)) {
+        for (const k of m[1].matchAll(/'([^']+)'/g)) keys.add(k[1]);
+    }
+    return [...keys].sort();
+}
+
 function collect(dir = FRONTEND) {
     const files = frontendFiles(dir);
     const defined = definedNames(files);
@@ -161,6 +225,9 @@ function collect(dir = FRONTEND) {
         actions,
         undefinedHandlers,
         api: apiCalls(files),
+        controls: controls(files),
+        options: options(files),
+        settings: settingsKeys(files),
     };
 }
 
@@ -172,6 +239,9 @@ function toPlain(inv) {
         actions: sorted(inv.actions),
         handlers: sorted(inv.handlers),
         api: sorted(inv.api),
+        controls: sorted(inv.controls),
+        options: sorted(inv.options),
+        settings: inv.settings.slice(),
     };
 }
 
@@ -184,7 +254,8 @@ function toMarkdown(inv) {
     };
     const lines = ['# UI inventory', '',
         `${plain.pages.length} pages, ${plain.modals.length} modals, ${plain.actions.length} distinct actions, ` +
-        `${plain.handlers.length} handler functions, ${plain.api.length} API paths.`, '',
+        `${plain.handlers.length} handler functions, ${plain.api.length} API paths, ` +
+        `${plain.controls.length} form fields, ${plain.options.length} drop-down options, ${plain.settings.length} settings.`, '',
         '## Pages', '', ...plain.pages.map(p => `- ${p}`), '',
         '## Modals', '', ...plain.modals.map(m => `- ${m}`), ''];
     const actions = byFile(inv.actions);
