@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.8.0] - 2026-09-24
+
 ### Added
 
 - **Rate Limits** - View sending activity and per-sender history, edit mailbox and domain limits individually or in bulk, and reset counters with an audit trail. Works independently of Mailbox Stats.
