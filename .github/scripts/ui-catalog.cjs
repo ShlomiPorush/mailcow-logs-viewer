@@ -286,7 +286,7 @@ function collect() {
             ({ what: `${name}: ${a.slice(0, 2).map(show).join(' / ')}` })) });
 
     cats.push({ title: 'Country flags', note: 'PNG flags served locally from `frontend/assets/flags/<size>/<cc>.png` (sizes 16x12, 24x18, 48x36), no emoji and no external source.',
-        rows: calls(files, 'getFlagUrl|getFlagEmoji|renderGeoIPInfo|renderDmarcGeoIPInfo', (a, name) =>
+        rows: calls(files, 'getFlagUrl|renderGeoIPInfo|renderDmarcGeoIPInfo', (a, name) =>
             ({ what: `${name}(${a.map(x => short(x, 40)).join(', ')})` })) });
 
     cats.push({ title: 'Markdown rendering', note: 'Places that render Markdown (help pages, changelogs) through `renderMarkdown` (marked, then DOMPurify) into a `.markdown-body` element.',

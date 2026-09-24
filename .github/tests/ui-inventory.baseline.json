@@ -248,8 +248,7 @@
     "uploadDmarcReport",
     "validateMapContent",
     "validateMaxMindLicense",
-    "viewMessageDetails",
-    "viewPostfixDetails"
+    "viewMessageDetails"
   ],
   "handlers": [
     "acknowledgeAllSecurityAlerts",
@@ -466,9 +465,6 @@
     "/api/logs/netfilter",
     "/api/logs/netfilter/countries",
     "/api/logs/netfilter/stats/by-country",
-    "/api/logs/postfix",
-    "/api/logs/postfix/by-queue/{param}",
-    "/api/logs/rspamd",
     "/api/mailbox-stats/all",
     "/api/mailbox-stats/domains",
     "/api/mailbox-stats/summary",

@@ -39,7 +39,7 @@ SAFE_CLICK = re.compile(
 # clicked at most OPEN_CAP times per page, so a long list does not dominate.
 OPEN_CLICK = re.compile(
     r'^\s*(?:event\.stopPropagation\(\);?\s*)?'
-    r'(?:viewMessageDetails|viewPostfixDetails|loadDomainOverview|loadSourceDetails)\s*\(')
+    r'(?:viewMessageDetails|loadDomainOverview|loadSourceDetails)\s*\(')
 OPEN_CAP = 2
 
 # View switches wired with addEventListener instead of an inline handler.
@@ -69,7 +69,7 @@ CLICK_NEXT_JS = r"""([safePattern, openPattern, selectors, openCap]) => {
     for (const el of document.querySelectorAll('[onclick]')) {
         const v = el.getAttribute('onclick');
         if (safe.test(v)) candidates.push([el, v, null]);
-        else if (open.test(v)) candidates.push([el, v, v.match(/(viewMessageDetails|viewPostfixDetails|loadDomainOverview|loadSourceDetails)/)[1]]);
+        else if (open.test(v)) candidates.push([el, v, v.match(/(viewMessageDetails|loadDomainOverview|loadSourceDetails)/)[1]]);
     }
     for (const el of document.querySelectorAll(selectors)) {
         candidates.push([el, 'selector:' + (el.dataset.tab || el.textContent.trim()), null]);
