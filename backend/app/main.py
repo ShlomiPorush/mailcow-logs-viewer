@@ -7,6 +7,7 @@ root = logging.getLogger()
 root.handlers = []
 
 import asyncio
+import mimetypes
 import time
 
 from fastapi import FastAPI, Request
@@ -360,7 +361,9 @@ app.include_router(rate_limits_router.router, prefix="/api", tags=["Rate Limits"
 # them (see backend/tests/test_route_exposure.py).
 app.include_router(raw_logs_router.ws_router, tags=["Raw Logs WebSocket"])
 
-# Mount static files (frontend)
+# Mount static files (frontend). The slim Python image has no MIME entry for
+# web fonts, so they would go out as application/octet-stream.
+mimetypes.add_type("font/woff2", ".woff2")
 app.mount("/static", StaticFiles(directory="/app/frontend"), name="static")
 
 
