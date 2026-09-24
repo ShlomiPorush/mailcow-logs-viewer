@@ -117,7 +117,7 @@ def seed_dmarc(db):
                               'spf': [{'domain': 'spoof.test', 'result': 'fail'}]},
                 country_code='NL', country_name='Netherlands'))
     tls = m.TLSReport(
-        report_id='smoke-tls-0', organization_name='google.com', contact_info='smtp-tls@google.com',
+        report_id='smoke-tls-0', organization_name='reporter.example.net', contact_info='smtp-tls@reporter.example.net',
         policy_domain='example.com', start_datetime=ago(days=1), end_datetime=NOW, raw_json='{}')
     db.add(tls)
     db.flush()
