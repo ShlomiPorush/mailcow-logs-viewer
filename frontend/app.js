@@ -158,14 +158,10 @@ async function checkAuthentication() {
 let currentTab = 'dashboard';
 let appTimezone = 'UTC'; // Default timezone, will be updated from API
 let currentPage = {
-    postfix: 1,
-    rspamd: 1,
     netfilter: 1,
     messages: 1
 };
 let currentFilters = {
-    postfix: {},
-    rspamd: {},
     netfilter: {},
     queue: {},
     messages: {}
@@ -1536,208 +1532,6 @@ function performDashboardSearch() {
 
     // Switch to Messages tab and load
     switchTab('messages');
-}
-
-// =============================================================================
-// POSTFIX LOGS
-// =============================================================================
-
-function applyPostfixFilters() {
-    currentFilters.postfix = {
-        search: document.getElementById('postfix-filter-search').value,
-        sender: document.getElementById('postfix-filter-sender').value,
-        recipient: document.getElementById('postfix-filter-recipient').value
-    };
-    currentPage.postfix = 1;
-    loadPostfixLogs();
-}
-
-function clearPostfixFilters() {
-    document.getElementById('postfix-filter-search').value = '';
-    document.getElementById('postfix-filter-sender').value = '';
-    document.getElementById('postfix-filter-recipient').value = '';
-    currentFilters.postfix = {};
-    currentPage.postfix = 1;
-    loadPostfixLogs();
-}
-
-async function loadPostfixLogs(page = 1) {
-    const container = document.getElementById('postfix-logs');
-
-    // Show loading immediately
-    container.innerHTML = '<div class="text-center py-8"><div class="loading mx-auto mb-4"></div><p class="text-gray-500 dark:text-gray-400">Loading Postfix logs... This may take a few moments.</p></div>';
-
-    try {
-        const filters = currentFilters.postfix || {};
-        const params = new URLSearchParams({
-            page: page,
-            limit: 50
-        });
-
-        if (filters.search) params.append('search', filters.search);
-        if (filters.sender) params.append('sender', filters.sender);
-        if (filters.recipient) params.append('recipient', filters.recipient);
-
-        console.log('Loading Postfix logs:', `/api/logs/postfix?${params}`);
-        const startTime = performance.now();
-
-        const response = await authenticatedFetch(`/api/logs/postfix?${params}`);
-        if (!response.ok) {
-            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-        }
-
-        const data = await response.json();
-        const loadTime = ((performance.now() - startTime) / 1000).toFixed(2);
-        console.log(`Postfix data loaded in ${loadTime}s:`, data); // nosemgrep: javascript.lang.security.audit.unsafe-formatstring.unsafe-formatstring
-
-        if (!data.data || data.data.length === 0) {
-            container.innerHTML = '<p class="text-gray-500 dark:text-gray-400 text-center py-8">No logs found</p>';
-            return;
-        }
-
-        container.innerHTML = `
-            <div class="mobile-scroll overflow-x-auto">
-                <table class="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
-                    <thead class="bg-gray-50 dark:bg-gray-700">
-                        <tr>
-                            <th class="px-3 sm:px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Time</th>
-                            <th class="px-3 sm:px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Queue ID</th>
-                            <th class="px-3 sm:px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">From</th>
-                            <th class="px-3 sm:px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">To</th>
-                            <th class="px-3 sm:px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Status</th>
-                            <th class="px-3 sm:px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider hide-mobile">Relay</th>
-                            <th class="px-3 sm:px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider hide-mobile">Delay</th>
-                            <th class="px-3 sm:px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider hide-mobile">DSN</th>
-                        </tr>
-                    </thead>
-                    <tbody class="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
-                        ${data.data.map(log => `
-                            <tr class="hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer" onclick="${log.queue_id ? `viewPostfixDetails('${log.queue_id}')` : ''}">
-                                <td class="px-3 sm:px-4 py-3 text-xs sm:text-sm text-gray-900 dark:text-gray-100 whitespace-nowrap">${formatTime(log.time)}</td>
-                                <td class="px-3 sm:px-4 py-3 text-xs sm:text-sm font-mono text-gray-600 dark:text-gray-300">${log.queue_id || '-'}</td>
-                                <td class="px-3 sm:px-4 py-3 text-xs sm:text-sm text-gray-900 dark:text-gray-100 max-w-xs truncate">${escapeHtml(log.sender || '-')}</td>
-                                <td class="px-3 sm:px-4 py-3 text-xs sm:text-sm text-gray-900 dark:text-gray-100 max-w-xs truncate">${escapeHtml(log.recipient || '-')}</td>
-                                <td class="px-3 sm:px-4 py-3 text-xs sm:text-sm">
-                                    <span class="inline-block px-2 py-1 text-xs font-medium rounded ${getStatusClass(log.status)}">${log.status || 'unknown'}</span>
-                                </td>
-                                <td class="px-3 sm:px-4 py-3 text-xs sm:text-sm text-gray-600 dark:text-gray-300 hide-mobile">${escapeHtml(log.relay || '-')}</td>
-                                <td class="px-3 sm:px-4 py-3 text-xs sm:text-sm text-gray-600 dark:text-gray-300 hide-mobile">${log.delay ? log.delay.toFixed(2) + 's' : '-'}</td>
-                                <td class="px-3 sm:px-4 py-3 text-xs sm:text-sm text-gray-600 dark:text-gray-300 hide-mobile">${log.dsn || '-'}</td>
-                            </tr>
-                        `).join('')}
-                    </tbody>
-                </table>
-            </div>
-            ${renderPagination('postfix', data.page, data.pages)}
-        `;
-
-        currentPage.postfix = page;
-    } catch (error) {
-        console.error('Failed to load Postfix logs:', error);
-        document.getElementById('postfix-logs').innerHTML = `<p class="text-red-500 text-center py-8">Failed to load logs: ${escapeHtml(error.message)}</p>`;
-    }
-}
-
-// =============================================================================
-// RSPAMD LOGS
-// =============================================================================
-
-function applyRspamdFilters() {
-    currentFilters.rspamd = {
-        search: document.getElementById('rspamd-filter-search').value,
-        direction: document.getElementById('rspamd-filter-direction').value,
-        is_spam: document.getElementById('rspamd-filter-spam').value,
-        min_score: document.getElementById('rspamd-filter-score').value
-    };
-    currentPage.rspamd = 1;
-    loadRspamdLogs();
-}
-
-function clearRspamdFilters() {
-    document.getElementById('rspamd-filter-search').value = '';
-    document.getElementById('rspamd-filter-direction').value = '';
-    document.getElementById('rspamd-filter-spam').value = '';
-    document.getElementById('rspamd-filter-score').value = '';
-    currentFilters.rspamd = {};
-    currentPage.rspamd = 1;
-    loadRspamdLogs();
-}
-
-async function loadRspamdLogs(page = 1) {
-    const container = document.getElementById('rspamd-logs');
-
-    try {
-        container.innerHTML = '<div class="text-center py-8"><div class="loading mx-auto mb-4"></div><p class="text-gray-500 dark:text-gray-400">Loading...</p></div>';
-
-        const filters = currentFilters.rspamd || {};
-        const params = new URLSearchParams({
-            page: page,
-            limit: 50
-        });
-
-        if (filters.search) params.append('search', filters.search);
-        if (filters.direction) params.append('direction', filters.direction);
-        if (filters.is_spam === 'true') params.append('is_spam', 'true');
-        if (filters.is_spam === 'false') params.append('is_spam', 'false');
-        if (filters.min_score) params.append('min_score', filters.min_score);
-
-        console.log('Loading Rspamd logs:', `/api/logs/rspamd?${params}`);
-
-        const response = await authenticatedFetch(`/api/logs/rspamd?${params}`);
-        if (!response.ok) {
-            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-        }
-
-        const data = await response.json();
-        console.log('Rspamd data:', data);
-
-        if (!data.data || data.data.length === 0) {
-            container.innerHTML = '<p class="text-gray-500 dark:text-gray-400 text-center py-8">No logs found</p>';
-            return;
-        }
-
-        container.innerHTML = `
-            <div class="mobile-scroll overflow-x-auto">
-                <table class="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
-                    <thead class="bg-gray-50 dark:bg-gray-700">
-                        <tr>
-                            <th class="px-3 sm:px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Time</th>
-                            <th class="px-3 sm:px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">From</th>
-                            <th class="px-3 sm:px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Subject</th>
-                            <th class="px-3 sm:px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Direction</th>
-                            <th class="px-3 sm:px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Score</th>
-                            <th class="px-3 sm:px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Action</th>
-                            <th class="px-3 sm:px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider hide-mobile">Symbols</th>
-                        </tr>
-                    </thead>
-                    <tbody class="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
-                        ${data.data.map(log => `
-                            <tr class="hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer" onclick="${log.correlation_key ? `viewMessageDetails('${log.correlation_key}')` : ''}">
-                                <td class="px-3 sm:px-4 py-3 text-xs sm:text-sm text-gray-900 dark:text-gray-100 whitespace-nowrap">${formatTime(log.time)}</td>
-                                <td class="px-3 sm:px-4 py-3 text-xs sm:text-sm text-gray-900 dark:text-gray-100 max-w-xs truncate">${escapeHtml(log.sender_smtp || '-')}</td>
-                                <td class="px-3 sm:px-4 py-3 text-xs sm:text-sm text-gray-900 dark:text-gray-100 max-w-xs truncate" title="${escapeHtml(log.subject || 'No subject')}">${escapeHtml(log.subject || 'No subject')}</td>
-                                <td class="px-3 sm:px-4 py-3 text-xs sm:text-sm">
-                                    <span class="inline-block px-2 py-1 text-xs font-medium rounded ${getDirectionClass(log.direction)}">${log.direction}</span>
-                                </td>
-                                <td class="px-3 sm:px-4 py-3 text-xs sm:text-sm">
-                                    <span class="${log.score >= log.required_score ? 'text-red-600 dark:text-red-400 font-semibold' : 'text-gray-600 dark:text-gray-300'}">${log.score.toFixed(2)}</span>
-                                    <span class="text-gray-400 dark:text-gray-500">/${log.required_score}</span>
-                                </td>
-                                <td class="px-3 sm:px-4 py-3 text-xs sm:text-sm text-gray-600 dark:text-gray-300">${log.action}</td>
-                                <td class="px-3 sm:px-4 py-3 text-xs text-gray-500 dark:text-gray-400 max-w-xs truncate hide-mobile">${log.symbols ? Object.keys(log.symbols).slice(0, 3).join(', ') : '-'}</td>
-                            </tr>
-                        `).join('')}
-                    </tbody>
-                </table>
-            </div>
-            ${renderPagination('rspamd', data.page, data.pages)}
-        `;
-
-        currentPage.rspamd = page;
-    } catch (error) {
-        console.error('Failed to load Rspamd logs:', error);
-        document.getElementById('rspamd-logs').innerHTML = `<p class="text-red-500 text-center py-8">Failed to load logs: ${escapeHtml(error.message)}</p>`;
-    }
 }
 
 // =============================================================================
@@ -4931,12 +4725,6 @@ function loadLogs(type, page) {
     switch (type) {
         case 'messages':
             loadMessages(page);
-            break;
-        case 'postfix':
-            loadPostfixLogs(page);
-            break;
-        case 'rspamd':
-            loadRspamdLogs(page);
             break;
         case 'netfilter':
             loadNetfilterLogs(page);

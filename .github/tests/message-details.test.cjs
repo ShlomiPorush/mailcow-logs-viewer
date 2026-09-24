@@ -70,13 +70,6 @@ test('message entry point and all four tabs preserve content and actions', async
     assert.equal(h.element('modal-tab-netfilter').innerHTML, '<span class="text-sm font-medium">Security</span>');
 });
 
-test('Postfix entry point opens the same modal', async () => {
-    const h = harness({ logs: message().postfix });
-    await h.context.viewPostfixDetails('TEST123');
-    assert.deepEqual(h.requests, ['/api/logs/postfix/by-queue/TEST123']);
-    assert.match(h.element('message-modal-content').innerHTML, /Message Overview/);
-});
-
 test('empty analysis and security records retain their empty states', () => {
     const h = harness({});
     h.context.renderSpamTab(h.element('content'), {});
