@@ -15,7 +15,8 @@ detail views of the seeded data (smoke_seed.py) and fails on:
 Buttons that act (run, save, delete, ban, release) are never clicked.
 
 Usage: python ui_smoke.py <base url>
-Runs inside mcr.microsoft.com/playwright/python (see .github/scripts/smoke.sh).
+Run it with: UI_SMOKE=1 bash .github/scripts/smoke.sh <image tag>
+It runs inside mcr.microsoft.com/playwright/python; CI does not run it.
 """
 import json
 import re

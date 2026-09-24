@@ -1,11 +1,14 @@
 #!/usr/bin/env bash
 # Boot the built image against a real PostgreSQL and prove the application
 # actually works: health, SPA, static assets, Alembic head, and the manual
-# job runner accepting every job the Status page lists, and a headless
-# browser pass over every page (ui_smoke.py).
+# job runner accepting every job the Status page lists.
 #
 # Usage: smoke.sh <image tag>
+#        UI_SMOKE=1 smoke.sh <image tag>   also seed fake data and run a headless
+#                                          browser pass over every page (ui_smoke.py)
 # Runs in CI (ubuntu runner) and locally (Git Bash / WSL) against any image.
+# CI does not set UI_SMOKE; the browser pass is a manual tool for large UI
+# changes such as a redesign (see documentation/UI_Behavior_Catalog.md).
 set -euo pipefail
 
 IMAGE="${1:?usage: smoke.sh <image tag>}"
@@ -125,23 +128,25 @@ if docker logs "${APP}" 2>&1 | grep -E "(TypeError|AttributeError|NameError|Impo
     fail "a job raised a programming error (see log lines above)"
 fi
 
-step "Seed fake data for the browser pass"
-# Through the app's own models, so detail views (message details, DMARC
-# domains, blocklist results) have something to render.
-MSYS_NO_PATHCONV=1 docker exec -i -w /app "${APP}" python - < "$(dirname "$0")/smoke_seed.py" \
-    || fail "seeding the smoke database failed"
+if [ "${UI_SMOKE:-0}" = "1" ]; then
+    step "Seed fake data for the browser pass"
+    # Through the app's own models, so detail views (message details, DMARC
+    # domains, blocklist results) have something to render.
+    MSYS_NO_PATHCONV=1 docker exec -i -w /app "${APP}" python - < "$(dirname "$0")/smoke_seed.py" \
+        || fail "seeding the smoke database failed"
 
-step "Browser pass over every page"
-# Headless Chromium from the pinned Playwright image; the Python package is
-# pinned to the same release so it uses the browsers the image ships.
-PW_VERSION="1.56.0"
-PW_IMAGE="mcr.microsoft.com/playwright/python:v${PW_VERSION}-noble"
-SCRIPTS="$(cd "$(dirname "$0")" && (pwd -W 2>/dev/null || pwd))"
-MSYS_NO_PATHCONV=1 docker run --rm --network "${NET}" --ipc=host \
-    -v "${SCRIPTS}:/scripts:ro" "${PW_IMAGE}" \
-    sh -c "pip install -q --disable-pip-version-check --root-user-action=ignore --break-system-packages playwright==${PW_VERSION} \
-           && python /scripts/ui_smoke.py http://${APP}:8080" \
-    || fail "browser pass found problems (see FAIL lines above)"
+    step "Browser pass over every page"
+    # Headless Chromium from the pinned Playwright image; the Python package is
+    # pinned to the same release so it uses the browsers the image ships.
+    PW_VERSION="1.56.0"
+    PW_IMAGE="mcr.microsoft.com/playwright/python:v${PW_VERSION}-noble"
+    SCRIPTS="$(cd "$(dirname "$0")" && (pwd -W 2>/dev/null || pwd))"
+    MSYS_NO_PATHCONV=1 docker run --rm --network "${NET}" --ipc=host \
+        -v "${SCRIPTS}:/scripts:ro" "${PW_IMAGE}" \
+        sh -c "pip install -q --disable-pip-version-check --root-user-action=ignore --break-system-packages playwright==${PW_VERSION} \
+               && python /scripts/ui_smoke.py http://${APP}:8080" \
+        || fail "browser pass found problems (see FAIL lines above)"
+fi
 
 echo
 echo "SMOKE OK"
