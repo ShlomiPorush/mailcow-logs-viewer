@@ -286,6 +286,9 @@ function collect() {
         rows: calls(files, 'getFlagUrl|getFlagEmoji|renderGeoIPInfo|renderDmarcGeoIPInfo', (a, name) =>
             ({ what: `${name}(${a.map(x => short(x, 40)).join(', ')})` })) });
 
+    cats.push({ title: 'Markdown rendering', note: 'Places that render Markdown (help pages, changelogs) through `renderMarkdown` (marked, then DOMPurify) into a `.markdown-body` element.',
+        rows: calls(files, 'renderMarkdown', a => ({ what: `renders \`${short(a[0], 60)}\`` })) });
+
     cats.push({ title: 'Help topics', note: 'In-app help buttons; the topic is the Markdown file name under documentation/HelpDocs.',
         rows: calls(files, 'showHelpModal', a => ({ what: `topic ${show(a[0])}` })) });
 

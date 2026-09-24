@@ -20,6 +20,8 @@ Pages, modals, actions, handler functions and API calls are also guarded automat
 - **Light and dark theme.** The theme toggle is stored in `localStorage` ("theme") and every page, modal and badge has a dark variant.
 - **Desktop and mobile.** The navigation has a mobile menu (`toggleMobileMenu`, `navigateToMobile`); every page must stay usable on a phone.
 - **Escaping.** Anything that comes from the server or from mail headers is rendered through `escapeHtml`, and values placed inside inline handlers through `escapeJsArg` (see `frontend/utils.js`). New markup must keep this; mail headers are attacker-controlled.
+- **Country flags are PNG images, never emoji.** Most use is on desktop, and Windows does not render flag emoji (it shows two letters instead). The images live in `frontend/assets/flags/` in three sizes.
+- **Markdown keeps its styling.** Help pages and changelogs are rendered by `renderMarkdown` (marked, then DOMPurify, `frontend/utils.js`) into a `.markdown-body` element inside `#changelog-content` or `.update-changelog-content`. Their look comes from the local `github-markdown.min.css` plus the overrides in the `<style>` block of `index.html` (the `.markdown-body` rules, about lines 270 to 470), which also carry the dark theme. A redesign that renames these containers or drops those rules breaks every help page and changelog, even though nothing else changes.
 - **Badges** use the recipes in `APP_COLORS` (soft fill plus a subtle border, squared corners, not rounded pills).
 - **Cache busting.** Every changed frontend file gets a new `?v=` in `index.html`, or browsers keep the old copy.
 
@@ -31,7 +33,8 @@ Pages, modals, actions, handler functions and API calls are also guarded automat
 | Tooltips | Hovering shows the same text as before. Dynamic tooltips show the full value where the cell truncates it. |
 | Toasts | One toast at a time (a new one replaces the old), bottom of the screen, colour by type (success, error, warning, info), disappears after about 4 s. The wording is part of the product; keep it. |
 | Confirmation dialogs | Every action listed here still asks first, with the same title and message, and Escape/Enter still work where noted under keyboard handling. |
-| Country flags | The flag image appears next to IP addresses where listed, at the listed size, with no emoji fallback and no external image source. |
+| Country flags | The flag image appears next to IP addresses where listed, at the listed size, with no emoji fallback and no external image source. Check on Windows. |
+| Markdown | Open a help page, the changelog from the footer, and the update changelog in Settings, in light and dark theme. Headings, paragraphs, nested lists (three levels), inline code, code blocks, tables, block quotes and links all look as before, the background stays transparent, and nothing is unreadable in dark mode. |
 | Help topics | Each help button opens the listed topic. |
 | Empty states | An empty list shows its sentence, not a blank area or a broken table. |
 | Loading states | A spinner or "Loading..." appears while data loads; the page never shows stale data without an indicator. |
@@ -42,8 +45,8 @@ Pages, modals, actions, handler functions and API calls are also guarded automat
 
 ## Open questions and findings
 
-- **Flags are PNG files, not emoji.** The reason is not recorded in the code or history. Keep the images unless a redesign decides otherwise.
-- **Possible dead code.** `loadPostfixLogs` and `loadRspamdLogs` (`frontend/app.js`) render into `#postfix-logs` and `#rspamd-logs`, which exist nowhere in the markup. Their rows are listed under "Not rendered (possible dead code)". Confirm and remove them rather than porting them.
+- **Dead code: the old Postfix and Rspamd log lists.** `loadPostfixLogs` and `loadRspamdLogs` (`frontend/app.js`) render into `#postfix-logs` and `#rspamd-logs`, which have not existed in `index.html` at any point in the repository history. Nothing reaches them: the only callers are their own pagination (rendered inside them) and `applyPostfixFilters`, `clearPostfixFilters`, `applyRspamdFilters` and `clearRspamdFilters`, which nothing calls. Their rows are listed under "Not rendered (possible dead code)". Remove them rather than port them.
+- **Dead code: `getFlagEmoji`** (`frontend/dmarc.js`) is defined and never called, in line with the PNG-only rule above.
 
 <!-- generated:start (node .github/scripts/ui-catalog.cjs --write) -->
 
@@ -58,6 +61,7 @@ Generated from the code. Do not edit by hand; run `node .github/scripts/ui-catal
 | [Toasts](#toasts) | 133 |
 | [Confirmation dialogs](#confirmation-dialogs) | 27 |
 | [Country flags](#country-flags) | 5 |
+| [Markdown rendering](#markdown-rendering) | 4 |
 | [Help topics](#help-topics) | 8 |
 | [Empty states](#empty-states) | 37 |
 | [Loading states](#loading-states) | 20 |
@@ -399,6 +403,17 @@ PNG flags served locally from `frontend/assets/flags/<size>/<cc>.png` (sizes 16x
 | Security | getFlagUrl(d.country_code, '24x18') | `frontend/app.js:1804` (loadSecurityCountryChart) |
 | Shared | getFlagUrl(rspamdData.country_code, size) | `frontend/app.js:4837` (renderGeoIPInfo) |
 | Shared | getFlagUrl(record.country_code, size) | `frontend/app.js:4880` (renderGeoIPForDMARC) |
+
+### Markdown rendering
+
+Places that render Markdown (help pages, changelogs) through `renderMarkdown` (marked, then DOMPurify) into a `.markdown-body` element.
+
+| Page | What | Code |
+|---|---|---|
+| Settings | renders `versionInfo.changelog` | `frontend/settings.js:924` (updateVersionInfoUI) |
+| Settings | renders `changelogText` | `frontend/settings.js:1541` (renderSettings) |
+| Modal: changelog-modal | renders `markdownContent` | `frontend/app.js:545` (showMarkdownModal) |
+| Modal: changelog-modal | renders `changelog` | `frontend/app.js:4793` (showChangelogModal) |
 
 ### Help topics
 
