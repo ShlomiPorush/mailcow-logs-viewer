@@ -228,7 +228,7 @@ function callArgs(text, open) {
     return args;
 }
 
-const clean = s => (s || '').replace(/\s+/g, ' ').replace(/\|/g, '\\|').trim();
+const clean = s => (s || '').replace(/\s+/g, ' ').replace(/[\\|]/g, '\\$&').trim();
 const short = (s, n = 110) => { s = clean(s); return s.length > n ? s.slice(0, n - 3) + '...' : s; };
 const literal = s => { const m = (s || '').match(/^(['"`])([\s\S]*)\1$/); return m && !m[2].includes('${') ? m[2] : null; };
 const show = s => { const lit = literal(s); return lit !== null ? `"${short(lit)}"` : `dynamic: \`${short(s, 80)}\``; };

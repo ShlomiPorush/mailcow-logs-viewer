@@ -43,8 +43,13 @@ function frontendFiles(dir) {
 
 // Comments document handler patterns ("onclick=\"fn(...)\"") without being code.
 function stripComments(text) {
+    // Repeat until stable so removing one comment cannot join the pieces of another.
+    let prev;
+    do {
+        prev = text;
+        text = text.replace(/<!--[\s\S]*?-->/g, '');
+    } while (text !== prev);
     return text
-        .replace(/<!--[\s\S]*?-->/g, '')
         .replace(/\/\*[\s\S]*?\*\//g, '')
         .replace(/^\s*\/\/.*$/gm, '');
 }
