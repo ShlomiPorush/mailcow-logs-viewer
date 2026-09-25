@@ -1054,3 +1054,72 @@ body { font-family: var(--ui-font); background: var(--ui-bg); }
     .ui-dialog.ui-dialog-fit { max-height: 100%; }
 }
 #dmarc-header-actions { align-items: flex-start; }
+
+/* ---------- Mailbox Stats (v3 language) ---------- */
+.ui-page-tabs { padding: 0; margin-top: -4px; }
+.ui-page-tabs .modal-tab { flex: 0 0 auto; padding-inline: 4px; margin-inline-end: 18px; }
+.ui-ms-filters .ui-filters-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; }
+.ui-ms-search { flex: 1 1 240px; min-width: 200px; }
+.ui-ms-picker { position: relative; }
+.ui-ms-dropdown { position: absolute; top: calc(100% + 6px); inset-inline-start: 0; z-index: 40; width: 320px; display: grid; gap: 10px;
+    padding: 14px; box-shadow: 0 10px 30px rgba(0, 0, 0, .14); border: 1px solid var(--ui-line); }
+.ui-ms-dropdown.hidden { display: none; }
+.ui-ms-dropdown .ui-md-h { margin: 0; }
+.ui-ms-range { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.ui-ms-range label { display: grid; gap: 4px; color: var(--ui-muted); font-size: 12px; }
+#date-range-arrow { transition: transform .15s; }
+.ui-ms-table { --ui-cols: minmax(240px, 2.4fr) repeat(4, 90px) 70px 90px; --ui-table-min: 820px; }
+.ui-ms-row { cursor: pointer; }
+.ui-ms-row:hover { background: color-mix(in srgb, var(--ui-accent) 4%, transparent); }
+.ui-ms-counts { grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); }
+.ui-kpi-btn { border: 0; font: inherit; text-align: start; cursor: pointer; }
+.ui-kpi-btn:hover { background: color-mix(in srgb, var(--ui-ink) 5%, var(--ui-bg)); }
+.ui-kpi b.ui-spam { color: var(--ui-spam); }
+.ui-ms-aliases { --ui-cols: minmax(220px, 2fr) repeat(7, 76px) 70px; --ui-table-min: 860px; background: var(--ui-bg); }
+.ui-link-cell { border: 0; background: none; color: inherit; font: inherit; cursor: pointer; }
+.ui-link-cell:hover { text-decoration: underline; }
+.ui-domain-details .ui-md-fact > span .ui-mdot { display: inline-block; margin-inline-end: 4px; }
+
+@media (max-width: 760px) {
+    .ui-ms-dropdown { width: min(320px, calc(100vw - 32px)); }
+}
+.ui-ms-filters .ui-select { width: auto; max-width: 220px; }
+
+/* ---------- HTML tables in the v3 look (rows that filter in place stay <tr>) ---------- */
+.ui-dtable-scroll { overflow-x: auto; }
+.ui-dtable { width: 100%; border-collapse: collapse; font-size: var(--ui-fs-sm); }
+.ui-dtable th { padding: 9px var(--ui-pad-x); color: var(--ui-muted); font-size: 12.5px; font-weight: 600; text-align: start; white-space: nowrap; }
+.ui-dtable td { padding: 10px var(--ui-pad-x); border-top: 1px solid var(--ui-line); vertical-align: middle; }
+.ui-dtable tr.hidden { display: none; }
+.ui-dtable .ui-td-end { text-align: end; }
+.ui-dtable-link { cursor: pointer; }
+.ui-dtable-link:hover td { background: color-mix(in srgb, var(--ui-accent) 4%, transparent); }
+.ui-dtable-wrap { overflow-wrap: anywhere; min-width: 170px; }
+.ui-dtable td.ui-empty { padding: 28px; text-align: center; }
+.ui-nowrap { white-space: nowrap; }
+.ui-phone-only { display: none; }
+
+/* ---------- Rate Limits (v3 language) ---------- */
+.ui-rl-head { flex-wrap: wrap; align-items: flex-start; gap: 10px 16px; }
+.ui-rl-head .ui-h2 { margin: 0; }
+.ui-rl-head p { margin: 3px 0 0; font-size: var(--ui-fs-sm); font-weight: 400; }
+.ui-rl-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-inline-start: auto; font-weight: 400; }
+.ui-rl-search { width: 220px; }
+.ui-rl-chart { position: relative; height: 180px; }
+.ui-rl-sender { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-start; gap: 12px; padding: 4px var(--ui-pad-x) 14px; }
+.ui-rl-sender p { margin: 10px 0 0; }
+.ui-rl-sender .ui-chip-row { margin-top: 8px; }
+.ui-rl-note { margin: 10px var(--ui-pad-x); font-size: var(--ui-fs-sm); }
+.ui-rl-warning { margin: 0; padding: 8px var(--ui-pad-x); color: var(--ui-warn); background: color-mix(in srgb, var(--ui-warn) 10%, transparent); font-size: var(--ui-fs-sm); }
+.ui-rl-form { display: grid; gap: 10px; padding: 12px var(--ui-pad-x); border-top: 1px solid var(--ui-line); background: color-mix(in srgb, var(--ui-ink) 3%, transparent); }
+.ui-rl-form p { margin: 0; font-size: var(--ui-fs-sm); }
+.ui-rl-form-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; }
+.ui-rl-number { width: 120px; }
+.ui-rl-editrow td { background: color-mix(in srgb, var(--ui-ink) 3%, transparent); }
+
+@media (max-width: 760px) {
+    .ui-phone-only { display: inline; }
+    .ui-phone-hide { display: none; }
+    .ui-rl-search { width: 100%; }
+    .ui-rl-tools { width: 100%; margin-inline-start: 0; }
+}
