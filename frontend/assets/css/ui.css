@@ -138,8 +138,9 @@
 
 /* The JavaScript shows and hides elements with the "hidden" class. A component
    that sets its own display must still yield to it, whatever the order in which
-   the stylesheets load. */
-.hidden:is(.ui-btn, .ui-icon-btn, .ui-chip, .ui-tag, .ui-banner, .ui-locked, .ui-dialog-backdrop, .ui-md-legs, .ui-md-symbol) { display: none; }
+   the stylesheets load. No component combines "hidden" with a responsive display
+   utility (hidden md:flex), so hidden always wins here. */
+.hidden[class*="ui-"] { display: none !important; }
 
 /* ---------- Panel ---------- */
 
@@ -540,6 +541,28 @@
 @media (max-width: 1000px) {
     .ui-grid-3, .ui-grid-2 { grid-template-columns: minmax(0, 1fr); }
 }
+
+/* ---------- Login page ---------- */
+
+.ui-login { min-height: 100vh; margin: 0; display: flex; align-items: center; justify-content: center; padding: 16px;
+    background: var(--ui-bg); color: var(--ui-ink); font-family: var(--ui-font); font-size: var(--ui-fs); }
+.ui-login-card { width: 100%; max-width: 400px; padding: 28px 24px; }
+.ui-login-head { text-align: center; margin-bottom: 22px; }
+.ui-login-head p { margin: 8px 0 0; }
+.ui-login-logo { width: 56px; height: 56px; margin: 0 auto 14px; object-fit: contain; display: block; }
+.ui-login-oauth { margin-bottom: 16px; }
+.ui-login-or { position: relative; margin: 16px 0; }
+.ui-login-or-rule { position: absolute; inset: 0; display: flex; align-items: center; }
+.ui-login-or-line { width: 100%; border-top: 1px solid var(--ui-line); }
+.ui-login-or-text { position: relative; display: flex; justify-content: center; }
+.ui-login-or-text span { padding: 0 8px; background: var(--ui-panel); color: var(--ui-muted); font-size: 12px; }
+.ui-login-form { display: grid; gap: 14px; }
+.ui-login-form .ui-input { height: 40px; }
+.ui-btn-block { width: 100%; height: 40px; }
+.ui-spin { display: inline-block; vertical-align: -3px; margin-inline-end: 6px; animation: spin 1s linear infinite; }
+.ui-spin .opacity-25 { opacity: .25; }
+.ui-spin .opacity-75 { opacity: .75; }
+@keyframes spin { to { transform: rotate(360deg); } }
 
 /* ---------- Token bridge for markup not rebuilt on components yet ----------
  *
