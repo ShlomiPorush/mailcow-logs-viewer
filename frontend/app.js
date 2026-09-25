@@ -1193,6 +1193,7 @@ async function smartRefreshDashboard() {
 
         // Also refresh recent activity and status summary
         loadRecentActivity();
+        loadMailFlowChart();
         loadDashboardStatusSummary();
     } catch (error) {
         console.error('Dashboard refresh error:', error);
@@ -1425,6 +1426,8 @@ async function loadDashboard() {
         loadDashboardStatusSummary();
         loadDashboardBlacklistSummary();
         loadDashboardSecurityAlerts();
+        loadDashboardAttention();
+        loadMailFlowChart();
     } catch (error) {
         console.error('Failed to load dashboard:', error);
     }
@@ -1433,18 +1436,21 @@ async function loadDashboard() {
 async function loadDashboardSecurityAlerts() {
     const container = document.getElementById('dashboard-security-alerts');
     if (!container) return;
+    const dismissAll = document.getElementById('dashboard-dismiss-all');
     try {
         const response = await authenticatedFetch('/api/security-alerts?acknowledged=false&limit=20');
-        if (!response.ok) { container.classList.add('hidden'); return; }
+        if (!response.ok) { container.classList.add('hidden'); updateAttentionState(); return; }
         const data = await response.json();
         const alerts = data.alerts || [];
         if (alerts.length === 0) {
             container.classList.add('hidden');
             container.innerHTML = '';
+            if (dismissAll) dismissAll.classList.add('hidden');
+            updateAttentionState();
             return;
         }
 
-        const rows = alerts.map(a => {
+        container.innerHTML = alerts.map(a => {
             const critical = a.severity === 'critical';
             return `
                 <div class="ui-alert ${critical ? 'ui-alert-fail' : 'ui-alert-warn'}">
@@ -1460,21 +1466,116 @@ async function loadDashboardSecurityAlerts() {
                     <button type="button" onclick="acknowledgeSecurityAlert(${a.id})" class="ui-btn ui-btn-sm" title="Dismiss">Dismiss</button>
                 </div>`;
         }).join('');
-
-        container.innerHTML = `
-            <section class="ui-panel ui-alerts">
-                <div class="ui-panel-head">
-                    <svg class="ui-text-fail" width="18" height="18" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true"><path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd"></path></svg>
-                    Security Alerts (${alerts.length})
-                    <button type="button" onclick="acknowledgeAllSecurityAlerts()" class="ui-btn ui-btn-sm ui-btn-danger" style="margin-inline-start: auto">Dismiss all</button>
-                </div>
-                ${rows}
-            </section>`;
         container.classList.remove('hidden');
+        if (dismissAll) dismissAll.classList.remove('hidden');
     } catch (e) {
         console.warn('Failed to load security alerts:', e);
         container.classList.add('hidden');
     }
+    updateAttentionState();
+}
+
+// The count and the "all clear" line of Needs attention follow what is in it
+function updateAttentionState() {
+    const panel = document.getElementById('dashboard-attention-panel');
+    if (!panel) return;
+    const rows = panel.querySelectorAll('.ui-alert').length;
+    const count = document.getElementById('dashboard-attention-count');
+    if (count) count.textContent = rows ? String(rows) : '';
+    const clear = document.getElementById('dashboard-attention-clear');
+    if (clear) clear.classList.toggle('hidden', rows > 0);
+}
+
+// Server checks that need a look, each with the place to handle it
+async function loadDashboardAttention() {
+    const container = document.getElementById('dashboard-attention');
+    if (!container) return;
+    const off = feature => (window.disabledFeatures || []).includes(feature);
+    const get = async url => {
+        try {
+            const res = await authenticatedFetch(url);
+            return res.ok ? await res.json() : null;
+        } catch (e) {
+            return null;
+        }
+    };
+    const [blacklist, summary, insights, appVersion, mailcowVersion, connection] = await Promise.all([
+        off('blacklist') ? null : get('/api/blacklist/summary'),
+        get('/api/status/summary'),
+        off('dmarc') ? null : get('/api/dmarc/insights'),
+        get('/api/status/app-version'),
+        get('/api/status/version'),
+        get('/api/status/mailcow-connection'),
+    ]);
+    const items = [];
+    if (connection && connection.connected === false) {
+        items.push({ tone: 'fail', title: 'mailcow is not reachable', detail: 'The mailcow API did not answer, so logs and server data may be out of date.', action: 'Open settings', onclick: "navigateTo('settings')" });
+    }
+    if (blacklist && blacklist.status === 'listed') {
+        const host = (blacklist.hosts && blacklist.hosts[0] && blacklist.hosts[0].hostname) || blacklist.server_ip || 'Your server';
+        items.push({ tone: 'fail', title: `${host} is on a blocklist`,
+            detail: `Listed on ${blacklist.listed_count} of ${blacklist.total_blacklists} lists${blacklist.server_ip ? ` (${blacklist.server_ip})` : ''}. Outbound mail to some providers may bounce.`,
+            action: 'Check listing', onclick: "navigateTo('status')" });
+    }
+    const containers = summary && summary.containers ? summary.containers : null;
+    if (containers && containers.stopped > 0) {
+        items.push({ tone: 'fail', title: containers.stopped === 1 ? 'A mailcow container is stopped' : `${containers.stopped} mailcow containers are stopped`,
+            detail: `${containers.running || 0} of ${containers.total || 0} containers are running.`, action: 'Open status', onclick: "navigateTo('status')" });
+    }
+    const dmarc = insights ? (insights.insights || []).filter(i =>
+        i.recommendations.some(r => r.type === 'tighten_policy' || r.type === 'low_pass_rate') || (i.new_sources && i.new_sources.length > 0)) : [];
+    if (dmarc.length) {
+        const first = dmarc[0].recommendations[0];
+        items.push({ tone: 'warn', title: dmarc.length === 1 ? `DMARC needs attention for ${dmarc[0].domain}` : `DMARC needs attention for ${dmarc.length} domains`,
+            detail: first ? first.message : 'New sources are failing DMARC.', action: 'Open DMARC', onclick: "navigateTo('dmarc')" });
+    }
+    if (appVersion && appVersion.update_available) {
+        items.push({ tone: 'info', title: `Version ${appVersion.latest_version} is available`,
+            detail: `You are running ${appVersion.current_version}. See what changed before updating.`, action: 'Read changes', onclick: "switchTab('settings')" });
+    }
+    if (mailcowVersion && mailcowVersion.update_available) {
+        items.push({ tone: 'info', title: `mailcow ${mailcowVersion.latest_version} is available`,
+            detail: `You are running ${mailcowVersion.current_version}.`, action: 'Read changes', onclick: 'showMailcowUpdateModal()' });
+    }
+    container.innerHTML = items.map(item => `
+        <div class="ui-alert ui-alert-${item.tone}">
+            <span class="ui-alert-bar"></span>
+            <div class="ui-alert-text"><div class="ui-alert-title"><b>${escapeHtml(item.title)}</b></div><p>${escapeHtml(item.detail)}</p></div>
+            <button type="button" class="ui-btn ui-btn-sm" onclick="${item.onclick}">${escapeHtml(item.action)}</button>
+        </div>`).join('');
+    updateAttentionState();
+}
+
+// Hourly messages over the last 24 hours, clean and spam (Rspamd), as bars
+async function loadMailFlowChart() {
+    const chart = document.getElementById('dashboard-flow-chart');
+    if (!chart) return;
+    let rows = [];
+    try {
+        const res = await authenticatedFetch('/api/stats/timeline?hours=24');
+        if (res.ok) rows = (await res.json()).timeline || [];
+    } catch (e) {
+        rows = [];
+    }
+    const byHour = new Map(rows.map(r => [new Date(r.hour).getTime(), r]));
+    // Hours are counted from the epoch, so any time zone lines up with the UTC buckets
+    const now = Math.floor(Date.now() / 3600000) * 3600000;
+    const slots = [];
+    for (let i = 23; i >= 0; i--) {
+        const t = now - i * 3600 * 1000;
+        const r = byHour.get(t) || { total: 0, spam: 0, clean: 0 };
+        slots.push({ t, clean: r.clean || 0, spam: r.spam || 0 });
+    }
+    const max = Math.max(1, ...slots.map(s => s.clean + s.spam));
+    const hour = t => new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit', hour12: false,
+        timeZone: appTimezone && appTimezone !== 'UTC' ? appTimezone : undefined }).format(new Date(t));
+    chart.innerHTML = `
+        <div class="ui-flow-bars">${slots.map(s => `
+            <div class="ui-flow-bar" title="${hour(s.t)}: ${s.clean.toLocaleString()} clean, ${s.spam.toLocaleString()} spam">
+                <i class="ui-flow-spam" style="height: ${(s.spam / max) * 100}%"></i>
+                <i class="ui-flow-clean" style="height: ${(s.clean / max) * 100}%"></i>
+            </div>`).join('')}</div>
+        <div class="ui-flow-legend"><span><i class="ui-flow-clean"></i>Clean</span><span><i class="ui-flow-spam"></i>Spam</span></div>`;
 }
 
 async function acknowledgeSecurityAlert(alertId) {
@@ -1508,30 +1609,32 @@ async function loadDashboardStatusSummary() {
         const data = await response.json();
         console.log('Status summary data:', data);
 
+        // Containers: one line, red when one is stopped
         const containersDiv = document.getElementById('dashboard-containers-summary');
         const containers = data.containers || {};
         containersDiv.innerHTML = `
-            <div class="ui-kv"><span>Running</span><b class="ui-text-ok">${containers.running || 0}</b></div>
-            <div class="ui-kv"><span>Stopped</span><b class="${containers.stopped > 0 ? 'ui-text-fail' : 'ui-muted'}">${containers.stopped || 0}</b></div>
-            <div class="ui-kv"><span>Total</span><b>${containers.total || 0}</b></div>
+            <div class="ui-kv" title="Running ${containers.running || 0}, Stopped ${containers.stopped || 0}, Total ${containers.total || 0}"><span>Containers</span>
+                <b class="${containers.stopped > 0 ? 'ui-text-fail' : ''}">${containers.running || 0} of ${containers.total || 0} running</b></div>
         `;
 
+        // Storage: amber above 75%, red above 90%
         const storageDiv = document.getElementById('dashboard-storage-summary');
         const storage = data.storage || {};
         const usedPercent = parseInt(storage.used_percent) || 0;
         const storageLevel = usedPercent > 90 ? 'fail' : usedPercent > 75 ? 'warn' : 'ok';
         storageDiv.innerHTML = `
-            <div class="ui-kv"><span>Used</span><b class="ui-text-${storageLevel}">${storage.used_percent || '0%'}</b></div>
-            <div class="ui-kv"><span>Available</span><b>${storage.used || '0'} / ${storage.total || '0'}</b></div>
+            <div class="ui-kv" title="Available ${storage.used || '0'} / ${storage.total || '0'}"><span>Storage</span>
+                <b class="${storageLevel === 'ok' ? '' : `ui-text-${storageLevel}`}">${storage.used_percent || '0%'} used</b></div>
             <div class="ui-meter ui-${storageLevel} ui-meter-panel"><i style="width: ${usedPercent}%"></i></div>
+            <p class="ui-kv-note">${storage.used || '0'} / ${storage.total || '0'}</p>
         `;
 
         const systemDiv = document.getElementById('dashboard-system-summary');
         const system = data.system || {};
         systemDiv.innerHTML = `
-            <div class="ui-kv"><span>Domains</span><b>${system.domains || 0}</b></div>
-            <div class="ui-kv"><span>Mailboxes</span><b>${system.mailboxes || 0}</b></div>
-            <div class="ui-kv"><span>Aliases</span><b>${system.aliases || 0}</b></div>
+            <div class="ui-kv"><span>Domains</span><b>${(system.domains || 0).toLocaleString()}</b></div>
+            <div class="ui-kv"><span>Mailboxes</span><b>${(system.mailboxes || 0).toLocaleString()}</b></div>
+            <div class="ui-kv"><span>Aliases</span><b>${(system.aliases || 0).toLocaleString()}</b></div>
         `;
     } catch (error) {
         console.error('Failed to load status summary:', error);
@@ -1557,22 +1660,18 @@ async function loadRecentActivity() {
             return;
         }
 
-        container.innerHTML = data.activity.map(msg => `
-            <div class="ui-msg-row" onclick="viewMessageDetails('${escapeJsArg(msg.correlation_key)}')">
-                <div class="ui-msg-main">
-                    <div class="ui-msg-who">
-                        <span>${escapeHtml(msg.sender || 'Unknown')}</span>
-                        <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg>
-                        <span class="ui-muted">${escapeHtml(msg.recipient || 'Unknown')}</span>
-                    </div>
-                    <p class="ui-msg-sub" dir="auto" title="${escapeHtml(msg.subject || 'No subject')}">${escapeHtml(msg.subject || 'No subject')}</p>
-                </div>
-                <div class="ui-msg-meta">
-                    <div class="ui-msg-tags">${uiStatusTag(msg.status || 'unknown')}${msg.direction ? uiDirectionTag(msg.direction) : ''}</div>
-                    <time>${formatTime(msg.time)}</time>
-                </div>
-            </div>
-        `).join('');
+        // One compact row per message: time, outcome dot, who, subject
+        container.innerHTML = data.activity.map(msg => {
+            const tone = UI_STATUS_TONE[msg.status] || '';
+            const state = `${msg.status || 'unknown'}${msg.direction ? `, ${msg.direction}` : ''}`;
+            return `
+            <div class="ui-mrow" onclick="viewMessageDetails('${escapeJsArg(msg.correlation_key)}')">
+                <time title="${escapeHtml(formatTime(msg.time))}">${formatListTime(msg.time)}</time>
+                <i class="ui-mdot${tone ? ` ui-mdot-${tone}` : ''}" title="${escapeHtml(state)}"></i>
+                <span class="ui-mrow-who">${escapeHtml(msg.sender || 'Unknown')} → ${escapeHtml(msg.recipient || 'Unknown')}</span>
+                <span class="ui-mrow-sub" dir="auto" title="${escapeHtml(msg.subject || 'No subject')}">${escapeHtml(msg.subject || 'No subject')}</span>
+            </div>`;
+        }).join('');
     } catch (error) {
         console.error('Failed to load recent activity:', error);
         document.getElementById('recent-activity').innerHTML = `<p class="ui-empty ui-text-fail">Failed to load activity: ${escapeHtml(error.message)}</p>`;
@@ -4242,40 +4341,27 @@ async function loadDashboardBlacklistSummary() {
         console.log('Status summary data:', data);
 
         if (!data.has_data) {
-            container.innerHTML = `
-                <div class="ui-empty">
-                    <b>No blacklist data yet</b>
-                    The first check runs automatically
-                </div>`;
+            container.innerHTML = `<div class="ui-kv" title="The first check runs automatically"><span>Blocklists</span><b class="ui-muted">No blacklist data yet</b></div>`;
             return;
         }
 
-        const statusBadge = {
-            listed: '<b class="ui-text-fail">&#10007; Listed</b>',
+        const value = {
+            listed: `<b class="ui-text-fail">Listed on ${data.listed_count} of ${data.total_blacklists}</b>`,
             error: '<b class="ui-text-warn">! Check Error</b>',
-            clean: '<b class="ui-text-ok">&#10003; Clean</b>',
+            clean: `<b class="ui-text-ok">Clean on ${data.total_blacklists}</b>`,
             unknown: '<b class="ui-muted">Unknown</b>'
         }[data.status] || `<b class="ui-muted">${escapeHtml(String(data.status))}</b>`;
 
-        const rows = [`<div class="ui-kv"><span>Status</span>${statusBadge}</div>`];
-
-        if ((data.hosts_total || 0) > 1) {
-            rows.push(`<div class="ui-kv"><span>Hosts Listed</span><b>${data.hosts_listed}/${data.hosts_total}</b></div>`);
-        } else {
-            const ip = (data.hosts && data.hosts[0] && data.hosts[0].hostname) || data.server_ip;
-            if (ip) {
-                rows.push(`<div class="ui-kv"><span>IP</span><b class="ui-mono">${escapeHtml(ip)}</b></div>`);
-            }
-        }
-        rows.push(`<div class="ui-kv"><span>Listed On</span><b>${data.listed_count}/${data.total_blacklists}</b></div>`);
-        if (data.checked_at) {
-            rows.push(`<div class="ui-kv"><span>Last Check</span><b class="ui-muted ui-kv-small">${escapeHtml(new Date(data.checked_at).toLocaleString())}</b></div>`);
-        }
-
-        container.innerHTML = rows.join('');
+        const where = (data.hosts_total || 0) > 1
+            ? `Hosts Listed ${data.hosts_listed}/${data.hosts_total}`
+            : ((data.hosts && data.hosts[0] && data.hosts[0].hostname) || data.server_ip || '');
+        const checked = data.checked_at ? `Last Check ${new Date(data.checked_at).toLocaleString()}` : '';
+        container.innerHTML = `
+            <div class="ui-kv"><span>Blocklists</span>${value}</div>
+            ${where || checked ? `<p class="ui-kv-note">${escapeHtml([where, checked].filter(Boolean).join(', '))}</p>` : ''}`;
     } catch (error) {
         console.error('Failed to load blacklist summary:', error);
-        container.innerHTML = `<p class="ui-empty">Error loading</p>`;
+        container.innerHTML = `<div class="ui-kv"><span>Blocklists</span><b class="ui-muted">Error loading</b></div>`;
     }
 }
 
