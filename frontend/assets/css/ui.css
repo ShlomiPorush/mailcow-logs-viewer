@@ -1077,7 +1077,7 @@ body { font-family: var(--ui-font); background: var(--ui-bg); color: var(--ui-in
 /* The toggles and Reset wrap together, never Reset alone */
 .ui-ms-opts { display: flex; align-items: center; gap: 8px 12px; margin-inline-start: auto; }
 @media (max-width: 760px) {
-    .ui-ms-filters .ui-filters-row > :is(.ui-ms-search, .ui-ms-picker, select) { flex: 1 1 100%; width: 100%; }
+    .ui-ms-filters .ui-filters-row > :is(.ui-ms-search, .ui-ms-picker, select) { flex: 1 1 100%; width: 100%; max-width: none; }
     .ui-ms-picker > .ui-btn { width: 100%; justify-content: space-between; }
     .ui-ms-opts { flex: 1 1 100%; flex-wrap: wrap; margin-inline-start: 0; }
     .ui-ms-opts .ui-btn { margin-inline-start: auto; }
@@ -1348,7 +1348,7 @@ body { font-family: var(--ui-font); background: var(--ui-bg); color: var(--ui-in
 .ui-log-pause[aria-pressed="true"] { background: var(--ui-warn); border-color: var(--ui-warn); color: #fff; }
 .ui-logs-font { height: 30px; font-size: 12.5px; }
 /* Search and its two buttons stay on one line and shrink before anything wraps */
-.ui-logs-find { display: flex; align-items: center; gap: 4px; flex: 0 1 300px; min-width: 200px; }
+.ui-logs-find { display: flex; align-items: center; gap: 4px; flex: 1 1 190px; max-width: 320px; }
 .ui-logs-search { flex: 1; min-width: 0; height: 30px; }
 .ui-logs-date { width: auto; height: 30px; font-size: 12.5px; }
 .ui-logs-terminal { flex: 1; min-height: 420px; max-height: 75vh; overflow: auto; background: #0f1512; color: #d7ddd9;
