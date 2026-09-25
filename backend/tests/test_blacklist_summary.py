@@ -91,6 +91,18 @@ def test_listed_count_is_sum_across_hosts():
     assert result["hosts_listed"] == 2
 
 
+def test_each_host_reports_its_own_list_count():
+    # The dashboard names the host that is actually listed and its own ratio
+    result = aggregate_blacklist_summary([
+        host("a", "clean", 0, 30, FRESH),
+        host("b", "listed", 1, 30, FRESH),
+        host("c", "clean", 0, 4, FRESH),
+    ], now=NOW)
+    listed = [h for h in result["hosts"] if h["status"] == "listed"]
+    assert [(h["hostname"], h["listed_count"], h["total_blacklists"]) for h in listed] == [("b", 1, 30)]
+    assert result["hosts"][2]["total_blacklists"] == 4
+
+
 def test_stale_check_counts_as_no_data():
     # Preserves the old single-host behavior: has_data drops after the TTL
     result = aggregate_blacklist_summary(
@@ -155,8 +167,10 @@ def test_hosts_detail_shape():
         "source": "system",
         "status": "listed",
         "listed_count": 2,
+        "total_blacklists": 30,
         "checked_at": FRESH.isoformat().replace('+00:00', '') + 'Z',
     }
     assert result["hosts"][1]["status"] == "unknown"
     assert result["hosts"][1]["listed_count"] == 0
     assert result["hosts"][1]["checked_at"] is None
+    assert result["hosts"][1]["total_blacklists"] is None

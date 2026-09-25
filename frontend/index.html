@@ -1005,7 +1005,7 @@
 
                 <div class="ui-kpis" id="status-kpis">
                     <div class="ui-kpi"><b id="status-kpi-containers">-</b>Containers running</div>
-                    <div class="ui-kpi" id="status-kpi-blocklists-cell"><b id="status-kpi-blocklists">-</b>Blocklists listing you</div>
+                    <div class="ui-kpi" id="status-kpi-blocklists-cell"><b id="status-kpi-blocklists">-</b>Addresses on a blocklist</div>
                     <div class="ui-kpi"><b id="status-kpi-storage">-</b>Mail storage used</div>
                     <div class="ui-kpi"><b id="status-kpi-version">-</b><span id="status-kpi-version-note">Version</span></div>
                 </div>
@@ -1253,9 +1253,11 @@
                                 <option value="quota_used-desc">Quota Used (High to Low)</option>
                                 <option value="username-asc">Username (A-Z)</option>
                             </select>
-                            <label class="ui-check-label"><input type="checkbox" id="mailbox-stats-active-only" class="ui-check" checked onchange="applyMailboxStatsFilters()"> Active Only</label>
-                            <label class="ui-check-label"><input type="checkbox" id="mailbox-stats-hide-zero" class="ui-check" checked onchange="applyMailboxStatsFilters()"> Hide Zero Activity</label>
-                            <button onclick="resetMailboxStatsFilters()" class="ui-btn">Reset</button>
+                            <div class="ui-ms-opts">
+                                <label class="ui-check-label"><input type="checkbox" id="mailbox-stats-active-only" class="ui-check" checked onchange="applyMailboxStatsFilters()"> Active Only</label>
+                                <label class="ui-check-label"><input type="checkbox" id="mailbox-stats-hide-zero" class="ui-check" checked onchange="applyMailboxStatsFilters()"> Hide Zero Activity</label>
+                                <button onclick="resetMailboxStatsFilters()" class="ui-btn">Reset</button>
+                            </div>
                         </div>
                     </section>
 
@@ -1326,14 +1328,16 @@
                                 <button onclick="toggleWordWrap()" id="logs-wrap-btn" class="ui-btn ui-btn-sm ui-log-toggle" aria-pressed="true" title="Toggle word wrap">
                                     <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h10a4 4 0 010 8H9m0 0l3-3m-3 3l3 3"></path></svg> Wrap
                                 </button>
-                                <span class="ui-toolbar-gap"></span>
-                                <label class="ui-search ui-logs-search"><svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
-                                    <input type="text" id="logs-search-input" placeholder="Search logs..." aria-label="Search logs"
-                                        onkeydown="if(event.key==='Enter')searchLogs()" oninput="if(!this.value)clearLogSearch()">
-                                </label>
-                                <button onclick="searchLogs()" class="ui-icon-btn" title="Search" aria-label="Search"><svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg></button>
-                                <button onclick="clearLogSearch()" class="ui-icon-btn" title="Clear search" aria-label="Clear search"><svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg></button>
                                 <button onclick="clearLogDisplay()" class="ui-btn ui-btn-sm" title="Clear display"><svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg> Clear</button>
+                                <span class="ui-toolbar-gap"></span>
+                                <div class="ui-logs-find">
+                                    <label class="ui-search ui-logs-search"><svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
+                                        <input type="text" id="logs-search-input" placeholder="Search logs..." aria-label="Search logs"
+                                            onkeydown="if(event.key==='Enter')searchLogs()" oninput="if(!this.value)clearLogSearch()">
+                                    </label>
+                                    <button onclick="searchLogs()" class="ui-icon-btn" title="Search" aria-label="Search"><svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg></button>
+                                    <button onclick="clearLogSearch()" class="ui-icon-btn" title="Clear search" aria-label="Clear search"><svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg></button>
+                                </div>
                             </div>
 
                             <!-- Date Range Row -->
