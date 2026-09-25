@@ -21,7 +21,7 @@
     <script src="/static/assets/libs/purify.min.js?v=2"></script>
     <script src="/static/assets/libs/chart.umd.min.js?v=2"></script>
     <link rel="stylesheet" href="/static/assets/libs/github-markdown.min.css">
-    <link rel="stylesheet" href="/static/assets/css/ui.css?v=14">
+    <link rel="stylesheet" href="/static/assets/css/ui.css?v=16">
     <script>
         tailwind.config = {
             darkMode: 'class',
@@ -1822,20 +1822,19 @@
             </div>
 
             <!-- Settings Tab -->
-            <div id="content-settings" class="tab-content hidden">
-                <div class="mb-6">
-                    <h2 class="text-2xl font-bold text-gray-900 dark:text-white">Settings</h2>
-                    <p class="text-gray-600 dark:text-gray-400 mt-1">Application configuration</p>
+            <div id="content-settings" class="tab-content hidden ui-page">
+                <div class="ui-page-head">
+                    <div>
+                        <h1 class="ui-h1">Settings</h1>
+                        <p class="ui-muted">Application configuration</p>
+                    </div>
                 </div>
 
                 <!-- Loading State -->
-                <div id="settings-loading" class="text-center py-12">
-                    <div class="loading mx-auto mb-4"></div>
-                    <p class="text-gray-500 dark:text-gray-400">Loading settings...</p>
-                </div>
+                <div id="settings-loading" class="ui-loading"><div class="loading"></div><p>Loading settings...</p></div>
 
                 <!-- Content -->
-                <div id="settings-content" class="hidden space-y-6"></div>
+                <div id="settings-content" class="hidden ui-settings"></div>
             </div>
         </div>
 
@@ -1982,12 +1981,12 @@
     <script src="/static/message-details.js?v=5"></script>
     <script src="/static/dmarc.js?v=5"></script>
     <script src="/static/logs-viewer.js?v=3"></script>
-    <script src="/static/settings.js?v=17"></script>
+    <script src="/static/settings.js?v=19"></script>
     <script src="/static/domains.js?v=4"></script>
     <script src="/static/mailbox-stats.js?v=4"></script>
     <script src="/static/rate-limits.js?v=23"></script>
     <script src="/static/smtp-abuse.js?v=2"></script>
-    <script src="/static/notifications.js?v=3"></script>
+    <script src="/static/notifications.js?v=4"></script>
     <script src="/static/spam_filter.js?v=5"></script>
 
     <!-- DMARC Sync History Modal -->

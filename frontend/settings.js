@@ -945,10 +945,12 @@ function renderSettings(content, data) {
     }
 
     content.innerHTML = `
+        ${!data.settings_edit_via_ui_enabled ? `<div class="ui-list-note ui-flush">${uiLocked('Editing settings is off',
+            'These values come from the environment and are shown read-only. To change them here, set <code>SETTINGS_EDIT_VIA_UI_ENABLED=true</code> and restart the container.', '')}</div>` : ''}
         <!-- Version Information Section -->
-        <div class="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 mb-6">
-            <div class="p-4 border-b border-gray-200 dark:border-gray-700">
-                <h3 class="text-lg font-semibold text-gray-900 dark:text-white flex items-center gap-2">
+        <div class="ui-panel mb-6">
+            <div class="ui-panel-head">
+                <h3 class="ui-panel-title">
                     <svg class="w-5 h-5 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path>
                     </svg>
@@ -1013,9 +1015,9 @@ function renderSettings(content, data) {
         </div>
 
         <!-- Configuration Section -->
-        <div class="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700">
-            <div class="p-4 border-b border-gray-200 dark:border-gray-700">
-                <h3 class="text-lg font-semibold text-gray-900 dark:text-white flex items-center gap-2">
+        <div class="ui-panel">
+            <div class="ui-panel-head">
+                <h3 class="ui-panel-title">
                     <svg class="w-5 h-5 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path>
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
@@ -1240,10 +1242,9 @@ function renderSettings(content, data) {
                 group.tabs.forEach(function (id) {
                     const tab = tabById[id];
                     if (!tab) return;
-                    const active = id === firstVisibleId
-                        ? ' bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300'
-                        : ' text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700';
-                    navHtml += '<button type="button" class="settings-edit-tab w-full text-left px-2 py-1.5 text-sm font-medium rounded transition-colors' + active + '" data-tab="' + id + '">' + escapeHtml(tab.label) + '</button>';
+                    // The open category is marked with aria-current (styled in ui.css like the main navigation)
+                    const active = id === firstVisibleId ? ' aria-current="true"' : '';
+                    navHtml += '<button type="button" class="settings-edit-tab"' + active + ' data-tab="' + id + '">' + escapeHtml(tab.label) + '</button>';
                 });
                 navHtml += '</div></div>';
             });
@@ -1267,12 +1268,12 @@ function renderSettings(content, data) {
                 // Special handling for SMTP tab - add Global SMTP Configuration
                 if (tab.id === 'smtp' && data.smtp_configuration) {
                     tabsHtml += '<div class="mb-6 p-4 bg-gray-50 dark:bg-gray-700/30 rounded-lg"><h4 class="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">Status</h4><div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">';
-                    tabsHtml += '<div class="p-4 bg-white dark:bg-gray-800 rounded-lg"><p class="text-xs font-medium text-gray-500 dark:text-gray-400 mb-2">SMTP Enabled</p><div class="flex items-center gap-2 flex-wrap">';
+                    tabsHtml += '<div class="ui-panel p-4"><p class="text-xs font-medium text-gray-500 dark:text-gray-400 mb-2">SMTP Enabled</p><div class="flex items-center gap-2 flex-wrap">';
                     tabsHtml += data.smtp_configuration.enabled ? '<span class="inline-flex items-center px-2 py-1 rounded text-xs font-medium bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400"><svg class="w-3 h-3 mr-1" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path></svg>Enabled</span>' : '<span class="inline-flex items-center px-2 py-1 rounded text-xs font-medium bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-400">Disabled</span>';
                     tabsHtml += '<button type="button" onclick="testSmtpConnection()" class="px-3 py-1.5 bg-blue-500 hover:bg-blue-600 text-white rounded text-xs font-medium transition-colors duration-200 flex items-center gap-1.5"><svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg><span>Test SMTP</span></button></div></div>';
                     if (data.smtp_configuration.enabled) {
-                        tabsHtml += '<div class="p-4 bg-white dark:bg-gray-800 rounded-lg"><p class="text-xs font-medium text-gray-500 dark:text-gray-400 mb-2">Server</p><p class="text-sm text-gray-900 dark:text-white font-mono">' + escapeHtml(data.smtp_configuration.host) + ':' + escapeHtml(data.smtp_configuration.port) + '</p></div>';
-                        tabsHtml += '<div class="p-4 bg-white dark:bg-gray-800 rounded-lg"><p class="text-xs font-medium text-gray-500 dark:text-gray-400 mb-2">Admin Email</p><p class="text-sm text-gray-900 dark:text-white font-mono">' + escapeHtml(data.smtp_configuration.admin_email || 'N/A') + '</p></div>';
+                        tabsHtml += '<div class="ui-panel p-4"><p class="text-xs font-medium text-gray-500 dark:text-gray-400 mb-2">Server</p><p class="text-sm text-gray-900 dark:text-white font-mono">' + escapeHtml(data.smtp_configuration.host) + ':' + escapeHtml(data.smtp_configuration.port) + '</p></div>';
+                        tabsHtml += '<div class="ui-panel p-4"><p class="text-xs font-medium text-gray-500 dark:text-gray-400 mb-2">Admin Email</p><p class="text-sm text-gray-900 dark:text-white font-mono">' + escapeHtml(data.smtp_configuration.admin_email || 'N/A') + '</p></div>';
                     }
                     tabsHtml += '</div></div>';
                 }
@@ -1285,14 +1286,14 @@ function renderSettings(content, data) {
                 // Special handling for DMARC IMAP tab - add DMARC Management
                 if (tab.id === 'dmarc_imap' && data.dmarc_configuration) {
                     tabsHtml += '<div class="mb-6 p-4 bg-gray-50 dark:bg-gray-700/30 rounded-lg"><h4 class="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">Status</h4><div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">';
-                    tabsHtml += '<div class="p-4 bg-white dark:bg-gray-800 rounded-lg"><p class="text-xs font-medium text-gray-500 dark:text-gray-400 mb-2">IMAP Auto-Import</p><div class="flex items-center gap-2 flex-wrap">';
+                    tabsHtml += '<div class="ui-panel p-4"><p class="text-xs font-medium text-gray-500 dark:text-gray-400 mb-2">IMAP Auto-Import</p><div class="flex items-center gap-2 flex-wrap">';
                     tabsHtml += data.dmarc_configuration.imap_sync_enabled ? '<span class="inline-flex items-center px-2 py-1 rounded text-xs font-medium bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400"><svg class="w-3 h-3 mr-1" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path></svg>Enabled</span>' : '<span class="inline-flex items-center px-2 py-1 rounded text-xs font-medium bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-400">Disabled</span>';
                     tabsHtml += '<button type="button" onclick="testImapConnection()" class="px-3 py-1.5 bg-blue-500 hover:bg-blue-600 text-white rounded text-xs font-medium transition-colors duration-200 flex items-center gap-1.5"><svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg><span>Test IMAP</span></button></div></div>';
-                    tabsHtml += '<div class="p-4 bg-white dark:bg-gray-800 rounded-lg"><p class="text-xs font-medium text-gray-500 dark:text-gray-400 mb-2">Manual Upload</p><p class="text-sm text-gray-900 dark:text-white">';
+                    tabsHtml += '<div class="ui-panel p-4"><p class="text-xs font-medium text-gray-500 dark:text-gray-400 mb-2">Manual Upload</p><p class="text-sm text-gray-900 dark:text-white">';
                     tabsHtml += data.dmarc_configuration.manual_upload_enabled ? '<span class="inline-flex items-center px-2 py-1 rounded text-xs font-medium bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400"><svg class="w-3 h-3 mr-1" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path></svg>Enabled</span>' : '<span class="inline-flex items-center px-2 py-1 rounded text-xs font-medium bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400">Disabled</span>';
                     tabsHtml += '</p></div>';
                     if (data.dmarc_configuration.imap_sync_enabled) {
-                        tabsHtml += '<div class="p-4 bg-white dark:bg-gray-800 rounded-lg"><p class="text-xs font-medium text-gray-500 dark:text-gray-400 mb-2">IMAP Server</p><p class="text-sm text-gray-900 dark:text-white font-mono">' + escapeHtml(data.dmarc_configuration.imap_host || 'N/A') + '</p></div>';
+                        tabsHtml += '<div class="ui-panel p-4"><p class="text-xs font-medium text-gray-500 dark:text-gray-400 mb-2">IMAP Server</p><p class="text-sm text-gray-900 dark:text-white font-mono">' + escapeHtml(data.dmarc_configuration.imap_host || 'N/A') + '</p></div>';
                     }
                     tabsHtml += '</div></div>';
                 }
@@ -1308,7 +1309,7 @@ function renderSettings(content, data) {
                     tabsHtml += '<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">';
                     
                     // License Status
-                    tabsHtml += '<div class="p-4 bg-white dark:bg-gray-800 rounded-lg">';
+                    tabsHtml += '<div class="ui-panel p-4">';
                     tabsHtml += '<p class="text-xs font-medium text-gray-500 dark:text-gray-400 mb-2">License</p>';
                     tabsHtml += '<div class="flex items-center gap-2"><span id="maxmind-license-status-tab">' + renderMaxMindStatus(data.configuration.maxmind_status) + '</span>';
                     if (data.geoip_configuration && data.geoip_configuration.enabled) {
@@ -1318,13 +1319,13 @@ function renderSettings(content, data) {
                     tabsHtml += '</div>';
                     
                     // DB Health
-                    tabsHtml += '<div class="p-4 bg-white dark:bg-gray-800 rounded-lg">';
+                    tabsHtml += '<div class="ui-panel p-4">';
                     tabsHtml += '<p class="text-xs font-medium text-gray-500 dark:text-gray-400 mb-2">Database Health</p>';
                     tabsHtml += '<div id="geoip-db-status" class="flex items-center gap-2">' + renderGeoIPDbStatus(geoipCfg) + '</div>';
                     tabsHtml += '</div>';
                     
                     // Databases (City + ASN combined)
-                    tabsHtml += '<div class="p-4 bg-white dark:bg-gray-800 rounded-lg">';
+                    tabsHtml += '<div class="ui-panel p-4">';
                     tabsHtml += '<p class="text-xs font-medium text-gray-500 dark:text-gray-400 mb-2">Databases</p>';
                     if (cityDb.available || asnDb.available) {
                         tabsHtml += '<div class="space-y-1">';
@@ -1368,9 +1369,9 @@ function renderSettings(content, data) {
             tabsHtml += '</div></div>';  // close .settings-edit-content and .settings-edit-layout
             return `
         <!-- Edit Configuration (only when SETTINGS_EDIT_VIA_UI_ENABLED) -->
-        <div class="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700">
-            <div class="p-4 border-b border-gray-200 dark:border-gray-700">
-                <h3 class="text-lg font-semibold text-gray-900 dark:text-white flex items-center gap-2">
+        <div class="ui-panel">
+            <div class="ui-panel-head">
+                <h3 class="ui-panel-title">
                     <svg class="w-5 h-5 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path>
                     </svg>
@@ -1395,9 +1396,9 @@ function renderSettings(content, data) {
 
         ${!data.settings_edit_via_ui_enabled ? `
         <!-- Global SMTP Configuration -->
-        <div class="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700">
-            <div class="p-4 border-b border-gray-200 dark:border-gray-700">
-                <h3 class="text-lg font-semibold text-gray-900 dark:text-white flex items-center gap-2">
+        <div class="ui-panel">
+            <div class="ui-panel-head">
+                <h3 class="ui-panel-title">
                     <svg class="w-5 h-5 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path>
                     </svg>
@@ -1441,9 +1442,9 @@ function renderSettings(content, data) {
         </div>
 
         <!-- DMARC Management -->
-        <div class="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700">
-            <div class="p-4 border-b border-gray-200 dark:border-gray-700">
-                <h3 class="text-lg font-semibold text-gray-900 dark:text-white flex items-center gap-2">
+        <div class="ui-panel">
+            <div class="ui-panel-head">
+                <h3 class="ui-panel-title">
                     <svg class="w-5 h-5 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"></path>
                     </svg>
@@ -1648,14 +1649,8 @@ function renderSettings(content, data) {
         const switchSettingsTab = function (tabId, scrollToTop) {
             content.querySelectorAll('.settings-edit-tab').forEach(function (b) {
                 const isActive = b.getAttribute('data-tab') === tabId;
-                b.classList.toggle('bg-blue-100', isActive);
-                b.classList.toggle('dark:bg-blue-900/40', isActive);
-                b.classList.toggle('text-blue-700', isActive);
-                b.classList.toggle('dark:text-blue-300', isActive);
-                b.classList.toggle('text-gray-600', !isActive);
-                b.classList.toggle('dark:text-gray-400', !isActive);
-                b.classList.toggle('hover:bg-gray-100', !isActive);
-                b.classList.toggle('dark:hover:bg-gray-700', !isActive);
+                if (isActive) b.setAttribute('aria-current', 'true');
+                else b.removeAttribute('aria-current');
             });
             content.querySelectorAll('.settings-edit-panel').forEach(function (panel) {
                 panel.classList.add('hidden');
@@ -1880,9 +1875,9 @@ async function showGeoIPSetupModal() {
     overlay.style.animation = 'fadeIn 0.2s ease-out';
     
     overlay.innerHTML = `
-        <div class="bg-white dark:bg-gray-800 rounded-xl shadow-2xl w-full max-w-md mx-4 overflow-hidden">
+        <div class="ui-panel shadow-2xl w-full max-w-md mx-4 overflow-hidden">
             <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
-                <h3 class="text-lg font-semibold text-gray-900 dark:text-white flex items-center gap-2">
+                <h3 class="ui-panel-title">
                     <svg class="w-5 h-5 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
                     </svg>
@@ -2363,7 +2358,7 @@ function showConnectionTestModal(title, message) {
     modal.id = 'connection-test-modal';
     modal.className = 'fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50';
     modal.innerHTML = `
-        <div class="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-2xl w-full mx-4 max-h-[80vh] overflow-hidden flex flex-col">
+        <div class="ui-panel shadow-xl max-w-2xl w-full mx-4 max-h-[80vh] overflow-hidden flex flex-col">
             <div class="p-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
                 <h3 class="text-lg font-semibold text-gray-900 dark:text-white">${escapeHtml(title)}</h3>
                 <button onclick="closeConnectionTestModal()" class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">

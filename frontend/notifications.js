@@ -161,7 +161,7 @@ function renderNotificationChannelModal() {
     modal.id = 'notification-channel-modal';
     modal.className = 'fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4';
     modal.innerHTML = `
-        <div class="bg-white dark:bg-gray-800 rounded-lg shadow-xl w-full max-w-md max-h-[90vh] overflow-y-auto">
+        <div class="ui-panel shadow-xl w-full max-w-md max-h-[90vh] overflow-y-auto">
             <div class="px-5 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
                 <h3 class="text-lg font-semibold text-gray-900 dark:text-white">${isNew ? 'Add destination' : 'Edit destination'}</h3>
                 <button type="button" onclick="closeNotificationChannelModal()" class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 text-xl leading-none">&times;</button>
