@@ -136,9 +136,13 @@ const UI_STATUS_TONE = {
     delivered: 'ok', sent: 'ok', deferred: 'warn', bounced: 'fail', rejected: 'fail', spam: 'spam',
 };
 
+// A v3 tag with the given text and tone (ok, warn, fail, spam, info or none)
+function uiTag(text, tone) {
+    return `<span class="ui-tag${tone ? ` ui-tag-${tone}` : ''}">${escapeHtml(String(text))}</span>`;
+}
+
 function uiStatusTag(status) {
-    const tone = UI_STATUS_TONE[status];
-    return `<span class="ui-tag${tone ? ` ui-tag-${tone}` : ''}">${escapeHtml(String(status))}</span>`;
+    return uiTag(status, UI_STATUS_TONE[status]);
 }
 
 // The correlation status of a message (getCorrelationStatusDisplay) as a v3

@@ -760,7 +760,7 @@ async function smartRefreshMessages() {
 function renderMessageRow(msg) {
     const tone = messageRowTone(msg);
     return `
-        <div class="ui-msg-item${tone ? ` ui-msg-${tone}` : ''}" onclick="viewMessageDetails('${escapeJsArg(msg.correlation_key)}')">
+        <div class="ui-msg-item${tone ? ` ui-msg-${tone}` : ''}" data-key="${escapeHtml(msg.correlation_key || '')}" onclick="viewMessageDetails('${escapeJsArg(msg.correlation_key)}')">
             <div class="ui-msg-l1">
                 <span class="ui-msg-who">
                     <span>${escapeHtml(msg.sender || 'Unknown')}</span>
