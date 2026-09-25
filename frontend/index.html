@@ -21,7 +21,7 @@
     <script src="/static/assets/libs/purify.min.js?v=2"></script>
     <script src="/static/assets/libs/chart.umd.min.js?v=2"></script>
     <link rel="stylesheet" href="/static/assets/libs/github-markdown.min.css">
-    <link rel="stylesheet" href="/static/assets/css/ui.css?v=4">
+    <link rel="stylesheet" href="/static/assets/css/ui.css?v=6">
     <script>
         tailwind.config = {
             darkMode: 'class',
@@ -607,34 +607,32 @@
             </div>
 
             <!-- Messages Tab -->
-            <div id="content-messages" class="tab-content hidden">
-                <!-- Filters -->
-                <div class="bg-white dark:bg-gray-800 rounded-lg shadow dark:shadow-gray-900/30 p-4 mb-4">
-                    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 mb-3">
-                        <input type="text" id="messages-filter-search"
-                            placeholder="Search (sender, recipient, subject, IP, user)..."
-                            class="px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-lg"
-                            onkeypress="if(event.key==='Enter') applyMessagesFilters()">
-                        <input type="text" id="messages-filter-sender" placeholder="Sender"
-                            class="px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-lg"
-                            onkeypress="if(event.key==='Enter') applyMessagesFilters()">
-                        <input type="text" id="messages-filter-recipient" placeholder="Recipient"
-                            class="px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-lg"
-                            onkeypress="if(event.key==='Enter') applyMessagesFilters()">
-                        <input type="text" id="messages-filter-user" placeholder="Authenticated User"
-                            class="px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-lg"
-                            onkeypress="if(event.key==='Enter') applyMessagesFilters()">
+            <div id="content-messages" class="tab-content hidden ui-page">
+                <div class="ui-page-head">
+                    <div>
+                        <h1 class="ui-h1">Messages</h1>
+                        <p class="ui-muted">Every message with its delivery, spam check and security events</p>
                     </div>
-                    <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
-                        <select id="messages-filter-direction"
-                            class="px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-lg">
+                    <button onclick="exportCSV('messages')" class="ui-btn" style="margin-inline-start: auto">Export CSV</button>
+                </div>
+
+                <!-- Filters -->
+                <section class="ui-panel ui-filters">
+                    <div class="ui-filters-row">
+                        <input type="text" id="messages-filter-search" class="ui-input ui-filter-wide" aria-label="Search"
+                            placeholder="Search (sender, recipient, subject, IP, user)..." onkeypress="if(event.key==='Enter') applyMessagesFilters()">
+                        <input type="text" id="messages-filter-sender" class="ui-input ui-filter-extra" placeholder="Sender" aria-label="Sender" onkeypress="if(event.key==='Enter') applyMessagesFilters()">
+                        <input type="text" id="messages-filter-recipient" class="ui-input ui-filter-extra" placeholder="Recipient" aria-label="Recipient" onkeypress="if(event.key==='Enter') applyMessagesFilters()">
+                        <input type="text" id="messages-filter-user" class="ui-input ui-filter-extra" placeholder="Authenticated User" aria-label="Authenticated User" onkeypress="if(event.key==='Enter') applyMessagesFilters()">
+                    </div>
+                    <div class="ui-filters-row">
+                        <select id="messages-filter-direction" class="ui-select ui-filter-extra" aria-label="Direction">
                             <option value="">All Directions</option>
                             <option value="inbound">Inbound</option>
                             <option value="outbound">Outbound</option>
                             <option value="internal">Internal</option>
                         </select>
-                        <select id="messages-filter-status"
-                            class="px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-lg">
+                        <select id="messages-filter-status" class="ui-select ui-filter-extra" aria-label="Status">
                             <option value="">All Statuses</option>
                             <option value="delivered">Delivered</option>
                             <option value="deferred">Deferred</option>
@@ -644,125 +642,47 @@
                             <option value="discarded">Discarded (Sieve)</option>
                         </select>
                         <!-- Date Range Picker -->
-                        <div class="relative" id="messages-date-range-picker-container">
-                            <button type="button" onclick="toggleMessagesDateRangePicker()" id="messages-date-range-picker-btn"
-                                class="w-full flex items-center justify-between gap-2 text-sm border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-lg py-2 pl-3 pr-3 hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors">
-                                <span class="flex items-center gap-2">
-                                    <svg class="w-4 h-4 text-gray-500 dark:text-gray-400 flex-shrink-0" fill="none"
-                                        stroke="currentColor" viewBox="0 0 24 24">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                            d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z">
-                                        </path>
-                                    </svg>
-                                    <span id="messages-date-range-label">All Time</span>
-                                </span>
-                                <svg class="w-4 h-4 text-gray-400 transition-transform flex-shrink-0" id="messages-date-range-arrow"
-                                    fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                        d="M19 9l-7 7-7-7"></path>
-                                </svg>
+                        <div class="ui-popover-host ui-filter-extra" id="messages-date-range-picker-container">
+                            <button type="button" onclick="toggleMessagesDateRangePicker()" id="messages-date-range-picker-btn" class="ui-select ui-select-btn">
+                                <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg><span id="messages-date-range-label">All Time</span><svg id="messages-date-range-arrow" class="ui-select-arrow" width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
                             </button>
-
-                            <!-- Dropdown Panel -->
-                            <div id="messages-date-range-dropdown"
-                                class="hidden absolute left-0 top-full mt-2 w-80 bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 z-50">
-                                <!-- Preset Shortcuts -->
-                                <div class="p-3 border-b border-gray-200 dark:border-gray-700">
-                                    <p class="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-2">
-                                        Quick Select</p>
-                                    <div class="flex flex-wrap gap-2">
-                                        <button type="button" onclick="selectMessagesDatePreset('')"
-                                            data-preset=""
-                                            class="messages-date-preset-btn px-3 py-1.5 text-xs font-medium rounded-md border border-blue-500 bg-blue-500 text-white transition-colors">
-                                            All Time
-                                        </button>
-                                        <button type="button" onclick="selectMessagesDatePreset('today')"
-                                            data-preset="today"
-                                            class="messages-date-preset-btn px-3 py-1.5 text-xs font-medium rounded-md border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
-                                            Today
-                                        </button>
-                                        <button type="button" onclick="selectMessagesDatePreset('7days')"
-                                            data-preset="7days"
-                                            class="messages-date-preset-btn px-3 py-1.5 text-xs font-medium rounded-md border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
-                                            7 Days
-                                        </button>
-                                        <button type="button" onclick="selectMessagesDatePreset('30days')"
-                                            data-preset="30days"
-                                            class="messages-date-preset-btn px-3 py-1.5 text-xs font-medium rounded-md border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
-                                            30 Days
-                                        </button>
-                                        <button type="button" onclick="selectMessagesDatePreset('90days')"
-                                            data-preset="90days"
-                                            class="messages-date-preset-btn px-3 py-1.5 text-xs font-medium rounded-md border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
-                                            90 Days
-                                        </button>
-                                    </div>
+                            <div id="messages-date-range-dropdown" class="hidden ui-popover">
+                                <p class="ui-label">Quick Select</p>
+                                <div class="ui-chip-row">
+                                    <button type="button" onclick="selectMessagesDatePreset('')" data-preset="" class="messages-date-preset-btn ui-chip" aria-pressed="true">All Time</button>
+                                    <button type="button" onclick="selectMessagesDatePreset('today')" data-preset="today" class="messages-date-preset-btn ui-chip" aria-pressed="false">Today</button>
+                                    <button type="button" onclick="selectMessagesDatePreset('7days')" data-preset="7days" class="messages-date-preset-btn ui-chip" aria-pressed="false">7 Days</button>
+                                    <button type="button" onclick="selectMessagesDatePreset('30days')" data-preset="30days" class="messages-date-preset-btn ui-chip" aria-pressed="false">30 Days</button>
+                                    <button type="button" onclick="selectMessagesDatePreset('90days')" data-preset="90days" class="messages-date-preset-btn ui-chip" aria-pressed="false">90 Days</button>
                                 </div>
-
-                                <!-- Custom Date Range -->
-                                <div class="p-3">
-                                    <p class="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-2">
-                                        Custom Range</p>
-                                    <div class="flex items-center gap-2">
-                                        <div class="flex-1">
-                                            <label class="text-xs text-gray-500 dark:text-gray-400 block mb-1">From</label>
-                                            <input type="date" id="messages-date-range-start"
-                                                class="w-full text-sm border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-md py-1.5 px-2 focus:ring-blue-500 focus:border-blue-500">
-                                        </div>
-                                        <div class="flex-1">
-                                            <label class="text-xs text-gray-500 dark:text-gray-400 block mb-1">To</label>
-                                            <input type="date" id="messages-date-range-end"
-                                                class="w-full text-sm border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-md py-1.5 px-2 focus:ring-blue-500 focus:border-blue-500">
-                                        </div>
-                                    </div>
-                                    <button type="button" onclick="applyMessagesCustomDateRange()"
-                                        class="w-full mt-3 px-3 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-md transition-colors">
-                                        Apply Custom Range
-                                    </button>
+                                <p class="ui-label" style="margin-top: 14px">Custom Range</p>
+                                <div class="ui-date-pair">
+                                    <label><span class="ui-label">From</span><input type="date" id="messages-date-range-start" class="ui-input"></label>
+                                    <label><span class="ui-label">To</span><input type="date" id="messages-date-range-end" class="ui-input"></label>
                                 </div>
+                                <button type="button" onclick="applyMessagesCustomDateRange()" class="ui-btn ui-btn-primary" style="width: 100%; margin-top: 12px">Apply Custom Range</button>
                             </div>
-
                             <!-- Hidden inputs for state -->
                             <input type="hidden" id="messages-date-range" value="">
                             <input type="hidden" id="messages-start-date" value="">
                             <input type="hidden" id="messages-end-date" value="">
                         </div>
-                        <input type="text" id="messages-filter-ip" placeholder="Source IP"
-                            class="px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-lg"
-                            onkeypress="if(event.key==='Enter') applyMessagesFilters()">
-                        <div class="flex gap-2">
-                            <button onclick="applyMessagesFilters()"
-                                class="flex-1 px-3 py-2 text-sm bg-blue-600 hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600 text-white rounded-lg">
-                                Apply
-                            </button>
-                            <button onclick="clearMessagesFilters()"
-                                class="flex-1 px-3 py-2 text-sm bg-gray-200 hover:bg-gray-300 dark:bg-gray-600 dark:hover:bg-gray-500 text-gray-700 dark:text-gray-300 rounded-lg">
-                                Clear
-                            </button>
+                        <input type="text" id="messages-filter-ip" class="ui-input ui-filter-extra" placeholder="Source IP" aria-label="Source IP" onkeypress="if(event.key==='Enter') applyMessagesFilters()">
+                        <div class="ui-filters-actions">
+                            <button type="button" class="ui-btn ui-filters-toggle" aria-expanded="false"
+                                onclick="this.setAttribute('aria-expanded', this.closest('.ui-filters').classList.toggle('is-open'))">Filters</button>
+                            <button onclick="applyMessagesFilters()" class="ui-btn ui-btn-primary">Apply</button>
+                            <button onclick="clearMessagesFilters()" class="ui-btn">Clear</button>
                         </div>
                     </div>
-                </div>
+                </section>
 
-                <div class="bg-white dark:bg-gray-800 rounded-lg shadow dark:shadow-gray-900/30">
-                    <div
-                        class="px-4 sm:px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center">
-                        <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
-                            All Messages
-                            <span id="messages-count"
-                                class="ml-2 text-sm font-normal text-gray-500 dark:text-gray-400"></span>
-                        </h2>
-                        <button onclick="exportCSV('messages')"
-                            class="px-3 py-2 text-sm bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600">
-                            Export CSV
-                        </button>
+                <section class="ui-panel">
+                    <div class="ui-panel-head">All Messages <span id="messages-count" class="ui-count"></span></div>
+                    <div id="messages-logs">
+                        <div class="ui-loading"><div class="loading"></div><p>Loading...</p></div>
                     </div>
-                    <div id="messages-logs" class="p-4 sm:p-6">
-                        <div class="text-center py-8">
-                            <div class="loading mx-auto mb-4"></div>
-                            <p class="text-gray-500 dark:text-gray-400">Loading...</p>
-                        </div>
-                    </div>
-                </div>
+                </section>
             </div>
 
             <!-- Netfilter Tab -->
@@ -2280,9 +2200,9 @@
     </div> <!-- Close app-content div -->
 
     <!-- JavaScript -->
-    <script src="/static/utils.js?v=6"></script>
+    <script src="/static/utils.js?v=7"></script>
     <script src="/static/router.js?v=3"></script>
-    <script src="/static/app.js?v=39"></script>
+    <script src="/static/app.js?v=40"></script>
     <script src="/static/export.js?v=1"></script>
     <script src="/static/message-details.js?v=3"></script>
     <script src="/static/dmarc.js?v=5"></script>
