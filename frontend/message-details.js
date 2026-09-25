@@ -17,7 +17,7 @@ let messageModalHome = null;
 // The reading pane is used on the Messages page when the screen is wide enough
 // for the list and the message side by side.
 function messageReaderSlot() {
-    if (typeof window.matchMedia !== 'function' || !window.matchMedia('(min-width: 1200px)').matches) return null;
+    if (typeof window.matchMedia !== 'function' || !window.matchMedia('(min-width: 1000px)').matches) return null;
     if (typeof currentTab === 'undefined' || currentTab !== 'messages') return null;
     return document.getElementById('messages-reader');
 }
@@ -93,6 +93,9 @@ async function viewMessageDetails(correlationKey) {
     else markSelectedMessageRow(correlationKey);
 
     modal.classList.remove('hidden');
+    window.openMessageKey = correlationKey;
+    const header = document.getElementById('message-modal-header');
+    if (header) header.innerHTML = '';
     content.innerHTML = '<div class="ui-loading"><div class="loading"></div><p>Loading...</p></div>';
 
     try {
@@ -106,6 +109,8 @@ async function viewMessageDetails(correlationKey) {
 
         currentModalData = data;
         currentModalTab = 'overview';
+
+        renderMessageHeader(data);
 
         // Update Security tab indicator
         updateSecurityTabIndicator(data);
@@ -389,6 +394,119 @@ function toggleDeliveryJourney() {
     if (chevron) chevron.style.transform = open ? '' : 'rotate(180deg)';
 }
 
+// =============================================================================
+// READING PANE HEADER AND "WHAT HAPPENED"
+// =============================================================================
+
+// Host part of a Postfix relay such as "mx.example.com[192.0.2.1]:25"
+function relayHost(relay) {
+    if (!relay) return '';
+    const host = String(relay).split('[')[0];
+    return host === 'none' ? '' : host;
+}
+
+// The outcome of the message in one sentence, with its tone
+function messageVerdict(data) {
+    const status = data.final_status;
+    const lastSent = (data.postfix || []).filter(l => l.status === 'sent').pop();
+    const dovecot = data.dovecot || {};
+    switch (status) {
+        case 'delivered':
+        case 'sent':
+            if (dovecot.status === 'stored' && dovecot.mailbox) return { tone: 'ok', text: `Delivered to the folder "${dovecot.mailbox}"` };
+            return { tone: 'ok', text: relayHost(lastSent && lastSent.relay) ? `Delivered to ${relayHost(lastSent.relay)}` : 'Delivered' };
+        case 'deferred': return { tone: 'warn', text: 'Deferred, Postfix will try again' };
+        case 'bounced': return { tone: 'fail', text: 'Bounced back to the sender' };
+        case 'rejected': return { tone: 'fail', text: 'Rejected' };
+        case 'spam': return { tone: 'spam', text: 'Marked as spam' };
+        case 'discarded': return { tone: '', text: 'Discarded by a Sieve rule' };
+        case 'expired': return { tone: '', text: 'Expired in the queue' };
+        default:
+            return data.is_complete === false ? { tone: 'info', text: 'In progress, waiting for Postfix logs' } : { tone: 'info', text: 'Linked' };
+    }
+}
+
+// Subject, From/To/When and the outcome, above the tabs
+function renderMessageHeader(data) {
+    const header = document.getElementById('message-modal-header');
+    if (!header) return;
+    const recipients = (data.recipients && data.recipients.length) ? data.recipients : (data.recipient ? [data.recipient] : []);
+    const verdict = messageVerdict(data);
+    const facts = [];
+    if (data.rspamd && typeof data.rspamd.score === 'number') facts.push(`Spam score ${data.rspamd.score.toFixed(1)}`);
+    if (data.rspamd && data.rspamd.size) facts.push(formatSize(data.rspamd.size));
+    if (data.direction) facts.push(data.direction);
+    const hasSubject = data.subject && data.subject !== 'Postfix Log Details';
+    header.innerHTML = `
+        <h2 class="ui-md-subject" dir="auto" title="${escapeHtml(hasSubject ? data.subject : 'No subject')}">${escapeHtml(hasSubject ? data.subject : 'No subject')}</h2>
+        <div class="ui-md-who">
+            <span>From</span><div>${copyableText(data.sender || '-')}</div>
+            <span>To</span><div>${recipients.length > 1 ? `${recipients.length} recipients: ${recipients.map(r => copyableText(r)).join(', ')}` : copyableText(recipients[0] || '-')}</div>
+            <span>When</span><div>${formatTime(data.first_seen)}</div>
+        </div>
+        <div class="ui-md-verdict-bar${verdict.tone ? ` ui-md-verdict-${verdict.tone}` : ''}">
+            ${escapeHtml(verdict.text)}
+            ${facts.length ? `<small>${escapeHtml(facts.join(', '))}</small>` : ''}
+        </div>`;
+}
+
+// The delivery told as steps: received, scanned, queued, delivered or not,
+// and what Dovecot did with it. Built from the same logs as the Logs tab.
+function buildDeliverySteps(data) {
+    const steps = [];
+    const add = (time, tone, title, detail) => steps.push({ time: time || '', tone, title, detail });
+    for (const log of data.postfix || []) {
+        const message = log.message || '';
+        const program = log.program || 'postfix';
+        const when = formatTime(log.time);
+        if (/NOQUEUE: reject/i.test(message)) {
+            add(log.time, 'fail', 'Rejected while receiving', `${when}, ${program}`);
+        } else if (/client=/.test(message) && /smtpd/.test(program)) {
+            const ip = (message.match(/client=.*?\[([^\]]+)\]/) || [])[1];
+            const user = (message.match(/sasl_username=(\S+)/) || [])[1];
+            add(log.time, 'ok', ip ? `Received from ${ip}` : 'Received', `${when}, ${program}${user ? `, authenticated as ${user}` : ''}`);
+        } else if (/cleanup/.test(program) && /message-id=/.test(message)) {
+            add(log.time, 'ok', log.queue_id || data.queue_id ? `Queued as ${log.queue_id || data.queue_id}` : 'Queued', `${when}, ${program}`);
+        } else if (log.status) {
+            const target = relayHost(log.relay) || log.recipient || '';
+            const detail = `${when}, status=${log.status}${log.dsn ? ` (${log.dsn})` : ''}`;
+            if (log.status === 'sent') add(log.time, 'ok', target ? `Delivered to ${target}` : 'Delivered', detail);
+            else if (log.status === 'deferred') add(log.time, 'warn', target ? `Deferred for ${target}` : 'Deferred', detail);
+            else if (log.status === 'bounced') add(log.time, 'fail', target ? `Bounced for ${target}` : 'Bounced', detail);
+            else add(log.time, 'fail', `${log.status.charAt(0).toUpperCase()}${log.status.slice(1)}`, detail);
+        }
+    }
+    if (data.rspamd && typeof data.rspamd.score === 'number') {
+        add(data.rspamd.time, data.rspamd.is_spam ? 'fail' : 'ok', `Rspamd score ${data.rspamd.score.toFixed(1)}`,
+            `${data.rspamd.time ? `${formatTime(data.rspamd.time)}, ` : ''}${data.rspamd.action || ''}`);
+    }
+    const dovecot = data.dovecot;
+    if (dovecot && dovecot.status && DOVECOT_VERDICTS[dovecot.status]) {
+        const verdict = DOVECOT_VERDICTS[dovecot.status];
+        const last = (dovecot.logs || []).slice(-1)[0];
+        add(last ? last.time : '9', verdict.tone || 'warn', verdict.label, getDovecotVerdictText(dovecot));
+    }
+    steps.sort((a, b) => (a.time < b.time ? -1 : a.time > b.time ? 1 : 0));
+    // A retry logs the same step again; one line with the number of attempts
+    const merged = [];
+    for (const step of steps) {
+        const prev = merged[merged.length - 1];
+        if (prev && prev.title === step.title) { prev.count = (prev.count || 1) + 1; prev.detail = step.detail; continue; }
+        merged.push({ ...step });
+    }
+    return merged;
+}
+
+function renderDeliverySteps(data) {
+    const steps = buildDeliverySteps(data);
+    if (!steps.length) return '<p class="ui-muted">No delivery steps recorded yet.</p>';
+    return `<ol class="ui-steps">${steps.map(step => `
+        <li class="${step.tone ? `ui-step-${step.tone}` : ''}">
+            <b>${escapeHtml(step.title)}${step.count > 1 ? ` <span class="ui-tag">${step.count} attempts</span>` : ''}</b>
+            <span>${escapeHtml(step.detail)}</span>
+        </li>`).join('')}</ol>`;
+}
+
 function renderOverviewTab(content, data) {
     // Collect recipients from Postfix logs if available (these have full addresses including +)
     let recipientsFromPostfix = new Set();
@@ -399,78 +517,48 @@ function renderOverviewTab(content, data) {
             }
         });
     }
-
-    // Use Postfix recipients if available, otherwise fall back to correlation recipients
     const recipientsToDisplay = recipientsFromPostfix.size > 0
         ? Array.from(recipientsFromPostfix)
         : (data.recipients || []);
 
-    let recipientsFact = '';
-    if (recipientsToDisplay.length > 1) {
-        recipientsFact = mdFact(`Recipients (${recipientsToDisplay.length})`,
-            `<div class="ui-md-recipients">${recipientsToDisplay.map(r => `<div>${copyableText(r)}</div>`).join('')}</div>`, 'ui-md-fact-wide');
-    } else if (recipientsToDisplay.length === 1) {
-        recipientsFact = mdFact('To', copyableText(recipientsToDisplay[0] || '-'));
-    } else if (data.recipient) {
-        recipientsFact = mdFact('To', copyableText(data.recipient));
-    }
-
-    const statusTags = data.final_status || data.direction ? `
-        <div class="ui-md-tags">
-            ${data.final_status ? uiStatusTag(data.final_status) : ''}
-            ${data.direction ? uiDirectionTag(data.direction) : ''}
-            ${data.dovecot && data.dovecot.status === 'stored' && data.dovecot.mailbox ? `<span class="ui-tag ui-tag-warn ui-md-folder">${folderIconSvg('ui-md-folder-icon')}${escapeHtml(data.dovecot.mailbox)}</span>` : ''}
-        </div>` : '';
-
-    const hasSubject = data.subject && data.subject !== 'Postfix Log Details';
+    const rspamd = data.rspamd || {};
+    const identifiers = [
+        data.queue_id ? mdFact('Queue ID', `<span class="ui-mono">${copyableText(data.queue_id)}</span>`) : '',
+        rspamd.ip ? mdFact('Client IP', `<div class="ui-md-geo">${renderGeoIPInfo(rspamd, '16x12')}</div>`) : '',
+        rspamd.user ? mdFact('User', `<span class="ui-mono">${copyableText(rspamd.user)}</span>`) : '',
+        rspamd.size ? mdFact('Message Size', formatSize(rspamd.size)) : '',
+        rspamd.has_auth ? mdFact('Authentication', 'Verified (MAILCOW_AUTH)') : '',
+        data.dovecot && data.dovecot.status === 'stored' && data.dovecot.mailbox ? mdFact('Folder', `<span class="ui-md-folder">${folderIconSvg('ui-md-folder-icon')}${escapeHtml(data.dovecot.mailbox)}</span>`) : '',
+        recipientsToDisplay.length > 1 ? mdFact(`Recipients (${recipientsToDisplay.length})`,
+            `<div class="ui-md-recipients">${recipientsToDisplay.map(r => `<div>${copyableText(r)}</div>`).join('')}</div>`, 'ui-md-fact-wide') : '',
+        data.message_id ? mdFact('Message ID', `<span class="ui-mono" title="${escapeHtml(data.message_id)}">${copyableText(data.message_id)}</span>`, 'ui-md-fact-wide') : '',
+    ].join('');
 
     content.innerHTML = `
-        <div class="ui-md-fill">
-            <div class="ui-md-stack">
-                <section class="ui-md-card">
-                    <h3 class="ui-md-title">Message Overview</h3>
-                    ${hasSubject ? `<p class="ui-md-subject" dir="auto" title="${escapeHtml(data.subject)}">${escapeHtml(data.subject)}</p>` : ''}
-                    ${statusTags}
-                    <div class="ui-md-facts">
-                        ${mdFact('From', copyableText(data.sender || '-'))}
-                        ${recipientsFact}
-                        ${data.queue_id ? mdFact('Queue ID', `<span class="ui-mono">${copyableText(data.queue_id)}</span>`) : ''}
-                        ${data.message_id ? mdFact('Message ID', `<span class="ui-mono" title="${escapeHtml(data.message_id)}">${copyableText(data.message_id)}</span>`, 'ui-md-fact-wide') : ''}
+        <div class="ui-md-stack">
+            <section>
+                <h4 class="ui-md-h">What happened</h4>
+                ${renderDeliverySteps(data)}
+            </section>
+            ${renderDovecotSummary(data.dovecot)}
+            ${renderRelatedDeliveries(data)}
+            ${identifiers ? `<section><h4 class="ui-md-h">Identifiers</h4><div class="ui-md-facts ui-md-ids">${identifiers}</div></section>` : ''}
+            ${data.rspamd ? `
+                <section class="ui-md-card ui-md-clickable" onclick="switchModalTab('spam')">
+                    <div class="ui-md-card-head">
+                        <h4 class="ui-md-h">Quick Spam Summary</h4>
+                        <span class="ui-muted">See "Spam Analysis" tab for details</span>
+                    </div>
+                    <div class="ui-md-figures">
+                        <div><b class="${data.rspamd.score >= (data.rspamd.required_score || 15) ? 'ui-text-fail' : 'ui-text-ok'}">${data.rspamd.score.toFixed(2)}</b><span>Score</span></div>
+                        <div><b>${escapeHtml(String(data.rspamd.action))}</b><span>Action</span></div>
+                        <div><b class="${data.rspamd.is_spam ? 'ui-text-fail' : 'ui-text-ok'}">${data.rspamd.is_spam ? 'SPAM' : 'CLEAN'}</b><span>Class</span></div>
                     </div>
                 </section>
-                ${renderRelatedDeliveries(data)}
-                ${renderDovecotSummary(data.dovecot)}
-                ${data.rspamd ? `
-                    <section class="ui-md-card ui-md-clickable" onclick="switchModalTab('spam')">
-                        <div class="ui-md-card-head">
-                            <h4 class="ui-md-h">Quick Spam Summary</h4>
-                            <span class="ui-muted">See "Spam Analysis" tab for details</span>
-                        </div>
-                        <div class="ui-md-figures">
-                            <div><b class="${data.rspamd.score >= (data.rspamd.required_score || 15) ? 'ui-text-fail' : 'ui-text-ok'}">${data.rspamd.score.toFixed(2)}</b><span>Score</span></div>
-                            <div><b>${escapeHtml(String(data.rspamd.action))}</b><span>Action</span></div>
-                            <div><b class="${data.rspamd.is_spam ? 'ui-text-fail' : 'ui-text-ok'}">${data.rspamd.is_spam ? 'SPAM' : 'CLEAN'}</b><span>Class</span></div>
-                        </div>
-                    </section>
-                ` : data.postfix && data.postfix.length > 0 ? `
-                    <div class="ui-banner">
-                        <div>Postfix Delivery Logs
-                            <p>Click "Logs" tab to see complete delivery timeline (${data.postfix.length} entries)</p>
-                        </div>
-                    </div>
-                ` : ''}
-            </div>
-            ${data.rspamd ? `
-                <div class="ui-md-footer">
-                    <div class="ui-banner">
-                        <div>Additional Details
-                            <div class="ui-md-extra">
-                                ${data.rspamd.ip ? renderGeoIPInfo(data.rspamd, '16x12') : ''}
-                                ${data.rspamd.user ? `<p>Authenticated User: ${copyableText(data.rspamd.user)}</p>` : ''}
-                                ${data.rspamd.size ? `<p>Message Size: ${formatSize(data.rspamd.size)}</p>` : ''}
-                                ${data.rspamd.has_auth ? `<p>Authentication: Verified (MAILCOW_AUTH)</p>` : ''}
-                            </div>
-                        </div>
+            ` : data.postfix && data.postfix.length > 0 ? `
+                <div class="ui-banner">
+                    <div>Postfix Delivery Logs
+                        <p>Click "Logs" tab to see complete delivery timeline (${data.postfix.length} entries)</p>
                     </div>
                 </div>
             ` : ''}
@@ -770,6 +858,7 @@ function closeMessageModal() {
     if (modal) {
         modal.classList.add('hidden');
         currentModalData = null;
+        window.openMessageKey = null;
         // Restore body scroll
         document.body.style.overflow = '';
         markSelectedMessageRow(null);
@@ -778,6 +867,8 @@ function closeMessageModal() {
         if (securityTab) {
             securityTab.innerHTML = '<span>Security</span>';
         }
+        const header = document.getElementById('message-modal-header');
+        if (header) header.innerHTML = '';
     }
 }
 

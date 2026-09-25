@@ -23,7 +23,7 @@
     <!-- Utility classes still used by the markup, compiled once
          (.github/scripts/build-utilities-css.sh); the design system comes last -->
     <link rel="stylesheet" href="/static/assets/css/utilities.css?v=1">
-    <link rel="stylesheet" href="/static/assets/css/ui.css?v=19">
+    <link rel="stylesheet" href="/static/assets/css/ui.css?v=21">
     <style>
         .tab-active {
             border-bottom: 2px solid #3b82f6;
@@ -378,32 +378,73 @@
 <body class="min-h-screen">
     <!-- Main App Content -->
     <div id="app-content" class="ui-shell">
-        <!-- Top bar: brand, connection and update indicators, page actions -->
-        <header class="ui-topbar">
+        <!-- Phones: a slim top bar with the page name and the problems pill -->
+        <header class="ui-mtop">
+            <img src="/static/assets/icons/app-icon.svg" alt="" class="ui-mtop-logo">
+            <span id="current-tab-label" class="ui-page-label">Dashboard</span>
+            <button type="button" id="ui-problems-pill" class="ui-problems hidden" onclick="navigateTo('status')"></button>
+            <div id="ui-mtop-actions" class="ui-mtop-actions"></div>
+        </header>
+
+        <!-- Sidebar: brand, server card, navigation with counters, versions and tools -->
+        <nav class="ui-sidenav" aria-label="Main">
             <a href="/" onclick="navigateTo('dashboard'); return false;" class="ui-brand">
                 <img id="app-logo" src="" alt="" class="hidden">
                 <img id="default-logo" src="/static/assets/icons/app-icon.svg" alt="">
                 <span id="app-title">mailcow Logs Viewer</span>
             </a>
-            <span id="current-tab-label" class="ui-page-label">Dashboard</span>
-            <span id="mailcow-connection-indicator" class="hidden" title="mailcow connection status">
+            <button type="button" class="ui-server" onclick="navigateTo('status')" title="Server status">
+                <span id="mailcow-connection-indicator" class="hidden" title="mailcow connection status">
                             <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
                                 <path fill-rule="evenodd"
                                     d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
                                     clip-rule="evenodd"></path>
                             </svg>
                         </span>
-            <button id="mailcow-update-icon"
-                            class="ui-icon-btn hidden text-blue-500 dark:text-blue-400"
+                <span class="ui-server-text"><b id="ui-server-host">mailcow</b><small id="ui-server-problems">Checking...</small></span>
+            </button>
+
+            <div class="ui-nav-group" data-nav-group>
+                <button onclick="navigateTo('dashboard')" id="tab-dashboard" class="ui-nav-item" aria-current="page" title="Dashboard"><svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"> <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z"> </path> </svg><span class="ui-nav-label">Dashboard</span></button>
+            </div>
+            <div class="ui-nav-group" data-nav-group>
+                <div class="ui-nav-group-label">Mail</div>
+                <button onclick="navigateTo('messages')" id="tab-messages" class="ui-nav-item" title="Messages"><svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"> <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"> </path> </svg><span class="ui-nav-label">Messages</span></button>
+                <button onclick="navigateTo('queue')" id="tab-queue" class="ui-nav-item" title="Queue"><svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"> <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"> </path> </svg><span class="ui-nav-label">Queue</span><span id="nav-count-queue" class="ui-nav-count hidden"></span></button>
+                <button onclick="navigateTo('quarantine')" id="tab-quarantine" class="ui-nav-item" title="Quarantine"><svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"> <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"> </path> </svg><span class="ui-nav-label">Quarantine</span><span id="nav-count-quarantine" class="ui-nav-count hidden"></span></button>
+            </div>
+            <div class="ui-nav-group" data-nav-group>
+                <div class="ui-nav-group-label">Protection</div>
+                <button onclick="navigateTo('netfilter')" id="tab-netfilter" class="ui-nav-item" title="Security"><svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"> <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"> </path> </svg><span class="ui-nav-label">Security</span><span id="nav-count-netfilter" class="ui-nav-count hidden"></span></button>
+                <button onclick="navigateTo('spam-filter')" id="tab-spam-filter" class="ui-nav-item" title="Spam Filter"><svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"> <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z"> </path> </svg><span class="ui-nav-label">Spam Filter</span></button>
+                <button onclick="navigateTo('dmarc')" id="tab-dmarc" class="ui-nav-item" title="DMARC"><svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"> <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path> </svg><span class="ui-nav-label">DMARC</span><span id="nav-count-dmarc" class="ui-nav-count hidden"></span></button>
+            </div>
+            <div class="ui-nav-group" data-nav-group>
+                <div class="ui-nav-group-label">Server</div>
+                <button onclick="navigateTo('status')" id="tab-status" class="ui-nav-item" title="Status"><svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"> <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"> </path> </svg><span class="ui-nav-label">Status</span><span id="nav-count-status" class="ui-nav-count hidden"></span></button>
+                <button onclick="navigateTo('domains')" id="tab-domains" class="ui-nav-item" title="Domains"><svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"> <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9"> </path> </svg><span class="ui-nav-label">Domains</span></button>
+                <button onclick="navigateTo('mailbox-stats')" id="tab-mailbox-stats" class="ui-nav-item" title="Mailbox Stats"><svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"> <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 8v8m-4-5v5m-4-2v2m-2 4h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"> </path> </svg><span class="ui-nav-label">Mailbox Stats</span></button>
+                <button onclick="navigateTo('logs')" id="tab-logs" class="ui-nav-item" title="Logs"><svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"> <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"> </path> </svg><span class="ui-nav-label">Logs</span></button>
+            </div>
+            <div class="ui-nav-group" data-nav-group>
+                <button onclick="navigateTo('settings')" id="tab-settings" class="ui-nav-item" title="Settings"><svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"> <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"> </path> <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path> </svg><span class="ui-nav-label">Settings</span></button>
+            </div>
+        
+            <footer id="app-footer" class="ui-side-foot">
+                <div class="ui-side-line"><span id="app-name-footer" class="hidden">mailcow Logs Viewer</span><span id="app-version-footer">v1.4.2</span>
+                    <button id="update-badge" onclick="switchTab('settings')" class="hidden ui-side-link">Update Available</button></div>
+                <div class="ui-side-line"><span id="mailcow-version-footer"></span>
+                    <button id="mailcow-update-badge" class="hidden ui-side-link">Update Available</button><button id="mailcow-update-icon"
+                            class="ui-icon-btn ui-icon-btn-sm hidden ui-text-info"
                             title="mailcow update available">
                             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                                     d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15">
                                 </path>
                             </svg>
-                        </button>
-            <div class="ui-topbar-actions">
-                <button id="theme-toggle" onclick="toggleDarkMode()" class="ui-icon-btn" title="Switch theme" aria-label="Switch theme">
+                        </button></div>
+                <div id="ui-utilities" class="ui-utilities">
+                    <button id="theme-toggle" onclick="toggleDarkMode()" class="ui-icon-btn" title="Switch theme" aria-label="Switch theme">
                             <svg id="theme-toggle-dark-icon" class="w-5 h-5 hidden" fill="currentColor"
                                 viewBox="0 0 20 20">
                                 <path d="M17.293 13.293A8 8 0 016.707 2.707a8.001 8.001 0 1010.586 10.586z"></path>
@@ -415,46 +456,66 @@
                                     fill-rule="evenodd" clip-rule="evenodd"></path>
                             </svg>
                         </button>
-                <button onclick="refreshAllData()" class="ui-btn ui-btn-primary" title="Refresh"><svg class="w-4 h-4 inline mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <button onclick="refreshAllData()" class="ui-icon-btn" title="Refresh" aria-label="Refresh"><svg class="w-4 h-4 inline mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                                     d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15">
                                 </path>
-                            </svg><span class="ui-hide-phone">Refresh</span></button>
-                <button onclick="handleLogout()" id="logout-btn" class="hidden ui-btn" title="Logout"><svg class="w-4 h-4 inline mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            </svg></button>
+                    <button onclick="handleLogout()" id="logout-btn" class="hidden ui-icon-btn" title="Logout" aria-label="Logout"><svg class="w-4 h-4 inline mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                                     d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1">
                                 </path>
-                            </svg><span class="ui-hide-phone">Logout</span></button>
-            </div>
-        </header>
-
-        <!-- Sidebar navigation (desktop: labels, tablet: icon rail, phone: hidden) -->
-        <nav class="ui-sidenav" aria-label="Main">
-            <div class="ui-nav-group" data-nav-group>
-                <button onclick="navigateTo('dashboard')" id="tab-dashboard" class="ui-nav-item" aria-current="page" title="Dashboard"><svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"> <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z"> </path> </svg><span class="ui-nav-label">Dashboard</span></button>
-            </div>
-            <div class="ui-nav-group" data-nav-group>
-                <div class="ui-nav-group-label">Mail</div>
-                <button onclick="navigateTo('messages')" id="tab-messages" class="ui-nav-item" title="Messages"><svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"> <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"> </path> </svg><span class="ui-nav-label">Messages</span></button>
-                <button onclick="navigateTo('queue')" id="tab-queue" class="ui-nav-item" title="Queue"><svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"> <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"> </path> </svg><span class="ui-nav-label">Queue</span></button>
-                <button onclick="navigateTo('quarantine')" id="tab-quarantine" class="ui-nav-item" title="Quarantine"><svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"> <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"> </path> </svg><span class="ui-nav-label">Quarantine</span></button>
-            </div>
-            <div class="ui-nav-group" data-nav-group>
-                <div class="ui-nav-group-label">Protection</div>
-                <button onclick="navigateTo('netfilter')" id="tab-netfilter" class="ui-nav-item" title="Security"><svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"> <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"> </path> </svg><span class="ui-nav-label">Security</span></button>
-                <button onclick="navigateTo('spam-filter')" id="tab-spam-filter" class="ui-nav-item" title="Spam Filter"><svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"> <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z"> </path> </svg><span class="ui-nav-label">Spam Filter</span></button>
-                <button onclick="navigateTo('dmarc')" id="tab-dmarc" class="ui-nav-item" title="DMARC"><svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"> <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path> </svg><span class="ui-nav-label">DMARC</span></button>
-            </div>
-            <div class="ui-nav-group" data-nav-group>
-                <div class="ui-nav-group-label">Server</div>
-                <button onclick="navigateTo('status')" id="tab-status" class="ui-nav-item" title="Status"><svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"> <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"> </path> </svg><span class="ui-nav-label">Status</span></button>
-                <button onclick="navigateTo('domains')" id="tab-domains" class="ui-nav-item" title="Domains"><svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"> <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9"> </path> </svg><span class="ui-nav-label">Domains</span></button>
-                <button onclick="navigateTo('mailbox-stats')" id="tab-mailbox-stats" class="ui-nav-item" title="Mailbox Stats"><svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"> <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 8v8m-4-5v5m-4-2v2m-2 4h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"> </path> </svg><span class="ui-nav-label">Mailbox Stats</span></button>
-                <button onclick="navigateTo('logs')" id="tab-logs" class="ui-nav-item" title="Logs"><svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"> <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"> </path> </svg><span class="ui-nav-label">Logs</span></button>
-            </div>
-            <div class="ui-nav-group" data-nav-group>
-                <button onclick="navigateTo('settings')" id="tab-settings" class="ui-nav-item" title="Settings"><svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"> <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"> </path> <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path> </svg><span class="ui-nav-label">Settings</span></button>
-            </div>
+                            </svg></button>
+                    <a href="https://github.com/ShlomiPorush/mailcow-logs-viewer" target="_blank" rel="noopener noreferrer" class="ui-icon-btn" title="Created with ❤️ - GitHub" aria-label="GitHub"><svg width="16" height="16" fill="currentColor" viewBox="0 0 24 24">
+                                <path
+                                    d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z" />
+                            </svg><span class="hidden">GitHub</span></a>
+                    <button onclick="loadContainerLogs()" class="ui-icon-btn" title="View Container Logs" aria-label="View Container Logs"><svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                    d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z">
+                                </path>
+                            </svg></button>
+                </div>
+                    <!-- Container Logs Modal -->
+                    <div id="container-logs-modal"
+                        class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+                        <div
+                            class="bg-gray-900 rounded-lg max-w-5xl w-full max-h-[85vh] flex flex-col shadow-2xl border border-gray-700">
+                            <div
+                                class="flex-shrink-0 bg-gray-900 border-b border-gray-700 px-6 py-4 flex justify-between items-center rounded-t-lg">
+                                <div class="flex items-center gap-2">
+                                    <svg class="w-5 h-5 text-green-500" fill="none" stroke="currentColor"
+                                        viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                            d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z">
+                                        </path>
+                                    </svg>
+                                    <h3 class="text-lg font-mono font-bold text-green-500">container.log</h3>
+                                </div>
+                                <div class="flex items-center gap-3">
+                                    <button onclick="loadContainerLogs()"
+                                        class="text-gray-400 hover:text-white transition" title="Refresh">
+                                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                                d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15">
+                                            </path>
+                                        </svg>
+                                    </button>
+                                    <button onclick="closeContainerLogsModal()"
+                                        class="text-gray-400 hover:text-white transition" title="Close">
+                                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                                d="M6 18L18 6M6 6l12 12"></path>
+                                        </svg>
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="flex-1 overflow-y-auto p-4 bg-black font-mono text-xs sm:text-sm text-gray-300">
+                                <pre id="container-logs-content" class="whitespace-pre-wrap break-all"></pre>
+                            </div>
+                        </div>
+                    </div>
+            </footer>
         </nav>
 
         <!-- Phone: bottom tab bar; "More" opens every page in a sheet -->
@@ -462,7 +523,7 @@
             <button onclick="navigateToMobile('dashboard')" id="tabbar-dashboard" class="ui-tabbar-item" aria-current="page"><svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"> <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z"> </path> </svg><span>Dashboard</span></button>
             <button onclick="navigateToMobile('messages')" id="tabbar-messages" class="ui-tabbar-item"><svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"> <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"> </path> </svg><span>Messages</span></button>
             <button onclick="navigateToMobile('netfilter')" id="tabbar-netfilter" class="ui-tabbar-item"><svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"> <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"> </path> </svg><span>Security</span></button>
-            <button onclick="navigateToMobile('status')" id="tabbar-status" class="ui-tabbar-item"><svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"> <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"> </path> </svg><span>Status</span></button>
+            <button onclick="navigateToMobile('status')" id="tabbar-status" class="ui-tabbar-item"><span id="tabbar-pip-status" class="ui-pip hidden"></span><svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"> <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"> </path> </svg><span>Status</span></button>
             <button id="hamburger-btn" class="ui-tabbar-item" onclick="toggleMobileMenu()" aria-label="All pages"><svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"></path></svg><span>More</span></button>
         </nav>
         <div id="mobile-menu" class="mobile-menu">
@@ -497,7 +558,7 @@
 
         <div class="ui-main">
         <!-- Main Content -->
-        <div class="max-w-[1400px] mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-6 flex-1 w-full">
+        <div class="ui-content">
 
             <!-- Dashboard Tab -->
             <div id="content-dashboard" class="tab-content ui-page">
@@ -573,85 +634,86 @@
             </div>
 
             <!-- Messages Tab -->
-            <div id="content-messages" class="tab-content hidden ui-page">
-                <div class="ui-page-head">
-                    <div>
+            <div id="content-messages" class="tab-content hidden ui-page ui-msgs-page">
+                <div class="ui-msgs">
+                    <!-- Facets: outcome and direction with counts, time, the other filters -->
+                    <aside class="ui-facets" aria-label="Filters">
                         <h1 class="ui-h1">Messages</h1>
-                        <p class="ui-muted">Every message with its delivery, spam check and security events</p>
-                    </div>
-                    <button onclick="exportCSV('messages')" class="ui-btn" style="margin-inline-start: auto">Export CSV</button>
-                </div>
-
-                <!-- Filters -->
-                <section class="ui-panel ui-filters">
-                    <div class="ui-filters-row">
-                        <input type="text" id="messages-filter-search" class="ui-input ui-filter-wide" aria-label="Search"
-                            placeholder="Search (sender, recipient, subject, IP, user)..." onkeypress="if(event.key==='Enter') applyMessagesFilters()">
-                        <input type="text" id="messages-filter-sender" class="ui-input ui-filter-extra" placeholder="Sender" aria-label="Sender" onkeypress="if(event.key==='Enter') applyMessagesFilters()">
-                        <input type="text" id="messages-filter-recipient" class="ui-input ui-filter-extra" placeholder="Recipient" aria-label="Recipient" onkeypress="if(event.key==='Enter') applyMessagesFilters()">
-                        <input type="text" id="messages-filter-user" class="ui-input ui-filter-extra" placeholder="Authenticated User" aria-label="Authenticated User" onkeypress="if(event.key==='Enter') applyMessagesFilters()">
-                    </div>
-                    <div class="ui-filters-row">
-                        <select id="messages-filter-direction" class="ui-select ui-filter-extra" aria-label="Direction">
-                            <option value="">All Directions</option>
-                            <option value="inbound">Inbound</option>
-                            <option value="outbound">Outbound</option>
-                            <option value="internal">Internal</option>
-                        </select>
-                        <select id="messages-filter-status" class="ui-select ui-filter-extra" aria-label="Status">
-                            <option value="">All Statuses</option>
-                            <option value="delivered">Delivered</option>
-                            <option value="deferred">Deferred</option>
-                            <option value="bounced">Bounced</option>
-                            <option value="rejected">Rejected</option>
-                            <option value="spam">Spam</option>
-                            <option value="discarded">Discarded (Sieve)</option>
-                        </select>
-                        <!-- Date Range Picker -->
-                        <div class="ui-popover-host ui-filter-extra" id="messages-date-range-picker-container">
-                            <button type="button" onclick="toggleMessagesDateRangePicker()" id="messages-date-range-picker-btn" class="ui-select ui-select-btn">
-                                <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg><span id="messages-date-range-label">All Time</span><svg id="messages-date-range-arrow" class="ui-select-arrow" width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
-                            </button>
-                            <div id="messages-date-range-dropdown" class="hidden ui-popover">
-                                <p class="ui-label">Quick Select</p>
-                                <div class="ui-chip-row">
-                                    <button type="button" onclick="selectMessagesDatePreset('')" data-preset="" class="messages-date-preset-btn ui-chip" aria-pressed="true">All Time</button>
-                                    <button type="button" onclick="selectMessagesDatePreset('today')" data-preset="today" class="messages-date-preset-btn ui-chip" aria-pressed="false">Today</button>
-                                    <button type="button" onclick="selectMessagesDatePreset('7days')" data-preset="7days" class="messages-date-preset-btn ui-chip" aria-pressed="false">7 Days</button>
-                                    <button type="button" onclick="selectMessagesDatePreset('30days')" data-preset="30days" class="messages-date-preset-btn ui-chip" aria-pressed="false">30 Days</button>
-                                    <button type="button" onclick="selectMessagesDatePreset('90days')" data-preset="90days" class="messages-date-preset-btn ui-chip" aria-pressed="false">90 Days</button>
+                        <h3>Outcome</h3>
+                        <div id="messages-facet-status" class="ui-fct-list"></div>
+                        <h3>Direction</h3>
+                        <div id="messages-facet-direction" class="ui-fct-list"></div>
+                        <h3>Time</h3>
+                        <div class="ui-fct-list">
+                            <button type="button" onclick="selectMessagesDatePreset('')" data-preset="" class="messages-date-preset-btn ui-fct" aria-pressed="true"><span>All Time</span></button>
+                            <button type="button" onclick="selectMessagesDatePreset('today')" data-preset="today" class="messages-date-preset-btn ui-fct" aria-pressed="false"><span>Today</span></button>
+                            <button type="button" onclick="selectMessagesDatePreset('7days')" data-preset="7days" class="messages-date-preset-btn ui-fct" aria-pressed="false"><span>7 Days</span></button>
+                            <button type="button" onclick="selectMessagesDatePreset('30days')" data-preset="30days" class="messages-date-preset-btn ui-fct" aria-pressed="false"><span>30 Days</span></button>
+                            <button type="button" onclick="selectMessagesDatePreset('90days')" data-preset="90days" class="messages-date-preset-btn ui-fct" aria-pressed="false"><span>90 Days</span></button>
+                            <div class="ui-popover-host" id="messages-date-range-picker-container">
+                                <button type="button" onclick="toggleMessagesDateRangePicker()" id="messages-date-range-picker-btn" class="ui-fct"><span>Custom range</span><svg id="messages-date-range-arrow" class="ui-select-arrow" width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg></button>
+                                <div id="messages-date-range-dropdown" class="hidden ui-popover">
+                                    <p class="ui-label">Custom Range</p>
+                                    <div class="ui-date-pair">
+                                        <label><span class="ui-label">From</span><input type="date" id="messages-date-range-start" class="ui-input"></label>
+                                        <label><span class="ui-label">To</span><input type="date" id="messages-date-range-end" class="ui-input"></label>
+                                    </div>
+                                    <button type="button" onclick="applyMessagesCustomDateRange()" class="ui-btn ui-btn-primary" style="width: 100%; margin-top: 12px">Apply Custom Range</button>
                                 </div>
-                                <p class="ui-label" style="margin-top: 14px">Custom Range</p>
-                                <div class="ui-date-pair">
-                                    <label><span class="ui-label">From</span><input type="date" id="messages-date-range-start" class="ui-input"></label>
-                                    <label><span class="ui-label">To</span><input type="date" id="messages-date-range-end" class="ui-input"></label>
-                                </div>
-                                <button type="button" onclick="applyMessagesCustomDateRange()" class="ui-btn ui-btn-primary" style="width: 100%; margin-top: 12px">Apply Custom Range</button>
+                                <!-- Hidden inputs for state -->
+                                <input type="hidden" id="messages-date-range" value="">
+                                <input type="hidden" id="messages-start-date" value="">
+                                <input type="hidden" id="messages-end-date" value="">
                             </div>
-                            <!-- Hidden inputs for state -->
-                            <input type="hidden" id="messages-date-range" value="">
-                            <input type="hidden" id="messages-start-date" value="">
-                            <input type="hidden" id="messages-end-date" value="">
                         </div>
-                        <input type="text" id="messages-filter-ip" class="ui-input ui-filter-extra" placeholder="Source IP" aria-label="Source IP" onkeypress="if(event.key==='Enter') applyMessagesFilters()">
-                        <div class="ui-filters-actions">
-                            <button type="button" class="ui-btn ui-filters-toggle" aria-expanded="false"
-                                onclick="this.setAttribute('aria-expanded', this.closest('.ui-filters').classList.toggle('is-open'))">Filters</button>
-                            <button onclick="applyMessagesFilters()" class="ui-btn ui-btn-primary">Apply</button>
-                            <button onclick="clearMessagesFilters()" class="ui-btn">Clear</button>
-                        </div>
-                    </div>
-                </section>
+                        <details class="ui-fct-more">
+                            <summary>More filters</summary>
+                            <input type="text" id="messages-filter-sender" class="ui-input" placeholder="Sender" aria-label="Sender" onkeypress="if(event.key==='Enter') applyMessagesFilters()">
+                            <input type="text" id="messages-filter-recipient" class="ui-input" placeholder="Recipient" aria-label="Recipient" onkeypress="if(event.key==='Enter') applyMessagesFilters()">
+                            <input type="text" id="messages-filter-user" class="ui-input" placeholder="Authenticated User" aria-label="Authenticated User" onkeypress="if(event.key==='Enter') applyMessagesFilters()">
+                            <input type="text" id="messages-filter-ip" class="ui-input" placeholder="Source IP" aria-label="Source IP" onkeypress="if(event.key==='Enter') applyMessagesFilters()">
+                            <!-- The facets set these; they stay the single source of the outcome and direction filter -->
+                            <select id="messages-filter-direction" class="ui-select" aria-label="Direction">
+                                <option value="">All Directions</option>
+                                <option value="inbound">Inbound</option>
+                                <option value="outbound">Outbound</option>
+                                <option value="internal">Internal</option>
+                            </select>
+                            <select id="messages-filter-status" class="ui-select" aria-label="Status">
+                                <option value="">All Statuses</option>
+                                <option value="delivered">Delivered</option>
+                                <option value="deferred">Deferred</option>
+                                <option value="bounced">Bounced</option>
+                                <option value="rejected">Rejected</option>
+                                <option value="spam">Spam</option>
+                                <option value="discarded">Discarded (Sieve)</option>
+                            </select>
+                            <div class="ui-filters-actions">
+                                <button onclick="applyMessagesFilters()" class="ui-btn ui-btn-primary ui-btn-sm">Apply</button>
+                                <button onclick="clearMessagesFilters()" class="ui-btn ui-btn-sm">Clear</button>
+                            </div>
+                        </details>
+                        <button onclick="exportCSV('messages')" class="ui-btn ui-btn-sm ui-fct-export">Export CSV</button>
+                    </aside>
 
-                <div class="ui-msg-split">
-                    <section class="ui-panel">
-                        <div class="ui-panel-head">All Messages <span id="messages-count" class="ui-count"></span></div>
-                        <div id="messages-logs">
+                    <!-- The list -->
+                    <section class="ui-msg-col" aria-label="All Messages">
+                        <div class="ui-msg-searchbar">
+                            <label class="ui-search"><svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-4.35-4.35M17 11a6 6 0 11-12 0 6 6 0 0112 0z"></path></svg>
+                                <input type="text" id="messages-filter-search" placeholder="Search (sender, recipient, subject, IP, user)..." aria-label="Search" onkeypress="if(event.key==='Enter') applyMessagesFilters()">
+                            </label>
+                            <div id="messages-chips" class="ui-chips"></div>
+                            <p class="ui-msg-summary"><span id="messages-count"></span> <span id="messages-date-range-label" class="ui-muted">All Time</span></p>
+                        </div>
+                        <div id="messages-logs" class="ui-msg-items">
                             <div class="ui-loading"><div class="loading"></div><p>Loading...</p></div>
                         </div>
                     </section>
+
                     <!-- Reading pane: message-details.js docks #message-modal here on wide screens -->
-                    <div id="messages-reader" class="ui-reader"></div>
+                    <div id="messages-reader" class="ui-reader">
+                        <p class="ui-reader-empty">Select a message to see what happened to it.</p>
+                    </div>
                 </div>
             </div>
 
@@ -1845,6 +1907,8 @@
                     </button>
                 </div>
 
+                <div id="message-modal-header" class="ui-md-header"></div>
+
                 <div class="ui-tabs" role="tablist">
                     <button id="modal-tab-overview" class="modal-tab active" onclick="switchModalTab('overview')"><span>Overview</span></button>
                     <button id="modal-tab-postfix" class="modal-tab" onclick="switchModalTab('postfix')"><span>Logs</span></button>
@@ -1881,98 +1945,15 @@
         </div>
 
         <!-- Footer -->
-        <footer id="app-footer" class="ui-footer">
-            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
-                <div
-                    class="flex flex-col sm:flex-row justify-between items-center gap-2">
-                    <div class="flex flex-wrap items-center gap-2 justify-center sm:justify-start">
-                        <span id="app-name-footer">mailcow Logs Viewer</span>
-                        <span id="app-version-footer">v1.4.2</span>
-                        <button id="update-badge" onclick="switchTab('settings')"
-                            class="hidden ml-2 px-2 py-0.5 bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300 rounded text-xs font-medium hover:bg-green-200 dark:hover:bg-green-900/50 cursor-pointer transition-colors">
-                            Update Available
-                        </button>
-                        <span class="text-gray-400 dark:text-gray-500 hidden sm:inline">•</span>
-                        <span id="mailcow-version-footer" class="hidden sm:inline"></span>
-                        <button id="mailcow-update-badge"
-                            class="hidden ml-2 px-2 py-0.5 bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-300 rounded text-xs font-medium hover:bg-blue-200 dark:hover:bg-blue-900/50 cursor-pointer transition-colors">
-                            Update Available
-                        </button>
-                    </div>
-                    <div class="flex flex-wrap items-center gap-2 justify-center sm:justify-end">
-                        <span>Created with ❤️</span>
-                        <a href="https://github.com/ShlomiPorush/mailcow-logs-viewer" target="_blank"
-                            rel="noopener noreferrer"
-                            class="text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 transition flex items-center gap-1">
-                            <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
-                                <path
-                                    d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z" />
-                            </svg>
-                            GitHub
-                        </a>
-                        <span class="text-gray-400 dark:text-gray-500">•</span>
-                        <button onclick="loadContainerLogs()"
-                            class="text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200 transition cursor-pointer"
-                            title="View Container Logs">
-                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                    d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z">
-                                </path>
-                            </svg>
-                        </button>
-                    </div>
-
-                    <!-- Container Logs Modal -->
-                    <div id="container-logs-modal"
-                        class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
-                        <div
-                            class="bg-gray-900 rounded-lg max-w-5xl w-full max-h-[85vh] flex flex-col shadow-2xl border border-gray-700">
-                            <div
-                                class="flex-shrink-0 bg-gray-900 border-b border-gray-700 px-6 py-4 flex justify-between items-center rounded-t-lg">
-                                <div class="flex items-center gap-2">
-                                    <svg class="w-5 h-5 text-green-500" fill="none" stroke="currentColor"
-                                        viewBox="0 0 24 24">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                            d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z">
-                                        </path>
-                                    </svg>
-                                    <h3 class="text-lg font-mono font-bold text-green-500">container.log</h3>
-                                </div>
-                                <div class="flex items-center gap-3">
-                                    <button onclick="loadContainerLogs()"
-                                        class="text-gray-400 hover:text-white transition" title="Refresh">
-                                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                                d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15">
-                                            </path>
-                                        </svg>
-                                    </button>
-                                    <button onclick="closeContainerLogsModal()"
-                                        class="text-gray-400 hover:text-white transition" title="Close">
-                                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                                d="M6 18L18 6M6 6l12 12"></path>
-                                        </svg>
-                                    </button>
-                                </div>
-                            </div>
-                            <div class="flex-1 overflow-y-auto p-4 bg-black font-mono text-xs sm:text-sm text-gray-300">
-                                <pre id="container-logs-content" class="whitespace-pre-wrap break-all"></pre>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </footer>
         </div>
     </div> <!-- Close app-content div -->
 
     <!-- JavaScript -->
-    <script src="/static/utils.js?v=10"></script>
+    <script src="/static/utils.js?v=12"></script>
     <script src="/static/router.js?v=3"></script>
-    <script src="/static/app.js?v=43"></script>
+    <script src="/static/app.js?v=45"></script>
     <script src="/static/export.js?v=1"></script>
-    <script src="/static/message-details.js?v=5"></script>
+    <script src="/static/message-details.js?v=6"></script>
     <script src="/static/dmarc.js?v=5"></script>
     <script src="/static/logs-viewer.js?v=3"></script>
     <script src="/static/settings.js?v=19"></script>
