@@ -349,6 +349,7 @@ let autoRefreshTimer = null;
 
 // Initialize on page load
 document.addEventListener('DOMContentLoaded', async () => {
+    uiInitMenus();
     console.log('=== mailcow Logs Viewer Initializing ===');
 
     // Check authentication first
@@ -1285,6 +1286,7 @@ async function smartRefreshQueue() {
         console.log('[REFRESH] Queue data changed, updating UI');
         lastDataCache.queue = data;
         allQueueData = data.data || [];
+        updateQueueSummary();
         applyQueueFilters();
     }
 }
@@ -2509,6 +2511,7 @@ async function loadQueue() {
         console.log('Queue data:', data);
 
         allQueueData = data.data || [];
+        updateQueueSummary();
         applyQueueFilters();
     } catch (error) {
         console.error('Failed to load queue:', error);
@@ -2516,6 +2519,23 @@ async function loadQueue() {
         const countEl = document.getElementById('queue-count');
         if (countEl) countEl.textContent = '';
     }
+}
+
+function updateQueueSummary() {
+    const el = document.getElementById('queue-summary');
+    if (!el) return;
+    if (!allQueueData.length) {
+        el.textContent = 'The queue is empty.';
+        return;
+    }
+    const count = name => allQueueData.filter(i => (i.queue_name || '').toLowerCase() === name).length;
+    const parts = [];
+    if (count('deferred')) parts.push(`${count('deferred')} waiting to retry`);
+    if (count('hold')) parts.push(`${count('hold')} on hold`);
+    if (count('active')) parts.push(`${count('active')} being delivered`);
+    const other = allQueueData.length - count('deferred') - count('hold') - count('active');
+    if (other) parts.push(`${other} other`);
+    el.textContent = `${allQueueData.length} ${allQueueData.length === 1 ? 'message' : 'messages'}: ${parts.join(', ')}. Postfix retries deferred mail on its own.`;
 }
 
 function applyQueueFilters() {
@@ -2553,118 +2573,67 @@ function applyQueueFilters() {
     const canAct = mailcowRwConfigured;
 
     const lockedNote = canAct ? '' : `<div class="ui-list-note">${uiLocked('Queue actions are locked', `Retry, hold, release, delete and flush ${UI_RW_KEY_TEXT}`)}</div>`;
+    const cols = canAct
+        ? '--ui-cols: 20px minmax(200px, 1.6fr) 84px minmax(240px, 2.8fr) 70px 318px; --ui-table-min: 1000px'
+        : '--ui-cols: minmax(200px, 1.6fr) 84px minmax(240px, 2.8fr) 70px; --ui-table-min: 640px';
 
     container.innerHTML = `
         ${lockedNote}
+        <div class="ui-table ui-stack" style="${cols}">
         ${canAct ? `
-            <div class="ui-toolbar">
-                <button onclick="queueSelectAll()" id="queue-select-all-btn"
-                    class="ui-btn ui-btn-sm">
-                    Select All
-                </button>
-                <button onclick="queueBulkRetry()" id="queue-bulk-retry-btn"
-                    class="hidden ui-btn ui-btn-sm ui-btn-primary">
-                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
-                    Retry Selected
-                </button>
-                <button onclick="queueBulkDelete()" id="queue-bulk-delete-btn"
-                    class="hidden ui-btn ui-btn-sm ui-btn-danger-solid">
-                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
-                    Delete Selected
-                </button>
-                <span id="queue-selection-count" class="hidden text-xs text-gray-500 dark:text-gray-400"></span>
-
-                <div class="flex-1"></div>
-
-                <button onclick="queueFlushAll()" id="queue-flush-all-btn"
-                    class="ui-btn ui-btn-sm ui-btn-primary">
-                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+            <div class="ui-toolbar ui-table-tools">
+                <button onclick="queueSelectAll()" id="queue-select-all-btn" class="ui-btn ui-btn-sm">Select All</button>
+                <button onclick="queueBulkRetry()" id="queue-bulk-retry-btn" class="hidden ui-btn ui-btn-sm ui-btn-primary">Retry Selected</button>
+                <button onclick="queueBulkDelete()" id="queue-bulk-delete-btn" class="hidden ui-btn ui-btn-sm ui-btn-danger-solid">Delete Selected</button>
+                <span id="queue-selection-count" class="hidden ui-muted"></span>
+                <span class="ui-toolbar-gap"></span>
+                <button onclick="queueFlushAll()" id="queue-flush-all-btn" class="ui-btn ui-btn-sm ui-btn-primary" title="Retry delivery of every message in the queue">
+                    <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
                     Flush All
                 </button>
-                <button onclick="queueDeleteAll()" id="queue-delete-all-btn"
-                    class="ui-btn ui-btn-sm ui-btn-danger-solid">
-                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
-                    Delete All
-                </button>
+                <button onclick="queueDeleteAll()" id="queue-delete-all-btn" class="ui-btn ui-btn-sm ui-btn-danger-solid">Delete All</button>
             </div>
         ` : ''}
-        <div class="ui-q-list">
+            <div class="ui-tr ui-tr-head">${canAct ? '<span></span>' : ''}<span>Recipient</span><span>State</span><span>Last response</span><span class="ui-td-end">Size</span>${canAct ? '<span class="ui-td-end">Actions</span>' : ''}</div>
             ${filteredData.map(item => {
                 const qid = item.queue_id || '';
                 const queueName = (item.queue_name || '').toLowerCase();
                 const isHold = queueName === 'hold';
-                const queueTone = { hold: 'warn', deferred: 'warn', active: 'ok', incoming: 'info', bounce: 'fail', corrupt: 'fail' }[queueName] || '';
+                const queueTone = { hold: '', deferred: 'warn', active: 'ok', incoming: 'info', bounce: 'fail', corrupt: 'fail' }[queueName] || '';
+                const stateText = isHold ? 'On hold' : (item.queue_name || 'unknown').replace(/^./, c => c.toUpperCase());
+                // "user@example.com (connect to ...: Connection timed out)" -> address and response
+                const recipients = item.recipients.map(r => {
+                    const email = r.split(' ')[0].replace(/[<>]/g, '').trim();
+                    const rest = r.includes(' ') ? r.substring(r.indexOf(' ')).trim().replace(/^\((.*)\)$/, '$1') : '';
+                    return { email, response: rest };
+                });
+                const responses = recipients.filter(r => r.response);
+                const queued = new Date(item.arrival_time * 1000).toISOString();
+                const suppress = recipients.length === 1
+                    ? `<button onclick="showAddSuppressionModal('${escapeJsArg(recipients[0].email)}')" title="Suppress ${escapeHtml(recipients[0].email)}" class="ui-btn ui-btn-sm">Suppress</button>`
+                    : uiMenu('Suppress', recipients.map(r => `<button type="button" role="menuitem" onclick="showAddSuppressionModal('${escapeJsArg(r.email)}')">${escapeHtml(r.email)}</button>`).join(''));
                 return `
-                <div class="ui-q-row${queueTone ? ` ui-msg-${queueTone}` : ''}" data-queue-id="${qid}">
-                    <div class="flex flex-col sm:flex-row sm:justify-between sm:items-start mb-2 gap-2">
-                        <div class="flex-1 flex items-start gap-3">
-                            ${canAct ? `
-                                <input type="checkbox" class="queue-checkbox mt-1 flex-shrink-0 w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 dark:focus:ring-blue-600 dark:ring-offset-gray-800 dark:bg-gray-700 dark:border-gray-600 cursor-pointer"
-                                    value="${qid}" onchange="queueUpdateSelection()" />
-                            ` : ''}
-                            <div>
-                                <p class="text-sm font-medium text-gray-900 dark:text-white">From: ${copyableText(item.sender)}</p>
-                                <p class="text-sm text-gray-600 dark:text-gray-300">Queue ID: ${copyableText(qid)}</p>
-                            </div>
-                        </div>
-                        <div class="flex items-center gap-2">
-                            <span class="ui-tag${queueTone ? ` ui-tag-${queueTone}` : ''} ui-upper">${escapeHtml(item.queue_name || 'unknown')}</span>
-                            <span class="text-xs text-gray-500 dark:text-gray-400">${formatTime(new Date(item.arrival_time * 1000).toISOString())}</span>
-                        </div>
+                <div class="ui-tr ui-q-row" data-queue-id="${escapeHtml(qid)}">
+                    ${canAct ? `<input type="checkbox" class="queue-checkbox ui-check" value="${escapeHtml(qid)}" onchange="queueUpdateSelection()" aria-label="Select ${escapeHtml(qid)}" />` : ''}
+                    <div class="ui-td ui-q-who">
+                        <div>${recipients.map(r => copyableText(r.email)).join(', ')}</div>
+                        <small>From ${copyableText(item.sender)}, queued <span title="${escapeHtml(formatTime(queued))}">${formatAgo(queued)}</span>, ID ${copyableText(qid)}</small>
                     </div>
-                    <div class="mb-2">
-                        <p class="text-sm font-medium text-gray-700 dark:text-gray-300">Recipients:</p>
-                        ${item.recipients.map(r => {
-                            const emailOnly = r.split(' ')[0].replace(/[<>]/g, '').trim();
-                            const errorPart = r.substring(r.indexOf(' ')).trim();
-                            const hasError = errorPart && errorPart !== emailOnly && r.includes(' ');
-                            return `<div class="ml-1 py-0.5">
-                                <span class="text-sm font-medium text-gray-800 dark:text-gray-200">${copyableText(emailOnly)}</span>
-                                ${hasError ? `<p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5 break-words">${escapeHtml(errorPart)}</p>` : ''}
-                            </div>`;
-                        }).join('')}
-                    </div>
-                    <div class="flex flex-wrap items-center justify-between gap-2">
-                        <span class="text-xs text-gray-500 dark:text-gray-400">Size: ${formatSize(item.message_size)}</span>
-                        <div class="flex items-center gap-2 flex-shrink-0">
-                            ${canAct ? `
-                                <button onclick="queueRetry('${qid}')" title="Retry delivery"
-                                    class="queue-action-btn ui-btn ui-btn-sm">
-                                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
-                                    Retry
-                                </button>
-                                ${isHold ? `
-                                    <button onclick="queueUnhold('${qid}')" title="Release from hold"
-                                        class="queue-action-btn ui-btn ui-btn-sm">
-                                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
-                                        Unhold
-                                    </button>
-                                ` : `
-                                    <button onclick="queueHold('${qid}')" title="Hold message"
-                                        class="queue-action-btn ui-btn ui-btn-sm">
-                                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
-                                        Hold
-                                    </button>
-                                `}
-                                <button onclick="queueDeleteItem('${qid}')" title="Delete from queue"
-                                    class="queue-action-btn ui-btn ui-btn-sm ui-btn-danger">
-                                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
-                                    Delete
-                                </button>
-                            ` : ''}
-                            ${item.recipients.map(r => {
-                                const emailOnly = r.split(' ')[0].replace(/[<>]/g, '');
-                                return `
-                                <button onclick="showAddSuppressionModal('${escapeJsArg(emailOnly)}')" title="Suppress ${escapeHtml(emailOnly)}"
-                                    class="ui-btn ui-btn-sm">
-                                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"></path></svg>
-                                    Suppress
-                                </button>`;
-                            }).join('')}
-                        </div>
-                    </div>
-                </div>
-            `;
+                    <span class="ui-td">${uiTag(stateText, queueTone)}</span>
+                    <div class="ui-td ui-td-wrap ui-mono ui-q-resp">${responses.length
+                        ? responses.map(r => `<div>${recipients.length > 1 ? `<span class="ui-muted">${escapeHtml(r.email)}:</span> ` : ''}${escapeHtml(r.response)}</div>`).join('')
+                        : `<span class="ui-muted">${isHold ? 'Put on hold' : '-'}</span>`}</div>
+                    <span class="ui-td ui-td-end">${formatSize(item.message_size)}</span>
+                    ${canAct ? `
+                    <span class="ui-td ui-td-end ui-row-actions">
+                        <button onclick="queueRetry('${escapeJsArg(qid)}')" title="Retry delivery" class="queue-action-btn ui-btn ui-btn-sm">Retry</button>
+                        ${isHold
+                            ? `<button onclick="queueUnhold('${escapeJsArg(qid)}')" title="Release from hold" class="queue-action-btn ui-btn ui-btn-sm">Unhold</button>`
+                            : `<button onclick="queueHold('${escapeJsArg(qid)}')" title="Hold message" class="queue-action-btn ui-btn ui-btn-sm">Hold</button>`}
+                        <button onclick="queueDeleteItem('${escapeJsArg(qid)}')" title="Delete from queue" class="queue-action-btn ui-btn ui-btn-sm ui-btn-danger">Delete</button>
+                        ${suppress}
+                    </span>` : ''}
+                </div>`;
             }).join('')}
         </div>
     `;
@@ -2867,12 +2836,6 @@ async function loadQuarantine() {
             countEl.textContent = data.total ? `(${data.total.toLocaleString()} results)` : '';
         }
 
-        if (!data.data || data.data.length === 0) {
-            quarantineLastData = data;
-            container.innerHTML = '<p class="ui-empty">No quarantined messages</p>';
-            return;
-        }
-
         renderQuarantineData(data);
     } catch (error) {
         console.error('Failed to load quarantine:', error);
@@ -2889,6 +2852,13 @@ function renderQuarantineData(data) {
 
     // Keep the latest payload so sort changes can re-render without a re-fetch
     quarantineLastData = data;
+    const summary = document.getElementById('quarantine-summary');
+    if (summary) {
+        const total = data.total || (data.data || []).length;
+        summary.textContent = total
+            ? `${total.toLocaleString()} ${total === 1 ? 'message' : 'messages'} held as likely spam. Releasing one delivers it to the recipient.`
+            : 'Nothing is held right now.';
+    }
 
     // Update counter display
     const countEl = document.getElementById('quarantine-count');
@@ -2905,121 +2875,54 @@ function renderQuarantineData(data) {
     const items = sortQuarantineItems(data.data);
 
     const lockedNote = canAct ? '' : `<div class="ui-list-note">${uiLocked('Quarantine actions are locked', `Release, delete, spam learning and the auto-rules ${UI_RW_KEY_TEXT}`)}</div>`;
+    const cols = canAct
+        ? '--ui-cols: 20px minmax(200px, 2fr) minmax(150px, 1.3fr) minmax(120px, 1fr) 56px 64px 214px; --ui-table-min: 960px'
+        : '--ui-cols: minmax(200px, 2fr) minmax(150px, 1.3fr) minmax(120px, 1fr) 56px 64px 76px; --ui-table-min: 760px';
 
     container.innerHTML = `
         ${lockedNote}
+        <div class="ui-table ui-stack" style="${cols}">
         ${!canAct ? '' : `
-            <div class="ui-toolbar">
-                <button onclick="quarantineSelectAll()" id="quarantine-select-all-btn"
-                    class="ui-btn ui-btn-sm">
-                    Select All
-                </button>
-                <button onclick="quarantineBulkRelease()" id="quarantine-bulk-release-btn"
-                    class="hidden ui-btn ui-btn-sm ui-btn-primary">
-                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
-                    Release Selected
-                </button>
-                <button onclick="quarantineBulkDelete()" id="quarantine-bulk-delete-btn"
-                    class="hidden ui-btn ui-btn-sm ui-btn-danger-solid">
-                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
-                    Delete Selected
-                </button>
-                <button onclick="quarantineBulkLearnHam()" id="quarantine-bulk-learnham-btn"
-                    class="hidden ui-btn ui-btn-sm ui-btn-primary">
-                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"></path></svg>
-                    Not Spam
-                </button>
-                <button onclick="quarantineBulkLearnSpam()" id="quarantine-bulk-learnspam-btn"
-                    class="hidden ui-btn ui-btn-sm ui-btn-primary">
-                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"></path></svg>
-                    Learn Spam
-                </button>
-                <span id="quarantine-selection-count" class="hidden text-xs text-gray-500 dark:text-gray-400"></span>
-
-                <div class="flex-1"></div>
-
-                <button onclick="quarantineReleaseAll()" id="quarantine-release-all-btn"
-                    class="ui-btn ui-btn-sm ui-btn-primary">
-                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
-                    Release All
-                </button>
-                <button onclick="quarantineDeleteAll()" id="quarantine-delete-all-btn"
-                    class="ui-btn ui-btn-sm ui-btn-danger-solid">
-                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
-                    Delete All
-                </button>
+            <div class="ui-toolbar ui-table-tools">
+                <button onclick="quarantineSelectAll()" id="quarantine-select-all-btn" class="ui-btn ui-btn-sm">Select All</button>
+                <button onclick="quarantineBulkRelease()" id="quarantine-bulk-release-btn" class="hidden ui-btn ui-btn-sm ui-btn-primary">Release Selected</button>
+                <button onclick="quarantineBulkDelete()" id="quarantine-bulk-delete-btn" class="hidden ui-btn ui-btn-sm ui-btn-danger-solid">Delete Selected</button>
+                <button onclick="quarantineBulkLearnHam()" id="quarantine-bulk-learnham-btn" class="hidden ui-btn ui-btn-sm ui-btn-primary">Not Spam</button>
+                <button onclick="quarantineBulkLearnSpam()" id="quarantine-bulk-learnspam-btn" class="hidden ui-btn ui-btn-sm ui-btn-primary">Learn Spam</button>
+                <span id="quarantine-selection-count" class="hidden ui-muted"></span>
+                <span class="ui-toolbar-gap"></span>
+                <button onclick="quarantineReleaseAll()" id="quarantine-release-all-btn" class="ui-btn ui-btn-sm ui-btn-primary">Release All</button>
+                <button onclick="quarantineDeleteAll()" id="quarantine-delete-all-btn" class="ui-btn ui-btn-sm ui-btn-danger-solid">Delete All</button>
             </div>
         `}
-        <div class="ui-q-list">
+            <div class="ui-tr ui-tr-head">${canAct ? '<span></span>' : ''}<span>Message</span><span>For</span><span>Why</span><span class="ui-td-end">Score</span><span>Held</span><span class="ui-td-end">Actions</span></div>
             ${items.map(item => {
                 const itemId = item.id !== undefined ? item.id : '';
+                const idArg = escapeJsArg(String(itemId));
+                const hasScore = item.score !== undefined && item.score !== null;
                 return `
-                <div class="ui-q-row ui-msg-fail" data-quarantine-id="${itemId}">
-                    <div class="grid grid-cols-1 sm:grid-cols-[1fr_auto] gap-2 mb-2 items-start">
-                        <div class="min-w-0 overflow-hidden flex items-start gap-3">
-                            ${canAct ? `
-                                <input type="checkbox" class="quarantine-checkbox mt-1 flex-shrink-0 w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 dark:focus:ring-blue-600 dark:ring-offset-gray-800 dark:bg-gray-700 dark:border-gray-600 cursor-pointer"
-                                    value="${itemId}" onchange="quarantineUpdateSelection()" />
-                            ` : ''}
-                            <div class="min-w-0 overflow-hidden">
-                                <div class="flex flex-wrap items-center gap-2 mb-1">
-                                    <span class="text-sm font-medium text-gray-900 dark:text-white">${copyableText(item.sender || 'Unknown')}</span>
-                                    <svg class="w-4 h-4 text-gray-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
-                                    </svg>
-                                    <span class="text-sm text-gray-600 dark:text-gray-300">${copyableText(item.rcpt || 'Unknown')}</span>
-                                </div>
-                                <p class="text-xs text-gray-500 dark:text-gray-400 truncate cursor-pointer hover:text-blue-500 dark:hover:text-blue-400 transition-colors" dir="auto" title="Click to view details" onclick="showQuarantineDetails('${itemId}')">${escapeHtml(item.subject || 'No subject')}</p>
-                            </div>
-                        </div>
-                        <div class="flex flex-wrap items-center gap-2 flex-shrink-0 sm:justify-end">
-                            <span class="ui-tag ui-tag-fail">${escapeHtml(item.action || 'Quarantined')}</span>
-                            ${item.virus_flag ? '<span class="ui-tag ui-tag-spam">🦠 VIRUS</span>' : ''}
-                        </div>
+                <div class="ui-tr ui-q-row" data-quarantine-id="${escapeHtml(String(itemId))}">
+                    ${canAct ? `<input type="checkbox" class="quarantine-checkbox ui-check" value="${escapeHtml(String(itemId))}" onchange="quarantineUpdateSelection()" aria-label="Select message" />` : ''}
+                    <div class="ui-td ui-q-who">
+                        <button type="button" class="ui-link-row" dir="auto" title="View details" onclick="showQuarantineDetails('${idArg}')">${escapeHtml(item.subject || 'No subject')}</button>
+                        <small>${copyableText(item.sender || 'Unknown')}${item.qid ? `, ID ${copyableText(item.qid)}` : ''}</small>
                     </div>
-                    <div class="flex flex-col gap-2">
-                        <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-gray-600 dark:text-gray-400">
-                            <span>${formatTime(item.created)}</span>
-                            ${item.qid ? `<span class="font-mono" title="Queue ID">Q: ${copyableText(item.qid)}</span>` : ''}
-                            ${item.score !== undefined && item.score !== null ? `<span>Score: <b class="${item.score >= 15 ? 'ui-text-fail' : ''}">${item.score.toFixed(1)}</b></span>` : ''}
-                        </div>
-                        <div class="flex flex-wrap gap-1">
-                            <button onclick="showQuarantineDetails('${itemId}')" title="View details"
-                                class="quarantine-action-btn ui-btn ui-btn-sm">
-                                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>
-                                Details
-                            </button>
-                            ${canAct ? `
-                                <button onclick="quarantineRelease('${itemId}')" title="Release message"
-                                    class="quarantine-action-btn ui-btn ui-btn-sm">
-                                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
-                                    Release
-                                </button>
-                                <button onclick="quarantineDelete('${itemId}')" title="Delete message"
-                                    class="quarantine-action-btn ui-btn ui-btn-sm ui-btn-danger">
-                                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
-                                    Delete
-                                </button>
-                                <button onclick="quarantineLearnHam('${itemId}')" title="Release & train as Not Spam"
-                                    class="quarantine-action-btn ui-btn ui-btn-sm">
-                                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"></path></svg>
-                                    Not Spam
-                                </button>
-                                <button onclick="quarantineLearnSpam('${itemId}')" title="Delete & train as Spam"
-                                    class="quarantine-action-btn ui-btn ui-btn-sm">
-                                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"></path></svg>
-                                    Spam
-                                </button>
-                                <button onclick="showAddRuleFromQuarantine('${escapeJsArg(item.sender || '')}', '${escapeJsArg(item.rcpt || '')}', '${escapeJsArg(item.subject || '')}')" title="Create auto-rule from this email"
-                                    class="quarantine-action-btn ui-btn ui-btn-sm">
-                                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path></svg>
-                                    Rule
-                                </button>
-                            ` : ''}
-                        </div>
-                    </div>
-                </div>
-            `;
+                    <span class="ui-td">${copyableText(item.rcpt || 'Unknown')}</span>
+                    <span class="ui-td ui-td-wrap">${uiTag(item.action || 'Quarantined', 'fail')}${item.virus_flag ? ` ${uiTag('Virus', 'spam')}` : ''}</span>
+                    <span class="ui-td ui-td-end${hasScore && item.score >= 15 ? ' ui-text-fail' : ''}"><small class="ui-sec-unit">Score </small>${hasScore ? item.score.toFixed(1) : '-'}</span>
+                    <time class="ui-td" title="${escapeHtml(formatTime(item.created))}"><small class="ui-sec-unit">Held </small>${formatAgo(item.created).replace(' ago', '')}</time>
+                    <span class="ui-td ui-td-end ui-row-actions">
+                        ${canAct ? `
+                            <button onclick="quarantineRelease('${idArg}')" title="Release message" class="quarantine-action-btn ui-btn ui-btn-sm">Release</button>
+                            <button onclick="quarantineDelete('${idArg}')" title="Delete message" class="quarantine-action-btn ui-btn ui-btn-sm ui-btn-danger">Delete</button>
+                            ${uiMenu('More', `
+                                <button type="button" role="menuitem" onclick="showQuarantineDetails('${idArg}')">Details</button>
+                                <button type="button" role="menuitem" onclick="quarantineLearnHam('${idArg}')" title="Release & train as Not Spam">Not Spam</button>
+                                <button type="button" role="menuitem" onclick="quarantineLearnSpam('${idArg}')" title="Delete & train as Spam">Spam</button>
+                                <button type="button" role="menuitem" onclick="showAddRuleFromQuarantine('${escapeJsArg(item.sender || '')}', '${escapeJsArg(item.rcpt || '')}', '${escapeJsArg(item.subject || '')}')" title="Create auto-rule from this email">Rule</button>`)}
+                        ` : `<button onclick="showQuarantineDetails('${idArg}')" title="View details" class="quarantine-action-btn ui-btn ui-btn-sm">Details</button>`}
+                    </span>
+                </div>`;
             }).join('')}
         </div>
     `;

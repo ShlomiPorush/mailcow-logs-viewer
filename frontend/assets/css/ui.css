@@ -605,11 +605,7 @@
 .ui-subsection { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--ui-line); }
 .ui-subsection > .ui-md-h { margin-bottom: 8px; }
 
-.ui-q-list { display: grid; }
-.ui-q-row { display: grid; gap: 6px; padding: 12px var(--ui-pad-x) 12px calc(var(--ui-pad-x) - 3px); border-top: 1px solid var(--ui-line);
-    border-inline-start: 3px solid transparent; }
-.ui-q-row .flex-wrap { gap: 6px; }
-.ui-q-row input[type="checkbox"] { width: 16px; height: 16px; }
+.ui-check { width: 16px; height: 16px; margin: 0; accent-color: var(--ui-accent); cursor: pointer; }
 
 /* ---------- Generic page frames (cards converted to panels) ---------- */
 
@@ -886,11 +882,40 @@ body { font-family: var(--ui-font); background: var(--ui-bg); }
 .ui-sec-unit { display: none; }
 
 @media (max-width: 760px) {
+    .ui-stack .ui-tr { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; min-width: 0; }
+    .ui-stack .ui-tr-head { display: none; }
+    .ui-stack .ui-q-who { flex: 1 1 calc(100% - 40px); }
+    .ui-stack .ui-td-wrap { flex: 1 1 100%; }
+    .ui-stack .ui-row-actions { flex: 1 1 100%; justify-content: flex-start; }
     .ui-sec-table .ui-tr { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; min-width: 0; }
     .ui-sec-table .ui-tr-head { display: none; }
     .ui-sec-table .ui-sec-addr { flex: 1 1 100%; }
     .ui-sec-table .ui-td-end { text-align: start; }
     .ui-sec-unit { display: inline; color: var(--ui-muted); }
+    .ui-stack .ui-sec-unit { margin-inline-end: 2px; }
     .ui-sec-table .ui-sec-actions { flex: 1 1 100%; justify-content: flex-start; }
     .ui-sec-table .ui-sec-actions:empty { display: none; }
 }
+
+/* ---------- Queue and Quarantine (as the mockup) ---------- */
+.ui-list-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.ui-list-foot { margin: 0; text-align: start; padding: 0 2px; }
+.ui-table-tools { min-width: var(--ui-table-min, 560px); }
+.ui-toolbar-gap { flex: 1; }
+.ui-td-wrap { white-space: normal; overflow-wrap: anywhere; }
+.ui-q-who { display: grid; }
+.ui-q-who > div, .ui-q-who > .ui-link-row { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ui-q-who small { overflow: hidden; text-overflow: ellipsis; color: var(--ui-muted); font-size: 12px; }
+.ui-q-resp { font-size: 12.5px; line-height: 1.45; }
+/* Compact lines copy on click too; the icon would open gaps in the text */
+.ui-q-who .copy-icon { display: none; }
+.ui-q-who .copyable { margin: 0; padding: 0; }
+.ui-row-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 6px; overflow: visible; }
+.ui-link-row { padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: start; cursor: pointer; }
+.ui-link-row:hover { text-decoration: underline; }
+
+.ui-menu[popover] { position: fixed; inset: auto; margin: 0; min-width: 150px; padding: 4px; border: 1px solid var(--ui-line); border-radius: var(--ui-radius-sm);
+    background: var(--ui-bg); color: var(--ui-ink); box-shadow: 0 8px 24px rgba(0, 0, 0, .14); }
+.ui-menu button { display: block; width: 100%; padding: 7px 10px; border: 0; border-radius: 6px; background: none; color: inherit; font: inherit;
+    font-size: var(--ui-fs-sm); text-align: start; cursor: pointer; }
+.ui-menu button:hover, .ui-menu button:focus-visible { background: color-mix(in srgb, var(--ui-ink) 7%, transparent); outline: none; }
