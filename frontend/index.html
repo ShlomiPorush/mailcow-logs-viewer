@@ -14,22 +14,16 @@
     <link rel="apple-touch-icon" sizes="180x180" href="/static/assets/icons/apple-touch-icon.png">
     <meta name="theme-color" content="#0f172a">
 
-    <!-- Native .hidden rule prevents modals flashing before Tailwind's runtime compiler runs -->
+    <!-- The .hidden rule the scripts rely on, before any stylesheet loads -->
     <style>.hidden{display:none}</style>
-    <script src="/static/assets/libs/tailwindcss.min.js"></script>
     <script src="/static/assets/libs/marked.min.js"></script>
     <script src="/static/assets/libs/purify.min.js?v=2"></script>
     <script src="/static/assets/libs/chart.umd.min.js?v=2"></script>
     <link rel="stylesheet" href="/static/assets/libs/github-markdown.min.css">
-    <link rel="stylesheet" href="/static/assets/css/ui.css?v=16">
-    <script>
-        tailwind.config = {
-            darkMode: 'class',
-            theme: {
-                extend: {}
-            }
-        }
-    </script>
+    <!-- Utility classes still used by the markup, compiled once
+         (.github/scripts/build-utilities-css.sh); the design system comes last -->
+    <link rel="stylesheet" href="/static/assets/css/utilities.css?v=1">
+    <link rel="stylesheet" href="/static/assets/css/ui.css?v=19">
     <style>
         .tab-active {
             border-bottom: 2px solid #3b82f6;

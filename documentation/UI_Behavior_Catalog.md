@@ -16,7 +16,7 @@ Pages, modals, actions, handler functions, API calls, form fields, drop-down opt
 
 ## Invariants for every page
 
-- **Everything is served locally.** The browser loads no external resource: no CDN, no remote web fonts, no remote images. Tailwind, Chart.js, marked, DOMPurify, the Markdown CSS, the design system (`assets/css/ui.css`), its fonts (`assets/fonts/`, with their OFL licences) and the flag images live under `frontend/assets/`. A redesign that adds a font or a library must add it as a local file; `.github/tests/local-assets.test.cjs` fails on any external script, stylesheet, image or font. (The in-app help pages are fetched by the backend from GitHub, see `backend/app/routers/documentation.py`; the browser still only talks to the app.)
+- **Everything is served locally.** The browser loads no external resource: no CDN, no remote web fonts, no remote images. Chart.js, marked, DOMPurify, the Markdown CSS, the design system (`assets/css/ui.css`), its fonts (`assets/fonts/`, with their OFL licences), the compiled utility classes (`assets/css/utilities.css`) and the flag images live under `frontend/assets/`. A redesign that adds a font or a library must add it as a local file; `.github/tests/local-assets.test.cjs` fails on any external script, stylesheet, image or font. (The in-app help pages are fetched by the backend from GitHub, see `backend/app/routers/documentation.py`; the browser still only talks to the app.)
 - **Light and dark theme.** The theme toggle is stored in `localStorage` ("theme") and every page, modal and badge has a dark variant.
 - **Desktop and mobile.** The navigation is a grouped sidebar (Mail, Protection, Server) on desktop, an icon rail with tooltips on tablets (below 1100 px), and on phones (below 760 px) a bottom tab bar (Dashboard, Messages, Security, Status, More) whose More button opens every page in a sheet (`toggleMobileMenu`, `navigateToMobile`). The top bar shows the page name on phones (`#current-tab-label`). On phones a filter panel keeps its search field, Apply and Clear visible and opens the other filters with a Filters button (`.ui-filters.is-open`). Every page must stay usable on a phone.
 - **Escaping.** Anything that comes from the server or from mail headers is rendered through `escapeHtml`, and values placed inside inline handlers through `escapeJsArg` (see `frontend/utils.js`). New markup must keep this; mail headers are attacker-controlled.
@@ -30,6 +30,7 @@ Pages, modals, actions, handler functions, API calls, form fields, drop-down opt
 - **Message details: dialog or reading pane.** `#message-modal` opens as a dialog over any page. On the Messages page of a screen at least 1200 px wide it docks next to the list as a reading pane (`#messages-reader`, class `ui-docked`): the page does not lock its scroll, the opened row is marked, and Escape or the close button closes the pane. Every id, tab and handler is the same in both forms (`message-details.js`).
 - **Badges** use the recipes in `APP_COLORS` (soft fill plus a subtle border, squared corners, not rounded pills). Pages already on the v3 design use `uiStatusTag` and `uiDirectionTag` (`frontend/utils.js`) instead: the tone follows the meaning (delivered and sent green, deferred amber, bounced and rejected red, spam its own colour, anything else neutral) and the text is the status itself.
 - **Cache busting.** Every changed frontend file gets a new `?v=` in `index.html`, or browsers keep the old copy.
+- **Utility classes are compiled, not generated in the browser.** The Tailwind utilities the markup still uses are built once into `assets/css/utilities.css` (`bash .github/scripts/build-utilities-css.sh`, Tailwind 3.4.17). After adding or changing a utility class, rebuild it and bump its `?v=`; CI fails when the file does not match the markup. A class assembled at runtime (`bg-${color}-100`) must be in the safelist of `.github/tailwind/tailwind.config.cjs` (`utilities-css.test.cjs` checks this). New UI is built on the `ui-` components instead.
 
 ## Manual checks per behavior
 
@@ -220,24 +221,24 @@ Native `title` tooltips. Dynamic ones show the expression that builds the text.
 
 | Page | What | Code |
 |---|---|---|
-| Shell | "mailcow connection status" | `frontend/index.html:395` |
-| Shell | "mailcow update available" | `frontend/index.html:404` |
-| Shell | "Switch theme" | `frontend/index.html:412` |
-| Shell | "Refresh" | `frontend/index.html:424` |
-| Shell | "Logout" | `frontend/index.html:429` |
-| Shell | "Dashboard" | `frontend/index.html:440` |
-| Shell | "Messages" | `frontend/index.html:444` |
-| Shell | "Queue" | `frontend/index.html:445` |
-| Shell | "Quarantine" | `frontend/index.html:446` |
-| Shell | "Security" | `frontend/index.html:450` |
-| Shell | "Spam Filter" | `frontend/index.html:451` |
-| Shell | "DMARC" | `frontend/index.html:452` |
-| Shell | "Status" | `frontend/index.html:456` |
-| Shell | "Domains" | `frontend/index.html:457` |
-| Shell | "Mailbox Stats" | `frontend/index.html:458` |
-| Shell | "Logs" | `frontend/index.html:459` |
-| Shell | "Settings" | `frontend/index.html:462` |
-| Shell | "View Container Logs" | `frontend/index.html:1922` |
+| Shell | "mailcow connection status" | `frontend/index.html:389` |
+| Shell | "mailcow update available" | `frontend/index.html:398` |
+| Shell | "Switch theme" | `frontend/index.html:406` |
+| Shell | "Refresh" | `frontend/index.html:418` |
+| Shell | "Logout" | `frontend/index.html:423` |
+| Shell | "Dashboard" | `frontend/index.html:434` |
+| Shell | "Messages" | `frontend/index.html:438` |
+| Shell | "Queue" | `frontend/index.html:439` |
+| Shell | "Quarantine" | `frontend/index.html:440` |
+| Shell | "Security" | `frontend/index.html:444` |
+| Shell | "Spam Filter" | `frontend/index.html:445` |
+| Shell | "DMARC" | `frontend/index.html:446` |
+| Shell | "Status" | `frontend/index.html:450` |
+| Shell | "Domains" | `frontend/index.html:451` |
+| Shell | "Mailbox Stats" | `frontend/index.html:452` |
+| Shell | "Logs" | `frontend/index.html:453` |
+| Shell | "Settings" | `frontend/index.html:456` |
+| Shell | "View Container Logs" | `frontend/index.html:1916` |
 | Shell | set in JS: dynamic: `data.app_title` | `frontend/app.js:412` (loadAppInfo) |
 | Shell | set in JS: "Connected to mailcow" | `frontend/app.js:482` (loadMailcowConnectionStatus) |
 | Shell | set in JS: "Not connected to mailcow" | `frontend/app.js:491` (loadMailcowConnectionStatus) |
@@ -257,8 +258,8 @@ Native `title` tooltips. Dynamic ones show the expression that builds the text.
 | Message details | dynamic: `${escapeHtml(relay)}` | `frontend/message-details.js:607` (renderPostfixTab) |
 | Security | dynamic: `Unban ${escapeHtml(log.ip)}/32` | `frontend/app.js:903` (renderNetfilterData) |
 | Security | dynamic: `Ban ${escapeHtml(log.ip)}/32` | `frontend/app.js:904` (renderNetfilterData) |
-| Security | "This feature is new - please report any issues on GitHub" | `frontend/index.html:688` |
-| Security | "Help - Abuse Protection" | `frontend/index.html:692` |
+| Security | "This feature is new - please report any issues on GitHub" | `frontend/index.html:682` |
+| Security | "Help - Abuse Protection" | `frontend/index.html:686` |
 | Queue | "Retry delivery" | `frontend/app.js:2297` (applyQueueFilters) |
 | Queue | "Release from hold" | `frontend/app.js:2303` (applyQueueFilters) |
 | Queue | "Hold message" | `frontend/app.js:2309` (applyQueueFilters) |
@@ -279,10 +280,10 @@ Native `title` tooltips. Dynamic ones show the expression that builds the text.
 | Quarantine | dynamic: `${escapeHtml(m.subject \|\| '')}` | `frontend/app.js:3343` (testQuarantineRules) |
 | Quarantine | dynamic: `${escapeHtml(log.sender \|\| '')} → ${escapeHtml(log.recipient \|\| '')}` | `frontend/app.js:3427` (loadQuarantineRuleHistory) |
 | Quarantine | dynamic: `Rule: ${escapeHtml(log.rule_name \|\| '')}` | `frontend/app.js:3430` (loadQuarantineRuleHistory) |
-| Quarantine | "Help - Quarantine Auto-Rules" | `frontend/index.html:789` |
-| Spam filter | "Help - Spam Filter" | `frontend/index.html:851` |
-| Spam filter | "Clear all filters" | `frontend/index.html:916` |
-| Spam filter | "Sync suppression list to Rspamd" | `frontend/index.html:928` |
+| Quarantine | "Help - Quarantine Auto-Rules" | `frontend/index.html:783` |
+| Spam filter | "Help - Spam Filter" | `frontend/index.html:845` |
+| Spam filter | "Clear all filters" | `frontend/index.html:910` |
+| Spam filter | "Sync suppression list to Rspamd" | `frontend/index.html:922` |
 | Spam filter | "Synced to Rspamd" | `frontend/spam_filter.js:477` (renderSuppressionItem) |
 | Spam filter | "Pending sync to Rspamd" | `frontend/spam_filter.js:479` (renderSuppressionItem) |
 | Spam filter | "Will be removed from Rspamd on next sync" | `frontend/spam_filter.js:484` (renderSuppressionItem) |
@@ -294,7 +295,7 @@ Native `title` tooltips. Dynamic ones show the expression that builds the text.
 | Status | dynamic: `${escapeHtml(detail)}` | `frontend/app.js:4224` (renderBlacklistStatus) |
 | Status | dynamic: `${escapeHtml(detail)}` | `frontend/app.js:4226` (renderBlacklistStatus) |
 | Status | "View info" | `frontend/app.js:4227` (renderBlacklistStatus) |
-| Status | "Help - IP Blacklist Monitor" | `frontend/index.html:1014` |
+| Status | "Help - IP Blacklist Monitor" | `frontend/index.html:1008` |
 | Domains | "OK" | `frontend/domains.js:242` (renderDomainAccordionRow) |
 | Domains | "Warning" | `frontend/domains.js:243` (renderDomainAccordionRow) |
 | Domains | "Error" | `frontend/domains.js:244` (renderDomainAccordionRow) |
@@ -305,25 +306,25 @@ Native `title` tooltips. Dynamic ones show the expression that builds the text.
 | Domains | "Warning" | `frontend/domains.js:755` (checkSingleDomainDNS) |
 | Domains | "Error" | `frontend/domains.js:756` (checkSingleDomainDNS) |
 | Domains | "Unknown" | `frontend/domains.js:757` (checkSingleDomainDNS) |
-| Domains | "Help - Domains Information" | `frontend/index.html:1109` |
+| Domains | "Help - Domains Information" | `frontend/index.html:1103` |
 | DMARC | "DMARC Reports" | `frontend/dmarc.js:366` (loadDmarcDomains) |
 | DMARC | "TLS Reports" | `frontend/dmarc.js:367` (loadDmarcDomains) |
 | DMARC | "Delete report" | `frontend/dmarc.js:1646` (renderReportsManagementTable) |
 | DMARC | "Delete" | `frontend/dmarc.js:1681` (renderReportsManagementTable) |
-| DMARC | "Help - DMARC Information" | `frontend/index.html:1141` |
-| Mailbox stats | "Help - Mailbox Statistics" | `frontend/index.html:1347` |
+| DMARC | "Help - DMARC Information" | `frontend/index.html:1135` |
+| Mailbox stats | "Help - Mailbox Statistics" | `frontend/index.html:1341` |
 | Mailbox stats | "Address on a mailcow alias domain that points at this mailbox" | `frontend/mailbox-stats.js:556` (renderMailboxStatsAccordion) |
 | Mailbox stats | set in JS: dynamic: `isRateLimits ? 'Help - Rate Limits' : 'Help - Mailbox Statistics'` | `frontend/mailbox-stats.js:83` (mailboxStatsSwitchView) |
-| Logs | "Pause/Resume live updates" | `frontend/index.html:1654` |
-| Logs | "Live mode - show latest logs" | `frontend/index.html:1664` |
-| Logs | "Auto-scroll to new entries" | `frontend/index.html:1674` |
-| Logs | "Toggle sort order (newest at bottom / newest at top)" | `frontend/index.html:1684` |
-| Logs | "Toggle word wrap" | `frontend/index.html:1705` |
-| Logs | "Search" | `frontend/index.html:1722` |
-| Logs | "Clear search" | `frontend/index.html:1729` |
-| Logs | "Clear display" | `frontend/index.html:1739` |
-| Logs | "From date" | `frontend/index.html:1767` |
-| Logs | "To date" | `frontend/index.html:1772` |
+| Logs | "Pause/Resume live updates" | `frontend/index.html:1648` |
+| Logs | "Live mode - show latest logs" | `frontend/index.html:1658` |
+| Logs | "Auto-scroll to new entries" | `frontend/index.html:1668` |
+| Logs | "Toggle sort order (newest at bottom / newest at top)" | `frontend/index.html:1678` |
+| Logs | "Toggle word wrap" | `frontend/index.html:1699` |
+| Logs | "Search" | `frontend/index.html:1716` |
+| Logs | "Clear search" | `frontend/index.html:1723` |
+| Logs | "Clear display" | `frontend/index.html:1733` |
+| Logs | "From date" | `frontend/index.html:1761` |
+| Logs | "To date" | `frontend/index.html:1766` |
 | Logs | dynamic: `${escapeHtml(f.description \|\| '')}` | `frontend/logs-viewer.js:232` (loadSmartFilters) |
 | Logs | "Clear all filters" | `frontend/logs-viewer.js:1227` (updateFilterBadge) |
 | Settings | "Last delivery succeeded" | `frontend/notifications.js:67` (renderNotificationChannels) |
@@ -338,9 +339,9 @@ Native `title` tooltips. Dynamic ones show the expression that builds the text.
 | Shared | "This job is turned off in its settings, so it cannot be run" | `frontend/utils.js:572` (renderJobCard) |
 | Shared | dynamic: `${isRunning ? 'Job is running' : 'Run this job now'}` | `frontend/utils.js:606` (renderJobCard) |
 | app.js (mixed) | set in JS: dynamic: `label` | `frontend/app.js:286` (setNavTabLabel) |
-| Modal: container-logs-modal | "Refresh" | `frontend/index.html:1949` |
-| Modal: container-logs-modal | "Close" | `frontend/index.html:1957` |
-| Modal: message-modal | "Close" | `frontend/index.html:1847` |
+| Modal: container-logs-modal | "Refresh" | `frontend/index.html:1943` |
+| Modal: container-logs-modal | "Close" | `frontend/index.html:1951` |
+| Modal: message-modal | "Close" | `frontend/index.html:1841` |
 
 ### Toasts
 
@@ -579,17 +580,17 @@ Drop-down lists in the page markup with their options. The option wording and or
 
 | Page | What | Code |
 |---|---|---|
-| Dashboard | `dashboard-search-status`: All Statuses / Delivered / Sent / Deferred / Bounced / Rejected / Discarded (Sieve) / Expired | `frontend/index.html:518` |
-| Messages | `messages-filter-direction`: All Directions / Inbound / Outbound / Internal | `frontend/index.html:601` |
-| Messages | `messages-filter-status`: All Statuses / Delivered / Deferred / Bounced / Rejected / Spam / Discarded (Sieve) | `frontend/index.html:607` |
-| Security | `netfilter-filter-action`: All Actions / BAN / UNBAN / Warning / Info | `frontend/index.html:709` |
-| Security | `netfilter-filter-country`: All Countries | `frontend/index.html:716` |
-| Quarantine | `quarantine-sort`: Newest first / Score: high to low / Score: low to high | `frontend/index.html:832` |
-| Spam filter | `suppression-filter-reason`: All Reasons / Hard Bounce / Soft Bounce / Deferred Stuck / Rejected / Manual | `frontend/index.html:896` |
-| Spam filter | `suppression-filter-active`: Active Only / All / Inactive / Expired | `frontend/index.html:906` |
-| Mailbox stats | `mailbox-stats-domain-filter`: All Domains | `frontend/index.html:1551` |
-| Mailbox stats | `mailbox-stats-sort`: Sent (High to Low) / Received (High to Low) / Failure Rate (High to Low) / Quota Used (High to Low) / Username (A-Z) | `frontend/index.html:1555` |
-| Logs | `logs-fontsize`: 10px / 11px / 12px / 13px / 14px / 16px | `frontend/index.html:1692` |
+| Dashboard | `dashboard-search-status`: All Statuses / Delivered / Sent / Deferred / Bounced / Rejected / Discarded (Sieve) / Expired | `frontend/index.html:512` |
+| Messages | `messages-filter-direction`: All Directions / Inbound / Outbound / Internal | `frontend/index.html:595` |
+| Messages | `messages-filter-status`: All Statuses / Delivered / Deferred / Bounced / Rejected / Spam / Discarded (Sieve) | `frontend/index.html:601` |
+| Security | `netfilter-filter-action`: All Actions / BAN / UNBAN / Warning / Info | `frontend/index.html:703` |
+| Security | `netfilter-filter-country`: All Countries | `frontend/index.html:710` |
+| Quarantine | `quarantine-sort`: Newest first / Score: high to low / Score: low to high | `frontend/index.html:826` |
+| Spam filter | `suppression-filter-reason`: All Reasons / Hard Bounce / Soft Bounce / Deferred Stuck / Rejected / Manual | `frontend/index.html:890` |
+| Spam filter | `suppression-filter-active`: Active Only / All / Inactive / Expired | `frontend/index.html:900` |
+| Mailbox stats | `mailbox-stats-domain-filter`: All Domains | `frontend/index.html:1545` |
+| Mailbox stats | `mailbox-stats-sort`: Sent (High to Low) / Received (High to Low) / Failure Rate (High to Low) / Quota Used (High to Low) / Username (A-Z) | `frontend/index.html:1549` |
+| Logs | `logs-fontsize`: 10px / 11px / 12px / 13px / 14px / 16px | `frontend/index.html:1686` |
 
 ### Charts
 
@@ -658,13 +659,13 @@ In-app help buttons; the topic is the Markdown file name under documentation/Hel
 
 | Page | What | Code |
 |---|---|---|
-| Security | topic "Abuse_Protection" | `frontend/index.html:690` |
-| Quarantine | topic "Quarantine" | `frontend/index.html:789` |
-| Spam filter | topic "Spam_Filter" | `frontend/index.html:850` |
-| Status | topic "IP_Blacklist_Monitor" | `frontend/index.html:1013` |
-| Domains | topic "Domains" | `frontend/index.html:1108` |
-| DMARC | topic "DMARC" | `frontend/index.html:1140` |
-| Mailbox stats | topic "Mailbox_Stats" | `frontend/index.html:1345` |
+| Security | topic "Abuse_Protection" | `frontend/index.html:684` |
+| Quarantine | topic "Quarantine" | `frontend/index.html:783` |
+| Spam filter | topic "Spam_Filter" | `frontend/index.html:844` |
+| Status | topic "IP_Blacklist_Monitor" | `frontend/index.html:1007` |
+| Domains | topic "Domains" | `frontend/index.html:1102` |
+| DMARC | topic "DMARC" | `frontend/index.html:1134` |
+| Mailbox stats | topic "Mailbox_Stats" | `frontend/index.html:1339` |
 | Mailbox stats | topic dynamic: `'${isRateLimits ? 'Rate_Limits' : 'Mailbox_Stats'}'` | `frontend/mailbox-stats.js:82` (mailboxStatsSwitchView) |
 
 ### Empty states
