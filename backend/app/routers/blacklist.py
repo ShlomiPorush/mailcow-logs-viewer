@@ -2,7 +2,8 @@
 API endpoints for IP blacklist checking
 """
 import logging
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, HTTPException
+from pydantic import BaseModel
 from datetime import datetime, timezone, timedelta
 from typing import Dict, Any
 from sqlalchemy import desc
@@ -13,8 +14,10 @@ from app.services.blacklist_service import (
     get_check_progress,
     BLACKLISTS,
     CACHE_TTL_HOURS,
-    check_all_blacklists
+    check_all_blacklists,
+    apply_ignored_lists
 )
+from app.services.ignore_lists import load_ignored, set_ignored, IGNORED_BLOCKLISTS_KEY
 from app.routers.domains import get_cached_server_ip, init_server_ip
 from app.database import get_db_context
 from app.models import MonitoredHost, BlacklistCheck
@@ -46,6 +49,7 @@ def get_monitored_hosts() -> Dict[str, Any]:
             from app.services.blacklist_service import reconcile_monitored_hosts
             reconcile_monitored_hosts(db)
             hosts = db.query(MonitoredHost).filter(MonitoredHost.active == True).all()
+            ignored = load_ignored(db, IGNORED_BLOCKLISTS_KEY)
             results = []
             for host in hosts:
                 # Get latest check for this host
@@ -74,7 +78,8 @@ def get_monitored_hosts() -> Dict[str, Any]:
                         "cache_valid": is_valid,
                         "results": check.results or []
                     })
-                
+                    status_data = apply_ignored_lists(status_data, ignored)
+
                 results.append(status_data)
                 
             return {"hosts": results}
@@ -188,32 +193,43 @@ def get_blacklist_summary() -> Dict[str, Any]:
 
             latest_by_ip = {}
             hostnames = [h.hostname for h in hosts]
+            ignored = load_ignored(db, IGNORED_BLOCKLISTS_KEY)
             if hostnames:
                 # Latest check per host in ONE query (window function) and
-                # only the summary columns - the full results JSONB is never
-                # loaded here.
+                # only the summary columns. The full results JSONB is loaded
+                # only when some lists are ignored, to recount without them.
                 rn = func.row_number().over(
                     partition_by=BlacklistCheck.server_ip,
                     order_by=desc(BlacklistCheck.checked_at)
                 ).label("rn")
-                subq = db.query(
+                columns = [
                     BlacklistCheck.server_ip,
                     BlacklistCheck.status,
                     BlacklistCheck.listed_count,
                     BlacklistCheck.total_blacklists,
                     BlacklistCheck.checked_at,
-                    rn
-                ).filter(BlacklistCheck.server_ip.in_(hostnames)).subquery()
+                ]
+                if ignored:
+                    columns.append(BlacklistCheck.results)
+                subq = db.query(*columns, rn).filter(BlacklistCheck.server_ip.in_(hostnames)).subquery()
                 for row in db.query(subq).filter(subq.c.rn == 1).all():
                     latest_by_ip[row.server_ip] = row
 
             for h in hosts:
                 check = latest_by_ip.get(h.hostname)
+                status = check.status if check else None
+                listed_count = check.listed_count if check else None
+                if check and ignored:
+                    adjusted = apply_ignored_lists({
+                        "status": status, "listed_count": listed_count,
+                        "total_blacklists": check.total_blacklists, "results": check.results or []
+                    }, ignored)
+                    status, listed_count = adjusted["status"], adjusted["listed_count"]
                 host_rows.append({
                     "hostname": h.hostname,
                     "source": h.source,
-                    "status": check.status if check else None,
-                    "listed_count": check.listed_count if check else None,
+                    "status": status,
+                    "listed_count": listed_count,
                     "total_blacklists": check.total_blacklists if check else None,
                     "checked_at": check.checked_at if check else None
                 })
@@ -222,3 +238,26 @@ def get_blacklist_summary() -> Dict[str, Any]:
         host_rows = []
 
     return aggregate_blacklist_summary(host_rows, server_ip=get_cached_server_ip())
+
+
+class IgnoreRequest(BaseModel):
+    ignored: bool
+
+
+@router.get("/ignored")
+def get_ignored_blocklists() -> Dict[str, Any]:
+    """Blocklists the admin chose to ignore (still checked, never counted or alerted)."""
+    with get_db_context() as db:
+        zones = load_ignored(db, IGNORED_BLOCKLISTS_KEY)
+    return {"lists": [{"name": bl["name"], "zone": bl["zone"]} for bl in BLACKLISTS if bl["zone"] in zones]}
+
+
+@router.put("/lists/{zone}/ignore")
+def ignore_blocklist(zone: str, body: IgnoreRequest) -> Dict[str, Any]:
+    """Ignore or stop ignoring one blocklist for every monitored address."""
+    known = {bl["zone"]: bl["name"] for bl in BLACKLISTS}
+    if zone not in known:
+        raise HTTPException(status_code=404, detail="Unknown blocklist.")
+    with get_db_context() as db:
+        set_ignored(db, IGNORED_BLOCKLISTS_KEY, zone, body.ignored)
+    return {"zone": zone, "name": known[zone], "ignored": body.ignored}
