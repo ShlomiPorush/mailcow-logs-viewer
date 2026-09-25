@@ -525,9 +525,10 @@ function renderOverviewTab(content, data) {
     const identifiers = [
         data.queue_id ? mdFact('Queue ID', `<span class="ui-mono">${copyableText(data.queue_id)}</span>`) : '',
         rspamd.ip ? mdFact('Client IP', `<div class="ui-md-geo">${renderGeoIPInfo(rspamd, '16x12')}</div>`) : '',
-        rspamd.user ? mdFact('User', copyableText(rspamd.user)) : '',
+        // Who sent it and how they proved it, in one cell
+        rspamd.user || rspamd.has_auth ? mdFact('Authenticated user',
+            `${rspamd.user ? copyableText(rspamd.user) : '<span class="ui-muted">Unknown user</span>'}${rspamd.has_auth ? '<small class="ui-md-sub">Verified (MAILCOW_AUTH)</small>' : ''}`) : '',
         rspamd.size ? mdFact('Message Size', formatSize(rspamd.size)) : '',
-        rspamd.has_auth ? mdFact('Authentication', 'Verified (MAILCOW_AUTH)') : '',
         data.dovecot && data.dovecot.status === 'stored' && data.dovecot.mailbox ? mdFact('Folder', `<span class="ui-md-folder">${folderIconSvg('ui-md-folder-icon')}${escapeHtml(data.dovecot.mailbox)}</span>`) : '',
         recipientsToDisplay.length > 1 ? mdFact(`Recipients (${recipientsToDisplay.length})`,
             `<div class="ui-md-recipients">${recipientsToDisplay.map(r => `<div>${copyableText(r)}</div>`).join('')}</div>`, 'ui-md-fact-wide') : '',

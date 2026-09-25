@@ -4257,6 +4257,10 @@ function renderBlacklistStatus(data) {
                     : host.status === 'clean' ? uiTag(`Not listed on ${total}`, 'ok')
                     : uiTag('Unknown', '');
                 const detail = r => r.response ? `${r.name}: ${r.response}` : r.name;
+                // The provider's own lookup page, to check or request removal yourself
+                const lookup = r => /^https:\/\//.test(r.info_url || '')
+                    ? `<a href="${escapeHtml(r.info_url)}" target="_blank" rel="noopener noreferrer" class="ui-bl-link" title="Look up on ${escapeHtml(r.name)}" aria-label="Look up on ${escapeHtml(r.name)}"><svg width="12" height="12" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path></svg></a>`
+                    : '';
                 return `
                 <div class="ui-tr ui-bl-row">
                     <div class="ui-td ui-q-who">
@@ -4264,7 +4268,7 @@ function renderBlacklistStatus(data) {
                     </div>
                     <div class="ui-td ui-td-wrap ui-bl-result">
                         ${result}
-                        ${listedOn.map(r => `<code class="ui-code-chip" title="${escapeHtml(detail(r))}">${escapeHtml(r.name)}</code>`).join('')}
+                        ${listedOn.map(r => `<code class="ui-code-chip" title="${escapeHtml(detail(r))}">${escapeHtml(r.name)}${lookup(r)}</code>`).join('')}
                     </div>
                     <span class="ui-td" title="${host.checked_at ? escapeHtml(formatTime(host.checked_at)) : ''}">${host.checked_at ? formatAgo(host.checked_at) : 'Never'}</span>
                     <span class="ui-td ui-td-end ui-row-actions">
@@ -4277,7 +4281,7 @@ function renderBlacklistStatus(data) {
                             ${host.results.map(r => {
                                 const tone = r.listed ? 'fail' : (RESULT_TONE[r.status] || '');
                                 const state = r.listed ? 'listed' : (r.status || 'unknown');
-                                return `<span class="ui-bl-item${tone ? ` ui-bl-${tone}` : ''}" title="${escapeHtml(detail(r))}"><i class="ui-mdot${tone ? ` ui-mdot-${tone}` : ''}"></i>${escapeHtml(r.name)}<small>${escapeHtml(state)}</small></span>`;
+                                return `<span class="ui-bl-item${tone ? ` ui-bl-${tone}` : ''}" title="${escapeHtml(detail(r))}"><i class="ui-mdot${tone ? ` ui-mdot-${tone}` : ''}"></i>${escapeHtml(r.name)}${lookup(r)}<small>${escapeHtml(state)}</small></span>`;
                             }).join('')}
                         </div>
                     </details>` : ''}
