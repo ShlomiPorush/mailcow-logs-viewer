@@ -23,7 +23,7 @@
     <!-- Utility classes still used by the markup, compiled once
          (.github/scripts/build-utilities-css.sh); the design system comes last -->
     <link rel="stylesheet" href="/static/assets/css/utilities.css?v=1">
-    <link rel="stylesheet" href="/static/assets/css/ui.css?v=31">
+    <link rel="stylesheet" href="/static/assets/css/ui.css?v=32">
     <style>
         .tab-active {
             border-bottom: 2px solid #3b82f6;
@@ -1428,22 +1428,15 @@
         </div>
 
         <!-- Changelog Modal -->
-        <div id="changelog-modal"
-            class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
-            <div class="bg-white dark:bg-gray-800 rounded-lg max-w-3xl w-full max-h-[80vh] flex flex-col">
-                <div
-                    class="flex-shrink-0 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-6 py-4 flex justify-between items-center rounded-t-lg">
-                    <h3 class="text-lg font-semibold text-gray-900 dark:text-white">Changelog</h3>
-                    <button onclick="closeChangelogModal()"
-                        class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200">
-                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                d="M6 18L18 6M6 6l12 12">
-                            </path>
-                        </svg>
+        <div id="changelog-modal" class="hidden ui-dialog-backdrop" role="dialog" aria-label="Changelog">
+            <div class="ui-dialog ui-dialog-fit">
+                <div class="ui-dialog-head">
+                    <h3>Changelog</h3>
+                    <button onclick="closeChangelogModal()" class="ui-icon-btn" title="Close" aria-label="Close">
+                        <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
                     </button>
                 </div>
-                <div class="flex-1 overflow-y-auto p-6">
+                <div class="ui-dialog-body">
                     <div id="changelog-content" class="markdown-body"></div>
                 </div>
             </div>
@@ -1456,7 +1449,7 @@
     <!-- JavaScript -->
     <script src="/static/utils.js?v=16"></script>
     <script src="/static/router.js?v=3"></script>
-    <script src="/static/app.js?v=51"></script>
+    <script src="/static/app.js?v=52"></script>
     <script src="/static/export.js?v=1"></script>
     <script src="/static/message-details.js?v=6"></script>
     <script src="/static/dmarc.js?v=6"></script>

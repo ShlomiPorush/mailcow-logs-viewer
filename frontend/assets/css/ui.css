@@ -1378,3 +1378,4 @@ body { font-family: var(--ui-font); background: var(--ui-bg); }
     .ui-toast { bottom: 76px; }
 }
 .ui-qr-table .ui-q-who > div { white-space: normal; }
+.ui-dialog .markdown-body { font-family: inherit; background: transparent; color: var(--ui-ink); }
