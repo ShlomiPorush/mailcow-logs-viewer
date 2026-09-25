@@ -23,7 +23,7 @@
     <!-- Utility classes still used by the markup, compiled once
          (.github/scripts/build-utilities-css.sh); the design system comes last -->
     <link rel="stylesheet" href="/static/assets/css/utilities.css?v=1">
-    <link rel="stylesheet" href="/static/assets/css/ui.css?v=25">
+    <link rel="stylesheet" href="/static/assets/css/ui.css?v=26">
     <style>
         .tab-active {
             border-bottom: 2px solid #3b82f6;
@@ -1103,31 +1103,21 @@
 
             <!-- Domains Tab -->
             <div id="content-domains" class="tab-content hidden ui-page">
-                <div class="ui-block">
-                    <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
-                        <div class="text-center lg:text-left">
-                            <div class="flex items-center justify-center lg:justify-start gap-2">
-                                <h1 class="ui-h1">Domains Overview</h1>
-                                <button onclick="showHelpModal('Domains')" class="ui-icon-btn ui-help-btn"
+                <div class="ui-page-head">
+                    <div>
+                        <h1 class="ui-h1">Domains <button onclick="showHelpModal('Domains')" class="ui-icon-btn ui-help-btn"
                                     title="Help - Domains Information">
                                     <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                                             d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
                                     </svg>
-                                </button>
-                            </div>
-                            <p class="text-gray-600 dark:text-gray-400 mt-1">View Domains Settings with DNS records
-                                validation</p>
-                        </div>
-
-                        <div id="dns-check-info" class="flex items-center gap-3 justify-center lg:justify-end"></div>
+                                </button></h1>
+                        <p class="ui-muted" id="domains-summary">Domains and their DNS records</p>
                     </div>
+                    <div id="dns-check-info" class="ui-head-tools"></div>
                 </div>
-                <div id="domains-loading" class="text-center py-12">
-                    <div class="loading mx-auto mb-4"></div>
-                    <p class="text-gray-500 dark:text-gray-400">Loading domains...</p>
-                </div>
-                <div id="domains-content" class="hidden"></div>
+                <div id="domains-loading" class="ui-loading"><div class="loading"></div><p>Loading domains...</p></div>
+                <div id="domains-content" class="hidden ui-sec-block"></div>
             </div>
 
             <!-- DMARC Tab -->
@@ -1904,7 +1894,7 @@
     <script src="/static/dmarc.js?v=5"></script>
     <script src="/static/logs-viewer.js?v=3"></script>
     <script src="/static/settings.js?v=19"></script>
-    <script src="/static/domains.js?v=4"></script>
+    <script src="/static/domains.js?v=5"></script>
     <script src="/static/mailbox-stats.js?v=4"></script>
     <script src="/static/rate-limits.js?v=23"></script>
     <script src="/static/smtp-abuse.js?v=2"></script>
