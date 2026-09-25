@@ -716,14 +716,6 @@ function toggleZeroSymbols(button) {
     });
 }
 
-// Tone of a netfilter action tag (the label comes from getActionLabel)
-function netfilterActionTone(action) {
-    if (action === 'ban' || action === 'banned') return 'fail';
-    if (action === 'unban') return 'ok';
-    if (action === 'info') return 'info';
-    return 'warn';
-}
-
 function renderNetfilterTab(content, data) {
     if (!data.netfilter || data.netfilter.length === 0) {
         content.innerHTML = `
@@ -750,7 +742,7 @@ function renderNetfilterTab(content, data) {
                         <div class="ui-md-log-head">
                             <span class="ui-mono ui-muted">${formatTime(log.time)}</span>
                             <b class="ui-mono">${copyableText(log.ip)}</b>
-                            <span class="ui-md-log-status"><span class="ui-tag ui-tag-${netfilterActionTone(log.action)}">${getActionLabel(log.action)}</span></span>
+                            <span class="ui-md-log-status">${uiActionTag(log.action)}</span>
                         </div>
                         ${log.username ? `<p>User: ${copyableText(log.username)}</p>` : ''}
                         ${log.auth_method ? `<p class="ui-muted">Method: ${escapeHtml(log.auth_method)}</p>` : ''}

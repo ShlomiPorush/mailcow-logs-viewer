@@ -21,7 +21,7 @@
     <script src="/static/assets/libs/purify.min.js?v=2"></script>
     <script src="/static/assets/libs/chart.umd.min.js?v=2"></script>
     <link rel="stylesheet" href="/static/assets/libs/github-markdown.min.css">
-    <link rel="stylesheet" href="/static/assets/css/ui.css?v=7">
+    <link rel="stylesheet" href="/static/assets/css/ui.css?v=9">
     <script>
         tailwind.config = {
             darkMode: 'class',
@@ -665,186 +665,90 @@
             </div>
 
             <!-- Netfilter Tab -->
-            <div id="content-netfilter" class="tab-content hidden">
-                <!-- Fail2Ban Settings -->
-                <div class="mb-4">
-                    <details
-                        class="group bg-white dark:bg-gray-800 rounded-lg shadow dark:shadow-gray-900/30 overflow-hidden">
-                        <summary
-                            class="list-none px-6 py-4 border-b border-gray-200 dark:border-gray-700 cursor-pointer flex items-center justify-between hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors select-none">
-                            <h2 class="text-lg font-semibold text-gray-900 dark:text-white flex items-center gap-2">
-                                <svg class="w-5 h-5 text-red-500" fill="none" stroke="currentColor"
-                                    viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                        d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z">
-                                    </path>
-                                </svg>
-                                Fail2ban Settings
-                            </h2>
-                            <svg class="w-5 h-5 text-gray-400 transition-transform duration-200 group-open:rotate-180"
-                                fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                    d="M19 9l-7 7-7-7"></path>
-                            </svg>
-                        </summary>
-                        <div id="fail2ban-settings" class="p-4 sm:p-6">
-                            <div class="text-center py-6">
-                                <div class="loading mx-auto mb-4"></div>
-                                <p class="text-gray-500 dark:text-gray-400">Loading Fail2ban settings...</p>
-                            </div>
-                        </div>
-                    </details>
+            <div id="content-netfilter" class="tab-content hidden ui-page">
+                <div class="ui-page-head">
+                    <div>
+                        <h1 class="ui-h1">Security</h1>
+                        <p class="ui-muted">Fail2ban, abuse protection and authentication events</p>
+                    </div>
                 </div>
+
+                <!-- Fail2Ban Settings -->
+                <details class="ui-panel ui-collapse">
+                    <summary class="ui-panel-head">Fail2ban Settings <svg class="ui-collapse-chevron" width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg></summary>
+                    <div id="fail2ban-settings" class="ui-collapse-body"><div class="ui-loading"><div class="loading"></div><p>Loading Fail2ban settings...</p></div></div>
+                </details>
 
                 <!-- Fail2Ban IP Lists -->
-                <div class="mb-4">
-                    <details
-                        class="group bg-white dark:bg-gray-800 rounded-lg shadow dark:shadow-gray-900/30 overflow-hidden">
-                        <summary
-                            class="list-none px-6 py-4 border-b border-gray-200 dark:border-gray-700 cursor-pointer flex items-center justify-between hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors select-none">
-                            <h2 class="text-lg font-semibold text-gray-900 dark:text-white flex items-center gap-2">
-                                <svg class="w-5 h-5 text-orange-500" fill="none" stroke="currentColor"
-                                    viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                        d="M3 6l3 1m0 0l-3 9a5.002 5.002 0 006.001 0M6 7l3 9M6 7l6-2m6 2l3-1m-3 1l-3 9a5.002 5.002 0 006.001 0M18 7l3 9m-3-9l-6-2m0-2v2m0 16V5m0 16H9m3 0h3">
-                                    </path>
-                                </svg>
-                                Fail2ban IP Lists
-                            </h2>
-                            <svg class="w-5 h-5 text-gray-400 transition-transform duration-200 group-open:rotate-180"
-                                fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                    d="M19 9l-7 7-7-7"></path>
-                            </svg>
-                        </summary>
-                        <div id="fail2ban-ip-lists" class="p-4 sm:p-6">
-                            <div class="text-center py-6">
-                                <div class="loading mx-auto mb-4"></div>
-                                <p class="text-gray-500 dark:text-gray-400">Loading IP lists...</p>
-                            </div>
-                        </div>
-                    </details>
-                </div>
+                <details class="ui-panel ui-collapse">
+                    <summary class="ui-panel-head">Fail2ban IP Lists <svg class="ui-collapse-chevron" width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg></summary>
+                    <div id="fail2ban-ip-lists" class="ui-collapse-body"><div class="ui-loading"><div class="loading"></div><p>Loading IP lists...</p></div></div>
+                </details>
 
                 <!-- SMTP Abuse Protection -->
-                <div class="mb-4">
-                    <details
-                        class="group bg-white dark:bg-gray-800 rounded-lg shadow dark:shadow-gray-900/30 overflow-hidden">
-                        <summary
-                            class="list-none px-6 py-4 border-b border-gray-200 dark:border-gray-700 cursor-pointer flex items-center justify-between hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors select-none">
-                            <h2 class="text-lg font-semibold text-gray-900 dark:text-white flex items-center gap-2">
-                                <svg class="w-5 h-5 text-red-500" fill="none" stroke="currentColor"
-                                    viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                        d="M12 9v2m0 4h.01M5.07 19h13.86c1.54 0 2.5-1.67 1.73-3L13.73 4a2 2 0 00-3.46 0L3.34 16c-.77 1.33.19 3 1.73 3z">
-                                    </path>
-                                </svg>
-                                Abuse Protection
-                                <span class="px-1.5 py-0.5 text-xs font-semibold rounded bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200"
-                                    title="This feature is new - please report any issues on GitHub">Beta</span>
-                                <button type="button"
+                <details class="ui-panel ui-collapse">
+                    <summary class="ui-panel-head">Abuse Protection
+                        <span class="ui-tag ui-tag-warn" title="This feature is new - please report any issues on GitHub">Beta</span>
+                        <button type="button"
                                     onclick="event.preventDefault(); event.stopPropagation(); showHelpModal('Abuse_Protection')"
-                                    class="text-gray-400 hover:text-blue-500 dark:hover:text-blue-400 transition-colors"
+                                    class="ui-icon-btn ui-help-btn"
                                     title="Help - Abuse Protection">
-                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                                             d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z">
                                         </path>
                                     </svg>
                                 </button>
-                            </h2>
-                            <svg class="w-5 h-5 text-gray-400 transition-transform duration-200 group-open:rotate-180"
-                                fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                    d="M19 9l-7 7-7-7"></path>
-                            </svg>
-                        </summary>
-                        <div id="smtp-abuse-panel" class="p-4 sm:p-6">
-                            <div class="text-center py-6">
-                                <div class="loading mx-auto mb-4"></div>
-                                <p class="text-gray-500 dark:text-gray-400">Loading abuse protection...</p>
-                            </div>
-                        </div>
-                    </details>
-                </div>
+                        <svg class="ui-collapse-chevron" width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
+                    </summary>
+                    <div id="smtp-abuse-panel" class="ui-collapse-body"><div class="ui-loading"><div class="loading"></div><p>Loading abuse protection...</p></div></div>
+                </details>
 
                 <!-- Filters -->
-                <div class="bg-white dark:bg-gray-800 rounded-lg shadow dark:shadow-gray-900/30 p-4 mb-4">
-                <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-                        <input type="text" id="netfilter-filter-ip" placeholder="IP Address"
-                            class="px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-lg"
-                            onkeypress="if(event.key==='Enter') applyNetfilterFilters()">
-                        <input type="text" id="netfilter-filter-username" placeholder="Username"
-                            class="px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-lg"
-                            onkeypress="if(event.key==='Enter') applyNetfilterFilters()">
-                        <select id="netfilter-filter-action"
-                            class="px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-lg">
+                <section class="ui-panel ui-filters">
+                    <div class="ui-filters-row">
+                        <input type="text" id="netfilter-filter-ip" class="ui-input" placeholder="IP Address" aria-label="IP Address" onkeypress="if(event.key==='Enter') applyNetfilterFilters()">
+                        <input type="text" id="netfilter-filter-username" class="ui-input" placeholder="Username" aria-label="Username" onkeypress="if(event.key==='Enter') applyNetfilterFilters()">
+                        <select id="netfilter-filter-action" class="ui-select" aria-label="Action">
                             <option value="">All Actions</option>
                             <option value="ban">BAN</option>
                             <option value="unban">UNBAN</option>
                             <option value="warning">Warning</option>
                             <option value="info">Info</option>
                         </select>
-                        <select id="netfilter-filter-country"
-                            class="px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-lg">
+                        <select id="netfilter-filter-country" class="ui-select" aria-label="Country">
                             <option value="">All Countries</option>
                         </select>
-                        <button onclick="applyNetfilterFilters()"
-                            class="px-3 py-2 text-sm bg-blue-600 hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600 text-white rounded-lg">
-                            Apply
-                        </button>
-                        <button onclick="clearNetfilterFilters()"
-                            class="px-3 py-2 text-sm bg-gray-200 hover:bg-gray-300 dark:bg-gray-600 dark:hover:bg-gray-500 text-gray-700 dark:text-gray-300 rounded-lg">
-                            Clear
-                        </button>
+                        <div class="ui-filters-actions">
+                            <button onclick="applyNetfilterFilters()" class="ui-btn ui-btn-primary">Apply</button>
+                            <button onclick="clearNetfilterFilters()" class="ui-btn">Clear</button>
+                        </div>
                     </div>
-                </div>
+                </section>
 
                 <!-- Country Chart -->
-                <div class="bg-white dark:bg-gray-800 rounded-lg shadow dark:shadow-gray-900/30 p-4 sm:p-6 mb-4">
-                    <div class="flex justify-between items-center mb-4">
-                        <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Events by Country</h2>
-                        <div class="flex gap-2">
-                            <button onclick="loadSecurityCountryChart(7)" id="country-chart-7d"
-                                class="country-chart-period-btn px-3 py-1.5 text-xs font-medium rounded-md border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
-                                7D
-                            </button>
-                            <button onclick="loadSecurityCountryChart(30)" id="country-chart-30d"
-                                class="country-chart-period-btn px-3 py-1.5 text-xs font-medium rounded-md border border-blue-500 bg-blue-500 text-white transition-colors">
-                                30D
-                            </button>
-                            <button onclick="loadSecurityCountryChart(90)" id="country-chart-90d"
-                                class="country-chart-period-btn px-3 py-1.5 text-xs font-medium rounded-md border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
-                                90D
-                            </button>
+                <section class="ui-panel">
+                    <div class="ui-panel-head">Events by Country
+                        <div class="ui-chip-row ui-head-actions">
+                            <button onclick="loadSecurityCountryChart(7)" id="country-chart-7d" class="country-chart-period-btn ui-chip" aria-pressed="false">7D</button>
+                            <button onclick="loadSecurityCountryChart(30)" id="country-chart-30d" class="country-chart-period-btn ui-chip" aria-pressed="true">30D</button>
+                            <button onclick="loadSecurityCountryChart(90)" id="country-chart-90d" class="country-chart-period-btn ui-chip" aria-pressed="false">90D</button>
                         </div>
                     </div>
-                    <div id="country-chart-container" style="position: relative;">
-                        <canvas id="security-country-chart"></canvas>
+                    <div class="ui-chart-body">
+                        <div id="country-chart-container" style="position: relative;">
+                            <canvas id="security-country-chart"></canvas>
+                        </div>
+                        <p id="country-chart-empty" class="hidden ui-empty">No GeoIP data available. Configure MaxMind to enable country statistics.</p>
                     </div>
-                    <p id="country-chart-empty" class="hidden text-gray-500 dark:text-gray-400 text-center py-8">No GeoIP data available. Configure MaxMind to enable country statistics.</p>
-                </div>
+                </section>
 
-                <div class="bg-white dark:bg-gray-800 rounded-lg shadow dark:shadow-gray-900/30">
-                    <div
-                        class="px-4 sm:px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center">
-                        <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
-                            Security Events
-                            <span id="security-count"
-                                class="ml-2 text-sm font-normal text-gray-500 dark:text-gray-400"></span>
-                        </h2>
-                        <button onclick="exportCSV('netfilter')"
-                            class="px-3 py-2 text-sm bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600">
-                            Export CSV
-                        </button>
+                <section class="ui-panel">
+                    <div class="ui-panel-head">Security Events <span id="security-count" class="ui-count"></span>
+                        <button onclick="exportCSV('netfilter')" class="ui-btn ui-btn-sm ui-head-actions">Export CSV</button>
                     </div>
-                    <div id="netfilter-logs" class="p-4 sm:p-6">
-                        <div class="text-center py-8">
-                            <div class="loading mx-auto mb-4"></div>
-                            <p class="text-gray-500 dark:text-gray-400">Loading...</p>
-                        </div>
-                    </div>
-                </div>
+                    <div id="netfilter-logs"><div class="ui-loading"><div class="loading"></div><p>Loading...</p></div></div>
+                </section>
             </div>
 
             <!-- Queue Tab -->
@@ -2150,18 +2054,18 @@
     </div> <!-- Close app-content div -->
 
     <!-- JavaScript -->
-    <script src="/static/utils.js?v=8"></script>
+    <script src="/static/utils.js?v=9"></script>
     <script src="/static/router.js?v=3"></script>
-    <script src="/static/app.js?v=41"></script>
+    <script src="/static/app.js?v=42"></script>
     <script src="/static/export.js?v=1"></script>
-    <script src="/static/message-details.js?v=4"></script>
+    <script src="/static/message-details.js?v=5"></script>
     <script src="/static/dmarc.js?v=5"></script>
     <script src="/static/logs-viewer.js?v=2"></script>
     <script src="/static/settings.js?v=17"></script>
     <script src="/static/domains.js?v=4"></script>
     <script src="/static/mailbox-stats.js?v=4"></script>
     <script src="/static/rate-limits.js?v=22"></script>
-    <script src="/static/smtp-abuse.js?v=1"></script>
+    <script src="/static/smtp-abuse.js?v=2"></script>
     <script src="/static/notifications.js?v=3"></script>
     <script src="/static/spam_filter.js?v=3"></script>
 
