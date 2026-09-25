@@ -110,7 +110,7 @@ async function loadRspamdMaps() {
         
     } catch (error) {
         console.error('Failed to load Rspamd maps:', error);
-        container.innerHTML = `<p class="text-red-500 text-center py-8">Failed to load maps: ${escapeHtml(error.message)}</p>`;
+        container.innerHTML = `<p class="ui-empty ui-text-fail">Failed to load maps: ${escapeHtml(error.message)}</p>`;
     }
 }
 
@@ -298,7 +298,7 @@ async function openMapEditor(filename) {
                     ← Back to Maps List
                 </button>
             </div>
-            <p class="text-red-500 text-center py-8">Failed to load map: ${escapeHtml(error.message)}</p>
+            <p class="ui-empty ui-text-fail">Failed to load map: ${escapeHtml(error.message)}</p>
         `;
     }
 }
@@ -464,7 +464,7 @@ async function loadSuppressions(page) {
         
     } catch (error) {
         console.error('Failed to load suppressions:', error);
-        container.innerHTML = `<p class="text-red-500 text-center py-8">Failed to load: ${escapeHtml(error.message)}</p>`;
+        container.innerHTML = `<p class="ui-empty ui-text-fail">Failed to load: ${escapeHtml(error.message)}</p>`;
     }
 }
 

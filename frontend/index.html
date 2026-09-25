@@ -21,7 +21,7 @@
     <script src="/static/assets/libs/purify.min.js?v=2"></script>
     <script src="/static/assets/libs/chart.umd.min.js?v=2"></script>
     <link rel="stylesheet" href="/static/assets/libs/github-markdown.min.css">
-    <link rel="stylesheet" href="/static/assets/css/ui.css?v=9">
+    <link rel="stylesheet" href="/static/assets/css/ui.css?v=11">
     <script>
         tailwind.config = {
             darkMode: 'class',
@@ -752,128 +752,94 @@
             </div>
 
             <!-- Queue Tab -->
-            <div id="content-queue" class="tab-content hidden">
-                <!-- Filters -->
-                <div class="bg-white dark:bg-gray-800 rounded-lg shadow dark:shadow-gray-900/30 p-4 mb-4">
-                    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-                        <input type="text" id="queue-filter-search" placeholder="Search sender/recipient..."
-                            class="px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-lg"
-                            onkeypress="if(event.key==='Enter') applyQueueFilters()">
-                        <input type="text" id="queue-filter-queue-id" placeholder="Queue ID"
-                            class="px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-lg"
-                            onkeypress="if(event.key==='Enter') applyQueueFilters()">
-                        <button onclick="applyQueueFilters()"
-                            class="px-3 py-2 text-sm bg-blue-600 hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600 text-white rounded-lg">
-                            Apply
-                        </button>
-                        <button onclick="clearQueueFilters()"
-                            class="px-3 py-2 text-sm bg-gray-200 hover:bg-gray-300 dark:bg-gray-600 dark:hover:bg-gray-500 text-gray-700 dark:text-gray-300 rounded-lg">
-                            Clear
-                        </button>
+            <div id="content-queue" class="tab-content hidden ui-page">
+                <div class="ui-page-head">
+                    <div>
+                        <h1 class="ui-h1">Queue</h1>
+                        <p class="ui-muted">Messages waiting in the Postfix queue</p>
                     </div>
                 </div>
-
-                <div class="bg-white dark:bg-gray-800 rounded-lg shadow dark:shadow-gray-900/30">
-                    <div class="px-4 sm:px-6 py-4 border-b border-gray-200 dark:border-gray-700">
-                        <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
-                            Mail Queue
-                            <span id="queue-count"
-                                class="ml-2 text-sm font-normal text-gray-500 dark:text-gray-400"></span>
-                        </h2>
-                    </div>
-                    <div id="queue-logs" class="p-4 sm:p-6">
-                        <div class="text-center py-8">
-                            <div class="loading mx-auto mb-4"></div>
-                            <p class="text-gray-500 dark:text-gray-400">Loading...</p>
+                <section class="ui-panel ui-filters">
+                    <div class="ui-filters-row">
+                        <input type="text" id="queue-filter-search" class="ui-input" placeholder="Search sender/recipient..." aria-label="Search sender or recipient"
+                            onkeypress="if(event.key==='Enter') applyQueueFilters()">
+                        <input type="text" id="queue-filter-queue-id" class="ui-input" placeholder="Queue ID" aria-label="Queue ID"
+                            onkeypress="if(event.key==='Enter') applyQueueFilters()">
+                        <div class="ui-filters-actions">
+                            <button onclick="applyQueueFilters()" class="ui-btn ui-btn-primary">Apply</button>
+                            <button onclick="clearQueueFilters()" class="ui-btn">Clear</button>
                         </div>
                     </div>
-                </div>
+                </section>
+                <section class="ui-panel">
+                    <div class="ui-panel-head">Mail Queue <span id="queue-count" class="ui-count"></span></div>
+                    <div id="queue-logs"><div class="ui-loading"><div class="loading"></div><p>Loading...</p></div></div>
+                </section>
             </div>
 
             <!-- Quarantine Tab -->
-            <div id="content-quarantine" class="tab-content hidden">
+            <div id="content-quarantine" class="tab-content hidden ui-page">
+                <div class="ui-page-head">
+                    <div>
+                        <h1 class="ui-h1">Quarantine</h1>
+                        <p class="ui-muted">Messages held by the spam filter, and the rules that handle them</p>
+                    </div>
+                </div>
                 <!-- Auto-Rules Section (only visible with RW key) -->
-                <div id="quarantine-rules-section" class="mb-4 hidden">
-                    <details class="group bg-white dark:bg-gray-800 rounded-lg shadow dark:shadow-gray-900/30 overflow-hidden">
-                        <summary class="list-none px-6 py-4 border-b border-gray-200 dark:border-gray-700 cursor-pointer flex items-center justify-between hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors select-none">
-                            <h2 class="text-lg font-semibold text-gray-900 dark:text-white flex items-center gap-2">
-                                <svg class="w-5 h-5 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                        d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"></path>
-                                </svg>
-                                Quarantine Auto-Rules
-                                <span id="quarantine-rules-count" class="text-sm font-normal text-gray-500 dark:text-gray-400"></span>
-                                <button onclick="showHelpModal('Quarantine')" class="text-gray-400 hover:text-blue-500 dark:hover:text-blue-400 transition-colors" title="Help - Quarantine Auto-Rules">
-                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <details id="quarantine-rules-section" class="ui-panel ui-collapse hidden">
+                    <summary class="ui-panel-head">Quarantine Auto-Rules
+                        <span id="quarantine-rules-count" class="ui-count"></span>
+                        <button onclick="showHelpModal('Quarantine')" class="ui-icon-btn ui-help-btn" title="Help - Quarantine Auto-Rules">
+                                    <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
                                     </svg>
                                 </button>
-                            </h2>
-                            <svg class="w-5 h-5 text-gray-400 transition-transform duration-200 group-open:rotate-180"
-                                fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                    d="M19 9l-7 7-7-7"></path>
-                            </svg>
-                        </summary>
-                        <div class="p-4 sm:p-6">
-                            <!-- Rules toolbar -->
-                            <div class="flex flex-wrap items-center gap-2 mb-4">
+                        <svg class="ui-collapse-chevron" width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
+                    </summary>
+                    <div class="ui-collapse-body">
+                        <div class="ui-toolbar">
                                 <button onclick="showAddQuarantineRuleModal()"
-                                    class="px-3 py-1.5 text-sm font-medium rounded-md border border-amber-500 bg-amber-500 text-white hover:bg-amber-600 transition-colors flex items-center gap-1">
-                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    class="ui-btn ui-btn-sm ui-btn-primary">
+                                    <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
                                     </svg>
                                     Add Rule
                                 </button>
                                 <button onclick="testQuarantineRules()"
-                                    class="px-3 py-1.5 text-sm font-medium rounded-md border border-blue-300 dark:border-blue-700 text-blue-700 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-colors flex items-center gap-1">
-                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    class="ui-btn ui-btn-sm">
+                                    <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
                                     </svg>
                                     Test Rules
                                 </button>
                                 <div class="flex-1"></div>
                                 <button onclick="toggleQuarantineRuleHistory()"
-                                    class="px-3 py-1.5 text-sm font-medium rounded-md border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors flex items-center gap-1">
-                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    class="ui-btn ui-btn-sm">
+                                    <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
                                     </svg>
                                     History
                                 </button>
                             </div>
-                            <!-- Rules list -->
-                            <div id="quarantine-rules-list" class="space-y-3">
-                                <p class="text-gray-500 dark:text-gray-400 text-center py-4 text-sm">Loading rules...</p>
-                            </div>
-                            <!-- History section (hidden by default) -->
-                            <div id="quarantine-rules-history" class="hidden mt-4 border-t border-gray-200 dark:border-gray-700 pt-4">
-                                <h3 class="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">Recent Activity</h3>
-                                <div id="quarantine-rules-history-list"></div>
-                            </div>
+                        <div id="quarantine-rules-list" class="ui-md-stack">
+                            <p class="ui-empty">Loading rules...</p>
                         </div>
-                    </details>
-                </div>
-
-                <div class="bg-white dark:bg-gray-800 rounded-lg shadow dark:shadow-gray-900/30">
-                    <div class="px-4 sm:px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex flex-wrap items-center justify-between gap-2">
-                        <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Quarantined Messages <span
-                                id="quarantine-count"
-                                class="text-sm font-normal text-gray-500 dark:text-gray-400"></span>
-                        </h2>
-                        <select id="quarantine-sort" onchange="applyQuarantineSort()"
-                            class="px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-lg">
+                        <div id="quarantine-rules-history" class="hidden ui-subsection">
+                            <h3 class="ui-md-h">Recent Activity</h3>
+                            <div id="quarantine-rules-history-list"></div>
+                        </div>
+                    </div>
+                </details>
+                <section class="ui-panel">
+                    <div class="ui-panel-head">Quarantined Messages <span id="quarantine-count" class="ui-count"></span>
+                        <select id="quarantine-sort" onchange="applyQuarantineSort()" class="ui-select ui-head-actions ui-select-auto" aria-label="Sort">
                             <option value="newest">Newest first</option>
                             <option value="score_desc">Score: high to low</option>
                             <option value="score_asc">Score: low to high</option>
                         </select>
                     </div>
-                    <div id="quarantine-logs" class="p-4 sm:p-6">
-                        <div class="text-center py-8">
-                            <div class="loading mx-auto mb-4"></div>
-                            <p class="text-gray-500 dark:text-gray-400">Loading...</p>
-                        </div>
-                    </div>
-                </div>
+                    <div id="quarantine-logs"><div class="ui-loading"><div class="loading"></div><p>Loading...</p></div></div>
+                </section>
             </div>
 
             <!-- Spam Filter Tab -->
@@ -2056,7 +2022,7 @@
     <!-- JavaScript -->
     <script src="/static/utils.js?v=9"></script>
     <script src="/static/router.js?v=3"></script>
-    <script src="/static/app.js?v=42"></script>
+    <script src="/static/app.js?v=43"></script>
     <script src="/static/export.js?v=1"></script>
     <script src="/static/message-details.js?v=5"></script>
     <script src="/static/dmarc.js?v=5"></script>
@@ -2067,7 +2033,7 @@
     <script src="/static/rate-limits.js?v=22"></script>
     <script src="/static/smtp-abuse.js?v=2"></script>
     <script src="/static/notifications.js?v=3"></script>
-    <script src="/static/spam_filter.js?v=3"></script>
+    <script src="/static/spam_filter.js?v=4"></script>
 
     <!-- DMARC Sync History Modal -->
     <div id="dmarc-sync-history-modal"
