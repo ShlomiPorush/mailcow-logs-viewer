@@ -1486,56 +1486,56 @@ async function showGeoIPSetupModal() {
     // Create modal overlay
     const overlay = document.createElement('div');
     overlay.id = 'geoip-setup-overlay';
-    overlay.className = 'fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50';
+    overlay.className = 'ui-dialog-backdrop';
     overlay.style.animation = 'fadeIn 0.2s ease-out';
     
     overlay.innerHTML = `
-        <div class="ui-panel shadow-2xl w-full max-w-md mx-4 overflow-hidden">
-            <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
-                <h3 class="ui-panel-title">
-                    <svg class="w-5 h-5 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <div class="ui-dialog ui-dialog-fit ui-dialog-sm">
+            <div class="ui-dialog-head">
+                <h3>
+                    <svg class="w-5 h-5 ui-text-info" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
                     </svg>
                     GeoIP Database Setup
                 </h3>
             </div>
-            <div class="px-6 py-5 space-y-4" id="geoip-setup-steps">
-                <div id="geoip-step-1" class="flex items-start gap-3">
-                    <div id="geoip-step-1-icon" class="mt-0.5 flex-shrink-0">
-                        <svg class="w-5 h-5 text-blue-500 animate-spin" fill="none" viewBox="0 0 24 24">
+            <div class="ui-dialog-body ui-geo-steps" id="geoip-setup-steps">
+                <div id="geoip-step-1" class="ui-geo-step">
+                    <div id="geoip-step-1-icon" class="ui-geo-icon">
+                        <svg class="w-5 h-5 ui-text-info animate-spin" fill="none" viewBox="0 0 24 24">
                             <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
                             <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
                         </svg>
                     </div>
                     <div>
-                        <p class="text-sm font-medium text-gray-900 dark:text-white">Checking credentials</p>
-                        <p id="geoip-step-1-detail" class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Verifying MaxMind configuration</p>
+                        <p class="ui-geo-title">Checking credentials</p>
+                        <p id="geoip-step-1-detail" class="ui-set-desc">Verifying MaxMind configuration</p>
                     </div>
                 </div>
-                <div id="geoip-step-2" class="flex items-start gap-3 opacity-40">
-                    <div id="geoip-step-2-icon" class="mt-0.5 flex-shrink-0">
-                        <div class="w-5 h-5 rounded-full border-2 border-gray-300 dark:border-gray-600"></div>
+                <div id="geoip-step-2" class="ui-geo-step opacity-40">
+                    <div id="geoip-step-2-icon" class="ui-geo-icon">
+                        <div class="ui-geo-pending"></div>
                     </div>
-                    <div class="flex-1">
-                        <p class="text-sm font-medium text-gray-900 dark:text-white">Download databases</p>
-                        <p id="geoip-step-2-detail" class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Waiting...</p>
-                        <div id="geoip-progress-bar" class="hidden mt-2 w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2 overflow-hidden">
-                            <div id="geoip-progress-fill" class="bg-blue-500 h-full rounded-full transition-all duration-500" style="width: 0%"></div>
+                    <div>
+                        <p class="ui-geo-title">Download databases</p>
+                        <p id="geoip-step-2-detail" class="ui-set-desc">Waiting...</p>
+                        <div id="geoip-progress-bar" class="hidden ui-meter ui-meter-info ui-geo-bar">
+                            <i id="geoip-progress-fill" style="width: 0%"></i>
                         </div>
                     </div>
                 </div>
-                <div id="geoip-step-3" class="flex items-start gap-3 opacity-40">
-                    <div id="geoip-step-3-icon" class="mt-0.5 flex-shrink-0">
-                        <div class="w-5 h-5 rounded-full border-2 border-gray-300 dark:border-gray-600"></div>
+                <div id="geoip-step-3" class="ui-geo-step opacity-40">
+                    <div id="geoip-step-3-icon" class="ui-geo-icon">
+                        <div class="ui-geo-pending"></div>
                     </div>
                     <div>
-                        <p class="text-sm font-medium text-gray-900 dark:text-white">Validate database integrity</p>
-                        <p id="geoip-step-3-detail" class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Waiting...</p>
+                        <p class="ui-geo-title">Validate database integrity</p>
+                        <p id="geoip-step-3-detail" class="ui-set-desc">Waiting...</p>
                     </div>
                 </div>
             </div>
-            <div class="px-6 py-4 border-t border-gray-200 dark:border-gray-700 flex justify-end">
-                <button id="geoip-setup-close-btn" class="px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg text-sm font-medium hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed" disabled>
+            <div class="ui-dialog-foot">
+                <button id="geoip-setup-close-btn" class="ui-btn" disabled>
                     Close
                 </button>
             </div>
@@ -1559,13 +1559,13 @@ async function showGeoIPSetupModal() {
         if (detail) detailEl.textContent = detail;
         
         if (status === 'running') {
-            iconEl.innerHTML = '<svg class="w-5 h-5 text-blue-500 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>';
+            iconEl.innerHTML = '<svg class="w-5 h-5 ui-text-info animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>';
         } else if (status === 'success') {
-            iconEl.innerHTML = '<svg class="w-5 h-5 text-green-500" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path></svg>';
+            iconEl.innerHTML = '<svg class="w-5 h-5 ui-text-ok" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path></svg>';
         } else if (status === 'error') {
-            iconEl.innerHTML = '<svg class="w-5 h-5 text-red-500" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd"></path></svg>';
+            iconEl.innerHTML = '<svg class="w-5 h-5 ui-text-fail" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd"></path></svg>';
         } else if (status === 'skipped') {
-            iconEl.innerHTML = '<svg class="w-5 h-5 text-gray-400" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-11a1 1 0 10-2 0v3.586L7.707 9.293a1 1 0 00-1.414 1.414l3 3a1 1 0 001.414 0l3-3a1 1 0 00-1.414-1.414L11 10.586V7z" clip-rule="evenodd"></path></svg>';
+            iconEl.innerHTML = '<svg class="w-5 h-5 ui-muted" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-11a1 1 0 10-2 0v3.586L7.707 9.293a1 1 0 00-1.414 1.414l3 3a1 1 0 001.414 0l3-3a1 1 0 00-1.414-1.414L11 10.586V7z" clip-rule="evenodd"></path></svg>';
         }
     };
     
@@ -1691,7 +1691,7 @@ var _cachedMaxMindStatus = null;
 async function validateMaxMindLicense() {
     // Show checking state on all MaxMind status badges
     const checkingHtml = `
-        <span class="inline-flex items-center px-2 py-1 rounded text-xs font-medium bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">
+        <span class="ui-tag ui-tag-info">
             <svg class="w-3 h-3 mr-1 animate-spin" fill="none" viewBox="0 0 24 24">
                 <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
                 <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
@@ -1737,7 +1737,7 @@ async function repairGeoIPDatabase() {
     const statusEl = document.getElementById('geoip-db-status');
     if (statusEl) {
         statusEl.innerHTML = `
-            <span class="inline-flex items-center px-2 py-1 rounded text-xs font-medium bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">
+            <span class="ui-tag ui-tag-info">
                 <svg class="w-3 h-3 mr-1 animate-spin" fill="none" viewBox="0 0 24 24">
                     <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
                     <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>

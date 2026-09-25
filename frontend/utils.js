@@ -500,29 +500,22 @@ function showToast(message, type = 'info') {
         existingToast.remove();
     }
 
-    const colors = {
-        'success': 'bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-200 border-green-500',
-        'error': 'bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-200 border-red-500',
-        'warning': 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-800 dark:text-yellow-200 border-yellow-500',
-        'info': 'bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-200 border-blue-500'
-    };
-
     const icons = {
         'success': '✓',
         'error': '✗',
         'warning': '⚠',
         'info': 'ℹ'
     };
+    const kind = icons[type] ? type : 'info';
 
     const toast = document.createElement('div');
     toast.id = 'toast-notification';
-    toast.className = `fixed bottom-4 right-4 z-50 ${colors[type]} border-l-4 p-4 rounded shadow-lg max-w-md animate-slide-in`;
+    toast.className = `ui-toast ui-toast-${kind}`;
+    toast.setAttribute('role', kind === 'error' ? 'alert' : 'status');
     toast.innerHTML = `
-        <div class="flex items-start gap-3">
-            <span class="text-xl font-bold flex-shrink-0">${icons[type]}</span>
-            <p class="text-sm flex-1">${escapeHtml(message)}</p>
-            <button onclick="this.parentElement.parentElement.remove()" class="text-lg font-bold hover:opacity-70 flex-shrink-0">×</button>
-        </div>
+        <span class="ui-toast-icon" aria-hidden="true">${icons[kind]}</span>
+        <p>${escapeHtml(message)}</p>
+        <button type="button" onclick="this.parentElement.remove()" class="ui-icon-btn" title="Close" aria-label="Close">×</button>
     `;
 
     document.body.appendChild(toast);
@@ -550,48 +543,24 @@ function showConfirmModal({ title = 'Confirm', message = 'Are you sure?', confir
         const existing = document.getElementById('app-confirm-modal');
         if (existing) existing.remove();
 
-        const gradientColor = confirmColor || (isDangerous
-            ? 'linear-gradient(135deg,#ef4444,#dc2626)'
-            : 'linear-gradient(135deg,#3b82f6,#2563eb)');
-
-        const iconBg = isDangerous
-            ? 'linear-gradient(135deg,#ef4444,#dc2626)'
-            : 'linear-gradient(135deg,#3b82f6,#2563eb)';
-
-        const iconSvg = isDangerous
-            ? '<path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z"></path>'
-            : '<path stroke-linecap="round" stroke-linejoin="round" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>';
-
         const overlay = document.createElement('div');
         overlay.id = 'app-confirm-modal';
-        overlay.style.cssText = 'position:fixed;inset:0;z-index:99999;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.6);backdrop-filter:blur(4px);';
+        overlay.className = 'ui-dialog-backdrop ui-confirm';
+        overlay.setAttribute('role', 'alertdialog');
+        overlay.setAttribute('aria-label', title);
 
         // Callers pass plain text (channel names, emails, domains, ...) - escape
         // it before it goes into innerHTML, then turn newlines into breaks.
         const escapedMessage = escapeHtml(message).replace(/\n/g, '<br>');
 
         overlay.innerHTML = `
-            <div style="background:var(--color-bg-primary, #1f2937);border:1px solid var(--color-border, #374151);border-radius:12px;padding:28px;max-width:420px;width:90%;box-shadow:0 25px 50px rgba(0,0,0,0.4);">
-                <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px;">
-                    <div style="width:40px;height:40px;border-radius:10px;background:${iconBg};display:flex;align-items:center;justify-content:center;flex-shrink:0;">
-                        <svg width="20" height="20" fill="none" stroke="white" stroke-width="2" viewBox="0 0 24 24">${iconSvg}</svg>
-                    </div>
-                    <div>
-                        <h3 style="margin:0;font-size:16px;font-weight:600;color:#f3f4f6;">${title}</h3>
-                    </div>
-                </div>
-                <p style="margin:0 0 24px;font-size:14px;color:#d1d5db;line-height:1.5;">${escapedMessage}</p>
-                <div style="display:flex;justify-content:flex-end;gap:10px;">
-                    <button type="button" id="app-confirm-cancel"
-                        style="padding:9px 18px;border-radius:6px;border:1px solid #4b5563;background:transparent;color:#d1d5db;font-size:13px;font-weight:500;cursor:pointer;transition:all 0.15s;"
-                        onmouseover="this.style.background='#374151'" onmouseout="this.style.background='transparent'">
-                        ${cancelText}
-                    </button>
-                    <button type="button" id="app-confirm-ok"
-                        style="padding:9px 18px;border-radius:6px;border:none;background:${gradientColor};color:white;font-size:13px;font-weight:600;cursor:pointer;transition:all 0.15s;"
-                        onmouseover="this.style.opacity='0.9'" onmouseout="this.style.opacity='1'">
-                        ${confirmText}
-                    </button>
+            <div class="ui-dialog ui-dialog-fit ui-dialog-sm">
+                <div class="ui-dialog-head"><h3>${escapeHtml(title)}</h3></div>
+                <div class="ui-dialog-body"><p class="ui-confirm-text">${escapedMessage}</p></div>
+                <div class="ui-dialog-foot">
+                    <button type="button" id="app-confirm-cancel" class="ui-btn">${escapeHtml(cancelText)}</button>
+                    <button type="button" id="app-confirm-ok" class="ui-btn ${isDangerous ? 'ui-btn-danger-solid' : 'ui-btn-primary'}"
+                        ${confirmColor ? `style="background: ${escapeHtml(confirmColor)}"` : ''}>${escapeHtml(confirmText)}</button>
                 </div>
             </div>
         `;
@@ -604,9 +573,15 @@ function showConfirmModal({ title = 'Confirm', message = 'Are you sure?', confir
 
         function cleanup(result) {
             overlay.remove();
+            document.removeEventListener('keydown', onKey);
             document.body.style.overflow = '';
             resolve(result);
         }
+        // Escape cancels, like the other dialogs
+        function onKey(event) {
+            if (event.key === 'Escape') cleanup(false);
+        }
+        document.addEventListener('keydown', onKey);
 
         cancelBtn.addEventListener('click', () => cleanup(false));
         okBtn.addEventListener('click', () => cleanup(true));
