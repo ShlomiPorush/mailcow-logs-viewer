@@ -743,13 +743,14 @@ body { font-family: var(--ui-font); background: var(--ui-bg); color: var(--ui-in
     border: 0; border-radius: var(--ui-radius-sm); background: none; color: var(--ui-side-ink); font: inherit; font-weight: 500;
     text-align: start; cursor: pointer; }
 .ui-nav-item svg, .mobile-menu-item svg { width: 18px; height: 18px; flex: none; color: var(--ui-side-muted); }
-.ui-nav-item:hover, .mobile-menu-item:hover { background: color-mix(in srgb, var(--ui-side-ink) 8%, transparent); }
+/* Hover only where there is a pointer, so a tapped item does not stay grey */
+@media (hover: hover) { .ui-nav-item:hover, .mobile-menu-item:hover { background: color-mix(in srgb, var(--ui-side-ink) 8%, transparent); } }
 .ui-nav-item[aria-current="page"], .mobile-menu-item.active { background: var(--ui-side-on); color: var(--ui-side-on-ink); font-weight: 650; }
 .ui-nav-item[aria-current="page"] svg, .mobile-menu-item.active svg { color: inherit; }
 .ui-nav-count { margin-inline-start: auto; padding: 1px 7px; border-radius: 6px; font-size: 11.5px; font-weight: 700; font-variant-numeric: tabular-nums;
     color: var(--ui-warn); background: color-mix(in srgb, var(--ui-warn) 18%, transparent); }
 .ui-nav-count.is-fail { color: var(--ui-fail); background: color-mix(in srgb, var(--ui-fail) 18%, transparent); }
-.ui-nav-item[aria-current="page"] .ui-nav-count { background: transparent; color: inherit; }
+.ui-nav-item[aria-current="page"] .ui-nav-count, .mobile-menu-item.active .ui-nav-count { background: transparent; color: inherit; }
 
 .ui-side-foot { margin-top: auto; padding: 14px 10px 0; color: var(--ui-side-muted); font-size: 12px; line-height: 1.6; }
 .ui-side-line { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; }
@@ -775,7 +776,8 @@ body { font-family: var(--ui-font); background: var(--ui-bg); color: var(--ui-in
     .ui-shell { grid-template-columns: 72px minmax(0, 1fr); }
     .ui-sidenav { padding: 14px 10px; align-items: center; }
     .ui-brand { padding: 4px 0 14px; }
-    .ui-brand #app-title, .ui-server, .ui-nav-label, .ui-nav-group-label, .ui-side-line { display: none; }
+    /* Only the sidebar rail loses its labels; the phone More sheet keeps them */
+    .ui-brand #app-title, .ui-server, .ui-sidenav .ui-nav-label, .ui-sidenav .ui-nav-group-label, .ui-side-line { display: none; }
     .ui-sidenav .ui-nav-group { align-items: center; }
     .ui-sidenav .ui-nav-item { justify-content: center; width: 48px; height: 42px; padding: 0; }
     .ui-sidenav .ui-nav-count { position: absolute; top: 7px; inset-inline-end: 8px; width: 8px; height: 8px; padding: 0; font-size: 0; border-radius: 50%;
@@ -814,8 +816,10 @@ body { font-family: var(--ui-font); background: var(--ui-bg); color: var(--ui-in
     .mobile-menu { display: block; position: fixed; inset: 0; z-index: 35; background: rgba(0, 0, 0, .4);
         opacity: 0; visibility: hidden; transition: opacity .2s ease, visibility .2s ease; }
     .mobile-menu.active { opacity: 1; visibility: visible; }
-    .mobile-menu-content { position: absolute; inset: auto 0 0 0; max-height: 82vh; overflow-y: auto; display: flex; flex-direction: column; gap: 2px;
-        padding: 8px 12px calc(76px + env(safe-area-inset-bottom)); background: var(--ui-side); border-radius: 20px 20px 0 0;
+    /* The sheet sits on top of the tab bar, so no page hides behind it */
+    .mobile-menu-content { position: absolute; inset: auto 0 calc(64px + env(safe-area-inset-bottom)) 0; max-height: calc(100dvh - 64px - 60px - env(safe-area-inset-bottom));
+        overflow-y: auto; display: flex; flex-direction: column; gap: 2px;
+        padding: 8px 12px 12px; background: var(--ui-side); border-radius: 20px 20px 0 0; border-bottom: 1px solid var(--ui-line);
         transform: translateY(30px); transition: transform .2s ease-out; }
     .mobile-menu-content::before { content: ""; display: block; width: 40px; height: 4px; margin: 4px auto 6px; border-radius: 4px;
         background: var(--ui-side-muted); opacity: .5; }

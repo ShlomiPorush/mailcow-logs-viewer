@@ -484,16 +484,18 @@ function placeShellUtilities() {
     }
 }
 
+// The sidebar and the phone More sheet show the same counters
 function setNavCount(page, count, isFail, title) {
-    const el = document.getElementById(`nav-count-${page}`);
-    if (!el) return;
-    if (count > 0) {
-        el.textContent = count.toLocaleString();
-        el.classList.toggle('is-fail', !!isFail);
-        el.title = title || '';
-        el.classList.remove('hidden');
-    } else {
-        el.classList.add('hidden');
+    for (const el of [document.getElementById(`nav-count-${page}`), document.getElementById(`mobile-nav-count-${page}`)]) {
+        if (!el) continue;
+        if (count > 0) {
+            el.textContent = count.toLocaleString();
+            el.classList.toggle('is-fail', !!isFail);
+            el.title = title || '';
+            el.classList.remove('hidden');
+        } else {
+            el.classList.add('hidden');
+        }
     }
 }
 
