@@ -8,7 +8,7 @@ import asyncio
 import ipaddress
 import dns.asyncresolver
 from datetime import datetime, timezone, timedelta
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Set
 from sqlalchemy import desc
 
 logger = logging.getLogger(__name__)
@@ -73,6 +73,54 @@ def _is_spamhaus_zone(zone: str) -> bool:
     """
     zone = (zone or "").strip().rstrip(".").lower()
     return zone == _SPAMHAUS_DOMAIN or zone.endswith("." + _SPAMHAUS_DOMAIN)
+
+
+def overall_status(results: List[Dict[str, Any]], total: int, ignored: Optional[Set[str]] = None) -> str:
+    """Overall verdict for one host from its per-list results.
+
+    A listing on an ignored list counts as clean. A failed Spamhaus lookup is
+    never reported as "clean": Spamhaus is the list that matters most for
+    delivery, so if it could not be checked the honest answer is "error".
+    """
+    ignored = ignored or set()
+    listed = errors = timeouts = 0
+    spamhaus_failed = False
+    for r in results:
+        if r.get("zone") in ignored:
+            continue
+        if r.get("listed"):
+            listed += 1
+        elif r.get("status") == "timeout":
+            timeouts += 1
+        elif r.get("status") != "clean":
+            errors += 1
+        if _is_spamhaus_zone(r.get("zone", "")) and r.get("status") in ("error", "timeout"):
+            spamhaus_failed = True
+    if listed > 0:
+        return "listed"
+    if spamhaus_failed:
+        return "error"
+    if errors + timeouts > total / 2:
+        return "error"
+    return "clean"
+
+
+def apply_ignored_lists(check: Optional[Dict[str, Any]], ignored: Set[str]) -> Optional[Dict[str, Any]]:
+    """Copy of a check where ignored lists are marked and no longer count as a listing.
+
+    The stored check is never changed, so un-ignoring a list brings its
+    listing back at once without a new scan.
+    """
+    if not check:
+        return check
+    results = [dict(r, ignored=r.get("zone") in ignored) for r in (check.get("results") or [])]
+    out = dict(check, results=results)
+    out["ignored_listed_count"] = sum(1 for r in results if r["ignored"] and r.get("listed"))
+    if ignored and results:
+        out["listed_count"] = sum(1 for r in results if r.get("listed") and not r["ignored"])
+        if check.get("status") in ("listed", "clean", "error"):
+            out["status"] = overall_status(results, check.get("total_blacklists") or len(results), ignored)
+    return out
 
 def applicable_blacklists(ip: str) -> List[Dict[str, str]]:
     """The zones that can actually hold a listing for this address.
@@ -434,8 +482,9 @@ def get_cached_blacklist_check(ip: str) -> Optional[Dict[str, Any]]:
                 logger.info(f"Blacklist configuration changed (stored: {check.total_blacklists}, current: {expected_total}). Invalidating cache.")
                 return None
             
-            # Return cached data
-            return {
+            # Return cached data, with the admin's ignored lists applied
+            from .ignore_lists import load_ignored, IGNORED_BLOCKLISTS_KEY
+            return apply_ignored_lists({
                 "server_ip": check.server_ip,
                 "checked_at": check.checked_at.isoformat() + 'Z',
                 "total_blacklists": check.total_blacklists,
@@ -445,7 +494,7 @@ def get_cached_blacklist_check(ip: str) -> Optional[Dict[str, Any]]:
                 "timeout_count": check.timeout_count,
                 "status": check.status,
                 "results": check.results or []
-            }
+            }, load_ignored(db, IGNORED_BLOCKLISTS_KEY))
     except Exception as e:
         logger.error(f"Error getting cached blacklist check: {e}")
         return None
@@ -696,26 +745,15 @@ async def check_all_blacklists(ip: str) -> Dict[str, Any]:
             x["name"]
         ))
         
-        # Determine overall status.
-        # A failed Spamhaus lookup must never be reported as "clean": Spamhaus
-        # is the RBL that actually matters for deliverability, so if its zones
-        # could not be checked the honest answer is "unknown".
-        spamhaus_failed = [
-            r for r in processed_results
-            if _is_spamhaus_zone(r.get('zone', '')) and r.get('status') in ('error', 'timeout')
-        ]
-        if listed_count > 0:
-            status = "listed"
-        elif spamhaus_failed:
-            status = "error"
+        # Determine overall status (see overall_status for the Spamhaus rule)
+        status = overall_status(processed_results, len(blacklists))
+        if status == "error" and listed_count == 0 and any(
+            _is_spamhaus_zone(r.get('zone', '')) and r.get('status') in ('error', 'timeout') for r in processed_results
+        ):
             logger.warning(
-                "Blacklist check for %s: %d Spamhaus zone(s) could not be checked - "
-                "reporting status 'error' rather than 'clean'", ip, len(spamhaus_failed)
+                "Blacklist check for %s: Spamhaus zone(s) could not be checked - "
+                "reporting status 'error' rather than 'clean'", ip
             )
-        elif error_count + timeout_count > len(blacklists) / 2:
-            status = "error"
-        else:
-            status = "clean"
 
         data = {
             "server_ip": ip,
@@ -729,12 +767,14 @@ async def check_all_blacklists(ip: str) -> Dict[str, Any]:
             "results": processed_results
         }
         
-        # Save to database
+        # Save to database (as checked; ignored lists are applied on read)
         await asyncio.to_thread(save_blacklist_check, data)
         
         logger.info(f"Blacklist check complete: {listed_count} listed, {clean_count} clean, {error_count} errors")
         
-        return data
+        from .ignore_lists import ignored_now, IGNORED_BLOCKLISTS_KEY
+        ignored = await asyncio.to_thread(ignored_now, IGNORED_BLOCKLISTS_KEY)
+        return apply_ignored_lists(data, ignored)
         
     finally:
         if not _batch_state.get("active", False):
@@ -808,4 +848,4 @@ def get_listed_blacklists() -> List[Dict[str, Any]]:
     if not cached or not cached.get("results"):
         return []
     
-    return [r for r in cached["results"] if r.get("listed")]
+    return [r for r in cached["results"] if r.get("listed") and not r.get("ignored")]

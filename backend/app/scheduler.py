@@ -1786,7 +1786,7 @@ async def _run_check_monitored_hosts(force: bool, send_notification: bool):
             for host_data in listed_hosts:
                 results = host_data.get('results', {}).get('results', [])
                 for res in results:
-                    if res.get('listed') and res.get('name') not in IGNORED_NOTIFICATION_BLACKLISTS:
+                    if res.get('listed') and not res.get('ignored') and res.get('name') not in IGNORED_NOTIFICATION_BLACKLISTS:
                         actionable_listed_hosts.append(host_data)
                         break
             actionable_count = len(actionable_listed_hosts)
@@ -1839,7 +1839,7 @@ async def _run_check_monitored_hosts(force: bool, send_notification: bool):
                                 extra_info = f" ({ip})"
 
                         # Get specific blacklists
-                        listed_bls = [r for r in results.get('results', []) if r.get('listed')]
+                        listed_bls = [r for r in results.get('results', []) if r.get('listed') and not r.get('ignored')]
                         bl_text_list = "\n".join([f"  - {bl['name']} ({bl['zone']})" for bl in listed_bls])
                         
                         text_content += f"Host: {display_name}{extra_info}\n"
