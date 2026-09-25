@@ -23,7 +23,7 @@
     <!-- Utility classes still used by the markup, compiled once
          (.github/scripts/build-utilities-css.sh); the design system comes last -->
     <link rel="stylesheet" href="/static/assets/css/utilities.css?v=1">
-    <link rel="stylesheet" href="/static/assets/css/ui.css?v=26">
+    <link rel="stylesheet" href="/static/assets/css/ui.css?v=27">
     <style>
         .tab-active {
             border-bottom: 2px solid #3b82f6;
@@ -1122,208 +1122,97 @@
 
             <!-- DMARC Tab -->
             <div id="content-dmarc" class="tab-content hidden ui-page">
-                <!-- Sub-navigation -->
-                <div class="mb-6">
-                    <div class="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
-                        <div class="text-center lg:text-left flex items-center gap-4 justify-center lg:justify-start">
-                            <div>
-                                <div class="flex items-center justify-center lg:justify-start gap-2">
-                                    <h1 id="dmarc-page-title" class="ui-h1">
-                                        DMARC Reports</h1>
-                                    <button onclick="showHelpModal('DMARC')" class="ui-icon-btn ui-help-btn"
+                <div class="ui-page-head">
+                    <div>
+                        <h1 id="dmarc-page-title" class="ui-h1">DMARC Reports</h1>
+                        <p id="dmarc-subtitle" class="ui-muted">What receivers report about mail sent in your domains' name <button onclick="showHelpModal('DMARC')" class="ui-icon-btn ui-help-btn"
                                         title="Help - DMARC Information">
                                         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                                                 d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
                                         </svg>
-                                    </button>
-                                </div>
-                                <p id="dmarc-subtitle" class="text-gray-600 dark:text-gray-400 mt-1">Monitor Domain
-                                    Authentication and Global Delivery Reports</p>
-                            </div>
-                        </div>
-                        <div id="dmarc-header-actions"
-                            class="flex flex-row items-start gap-3 justify-end w-full lg:w-auto">
-                            <label id="dmarc-upload-btn"
-                                class="hidden cursor-pointer inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 transition shadow-sm">
-                                <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                        d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12">
-                                    </path>
-                                </svg>
-                                Upload Report
-                                <input type="file" id="dmarc-file-input" class="hidden" accept=".xml,.gz,.zip,.json"
-                                    onchange="uploadDmarcReport(event)">
-                            </label>
-                            <div id="dmarc-sync-container" class="hidden flex flex-col items-center lg:items-end gap-1">
-                                <button id="dmarc-sync-btn" onclick="triggerDmarcSync()"
-                                    class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-green-600 hover:bg-green-700 transition shadow-sm">
-                                    <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                            d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15">
-                                        </path>
-                                    </svg>
-                                    <span id="dmarc-sync-btn-text">Sync from IMAP</span>
-                                </button>
-                                <div id="dmarc-last-sync-info"
-                                    class="text-xs text-gray-500 dark:text-gray-400 text-right">
-                                </div>
-                            </div>
-                        </div>
+                                    </button></p>
                     </div>
-
-                    <!-- Breadcrumb -->
-                    <div id="dmarc-breadcrumb" class="text-sm text-gray-500 dark:text-gray-400">
+                    <div id="dmarc-header-actions" class="ui-head-tools">
+                        <label id="dmarc-upload-btn" class="hidden ui-btn">
+                            <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path></svg>
+                            Upload Report
+                            <input type="file" id="dmarc-file-input" class="hidden" accept=".xml,.gz,.zip,.json"
+                                onchange="uploadDmarcReport(event)">
+                        </label>
+                        <div id="dmarc-sync-container" class="hidden ui-dmarc-sync">
+                            <button id="dmarc-sync-btn" onclick="triggerDmarcSync()" class="ui-btn ui-btn-primary">
+                                <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+                                <span id="dmarc-sync-btn-text">Sync from IMAP</span>
+                            </button>
+                            <div id="dmarc-last-sync-info" class="ui-dmarc-sync-info"></div>
+                        </div>
                     </div>
                 </div>
 
+                <!-- Breadcrumb -->
+                <nav id="dmarc-breadcrumb" class="ui-crumbs hidden" aria-label="Breadcrumb"></nav>
+
                 <!-- Domains List View -->
-                <div id="dmarc-domains-view">
-                    <!-- Stats Cards -->
+                <div id="dmarc-domains-view" class="ui-sec-block">
                     <div id="dmarc-main-stats-container"></div>
 
                     <!-- Insights (policy recommendations + new-source detection) -->
-                    <div id="dmarc-insights-container" class="mb-6 hidden"></div>
+                    <div id="dmarc-insights-container" class="hidden"></div>
 
-                    <!-- Domains Table -->
-                    <div
-                        class="ui-panel overflow-hidden">
-                        <table class="min-w-full">
-                            <thead class="hidden md:table-header-group bg-gray-100 dark:bg-gray-700/50">
-                                <tr>
-                                    <th class="px-6 py-4 text-left text-sm font-bold text-gray-600 dark:text-gray-400">
-                                        Domain</th>
-                                    <th class="px-6 py-4 text-left text-sm font-bold text-gray-600 dark:text-gray-400">
-                                        Activity Period</th>
-                                    <th
-                                        class="px-6 py-4 text-center text-sm font-bold text-gray-600 dark:text-gray-400">
-                                        Reports</th>
-                                    <th class="px-6 py-4 text-left text-sm font-bold text-gray-600 dark:text-gray-400">
-                                        Messages (30d)</th>
-                                    <th class="px-6 py-4 text-left text-sm font-bold text-gray-600 dark:text-gray-400">
-                                        Unique IPs</th>
-                                    <th class="px-6 py-4 text-left text-sm font-bold text-gray-600 dark:text-gray-400">
-                                        DMARC Pass</th>
-                                    <th class="px-6 py-4 text-left text-sm font-bold text-gray-600 dark:text-gray-400">
-                                        TLS Success</th>
-                                </tr>
-                            </thead>
-                            <tbody id="dmarc-domains-list"
-                                class="block md:table-row-group divide-y divide-gray-200 dark:divide-gray-700">
-                            </tbody>
-                        </table>
-                    </div>
+                    <div id="dmarc-domains-list" class="ui-table ui-stack" style="--ui-cols: minmax(180px, 1.6fr) minmax(120px, 1fr) 90px 120px 90px minmax(120px, 1fr) minmax(120px, 1fr); --ui-table-min: 900px"></div>
 
-                    <!-- Manage Reports Link -->
-                    <div id="dmarc-manage-reports-link" class="hidden mt-4 text-center text-sm">
-                        <!-- Populated by JavaScript -->
-                    </div>
+                    <div id="dmarc-manage-reports-link" class="hidden ui-dmarc-manage"></div>
                 </div>
 
                 <!-- Domain Overview View (hidden by default) -->
-                <div id="dmarc-overview-view" class="hidden">
-                    <!-- Overview Stats -->
-                    <div id="dmarc-overview-stats-container"></div>
+                <div id="dmarc-overview-view" class="hidden ui-sec-block">
+                    <div id="dmarc-overview-stats-container" class="ui-sec-block"></div>
 
-                    <!-- Chart -->
-                    <div class="ui-panel p-6 mb-8 relative h-80">
-                        <h3 class="text-lg font-medium text-gray-900 dark:text-white mb-4">Email Volume (Last 30 Days)
-                        </h3>
-                        <canvas id="dmarc-chart"></canvas>
-                    </div>
+                    <section class="ui-panel">
+                        <div class="ui-panel-head">Email Volume (Last 30 Days)</div>
+                        <div class="ui-chart-body ui-dmarc-chart"><canvas id="dmarc-chart"></canvas></div>
+                    </section>
 
                     <!-- Sub-tabs: Reports | Sources | TLS Reports -->
-                    <div class="ui-panel">
-                        <div class="border-b border-gray-200 dark:border-gray-700 overflow-x-auto">
-                            <div class="flex space-x-4 px-4 min-w-max">
-                                <button onclick="dmarcSwitchSubTab('reports')" id="dmarc-subtab-reports"
-                                    class="modal-tab-sm active">
-                                    Daily Reports
-                                </button>
-                                <button onclick="dmarcSwitchSubTab('sources')" id="dmarc-subtab-sources"
-                                    class="modal-tab-sm">
-                                    Source IPs
-                                </button>
-                                <button onclick="dmarcSwitchSubTab('tls')" id="dmarc-subtab-tls" class="modal-tab-sm">
-                                    TLS Reports
-                                </button>
-                            </div>
+                    <section class="ui-panel">
+                        <div class="ui-tabs" role="tablist">
+                            <button onclick="dmarcSwitchSubTab('reports')" id="dmarc-subtab-reports" class="modal-tab active" role="tab" aria-selected="true">Daily Reports</button>
+                            <button onclick="dmarcSwitchSubTab('sources')" id="dmarc-subtab-sources" class="modal-tab" role="tab" aria-selected="false">Source IPs</button>
+                            <button onclick="dmarcSwitchSubTab('tls')" id="dmarc-subtab-tls" class="modal-tab" role="tab" aria-selected="false">TLS Reports</button>
                         </div>
-
-                        <!-- Reports Tab Content -->
-                        <div id="dmarc-reports-content" class="p-6">
-                            <div id="dmarc-reports-list" class="space-y-4">
-                                <div class="ui-loading"><div class="loading"></div><p>Loading reports...</p></div>
-                            </div>
+                        <div id="dmarc-reports-content" class="ui-dmarc-tab">
+                            <div id="dmarc-reports-list"><div class="ui-loading"><div class="loading"></div><p>Loading reports...</p></div></div>
                         </div>
-
-                        <!-- Sources Tab Content -->
-                        <div id="dmarc-sources-content" class="p-6 hidden">
-                            <div id="dmarc-sources-list">
-                                <div class="ui-loading"><div class="loading"></div><p>Loading sources...</p></div>
-                            </div>
+                        <div id="dmarc-sources-content" class="ui-dmarc-tab hidden">
+                            <div id="dmarc-sources-list"><div class="ui-loading"><div class="loading"></div><p>Loading sources...</p></div></div>
                         </div>
-
-                        <!-- TLS Reports Tab Content -->
-                        <div id="dmarc-tls-content" class="p-6 hidden">
-                            <div id="dmarc-tls-list">
-                                <div class="ui-loading"><div class="loading"></div><p>Loading TLS reports...</p></div>
-                            </div>
+                        <div id="dmarc-tls-content" class="ui-dmarc-tab hidden">
+                            <div id="dmarc-tls-list" class="ui-sec-block"><div class="ui-loading"><div class="loading"></div><p>Loading TLS reports...</p></div></div>
                         </div>
-                    </div>
+                    </section>
                 </div>
 
                 <!-- Report Details View (hidden by default) -->
-                <div id="dmarc-report-details-view" class="hidden">
-                    <!-- Stats -->
+                <div id="dmarc-report-details-view" class="hidden ui-sec-block">
                     <div id="report-details-stats-container"></div>
-
-                    <!-- Sources Table -->
-                    <div class="ui-panel">
-                        <div class="ui-panel-head">
-                            <h3 class="text-lg font-medium text-gray-900 dark:text-white">Sources</h3>
-                        </div>
-                        <div class="overflow-x-auto">
-                            <div id="report-detail-sources-list">
-                                <div class="ui-loading"><div class="loading"></div><p>Loading sources...</p></div>
-                            </div>
-                        </div>
-                    </div>
+                    <div class="ui-list-head"><h2 class="ui-h2">Sources</h2></div>
+                    <div id="report-detail-sources-list"><div class="ui-loading"><div class="loading"></div><p>Loading sources...</p></div></div>
                 </div>
 
                 <!-- Source Details View (hidden by default) -->
-                <div id="dmarc-source-details-view" class="hidden">
-                    <!-- Source Info Header -->
-                    <div class="ui-panel p-6 mb-6">
-                        <div class="flex items-start gap-4">
-                            <img id="source-detail-flag" src="" alt="" class="w-12 h-8 object-cover rounded shadow"
-                                style="border: 1px solid rgba(0,0,0,0.1);">
-                            <div class="flex-1">
-                                <h3 id="source-detail-name"
-                                    class="text-xl font-semibold text-gray-900 dark:text-white mb-1">-</h3>
-                                <p id="source-detail-ip" class="text-sm text-gray-600 dark:text-gray-400 mb-2">-</p>
-                                <div class="flex flex-wrap gap-4 text-sm text-gray-600 dark:text-gray-400">
-                                    <span id="source-detail-location">-</span>
-                                    <span id="source-detail-asn">-</span>
-                                </div>
-                            </div>
+                <div id="dmarc-source-details-view" class="hidden ui-sec-block">
+                    <section class="ui-panel ui-dmarc-source">
+                        <img id="source-detail-flag" src="" alt="" class="ui-flag-lg">
+                        <div>
+                            <h3 id="source-detail-name" class="ui-h2">-</h3>
+                            <p id="source-detail-ip" class="ui-mono">-</p>
+                            <p class="ui-muted"><span id="source-detail-location">-</span>, <span id="source-detail-asn">-</span></p>
                         </div>
-                    </div>
-
-                    <!-- Stats -->
+                    </section>
                     <div id="source-details-stats-container"></div>
-
-                    <!-- Envelope From Groups Table -->
-                    <div class="ui-panel">
-                        <div class="ui-panel-head">
-                            <h3 class="text-lg font-medium text-gray-900 dark:text-white">Email Details</h3>
-                        </div>
-                        <div class="overflow-x-auto">
-                            <div id="source-detail-envelope-list">
-                                <div class="ui-loading"><div class="loading"></div><p>Loading details...</p></div>
-                            </div>
-                        </div>
-                    </div>
+                    <div class="ui-list-head"><h2 class="ui-h2">Email Details</h2></div>
+                    <div id="source-detail-envelope-list"><div class="ui-loading"><div class="loading"></div><p>Loading details...</p></div></div>
                 </div>
             </div>
 
@@ -1891,7 +1780,7 @@
     <script src="/static/app.js?v=49"></script>
     <script src="/static/export.js?v=1"></script>
     <script src="/static/message-details.js?v=6"></script>
-    <script src="/static/dmarc.js?v=5"></script>
+    <script src="/static/dmarc.js?v=6"></script>
     <script src="/static/logs-viewer.js?v=3"></script>
     <script src="/static/settings.js?v=19"></script>
     <script src="/static/domains.js?v=5"></script>
@@ -1902,56 +1791,27 @@
     <script src="/static/spam_filter.js?v=5"></script>
 
     <!-- DMARC Sync History Modal -->
-    <div id="dmarc-sync-history-modal"
-        class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
-        <div class="bg-white dark:bg-gray-800 rounded-lg max-w-6xl w-full max-h-[80vh] flex flex-col">
-            <div
-                class="flex-shrink-0 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-6 py-4 flex justify-between items-center rounded-t-lg">
-                <h3 class="text-lg font-semibold text-gray-900 dark:text-white">IMAP Sync History</h3>
-                <button onclick="closeDmarcSyncHistoryModal()"
-                    class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200">
-                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12">
-                        </path>
-                    </svg>
-                </button>
+    <div id="dmarc-sync-history-modal" class="hidden ui-dialog-backdrop" role="dialog" aria-label="IMAP Sync History">
+        <div class="ui-dialog ui-dialog-fit">
+            <div class="ui-dialog-head">
+                <h3>IMAP Sync History</h3>
+                <button onclick="closeDmarcSyncHistoryModal()" class="ui-icon-btn" title="Close" aria-label="Close"><svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg></button>
             </div>
-            <div class="flex-1 overflow-y-auto p-6">
-                <div id="dmarc-sync-history-content">
-                    <div class="text-center py-12">
-                        <div class="loading mx-auto mb-4"></div>
-                        <p class="text-gray-500 dark:text-gray-400">Loading sync history...</p>
-                    </div>
-                </div>
+            <div class="ui-dialog-body">
+                <div id="dmarc-sync-history-content"><div class="ui-loading"><div class="loading"></div><p>Loading sync history...</p></div></div>
             </div>
         </div>
     </div>
 
     <!-- DMARC Reports Management Modal -->
-    <div id="dmarc-reports-management-modal"
-        class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
-        <div class="bg-white dark:bg-gray-800 rounded-lg max-w-6xl w-full max-h-[85vh] flex flex-col">
-            <div
-                class="flex-shrink-0 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-6 py-4 flex justify-between items-center rounded-t-lg">
-                <div>
-                    <h3 class="text-lg font-semibold text-gray-900 dark:text-white">Manage Reports</h3>
-                    <p class="text-sm text-gray-500 dark:text-gray-400">View and manage all DMARC and TLS reports</p>
-                </div>
-                <button onclick="closeReportsManagementModal()"
-                    class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200">
-                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12">
-                        </path>
-                    </svg>
-                </button>
+    <div id="dmarc-reports-management-modal" class="hidden ui-dialog-backdrop" role="dialog" aria-label="Manage Reports">
+        <div class="ui-dialog ui-dialog-fit">
+            <div class="ui-dialog-head">
+                <h3>Manage Reports</h3> <span class="ui-muted">View and manage all DMARC and TLS reports</span>
+                <button onclick="closeReportsManagementModal()" class="ui-icon-btn" title="Close" aria-label="Close"><svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg></button>
             </div>
-            <div class="flex-1 overflow-y-auto p-6">
-                <div id="dmarc-reports-management-content">
-                    <div class="text-center py-12">
-                        <div class="loading mx-auto mb-4"></div>
-                        <p class="text-gray-500 dark:text-gray-400">Loading reports...</p>
-                    </div>
-                </div>
+            <div class="ui-dialog-body">
+                <div id="dmarc-reports-management-content"><div class="ui-loading"><div class="loading"></div><p>Loading reports...</p></div></div>
             </div>
         </div>
     </div>
