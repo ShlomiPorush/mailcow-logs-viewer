@@ -1170,7 +1170,7 @@ function renderSecurityOverview() {
     };
     const decide = states.filter(st => st.key === 'open').length;
     setKpi('security-kpi-failed', (data.failed_logins || 0).toLocaleString());
-    setKpi('security-kpi-banned', known ? fail2banActiveBans.length.toLocaleString() : '-');
+    setKpi('security-kpi-banned', known ? (fail2banTotalBans ?? fail2banActiveBans.length).toLocaleString() : '-');
     setKpi('security-kpi-sources', (data.source_count || 0).toLocaleString());
     setKpi('security-kpi-decide', known ? decide.toLocaleString() : '-', decide > 0 ? 'ui-fail' : '');
 
@@ -2169,6 +2169,8 @@ async function loadNetfilterLogs(page = 1) {
 
 let fail2banSettingsLoaded = false;
 let fail2banActiveBans = null;
+// Permanent plus temporary bans, as the Active Bans list shows them
+let fail2banTotalBans = null;
 let fail2banBlacklist = [];
 let fail2banWhitelist = [];
 
@@ -2191,6 +2193,9 @@ async function loadFail2BanSettings() {
         const canEdit = mailcowRwConfigured;
         fail2banSettingsLoaded = true;
         fail2banActiveBans = data.active_bans || [];
+        // Same count as the Active Bans list: permanent bans plus the temporary ones not among them
+        const permNetworks = new Set((data.perm_bans || []).map(ban => ban.network || ban.ip));
+        fail2banTotalBans = (data.perm_bans || []).length + fail2banActiveBans.filter(ban => !permNetworks.has(ban.network)).length;
 
         // Store blacklist entries globally for button logic
         const rawBlacklist = data.blacklist || '';

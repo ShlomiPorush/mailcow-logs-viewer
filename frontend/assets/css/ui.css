@@ -598,13 +598,14 @@
 
 /* One event per line; the raw log line opens on demand */
 .ui-ev-list { display: grid; }
-.ui-ev-row { display: grid; grid-template-columns: 64px minmax(120px, 1fr) minmax(0, 1.5fr) 90px minmax(0, 1.2fr) auto; align-items: center; gap: 4px 12px;
+.ui-ev-row { display: grid; grid-template-columns: 64px minmax(120px, 1fr) minmax(0, 1.5fr) 90px minmax(0, 1.2fr) 120px; align-items: center; gap: 4px 12px;
     padding: 8px var(--ui-pad-x) 8px calc(var(--ui-pad-x) - 3px); border-top: 1px solid var(--ui-line); border-inline-start: 3px solid transparent; font-size: var(--ui-fs-sm); }
 .ui-ev-row > * { min-width: 0; }
 .ui-ev-head { color: var(--ui-muted); font-size: 12px; font-weight: 650; border-top: 0; }
 .ui-ev-account, .ui-ev-where { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ui-ev-where { display: flex; align-items: center; gap: 6px; color: var(--ui-muted); }
 .ui-ev-where img { flex: none; }
+.ui-ev-row .ui-st-acts { flex-wrap: nowrap; }
 .ui-ev-toggle svg { transition: transform .15s ease; }
 .ui-ev-toggle[aria-expanded="true"] svg { transform: rotate(180deg); }
 .ui-ev-detail { grid-column: 1 / -1; display: grid; gap: 4px; padding: 8px 10px; border-radius: var(--ui-radius-sm); background: var(--ui-bg); }
