@@ -89,11 +89,7 @@ async function loadRspamdMaps() {
         }
         
         if (data.error) {
-            container.innerHTML = `
-                <div class="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-4 text-center">
-                    <p class="text-red-700 dark:text-red-300">${escapeHtml(data.error)}</p>
-                </div>
-            `;
+            container.innerHTML = `<p class="ui-empty ui-panel ui-text-fail">${escapeHtml(data.error)}</p>`;
             return;
         }
         
@@ -107,183 +103,139 @@ async function loadRspamdMaps() {
 
 function renderRspamdMapsList(maps, rwKeyConfigured) {
     const container = document.getElementById('rspamd-maps-list');
-    
+
     // Group maps by category
     const categories = {
-        sender: { label: 'Sender Rules', icon: '📤', maps: [] },
-        recipient: { label: 'Recipient Rules', icon: '📥', maps: [] },
-        content: { label: 'Content Rules', icon: '📝', maps: [] },
-        system: { label: 'System', icon: '⚙️', maps: [] }
+        sender: { label: 'Sender Rules', maps: [] },
+        recipient: { label: 'Recipient Rules', maps: [] },
+        content: { label: 'Content Rules', maps: [] },
+        system: { label: 'System', maps: [] }
     };
-    
+
     maps.forEach(m => {
         const cat = categories[m.category] || categories.system;
         cat.maps.push(m);
     });
-    
+
     let html = '';
-    
-    for (const [key, cat] of Object.entries(categories)) {
+
+    for (const cat of Object.values(categories)) {
         if (cat.maps.length === 0) continue;
-        
+
         html += `
-            <div class="mb-6">
-                <h3 class="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-3 flex items-center gap-2">
-                    <span>${cat.icon}</span> ${cat.label}
-                </h3>
-                <div class="space-y-2">
+            <section class="ui-sec-block">
+                <div class="ui-list-head"><h2 class="ui-h2">${cat.label}</h2> <span class="ui-count">${cat.maps.length}</span></div>
+                <div class="ui-table ui-stack ui-map-table">
                     ${cat.maps.map(m => {
                         // Use our metadata description, not the rspamd technical description
                         const displayDesc = _getMapMetaDescription(m.filename) || m.description || '';
                         return `
-                        <div class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg hover:border-blue-300 dark:hover:border-blue-600 transition cursor-pointer"
-                             onclick="openMapEditor('${escapeJsArg(m.filename)}')">
-                            <div class="p-4 flex items-center justify-between">
-                                <div class="flex-1 min-w-0">
-                                    <div class="flex items-center gap-2 mb-1">
-                                        <h4 class="font-medium text-gray-900 dark:text-white truncate">${escapeHtml(m.name)}</h4>
-                                        ${m.managed_by_suppression ? '<span class="px-2 py-0.5 text-xs bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 rounded-full">Auto-managed</span>' : ''}
-                                    </div>
-                                    <p class="text-sm text-gray-500 dark:text-gray-400 truncate">${escapeHtml(displayDesc)}</p>
-                                </div>
-                                <div class="flex items-center gap-3 ml-4 flex-shrink-0">
-                                    ${m.loaded !== undefined ? `
-                                        <span class="inline-flex items-center gap-1 text-xs ${m.loaded ? 'text-green-600 dark:text-green-400' : 'text-gray-400'}">
-                                            <span class="w-2 h-2 rounded-full ${m.loaded ? 'bg-green-500' : 'bg-gray-300'}"></span>
-                                            ${m.loaded ? 'Loaded' : 'Not loaded'}
-                                        </span>
-                                    ` : ''}
-                                    <svg class="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
-                                    </svg>
-                                </div>
+                        <div class="ui-tr" onclick="openMapEditor('${escapeJsArg(m.filename)}')">
+                            <div class="ui-td ui-q-who">
+                                <div>${escapeHtml(m.name)} ${m.managed_by_suppression ? uiTag('Auto-managed', 'info') : ''}</div>
+                                <small title="${escapeHtml(displayDesc)}">${escapeHtml(displayDesc)}</small>
                             </div>
+                            <span class="ui-td ui-mono ui-muted">${escapeHtml(m.filename)}</span>
+                            <span class="ui-td">${m.loaded !== undefined
+                                ? `<i class="ui-mdot ${m.loaded ? 'ui-mdot-ok' : ''}"></i> ${m.loaded ? 'Loaded' : 'Not loaded'}`
+                                : ''}</span>
+                            <span class="ui-td ui-td-end ui-muted" aria-hidden="true">›</span>
                         </div>
                     `}).join('')}
                 </div>
-            </div>
+            </section>
         `;
     }
-    
+
     if (!rwKeyConfigured) {
         html = `<div class="ui-list-note ui-flush">${uiLocked('Read-Only Mode', '<code>MAILCOW_API_KEY_RW</code> is not configured. You can view maps but cannot save changes.')}</div>` + html;
     }
-    
+
     container.innerHTML = html;
 }
 
 async function openMapEditor(filename) {
     const container = document.getElementById('rspamd-maps-list');
-    
-    container.innerHTML = `
-        <div class="text-center py-8">
-            <div class="loading mx-auto mb-4"></div>
-            <p class="text-gray-500 dark:text-gray-400">Loading map content...</p>
-        </div>
-    `;
-    
+
+    container.innerHTML = '<div class="ui-loading"><div class="loading"></div><p>Loading map content...</p></div>';
+
     try {
         const response = await authenticatedFetch(`/api/rspamd/maps/${filename}`);
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        
+
         const data = await response.json();
         const meta = data.metadata || {};
-        
+
         container.innerHTML = `
-            <div class="mb-4">
-                <button onclick="loadRspamdMaps()" class="inline-flex items-center gap-1.5 text-sm text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300">
-                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path>
-                    </svg>
-                    Back to Maps List
-                </button>
+            <div class="ui-list-head">
+                <button onclick="loadRspamdMaps()" class="ui-btn ui-btn-sm">← Back to Maps List</button>
             </div>
-            
-            <div class="bg-white dark:bg-gray-800 rounded-lg shadow dark:shadow-gray-900/30 overflow-hidden">
-                <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex flex-wrap items-center justify-between gap-2">
+
+            <section class="ui-panel">
+                <div class="ui-panel-head ui-rl-head">
                     <div>
-                        <h3 class="text-lg font-semibold text-gray-900 dark:text-white">${escapeHtml(meta.name || filename)}</h3>
-                        <p class="text-sm text-gray-500 dark:text-gray-400">${escapeHtml(meta.description || '')}</p>
-                        <p class="text-xs text-gray-400 dark:text-gray-500 font-mono mt-1">${escapeHtml(filename)}</p>
+                        <h3 class="ui-h2">${escapeHtml(meta.name || filename)}</h3>
+                        <p class="ui-muted">${escapeHtml(meta.description || '')}</p>
+                        <p class="ui-mono ui-muted">${escapeHtml(filename)}</p>
                     </div>
-                    <div class="flex items-center gap-2">
-                        <span id="map-entry-count" class="text-sm text-gray-500 dark:text-gray-400">${data.entry_count} entries</span>
+                    <div class="ui-rl-tools">
+                        <span id="map-entry-count" class="ui-muted">${data.entry_count} entries</span>
                         <span id="map-validation-status"></span>
                     </div>
                 </div>
-                <div class="p-6">
+                <div class="ui-map-body">
                     ${meta.supports_regex ? `
-                        <div class="mb-4">
-                            <button onclick="toggleRegexWizard()" id="regex-wizard-toggle" class="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium rounded-lg border border-blue-300 dark:border-blue-600 text-blue-700 dark:text-blue-300 bg-blue-50 dark:bg-blue-900/20 hover:bg-blue-100 dark:hover:bg-blue-900/40 transition">
-                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path>
-                                </svg>
-                                Regex Wizard
-                            </button>
-                            <div id="regex-wizard-panel" class="hidden mt-3 p-4 bg-gradient-to-br from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
-                                <div class="flex items-center justify-between mb-3">
-                                    <h4 class="text-sm font-semibold text-blue-800 dark:text-blue-200">Regex Pattern Generator</h4>
-                                    <button onclick="toggleRegexWizard()" class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">
-                                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                        <div>
+                            <button onclick="toggleRegexWizard()" id="regex-wizard-toggle" class="ui-btn ui-btn-sm">+ Regex Wizard</button>
+                            <div id="regex-wizard-panel" class="hidden ui-wizard">
+                                <div class="ui-list-head">
+                                    <h4 class="ui-md-h">Regex Pattern Generator</h4>
+                                    <button onclick="toggleRegexWizard()" class="ui-icon-btn ui-head-actions" title="Close" aria-label="Close">
+                                        <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
                                     </button>
                                 </div>
-                                <div class="flex flex-col sm:flex-row gap-3">
-                                    <div class="flex-shrink-0">
-                                        <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Type</label>
-                                        <select id="regex-wizard-type" onchange="updateRegexWizardPreview()" class="w-full sm:w-40 px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-lg">
+                                <div class="ui-wizard-row">
+                                    <label class="ui-wizard-type"><span class="ui-label">Type</span>
+                                        <select id="regex-wizard-type" onchange="updateRegexWizardPreview()" class="ui-select">
                                             <option value="email">Exact Email</option>
                                             <option value="domain">Domain</option>
                                             <option value="tld">TLD</option>
                                             <option value="keyword">Keyword</option>
                                         </select>
-                                    </div>
-                                    <div class="flex-1">
-                                        <label id="regex-wizard-input-label" class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Email address</label>
-                                        <input type="text" id="regex-wizard-input" oninput="updateRegexWizardPreview()" placeholder="user@example.com" class="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-lg" />
-                                    </div>
-                                    <div class="flex-shrink-0 flex items-end">
-                                        <button onclick="regexWizardAdd()" id="regex-wizard-add-btn" class="px-4 py-2 text-sm bg-blue-600 hover:bg-blue-700 text-white rounded-lg disabled:opacity-50 disabled:cursor-not-allowed" disabled>Add</button>
-                                    </div>
+                                    </label>
+                                    <label class="ui-wizard-value"><span id="regex-wizard-input-label" class="ui-label">Email address</span>
+                                        <input type="text" id="regex-wizard-input" oninput="updateRegexWizardPreview()" placeholder="user@example.com" class="ui-input" />
+                                    </label>
+                                    <button onclick="regexWizardAdd()" id="regex-wizard-add-btn" class="ui-btn ui-btn-primary" disabled>Add</button>
                                 </div>
-                                <div id="regex-wizard-preview" class="mt-3 hidden">
-                                    <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Generated pattern</label>
-                                    <div class="flex items-center gap-2">
-                                        <code id="regex-wizard-result" class="flex-1 px-3 py-2 text-sm font-mono bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-lg text-green-700 dark:text-green-400 break-all"></code>
-                                    </div>
-                                    <p id="regex-wizard-explain" class="mt-1 text-xs text-gray-500 dark:text-gray-400"></p>
+                                <div id="regex-wizard-preview" class="hidden">
+                                    <span class="ui-label">Generated pattern</span>
+                                    <code id="regex-wizard-result" class="ui-wizard-result"></code>
+                                    <p id="regex-wizard-explain" class="ui-muted"></p>
                                 </div>
                             </div>
                         </div>
                     ` : ''}
-                    <textarea id="map-editor-content" 
-                        class="w-full h-64 font-mono text-sm border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-lg p-4 focus:ring-blue-500 focus:border-blue-500"
+                    <textarea id="map-editor-content" class="ui-textarea ui-map-editor"
                         placeholder="Enter entries, one per line..."
                         oninput="onMapContentChange('${escapeJsArg(filename)}')">${escapeHtml(data.content || '')}</textarea>
-                    <div id="map-validation-errors" class="mt-2 hidden"></div>
-                    <div class="flex items-center justify-between mt-4">
-                        <p class="text-xs text-gray-400 dark:text-gray-500">
-                            Lines starting with # are comments. Empty lines are ignored.
-                        </p>
-                        <div class="flex items-center gap-2">
-                            <button onclick="validateMapContent('${escapeJsArg(filename)}')" class="px-4 py-2 text-sm bg-gray-200 hover:bg-gray-300 dark:bg-gray-600 dark:hover:bg-gray-500 text-gray-700 dark:text-gray-300 rounded-lg">
-                                Validate
-                            </button>
-                            <button onclick="saveMapContent('${escapeJsArg(filename)}')" id="map-save-btn" class="px-4 py-2 text-sm bg-blue-600 hover:bg-blue-700 text-white rounded-lg disabled:opacity-50 disabled:cursor-not-allowed">
-                                Save Changes
-                            </button>
+                    <div id="map-validation-errors" class="hidden ui-map-errors"></div>
+                    <div class="ui-map-foot">
+                        <p class="ui-muted">Lines starting with # are comments. Empty lines are ignored.</p>
+                        <div class="ui-row-actions">
+                            <button onclick="validateMapContent('${escapeJsArg(filename)}')" class="ui-btn">Validate</button>
+                            <button onclick="saveMapContent('${escapeJsArg(filename)}')" id="map-save-btn" class="ui-btn ui-btn-primary">Save Changes</button>
                         </div>
                     </div>
                 </div>
-            </div>
+            </section>
         `;
-        
+
     } catch (error) {
         console.error('Failed to load map content:', error);
         container.innerHTML = `
-            <div class="mb-4">
-                <button onclick="loadRspamdMaps()" class="inline-flex items-center gap-1.5 text-sm text-blue-600 hover:text-blue-800">
-                    ← Back to Maps List
-                </button>
+            <div class="ui-list-head">
+                <button onclick="loadRspamdMaps()" class="ui-btn ui-btn-sm">← Back to Maps List</button>
             </div>
             <p class="ui-empty ui-text-fail">Failed to load map: ${escapeHtml(error.message)}</p>
         `;
@@ -293,7 +245,7 @@ async function openMapEditor(filename) {
 function onMapContentChange(filename) {
     const statusEl = document.getElementById('map-validation-status');
     if (statusEl) {
-        statusEl.innerHTML = '<span class="text-yellow-600 dark:text-yellow-400 text-xs">Modified</span>';
+        statusEl.innerHTML = uiTag('Modified', 'warn');
     }
 }
 
@@ -301,44 +253,40 @@ async function validateMapContent(filename) {
     const content = document.getElementById('map-editor-content').value;
     const statusEl = document.getElementById('map-validation-status');
     const errorsEl = document.getElementById('map-validation-errors');
-    
+
     try {
         const response = await authenticatedFetch('/api/rspamd/validate', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ content, filename })
         });
-        
+
         const data = await response.json();
-        
+
         document.getElementById('map-entry-count').textContent = `${data.entry_count} entries`;
-        
-        const warnings = data.warnings || [];
-        const warningHtml = warnings.map(w => `
-            <div class="text-xs text-amber-700 dark:text-amber-300 flex items-start gap-2 py-1">
-                <span class="font-mono text-gray-500 dark:text-gray-400 flex-shrink-0">Line ${w.line}:</span>
-                <span>${escapeHtml(w.error)} - <code class="bg-amber-50 dark:bg-amber-900/30 px-1 rounded">${escapeHtml(w.content)}</code></span>
+
+        const line = (entry, tone) => `
+            <div class="ui-map-error ui-text-${tone}">
+                <span class="ui-mono ui-muted">Line ${entry.line}:</span>
+                <span>${escapeHtml(entry.error)} - <code>${escapeHtml(entry.content)}</code></span>
             </div>
-        `).join('');
+        `;
+        const warnings = data.warnings || [];
+        const warningHtml = warnings.map(w => line(w, 'warn')).join('');
 
         if (data.valid) {
             statusEl.innerHTML = warnings.length
-                ? `<span class="text-amber-600 dark:text-amber-400 text-xs font-medium">✓ Valid, ${warnings.length} warning(s)</span>`
-                : '<span class="text-green-600 dark:text-green-400 text-xs font-medium">✓ Valid</span>';
+                ? uiTag(`✓ Valid, ${warnings.length} warning(s)`, 'warn')
+                : uiTag('✓ Valid', 'ok');
             errorsEl.classList.toggle('hidden', warnings.length === 0);
             errorsEl.innerHTML = warningHtml;
         } else {
-            statusEl.innerHTML = `<span class="text-red-600 dark:text-red-400 text-xs font-medium">✗ ${data.errors.length} error(s)</span>`;
+            statusEl.innerHTML = uiTag(`✗ ${data.errors.length} error(s)`, 'fail');
             errorsEl.classList.remove('hidden');
-            errorsEl.innerHTML = data.errors.map(e => `
-                <div class="text-xs text-red-600 dark:text-red-400 flex items-start gap-2 py-1">
-                    <span class="font-mono text-gray-500 dark:text-gray-400 flex-shrink-0">Line ${e.line}:</span>
-                    <span>${escapeHtml(e.error)} - <code class="bg-red-50 dark:bg-red-900/30 px-1 rounded">${escapeHtml(e.content)}</code></span>
-                </div>
-            `).join('') + warningHtml;
+            errorsEl.innerHTML = data.errors.map(e => line(e, 'fail')).join('') + warningHtml;
         }
     } catch (error) {
-        statusEl.innerHTML = '<span class="text-red-600 text-xs">Validation failed</span>';
+        statusEl.innerHTML = uiTag('Validation failed', 'fail');
     }
 }
 
@@ -392,7 +340,7 @@ async function saveMapContent(filename) {
         }
 
         const statusEl = document.getElementById('map-validation-status');
-        if (statusEl) statusEl.innerHTML = '<span class="text-green-600 dark:text-green-400 text-xs font-medium">✓ Saved</span>';
+        if (statusEl) statusEl.innerHTML = uiTag('✓ Saved', 'ok');
         document.getElementById('map-entry-count').textContent = `${result.entry_count} entries`;
         
     } catch (error) {
@@ -410,11 +358,11 @@ async function saveMapContent(filename) {
 async function loadSuppressions(page) {
     suppressionPage = page || suppressionPage || 1;
     const container = document.getElementById('suppression-list');
-    
+
     const search = document.getElementById('suppression-search')?.value || '';
     const reason = document.getElementById('suppression-filter-reason')?.value || '';
     const active = document.getElementById('suppression-filter-active')?.value || '';
-    
+
     const params = new URLSearchParams({
         page: suppressionPage,
         per_page: 50,
@@ -422,33 +370,31 @@ async function loadSuppressions(page) {
     if (search) params.append('search', search);
     if (reason) params.append('reason_filter', reason);
     if (active) params.append('active_filter', active);
-    
+
     try {
         const response = await authenticatedFetch(`/api/suppressions?${params}`);
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        
+
         const data = await response.json();
-        
+
         if (!data.items || data.items.length === 0) {
             container.innerHTML = `
-                <div class="text-center py-12">
-                    <svg class="w-16 h-16 mx-auto mb-4 text-gray-300 dark:text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z"></path>
-                    </svg>
-                    <h3 class="text-lg font-medium text-gray-500 dark:text-gray-400 mb-1">No Suppressions</h3>
-                    <p class="text-sm text-gray-400 dark:text-gray-500">Suppressed addresses will appear here when detected or added manually.</p>
+                <div class="ui-empty ui-panel">
+                    <p><b>No Suppressions</b></p>
+                    <p>Suppressed addresses will appear here when detected or added manually.</p>
                 </div>
             `;
             return;
         }
-        
+
         container.innerHTML = `
-            <div class="space-y-2">
+            <div class="ui-table ui-stack ui-supp-table">
+                <div class="ui-tr ui-tr-head"><span>Address</span><span>Reason</span><span>Bounces</span><span>Expiry</span><span>Rspamd</span><span>Added</span><span class="ui-td-end">Actions</span></div>
                 ${data.items.map(s => renderSuppressionItem(s)).join('')}
             </div>
             ${data.total_pages > 1 ? renderSuppressionPagination(data.page, data.total_pages, data.total) : ''}
         `;
-        
+
     } catch (error) {
         console.error('Failed to load suppressions:', error);
         container.innerHTML = `<p class="ui-empty ui-text-fail">Failed to load: ${escapeHtml(error.message)}</p>`;
@@ -456,116 +402,75 @@ async function loadSuppressions(page) {
 }
 
 function renderSuppressionItem(s) {
-    const reasonColors = {
-        hard_bounce: 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300',
-        soft_bounce: 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-300',
-        deferred_stuck: 'bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-300',
-        rejected: 'bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-300',
-        manual: 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300',
-    };
-    
-    const sourceColors = {
-        auto: 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300',
-        manual: 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300',
-        import: 'bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300',
-    };
-    
+    const REASON_TONE = { hard_bounce: 'fail', soft_bounce: 'warn', deferred_stuck: 'warn', rejected: 'warn', manual: '' };
+    const SOURCE_TONE = { auto: 'info', manual: '', import: 'spam' };
+
     // Fix #5: Show proper sync status based on active state
-    let syncBadge = '';
+    let syncBadge = '<span class="ui-muted">-</span>';
     if (s.active) {
-        if (s.synced_to_rspamd) {
-            syncBadge = '<span class="text-green-500 text-xs" title="Synced to Rspamd">✓ Synced</span>';
-        } else {
-            syncBadge = '<span class="text-yellow-500 text-xs" title="Pending sync to Rspamd">⟳ Pending</span>';
-        }
-    } else {
+        syncBadge = s.synced_to_rspamd
+            ? '<span class="ui-text-ok" title="Synced to Rspamd">✓ Synced</span>'
+            : '<span class="ui-text-warn" title="Pending sync to Rspamd">⟳ Pending</span>';
+    } else if (s.synced_to_rspamd) {
         // Inactive entries: show "Removed" if was synced, nothing if never synced
-        if (s.synced_to_rspamd) {
-            syncBadge = '<span class="text-gray-400 text-xs" title="Will be removed from Rspamd on next sync">⊘ Will unsync</span>';
-        }
+        syncBadge = '<span class="ui-muted" title="Will be removed from Rspamd on next sync">⊘ Will unsync</span>';
     }
-    
+
     // For domain regex entries like /.+@example\.com/i, show clean domain
     const displayEmail = _cleanRegexDomain(s.email);
     const isRegexDomain = displayEmail !== s.email;
-    
+    const expiry = s.expires_in ? `Expires in ${s.expires_in.human}`
+        : (!s.expires_at && s.active ? '<span class="ui-text-spam">∞ Permanent</span>' : '-');
+
     return `
-        <div class="border border-gray-200 dark:border-gray-700 rounded-lg p-4 ${!s.active ? 'opacity-60' : ''} hover:bg-gray-50 dark:hover:bg-gray-700/50 transition">
-            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                <div class="flex-1 min-w-0">
-                    <div class="flex flex-wrap items-center gap-2 mb-1">
-                        <span class="font-medium text-gray-900 dark:text-white">${copyableText(displayEmail)}</span>
-                        ${isRegexDomain ? '<span class="px-2 py-0.5 text-xs bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 rounded" title="' + escapeHtml(s.email) + '">Domain</span>' : ''}
-                        <span class="px-2 py-0.5 text-xs font-medium rounded ${reasonColors[s.reason] || reasonColors.manual}">${s.reason.replace('_', ' ')}</span>
-                        <span class="px-2 py-0.5 text-xs font-medium rounded ${sourceColors[s.source] || sourceColors.manual}">${s.source || 'manual'}</span>
-                        ${!s.active ? '<span class="px-2 py-0.5 text-xs font-medium rounded bg-gray-200 dark:bg-gray-600 text-gray-600 dark:text-gray-400">Inactive</span>' : ''}
-                        ${s.is_expired ? '<span class="px-2 py-0.5 text-xs font-medium rounded bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300">Expired</span>' : ''}
-                        ${syncBadge}
-                    </div>
-                    <div class="flex flex-wrap gap-3 text-xs text-gray-500 dark:text-gray-400">
-                        ${s.bounce_count > 0 ? `<span>Bounces: ${s.bounce_count} (H:${s.hard_bounce_count} S:${s.soft_bounce_count})</span>` : ''}
-                        ${!s.expires_at && s.active ? '<span class="text-purple-600 dark:text-purple-400 font-medium">∞ Permanent</span>' : ''}
-                        ${s.expires_in ? `<span>Expires in ${s.expires_in.human}</span>` : ''}
-                        ${s.notes ? `<span title="${escapeHtml(s.notes)}">📝 ${escapeHtml(s.notes.substring(0, 40))}${s.notes.length > 40 ? '...' : ''}</span>` : ''}
-                        <span>${formatTime(s.created_at)}</span>
-                    </div>
-                </div>
-                <div class="flex items-center gap-1 flex-shrink-0">
-                    <button onclick='showEditSuppressionModal(${JSON.stringify(s).replace(/'/g, "&#39;")})' class="px-2 py-1 text-xs rounded bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 hover:bg-blue-200" title="Edit suppression">
-                        Edit
-                    </button>
-                    <button onclick="toggleSuppression(${s.id}, ${!s.active})" class="px-2 py-1 text-xs rounded ${s.active ? 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-300 hover:bg-yellow-200' : 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 hover:bg-green-200'}" title="${s.active ? 'Deactivate' : 'Reactivate'}">
-                        ${s.active ? 'Disable' : 'Enable'}
-                    </button>
-                    <button onclick="deleteSuppression(${s.id}, '${escapeJsArg(s.email)}')" class="px-2 py-1 text-xs rounded bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 hover:bg-red-200" title="Delete permanently">
-                        Delete
-                    </button>
-                </div>
+        <div class="ui-tr${!s.active ? ' ui-row-off' : ''}">
+            <div class="ui-td ui-q-who">
+                <div>${copyableText(displayEmail)}
+                    ${isRegexDomain ? `<span class="ui-tag ui-tag-info" title="${escapeHtml(s.email)}">Domain</span>` : ''}
+                    ${!s.active ? uiTag('Inactive', '') : ''}
+                    ${s.is_expired ? uiTag('Expired', 'fail') : ''}</div>
+                ${s.notes ? `<small title="${escapeHtml(s.notes)}">${escapeHtml(s.notes)}</small>` : ''}
             </div>
+            <span class="ui-td ui-td-wrap">${uiTag(s.reason.replace('_', ' '), REASON_TONE[s.reason] || '')} ${uiTag(s.source || 'manual', SOURCE_TONE[s.source] || '')}</span>
+            <span class="ui-td"><small class="ui-sec-unit">Bounces </small>${s.bounce_count > 0 ? `${s.bounce_count} <small class="ui-muted">(H:${s.hard_bounce_count} S:${s.soft_bounce_count})</small>` : '<span class="ui-muted">-</span>'}</span>
+            <span class="ui-td">${expiry}</span>
+            <span class="ui-td">${syncBadge}</span>
+            <span class="ui-td" title="${escapeHtml(formatTime(s.created_at))}"><small class="ui-sec-unit">Added </small>${formatAgo(s.created_at)}</span>
+            <span class="ui-td ui-td-end ui-row-actions">
+                <button onclick='showEditSuppressionModal(${JSON.stringify(s).replace(/'/g, "&#39;")})' class="ui-btn ui-btn-sm" title="Edit suppression">Edit</button>
+                <button onclick="toggleSuppression(${s.id}, ${!s.active})" class="ui-btn ui-btn-sm" title="${s.active ? 'Deactivate' : 'Reactivate'}">${s.active ? 'Disable' : 'Enable'}</button>
+                <button onclick="deleteSuppression(${s.id}, '${escapeJsArg(s.email)}')" class="ui-btn ui-btn-sm ui-btn-danger" title="Delete permanently">Delete</button>
+            </span>
         </div>
     `;
 }
 
 function renderSuppressionPagination(page, totalPages, total) {
     return `
-        <div class="flex items-center justify-between mt-4 pt-4 border-t border-gray-200 dark:border-gray-700">
-            <span class="text-sm text-gray-500 dark:text-gray-400">${total} total</span>
-            <div class="flex items-center gap-1">
-                ${page > 1 ? `<button onclick="loadSuppressions(${page - 1})" class="px-3 py-1 text-sm rounded border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700">← Prev</button>` : ''}
-                <span class="px-3 py-1 text-sm text-gray-500 dark:text-gray-400">Page ${page}/${totalPages}</span>
-                ${page < totalPages ? `<button onclick="loadSuppressions(${page + 1})" class="px-3 py-1 text-sm rounded border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700">Next →</button>` : ''}
-            </div>
-        </div>
+        <nav class="ui-pager" aria-label="Suppression pages">
+            <span class="ui-muted">${total} total</span>
+            ${page > 1 ? `<button onclick="loadSuppressions(${page - 1})" class="ui-btn ui-btn-sm">← Prev</button>` : ''}
+            <span class="ui-muted">Page ${page}/${totalPages}</span>
+            ${page < totalPages ? `<button onclick="loadSuppressions(${page + 1})" class="ui-btn ui-btn-sm">Next →</button>` : ''}
+        </nav>
     `;
 }
 
 async function loadSuppressionStats() {
     const container = document.getElementById('suppression-stats');
     if (!container) return;
-    
+
     try {
         const response = await authenticatedFetch('/api/suppressions/stats');
         if (!response.ok) return;
-        
+
         const stats = await response.json();
-        
+
         container.innerHTML = `
-            <div class="bg-white dark:bg-gray-800 rounded-lg shadow dark:shadow-gray-900/30 p-4">
-                <div class="text-2xl font-bold text-gray-900 dark:text-white">${stats.active}</div>
-                <div class="text-xs text-gray-500 dark:text-gray-400">Active</div>
-            </div>
-            <div class="bg-white dark:bg-gray-800 rounded-lg shadow dark:shadow-gray-900/30 p-4">
-                <div class="text-2xl font-bold text-red-600 dark:text-red-400">${stats.hard_bounce}</div>
-                <div class="text-xs text-gray-500 dark:text-gray-400">Hard Bounces</div>
-            </div>
-            <div class="bg-white dark:bg-gray-800 rounded-lg shadow dark:shadow-gray-900/30 p-4">
-                <div class="text-2xl font-bold text-yellow-600 dark:text-yellow-400">${stats.soft_bounce}</div>
-                <div class="text-xs text-gray-500 dark:text-gray-400">Soft Bounces</div>
-            </div>
-            <div class="bg-white dark:bg-gray-800 rounded-lg shadow dark:shadow-gray-900/30 p-4">
-                <div class="text-2xl font-bold text-blue-600 dark:text-blue-400">${stats.pending_sync}</div>
-                <div class="text-xs text-gray-500 dark:text-gray-400">Pending Sync</div>
-            </div>
+            <div class="ui-kpi"><b>${stats.active}</b>Active</div>
+            <div class="ui-kpi"><b class="${stats.hard_bounce ? 'ui-fail' : ''}">${stats.hard_bounce}</b>Hard Bounces</div>
+            <div class="ui-kpi"><b class="${stats.soft_bounce ? 'ui-warn' : ''}">${stats.soft_bounce}</b>Soft Bounces</div>
+            <div class="ui-kpi"><b>${stats.pending_sync}</b>Pending Sync</div>
         `;
     } catch (error) {
         console.error('Failed to load suppression stats:', error);
@@ -576,79 +481,68 @@ async function loadSuppressionStats() {
 // SUPPRESSION CRUD
 // =============================================================================
 
-function showAddSuppressionModal(prefillEmail) {
+// A small v3 dialog; clicking the backdrop leaves it open, like before
+function suppressionDialog(id, title, body, actions) {
     const modal = document.createElement('div');
-    modal.id = 'add-suppression-modal';
-    modal.className = 'fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4';
-    
+    modal.id = id;
+    modal.className = 'ui-dialog-backdrop';
+    modal.setAttribute('role', 'dialog');
+    modal.setAttribute('aria-label', title);
     modal.innerHTML = `
-        <div class="bg-white dark:bg-gray-800 rounded-lg max-w-md w-full p-6" onclick="event.stopPropagation()">
-            <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">Add Suppression</h3>
-            <div class="space-y-4">
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Type</label>
-                    <select id="new-suppression-type" class="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-lg"
-                        onchange="updateSuppressionInputPlaceholder()">
-                        <option value="email">Email Address</option>
-                        <option value="domain">Domain</option>
-                    </select>
-                </div>
-                <div>
-                    <label id="new-suppression-label" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Email Address</label>
-                    <input type="text" id="new-suppression-email" 
-                        class="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-lg"
-                        placeholder="user@example.com">
-                    <p id="new-suppression-hint" class="text-xs text-gray-400 dark:text-gray-500 mt-1 hidden"></p>
-                </div>
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Reason</label>
-                    <select id="new-suppression-reason" class="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-lg">
-                        <option value="manual">Manual</option>
-                        <option value="hard_bounce">Hard Bounce</option>
-                        <option value="soft_bounce">Soft Bounce</option>
-                        <option value="deferred_stuck">Deferred Stuck</option>
-                        <option value="rejected">Rejected</option>
-                    </select>
-                </div>
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Notes (optional)</label>
-                    <input type="text" id="new-suppression-notes" 
-                        class="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-lg"
-                        placeholder="Reason for suppression...">
-                </div>
-                <div>
-                    <label class="flex items-center gap-2 cursor-pointer">
-                        <input type="checkbox" id="new-suppression-permanent" checked
-                            class="rounded border-gray-300 dark:border-gray-600"
-                            onchange="toggleCreateExpiryField()">
-                        <span class="text-sm font-medium text-gray-700 dark:text-gray-300">Permanent block</span>
-                    </label>
-                    <div id="new-suppression-expiry-row" class="mt-2 hidden">
-                        <label class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Expires after (days)</label>
-                        <input type="number" id="new-suppression-expiry-days" min="1" max="365" value="7"
-                            class="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-lg">
-                    </div>
-                </div>
-            </div>
-            <div class="flex justify-end gap-2 mt-6">
-                <button onclick="document.getElementById('add-suppression-modal').remove()" class="px-4 py-2 text-sm bg-gray-200 hover:bg-gray-300 dark:bg-gray-600 dark:hover:bg-gray-500 text-gray-700 dark:text-gray-300 rounded-lg">
-                    Cancel
-                </button>
-                <button onclick="createSuppression()" class="px-4 py-2 text-sm bg-red-600 hover:bg-red-700 text-white rounded-lg">
-                    Add Suppression
-                </button>
-            </div>
+        <div class="ui-dialog ui-dialog-fit ui-dialog-sm" onclick="event.stopPropagation()">
+            <div class="ui-dialog-head"><h3>${escapeHtml(title)}</h3></div>
+            <div class="ui-dialog-body ui-form">${body}</div>
+            <div class="ui-dialog-foot">${actions}</div>
         </div>
     `;
-    
     document.body.appendChild(modal);
-    
+    return modal;
+}
+
+function showAddSuppressionModal(prefillEmail) {
+    suppressionDialog('add-suppression-modal', 'Add Suppression', `
+        <label><span class="ui-label">Type</span>
+            <select id="new-suppression-type" class="ui-select" onchange="updateSuppressionInputPlaceholder()">
+                <option value="email">Email Address</option>
+                <option value="domain">Domain</option>
+            </select>
+        </label>
+        <label><span id="new-suppression-label" class="ui-label">Email Address</span>
+            <input type="text" id="new-suppression-email" class="ui-input" placeholder="user@example.com">
+            <small id="new-suppression-hint" class="ui-muted hidden"></small>
+        </label>
+        <label><span class="ui-label">Reason</span>
+            <select id="new-suppression-reason" class="ui-select">
+                <option value="manual">Manual</option>
+                <option value="hard_bounce">Hard Bounce</option>
+                <option value="soft_bounce">Soft Bounce</option>
+                <option value="deferred_stuck">Deferred Stuck</option>
+                <option value="rejected">Rejected</option>
+            </select>
+        </label>
+        <label><span class="ui-label">Notes (optional)</span>
+            <input type="text" id="new-suppression-notes" class="ui-input" placeholder="Reason for suppression...">
+        </label>
+        <div>
+            <label class="ui-check-label">
+                <input type="checkbox" id="new-suppression-permanent" class="ui-check" checked onchange="toggleCreateExpiryField()">
+                Permanent block
+            </label>
+            <label id="new-suppression-expiry-row" class="hidden ui-form-sub"><span class="ui-label">Expires after (days)</span>
+                <input type="number" id="new-suppression-expiry-days" min="1" max="365" value="7" class="ui-input">
+            </label>
+        </div>
+    `, `
+        <button onclick="document.getElementById('add-suppression-modal').remove()" class="ui-btn">Cancel</button>
+        <button onclick="createSuppression()" class="ui-btn ui-btn-primary">Add Suppression</button>
+    `);
+
     // Pre-fill email if provided (e.g., from queue page)
     if (prefillEmail) {
         document.getElementById('new-suppression-email').value = prefillEmail;
         document.getElementById('new-suppression-notes').value = 'Added from queue page';
     }
-    
+
     document.getElementById('new-suppression-email').focus();
 }
 
@@ -749,68 +643,41 @@ async function createSuppression() {
 }
 
 function showEditSuppressionModal(s) {
-    const modal = document.createElement('div');
-    modal.id = 'edit-suppression-modal';
-    modal.className = 'fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4';
-    
     const isPermanent = !s.expires_at;
     const currentExpiry = s.expires_at ? new Date(s.expires_at).toISOString().slice(0, 16) : '';
-    
-    modal.innerHTML = `
-        <div class="bg-white dark:bg-gray-800 rounded-lg max-w-md w-full p-6" onclick="event.stopPropagation()">
-            <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-2">Edit Suppression</h3>
-            <p class="text-sm text-gray-500 dark:text-gray-400 mb-4 font-mono">${escapeHtml(s.email)}</p>
-            
-            <div class="space-y-4">
-                <div class="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3 text-xs text-gray-600 dark:text-gray-400">
-                    <div class="grid grid-cols-2 gap-2">
-                        <span>Reason: <strong>${s.reason.replace('_', ' ')}</strong></span>
-                        <span>Source: <strong>${s.source || 'manual'}</strong></span>
-                        ${s.bounce_count > 0 ? `<span>Bounces: <strong>${s.bounce_count}</strong></span>` : ''}
-                        <span>Created: <strong>${formatTime(s.created_at)}</strong></span>
-                    </div>
+
+    suppressionDialog('edit-suppression-modal', 'Edit Suppression', `
+        <p class="ui-mono ui-muted">${escapeHtml(s.email)}</p>
+        <div class="ui-md-ids ui-form-facts">
+            <div class="ui-md-fact"><span>Reason</span><div>${escapeHtml(s.reason.replace('_', ' '))}</div></div>
+            <div class="ui-md-fact"><span>Source</span><div>${escapeHtml(s.source || 'manual')}</div></div>
+            ${s.bounce_count > 0 ? `<div class="ui-md-fact"><span>Bounces</span><div>${s.bounce_count}</div></div>` : ''}
+            <div class="ui-md-fact"><span>Created</span><div>${formatTime(s.created_at)}</div></div>
+        </div>
+        <label><span class="ui-label">Notes</span>
+            <input type="text" id="edit-suppression-notes" value="${escapeHtml(s.notes || '')}" class="ui-input" placeholder="Notes...">
+        </label>
+        <div>
+            <label class="ui-check-label">
+                <input type="checkbox" id="edit-suppression-permanent" class="ui-check" ${isPermanent ? 'checked' : ''} onchange="toggleEditExpiryField()">
+                Permanent block
+            </label>
+            <div id="edit-suppression-expiry-row" class="ui-form-sub ${isPermanent ? 'hidden' : ''}">
+                <label><span class="ui-label">Expiry date & time</span>
+                    <input type="datetime-local" id="edit-suppression-expiry" value="${currentExpiry}" class="ui-input">
+                </label>
+                <div class="ui-chip-row">
+                    <button onclick="extendExpiryBy(7)" class="ui-chip">+7 days</button>
+                    <button onclick="extendExpiryBy(14)" class="ui-chip">+14 days</button>
+                    <button onclick="extendExpiryBy(30)" class="ui-chip">+30 days</button>
+                    <button onclick="extendExpiryBy(90)" class="ui-chip">+90 days</button>
                 </div>
-                
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Notes</label>
-                    <input type="text" id="edit-suppression-notes" value="${escapeHtml(s.notes || '')}"
-                        class="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-lg"
-                        placeholder="Notes...">
-                </div>
-                
-                <div>
-                    <label class="flex items-center gap-2 cursor-pointer">
-                        <input type="checkbox" id="edit-suppression-permanent" ${isPermanent ? 'checked' : ''}
-                            class="rounded border-gray-300 dark:border-gray-600"
-                            onchange="toggleEditExpiryField()">
-                        <span class="text-sm font-medium text-gray-700 dark:text-gray-300">Permanent block</span>
-                    </label>
-                    <div id="edit-suppression-expiry-row" class="mt-2 ${isPermanent ? 'hidden' : ''}">
-                        <label class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Expiry date & time</label>
-                        <input type="datetime-local" id="edit-suppression-expiry" value="${currentExpiry}"
-                            class="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-lg">
-                        <div class="flex gap-2 mt-2">
-                            <button onclick="extendExpiryBy(7)" class="px-2 py-1 text-xs rounded bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-300">+7 days</button>
-                            <button onclick="extendExpiryBy(14)" class="px-2 py-1 text-xs rounded bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-300">+14 days</button>
-                            <button onclick="extendExpiryBy(30)" class="px-2 py-1 text-xs rounded bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-300">+30 days</button>
-                            <button onclick="extendExpiryBy(90)" class="px-2 py-1 text-xs rounded bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-300">+90 days</button>
-                        </div>
-                    </div>
-                </div>
-            </div>
-            
-            <div class="flex justify-end gap-2 mt-6">
-                <button onclick="document.getElementById('edit-suppression-modal').remove()" class="px-4 py-2 text-sm bg-gray-200 hover:bg-gray-300 dark:bg-gray-600 dark:hover:bg-gray-500 text-gray-700 dark:text-gray-300 rounded-lg">
-                    Cancel
-                </button>
-                <button onclick="saveEditSuppression(${s.id})" class="px-4 py-2 text-sm bg-blue-600 hover:bg-blue-700 text-white rounded-lg">
-                    Save Changes
-                </button>
             </div>
         </div>
-    `;
-    
-    document.body.appendChild(modal);
+    `, `
+        <button onclick="document.getElementById('edit-suppression-modal').remove()" class="ui-btn">Cancel</button>
+        <button onclick="saveEditSuppression(${s.id})" class="ui-btn ui-btn-primary">Save Changes</button>
+    `);
 }
 
 function toggleEditExpiryField() {
@@ -940,7 +807,7 @@ async function syncSuppressionsToRspamd() {
     const btn = document.getElementById('suppression-sync-btn');
     if (btn) {
         btn.disabled = true;
-        btn.innerHTML = '<span class="loading" style="width:16px;height:16px;border-width:2px;display:inline-block;vertical-align:middle;margin-right:4px"></span> Syncing...';
+        btn.textContent = 'Syncing...';
     }
     
     try {
@@ -961,7 +828,7 @@ async function syncSuppressionsToRspamd() {
         if (btn) {
             btn.disabled = false;
             btn.innerHTML = `
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                         d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
                 </svg>
