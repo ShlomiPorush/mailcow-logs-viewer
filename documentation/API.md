@@ -2524,21 +2524,44 @@ Get status of all mailcow containers.
     "postfix-mailcow": {
       "name": "postfix",
       "state": "running",
-      "started_at": "2025-12-20T08:00:00Z"
+      "started_at": "2025-12-20T08:00:00Z",
+      "ignored": false
     },
-    "dovecot-mailcow": {
-      "name": "dovecot",
-      "state": "running",
-      "started_at": "2025-12-20T08:00:00Z"
+    "ipv6nat-mailcow": {
+      "name": "ipv6nat",
+      "state": "exited",
+      "started_at": null,
+      "ignored": true
     }
   },
   "summary": {
     "running": 18,
     "stopped": 0,
-    "total": 18
+    "total": 18,
+    "ignored": 1
   }
 }
 ```
+
+An ignored container is still listed but never counted: `running`, `stopped` and `total` leave it out, and `ignored` counts them. The dashboard alert and the problem counters follow the summary.
+
+---
+
+### PUT /status/containers/{container}/ignore
+
+Ignore or stop ignoring one container, for example `ipv6nat-mailcow` on a server without IPv6. The choice is stored on the server for every user.
+
+**Request:**
+```json
+{ "ignored": true }
+```
+
+**Response:**
+```json
+{ "container": "ipv6nat-mailcow", "ignored": true }
+```
+
+Returns `404` for a container name the app has never seen.
 
 ---
 
@@ -4554,6 +4577,32 @@ Get a high-level blacklist summary for the dashboard, aggregated across ALL acti
 - `hosts`: One entry per active monitored host. A host's `status` is `unknown` and its `listed_count` is `0` when its latest check is older than 24 hours
 - `hosts_total`: Number of active monitored hosts
 - `hosts_listed`: Number of hosts currently listed (fresh data only)
+
+---
+
+### Ignored blocklists
+
+A blocklist can be ignored for every monitored address (for example UCEPROTECT Level 3, which lists whole ranges). It is still checked and shown, but a listing on it is not counted and sends no alert. Every response that carries per-list `results` marks each entry with `"ignored": true|false`, and `listed_count` and `status` leave ignored listings out. `ignored_listed_count` says how many listings were left out. The stored check is never changed, so un-ignoring takes effect at once.
+
+### GET /api/blacklist/ignored
+
+```json
+{ "lists": [{ "name": "UCEPROTECT Level 3", "zone": "dnsbl-3.uceprotect.net" }] }
+```
+
+### PUT /api/blacklist/lists/{zone}/ignore
+
+**Request:**
+```json
+{ "ignored": true }
+```
+
+**Response:**
+```json
+{ "zone": "dnsbl-3.uceprotect.net", "name": "UCEPROTECT Level 3", "ignored": true }
+```
+
+Returns `404` for a zone that is not one of the checked blocklists.
 
 ---
 

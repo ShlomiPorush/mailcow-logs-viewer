@@ -950,6 +950,16 @@ body { font-family: var(--ui-font); background: var(--ui-bg); color: var(--ui-in
 .ui-ctr.is-down { background: color-mix(in srgb, var(--ui-fail) 10%, var(--ui-bg)); color: var(--ui-fail); font-weight: 600; }
 .ui-ctr.is-down small { color: var(--ui-fail); }
 .ui-ctr .ui-mdot { flex: none; }
+/* Ignored containers stay visible but quiet; the action is a small text button */
+.ui-ctr.is-ignored { color: var(--ui-muted); }
+.ui-ctr.is-ignored .ui-mdot { background: var(--ui-line); }
+.ui-ctr-act, .ui-bl-ign { flex: none; padding: 2px 6px; border: 1px solid var(--ui-line); border-radius: 6px; background: var(--ui-bg);
+    color: var(--ui-ink); font: inherit; font-size: 11.5px; font-weight: 600; cursor: pointer; }
+.ui-ctr-act:hover, .ui-bl-ign:hover { border-color: var(--ui-ink); }
+.ui-bl-ign { padding: 1px 5px; font-size: 11px; font-weight: 500; color: var(--ui-muted); }
+.ui-bl-item.is-ignored { color: var(--ui-muted); }
+.ui-bl-item.is-ignored .ui-mdot { background: var(--ui-line); }
+.ui-code-chip.is-ignored { opacity: .6; text-decoration: line-through; }
 
 .ui-tr-group { display: block; padding-top: 14px; padding-bottom: 6px; color: var(--ui-muted); font-size: 12px; font-weight: 650;
     text-transform: uppercase; letter-spacing: .04em; }
