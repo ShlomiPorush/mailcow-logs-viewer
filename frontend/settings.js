@@ -520,50 +520,40 @@ var SETTINGS_TAB_GROUPS = [
 ];
 
 function renderSettingsEditField(key, value, sensitiveKeys, description, envLocked, defaultValue) {
+    const LOCK = '<svg width="12" height="12" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true"><path fill-rule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clip-rule="evenodd"></path></svg>';
     // Special renderer for disabled_features - checkboxes for feature toggles
     if (key === 'disabled_features') {
         const disabledSet = new Set(
             (value || '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean)
         );
         const isLocked = envLocked;
-        
-        let html = `<div class="mb-2">
-            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Feature Toggles</label>
-            <p class="text-xs text-gray-500 dark:text-gray-400 mb-3">Uncheck features to hide them from the UI and stop their background jobs. <span class="text-red-500 dark:text-red-400 font-medium">Disabling a feature permanently deletes its stored data.</span></p>`;
-        
+
+        let html = `<div class="ui-set-field ui-set-wide">
+            <span class="ui-label">Feature Toggles</span>
+            <p class="ui-set-desc">Uncheck features to hide them from the UI and stop their background jobs. <b class="ui-text-fail">Disabling a feature permanently deletes its stored data.</b></p>`;
+
         if (isLocked) {
-            html += `<div class="text-xs text-amber-600 dark:text-amber-400 mb-2 flex items-center gap-1">
-                <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clip-rule="evenodd"/></svg>
-                Locked by ENV (DISABLED_FEATURES)
-            </div>`;
+            html += `<p class="ui-set-env">${LOCK} Locked by ENV (DISABLED_FEATURES)</p>`;
         }
-        
-        html += `<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">`;
-        
+
+        html += `<div class="ui-set-features">`;
+
         for (const feature of TOGGLEABLE_FEATURES) {
             const isEnabled = !disabledSet.has(feature.id);
             const checkedAttr = isEnabled ? 'checked' : '';
             const disabledAttr = isLocked ? 'disabled' : '';
-            
-            html += `<label class="flex items-start gap-2 p-2 rounded-lg border cursor-pointer transition-all
-                ${isEnabled 
-                    ? 'border-green-200 dark:border-green-700/50 bg-green-50/50 dark:bg-green-900/10' 
-                    : 'border-gray-200 dark:border-gray-700 bg-gray-50/50 dark:bg-gray-800/50 opacity-60'}
-                ${isLocked ? 'cursor-not-allowed' : 'hover:border-blue-300 dark:hover:border-blue-600'}">
-                <input type="checkbox" ${checkedAttr} ${disabledAttr}
-                    class="mt-0.5 rounded border-gray-300 dark:border-gray-600 text-blue-600 focus:ring-blue-500"
+
+            html += `<label class="ui-feature ${isEnabled ? 'is-on' : 'is-off'}${isLocked ? ' is-locked' : ''}">
+                <input type="checkbox" ${checkedAttr} ${disabledAttr} class="ui-check"
                     onchange="updateDisabledFeaturesCheckbox('${feature.id}', this.checked, this)">
-                <div>
-                    <div class="text-sm font-medium text-gray-800 dark:text-gray-200">${feature.label}</div>
-                    <div class="text-xs text-gray-500 dark:text-gray-400">${feature.description}</div>
-                </div>
+                <span><b>${feature.label}</b><small>${feature.description}</small></span>
             </label>`;
         }
-        
+
         html += `</div>
             <input type="hidden" id="setting-disabled_features" name="disabled_features" value="${value || ''}">
         </div>`;
-        
+
         return html;
     }
 
@@ -583,24 +573,24 @@ function renderSettingsEditField(key, value, sensitiveKeys, description, envLock
         ];
         const enabledServices = (value || '').split(',').map(function(s) { return s.trim().toLowerCase(); }).filter(Boolean);
         const disabledAttr = envLocked ? 'disabled' : '';
-        const envLockedHtml = envLocked ? '<p class="text-xs text-blue-600 dark:text-blue-400 mt-1 flex items-center gap-1"><svg class="w-3 h-3 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clip-rule="evenodd"></path></svg>Controlled by ENV variable.</p>' : '';
-        const descHtml = (description && description.trim()) ? '<p class="text-xs text-gray-500 dark:text-gray-400 mb-2">' + escapeHtml(description) + '</p>' : '';
-        
-        let checkboxesHtml = '<div class="grid grid-cols-1 sm:grid-cols-2 gap-1.5">';
+        const envLockedHtml = envLocked ? '<p class="ui-set-env">' + LOCK + ' Controlled by ENV variable.</p>' : '';
+        const descHtml = (description && description.trim()) ? '<p class="ui-set-desc">' + escapeHtml(description) + '</p>' : '';
+
+        let checkboxesHtml = '<div class="ui-set-checks">';
         ALL_LOG_SERVICES.forEach(function(svc) {
             const checked = enabledServices.includes(svc.id) ? 'checked' : '';
-            checkboxesHtml += '<label class="flex items-center gap-2 p-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-600/30 cursor-pointer text-sm text-gray-700 dark:text-gray-300">' +
-                '<input type="checkbox" class="raw-logs-service-cb rounded border-gray-300 dark:border-gray-600" data-service="' + svc.id + '" ' + checked + ' ' + disabledAttr + '>' +
+            checkboxesHtml += '<label class="ui-check-label">' +
+                '<input type="checkbox" class="raw-logs-service-cb ui-check" data-service="' + svc.id + '" ' + checked + ' ' + disabledAttr + '>' +
                 escapeHtml(svc.label) + '</label>';
         });
         checkboxesHtml += '</div>';
-        
+
         // Hidden input that holds the comma-separated value
         checkboxesHtml += '<input type="hidden" id="edit-raw_logs_services" name="raw_logs_services" value="' + escapeHtml(value || '') + '">';
-        
-        return '<div class="' + (envLocked ? 'opacity-60' : '') + '">' + descHtml + checkboxesHtml + envLockedHtml + '</div>';
+
+        return '<div class="ui-set-field ui-set-wide' + (envLocked ? ' is-locked' : '') + '">' + descHtml + checkboxesHtml + envLockedHtml + '</div>';
     }
-    
+
     const isBool = typeof value === 'boolean';
     const isNum = typeof value === 'number';
     const sensitive = sensitiveKeys.includes(key);
@@ -614,10 +604,10 @@ function renderSettingsEditField(key, value, sensitiveKeys, description, envLock
         .replace(/\bDmarc\b/gi, 'DMARC').replace(/\bSpf\b/gi, 'SPF').replace(/\bDkim\b/gi, 'DKIM')
         .replace(/\bSmtp\b/gi, 'SMTP').replace(/\bCsv\b/gi, 'CSV').replace(/\bEnv\b/gi, 'ENV')
         .replace(/\bDb\b/gi, 'DB');
-    const descHtml = (description && description.trim()) ? '<p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5 mb-1">' + escapeHtml(description) + '</p>' : '';
+    const descHtml = (description && description.trim()) ? '<p class="ui-set-desc">' + escapeHtml(description) + '</p>' : '';
     const disabledAttr = envLocked ? 'disabled' : '';
-    const envLockedHtml = envLocked ? '<p class="text-xs text-blue-600 dark:text-blue-400 mt-1 flex items-center gap-1"><svg class="w-3 h-3 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clip-rule="evenodd"></path></svg>Controlled by ENV variable - cannot be changed from here.</p>' : '';
-    const labelLockIcon = envLocked ? ' <svg class="w-3.5 h-3.5 inline-block text-blue-500 dark:text-blue-400" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clip-rule="evenodd"></path></svg>' : '';
+    const envLockedHtml = envLocked ? '<p class="ui-set-env">' + LOCK + ' Controlled by ENV variable - cannot be changed from here.</p>' : '';
+    const labelLockIcon = envLocked ? ' <span class="ui-set-lock" title="Controlled by ENV">' + LOCK + '</span>' : '';
 
     // Determine if changed from default
     const hasDefault = defaultValue !== null && defaultValue !== undefined;
@@ -652,24 +642,22 @@ function renderSettingsEditField(key, value, sensitiveKeys, description, envLock
     if (!envLocked) {
         if (hasDefault && !isUserSpecific && (isChanged || isSensitiveChanged)) {
             const defaultLabel = sensitive ? '(empty)' : escapeHtml(String(defaultValue));
-            clearBtnHtml = '<button type="button" class="settings-clear-btn text-xs text-amber-600 dark:text-amber-400 hover:text-amber-800 dark:hover:text-amber-200 mt-1 flex items-center gap-1 transition-colors" data-key="' + key + '" data-default="' + escapeHtml(String(defaultValue)) + '" data-sensitive="' + sensitive + '" data-isbool="' + isBool + '">' +
-                '<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>' +
-                'Reset to default' + (isBool ? ': ' + defaultLabel : ' (' + defaultLabel + ')') + '</button>';
+            clearBtnHtml = '<button type="button" class="settings-clear-btn ui-set-clear is-reset" data-key="' + key + '" data-default="' + escapeHtml(String(defaultValue)) + '" data-sensitive="' + sensitive + '" data-isbool="' + isBool + '">' +
+                '↺ Reset to default' + (isBool ? ': ' + defaultLabel : ' (' + defaultLabel + ')') + '</button>';
         } else if (!isBool && String(displayVal).trim() !== '' && !(sensitive && displayVal === '') && !(hasDefault && !isUserSpecific && String(displayVal) === String(defaultValue))) {
-            clearBtnHtml = '<button type="button" class="settings-clear-btn text-xs text-gray-500 dark:text-gray-400 hover:text-red-600 dark:hover:text-red-400 mt-1 flex items-center gap-1 transition-colors" data-key="' + key + '" data-default="' + (hasDefault ? escapeHtml(String(defaultValue)) : '') + '" data-sensitive="' + sensitive + '" data-isbool="false">' +
-                '<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>' +
-                'Clear</button>';
+            clearBtnHtml = '<button type="button" class="settings-clear-btn ui-set-clear" data-key="' + key + '" data-default="' + (hasDefault ? escapeHtml(String(defaultValue)) : '') + '" data-sensitive="' + sensitive + '" data-isbool="false">' +
+                '× Clear</button>';
         }
     }
 
-    // Changed border style
-    const changedBorder = (isChanged || isSensitiveChanged) && !envLocked ? 'border-amber-400 dark:border-amber-500 ring-1 ring-amber-200 dark:ring-amber-800' : '';
+    // A value that differs from its default is marked, so a changed setting stands out
+    const changed = (isChanged || isSensitiveChanged) && !envLocked ? ' is-changed' : '';
 
     if (isBool) {
-        return '<div class="flex items-center justify-between gap-2 p-2 ' + (envLocked ? 'bg-gray-100 dark:bg-gray-800/50 opacity-60' : (isChanged ? 'bg-amber-50 dark:bg-amber-900/10 border border-amber-300 dark:border-amber-700 rounded' : 'bg-gray-50 dark:bg-gray-700/30')) + ' rounded">' +
-            '<div class="flex items-center gap-2">' +
-            '<input type="checkbox" id="edit-' + key + '" name="' + key + '" ' + (displayVal ? 'checked' : '') + ' ' + disabledAttr + ' class="rounded border-gray-300 dark:border-gray-600">' +
-            '<div><label for="edit-' + key + '" class="text-sm font-medium text-gray-700 dark:text-gray-300">' + escapeHtml(label) + labelLockIcon + '</label>' + descHtml + envLockedHtml + '</div></div>' +
+        return '<div class="ui-set-bool' + (envLocked ? ' is-locked' : (isChanged ? ' is-changed' : '')) + '">' +
+            '<div class="ui-set-bool-main">' +
+            '<input type="checkbox" id="edit-' + key + '" name="' + key + '" ' + (displayVal ? 'checked' : '') + ' ' + disabledAttr + ' class="ui-check">' +
+            '<div><label for="edit-' + key + '" class="ui-set-bool-label">' + escapeHtml(label) + labelLockIcon + '</label>' + descHtml + envLockedHtml + '</div></div>' +
             clearBtnHtml + '</div>';
     }
 
@@ -681,10 +669,9 @@ function renderSettingsEditField(key, value, sensitiveKeys, description, envLock
             const selected = String(displayVal) === opt.value ? 'selected' : '';
             optionsHtml += '<option value="' + escapeHtml(opt.value) + '" ' + selected + '>' + escapeHtml(opt.label) + '</option>';
         });
-        return '<div class="' + (envLocked ? 'opacity-60' : '') + '"><label for="edit-' + key + '" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">' + escapeHtml(label) + labelLockIcon + '</label>' +
+        return '<div class="ui-set-field' + (envLocked ? ' is-locked' : '') + '"><label for="edit-' + key + '" class="ui-label">' + escapeHtml(label) + labelLockIcon + '</label>' +
             descHtml +
-            '<select id="edit-' + key + '" name="' + key + '" ' + disabledAttr + ' ' +
-            'class="w-full rounded border ' + (envLocked ? 'border-gray-200 dark:border-gray-700 bg-gray-100 dark:bg-gray-800 text-gray-400 dark:text-gray-500 cursor-not-allowed' : (changedBorder ? changedBorder + ' bg-white dark:bg-gray-700 text-gray-900 dark:text-white' : 'border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white')) + ' px-3 py-2 text-sm">' +
+            '<select id="edit-' + key + '" name="' + key + '" ' + disabledAttr + ' class="ui-select' + changed + '">' +
             optionsHtml + '</select>' +
             clearBtnHtml +
             envLockedHtml + '</div>';
@@ -693,10 +680,9 @@ function renderSettingsEditField(key, value, sensitiveKeys, description, envLock
     const inputType = sensitive ? 'password' : (isNum ? 'number' : 'text');
     const placeholder = envLocked ? 'Controlled by ENV' : '';
     const valAttr = (isBool ? '' : displayVal);
-    return '<div class="' + (envLocked ? 'opacity-60' : '') + '"><label for="edit-' + key + '" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">' + escapeHtml(label) + labelLockIcon + '</label>' +
+    return '<div class="ui-set-field' + (envLocked ? ' is-locked' : '') + '"><label for="edit-' + key + '" class="ui-label">' + escapeHtml(label) + labelLockIcon + '</label>' +
         descHtml +
-        '<input type="' + inputType + '" id="edit-' + key + '" name="' + key + '" value="' + escapeHtml(valAttr) + '" placeholder="' + escapeHtml(placeholder) + '" ' + disabledAttr + ' ' +
-        'class="w-full rounded border ' + (envLocked ? 'border-gray-200 dark:border-gray-700 bg-gray-100 dark:bg-gray-800 text-gray-400 dark:text-gray-500 cursor-not-allowed' : (changedBorder ? changedBorder + ' bg-white dark:bg-gray-700 text-gray-900 dark:text-white' : 'border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white')) + ' px-3 py-2 text-sm">' +
+        '<input type="' + inputType + '" id="edit-' + key + '" name="' + key + '" value="' + escapeHtml(valAttr) + '" placeholder="' + escapeHtml(placeholder) + '" ' + disabledAttr + ' class="ui-input' + changed + '">' +
         clearBtnHtml +
         envLockedHtml + '</div>';
 }
@@ -791,140 +777,47 @@ async function loadSettings() {
     } catch (error) {
         console.error('Failed to load settings:', error);
         loading.innerHTML = `
-            <div class="text-center py-12">
-                <svg class="w-16 h-16 mx-auto text-red-400 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                </svg>
-                <p class="text-red-500">Failed to load settings</p>
-                <p class="text-sm text-gray-500 dark:text-gray-400 mt-2">${escapeHtml(error.message)}</p>
+            <div class="ui-empty">
+                <p class="ui-text-fail">Failed to load settings</p>
+                <p>${escapeHtml(error.message)}</p>
             </div>
         `;
     }
 }
 
+// The latest version, its state and the update note, by id
+function renderLatestVersionState(versionInfo) {
+    const tag = versionInfo.update_available ? uiTag('Update Available', 'ok')
+        : versionInfo.latest_version ? uiTag('Up to Date', 'info') : '';
+    return `${versionInfo.latest_version ? `v${escapeHtml(versionInfo.latest_version)}` : 'Checking...'} ${tag}`;
+}
+
+function renderUpdateNote(versionInfo) {
+    if (!versionInfo.update_available) return '';
+    return `
+        <div class="ui-alert ui-alert-info ui-set-update">
+            <span class="ui-alert-bar"></span>
+            <div class="ui-alert-text">
+                <div class="ui-alert-title"><b>Update available!</b></div>
+                <p>A new version (v${escapeHtml(versionInfo.latest_version)}) is available on GitHub.</p>
+                ${versionInfo.changelog ? `<div class="update-changelog-content markdown-body ui-set-changelog"></div>` : ''}
+                <a href="https://github.com/ShlomiPorush/mailcow-logs-viewer/releases/latest" target="_blank" rel="noopener noreferrer" class="ui-link">View release notes →</a>
+            </div>
+        </div>`;
+}
+
 function updateVersionInfoUI(versionInfo) {
-    // Find the container with Latest Version by searching for the label
-    const allContainers = document.querySelectorAll('#settings-content .p-4.bg-gray-50');
-    let latestVersionContainer = null;
-
-    for (const container of allContainers) {
-        const label = container.querySelector('.text-xs.uppercase');
-        if (label && label.textContent.trim() === 'LATEST VERSION') {
-            latestVersionContainer = container;
-            break;
-        }
-    }
-
-    if (!latestVersionContainer) {
-        return;
-    }
-
-    // Update version text
-    const versionTextEl = latestVersionContainer.querySelector('.text-lg.font-semibold');
-    if (versionTextEl) {
-        versionTextEl.textContent = versionInfo.latest_version ? `v${versionInfo.latest_version}` : 'Checking...';
-    }
-
-    // Update last_checked date
-    const badgeContainer = latestVersionContainer.querySelector('.flex.items-center');
-    if (badgeContainer) {
-        // Find or create last_checked span
-        let lastCheckedSpan = Array.from(badgeContainer.querySelectorAll('span.text-xs.text-gray-500, span.text-xs.text-gray-400'))
-            .find(span => span.textContent.includes('Last checked'));
-
-        if (versionInfo.last_checked) {
-            if (!lastCheckedSpan) {
-                lastCheckedSpan = document.createElement('span');
-                lastCheckedSpan.className = 'text-xs text-gray-500 dark:text-gray-400';
-                const button = badgeContainer.querySelector('button');
-                if (button) {
-                    badgeContainer.insertBefore(lastCheckedSpan, button);
-                } else {
-                    badgeContainer.appendChild(lastCheckedSpan);
-                }
-            }
-            lastCheckedSpan.textContent = `(Last checked: ${formatDate(versionInfo.last_checked)})`;
-        } else if (lastCheckedSpan) {
-            lastCheckedSpan.remove();
-        }
-
-        // Remove existing badges (but keep the button and last_checked span)
-        const existingBadges = Array.from(badgeContainer.querySelectorAll('span.px-2.py-1.rounded.text-xs'));
-        existingBadges.forEach(badge => {
-            badge.remove();
-        });
-
-        // Add new badge if needed
-        if (versionInfo.update_available) {
-            const badge = document.createElement('span');
-            badge.className = 'px-2 py-1 bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300 rounded text-xs font-medium';
-            badge.textContent = 'Update Available';
-            const button = badgeContainer.querySelector('button');
-            if (button) {
-                badgeContainer.insertBefore(badge, button);
-            } else {
-                badgeContainer.appendChild(badge);
-            }
-        } else if (versionInfo.latest_version && !versionInfo.update_available) {
-            const badge = document.createElement('span');
-            badge.className = 'px-2 py-1 bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-300 rounded text-xs font-medium';
-            badge.textContent = 'Up to Date';
-            const button = badgeContainer.querySelector('button');
-            if (button) {
-                badgeContainer.insertBefore(badge, button);
-            } else {
-                badgeContainer.appendChild(badge);
-            }
-        }
-    }
-
-    // Update or create update message
-    const versionSection = latestVersionContainer.closest('.bg-white, .dark\\:bg-gray-800');
-    if (versionSection) {
-        // Remove existing update message
-        const existingMessages = versionSection.querySelectorAll('.bg-green-50, .dark\\:bg-green-900\\/20');
-        existingMessages.forEach(msg => {
-            if (msg.textContent.includes('Update available')) {
-                msg.remove();
-            }
-        });
-
-        // Add new update message if update is available
-        if (versionInfo.update_available) {
-            const gridContainer = versionSection.querySelector('.grid.grid-cols-1');
-            if (gridContainer && gridContainer.parentNode) {
-                const messageDiv = document.createElement('div');
-                messageDiv.className = 'mt-4 p-3 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg';
-                messageDiv.innerHTML = `
-                    <p class="text-sm text-green-800 dark:text-green-300">
-                        <strong>Update available!</strong> A new version (v${versionInfo.latest_version}) is available on GitHub.
-                    </p>
-                    ${versionInfo.changelog ? `
-                        <div class="mt-3 border border-green-200 dark:border-green-800 rounded p-3 bg-white dark:bg-gray-800">
-                            <p class="text-xs font-semibold text-green-800 dark:text-green-300 mb-2">Changelog:</p>
-                            <div class="update-changelog-content markdown-body" style="max-height: 16rem; overflow-y: auto; overflow-x: hidden; display: block;"></div>
-                        </div>
-                    ` : ''}
-                    <a href="https://github.com/ShlomiPorush/mailcow-logs-viewer/releases/latest" target="_blank" rel="noopener noreferrer" class="text-sm text-green-600 dark:text-green-400 hover:underline mt-2 inline-block">
-                        View release notes →
-                    </a>
-                `;
-                gridContainer.parentNode.insertBefore(messageDiv, gridContainer.nextSibling);
-
-                // Render markdown in changelog if marked.js is available
-                // Do this immediately after inserting to DOM
-                if (typeof marked !== 'undefined' && versionInfo.changelog) {
-                    marked.setOptions({
-                        breaks: true,
-                        gfm: true
-                    });
-                    const changelogEl = messageDiv.querySelector('.update-changelog-content');
-                    if (changelogEl && versionInfo.changelog) {
-                        // Use the full changelog text directly
-                        changelogEl.innerHTML = renderMarkdown(versionInfo.changelog);
-                    }
-                }
-            }
+    const latest = document.getElementById('settings-latest-version');
+    if (latest) latest.innerHTML = renderLatestVersionState(versionInfo);
+    const checked = document.getElementById('settings-version-checked');
+    if (checked) checked.textContent = versionInfo.last_checked ? `Last checked: ${formatDate(versionInfo.last_checked)}` : '';
+    const note = document.getElementById('settings-update-note');
+    if (note) {
+        note.innerHTML = renderUpdateNote(versionInfo);
+        const changelogEl = note.querySelector('.update-changelog-content');
+        if (changelogEl && typeof marked !== 'undefined' && versionInfo.changelog) {
+            marked.setOptions({ breaks: true, gfm: true });
+            changelogEl.innerHTML = renderMarkdown(versionInfo.changelog);
         }
     }
 }
@@ -944,225 +837,78 @@ function renderSettings(content, data) {
         config.maxmind_status = _cachedMaxMindStatus;
     }
 
+    const kv = (label, value, cls = '') => `<div class="ui-kv"><span>${label}</span><b class="${cls}">${value}</b></div>`;
+    const readOnlyFacts = [
+        ['Fetch Interval', `${config.fetch_interval || 0} seconds`],
+        ['Fetch Count (Postfix)', `${config.fetch_count_postfix || config.fetch_count || 0} per request`],
+        ['Fetch Count (Rspamd)', `${config.fetch_count_rspamd || config.fetch_count || 0} per request`],
+        ['Fetch Count (Netfilter)', `${config.fetch_count_netfilter || config.fetch_count || 0} per request`],
+        ['Max Pages per Cycle', `${config.fetch_max_pages || 50}`],
+        ['Retention', `${config.retention_days || 0} days`],
+        ['Max Correlation Age', `${config.max_correlation_age_minutes || 10} minutes`],
+        ['Correlation Check', `${config.correlation_check_interval || 120} seconds`],
+        ['Timezone', escapeHtml(config.timezone || 'N/A')],
+        ['Log Level', escapeHtml(config.log_level || 'INFO')],
+        ['Blacklist', config.blacklist_enabled ? `Enabled (${config.blacklist_count} emails)` : 'Disabled'],
+        ['Scheduler Workers', `${config.scheduler_workers || 4}`],
+    ];
+
     content.innerHTML = `
         ${!data.settings_edit_via_ui_enabled ? `<div class="ui-list-note ui-flush">${uiLocked('Editing settings is off',
             'These values come from the environment and are shown read-only. To change them here, set <code>SETTINGS_EDIT_VIA_UI_ENABLED=true</code> and restart the container.', '')}</div>` : ''}
-        <!-- Version Information Section -->
-        <div class="ui-panel mb-6">
-            <div class="ui-panel-head">
-                <h3 class="ui-panel-title">
-                    <svg class="w-5 h-5 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path>
-                    </svg>
-                    Version Information
-                </h3>
-            </div>
-            <div class="p-4">
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div class="p-4 bg-gray-50 dark:bg-gray-700/30 rounded-lg">
-                        <p class="text-xs font-medium text-gray-500 dark:text-gray-400 mb-2">Current Version</p>
-                        <div class="flex items-center gap-2">
-                            <p id="current-version-text" class="text-lg font-semibold text-gray-900 dark:text-white cursor-pointer hover:text-blue-600 dark:hover:text-blue-400 transition-colors" title="Click to view changelog">v${appVersion}</p>
-                            <svg class="w-4 h-4 text-blue-500 dark:text-blue-400 cursor-pointer" fill="none" stroke="currentColor" viewBox="0 0 24 24" title="Click to view changelog">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                            </svg>
-                        </div>
-                    </div>
-                    <div class="p-4 bg-gray-50 dark:bg-gray-700/30 rounded-lg">
-                        <p class="text-xs font-medium text-gray-500 dark:text-gray-400 mb-2">Latest Version</p>
-                        <div class="flex items-center gap-2 flex-wrap">
-                            <p class="text-lg font-semibold text-gray-900 dark:text-white">${versionInfo.latest_version ? `v${versionInfo.latest_version}` : 'Checking...'}</p>
-                            ${versionInfo.last_checked ? `
-                                <span class="text-xs text-gray-500 dark:text-gray-400">
-                                    (Last checked: ${formatDate(versionInfo.last_checked)})
-                                </span>
-                            ` : ''}
-                            ${versionInfo.update_available ? `
-                                <span class="px-2 py-1 bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300 rounded text-xs font-medium">
-                                    Update Available
-                                </span>
-                            ` : versionInfo.latest_version && !versionInfo.update_available ? `
-                                <span class="px-2 py-1 bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-300 rounded text-xs font-medium">
-                                    Up to Date
-                                </span>
-                            ` : ''}
-                            <button id="check-version-btn" class="px-3 py-1.5 bg-blue-500 hover:bg-blue-600 text-white rounded text-xs font-medium transition-colors duration-200 flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed">
-                                <svg id="check-version-icon" class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
-                                </svg>
-                                <span id="check-version-text">Check Now</span>
-                            </button>
-                        </div>
-                    </div>
+
+        <div class="ui-dash-grid ui-status-pair">
+            <!-- Version Information Section -->
+            <section class="ui-panel">
+                <div class="ui-panel-head">Version Information</div>
+                <div class="ui-kv"><span>Current Version</span><b><button type="button" id="current-version-text" class="ui-link-row ui-link" title="Click to view changelog">v${escapeHtml(appVersion)}</button></b></div>
+                <div class="ui-kv"><span>Latest Version</span><b id="settings-latest-version">${renderLatestVersionState(versionInfo)}</b></div>
+                <div class="ui-set-version-foot">
+                    <span id="settings-version-checked" class="ui-muted">${versionInfo.last_checked ? `Last checked: ${formatDate(versionInfo.last_checked)}` : ''}</span>
+                    <button id="check-version-btn" class="ui-btn ui-btn-sm">
+                        <svg id="check-version-icon" width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+                        </svg>
+                        <span id="check-version-text">Check Now</span>
+                    </button>
                 </div>
-                ${versionInfo.update_available ? `
-                    <div class="mt-4 p-3 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg">
-                        <p class="text-sm text-green-800 dark:text-green-300">
-                            <strong>Update available!</strong> A new version (v${versionInfo.latest_version}) is available on GitHub.
-                        </p>
-                        ${versionInfo.changelog ? `
-                            <div class="mt-3 border border-green-200 dark:border-green-800 rounded p-3 bg-white dark:bg-gray-800">
-                                <p class="text-xs font-semibold text-green-800 dark:text-green-300 mb-2">Changelog:</p>
-                                <div class="update-changelog-content markdown-body" style="max-height: 16rem; overflow-y: auto; overflow-x: hidden; display: block;"></div>
-                            </div>
-                        ` : ''}
-                        <a href="https://github.com/ShlomiPorush/mailcow-logs-viewer/releases/latest" target="_blank" rel="noopener noreferrer" class="text-sm text-green-600 dark:text-green-400 hover:underline mt-2 inline-block">
-                            View release notes →
-                        </a>
-                    </div>
-                ` : ''}
-            </div>
+                <div id="settings-update-note">${renderUpdateNote(versionInfo)}</div>
+            </section>
+
+            <!-- Configuration Section -->
+            <section class="ui-panel">
+                <div class="ui-panel-head">Configuration</div>
+                ${kv('mailcow URL', escapeHtml(config.mailcow_url || 'N/A'), 'ui-mono ui-kv-small')}
+                ${kv('Server IP', config.server_ip ? `<span class="ui-text-ok">✓</span> ${escapeHtml(config.server_ip)}` : '<span class="ui-muted">Not available</span>', 'ui-mono ui-kv-small')}
+                ${kv('Authentication', config.auth_enabled
+                    ? `${uiTag('Enabled', 'ok')} ${config.basic_auth_enabled ? uiTag('Basic Auth', 'info') : ''} ${config.oauth2_enabled ? uiTag(`OAuth2${config.oauth2_provider_name ? ` (${config.oauth2_provider_name})` : ''}`, 'spam') : ''}`
+                    : uiTag('Disabled', ''))}
+                ${config.auth_enabled && config.basic_auth_enabled && config.auth_username ? `<p class="ui-kv-note">Basic Auth Username: ${escapeHtml(config.auth_username)}</p>` : ''}
+                ${config.local_domains && config.local_domains.length > 0 ? '' : kv('Local Domains', '<span class="ui-muted">N/A</span>')}
+            </section>
         </div>
 
-        <!-- Configuration Section -->
-        <div class="ui-panel">
-            <div class="ui-panel-head">
-                <h3 class="ui-panel-title">
-                    <svg class="w-5 h-5 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path>
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
-                    </svg>
-                    Configuration
-                </h3>
-            </div>
-            <div class="p-4">
-                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                    <div class="p-3 bg-gray-50 dark:bg-gray-700/30 rounded-lg">
-                        <p class="text-xs font-medium text-gray-500 dark:text-gray-400">mailcow URL</p>
-                        <p class="text-sm text-gray-900 dark:text-white mt-1 font-mono break-all">${escapeHtml(config.mailcow_url || 'N/A')}</p>
+        ${config.local_domains && config.local_domains.length > 0 ? `
+        <section class="ui-panel">
+            <div class="ui-panel-head">Local Domains <span class="ui-count">${config.local_domains.length}</span></div>
+            <div class="ui-set-domains">${config.local_domains.map(domain => `<span class="ui-code-chip" title="${escapeHtml(domain)}">${escapeHtml(domain)}</span>`).join('')}</div>
+        </section>` : ''}
+
+        ${!data.settings_edit_via_ui_enabled ? `
+        <section class="ui-panel">
+            <div class="ui-panel-head">Runtime</div>
+            <div class="ui-md-ids ui-set-facts">
+                ${readOnlyFacts.map(([label, value]) => `<div class="ui-md-fact"><span>${label}</span><div>${value}</div></div>`).join('')}
+                <div class="ui-md-fact"><span>MaxMind Status</span>
+                    <div class="ui-chip-row">
+                        <span id="maxmind-license-status">${renderMaxMindStatus(data.configuration.maxmind_status)}</span>
+                        ${data.geoip_configuration ? renderGeoIPDbStatus(data.geoip_configuration) : ''}
+                        ${data.geoip_configuration && data.geoip_configuration.enabled ? '<button type="button" onclick="validateMaxMindLicense()" class="ui-btn ui-btn-sm">Validate</button>' : ''}
                     </div>
-                    <div class="p-3 bg-gray-50 dark:bg-gray-700/30 rounded-lg">
-                        <p class="text-xs font-medium text-gray-500 dark:text-gray-400">Server IP</p>
-                        <p class="text-sm text-gray-900 dark:text-white mt-1 font-mono">
-                            ${config.server_ip ?
-            `<span class="inline-flex items-center gap-1.5">
-                                    <svg class="w-3.5 h-3.5 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                                    </svg>
-                                    ${escapeHtml(config.server_ip)}
-                                </span>`
-            : '<span class="text-gray-400">Not available</span>'
-        }
-                        </p>
-                    </div>
-                    <div class="p-3 bg-gray-50 dark:bg-gray-700/30 rounded-lg">
-                        <p class="text-xs font-medium text-gray-500 dark:text-gray-400 mb-2">Authentication</p>
-                        ${config.auth_enabled ?
-            `<div class="space-y-2">
-                                <div class="flex items-center gap-2 flex-wrap">
-                                    <span class="inline-flex items-center px-2 py-1 rounded text-xs font-medium bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400">
-                                        <svg class="w-3 h-3 mr-1" fill="currentColor" viewBox="0 0 20 20">
-                                            <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path>
-                                        </svg>
-                                        Enabled
-                                    </span>
-                                    ${config.basic_auth_enabled ?
-                `<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400">
-                                            Basic Auth
-                                        </span>` : ''
-            }
-                                    ${config.oauth2_enabled ?
-                `<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-400">
-                                            OAuth2${config.oauth2_provider_name ? ` (${escapeHtml(config.oauth2_provider_name)})` : ''}
-                                        </span>` : ''
-            }
-                                </div>
-                                ${config.basic_auth_enabled && config.auth_username ?
-                `<p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Basic Auth Username: ${escapeHtml(config.auth_username)}</p>` : ''
-            }
-                            </div>` :
-            `<span class="inline-flex items-center px-2 py-1 rounded text-xs font-medium bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-400">
-                                    Disabled
-                                </span>`
-        }
-                    </div>
-                    <div class="p-3 bg-gray-50 dark:bg-gray-700/30 rounded-lg ${config.local_domains && config.local_domains.length > 0 ? 'col-span-1 md:col-span-2 lg:col-span-3' : ''}">
-                        <p class="text-xs font-medium text-gray-500 dark:text-gray-400 mb-2">
-                            Local Domains
-                            ${config.local_domains && config.local_domains.length > 0 ?
-            `<span class="ml-1 text-gray-400 dark:text-gray-500 font-normal">(${config.local_domains.length})</span>` :
-            ''
-        }
-                        </p>
-                        ${config.local_domains && config.local_domains.length > 0 ?
-            `<div class="mt-2 max-h-64 overflow-y-auto">
-                                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
-                                    ${config.local_domains.map(domain => `
-                                        <div class="text-sm text-gray-900 dark:text-white font-mono px-3 py-1.5 bg-white dark:bg-gray-800 rounded border border-gray-200 dark:border-gray-600 truncate" title="${escapeHtml(domain)}">
-                                            ${escapeHtml(domain)}
-                                        </div>
-                                    `).join('')}
-                                </div>
-                            </div>` :
-            '<p class="text-sm text-gray-500 dark:text-gray-400 mt-1">N/A</p>'
-        }
-                    </div>
-                    ${!data.settings_edit_via_ui_enabled ? `
-                    <div class="p-3 bg-gray-50 dark:bg-gray-700/30 rounded-lg">
-                        <p class="text-xs font-medium text-gray-500 dark:text-gray-400">Fetch Interval</p>
-                        <p class="text-sm text-gray-900 dark:text-white mt-1">${config.fetch_interval || 0} seconds</p>
-                    </div>
-                    <div class="p-3 bg-gray-50 dark:bg-gray-700/30 rounded-lg">
-                        <p class="text-xs font-medium text-gray-500 dark:text-gray-400">Fetch Count (Postfix)</p>
-                        <p class="text-sm text-gray-900 dark:text-white mt-1">${config.fetch_count_postfix || config.fetch_count || 0} per request</p>
-                    </div>
-                    <div class="p-3 bg-gray-50 dark:bg-gray-700/30 rounded-lg">
-                        <p class="text-xs font-medium text-gray-500 dark:text-gray-400">Fetch Count (Rspamd)</p>
-                        <p class="text-sm text-gray-900 dark:text-white mt-1">${config.fetch_count_rspamd || config.fetch_count || 0} per request</p>
-                    </div>
-                    <div class="p-3 bg-gray-50 dark:bg-gray-700/30 rounded-lg">
-                        <p class="text-xs font-medium text-gray-500 dark:text-gray-400">Fetch Count (Netfilter)</p>
-                        <p class="text-sm text-gray-900 dark:text-white mt-1">${config.fetch_count_netfilter || config.fetch_count || 0} per request</p>
-                    </div>
-                    <div class="p-3 bg-gray-50 dark:bg-gray-700/30 rounded-lg">
-                        <p class="text-xs font-medium text-gray-500 dark:text-gray-400">Max Pages per Cycle</p>
-                        <p class="text-sm text-gray-900 dark:text-white mt-1">${config.fetch_max_pages || 50}</p>
-                    </div>
-                    <div class="p-3 bg-gray-50 dark:bg-gray-700/30 rounded-lg">
-                        <p class="text-xs font-medium text-gray-500 dark:text-gray-400">Retention</p>
-                        <p class="text-sm text-gray-900 dark:text-white mt-1">${config.retention_days || 0} days</p>
-                    </div>
-                    <div class="p-3 bg-gray-50 dark:bg-gray-700/30 rounded-lg">
-                        <p class="text-xs font-medium text-gray-500 dark:text-gray-400">Max Correlation Age</p>
-                        <p class="text-sm text-gray-900 dark:text-white mt-1">${config.max_correlation_age_minutes || 10} minutes</p>
-                    </div>
-                    <div class="p-3 bg-gray-50 dark:bg-gray-700/30 rounded-lg">
-                        <p class="text-xs font-medium text-gray-500 dark:text-gray-400">Correlation Check</p>
-                        <p class="text-sm text-gray-900 dark:text-white mt-1">${config.correlation_check_interval || 120} seconds</p>
-                    </div>
-                    <div class="p-3 bg-gray-50 dark:bg-gray-700/30 rounded-lg">
-                        <p class="text-xs font-medium text-gray-500 dark:text-gray-400">Timezone</p>
-                        <p class="text-sm text-gray-900 dark:text-white mt-1">${escapeHtml(config.timezone || 'N/A')}</p>
-                    </div>
-                    <div class="p-3 bg-gray-50 dark:bg-gray-700/30 rounded-lg">
-                        <p class="text-xs font-medium text-gray-500 dark:text-gray-400">Log Level</p>
-                        <p class="text-sm text-gray-900 dark:text-white mt-1">${config.log_level || 'INFO'}</p>
-                    </div>
-                    <div class="p-3 bg-gray-50 dark:bg-gray-700/30 rounded-lg">
-                        <p class="text-xs font-medium text-gray-500 dark:text-gray-400">Blacklist</p>
-                        <p class="text-sm text-gray-900 dark:text-white mt-1">${config.blacklist_enabled ? `Enabled (${config.blacklist_count} emails)` : 'Disabled'}</p>
-                    </div>
-                    <div class="p-3 bg-gray-50 dark:bg-gray-700/30 rounded-lg">
-                        <p class="text-xs font-medium text-gray-500 dark:text-gray-400">Scheduler Workers</p>
-                        <p class="text-sm text-gray-900 dark:text-white mt-1">${config.scheduler_workers || 4}</p>
-                    </div>
-                    <div class="p-3 bg-gray-50 dark:bg-gray-700/30 rounded-lg">
-                        <p class="text-xs font-medium text-gray-500 dark:text-gray-400">MaxMind Status</p>
-                        <div class="flex flex-wrap items-center gap-1 mt-1">
-                            <span id="maxmind-license-status">${renderMaxMindStatus(data.configuration.maxmind_status)}</span>
-                            ${data.geoip_configuration ? renderGeoIPDbStatus(data.geoip_configuration) : ''}
-                            ${data.geoip_configuration && data.geoip_configuration.enabled ? `
-                            <button type="button" onclick="validateMaxMindLicense()" class="px-2 py-1 bg-blue-500 hover:bg-blue-600 text-white rounded text-xs font-medium transition-colors duration-200 flex items-center gap-1">
-                                <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
-                                Validate
-                            </button>
-                            ` : ''}
-                        </div>
-                    </div>
-                    ` : ''}
                 </div>
             </div>
-        </div>
+        </section>
+        ` : ''}
 
         ${data.settings_edit_via_ui_enabled && data.editable_config ? (function () {
             const sensitiveKeys = ['mailcow_api_key', 'mailcow_api_key_rw', 'auth_password', 'oauth2_client_secret', 'smtp_password', 'dmarc_imap_password', 'session_secret_key', 'maxmind_license_key'];
@@ -1218,9 +964,9 @@ function renderSettings(content, data) {
             // Mobile: a single sticky category picker instead of the long list.
             // It stays visible while scrolling, so switching category never
             // means scrolling back to the top.
-            let mobileNavHtml = '<div class="settings-mobile-nav lg:hidden sticky top-0 z-20 -mx-4 px-4 py-2 mb-3 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">'
+            let mobileNavHtml = '<div class="settings-mobile-nav">'
                 + '<label for="settings-tab-select" class="sr-only">Settings category</label>'
-                + '<select id="settings-tab-select" class="w-full rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white px-3 py-2 text-sm font-medium">';
+                + '<select id="settings-tab-select" class="ui-select">';
             grouped.forEach(function (group) {
                 if (!group.tabs.length) return;
                 mobileNavHtml += '<optgroup label="' + escapeHtml(group.label) + '">';
@@ -1235,10 +981,10 @@ function renderSettings(content, data) {
             mobileNavHtml += '</select></div>';
 
             // Desktop: grouped category sidebar
-            let navHtml = '<nav class="settings-edit-nav hidden lg:block flex-shrink-0 w-full lg:w-56 lg:border-r border-gray-200 dark:border-gray-700 lg:pr-3">';
+            let navHtml = '<nav class="settings-edit-nav" aria-label="Settings categories">';
             grouped.forEach(function (group) {
                 if (!group.tabs.length) return;
-                navHtml += '<div class="mb-3"><p class="px-2 mb-1 text-[11px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">' + escapeHtml(group.label) + '</p><div class="space-y-0.5">';
+                navHtml += '<div class="ui-set-navgroup"><p>' + escapeHtml(group.label) + '</p><div>';
                 group.tabs.forEach(function (id) {
                     const tab = tabById[id];
                     if (!tab) return;
@@ -1253,8 +999,8 @@ function renderSettings(content, data) {
             // Mobile picker sits above the layout so it can stick to the top;
             // on desktop the sidebar sits beside the content.
             let tabsHtml = mobileNavHtml
-                + '<div class="settings-edit-layout flex flex-col lg:flex-row gap-4">' + navHtml
-                + '<div class="settings-edit-content flex-1 min-w-0 space-y-6">';
+                + '<div class="settings-edit-layout">' + navHtml
+                + '<div class="settings-edit-content">';
             filteredTabs.forEach(function (tab, idx) {
                 const allKeysInTab = (tab.groups || []).flatMap(function (g) { return g.keys; });
                 const keysInTab = allKeysInTab.filter(function (k) { return data.editable_config[k] !== undefined; });
@@ -1262,40 +1008,42 @@ function renderSettings(content, data) {
                 if (keysInTab.length === 0 && tab.id !== 'maxmind') return;
                 // The visible panel is the one matching the active sidebar item
                 const hidden = tab.id === firstVisibleId ? '' : ' hidden';
-                const desc = tab.description ? '<p class="text-sm text-gray-500 dark:text-gray-400 mb-4">' + escapeHtml(tab.description) + '</p>' : '';
+                const desc = tab.description ? '<p class="ui-set-tabdesc">' + escapeHtml(tab.description) + '</p>' : '';
                 tabsHtml += '<div id="settings-tab-panel-' + tab.id + '" class="settings-edit-panel' + hidden + '">' + desc;
+
+                // A small grid of facts at the top of a tab: SMTP, DMARC IMAP and MaxMind status
+                const statusBlock = function (facts) {
+                    return '<div class="ui-set-group"><h4 class="ui-md-h">Status</h4><div class="ui-md-ids ui-set-facts">'
+                        + facts.map(function (f) { return '<div class="ui-md-fact"><span>' + f[0] + '</span><div class="ui-chip-row">' + f[1] + '</div></div>'; }).join('')
+                        + '</div></div>';
+                };
+                const onOff = function (on, offTone) { return on ? uiTag('Enabled', 'ok') : uiTag('Disabled', offTone || ''); };
 
                 // Special handling for SMTP tab - add Global SMTP Configuration
                 if (tab.id === 'smtp' && data.smtp_configuration) {
-                    tabsHtml += '<div class="mb-6 p-4 bg-gray-50 dark:bg-gray-700/30 rounded-lg"><h4 class="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">Status</h4><div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">';
-                    tabsHtml += '<div class="ui-panel p-4"><p class="text-xs font-medium text-gray-500 dark:text-gray-400 mb-2">SMTP Enabled</p><div class="flex items-center gap-2 flex-wrap">';
-                    tabsHtml += data.smtp_configuration.enabled ? '<span class="inline-flex items-center px-2 py-1 rounded text-xs font-medium bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400"><svg class="w-3 h-3 mr-1" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path></svg>Enabled</span>' : '<span class="inline-flex items-center px-2 py-1 rounded text-xs font-medium bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-400">Disabled</span>';
-                    tabsHtml += '<button type="button" onclick="testSmtpConnection()" class="px-3 py-1.5 bg-blue-500 hover:bg-blue-600 text-white rounded text-xs font-medium transition-colors duration-200 flex items-center gap-1.5"><svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg><span>Test SMTP</span></button></div></div>';
+                    const facts = [['SMTP Enabled', onOff(data.smtp_configuration.enabled) + '<button type="button" onclick="testSmtpConnection()" class="ui-btn ui-btn-sm">Test SMTP</button>']];
                     if (data.smtp_configuration.enabled) {
-                        tabsHtml += '<div class="ui-panel p-4"><p class="text-xs font-medium text-gray-500 dark:text-gray-400 mb-2">Server</p><p class="text-sm text-gray-900 dark:text-white font-mono">' + escapeHtml(data.smtp_configuration.host) + ':' + escapeHtml(data.smtp_configuration.port) + '</p></div>';
-                        tabsHtml += '<div class="ui-panel p-4"><p class="text-xs font-medium text-gray-500 dark:text-gray-400 mb-2">Admin Email</p><p class="text-sm text-gray-900 dark:text-white font-mono">' + escapeHtml(data.smtp_configuration.admin_email || 'N/A') + '</p></div>';
+                        facts.push(['Server', '<span class="ui-mono">' + escapeHtml(data.smtp_configuration.host) + ':' + escapeHtml(data.smtp_configuration.port) + '</span>']);
+                        facts.push(['Admin Email', '<span class="ui-mono">' + escapeHtml(data.smtp_configuration.admin_email || 'N/A') + '</span>']);
                     }
-                    tabsHtml += '</div></div>';
+                    tabsHtml += statusBlock(facts);
                 }
 
                 // Notifications tab - channel manager (rendered by notifications.js)
                 if (tab.id === 'notifications') {
-                    tabsHtml += '<div id="notification-channels-panel" class="mb-6"></div>';
+                    tabsHtml += '<div id="notification-channels-panel" class="ui-set-group"></div>';
                 }
 
                 // Special handling for DMARC IMAP tab - add DMARC Management
                 if (tab.id === 'dmarc_imap' && data.dmarc_configuration) {
-                    tabsHtml += '<div class="mb-6 p-4 bg-gray-50 dark:bg-gray-700/30 rounded-lg"><h4 class="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">Status</h4><div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">';
-                    tabsHtml += '<div class="ui-panel p-4"><p class="text-xs font-medium text-gray-500 dark:text-gray-400 mb-2">IMAP Auto-Import</p><div class="flex items-center gap-2 flex-wrap">';
-                    tabsHtml += data.dmarc_configuration.imap_sync_enabled ? '<span class="inline-flex items-center px-2 py-1 rounded text-xs font-medium bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400"><svg class="w-3 h-3 mr-1" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path></svg>Enabled</span>' : '<span class="inline-flex items-center px-2 py-1 rounded text-xs font-medium bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-400">Disabled</span>';
-                    tabsHtml += '<button type="button" onclick="testImapConnection()" class="px-3 py-1.5 bg-blue-500 hover:bg-blue-600 text-white rounded text-xs font-medium transition-colors duration-200 flex items-center gap-1.5"><svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg><span>Test IMAP</span></button></div></div>';
-                    tabsHtml += '<div class="ui-panel p-4"><p class="text-xs font-medium text-gray-500 dark:text-gray-400 mb-2">Manual Upload</p><p class="text-sm text-gray-900 dark:text-white">';
-                    tabsHtml += data.dmarc_configuration.manual_upload_enabled ? '<span class="inline-flex items-center px-2 py-1 rounded text-xs font-medium bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400"><svg class="w-3 h-3 mr-1" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path></svg>Enabled</span>' : '<span class="inline-flex items-center px-2 py-1 rounded text-xs font-medium bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400">Disabled</span>';
-                    tabsHtml += '</p></div>';
+                    const facts = [
+                        ['IMAP Auto-Import', onOff(data.dmarc_configuration.imap_sync_enabled) + '<button type="button" onclick="testImapConnection()" class="ui-btn ui-btn-sm">Test IMAP</button>'],
+                        ['Manual Upload', onOff(data.dmarc_configuration.manual_upload_enabled, 'fail')]
+                    ];
                     if (data.dmarc_configuration.imap_sync_enabled) {
-                        tabsHtml += '<div class="ui-panel p-4"><p class="text-xs font-medium text-gray-500 dark:text-gray-400 mb-2">IMAP Server</p><p class="text-sm text-gray-900 dark:text-white font-mono">' + escapeHtml(data.dmarc_configuration.imap_host || 'N/A') + '</p></div>';
+                        facts.push(['IMAP Server', '<span class="ui-mono">' + escapeHtml(data.dmarc_configuration.imap_host || 'N/A') + '</span>']);
                     }
-                    tabsHtml += '</div></div>';
+                    tabsHtml += statusBlock(facts);
                 }
 
                 // Special handling for MaxMind tab
@@ -1304,48 +1052,17 @@ function renderSettings(content, data) {
                     const dbs = geoipCfg.databases || {};
                     const cityDb = dbs.City || {};
                     const asnDb = dbs.ASN || {};
-                    
-                    tabsHtml += '<div class="mb-6 p-4 bg-gray-50 dark:bg-gray-700/30 rounded-lg"><h4 class="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">Status</h4>';
-                    tabsHtml += '<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">';
-                    
-                    // License Status
-                    tabsHtml += '<div class="ui-panel p-4">';
-                    tabsHtml += '<p class="text-xs font-medium text-gray-500 dark:text-gray-400 mb-2">License</p>';
-                    tabsHtml += '<div class="flex items-center gap-2"><span id="maxmind-license-status-tab">' + renderMaxMindStatus(data.configuration.maxmind_status) + '</span>';
-                    if (data.geoip_configuration && data.geoip_configuration.enabled) {
-                        tabsHtml += '<button type="button" onclick="validateMaxMindLicense()" class="px-2 py-1 bg-blue-500 hover:bg-blue-600 text-white rounded text-xs font-medium transition-colors duration-200 flex items-center gap-1"><svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>Validate</button>';
-                    }
-                    tabsHtml += '</div>';
-                    tabsHtml += '</div>';
-                    
-                    // DB Health
-                    tabsHtml += '<div class="ui-panel p-4">';
-                    tabsHtml += '<p class="text-xs font-medium text-gray-500 dark:text-gray-400 mb-2">Database Health</p>';
-                    tabsHtml += '<div id="geoip-db-status" class="flex items-center gap-2">' + renderGeoIPDbStatus(geoipCfg) + '</div>';
-                    tabsHtml += '</div>';
-                    
-                    // Databases (City + ASN combined)
-                    tabsHtml += '<div class="ui-panel p-4">';
-                    tabsHtml += '<p class="text-xs font-medium text-gray-500 dark:text-gray-400 mb-2">Databases</p>';
-                    if (cityDb.available || asnDb.available) {
-                        tabsHtml += '<div class="space-y-1">';
-                        if (cityDb.available) {
-                            tabsHtml += '<p class="text-sm text-gray-900 dark:text-white">City: ' + cityDb.size_mb + 'MB <span class="text-xs text-gray-500">(' + cityDb.age_days + 'd old)</span></p>';
-                        } else {
-                            tabsHtml += '<p class="text-sm text-gray-500 dark:text-gray-400">City: Not installed</p>';
-                        }
-                        if (asnDb.available) {
-                            tabsHtml += '<p class="text-sm text-gray-900 dark:text-white">ASN: ' + asnDb.size_mb + 'MB <span class="text-xs text-gray-500">(' + asnDb.age_days + 'd old)</span></p>';
-                        } else {
-                            tabsHtml += '<p class="text-sm text-gray-500 dark:text-gray-400">ASN: Not installed</p>';
-                        }
-                        tabsHtml += '</div>';
-                    } else {
-                        tabsHtml += '<p class="text-sm text-gray-500 dark:text-gray-400">Not installed</p>';
-                    }
-                    tabsHtml += '</div>';
-                    
-                    tabsHtml += '</div></div>';
+                    const dbLine = function (name, db) {
+                        return db.available
+                            ? '<span>' + name + ': ' + db.size_mb + 'MB <small class="ui-muted">(' + db.age_days + 'd old)</small></span>'
+                            : '<span class="ui-muted">' + name + ': Not installed</span>';
+                    };
+                    tabsHtml += statusBlock([
+                        ['License', '<span id="maxmind-license-status-tab">' + renderMaxMindStatus(data.configuration.maxmind_status) + '</span>'
+                            + (data.geoip_configuration && data.geoip_configuration.enabled ? '<button type="button" onclick="validateMaxMindLicense()" class="ui-btn ui-btn-sm">Validate</button>' : '')],
+                        ['Database Health', '<span id="geoip-db-status" class="ui-chip-row">' + renderGeoIPDbStatus(geoipCfg) + '</span>'],
+                        ['Databases', (cityDb.available || asnDb.available) ? dbLine('City', cityDb) + dbLine('ASN', asnDb) : '<span class="ui-muted">Not installed</span>']
+                    ]);
                 }
 
                 // Groups are separated by a rule so a long tab reads as a few
@@ -1354,11 +1071,8 @@ function renderSettings(content, data) {
                 (tab.groups || []).forEach(function (group) {
                     const groupKeys = group.keys.filter(function (k) { return data.editable_config[k] !== undefined; });
                     if (groupKeys.length === 0) return;
-                    const separator = renderedGroups > 0
-                        ? ' border-t border-gray-200 dark:border-gray-700 pt-5 mt-6'
-                        : '';
                     renderedGroups++;
-                    tabsHtml += '<div class="mb-6' + separator + '"><h4 class="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">' + escapeHtml(group.label) + '</h4><div class="grid grid-cols-1 md:grid-cols-2 gap-4">';
+                    tabsHtml += '<div class="ui-set-group"><h4 class="ui-md-h">' + escapeHtml(group.label) + '</h4><div class="ui-set-grid">';
                     groupKeys.forEach(function (key) {
                         tabsHtml += renderSettingsEditField(key, data.editable_config[key], sensitiveKeys, SETTINGS_FIELD_DESCRIPTIONS[key] || '', envLockedKeys.has(key), defaults[key]);
                     });
@@ -1369,139 +1083,51 @@ function renderSettings(content, data) {
             tabsHtml += '</div></div>';  // close .settings-edit-content and .settings-edit-layout
             return `
         <!-- Edit Configuration (only when SETTINGS_EDIT_VIA_UI_ENABLED) -->
-        <div class="ui-panel">
-            <div class="ui-panel-head">
-                <h3 class="ui-panel-title">
-                    <svg class="w-5 h-5 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path>
-                    </svg>
-                    Edit configuration
-                </h3>
-                <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">
-                    Priority: Default → DB → ENV. Environment variables always override DB values and cannot be changed from here.
-                </p>
-            </div>
-            <div class="p-4 space-y-4">
-                <div class="flex flex-wrap gap-2" id="settings-edit-actions">
-                    ${!data.settings_migrated ? '<button type="button" id="settings-import-env-btn" class="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-lg text-sm font-medium transition-colors">Migrate Settings from ENV</button>' : ''}
-                    ${data.settings_migrated ? '<button type="submit" form="settings-edit-form" id="settings-save-btn" class="px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-lg text-sm font-medium transition-colors">Save changes</button>' : ''}
+        <section class="ui-panel ui-set-edit">
+            <div class="ui-panel-head ui-rl-head">
+                <div>
+                    <h3 class="ui-h2">Edit configuration</h3>
+                    <p class="ui-muted">Priority: Default → DB → ENV. Environment variables always override DB values and cannot be changed from here.</p>
                 </div>
-                <form id="settings-edit-form" class="space-y-4 pr-2">
-                    ` + tabsHtml + `
-                </form>
+                <div class="ui-rl-tools" id="settings-edit-actions">
+                    ${!data.settings_migrated ? '<button type="button" id="settings-import-env-btn" class="ui-btn ui-btn-primary">Migrate Settings from ENV</button>' : ''}
+                    ${data.settings_migrated ? '<button type="submit" form="settings-edit-form" id="settings-save-btn" class="ui-btn ui-btn-primary">Save changes</button>' : ''}
+                </div>
             </div>
-        </div>
+            <form id="settings-edit-form" class="ui-set-form">
+                ` + tabsHtml + `
+            </form>
+        </section>
         `;
         })() : ''}
 
         ${!data.settings_edit_via_ui_enabled ? `
-        <!-- Global SMTP Configuration -->
-        <div class="ui-panel">
-            <div class="ui-panel-head">
-                <h3 class="ui-panel-title">
-                    <svg class="w-5 h-5 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path>
-                    </svg>
-                    Global SMTP Configuration
-                </h3>
-            </div>
-            <div class="p-4">
-                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                    <div class="p-4 bg-gray-50 dark:bg-gray-700/30 rounded-lg">
-                        <p class="text-xs font-medium text-gray-500 dark:text-gray-400 mb-2">SMTP Enabled</p>
-                        <div class="flex items-center gap-2 flex-wrap">
-                            ${data.smtp_configuration?.enabled ?
-                `<span class="inline-flex items-center px-2 py-1 rounded text-xs font-medium bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400">
-                                    <svg class="w-3 h-3 mr-1" fill="currentColor" viewBox="0 0 20 20">
-                                        <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path>
-                                    </svg>
-                                    Enabled
-                                </span>` :
-                `<span class="inline-flex items-center px-2 py-1 rounded text-xs font-medium bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-400">Disabled</span>`
-            }
-                            <button type="button" onclick="testSmtpConnection()" class="px-3 py-1.5 bg-blue-500 hover:bg-blue-600 text-white rounded text-xs font-medium transition-colors duration-200 flex items-center gap-1.5">
-                                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                                </svg>
-                                <span>Test SMTP</span>
-                            </button>
-                        </div>
-                    </div>
-                    ${data.smtp_configuration?.enabled ? `
-                    <div class="p-4 bg-gray-50 dark:bg-gray-700/30 rounded-lg">
-                        <p class="text-xs font-medium text-gray-500 dark:text-gray-400 mb-2">Server</p>
-                        <p class="text-sm text-gray-900 dark:text-white font-mono">${data.smtp_configuration.host}:${data.smtp_configuration.port}</p>
-                    </div>
-                    <div class="p-4 bg-gray-50 dark:bg-gray-700/30 rounded-lg">
-                        <p class="text-xs font-medium text-gray-500 dark:text-gray-400 mb-2">Admin Email</p>
-                        <p class="text-sm text-gray-900 dark:text-white font-mono">${data.smtp_configuration.admin_email || 'N/A'}</p>
-                    </div>
-                    ` : ''}
-                </div>
-            </div>
-        </div>
+        <div class="ui-dash-grid ui-status-pair">
+            <!-- Global SMTP Configuration -->
+            <section class="ui-panel">
+                <div class="ui-panel-head">Global SMTP Configuration
+                    <button type="button" onclick="testSmtpConnection()" class="ui-btn ui-btn-sm ui-head-actions">Test SMTP</button></div>
+                <div class="ui-kv"><span>SMTP Enabled</span><b>${data.smtp_configuration?.enabled ? uiTag('Enabled', 'ok') : uiTag('Disabled', '')}</b></div>
+                ${data.smtp_configuration?.enabled ? `
+                <div class="ui-kv"><span>Server</span><b class="ui-mono ui-kv-small">${escapeHtml(String(data.smtp_configuration.host))}:${escapeHtml(String(data.smtp_configuration.port))}</b></div>
+                <div class="ui-kv"><span>Admin Email</span><b class="ui-mono ui-kv-small">${escapeHtml(data.smtp_configuration.admin_email || 'N/A')}</b></div>
+                ` : ''}
+            </section>
 
-        <!-- DMARC Management -->
-        <div class="ui-panel">
-            <div class="ui-panel-head">
-                <h3 class="ui-panel-title">
-                    <svg class="w-5 h-5 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"></path>
-                    </svg>
-                    DMARC Management
-                </h3>
-            </div>
-            <div class="p-4">
-                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                    <div class="p-4 bg-gray-50 dark:bg-gray-700/30 rounded-lg">
-                        <p class="text-xs font-medium text-gray-500 dark:text-gray-400 mb-2">IMAP Auto-Import</p>
-                        <div class="flex items-center gap-2 flex-wrap">
-                            ${data.dmarc_configuration?.imap_sync_enabled ?
-                `<span class="inline-flex items-center px-2 py-1 rounded text-xs font-medium bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400">
-                                    <svg class="w-3 h-3 mr-1" fill="currentColor" viewBox="0 0 20 20">
-                                        <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path>
-                                    </svg>
-                                    Enabled
-                                </span>` :
-                `<span class="inline-flex items-center px-2 py-1 rounded text-xs font-medium bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-400">Disabled</span>`
-            }
-                            <button type="button" onclick="testImapConnection()" class="px-3 py-1.5 bg-blue-500 hover:bg-blue-600 text-white rounded text-xs font-medium transition-colors duration-200 flex items-center gap-1.5">
-                                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                                </svg>
-                                <span>Test IMAP</span>
-                            </button>
-                        </div>
-                    </div>
-                    <div class="p-4 bg-gray-50 dark:bg-gray-700/30 rounded-lg">
-                        <p class="text-xs font-medium text-gray-500 dark:text-gray-400 mb-2">Manual Upload</p>
-                        <p class="text-sm text-gray-900 dark:text-white">
-                            ${data.dmarc_configuration?.manual_upload_enabled ?
-                `<span class="inline-flex items-center px-2 py-1 rounded text-xs font-medium bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400">
-                                    <svg class="w-3 h-3 mr-1" fill="currentColor" viewBox="0 0 20 20">
-                                        <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path>
-                                    </svg>
-                                    Enabled
-                                </span>` :
-                `<span class="inline-flex items-center px-2 py-1 rounded text-xs font-medium bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400">Disabled</span>`
-            }
-                        </p>
-                    </div>
-                    ${data.dmarc_configuration?.imap_sync_enabled ? `
-                    <div class="p-4 bg-gray-50 dark:bg-gray-700/30 rounded-lg">
-                        <p class="text-xs font-medium text-gray-500 dark:text-gray-400 mb-2">IMAP Server</p>
-                        <p class="text-sm text-gray-900 dark:text-white font-mono">${data.dmarc_configuration.imap_host || 'N/A'}</p>
-                    </div>
-                    ` : ''}
-                </div>
-            </div>
+            <!-- DMARC Management -->
+            <section class="ui-panel">
+                <div class="ui-panel-head">DMARC Management
+                    <button type="button" onclick="testImapConnection()" class="ui-btn ui-btn-sm ui-head-actions">Test IMAP</button></div>
+                <div class="ui-kv"><span>IMAP Auto-Import</span><b>${data.dmarc_configuration?.imap_sync_enabled ? uiTag('Enabled', 'ok') : uiTag('Disabled', '')}</b></div>
+                <div class="ui-kv"><span>Manual Upload</span><b>${data.dmarc_configuration?.manual_upload_enabled ? uiTag('Enabled', 'ok') : uiTag('Disabled', 'fail')}</b></div>
+                ${data.dmarc_configuration?.imap_sync_enabled ? `<div class="ui-kv"><span>IMAP Server</span><b class="ui-mono ui-kv-small">${escapeHtml(data.dmarc_configuration.imap_host || 'N/A')}</b></div>` : ''}
+            </section>
         </div>
         ` : ''}
     `;
 
     // Add event listener for version number click (changelog popup)
     const currentVersionText = document.getElementById('current-version-text');
-    const currentVersionIcon = currentVersionText?.parentElement?.querySelector('svg');
 
     const loadCurrentVersionChangelog = async () => {
         try {
@@ -1522,9 +1148,6 @@ function renderSettings(content, data) {
 
     if (currentVersionText) {
         currentVersionText.onclick = loadCurrentVersionChangelog;
-    }
-    if (currentVersionIcon) {
-        currentVersionIcon.onclick = loadCurrentVersionChangelog;
     }
 
     // Render markdown in changelog sections if marked.js is available
@@ -1574,8 +1197,7 @@ function renderSettings(content, data) {
                 updateVersionInfoUI(versionInfo);
 
                 // Show success state - green button with "Done"
-                btn.classList.remove('bg-blue-500', 'hover:bg-blue-600');
-                btn.classList.add('bg-green-500', 'hover:bg-green-600');
+                btn.classList.add('ui-btn-done');
                 if (text) {
                     text.textContent = 'Done';
                 }
@@ -1593,8 +1215,7 @@ function renderSettings(content, data) {
 
                 // Reset button after 3 seconds
                 setTimeout(() => {
-                    btn.classList.remove('bg-green-500', 'hover:bg-green-600');
-                    btn.classList.add('bg-blue-500', 'hover:bg-blue-600');
+                    btn.classList.remove('ui-btn-done');
                     if (text) {
                         text.textContent = 'Check Now';
                     }
@@ -1609,8 +1230,7 @@ function renderSettings(content, data) {
             } catch (error) {
                 console.error('Failed to check version:', error);
                 // Show error message
-                btn.classList.remove('bg-blue-500', 'hover:bg-blue-600');
-                btn.classList.add('bg-red-500', 'hover:bg-red-600');
+                btn.classList.add('ui-btn-failed');
                 if (text) {
                     text.textContent = 'Error';
                 }
@@ -1620,8 +1240,7 @@ function renderSettings(content, data) {
 
                 // Reset button after 2 seconds
                 setTimeout(() => {
-                    btn.classList.remove('bg-red-500', 'hover:bg-red-600');
-                    btn.classList.add('bg-blue-500', 'hover:bg-blue-600');
+                    btn.classList.remove('ui-btn-failed');
                     if (text) {
                         text.textContent = 'Check Now';
                     }
@@ -1699,14 +1318,10 @@ function renderSettings(content, data) {
                 } else {
                     el.value = defaultVal || '';
                 }
-                // Remove the amber border from parent
-                const parent = el.closest('div');
-                if (parent) {
-                    parent.classList.remove('border-amber-400', 'dark:border-amber-500', 'ring-1', 'ring-amber-200', 'dark:ring-amber-800');
-                    parent.classList.remove('bg-amber-50', 'dark:bg-amber-900/10', 'border-amber-300', 'dark:border-amber-700');
-                }
-                // Also remove ring from input itself
-                el.classList.remove('border-amber-400', 'dark:border-amber-500', 'ring-1', 'ring-amber-200', 'dark:ring-amber-800');
+                // The field is back at its default, so it is no longer marked as changed
+                const parent = el.closest('.ui-set-bool, .ui-set-field');
+                if (parent) parent.classList.remove('is-changed');
+                el.classList.remove('is-changed');
                 // Remove the clear button itself
                 btn.remove();
             });
@@ -2197,104 +1812,32 @@ async function repairGeoIPDatabase() {
 
 function renderMaxMindStatus(status) {
     // null/undefined = not checked yet (user must click 'Validate License')
-    if (status === null || status === undefined) {
-        return `
-            <span class="inline-flex items-center px-2 py-1 rounded text-xs font-medium bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400">
-                <svg class="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                </svg>
-                Not checked
-            </span>
-        `;
-    }
-
-    if (!status.configured) {
-        return `
-            <span class="inline-flex items-center px-2 py-1 rounded text-xs font-medium bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-400">
-                Not configured
-            </span>
-        `;
-    }
-
-    let html = '';
-    
-    // License badge
-    if (status.valid) {
-        html += `
-            <span class="inline-flex items-center px-2 py-1 rounded text-xs font-medium bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400">
-                <svg class="w-3 h-3 mr-1" fill="currentColor" viewBox="0 0 20 20">
-                    <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path>
-                </svg>
-                License Valid
-            </span>
-        `;
-    } else {
-        html += `
-            <span class="inline-flex items-center px-2 py-1 rounded text-xs font-medium bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400">
-                <svg class="w-3 h-3 mr-1" fill="currentColor" viewBox="0 0 20 20">
-                    <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd"></path>
-                </svg>
-                ${escapeHtml(status.error || 'Invalid')}
-            </span>
-        `;
-    }
-
-    return html;
+    if (status === null || status === undefined) return uiTag('Not checked', '');
+    if (!status.configured) return uiTag('Not configured', '');
+    return status.valid ? uiTag('License Valid', 'ok') : uiTag(status.error || 'Invalid', 'fail');
 }
 
 function renderGeoIPDbStatus(geoipConfig) {
     if (!geoipConfig) return '';
-    
+
     // Don't show DB status if MaxMind is not configured
     if (geoipConfig.enabled === false) return '';
-    
+
     const dbValid = geoipConfig.db_valid;
-    
-    if (dbValid === true) {
+
+    if (dbValid === true) return uiTag('DB Healthy', 'ok');
+    if (dbValid === false) {
         return `
-            <span class="inline-flex items-center px-2 py-1 rounded text-xs font-medium bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400">
-                <svg class="w-3 h-3 mr-1" fill="currentColor" viewBox="0 0 20 20">
-                    <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path>
-                </svg>
-                DB Healthy
-            </span>
-        `;
-    } else if (dbValid === false) {
-        return `
-            <span id="geoip-db-status" class="inline-flex items-center gap-1">
-                <span class="inline-flex items-center px-2 py-1 rounded text-xs font-medium bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400">
-                    <svg class="w-3 h-3 mr-1" fill="currentColor" viewBox="0 0 20 20">
-                        <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd"></path>
-                    </svg>
-                    DB Corrupt
-                </span>
-                <button type="button" onclick="repairGeoIPDatabase()" class="px-2 py-1 bg-amber-500 hover:bg-amber-600 text-white rounded text-xs font-medium transition-colors duration-200 flex items-center gap-1">
-                    <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
-                    Repair
-                </button>
-            </span>
-        `;
-    } else {
-        // null = not checked yet - could be downloading
-        const dbs = geoipConfig.databases || {};
-        const cityAvail = dbs.City && dbs.City.available;
-        if (!cityAvail) {
-            return `
-                <span class="inline-flex items-center px-2 py-1 rounded text-xs font-medium bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400">
-                    <svg class="w-3 h-3 mr-1 animate-spin" fill="none" viewBox="0 0 24 24">
-                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
-                    </svg>
-                    Downloading...
-                </span>
-            `;
-        }
-        return `
-            <span class="inline-flex items-center px-2 py-1 rounded text-xs font-medium bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-400">
-                Checking...
+            <span id="geoip-db-status" class="ui-chip-row">
+                ${uiTag('DB Corrupt', 'fail')}
+                <button type="button" onclick="repairGeoIPDatabase()" class="ui-btn ui-btn-sm">Repair</button>
             </span>
         `;
     }
+    // null = not checked yet - could be downloading
+    const dbs = geoipConfig.databases || {};
+    const cityAvail = dbs.City && dbs.City.available;
+    return cityAvail ? uiTag('Checking...', '') : uiTag('Downloading...', 'warn');
 }
 
 // =============================================================================
@@ -2356,29 +1899,24 @@ async function testImapConnection() {
 function showConnectionTestModal(title, message) {
     const modal = document.createElement('div');
     modal.id = 'connection-test-modal';
-    modal.className = 'fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50';
+    modal.className = 'ui-dialog-backdrop';
+    modal.setAttribute('role', 'dialog');
+    modal.setAttribute('aria-label', title);
     modal.innerHTML = `
-        <div class="ui-panel shadow-xl max-w-2xl w-full mx-4 max-h-[80vh] overflow-hidden flex flex-col">
-            <div class="p-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
-                <h3 class="text-lg font-semibold text-gray-900 dark:text-white">${escapeHtml(title)}</h3>
-                <button onclick="closeConnectionTestModal()" class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">
-                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
-                    </svg>
+        <div class="ui-dialog ui-dialog-fit ui-dialog-md">
+            <div class="ui-dialog-head">
+                <h3>${escapeHtml(title)}</h3>
+                <button onclick="closeConnectionTestModal()" class="ui-icon-btn" title="Close" aria-label="Close">
+                    <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
                 </button>
             </div>
-            <div class="p-4 overflow-y-auto flex-1">
-                <div id="connection-test-content" class="space-y-2">
-                    <div class="flex items-center gap-2 text-gray-600 dark:text-gray-400">
-                        <div class="loading"></div>
-                        <span>${escapeHtml(message)}</span>
-                    </div>
+            <div class="ui-dialog-body">
+                <div id="connection-test-content">
+                    <div class="ui-loading"><div class="loading"></div><p>${escapeHtml(message)}</p></div>
                 </div>
             </div>
-            <div class="p-4 border-t border-gray-200 dark:border-gray-700 flex justify-end">
-                <button onclick="closeConnectionTestModal()" class="px-4 py-2 bg-gray-500 hover:bg-gray-600 text-white rounded transition-colors">
-                    Close
-                </button>
+            <div class="ui-dialog-foot">
+                <button onclick="closeConnectionTestModal()" class="ui-btn">Close</button>
             </div>
         </div>
     `;
@@ -2402,27 +1940,16 @@ function updateConnectionTestModal(status, logs) {
         logs = ['Error: Invalid response format'];
     }
 
-    const statusColor = status === 'success' ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400';
-    const statusIcon = status === 'success' ?
-        '<svg class="w-6 h-6" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path></svg>' :
-        '<svg class="w-6 h-6" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd"></path></svg>';
-
+    const ok = status === 'success';
     content.innerHTML = `
-        <div class="flex items-center gap-3 mb-4 p-3 rounded ${status === 'success' ? 'bg-green-50 dark:bg-green-900/20' : 'bg-red-50 dark:bg-red-900/20'}">
-            <div class="${statusColor}">
-                ${statusIcon}
-            </div>
-            <span class="font-semibold ${statusColor}">
-                ${status === 'success' ? 'Connection Successful' : 'Connection Failed'}
-            </span>
-        </div>
-        <div class="bg-gray-900 text-gray-100 p-4 rounded font-mono text-xs overflow-x-auto">
+        <div class="ui-md-verdict-bar ${ok ? 'ui-md-verdict-ok' : 'ui-md-verdict-fail'}">${ok ? '✓ Connection Successful' : '✗ Connection Failed'}</div>
+        <div class="ui-set-log">
             ${logs.map(log => {
-        let color = 'text-gray-300';
-        if (log.includes('✓')) color = 'text-green-400';
-        if (log.includes('✗') || log.includes('ERROR')) color = 'text-red-400';
-        if (log.includes('WARNING')) color = 'text-yellow-400';
-        return `<div class="${color}">${escapeHtml(log)}</div>`;
+        let tone = '';
+        if (log.includes('✓')) tone = 'ok';
+        if (log.includes('✗') || log.includes('ERROR')) tone = 'fail';
+        if (log.includes('WARNING')) tone = 'warn';
+        return `<div class="${tone ? `is-${tone}` : ''}">${escapeHtml(log)}</div>`;
     }).join('')}
         </div>
     `;
