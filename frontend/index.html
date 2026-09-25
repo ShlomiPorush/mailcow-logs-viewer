@@ -23,7 +23,7 @@
     <!-- Utility classes still used by the markup, compiled once
          (.github/scripts/build-utilities-css.sh); the design system comes last -->
     <link rel="stylesheet" href="/static/assets/css/utilities.css?v=1">
-    <link rel="stylesheet" href="/static/assets/css/ui.css?v=21">
+    <link rel="stylesheet" href="/static/assets/css/ui.css?v=22">
     <style>
         .tab-active {
             border-bottom: 2px solid #3b82f6;
@@ -565,7 +565,7 @@
                 <div class="ui-page-head">
                     <div>
                         <h1 class="ui-h1">Dashboard</h1>
-                        <p class="ui-muted">The last 24 hours, with the last 7 days for comparison</p>
+                        <p class="ui-muted" id="dashboard-subtitle">The last 24 hours, with the last 7 days for comparison</p>
                     </div>
                     <div class="ui-quick-search" role="search">
                         <input type="text" id="dashboard-search-query" placeholder="Search messages..." class="ui-input"
@@ -584,11 +584,17 @@
                     </div>
                 </div>
 
-                <!-- Security alerts (anomaly detection), hidden until alerts exist -->
-                <div id="dashboard-security-alerts" class="hidden"></div>
-
                 <div class="ui-dash-grid">
                     <div class="ui-col">
+                        <!-- Needs attention: server checks and the security alerts (anomaly detection) -->
+                        <section class="ui-panel" id="dashboard-attention-panel">
+                            <div class="ui-panel-head">Needs attention <span id="dashboard-attention-count" class="ui-count"></span>
+                                <button type="button" id="dashboard-dismiss-all" onclick="acknowledgeAllSecurityAlerts()" class="hidden ui-btn ui-btn-sm ui-head-actions">Dismiss all alerts</button></div>
+                            <div id="dashboard-attention"></div>
+                            <div id="dashboard-security-alerts" class="hidden"></div>
+                            <p id="dashboard-attention-clear" class="hidden ui-dash-clear">Nothing needs attention right now.</p>
+                        </section>
+
                         <section class="ui-panel">
                             <div class="ui-panel-head">Mail flow, last 24 hours</div>
                             <div class="ui-stats">
@@ -601,32 +607,25 @@
                                 <div class="ui-stat"><span>Auth Fails</span><b id="stat-auth-failures-24h">0</b>
                                     <small>7d: <span id="stat-auth-failures-7d">0</span></small></div>
                             </div>
+                            <div id="dashboard-flow-chart" class="ui-flow"></div>
                         </section>
 
                         <section class="ui-panel">
-                            <div class="ui-panel-head">Recent Activity
+                            <div class="ui-panel-head">Latest messages
                                 <button type="button" class="ui-more" onclick="navigateTo('messages')">View all</button></div>
-                            <div id="recent-activity">
-                                <div class="ui-loading"><div class="loading"></div><p>Loading...</p></div>
-                            </div>
+                            <div id="recent-activity"><div class="ui-loading"><div class="loading"></div><p>Loading...</p></div></div>
                         </section>
                     </div>
 
                     <div class="ui-col">
-                        <section id="dashboard-blacklist-card" class="ui-panel">
-                            <div class="ui-panel-head">Blacklist Status</div>
-                            <div id="dashboard-blacklist-summary"><div class="ui-loading"><div class="loading"></div><p>Loading...</p></div></div>
+                        <section class="ui-panel">
+                            <div class="ui-panel-head">Server</div>
+                            <div id="dashboard-blacklist-card"><div id="dashboard-blacklist-summary"><div class="ui-loading"><div class="loading"></div><p>Loading...</p></div></div></div>
+                            <div id="dashboard-containers-summary"></div>
+                            <div id="dashboard-storage-summary"></div>
                         </section>
                         <section class="ui-panel">
-                            <div class="ui-panel-head">Containers</div>
-                            <div id="dashboard-containers-summary"><div class="ui-loading"><div class="loading"></div><p>Loading...</p></div></div>
-                        </section>
-                        <section class="ui-panel">
-                            <div class="ui-panel-head">Storage</div>
-                            <div id="dashboard-storage-summary"><div class="ui-loading"><div class="loading"></div><p>Loading...</p></div></div>
-                        </section>
-                        <section class="ui-panel">
-                            <div class="ui-panel-head">System</div>
+                            <div class="ui-panel-head">Hosted</div>
                             <div id="dashboard-system-summary"><div class="ui-loading"><div class="loading"></div><p>Loading...</p></div></div>
                         </section>
                     </div>
@@ -1951,7 +1950,7 @@
     <!-- JavaScript -->
     <script src="/static/utils.js?v=12"></script>
     <script src="/static/router.js?v=3"></script>
-    <script src="/static/app.js?v=45"></script>
+    <script src="/static/app.js?v=46"></script>
     <script src="/static/export.js?v=1"></script>
     <script src="/static/message-details.js?v=6"></script>
     <script src="/static/dmarc.js?v=5"></script>
