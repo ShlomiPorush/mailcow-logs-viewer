@@ -219,13 +219,11 @@ function applyFeatureToggles() {
     // it's a section inside the Domains page
     const blacklistSection = document.getElementById('blacklist-section');
     const dashboardBlacklistCard = document.getElementById('dashboard-blacklist-card');
-    if (window.disabledFeatures.includes('blacklist')) {
-        if (blacklistSection) blacklistSection.style.display = 'none';
-        if (dashboardBlacklistCard) dashboardBlacklistCard.style.display = 'none';
-    } else {
-        if (blacklistSection) blacklistSection.style.display = '';
-        if (dashboardBlacklistCard) dashboardBlacklistCard.style.display = '';
-    }
+    const statusBlacklistKpi = document.getElementById('status-kpi-blocklists-cell');
+    const blacklistOff = window.disabledFeatures.includes('blacklist');
+    [blacklistSection, dashboardBlacklistCard, statusBlacklistKpi].forEach(el => {
+        if (el) el.style.display = blacklistOff ? 'none' : '';
+    });
 
     // Same for rate-limits - it is a view inside the Mailbox Stats page,
     // so the feature toggle hides its switcher button instead of a tab
@@ -3960,10 +3958,44 @@ async function loadStatus() {
             loadStatusContainers(),
             loadStatusSystem(),
             loadStatusStorage(),
-            loadStatusExtended()
+            loadStatusExtended(),
+            loadStatusAppVersion()
         ]);
+        const subtitle = document.getElementById('status-subtitle');
+        const host = document.getElementById('ui-server-host');
+        if (subtitle) {
+            const now = new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit', hour12: false,
+                timeZone: appTimezone && appTimezone !== 'UTC' ? appTimezone : undefined }).format(new Date());
+            subtitle.textContent = `${host && host.textContent && host.textContent !== 'mailcow' ? `${host.textContent}, checked` : 'Checked'} at ${now}`;
+        }
     } catch (error) {
         console.error('Failed to load status:', error);
+    }
+}
+
+function setStatusKpi(id, value, tone) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.textContent = value;
+    el.className = tone ? `ui-${tone}` : '';
+}
+
+// The version of this app, and whether an update is out
+async function loadStatusAppVersion() {
+    const note = document.getElementById('status-kpi-version-note');
+    try {
+        const res = await authenticatedFetch('/api/status/app-version');
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        setStatusKpi('status-kpi-version', data.current_version || '-');
+        if (note) {
+            note.innerHTML = data.update_available
+                ? `<button type="button" class="ui-link-row ui-text-info" onclick="switchTab('settings')">Update ${escapeHtml(data.latest_version)} available</button>`
+                : 'Up to date';
+        }
+    } catch (error) {
+        setStatusKpi('status-kpi-version', '-');
+        if (note) note.textContent = 'Version';
     }
 }
 
@@ -3992,57 +4024,42 @@ async function loadStatusContainers() {
             }));
         }
 
+        const note = document.getElementById('status-containers-note');
         if (containersList.length > 0) {
-            // Normalize states and count: only 'running' is running, everything else is stopped
-            // This includes: paused, exited, stopped, created, restarting, removing, dead, unknown, etc.
-            const running = containersList.filter(c => {
-                const state = (c.state || 'unknown').toString().toLowerCase().trim();
-                return state === 'running';
-            }).length;
+            // Only 'running' is running; paused, exited, restarting, dead and the rest count as stopped
+            const isRunning = c => (c.state || 'unknown').toString().toLowerCase().trim() === 'running';
+            const running = containersList.filter(isRunning).length;
             const stopped = containersList.length - running;
             const total = containersList.length;
+            setStatusKpi('status-kpi-containers', `${running} of ${total}`, stopped > 0 ? 'fail' : '');
+            if (note) note.textContent = stopped ? `${stopped} stopped` : 'All running';
 
+            // Stopped containers first, so they are seen
+            const ordered = [...containersList].sort((a, b) => Number(isRunning(a)) - Number(isRunning(b)));
             container.innerHTML = `
-                <!-- Summary FIRST -->
-                <div class="mb-4 pb-4 border-b border-gray-200 dark:border-gray-700">
-                    <div class="grid grid-cols-3 gap-4 text-center">
-                        <div>
-                            <p class="text-xs text-gray-500 dark:text-gray-400">Total</p>
-                            <p class="text-xl font-bold text-gray-900 dark:text-white">${total}</p>
-                        </div>
-                        <div>
-                            <p class="text-xs text-gray-500 dark:text-gray-400">Running</p>
-                            <p class="text-xl font-bold text-green-600 dark:text-green-400">${running}</p>
-                        </div>
-                        <div>
-                            <p class="text-xs text-gray-500 dark:text-gray-400">Stopped</p>
-                            <p class="text-xl font-bold text-red-600 dark:text-red-400">${stopped}</p>
-                        </div>
-                    </div>
-                </div>
-                
-                <!-- Containers list -->
-                <div class="space-y-2 max-h-96 overflow-y-auto" style="scrollbar-width: thin;">
-                    ${containersList.map(c => `
-                        <div class="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
-                            <div class="flex items-center gap-3 flex-1">
-                                <div class="w-2 h-2 rounded-full flex-shrink-0 ${c.state === 'running' ? 'bg-green-500' : 'bg-red-500'}"></div>
-                                <div class="min-w-0 flex-1">
-                                    <p class="text-sm font-medium text-gray-900 dark:text-white truncate">${escapeHtml(c.name)}</p>
-                                    <p class="text-xs text-gray-500 dark:text-gray-400">${c.started_at ? new Date(c.started_at).toLocaleString('he-IL', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'Unknown'}</p>
-                                </div>
-                            </div>
-                            <span class="text-xs px-2 py-1 rounded flex-shrink-0 ${c.state === 'running' ? 'bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300' : 'bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-300'}">${c.state}</span>
-                        </div>
-                    `).join('')}
+                <div class="ui-ctr-grid">
+                    ${ordered.map(c => {
+                        const up = isRunning(c);
+                        const since = c.started_at ? formatAgo(c.started_at).replace(' ago', '') : '';
+                        const title = c.started_at ? `Started ${formatTime(c.started_at)}` : 'Start time unknown';
+                        return `
+                        <div class="ui-ctr${up ? '' : ' is-down'}" title="${escapeHtml(title)}">
+                            <i class="ui-mdot ${up ? 'ui-mdot-ok' : 'ui-mdot-fail'}"></i>
+                            <span class="ui-ctr-name">${escapeHtml(c.name)}</span>
+                            <small>${up ? escapeHtml(since) : escapeHtml(String(c.state || 'unknown'))}</small>
+                        </div>`;
+                    }).join('')}
                 </div>
             `;
         } else {
-            container.innerHTML = '<p class="ui-empty">No container information available</p>';
+            setStatusKpi('status-kpi-containers', '-');
+            if (note) note.textContent = '';
+            container.innerHTML = '<p class="ui-empty ui-panel">No container information available</p>';
         }
     } catch (error) {
         console.error('Failed to load containers status:', error);
-        document.getElementById('status-containers').innerHTML = '<p class="ui-empty ui-text-fail">Failed to load containers</p>';
+        setStatusKpi('status-kpi-containers', '-');
+        document.getElementById('status-containers').innerHTML = '<p class="ui-empty ui-panel ui-text-fail">Failed to load containers</p>';
     }
 }
 
@@ -4074,46 +4091,18 @@ async function loadStatusSystem() {
             window.mailcowUpdateName = versionData.name || ''; // Store release title
             window.mailcowUpdateChangelog = versionData.changelog || 'No changelog available';
 
-            const updateBadge = versionData.update_available ?
-                `<button onclick="showMailcowUpdateModal()" 
-                    class="ml-2 px-2 py-0.5 bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-300 rounded text-xs font-medium hover:bg-blue-200 dark:hover:bg-blue-900/50 cursor-pointer transition-colors">
-                    Update Available
-                </button>` : '';
-
-            versionHtml = `
-                <div class="mt-4 pt-4 border-t border-gray-100 dark:border-gray-700 mx-1">
-                    <div class="flex items-center justify-between">
-                        <span class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">mailcow Version</span>
-                        <div class="flex items-center">
-                            <span class="text-sm font-bold text-gray-900 dark:text-white">v${versionData.current_version}</span>
-                            ${updateBadge}
-                        </div>
-                    </div>
-                </div>
-            `;
+            const updateBadge = versionData.update_available
+                ? ` <button onclick="showMailcowUpdateModal()" class="ui-tag ui-tag-info ui-tag-btn">Update Available</button>`
+                : '';
+            versionHtml = `<div class="ui-kv"><span>mailcow Version</span><b>v${escapeHtml(versionData.current_version)}${updateBadge}</b></div>`;
         }
 
+        const row = (label, part) => `<div class="ui-kv"><span>${label}</span><b>${(part.total || 0).toLocaleString()} <small class="ui-muted">${(part.active || 0).toLocaleString()} active</small></b></div>`;
         container.innerHTML = `
-            <div class="space-y-4">
-                <div class="grid grid-cols-2 gap-4">
-                    <div class="text-center p-4 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
-                        <p class="text-xs text-gray-500 dark:text-gray-400 uppercase mb-1">Domains</p>
-                        <p class="text-2xl font-bold text-gray-900 dark:text-white">${data.domains.total}</p>
-                        <p class="text-xs text-green-600 dark:text-green-400 mt-1">${data.domains.active} active</p>
-                    </div>
-                    <div class="text-center p-4 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
-                        <p class="text-xs text-gray-500 dark:text-gray-400 uppercase mb-1">Mailboxes</p>
-                        <p class="text-2xl font-bold text-gray-900 dark:text-white">${data.mailboxes.total}</p>
-                        <p class="text-xs text-green-600 dark:text-green-400 mt-1">${data.mailboxes.active} active</p>
-                    </div>
-                </div>
-                <div class="text-center p-4 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
-                    <p class="text-xs text-gray-500 dark:text-gray-400 uppercase mb-1">Aliases</p>
-                    <p class="text-2xl font-bold text-gray-900 dark:text-white">${data.aliases.total}</p>
-                    <p class="text-xs text-green-600 dark:text-green-400 mt-1">${data.aliases.active} active</p>
-                </div>
-                ${versionHtml}
-            </div>
+            ${row('Domains', data.domains || {})}
+            ${row('Mailboxes', data.mailboxes || {})}
+            ${row('Aliases', data.aliases || {})}
+            ${versionHtml}
         `;
     } catch (error) {
         console.error('Failed to load system info:', error);
@@ -4154,47 +4143,20 @@ async function loadStatusStorage() {
             data = rawData[0]; // Take first element
         }
         const usedPercent = parseInt(data.used_percent) || 0;
-        const storageColor = usedPercent > 90 ? 'bg-red-600' :
-            usedPercent > 75 ? 'bg-yellow-600' :
-                'bg-green-600';
-        const textColor = usedPercent > 90 ? 'text-red-600 dark:text-red-400' :
-            usedPercent > 75 ? 'text-yellow-600 dark:text-yellow-400' :
-                'text-green-600 dark:text-green-400';
+        // Amber above 75%, red above 90%
+        const level = usedPercent > 90 ? 'fail' : usedPercent > 75 ? 'warn' : 'ok';
+        setStatusKpi('status-kpi-storage', data.used_percent || `${usedPercent}%`, level === 'ok' ? '' : level);
 
         container.innerHTML = `
-            <div class="space-y-6">
-                <div class="text-center">
-                    <p class="text-5xl font-bold ${textColor} mb-2">${data.used_percent}</p>
-                    <p class="text-sm text-gray-600 dark:text-gray-400">Storage Used</p>
-                </div>
-                
-                <div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-4">
-                    <div class="${storageColor} h-4 rounded-full transition-all duration-300" style="width: ${usedPercent}%"></div>
-                </div>
-                
-                <div class="grid grid-cols-2 gap-4 text-center">
-                    <div>
-                        <p class="text-xs text-gray-500 dark:text-gray-400 mb-1">Used</p>
-                        <p class="text-lg font-semibold text-gray-900 dark:text-white">${data.used}</p>
-                    </div>
-                    <div>
-                        <p class="text-xs text-gray-500 dark:text-gray-400 mb-1">Total</p>
-                        <p class="text-lg font-semibold text-gray-900 dark:text-white">${data.total}</p>
-                    </div>
-                </div>
-                
-                <div class="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3">
-                    <p class="text-xs text-gray-600 dark:text-gray-400">
-                        <svg class="inline w-4 h-4 mr-1" fill="currentColor" viewBox="0 0 20 20">
-                            <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"></path>
-                        </svg>
-                        Disk: ${data.disk}
-                    </p>
-                </div>
-            </div>
+            <div class="ui-kv"><span>Storage Used</span><b class="${level === 'ok' ? '' : `ui-text-${level}`}">${escapeHtml(String(data.used_percent || '0%'))}</b></div>
+            <div class="ui-meter ui-${level} ui-meter-panel"><i style="width: ${usedPercent}%"></i></div>
+            <div class="ui-kv"><span>Used</span><b>${escapeHtml(String(data.used || '-'))}</b></div>
+            <div class="ui-kv"><span>Total</span><b>${escapeHtml(String(data.total || '-'))}</b></div>
+            <div class="ui-kv"><span>Disk</span><b class="ui-mono ui-kv-small">${escapeHtml(String(data.disk || '-'))}</b></div>
         `;
     } catch (error) {
         console.error('Failed to load storage info:', error);
+        setStatusKpi('status-kpi-storage', '-');
         document.getElementById('status-storage').innerHTML = `<p class="ui-empty ui-text-fail">Failed to load storage info: ${escapeHtml(error.message)}</p>`;
     }
 }
@@ -4257,20 +4219,18 @@ async function checkBlacklists(force = false, host = null) {
         if (existing) existing.remove();
 
         const progressHtml = `
-            <div id="blacklist-temp-progress" class="mb-4 p-4 bg-white dark:bg-gray-800 rounded-lg border border-blue-200 dark:border-blue-900 shadow-sm">
-                <div class="flex justify-between items-center mb-2">
-                    <span class="text-sm font-medium text-blue-700 dark:text-blue-400 flex items-center gap-2">
+            <div id="blacklist-temp-progress" class="ui-panel ui-bl-progress">
+                <div class="ui-bl-progress-head">
+                    <span class="ui-text-info">
                         <svg class="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                             <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
                             <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                         </svg>
                         Running Scan...
                     </span>
-                    <span id="blacklist-progress-text" class="text-xs text-gray-500 dark:text-gray-400">Initializing...</span>
+                    <span id="blacklist-progress-text" class="ui-muted">Initializing...</span>
                 </div>
-                <div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
-                    <div id="blacklist-progress-bar" class="bg-blue-600 h-2 rounded-full transition-all duration-300" style="width: 0%"></div>
-                </div>
+                <div class="ui-meter ui-meter-info"><i id="blacklist-progress-bar" style="width: 0%"></i></div>
             </div>
         `;
         container.insertAdjacentHTML('afterbegin', progressHtml);
@@ -4414,138 +4374,89 @@ function renderBlacklistStatus(data) {
     if (!container) return;
 
     if (!data.hosts || data.hosts.length === 0) {
+        setStatusKpi('status-kpi-blocklists', '-');
         container.innerHTML = `
-            <div class="text-center py-8">
-                <svg class="w-12 h-12 mx-auto text-gray-400 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
-                </svg>
-                <h3 class="text-lg font-medium text-gray-900 dark:text-white">No Monitored Hosts</h3>
-                <p class="text-gray-500 dark:text-gray-400 mt-2">Syncing monitoring targets...</p>
+            <div class="ui-empty ui-panel">
+                <b>No Monitored Hosts</b>
+                <p>Syncing monitoring targets...</p>
             </div>
         `;
         return;
     }
 
-    // Preserve open states
+    const withData = data.hosts.filter(host => host.has_data);
+    const listed = data.hosts.reduce((sum, host) => sum + (host.listed_count || 0), 0);
+    const lists = Math.max(0, ...data.hosts.map(host => host.total_blacklists || 0));
+    setStatusKpi('status-kpi-blocklists', withData.length ? `${listed} of ${lists}` : '-', listed > 0 ? 'fail' : '');
+
+    // Preserve which hosts show all their lists
     const openStates = {};
     container.querySelectorAll('details').forEach(el => {
         if (el.open && el.id) openStates[el.id] = true;
     });
 
-    let html = '<div class="space-y-4">';
-
-    data.hosts.forEach((host, index) => {
-        const hostId = `host-${index}`;
-        const isOpen = openStates[hostId] || false;
-
-        let statusColor = 'gray';
-        let statusText = 'Unknown';
-        let statusIcon = '?';
-
-        if (host.status === 'clean') {
-            statusColor = 'green';
-            statusText = 'Clean';
-            statusIcon = '✓';
-        } else if (host.status === 'listed') {
-            statusColor = 'red';
-            statusText = 'Listed';
-            statusIcon = '✗';
-        } else if (host.status === 'error') {
-            statusColor = 'yellow';
-            statusText = 'Error';
-            statusIcon = '!';
-        }
-
-        const listedCount = host.listed_count || 0;
-        const totalCount = host.total_blacklists || 0;
-        const lastCheck = host.checked_at ? formatTime(host.checked_at) : 'Never';
-        const hostname = escapeHtml(host.hostname);
-        const source = escapeHtml(host.source || 'system');
-
-        // Host card
-        html += `
-            <details id="${hostId}" class="group bg-gray-50 dark:bg-gray-700/50 rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden" ${isOpen ? 'open' : ''}>
-                <summary class="list-none px-4 py-3 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 transition flex items-center justify-between select-none">
-                    <div class="flex items-center gap-3">
-                        <div class="p-2 rounded-full bg-${statusColor}-100 dark:bg-${statusColor}-900/30 text-${statusColor}-600 dark:text-${statusColor}-400">
-                             <span class="font-bold text-lg w-5 h-5 flex items-center justify-center">${statusIcon}</span>
-                        </div>
-                        <div>
-                            <h3 class="font-semibold text-gray-900 dark:text-white flex items-center gap-2">
-                                ${hostname}
-                                <span class="text-xs px-2 py-0.5 rounded-full bg-gray-200 dark:bg-gray-600 text-gray-600 dark:text-gray-300">${source}</span>
-                            </h3>
-                            <p class="text-xs text-gray-500 dark:text-gray-400">
-                                ${statusText} • Listed on ${listedCount}/${totalCount} • Last check: ${lastCheck}
-                            </p>
-                        </div>
+    const RESULT_TONE = { clean: 'ok', listed: 'fail', error: 'warn', timeout: 'warn' };
+    container.innerHTML = `
+        <div class="ui-table ui-stack" style="--ui-cols: minmax(180px, 1.4fr) minmax(220px, 2.4fr) 110px 120px; --ui-table-min: 700px">
+            <div class="ui-tr ui-tr-head"><span>Address</span><span>Result</span><span>Checked</span><span class="ui-td-end">Actions</span></div>
+            ${data.hosts.map((host, index) => {
+                const hostId = `host-${index}`;
+                const listedOn = (host.results || []).filter(r => r.listed);
+                const total = host.total_blacklists || 0;
+                const result = !host.has_data ? uiTag('Not checked yet', '')
+                    : host.status === 'listed' ? uiTag(`Listed on ${host.listed_count || 0} of ${total}`, 'fail')
+                    : host.status === 'error' ? uiTag('Check error', 'warn')
+                    : host.status === 'clean' ? uiTag(`Not listed on ${total}`, 'ok')
+                    : uiTag('Unknown', '');
+                const detail = r => r.response ? `${r.name}: ${r.response}` : r.name;
+                return `
+                <div class="ui-tr ui-bl-row">
+                    <div class="ui-td ui-q-who">
+                        <div>${escapeHtml(host.hostname)} <span class="ui-tag">${escapeHtml(host.source || 'system')}</span></div>
                     </div>
-                    <svg class="w-5 h-5 text-gray-400 transition-transform duration-200 group-open:rotate-180" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
-                    </svg>
-                </summary>
-                
-                <div class="px-4 pb-4 pt-1 border-t border-gray-200 dark:border-gray-700">
-        `;
-
-        if (host.has_data && host.results) {
-            html += '<div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-2 mb-4 max-h-96 overflow-y-auto custom-scrollbar p-1">';
-            host.results.forEach(result => {
-                let color = 'gray';
-                let icon = '?';
-
-                if (result.status === 'clean') {
-                    color = 'green';
-                    icon = '✓';
-                } else if (result.listed) {
-                    color = 'red';
-                    icon = '✗';
-                } else if (result.status === 'error') {
-                    color = 'yellow';
-                    icon = '!';
-                } else if (result.status === 'timeout') {
-                    color = 'orange';
-                    icon = '⏱';
-                }
-
-                // The raw DNS answer distinguishes a real listing (127.0.0.x)
-                // from resolver interference - surface it on hover
-                const detail = result.response
-                    ? `${result.name}: ${result.response}`
-                    : result.name;
-                html += `
-                    <div class="px-2 py-1.5 rounded bg-${color}-50 dark:bg-${color}-900/10 border border-${color}-100 dark:border-${color}-900/30 text-xs flex items-center justify-between group/item relative hover:bg-${color}-100 dark:hover:bg-${color}-900/20 transition cursor-default">
-                        <span class="font-medium text-${color}-700 dark:text-${color}-300 truncate mr-1" title="${escapeHtml(detail)}">${escapeHtml(result.name)}</span>
-                        <div class="flex items-center">
-                            <span class="text-${color}-600 dark:text-${color}-400 font-bold" title="${escapeHtml(detail)}">${icon}</span>
-                            ${result.info_url ? `<a href="${result.info_url}" target="_blank" class="ml-1 text-${color}-400 hover:text-${color}-600" title="View info"><svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path></svg></a>` : ''}
+                    <div class="ui-td ui-td-wrap ui-bl-result">
+                        ${result}
+                        ${listedOn.map(r => `<code class="ui-code-chip" title="${escapeHtml(detail(r))}">${escapeHtml(r.name)}</code>`).join('')}
+                    </div>
+                    <span class="ui-td" title="${host.checked_at ? escapeHtml(formatTime(host.checked_at)) : ''}">${host.checked_at ? formatAgo(host.checked_at) : 'Never'}</span>
+                    <span class="ui-td ui-td-end ui-row-actions">
+                        <button onclick="checkHost('${escapeJsArg(host.hostname)}')" class="ui-btn ui-btn-sm" title="Run Check for this Host">Check now</button>
+                    </span>
+                    ${host.has_data && host.results && host.results.length ? `
+                    <details id="${hostId}" class="ui-bl-all"${openStates[hostId] ? ' open' : ''}>
+                        <summary>All ${host.results.length} lists</summary>
+                        <div class="ui-bl-grid">
+                            ${host.results.map(r => {
+                                const tone = r.listed ? 'fail' : (RESULT_TONE[r.status] || '');
+                                const state = r.listed ? 'listed' : (r.status || 'unknown');
+                                return `<span class="ui-bl-item${tone ? ` ui-bl-${tone}` : ''}" title="${escapeHtml(detail(r))}"><i class="ui-mdot${tone ? ` ui-mdot-${tone}` : ''}"></i>${escapeHtml(r.name)}<small>${escapeHtml(state)}</small></span>`;
+                            }).join('')}
                         </div>
-                    </div>
-                `;
-            });
-            html += '</div>';
-        }
-
-        html += `
-                    <div class="mt-2 text-center">
-                         <button onclick="checkHost('${hostname}')" class="text-sm text-blue-600 dark:text-blue-400 hover:underline">Run Check for this Host</button>
-                    </div>
-                </div>
-            </details>
-        `;
-    });
-
-    html += '</div>';
-    container.innerHTML = html;
+                    </details>` : ''}
+                </div>`;
+            }).join('')}
+        </div>
+    `;
 }
 
 function renderStatusImport(imports) {
     const container = document.getElementById('status-import');
+    const row = (title, d) => `
+        <div class="ui-tr">
+            <b class="ui-td">${title}</b>
+            ${d ? `
+            <span class="ui-td" title="${d.last_fetch_run ? escapeHtml(formatTime(d.last_fetch_run)) : ''}"><small class="ui-sec-unit">Last Fetch Run </small>${d.last_fetch_run ? formatAgo(d.last_fetch_run) : 'Never'}</span>
+            <span class="ui-td" title="${d.last_import ? escapeHtml(formatTime(d.last_import)) : ''}"><small class="ui-sec-unit">Last Import </small>${d.last_import ? formatAgo(d.last_import) : 'Never'}</span>
+            <span class="ui-td ui-td-end"><small class="ui-sec-unit">Total Entries </small>${(d.total_entries || 0).toLocaleString()}</span>
+            <span class="ui-td"><small class="ui-sec-unit">Oldest Entry </small>${d.oldest_entry ? formatTime(d.oldest_entry) : '-'}</span>
+            ` : '<span class="ui-td ui-muted">No data</span><span></span><span></span><span></span>'}
+        </div>`;
     container.innerHTML = `
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-            ${renderImportCard('Postfix Logs', imports.postfix, 'blue')}
-            ${renderImportCard('Rspamd Logs', imports.rspamd, 'purple')}
-            ${renderImportCard('Netfilter Logs', imports.netfilter, 'red')}
+        <div class="ui-table ui-stack" style="--ui-cols: minmax(130px, 1fr) minmax(110px, 1fr) minmax(110px, 1fr) 110px minmax(150px, 1.2fr); --ui-table-min: 660px">
+            <div class="ui-tr ui-tr-head"><span>Source</span><span>Last Fetch Run</span><span>Last Import</span><span class="ui-td-end">Total Entries</span><span>Oldest Entry</span></div>
+            ${row('Postfix Logs', imports.postfix)}
+            ${row('Rspamd Logs', imports.rspamd)}
+            ${row('Netfilter Logs', imports.netfilter)}
         </div>
     `;
 }
@@ -4553,54 +4464,25 @@ function renderStatusImport(imports) {
 function renderStatusCorrelation(correlation, incompleteList) {
     const container = document.getElementById('status-correlation');
     container.innerHTML = `
-        <div class="grid grid-cols-2 md:grid-cols-5 gap-4 mb-4">
-            <div class="p-4 bg-gradient-to-br from-blue-50 to-blue-100 dark:from-blue-900/20 dark:to-blue-800/20 rounded-lg text-center">
-                <p class="text-2xl font-bold text-blue-600 dark:text-blue-400">${correlation.total || 0}</p>
-                <p class="text-xs text-gray-600 dark:text-gray-400 mt-1">Total</p>
-            </div>
-            <div class="p-4 bg-gradient-to-br from-green-50 to-green-100 dark:from-green-900/20 dark:to-green-800/20 rounded-lg text-center">
-                <p class="text-2xl font-bold text-green-600 dark:text-green-400">${correlation.complete || 0}</p>
-                <p class="text-xs text-gray-600 dark:text-gray-400 mt-1">Complete</p>
-            </div>
-            <div class="p-4 bg-gradient-to-br from-yellow-50 to-yellow-100 dark:from-yellow-900/20 dark:to-yellow-800/20 rounded-lg text-center">
-                <p class="text-2xl font-bold text-yellow-600 dark:text-yellow-400">${correlation.incomplete || 0}</p>
-                <p class="text-xs text-gray-600 dark:text-gray-400 mt-1">Incomplete</p>
-            </div>
-            <div class="p-4 bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-700/20 dark:to-gray-600/20 rounded-lg text-center">
-                <p class="text-2xl font-bold text-gray-500 dark:text-gray-400">${correlation.expired || 0}</p>
-                <p class="text-xs text-gray-600 dark:text-gray-400 mt-1">Expired</p>
-            </div>
-            <div class="p-4 bg-gradient-to-br from-purple-50 to-purple-100 dark:from-purple-900/20 dark:to-purple-800/20 rounded-lg text-center">
-                <p class="text-2xl font-bold text-purple-600 dark:text-purple-400">${correlation.completion_rate || 0}%</p>
-                <p class="text-xs text-gray-600 dark:text-gray-400 mt-1">Success Rate</p>
-            </div>
+        <div class="ui-kpis">
+            <div class="ui-kpi"><b>${(correlation.total || 0).toLocaleString()}</b>Total</div>
+            <div class="ui-kpi"><b>${(correlation.complete || 0).toLocaleString()}</b>Complete</div>
+            <div class="ui-kpi"><b class="${correlation.incomplete ? 'ui-warn' : ''}">${(correlation.incomplete || 0).toLocaleString()}</b>Incomplete</div>
+            <div class="ui-kpi"><b>${(correlation.expired || 0).toLocaleString()}</b>Expired</div>
+            <div class="ui-kpi"><b>${correlation.completion_rate || 0}%</b>Success Rate</div>
         </div>
-        ${correlation.last_update ? `
-            <p class="text-sm text-gray-600 dark:text-gray-400 text-center">
-                Last updated: ${formatTime(correlation.last_update)}
-            </p>
-        ` : ''}
-        
+        ${correlation.last_update ? `<p class="ui-kv-note ui-list-foot">Last updated: ${formatTime(correlation.last_update)}</p>` : ''}
         ${incompleteList.length > 0 ? `
-            <div class="mt-4 p-4 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg">
-                <h4 class="text-sm font-semibold text-yellow-800 dark:text-yellow-300 mb-2">Recent Incomplete Correlations</h4>
-                <div class="space-y-2">
-                    ${incompleteList.map(item => `
-                        <div class="p-2 bg-white dark:bg-gray-800 rounded text-xs">
-                            <div class="flex justify-between items-start mb-1">
-                                <span class="font-mono text-gray-600 dark:text-gray-400">${copyableText(item.message_id || 'N/A')}</span>
-                                <span class="text-yellow-600 dark:text-yellow-400">${item.age_minutes}m ago</span>
-                            </div>
-                            <div class="text-gray-500 dark:text-gray-400">
-                                ${copyableText(item.sender || 'N/A')} => ${copyableText(item.recipient || 'N/A')}
-                            </div>
-                        </div>
-                    `).join('')}
-                </div>
-                <p class="text-xs text-yellow-700 dark:text-yellow-400 mt-2">
-                    These will be automatically completed or expired within 1-2 minutes
-                </p>
+            <div class="ui-table ui-stack" style="--ui-cols: minmax(180px, 1.4fr) minmax(220px, 2fr) 90px; --ui-table-min: 560px">
+                <div class="ui-tr ui-tr-head"><span>Recent Incomplete Correlations</span><span>From and to</span><span class="ui-td-end">Age</span></div>
+                ${incompleteList.map(item => `
+                    <div class="ui-tr">
+                        <span class="ui-td ui-mono">${copyableText(item.message_id || 'N/A')}</span>
+                        <span class="ui-td">${copyableText(item.sender || 'N/A')} → ${copyableText(item.recipient || 'N/A')}</span>
+                        <span class="ui-td ui-td-end ui-text-warn">${item.age_minutes}m ago</span>
+                    </div>`).join('')}
             </div>
+            <p class="ui-kv-note ui-list-foot">These will be automatically completed or expired within 1-2 minutes</p>
         ` : ''}
     `;
 }
@@ -4694,19 +4576,14 @@ function renderStatusJobs(jobs) {
         // Skip categories where no jobs exist
         const validJobs = cat.jobs.filter(j => j[2]);
         if (validJobs.length === 0) continue;
-        
-        html += `
-            <div class="mb-6">
-                <div class="flex items-center gap-2 mb-3">
-                    <svg class="w-4 h-4 text-gray-400 dark:text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">${cat.icon}</svg>
-                    <h4 class="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">${cat.title}</h4>
-                </div>
-                <div class="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-3">
-                    ${cat.jobs.map(j => renderJobCard(j[0], j[1], j[2])).join('')}
-                </div>
-            </div>`;
+        html += `<div class="ui-tr ui-tr-group">${escapeHtml(cat.title)}</div>`;
+        html += validJobs.map(j => renderJobCard(j[0], j[1], j[2])).join('');
     }
-    container.innerHTML = html;
+    container.innerHTML = `
+        <div class="ui-table ui-stack" style="--ui-cols: minmax(220px, 2fr) minmax(150px, 1.3fr) 110px 110px 84px; --ui-table-min: 760px">
+            <div class="ui-tr ui-tr-head"><span>Job</span><span>Runs</span><span>Last result</span><span>Last run</span><span class="ui-td-end">Actions</span></div>
+            ${html}
+        </div>`;
 }
 
 async function triggerBackgroundJob(jobKey, buttonEl, jobName = null) {
