@@ -314,16 +314,11 @@ function updateDisabledFeaturesCheckbox(featureId, isChecked, el) {
 
     hiddenInput.value = Array.from(currentDisabled).sort().join(',');
 
-    // Update visual styling of the label
+    // Mark the toggle on or off
     const label = el ? el.closest('label') : null;
     if (label) {
-        if (isChecked) {
-            label.classList.remove('border-gray-200', 'dark:border-gray-700', 'bg-gray-50/50', 'dark:bg-gray-800/50', 'opacity-60');
-            label.classList.add('border-green-200', 'dark:border-green-700/50', 'bg-green-50/50', 'dark:bg-green-900/10');
-        } else {
-            label.classList.remove('border-green-200', 'dark:border-green-700/50', 'bg-green-50/50', 'dark:bg-green-900/10');
-            label.classList.add('border-gray-200', 'dark:border-gray-700', 'bg-gray-50/50', 'dark:bg-gray-800/50', 'opacity-60');
-        }
+        label.classList.toggle('is-on', isChecked);
+        label.classList.toggle('is-off', !isChecked);
     }
 }
 
