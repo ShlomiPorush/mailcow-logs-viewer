@@ -32,6 +32,7 @@ Pages, modals, actions, handler functions, API calls, form fields, drop-down opt
 - **Status.** Key figures on top (containers running, blocklists listing you, mail storage used with amber above 75% and red above 90%, this app's version with the update link to Settings); the blocklists figure hides with the `blacklist` feature like its section. Containers are a grid with stopped ones first and in red. Blocklists are a table per monitored host with the listing lists named, Check now per host (`checkHost`) and Check Now for all with its progress bar (`checkBlacklists`); "All N lists" opens every result and stays open across refreshes. Background jobs are a table grouped by category with how often they run, the last result (feature off and disabled explain a missing Run), the last run, errors under the row and Run (`triggerBackgroundJob`). Log import, message linking with the recent incomplete ones, the mailcow system (with the mailcow update) and storage follow.
 - **Domains.** A table with one row per domain: mailboxes and aliases under the name (with "open for the fix" when SPF, DKIM or DMARC has an error or a warning), a tag per DNS check (SPF, DKIM, DMARC, TLSA, MTA-STS; the tooltip gives the message) and storage. There is no MX check, so there is no MX column. A row opens its details (`toggleDomainDetails`): the domain facts, the DNS records with View Record, Checked IPs, warnings, info and Expected Value, Check for this domain (`checkSingleDomainDNS`, which re-renders the row open) and the alias domains. The subtitle counts domains, inactive ones and those that need a DNS change; the head keeps Last checked and Check Now (`checkAllDomainsDNS`); search and "Show only domains with issues" filter the rows (`filterDomains`).
 - **DMARC.** Key figures on top of every view, rates as a number with a bar (green from 95%, amber from 80%, red below). The domains view has DMARC Insights (each with Open), a domains table (a row opens the domain) and Manage Reports. A domain shows its DMARC record from DNS (policy tags, View Record, warnings), the 30 day chart in the theme colours, and tabs for Daily Reports, Source IPs and TLS Reports, each a table whose row opens its details. A breadcrumb (DMARC / domain / tab / item) leads back. Upload Report shows only when manual upload is enabled, Sync from IMAP only when IMAP is enabled, with the last sync and View History. The sync history and Manage Reports are dialogs; deletion shows only when allowed.
+- **Mailbox Stats and Rate Limits.** One page with two tabs (Statistics, Rate Limits; each hides with its feature). Statistics: key figures for the chosen period, search, the period picker (presets and a custom range), domain, sort, Active Only, Hide Zero Activity and Reset, then a table of mailboxes; a row opens quota, messages, dates, rate limit, access with last logins, counts that open Messages filtered on the address, and the aliases with their own clickable counts. Rate Limits: the activity chart with its window, Blocked senders (search, Reset counter, a sender opens its refused messages) and Configured limits (All, Mailboxes, Domains, search, Apply to filtered, Edit per row). Without the Read-Write key the editing and Reset counter are removed and a locked area says why.
 - **Badges** use the recipes in `APP_COLORS` (soft fill plus a subtle border, squared corners, not rounded pills). Pages already on the v3 design use `uiStatusTag` and `uiDirectionTag` (`frontend/utils.js`) instead: the tone follows the meaning (delivered and sent green, deferred amber, bounced and rejected red, spam its own colour, anything else neutral) and the text is the status itself.
 - **Cache busting.** Every changed frontend file gets a new `?v=` in `index.html`, or browsers keep the old copy.
 - **Utility classes are compiled, not generated in the browser.** The Tailwind utilities the markup still uses are built once into `assets/css/utilities.css` (`bash .github/scripts/build-utilities-css.sh`, Tailwind 3.4.17). After adding or changing a utility class, rebuild it and bump its `?v=`; CI fails when the file does not match the markup. A class assembled at runtime (`bg-${color}-100`) must be in the safelist of `.github/tailwind/tailwind.config.cjs` (`utilities-css.test.cjs` checks this). New UI is built on the `ui-` components instead.
@@ -163,7 +164,7 @@ Generated from the code. Do not edit by hand; run `node .github/scripts/ui-catal
 | Behaviour | Count |
 |---|---|
 | [Click to copy](#click-to-copy) | 37 |
-| [Tooltips](#tooltips) | 146 |
+| [Tooltips](#tooltips) | 148 |
 | [Toasts](#toasts) | 136 |
 | [Confirmation dialogs](#confirmation-dialogs) | 28 |
 | [Country flags](#country-flags) | 5 |
@@ -171,7 +172,7 @@ Generated from the code. Do not edit by hand; run `node .github/scripts/ui-catal
 | [Controls wired in JavaScript](#controls-wired-in-javascript) | 28 |
 | [Filters, sorting and view options](#filters-sorting-and-view-options) | 11 |
 | [Charts](#charts) | 3 |
-| [Colour thresholds](#colour-thresholds) | 7 |
+| [Colour thresholds](#colour-thresholds) | 2 |
 | [Help topics](#help-topics) | 8 |
 | [Empty states](#empty-states) | 36 |
 | [Loading states](#loading-states) | 15 |
@@ -342,19 +343,21 @@ Native `title` tooltips. Dynamic ones show the expression that builds the text.
 | DMARC | dynamic: `${escapeHtml(formatTime(sync.started_at))}` | `frontend/dmarc.js:984` (updateDmarcControls) |
 | DMARC | "Delete report" | `frontend/dmarc.js:1173` (renderReportsManagementTable) |
 | DMARC | "Help - DMARC Information" | `frontend/index.html:1129` |
-| Mailbox stats | "Help - Mailbox Statistics" | `frontend/index.html:1229` |
-| Mailbox stats | "Address on a mailcow alias domain that points at this mailbox" | `frontend/mailbox-stats.js:556` (renderMailboxStatsAccordion) |
+| Mailbox stats | "Help - Mailbox Statistics" | `frontend/index.html:1225` |
+| Mailbox stats | "Open these messages" | `frontend/mailbox-stats.js:291` (mailboxStatLink) |
+| Mailbox stats | "Address on a mailcow alias domain that points at this mailbox" | `frontend/mailbox-stats.js:371` (renderMailboxStatsAccordion) |
+| Mailbox stats | dynamic: `${escapeHtml(formatTime(group.last_seen))}` | `frontend/rate-limits.js:358` (renderRateLimitSendersTable) |
 | Mailbox stats | set in JS: dynamic: `isRateLimits ? 'Help - Rate Limits' : 'Help - Mailbox Statistics'` | `frontend/mailbox-stats.js:83` (mailboxStatsSwitchView) |
-| Logs | "Pause/Resume live updates" | `frontend/index.html:1536` |
-| Logs | "Live mode - show latest logs" | `frontend/index.html:1546` |
-| Logs | "Auto-scroll to new entries" | `frontend/index.html:1556` |
-| Logs | "Toggle sort order (newest at bottom / newest at top)" | `frontend/index.html:1566` |
-| Logs | "Toggle word wrap" | `frontend/index.html:1587` |
-| Logs | "Search" | `frontend/index.html:1604` |
-| Logs | "Clear search" | `frontend/index.html:1611` |
-| Logs | "Clear display" | `frontend/index.html:1621` |
-| Logs | "From date" | `frontend/index.html:1649` |
-| Logs | "To date" | `frontend/index.html:1654` |
+| Logs | "Pause/Resume live updates" | `frontend/index.html:1349` |
+| Logs | "Live mode - show latest logs" | `frontend/index.html:1359` |
+| Logs | "Auto-scroll to new entries" | `frontend/index.html:1369` |
+| Logs | "Toggle sort order (newest at bottom / newest at top)" | `frontend/index.html:1379` |
+| Logs | "Toggle word wrap" | `frontend/index.html:1400` |
+| Logs | "Search" | `frontend/index.html:1417` |
+| Logs | "Clear search" | `frontend/index.html:1424` |
+| Logs | "Clear display" | `frontend/index.html:1434` |
+| Logs | "From date" | `frontend/index.html:1462` |
+| Logs | "To date" | `frontend/index.html:1467` |
 | Logs | dynamic: `${escapeHtml(f.description \|\| '')}` | `frontend/logs-viewer.js:232` (loadSmartFilters) |
 | Logs | "Clear all filters" | `frontend/logs-viewer.js:1227` (updateFilterBadge) |
 | Settings | "Last delivery succeeded" | `frontend/notifications.js:67` (renderNotificationChannels) |
@@ -374,9 +377,9 @@ Native `title` tooltips. Dynamic ones show the expression that builds the text.
 | app.js (mixed) | set in JS: dynamic: `title \|\| ''` | `frontend/app.js:498` (setNavCount) |
 | Modal: container-logs-modal | "Refresh" | `frontend/index.html:497` |
 | Modal: container-logs-modal | "Close" | `frontend/index.html:505` |
-| Modal: dmarc-reports-management-modal | "Close" | `frontend/index.html:1811` |
-| Modal: dmarc-sync-history-modal | "Close" | `frontend/index.html:1798` |
-| Modal: message-modal | "Close" | `frontend/index.html:1729` |
+| Modal: dmarc-reports-management-modal | "Close" | `frontend/index.html:1624` |
+| Modal: dmarc-sync-history-modal | "Close" | `frontend/index.html:1611` |
+| Modal: message-modal | "Close" | `frontend/index.html:1542` |
 
 ### Toasts
 
@@ -480,20 +483,20 @@ Transient notifications from `showToast(message, type)` (utils.js). Type default
 | DMARC | "Report deletion is disabled" [error] | `frontend/dmarc.js:1191` (deleteReport) |
 | DMARC | dynamic: ``${reportType.toUpperCase()} report deleted`` [success] | `frontend/dmarc.js:1199` (deleteReport) |
 | DMARC | "Failed to delete report" [error] | `frontend/dmarc.js:1213` (deleteReport) |
-| Mailbox stats | "Please select both start and end dates" [error] | `frontend/mailbox-stats.js:740` (applyCustomDateRange) |
-| Mailbox stats | "Start date must be before end date" [error] | `frontend/mailbox-stats.js:748` (applyCustomDateRange) |
-| Mailbox stats | dynamic: `detail.detail \|\| 'Could not reset the counter'` [error] | `frontend/rate-limits.js:645` (resetRateLimitCounter) |
-| Mailbox stats | dynamic: ``${user} can send again`` [success] | `frontend/rate-limits.js:649` (resetRateLimitCounter) |
-| Mailbox stats | "Could not reset the counter" [error] | `frontend/rate-limits.js:658` (resetRateLimitCounter) |
-| Mailbox stats | "Enter how many messages to allow, as a whole number" [error] | `frontend/rate-limits.js:939` (applyRateLimitBulk) |
-| Mailbox stats | dynamic: `detail.detail \|\| 'Could not apply the rate limit'` [error] | `frontend/rate-limits.js:971` (applyRateLimitBulk) |
-| Mailbox stats | dynamic: ``Nothing was changed${tail}`` [warning] | `frontend/rate-limits.js:1015` (applyRateLimitBulk) |
-| Mailbox stats | dynamic: `value === 0 ? `Limit removed from ${changed}${tail}` : `Limit set on ${change...` [success] | `frontend/rate-limits.js:1018` (applyRateLimitBulk) |
-| Mailbox stats | "Could not apply the rate limit" [error] | `frontend/rate-limits.js:1023` (applyRateLimitBulk) |
-| Mailbox stats | "Enter how many messages to allow, as a whole number" [error] | `frontend/rate-limits.js:1116` (saveRateLimit) |
-| Mailbox stats | dynamic: `detail.detail \|\| 'Could not save the rate limit'` [error] | `frontend/rate-limits.js:1153` (submitRateLimit) |
-| Mailbox stats | dynamic: `value === 0 ? `${name} now sends without a limit` : `${name} is limited to ${...` [success] | `frontend/rate-limits.js:1158` (submitRateLimit) |
-| Mailbox stats | "Could not save the rate limit" [error] | `frontend/rate-limits.js:1189` (submitRateLimit) |
+| Mailbox stats | "Please select both start and end dates" [error] | `frontend/mailbox-stats.js:528` (applyCustomDateRange) |
+| Mailbox stats | "Start date must be before end date" [error] | `frontend/mailbox-stats.js:536` (applyCustomDateRange) |
+| Mailbox stats | dynamic: `detail.detail \|\| 'Could not reset the counter'` [error] | `frontend/rate-limits.js:585` (resetRateLimitCounter) |
+| Mailbox stats | dynamic: ``${user} can send again`` [success] | `frontend/rate-limits.js:589` (resetRateLimitCounter) |
+| Mailbox stats | "Could not reset the counter" [error] | `frontend/rate-limits.js:598` (resetRateLimitCounter) |
+| Mailbox stats | "Enter how many messages to allow, as a whole number" [error] | `frontend/rate-limits.js:853` (applyRateLimitBulk) |
+| Mailbox stats | dynamic: `detail.detail \|\| 'Could not apply the rate limit'` [error] | `frontend/rate-limits.js:885` (applyRateLimitBulk) |
+| Mailbox stats | dynamic: ``Nothing was changed${tail}`` [warning] | `frontend/rate-limits.js:929` (applyRateLimitBulk) |
+| Mailbox stats | dynamic: `value === 0 ? `Limit removed from ${changed}${tail}` : `Limit set on ${change...` [success] | `frontend/rate-limits.js:932` (applyRateLimitBulk) |
+| Mailbox stats | "Could not apply the rate limit" [error] | `frontend/rate-limits.js:937` (applyRateLimitBulk) |
+| Mailbox stats | "Enter how many messages to allow, as a whole number" [error] | `frontend/rate-limits.js:1025` (saveRateLimit) |
+| Mailbox stats | dynamic: `detail.detail \|\| 'Could not save the rate limit'` [error] | `frontend/rate-limits.js:1062` (submitRateLimit) |
+| Mailbox stats | dynamic: `value === 0 ? `${name} now sends without a limit` : `${name} is limited to ${...` [success] | `frontend/rate-limits.js:1067` (submitRateLimit) |
+| Mailbox stats | "Could not save the rate limit" [error] | `frontend/rate-limits.js:1098` (submitRateLimit) |
 | Settings | dynamic: `detail.detail \|\| 'Could not save destination'` [error] | `frontend/notifications.js:253` (saveNotificationChannel) |
 | Settings | dynamic: `isNew ? 'Destination added' : 'Destination updated'` [success] | `frontend/notifications.js:256` (saveNotificationChannel) |
 | Settings | "Could not save destination" [error] | `frontend/notifications.js:260` (saveNotificationChannel) |
@@ -547,9 +550,9 @@ Every action that asks before it acts. Losing one turns a guarded action into a 
 | Quarantine | showConfirmModal: dynamic: `{ title: 'Delete Rule', message: `Delete rule "${ruleName}"?`, confirmText: '...` | `frontend/app.js:3524` (deleteQuarantineRule) |
 | Spam filter | showConfirmModal: dynamic: `{ title: 'Delete Suppression', message: `Delete suppression for ${email}? Thi...` | `frontend/spam_filter.js:899` (renderSuppressionItem) |
 | DMARC | showConfirmModal: dynamic: `{ title: 'Delete Report', message: `Are you sure you want to delete this ${re...` | `frontend/dmarc.js:1181` (deleteReport) |
-| Mailbox stats | showConfirmModal: dynamic: `{ title: 'Reset rate limit counter', message: `Let ${user} send again straigh...` | `frontend/rate-limits.js:629` (resetRateLimitCounter) |
-| Mailbox stats | showConfirmModal: dynamic: `{ title: value === 0 ? 'Remove rate limits' : 'Apply rate limit', message: va...` | `frontend/rate-limits.js:947` (applyRateLimitBulk) |
-| Mailbox stats | showConfirmModal: dynamic: `{ title: 'Remove rate limit', message: `Remove the rate limit on ${name}? It ...` | `frontend/rate-limits.js:1125` (removeRateLimit) |
+| Mailbox stats | showConfirmModal: dynamic: `{ title: 'Reset rate limit counter', message: `Let ${user} send again straigh...` | `frontend/rate-limits.js:569` (resetRateLimitCounter) |
+| Mailbox stats | showConfirmModal: dynamic: `{ title: value === 0 ? 'Remove rate limits' : 'Apply rate limit', message: va...` | `frontend/rate-limits.js:861` (applyRateLimitBulk) |
+| Mailbox stats | showConfirmModal: dynamic: `{ title: 'Remove rate limit', message: `Remove the rate limit on ${name}? It ...` | `frontend/rate-limits.js:1034` (removeRateLimit) |
 | Settings | showConfirmModal: dynamic: `{ title: 'Delete destination', message: `Delete "${channel ? channel.name : '...` | `frontend/notifications.js:266` (deleteNotificationChannel) |
 | Settings | showFeatureDisableConfirmModal: dynamic: `purgeableNewlyDisabled` | `frontend/settings.js:1788` (renderSettings) |
 | Settings | showConfirmModal: dynamic: `{ title: 'Import from ENV', message: 'Import current configuration from ENV i...` | `frontend/settings.js:1850` (renderSettings) |
@@ -596,7 +599,7 @@ Buttons, tabs and fields whose behavior is attached with `addEventListener` inst
 | Security | submit on `ipForm` | `frontend/app.js:2427` (loadFail2BanSettings) |
 | Spam filter | click on `document` | `frontend/spam_filter.js:1024` (renderSuppressionItem) |
 | DMARC | click on `modal` | `frontend/dmarc.js:1051` (showDmarcSyncHistory) |
-| Mailbox stats | click on `document` | `frontend/mailbox-stats.js:671` (toggleDateRangePicker) |
+| Mailbox stats | click on `document` | `frontend/mailbox-stats.js:464` (toggleDateRangePicker) |
 | Settings | click on `cancelBtn` | `frontend/settings.js:114` (showBasicAuthVerifyModal) |
 | Settings | click on `confirmBtn` | `frontend/settings.js:115` (showBasicAuthVerifyModal) |
 | Settings | click on `overlay` | `frontend/settings.js:129` (showBasicAuthVerifyModal) |
@@ -628,9 +631,9 @@ Drop-down lists in the page markup with their options. The option wording and or
 | Quarantine | `quarantine-sort`: Newest first / Score: high to low / Score: low to high | `frontend/index.html:862` |
 | Spam filter | `suppression-filter-reason`: All Reasons / Hard Bounce / Soft Bounce / Deferred Stuck / Rejected / Manual | `frontend/index.html:971` |
 | Spam filter | `suppression-filter-active`: Active Only / All / Inactive / Expired | `frontend/index.html:981` |
-| Mailbox stats | `mailbox-stats-domain-filter`: All Domains | `frontend/index.html:1433` |
-| Mailbox stats | `mailbox-stats-sort`: Sent (High to Low) / Received (High to Low) / Failure Rate (High to Low) / Quota Used (High to Low) / Username (A-Z) | `frontend/index.html:1437` |
-| Logs | `logs-fontsize`: 10px / 11px / 12px / 13px / 14px / 16px | `frontend/index.html:1574` |
+| Mailbox stats | `mailbox-stats-domain-filter`: All Domains | `frontend/index.html:1282` |
+| Mailbox stats | `mailbox-stats-sort`: Sent (High to Low) / Received (High to Low) / Failure Rate (High to Low) / Quota Used (High to Low) / Username (A-Z) | `frontend/index.html:1285` |
+| Logs | `logs-fontsize`: 10px / 11px / 12px / 13px / 14px / 16px | `frontend/index.html:1387` |
 
 ### Charts
 
@@ -640,7 +643,7 @@ Chart.js charts (local library). Check hover tooltips, legend and both themes.
 |---|---|---|
 | Security | bar chart on `ctx` | `frontend/app.js:1989` (loadSecurityCountryChart) |
 | DMARC | line chart on `ctx` | `frontend/dmarc.js:478` (renderDmarcChart) |
-| Mailbox stats | bar chart on `canvas.getContext('2d')` | `frontend/rate-limits.js:276` (renderRateLimitChart) |
+| Mailbox stats | bar chart on `canvas.getContext('2d')` | `frontend/rate-limits.js:256` (renderRateLimitChart) |
 
 ### Colour thresholds
 
@@ -650,11 +653,6 @@ Values whose colour changes at a threshold (for example storage turns yellow and
 |---|---|---|
 | Quarantine | `sc > 0` turns red | `frontend/app.js:3126` (renderQuarantineDetailContent) |
 | Quarantine | `sc < 0` turns green | `frontend/app.js:3127` (renderQuarantineDetailContent) |
-| Mailbox stats | `mb.combined_failure_rate >= 10` turns red | `frontend/mailbox-stats.js:315` (renderMailboxStatsAccordion) |
-| Mailbox stats | `mb.combined_failure_rate >= 5` turns yellow | `frontend/mailbox-stats.js:316` (renderMailboxStatsAccordion) |
-| Mailbox stats | `quotaPercent >= 90` turns red | `frontend/mailbox-stats.js:321` (renderMailboxStatsAccordion) |
-| Mailbox stats | `quotaPercent >= 75` turns yellow | `frontend/mailbox-stats.js:321` (renderMailboxStatsAccordion) |
-| Mailbox stats | `alias.failure_rate >= 5` turns red | `frontend/mailbox-stats.js:567` (renderMailboxStatsAccordion) |
 
 ### Help topics
 
@@ -668,7 +666,7 @@ In-app help buttons; the topic is the Markdown file name under documentation/Hel
 | Status | topic "IP_Blacklist_Monitor" | `frontend/index.html:1057` |
 | Domains | topic "Domains" | `frontend/index.html:1108` |
 | DMARC | topic "DMARC" | `frontend/index.html:1128` |
-| Mailbox stats | topic "Mailbox_Stats" | `frontend/index.html:1227` |
+| Mailbox stats | topic "Mailbox_Stats" | `frontend/index.html:1223` |
 | Mailbox stats | topic dynamic: `'${isRateLimits ? 'Rate_Limits' : 'Mailbox_Stats'}'` | `frontend/mailbox-stats.js:82` (mailboxStatsSwitchView) |
 
 ### Empty states
@@ -703,7 +701,7 @@ Text shown when a list or panel has nothing to show.
 | DMARC | "No data found" | `frontend/dmarc.js:846` (loadSourceDetails) |
 | DMARC | "No sync history yet" | `frontend/dmarc.js:1058` (showDmarcSyncHistory) |
 | DMARC | "No reports found" | `frontend/dmarc.js:1140` (renderReportsManagementTable) |
-| Mailbox stats | "No mailboxes found" | `frontend/mailbox-stats.js:301` (renderMailboxStatsAccordion) |
+| Mailbox stats | "No mailboxes found" | `frontend/mailbox-stats.js:306` (renderMailboxStatsAccordion) |
 | Logs | "No log services available" | `frontend/logs-viewer.js:90` (loadLogViewer) |
 | Logs | "No log entries found" | `frontend/logs-viewer.js:459` (renderLogEntries) |
 | Settings | "No logs available" | `frontend/notifications.js:288` (testNotificationChannel) |

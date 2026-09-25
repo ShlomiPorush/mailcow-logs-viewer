@@ -23,7 +23,7 @@
     <!-- Utility classes still used by the markup, compiled once
          (.github/scripts/build-utilities-css.sh); the design system comes last -->
     <link rel="stylesheet" href="/static/assets/css/utilities.css?v=1">
-    <link rel="stylesheet" href="/static/assets/css/ui.css?v=27">
+    <link rel="stylesheet" href="/static/assets/css/ui.css?v=28">
     <style>
         .tab-active {
             border-bottom: 2px solid #3b82f6;
@@ -1218,283 +1218,96 @@
 
             <!-- Mailbox Stats Tab -->
             <div id="content-mailbox-stats" class="tab-content hidden ui-page">
-                <!-- Header -->
-                <div class="mb-6">
-                    <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
-                        <div class="text-center lg:text-left">
-                            <div class="flex items-center justify-center lg:justify-start gap-2">
-                                <h1 id="mailbox-stats-page-title" class="ui-h1">Mailbox Statistics</h1>
-                                <button onclick="showHelpModal('Mailbox_Stats')" id="mailbox-stats-help-btn"
-                                    class="text-gray-400 hover:text-blue-500 dark:hover:text-blue-400 transition-colors"
+                <div class="ui-page-head">
+                    <div>
+                        <h1 class="ui-h1"><span id="mailbox-stats-page-title">Mailbox Statistics</span> <button onclick="showHelpModal('Mailbox_Stats')" id="mailbox-stats-help-btn"
+                                    class="ui-icon-btn ui-help-btn"
                                     title="Help - Mailbox Statistics">
                                     <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                                             d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
                                     </svg>
-                                </button>
-                            </div>
-                            <p id="mailbox-stats-page-subtitle" class="text-gray-600 dark:text-gray-400 mt-1">View
-                                message statistics per mailbox and aliases</p>
-                        </div>
-                        <div id="mailbox-stats-header-info"
-                            class="flex items-center gap-3 justify-center lg:justify-end"><span
-                                id="mailbox-stats-last-update" class="text-sm text-gray-500 dark:text-gray-400"></span>
-                        </div>
+                                </button></h1>
+                        <p id="mailbox-stats-page-subtitle" class="ui-muted">View message statistics per mailbox and aliases</p>
                     </div>
+                    <div id="mailbox-stats-header-info" class="ui-head-tools"><span id="mailbox-stats-last-update" class="ui-muted"></span></div>
                 </div>
 
                 <!-- View switcher: Statistics | Rate Limits -->
-                <div id="mailbox-stats-views"
-                    class="ui-panel mb-4">
-                    <div class="border-b border-gray-200 dark:border-gray-700 overflow-x-auto">
-                        <div class="flex space-x-4 px-4 min-w-max">
-                            <button onclick="mailboxStatsSwitchView('statistics')" id="mailbox-stats-view-statistics"
-                                class="modal-tab-sm active">
-                                Statistics
-                            </button>
-                            <button onclick="mailboxStatsSwitchView('rate-limits')" id="mailbox-stats-view-rate-limits"
-                                class="modal-tab-sm">
-                                Rate Limits
-                            </button>
-                        </div>
-                    </div>
+                <div id="mailbox-stats-views" class="ui-tabs ui-page-tabs" role="tablist">
+                    <button onclick="mailboxStatsSwitchView('statistics')" id="mailbox-stats-view-statistics" class="modal-tab active" role="tab">Statistics</button>
+                    <button onclick="mailboxStatsSwitchView('rate-limits')" id="mailbox-stats-view-rate-limits" class="modal-tab" role="tab">Rate Limits</button>
                 </div>
 
                 <!-- Statistics view -->
-                <div id="mailbox-stats-statistics-view">
-                <!-- Summary Cards -->
-                <div id="mailbox-stats-summary" class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-                    <div
-                        class="ui-panel p-4">
-                        <div class="flex items-center justify-between">
-                            <div class="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">Messages Sent
-                            </div>
-                            <svg class="w-6 h-6 text-purple-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                    d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"></path>
-                            </svg>
-                        </div>
-                        <div id="mailbox-stats-sent" class="text-3xl font-bold text-gray-900 dark:text-white mt-2">-
-                        </div>
-                        <div id="mailbox-stats-date-label-sent" class="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                            Last 30 days</div>
+                <div id="mailbox-stats-statistics-view" class="ui-sec-block">
+                    <div id="mailbox-stats-summary" class="ui-kpis">
+                        <div class="ui-kpi"><b id="mailbox-stats-sent">-</b>Messages Sent<small id="mailbox-stats-date-label-sent" class="ui-kpi-note">Last 30 days</small></div>
+                        <div class="ui-kpi"><b id="mailbox-stats-received">-</b>Messages Received<small id="mailbox-stats-date-label-recv" class="ui-kpi-note">Last 30 days</small></div>
+                        <div class="ui-kpi"><b id="mailbox-stats-failed">-</b>Failed<small id="mailbox-stats-date-label-failed" class="ui-kpi-note">Last 30 days</small></div>
+                        <div class="ui-kpi"><b id="mailbox-stats-failure-rate">-</b>Failure Rate<small id="mailbox-stats-date-label-rate" class="ui-kpi-note">Last 30 days</small></div>
                     </div>
-                    <div
-                        class="ui-panel p-4">
-                        <div class="flex items-center justify-between">
-                            <div class="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">Messages
-                                Received</div>
-                            <svg class="w-6 h-6 text-cyan-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                    d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4">
-                                </path>
-                            </svg>
-                        </div>
-                        <div id="mailbox-stats-received" class="text-3xl font-bold text-gray-900 dark:text-white mt-2">-
-                        </div>
-                        <div id="mailbox-stats-date-label-recv" class="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                            Last 30 days</div>
-                    </div>
-                    <div
-                        class="ui-panel p-4">
-                        <div class="flex items-center justify-between">
-                            <div class="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">Failed</div>
-                            <svg class="w-6 h-6 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                    d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636">
-                                </path>
-                            </svg>
-                        </div>
-                        <div id="mailbox-stats-failed" class="text-3xl font-bold text-gray-900 dark:text-white mt-2">-
-                        </div>
-                        <div id="mailbox-stats-date-label-failed" class="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                            Last 30 days</div>
-                    </div>
-                    <div
-                        class="ui-panel p-4">
-                        <div class="flex items-center justify-between">
-                            <div class="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">Failure Rate
-                            </div>
-                            <svg class="w-6 h-6 text-orange-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                    d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                            </svg>
-                        </div>
-                        <div id="mailbox-stats-failure-rate"
-                            class="text-3xl font-bold text-gray-900 dark:text-white mt-2">-
-                        </div>
-                        <div id="mailbox-stats-date-label-rate" class="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                            Last 30 days</div>
-                    </div>
-                </div>
 
-                <!-- Search and Filters -->
-                <div class="ui-panel mb-4 p-4">
-                    <div class="flex flex-col lg:flex-row gap-4">
-                        <!-- Search -->
-                        <div class="flex-1">
-                            <div class="relative">
-                                <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                                    <svg class="h-5 w-5 text-gray-400" fill="none" stroke="currentColor"
-                                        viewBox="0 0 24 24">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                            d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
-                                    </svg>
-                                </div>
-                                <input type="text" id="mailbox-stats-search" oninput="applyMailboxStatsFilters()"
-                                    placeholder="Search mailboxes..."
-                                    class="block w-full pl-10 pr-3 py-2.5 border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-lg text-sm focus:ring-blue-500 focus:border-blue-500">
-                            </div>
-                        </div>
-                        <!-- Filters -->
-                        <div class="flex flex-wrap items-center gap-3">
-                            <!-- Date Range Picker -->
-                            <div class="relative" id="date-range-picker-container">
-                                <!-- Toggle Button -->
-                                <button type="button" onclick="toggleDateRangePicker()" id="date-range-picker-btn"
-                                    class="flex items-center gap-2 text-sm border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-lg shadow-sm py-2.5 pl-3 pr-3 hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors">
-                                    <svg class="w-4 h-4 text-gray-500 dark:text-gray-400" fill="none"
-                                        stroke="currentColor" viewBox="0 0 24 24">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                            d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z">
-                                        </path>
-                                    </svg>
+                    <section class="ui-panel ui-filters ui-ms-filters">
+                        <div class="ui-filters-row">
+                            <label class="ui-search ui-ms-search"><svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
+                                <input type="text" id="mailbox-stats-search" oninput="applyMailboxStatsFilters()" placeholder="Search mailboxes..." aria-label="Search mailboxes">
+                            </label>
+                            <div class="ui-ms-picker" id="date-range-picker-container">
+                                <button type="button" onclick="toggleDateRangePicker()" id="date-range-picker-btn" class="ui-btn">
+                                    <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
                                     <span id="date-range-label">Last 30 Days</span>
-                                    <svg class="w-4 h-4 text-gray-400 transition-transform" id="date-range-arrow"
-                                        fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                            d="M19 9l-7 7-7-7"></path>
-                                    </svg>
+                                    <svg width="14" height="14" id="date-range-arrow" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
                                 </button>
-
-                                <!-- Dropdown Panel -->
-                                <div id="date-range-dropdown"
-                                    class="ui-panel hidden absolute left-0 top-full mt-2 w-80 z-50">
-                                    <!-- Preset Shortcuts -->
-                                    <div class="p-3 border-b border-gray-200 dark:border-gray-700">
-                                        <p
-                                            class="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-2">
-                                            Quick Select</p>
-                                        <div class="flex flex-wrap gap-2">
-                                            <button type="button" onclick="selectDatePreset('today')"
-                                                data-preset="today"
-                                                class="date-preset-btn px-3 py-1.5 text-xs font-medium rounded-md border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
-                                                Today
-                                            </button>
-                                            <button type="button" onclick="selectDatePreset('7days')"
-                                                data-preset="7days"
-                                                class="date-preset-btn px-3 py-1.5 text-xs font-medium rounded-md border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
-                                                7 Days
-                                            </button>
-                                            <button type="button" onclick="selectDatePreset('30days')"
-                                                data-preset="30days"
-                                                class="date-preset-btn px-3 py-1.5 text-xs font-medium rounded-md border border-blue-500 bg-blue-500 text-white transition-colors">
-                                                30 Days
-                                            </button>
-                                            <button type="button" onclick="selectDatePreset('90days')"
-                                                data-preset="90days"
-                                                class="date-preset-btn px-3 py-1.5 text-xs font-medium rounded-md border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
-                                                90 Days
-                                            </button>
-                                        </div>
+                                <div id="date-range-dropdown" class="ui-panel ui-ms-dropdown hidden">
+                                    <p class="ui-md-h">Quick Select</p>
+                                    <div class="ui-chip-row">
+                                        <button type="button" onclick="selectDatePreset('today')" data-preset="today" class="date-preset-btn ui-chip" aria-pressed="false">Today</button>
+                                        <button type="button" onclick="selectDatePreset('7days')" data-preset="7days" class="date-preset-btn ui-chip" aria-pressed="false">7 Days</button>
+                                        <button type="button" onclick="selectDatePreset('30days')" data-preset="30days" class="date-preset-btn ui-chip" aria-pressed="true">30 Days</button>
+                                        <button type="button" onclick="selectDatePreset('90days')" data-preset="90days" class="date-preset-btn ui-chip" aria-pressed="false">90 Days</button>
                                     </div>
-
-                                    <!-- Custom Date Range -->
-                                    <div class="p-3">
-                                        <p
-                                            class="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-2">
-                                            Custom Range</p>
-                                        <div class="flex items-center gap-2">
-                                            <div class="flex-1">
-                                                <label
-                                                    class="text-xs text-gray-500 dark:text-gray-400 block mb-1">From</label>
-                                                <input type="date" id="date-range-start"
-                                                    class="w-full text-sm border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-md py-1.5 px-2 focus:ring-blue-500 focus:border-blue-500">
-                                            </div>
-                                            <div class="flex-1">
-                                                <label
-                                                    class="text-xs text-gray-500 dark:text-gray-400 block mb-1">To</label>
-                                                <input type="date" id="date-range-end"
-                                                    class="w-full text-sm border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-md py-1.5 px-2 focus:ring-blue-500 focus:border-blue-500">
-                                            </div>
-                                        </div>
-                                        <button type="button" onclick="applyCustomDateRange()"
-                                            class="w-full mt-3 px-3 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-md transition-colors">
-                                            Apply Custom Range
-                                        </button>
+                                    <p class="ui-md-h">Custom Range</p>
+                                    <div class="ui-ms-range">
+                                        <label>From<input type="date" id="date-range-start" class="ui-input"></label>
+                                        <label>To<input type="date" id="date-range-end" class="ui-input"></label>
                                     </div>
+                                    <button type="button" onclick="applyCustomDateRange()" class="ui-btn ui-btn-primary">Apply Custom Range</button>
                                 </div>
-
                                 <!-- Hidden input for compatibility with existing code -->
                                 <input type="hidden" id="mailbox-stats-date-range" value="30days">
                                 <input type="hidden" id="mailbox-stats-start-date" value="">
                                 <input type="hidden" id="mailbox-stats-end-date" value="">
                             </div>
-                            <select id="mailbox-stats-domain-filter" onchange="applyMailboxStatsFilters()"
-                                class="text-sm border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-lg shadow-sm focus:border-blue-500 focus:ring-blue-500 py-2.5 pl-3 pr-8">
+                            <select id="mailbox-stats-domain-filter" onchange="applyMailboxStatsFilters()" class="ui-select ui-select-auto" aria-label="Domain">
                                 <option value="">All Domains</option>
                             </select>
                             <select id="mailbox-stats-sort" onchange="applyMailboxStatsFilters()"
-                                class="text-sm border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-lg shadow-sm focus:border-blue-500 focus:ring-blue-500 py-2.5 pl-3 pr-8">
+                                class="ui-select ui-select-auto" aria-label="Sort">
                                 <option value="sent_total-desc">Sent (High to Low)</option>
                                 <option value="received_total-desc">Received (High to Low)</option>
                                 <option value="failure_rate-desc">Failure Rate (High to Low)</option>
                                 <option value="quota_used-desc">Quota Used (High to Low)</option>
                                 <option value="username-asc">Username (A-Z)</option>
                             </select>
-                            <label
-                                class="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400 whitespace-nowrap">
-                                <input type="checkbox" id="mailbox-stats-active-only" checked
-                                    onchange="applyMailboxStatsFilters()"
-                                    class="rounded border-gray-300 dark:border-gray-600 text-blue-600 focus:ring-blue-500">
-                                Active Only
-                            </label>
-                            <label
-                                class="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400 whitespace-nowrap">
-                                <input type="checkbox" id="mailbox-stats-hide-zero" checked
-                                    onchange="applyMailboxStatsFilters()"
-                                    class="rounded border-gray-300 dark:border-gray-600 text-blue-600 focus:ring-blue-500">
-                                Hide Zero Activity
-                            </label>
-                            <button onclick="resetMailboxStatsFilters()"
-                                class="flex items-center gap-1 px-3 py-2 text-sm text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-white border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
-                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                        d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15">
-                                    </path>
-                                </svg>
-                                Reset
-                            </button>
+                            <label class="ui-check-label"><input type="checkbox" id="mailbox-stats-active-only" class="ui-check" checked onchange="applyMailboxStatsFilters()"> Active Only</label>
+                            <label class="ui-check-label"><input type="checkbox" id="mailbox-stats-hide-zero" class="ui-check" checked onchange="applyMailboxStatsFilters()"> Hide Zero Activity</label>
+                            <button onclick="resetMailboxStatsFilters()" class="ui-btn">Reset</button>
                         </div>
-                    </div>
-                    <div class="mt-3 flex items-center justify-between text-sm text-gray-500 dark:text-gray-400">
-                        <span id="mailbox-stats-count">0 mailboxes</span>
-                        <span id="mailbox-stats-page-info"></span>
-                    </div>
-                </div>
+                    </section>
 
-                <!-- Loading State -->
-                <div id="mailbox-stats-loading" class="text-center py-12">
-                    <div class="loading mx-auto mb-4"></div>
-                    <p class="text-gray-500 dark:text-gray-400">Loading mailbox statistics...</p>
-                </div>
+                    <div class="ui-list-head"><span id="mailbox-stats-count" class="ui-count">0 mailboxes</span><span id="mailbox-stats-page-info" class="ui-muted ui-head-actions"></span></div>
 
-                <!-- Mailboxes List (Accordion Style) -->
-                <div id="mailbox-stats-content" class="hidden space-y-2">
-                    <div id="mailbox-stats-list">
-                        <!-- Mailbox rows will be rendered here by JavaScript -->
+                    <div id="mailbox-stats-loading" class="ui-loading"><div class="loading"></div><p>Loading mailbox statistics...</p></div>
+                    <div id="mailbox-stats-content" class="hidden">
+                        <div id="mailbox-stats-list"></div>
                     </div>
                 </div>
-                </div>
-
                 <!-- Rate Limits view -->
                 <div id="mailbox-stats-rate-limits-view" class="hidden">
-                    <div id="rate-limits-loading" class="text-center py-12">
-                        <div class="loading mx-auto mb-4"></div>
-                        <p class="text-gray-500 dark:text-gray-400">Loading rate limits...</p>
-                    </div>
+                    <div id="rate-limits-loading" class="ui-loading"><div class="loading"></div><p>Loading rate limits...</p></div>
                     <div id="rate-limits-content" class="hidden">
-                        <div class="space-y-6">
+                        <div class="ui-sec-block">
                             <!-- All three cards are rendered by rate-limits.js -->
                             <div id="rate-limits-activity-card"></div>
                             <div id="rate-limits-senders-card"></div>
@@ -1784,8 +1597,8 @@
     <script src="/static/logs-viewer.js?v=3"></script>
     <script src="/static/settings.js?v=19"></script>
     <script src="/static/domains.js?v=5"></script>
-    <script src="/static/mailbox-stats.js?v=4"></script>
-    <script src="/static/rate-limits.js?v=23"></script>
+    <script src="/static/mailbox-stats.js?v=5"></script>
+    <script src="/static/rate-limits.js?v=24"></script>
     <script src="/static/smtp-abuse.js?v=2"></script>
     <script src="/static/notifications.js?v=4"></script>
     <script src="/static/spam_filter.js?v=5"></script>
