@@ -566,28 +566,31 @@ function renderJobCard(name, jobKey, job) {
     let statusBadge = '';
 
     if (isFeatureOff) {
-        statusBadge = '<span class="px-2 py-1 text-xs font-medium rounded bg-orange-500/80 text-white">feature off</span>';
+        statusBadge = '<span class="ui-tag ui-tag-warn" title="The feature this job belongs to is turned off in Settings">feature off</span>';
+    } else if (isDisabled) {
+        // Without this tag the missing Run button had no explanation
+        statusBadge = '<span class="ui-tag" title="This job is turned off in its settings, so it cannot be run">disabled</span>';
     } else {
         switch (job.status) {
             case 'running':
-                statusBadge = '<span class="px-2 py-1 text-xs font-medium rounded bg-blue-500 text-white">running</span>';
+                statusBadge = '<span class="ui-tag ui-tag-info">running</span>';
                 break;
             case 'success':
-                statusBadge = '<span class="px-2 py-1 text-xs font-medium rounded bg-green-600 dark:bg-green-500 text-white">success</span>';
+                statusBadge = '<span class="ui-tag ui-tag-ok">success</span>';
                 break;
             case 'failed':
-                statusBadge = '<span class="px-2 py-1 text-xs font-medium rounded bg-red-600 dark:bg-red-500 text-white">failed</span>';
+                statusBadge = '<span class="ui-tag ui-tag-fail">failed</span>';
                 break;
             case 'scheduled':
-                statusBadge = '<span class="px-2 py-1 text-xs font-medium rounded bg-purple-600 dark:bg-purple-500 text-white">scheduled</span>';
+                statusBadge = '<span class="ui-tag ui-tag-spam">scheduled</span>';
                 break;
             default:
-                statusBadge = '<span class="px-2 py-1 text-xs font-medium rounded bg-gray-500 text-white">idle</span>';
+                statusBadge = '<span class="ui-tag">idle</span>';
         }
     }
 
     return `
-        <div class="p-3 bg-gray-50 dark:bg-gray-700/30 rounded-lg ${isFeatureOff ? 'opacity-50' : ''}">
+        <div class="ui-job${isFeatureOff ? ' is-off' : ''}">
             <div class="flex items-start justify-between gap-3 mb-2">
                 <div class="flex-1 min-w-0">
                     <h4 class="font-semibold text-gray-900 dark:text-white text-sm">${escapeHtml(name)}</h4>
@@ -598,9 +601,7 @@ function renderJobCard(name, jobKey, job) {
                     ${!isDisabled ? `
                         <button 
                             onclick="triggerBackgroundJob('${escapeJsArg(jobKey)}', this, '${escapeJsArg(name)}')" 
-                            class="px-2 py-1 text-xs font-medium rounded transition-colors flex items-center gap-1 ${isRunning
-                ? 'bg-gray-200 dark:bg-gray-600 text-gray-400 dark:text-gray-500 cursor-not-allowed'
-                : 'bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 hover:bg-blue-200 dark:hover:bg-blue-900/50'}"
+                            class="ui-btn ui-btn-sm"
                             ${isRunning ? 'disabled' : ''}
                             title="${isRunning ? 'Job is running' : 'Run this job now'}">
                             ${isRunning ? '<span class="inline-block animate-spin w-3 h-3 border-2 border-current border-t-transparent rounded-full"></span>' : '<span class="text-[10px]">▶</span>'}
