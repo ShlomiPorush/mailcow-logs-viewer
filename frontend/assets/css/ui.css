@@ -139,7 +139,7 @@
 /* The JavaScript shows and hides elements with the "hidden" class. A component
    that sets its own display must still yield to it, whatever the order in which
    the stylesheets load. */
-.hidden:is(.ui-btn, .ui-icon-btn, .ui-chip, .ui-tag, .ui-banner, .ui-locked) { display: none; }
+.hidden:is(.ui-btn, .ui-icon-btn, .ui-chip, .ui-tag, .ui-banner, .ui-locked, .ui-dialog-backdrop, .ui-md-legs, .ui-md-symbol) { display: none; }
 
 /* ---------- Panel ---------- */
 
@@ -357,6 +357,108 @@
     .ui-filters.is-open .ui-filters-toggle { background: var(--ui-accent); border-color: var(--ui-accent); color: var(--ui-on-accent); }
     .ui-msg-l1 { flex-wrap: wrap; }
     .ui-alert > .ui-btn { margin-inline-start: 18px; }
+}
+
+/* ---------- Dialog, tabs and the Messages reading pane ---------- */
+
+.ui-dialog-backdrop { position: fixed; inset: 0; z-index: 50; display: flex; align-items: center; justify-content: center; padding: 16px;
+    background: rgb(0 0 0 / .45); }
+.ui-dialog { display: flex; flex-direction: column; width: min(1100px, 100%); height: 90%; overflow: hidden; border-radius: var(--ui-radius);
+    background: var(--ui-bg); color: var(--ui-ink); font-size: var(--ui-fs); box-shadow: 0 24px 60px rgb(0 0 0 / .25); }
+.ui-dialog-head { display: flex; align-items: center; gap: 10px; padding: 10px 10px 10px var(--ui-pad-x); border-bottom: 1px solid var(--ui-line); }
+.ui-dialog-head h3 { margin: 0; font-size: 16px; font-weight: 700; }
+.ui-dialog-head .ui-icon-btn { margin-inline-start: auto; }
+.ui-dialog-body { flex: 1; min-height: 0; overflow-y: auto; padding: var(--ui-pad-x); }
+
+.ui-tabs { display: flex; border-bottom: 1px solid var(--ui-line); padding: 0 8px; overflow-x: auto; }
+.ui-tabs .modal-tab { flex: 1; min-width: max-content; padding: 10px 12px; border: 0; border-bottom: 2px solid transparent; background: none;
+    color: var(--ui-muted); font: inherit; font-weight: 600; cursor: pointer; white-space: nowrap; }
+.ui-tabs .modal-tab:hover { color: var(--ui-ink); }
+.ui-tabs .modal-tab.active { color: var(--ui-ink); border-bottom-color: var(--ui-accent); }
+
+.ui-msg-split { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--ui-gap); align-items: start; }
+.ui-reader:not(:has(#message-modal:not(.hidden))) { display: none; }
+.ui-msg-split:has(#message-modal.ui-docked:not(.hidden)) { grid-template-columns: minmax(340px, 420px) minmax(0, 1fr); }
+#message-modal.ui-docked { position: sticky; top: calc(56px + var(--ui-gap)); z-index: 1; display: block; padding: 0; background: none;
+    height: calc(100vh - 56px - 2 * var(--ui-gap)); }
+#message-modal.ui-docked .ui-dialog { width: 100%; height: 100%; box-shadow: none; border: 1px solid var(--ui-line); }
+.ui-msg-item.is-selected { background: color-mix(in srgb, var(--ui-accent) 9%, transparent); border-inline-start-color: var(--ui-accent); }
+
+/* Message detail content */
+.ui-md-fill { display: flex; flex-direction: column; gap: 12px; height: 100%; min-height: 0; }
+.ui-md-stack { display: grid; gap: 12px; align-content: start; }
+.ui-md-stack-tight { display: grid; gap: 6px; }
+.ui-md-card { padding: 14px var(--ui-pad-x); border-radius: var(--ui-radius); background: var(--ui-panel); }
+.ui-md-clickable { cursor: pointer; }
+.ui-md-clickable:hover { background: color-mix(in srgb, var(--ui-accent) 6%, var(--ui-panel)); }
+.ui-md-title { margin: 0 0 6px; color: var(--ui-muted); font-size: var(--ui-fs-sm); font-weight: 600; }
+.ui-md-subject { margin: 0 0 10px; font-size: 19px; line-height: 1.3; font-weight: 700; letter-spacing: -.01em; overflow-wrap: anywhere; }
+.ui-md-h { margin: 0; font-size: 15px; font-weight: 650; }
+.ui-md-h .ui-muted { font-size: 12px; font-weight: 500; margin-inline-start: 6px; }
+.ui-md-card-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 6px 12px; margin-bottom: 10px; }
+.ui-md-card-head .ui-muted { font-size: 12px; }
+.ui-md-tags { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.ui-md-card > .ui-md-tags { margin-bottom: 12px; }
+.ui-md-folder { display: inline-flex; align-items: center; gap: 4px; }
+.ui-md-folder-icon { width: 12px; height: 12px; }
+.ui-md-facts { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px 18px; }
+.ui-md-fact { min-width: 0; }
+.ui-md-fact > span { display: block; margin-bottom: 2px; color: var(--ui-muted); font-size: 12px; font-weight: 600; }
+.ui-md-fact > div { overflow-wrap: anywhere; font-weight: 600; }
+.ui-md-fact-wide { grid-column: 1 / -1; }
+.ui-md-recipients { display: grid; gap: 2px; max-height: 8rem; overflow-y: auto; }
+.ui-md-strip { padding: 12px var(--ui-pad-x); border-radius: var(--ui-radius); background: var(--ui-panel); flex: none; }
+.ui-md-figures { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; text-align: center; }
+.ui-md-figures b { display: block; font-size: 22px; line-height: 1.2; font-weight: 750; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ui-md-figures span { display: block; color: var(--ui-muted); font-size: 12px; }
+.ui-md-figures small { display: block; color: var(--ui-muted); font-size: 11px; }
+.ui-md-footer { margin-top: auto; padding-top: 12px; border-top: 1px solid var(--ui-line); flex: none; }
+.ui-md-extra { display: grid; gap: 2px; margin-top: 4px; color: var(--ui-ink); font-size: var(--ui-fs-sm); font-weight: 400; }
+.ui-md-extra p { margin: 0; }
+.ui-banner-muted { color: var(--ui-muted); background: color-mix(in srgb, var(--ui-muted) 12%, transparent); }
+.ui-md-verdict-icon { font-size: 18px; line-height: 1; }
+.ui-md-errors { flex: none; }
+.ui-md-error-list { display: grid; gap: 8px; max-height: 10rem; overflow-y: auto; margin-top: 6px; color: var(--ui-ink); font-weight: 400; }
+.ui-md-error p { margin: 2px 0 0; }
+.ui-md-recipient-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 8px; margin-top: 8px; }
+.ui-md-recipient-grid .ui-md-card { padding: 10px 12px; }
+.ui-md-grow { flex: 1; min-width: 0; }
+.ui-md-truncate { margin: 4px 0 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+
+/* The log timeline: header and filters stay, the entries scroll */
+.ui-md-timeline { display: flex; flex-direction: column; gap: 8px; flex: 1; min-height: 12rem; }
+.ui-md-timeline-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+.ui-md-timeline-entries { flex: 1; min-height: 0; overflow-y: auto; display: grid; gap: 6px; align-content: start; }
+.ui-md-log { padding: 10px 12px; border-radius: var(--ui-radius-sm); background: var(--ui-panel); font-size: var(--ui-fs-sm); }
+.ui-md-log p { margin: 3px 0 0; }
+.ui-md-log-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; font-size: 12px; }
+.ui-md-log-status { margin-inline-start: auto; }
+.ui-md-log-msg { font-family: var(--ui-mono); font-size: 12px; line-height: 1.5; word-break: break-all; }
+.ui-md-log-note { color: var(--ui-muted); font-size: 12px; }
+
+/* Delivery journey */
+.ui-md-toggle { display: flex; align-items: center; justify-content: space-between; gap: 12px; cursor: pointer; user-select: none; }
+.ui-md-toggle p { margin: 2px 0 0; font-size: 12px; }
+.ui-md-toggle svg { flex: none; color: var(--ui-muted); transition: transform .15s ease; }
+.ui-md-legs { display: grid; gap: 6px; margin-top: 10px; }
+.ui-md-leg { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; padding: 8px 10px; border-radius: var(--ui-radius-sm);
+    background: var(--ui-bg); cursor: pointer; }
+.ui-md-leg:hover { background: color-mix(in srgb, var(--ui-accent) 6%, var(--ui-bg)); }
+.ui-md-leg.is-current { cursor: default; box-shadow: inset 0 0 0 1px var(--ui-info); }
+.ui-md-leg-who { overflow-wrap: anywhere; }
+.ui-md-leg-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-inline-start: auto; }
+
+/* Spam symbols */
+.ui-md-symbols { display: grid; gap: 6px; max-height: 29rem; overflow-y: auto; }
+.ui-md-symbol { display: flex; align-items: flex-start; gap: 12px; padding: 10px 12px; border-radius: var(--ui-radius-sm); background: var(--ui-panel); }
+.ui-md-symbol p { margin: 3px 0 0; font-size: 12px; }
+.ui-md-options { color: var(--ui-info); overflow-wrap: anywhere; }
+
+@media (max-width: 760px) {
+    .ui-dialog-backdrop { padding: 0; }
+    .ui-dialog { width: 100%; height: 100%; border-radius: 0; }
+    .ui-md-subject { font-size: 17px; }
+    .ui-md-figures b { font-size: 18px; }
 }
 
 /* ---------- App shell: top bar, sidebar, phone tab bar and sheet ---------- */
