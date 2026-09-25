@@ -23,7 +23,7 @@
     <!-- Utility classes still used by the markup, compiled once
          (.github/scripts/build-utilities-css.sh); the design system comes last -->
     <link rel="stylesheet" href="/static/assets/css/utilities.css?v=1">
-    <link rel="stylesheet" href="/static/assets/css/ui.css?v=28">
+    <link rel="stylesheet" href="/static/assets/css/ui.css?v=29">
     <style>
         .tab-active {
             border-bottom: 2px solid #3b82f6;
@@ -916,60 +916,45 @@
 
             <!-- Spam Filter Tab -->
             <div id="content-spam-filter" class="tab-content hidden ui-page">
-                <!-- Sub-tabs: Rspamd Maps | Suppressions -->
-                <div class="mb-6">
-                    <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
-                        <div class="text-center lg:text-left">
-                            <div class="flex items-center justify-center lg:justify-start gap-2">
-                                <h1 class="ui-h1">Spam Filter</h1>
-                                <button onclick="showHelpModal('Spam_Filter')" class="ui-icon-btn ui-help-btn"
+                <div class="ui-page-head">
+                    <div>
+                        <h1 class="ui-h1">Spam Filter <button onclick="showHelpModal('Spam_Filter')" class="ui-icon-btn ui-help-btn"
                                     title="Help - Spam Filter">
                                     <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                                             d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
                                     </svg>
-                                </button>
-                            </div>
-                            <p class="text-gray-600 dark:text-gray-400 mt-1">Manage Rspamd maps and email suppression lists</p>
-                        </div>
-                        <div id="spam-filter-actions" class="flex items-center gap-2 justify-center lg:justify-end"></div>
+                                </button></h1>
+                        <p class="ui-muted">Addresses mailcow stops sending to, and the Rspamd maps that allow or block mail</p>
                     </div>
+                    <div id="spam-filter-actions" class="ui-head-tools"></div>
                 </div>
 
-                <!-- Sub-tab navigation -->
-                <div class="ui-panel mb-4">
-                    <div class="border-b border-gray-200 dark:border-gray-700 overflow-x-auto">
-                        <div class="flex space-x-4 px-4 min-w-max">
-                            <button onclick="spamFilterSwitchSubTab('suppressions')" id="spam-subtab-suppressions" class="modal-tab-sm active">
-                                Suppressions
-                            </button>
-                            <button onclick="spamFilterSwitchSubTab('maps')" id="spam-subtab-maps" class="modal-tab-sm">
-                                Rspamd Maps
-                            </button>
-                        </div>
-                    </div>
+                <!-- Sub-tabs: Suppressions | Rspamd Maps -->
+                <div class="ui-tabs ui-page-tabs" role="tablist">
+                    <button onclick="spamFilterSwitchSubTab('suppressions')" id="spam-subtab-suppressions" class="modal-tab active" role="tab">Suppressions</button>
+                    <button onclick="spamFilterSwitchSubTab('maps')" id="spam-subtab-maps" class="modal-tab" role="tab">Rspamd Maps</button>
                 </div>
 
                 <!-- Maps sub-tab content (hidden by default) -->
                 <div id="spam-filter-maps-content" class="hidden">
-                    <div id="rspamd-maps-list" class="space-y-4">
+                    <div id="rspamd-maps-list" class="ui-sec-block">
                         <div class="ui-loading"><div class="loading"></div><p>Loading Rspamd maps...</p></div>
                     </div>
                 </div>
 
                 <!-- Suppressions sub-tab content (visible by default) -->
-                <div id="spam-filter-suppressions-content">
-                    <!-- Stats cards -->
-                    <div id="suppression-stats" class="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4"></div>
+                <div id="spam-filter-suppressions-content" class="ui-sec-block">
+                    <div id="suppression-stats" class="ui-kpis"></div>
 
-                    <!-- Actions bar -->
-                    <div class="ui-panel p-4 mb-4">
-                        <div class="flex flex-wrap items-center gap-3">
-                            <input type="text" id="suppression-search" placeholder="Search email, notes..."
-                                class="flex-1 min-w-[200px] px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-lg"
-                                onkeypress="if(event.key==='Enter') loadSuppressions()">
+                    <section class="ui-panel ui-filters ui-ms-filters">
+                        <div class="ui-filters-row">
+                            <label class="ui-search ui-ms-search"><svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
+                                <input type="text" id="suppression-search" placeholder="Search email, notes..." aria-label="Search suppressions"
+                                    onkeypress="if(event.key==='Enter') loadSuppressions()">
+                            </label>
                             <select id="suppression-filter-reason"
-                                class="px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-lg"
+                                class="ui-select ui-select-auto" aria-label="Reason"
                                 onchange="loadSuppressions()">
                                 <option value="">All Reasons</option>
                                 <option value="hard_bounce">Hard Bounce</option>
@@ -979,54 +964,32 @@
                                 <option value="manual">Manual</option>
                             </select>
                             <select id="suppression-filter-active"
-                                class="px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-lg"
+                                class="ui-select ui-select-auto" aria-label="State"
                                 onchange="loadSuppressions()">
                                 <option value="true">Active Only</option>
                                 <option value="">All</option>
                                 <option value="false">Inactive</option>
                                 <option value="expired">Expired</option>
                             </select>
-                            <button onclick="clearSuppressionFilters()"
-                                class="px-3 py-2 text-sm bg-gray-200 hover:bg-gray-300 dark:bg-gray-600 dark:hover:bg-gray-500 text-gray-700 dark:text-gray-300 rounded-lg"
-                                title="Clear all filters">
-                                Clear
-                            </button>
-                            <button onclick="showAddSuppressionModal()"
-                                class="px-4 py-2 text-sm bg-red-600 hover:bg-red-700 text-white rounded-lg flex items-center gap-1.5">
-                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
-                                </svg>
-                                Add Suppression
-                            </button>
-                            <button onclick="syncSuppressionsToRspamd()" id="suppression-sync-btn"
-                                class="px-4 py-2 text-sm bg-blue-600 hover:bg-blue-700 text-white rounded-lg flex items-center gap-1.5"
-                                title="Sync suppression list to Rspamd">
-                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                        d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
-                                </svg>
-                                Sync to Rspamd
-                            </button>
-                            <div class="relative">
-                                <button onclick="toggleSuppressionMoreMenu()" class="px-3 py-2 text-sm bg-gray-200 hover:bg-gray-300 dark:bg-gray-600 dark:hover:bg-gray-500 text-gray-700 dark:text-gray-300 rounded-lg">
-                                    ⋯
-                                </button>
-                                <div id="suppression-more-menu" class="ui-panel hidden absolute right-0 top-full mt-1 w-48 z-50">
-                                    <button onclick="exportSuppressions()" class="w-full text-left px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700">Export CSV</button>
-                                    <label class="w-full text-left px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer block">
+                            <button onclick="clearSuppressionFilters()" class="ui-btn" title="Clear all filters">Clear</button>
+                            <span class="ui-toolbar-gap"></span>
+                            <button onclick="showAddSuppressionModal()" class="ui-btn ui-btn-primary">Add Suppression</button>
+                            <button onclick="syncSuppressionsToRspamd()" id="suppression-sync-btn" class="ui-btn" title="Sync suppression list to Rspamd"><svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg> Sync to Rspamd</button>
+                            <div class="ui-more-wrap">
+                                <button onclick="toggleSuppressionMoreMenu()" class="ui-btn" title="More" aria-label="More">⋯</button>
+                                <div id="suppression-more-menu" class="ui-menu-panel hidden">
+                                    <button onclick="exportSuppressions()">Export CSV</button>
+                                    <label>
                                         Import CSV
                                         <input type="file" accept=".csv" class="hidden" onchange="importSuppressions(event)">
                                     </label>
                                 </div>
                             </div>
                         </div>
-                    </div>
+                    </section>
 
-                    <!-- Suppressions table -->
-                    <div class="ui-panel">
-                        <div id="suppression-list" class="p-4 sm:p-6">
-                            <div class="ui-loading"><div class="loading"></div><p>Loading...</p></div>
-                        </div>
+                    <div id="suppression-list">
+                        <div class="ui-loading"><div class="loading"></div><p>Loading...</p></div>
                     </div>
                 </div>
             </div>
@@ -1601,7 +1564,7 @@
     <script src="/static/rate-limits.js?v=24"></script>
     <script src="/static/smtp-abuse.js?v=2"></script>
     <script src="/static/notifications.js?v=4"></script>
-    <script src="/static/spam_filter.js?v=5"></script>
+    <script src="/static/spam_filter.js?v=6"></script>
 
     <!-- DMARC Sync History Modal -->
     <div id="dmarc-sync-history-modal" class="hidden ui-dialog-backdrop" role="dialog" aria-label="IMAP Sync History">
