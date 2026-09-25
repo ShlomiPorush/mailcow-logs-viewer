@@ -518,6 +518,11 @@
 .ui-grid-2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--ui-gap); align-items: start; }
 .ui-collapse > summary.ui-panel-head { border-bottom: 0; }
 
+/* Locked areas placed flush in a list, and inside the dark log terminal */
+.ui-list-note.ui-flush { padding: 0 0 12px; }
+.ui-logs-locked { padding: 32px 16px; font-family: var(--ui-font); color: var(--ui-ink); }
+.ui-logs-locked .ui-locked { max-width: 640px; margin: 0 auto; background: var(--ui-bg); }
+
 /* Background job cards (Status) */
 .ui-job { padding: 10px 12px; border-radius: var(--ui-radius-sm); background: var(--ui-bg); }
 .ui-job.is-off { opacity: .55; }
@@ -538,7 +543,7 @@
 
 /* Surfaces: white cards become panels without a shadow, inner rows sit on the page tone */
 html body .ui-main .bg-white { background-color: var(--ui-panel); }
-html body .ui-main .bg-white.shadow, html body .ui-main .bg-white.shadow-sm, html body .ui-main .bg-white.shadow-md { box-shadow: none; }
+html body .ui-main :is(.bg-white, .ui-panel):is(.shadow, .shadow-sm, .shadow-md, .shadow-lg) { box-shadow: none; }
 html body .ui-main :is(.bg-gray-50, .bg-gray-100) { background-color: var(--ui-bg); }
 html body .ui-main :is(.bg-gray-200, .bg-gray-300) { background-color: var(--ui-line); }
 html.dark body .ui-main :is(.dark\:bg-gray-800, .dark\:bg-gray-900) { background-color: var(--ui-panel); }
