@@ -516,7 +516,7 @@ async function loadNavCounters() {
         }
     };
     const [dashboard, queue, quarantine, insights, summary, blacklist, info] = await Promise.all([
-        off('netfilter') ? null : get('/api/stats/dashboard'),
+        off('netfilter') ? null : get('/api/logs/netfilter/overview'),
         off('queue') ? null : get('/api/queue'),
         off('quarantine') ? null : get('/api/quarantine'),
         off('dmarc') ? null : get('/api/dmarc/insights'),
@@ -525,7 +525,7 @@ async function loadNavCounters() {
         get('/api/settings/info'),
     ]);
 
-    const failedLogins = dashboard && dashboard.auth_failures ? dashboard.auth_failures['24h'] || 0 : 0;
+    const failedLogins = dashboard ? dashboard.failed_logins || 0 : 0;
     setNavCount('netfilter', failedLogins, false, `${failedLogins} failed logins in the last 24 hours`);
     const queued = queue && Array.isArray(queue.data) ? queue.data.length : 0;
     setNavCount('queue', queued, false, `${queued} messages in the queue`);
@@ -782,6 +782,7 @@ async function smartRefreshCurrentTab() {
                 break;
             case 'netfilter':
                 await smartRefreshNetfilter();
+                await loadSecurityOverview();
                 break;
             case 'queue':
                 await smartRefreshQueue();
@@ -1085,6 +1086,141 @@ async function banIP(ip, btnEl) {
     }
 }
 
+// ---------- Security overview: key figures, sources, latest failed logins ----------
+
+let securityOverview = null;
+
+async function loadSecurityOverview() {
+    try {
+        const res = await authenticatedFetch('/api/logs/netfilter/overview?hours=24');
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        securityOverview = await res.json();
+        renderSecurityOverview();
+    } catch (err) {
+        console.error('Failed to load security overview:', err);
+        const msg = `<p class="ui-empty ui-text-fail">Failed to load: ${escapeHtml(err.message)}</p>`;
+        ['security-sources', 'security-latest'].forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.innerHTML = msg;
+        });
+    }
+}
+
+// Where an address stands with Fail2ban. Unknown until the Fail2ban data has loaded.
+function securitySourceState(source) {
+    if (fail2banActiveBans === null) return { key: 'unknown', text: '-', tone: '' };
+    const ip = source.ip;
+    const onList = list => list.some(entry => entry === ip || entry === `${ip}/32`);
+    const ban = fail2banActiveBans.find(b => b.ip === ip || (b.network && (b.network === ip || b.network.split('/')[0] === ip)));
+    if (ban) return { key: 'banned', text: ban.banned_until ? `Banned, ${ban.banned_until} left` : 'Banned', tone: 'fail' };
+    if (onList(fail2banBlacklist)) return { key: 'blocklisted', text: 'On the blacklist', tone: 'fail' };
+    if (onList(fail2banWhitelist)) return { key: 'allowed', text: 'Allowlisted', tone: 'ok' };
+    const recent = Date.now() - new Date(source.last_seen).getTime() < 3600 * 1000;
+    return recent ? { key: 'open', text: 'Not banned', tone: 'warn' } : { key: 'quiet', text: 'Quiet', tone: '' };
+}
+
+function renderSecurityOverview() {
+    const data = securityOverview;
+    const sourcesEl = document.getElementById('security-sources');
+    const latestEl = document.getElementById('security-latest');
+    if (!data || !sourcesEl || !latestEl) return;
+
+    const states = data.sources.map(securitySourceState);
+    const known = fail2banActiveBans !== null;
+    const setKpi = (id, value, tone) => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.textContent = value;
+        el.className = tone || '';
+    };
+    const decide = states.filter(st => st.key === 'open').length;
+    setKpi('security-kpi-failed', (data.failed_logins || 0).toLocaleString());
+    setKpi('security-kpi-banned', known ? fail2banActiveBans.length.toLocaleString() : '-');
+    setKpi('security-kpi-sources', (data.source_count || 0).toLocaleString());
+    setKpi('security-kpi-decide', known ? decide.toLocaleString() : '-', decide > 0 ? 'ui-fail' : '');
+
+    if (!data.sources.length) {
+        sourcesEl.innerHTML = '<p class="ui-empty ui-panel">No attempts in the last 24 hours.</p>';
+    } else {
+        const lockedNote = mailcowRwConfigured ? '' : `<div class="ui-list-note">${uiLocked('Ban, Allow and Unban are locked', `Changing Fail2ban from this list ${UI_RW_KEY_TEXT}`)}</div>`;
+        const more = data.source_count > data.sources.length ? `<p class="ui-kv-note">The ${data.sources.length} addresses with the most attempts of ${data.source_count.toLocaleString()}.</p>` : '';
+        sourcesEl.innerHTML = `${lockedNote}
+            <div class="ui-table ui-sec-table" style="--ui-cols: minmax(190px, 2.2fr) minmax(90px, 1fr) 72px 96px minmax(130px, 1.2fr) 136px; --ui-table-min: 820px">
+                <div class="ui-tr ui-tr-head"><span>Address</span><span>Service</span><span class="ui-td-end">Attempts</span><span>Last seen</span><span>State</span><span class="ui-td-end">Actions</span></div>
+                ${data.sources.map((src, i) => {
+                    const st = states[i];
+                    const where = [src.country_name, src.usernames.length ? `tried ${src.usernames.join(', ')}` : ''].filter(Boolean).join(', ');
+                    const ipArg = escapeJsArg(src.ip);
+                    const actions = !mailcowRwConfigured || st.key === 'unknown' ? '' :
+                        (st.key === 'banned' || st.key === 'blocklisted')
+                            ? `<button onclick="unbanIP('${ipArg}', this)" class="ui-btn ui-btn-sm" title="Unban ${escapeHtml(src.ip)}/32">Unban</button>`
+                            : st.key === 'allowed' ? ''
+                            : `<button onclick="banIP('${ipArg}', this)" class="ui-btn ui-btn-sm ui-btn-danger" title="Ban ${escapeHtml(src.ip)}/32">Ban</button>
+                               <button onclick="allowIP('${ipArg}', this)" class="ui-btn ui-btn-sm" title="Never ban ${escapeHtml(src.ip)}/32">Allow</button>`;
+                    return `
+                    <div class="ui-tr${st.key === 'open' ? ' ui-tr-attn' : ''}">
+                        <div class="ui-td ui-sec-addr">
+                            <b class="ui-mono">${copyableText(src.ip)}</b>
+                            ${where ? `<small title="${escapeHtml(where)}">${escapeHtml(where)}</small>` : ''}
+                        </div>
+                        <span class="ui-td">${escapeHtml(src.services.join(', ') || '-')}</span>
+                        <span class="ui-td ui-td-end">${src.attempts.toLocaleString()}<small class="ui-sec-unit"> attempts</small></span>
+                        <time class="ui-td" title="${escapeHtml(formatTime(src.last_seen))}">${formatAgo(src.last_seen)}</time>
+                        <span class="ui-td">${st.tone || st.key === 'quiet' ? uiTag(st.text, st.tone) : escapeHtml(st.text)}</span>
+                        <span class="ui-td ui-td-end ui-sec-actions">${actions}</span>
+                    </div>`;
+                }).join('')}
+            </div>${more}`;
+    }
+
+    if (!data.latest.length) {
+        latestEl.innerHTML = '<p class="ui-empty ui-panel">No failed logins in the last 24 hours.</p>';
+    } else {
+        latestEl.innerHTML = `
+            <div class="ui-table ui-sec-table" style="--ui-cols: 64px minmax(130px, 1fr) minmax(160px, 1.6fr) minmax(90px, .8fr); --ui-table-min: 520px">
+                <div class="ui-tr ui-tr-head"><span>When</span><span>Address</span><span>Account tried</span><span>Service</span></div>
+                ${data.latest.map(row => `
+                    <div class="ui-tr">
+                        <time class="ui-td" title="${escapeHtml(formatTime(row.time))}">${formatListTime(row.time)}</time>
+                        <span class="ui-td ui-mono">${copyableText(row.ip)}</span>
+                        <span class="ui-td">${row.username ? copyableText(row.username) : '<span class="ui-muted">-</span>'}</span>
+                        <span class="ui-td">${escapeHtml(row.service || '-')}</span>
+                    </div>`).join('')}
+            </div>`;
+    }
+}
+
+async function allowIP(ip, btnEl) {
+    const ipWithMask = ip.includes('/') ? ip : ip + '/32';
+    if (!await showConfirmModal({ title: 'Allow IP', message: `Add ${ipWithMask} to the Fail2Ban allowlist?\n\nFailed attempts from this address will never lead to a ban.`, confirmText: 'Allow' })) return;
+    if (btnEl) {
+        btnEl.disabled = true;
+        btnEl.textContent = 'Allowing...';
+    }
+    try {
+        const res = await authenticatedFetch('/api/fail2ban/allow', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ip: ipWithMask })
+        });
+        const result = await res.json();
+        if (res.ok && result.status === 'success') {
+            showToast(`IP ${ip} added to the allowlist`, 'success');
+            fail2banSettingsLoaded = false;
+            fail2banActiveBans = null;
+            loadFail2BanSettings();
+            return;
+        }
+        showToast('Failed to allow: ' + (result.msg || result.detail || 'Unknown error'), 'error');
+    } catch (err) {
+        showToast('Failed to allow IP: ' + err.message, 'error');
+    }
+    if (btnEl) {
+        btnEl.disabled = false;
+        btnEl.textContent = 'Allow';
+    }
+}
+
 async function loadNetfilterCountries() {
     try {
         const select = document.getElementById('netfilter-filter-country');
@@ -1344,6 +1480,7 @@ function switchTab(tab, params = {}) {
             loadMessages(1);
             break;
         case 'netfilter':
+            loadSecurityOverview();
             loadNetfilterLogs(1);
             loadFail2BanSettings();
             loadNetfilterCountries();
@@ -1983,6 +2120,7 @@ async function loadNetfilterLogs(page = 1) {
 let fail2banSettingsLoaded = false;
 let fail2banActiveBans = null;
 let fail2banBlacklist = [];
+let fail2banWhitelist = [];
 
 async function loadFail2BanSettings() {
     // Only load once per session (settings don't change often)
@@ -2007,6 +2145,8 @@ async function loadFail2BanSettings() {
         // Store blacklist entries globally for button logic
         const rawBlacklist = data.blacklist || '';
         fail2banBlacklist = rawBlacklist.replace(/\n/g, ',').split(',').map(e => e.trim()).filter(e => e);
+        fail2banWhitelist = (data.whitelist || '').replace(/\n/g, ',').split(',').map(e => e.trim()).filter(e => e);
+        renderSecurityOverview();
 
         // Re-render netfilter logs if they were already loaded (race condition fix)
         // Now after blacklist is loaded, so buttons correctly reflect blacklist state
