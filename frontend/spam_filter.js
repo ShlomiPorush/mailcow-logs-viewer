@@ -82,18 +82,9 @@ async function loadRspamdMaps() {
         rspamdMapsData = data.maps || [];
         
         if (!data.configured) {
-            container.innerHTML = `
-                <div class="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg p-6 text-center">
-                    <svg class="w-12 h-12 mx-auto mb-3 text-yellow-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
-                    </svg>
-                    <h3 class="text-lg font-semibold text-yellow-800 dark:text-yellow-200 mb-2">Rspamd Not Configured</h3>
-                    <p class="text-yellow-700 dark:text-yellow-300 mb-4">${escapeHtml(data.message || 'Set RSPAMD_PASSWORD in Settings to enable Rspamd map management.')}</p>
-                    <button onclick="navigateTo('settings')" class="px-4 py-2 bg-yellow-600 hover:bg-yellow-700 text-white rounded-lg text-sm">
-                        Go to Settings
-                    </button>
-                </div>
-            `;
+            container.innerHTML = uiLocked('Rspamd Not Configured',
+                escapeHtml(data.message || 'Set RSPAMD_PASSWORD in Settings to enable Rspamd map management.'),
+                `<button type="button" class="ui-btn ui-btn-sm" onclick="navigateTo('settings')">Go to Settings</button>`);
             return;
         }
         
@@ -175,11 +166,7 @@ function renderRspamdMapsList(maps, rwKeyConfigured) {
     }
     
     if (!rwKeyConfigured) {
-        html = `
-            <div class="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4 mb-4 text-sm text-blue-700 dark:text-blue-300">
-                <strong>Read-Only Mode:</strong> MAILCOW_API_KEY_RW is not configured. You can view maps but cannot save changes.
-            </div>
-        ` + html;
+        html = `<div class="ui-list-note ui-flush">${uiLocked('Read-Only Mode', '<code>MAILCOW_API_KEY_RW</code> is not configured. You can view maps but cannot save changes.')}</div>` + html;
     }
     
     container.innerHTML = html;

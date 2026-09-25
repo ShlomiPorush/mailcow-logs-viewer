@@ -21,7 +21,7 @@
     <script src="/static/assets/libs/purify.min.js?v=2"></script>
     <script src="/static/assets/libs/chart.umd.min.js?v=2"></script>
     <link rel="stylesheet" href="/static/assets/libs/github-markdown.min.css">
-    <link rel="stylesheet" href="/static/assets/css/ui.css?v=12">
+    <link rel="stylesheet" href="/static/assets/css/ui.css?v=14">
     <script>
         tailwind.config = {
             darkMode: 'class',
@@ -36,33 +36,30 @@
             color: #3b82f6;
         }
 
+        /* Sub-tabs inside a page (Spam Filter, DMARC, Mailbox Stats), in the v3 tokens */
         .modal-tab-sm {
             padding: 0.5rem 1rem;
             border-bottom: 2px solid transparent;
-            transition: all 0.2s;
+            transition: color 0.15s, border-color 0.15s;
             cursor: pointer;
-            color: #6b7280;
+            color: var(--ui-muted);
             font-size: 0.875rem;
+            font-weight: 600;
             white-space: nowrap;
         }
 
-        .dark .modal-tab-sm {
-            color: #9ca3af;
-        }
-
         .modal-tab-sm:hover {
-            background-color: rgba(59, 130, 246, 0.05);
+            color: var(--ui-ink);
         }
 
         .modal-tab-sm.active {
-            border-bottom-color: #3b82f6;
-            color: #3b82f6 !important;
-            background-color: rgba(59, 130, 246, 0.1);
+            border-bottom-color: var(--ui-accent);
+            color: var(--ui-ink) !important;
         }
 
         .loading {
-            border: 3px solid #f3f4f6;
-            border-top: 3px solid #3b82f6;
+            border: 3px solid var(--ui-line);
+            border-top: 3px solid var(--ui-accent);
             border-radius: 50%;
             width: 40px;
             height: 40px;
@@ -843,15 +840,14 @@
             </div>
 
             <!-- Spam Filter Tab -->
-            <div id="content-spam-filter" class="tab-content hidden">
+            <div id="content-spam-filter" class="tab-content hidden ui-page">
                 <!-- Sub-tabs: Rspamd Maps | Suppressions -->
                 <div class="mb-6">
                     <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
                         <div class="text-center lg:text-left">
                             <div class="flex items-center justify-center lg:justify-start gap-2">
-                                <h2 class="text-2xl font-bold text-gray-900 dark:text-white">Spam Filter</h2>
-                                <button onclick="showHelpModal('Spam_Filter')"
-                                    class="text-gray-400 hover:text-blue-500 dark:hover:text-blue-400 transition-colors"
+                                <h1 class="ui-h1">Spam Filter</h1>
+                                <button onclick="showHelpModal('Spam_Filter')" class="ui-icon-btn ui-help-btn"
                                     title="Help - Spam Filter">
                                     <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
@@ -866,7 +862,7 @@
                 </div>
 
                 <!-- Sub-tab navigation -->
-                <div class="bg-white dark:bg-gray-800 rounded-lg shadow dark:shadow-gray-900/30 mb-4">
+                <div class="ui-panel mb-4">
                     <div class="border-b border-gray-200 dark:border-gray-700 overflow-x-auto">
                         <div class="flex space-x-4 px-4 min-w-max">
                             <button onclick="spamFilterSwitchSubTab('suppressions')" id="spam-subtab-suppressions" class="modal-tab-sm active">
@@ -882,10 +878,7 @@
                 <!-- Maps sub-tab content (hidden by default) -->
                 <div id="spam-filter-maps-content" class="hidden">
                     <div id="rspamd-maps-list" class="space-y-4">
-                        <div class="text-center py-12">
-                            <div class="loading mx-auto mb-4"></div>
-                            <p class="text-gray-500 dark:text-gray-400">Loading Rspamd maps...</p>
-                        </div>
+                        <div class="ui-loading"><div class="loading"></div><p>Loading Rspamd maps...</p></div>
                     </div>
                 </div>
 
@@ -895,7 +888,7 @@
                     <div id="suppression-stats" class="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4"></div>
 
                     <!-- Actions bar -->
-                    <div class="bg-white dark:bg-gray-800 rounded-lg shadow dark:shadow-gray-900/30 p-4 mb-4">
+                    <div class="ui-panel p-4 mb-4">
                         <div class="flex flex-wrap items-center gap-3">
                             <input type="text" id="suppression-search" placeholder="Search email, notes..."
                                 class="flex-1 min-w-[200px] px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-lg"
@@ -943,7 +936,7 @@
                                 <button onclick="toggleSuppressionMoreMenu()" class="px-3 py-2 text-sm bg-gray-200 hover:bg-gray-300 dark:bg-gray-600 dark:hover:bg-gray-500 text-gray-700 dark:text-gray-300 rounded-lg">
                                     ⋯
                                 </button>
-                                <div id="suppression-more-menu" class="hidden absolute right-0 top-full mt-1 w-48 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg z-50">
+                                <div id="suppression-more-menu" class="ui-panel hidden absolute right-0 top-full mt-1 w-48 z-50">
                                     <button onclick="exportSuppressions()" class="w-full text-left px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700">Export CSV</button>
                                     <label class="w-full text-left px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer block">
                                         Import CSV
@@ -955,12 +948,9 @@
                     </div>
 
                     <!-- Suppressions table -->
-                    <div class="bg-white dark:bg-gray-800 rounded-lg shadow dark:shadow-gray-900/30">
+                    <div class="ui-panel">
                         <div id="suppression-list" class="p-4 sm:p-6">
-                            <div class="text-center py-8">
-                                <div class="loading mx-auto mb-4"></div>
-                                <p class="text-gray-500 dark:text-gray-400">Loading...</p>
-                            </div>
+                            <div class="ui-loading"><div class="loading"></div><p>Loading...</p></div>
                         </div>
                     </div>
                 </div>
@@ -1138,17 +1128,16 @@
             </div>
 
             <!-- DMARC Tab -->
-            <div id="content-dmarc" class="tab-content hidden">
+            <div id="content-dmarc" class="tab-content hidden ui-page">
                 <!-- Sub-navigation -->
                 <div class="mb-6">
                     <div class="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
                         <div class="text-center lg:text-left flex items-center gap-4 justify-center lg:justify-start">
                             <div>
                                 <div class="flex items-center justify-center lg:justify-start gap-2">
-                                    <h2 id="dmarc-page-title" class="text-2xl font-bold text-gray-900 dark:text-white">
-                                        DMARC Reports</h2>
-                                    <button onclick="showHelpModal('DMARC')"
-                                        class="text-gray-400 hover:text-blue-500 dark:hover:text-blue-400 transition-colors"
+                                    <h1 id="dmarc-page-title" class="ui-h1">
+                                        DMARC Reports</h1>
+                                    <button onclick="showHelpModal('DMARC')" class="ui-icon-btn ui-help-btn"
                                         title="Help - DMARC Information">
                                         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
@@ -1205,7 +1194,7 @@
 
                     <!-- Domains Table -->
                     <div
-                        class="rounded-xl overflow-hidden shadow-sm border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
+                        class="ui-panel overflow-hidden">
                         <table class="min-w-full">
                             <thead class="hidden md:table-header-group bg-gray-100 dark:bg-gray-700/50">
                                 <tr>
@@ -1244,14 +1233,14 @@
                     <div id="dmarc-overview-stats-container"></div>
 
                     <!-- Chart -->
-                    <div class="bg-white dark:bg-gray-800 rounded-lg shadow p-6 mb-8 relative h-80">
+                    <div class="ui-panel p-6 mb-8 relative h-80">
                         <h3 class="text-lg font-medium text-gray-900 dark:text-white mb-4">Email Volume (Last 30 Days)
                         </h3>
                         <canvas id="dmarc-chart"></canvas>
                     </div>
 
                     <!-- Sub-tabs: Reports | Sources | TLS Reports -->
-                    <div class="bg-white dark:bg-gray-800 rounded-lg shadow">
+                    <div class="ui-panel">
                         <div class="border-b border-gray-200 dark:border-gray-700 overflow-x-auto">
                             <div class="flex space-x-4 px-4 min-w-max">
                                 <button onclick="dmarcSwitchSubTab('reports')" id="dmarc-subtab-reports"
@@ -1271,30 +1260,21 @@
                         <!-- Reports Tab Content -->
                         <div id="dmarc-reports-content" class="p-6">
                             <div id="dmarc-reports-list" class="space-y-4">
-                                <div class="text-center py-12">
-                                    <div class="loading mx-auto mb-4"></div>
-                                    <p class="text-gray-500 dark:text-gray-400">Loading reports...</p>
-                                </div>
+                                <div class="ui-loading"><div class="loading"></div><p>Loading reports...</p></div>
                             </div>
                         </div>
 
                         <!-- Sources Tab Content -->
                         <div id="dmarc-sources-content" class="p-6 hidden">
                             <div id="dmarc-sources-list">
-                                <div class="text-center py-12">
-                                    <div class="loading mx-auto mb-4"></div>
-                                    <p class="text-gray-500 dark:text-gray-400">Loading sources...</p>
-                                </div>
+                                <div class="ui-loading"><div class="loading"></div><p>Loading sources...</p></div>
                             </div>
                         </div>
 
                         <!-- TLS Reports Tab Content -->
                         <div id="dmarc-tls-content" class="p-6 hidden">
                             <div id="dmarc-tls-list">
-                                <div class="text-center py-12">
-                                    <div class="loading mx-auto mb-4"></div>
-                                    <p class="text-gray-500 dark:text-gray-400">Loading TLS reports...</p>
-                                </div>
+                                <div class="ui-loading"><div class="loading"></div><p>Loading TLS reports...</p></div>
                             </div>
                         </div>
                     </div>
@@ -1306,16 +1286,13 @@
                     <div id="report-details-stats-container"></div>
 
                     <!-- Sources Table -->
-                    <div class="bg-white dark:bg-gray-800 rounded-lg shadow">
-                        <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+                    <div class="ui-panel">
+                        <div class="ui-panel-head">
                             <h3 class="text-lg font-medium text-gray-900 dark:text-white">Sources</h3>
                         </div>
                         <div class="overflow-x-auto">
                             <div id="report-detail-sources-list">
-                                <div class="text-center py-12">
-                                    <div class="loading mx-auto mb-4"></div>
-                                    <p class="text-gray-500 dark:text-gray-400">Loading sources...</p>
-                                </div>
+                                <div class="ui-loading"><div class="loading"></div><p>Loading sources...</p></div>
                             </div>
                         </div>
                     </div>
@@ -1324,7 +1301,7 @@
                 <!-- Source Details View (hidden by default) -->
                 <div id="dmarc-source-details-view" class="hidden">
                     <!-- Source Info Header -->
-                    <div class="bg-white dark:bg-gray-800 rounded-lg shadow p-6 mb-6">
+                    <div class="ui-panel p-6 mb-6">
                         <div class="flex items-start gap-4">
                             <img id="source-detail-flag" src="" alt="" class="w-12 h-8 object-cover rounded shadow"
                                 style="border: 1px solid rgba(0,0,0,0.1);">
@@ -1344,16 +1321,13 @@
                     <div id="source-details-stats-container"></div>
 
                     <!-- Envelope From Groups Table -->
-                    <div class="bg-white dark:bg-gray-800 rounded-lg shadow">
-                        <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+                    <div class="ui-panel">
+                        <div class="ui-panel-head">
                             <h3 class="text-lg font-medium text-gray-900 dark:text-white">Email Details</h3>
                         </div>
                         <div class="overflow-x-auto">
                             <div id="source-detail-envelope-list">
-                                <div class="text-center py-12">
-                                    <div class="loading mx-auto mb-4"></div>
-                                    <p class="text-gray-500 dark:text-gray-400">Loading details...</p>
-                                </div>
+                                <div class="ui-loading"><div class="loading"></div><p>Loading details...</p></div>
                             </div>
                         </div>
                     </div>
@@ -1361,14 +1335,13 @@
             </div>
 
             <!-- Mailbox Stats Tab -->
-            <div id="content-mailbox-stats" class="tab-content hidden">
+            <div id="content-mailbox-stats" class="tab-content hidden ui-page">
                 <!-- Header -->
                 <div class="mb-6">
                     <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
                         <div class="text-center lg:text-left">
                             <div class="flex items-center justify-center lg:justify-start gap-2">
-                                <h2 id="mailbox-stats-page-title"
-                                    class="text-2xl font-bold text-gray-900 dark:text-white">Mailbox Statistics</h2>
+                                <h1 id="mailbox-stats-page-title" class="ui-h1">Mailbox Statistics</h1>
                                 <button onclick="showHelpModal('Mailbox_Stats')" id="mailbox-stats-help-btn"
                                     class="text-gray-400 hover:text-blue-500 dark:hover:text-blue-400 transition-colors"
                                     title="Help - Mailbox Statistics">
@@ -1390,7 +1363,7 @@
 
                 <!-- View switcher: Statistics | Rate Limits -->
                 <div id="mailbox-stats-views"
-                    class="bg-white dark:bg-gray-800 rounded-lg shadow dark:shadow-gray-900/30 mb-4">
+                    class="ui-panel mb-4">
                     <div class="border-b border-gray-200 dark:border-gray-700 overflow-x-auto">
                         <div class="flex space-x-4 px-4 min-w-max">
                             <button onclick="mailboxStatsSwitchView('statistics')" id="mailbox-stats-view-statistics"
@@ -1410,7 +1383,7 @@
                 <!-- Summary Cards -->
                 <div id="mailbox-stats-summary" class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
                     <div
-                        class="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-4 border border-gray-200 dark:border-gray-700">
+                        class="ui-panel p-4">
                         <div class="flex items-center justify-between">
                             <div class="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">Messages Sent
                             </div>
@@ -1425,7 +1398,7 @@
                             Last 30 days</div>
                     </div>
                     <div
-                        class="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-4 border border-gray-200 dark:border-gray-700">
+                        class="ui-panel p-4">
                         <div class="flex items-center justify-between">
                             <div class="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">Messages
                                 Received</div>
@@ -1441,7 +1414,7 @@
                             Last 30 days</div>
                     </div>
                     <div
-                        class="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-4 border border-gray-200 dark:border-gray-700">
+                        class="ui-panel p-4">
                         <div class="flex items-center justify-between">
                             <div class="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">Failed</div>
                             <svg class="w-6 h-6 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1456,7 +1429,7 @@
                             Last 30 days</div>
                     </div>
                     <div
-                        class="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-4 border border-gray-200 dark:border-gray-700">
+                        class="ui-panel p-4">
                         <div class="flex items-center justify-between">
                             <div class="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">Failure Rate
                             </div>
@@ -1474,7 +1447,7 @@
                 </div>
 
                 <!-- Search and Filters -->
-                <div class="bg-white dark:bg-gray-800 rounded-lg shadow mb-4 p-4">
+                <div class="ui-panel mb-4 p-4">
                     <div class="flex flex-col lg:flex-row gap-4">
                         <!-- Search -->
                         <div class="flex-1">
@@ -1514,7 +1487,7 @@
 
                                 <!-- Dropdown Panel -->
                                 <div id="date-range-dropdown"
-                                    class="hidden absolute left-0 top-full mt-2 w-80 bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 z-50">
+                                    class="ui-panel hidden absolute left-0 top-full mt-2 w-80 z-50">
                                     <!-- Preset Shortcuts -->
                                     <div class="p-3 border-b border-gray-200 dark:border-gray-700">
                                         <p
@@ -1650,11 +1623,11 @@
             </div>
 
             <!-- Logs Tab -->
-            <div id="content-logs" class="tab-content hidden">
+            <div id="content-logs" class="tab-content hidden ui-page">
                 <div class="flex flex-col lg:flex-row gap-4" style="min-height: 70vh;">
                     <!-- Service Sidebar -->
                     <div class="w-full lg:w-56 flex-shrink-0">
-                        <div class="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-3">
+                        <div class="ui-panel p-3">
                             <div class="mb-3">
                                 <input type="text" id="logs-service-search" placeholder="Filter services..."
                                     oninput="filterLogServices(this.value)"
@@ -2008,14 +1981,14 @@
     <script src="/static/export.js?v=1"></script>
     <script src="/static/message-details.js?v=5"></script>
     <script src="/static/dmarc.js?v=5"></script>
-    <script src="/static/logs-viewer.js?v=2"></script>
+    <script src="/static/logs-viewer.js?v=3"></script>
     <script src="/static/settings.js?v=17"></script>
     <script src="/static/domains.js?v=4"></script>
     <script src="/static/mailbox-stats.js?v=4"></script>
-    <script src="/static/rate-limits.js?v=22"></script>
+    <script src="/static/rate-limits.js?v=23"></script>
     <script src="/static/smtp-abuse.js?v=2"></script>
     <script src="/static/notifications.js?v=3"></script>
-    <script src="/static/spam_filter.js?v=4"></script>
+    <script src="/static/spam_filter.js?v=5"></script>
 
     <!-- DMARC Sync History Modal -->
     <div id="dmarc-sync-history-modal"
