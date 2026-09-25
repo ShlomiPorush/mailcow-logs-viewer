@@ -13,19 +13,13 @@
     <link rel="apple-touch-icon" sizes="180x180" href="/static/assets/icons/apple-touch-icon.png">
     <meta name="theme-color" content="#0f172a">
     
-    <script src="/static/assets/libs/tailwindcss.min.js"></script>
-    <script>
-        tailwind.config = {
-            darkMode: 'class',
-            theme: {
-                extend: {}
-            }
-        }
-    </script>
+    <style>.hidden{display:none}</style>
+    <link rel="stylesheet" href="/static/assets/css/utilities.css?v=1">
+    <link rel="stylesheet" href="/static/assets/css/ui.css?v=19">
     <style>
         .loading {
-            border: 3px solid #f3f4f6;
-            border-top: 3px solid #3b82f6;
+            border: 3px solid var(--ui-line);
+            border-top: 3px solid var(--ui-accent);
             border-radius: 50%;
             width: 40px;
             height: 40px;
@@ -37,24 +31,24 @@
         }
     </style>
 </head>
-<body class="h-full bg-gray-50 dark:bg-gray-900 flex items-center justify-center">
-    <div class="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full p-8 mx-4">
-        <div class="text-center mb-6">
-            <img id="app-logo" src="" alt="" class="w-16 h-16 mx-auto mb-4 hidden object-contain">
-            <img id="default-logo" src="/static/assets/icons/app-icon.svg" alt="" class="w-16 h-16 mx-auto mb-4">
-            <h1 id="app-title" class="text-2xl font-bold text-gray-900 dark:text-white mb-2">mailcow Logs Viewer</h1>
-            <p class="text-gray-600 dark:text-gray-400">Please enter your credentials to continue</p>
+<body class="ui-login">
+    <div class="ui-panel ui-login-card">
+        <div class="ui-login-head">
+            <img id="app-logo" src="" alt="" class="ui-login-logo hidden">
+            <img id="default-logo" src="/static/assets/icons/app-icon.svg" alt="" class="ui-login-logo">
+            <h1 id="app-title" class="ui-h1">mailcow Logs Viewer</h1>
+            <p class="ui-muted">Please enter your credentials to continue</p>
         </div>
         
         <!-- OAuth2 Login Section -->
-        <div id="oauth2-section" class="hidden mb-6">
+        <div id="oauth2-section" class="hidden ui-login-oauth">
             <button 
                 type="button"
                 id="oauth2-login-btn"
                 onclick="handleOAuth2Login()"
-                class="w-full px-4 py-2 bg-blue-600 hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600 text-white rounded-lg transition font-medium focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 flex items-center justify-center"
+                class="ui-btn ui-btn-primary ui-btn-block"
             >
-                <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path>
                 </svg>
                 <span id="oauth2-login-text">Login with <span id="oauth2-provider-name">OAuth2</span></span>
@@ -62,23 +56,23 @@
         </div>
         
         <!-- OR Separator (only shown when both OAuth2 and Basic Auth are available) -->
-        <div id="auth-separator" class="hidden relative my-4">
-            <div class="absolute inset-0 flex items-center">
-                <div class="w-full border-t border-gray-300 dark:border-gray-600"></div>
+        <div id="auth-separator" class="hidden ui-login-or">
+            <div class="ui-login-or-rule">
+                <div class="ui-login-or-line"></div>
             </div>
-            <div class="relative flex justify-center text-sm">
-                <span class="px-2 bg-white dark:bg-gray-800 text-gray-500 dark:text-gray-400">OR</span>
+            <div class="ui-login-or-text">
+                <span>OR</span>
             </div>
         </div>
         
         <!-- Basic Auth Login Form -->
-        <form id="login-form" onsubmit="handleLogin(event)" class="space-y-4">
-            <div id="login-error" class="hidden bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-400 px-4 py-3 rounded-lg text-sm">
+        <form id="login-form" onsubmit="handleLogin(event)" class="ui-login-form">
+            <div id="login-error" class="hidden ui-banner ui-banner-fail">
                 <span id="login-error-text"></span>
             </div>
             
             <div>
-                <label for="login-username" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                <label for="login-username" class="ui-label">
                     Username
                 </label>
                 <input 
@@ -86,14 +80,14 @@
                     id="login-username" 
                     required
                     autocomplete="username"
-                    class="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    class="ui-input"
                     placeholder="Enter username"
                     autofocus
                 >
             </div>
             
             <div>
-                <label for="login-password" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                <label for="login-password" class="ui-label">
                     Password
                 </label>
                 <input 
@@ -101,7 +95,7 @@
                     id="login-password" 
                     required
                     autocomplete="current-password"
-                    class="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    class="ui-input"
                     placeholder="Enter password"
                 >
             </div>
@@ -109,11 +103,11 @@
             <button 
                 type="submit" 
                 id="login-submit"
-                class="w-full px-4 py-2 bg-blue-600 hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600 text-white rounded-lg transition font-medium focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+                class="ui-btn ui-btn-primary ui-btn-block"
             >
                 <span id="login-submit-text">Sign In</span>
                 <span id="login-submit-loading" class="hidden">
-                    <svg class="inline-block w-4 h-4 animate-spin mr-2" fill="none" viewBox="0 0 24 24">
+                    <svg class="ui-spin" width="16" height="16" fill="none" viewBox="0 0 24 24">
                         <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
                         <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                     </svg>
