@@ -23,7 +23,7 @@
     <!-- Utility classes still used by the markup, compiled once
          (.github/scripts/build-utilities-css.sh); the design system comes last -->
     <link rel="stylesheet" href="/static/assets/css/utilities.css?v=1">
-    <link rel="stylesheet" href="/static/assets/css/ui.css?v=23">
+    <link rel="stylesheet" href="/static/assets/css/ui.css?v=24">
     <style>
         .tab-active {
             border-bottom: 2px solid #3b82f6;
@@ -827,7 +827,7 @@
                 <div class="ui-page-head">
                     <div>
                         <h1 class="ui-h1">Queue</h1>
-                        <p class="ui-muted">Messages waiting in the Postfix queue</p>
+                        <p class="ui-muted" id="queue-summary">Messages waiting in the Postfix queue</p>
                     </div>
                 </div>
                 <section class="ui-panel ui-filters">
@@ -842,9 +842,10 @@
                         </div>
                     </div>
                 </section>
-                <section class="ui-panel">
-                    <div class="ui-panel-head">Mail Queue <span id="queue-count" class="ui-count"></span></div>
+                <section class="ui-sec-block">
+                    <div class="ui-list-head"><h2 class="ui-h2">Mail Queue</h2> <span id="queue-count" class="ui-count"></span></div>
                     <div id="queue-logs"><div class="ui-loading"><div class="loading"></div><p>Loading...</p></div></div>
+                    <p class="ui-kv-note ui-list-foot">Queue IDs and the full log lines are one click away in Messages.</p>
                 </section>
             </div>
 
@@ -853,9 +854,19 @@
                 <div class="ui-page-head">
                     <div>
                         <h1 class="ui-h1">Quarantine</h1>
-                        <p class="ui-muted">Messages held by the spam filter, and the rules that handle them</p>
+                        <p class="ui-muted" id="quarantine-summary">Messages held by the spam filter, and the rules that handle them</p>
                     </div>
                 </div>
+                <section class="ui-sec-block">
+                    <div class="ui-list-head"><h2 class="ui-h2">Quarantined Messages</h2> <span id="quarantine-count" class="ui-count"></span>
+                        <select id="quarantine-sort" onchange="applyQuarantineSort()" class="ui-select ui-head-actions ui-select-auto" aria-label="Sort">
+                            <option value="newest">Newest first</option>
+                            <option value="score_desc">Score: high to low</option>
+                            <option value="score_asc">Score: low to high</option>
+                        </select>
+                    </div>
+                    <div id="quarantine-logs"><div class="ui-loading"><div class="loading"></div><p>Loading...</p></div></div>
+                </section>
                 <!-- Auto-Rules Section (only visible with RW key) -->
                 <details id="quarantine-rules-section" class="ui-panel ui-collapse hidden">
                     <summary class="ui-panel-head">Quarantine Auto-Rules
@@ -901,16 +912,6 @@
                         </div>
                     </div>
                 </details>
-                <section class="ui-panel">
-                    <div class="ui-panel-head">Quarantined Messages <span id="quarantine-count" class="ui-count"></span>
-                        <select id="quarantine-sort" onchange="applyQuarantineSort()" class="ui-select ui-head-actions ui-select-auto" aria-label="Sort">
-                            <option value="newest">Newest first</option>
-                            <option value="score_desc">Score: high to low</option>
-                            <option value="score_asc">Score: low to high</option>
-                        </select>
-                    </div>
-                    <div id="quarantine-logs"><div class="ui-loading"><div class="loading"></div><p>Loading...</p></div></div>
-                </section>
             </div>
 
             <!-- Spam Filter Tab -->
@@ -1967,9 +1968,9 @@
     </div> <!-- Close app-content div -->
 
     <!-- JavaScript -->
-    <script src="/static/utils.js?v=13"></script>
+    <script src="/static/utils.js?v=14"></script>
     <script src="/static/router.js?v=3"></script>
-    <script src="/static/app.js?v=47"></script>
+    <script src="/static/app.js?v=48"></script>
     <script src="/static/export.js?v=1"></script>
     <script src="/static/message-details.js?v=6"></script>
     <script src="/static/dmarc.js?v=5"></script>
