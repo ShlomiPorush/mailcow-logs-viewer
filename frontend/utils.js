@@ -326,6 +326,17 @@ function formatListTime(isoString) {
     }
 }
 
+// "6 min ago", "3 h ago", "2 d ago"; the full time is for a tooltip
+function formatAgo(isoString) {
+    if (!isoString) return '-';
+    const minutes = Math.max(0, Math.round((Date.now() - new Date(isoString).getTime()) / 60000));
+    if (minutes < 1) return 'just now';
+    if (minutes < 60) return `${minutes} min ago`;
+    const hours = Math.round(minutes / 60);
+    if (hours < 48) return `${hours} h ago`;
+    return `${Math.round(hours / 24)} d ago`;
+}
+
 function formatTime(isoString) {
     if (!isoString) return '-';
     const date = new Date(isoString);

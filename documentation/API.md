@@ -1847,6 +1847,53 @@ Get Netfilter authentication failure logs.
 }
 ```
 
+#### GET /logs/netfilter/overview
+
+Attempts against the server over the last hours, grouped by source address. Used by the Security page.
+
+Only lines where netfilter matched a rule count as an attempt; the "N more attempts ... until banned" line that follows each one is not counted again. The service comes from the log text (SMTP auth, SMTP probe, IMAP, POP3, Sieve, SOGo, mailcow UI, Rspamd UI); failed logins are the attempts that are not SMTP probes.
+
+**Query Parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `hours` | int | Window in hours (default: 24, max: 168) |
+
+**Response:**
+```json
+{
+  "hours": 24,
+  "attempts": 61,
+  "failed_logins": 53,
+  "source_count": 4,
+  "sources": [
+    {
+      "ip": "198.51.100.23",
+      "attempts": 38,
+      "failed_logins": 38,
+      "last_seen": "2025-12-25T10:30:00Z",
+      "services": ["SMTP auth"],
+      "usernames": ["admin@example.com"],
+      "country_code": "NL",
+      "country_name": "Netherlands",
+      "last_action": null
+    }
+  ],
+  "latest": [
+    {
+      "time": "2025-12-25T10:30:00Z",
+      "ip": "198.51.100.23",
+      "username": "admin@example.com",
+      "service": "SMTP auth",
+      "country_code": "NL",
+      "country_name": "Netherlands"
+    }
+  ]
+}
+```
+
+`sources` holds the 50 addresses with the most attempts; `last_action` is the last Fail2ban `ban` or `unban` seen for the address in the window, or `null`. `latest` holds the 20 most recent failed logins.
+
 ---
 
 ### Fail2Ban Configuration
@@ -1931,6 +1978,24 @@ Update Fail2Ban configuration on mailcow. Requires the Read-Write API key (`MAIL
 - `400 Bad Request`: Invalid payload or mailcow rejected the update
 - `403 Forbidden`: Read-Write API key is not configured
 - `503 Service Unavailable`: Could not reach the mailcow API
+
+#### POST /fail2ban/ban, POST /fail2ban/allow
+
+Add an address to the Fail2Ban blacklist (`ban`) or whitelist (`allow`, so its failed attempts never lead to a ban). Every other Fail2Ban setting is kept. Requires the Read-Write API key.
+
+**Request Body:**
+```json
+{ "ip": "198.51.100.23/32" }
+```
+
+**Response:**
+```json
+{ "status": "success", "msg": "IP 198.51.100.23/32 added to allowlist" }
+```
+
+#### POST /fail2ban/unban
+
+Lift an active ban for an address. Requires the Read-Write API key. Same request body and response shape as above.
 
 #### RW Status Check
 
