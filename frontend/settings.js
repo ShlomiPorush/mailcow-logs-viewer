@@ -8,6 +8,10 @@
 // SETTINGS PAGE
 // =============================================================================
 
+// Settings the API returns masked as ******** (same list as the backend)
+const SETTINGS_SENSITIVE_KEYS = ['mailcow_api_key', 'mailcow_api_key_rw', 'auth_password', 'oauth2_client_secret', 'smtp_password',
+    'dmarc_imap_password', 'session_secret_key', 'maxmind_license_key', 'rspamd_password'];
+
 /**
  * Show a verification modal before enabling Basic Auth.
  * The user must type the username and password to confirm they know
@@ -603,7 +607,7 @@ function renderSettingsEditField(key, value, sensitiveKeys, description, envLock
         .replace(/\bUrl\b/gi, 'URL').replace(/\bIp\b/gi, 'IP').replace(/\bDns\b/gi, 'DNS')
         .replace(/\bDmarc\b/gi, 'DMARC').replace(/\bSpf\b/gi, 'SPF').replace(/\bDkim\b/gi, 'DKIM')
         .replace(/\bSmtp\b/gi, 'SMTP').replace(/\bCsv\b/gi, 'CSV').replace(/\bEnv\b/gi, 'ENV')
-        .replace(/\bDb\b/gi, 'DB');
+        .replace(/\bDb\b/gi, 'DB').replace(/\bRw\b/g, '(read-write)').replace(/^Mailcow\b/, 'mailcow');
     const descHtml = (description && description.trim()) ? '<p class="ui-set-desc">' + escapeHtml(description) + '</p>' : '';
     const disabledAttr = envLocked ? 'disabled' : '';
     const envLockedHtml = envLocked ? '<p class="ui-set-env">' + LOCK + ' Controlled by ENV variable - cannot be changed from here.</p>' : '';
@@ -634,14 +638,14 @@ function renderSettingsEditField(key, value, sensitiveKeys, description, envLock
         if (isNum) return Number(value) !== Number(defaultValue);
         return String(value || '') !== String(defaultValue || '');
     })();
-    // For sensitive keys with a value set (masked), consider them "changed" from empty default
-    const isSensitiveChanged = sensitive && hasDefault && displayVal === '********';
+    // A stored secret is not a changed setting: it gets a plain Clear and no marker
+    const isSensitiveChanged = false;
 
     // Clear/Reset button HTML (not shown for env-locked fields)
     let clearBtnHtml = '';
     if (!envLocked) {
         if (hasDefault && !isUserSpecific && (isChanged || isSensitiveChanged)) {
-            const defaultLabel = sensitive ? '(empty)' : escapeHtml(String(defaultValue));
+            const defaultLabel = sensitive || String(defaultValue) === '' ? 'empty' : escapeHtml(String(defaultValue));
             clearBtnHtml = '<button type="button" class="settings-clear-btn ui-set-clear is-reset" data-key="' + key + '" data-default="' + escapeHtml(String(defaultValue)) + '" data-sensitive="' + sensitive + '" data-isbool="' + isBool + '">' +
                 '↺ Reset to default' + (isBool ? ': ' + defaultLabel : ' (' + defaultLabel + ')') + '</button>';
         } else if (!isBool && String(displayVal).trim() !== '' && !(sensitive && displayVal === '') && !(hasDefault && !isUserSpecific && String(displayVal) === String(defaultValue))) {
@@ -911,7 +915,7 @@ function renderSettings(content, data) {
         ` : ''}
 
         ${data.settings_edit_via_ui_enabled && data.editable_config ? (function () {
-            const sensitiveKeys = ['mailcow_api_key', 'mailcow_api_key_rw', 'auth_password', 'oauth2_client_secret', 'smtp_password', 'dmarc_imap_password', 'session_secret_key', 'maxmind_license_key'];
+            const sensitiveKeys = SETTINGS_SENSITIVE_KEYS;
             const envLockedKeys = new Set(data.env_locked_keys || []);
             const defaults = data.default_config || {};
             const allAssignedKeys = new Set(SETTINGS_EDIT_TABS.flatMap(function (t) { return (t.groups || []).flatMap(function (g) { return g.keys; }); }));
@@ -1344,7 +1348,7 @@ function renderSettings(content, data) {
             form.onsubmit = async (e) => {
                 e.preventDefault();
                 const payload = {};
-                const sensitiveKeys = ['mailcow_api_key', 'mailcow_api_key_rw', 'auth_password', 'oauth2_client_secret', 'smtp_password', 'dmarc_imap_password', 'session_secret_key', 'maxmind_license_key'];
+                const sensitiveKeys = SETTINGS_SENSITIVE_KEYS;
                 for (const key of Object.keys(data.editable_config)) {
                     const el = form.querySelector('[name="' + key + '"]');
                     if (!el) continue;

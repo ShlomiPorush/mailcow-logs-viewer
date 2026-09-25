@@ -525,7 +525,7 @@ function renderOverviewTab(content, data) {
     const identifiers = [
         data.queue_id ? mdFact('Queue ID', `<span class="ui-mono">${copyableText(data.queue_id)}</span>`) : '',
         rspamd.ip ? mdFact('Client IP', `<div class="ui-md-geo">${renderGeoIPInfo(rspamd, '16x12')}</div>`) : '',
-        rspamd.user ? mdFact('User', `<span class="ui-mono">${copyableText(rspamd.user)}</span>`) : '',
+        rspamd.user ? mdFact('User', copyableText(rspamd.user)) : '',
         rspamd.size ? mdFact('Message Size', formatSize(rspamd.size)) : '',
         rspamd.has_auth ? mdFact('Authentication', 'Verified (MAILCOW_AUTH)') : '',
         data.dovecot && data.dovecot.status === 'stored' && data.dovecot.mailbox ? mdFact('Folder', `<span class="ui-md-folder">${folderIconSvg('ui-md-folder-icon')}${escapeHtml(data.dovecot.mailbox)}</span>`) : '',
