@@ -156,6 +156,33 @@ function uiCorrelationTag(msg) {
     return `<span class="ui-tag ui-tag-${tone}" title="${escapeHtml(title)}">${escapeHtml(status.display)}</span>`;
 }
 
+// Tone of a netfilter action tag; the text comes from getActionLabel
+function uiActionTone(action) {
+    if (action === 'ban' || action === 'banned') return 'fail';
+    if (action === 'unban') return 'ok';
+    if (action === 'info') return 'info';
+    return 'warn';
+}
+
+function uiActionTag(action) {
+    return uiTag(getActionLabel(action), uiActionTone(action));
+}
+
+// The locked area (assets/css/ui.css .ui-locked): shown instead of silently
+// hiding controls. Says what is missing and where to set it. textHtml is
+// trusted markup written in this codebase, never data.
+const UI_LOCK_ICON = '<svg class="ui-locked-icon" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="11" width="16" height="10" rx="2"></rect><path d="M8 11V7a4 4 0 0 1 8 0v4"></path></svg>';
+
+function uiLocked(title, textHtml, action = 'settings') {
+    const button = action === 'settings'
+        ? `<button type="button" class="ui-btn ui-btn-sm" onclick="navigateTo('settings')">Open Settings</button>`
+        : (action || '');
+    return `<div class="ui-locked">${UI_LOCK_ICON}<div><b>${escapeHtml(title)}</b><p>${textHtml}</p></div>${button}</div>`;
+}
+
+// The Read-Write key sentence used by every locked area that needs it
+const UI_RW_KEY_TEXT = 'needs a <strong>Read-Write API key</strong> (<code>MAILCOW_API_KEY_RW</code>). Configure it in Settings → Mailcow → Connection.';
+
 function uiDirectionTag(direction) {
     return `<span class="ui-tag ui-tag-line">${escapeHtml(String(direction))}</span>`;
 }

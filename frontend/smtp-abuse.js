@@ -144,15 +144,9 @@ function renderSmtpAbusePanel() {
         const reasons = [];
         if (!status.enabled) reasons.push('SMTP abuse protection is disabled');
         if (!status.rw_key_configured) reasons.push('a Read-Write mailcow API key is not configured');
-        panel.classList.add('relative');
-        panel.insertAdjacentHTML('afterbegin', `
-            <div class="absolute inset-0 z-10 flex items-center justify-center rounded-lg bg-white/85 dark:bg-gray-900/85 p-6">
-                <div class="max-w-md text-center">
-                    <svg class="w-8 h-8 mx-auto mb-2 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path></svg>
-                    <h3 class="text-base font-semibold text-gray-900 dark:text-white">Abuse protection controls are locked</h3>
-                    <p class="mt-1 text-sm text-gray-600 dark:text-gray-300">${escapeHtml(reasons.join(' and '))}.</p>
-                </div>
-            </div>`);
+        // The locked area explains the missing controls and leads to Settings;
+        // the activity below stays readable
+        panel.insertAdjacentHTML('afterbegin', `<div class="ui-list-note">${uiLocked('Abuse protection controls are locked', `${escapeHtml(reasons.join(' and '))}.`)}</div>`);
     }
 }
 

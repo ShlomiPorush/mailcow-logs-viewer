@@ -461,6 +461,79 @@
     .ui-md-figures b { font-size: 18px; }
 }
 
+/* ---------- Collapsible panels, list notes, security events ---------- */
+
+.ui-collapse > summary { list-style: none; cursor: pointer; user-select: none; }
+.ui-collapse > summary::-webkit-details-marker { display: none; }
+.ui-collapse > summary:hover { background: color-mix(in srgb, var(--ui-accent) 4%, transparent); }
+.ui-collapse-chevron { margin-inline-start: auto; color: var(--ui-muted); transition: transform .15s ease; flex: none; }
+.ui-collapse[open] .ui-collapse-chevron { transform: rotate(180deg); }
+.ui-collapse[open] > summary { border-bottom: 1px solid var(--ui-line); }
+.ui-collapse-body { padding: 14px var(--ui-pad-x); }
+.ui-help-btn { width: 26px; height: 26px; }
+.ui-panel-head .ui-head-actions { margin-inline-start: auto; }
+.ui-chart-body { padding: 4px var(--ui-pad-x) 14px; }
+.ui-list-note { padding: 10px var(--ui-pad-x) 4px; }
+.ui-collapse-body > .ui-list-note, .ui-collapse-body .ui-list-note:first-child { padding: 0 0 12px; }
+
+.ui-sec-row { padding: var(--ui-pad-y) var(--ui-pad-x) var(--ui-pad-y) calc(var(--ui-pad-x) - 3px); border-top: 1px solid var(--ui-line);
+    border-inline-start: 3px solid transparent; }
+.ui-sec-l1 { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+.ui-sec-user { color: var(--ui-info); }
+.ui-sec-meta { display: flex; align-items: center; gap: 8px; margin-inline-start: auto; }
+.ui-sec-meta time { color: var(--ui-muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.ui-sec-msg { margin: 4px 0 0; color: var(--ui-muted); font-size: var(--ui-fs-sm); overflow-wrap: anywhere; }
+.ui-sec-geo { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin-top: 4px; color: var(--ui-muted); font-size: 12px; }
+
+@media (max-width: 760px) {
+    .ui-sec-meta { margin-inline-start: 0; width: 100%; }
+}
+
+/* ---------- Token bridge for markup not rebuilt on components yet ----------
+ *
+ * Deep templates (settings forms, Fail2ban forms, older dialogs) still use
+ * Tailwind colour utilities. Inside the content column these are mapped onto
+ * the v3 tokens, so every page shares one palette in both themes without
+ * rewriting those templates. Layout utilities are left alone. The selectors
+ * start with "html body" so they outrank the utility they replace, whatever
+ * the order in which the stylesheets load.
+ */
+
+/* Surfaces: white cards become panels without a shadow, inner rows sit on the page tone */
+html body .ui-main .bg-white { background-color: var(--ui-panel); }
+html body .ui-main .bg-white.shadow, html body .ui-main .bg-white.shadow-sm, html body .ui-main .bg-white.shadow-md { box-shadow: none; }
+html body .ui-main :is(.bg-gray-50, .bg-gray-100) { background-color: var(--ui-bg); }
+html body .ui-main :is(.bg-gray-200, .bg-gray-300) { background-color: var(--ui-line); }
+html.dark body .ui-main :is(.dark\:bg-gray-800, .dark\:bg-gray-900) { background-color: var(--ui-panel); }
+html.dark body .ui-main :is(.dark\:bg-gray-700, .dark\:bg-gray-700\/50, .dark\:bg-gray-700\/30, .dark\:bg-gray-800\/50) { background-color: var(--ui-bg); }
+html.dark body .ui-main :is(.dark\:bg-gray-600, .dark\:bg-gray-600\/50) { background-color: var(--ui-line); }
+html.dark body .ui-main .dark\:shadow-gray-900\/30 { box-shadow: none; }
+
+/* Text */
+html body .ui-main :is(.text-gray-900, .text-gray-800) { color: var(--ui-ink); }
+html body .ui-main :is(.text-gray-700, .text-gray-600, .text-gray-500, .text-gray-400) { color: var(--ui-muted); }
+html.dark body .ui-main :is(.dark\:text-white, .dark\:text-gray-100, .dark\:text-gray-200) { color: var(--ui-ink); }
+html.dark body .ui-main :is(.dark\:text-gray-300, .dark\:text-gray-400, .dark\:text-gray-500) { color: var(--ui-muted); }
+
+/* Lines */
+html body .ui-main :is(.border-gray-100, .border-gray-200, .border-gray-300) { border-color: var(--ui-line); }
+html.dark body .ui-main :is(.dark\:border-gray-600, .dark\:border-gray-700, .dark\:border-gray-800) { border-color: var(--ui-line); }
+html body .ui-main :is(.divide-gray-200, .dark\:divide-gray-700) > * + * { border-color: var(--ui-line); }
+
+/* Primary actions: the accent instead of blue */
+html body .ui-main :is(.bg-blue-600, .bg-blue-500, .dark\:bg-blue-500, .dark\:bg-blue-600):not(.rounded-full) { background-color: var(--ui-accent); color: var(--ui-on-accent); }
+html body .ui-main :is(.hover\:bg-blue-700, .dark\:hover\:bg-blue-600):hover:not(.rounded-full) { background-color: color-mix(in srgb, var(--ui-accent) 85%, var(--ui-bg)); }
+
+/* Form fields */
+html body .ui-main :is(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="hidden"]), select, textarea):not([class*="ui-"]) {
+    background-color: var(--ui-bg); color: var(--ui-ink); border-color: var(--ui-line); font-family: inherit; }
+html body .ui-main :is(input, select, textarea):not([class*="ui-"]):focus { outline: none; border-color: var(--ui-accent); box-shadow: none; }
+html body .ui-main :is(input, textarea):not([class*="ui-"])::placeholder { color: var(--ui-muted); opacity: .8; }
+html body .ui-main :is(input[type="checkbox"], input[type="radio"]) { accent-color: var(--ui-accent); }
+
+/* Monospace follows the design mono font */
+html body .ui-main .font-mono { font-family: var(--ui-mono); }
+
 /* ---------- App shell: top bar, sidebar, phone tab bar and sheet ---------- */
 
 /* Page background. Panels sit on it in the panel tone; the white cards of pages
