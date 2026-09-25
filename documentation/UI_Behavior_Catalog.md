@@ -30,6 +30,7 @@ Pages, modals, actions, handler functions, API calls, form fields, drop-down opt
 - **Messages and the reading pane.** The Messages page has three columns from 1280 px: facets (Outcome and Direction with counts from `/api/messages/facets`, which counts exactly as the list does, the time presets and a custom range, More filters with sender, recipient, user and IP, Export CSV), the list, and the reading pane. From 1000 px the facets become chips above the list; below that the list stands alone and a message opens as a full-screen dialog. A list row shows sender, time (time of day for today, date before), subject, the outcome tag, direction, recipient, spam, folder and deliveries; queue ID, message ID, score, user and IP are in the reading pane. On a wide screen the first message opens in the pane and the open row is marked; the smart refresh keeps running while a message is docked. The pane (`#message-modal`, docked as `ui-docked`) shows the subject, From/To/When and the outcome above the tabs (`renderMessageHeader`), and the Overview tab tells "What happened" as steps built from the Postfix, Rspamd and Dovecot logs (`buildDeliverySteps`), then Identifiers. Every id, tab and handler is the same as a dialog (`message-details.js`).
 - **Queue and Quarantine tables.** One row per item with the actions at the end of the row and the bulk actions (Select All, the Selected actions, Flush All or Release All, Delete All) above the table. A queue row shows every recipient, the sender, how long ago it was queued, the queue ID and the last response per recipient; with several recipients Suppress opens a menu of them. A quarantine row shows Release and Delete, and a More menu (`uiMenu`, a popover so the table cannot clip it) holds Details, Not Spam, Spam and Rule; the subject also opens Details. The page subtitles count what is in the queue (`updateQueueSummary`) and what is held. On phones the rows stack.
 - **Status.** Key figures on top (containers running, blocklists listing you, mail storage used with amber above 75% and red above 90%, this app's version with the update link to Settings); the blocklists figure hides with the `blacklist` feature like its section. Containers are a grid with stopped ones first and in red. Blocklists are a table per monitored host with the listing lists named, Check now per host (`checkHost`) and Check Now for all with its progress bar (`checkBlacklists`); "All N lists" opens every result and stays open across refreshes. Background jobs are a table grouped by category with how often they run, the last result (feature off and disabled explain a missing Run), the last run, errors under the row and Run (`triggerBackgroundJob`). Log import, message linking with the recent incomplete ones, the mailcow system (with the mailcow update) and storage follow.
+- **Domains.** A table with one row per domain: mailboxes and aliases under the name (with "open for the fix" when SPF, DKIM or DMARC has an error or a warning), a tag per DNS check (SPF, DKIM, DMARC, TLSA, MTA-STS; the tooltip gives the message) and storage. There is no MX check, so there is no MX column. A row opens its details (`toggleDomainDetails`): the domain facts, the DNS records with View Record, Checked IPs, warnings, info and Expected Value, Check for this domain (`checkSingleDomainDNS`, which re-renders the row open) and the alias domains. The subtitle counts domains, inactive ones and those that need a DNS change; the head keeps Last checked and Check Now (`checkAllDomainsDNS`); search and "Show only domains with issues" filter the rows (`filterDomains`).
 - **Badges** use the recipes in `APP_COLORS` (soft fill plus a subtle border, squared corners, not rounded pills). Pages already on the v3 design use `uiStatusTag` and `uiDirectionTag` (`frontend/utils.js`) instead: the tone follows the meaning (delivered and sent green, deferred amber, bounced and rejected red, spam its own colour, anything else neutral) and the text is the status itself.
 - **Cache busting.** Every changed frontend file gets a new `?v=` in `index.html`, or browsers keep the old copy.
 - **Utility classes are compiled, not generated in the browser.** The Tailwind utilities the markup still uses are built once into `assets/css/utilities.css` (`bash .github/scripts/build-utilities-css.sh`, Tailwind 3.4.17). After adding or changing a utility class, rebuild it and bump its `?v=`; CI fails when the file does not match the markup. A class assembled at runtime (`bg-${color}-100`) must be in the safelist of `.github/tailwind/tailwind.config.cjs` (`utilities-css.test.cjs` checks this). New UI is built on the `ui-` components instead.
@@ -161,7 +162,7 @@ Generated from the code. Do not edit by hand; run `node .github/scripts/ui-catal
 | Behaviour | Count |
 |---|---|
 | [Click to copy](#click-to-copy) | 37 |
-| [Tooltips](#tooltips) | 149 |
+| [Tooltips](#tooltips) | 144 |
 | [Toasts](#toasts) | 136 |
 | [Confirmation dialogs](#confirmation-dialogs) | 28 |
 | [Country flags](#country-flags) | 5 |
@@ -172,7 +173,7 @@ Generated from the code. Do not edit by hand; run `node .github/scripts/ui-catal
 | [Colour thresholds](#colour-thresholds) | 40 |
 | [Help topics](#help-topics) | 8 |
 | [Empty states](#empty-states) | 36 |
-| [Loading states](#loading-states) | 17 |
+| [Loading states](#loading-states) | 16 |
 | [Persisted preferences](#persisted-preferences) | 4 |
 | [Auto refresh and timers](#auto-refresh-and-timers) | 5 |
 | [Address bar and deep links](#address-bar-and-deep-links) | 6 |
@@ -329,35 +330,30 @@ Native `title` tooltips. Dynamic ones show the expression that builds the text.
 | Status | dynamic: `${d.last_fetch_run ? escapeHtml(formatTime(d.last_fetch_run)) : ''}` | `frontend/app.js:4448` (renderStatusImport) |
 | Status | dynamic: `${d.last_import ? escapeHtml(formatTime(d.last_import)) : ''}` | `frontend/app.js:4449` (renderStatusImport) |
 | Status | "Help - IP Blacklist Monitor" | `frontend/index.html:1058` |
-| Domains | "OK" | `frontend/domains.js:242` (renderDomainAccordionRow) |
-| Domains | "Warning" | `frontend/domains.js:243` (renderDomainAccordionRow) |
-| Domains | "Error" | `frontend/domains.js:244` (renderDomainAccordionRow) |
-| Domains | "Unknown" | `frontend/domains.js:245` (renderDomainAccordionRow) |
-| Domains | "Check DNS for this domain" | `frontend/domains.js:412` (renderDomainAccordionRow) |
-| Domains | "Check DNS for this domain" | `frontend/domains.js:733` (checkSingleDomainDNS) |
-| Domains | "OK" | `frontend/domains.js:754` (checkSingleDomainDNS) |
-| Domains | "Warning" | `frontend/domains.js:755` (checkSingleDomainDNS) |
-| Domains | "Error" | `frontend/domains.js:756` (checkSingleDomainDNS) |
-| Domains | "Unknown" | `frontend/domains.js:757` (checkSingleDomainDNS) |
-| Domains | "Help - Domains Information" | `frontend/index.html:1112` |
+| Domains | dynamic: `${data.last_dns_check ? escapeHtml(formatTime(data.last_dns_check)) : ''}` | `frontend/domains.js:72` (renderDomains) |
+| Domains | dynamic: `${escapeHtml(`${label}: ${check.message \|\| 'Not checked'}`)}` | `frontend/domains.js:151` (dnsStatusTag) |
+| Domains | dynamic: `${dns.checked_at ? escapeHtml(formatTime(dns.checked_at)) : ''}` | `frontend/domains.js:160` (renderDomainDnsSection) |
+| Domains | "Check DNS for this domain" | `frontend/domains.js:163` (renderDomainDnsSection) |
+| Domains | dynamic: `${escapeHtml(text)}` | `frontend/domains.js:274` (getAliasStatusIcon) |
+| Domains | "Help - Domains Information" | `frontend/index.html:1109` |
 | DMARC | "DMARC Reports" | `frontend/dmarc.js:366` (loadDmarcDomains) |
 | DMARC | "TLS Reports" | `frontend/dmarc.js:367` (loadDmarcDomains) |
 | DMARC | "Delete report" | `frontend/dmarc.js:1646` (renderReportsManagementTable) |
 | DMARC | "Delete" | `frontend/dmarc.js:1681` (renderReportsManagementTable) |
-| DMARC | "Help - DMARC Information" | `frontend/index.html:1144` |
-| Mailbox stats | "Help - Mailbox Statistics" | `frontend/index.html:1350` |
+| DMARC | "Help - DMARC Information" | `frontend/index.html:1134` |
+| Mailbox stats | "Help - Mailbox Statistics" | `frontend/index.html:1340` |
 | Mailbox stats | "Address on a mailcow alias domain that points at this mailbox" | `frontend/mailbox-stats.js:556` (renderMailboxStatsAccordion) |
 | Mailbox stats | set in JS: dynamic: `isRateLimits ? 'Help - Rate Limits' : 'Help - Mailbox Statistics'` | `frontend/mailbox-stats.js:83` (mailboxStatsSwitchView) |
-| Logs | "Pause/Resume live updates" | `frontend/index.html:1657` |
-| Logs | "Live mode - show latest logs" | `frontend/index.html:1667` |
-| Logs | "Auto-scroll to new entries" | `frontend/index.html:1677` |
-| Logs | "Toggle sort order (newest at bottom / newest at top)" | `frontend/index.html:1687` |
-| Logs | "Toggle word wrap" | `frontend/index.html:1708` |
-| Logs | "Search" | `frontend/index.html:1725` |
-| Logs | "Clear search" | `frontend/index.html:1732` |
-| Logs | "Clear display" | `frontend/index.html:1742` |
-| Logs | "From date" | `frontend/index.html:1770` |
-| Logs | "To date" | `frontend/index.html:1775` |
+| Logs | "Pause/Resume live updates" | `frontend/index.html:1647` |
+| Logs | "Live mode - show latest logs" | `frontend/index.html:1657` |
+| Logs | "Auto-scroll to new entries" | `frontend/index.html:1667` |
+| Logs | "Toggle sort order (newest at bottom / newest at top)" | `frontend/index.html:1677` |
+| Logs | "Toggle word wrap" | `frontend/index.html:1698` |
+| Logs | "Search" | `frontend/index.html:1715` |
+| Logs | "Clear search" | `frontend/index.html:1722` |
+| Logs | "Clear display" | `frontend/index.html:1732` |
+| Logs | "From date" | `frontend/index.html:1760` |
+| Logs | "To date" | `frontend/index.html:1765` |
 | Logs | dynamic: `${escapeHtml(f.description \|\| '')}` | `frontend/logs-viewer.js:232` (loadSmartFilters) |
 | Logs | "Clear all filters" | `frontend/logs-viewer.js:1227` (updateFilterBadge) |
 | Settings | "Last delivery succeeded" | `frontend/notifications.js:67` (renderNotificationChannels) |
@@ -377,7 +373,7 @@ Native `title` tooltips. Dynamic ones show the expression that builds the text.
 | app.js (mixed) | set in JS: dynamic: `title \|\| ''` | `frontend/app.js:498` (setNavCount) |
 | Modal: container-logs-modal | "Refresh" | `frontend/index.html:497` |
 | Modal: container-logs-modal | "Close" | `frontend/index.html:505` |
-| Modal: message-modal | "Close" | `frontend/index.html:1850` |
+| Modal: message-modal | "Close" | `frontend/index.html:1840` |
 
 ### Toasts
 
@@ -461,15 +457,15 @@ Transient notifications from `showToast(message, type)` (utils.js). Type default
 | Status | dynamic: ``Job "${displayName}" started successfully`` [success] | `frontend/app.js:4612` (triggerBackgroundJob) |
 | Status | dynamic: ``Job "${displayName}" is already running`` [warning] | `frontend/app.js:4621` (triggerBackgroundJob) |
 | Status | dynamic: ``Failed to start job: ${error.message}`` [error] | `frontend/app.js:4624` (triggerBackgroundJob) |
-| Domains | "DNS check already in progress" [warning] | `frontend/domains.js:634` (checkAllDomainsDNS) |
-| Domains | dynamic: ``✓ Checked ${result.domains_checked} domains`` [success] | `frontend/domains.js:654` (checkAllDomainsDNS) |
-| Domains | "DNS check failed" [error] | `frontend/domains.js:657` (checkAllDomainsDNS) |
-| Domains | "Failed to check DNS" [error] | `frontend/domains.js:661` (checkAllDomainsDNS) |
-| Domains | "DNS check already in progress" [warning] | `frontend/domains.js:675` (checkSingleDomainDNS) |
-| Domains | dynamic: ``Checking DNS for ${domainName}...`` [info] | `frontend/domains.js:680` (checkSingleDomainDNS) |
-| Domains | dynamic: ``✓ DNS checked for ${domainName}`` [success] | `frontend/domains.js:694` (checkSingleDomainDNS) |
-| Domains | dynamic: ``Failed to check DNS for ${domainName}`` [error] | `frontend/domains.js:782` (checkSingleDomainDNS) |
-| Domains | "Failed to check DNS" [error] | `frontend/domains.js:786` (checkSingleDomainDNS) |
+| Domains | "DNS check already in progress" [warning] | `frontend/domains.js:324` (checkAllDomainsDNS) |
+| Domains | dynamic: ``✓ Checked ${result.domains_checked} domains`` [success] | `frontend/domains.js:343` (checkAllDomainsDNS) |
+| Domains | "DNS check failed" [error] | `frontend/domains.js:346` (checkAllDomainsDNS) |
+| Domains | "Failed to check DNS" [error] | `frontend/domains.js:350` (checkAllDomainsDNS) |
+| Domains | "DNS check already in progress" [warning] | `frontend/domains.js:361` (checkSingleDomainDNS) |
+| Domains | dynamic: ``Checking DNS for ${domainName}...`` [info] | `frontend/domains.js:366` (checkSingleDomainDNS) |
+| Domains | dynamic: ``✓ DNS checked for ${domainName}`` [success] | `frontend/domains.js:376` (checkSingleDomainDNS) |
+| Domains | dynamic: ``Failed to check DNS for ${domainName}`` [error] | `frontend/domains.js:391` (checkSingleDomainDNS) |
+| Domains | "Failed to check DNS" [error] | `frontend/domains.js:395` (checkSingleDomainDNS) |
 | DMARC | "Manual upload is disabled" [error] | `frontend/dmarc.js:1316` (uploadDmarcReport) |
 | DMARC | dynamic: ``${reportType} report uploaded: ${count} ${countLabel}`` [success] | `frontend/dmarc.js:1329` (uploadDmarcReport) |
 | DMARC | dynamic: ``${reportType} report already exists`` [warning] | `frontend/dmarc.js:1341` (uploadDmarcReport) |
@@ -629,9 +625,9 @@ Drop-down lists in the page markup with their options. The option wording and or
 | Quarantine | `quarantine-sort`: Newest first / Score: high to low / Score: low to high | `frontend/index.html:862` |
 | Spam filter | `suppression-filter-reason`: All Reasons / Hard Bounce / Soft Bounce / Deferred Stuck / Rejected / Manual | `frontend/index.html:971` |
 | Spam filter | `suppression-filter-active`: Active Only / All / Inactive / Expired | `frontend/index.html:981` |
-| Mailbox stats | `mailbox-stats-domain-filter`: All Domains | `frontend/index.html:1554` |
-| Mailbox stats | `mailbox-stats-sort`: Sent (High to Low) / Received (High to Low) / Failure Rate (High to Low) / Quota Used (High to Low) / Username (A-Z) | `frontend/index.html:1558` |
-| Logs | `logs-fontsize`: 10px / 11px / 12px / 13px / 14px / 16px | `frontend/index.html:1695` |
+| Mailbox stats | `mailbox-stats-domain-filter`: All Domains | `frontend/index.html:1544` |
+| Mailbox stats | `mailbox-stats-sort`: Sent (High to Low) / Received (High to Low) / Failure Rate (High to Low) / Quota Used (High to Low) / Username (A-Z) | `frontend/index.html:1548` |
+| Logs | `logs-fontsize`: 10px / 11px / 12px / 13px / 14px / 16px | `frontend/index.html:1685` |
 
 ### Charts
 
@@ -700,9 +696,9 @@ In-app help buttons; the topic is the Markdown file name under documentation/Hel
 | Quarantine | topic "Quarantine" | `frontend/index.html:874` |
 | Spam filter | topic "Spam_Filter" | `frontend/index.html:925` |
 | Status | topic "IP_Blacklist_Monitor" | `frontend/index.html:1057` |
-| Domains | topic "Domains" | `frontend/index.html:1111` |
-| DMARC | topic "DMARC" | `frontend/index.html:1143` |
-| Mailbox stats | topic "Mailbox_Stats" | `frontend/index.html:1348` |
+| Domains | topic "Domains" | `frontend/index.html:1108` |
+| DMARC | topic "DMARC" | `frontend/index.html:1133` |
+| Mailbox stats | topic "Mailbox_Stats" | `frontend/index.html:1338` |
 | Mailbox stats | topic dynamic: `'${isRateLimits ? 'Rate_Limits' : 'Mailbox_Stats'}'` | `frontend/mailbox-stats.js:82` (mailboxStatsSwitchView) |
 
 ### Empty states
@@ -728,9 +724,9 @@ Text shown when a list or panel has nothing to show.
 | Quarantine | "No actions recorded yet" | `frontend/app.js:3655` (loadQuarantineRuleHistory) |
 | Status | "No container information available" | `frontend/app.js:4057` (loadStatusContainers) |
 | Status | "No changelog available" | `frontend/app.js:4092` (loadStatusSystem) |
-| Domains | "No domains found" | `frontend/domains.js:83` (renderDomains) |
-| Domains | "No domains with DNS issues found" | `frontend/domains.js:216` (filterDomains) |
-| Domains | "No domains found matching" | `frontend/domains.js:217` (filterDomains) |
+| Domains | "No domains found" | `frontend/domains.js:89` (renderDomains) |
+| Domains | "No domains with DNS issues found" | `frontend/domains.js:141` (filterDomains) |
+| Domains | "No domains found matching" | `frontend/domains.js:142` (filterDomains) |
 | DMARC | "No daily reports available" | `frontend/dmarc.js:631` (loadDomainReports) |
 | DMARC | "No sources found" | `frontend/dmarc.js:689` (loadDomainSources) |
 | DMARC | "No sources found" | `frontend/dmarc.js:1088` (loadReportDetails) |
@@ -763,7 +759,6 @@ Functions that render a spinner or "Loading..." while data is fetched.
 | Quarantine | 1 loading indicator(s) | `frontend/app.js:3647` (loadQuarantineRuleHistory) |
 | Status | 2 loading indicator(s) | `frontend/app.js:4205` (checkBlacklists) |
 | Status | 1 loading indicator(s) | `frontend/app.js:4599` (triggerBackgroundJob) |
-| Domains | 1 loading indicator(s) | `frontend/domains.js:641` (checkAllDomainsDNS) |
 | DMARC | 1 loading indicator(s) | `frontend/dmarc.js:134` (loadDmarc) |
 | Logs | 1 loading indicator(s) | `frontend/logs-viewer.js:1096` (loadDateRangeLogs) |
 | Settings | 3 loading indicator(s) | `frontend/settings.js:1559` (renderSettings) |
