@@ -874,3 +874,23 @@ body { font-family: var(--ui-font); background: var(--ui-bg); }
     .ui-mrow-sub { grid-column: 3; }
     .ui-flow-bars { height: 90px; gap: 2px; }
 }
+
+/* ---------- Security (as the mockup) ---------- */
+.ui-sec-block { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; }
+.ui-sec-heading { margin-top: 10px; }
+.ui-sec-block .ui-empty.ui-panel { margin: 0; padding: var(--ui-pad-y) var(--ui-pad-x); }
+.ui-sec-addr { display: grid; }
+.ui-sec-addr small { overflow: hidden; text-overflow: ellipsis; color: var(--ui-muted); font-size: 12px; }
+.ui-tr-attn { background: color-mix(in srgb, var(--ui-warn) 7%, transparent); }
+.ui-sec-actions { display: flex; justify-content: flex-end; gap: 6px; overflow: visible; }
+.ui-sec-unit { display: none; }
+
+@media (max-width: 760px) {
+    .ui-sec-table .ui-tr { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; min-width: 0; }
+    .ui-sec-table .ui-tr-head { display: none; }
+    .ui-sec-table .ui-sec-addr { flex: 1 1 100%; }
+    .ui-sec-table .ui-td-end { text-align: start; }
+    .ui-sec-unit { display: inline; color: var(--ui-muted); }
+    .ui-sec-table .ui-sec-actions { flex: 1 1 100%; justify-content: flex-start; }
+    .ui-sec-table .ui-sec-actions:empty { display: none; }
+}
