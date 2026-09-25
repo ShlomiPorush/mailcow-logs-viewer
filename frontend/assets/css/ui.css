@@ -144,7 +144,7 @@
 /* ---------- Panel ---------- */
 
 .ui-panel { background: var(--ui-panel); border-radius: var(--ui-radius); overflow: hidden; }
-.ui-panel-head { display: flex; align-items: center; gap: 10px; padding: 13px var(--ui-pad-x) 9px; font-size: 15px; font-weight: 650; }
+.ui-panel-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; padding: 13px var(--ui-pad-x) 9px; font-size: 15px; font-weight: 650; }
 .ui-panel-head .ui-count { color: var(--ui-muted); font-weight: 500; }
 .ui-panel-head .ui-more { margin-inline-start: auto; font-size: 13px; font-weight: 600; text-decoration: underline; }
 .ui-row { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; padding: var(--ui-pad-y) var(--ui-pad-x); border-top: 1px solid var(--ui-line); }
@@ -488,6 +488,24 @@
 @media (max-width: 760px) {
     .ui-sec-meta { margin-inline-start: 0; width: 100%; }
 }
+
+/* ---------- Action toolbars and item rows (Queue, Quarantine) ---------- */
+
+.ui-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 10px var(--ui-pad-x); }
+.ui-collapse-body > .ui-toolbar { padding: 0 0 12px; }
+.ui-toolbar .flex-1 { flex: 1; }
+.ui-toolbar .ui-btn svg, .ui-q-row .ui-btn svg { width: 14px; height: 14px; }
+.ui-btn-danger-solid { background: var(--ui-fail); border-color: var(--ui-fail); color: #FFFFFF; }
+.ui-upper { text-transform: uppercase; }
+.ui-select-auto { width: auto; }
+.ui-subsection { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--ui-line); }
+.ui-subsection > .ui-md-h { margin-bottom: 8px; }
+
+.ui-q-list { display: grid; }
+.ui-q-row { display: grid; gap: 6px; padding: 12px var(--ui-pad-x) 12px calc(var(--ui-pad-x) - 3px); border-top: 1px solid var(--ui-line);
+    border-inline-start: 3px solid transparent; }
+.ui-q-row .flex-wrap { gap: 6px; }
+.ui-q-row input[type="checkbox"] { width: 16px; height: 16px; }
 
 /* ---------- Token bridge for markup not rebuilt on components yet ----------
  *

@@ -2162,7 +2162,7 @@ async function loadQueue() {
     const container = document.getElementById('queue-logs');
 
     try {
-        container.innerHTML = '<div class="text-center py-8"><div class="loading mx-auto mb-4"></div><p class="text-gray-500 dark:text-gray-400">Loading...</p></div>';
+        container.innerHTML = '<div class="ui-loading"><div class="loading"></div><p>Loading...</p></div>';
 
         console.log('Loading Queue...');
 
@@ -2178,7 +2178,7 @@ async function loadQueue() {
         applyQueueFilters();
     } catch (error) {
         console.error('Failed to load queue:', error);
-        document.getElementById('queue-logs').innerHTML = `<p class="text-red-500 text-center py-8">Failed to load queue: ${escapeHtml(error.message)}</p>`;
+        document.getElementById('queue-logs').innerHTML = `<p class="ui-empty ui-text-fail">Failed to load queue: ${escapeHtml(error.message)}</p>`;
         const countEl = document.getElementById('queue-count');
         if (countEl) countEl.textContent = '';
     }
@@ -2212,26 +2212,29 @@ function applyQueueFilters() {
     }
 
     if (filteredData.length === 0) {
-        container.innerHTML = '<p class="text-gray-500 dark:text-gray-400 text-center py-8">No matching queue entries</p>';
+        container.innerHTML = '<p class="ui-empty">No matching queue entries</p>';
         return;
     }
 
     const canAct = mailcowRwConfigured;
 
+    const lockedNote = canAct ? '' : `<div class="ui-list-note">${uiLocked('Queue actions are locked', `Retry, hold, release, delete and flush ${UI_RW_KEY_TEXT}`)}</div>`;
+
     container.innerHTML = `
+        ${lockedNote}
         ${canAct ? `
-            <div class="mb-4 flex flex-wrap items-center gap-2">
+            <div class="ui-toolbar">
                 <button onclick="queueSelectAll()" id="queue-select-all-btn"
-                    class="px-3 py-1.5 text-xs font-medium rounded-md border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+                    class="ui-btn ui-btn-sm">
                     Select All
                 </button>
                 <button onclick="queueBulkRetry()" id="queue-bulk-retry-btn"
-                    class="hidden px-3 py-1.5 text-xs font-medium rounded-md border border-blue-500 bg-blue-500 text-white hover:bg-blue-600 transition-colors flex items-center gap-1">
+                    class="hidden ui-btn ui-btn-sm ui-btn-primary">
                     <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
                     Retry Selected
                 </button>
                 <button onclick="queueBulkDelete()" id="queue-bulk-delete-btn"
-                    class="hidden px-3 py-1.5 text-xs font-medium rounded-md border border-red-500 bg-red-500 text-white hover:bg-red-600 transition-colors flex items-center gap-1">
+                    class="hidden ui-btn ui-btn-sm ui-btn-danger-solid">
                     <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
                     Delete Selected
                 </button>
@@ -2240,34 +2243,25 @@ function applyQueueFilters() {
                 <div class="flex-1"></div>
 
                 <button onclick="queueFlushAll()" id="queue-flush-all-btn"
-                    class="px-3 py-1.5 text-xs font-medium rounded-md border border-blue-500 bg-blue-500 text-white hover:bg-blue-600 transition-colors flex items-center gap-1">
+                    class="ui-btn ui-btn-sm ui-btn-primary">
                     <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
                     Flush All
                 </button>
                 <button onclick="queueDeleteAll()" id="queue-delete-all-btn"
-                    class="px-3 py-1.5 text-xs font-medium rounded-md border border-red-500 bg-red-500 text-white hover:bg-red-600 transition-colors flex items-center gap-1">
+                    class="ui-btn ui-btn-sm ui-btn-danger-solid">
                     <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
                     Delete All
                 </button>
             </div>
         ` : ''}
-        <div class="space-y-4">
+        <div class="ui-q-list">
             ${filteredData.map(item => {
                 const qid = item.queue_id || '';
                 const queueName = (item.queue_name || '').toLowerCase();
                 const isHold = queueName === 'hold';
-                // Status badge colors
-                const statusColors = {
-                    hold: 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-800 dark:text-yellow-300',
-                    deferred: 'bg-orange-100 dark:bg-orange-900/30 text-orange-800 dark:text-orange-300',
-                    active: 'bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300',
-                    incoming: 'bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-300',
-                    bounce: 'bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-300',
-                    corrupt: 'bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-300',
-                };
-                const badgeColor = statusColors[queueName] || 'bg-gray-100 dark:bg-gray-600 text-gray-800 dark:text-gray-200';
+                const queueTone = { hold: 'warn', deferred: 'warn', active: 'ok', incoming: 'info', bounce: 'fail', corrupt: 'fail' }[queueName] || '';
                 return `
-                <div class="border border-gray-200 dark:border-gray-700 rounded-lg p-4 bg-gray-50 dark:bg-gray-700/50" data-queue-id="${qid}">
+                <div class="ui-q-row${queueTone ? ` ui-msg-${queueTone}` : ''}" data-queue-id="${qid}">
                     <div class="flex flex-col sm:flex-row sm:justify-between sm:items-start mb-2 gap-2">
                         <div class="flex-1 flex items-start gap-3">
                             ${canAct ? `
@@ -2280,7 +2274,7 @@ function applyQueueFilters() {
                             </div>
                         </div>
                         <div class="flex items-center gap-2">
-                            <span class="inline-block px-2 py-0.5 text-xs font-semibold rounded ${badgeColor} uppercase">${escapeHtml(item.queue_name || 'unknown')}</span>
+                            <span class="ui-tag${queueTone ? ` ui-tag-${queueTone}` : ''} ui-upper">${escapeHtml(item.queue_name || 'unknown')}</span>
                             <span class="text-xs text-gray-500 dark:text-gray-400">${formatTime(new Date(item.arrival_time * 1000).toISOString())}</span>
                         </div>
                     </div>
@@ -2301,25 +2295,25 @@ function applyQueueFilters() {
                         <div class="flex items-center gap-2 flex-shrink-0">
                             ${canAct ? `
                                 <button onclick="queueRetry('${qid}')" title="Retry delivery"
-                                    class="queue-action-btn px-2.5 py-1 text-xs font-medium rounded-md border border-blue-300 dark:border-blue-700 text-blue-700 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-900/30 transition-colors flex items-center gap-1">
+                                    class="queue-action-btn ui-btn ui-btn-sm">
                                     <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
                                     Retry
                                 </button>
                                 ${isHold ? `
                                     <button onclick="queueUnhold('${qid}')" title="Release from hold"
-                                        class="queue-action-btn px-2.5 py-1 text-xs font-medium rounded-md border border-green-300 dark:border-green-700 text-green-700 dark:text-green-400 hover:bg-green-100 dark:hover:bg-green-900/30 transition-colors flex items-center gap-1">
+                                        class="queue-action-btn ui-btn ui-btn-sm">
                                         <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
                                         Unhold
                                     </button>
                                 ` : `
                                     <button onclick="queueHold('${qid}')" title="Hold message"
-                                        class="queue-action-btn px-2.5 py-1 text-xs font-medium rounded-md border border-yellow-300 dark:border-yellow-700 text-yellow-700 dark:text-yellow-400 hover:bg-yellow-100 dark:hover:bg-yellow-900/30 transition-colors flex items-center gap-1">
+                                        class="queue-action-btn ui-btn ui-btn-sm">
                                         <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
                                         Hold
                                     </button>
                                 `}
                                 <button onclick="queueDeleteItem('${qid}')" title="Delete from queue"
-                                    class="queue-action-btn px-2.5 py-1 text-xs font-medium rounded-md border border-red-300 dark:border-red-700 text-red-700 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-900/30 transition-colors flex items-center gap-1">
+                                    class="queue-action-btn ui-btn ui-btn-sm ui-btn-danger">
                                     <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
                                     Delete
                                 </button>
@@ -2328,7 +2322,7 @@ function applyQueueFilters() {
                                 const emailOnly = r.split(' ')[0].replace(/[<>]/g, '');
                                 return `
                                 <button onclick="showAddSuppressionModal('${escapeJsArg(emailOnly)}')" title="Suppress ${escapeHtml(emailOnly)}"
-                                    class="px-2.5 py-1 text-xs font-medium rounded-md border border-purple-300 dark:border-purple-700 text-purple-700 dark:text-purple-400 hover:bg-purple-100 dark:hover:bg-purple-900/30 transition-colors flex items-center gap-1">
+                                    class="ui-btn ui-btn-sm">
                                     <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"></path></svg>
                                     Suppress
                                 </button>`;
@@ -2521,7 +2515,7 @@ async function loadQuarantine() {
     const container = document.getElementById('quarantine-logs');
 
     try {
-        container.innerHTML = '<div class="text-center py-8"><div class="loading mx-auto mb-4"></div><p class="text-gray-500 dark:text-gray-400">Loading...</p></div>';
+        container.innerHTML = '<div class="ui-loading"><div class="loading"></div><p>Loading...</p></div>';
 
         console.log('Loading Quarantine...');
 
@@ -2541,14 +2535,14 @@ async function loadQuarantine() {
 
         if (!data.data || data.data.length === 0) {
             quarantineLastData = data;
-            container.innerHTML = '<p class="text-gray-500 dark:text-gray-400 text-center py-8">No quarantined messages</p>';
+            container.innerHTML = '<p class="ui-empty">No quarantined messages</p>';
             return;
         }
 
         renderQuarantineData(data);
     } catch (error) {
         console.error('Failed to load quarantine:', error);
-        document.getElementById('quarantine-logs').innerHTML = `<p class="text-red-500 text-center py-8">Failed to load quarantine: ${escapeHtml(error.message)}</p>`;
+        document.getElementById('quarantine-logs').innerHTML = `<p class="ui-empty ui-text-fail">Failed to load quarantine: ${escapeHtml(error.message)}</p>`;
         const countEl = document.getElementById('quarantine-count');
         if (countEl) countEl.textContent = '';
     }
@@ -2569,37 +2563,40 @@ function renderQuarantineData(data) {
     }
 
     if (!data.data || data.data.length === 0) {
-        container.innerHTML = '<p class="text-gray-500 dark:text-gray-400 text-center py-8">No quarantined messages</p>';
+        container.innerHTML = '<p class="ui-empty">No quarantined messages</p>';
         return;
     }
 
     const canAct = mailcowRwConfigured;
     const items = sortQuarantineItems(data.data);
 
+    const lockedNote = canAct ? '' : `<div class="ui-list-note">${uiLocked('Quarantine actions are locked', `Release, delete, spam learning and the auto-rules ${UI_RW_KEY_TEXT}`)}</div>`;
+
     container.innerHTML = `
+        ${lockedNote}
         ${!canAct ? '' : `
-            <div class="mb-4 flex flex-wrap items-center gap-2">
+            <div class="ui-toolbar">
                 <button onclick="quarantineSelectAll()" id="quarantine-select-all-btn"
-                    class="px-3 py-1.5 text-xs font-medium rounded-md border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+                    class="ui-btn ui-btn-sm">
                     Select All
                 </button>
                 <button onclick="quarantineBulkRelease()" id="quarantine-bulk-release-btn"
-                    class="hidden px-3 py-1.5 text-xs font-medium rounded-md border border-green-500 bg-green-500 text-white hover:bg-green-600 transition-colors flex items-center gap-1">
+                    class="hidden ui-btn ui-btn-sm ui-btn-primary">
                     <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
                     Release Selected
                 </button>
                 <button onclick="quarantineBulkDelete()" id="quarantine-bulk-delete-btn"
-                    class="hidden px-3 py-1.5 text-xs font-medium rounded-md border border-red-500 bg-red-500 text-white hover:bg-red-600 transition-colors flex items-center gap-1">
+                    class="hidden ui-btn ui-btn-sm ui-btn-danger-solid">
                     <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
                     Delete Selected
                 </button>
                 <button onclick="quarantineBulkLearnHam()" id="quarantine-bulk-learnham-btn"
-                    class="hidden px-3 py-1.5 text-xs font-medium rounded-md border border-emerald-500 bg-emerald-500 text-white hover:bg-emerald-600 transition-colors flex items-center gap-1">
+                    class="hidden ui-btn ui-btn-sm ui-btn-primary">
                     <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"></path></svg>
                     Not Spam
                 </button>
                 <button onclick="quarantineBulkLearnSpam()" id="quarantine-bulk-learnspam-btn"
-                    class="hidden px-3 py-1.5 text-xs font-medium rounded-md border border-orange-500 bg-orange-500 text-white hover:bg-orange-600 transition-colors flex items-center gap-1">
+                    class="hidden ui-btn ui-btn-sm ui-btn-primary">
                     <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"></path></svg>
                     Learn Spam
                 </button>
@@ -2608,22 +2605,22 @@ function renderQuarantineData(data) {
                 <div class="flex-1"></div>
 
                 <button onclick="quarantineReleaseAll()" id="quarantine-release-all-btn"
-                    class="px-3 py-1.5 text-xs font-medium rounded-md border border-green-500 bg-green-500 text-white hover:bg-green-600 transition-colors flex items-center gap-1">
+                    class="ui-btn ui-btn-sm ui-btn-primary">
                     <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
                     Release All
                 </button>
                 <button onclick="quarantineDeleteAll()" id="quarantine-delete-all-btn"
-                    class="px-3 py-1.5 text-xs font-medium rounded-md border border-red-500 bg-red-500 text-white hover:bg-red-600 transition-colors flex items-center gap-1">
+                    class="ui-btn ui-btn-sm ui-btn-danger-solid">
                     <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
                     Delete All
                 </button>
             </div>
         `}
-        <div class="space-y-3">
+        <div class="ui-q-list">
             ${items.map(item => {
                 const itemId = item.id !== undefined ? item.id : '';
                 return `
-                <div class="border border-red-200 dark:border-red-900/50 rounded-lg p-4 bg-red-50 dark:bg-red-900/20 hover:bg-red-100 dark:hover:bg-red-900/30 transition" data-quarantine-id="${itemId}">
+                <div class="ui-q-row ui-msg-fail" data-quarantine-id="${itemId}">
                     <div class="grid grid-cols-1 sm:grid-cols-[1fr_auto] gap-2 mb-2 items-start">
                         <div class="min-w-0 overflow-hidden flex items-start gap-3">
                             ${canAct ? `
@@ -2642,45 +2639,45 @@ function renderQuarantineData(data) {
                             </div>
                         </div>
                         <div class="flex flex-wrap items-center gap-2 flex-shrink-0 sm:justify-end">
-                            <span class="inline-block px-2 py-0.5 text-xs font-medium rounded bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-300">${item.action || 'Quarantined'}</span>
-                            ${item.virus_flag ? '<span class="inline-block px-2 py-0.5 text-xs font-medium rounded bg-purple-100 dark:bg-purple-900/30 text-purple-800 dark:text-purple-300">🦠 VIRUS</span>' : ''}
+                            <span class="ui-tag ui-tag-fail">${escapeHtml(item.action || 'Quarantined')}</span>
+                            ${item.virus_flag ? '<span class="ui-tag ui-tag-spam">🦠 VIRUS</span>' : ''}
                         </div>
                     </div>
                     <div class="flex flex-col gap-2">
                         <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-gray-600 dark:text-gray-400">
                             <span>${formatTime(item.created)}</span>
                             ${item.qid ? `<span class="font-mono" title="Queue ID">Q: ${copyableText(item.qid)}</span>` : ''}
-                            ${item.score !== undefined && item.score !== null ? `<span>Score: <span class="${item.score >= 15 ? 'text-red-600 dark:text-red-400 font-semibold' : 'text-gray-600 dark:text-gray-300'}">${item.score.toFixed(1)}</span></span>` : ''}
+                            ${item.score !== undefined && item.score !== null ? `<span>Score: <b class="${item.score >= 15 ? 'ui-text-fail' : ''}">${item.score.toFixed(1)}</b></span>` : ''}
                         </div>
                         <div class="flex flex-wrap gap-1">
                             <button onclick="showQuarantineDetails('${itemId}')" title="View details"
-                                class="quarantine-action-btn px-2 py-1 text-xs font-medium rounded-md border border-blue-300 dark:border-blue-700 text-blue-700 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-900/30 transition-colors flex items-center justify-center gap-1">
+                                class="quarantine-action-btn ui-btn ui-btn-sm">
                                 <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>
                                 Details
                             </button>
                             ${canAct ? `
                                 <button onclick="quarantineRelease('${itemId}')" title="Release message"
-                                    class="quarantine-action-btn px-2 py-1 text-xs font-medium rounded-md border border-green-300 dark:border-green-700 text-green-700 dark:text-green-400 hover:bg-green-100 dark:hover:bg-green-900/30 transition-colors flex items-center justify-center gap-1">
+                                    class="quarantine-action-btn ui-btn ui-btn-sm">
                                     <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
                                     Release
                                 </button>
                                 <button onclick="quarantineDelete('${itemId}')" title="Delete message"
-                                    class="quarantine-action-btn px-2 py-1 text-xs font-medium rounded-md border border-red-300 dark:border-red-700 text-red-700 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-900/30 transition-colors flex items-center justify-center gap-1">
+                                    class="quarantine-action-btn ui-btn ui-btn-sm ui-btn-danger">
                                     <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
                                     Delete
                                 </button>
                                 <button onclick="quarantineLearnHam('${itemId}')" title="Release & train as Not Spam"
-                                    class="quarantine-action-btn px-2 py-1 text-xs font-medium rounded-md border border-emerald-300 dark:border-emerald-700 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-100 dark:hover:bg-emerald-900/30 transition-colors flex items-center justify-center gap-1">
+                                    class="quarantine-action-btn ui-btn ui-btn-sm">
                                     <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"></path></svg>
                                     Not Spam
                                 </button>
                                 <button onclick="quarantineLearnSpam('${itemId}')" title="Delete & train as Spam"
-                                    class="quarantine-action-btn px-2 py-1 text-xs font-medium rounded-md border border-orange-300 dark:border-orange-700 text-orange-700 dark:text-orange-400 hover:bg-orange-100 dark:hover:bg-orange-900/30 transition-colors flex items-center justify-center gap-1">
+                                    class="quarantine-action-btn ui-btn ui-btn-sm">
                                     <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"></path></svg>
                                     Spam
                                 </button>
                                 <button onclick="showAddRuleFromQuarantine('${escapeJsArg(item.sender || '')}', '${escapeJsArg(item.rcpt || '')}', '${escapeJsArg(item.subject || '')}')" title="Create auto-rule from this email"
-                                    class="quarantine-action-btn px-2 py-1 text-xs font-medium rounded-md border border-amber-300 dark:border-amber-700 text-amber-700 dark:text-amber-400 hover:bg-amber-100 dark:hover:bg-amber-900/30 transition-colors flex items-center justify-center gap-1">
+                                    class="quarantine-action-btn ui-btn ui-btn-sm">
                                     <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path></svg>
                                     Rule
                                 </button>
@@ -3734,11 +3731,11 @@ async function loadStatusContainers() {
                 </div>
             `;
         } else {
-            container.innerHTML = '<p class="text-gray-500 dark:text-gray-400 text-center py-8">No container information available</p>';
+            container.innerHTML = '<p class="ui-empty">No container information available</p>';
         }
     } catch (error) {
         console.error('Failed to load containers status:', error);
-        document.getElementById('status-containers').innerHTML = '<p class="text-red-500 text-center py-8">Failed to load containers</p>';
+        document.getElementById('status-containers').innerHTML = '<p class="ui-empty ui-text-fail">Failed to load containers</p>';
     }
 }
 
@@ -3813,7 +3810,7 @@ async function loadStatusSystem() {
         `;
     } catch (error) {
         console.error('Failed to load system info:', error);
-        document.getElementById('status-system').innerHTML = `<p class="text-red-500 text-center py-8">Failed to load system info: ${escapeHtml(error.message)}</p>`;
+        document.getElementById('status-system').innerHTML = `<p class="ui-empty ui-text-fail">Failed to load system info: ${escapeHtml(error.message)}</p>`;
     }
 }
 
@@ -3891,7 +3888,7 @@ async function loadStatusStorage() {
         `;
     } catch (error) {
         console.error('Failed to load storage info:', error);
-        document.getElementById('status-storage').innerHTML = `<p class="text-red-500 text-center py-8">Failed to load storage info: ${escapeHtml(error.message)}</p>`;
+        document.getElementById('status-storage').innerHTML = `<p class="ui-empty ui-text-fail">Failed to load storage info: ${escapeHtml(error.message)}</p>`;
     }
 }
 
@@ -3919,9 +3916,9 @@ async function loadStatusExtended() {
 
     } catch (error) {
         console.error('Failed to load extended status:', error);
-        document.getElementById('status-import').innerHTML = `<p class="text-red-500 text-center py-8">Failed to load: ${escapeHtml(error.message)}</p>`;
-        document.getElementById('status-correlation').innerHTML = `<p class="text-red-500 text-center py-8">Failed to load: ${escapeHtml(error.message)}</p>`;
-        document.getElementById('status-jobs').innerHTML = `<p class="text-red-500 text-center py-8">Failed to load: ${escapeHtml(error.message)}</p>`;
+        document.getElementById('status-import').innerHTML = `<p class="ui-empty ui-text-fail">Failed to load: ${escapeHtml(error.message)}</p>`;
+        document.getElementById('status-correlation').innerHTML = `<p class="ui-empty ui-text-fail">Failed to load: ${escapeHtml(error.message)}</p>`;
+        document.getElementById('status-jobs').innerHTML = `<p class="ui-empty ui-text-fail">Failed to load: ${escapeHtml(error.message)}</p>`;
     }
 }
 
@@ -4064,7 +4061,7 @@ async function loadBlacklistStatus() {
         renderBlacklistStatus(data);
     } catch (error) {
         console.error('Failed to load blacklist status:', error);
-        container.innerHTML = `<p class="text-red-500 text-center py-8">Failed to load: ${escapeHtml(error.message)}</p>`;
+        container.innerHTML = `<p class="ui-empty ui-text-fail">Failed to load: ${escapeHtml(error.message)}</p>`;
     }
 }
 
