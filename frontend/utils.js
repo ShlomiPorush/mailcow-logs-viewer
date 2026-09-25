@@ -153,7 +153,9 @@ function uiCorrelationTag(msg) {
     if (!status) return '';
     const tone = UI_STATUS_TONE[msg.final_status] || (msg.is_complete ? 'ok' : 'warn');
     const title = msg.final_status || (msg.is_complete ? 'Correlation complete' : 'Waiting for Postfix logs');
-    return `<span class="ui-tag ui-tag-${tone}" title="${escapeHtml(title)}">${escapeHtml(status.display)}</span>`;
+    // The word only; the symbol (checkmark, cross) of the old badge is left out, the tone carries it
+    const text = status.display.replace(/^[^A-Za-z0-9]+\s*/, '');
+    return `<span class="ui-tag ui-tag-${tone}" title="${escapeHtml(title)}">${escapeHtml(text)}</span>`;
 }
 
 // Tone of a netfilter action tag; the text comes from getActionLabel
@@ -305,6 +307,23 @@ function renderMarkdown(markdownText) {
     }
     // Library failed to load - fail safe by escaping rather than injecting
     return escapeHtml(markdownText || '');
+}
+
+// Time for a list row: the time of day for today, the day and month before
+// that, in the app timezone. The full timestamp goes in the row tooltip.
+function formatListTime(isoString) {
+    if (!isoString) return '-';
+    const date = new Date(isoString);
+    const tz = appTimezone && appTimezone !== 'UTC' ? appTimezone : undefined;
+    try {
+        const day = d => new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
+        if (day(date) === day(new Date())) {
+            return new Intl.DateTimeFormat(undefined, { timeZone: tz, hour: '2-digit', minute: '2-digit', hour12: false }).format(date);
+        }
+        return new Intl.DateTimeFormat(undefined, { timeZone: tz, day: 'numeric', month: 'short' }).format(date);
+    } catch (e) {
+        return formatTime(isoString);
+    }
 }
 
 function formatTime(isoString) {
