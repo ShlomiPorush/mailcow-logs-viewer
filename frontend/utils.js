@@ -649,91 +649,38 @@ function renderJobCard(name, jobKey, job) {
         }
     }
 
-    return `
-        <div class="ui-job${isFeatureOff ? ' is-off' : ''}">
-            <div class="flex items-start justify-between gap-3 mb-2">
-                <div class="flex-1 min-w-0">
-                    <h4 class="font-semibold text-gray-900 dark:text-white text-sm">${escapeHtml(name)}</h4>
-                    <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">${escapeHtml(job.description || '')}</p>
-                </div>
-                <div class="flex flex-col items-end gap-1.5">
-                    ${statusBadge}
-                    ${!isDisabled ? `
-                        <button 
-                            onclick="triggerBackgroundJob('${escapeJsArg(jobKey)}', this, '${escapeJsArg(name)}')" 
-                            class="ui-btn ui-btn-sm"
-                            ${isRunning ? 'disabled' : ''}
-                            title="${isRunning ? 'Job is running' : 'Run this job now'}">
-                            ${isRunning ? '<span class="inline-block animate-spin w-3 h-3 border-2 border-current border-t-transparent rounded-full"></span>' : '<span class="text-[10px]">▶</span>'}
-                            Run
-                        </button>
-                    ` : ''}
-                </div>
-            </div>
-            
-            <div class="flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-600 dark:text-gray-400">
-                ${job.interval ? `<span>⏱ ${job.interval}</span>` : ''}
-                ${job.schedule ? `<span>📅 ${job.schedule}</span>` : ''}
-                ${job.retention ? `<span>🗂 ${job.retention}</span>` : ''}
-                ${job.max_age ? `<span>⏳ Max: ${job.max_age}</span>` : ''}
-                ${job.expire_after ? `<span>⏱ Expire: ${job.expire_after}</span>` : ''}
-                ${job.pending_items !== undefined ? `<span class="font-medium text-yellow-600 dark:text-yellow-400">📋 Pending: ${job.pending_items}</span>` : ''}
-            </div>
-            
-            ${job.last_run ? `
-                <div class="mt-2 pt-2 border-t border-gray-200 dark:border-gray-600">
-                    <p class="text-xs text-gray-500 dark:text-gray-400">
-                        Last run: <span class="text-gray-900 dark:text-white font-medium">${formatTime(job.last_run)}</span>
-                    </p>
-                </div>
-            ` : ''}
-            
-            ${job.error ? `
-                <div class="mt-2 p-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded">
-                    <p class="text-xs text-red-700 dark:text-red-300 font-mono break-all">${escapeHtml(job.error)}</p>
-                </div>
-            ` : ''}
-        </div>
-    `;
-}
-
-function renderImportCard(title, data, color) {
-    if (!data) {
-        return `<div class="p-4 bg-gray-50 dark:bg-gray-700/30 rounded-lg">
-            <p class="font-semibold text-gray-900 dark:text-white">${title}</p>
-            <p class="text-sm text-gray-500 dark:text-gray-400 mt-2">No data</p>
-        </div>`;
-    }
-
-    const colorClasses = {
-        blue: 'border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-900/20',
-        purple: 'border-purple-200 dark:border-purple-800 bg-purple-50 dark:bg-purple-900/20',
-        red: 'border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20'
-    };
+    const runs = [
+        job.interval,
+        job.schedule,
+        job.retention ? `keeps ${job.retention}` : '',
+        job.max_age ? `Max: ${job.max_age}` : '',
+        job.expire_after ? `Expire: ${job.expire_after}` : '',
+    ].filter(Boolean);
 
     return `
-        <div class="p-4 border ${colorClasses[color]} rounded-lg">
-            <p class="font-semibold text-gray-900 dark:text-white mb-3">${title}</p>
-            <div class="space-y-2 text-sm">
-                <div>
-                    <p class="text-xs text-gray-500 dark:text-gray-400">Last Fetch Run</p>
-                    <p class="text-gray-900 dark:text-white font-medium">${data.last_fetch_run ? formatTime(data.last_fetch_run) : 'Never'}</p>
-                </div>
-                <div>
-                    <p class="text-xs text-gray-500 dark:text-gray-400">Last Import</p>
-                    <p class="text-gray-900 dark:text-white">${data.last_import ? formatTime(data.last_import) : 'Never'}</p>
-                </div>
-                <div>
-                    <p class="text-xs text-gray-500 dark:text-gray-400">Total Entries</p>
-                    <p class="text-gray-900 dark:text-white font-semibold">${(data.total_entries || 0).toLocaleString()}</p>
-                </div>
-                ${data.oldest_entry ? `
-                    <div>
-                        <p class="text-xs text-gray-500 dark:text-gray-400">Oldest Entry</p>
-                        <p class="text-gray-900 dark:text-white">${formatTime(data.oldest_entry)}</p>
-                    </div>
+        <div class="ui-tr ui-job${isFeatureOff ? ' is-off' : ''}">
+            <div class="ui-td ui-q-who">
+                <div>${escapeHtml(name)}</div>
+                ${job.description ? `<small title="${escapeHtml(job.description)}">${escapeHtml(job.description)}</small>` : ''}
+            </div>
+            <div class="ui-td ui-td-wrap">
+                ${escapeHtml(runs.join(', ') || '-')}
+                ${job.pending_items !== undefined ? `<small class="ui-text-warn ui-job-pending">Pending: ${job.pending_items}</small>` : ''}
+            </div>
+            <span class="ui-td">${statusBadge}</span>
+            <span class="ui-td" title="${job.last_run ? escapeHtml(formatTime(job.last_run)) : ''}"><small class="ui-sec-unit">Last run </small>${job.last_run ? formatAgo(job.last_run) : '-'}</span>
+            <span class="ui-td ui-td-end ui-row-actions">
+                ${!isDisabled ? `
+                    <button
+                        onclick="triggerBackgroundJob('${escapeJsArg(jobKey)}', this, '${escapeJsArg(name)}')"
+                        class="ui-btn ui-btn-sm"
+                        ${isRunning ? 'disabled' : ''}
+                        title="${isRunning ? 'Job is running' : 'Run this job now'}">
+                        Run
+                    </button>
                 ` : ''}
-            </div>
+            </span>
+            ${job.error ? `<p class="ui-job-error ui-mono">${escapeHtml(job.error)}</p>` : ''}
         </div>
     `;
 }
