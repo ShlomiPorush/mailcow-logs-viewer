@@ -326,6 +326,36 @@ function formatListTime(isoString) {
     }
 }
 
+// A "More" menu for a table row. It opens as a popover, so the table's own
+// scrolling cannot clip it; the toggle listener below puts it under its button.
+let uiMenuSeq = 0;
+function uiMenu(label, itemsHtml) {
+    const id = `ui-menu-${++uiMenuSeq}`;
+    return `<button type="button" class="ui-btn ui-btn-sm" popovertarget="${id}" aria-haspopup="menu">${escapeHtml(label)}</button>
+        <div id="${id}" popover class="ui-menu" role="menu" onclick="if (event.target.closest('button')) this.hidePopover()">${itemsHtml}</div>`;
+}
+
+// Called once at startup: places an opening menu and closes it on scroll
+function uiInitMenus() {
+    document.addEventListener('toggle', event => {
+        const menu = event.target;
+        if (!(menu instanceof HTMLElement) || !menu.classList.contains('ui-menu') || event.newState !== 'open') return;
+        const button = document.querySelector(`[popovertarget="${menu.id}"]`);
+        if (!button) return;
+        const r = button.getBoundingClientRect();
+        const rtl = getComputedStyle(button).direction === 'rtl';
+        const left = rtl ? r.left : r.right - menu.offsetWidth;
+        menu.style.left = `${Math.max(8, Math.min(left, window.innerWidth - menu.offsetWidth - 8))}px`;
+        const below = r.bottom + 4;
+        menu.style.top = `${below + menu.offsetHeight > window.innerHeight - 8 ? Math.max(8, r.top - menu.offsetHeight - 4) : below}px`;
+    }, true);
+
+    // An open menu would drift away from its button on scroll, so close it
+    window.addEventListener('scroll', () => {
+        document.querySelectorAll('.ui-menu:popover-open').forEach(menu => menu.hidePopover());
+    }, true);
+}
+
 // "6 min ago", "3 h ago", "2 d ago"; the full time is for a tooltip
 function formatAgo(isoString) {
     if (!isoString) return '-';
