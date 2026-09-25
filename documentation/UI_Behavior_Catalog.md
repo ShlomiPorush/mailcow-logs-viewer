@@ -119,7 +119,7 @@ The v3 redesign replaces these with one consistent locked-area component that sa
 | Logs | WebSocket state | Green, yellow or red dot with Connected, Paused or Disconnected | `updateWsIndicator` |
 | Status | `blacklist` disabled | The IP Blacklist Monitor section is hidden | `#blacklist-section` |
 | Status | A job's feature is off | Job card faded with a "feature off" badge, no Run button | `renderJobCard` |
-| Status | A job is disabled for another reason | The Run button is hidden, **with no explanation** | `renderJobCard` |
+| Status | A job is disabled for another reason | The Run button is hidden and a "disabled" tag explains it (tooltip: turned off in its settings) | `renderJobCard` |
 | Status | A job is running | Run button disabled, "Job is running" | `renderJobCard` |
 
 ### Settings
@@ -155,7 +155,7 @@ Generated from the code. Do not edit by hand; run `node .github/scripts/ui-catal
 | Behaviour | Count |
 |---|---|
 | [Click to copy](#click-to-copy) | 34 |
-| [Tooltips](#tooltips) | 119 |
+| [Tooltips](#tooltips) | 121 |
 | [Toasts](#toasts) | 133 |
 | [Confirmation dialogs](#confirmation-dialogs) | 27 |
 | [Country flags](#country-flags) | 5 |
@@ -237,7 +237,7 @@ Native `title` tooltips. Dynamic ones show the expression that builds the text.
 | Shell | "Mailbox Stats" | `frontend/index.html:461` |
 | Shell | "Logs" | `frontend/index.html:462` |
 | Shell | "Settings" | `frontend/index.html:465` |
-| Shell | "View Container Logs" | `frontend/index.html:1968` |
+| Shell | "View Container Logs" | `frontend/index.html:1950` |
 | Shell | set in JS: dynamic: `data.app_title` | `frontend/app.js:412` (loadAppInfo) |
 | Shell | set in JS: "Connected to mailcow" | `frontend/app.js:482` (loadMailcowConnectionStatus) |
 | Shell | set in JS: "Not connected to mailcow" | `frontend/app.js:491` (loadMailcowConnectionStatus) |
@@ -294,7 +294,7 @@ Native `title` tooltips. Dynamic ones show the expression that builds the text.
 | Status | dynamic: `${escapeHtml(detail)}` | `frontend/app.js:4224` (renderBlacklistStatus) |
 | Status | dynamic: `${escapeHtml(detail)}` | `frontend/app.js:4226` (renderBlacklistStatus) |
 | Status | "View info" | `frontend/app.js:4227` (renderBlacklistStatus) |
-| Status | "Help - IP Blacklist Monitor" | `frontend/index.html:1028` |
+| Status | "Help - IP Blacklist Monitor" | `frontend/index.html:1024` |
 | Domains | "OK" | `frontend/domains.js:242` (renderDomainAccordionRow) |
 | Domains | "Warning" | `frontend/domains.js:243` (renderDomainAccordionRow) |
 | Domains | "Error" | `frontend/domains.js:244` (renderDomainAccordionRow) |
@@ -305,25 +305,25 @@ Native `title` tooltips. Dynamic ones show the expression that builds the text.
 | Domains | "Warning" | `frontend/domains.js:755` (checkSingleDomainDNS) |
 | Domains | "Error" | `frontend/domains.js:756` (checkSingleDomainDNS) |
 | Domains | "Unknown" | `frontend/domains.js:757` (checkSingleDomainDNS) |
-| Domains | "Help - Domains Information" | `frontend/index.html:1137` |
+| Domains | "Help - Domains Information" | `frontend/index.html:1119` |
 | DMARC | "DMARC Reports" | `frontend/dmarc.js:366` (loadDmarcDomains) |
 | DMARC | "TLS Reports" | `frontend/dmarc.js:367` (loadDmarcDomains) |
 | DMARC | "Delete report" | `frontend/dmarc.js:1646` (renderReportsManagementTable) |
 | DMARC | "Delete" | `frontend/dmarc.js:1681` (renderReportsManagementTable) |
-| DMARC | "Help - DMARC Information" | `frontend/index.html:1170` |
-| Mailbox stats | "Help - Mailbox Statistics" | `frontend/index.html:1392` |
+| DMARC | "Help - DMARC Information" | `frontend/index.html:1152` |
+| Mailbox stats | "Help - Mailbox Statistics" | `frontend/index.html:1374` |
 | Mailbox stats | "Address on a mailcow alias domain that points at this mailbox" | `frontend/mailbox-stats.js:556` (renderMailboxStatsAccordion) |
 | Mailbox stats | set in JS: dynamic: `isRateLimits ? 'Help - Rate Limits' : 'Help - Mailbox Statistics'` | `frontend/mailbox-stats.js:83` (mailboxStatsSwitchView) |
-| Logs | "Pause/Resume live updates" | `frontend/index.html:1699` |
-| Logs | "Live mode - show latest logs" | `frontend/index.html:1709` |
-| Logs | "Auto-scroll to new entries" | `frontend/index.html:1719` |
-| Logs | "Toggle sort order (newest at bottom / newest at top)" | `frontend/index.html:1729` |
-| Logs | "Toggle word wrap" | `frontend/index.html:1750` |
-| Logs | "Search" | `frontend/index.html:1767` |
-| Logs | "Clear search" | `frontend/index.html:1774` |
-| Logs | "Clear display" | `frontend/index.html:1784` |
-| Logs | "From date" | `frontend/index.html:1812` |
-| Logs | "To date" | `frontend/index.html:1817` |
+| Logs | "Pause/Resume live updates" | `frontend/index.html:1681` |
+| Logs | "Live mode - show latest logs" | `frontend/index.html:1691` |
+| Logs | "Auto-scroll to new entries" | `frontend/index.html:1701` |
+| Logs | "Toggle sort order (newest at bottom / newest at top)" | `frontend/index.html:1711` |
+| Logs | "Toggle word wrap" | `frontend/index.html:1732` |
+| Logs | "Search" | `frontend/index.html:1749` |
+| Logs | "Clear search" | `frontend/index.html:1756` |
+| Logs | "Clear display" | `frontend/index.html:1766` |
+| Logs | "From date" | `frontend/index.html:1794` |
+| Logs | "To date" | `frontend/index.html:1799` |
 | Logs | dynamic: `${escapeHtml(f.description \|\| '')}` | `frontend/logs-viewer.js:243` (loadSmartFilters) |
 | Logs | "Clear all filters" | `frontend/logs-viewer.js:1238` (updateFilterBadge) |
 | Settings | "Last delivery succeeded" | `frontend/notifications.js:67` (renderNotificationChannels) |
@@ -334,11 +334,13 @@ Native `title` tooltips. Dynamic ones show the expression that builds the text.
 | Settings | "Click to view changelog" | `frontend/settings.js:964` (renderSettings) |
 | Settings | dynamic: `${escapeHtml(domain)}` | `frontend/settings.js:1089` (renderSettings) |
 | Shared | dynamic: `${escapeHtml(title)}` | `frontend/utils.js:156` (uiCorrelationTag) |
-| Shared | dynamic: `${isRunning ? 'Job is running' : 'Run this job now'}` | `frontend/utils.js:605` (renderJobCard) |
+| Shared | "The feature this job belongs to is turned off in Settings" | `frontend/utils.js:569` (renderJobCard) |
+| Shared | "This job is turned off in its settings, so it cannot be run" | `frontend/utils.js:572` (renderJobCard) |
+| Shared | dynamic: `${isRunning ? 'Job is running' : 'Run this job now'}` | `frontend/utils.js:606` (renderJobCard) |
 | app.js (mixed) | set in JS: dynamic: `label` | `frontend/app.js:286` (setNavTabLabel) |
-| Modal: container-logs-modal | "Refresh" | `frontend/index.html:1995` |
-| Modal: container-logs-modal | "Close" | `frontend/index.html:2003` |
-| Modal: message-modal | "Close" | `frontend/index.html:1893` |
+| Modal: container-logs-modal | "Refresh" | `frontend/index.html:1977` |
+| Modal: container-logs-modal | "Close" | `frontend/index.html:1985` |
+| Modal: message-modal | "Close" | `frontend/index.html:1875` |
 
 ### Toasts
 
@@ -585,9 +587,9 @@ Drop-down lists in the page markup with their options. The option wording and or
 | Quarantine | `quarantine-sort`: Newest first / Score: high to low / Score: low to high | `frontend/index.html:835` |
 | Spam filter | `suppression-filter-reason`: All Reasons / Hard Bounce / Soft Bounce / Deferred Stuck / Rejected / Manual | `frontend/index.html:903` |
 | Spam filter | `suppression-filter-active`: Active Only / All / Inactive / Expired | `frontend/index.html:913` |
-| Mailbox stats | `mailbox-stats-domain-filter`: All Domains | `frontend/index.html:1596` |
-| Mailbox stats | `mailbox-stats-sort`: Sent (High to Low) / Received (High to Low) / Failure Rate (High to Low) / Quota Used (High to Low) / Username (A-Z) | `frontend/index.html:1600` |
-| Logs | `logs-fontsize`: 10px / 11px / 12px / 13px / 14px / 16px | `frontend/index.html:1737` |
+| Mailbox stats | `mailbox-stats-domain-filter`: All Domains | `frontend/index.html:1578` |
+| Mailbox stats | `mailbox-stats-sort`: Sent (High to Low) / Received (High to Low) / Failure Rate (High to Low) / Quota Used (High to Low) / Username (A-Z) | `frontend/index.html:1582` |
+| Logs | `logs-fontsize`: 10px / 11px / 12px / 13px / 14px / 16px | `frontend/index.html:1719` |
 
 ### Charts
 
@@ -659,10 +661,10 @@ In-app help buttons; the topic is the Markdown file name under documentation/Hel
 | Security | topic "Abuse_Protection" | `frontend/index.html:693` |
 | Quarantine | topic "Quarantine" | `frontend/index.html:792` |
 | Spam filter | topic "Spam_Filter" | `frontend/index.html:853` |
-| Status | topic "IP_Blacklist_Monitor" | `frontend/index.html:1026` |
-| Domains | topic "Domains" | `frontend/index.html:1135` |
-| DMARC | topic "DMARC" | `frontend/index.html:1168` |
-| Mailbox stats | topic "Mailbox_Stats" | `frontend/index.html:1390` |
+| Status | topic "IP_Blacklist_Monitor" | `frontend/index.html:1023` |
+| Domains | topic "Domains" | `frontend/index.html:1118` |
+| DMARC | topic "DMARC" | `frontend/index.html:1150` |
+| Mailbox stats | topic "Mailbox_Stats" | `frontend/index.html:1372` |
 | Mailbox stats | topic dynamic: `'${isRateLimits ? 'Rate_Limits' : 'Mailbox_Stats'}'` | `frontend/mailbox-stats.js:82` (mailboxStatsSwitchView) |
 
 ### Empty states
@@ -730,7 +732,7 @@ Functions that render a spinner or "Loading..." while data is fetched.
 | Settings | 1 loading indicator(s) | `frontend/settings.js:2085` (validateMaxMindLicense) |
 | Settings | 1 loading indicator(s) | `frontend/settings.js:2131` (repairGeoIPDatabase) |
 | Settings | 1 loading indicator(s) | `frontend/settings.js:2289` (renderGeoIPDbStatus) |
-| Shared | 1 loading indicator(s) | `frontend/utils.js:606` (renderJobCard) |
+| Shared | 1 loading indicator(s) | `frontend/utils.js:607` (renderJobCard) |
 
 ### Persisted preferences
 
