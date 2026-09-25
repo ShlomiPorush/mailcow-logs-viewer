@@ -149,12 +149,7 @@ function renderRateLimitBadge(limit) {
 function renderRateLimitReadOnlyNotice() {
     const data = rateLimitConfigData || {};
     if (data.rw_key_configured !== false) return '';
-    return `
-        <div class="mx-4 my-3 px-4 py-3 rounded-lg bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 text-yellow-800 dark:text-yellow-300 text-sm flex items-center gap-2">
-            <span class="text-lg">&#128274;</span>
-            <span>Editing requires a <strong>Read-Write API key</strong> (<code>MAILCOW_API_KEY_RW</code>). Configure it in Settings &rarr; Mailcow &rarr; Connection.</span>
-        </div>
-    `;
+    return `<div class="ui-list-note">${uiLocked('Editing rate limits is locked', `Editing ${UI_RW_KEY_TEXT}`)}</div>`;
 }
 
 
