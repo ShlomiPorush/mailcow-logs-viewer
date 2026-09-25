@@ -371,6 +371,7 @@ def aggregate_blacklist_summary(host_rows: List[Dict[str, Any]],
             "source": row.get("source"),
             "status": host_status,
             "listed_count": host_listed,
+            "total_blacklists": (row.get("total_blacklists") or 0) if is_fresh else None,
             "checked_at": _format_checked_at(checked_at)
         })
 
