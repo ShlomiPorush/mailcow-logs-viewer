@@ -940,58 +940,104 @@ body { font-family: var(--ui-font); background: var(--ui-bg); color: var(--ui-in
     font-size: var(--ui-fs-sm); text-align: start; cursor: pointer; }
 .ui-menu button:hover, .ui-menu button:focus-visible { background: color-mix(in srgb, var(--ui-ink) 7%, transparent); outline: none; }
 
-/* ---------- Status (as the mockup) ---------- */
-.ui-ctr-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 1px; background: var(--ui-bg);
-    border: 1px solid var(--ui-line); border-radius: var(--ui-radius); overflow: hidden; }
-.ui-ctr { display: flex; align-items: center; gap: 9px; min-width: 0; padding: 10px 14px; background: var(--ui-bg); outline: 1px solid var(--ui-line); }
+/* ---------- Status: attention list, tabs, one card per area ---------- */
 .ui-list-head .ui-head-actions { margin-inline-start: auto; }
-.ui-ctr-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ui-ctr small { color: var(--ui-muted); font-size: 12px; white-space: nowrap; }
-.ui-ctr.is-down { background: color-mix(in srgb, var(--ui-fail) 10%, var(--ui-bg)); color: var(--ui-fail); font-weight: 600; }
-.ui-ctr.is-down small { color: var(--ui-fail); }
-.ui-ctr .ui-mdot { flex: none; }
-/* Ignored containers stay visible but quiet; the action is a small text button */
-.ui-ctr.is-ignored { color: var(--ui-muted); }
-.ui-ctr.is-ignored .ui-mdot { background: var(--ui-line); }
-.ui-ctr-act, .ui-bl-ign { flex: none; padding: 2px 6px; border: 1px solid var(--ui-line); border-radius: 6px; background: var(--ui-bg);
-    color: var(--ui-ink); font: inherit; font-size: 11.5px; font-weight: 600; cursor: pointer; }
-.ui-ctr-act:hover, .ui-bl-ign:hover { border-color: var(--ui-ink); }
-.ui-bl-ign { padding: 1px 5px; font-size: 11px; font-weight: 500; color: var(--ui-muted); }
+.ui-st-allgood { margin: 0; padding: 12px var(--ui-pad-x) 14px; color: var(--ui-ok); font-weight: 600; }
+.ui-st-acts { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; flex: none; }
+#status-attention .ui-alert { align-items: center; }
+.ui-st-panel { display: grid; gap: var(--ui-gap); }
+.ui-st-panel.hidden { display: none; }
+.ui-tab-n { margin-inline-start: 4px; padding: 0 6px; border-radius: 6px; background: var(--ui-panel); color: var(--ui-muted); font-size: 11.5px; font-weight: 700; }
+.ui-tab-n.is-fail { background: color-mix(in srgb, var(--ui-fail) 14%, transparent); color: var(--ui-fail); }
+.ui-tab-n.hidden { display: none; }
+
+/* Segmented filter (All / Problems / Off) */
+.ui-seg { display: inline-flex; gap: 2px; padding: 2px; border-radius: 8px; background: var(--ui-panel); }
+.ui-seg button { padding: 4px 10px; border: 0; border-radius: 6px; background: none; color: var(--ui-muted); font: inherit; font-size: 12.5px; font-weight: 600; cursor: pointer; }
+.ui-seg button[aria-pressed="true"] { background: var(--ui-bg); color: var(--ui-ink); box-shadow: 0 1px 2px rgb(0 0 0 / .08); }
+
+/* Overview cards */
+.ui-st-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
+.ui-st-card { display: grid; align-content: start; gap: 4px; padding: 14px var(--ui-pad-x); border: 0; border-radius: var(--ui-radius);
+    background: var(--ui-panel); color: inherit; font: inherit; text-align: start; }
+button.ui-st-card { cursor: pointer; }
+button.ui-st-card:hover { outline: 1px solid var(--ui-line); }
+.ui-st-card-label { color: var(--ui-muted); font-size: 13px; font-weight: 650; }
+.ui-st-card b { font-size: 22px; font-weight: 800; letter-spacing: -.02em; }
+.ui-st-card b.ui-fail { color: var(--ui-fail); }
+.ui-st-card b.ui-warn { color: var(--ui-warn); }
+.ui-st-card small { color: var(--ui-muted); font-size: 12.5px; }
+.ui-st-card small .ui-link-row { font-size: inherit; }
+
+/* Containers: a quiet list, problems first */
+.ui-st-rows { display: grid; }
+.ui-st-row { display: grid; grid-template-columns: minmax(0, 1fr) 120px 100px minmax(140px, auto); align-items: center; gap: 12px;
+    padding: 9px var(--ui-pad-x); border-top: 1px solid var(--ui-line); }
+.ui-st-row:first-child { border-top: 0; }
+.ui-st-row[hidden] { display: none; }
+.ui-st-row-head { color: var(--ui-muted); font-size: 12px; font-weight: 650; }
+.ui-st-name { display: flex; align-items: center; gap: 9px; min-width: 0; font-weight: 600; }
+.ui-st-row.is-down { background: color-mix(in srgb, var(--ui-fail) 8%, transparent); color: var(--ui-fail); }
+.ui-st-row.is-ignored { color: var(--ui-muted); }
+.ui-st-row.is-ignored .ui-mdot { background: var(--ui-line); }
+
+/* Blocklists: one card per address, listings first */
+.ui-st-hosts { display: grid; gap: 12px; }
+.ui-st-host-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 12px var(--ui-pad-x); }
+.ui-st-host-tools { display: flex; align-items: center; gap: 10px; margin-inline-start: auto; font-size: 12.5px; }
+.ui-st-listing { display: flex; align-items: center; gap: 12px; padding: 10px var(--ui-pad-x); border-top: 1px solid var(--ui-line); }
+.ui-bl-row .ui-st-listing { background: color-mix(in srgb, var(--ui-fail) 7%, transparent); }
+.ui-st-listing > div { flex: 1; min-width: 0; }
+.ui-st-listing small { display: block; color: var(--ui-muted); font-size: 12px; }
+.ui-bl-all { padding: 10px var(--ui-pad-x) 12px; border-top: 1px solid var(--ui-line); }
+.ui-bl-all summary { width: fit-content; color: var(--ui-muted); font-size: 12.5px; font-weight: 600; cursor: pointer; }
+.ui-bl-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 6px 18px; margin-top: 10px; }
+.ui-bl-item { display: flex; align-items: center; gap: 7px; min-width: 0; font-size: 12.5px; }
+.ui-bl-item small { margin-inline-start: auto; color: var(--ui-muted); }
 .ui-bl-item.is-ignored { color: var(--ui-muted); }
 .ui-bl-item.is-ignored .ui-mdot { background: var(--ui-line); }
-.ui-code-chip.is-ignored { opacity: .6; text-decoration: line-through; }
-
-.ui-tr-group { display: block; padding-top: 14px; padding-bottom: 6px; color: var(--ui-muted); font-size: 12px; font-weight: 650;
-    text-transform: uppercase; letter-spacing: .04em; }
-.ui-job-pending { display: block; }
-.ui-job-error { grid-column: 1 / -1; margin: 0; padding: 6px 10px; border-radius: var(--ui-radius-sm); color: var(--ui-fail);
-    background: color-mix(in srgb, var(--ui-fail) 9%, transparent); font-size: 12px; overflow-wrap: anywhere; }
-
-.ui-bl-row { row-gap: 8px; }
-.ui-bl-result { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
-.ui-code-chip { padding: 1px 6px; border: 1px solid var(--ui-line); border-radius: 4px; font-family: var(--ui-mono); font-size: 11.5px; color: var(--ui-muted); }
-.ui-bl-all { grid-column: 1 / -1; }
-.ui-bl-all summary { width: fit-content; color: var(--ui-muted); font-size: 12.5px; cursor: pointer; }
-.ui-bl-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 6px 18px; margin-top: 8px; max-height: 320px; overflow-y: auto; }
-.ui-bl-item { display: flex; align-items: center; gap: 7px; min-width: 0; font-size: 12.5px; }
 .ui-bl-link { display: inline-flex; margin-inline-start: 4px; color: var(--ui-muted); vertical-align: middle; }
 .ui-bl-link:hover { color: var(--ui-ink); }
 .ui-bl-link svg { display: block; }
-.ui-bl-item small { margin-inline-start: auto; color: var(--ui-muted); }
+.ui-bl-ign { flex: none; padding: 1px 5px; border: 1px solid var(--ui-line); border-radius: 6px; background: var(--ui-bg);
+    color: var(--ui-muted); font: inherit; font-size: 11px; font-weight: 500; cursor: pointer; }
+.ui-bl-ign:hover { border-color: var(--ui-ink); color: var(--ui-ink); }
 .ui-bl-fail { color: var(--ui-fail); font-weight: 600; }
 .ui-bl-progress { padding: 12px var(--ui-pad-x); margin-bottom: 8px; }
 .ui-bl-progress-head { display: flex; justify-content: space-between; gap: 10px; margin-bottom: 8px; font-size: var(--ui-fs-sm); }
 .ui-meter.ui-meter-info > i { background: var(--ui-info); transition: width .3s; }
+.ui-code-chip { padding: 1px 6px; border: 1px solid var(--ui-line); border-radius: 4px; font-family: var(--ui-mono); font-size: 11.5px; color: var(--ui-muted); }
+
+/* Jobs */
+.ui-tr-group { display: block; padding-top: 14px; padding-bottom: 6px; color: var(--ui-muted); font-size: 12px; font-weight: 650;
+    text-transform: uppercase; letter-spacing: .04em; }
+.ui-tr[hidden] { display: none; }
+.ui-job.is-failed { background: color-mix(in srgb, var(--ui-fail) 7%, transparent); }
+.ui-job-pending { display: block; }
+.ui-job-error { grid-column: 1 / -1; margin: 0; padding: 6px 10px; border-radius: var(--ui-radius-sm); color: var(--ui-fail);
+    background: color-mix(in srgb, var(--ui-fail) 9%, transparent); font-size: 12px; overflow-wrap: anywhere; }
+
+/* Data & storage */
+.ui-st-data { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--ui-gap); align-items: start; }
+.ui-st-data .ui-st-wide { grid-column: 1 / -1; }
+.ui-st-data .ui-panel > div:last-child { padding: 0 var(--ui-pad-x) 12px; }
 .ui-tag-btn { border: 0; cursor: pointer; font: inherit; font-size: 11.5px; }
 .ui-status-pair { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .ui-kpi .ui-link-row { font-size: inherit; }
 
 @media (max-width: 760px) {
-    .ui-status-pair { grid-template-columns: minmax(0, 1fr); }
-    .ui-ctr-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-    .ui-ctr { padding: 9px 10px; gap: 7px; }
+    .ui-status-pair, .ui-st-data { grid-template-columns: minmax(0, 1fr); }
+    .ui-st-row { grid-template-columns: minmax(0, 1fr) auto; }
+    .ui-st-row-head, .ui-st-hide-sm { display: none; }
+    .ui-st-row > :nth-child(2) { justify-self: end; font-size: 12.5px; }
+    .ui-st-row .ui-st-acts { grid-column: 1 / -1; justify-content: flex-start; }
+    .ui-st-row .ui-st-acts:empty { display: none; }
+    #status-attention .ui-alert { flex-wrap: wrap; }
+    #status-attention .ui-st-acts { flex: 1 1 100%; justify-content: flex-start; padding-inline-start: 18px; }
+    .ui-st-host-tools { margin-inline-start: 0; }
+    .ui-st-listing { flex-wrap: wrap; }
     .ui-stack .ui-tr-group { flex: 1 1 100%; }
-    .ui-stack .ui-bl-result { flex: 1 1 100%; }
+    .ui-list-head .ui-seg { margin-inline-start: 0; }
 }
 
 /* ---------- Domains (as the mockup) ---------- */

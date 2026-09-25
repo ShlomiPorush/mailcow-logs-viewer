@@ -220,8 +220,10 @@ function applyFeatureToggles() {
     const blacklistSection = document.getElementById('blacklist-section');
     const dashboardBlacklistCard = document.getElementById('dashboard-blacklist-card');
     const statusBlacklistKpi = document.getElementById('status-kpi-blocklists-cell');
+    const statusBlacklistTab = document.getElementById('status-tab-btn-blocklists');
     const blacklistOff = window.disabledFeatures.includes('blacklist');
-    [blacklistSection, dashboardBlacklistCard, statusBlacklistKpi].forEach(el => {
+    if (blacklistOff && typeof statusTab !== 'undefined' && statusTab === 'blocklists') statusShowTab('overview');
+    [blacklistSection, dashboardBlacklistCard, statusBlacklistKpi, statusBlacklistTab].forEach(el => {
         if (el) el.style.display = blacklistOff ? 'none' : '';
     });
 
@@ -3797,6 +3799,109 @@ async function loadMessages(page = 1) {
 // STATUS TAB
 // =============================================================================
 
+// ---------- Status page ----------
+// What each loader found, so the attention list and the tab counters can be
+// built from one place once any of them finishes
+const statusState = { containers: null, blocklists: null, jobs: null };
+let statusTab = 'overview';
+let statusCtrFilter = 'all';
+let statusJobFilterValue = 'all';
+
+function statusShowTab(tab) {
+    statusTab = tab;
+    document.querySelectorAll('.ui-st-tabs .modal-tab').forEach(btn => {
+        const on = btn.id === `status-tab-btn-${tab}`;
+        btn.classList.toggle('active', on);
+        btn.setAttribute('aria-selected', on);
+    });
+    document.querySelectorAll('.ui-st-panel').forEach(panel => panel.classList.toggle('hidden', panel.id !== `status-tab-${tab}`));
+}
+
+function setStatusTabCount(tab, count, isFail) {
+    const el = document.getElementById(`status-tab-n-${tab}`);
+    if (!el) return;
+    el.textContent = count;
+    el.classList.toggle('hidden', !count);
+    el.classList.toggle('is-fail', !!isFail);
+}
+
+function statusContainerFilter(filter) {
+    statusCtrFilter = filter;
+    document.querySelectorAll('[data-ctr-filter]').forEach(b => b.setAttribute('aria-pressed', b.dataset.ctrFilter === filter));
+    document.querySelectorAll('#status-containers .ui-st-row').forEach(row => {
+        row.hidden = filter === 'problems' && !row.classList.contains('is-down');
+    });
+}
+
+function statusJobFilter(filter) {
+    statusJobFilterValue = filter;
+    document.querySelectorAll('[data-job-filter]').forEach(b => b.setAttribute('aria-pressed', b.dataset.jobFilter === filter));
+    const table = document.querySelector('#status-jobs .ui-table');
+    if (!table) return;
+    let group = null;
+    let groupHasRows = false;
+    const closeGroup = () => { if (group) group.hidden = !groupHasRows; };
+    table.querySelectorAll(':scope > .ui-tr:not(.ui-tr-head)').forEach(row => {
+        if (row.classList.contains('ui-tr-group')) {
+            closeGroup();
+            group = row;
+            groupHasRows = false;
+            return;
+        }
+        const show = filter === 'all' || (filter === 'problems' && row.classList.contains('is-failed'))
+            || (filter === 'off' && row.classList.contains('is-off'));
+        row.hidden = !show;
+        if (show) groupHasRows = true;
+    });
+    closeGroup();
+}
+
+// A clickable link to a provider's own lookup page
+function blocklistLookupLink(r, label) {
+    if (!/^https:\/\//.test(r.info_url || '')) return '';
+    return `<a href="${escapeHtml(r.info_url)}" target="_blank" rel="noopener noreferrer" class="ui-btn ui-btn-sm" title="Look up on ${escapeHtml(r.name)}">${label}</a>`;
+}
+
+// Needs attention: stopped containers, blocklist listings and failed jobs,
+// each with the action that resolves it
+function renderStatusAttention() {
+    const box = document.getElementById('status-attention');
+    const count = document.getElementById('status-attention-count');
+    if (!box) return;
+    const items = [];
+    for (const c of statusState.containers || []) {
+        if (c.ignored || c.running) continue;
+        items.push({ tone: 'fail', title: `${c.name} is stopped`, detail: `State: ${c.state}. It is not running, so what it does is off until it starts again.`,
+            actions: `<button type="button" class="ui-btn ui-btn-sm" onclick="setContainerIgnored('${escapeJsArg(c.container)}', true)" title="Stop counting and alerting on ${escapeHtml(c.name)}">Ignore</button>` });
+    }
+    const blOff = (window.disabledFeatures || []).includes('blacklist');
+    for (const host of blOff ? [] : (statusState.blocklists || [])) {
+        for (const r of (host.results || []).filter(x => x.listed && !x.ignored)) {
+            items.push({ tone: 'fail', title: `${host.hostname} is on ${r.name}`,
+                detail: `${host.source || 'system'}, listed on ${host.listed_count || 1} of ${host.total_blacklists || '?'} lists. Mail to some providers may bounce.`,
+                actions: `${blocklistLookupLink(r, 'Look up')}<button type="button" class="ui-btn ui-btn-sm" onclick="setBlocklistIgnored('${escapeJsArg(r.zone)}', true)" title="Keep checking ${escapeHtml(r.name)} but never count or alert on it">Ignore this list</button>` });
+        }
+    }
+    for (const job of statusState.jobs || []) {
+        if (!job.failed) continue;
+        items.push({ tone: 'warn', title: `${job.name} failed`, detail: job.error || 'The last run did not finish.',
+            actions: `<button type="button" class="ui-btn ui-btn-sm" onclick="triggerBackgroundJob('${escapeJsArg(job.key)}', this, '${escapeJsArg(job.name)}')">Run now</button>` });
+    }
+    const loaded = statusState.containers && statusState.jobs;
+    if (count) count.textContent = items.length ? String(items.length) : '';
+    if (!items.length) {
+        box.innerHTML = loaded ? '<p class="ui-st-allgood">Everything is running. Nothing needs you right now.</p>'
+            : '<div class="ui-loading"><div class="loading"></div><p>Loading...</p></div>';
+        return;
+    }
+    box.innerHTML = items.map(item => `
+        <div class="ui-alert ui-alert-${item.tone}">
+            <span class="ui-alert-bar"></span>
+            <div class="ui-alert-text"><div class="ui-alert-title"><b>${escapeHtml(item.title)}</b></div><p>${escapeHtml(item.detail)}</p></div>
+            <div class="ui-st-acts">${item.actions}</div>
+        </div>`).join('');
+}
+
 async function loadStatus() {
     try {
         await Promise.all([
@@ -3813,6 +3918,7 @@ async function loadStatus() {
                 timeZone: appTimezone && appTimezone !== 'UTC' ? appTimezone : undefined }).format(new Date());
             subtitle.textContent = `${host && host.textContent && host.textContent !== 'mailcow' ? `${host.textContent}, checked` : 'Checked'} at ${now}`;
         }
+        renderStatusAttention();
     } catch (error) {
         console.error('Failed to load status:', error);
     }
@@ -3893,34 +3999,39 @@ async function loadStatusContainers() {
             const running = counted.filter(isRunning).length;
             const stopped = counted.length - running;
             const ignoredCount = containersList.length - counted.length;
-            setStatusKpi('status-kpi-containers', `${running} of ${counted.length}`, stopped > 0 ? 'fail' : '');
-            if (note) note.textContent = [stopped ? `${stopped} stopped` : 'All running', ignoredCount ? `${ignoredCount} ignored` : ''].filter(Boolean).join(', ');
+            setStatusKpi('status-kpi-containers', `${running} of ${counted.length} running`, stopped > 0 ? 'fail' : '');
+            const summaryText = [stopped ? `${stopped} stopped` : 'All running', ignoredCount ? `${ignoredCount} ignored` : ''].filter(Boolean).join(', ');
+            if (note) note.textContent = summaryText;
+            const summary = document.getElementById('status-containers-summary');
+            if (summary) summary.textContent = summaryText;
+            setStatusTabCount('containers', stopped, true);
+            statusState.containers = containersList.map(c => ({ ...c, running: isRunning(c) }));
 
             // Stopped containers first, so they are seen; ignored ones last
             const rank = c => c.ignored ? 2 : (isRunning(c) ? 1 : 0);
-            const ordered = [...containersList].sort((a, b) => rank(a) - rank(b));
+            const ordered = [...containersList].sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name));
             container.innerHTML = `
-                <div class="ui-ctr-grid">
+                <section class="ui-panel ui-st-rows">
+                    <div class="ui-st-row ui-st-row-head"><span>Container</span><span>State</span><span class="ui-st-hide-sm">Up for</span><span></span></div>
                     ${ordered.map(c => {
                         const up = isRunning(c);
-                        const since = c.started_at ? formatAgo(c.started_at).replace(' ago', '') : '';
-                        const title = c.ignored ? 'Ignored: shown here but never counted or alerted'
-                            : (c.started_at ? `Started ${formatTime(c.started_at)}` : 'Start time unknown');
+                        const since = c.started_at ? formatAgo(c.started_at).replace(' ago', '') : '-';
                         const arg = escapeJsArg(c.container);
                         // A stopped container can be ignored; an ignored one can be counted again
                         const action = c.ignored
-                            ? `<button type="button" class="ui-ctr-act" onclick="setContainerIgnored('${arg}', false)">Stop ignoring</button>`
-                            : (up ? '' : `<button type="button" class="ui-ctr-act" onclick="setContainerIgnored('${arg}', true)" title="Stop counting and alerting on ${escapeHtml(c.name)}">Ignore</button>`);
+                            ? `<button type="button" class="ui-btn ui-btn-sm" onclick="setContainerIgnored('${arg}', false)">Stop ignoring</button>`
+                            : (up ? '' : `<button type="button" class="ui-btn ui-btn-sm" onclick="setContainerIgnored('${arg}', true)" title="Stop counting and alerting on ${escapeHtml(c.name)}">Ignore</button>`);
                         return `
-                        <div class="ui-ctr${c.ignored ? ' is-ignored' : (up ? '' : ' is-down')}" title="${escapeHtml(title)}">
-                            <i class="ui-mdot ${c.ignored ? '' : (up ? 'ui-mdot-ok' : 'ui-mdot-fail')}"></i>
-                            <span class="ui-ctr-name">${escapeHtml(c.name)}</span>
-                            <small>${c.ignored ? 'ignored' : (up ? escapeHtml(since) : escapeHtml(String(c.state || 'unknown')))}</small>
-                            ${action}
+                        <div class="ui-st-row${c.ignored ? ' is-ignored' : (up ? '' : ' is-down')}" title="${escapeHtml(c.ignored ? 'Ignored: shown here but never counted or alerted' : (c.started_at ? `Started ${formatTime(c.started_at)}` : 'Start time unknown'))}">
+                            <span class="ui-st-name"><i class="ui-mdot${c.ignored ? '' : (up ? ' ui-mdot-ok' : ' ui-mdot-fail')}"></i>${escapeHtml(c.name)}</span>
+                            <span>${c.ignored ? 'ignored' : escapeHtml(String(c.state || 'unknown'))}</span>
+                            <span class="ui-st-hide-sm ui-muted">${up ? escapeHtml(since) : '-'}</span>
+                            <span class="ui-st-acts">${action}</span>
                         </div>`;
                     }).join('')}
-                </div>
-            `;
+                </section>`;
+            statusContainerFilter(statusCtrFilter);
+            renderStatusAttention();
         } else {
             setStatusKpi('status-kpi-containers', '-');
             if (note) note.textContent = '';
@@ -4015,7 +4126,9 @@ async function loadStatusStorage() {
         const usedPercent = parseInt(data.used_percent) || 0;
         // Amber above 75%, red above 90%
         const level = usedPercent > 90 ? 'fail' : usedPercent > 75 ? 'warn' : 'ok';
-        setStatusKpi('status-kpi-storage', data.used_percent || `${usedPercent}%`, level === 'ok' ? '' : level);
+        setStatusKpi('status-kpi-storage', `${data.used_percent || `${usedPercent}%`} used`, level === 'ok' ? '' : level);
+        const storageNote = document.getElementById('status-kpi-storage-note');
+        if (storageNote) storageNote.textContent = [data.used && data.total ? `${data.used} of ${data.total}` : '', data.disk || ''].filter(Boolean).join(', ');
 
         container.innerHTML = `
             <div class="ui-kv"><span>Storage Used</span><b class="${level === 'ok' ? '' : `ui-text-${level}`}">${escapeHtml(String(data.used_percent || '0%'))}</b></div>
@@ -4260,7 +4373,17 @@ function renderBlacklistStatus(data) {
     // Addresses on at least one list, out of the checked addresses (same as the dashboard)
     const withData = data.hosts.filter(host => host.has_data);
     const listed = withData.filter(host => (host.listed_count || 0) > 0).length;
-    setStatusKpi('status-kpi-blocklists', withData.length ? `${listed} of ${withData.length}` : '-', listed > 0 ? 'fail' : '');
+    setStatusKpi('status-kpi-blocklists', withData.length ? `${listed} of ${withData.length} listed` : '-', listed > 0 ? 'fail' : '');
+    setStatusTabCount('blocklists', listed, true);
+    statusState.blocklists = data.hosts;
+
+    // Every list the admin ignores, once, with the way back
+    const ignoredLists = new Map();
+    data.hosts.forEach(host => (host.results || []).forEach(r => { if (r.ignored && r.zone) ignoredLists.set(r.zone, r.name); }));
+    const blNote = document.getElementById('status-kpi-blocklists-note');
+    if (blNote) blNote.textContent = ignoredLists.size ? `${ignoredLists.size} list${ignoredLists.size === 1 ? '' : 's'} ignored for every address` : 'Addresses on a blocklist';
+    const blSummary = document.getElementById('status-blacklist-summary');
+    if (blSummary) blSummary.textContent = `${data.hosts.length} address${data.hosts.length === 1 ? '' : 'es'}${listed ? `, ${listed} listed` : ''}`;
 
     // Preserve which hosts show all their lists
     const openStates = {};
@@ -4269,57 +4392,68 @@ function renderBlacklistStatus(data) {
     });
 
     const RESULT_TONE = { clean: 'ok', listed: 'fail', error: 'warn', timeout: 'warn' };
+    const detail = r => r.response ? `${r.name}: ${r.response}` : r.name;
+    const lookupIcon = r => /^https:\/\//.test(r.info_url || '')
+        ? `<a href="${escapeHtml(r.info_url)}" target="_blank" rel="noopener noreferrer" class="ui-bl-link" title="Look up on ${escapeHtml(r.name)}" aria-label="Look up on ${escapeHtml(r.name)}"><svg width="12" height="12" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path></svg></a>`
+        : '';
+    const ignoreToggle = r => r.zone && r.zone !== 'unknown'
+        ? `<button type="button" class="ui-bl-ign" onclick="setBlocklistIgnored('${escapeJsArg(r.zone)}', ${!r.ignored})" title="${r.ignored ? 'Count and alert on this list again' : 'Keep checking this list but never count or alert on it'}">${r.ignored ? 'Stop ignoring' : 'Ignore'}</button>`
+        : '';
+
     container.innerHTML = `
-        <div class="ui-table ui-stack" style="--ui-cols: minmax(180px, 1.4fr) minmax(220px, 2.4fr) 110px 120px; --ui-table-min: 700px">
-            <div class="ui-tr ui-tr-head"><span>Address</span><span>Result</span><span>Checked</span><span class="ui-td-end">Actions</span></div>
-            ${data.hosts.map((host, index) => {
-                const hostId = `host-${index}`;
-                const listedOn = (host.results || []).filter(r => r.listed && !r.ignored);
-                const ignoredOn = (host.results || []).filter(r => r.listed && r.ignored);
-                const total = host.total_blacklists || 0;
-                const result = !host.has_data ? uiTag('Not checked yet', '')
-                    : host.status === 'listed' ? uiTag(`Listed on ${host.listed_count || 0} of ${total}`, 'fail')
-                    : host.status === 'error' ? uiTag('Check error', 'warn')
-                    : host.status === 'clean' ? uiTag(`Not listed on ${total}`, 'ok')
-                    : uiTag('Unknown', '');
-                const detail = r => r.response ? `${r.name}: ${r.response}` : r.name;
-                // The provider's own lookup page, to check or request removal yourself
-                const lookup = r => /^https:\/\//.test(r.info_url || '')
-                    ? `<a href="${escapeHtml(r.info_url)}" target="_blank" rel="noopener noreferrer" class="ui-bl-link" title="Look up on ${escapeHtml(r.name)}" aria-label="Look up on ${escapeHtml(r.name)}"><svg width="12" height="12" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path></svg></a>`
-                    : '';
-                return `
-                <div class="ui-tr ui-bl-row">
-                    <div class="ui-td ui-q-who">
-                        <div>${escapeHtml(host.hostname)} <span class="ui-tag">${escapeHtml(host.source || 'system')}</span></div>
-                    </div>
-                    <div class="ui-td ui-td-wrap ui-bl-result">
-                        ${result}
-                        ${listedOn.map(r => `<code class="ui-code-chip" title="${escapeHtml(detail(r))}">${escapeHtml(r.name)}${lookup(r)}</code>`).join('')}
-                        ${ignoredOn.map(r => `<code class="ui-code-chip is-ignored" title="${escapeHtml(detail(r))}. Ignored: not counted or alerted">${escapeHtml(r.name)} ignored${lookup(r)}</code>`).join('')}
-                    </div>
-                    <span class="ui-td" title="${host.checked_at ? escapeHtml(formatTime(host.checked_at)) : ''}">${host.checked_at ? formatAgo(host.checked_at) : 'Never'}</span>
-                    <span class="ui-td ui-td-end ui-row-actions">
+        <div class="ui-st-hosts">
+        ${data.hosts.map((host, index) => {
+            const hostId = `host-${index}`;
+            const results = host.results || [];
+            const listedOn = results.filter(r => r.listed && !r.ignored);
+            const others = results.filter(r => !(r.listed && !r.ignored));
+            const total = host.total_blacklists || 0;
+            const result = !host.has_data ? uiTag('Not checked yet', '')
+                : host.status === 'listed' ? uiTag(`Listed on ${host.listed_count || 0} of ${total}`, 'fail')
+                : host.status === 'error' ? uiTag('Check error', 'warn')
+                : host.status === 'clean' ? uiTag(`Clean on ${total}`, 'ok')
+                : uiTag('Unknown', '');
+            return `
+            <section class="ui-panel ui-bl-row">
+                <div class="ui-st-host-head">
+                    <b class="ui-mono">${escapeHtml(host.hostname)}</b>
+                    <span class="ui-tag ui-tag-line">${escapeHtml(host.source || 'system')}</span>
+                    ${result}
+                    <span class="ui-st-host-tools">
+                        <span class="ui-muted" title="${host.checked_at ? escapeHtml(formatTime(host.checked_at)) : ''}">${host.checked_at ? `checked ${formatAgo(host.checked_at)}` : 'never checked'}</span>
                         <button onclick="checkHost('${escapeJsArg(host.hostname)}')" class="ui-btn ui-btn-sm" title="Run Check for this Host">Check now</button>
                     </span>
-                    ${host.has_data && host.results && host.results.length ? `
-                    <details id="${hostId}" class="ui-bl-all"${openStates[hostId] ? ' open' : ''}>
-                        <summary>All ${host.results.length} lists</summary>
-                        <div class="ui-bl-grid">
-                            ${host.results.map(r => {
-                                const tone = r.ignored ? '' : (r.listed ? 'fail' : (RESULT_TONE[r.status] || ''));
-                                const state = r.listed ? (r.ignored ? 'listed, ignored' : 'listed') : (r.status || 'unknown');
-                                // Ignoring a list applies to every monitored address
-                                const toggle = r.zone && r.zone !== 'unknown'
-                                    ? `<button type="button" class="ui-bl-ign" onclick="setBlocklistIgnored('${escapeJsArg(r.zone)}', ${!r.ignored})" title="${r.ignored ? 'Count and alert on this list again' : 'Keep checking this list but never count or alert on it'}">${r.ignored ? 'Stop ignoring' : 'Ignore'}</button>`
-                                    : '';
-                                return `<span class="ui-bl-item${tone ? ` ui-bl-${tone}` : ''}${r.ignored ? ' is-ignored' : ''}" title="${escapeHtml(detail(r))}"><i class="ui-mdot${tone ? ` ui-mdot-${tone}` : ''}"></i>${escapeHtml(r.name)}${lookup(r)}<small>${escapeHtml(state)}</small>${toggle}</span>`;
-                            }).join('')}
-                        </div>
-                    </details>` : ''}
-                </div>`;
-            }).join('')}
+                </div>
+                ${listedOn.map(r => `
+                <div class="ui-st-listing">
+                    <div><b>${escapeHtml(r.name)}</b><small>${escapeHtml(r.response ? `Answer ${r.response}` : 'Listed')}</small></div>
+                    <span class="ui-st-acts">${blocklistLookupLink(r, 'Look up')}<button type="button" class="ui-btn ui-btn-sm" onclick="setBlocklistIgnored('${escapeJsArg(r.zone)}', true)">Ignore list</button></span>
+                </div>`).join('')}
+                ${host.has_data && others.length ? `
+                <details id="${hostId}" class="ui-bl-all"${openStates[hostId] ? ' open' : ''}>
+                    <summary>${listedOn.length ? `${others.length} other lists` : `All ${others.length} lists`}</summary>
+                    <div class="ui-bl-grid">
+                        ${others.map(r => {
+                            const tone = r.ignored ? '' : (RESULT_TONE[r.status] || '');
+                            const state = r.listed ? 'listed, ignored' : (r.ignored ? 'ignored' : (r.status || 'unknown'));
+                            return `<span class="ui-bl-item${tone ? ` ui-bl-${tone}` : ''}${r.ignored ? ' is-ignored' : ''}" title="${escapeHtml(detail(r))}"><i class="ui-mdot${tone ? ` ui-mdot-${tone}` : ''}"></i>${escapeHtml(r.name)}${lookupIcon(r)}<small>${escapeHtml(state)}</small>${ignoreToggle(r)}</span>`;
+                        }).join('')}
+                    </div>
+                </details>` : ''}
+            </section>`;
+        }).join('')}
+        ${ignoredLists.size ? `
+            <section class="ui-panel">
+                <div class="ui-panel-head">Ignored lists <span class="ui-count">${ignoredLists.size}</span></div>
+                ${[...ignoredLists].map(([zone, name]) => `
+                <div class="ui-st-listing">
+                    <div><b>${escapeHtml(name)}</b><small>Checked and shown, never counted or alerted, for every address</small></div>
+                    <span class="ui-st-acts"><button type="button" class="ui-btn ui-btn-sm" onclick="setBlocklistIgnored('${escapeJsArg(zone)}', false)">Stop ignoring</button></span>
+                </div>`).join('')}
+            </section>` : ''}
         </div>
     `;
+    renderStatusAttention();
 }
 
 async function setBlocklistIgnored(zone, ignored) {
@@ -4361,6 +4495,9 @@ function renderStatusImport(imports) {
 
 function renderStatusCorrelation(correlation, incompleteList) {
     const container = document.getElementById('status-correlation');
+    setStatusKpi('status-kpi-linking', `${correlation.completion_rate || 0}%`, correlation.incomplete ? 'warn' : '');
+    const linkingNote = document.getElementById('status-kpi-linking-note');
+    if (linkingNote) linkingNote.textContent = `${(correlation.complete || 0).toLocaleString()} of ${(correlation.total || 0).toLocaleString()} complete, ${(correlation.incomplete || 0).toLocaleString()} waiting`;
     container.innerHTML = `
         <div class="ui-kpis">
             <div class="ui-kpi"><b>${(correlation.total || 0).toLocaleString()}</b>Total</div>
@@ -4469,6 +4606,20 @@ function renderStatusJobs(jobs) {
         }
     ];
     
+    // Failed and switched-off jobs feed the attention list, the card and the filter
+    const all = categories.flatMap(cat => cat.jobs.filter(j => j[2]));
+    const isOff = job => job.feature_disabled === true || job.status === 'disabled' || job.enabled === false;
+    statusState.jobs = all.map(([name, key, job]) => ({ name, key, failed: !isOff(job) && job.status === 'failed', error: job.error || '' }));
+    const failed = statusState.jobs.filter(j => j.failed).length;
+    const off = all.filter(j => isOff(j[2])).length;
+    setStatusKpi('status-kpi-jobs', `${all.length - failed - off} of ${all.length - off} healthy`, failed ? 'fail' : '');
+    const jobsNote = [failed ? `${failed} failed` : 'None failed', off ? `${off} off because a feature or setting is off` : ''].filter(Boolean).join(', ');
+    const kpiNote = document.getElementById('status-kpi-jobs-note');
+    if (kpiNote) kpiNote.textContent = jobsNote;
+    const jobsSummary = document.getElementById('status-jobs-summary');
+    if (jobsSummary) jobsSummary.textContent = `${all.length} jobs, ${jobsNote.charAt(0).toLowerCase()}${jobsNote.slice(1)}`;
+    setStatusTabCount('jobs', failed, true);
+
     let html = '';
     for (const cat of categories) {
         // Skip categories where no jobs exist
@@ -4482,6 +4633,8 @@ function renderStatusJobs(jobs) {
             <div class="ui-tr ui-tr-head"><span>Job</span><span>Runs</span><span>Last result</span><span>Last run</span><span class="ui-td-end">Actions</span></div>
             ${html}
         </div>`;
+    statusJobFilter(statusJobFilterValue);
+    renderStatusAttention();
 }
 
 async function triggerBackgroundJob(jobKey, buttonEl, jobName = null) {
