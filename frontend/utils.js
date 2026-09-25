@@ -633,7 +633,7 @@ function renderJobCard(name, jobKey, job) {
     ].filter(Boolean);
 
     return `
-        <div class="ui-tr ui-job${isFeatureOff ? ' is-off' : ''}">
+        <div class="ui-tr ui-job${isFeatureOff || isDisabled ? ' is-off' : ''}${!isDisabled && job.status === 'failed' ? ' is-failed' : ''}">
             <div class="ui-td ui-q-who">
                 <div>${escapeHtml(name)}</div>
                 ${job.description ? `<small title="${escapeHtml(job.description)}">${escapeHtml(job.description)}</small>` : ''}

@@ -999,68 +999,92 @@
                 <div class="ui-page-head">
                     <div>
                         <h1 class="ui-h1">Status</h1>
-                        <p class="ui-muted" id="status-subtitle">Containers, storage, blocklists, imports and background jobs</p>
+                        <p class="ui-muted" id="status-subtitle">Containers, blocklists, background jobs and data</p>
+                    </div>
+                    <div class="ui-head-tools"><button type="button" class="ui-btn" onclick="loadStatus()"><svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>Refresh</button></div>
+                </div>
+
+                <!-- Only what needs a decision, with the action next to it -->
+                <section class="ui-panel" id="status-attention-panel">
+                    <div class="ui-panel-head">Needs attention <span id="status-attention-count" class="ui-count"></span></div>
+                    <div id="status-attention"><div class="ui-loading"><div class="loading"></div><p>Loading...</p></div></div>
+                </section>
+
+                <div class="ui-tabs ui-page-tabs ui-st-tabs" role="tablist" aria-label="Status sections">
+                    <button type="button" class="modal-tab active" role="tab" aria-selected="true" id="status-tab-btn-overview" onclick="statusShowTab('overview')">Overview</button>
+                    <button type="button" class="modal-tab" role="tab" aria-selected="false" id="status-tab-btn-containers" onclick="statusShowTab('containers')">Containers <span id="status-tab-n-containers" class="ui-tab-n hidden"></span></button>
+                    <button type="button" class="modal-tab" role="tab" aria-selected="false" id="status-tab-btn-blocklists" onclick="statusShowTab('blocklists')">Blocklists <span id="status-tab-n-blocklists" class="ui-tab-n hidden"></span></button>
+                    <button type="button" class="modal-tab" role="tab" aria-selected="false" id="status-tab-btn-jobs" onclick="statusShowTab('jobs')">Jobs <span id="status-tab-n-jobs" class="ui-tab-n hidden"></span></button>
+                    <button type="button" class="modal-tab" role="tab" aria-selected="false" id="status-tab-btn-data" onclick="statusShowTab('data')">Data &amp; storage</button>
+                </div>
+
+                <!-- Overview: one card per area, each opens its tab -->
+                <div id="status-tab-overview" class="ui-st-panel" role="tabpanel">
+                    <div class="ui-st-cards" id="status-kpis">
+                        <button type="button" class="ui-st-card" onclick="statusShowTab('containers')"><span class="ui-st-card-label">Containers</span><b id="status-kpi-containers">-</b><small id="status-containers-note"></small></button>
+                        <button type="button" class="ui-st-card" id="status-kpi-blocklists-cell" onclick="statusShowTab('blocklists')"><span class="ui-st-card-label">Blocklists</span><b id="status-kpi-blocklists">-</b><small id="status-kpi-blocklists-note">Addresses on a blocklist</small></button>
+                        <button type="button" class="ui-st-card" onclick="statusShowTab('jobs')"><span class="ui-st-card-label">Background jobs</span><b id="status-kpi-jobs">-</b><small id="status-kpi-jobs-note"></small></button>
+                        <button type="button" class="ui-st-card" onclick="statusShowTab('data')"><span class="ui-st-card-label">Mail storage</span><b id="status-kpi-storage">-</b><small id="status-kpi-storage-note"></small></button>
+                        <button type="button" class="ui-st-card" onclick="statusShowTab('data')"><span class="ui-st-card-label">Message linking</span><b id="status-kpi-linking">-</b><small id="status-kpi-linking-note"></small></button>
+                        <div class="ui-st-card"><span class="ui-st-card-label">This app</span><b id="status-kpi-version">-</b><small id="status-kpi-version-note">Version</small></div>
                     </div>
                 </div>
 
-                <div class="ui-kpis" id="status-kpis">
-                    <div class="ui-kpi"><b id="status-kpi-containers">-</b>Containers running</div>
-                    <div class="ui-kpi" id="status-kpi-blocklists-cell"><b id="status-kpi-blocklists">-</b>Addresses on a blocklist</div>
-                    <div class="ui-kpi"><b id="status-kpi-storage">-</b>Mail storage used</div>
-                    <div class="ui-kpi"><b id="status-kpi-version">-</b><span id="status-kpi-version-note">Version</span></div>
+                <div id="status-tab-containers" class="ui-st-panel hidden" role="tabpanel">
+                    <div class="ui-list-head"><h2 class="ui-h2">Containers</h2> <span id="status-containers-summary" class="ui-count"></span>
+                        <div class="ui-seg ui-head-actions" role="group" aria-label="Show">
+                            <button type="button" aria-pressed="true" data-ctr-filter="all" onclick="statusContainerFilter('all')">All</button>
+                            <button type="button" aria-pressed="false" data-ctr-filter="problems" onclick="statusContainerFilter('problems')">Problems</button>
+                        </div></div>
+                    <div id="status-containers"><div class="ui-loading"><div class="loading"></div><p>Loading...</p></div></div>
                 </div>
 
-                <section class="ui-sec-block">
-                    <div class="ui-list-head"><h2 class="ui-h2">Containers</h2> <span id="status-containers-note" class="ui-count"></span></div>
-                    <div id="status-containers"><div class="ui-loading"><div class="loading"></div><p>Loading...</p></div></div>
-                </section>
-
-                <section id="blacklist-section" class="ui-sec-block">
-                    <div class="ui-list-head"><h2 class="ui-h2">Blocklists</h2>
-                        <button onclick="showHelpModal('IP_Blacklist_Monitor')" class="ui-icon-btn ui-help-btn"
+                <div id="status-tab-blocklists" class="ui-st-panel hidden" role="tabpanel">
+                    <section id="blacklist-section" class="ui-sec-block">
+                        <div class="ui-list-head"><h2 class="ui-h2">Blocklists</h2>
+                            <button onclick="showHelpModal('IP_Blacklist_Monitor')" class="ui-icon-btn ui-help-btn"
                                     title="Help - IP Blacklist Monitor">
                                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                                             d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
                                     </svg>
                                 </button>
-                        <button onclick="checkBlacklists(true)" id="blacklist-check-btn"
-                                class="ui-btn ui-btn-sm ui-head-actions">
-                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                        d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15">
-                                    </path>
-                                </svg>
-                                Check Now
-                            </button>
-                    </div>
-                    <div id="status-blacklist"><div class="ui-loading"><div class="loading"></div><p>Loading...</p></div></div>
-                </section>
+                            <span id="status-blacklist-summary" class="ui-count"></span>
+                            <button onclick="checkBlacklists(true)" id="blacklist-check-btn" class="ui-btn ui-btn-sm ui-head-actions"><svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>Check all now</button>
+                        </div>
+                        <div id="status-blacklist"><div class="ui-loading"><div class="loading"></div><p>Loading...</p></div></div>
+                    </section>
+                </div>
 
-                <section class="ui-sec-block">
-                    <div class="ui-list-head"><h2 class="ui-h2">Background jobs</h2></div>
+                <div id="status-tab-jobs" class="ui-st-panel hidden" role="tabpanel">
+                    <div class="ui-list-head"><h2 class="ui-h2">Background jobs</h2> <span id="status-jobs-summary" class="ui-count"></span>
+                        <div class="ui-seg ui-head-actions" role="group" aria-label="Show">
+                            <button type="button" aria-pressed="true" data-job-filter="all" onclick="statusJobFilter('all')">All</button>
+                            <button type="button" aria-pressed="false" data-job-filter="problems" onclick="statusJobFilter('problems')">Problems</button>
+                            <button type="button" aria-pressed="false" data-job-filter="off" onclick="statusJobFilter('off')">Off</button>
+                        </div></div>
                     <div id="status-jobs"><div class="ui-loading"><div class="loading"></div><p>Loading...</p></div></div>
-                </section>
+                </div>
 
-                <section class="ui-sec-block">
-                    <div class="ui-list-head"><h2 class="ui-h2">Log import</h2></div>
-                    <div id="status-import"><div class="ui-loading"><div class="loading"></div><p>Loading...</p></div></div>
-                </section>
-
-                <section class="ui-sec-block">
-                    <div class="ui-list-head"><h2 class="ui-h2">Message linking</h2></div>
-                    <div id="status-correlation"><div class="ui-loading"><div class="loading"></div><p>Loading...</p></div></div>
-                </section>
-
-                <div class="ui-dash-grid ui-status-pair">
-                    <section class="ui-panel">
-                        <div class="ui-panel-head">mailcow System</div>
-                        <div id="status-system"><div class="ui-loading"><div class="loading"></div><p>Loading...</p></div></div>
-                    </section>
-                    <section class="ui-panel">
-                        <div class="ui-panel-head">Storage</div>
-                        <div id="status-storage"><div class="ui-loading"><div class="loading"></div><p>Loading...</p></div></div>
-                    </section>
+                <div id="status-tab-data" class="ui-st-panel hidden" role="tabpanel">
+                    <div class="ui-st-data">
+                        <section class="ui-sec-block ui-st-wide">
+                            <div class="ui-list-head"><h2 class="ui-h2">Log import</h2></div>
+                            <div id="status-import"><div class="ui-loading"><div class="loading"></div><p>Loading...</p></div></div>
+                        </section>
+                        <section class="ui-sec-block ui-st-wide">
+                            <div class="ui-list-head"><h2 class="ui-h2">Message linking</h2></div>
+                            <div id="status-correlation"><div class="ui-loading"><div class="loading"></div><p>Loading...</p></div></div>
+                        </section>
+                        <section class="ui-panel">
+                            <div class="ui-panel-head">mailcow</div>
+                            <div id="status-system"><div class="ui-loading"><div class="loading"></div><p>Loading...</p></div></div>
+                        </section>
+                        <section class="ui-panel">
+                            <div class="ui-panel-head">Mail storage</div>
+                            <div id="status-storage"><div class="ui-loading"><div class="loading"></div><p>Loading...</p></div></div>
+                        </section>
+                    </div>
                 </div>
             </div>
 
