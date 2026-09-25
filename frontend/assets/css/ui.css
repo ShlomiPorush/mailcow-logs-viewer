@@ -240,12 +240,85 @@
 .ui-locked b { display: block; font-weight: 650; }
 .ui-locked p { margin: 2px 0 0; color: var(--ui-muted); }
 
+/* ---------- Text tones, key-value rows, loading ---------- */
+
+.ui-text-ok { color: var(--ui-ok); }
+.ui-text-warn { color: var(--ui-warn); }
+.ui-text-fail { color: var(--ui-fail); }
+.ui-panel-head .ui-more { border: 0; background: none; color: inherit; font: inherit; font-size: 13px; cursor: pointer; }
+.ui-tag-line { background: none; box-shadow: inset 0 0 0 1px var(--ui-line); font-weight: 600; }
+
+.ui-kv { display: flex; align-items: center; gap: 10px; padding: calc(var(--ui-pad-y) - 2px) var(--ui-pad-x); border-top: 1px solid var(--ui-line); }
+.ui-kv > span { color: var(--ui-muted); }
+.ui-kv > b { margin-inline-start: auto; font-weight: 650; text-align: end; font-variant-numeric: tabular-nums; }
+.ui-kv > b.ui-kv-small { font-size: var(--ui-fs-sm); font-weight: 500; }
+.ui-meter-panel { margin: 4px var(--ui-pad-x) 14px; }
+
+.ui-loading { display: grid; justify-items: center; gap: 8px; padding: 22px var(--ui-pad-x); color: var(--ui-muted); font-size: var(--ui-fs-sm); }
+.ui-loading .loading { width: 24px; height: 24px; border-width: 2px; }
+.ui-loading p { margin: 0; }
+
+/* ---------- Page layout ---------- */
+
+.ui-page:not(.hidden) { display: grid; gap: var(--ui-gap); color: var(--ui-ink); font-size: var(--ui-fs); }
+.ui-page-head { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px 16px; margin-bottom: 4px; }
+.ui-page-head p { margin: 6px 0 0; }
+.ui-quick-search { display: flex; gap: 8px; margin-inline-start: auto; }
+.ui-quick-search .ui-input { width: 230px; }
+.ui-quick-search .ui-select { width: 160px; }
+.ui-dash-grid { display: grid; grid-template-columns: minmax(0, 1.9fr) minmax(260px, 1fr); gap: var(--ui-gap); align-items: start; }
+.ui-col { display: grid; gap: var(--ui-gap); min-width: 0; }
+
+/* Key figures inside a panel */
+.ui-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px 18px; padding: 2px var(--ui-pad-x) 16px; }
+.ui-stat { display: flex; flex-direction: column; min-width: 0; color: var(--ui-muted); font-size: var(--ui-fs-sm); }
+.ui-stat b { order: 2; color: var(--ui-ink); font-size: 26px; line-height: 1.2; font-weight: 750; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+.ui-stat b.ui-text-fail { color: var(--ui-fail); }
+.ui-stat b.ui-text-warn { color: var(--ui-warn); }
+.ui-stat small { order: 3; font-size: 12px; }
+
+/* Message rows (Dashboard recent activity) */
+.ui-msg-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 14px; align-items: center; padding: var(--ui-pad-y) var(--ui-pad-x);
+    border-top: 1px solid var(--ui-line); cursor: pointer; }
+.ui-msg-row:hover { background: color-mix(in srgb, var(--ui-accent) 5%, transparent); }
+.ui-msg-main { min-width: 0; }
+.ui-msg-who { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; font-weight: 600; overflow-wrap: anywhere; }
+.ui-msg-who svg { color: var(--ui-muted); flex: none; }
+.ui-msg-sub { margin: 2px 0 0; color: var(--ui-muted); font-size: var(--ui-fs-sm); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ui-msg-meta { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+.ui-msg-tags { display: flex; gap: 6px; }
+.ui-msg-meta time { color: var(--ui-muted); font-size: 12px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+
+/* Alerts that need attention (a coloured bar, the text, one action) */
+.ui-alert { display: flex; align-items: flex-start; gap: 14px; padding: var(--ui-pad-y) var(--ui-pad-x) var(--ui-pad-y) 0; border-top: 1px solid var(--ui-line); }
+.ui-alert-bar { width: 4px; align-self: stretch; flex: none; border-radius: 0 4px 4px 0; background: var(--ui-info); }
+.ui-alert-fail .ui-alert-bar { background: var(--ui-fail); }
+.ui-alert-warn .ui-alert-bar { background: var(--ui-warn); }
+.ui-alert-text { flex: 1; min-width: 0; }
+.ui-alert-title { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; }
+.ui-alert-text p { margin: 3px 0 0; font-size: var(--ui-fs-sm); overflow-wrap: anywhere; }
+
+@media (max-width: 1000px) {
+    .ui-dash-grid { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 760px) {
+    /* 16px keeps phones from zooming in when a field gets focus */
+    .ui-input, .ui-select, .ui-textarea { font-size: 16px; }
+    .ui-quick-search { width: 100%; flex-wrap: wrap; margin-inline-start: 0; }
+    .ui-quick-search .ui-input { flex: 1 1 100%; width: auto; }
+    .ui-quick-search .ui-select { flex: 1; width: auto; }
+    .ui-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 18px; }
+    .ui-msg-row { grid-template-columns: minmax(0, 1fr); }
+    .ui-msg-meta { flex-direction: row; align-items: center; justify-content: space-between; }
+    .ui-alert { flex-wrap: wrap; }
+    .ui-alert > .ui-btn { margin-inline-start: 18px; }
+}
+
 /* ---------- App shell: top bar, sidebar, phone tab bar and sheet ---------- */
 
-/* Page background behind the content column. Light uses the panel tone so the
-   white cards of pages not yet migrated keep their contrast. */
-body { font-family: var(--ui-font); background: var(--ui-panel); }
-.dark body { background: var(--ui-bg); }
+/* Page background. Panels sit on it in the panel tone; the white cards of pages
+   not migrated yet keep their shadow, so they still stand out. */
+body { font-family: var(--ui-font); background: var(--ui-bg); }
 
 .ui-shell { display: grid; min-height: 100vh; grid-template-columns: 228px minmax(0, 1fr); grid-template-rows: 56px 1fr;
     grid-template-areas: "top top" "side main"; }
