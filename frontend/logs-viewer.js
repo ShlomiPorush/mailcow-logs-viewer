@@ -104,7 +104,7 @@ function renderLogServiceList(services) {
     if (!container) return;
     
     if (services.length === 0) {
-        container.innerHTML = '<p class="text-xs text-gray-500 dark:text-gray-400 text-center py-4">No services enabled</p>';
+        container.innerHTML = '<p class="ui-empty">No services enabled</p>';
         return;
     }
     
@@ -114,18 +114,13 @@ function renderLogServiceList(services) {
         const countStr = svc.log_count >= 1000 ? (svc.log_count / 1000).toFixed(1) + 'K' : svc.log_count.toString();
         
         return `
-            <button onclick="selectLogService('${svc.id}')" 
-                id="log-svc-${svc.id}"
-                class="w-full flex items-center gap-2 px-3 py-2 rounded-md text-left text-sm transition-colors log-service-btn ${
-                    isActive 
-                    ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-700' 
-                    : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
-                }" data-service="${svc.id}">
-                <svg class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <button onclick="selectLogService('${svc.id}')" id="log-svc-${svc.id}"
+                class="log-service-btn ui-log-svc"${isActive ? ' aria-current="true"' : ''} data-service="${svc.id}">
+                <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="${iconPath}"></path>
                 </svg>
-                <span class="flex-1 truncate font-medium">${escapeHtml(svc.name)}</span>
-                <span class="text-xs text-gray-400 dark:text-gray-500 font-mono">${countStr}</span>
+                <span class="ui-log-svc-name">${escapeHtml(svc.name)}</span>
+                <small>${countStr}</small>
             </button>
         `;
     }).join('');
@@ -149,17 +144,8 @@ async function selectLogService(serviceId) {
     
     // Update sidebar active state
     document.querySelectorAll('.log-service-btn').forEach(btn => {
-        const isActive = btn.dataset.service === serviceId;
-        if (isActive) {
-            btn.className = btn.className.replace(
-                /text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700/g, ''
-            );
-            btn.classList.add('bg-blue-50', 'dark:bg-blue-900/30', 'text-blue-700', 'dark:text-blue-300', 'border', 'border-blue-200', 'dark:border-blue-700');
-            btn.classList.remove('hover:bg-gray-100', 'dark:hover:bg-gray-700');
-        } else {
-            btn.classList.remove('bg-blue-50', 'dark:bg-blue-900/30', 'text-blue-700', 'dark:text-blue-300', 'border', 'border-blue-200', 'dark:border-blue-700');
-            btn.classList.add('text-gray-700', 'dark:text-gray-300', 'hover:bg-gray-100', 'dark:hover:bg-gray-700');
-        }
+        if (btn.dataset.service === serviceId) btn.setAttribute('aria-current', 'true');
+        else btn.removeAttribute('aria-current');
     });
     
     // Update status bar
@@ -210,30 +196,9 @@ async function loadSmartFilters(serviceId) {
         
         container.classList.remove('hidden');
         
-        const colorClasses = {
-            red: 'border-red-300 dark:border-red-700 text-red-700 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20',
-            orange: 'border-orange-300 dark:border-orange-700 text-orange-700 dark:text-orange-400 hover:bg-orange-50 dark:hover:bg-orange-900/20',
-            yellow: 'border-yellow-300 dark:border-yellow-700 text-yellow-700 dark:text-yellow-400 hover:bg-yellow-50 dark:hover:bg-yellow-900/20',
-            blue: 'border-blue-300 dark:border-blue-700 text-blue-700 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20',
-        };
-        
-        const activeColorClasses = {
-            red: 'bg-red-500 border-red-500 text-white',
-            orange: 'bg-orange-500 border-orange-500 text-white',
-            yellow: 'bg-yellow-500 border-yellow-500 text-white',
-            blue: 'bg-blue-500 border-blue-500 text-white',
-        };
-        
-        chipsContainer.innerHTML = logsState.smartFilters.map(f => {
-            const colors = colorClasses[f.color] || colorClasses.blue;
-            return `<button onclick="toggleSmartFilter('${f.id}')" 
-                id="smart-filter-${f.id}"
-                class="px-2.5 py-1 text-xs font-medium rounded-full border transition-colors ${colors}"
-                title="${escapeHtml(f.description || '')}"
-                data-filter-id="${f.id}" data-color="${f.color}">
-                ${escapeHtml(f.label)}
-            </button>`;
-        }).join('');
+        chipsContainer.innerHTML = logsState.smartFilters.map(f => `<button onclick="toggleSmartFilter('${f.id}')"
+                id="smart-filter-${f.id}" class="ui-chip ui-chip-${escapeHtml(f.color || 'blue')}" aria-pressed="false"
+                title="${escapeHtml(f.description || '')}" data-filter-id="${f.id}" data-color="${escapeHtml(f.color || 'blue')}">${escapeHtml(f.label)}</button>`).join('');
         
     } catch (error) {
         console.error('[LOGS] Failed to load smart filters:', error);
@@ -250,23 +215,9 @@ async function toggleSmartFilter(filterId) {
     }
     
     // Update chip visual
-    const colorClasses = {
-        red: { inactive: 'border-red-300 dark:border-red-700 text-red-700 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20', active: 'bg-red-500 border-red-500 text-white' },
-        orange: { inactive: 'border-orange-300 dark:border-orange-700 text-orange-700 dark:text-orange-400 hover:bg-orange-50 dark:hover:bg-orange-900/20', active: 'bg-orange-500 border-orange-500 text-white' },
-        yellow: { inactive: 'border-yellow-300 dark:border-yellow-700 text-yellow-700 dark:text-yellow-400 hover:bg-yellow-50 dark:hover:bg-yellow-900/20', active: 'bg-yellow-500 border-yellow-500 text-white' },
-        blue: { inactive: 'border-blue-300 dark:border-blue-700 text-blue-700 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20', active: 'bg-blue-500 border-blue-500 text-white' },
-    };
-    
     const btn = document.getElementById(`smart-filter-${filterId}`);
-    if (btn) {
-        const color = btn.dataset.color || 'blue';
-        const isActive = logsState.activeSmartFilters.includes(filterId);
-        const classes = colorClasses[color] || colorClasses.blue;
-        
-        // Reset classes
-        btn.className = `px-2.5 py-1 text-xs font-medium rounded-full border transition-colors ${isActive ? classes.active : classes.inactive}`;
-    }
-    
+    if (btn) btn.setAttribute('aria-pressed', logsState.activeSmartFilters.includes(filterId) ? 'true' : 'false');
+
     // Client-side filter: show/hide existing log lines
     applyLogFilter();
 }
@@ -869,7 +820,7 @@ function updateWsIndicator(connected) {
     const status = document.getElementById('logs-ws-status');
     
     if (indicator) {
-        indicator.className = `w-2 h-2 rounded-full ${connected ? 'bg-green-500' : logsState.isPaused ? 'bg-yellow-500' : 'bg-red-500'}`;
+        indicator.className = `ui-mdot ${connected ? 'ui-mdot-ok' : logsState.isPaused ? 'ui-mdot-warn' : 'ui-mdot-fail'}`;
     }
     if (status) {
         status.textContent = connected ? 'Connected' : logsState.isPaused ? 'Paused' : 'Disconnected';
@@ -918,19 +869,13 @@ function toggleLogPause() {
         // Paused → show Resume
         if (text) text.textContent = 'Resume';
         if (icon) icon.innerHTML = '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>';
-        if (btn) {
-            btn.classList.add('border-yellow-500', 'bg-yellow-500', 'text-white');
-            btn.classList.remove('border-gray-300', 'dark:border-gray-600', 'text-gray-700', 'dark:text-gray-300');
-        }
+        if (btn) btn.setAttribute('aria-pressed', 'true');
         disconnectLogWebSocket();
     } else {
         // Resumed → show Pause
         if (text) text.textContent = 'Pause';
         if (icon) icon.innerHTML = '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>';
-        if (btn) {
-            btn.classList.remove('border-yellow-500', 'bg-yellow-500', 'text-white');
-            btn.classList.add('border-gray-300', 'dark:border-gray-600', 'text-gray-700', 'dark:text-gray-300');
-        }
+        if (btn) btn.setAttribute('aria-pressed', 'false');
         connectLogWebSocket(logsState.activeService);
     }
     
@@ -941,15 +886,7 @@ function toggleAutoScroll() {
     logsState.autoScroll = !logsState.autoScroll;
     
     const btn = document.getElementById('logs-autoscroll-btn');
-    if (btn) {
-        if (logsState.autoScroll) {
-            btn.classList.add('border-blue-500', 'bg-blue-500', 'text-white');
-            btn.classList.remove('border-gray-300', 'dark:border-gray-600', 'text-gray-700', 'dark:text-gray-300');
-        } else {
-            btn.classList.remove('border-blue-500', 'bg-blue-500', 'text-white');
-            btn.classList.add('border-gray-300', 'dark:border-gray-600', 'text-gray-700', 'dark:text-gray-300');
-        }
-    }
+    if (btn) btn.setAttribute('aria-pressed', logsState.autoScroll ? 'true' : 'false');
     
     if (logsState.autoScroll) {
         const terminal = document.getElementById('logs-terminal');
@@ -976,15 +913,7 @@ function toggleWordWrap() {
         output.style.wordWrap = logsState.wordWrap ? 'break-word' : 'normal';
     }
     
-    if (btn) {
-        if (logsState.wordWrap) {
-            btn.classList.add('border-blue-500', 'bg-blue-500', 'text-white');
-            btn.classList.remove('border-gray-300', 'dark:border-gray-600', 'text-gray-700', 'dark:text-gray-300');
-        } else {
-            btn.classList.remove('border-blue-500', 'bg-blue-500', 'text-white');
-            btn.classList.add('border-gray-300', 'dark:border-gray-600', 'text-gray-700', 'dark:text-gray-300');
-        }
-    }
+    if (btn) btn.setAttribute('aria-pressed', logsState.wordWrap ? 'true' : 'false');
 }
 
 function searchLogs() {
@@ -1126,11 +1055,7 @@ function setLiveButtonActive(active) {
     const btn = document.getElementById('logs-live-btn');
     if (!btn) return;
     
-    if (active) {
-        btn.className = 'inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md border border-green-500 bg-green-500 text-white transition-colors';
-    } else {
-        btn.className = 'inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors';
-    }
+    btn.setAttribute('aria-pressed', active ? 'true' : 'false');
 }
 
 function clearLogSearch() {
@@ -1142,16 +1067,7 @@ function clearLogSearch() {
     if (logsState.activeSmartFilters.length > 0) {
         logsState.activeSmartFilters.forEach(filterId => {
             const btn = document.getElementById(`smart-filter-${filterId}`);
-            if (btn) {
-                const color = btn.dataset.color || 'blue';
-                const inactiveClasses = {
-                    red: 'border-red-300 dark:border-red-700 text-red-700 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20',
-                    orange: 'border-orange-300 dark:border-orange-700 text-orange-700 dark:text-orange-400 hover:bg-orange-50 dark:hover:bg-orange-900/20',
-                    yellow: 'border-yellow-300 dark:border-yellow-700 text-yellow-700 dark:text-yellow-400 hover:bg-yellow-50 dark:hover:bg-yellow-900/20',
-                    blue: 'border-blue-300 dark:border-blue-700 text-blue-700 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20',
-                };
-                btn.className = `px-2.5 py-1 text-xs font-medium rounded-full border transition-colors ${inactiveClasses[color] || inactiveClasses.blue}`;
-            }
+            if (btn) btn.setAttribute('aria-pressed', 'false');
         });
         logsState.activeSmartFilters = [];
     }
@@ -1245,10 +1161,7 @@ function clearLogDisplay() {
     if (logsState.activeSmartFilters.length > 0) {
         logsState.activeSmartFilters.forEach(filterId => {
             const chip = document.querySelector(`[data-filter-id="${filterId}"]`);
-            if (chip) {
-                chip.classList.remove('bg-blue-100', 'dark:bg-blue-900/40', 'text-blue-700', 'dark:text-blue-300', 'border-blue-300', 'dark:border-blue-600');
-                chip.classList.add('bg-gray-100', 'dark:bg-gray-700', 'text-gray-600', 'dark:text-gray-400', 'border-gray-300', 'dark:border-gray-600');
-            }
+            if (chip) chip.setAttribute('aria-pressed', 'false');
         });
         logsState.activeSmartFilters = [];
     }
