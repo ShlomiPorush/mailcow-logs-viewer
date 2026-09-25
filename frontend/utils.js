@@ -141,6 +141,17 @@ function uiStatusTag(status) {
     return `<span class="ui-tag${tone ? ` ui-tag-${tone}` : ''}">${escapeHtml(String(status))}</span>`;
 }
 
+// The correlation status of a message (getCorrelationStatusDisplay) as a v3
+// tag: same text and tooltip, tone from the final status; Linked is good and
+// Pending waits.
+function uiCorrelationTag(msg) {
+    const status = getCorrelationStatusDisplay(msg);
+    if (!status) return '';
+    const tone = UI_STATUS_TONE[msg.final_status] || (msg.is_complete ? 'ok' : 'warn');
+    const title = msg.final_status || (msg.is_complete ? 'Correlation complete' : 'Waiting for Postfix logs');
+    return `<span class="ui-tag ui-tag-${tone}" title="${escapeHtml(title)}">${escapeHtml(status.display)}</span>`;
+}
+
 function uiDirectionTag(direction) {
     return `<span class="ui-tag ui-tag-line">${escapeHtml(String(direction))}</span>`;
 }

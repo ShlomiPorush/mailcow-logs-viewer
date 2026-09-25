@@ -754,55 +754,55 @@ async function smartRefreshMessages() {
 }
 
 // Render messages without loading spinner
+// One row of the Messages list (also used by the smart refresh). Everything
+// the list showed before is kept: correlation status, direction, spam verdict,
+// time, queue ID, message ID, score (red from 15), folder, deliveries, user, IP.
+function renderMessageRow(msg) {
+    const tone = messageRowTone(msg);
+    return `
+        <div class="ui-msg-item${tone ? ` ui-msg-${tone}` : ''}" onclick="viewMessageDetails('${escapeJsArg(msg.correlation_key)}')">
+            <div class="ui-msg-l1">
+                <span class="ui-msg-who">
+                    <span>${escapeHtml(msg.sender || 'Unknown')}</span>
+                    <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg>
+                    <span class="ui-muted">${escapeHtml(msg.recipient || 'Unknown')}</span>
+                </span>
+                <time>${formatTime(msg.first_seen)}</time>
+            </div>
+            <p class="ui-msg-sub" dir="auto" title="${escapeHtml(msg.subject || 'No subject')}">${escapeHtml(msg.subject || 'No subject')}</p>
+            <div class="ui-msg-l3">
+                ${uiCorrelationTag(msg)}
+                ${msg.direction ? uiDirectionTag(msg.direction) : ''}
+                ${msg.is_spam !== null && msg.is_spam !== undefined ? `<span class="ui-tag ${msg.is_spam ? 'ui-tag-spam' : 'ui-tag-ok'}">${msg.is_spam ? 'SPAM' : 'CLEAN'}</span>` : ''}
+                ${msg.queue_id ? `<span class="ui-mono" title="Queue ID">Q: ${escapeHtml(msg.queue_id)}</span>` : ''}
+                ${msg.message_id ? `<span class="ui-mono ui-msg-mid" title="Message ID: ${escapeHtml(msg.message_id)}">MID: ${escapeHtml(msg.message_id.substring(0, 20))}${msg.message_id.length > 20 ? '...' : ''}</span>` : ''}
+                ${msg.spam_score !== null && msg.spam_score !== undefined ? `<span>Score: <b class="${msg.spam_score >= 15 ? 'ui-text-fail' : ''}">${msg.spam_score.toFixed(1)}</b></span>` : ''}
+                ${renderMailboxFolderHint(msg)}
+                ${renderDeliveriesChip(msg)}
+                ${msg.user ? `<span>User: ${escapeHtml(msg.user)}</span>` : ''}
+                ${msg.ip ? `<span>IP: ${escapeHtml(msg.ip)}</span>` : ''}
+            </div>
+        </div>`;
+}
+
+// The coloured edge of a row follows its final status.
+function messageRowTone(msg) {
+    const tone = UI_STATUS_TONE[msg.final_status];
+    if (tone) return tone;
+    return msg.is_complete === false ? 'warn' : '';
+}
+
 function renderMessagesData(data) {
     const container = document.getElementById('messages-logs');
     if (!container) return;
 
     if (!data.data || data.data.length === 0) {
-        container.innerHTML = '<p class="text-gray-500 dark:text-gray-400 text-center py-8">No messages found</p>';
+        container.innerHTML = '<p class="ui-empty">No messages found</p>';
         return;
     }
 
     container.innerHTML = `
-        <div class="space-y-3">
-            ${data.data.map(msg => `
-                <div class="border border-gray-200 dark:border-gray-700 rounded-lg p-4 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition cursor-pointer" onclick="viewMessageDetails('${msg.correlation_key}')">
-                    <div class="grid grid-cols-1 sm:grid-cols-[1fr_auto] gap-2 mb-2 items-start">
-                        <div class="min-w-0 overflow-hidden">
-                            <div class="flex flex-wrap items-center gap-2 mb-1">
-                                <span class="text-sm font-medium text-gray-900 dark:text-white">${escapeHtml(msg.sender || 'Unknown')}</span>
-                                <svg class="w-4 h-4 text-gray-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
-                                </svg>
-                                <span class="text-sm text-gray-600 dark:text-gray-300">${escapeHtml(msg.recipient || 'Unknown')}</span>
-                            </div>
-                            <p class="text-xs text-gray-500 dark:text-gray-400 truncate" dir="auto" title="${escapeHtml(msg.subject || 'No subject')}">${escapeHtml(msg.subject || 'No subject')}</p>
-                        </div>
-                        <div class="flex flex-wrap items-center gap-2 flex-shrink-0 sm:justify-end">
-                            ${(() => {
-            const correlationStatus = getCorrelationStatusDisplay(msg);
-            if (correlationStatus) {
-                return `<span class="inline-block px-2 py-0.5 text-xs font-medium rounded ${correlationStatus.class}" title="${msg.final_status || (msg.is_complete ? 'Correlation complete' : 'Waiting for Postfix logs')}">${correlationStatus.display}</span>`;
-            }
-            return '';
-        })()}
-                            ${msg.direction ? `<span class="inline-block px-2 py-0.5 text-xs font-medium rounded ${getDirectionClass(msg.direction)}">${msg.direction}</span>` : ''}
-                            ${msg.is_spam !== null ? `<span class="inline-block px-2 py-0.5 text-xs font-medium rounded ${msg.is_spam ? 'bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-300' : 'bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300'}">${msg.is_spam ? 'SPAM' : 'CLEAN'}</span>` : ''}
-                        </div>
-                    </div>
-                    <div class="flex flex-wrap items-center gap-4 text-xs text-gray-500 dark:text-gray-400">
-                        <span>${formatTime(msg.first_seen)}</span>
-                        ${msg.queue_id ? `<span class="font-mono" title="Queue ID">Q: ${msg.queue_id}</span>` : ''}
-                        ${msg.message_id ? `<span class="font-mono truncate max-w-xs" title="Message ID: ${escapeHtml(msg.message_id)}">MID: ${escapeHtml(msg.message_id.substring(0, 20))}${msg.message_id.length > 20 ? '...' : ''}</span>` : ''}
-                        ${msg.spam_score !== null ? `<span>Score: <span class="${msg.spam_score >= 15 ? 'text-red-600 dark:text-red-400 font-semibold' : 'text-gray-600 dark:text-gray-300'}">${msg.spam_score.toFixed(1)}</span></span>` : ''}
-                        ${renderMailboxFolderHint(msg)}
-                        ${renderDeliveriesChip(msg)}
-                        ${msg.user ? `<span>User: ${escapeHtml(msg.user)}</span>` : ''}
-                        ${msg.ip ? `<span>IP: ${msg.ip}</span>` : ''}
-                    </div>
-                </div>
-            `).join('')}
-        </div>
+        <div class="ui-msg-list">${data.data.map(renderMessageRow).join('')}</div>
         ${renderPagination('messages', data.page, data.pages)}
     `;
 }
@@ -3480,14 +3480,7 @@ function clearMessagesFilters() {
     document.getElementById('messages-date-range-start').value = '';
     document.getElementById('messages-date-range-end').value = '';
     document.getElementById('messages-date-range-label').textContent = 'All Time';
-    // Reset preset button styles
-    document.querySelectorAll('.messages-date-preset-btn').forEach(btn => {
-        if (btn.getAttribute('data-preset') === '') {
-            btn.className = 'messages-date-preset-btn px-3 py-1.5 text-xs font-medium rounded-md border border-blue-500 bg-blue-500 text-white transition-colors';
-        } else {
-            btn.className = 'messages-date-preset-btn px-3 py-1.5 text-xs font-medium rounded-md border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors';
-        }
-    });
+    setMessagesDatePresetActive('');
     currentFilters.messages = {};
     currentPage.messages = 1;
     loadMessages();
@@ -3496,6 +3489,13 @@ function clearMessagesFilters() {
 // =============================================================================
 // MESSAGES DATE RANGE PICKER
 // =============================================================================
+
+// Marks the chosen preset chip; null marks none (a custom range).
+function setMessagesDatePresetActive(preset) {
+    document.querySelectorAll('.messages-date-preset-btn').forEach(btn => {
+        btn.setAttribute('aria-pressed', String(preset !== null && btn.getAttribute('data-preset') === preset));
+    });
+}
 
 function toggleMessagesDateRangePicker() {
     const dropdown = document.getElementById('messages-date-range-dropdown');
@@ -3540,14 +3540,7 @@ function selectMessagesDatePreset(preset) {
     document.getElementById('messages-start-date').value = startDate;
     document.getElementById('messages-end-date').value = endDate;
 
-    // Update preset button styles
-    document.querySelectorAll('.messages-date-preset-btn').forEach(btn => {
-        if (btn.getAttribute('data-preset') === preset) {
-            btn.className = 'messages-date-preset-btn px-3 py-1.5 text-xs font-medium rounded-md border border-blue-500 bg-blue-500 text-white transition-colors';
-        } else {
-            btn.className = 'messages-date-preset-btn px-3 py-1.5 text-xs font-medium rounded-md border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors';
-        }
-    });
+    setMessagesDatePresetActive(preset);
 
     // Close dropdown and apply
     document.getElementById('messages-date-range-dropdown').classList.add('hidden');
@@ -3581,10 +3574,7 @@ function applyMessagesCustomDateRange() {
     const fmt = (d) => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
     document.getElementById('messages-date-range-label').textContent = `${fmt(startDate)} - ${fmt(endDate)}`;
 
-    // Reset preset button styles
-    document.querySelectorAll('.messages-date-preset-btn').forEach(btn => {
-        btn.className = 'messages-date-preset-btn px-3 py-1.5 text-xs font-medium rounded-md border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors';
-    });
+    setMessagesDatePresetActive(null);
 
     // Close dropdown and apply
     document.getElementById('messages-date-range-dropdown').classList.add('hidden');
@@ -3609,7 +3599,7 @@ async function loadMessages(page = 1) {
     const container = document.getElementById('messages-logs');
 
     try {
-        container.innerHTML = '<div class="text-center py-8"><div class="loading mx-auto mb-4"></div><p class="text-gray-500 dark:text-gray-400">Loading...</p></div>';
+        container.innerHTML = '<div class="ui-loading"><div class="loading"></div><p>Loading...</p></div>';
 
         const filters = currentFilters.messages || {};
         const params = new URLSearchParams({
@@ -3644,57 +3634,19 @@ async function loadMessages(page = 1) {
         }
 
         if (!data.data || data.data.length === 0) {
-            container.innerHTML = '<p class="text-gray-500 dark:text-gray-400 text-center py-8">No messages found</p>';
+            container.innerHTML = '<p class="ui-empty">No messages found</p>';
             return;
         }
 
         container.innerHTML = `
-            <div class="space-y-3">
-                ${data.data.map(msg => `
-                    <div class="border border-gray-200 dark:border-gray-700 rounded-lg p-4 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition cursor-pointer" onclick="viewMessageDetails('${msg.correlation_key}')">
-                        <div class="grid grid-cols-1 sm:grid-cols-[1fr_auto] gap-2 mb-2 items-start">
-                            <div class="min-w-0 overflow-hidden">
-                                <div class="flex flex-wrap items-center gap-2 mb-1">
-                                    <span class="text-sm font-medium text-gray-900 dark:text-white">${escapeHtml(msg.sender || 'Unknown')}</span>
-                                    <svg class="w-4 h-4 text-gray-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
-                                    </svg>
-                                    <span class="text-sm text-gray-600 dark:text-gray-300">${escapeHtml(msg.recipient || 'Unknown')}</span>
-                                </div>
-                                <p class="text-xs text-gray-500 dark:text-gray-400 truncate" dir="auto" title="${escapeHtml(msg.subject || 'No subject')}">${escapeHtml(msg.subject || 'No subject')}</p>
-                            </div>
-                            <div class="flex flex-wrap items-center gap-2 flex-shrink-0 sm:justify-end">
-                                ${(() => {
-                const correlationStatus = getCorrelationStatusDisplay(msg);
-                if (correlationStatus) {
-                    return `<span class="inline-block px-2 py-0.5 text-xs font-medium rounded ${correlationStatus.class}" title="${msg.final_status || (msg.is_complete ? 'Correlation complete' : 'Waiting for Postfix logs')}">${correlationStatus.display}</span>`;
-                }
-                return '';
-            })()}
-                                ${msg.direction ? `<span class="inline-block px-2 py-0.5 text-xs font-medium rounded ${getDirectionClass(msg.direction)}">${msg.direction}</span>` : ''}
-                                ${msg.is_spam !== null ? `<span class="inline-block px-2 py-0.5 text-xs font-medium rounded ${msg.is_spam ? 'bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-300' : 'bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300'}">${msg.is_spam ? 'SPAM' : 'CLEAN'}</span>` : ''}
-                            </div>
-                        </div>
-                        <div class="flex flex-wrap items-center gap-4 text-xs text-gray-500 dark:text-gray-400">
-                            <span>${formatTime(msg.first_seen)}</span>
-                            ${msg.queue_id ? `<span class="font-mono" title="Queue ID">Q: ${msg.queue_id}</span>` : ''}
-                            ${msg.message_id ? `<span class="font-mono truncate max-w-xs" title="Message ID: ${escapeHtml(msg.message_id)}">MID: ${escapeHtml(msg.message_id.substring(0, 20))}${msg.message_id.length > 20 ? '...' : ''}</span>` : ''}
-                            ${msg.spam_score !== null ? `<span>Score: <span class="${msg.spam_score >= 15 ? 'text-red-600 dark:text-red-400 font-semibold' : 'text-gray-600 dark:text-gray-300'}">${msg.spam_score.toFixed(1)}</span></span>` : ''}
-                            ${renderMailboxFolderHint(msg)}
-                            ${renderDeliveriesChip(msg)}
-                            ${msg.user ? `<span>User: ${escapeHtml(msg.user)}</span>` : ''}
-                            ${msg.ip ? `<span>IP: ${msg.ip}</span>` : ''}
-                        </div>
-                    </div>
-                `).join('')}
-            </div>
+            <div class="ui-msg-list">${data.data.map(renderMessageRow).join('')}</div>
             ${renderPagination('messages', data.page, data.pages)}
         `;
 
         currentPage.messages = page;
     } catch (error) {
         console.error('Failed to load messages:', error);
-        document.getElementById('messages-logs').innerHTML = `<p class="text-red-500 text-center py-8">Failed to load messages: ${escapeHtml(error.message)}</p>`;
+        document.getElementById('messages-logs').innerHTML = `<p class="ui-empty ui-text-fail">Failed to load messages: ${escapeHtml(error.message)}</p>`;
         const countEl = document.getElementById('messages-count');
         if (countEl) countEl.textContent = '';
     }
@@ -4659,12 +4611,12 @@ function renderPagination(type, currentPage, totalPages) {
     if (totalPages <= 1) return '';
 
     return `
-        <div class="flex flex-col sm:flex-row justify-center items-center gap-2 sm:gap-3 mt-6">
-            <button onclick="loadLogs('${type}', ${currentPage - 1})" ${currentPage === 1 ? 'disabled' : ''} class="w-full sm:w-auto px-4 py-2 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed transition">
+        <div class="ui-pagination">
+            <button onclick="loadLogs('${type}', ${currentPage - 1})" ${currentPage === 1 ? 'disabled' : ''} class="ui-btn">
                 Previous
             </button>
-            <span class="text-sm text-gray-600 dark:text-gray-400">Page ${currentPage} of ${totalPages}</span>
-            <button onclick="loadLogs('${type}', ${currentPage + 1})" ${currentPage === totalPages ? 'disabled' : ''} class="w-full sm:w-auto px-4 py-2 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed transition">
+            <span class="ui-muted">Page ${currentPage} of ${totalPages}</span>
+            <button onclick="loadLogs('${type}', ${currentPage + 1})" ${currentPage === totalPages ? 'disabled' : ''} class="ui-btn">
                 Next
             </button>
         </div>
