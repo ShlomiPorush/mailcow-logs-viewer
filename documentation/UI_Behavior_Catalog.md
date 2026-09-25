@@ -35,6 +35,7 @@ Pages, modals, actions, handler functions, API calls, form fields, drop-down opt
 - **Mailbox Stats and Rate Limits.** One page with two tabs (Statistics, Rate Limits; each hides with its feature). Statistics: key figures for the chosen period, search, the period picker (presets and a custom range), domain, sort, Active Only, Hide Zero Activity and Reset, then a table of mailboxes; a row opens quota, messages, dates, rate limit, access with last logins, counts that open Messages filtered on the address, and the aliases with their own clickable counts. Rate Limits: the activity chart with its window, Blocked senders (search, Reset counter, a sender opens its refused messages) and Configured limits (All, Mailboxes, Domains, search, Apply to filtered, Edit per row). Without the Read-Write key the editing and Reset counter are removed and a locked area says why.
 - **Spam Filter.** Two tabs. Suppressions: key figures, a filter bar (search, reason, state, Clear) with Add Suppression, Sync to Rspamd and a More menu (Export CSV, Import CSV), and a table with the address (domain patterns shown as the domain), reason and source tags, bounces, expiry, Rspamd sync state, age and Edit, Disable or Enable, Delete. Add and Edit are v3 dialogs. Rspamd Maps: maps grouped by category as rows that open the editor (Regex Wizard for regex maps, Validate with line errors and warnings, Save Changes); without Rspamd configured a locked area leads to Settings, without the Read-Write key a locked area says maps are read-only.
 - **Settings.** Version Information (current version opens its changelog, the latest version with Up to Date or Update Available, Last checked and Check Now, the update note with the changelog) and Configuration (mailcow URL, server IP, authentication, local domains) as key and value panels; local domains as chips when there are any. With editing off, a locked area explains it and the runtime values, SMTP and DMARC status show read-only with Test SMTP and Test IMAP. With editing on, Edit configuration has the categories as a side menu (a picker on narrow screens), groups of fields, a mark on values that differ from their default, Reset to default or Clear, fields locked by ENV, the feature toggles (disabling one warns that its data is deleted), status facts on the SMTP, DMARC IMAP and MaxMind tabs, and the alert destinations with a v3 dialog.
+- **Shared dialogs and notices.** Confirmations (`showConfirmModal`) are a v3 dialog in the current theme: the confirm button is red for destructive actions, Escape and Cancel both cancel. Toasts (`showToast`) sit at the bottom corner (above the tab bar on phones) with a tone per type and close by themselves after four seconds. The quarantine details, rule, rule test, GeoIP setup, connection test and alert destination dialogs use the same frame. The Logs page keeps its toggles (Pause, Live, Auto-scroll, Wrap), service list and quick filters as `aria-pressed` and `aria-current` states. A disabled feature shows a locked area with Go to Dashboard.
 - **Badges** use the recipes in `APP_COLORS` (soft fill plus a subtle border, squared corners, not rounded pills). Pages already on the v3 design use `uiStatusTag` and `uiDirectionTag` (`frontend/utils.js`) instead: the tone follows the meaning (delivered and sent green, deferred amber, bounced and rejected red, spam its own colour, anything else neutral) and the text is the status itself.
 - **Cache busting.** Every changed frontend file gets a new `?v=` in `index.html`, or browsers keep the old copy.
 - **Utility classes are compiled, not generated in the browser.** The Tailwind utilities the markup still uses are built once into `assets/css/utilities.css` (`bash .github/scripts/build-utilities-css.sh`, Tailwind 3.4.17). After adding or changing a utility class, rebuild it and bump its `?v=`; CI fails when the file does not match the markup. A class assembled at runtime (`bg-${color}-100`) must be in the safelist of `.github/tailwind/tailwind.config.cjs` (`utilities-css.test.cjs` checks this). New UI is built on the `ui-` components instead.
@@ -166,7 +167,7 @@ Generated from the code. Do not edit by hand; run `node .github/scripts/ui-catal
 | Behaviour | Count |
 |---|---|
 | [Click to copy](#click-to-copy) | 37 |
-| [Tooltips](#tooltips) | 154 |
+| [Tooltips](#tooltips) | 160 |
 | [Toasts](#toasts) | 136 |
 | [Confirmation dialogs](#confirmation-dialogs) | 28 |
 | [Country flags](#country-flags) | 5 |
@@ -174,14 +175,14 @@ Generated from the code. Do not edit by hand; run `node .github/scripts/ui-catal
 | [Controls wired in JavaScript](#controls-wired-in-javascript) | 28 |
 | [Filters, sorting and view options](#filters-sorting-and-view-options) | 11 |
 | [Charts](#charts) | 3 |
-| [Colour thresholds](#colour-thresholds) | 2 |
+| [Colour thresholds](#colour-thresholds) | 0 |
 | [Help topics](#help-topics) | 8 |
 | [Empty states](#empty-states) | 36 |
-| [Loading states](#loading-states) | 14 |
+| [Loading states](#loading-states) | 13 |
 | [Persisted preferences](#persisted-preferences) | 4 |
 | [Auto refresh and timers](#auto-refresh-and-timers) | 5 |
 | [Address bar and deep links](#address-bar-and-deep-links) | 6 |
-| [Keyboard handling](#keyboard-handling) | 4 |
+| [Keyboard handling](#keyboard-handling) | 5 |
 | [Badge colours](#badge-colours) | 11 |
 
 ### Click to copy
@@ -210,22 +211,22 @@ Fields that copy their value on click (hover shows a copy icon and "Click to cop
 | Security | copies: `src.ip` | `frontend/app.js:1157` (renderSecurityOverview) |
 | Security | copies: `row.ip` | `frontend/app.js:1179` (renderSecurityOverview) |
 | Security | copies: `row.username` | `frontend/app.js:1180` (renderSecurityOverview) |
-| Queue | copies: `r.email` | `frontend/app.js:2612` (applyQueueFilters) |
-| Queue | copies: `item.sender` | `frontend/app.js:2613` (applyQueueFilters) |
-| Queue | copies: `qid` | `frontend/app.js:2613` (applyQueueFilters) |
-| Quarantine | copies: `item.sender \|\| 'Unknown'` | `frontend/app.js:2901` (renderQuarantineData) |
-| Quarantine | copies: `item.qid` | `frontend/app.js:2901` (renderQuarantineData) |
-| Quarantine | copies: `item.rcpt \|\| 'Unknown'` | `frontend/app.js:2903` (renderQuarantineData) |
-| Quarantine | copies: `r.address` | `frontend/app.js:3111` (renderQuarantineDetailContent) |
-| Quarantine | copies: `data.subject \|\| '-'` | `frontend/app.js:3148` (renderQuarantineDetailContent) |
-| Quarantine | copies: `data.header_from \|\| '-'` | `frontend/app.js:3153` (renderQuarantineDetailContent) |
-| Quarantine | copies: `data.env_from \|\| '-'` | `frontend/app.js:3157` (renderQuarantineDetailContent) |
+| Queue | copies: `r.email` | `frontend/app.js:2533` (applyQueueFilters) |
+| Queue | copies: `item.sender` | `frontend/app.js:2534` (applyQueueFilters) |
+| Queue | copies: `qid` | `frontend/app.js:2534` (applyQueueFilters) |
+| Quarantine | copies: `item.sender \|\| 'Unknown'` | `frontend/app.js:2822` (renderQuarantineData) |
+| Quarantine | copies: `item.qid` | `frontend/app.js:2822` (renderQuarantineData) |
+| Quarantine | copies: `item.rcpt \|\| 'Unknown'` | `frontend/app.js:2824` (renderQuarantineData) |
+| Quarantine | copies: `r.address` | `frontend/app.js:3028` (renderQuarantineDetailContent) |
+| Quarantine | copies: `data.subject \|\| '-'` | `frontend/app.js:3056` (renderQuarantineDetailContent) |
+| Quarantine | copies: `data.header_from \|\| '-'` | `frontend/app.js:3057` (renderQuarantineDetailContent) |
+| Quarantine | copies: `data.env_from \|\| '-'` | `frontend/app.js:3058` (renderQuarantineDetailContent) |
 | Spam filter | copies: `displayEmail` | `frontend/spam_filter.js:428` (renderSuppressionItem) |
-| Status | copies: `item.message_id \|\| 'N/A'` | `frontend/app.js:4475` (renderStatusCorrelation) |
-| Status | copies: `item.sender \|\| 'N/A'` | `frontend/app.js:4476` (renderStatusCorrelation) |
-| Status | copies: `item.recipient \|\| 'N/A'` | `frontend/app.js:4476` (renderStatusCorrelation) |
-| Shared | copies: `ip` | `frontend/app.js:4688` (renderGeoIPInfo) |
-| Shared | copies: `ip` | `frontend/app.js:4695` (renderGeoIPInfo) |
+| Status | copies: `item.message_id \|\| 'N/A'` | `frontend/app.js:4293` (renderStatusCorrelation) |
+| Status | copies: `item.sender \|\| 'N/A'` | `frontend/app.js:4294` (renderStatusCorrelation) |
+| Status | copies: `item.recipient \|\| 'N/A'` | `frontend/app.js:4294` (renderStatusCorrelation) |
+| Shared | copies: `ip` | `frontend/app.js:4506` (renderGeoIPInfo) |
+| Shared | copies: `ip` | `frontend/app.js:4513` (renderGeoIPInfo) |
 | Shared | copyToClipboard: `'${safeText}'` | `frontend/utils.js:493` (copyableText) |
 
 ### Tooltips
@@ -264,14 +265,14 @@ Native `title` tooltips. Dynamic ones show the expression that builds the text.
 | Shell | set in JS: dynamic: ``Update available: v${data.latest_version}`` | `frontend/app.js:621` (loadAppVersionStatus) |
 | Shell | set in JS: dynamic: ``Update available: ${data.latest_version}`` | `frontend/app.js:700` (loadMailcowVersionStatus) |
 | Shell | set in JS: dynamic: ``Update available: ${data.latest_version}`` | `frontend/app.js:707` (loadMailcowVersionStatus) |
-| Dashboard | "Dismiss" | `frontend/app.js:1598` (loadDashboardSecurityAlerts) |
-| Dashboard | dynamic: `${hour(s.t)}: ${s.clean.toLocaleString()} clean, ${s.spam.toLocaleString()} spam` | `frontend/app.js:1706` (loadMailFlowChart) |
-| Dashboard | dynamic: `Running ${containers.running \|\| 0}, Stopped ${containers.stopped \|\| 0}, T...` | `frontend/app.js:1748` (loadDashboardStatusSummary) |
-| Dashboard | dynamic: `Available ${storage.used \|\| '0'} / ${storage.total \|\| '0'}` | `frontend/app.js:1758` (loadDashboardStatusSummary) |
-| Dashboard | dynamic: `${escapeHtml(formatTime(msg.time))}` | `frontend/app.js:1801` (loadRecentActivity) |
-| Dashboard | dynamic: `${escapeHtml(state)}` | `frontend/app.js:1802` (loadRecentActivity) |
-| Dashboard | dynamic: `${escapeHtml(msg.subject \|\| 'No subject')}` | `frontend/app.js:1804` (loadRecentActivity) |
-| Dashboard | "The first check runs automatically" | `frontend/app.js:4342` (loadDashboardBlacklistSummary) |
+| Dashboard | "Dismiss" | `frontend/app.js:1586` (loadDashboardSecurityAlerts) |
+| Dashboard | dynamic: `${hour(s.t)}: ${s.clean.toLocaleString()} clean, ${s.spam.toLocaleString()} spam` | `frontend/app.js:1694` (loadMailFlowChart) |
+| Dashboard | dynamic: `Running ${containers.running \|\| 0}, Stopped ${containers.stopped \|\| 0}, T...` | `frontend/app.js:1736` (loadDashboardStatusSummary) |
+| Dashboard | dynamic: `Available ${storage.used \|\| '0'} / ${storage.total \|\| '0'}` | `frontend/app.js:1746` (loadDashboardStatusSummary) |
+| Dashboard | dynamic: `${escapeHtml(formatTime(msg.time))}` | `frontend/app.js:1789` (loadRecentActivity) |
+| Dashboard | dynamic: `${escapeHtml(state)}` | `frontend/app.js:1790` (loadRecentActivity) |
+| Dashboard | dynamic: `${escapeHtml(msg.subject \|\| 'No subject')}` | `frontend/app.js:1792` (loadRecentActivity) |
+| Dashboard | "The first check runs automatically" | `frontend/app.js:4160` (loadDashboardBlacklistSummary) |
 | Messages | dynamic: `${escapeHtml(formatTime(msg.first_seen))}` | `frontend/app.js:862` (renderMessageRow) |
 | Messages | dynamic: `${escapeHtml(msg.subject \|\| 'No subject')}` | `frontend/app.js:864` (renderMessageRow) |
 | Messages | dynamic: `${escapeHtml(msg.recipient \|\| '')}` | `frontend/app.js:869` (renderMessageRow) |
@@ -292,28 +293,33 @@ Native `title` tooltips. Dynamic ones show the expression that builds the text.
 | Security | "Addresses that tried in the last hour, are not banned and are on neither Fail2ban list" | `frontend/index.html:732` |
 | Security | "This feature is new - please report any issues on GitHub" | `frontend/index.html:808` |
 | Security | "Help - Abuse Protection" | `frontend/index.html:812` |
-| Queue | "Retry delivery of every message in the queue" | `frontend/app.js:2583` (applyQueueFilters) |
-| Queue | dynamic: `Suppress ${escapeHtml(recipients[0].email)}` | `frontend/app.js:2606` (applyQueueFilters) |
-| Queue | dynamic: `${escapeHtml(formatTime(queued))}` | `frontend/app.js:2613` (applyQueueFilters) |
-| Queue | "Retry delivery" | `frontend/app.js:2622` (applyQueueFilters) |
-| Queue | "Release from hold" | `frontend/app.js:2624` (applyQueueFilters) |
-| Queue | "Hold message" | `frontend/app.js:2625` (applyQueueFilters) |
-| Queue | "Delete from queue" | `frontend/app.js:2626` (applyQueueFilters) |
-| Quarantine | "View details" | `frontend/app.js:2900` (renderQuarantineData) |
-| Quarantine | dynamic: `${escapeHtml(formatTime(item.created))}` | `frontend/app.js:2906` (renderQuarantineData) |
-| Quarantine | "Release message" | `frontend/app.js:2909` (renderQuarantineData) |
-| Quarantine | "Delete message" | `frontend/app.js:2910` (renderQuarantineData) |
-| Quarantine | "Release & train as Not Spam" | `frontend/app.js:2913` (renderQuarantineData) |
-| Quarantine | "Delete & train as Spam" | `frontend/app.js:2914` (renderQuarantineData) |
-| Quarantine | "Create auto-rule from this email" | `frontend/app.js:2915` (renderQuarantineData) |
-| Quarantine | "View details" | `frontend/app.js:2916` (renderQuarantineData) |
-| Quarantine | dynamic: `${escapeHtml(opts)}` | `frontend/app.js:3129` (renderQuarantineDetailContent) |
-| Quarantine | dynamic: `${rule.enabled ? 'Click to disable this rule' : 'Click to enable this rule'}` | `frontend/app.js:3301` (loadQuarantineRules) |
-| Quarantine | "Edit" | `frontend/app.js:3307` (loadQuarantineRules) |
-| Quarantine | "Delete" | `frontend/app.js:3311` (loadQuarantineRules) |
-| Quarantine | dynamic: `${escapeHtml(m.subject \|\| '')}` | `frontend/app.js:3573` (testQuarantineRules) |
-| Quarantine | dynamic: `${escapeHtml(log.sender \|\| '')} → ${escapeHtml(log.recipient \|\| '')}` | `frontend/app.js:3657` (loadQuarantineRuleHistory) |
-| Quarantine | dynamic: `Rule: ${escapeHtml(log.rule_name \|\| '')}` | `frontend/app.js:3660` (loadQuarantineRuleHistory) |
+| Queue | "Retry delivery of every message in the queue" | `frontend/app.js:2504` (applyQueueFilters) |
+| Queue | dynamic: `Suppress ${escapeHtml(recipients[0].email)}` | `frontend/app.js:2527` (applyQueueFilters) |
+| Queue | dynamic: `${escapeHtml(formatTime(queued))}` | `frontend/app.js:2534` (applyQueueFilters) |
+| Queue | "Retry delivery" | `frontend/app.js:2543` (applyQueueFilters) |
+| Queue | "Release from hold" | `frontend/app.js:2545` (applyQueueFilters) |
+| Queue | "Hold message" | `frontend/app.js:2546` (applyQueueFilters) |
+| Queue | "Delete from queue" | `frontend/app.js:2547` (applyQueueFilters) |
+| Quarantine | "View details" | `frontend/app.js:2821` (renderQuarantineData) |
+| Quarantine | dynamic: `${escapeHtml(formatTime(item.created))}` | `frontend/app.js:2827` (renderQuarantineData) |
+| Quarantine | "Release message" | `frontend/app.js:2830` (renderQuarantineData) |
+| Quarantine | "Delete message" | `frontend/app.js:2831` (renderQuarantineData) |
+| Quarantine | "Release & train as Not Spam" | `frontend/app.js:2834` (renderQuarantineData) |
+| Quarantine | "Delete & train as Spam" | `frontend/app.js:2835` (renderQuarantineData) |
+| Quarantine | "Create auto-rule from this email" | `frontend/app.js:2836` (renderQuarantineData) |
+| Quarantine | "View details" | `frontend/app.js:2837` (renderQuarantineData) |
+| Quarantine | "Close" | `frontend/app.js:2985` (showQuarantineDetails) |
+| Quarantine | dynamic: `${escapeHtml(opts)}` | `frontend/app.js:3042` (renderQuarantineDetailContent) |
+| Quarantine | "Delete & train as Spam" | `frontend/app.js:3092` (renderQuarantineDetailContent) |
+| Quarantine | "Release & train as Not Spam" | `frontend/app.js:3093` (renderQuarantineDetailContent) |
+| Quarantine | dynamic: `${rule.enabled ? 'Click to disable this rule' : 'Click to enable this rule'}` | `frontend/app.js:3154` (loadQuarantineRules) |
+| Quarantine | "Edit" | `frontend/app.js:3156` (loadQuarantineRules) |
+| Quarantine | "Delete" | `frontend/app.js:3157` (loadQuarantineRules) |
+| Quarantine | "Close" | `frontend/app.js:3213` (_showQuarantineRuleModal) |
+| Quarantine | dynamic: `${escapeHtml(m.subject \|\| '')}` | `frontend/app.js:3401` (testQuarantineRules) |
+| Quarantine | "Close" | `frontend/app.js:3425` (testQuarantineRules) |
+| Quarantine | dynamic: `${escapeHtml(log.sender \|\| '')} → ${escapeHtml(log.recipient \|\| '')}` | `frontend/app.js:3477` (loadQuarantineRuleHistory) |
+| Quarantine | dynamic: `Rule: ${escapeHtml(log.rule_name \|\| '')}` | `frontend/app.js:3478` (loadQuarantineRuleHistory) |
 | Quarantine | "Help - Quarantine Auto-Rules" | `frontend/index.html:874` |
 | Spam filter | "Help - Spam Filter" | `frontend/index.html:922` |
 | Spam filter | "Clear all filters" | `frontend/index.html:974` |
@@ -330,13 +336,13 @@ Native `title` tooltips. Dynamic ones show the expression that builds the text.
 | Spam filter | "Edit suppression" | `frontend/spam_filter.js:440` (renderSuppressionItem) |
 | Spam filter | dynamic: `${s.active ? 'Deactivate' : 'Reactivate'}` | `frontend/spam_filter.js:441` (renderSuppressionItem) |
 | Spam filter | "Delete permanently" | `frontend/spam_filter.js:442` (renderSuppressionItem) |
-| Status | dynamic: `${escapeHtml(title)}` | `frontend/app.js:4041` (loadStatusContainers) |
-| Status | dynamic: `${escapeHtml(detail(r))}` | `frontend/app.js:4414` (renderBlacklistStatus) |
-| Status | dynamic: `${host.checked_at ? escapeHtml(formatTime(host.checked_at)) : ''}` | `frontend/app.js:4416` (renderBlacklistStatus) |
-| Status | "Run Check for this Host" | `frontend/app.js:4418` (renderBlacklistStatus) |
-| Status | dynamic: `${escapeHtml(detail(r))}` | `frontend/app.js:4427` (renderBlacklistStatus) |
-| Status | dynamic: `${d.last_fetch_run ? escapeHtml(formatTime(d.last_fetch_run)) : ''}` | `frontend/app.js:4443` (renderStatusImport) |
-| Status | dynamic: `${d.last_import ? escapeHtml(formatTime(d.last_import)) : ''}` | `frontend/app.js:4444` (renderStatusImport) |
+| Status | dynamic: `${escapeHtml(title)}` | `frontend/app.js:3859` (loadStatusContainers) |
+| Status | dynamic: `${escapeHtml(detail(r))}` | `frontend/app.js:4232` (renderBlacklistStatus) |
+| Status | dynamic: `${host.checked_at ? escapeHtml(formatTime(host.checked_at)) : ''}` | `frontend/app.js:4234` (renderBlacklistStatus) |
+| Status | "Run Check for this Host" | `frontend/app.js:4236` (renderBlacklistStatus) |
+| Status | dynamic: `${escapeHtml(detail(r))}` | `frontend/app.js:4245` (renderBlacklistStatus) |
+| Status | dynamic: `${d.last_fetch_run ? escapeHtml(formatTime(d.last_fetch_run)) : ''}` | `frontend/app.js:4261` (renderStatusImport) |
+| Status | dynamic: `${d.last_import ? escapeHtml(formatTime(d.last_import)) : ''}` | `frontend/app.js:4262` (renderStatusImport) |
 | Status | "Help - IP Blacklist Monitor" | `frontend/index.html:1021` |
 | Domains | dynamic: `${data.last_dns_check ? escapeHtml(formatTime(data.last_dns_check)) : ''}` | `frontend/domains.js:72` (renderDomains) |
 | Domains | dynamic: `${escapeHtml(`${label}: ${check.message \|\| 'Not checked'}`)}` | `frontend/domains.js:151` (dnsStatusTag) |
@@ -354,18 +360,18 @@ Native `title` tooltips. Dynamic ones show the expression that builds the text.
 | Mailbox stats | "Address on a mailcow alias domain that points at this mailbox" | `frontend/mailbox-stats.js:371` (renderMailboxStatsAccordion) |
 | Mailbox stats | dynamic: `${escapeHtml(formatTime(group.last_seen))}` | `frontend/rate-limits.js:358` (renderRateLimitSendersTable) |
 | Mailbox stats | set in JS: dynamic: `isRateLimits ? 'Help - Rate Limits' : 'Help - Mailbox Statistics'` | `frontend/mailbox-stats.js:83` (mailboxStatsSwitchView) |
-| Logs | "Pause/Resume live updates" | `frontend/index.html:1312` |
-| Logs | "Live mode - show latest logs" | `frontend/index.html:1322` |
-| Logs | "Auto-scroll to new entries" | `frontend/index.html:1332` |
-| Logs | "Toggle sort order (newest at bottom / newest at top)" | `frontend/index.html:1342` |
-| Logs | "Toggle word wrap" | `frontend/index.html:1363` |
-| Logs | "Search" | `frontend/index.html:1380` |
-| Logs | "Clear search" | `frontend/index.html:1387` |
-| Logs | "Clear display" | `frontend/index.html:1397` |
-| Logs | "From date" | `frontend/index.html:1425` |
-| Logs | "To date" | `frontend/index.html:1430` |
-| Logs | dynamic: `${escapeHtml(f.description \|\| '')}` | `frontend/logs-viewer.js:232` (loadSmartFilters) |
-| Logs | "Clear all filters" | `frontend/logs-viewer.js:1227` (updateFilterBadge) |
+| Logs | "Pause/Resume live updates" | `frontend/index.html:1305` |
+| Logs | "Live mode - show latest logs" | `frontend/index.html:1309` |
+| Logs | "Auto-scroll to new entries" | `frontend/index.html:1312` |
+| Logs | "Toggle sort order (newest at bottom / newest at top)" | `frontend/index.html:1315` |
+| Logs | "Toggle word wrap" | `frontend/index.html:1326` |
+| Logs | "Search" | `frontend/index.html:1334` |
+| Logs | "Clear search" | `frontend/index.html:1335` |
+| Logs | "Clear display" | `frontend/index.html:1336` |
+| Logs | "From date" | `frontend/index.html:1349` |
+| Logs | "To date" | `frontend/index.html:1351` |
+| Logs | dynamic: `${escapeHtml(f.description \|\| '')}` | `frontend/logs-viewer.js:201` (loadSmartFilters) |
+| Logs | "Clear all filters" | `frontend/logs-viewer.js:1143` (updateFilterBadge) |
 | Settings | "Last delivery succeeded" | `frontend/notifications.js:67` (renderNotificationChannels) |
 | Settings | "Last delivery failed" | `frontend/notifications.js:69` (renderNotificationChannels) |
 | Settings | "Not used yet" | `frontend/notifications.js:70` (renderNotificationChannels) |
@@ -376,18 +382,19 @@ Native `title` tooltips. Dynamic ones show the expression that builds the text.
 | Settings | dynamic: `${escapeHtml(domain)}` | `frontend/settings.js:894` (renderSettings) |
 | Settings | "Close" | `frontend/settings.js:1909` (showConnectionTestModal) |
 | Shared | dynamic: `${escapeHtml(title)}` | `frontend/utils.js:158` (uiCorrelationTag) |
-| Shared | "The feature this job belongs to is turned off in Settings" | `frontend/utils.js:629` (renderJobCard) |
-| Shared | "This job is turned off in its settings, so it cannot be run" | `frontend/utils.js:632` (renderJobCard) |
-| Shared | dynamic: `${escapeHtml(job.description)}` | `frontend/utils.js:664` (renderJobCard) |
-| Shared | dynamic: `${job.last_run ? escapeHtml(formatTime(job.last_run)) : ''}` | `frontend/utils.js:671` (renderJobCard) |
-| Shared | dynamic: `${isRunning ? 'Job is running' : 'Run this job now'}` | `frontend/utils.js:678` (renderJobCard) |
+| Shared | "Close" | `frontend/utils.js:518` (showToast) |
+| Shared | "The feature this job belongs to is turned off in Settings" | `frontend/utils.js:604` (renderJobCard) |
+| Shared | "This job is turned off in its settings, so it cannot be run" | `frontend/utils.js:607` (renderJobCard) |
+| Shared | dynamic: `${escapeHtml(job.description)}` | `frontend/utils.js:639` (renderJobCard) |
+| Shared | dynamic: `${job.last_run ? escapeHtml(formatTime(job.last_run)) : ''}` | `frontend/utils.js:646` (renderJobCard) |
+| Shared | dynamic: `${isRunning ? 'Job is running' : 'Run this job now'}` | `frontend/utils.js:653` (renderJobCard) |
 | app.js (mixed) | set in JS: dynamic: `label` | `frontend/app.js:284` (setNavTabLabel) |
 | app.js (mixed) | set in JS: dynamic: `title \|\| ''` | `frontend/app.js:493` (setNavCount) |
 | Modal: container-logs-modal | "Refresh" | `frontend/index.html:497` |
 | Modal: container-logs-modal | "Close" | `frontend/index.html:505` |
-| Modal: dmarc-reports-management-modal | "Close" | `frontend/index.html:1587` |
-| Modal: dmarc-sync-history-modal | "Close" | `frontend/index.html:1574` |
-| Modal: message-modal | "Close" | `frontend/index.html:1505` |
+| Modal: dmarc-reports-management-modal | "Close" | `frontend/index.html:1490` |
+| Modal: dmarc-sync-history-modal | "Close" | `frontend/index.html:1477` |
+| Modal: message-modal | "Close" | `frontend/index.html:1408` |
 
 ### Toasts
 
@@ -395,23 +402,23 @@ Transient notifications from `showToast(message, type)` (utils.js). Type default
 
 | Page | What | Code |
 |---|---|---|
-| Messages | "Please select both start and end dates" [warning] | `frontend/app.js:3777` (applyMessagesCustomDateRange) |
-| Messages | "Start date must be before end date" [warning] | `frontend/app.js:3786` (applyMessagesCustomDateRange) |
+| Messages | "Please select both start and end dates" [warning] | `frontend/app.js:3595` (applyMessagesCustomDateRange) |
+| Messages | "Start date must be before end date" [warning] | `frontend/app.js:3604` (applyMessagesCustomDateRange) |
 | Security | "IP ' + ip + ' unbanned successfully" [success] | `frontend/app.js:1020` (unbanIP) |
 | Security | dynamic: `'Failed to unban: ' + (result.msg \|\| result.detail \|\| 'Unknown error')` [error] | `frontend/app.js:1027` (unbanIP) |
 | Security | dynamic: `'Failed to unban IP: ' + err.message` [error] | `frontend/app.js:1034` (unbanIP) |
 | Security | dynamic: ``IP ${ip} added to blacklist`` [success] | `frontend/app.js:1061` (banIP) |
 | Security | dynamic: `'Failed to ban: ' + (result.msg \|\| result.detail \|\| 'Unknown error')` [error] | `frontend/app.js:1068` (banIP) |
 | Security | dynamic: `'Failed to ban IP: ' + err.message` [error] | `frontend/app.js:1075` (banIP) |
-| Security | "Failed to dismiss alert" [error] | `frontend/app.js:1718` (acknowledgeSecurityAlert) |
-| Security | "All security alerts dismissed" [success] | `frontend/app.js:1726` (acknowledgeAllSecurityAlerts) |
-| Security | "Failed to dismiss alerts" [error] | `frontend/app.js:1728` (acknowledgeAllSecurityAlerts) |
-| Security | "Fail2Ban settings saved successfully" [success] | `frontend/app.js:2404` (loadFail2BanSettings) |
-| Security | dynamic: `'Failed to save Fail2Ban settings: ' + (result.msg \|\| result.detail \|\| 'U...` [error] | `frontend/app.js:2408` (loadFail2BanSettings) |
-| Security | dynamic: `'Failed to save Fail2Ban settings: ' + err.message` [error] | `frontend/app.js:2411` (loadFail2BanSettings) |
-| Security | "Fail2Ban IP lists saved successfully" [success] | `frontend/app.js:2457` (loadFail2BanSettings) |
-| Security | dynamic: `'Failed to save Fail2Ban IP lists: ' + (result.msg \|\| result.detail \|\| 'U...` [error] | `frontend/app.js:2460` (loadFail2BanSettings) |
-| Security | dynamic: `'Failed to save Fail2Ban IP lists: ' + err.message` [error] | `frontend/app.js:2463` (loadFail2BanSettings) |
+| Security | "Failed to dismiss alert" [error] | `frontend/app.js:1706` (acknowledgeSecurityAlert) |
+| Security | "All security alerts dismissed" [success] | `frontend/app.js:1714` (acknowledgeAllSecurityAlerts) |
+| Security | "Failed to dismiss alerts" [error] | `frontend/app.js:1716` (acknowledgeAllSecurityAlerts) |
+| Security | "Fail2Ban settings saved successfully" [success] | `frontend/app.js:2325` (loadFail2BanSettings) |
+| Security | dynamic: `'Failed to save Fail2Ban settings: ' + (result.msg \|\| result.detail \|\| 'U...` [error] | `frontend/app.js:2329` (loadFail2BanSettings) |
+| Security | dynamic: `'Failed to save Fail2Ban settings: ' + err.message` [error] | `frontend/app.js:2332` (loadFail2BanSettings) |
+| Security | "Fail2Ban IP lists saved successfully" [success] | `frontend/app.js:2378` (loadFail2BanSettings) |
+| Security | dynamic: `'Failed to save Fail2Ban IP lists: ' + (result.msg \|\| result.detail \|\| 'U...` [error] | `frontend/app.js:2381` (loadFail2BanSettings) |
+| Security | dynamic: `'Failed to save Fail2Ban IP lists: ' + err.message` [error] | `frontend/app.js:2384` (loadFail2BanSettings) |
 | Security | dynamic: `detail.detail \|\| `Could not ${action} SMTP`` [error] | `frontend/smtp-abuse.js:170` (smtpAbuseAction) |
 | Security | dynamic: `action === 'block' ? 'SMTP disabled' : 'SMTP re-enabled'` [success] | `frontend/smtp-abuse.js:173` (smtpAbuseAction) |
 | Security | dynamic: ``Could not ${action} SMTP`` [error] | `frontend/smtp-abuse.js:176` (smtpAbuseAction) |
@@ -421,27 +428,27 @@ Transient notifications from `showToast(message, type)` (utils.js). Type default
 | Security | "Could not remove whitelist entry" [error] | `frontend/smtp-abuse.js:218` (removeSmtpAbuseWhitelist) |
 | Security | "Whitelist entry removed" [success] | `frontend/smtp-abuse.js:219` (removeSmtpAbuseWhitelist) |
 | Security | "Could not remove whitelist entry" [error] | `frontend/smtp-abuse.js:222` (removeSmtpAbuseWhitelist) |
-| Queue | dynamic: `result.msg \|\| `${labels[action] \|\| action} completed`` [success] | `frontend/app.js:2730` (queueAction) |
-| Queue | dynamic: ``Queue action failed: ` + (result.msg \|\| result.detail \|\| 'Unknown error')` [error] | `frontend/app.js:2734` (queueAction) |
-| Queue | dynamic: ``Queue action failed: ` + err.message` [error] | `frontend/app.js:2737` (queueAction) |
-| Queue | dynamic: `result.msg \|\| 'Message deleted from queue'` [success] | `frontend/app.js:2757` (queueDeleteRequest) |
-| Queue | dynamic: `'Failed to delete from queue: ' + (result.msg \|\| result.detail \|\| 'Unknow...` [error] | `frontend/app.js:2761` (queueDeleteRequest) |
-| Queue | dynamic: `'Failed to delete from queue: ' + err.message` [error] | `frontend/app.js:2764` (queueDeleteRequest) |
-| Quarantine | dynamic: `result.msg \|\| `Message(s) ${actionLabels[action] \|\| action} successfully`` [success] | `frontend/app.js:3035` (quarantineAction) |
-| Quarantine | dynamic: ``Failed to ${action} message(s): ` + (result.msg \|\| result.detail \|\| 'Unk...` [error] | `frontend/app.js:3039` (quarantineAction) |
-| Quarantine | dynamic: ``Failed to ${action} message(s): ` + err.message` [error] | `frontend/app.js:3042` (quarantineAction) |
-| Quarantine | "Rule not found" [error] | `frontend/app.js:3331` (showEditQuarantineRuleModal) |
-| Quarantine | "Rule name is required" [error] | `frontend/app.js:3478` (saveQuarantineRule) |
-| Quarantine | "Match value is required" [error] | `frontend/app.js:3479` (saveQuarantineRule) |
-| Quarantine | dynamic: `isEdit ? 'Rule updated' : 'Rule created'` [success] | `frontend/app.js:3511` (saveQuarantineRule) |
-| Quarantine | dynamic: `'Failed to save rule: ' + err.message` [error] | `frontend/app.js:3514` (saveQuarantineRule) |
-| Quarantine | "Rule deleted" [success] | `frontend/app.js:3525` (deleteQuarantineRule) |
-| Quarantine | dynamic: `'Failed to delete rule: ' + err.message` [error] | `frontend/app.js:3528` (deleteQuarantineRule) |
-| Quarantine | dynamic: ``Rule ${rule.enabled ? 'enabled' : 'disabled'}`` [success] | `frontend/app.js:3538` (toggleQuarantineRule) |
-| Quarantine | dynamic: `'Failed to toggle rule: ' + err.message` [error] | `frontend/app.js:3541` (toggleQuarantineRule) |
-| Quarantine | "Testing rules against quarantine..." [info] | `frontend/app.js:3547` (testQuarantineRules) |
-| Quarantine | dynamic: ``No matches found (${data.total_quarantine} quarantine items checked)`` [info] | `frontend/app.js:3554` (testQuarantineRules) |
-| Quarantine | dynamic: `'Test failed: ' + err.message` [error] | `frontend/app.js:3622` (testQuarantineRules) |
+| Queue | dynamic: `result.msg \|\| `${labels[action] \|\| action} completed`` [success] | `frontend/app.js:2651` (queueAction) |
+| Queue | dynamic: ``Queue action failed: ` + (result.msg \|\| result.detail \|\| 'Unknown error')` [error] | `frontend/app.js:2655` (queueAction) |
+| Queue | dynamic: ``Queue action failed: ` + err.message` [error] | `frontend/app.js:2658` (queueAction) |
+| Queue | dynamic: `result.msg \|\| 'Message deleted from queue'` [success] | `frontend/app.js:2678` (queueDeleteRequest) |
+| Queue | dynamic: `'Failed to delete from queue: ' + (result.msg \|\| result.detail \|\| 'Unknow...` [error] | `frontend/app.js:2682` (queueDeleteRequest) |
+| Queue | dynamic: `'Failed to delete from queue: ' + err.message` [error] | `frontend/app.js:2685` (queueDeleteRequest) |
+| Quarantine | dynamic: `result.msg \|\| `Message(s) ${actionLabels[action] \|\| action} successfully`` [success] | `frontend/app.js:2956` (quarantineAction) |
+| Quarantine | dynamic: ``Failed to ${action} message(s): ` + (result.msg \|\| result.detail \|\| 'Unk...` [error] | `frontend/app.js:2960` (quarantineAction) |
+| Quarantine | dynamic: ``Failed to ${action} message(s): ` + err.message` [error] | `frontend/app.js:2963` (quarantineAction) |
+| Quarantine | "Rule not found" [error] | `frontend/app.js:3173` (showEditQuarantineRuleModal) |
+| Quarantine | "Rule name is required" [error] | `frontend/app.js:3306` (saveQuarantineRule) |
+| Quarantine | "Match value is required" [error] | `frontend/app.js:3307` (saveQuarantineRule) |
+| Quarantine | dynamic: `isEdit ? 'Rule updated' : 'Rule created'` [success] | `frontend/app.js:3339` (saveQuarantineRule) |
+| Quarantine | dynamic: `'Failed to save rule: ' + err.message` [error] | `frontend/app.js:3342` (saveQuarantineRule) |
+| Quarantine | "Rule deleted" [success] | `frontend/app.js:3353` (deleteQuarantineRule) |
+| Quarantine | dynamic: `'Failed to delete rule: ' + err.message` [error] | `frontend/app.js:3356` (deleteQuarantineRule) |
+| Quarantine | dynamic: ``Rule ${rule.enabled ? 'enabled' : 'disabled'}`` [success] | `frontend/app.js:3366` (toggleQuarantineRule) |
+| Quarantine | dynamic: `'Failed to toggle rule: ' + err.message` [error] | `frontend/app.js:3369` (toggleQuarantineRule) |
+| Quarantine | "Testing rules against quarantine..." [info] | `frontend/app.js:3375` (testQuarantineRules) |
+| Quarantine | dynamic: ``No matches found (${data.total_quarantine} quarantine items checked)`` [info] | `frontend/app.js:3382` (testQuarantineRules) |
+| Quarantine | dynamic: `'Test failed: ' + err.message` [error] | `frontend/app.js:3442` (testQuarantineRules) |
 | Spam filter | dynamic: ``Cannot save: ${valData.errors.length} validation error(s). Fix them first.`` [error] | `frontend/spam_filter.js:307` (saveMapContent) |
 | Spam filter | dynamic: `'Validation failed: ' + e.message` [error] | `frontend/spam_filter.js:312` (saveMapContent) |
 | Spam filter | dynamic: ``Map saved (${result.entry_count} entries). ${result.normalized_entries} bare...` [success] | `frontend/spam_filter.js:337` (saveMapContent) |
@@ -464,13 +471,13 @@ Transient notifications from `showToast(message, type)` (utils.js). Type default
 | Spam filter | dynamic: ``Imported ${result.imported} suppressions (${result.skipped} skipped)`` [success] | `frontend/spam_filter.js:862` (renderSuppressionItem) |
 | Spam filter | dynamic: `'Import failed: ' + error.message` [error] | `frontend/spam_filter.js:868` (renderSuppressionItem) |
 | Spam filter | dynamic: ``Pattern added: ${pattern}`` [success] | `frontend/spam_filter.js:1051` (renderSuppressionItem) |
-| Status | "Starting blacklist check..." [info] | `frontend/app.js:4208` (checkBlacklists) |
-| Status | "Blacklist check completed" [success] | `frontend/app.js:4252` (checkBlacklists) |
-| Status | dynamic: ``Check completed for ${host}`` [success] | `frontend/app.js:4280` (checkBlacklists) |
-| Status | dynamic: ``Failed to check: ${error.message}`` [error] | `frontend/app.js:4289` (checkBlacklists) |
-| Status | dynamic: ``Job "${displayName}" started successfully`` [success] | `frontend/app.js:4607` (triggerBackgroundJob) |
-| Status | dynamic: ``Job "${displayName}" is already running`` [warning] | `frontend/app.js:4616` (triggerBackgroundJob) |
-| Status | dynamic: ``Failed to start job: ${error.message}`` [error] | `frontend/app.js:4619` (triggerBackgroundJob) |
+| Status | "Starting blacklist check..." [info] | `frontend/app.js:4026` (checkBlacklists) |
+| Status | "Blacklist check completed" [success] | `frontend/app.js:4070` (checkBlacklists) |
+| Status | dynamic: ``Check completed for ${host}`` [success] | `frontend/app.js:4098` (checkBlacklists) |
+| Status | dynamic: ``Failed to check: ${error.message}`` [error] | `frontend/app.js:4107` (checkBlacklists) |
+| Status | dynamic: ``Job "${displayName}" started successfully`` [success] | `frontend/app.js:4425` (triggerBackgroundJob) |
+| Status | dynamic: ``Job "${displayName}" is already running`` [warning] | `frontend/app.js:4434` (triggerBackgroundJob) |
+| Status | dynamic: ``Failed to start job: ${error.message}`` [error] | `frontend/app.js:4437` (triggerBackgroundJob) |
 | Domains | "DNS check already in progress" [warning] | `frontend/domains.js:324` (checkAllDomainsDNS) |
 | Domains | dynamic: ``✓ Checked ${result.domains_checked} domains`` [success] | `frontend/domains.js:343` (checkAllDomainsDNS) |
 | Domains | "DNS check failed" [error] | `frontend/domains.js:346` (checkAllDomainsDNS) |
@@ -541,21 +548,21 @@ Every action that asks before it acts. Losing one turns a guarded action into a 
 | Security | showConfirmModal: dynamic: `{ title: 'Unban IP', message: 'Unban IP ' + ipWithMask + '?', confirmText: 'U...` | `frontend/app.js:1007` (unbanIP) |
 | Security | showConfirmModal: dynamic: `{ title: 'Ban IP', message: `Are you sure you want to permanently ban ${ipWit...` | `frontend/app.js:1044` (banIP) |
 | Security | showConfirmModal: dynamic: `{ title: action === 'block' ? 'Disable SMTP' : 'Re-enable SMTP', message: `${...` | `frontend/smtp-abuse.js:155` (smtpAbuseAction) |
-| Queue | showConfirmModal: dynamic: `{ title: 'Retry Delivery', message: `Retry delivery of ${ids.length} message(...` | `frontend/app.js:2676` (queueBulkRetry) |
-| Queue | showConfirmModal: dynamic: `{ title: 'Delete Messages', message: `Permanently delete ${ids.length} messag...` | `frontend/app.js:2683` (queueBulkDelete) |
-| Queue | showConfirmModal: dynamic: `{ title: 'Delete Message', message: 'Delete this message from the queue?', co...` | `frontend/app.js:2702` (queueDeleteItem) |
-| Queue | showConfirmModal: dynamic: `{ title: 'Flush Queue', message: 'Flush (retry delivery of) ALL messages in t...` | `frontend/app.js:2707` (queueFlushAll) |
-| Queue | showConfirmModal: dynamic: `{ title: 'Delete All', message: 'Permanently delete ALL messages from the que...` | `frontend/app.js:2712` (queueDeleteAll) |
-| Quarantine | showConfirmModal: dynamic: `{ title: 'Delete Message', message: 'Are you sure you want to permanently del...` | `frontend/app.js:2958` (quarantineDelete) |
-| Quarantine | showConfirmModal: dynamic: `{ title: 'Not Spam', message: 'Release this message and train Rspamd that it ...` | `frontend/app.js:2963` (quarantineLearnHam) |
-| Quarantine | showConfirmModal: dynamic: `{ title: 'Mark as Spam', message: 'Delete this message and train Rspamd that ...` | `frontend/app.js:2968` (quarantineLearnSpam) |
-| Quarantine | showConfirmModal: dynamic: `{ title: 'Release Messages', message: `Release ${ids.length} quarantined mess...` | `frontend/app.js:2975` (quarantineBulkRelease) |
-| Quarantine | showConfirmModal: dynamic: `{ title: 'Delete Messages', message: `Permanently delete ${ids.length} quaran...` | `frontend/app.js:2982` (quarantineBulkDelete) |
-| Quarantine | showConfirmModal: dynamic: `{ title: 'Not Spam', message: `Release ${ids.length} message(s) and train Rsp...` | `frontend/app.js:2989` (quarantineBulkLearnHam) |
-| Quarantine | showConfirmModal: dynamic: `{ title: 'Mark as Spam', message: `Delete ${ids.length} message(s) and train ...` | `frontend/app.js:2996` (quarantineBulkLearnSpam) |
-| Quarantine | showConfirmModal: dynamic: `{ title: 'Release All', message: `Release ALL ${allIds.length} quarantined me...` | `frontend/app.js:3003` (quarantineReleaseAll) |
-| Quarantine | showConfirmModal: dynamic: `{ title: 'Delete All', message: `Permanently delete ALL ${allIds.length} quar...` | `frontend/app.js:3010` (quarantineDeleteAll) |
-| Quarantine | showConfirmModal: dynamic: `{ title: 'Delete Rule', message: `Delete rule "${ruleName}"?`, confirmText: '...` | `frontend/app.js:3519` (deleteQuarantineRule) |
+| Queue | showConfirmModal: dynamic: `{ title: 'Retry Delivery', message: `Retry delivery of ${ids.length} message(...` | `frontend/app.js:2597` (queueBulkRetry) |
+| Queue | showConfirmModal: dynamic: `{ title: 'Delete Messages', message: `Permanently delete ${ids.length} messag...` | `frontend/app.js:2604` (queueBulkDelete) |
+| Queue | showConfirmModal: dynamic: `{ title: 'Delete Message', message: 'Delete this message from the queue?', co...` | `frontend/app.js:2623` (queueDeleteItem) |
+| Queue | showConfirmModal: dynamic: `{ title: 'Flush Queue', message: 'Flush (retry delivery of) ALL messages in t...` | `frontend/app.js:2628` (queueFlushAll) |
+| Queue | showConfirmModal: dynamic: `{ title: 'Delete All', message: 'Permanently delete ALL messages from the que...` | `frontend/app.js:2633` (queueDeleteAll) |
+| Quarantine | showConfirmModal: dynamic: `{ title: 'Delete Message', message: 'Are you sure you want to permanently del...` | `frontend/app.js:2879` (quarantineDelete) |
+| Quarantine | showConfirmModal: dynamic: `{ title: 'Not Spam', message: 'Release this message and train Rspamd that it ...` | `frontend/app.js:2884` (quarantineLearnHam) |
+| Quarantine | showConfirmModal: dynamic: `{ title: 'Mark as Spam', message: 'Delete this message and train Rspamd that ...` | `frontend/app.js:2889` (quarantineLearnSpam) |
+| Quarantine | showConfirmModal: dynamic: `{ title: 'Release Messages', message: `Release ${ids.length} quarantined mess...` | `frontend/app.js:2896` (quarantineBulkRelease) |
+| Quarantine | showConfirmModal: dynamic: `{ title: 'Delete Messages', message: `Permanently delete ${ids.length} quaran...` | `frontend/app.js:2903` (quarantineBulkDelete) |
+| Quarantine | showConfirmModal: dynamic: `{ title: 'Not Spam', message: `Release ${ids.length} message(s) and train Rsp...` | `frontend/app.js:2910` (quarantineBulkLearnHam) |
+| Quarantine | showConfirmModal: dynamic: `{ title: 'Mark as Spam', message: `Delete ${ids.length} message(s) and train ...` | `frontend/app.js:2917` (quarantineBulkLearnSpam) |
+| Quarantine | showConfirmModal: dynamic: `{ title: 'Release All', message: `Release ALL ${allIds.length} quarantined me...` | `frontend/app.js:2924` (quarantineReleaseAll) |
+| Quarantine | showConfirmModal: dynamic: `{ title: 'Delete All', message: `Permanently delete ALL ${allIds.length} quar...` | `frontend/app.js:2931` (quarantineDeleteAll) |
+| Quarantine | showConfirmModal: dynamic: `{ title: 'Delete Rule', message: `Delete rule "${ruleName}"?`, confirmText: '...` | `frontend/app.js:3347` (deleteQuarantineRule) |
 | Spam filter | showConfirmModal: dynamic: `{ title: 'Delete Suppression', message: `Delete suppression for ${email}? Thi...` | `frontend/spam_filter.js:766` (renderSuppressionItem) |
 | DMARC | showConfirmModal: dynamic: `{ title: 'Delete Report', message: `Are you sure you want to delete this ${re...` | `frontend/dmarc.js:1181` (deleteReport) |
 | Mailbox stats | showConfirmModal: dynamic: `{ title: 'Reset rate limit counter', message: `Let ${user} send again straigh...` | `frontend/rate-limits.js:569` (resetRateLimitCounter) |
@@ -564,7 +571,7 @@ Every action that asks before it acts. Losing one turns a guarded action into a 
 | Settings | showConfirmModal: dynamic: `{ title: 'Delete destination', message: `Delete "${channel ? channel.name : '...` | `frontend/notifications.js:247` (deleteNotificationChannel) |
 | Settings | showFeatureDisableConfirmModal: dynamic: `purgeableNewlyDisabled` | `frontend/settings.js:1403` (renderSettings) |
 | Settings | showConfirmModal: dynamic: `{ title: 'Import from ENV', message: 'Import current configuration from ENV i...` | `frontend/settings.js:1465` (renderSettings) |
-| Shared | confirm: dynamic: `` | `frontend/utils.js:545` |
+| Shared | confirm: dynamic: `` | `frontend/utils.js:538` |
 | app.js (mixed) | showConfirmModal: dynamic: `{ title: 'Allow IP', message: `Add ${ipWithMask} to the Fail2Ban allowlist?\\...` | `frontend/app.js:1189` (allowIP) |
 
 ### Country flags
@@ -575,9 +582,9 @@ PNG flags served locally from `frontend/assets/flags/<size>/<cc>.png` (sizes 16x
 |---|---|---|
 | Message details | renderGeoIPInfo(rspamd, '16x12') | `frontend/message-details.js:527` (renderOverviewTab) |
 | Security | getFlagUrl(log.country_code, '16x12') | `frontend/app.js:970` (renderNetfilterData) |
-| Security | getFlagUrl(d.country_code, '24x18') | `frontend/app.js:1893` (loadSecurityCountryChart) |
-| Shared | getFlagUrl(rspamdData.country_code, size) | `frontend/app.js:4691` (renderGeoIPInfo) |
-| Shared | getFlagUrl(record.country_code, size) | `frontend/app.js:4734` (renderGeoIPForDMARC) |
+| Security | getFlagUrl(d.country_code, '24x18') | `frontend/app.js:1881` (loadSecurityCountryChart) |
+| Shared | getFlagUrl(rspamdData.country_code, size) | `frontend/app.js:4509` (renderGeoIPInfo) |
+| Shared | getFlagUrl(record.country_code, size) | `frontend/app.js:4552` (renderGeoIPForDMARC) |
 
 ### Markdown rendering
 
@@ -588,7 +595,7 @@ Places that render Markdown (help pages, changelogs) through `renderMarkdown` (m
 | Settings | renders `versionInfo.changelog` | `frontend/settings.js:820` (updateVersionInfoUI) |
 | Settings | renders `changelogText` | `frontend/settings.js:1165` (renderSettings) |
 | Modal: changelog-modal | renders `markdownContent` | `frontend/app.js:646` (showMarkdownModal) |
-| Modal: changelog-modal | renders `changelog` | `frontend/app.js:4647` (showChangelogModal) |
+| Modal: changelog-modal | renders `changelog` | `frontend/app.js:4465` (showChangelogModal) |
 
 ### Controls wired in JavaScript
 
@@ -598,13 +605,13 @@ Buttons, tabs and fields whose behavior is attached with `addEventListener` inst
 |---|---|---|
 | Shell | change on `px)')` | `frontend/app.js:461` (loadAppInfo) |
 | Shell | click on `document` | `frontend/router.js:317` |
-| Messages | click on `document` | `frontend/app.js:3807` |
+| Messages | click on `document` | `frontend/app.js:3625` |
 | Message details | click on `messageModal` | `frontend/message-details.js:878` |
 | Message details | click on `modalContent` | `frontend/message-details.js:888` |
-| Security | click on `editSettingsBtn` | `frontend/app.js:2342` (loadFail2BanSettings) |
-| Security | click on `editIpBtn` | `frontend/app.js:2358` (loadFail2BanSettings) |
-| Security | submit on `settingsForm` | `frontend/app.js:2369` (loadFail2BanSettings) |
-| Security | submit on `ipForm` | `frontend/app.js:2422` (loadFail2BanSettings) |
+| Security | click on `editSettingsBtn` | `frontend/app.js:2263` (loadFail2BanSettings) |
+| Security | click on `editIpBtn` | `frontend/app.js:2279` (loadFail2BanSettings) |
+| Security | submit on `settingsForm` | `frontend/app.js:2290` (loadFail2BanSettings) |
+| Security | submit on `ipForm` | `frontend/app.js:2343` (loadFail2BanSettings) |
 | Spam filter | click on `document` | `frontend/spam_filter.js:891` (renderSuppressionItem) |
 | DMARC | click on `modal` | `frontend/dmarc.js:1051` (showDmarcSyncHistory) |
 | Mailbox stats | click on `document` | `frontend/mailbox-stats.js:464` (toggleDateRangePicker) |
@@ -620,10 +627,10 @@ Buttons, tabs and fields whose behavior is attached with `addEventListener` inst
 | Settings | change on `cb` | `frontend/settings.js:1332` (renderSettings) |
 | Settings | click on `closeBtn` | `frontend/settings.js:1548` (showGeoIPSetupModal) |
 | Settings | click on `modal` | `frontend/settings.js:1925` (showConnectionTestModal) |
-| Shared | click on `cancelBtn` | `frontend/utils.js:611` (showConfirmModal) |
-| Shared | click on `okBtn` | `frontend/utils.js:612` (showConfirmModal) |
-| app.js (mixed) | click on `changelogModal` | `frontend/app.js:4842` |
-| app.js (mixed) | click on `changelogContent` | `frontend/app.js:4850` |
+| Shared | click on `cancelBtn` | `frontend/utils.js:586` (showConfirmModal) |
+| Shared | click on `okBtn` | `frontend/utils.js:587` (showConfirmModal) |
+| app.js (mixed) | click on `changelogModal` | `frontend/app.js:4660` |
+| app.js (mixed) | click on `changelogContent` | `frontend/app.js:4668` |
 
 ### Filters, sorting and view options
 
@@ -641,7 +648,7 @@ Drop-down lists in the page markup with their options. The option wording and or
 | Spam filter | `suppression-filter-active`: Active Only / All / Inactive / Expired | `frontend/index.html:966` |
 | Mailbox stats | `mailbox-stats-domain-filter`: All Domains | `frontend/index.html:1245` |
 | Mailbox stats | `mailbox-stats-sort`: Sent (High to Low) / Received (High to Low) / Failure Rate (High to Low) / Quota Used (High to Low) / Username (A-Z) | `frontend/index.html:1248` |
-| Logs | `logs-fontsize`: 10px / 11px / 12px / 13px / 14px / 16px | `frontend/index.html:1350` |
+| Logs | `logs-fontsize`: 10px / 11px / 12px / 13px / 14px / 16px | `frontend/index.html:1318` |
 
 ### Charts
 
@@ -649,7 +656,7 @@ Chart.js charts (local library). Check hover tooltips, legend and both themes.
 
 | Page | What | Code |
 |---|---|---|
-| Security | bar chart on `ctx` | `frontend/app.js:1984` (loadSecurityCountryChart) |
+| Security | bar chart on `ctx` | `frontend/app.js:1972` (loadSecurityCountryChart) |
 | DMARC | line chart on `ctx` | `frontend/dmarc.js:478` (renderDmarcChart) |
 | Mailbox stats | bar chart on `canvas.getContext('2d')` | `frontend/rate-limits.js:256` (renderRateLimitChart) |
 
@@ -659,8 +666,6 @@ Values whose colour changes at a threshold (for example storage turns yellow and
 
 | Page | What | Code |
 |---|---|---|
-| Quarantine | `sc > 0` turns red | `frontend/app.js:3121` (renderQuarantineDetailContent) |
-| Quarantine | `sc < 0` turns green | `frontend/app.js:3122` (renderQuarantineDetailContent) |
 
 ### Help topics
 
@@ -685,9 +690,9 @@ Text shown when a list or panel has nothing to show.
 |---|---|---|
 | Shell | "No changelog available" | `frontend/app.js:627` (loadAppVersionStatus) |
 | Shell | "No changelog available" | `frontend/app.js:688` (loadMailcowVersionStatus) |
-| Dashboard | "No blacklist data yet" | `frontend/app.js:4342` (loadDashboardBlacklistSummary) |
+| Dashboard | "No blacklist data yet" | `frontend/app.js:4160` (loadDashboardBlacklistSummary) |
 | Messages | "No messages found" | `frontend/app.js:888` (renderMessagesData) |
-| Messages | "No messages found" | `frontend/app.js:3927` (loadMessages) |
+| Messages | "No messages found" | `frontend/app.js:3745` (loadMessages) |
 | Message details | "No modal data available" | `frontend/message-details.js:70` (switchModalTab) |
 | Message details | "No delivery steps recorded yet" | `frontend/message-details.js:502` (renderDeliverySteps) |
 | Message details | "No Postfix delivery logs available" | `frontend/message-details.js:577` (renderPostfixTab) |
@@ -695,11 +700,11 @@ Text shown when a list or panel has nothing to show.
 | Message details | "No spam analysis data available" | `frontend/message-details.js:744` (renderSpamTab) |
 | Security | "No logs found" | `frontend/app.js:925` (renderNetfilterData) |
 | Security | "No matching entries" | `frontend/smtp-abuse.js:137` (renderSmtpAbusePanel) |
-| Queue | "No matching queue entries" | `frontend/app.js:2562` (applyQueueFilters) |
-| Quarantine | "No quarantined messages" | `frontend/app.js:2863` (renderQuarantineData) |
-| Quarantine | "No actions recorded yet" | `frontend/app.js:3650` (loadQuarantineRuleHistory) |
-| Status | "No container information available" | `frontend/app.js:4052` (loadStatusContainers) |
-| Status | "No changelog available" | `frontend/app.js:4087` (loadStatusSystem) |
+| Queue | "No matching queue entries" | `frontend/app.js:2483` (applyQueueFilters) |
+| Quarantine | "No quarantined messages" | `frontend/app.js:2784` (renderQuarantineData) |
+| Quarantine | "No actions recorded yet" | `frontend/app.js:3470` (loadQuarantineRuleHistory) |
+| Status | "No container information available" | `frontend/app.js:3870` (loadStatusContainers) |
+| Status | "No changelog available" | `frontend/app.js:3905` (loadStatusSystem) |
 | Domains | "No domains found" | `frontend/domains.js:89` (renderDomains) |
 | Domains | "No domains with DNS issues found" | `frontend/domains.js:141` (filterDomains) |
 | Domains | "No domains found matching" | `frontend/domains.js:142` (filterDomains) |
@@ -711,14 +716,14 @@ Text shown when a list or panel has nothing to show.
 | DMARC | "No reports found" | `frontend/dmarc.js:1140` (renderReportsManagementTable) |
 | Mailbox stats | "No mailboxes found" | `frontend/mailbox-stats.js:306` (renderMailboxStatsAccordion) |
 | Logs | "No log services available" | `frontend/logs-viewer.js:90` (loadLogViewer) |
-| Logs | "No log entries found" | `frontend/logs-viewer.js:459` (renderLogEntries) |
+| Logs | "No log entries found" | `frontend/logs-viewer.js:410` (renderLogEntries) |
 | Settings | "No logs available" | `frontend/notifications.js:269` (testNotificationChannel) |
 | Settings | "No logs available" | `frontend/notifications.js:286` (testNotificationChannelDraft) |
 | Settings | "No changelog available" | `frontend/settings.js:1139` (renderSettings) |
 | Settings | "No logs available" | `frontend/settings.js:1862` (testSmtpConnection) |
 | Settings | "No logs available" | `frontend/settings.js:1888` (testImapConnection) |
-| Modal: changelog-modal | "No changelog available" | `frontend/app.js:4649` (showChangelogModal) |
-| Modal: container-logs-modal | "No logs available" | `frontend/app.js:4925` (fetchContainerLogs) |
+| Modal: changelog-modal | "No changelog available" | `frontend/app.js:4467` (showChangelogModal) |
+| Modal: container-logs-modal | "No logs available" | `frontend/app.js:4743` (fetchContainerLogs) |
 
 ### Loading states
 
@@ -726,16 +731,15 @@ Functions that render a spinner or "Loading..." while data is fetched.
 
 | Page | What | Code |
 |---|---|---|
-| Messages | 1 loading indicator(s) | `frontend/app.js:3891` (loadMessages) |
+| Messages | 1 loading indicator(s) | `frontend/app.js:3709` (loadMessages) |
 | Message details | 1 loading indicator(s) | `frontend/message-details.js:99` (viewMessageDetails) |
-| Security | 1 loading indicator(s) | `frontend/app.js:2077` (loadNetfilterLogs) |
-| Queue | 1 loading indicator(s) | `frontend/app.js:2494` (loadQueue) |
-| Quarantine | 1 loading indicator(s) | `frontend/app.js:2814` (loadQuarantine) |
-| Quarantine | 1 loading indicator(s) | `frontend/app.js:3069` (showQuarantineDetails) |
-| Quarantine | 1 loading indicator(s) | `frontend/app.js:3642` (loadQuarantineRuleHistory) |
-| Status | 2 loading indicator(s) | `frontend/app.js:4200` (checkBlacklists) |
-| Status | 1 loading indicator(s) | `frontend/app.js:4594` (triggerBackgroundJob) |
-| Logs | 1 loading indicator(s) | `frontend/logs-viewer.js:1096` (loadDateRangeLogs) |
+| Security | 1 loading indicator(s) | `frontend/app.js:2065` (loadNetfilterLogs) |
+| Queue | 1 loading indicator(s) | `frontend/app.js:2415` (loadQueue) |
+| Quarantine | 1 loading indicator(s) | `frontend/app.js:2735` (loadQuarantine) |
+| Quarantine | 1 loading indicator(s) | `frontend/app.js:3462` (loadQuarantineRuleHistory) |
+| Status | 2 loading indicator(s) | `frontend/app.js:4018` (checkBlacklists) |
+| Status | 1 loading indicator(s) | `frontend/app.js:4412` (triggerBackgroundJob) |
+| Logs | 1 loading indicator(s) | `frontend/logs-viewer.js:1025` (loadDateRangeLogs) |
 | Settings | 3 loading indicator(s) | `frontend/settings.js:1182` (renderSettings) |
 | Settings | 2 loading indicator(s) | `frontend/settings.js:1505` (showGeoIPSetupModal) |
 | Settings | 1 loading indicator(s) | `frontend/settings.js:1695` (validateMaxMindLicense) |
@@ -747,10 +751,10 @@ Settings the browser remembers between visits.
 
 | Page | What | Code |
 |---|---|---|
-| Shell | localStorage getItem "theme" | `frontend/app.js:4800` (initDarkMode) |
-| Shell | localStorage setItem "theme" | `frontend/app.js:4815` (toggleDarkMode) |
+| Shell | localStorage getItem "theme" | `frontend/app.js:4618` (initDarkMode) |
+| Shell | localStorage setItem "theme" | `frontend/app.js:4633` (toggleDarkMode) |
 | Logs | localStorage getItem "logsNewestFirst" | `frontend/logs-viewer.js:17` |
-| Logs | localStorage setItem "logsNewestFirst" | `frontend/logs-viewer.js:532` (toggleLogSortOrder) |
+| Logs | localStorage setItem "logsNewestFirst" | `frontend/logs-viewer.js:483` (toggleLogSortOrder) |
 
 ### Auto refresh and timers
 
@@ -760,9 +764,9 @@ Background refreshes and polling.
 |---|---|---|
 | Shell | every 5 * 60 * 1000 ms | `frontend/app.js:463` (loadAppInfo) |
 | Shell | every AUTO_REFRESH_INTERVAL ms | `frontend/app.js:746` (startAutoRefresh) |
-| Status | every 1000 ms | `frontend/app.js:4235` (checkBlacklists) |
+| Status | every 1000 ms | `frontend/app.js:4053` (checkBlacklists) |
 | Settings | every 2000 ms | `frontend/settings.js:1626` (showGeoIPSetupModal) |
-| Modal: container-logs-modal | every 2000 ms | `frontend/app.js:4961` (loadContainerLogs) |
+| Modal: container-logs-modal | every 2000 ms | `frontend/app.js:4779` (loadContainerLogs) |
 
 ### Address bar and deep links
 
@@ -770,7 +774,7 @@ Places that change the URL so a view can be bookmarked or shared.
 
 | Page | What | Code |
 |---|---|---|
-| Shell | replaceState | `frontend/app.js:1425` (switchTab) |
+| Shell | replaceState | `frontend/app.js:1413` (switchTab) |
 | Shell | pushState | `frontend/router.js:154` (navigateTo) |
 | Shell | replaceState | `frontend/router.js:222` (initRouter) |
 | DMARC | pushState | `frontend/dmarc.js:381` (loadDomainOverview) |
@@ -786,7 +790,8 @@ Key handlers; the keys are read from the handler body.
 | Message details | keydown: Escape | `frontend/message-details.js:894` |
 | Settings | keydown: Escape, Enter | `frontend/settings.js:118` (showBasicAuthVerifyModal) |
 | Settings | keydown: Escape, Enter | `frontend/settings.js:207` (showFeatureDisableConfirmModal) |
-| Modal: changelog-modal | keydown: Escape | `frontend/app.js:4830` |
+| Shared | keydown | `frontend/utils.js:584` (showConfirmModal) |
+| Modal: changelog-modal | keydown: Escape | `frontend/app.js:4648` |
 
 ### Badge colours
 

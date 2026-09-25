@@ -23,7 +23,7 @@
     <!-- Utility classes still used by the markup, compiled once
          (.github/scripts/build-utilities-css.sh); the design system comes last -->
     <link rel="stylesheet" href="/static/assets/css/utilities.css?v=1">
-    <link rel="stylesheet" href="/static/assets/css/ui.css?v=30">
+    <link rel="stylesheet" href="/static/assets/css/ui.css?v=31">
     <style>
         .tab-active {
             border-bottom: 2px solid #3b82f6;
@@ -1282,73 +1282,40 @@
 
             <!-- Logs Tab -->
             <div id="content-logs" class="tab-content hidden ui-page">
-                <div class="flex flex-col lg:flex-row gap-4" style="min-height: 70vh;">
-                    <!-- Service Sidebar -->
-                    <div class="w-full lg:w-56 flex-shrink-0">
-                        <div class="ui-panel p-3">
-                            <div class="mb-3">
-                                <input type="text" id="logs-service-search" placeholder="Filter services..."
-                                    oninput="filterLogServices(this.value)"
-                                    class="w-full px-3 py-2 text-sm bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md text-gray-900 dark:text-white placeholder-gray-500 dark:placeholder-gray-400 focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
-                            </div>
-                            <div id="logs-service-list" class="space-y-1">
-                                <!-- Services populated by JS -->
-                                <div class="text-center py-4">
-                                    <div class="loading mx-auto mb-2"></div>
-                                    <p class="text-xs text-gray-500 dark:text-gray-400">Loading services...</p>
-                                </div>
-                            </div>
-                        </div>
+                <div class="ui-page-head">
+                    <div>
+                        <h1 class="ui-h1">Logs</h1>
+                        <p class="ui-muted">Live and past log lines of each mailcow service</p>
                     </div>
+                </div>
+                <div class="ui-logs">
+                    <!-- Service Sidebar -->
+                    <aside class="ui-panel ui-logs-side">
+                        <input type="text" id="logs-service-search" placeholder="Filter services..." aria-label="Filter services"
+                            oninput="filterLogServices(this.value)" class="ui-input">
+                        <div id="logs-service-list" class="ui-logs-services">
+                            <div class="ui-loading"><div class="loading"></div><p>Loading services...</p></div>
+                        </div>
+                    </aside>
 
                     <!-- Log Viewer Main Area -->
-                    <div class="flex-1 flex flex-col min-w-0">
-                        <!-- Controls Bar -->
-                        <div class="bg-white dark:bg-gray-800 rounded-t-lg border border-b-0 border-gray-200 dark:border-gray-700 px-4 py-3">
-                            <div class="flex flex-wrap items-center gap-2">
-                                <!-- Pause/Resume -->
-                                <button onclick="toggleLogPause()" id="logs-pause-btn"
-                                    class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-                                    title="Pause/Resume live updates">
-                                    <svg id="logs-pause-icon" class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                                    </svg>
+                    <section class="ui-logs-main">
+                        <div class="ui-logs-bar">
+                            <div class="ui-logs-row">
+                                <button onclick="toggleLogPause()" id="logs-pause-btn" class="ui-btn ui-btn-sm ui-log-toggle ui-log-pause" aria-pressed="false" title="Pause/Resume live updates">
+                                    <svg id="logs-pause-icon" width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
                                     <span id="logs-pause-text">Pause</span>
                                 </button>
-
-                                <!-- Live -->
-                                <button onclick="resetToLiveLogs()" id="logs-live-btn"
-                                    class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md border border-green-500 bg-green-500 text-white transition-colors"
-                                    title="Live mode - show latest logs">
-                                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
-                                    </svg>
-                                    Live
+                                <button onclick="resetToLiveLogs()" id="logs-live-btn" class="ui-btn ui-btn-sm ui-log-toggle ui-log-live" aria-pressed="true" title="Live mode - show latest logs">
+                                    <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg> Live
                                 </button>
-
-                                <!-- Auto-scroll -->
-                                <button onclick="toggleAutoScroll()" id="logs-autoscroll-btn"
-                                    class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md border border-blue-500 bg-blue-500 text-white transition-colors"
-                                    title="Auto-scroll to new entries">
-                                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 14l-7 7m0 0l-7-7m7 7V3"></path>
-                                    </svg>
-                                    Auto-scroll
+                                <button onclick="toggleAutoScroll()" id="logs-autoscroll-btn" class="ui-btn ui-btn-sm ui-log-toggle" aria-pressed="true" title="Auto-scroll to new entries">
+                                    <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 14l-7 7m0 0l-7-7m7 7V3"></path></svg> Auto-scroll
                                 </button>
-
-                                <!-- Sort Order (issue #69) -->
-                                <button onclick="toggleLogSortOrder()" id="logs-sort-btn"
-                                    class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 transition-colors"
-                                    title="Toggle sort order (newest at bottom / newest at top)">
-                                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path id="logs-sort-icon" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4h13M3 8h9m-9 4h9m5-4v12m0 0l-4-4m4 4l4-4"></path>
-                                    </svg>
-                                    <span id="logs-sort-text">Newest last</span>
+                                <button onclick="toggleLogSortOrder()" id="logs-sort-btn" class="ui-btn ui-btn-sm" title="Toggle sort order (newest at bottom / newest at top)">
+                                    <svg id="logs-sort-icon" width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4h13M3 8h9m-9 4h6m4 0l4-4m0 0l4 4m-4-4v12"></path></svg> <span id="logs-sort-text">Newest last</span>
                                 </button>
-
-                                <!-- Font Size -->
-                                <select id="logs-fontsize" onchange="setLogFontSize(this.value)"
-                                    class="px-2 py-1.5 text-xs bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md text-gray-700 dark:text-gray-300">
+                                <select id="logs-fontsize" onchange="setLogFontSize(this.value)" class="ui-select ui-select-auto ui-logs-font" aria-label="Font size">
                                     <option value="10">10px</option>
                                     <option value="11">11px</option>
                                     <option value="12" selected>12px</option>
@@ -1356,126 +1323,62 @@
                                     <option value="14">14px</option>
                                     <option value="16">16px</option>
                                 </select>
-
-                                <!-- Word Wrap -->
-                                <button onclick="toggleWordWrap()" id="logs-wrap-btn"
-                                    class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md border border-blue-500 bg-blue-500 text-white transition-colors"
-                                    title="Toggle word wrap">
-                                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16m-7 6h7"></path>
-                                    </svg>
-                                    Wrap
+                                <button onclick="toggleWordWrap()" id="logs-wrap-btn" class="ui-btn ui-btn-sm ui-log-toggle" aria-pressed="true" title="Toggle word wrap">
+                                    <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h10a4 4 0 010 8H9m0 0l3-3m-3 3l3 3"></path></svg> Wrap
                                 </button>
-
-                                <!-- Spacer -->
-                                <div class="flex-1"></div>
-
-                                <!-- Search -->
-                                <div class="flex items-center gap-1">
-                                    <input type="text" id="logs-search-input" placeholder="Search logs..."
-                                        onkeydown="if(event.key==='Enter')searchLogs()" oninput="if(!this.value)clearLogSearch()"
-                                        class="w-40 sm:w-56 px-3 py-1.5 text-xs bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md text-gray-900 dark:text-white placeholder-gray-500 dark:placeholder-gray-400 focus:ring-2 focus:ring-blue-500">
-                                    <button onclick="searchLogs()"
-                                        class="p-1.5 text-gray-500 hover:text-blue-600 dark:text-gray-400 dark:hover:text-blue-400"
-                                        title="Search">
-                                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
-                                        </svg>
-                                    </button>
-                                    <button onclick="clearLogSearch()"
-                                        class="p-1.5 text-gray-500 hover:text-red-500 dark:text-gray-400 dark:hover:text-red-400"
-                                        title="Clear search">
-                                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
-                                        </svg>
-                                    </button>
-                                </div>
-
-                                <!-- Clear -->
-                                <button onclick="clearLogDisplay()"
-                                    class="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium rounded-md border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-                                    title="Clear display">
-                                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
-                                    </svg>
-                                    Clear
-                                </button>
+                                <span class="ui-toolbar-gap"></span>
+                                <label class="ui-search ui-logs-search"><svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
+                                    <input type="text" id="logs-search-input" placeholder="Search logs..." aria-label="Search logs"
+                                        onkeydown="if(event.key==='Enter')searchLogs()" oninput="if(!this.value)clearLogSearch()">
+                                </label>
+                                <button onclick="searchLogs()" class="ui-icon-btn" title="Search" aria-label="Search"><svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg></button>
+                                <button onclick="clearLogSearch()" class="ui-icon-btn" title="Clear search" aria-label="Clear search"><svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg></button>
+                                <button onclick="clearLogDisplay()" class="ui-btn ui-btn-sm" title="Clear display"><svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg> Clear</button>
                             </div>
 
                             <!-- Date Range Row -->
-                            <div class="flex flex-wrap items-center gap-2 px-4 py-2 bg-white dark:bg-gray-800 border-x border-gray-200 dark:border-gray-700">
-                                <svg class="w-3.5 h-3.5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                                </svg>
-                                <span class="text-xs text-gray-500 dark:text-gray-400">Range:</span>
-
-                                <!-- Quick presets -->
-                                <div class="flex gap-1">
-                                    <button onclick="setLogTimePreset(60)" class="px-1.5 py-0.5 text-[10px] rounded border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 hover:border-blue-400 hover:text-blue-600 dark:hover:text-blue-400 transition-colors">1h</button>
-                                    <button onclick="setLogTimePreset(360)" class="px-1.5 py-0.5 text-[10px] rounded border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 hover:border-blue-400 hover:text-blue-600 dark:hover:text-blue-400 transition-colors">6h</button>
-                                    <button onclick="setLogTimePreset(1440)" class="px-1.5 py-0.5 text-[10px] rounded border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 hover:border-blue-400 hover:text-blue-600 dark:hover:text-blue-400 transition-colors">24h</button>
-                                    <button onclick="setLogTimePreset(2880)" class="px-1.5 py-0.5 text-[10px] rounded border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 hover:border-blue-400 hover:text-blue-600 dark:hover:text-blue-400 transition-colors">48h</button>
+                            <div class="ui-logs-row ui-logs-range">
+                                <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                                <span class="ui-muted">Range:</span>
+                                <div class="ui-chip-row">
+                                    <button onclick="setLogTimePreset(60)" class="ui-chip">1h</button>
+                                    <button onclick="setLogTimePreset(360)" class="ui-chip">6h</button>
+                                    <button onclick="setLogTimePreset(1440)" class="ui-chip">24h</button>
+                                    <button onclick="setLogTimePreset(2880)" class="ui-chip">48h</button>
                                 </div>
-
-                                <span class="text-gray-300 dark:text-gray-600">|</span>
-
-                                <!-- From date -->
-                                <input type="datetime-local" id="logs-date-from"
-                                    class="px-2 py-1 text-xs bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500"
-                                    title="From date">
-                                <span class="text-xs text-gray-400">→</span>
-                                <!-- To date -->
-                                <input type="datetime-local" id="logs-date-to"
-                                    class="px-2 py-1 text-xs bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500"
-                                    title="To date">
-
-                                <!-- Load button -->
-                                <button onclick="loadDateRangeLogs()"
-                                    class="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded-md bg-blue-600 text-white hover:bg-blue-700 transition-colors"
-                                    id="logs-load-range-btn">
-                                    <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path>
-                                    </svg>
-                                    Load
-                                </button>
-
-                                <!-- Loading indicator -->
-                                <span id="logs-range-loading" class="hidden text-xs text-blue-400 animate-pulse">Loading...</span>
+                                <input type="datetime-local" id="logs-date-from" class="ui-input ui-logs-date" title="From date" aria-label="From date">
+                                <span class="ui-muted">→</span>
+                                <input type="datetime-local" id="logs-date-to" class="ui-input ui-logs-date" title="To date" aria-label="To date">
+                                <button onclick="loadDateRangeLogs()" class="ui-btn ui-btn-sm ui-btn-primary" id="logs-load-range-btn"><svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg> Load</button>
+                                <span id="logs-range-loading" class="hidden ui-text-info">Loading...</span>
                             </div>
-                        </div>
 
-                        <!-- Smart Filters (Postfix only) -->
-                        <div id="logs-smart-filters" class="bg-white dark:bg-gray-800 border-x border-gray-200 dark:border-gray-700 px-4 py-2 hidden">
-                            <div class="flex flex-wrap items-center gap-2">
-                                <span class="text-xs font-medium text-gray-500 dark:text-gray-400 mr-1">Quick Filters:</span>
-                                <div id="logs-smart-filter-chips" class="flex flex-wrap gap-1.5">
-                                    <!-- Populated by JS -->
-                                </div>
+                            <!-- Smart Filters (Postfix only) -->
+                            <div id="logs-smart-filters" class="ui-logs-row hidden">
+                                <span class="ui-muted">Quick Filters:</span>
+                                <div id="logs-smart-filter-chips" class="ui-chip-row"></div>
                             </div>
                         </div>
 
                         <!-- Terminal Log Output -->
-                        <div id="logs-terminal" class="flex-1 bg-gray-900 rounded-b-lg border border-t-0 border-gray-700 overflow-auto font-mono text-xs leading-relaxed" style="min-height: 400px; max-height: 75vh;">
-                            <div id="logs-output" class="p-3" style="font-size: 12px; word-wrap: break-word; white-space: pre-wrap;">
+                        <div id="logs-terminal" class="ui-logs-terminal">
+                            <div id="logs-output" style="font-size: 12px; word-wrap: break-word; white-space: pre-wrap;">
                                 <span class="text-gray-500">Connecting to log stream...</span>
                             </div>
                         </div>
 
                         <!-- Status Bar -->
-                        <div class="bg-white dark:bg-gray-800 rounded-b-lg border border-t-0 border-gray-200 dark:border-gray-700 px-4 py-2 flex items-center justify-between text-xs text-gray-500 dark:text-gray-400" style="margin-top: -1px; border-top: 1px solid;" id="logs-status-bar">
-                            <div class="flex items-center gap-3">
-                                <span class="flex items-center gap-1.5">
-                                    <span id="logs-ws-indicator" class="w-2 h-2 rounded-full bg-gray-400"></span>
-                                    <span id="logs-ws-status">Disconnected</span>
-                                </span>
-                                <span id="logs-entry-count">0 entries</span>
-                            </div>
-                            <div class="flex items-center gap-3">
-                                <span id="logs-last-update">Last update: never</span>
-                                <span id="logs-active-service" class="font-medium text-gray-700 dark:text-gray-300">postfix</span>
-                            </div>
+                        <div class="ui-logs-status" id="logs-status-bar">
+                            <span class="ui-logs-conn">
+                                <span id="logs-ws-indicator" class="ui-mdot"></span>
+                                <span id="logs-ws-status">Disconnected</span>
+                            </span>
+                            <span id="logs-entry-count">0 entries</span>
+                            <span class="ui-toolbar-gap"></span>
+                            <span id="logs-last-update">Last update: never</span>
+                            <b id="logs-active-service">postfix</b>
                         </div>
-                    </div>
+                    </section>
                 </div>
             </div>
 
@@ -1551,18 +1454,18 @@
     </div> <!-- Close app-content div -->
 
     <!-- JavaScript -->
-    <script src="/static/utils.js?v=15"></script>
+    <script src="/static/utils.js?v=16"></script>
     <script src="/static/router.js?v=3"></script>
-    <script src="/static/app.js?v=50"></script>
+    <script src="/static/app.js?v=51"></script>
     <script src="/static/export.js?v=1"></script>
     <script src="/static/message-details.js?v=6"></script>
     <script src="/static/dmarc.js?v=6"></script>
-    <script src="/static/logs-viewer.js?v=3"></script>
-    <script src="/static/settings.js?v=20"></script>
+    <script src="/static/logs-viewer.js?v=4"></script>
+    <script src="/static/settings.js?v=21"></script>
     <script src="/static/domains.js?v=5"></script>
     <script src="/static/mailbox-stats.js?v=5"></script>
     <script src="/static/rate-limits.js?v=24"></script>
-    <script src="/static/smtp-abuse.js?v=2"></script>
+    <script src="/static/smtp-abuse.js?v=3"></script>
     <script src="/static/notifications.js?v=5"></script>
     <script src="/static/spam_filter.js?v=6"></script>
 
