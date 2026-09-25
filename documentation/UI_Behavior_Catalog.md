@@ -167,7 +167,7 @@ Generated from the code. Do not edit by hand; run `node .github/scripts/ui-catal
 | Behaviour | Count |
 |---|---|
 | [Click to copy](#click-to-copy) | 37 |
-| [Tooltips](#tooltips) | 160 |
+| [Tooltips](#tooltips) | 161 |
 | [Toasts](#toasts) | 136 |
 | [Confirmation dialogs](#confirmation-dialogs) | 28 |
 | [Country flags](#country-flags) | 5 |
@@ -390,10 +390,11 @@ Native `title` tooltips. Dynamic ones show the expression that builds the text.
 | Shared | dynamic: `${isRunning ? 'Job is running' : 'Run this job now'}` | `frontend/utils.js:653` (renderJobCard) |
 | app.js (mixed) | set in JS: dynamic: `label` | `frontend/app.js:284` (setNavTabLabel) |
 | app.js (mixed) | set in JS: dynamic: `title \|\| ''` | `frontend/app.js:493` (setNavCount) |
+| Modal: changelog-modal | "Close" | `frontend/index.html:1435` |
 | Modal: container-logs-modal | "Refresh" | `frontend/index.html:497` |
 | Modal: container-logs-modal | "Close" | `frontend/index.html:505` |
-| Modal: dmarc-reports-management-modal | "Close" | `frontend/index.html:1490` |
-| Modal: dmarc-sync-history-modal | "Close" | `frontend/index.html:1477` |
+| Modal: dmarc-reports-management-modal | "Close" | `frontend/index.html:1483` |
+| Modal: dmarc-sync-history-modal | "Close" | `frontend/index.html:1470` |
 | Modal: message-modal | "Close" | `frontend/index.html:1408` |
 
 ### Toasts

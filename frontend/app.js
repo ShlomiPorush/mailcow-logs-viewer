@@ -659,7 +659,7 @@ function showMarkdownModal(title, markdownContent) {
         }
 
         // Add some basic styling for markdown content
-        content.innerHTML = `<div class="markdown-body prose dark:prose-invert max-w-none">${htmlContent}</div>`;
+        content.innerHTML = `<div class="markdown-body">${htmlContent}</div>`;
         modal.classList.remove('hidden');
         document.body.style.overflow = 'hidden';
     }
