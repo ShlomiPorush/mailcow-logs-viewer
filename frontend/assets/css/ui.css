@@ -941,7 +941,7 @@ body { font-family: var(--ui-font); background: var(--ui-bg); color: var(--ui-in
 .ui-menu button:hover, .ui-menu button:focus-visible { background: color-mix(in srgb, var(--ui-ink) 7%, transparent); outline: none; }
 
 /* ---------- Status (as the mockup) ---------- */
-.ui-ctr-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 1px; background: var(--ui-bg);
+.ui-ctr-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 1px; background: var(--ui-bg);
     border: 1px solid var(--ui-line); border-radius: var(--ui-radius); overflow: hidden; }
 .ui-ctr { display: flex; align-items: center; gap: 9px; min-width: 0; padding: 10px 14px; background: var(--ui-bg); outline: 1px solid var(--ui-line); }
 .ui-list-head .ui-head-actions { margin-inline-start: auto; }
@@ -972,7 +972,7 @@ body { font-family: var(--ui-font); background: var(--ui-bg); color: var(--ui-in
 .ui-code-chip { padding: 1px 6px; border: 1px solid var(--ui-line); border-radius: 4px; font-family: var(--ui-mono); font-size: 11.5px; color: var(--ui-muted); }
 .ui-bl-all { grid-column: 1 / -1; }
 .ui-bl-all summary { width: fit-content; color: var(--ui-muted); font-size: 12.5px; cursor: pointer; }
-.ui-bl-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 4px 14px; margin-top: 8px; max-height: 320px; overflow-y: auto; }
+.ui-bl-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 6px 18px; margin-top: 8px; max-height: 320px; overflow-y: auto; }
 .ui-bl-item { display: flex; align-items: center; gap: 7px; min-width: 0; font-size: 12.5px; }
 .ui-bl-link { display: inline-flex; margin-inline-start: 4px; color: var(--ui-muted); vertical-align: middle; }
 .ui-bl-link:hover { color: var(--ui-ink); }
