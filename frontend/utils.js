@@ -129,6 +129,22 @@ function getDirectionClass(direction) {
     return APP_COLORS.default.badge;
 }
 
+// v3 status and direction tags (assets/css/ui.css). The colour follows the
+// meaning: delivered and sent are good, deferred waits, bounced and rejected
+// failed, spam is spam, anything else is neutral.
+const UI_STATUS_TONE = {
+    delivered: 'ok', sent: 'ok', deferred: 'warn', bounced: 'fail', rejected: 'fail', spam: 'spam',
+};
+
+function uiStatusTag(status) {
+    const tone = UI_STATUS_TONE[status];
+    return `<span class="ui-tag${tone ? ` ui-tag-${tone}` : ''}">${escapeHtml(String(status))}</span>`;
+}
+
+function uiDirectionTag(direction) {
+    return `<span class="ui-tag ui-tag-line">${escapeHtml(String(direction))}</span>`;
+}
+
 function getCorrelationStatusDisplay(msg) {
     // If there's a final_status, show it with emoji
     if (msg.final_status) {
