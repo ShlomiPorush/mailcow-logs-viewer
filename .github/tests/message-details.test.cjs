@@ -54,7 +54,9 @@ test('message entry point and all four tabs preserve content and actions', async
     assert.deepEqual(h.requests, ['/api/message/example-key/details']);
     assert.equal(h.element('message-modal').classList.contains('hidden'), false);
     assert.equal(h.document.body.style.overflow, 'hidden');
-    assert.match(h.element('message-modal-content').innerHTML, /sender@example.com/);
+    // Subject, sender and outcome sit in the header above the tabs
+    assert.match(h.element('message-modal-header').innerHTML, /sender@example.com/);
+    assert.match(h.element('message-modal-content').innerHTML, /What happened/);
     assert.match(h.element('message-modal-content').innerHTML, /Junk/);
     h.context.switchModalTab('postfix');
     assert.match(h.element('message-modal-content').innerHTML, /status=sent &lt;test&gt;/);
@@ -75,8 +77,8 @@ test('right-to-left mail content keeps its own direction', async () => {
     const rtl = '\u05e9\u05dc\u05d5\u05dd (1)';
     const h = harness({ ...message(), subject: rtl });
     await h.context.viewMessageDetails('example-key');
-    const html = h.element('message-modal-content').innerHTML;
-    assert.ok(html.includes(`dir="auto" title="${rtl}">${rtl}</p>`));
+    const html = h.element('message-modal-header').innerHTML;
+    assert.ok(html.includes(`dir="auto" title="${rtl}">${rtl}</h2>`));
     assert.match(html, /<bdi>sender@example\.com<\/bdi>/);
 });
 
