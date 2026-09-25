@@ -1348,8 +1348,9 @@ body { font-family: var(--ui-font); background: var(--ui-bg); color: var(--ui-in
 .ui-log-pause[aria-pressed="true"] { background: var(--ui-warn); border-color: var(--ui-warn); color: #fff; }
 .ui-logs-font { height: 30px; font-size: 12.5px; }
 /* Search and its two buttons stay on one line and shrink before anything wraps */
-.ui-logs-find { display: flex; align-items: center; gap: 4px; flex: 1 1 190px; max-width: 320px; }
+.ui-logs-find { display: flex; align-items: center; gap: 4px; flex: 1 1 190px; min-width: 0; max-width: 320px; }
 .ui-logs-search { flex: 1; min-width: 0; height: 30px; }
+.ui-logs-search input { width: 0; }
 .ui-logs-date { width: auto; height: 30px; font-size: 12.5px; }
 .ui-logs-terminal { flex: 1; min-height: 420px; max-height: 75vh; overflow: auto; background: #0f1512; color: #d7ddd9;
     font-family: var(--ui-mono); line-height: 1.6; }
