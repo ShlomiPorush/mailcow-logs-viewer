@@ -1348,34 +1348,31 @@ async function loadDashboardSecurityAlerts() {
         }
 
         const rows = alerts.map(a => {
-            const sev = a.severity === 'critical'
-                ? 'bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300'
-                : 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/40 dark:text-yellow-300';
+            const critical = a.severity === 'critical';
             return `
-                <div class="flex items-start justify-between gap-3 py-2 border-t border-red-200 dark:border-red-800/50 first:border-t-0">
-                    <div class="min-w-0">
-                        <div class="flex items-center gap-2 flex-wrap">
-                            <span class="inline-block px-2 py-0.5 text-xs font-semibold rounded ${sev}">${escapeHtml((a.severity || 'warning').toUpperCase())}</span>
-                            <span class="text-sm font-semibold text-gray-900 dark:text-white">${escapeHtml(a.title)}</span>
+                <div class="ui-alert ${critical ? 'ui-alert-fail' : 'ui-alert-warn'}">
+                    <span class="ui-alert-bar"></span>
+                    <div class="ui-alert-text">
+                        <div class="ui-alert-title">
+                            <span class="ui-tag ${critical ? 'ui-tag-fail' : 'ui-tag-warn'}">${escapeHtml((a.severity || 'warning').toUpperCase())}</span>
+                            <b>${escapeHtml(a.title)}</b>
                         </div>
-                        <p class="text-xs text-gray-600 dark:text-gray-400 mt-1">${escapeHtml(a.detail || '')}</p>
-                        <p class="text-xs text-gray-400 mt-1">${escapeHtml(formatTime(a.created_at))}</p>
+                        <p>${escapeHtml(a.detail || '')}</p>
+                        <p class="ui-muted">${escapeHtml(formatTime(a.created_at))}</p>
                     </div>
-                    <button type="button" onclick="acknowledgeSecurityAlert(${a.id})" class="flex-shrink-0 px-2 py-1 text-xs rounded bg-white/70 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700" title="Dismiss">Dismiss</button>
+                    <button type="button" onclick="acknowledgeSecurityAlert(${a.id})" class="ui-btn ui-btn-sm" title="Dismiss">Dismiss</button>
                 </div>`;
         }).join('');
 
         container.innerHTML = `
-            <div class="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-4">
-                <div class="flex items-center justify-between mb-2">
-                    <div class="flex items-center gap-2">
-                        <svg class="w-5 h-5 text-red-600 dark:text-red-400" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd"></path></svg>
-                        <h3 class="text-sm font-semibold text-red-800 dark:text-red-300">Security Alerts (${alerts.length})</h3>
-                    </div>
-                    <button type="button" onclick="acknowledgeAllSecurityAlerts()" class="px-2 py-1 text-xs rounded bg-white/70 dark:bg-gray-800 border border-red-300 dark:border-red-700 text-red-700 dark:text-red-300 hover:bg-red-100 dark:hover:bg-red-900/40">Dismiss all</button>
+            <section class="ui-panel ui-alerts">
+                <div class="ui-panel-head">
+                    <svg class="ui-text-fail" width="18" height="18" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true"><path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd"></path></svg>
+                    Security Alerts (${alerts.length})
+                    <button type="button" onclick="acknowledgeAllSecurityAlerts()" class="ui-btn ui-btn-sm ui-btn-danger" style="margin-inline-start: auto">Dismiss all</button>
                 </div>
                 ${rows}
-            </div>`;
+            </section>`;
         container.classList.remove('hidden');
     } catch (e) {
         console.warn('Failed to load security alerts:', e);
@@ -1417,57 +1414,27 @@ async function loadDashboardStatusSummary() {
         const containersDiv = document.getElementById('dashboard-containers-summary');
         const containers = data.containers || {};
         containersDiv.innerHTML = `
-            <div class="flex justify-between items-center">
-                <span class="text-sm text-gray-600 dark:text-gray-400">Running</span>
-                <span class="text-lg font-semibold text-green-600 dark:text-green-400">${containers.running || 0}</span>
-            </div>
-            <div class="flex justify-between items-center">
-                <span class="text-sm text-gray-600 dark:text-gray-400">Stopped</span>
-                <span class="text-lg font-semibold ${containers.stopped > 0 ? 'text-red-600 dark:text-red-400' : 'text-gray-600 dark:text-gray-400'}">${containers.stopped || 0}</span>
-            </div>
-            <div class="flex justify-between items-center pt-2 border-t border-gray-200 dark:border-gray-700">
-                <span class="text-sm font-medium text-gray-700 dark:text-gray-300">Total</span>
-                <span class="text-lg font-semibold text-gray-900 dark:text-white">${containers.total || 0}</span>
-            </div>
+            <div class="ui-kv"><span>Running</span><b class="ui-text-ok">${containers.running || 0}</b></div>
+            <div class="ui-kv"><span>Stopped</span><b class="${containers.stopped > 0 ? 'ui-text-fail' : 'ui-muted'}">${containers.stopped || 0}</b></div>
+            <div class="ui-kv"><span>Total</span><b>${containers.total || 0}</b></div>
         `;
 
         const storageDiv = document.getElementById('dashboard-storage-summary');
         const storage = data.storage || {};
         const usedPercent = parseInt(storage.used_percent) || 0;
-        const storageColor = usedPercent > 90 ? 'text-red-600 dark:text-red-400' :
-            usedPercent > 75 ? 'text-yellow-600 dark:text-yellow-400' :
-                'text-green-600 dark:text-green-400';
+        const storageLevel = usedPercent > 90 ? 'fail' : usedPercent > 75 ? 'warn' : 'ok';
         storageDiv.innerHTML = `
-            <div class="flex justify-between items-center">
-                <span class="text-sm text-gray-600 dark:text-gray-400">Used</span>
-                <span class="text-lg font-semibold ${storageColor}">${storage.used_percent || '0%'}</span>
-            </div>
-            <div class="flex justify-between items-center">
-                <span class="text-sm text-gray-600 dark:text-gray-400">Available</span>
-                <span class="text-sm text-gray-900 dark:text-white">${storage.used || '0'} / ${storage.total || '0'}</span>
-            </div>
-            <div class="mt-2">
-                <div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
-                    <div class="h-2 rounded-full ${usedPercent > 90 ? 'bg-red-600' : usedPercent > 75 ? 'bg-yellow-600' : 'bg-green-600'}" style="width: ${usedPercent}%"></div>
-                </div>
-            </div>
+            <div class="ui-kv"><span>Used</span><b class="ui-text-${storageLevel}">${storage.used_percent || '0%'}</b></div>
+            <div class="ui-kv"><span>Available</span><b>${storage.used || '0'} / ${storage.total || '0'}</b></div>
+            <div class="ui-meter ui-${storageLevel} ui-meter-panel"><i style="width: ${usedPercent}%"></i></div>
         `;
 
         const systemDiv = document.getElementById('dashboard-system-summary');
         const system = data.system || {};
         systemDiv.innerHTML = `
-            <div class="flex justify-between items-center">
-                <span class="text-sm text-gray-600 dark:text-gray-400">Domains</span>
-                <span class="text-lg font-semibold text-gray-900 dark:text-white">${system.domains || 0}</span>
-            </div>
-            <div class="flex justify-between items-center">
-                <span class="text-sm text-gray-600 dark:text-gray-400">Mailboxes</span>
-                <span class="text-lg font-semibold text-gray-900 dark:text-white">${system.mailboxes || 0}</span>
-            </div>
-            <div class="flex justify-between items-center">
-                <span class="text-sm text-gray-600 dark:text-gray-400">Aliases</span>
-                <span class="text-lg font-semibold text-gray-900 dark:text-white">${system.aliases || 0}</span>
-            </div>
+            <div class="ui-kv"><span>Domains</span><b>${system.domains || 0}</b></div>
+            <div class="ui-kv"><span>Mailboxes</span><b>${system.mailboxes || 0}</b></div>
+            <div class="ui-kv"><span>Aliases</span><b>${system.aliases || 0}</b></div>
         `;
     } catch (error) {
         console.error('Failed to load status summary:', error);
@@ -1489,34 +1456,29 @@ async function loadRecentActivity() {
         console.log('Recent Activity data:', data);
 
         if (data.activity.length === 0) {
-            container.innerHTML = '<p class="text-gray-500 dark:text-gray-400 text-center py-8">No recent activity</p>';
+            container.innerHTML = '<p class="ui-empty">No recent activity</p>';
             return;
         }
 
         container.innerHTML = data.activity.map(msg => `
-            <div class="grid grid-cols-1 sm:grid-cols-[1fr_auto] gap-2 p-3 sm:p-4 bg-gray-50 dark:bg-gray-700/50 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition cursor-pointer items-start" onclick="viewMessageDetails('${msg.correlation_key}')">
-                <div class="min-w-0 overflow-hidden">
-                    <div class="flex flex-wrap items-center gap-2 mb-1">
-                        <span class="text-sm font-medium text-gray-900 dark:text-white">${escapeHtml(msg.sender || 'Unknown')}</span>
-                        <svg class="w-4 h-4 text-gray-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
-                        </svg>
-                        <span class="text-sm text-gray-600 dark:text-gray-300">${escapeHtml(msg.recipient || 'Unknown')}</span>
+            <div class="ui-msg-row" onclick="viewMessageDetails('${escapeJsArg(msg.correlation_key)}')">
+                <div class="ui-msg-main">
+                    <div class="ui-msg-who">
+                        <span>${escapeHtml(msg.sender || 'Unknown')}</span>
+                        <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg>
+                        <span class="ui-muted">${escapeHtml(msg.recipient || 'Unknown')}</span>
                     </div>
-                    <p class="text-xs text-gray-500 dark:text-gray-400 truncate" dir="auto" title="${escapeHtml(msg.subject || 'No subject')}">${escapeHtml(msg.subject || 'No subject')}</p>
+                    <p class="ui-msg-sub" dir="auto" title="${escapeHtml(msg.subject || 'No subject')}">${escapeHtml(msg.subject || 'No subject')}</p>
                 </div>
-                <div class="flex flex-col items-end gap-1 flex-shrink-0">
-                    <div class="flex items-center gap-2">
-                        <span class="inline-block px-2 py-1 text-xs font-medium rounded ${getStatusClass(msg.status)}">${msg.status || 'unknown'}</span>
-                        ${msg.direction ? `<span class="inline-block px-2 py-0.5 text-xs font-medium rounded ${getDirectionClass(msg.direction)}">${msg.direction}</span>` : ''}
-                    </div>
-                    <p class="text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap">${formatTime(msg.time)}</p>
+                <div class="ui-msg-meta">
+                    <div class="ui-msg-tags">${uiStatusTag(msg.status || 'unknown')}${msg.direction ? uiDirectionTag(msg.direction) : ''}</div>
+                    <time>${formatTime(msg.time)}</time>
                 </div>
             </div>
         `).join('');
     } catch (error) {
         console.error('Failed to load recent activity:', error);
-        document.getElementById('recent-activity').innerHTML = `<p class="text-red-500 text-center py-8">Failed to load activity: ${escapeHtml(error.message)}</p>`;
+        document.getElementById('recent-activity').innerHTML = `<p class="ui-empty ui-text-fail">Failed to load activity: ${escapeHtml(error.message)}</p>`;
     }
 }
 
@@ -4173,59 +4135,39 @@ async function loadDashboardBlacklistSummary() {
 
         if (!data.has_data) {
             container.innerHTML = `
-                <div class="text-center py-4">
-                    <p class="text-sm text-gray-500 dark:text-gray-400">No blacklist data yet</p>
-                    <p class="text-xs text-gray-400 dark:text-gray-500 mt-1">The first check runs automatically</p>
+                <div class="ui-empty">
+                    <b>No blacklist data yet</b>
+                    The first check runs automatically
                 </div>`;
             return;
         }
 
         const statusBadge = {
-            listed: '<span class="text-red-600 dark:text-red-400 font-semibold">&#10007; Listed</span>',
-            error: '<span class="text-yellow-600 dark:text-yellow-400 font-semibold">! Check Error</span>',
-            clean: '<span class="text-green-600 dark:text-green-400 font-semibold">&#10003; Clean</span>',
-            unknown: '<span class="text-gray-500 dark:text-gray-400 font-semibold">Unknown</span>'
-        }[data.status] || `<span class="text-gray-500 dark:text-gray-400">${escapeHtml(String(data.status))}</span>`;
+            listed: '<b class="ui-text-fail">&#10007; Listed</b>',
+            error: '<b class="ui-text-warn">! Check Error</b>',
+            clean: '<b class="ui-text-ok">&#10003; Clean</b>',
+            unknown: '<b class="ui-muted">Unknown</b>'
+        }[data.status] || `<b class="ui-muted">${escapeHtml(String(data.status))}</b>`;
 
-        const rows = [`
-            <div class="flex justify-between items-center">
-                <span class="text-sm text-gray-600 dark:text-gray-300">Status</span>
-                ${statusBadge}
-            </div>`];
+        const rows = [`<div class="ui-kv"><span>Status</span>${statusBadge}</div>`];
 
         if ((data.hosts_total || 0) > 1) {
-            rows.push(`
-                <div class="flex justify-between items-center">
-                    <span class="text-sm text-gray-600 dark:text-gray-300">Hosts Listed</span>
-                    <span class="text-sm font-medium text-gray-900 dark:text-white">${data.hosts_listed}/${data.hosts_total}</span>
-                </div>`);
+            rows.push(`<div class="ui-kv"><span>Hosts Listed</span><b>${data.hosts_listed}/${data.hosts_total}</b></div>`);
         } else {
             const ip = (data.hosts && data.hosts[0] && data.hosts[0].hostname) || data.server_ip;
             if (ip) {
-                rows.push(`
-                    <div class="flex justify-between items-center">
-                        <span class="text-sm text-gray-600 dark:text-gray-300">IP</span>
-                        <span class="text-sm font-mono text-gray-900 dark:text-white">${escapeHtml(ip)}</span>
-                    </div>`);
+                rows.push(`<div class="ui-kv"><span>IP</span><b class="ui-mono">${escapeHtml(ip)}</b></div>`);
             }
         }
-        rows.push(`
-            <div class="flex justify-between items-center">
-                <span class="text-sm text-gray-600 dark:text-gray-300">Listed On</span>
-                <span class="text-sm font-medium text-gray-900 dark:text-white">${data.listed_count}/${data.total_blacklists}</span>
-            </div>`);
+        rows.push(`<div class="ui-kv"><span>Listed On</span><b>${data.listed_count}/${data.total_blacklists}</b></div>`);
         if (data.checked_at) {
-            rows.push(`
-                <div class="flex justify-between items-center">
-                    <span class="text-sm text-gray-600 dark:text-gray-300">Last Check</span>
-                    <span class="text-xs text-gray-500 dark:text-gray-400">${escapeHtml(new Date(data.checked_at).toLocaleString())}</span>
-                </div>`);
+            rows.push(`<div class="ui-kv"><span>Last Check</span><b class="ui-muted ui-kv-small">${escapeHtml(new Date(data.checked_at).toLocaleString())}</b></div>`);
         }
 
-        container.innerHTML = `<div class="space-y-3">${rows.join('')}</div>`;
+        container.innerHTML = rows.join('');
     } catch (error) {
         console.error('Failed to load blacklist summary:', error);
-        container.innerHTML = `<p class="text-gray-500 dark:text-gray-400 text-center text-sm">Error loading</p>`;
+        container.innerHTML = `<p class="ui-empty">Error loading</p>`;
     }
 }
 

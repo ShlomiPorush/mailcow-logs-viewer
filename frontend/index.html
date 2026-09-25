@@ -21,7 +21,7 @@
     <script src="/static/assets/libs/purify.min.js?v=2"></script>
     <script src="/static/assets/libs/chart.umd.min.js?v=2"></script>
     <link rel="stylesheet" href="/static/assets/libs/github-markdown.min.css">
-    <link rel="stylesheet" href="/static/assets/css/ui.css?v=3">
+    <link rel="stylesheet" href="/static/assets/css/ui.css?v=4">
     <script>
         tailwind.config = {
             darkMode: 'class',
@@ -534,188 +534,74 @@
         <div class="max-w-[1400px] mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-6 flex-1 w-full">
 
             <!-- Dashboard Tab -->
-            <div id="content-dashboard" class="tab-content">
-                <!-- Security alerts banner (anomaly detection) - hidden until alerts exist -->
-                <div id="dashboard-security-alerts" class="mb-6 hidden"></div>
-                <!-- Stats Grid -->
-                <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6 mb-6">
-                    <div class="bg-white dark:bg-gray-800 rounded-lg shadow dark:shadow-gray-900/30 p-4 sm:p-6">
-                        <div class="flex items-center justify-between mb-2">
-                            <h3 class="text-xs sm:text-sm font-medium text-gray-600 dark:text-gray-400">Messages (24h)
-                            </h3>
-                            <svg class="w-8 h-8 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                    d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z">
-                                </path>
-                            </svg>
-                        </div>
-                        <p id="stat-messages-24h" class="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-white">0
-                        </p>
-                        <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">7d: <span
-                                id="stat-messages-7d">0</span>
-                        </p>
+            <div id="content-dashboard" class="tab-content ui-page">
+                <div class="ui-page-head">
+                    <div>
+                        <h1 class="ui-h1">Dashboard</h1>
+                        <p class="ui-muted">The last 24 hours, with the last 7 days for comparison</p>
                     </div>
-
-                    <div class="bg-white dark:bg-gray-800 rounded-lg shadow dark:shadow-gray-900/30 p-4 sm:p-6">
-                        <div class="flex items-center justify-between mb-2">
-                            <h3 class="text-xs sm:text-sm font-medium text-gray-600 dark:text-gray-400">Blocked (24h)
-                            </h3>
-                            <svg class="w-8 h-8 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                    d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636">
-                                </path>
-                            </svg>
-                        </div>
-                        <p id="stat-blocked-24h" class="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-white">0
-                        </p>
-                        <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">7d: <span id="stat-blocked-7d">0</span>
-                            (<span id="stat-blocked-percentage">0</span>%)</p>
-                    </div>
-
-                    <div class="bg-white dark:bg-gray-800 rounded-lg shadow dark:shadow-gray-900/30 p-4 sm:p-6">
-                        <div class="flex items-center justify-between mb-2">
-                            <h3 class="text-xs sm:text-sm font-medium text-gray-600 dark:text-gray-400">Deferred (24h)
-                            </h3>
-                            <svg class="w-8 h-8 text-yellow-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                    d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                            </svg>
-                        </div>
-                        <p id="stat-deferred-24h" class="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-white">0
-                        </p>
-                        <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">7d: <span
-                                id="stat-deferred-7d">0</span>
-                        </p>
-                    </div>
-
-                    <div class="bg-white dark:bg-gray-800 rounded-lg shadow dark:shadow-gray-900/30 p-4 sm:p-6">
-                        <div class="flex items-center justify-between mb-2">
-                            <h3 class="text-xs sm:text-sm font-medium text-gray-600 dark:text-gray-400">Auth Fails (24h)
-                            </h3>
-                            <svg class="w-8 h-8 text-orange-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                    d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z">
-                                </path>
-                            </svg>
-                        </div>
-                        <p id="stat-auth-failures-24h"
-                            class="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-white">
-                            0</p>
-                        <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">7d: <span
-                                id="stat-auth-failures-7d">0</span></p>
+                    <div class="ui-quick-search" role="search">
+                        <input type="text" id="dashboard-search-query" placeholder="Search messages..." class="ui-input"
+                            aria-label="Search messages" onkeypress="if(event.key==='Enter') performDashboardSearch()">
+                        <select id="dashboard-search-status" class="ui-select" aria-label="Status">
+                            <option value="">All Statuses</option>
+                            <option value="delivered">Delivered</option>
+                            <option value="sent">Sent</option>
+                            <option value="deferred">Deferred</option>
+                            <option value="bounced">Bounced</option>
+                            <option value="rejected">Rejected</option>
+                            <option value="discarded">Discarded (Sieve)</option>
+                            <option value="expired">Expired</option>
+                        </select>
+                        <button onclick="performDashboardSearch()" class="ui-btn ui-btn-primary">Search</button>
                     </div>
                 </div>
 
-                <!-- Recent Activity & Quick Search & System Status -->
-                <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                    <!-- Recent Activity -->
-                    <div class="lg:col-span-2 bg-white dark:bg-gray-800 rounded-lg shadow dark:shadow-gray-900/30">
-                        <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
-                            <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Recent Activity</h2>
-                        </div>
-                        <div id="recent-activity" class="p-6 space-y-3"
-                            style="max-height: unset; overflow-y: auto; scrollbar-width: none; -ms-overflow-style: none;">
-                            <div class="text-center py-8">
-                                <div class="loading mx-auto mb-4"></div>
-                                <p class="text-gray-500 dark:text-gray-400">Loading...</p>
+                <!-- Security alerts (anomaly detection), hidden until alerts exist -->
+                <div id="dashboard-security-alerts" class="hidden"></div>
+
+                <div class="ui-dash-grid">
+                    <div class="ui-col">
+                        <section class="ui-panel">
+                            <div class="ui-panel-head">Mail flow, last 24 hours</div>
+                            <div class="ui-stats">
+                                <div class="ui-stat"><span>Messages</span><b id="stat-messages-24h">0</b>
+                                    <small>7d: <span id="stat-messages-7d">0</span></small></div>
+                                <div class="ui-stat"><span>Blocked</span><b id="stat-blocked-24h" class="ui-text-fail">0</b>
+                                    <small>7d: <span id="stat-blocked-7d">0</span> (<span id="stat-blocked-percentage">0</span>%)</small></div>
+                                <div class="ui-stat"><span>Deferred</span><b id="stat-deferred-24h" class="ui-text-warn">0</b>
+                                    <small>7d: <span id="stat-deferred-7d">0</span></small></div>
+                                <div class="ui-stat"><span>Auth Fails</span><b id="stat-auth-failures-24h">0</b>
+                                    <small>7d: <span id="stat-auth-failures-7d">0</span></small></div>
                             </div>
-                        </div>
+                        </section>
+
+                        <section class="ui-panel">
+                            <div class="ui-panel-head">Recent Activity
+                                <button type="button" class="ui-more" onclick="navigateTo('messages')">View all</button></div>
+                            <div id="recent-activity">
+                                <div class="ui-loading"><div class="loading"></div><p>Loading...</p></div>
+                            </div>
+                        </section>
                     </div>
 
-                    <!-- System Status Summary & Quick Search -->
-                    <div class="space-y-6">
-                        <!-- Quick Search -->
-                        <div class="bg-white dark:bg-gray-800 rounded-lg shadow dark:shadow-gray-900/30 p-6">
-                            <h3 class="text-md font-semibold text-gray-900 dark:text-white mb-4">Quick Search</h3>
-                            <div class="space-y-3">
-                                <input type="text" id="dashboard-search-query" placeholder="Search messages..."
-                                    class="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-lg"
-                                    onkeypress="if(event.key==='Enter') performDashboardSearch()">
-                                <select id="dashboard-search-status"
-                                    class="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-lg">
-                                    <option value="">All Statuses</option>
-                                    <option value="delivered">Delivered</option>
-                                    <option value="sent">Sent</option>
-                                    <option value="deferred">Deferred</option>
-                                    <option value="bounced">Bounced</option>
-                                    <option value="rejected">Rejected</option>
-                                    <option value="discarded">Discarded (Sieve)</option>
-                                    <option value="expired">Expired</option>
-                                </select>
-                                <button onclick="performDashboardSearch()"
-                                    class="w-full px-4 py-2 bg-blue-600 hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600 text-white rounded-lg transition text-sm font-medium">
-                                    Search
-                                </button>
-                            </div>
-                        </div>
-
-                        <!-- Blacklist Status -->
-                        <div id="dashboard-blacklist-card" class="bg-white dark:bg-gray-800 rounded-lg shadow dark:shadow-gray-900/30">
-                            <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
-                                <h3 class="text-md font-semibold text-gray-900 dark:text-white flex items-center gap-2">
-                                    <svg class="w-4 h-4 text-blue-500" fill="none" stroke="currentColor"
-                                        viewBox="0 0 24 24">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                            d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z">
-                                        </path>
-                                    </svg>
-                                    Blacklist Status
-                                </h3>
-                            </div>
-                            <div id="dashboard-blacklist-summary" class="p-6">
-                                <div class="text-center py-4">
-                                    <div class="loading mx-auto mb-2"
-                                        style="width: 24px; height: 24px; border-width: 2px;">
-                                    </div>
-                                    <p class="text-xs text-gray-500 dark:text-gray-400">Loading...</p>
-                                </div>
-                            </div>
-                        </div>
-
-                        <!-- Containers Summary -->
-                        <div class="bg-white dark:bg-gray-800 rounded-lg shadow dark:shadow-gray-900/30">
-                            <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
-                                <h3 class="text-md font-semibold text-gray-900 dark:text-white">Containers</h3>
-                            </div>
-                            <div id="dashboard-containers-summary" class="p-6 space-y-2">
-                                <div class="text-center py-4">
-                                    <div class="loading mx-auto mb-2"
-                                        style="width: 24px; height: 24px; border-width: 2px;">
-                                    </div>
-                                    <p class="text-xs text-gray-500 dark:text-gray-400">Loading...</p>
-                                </div>
-                            </div>
-                        </div>
-
-                        <!-- Storage Summary -->
-                        <div class="bg-white dark:bg-gray-800 rounded-lg shadow dark:shadow-gray-900/30">
-                            <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
-                                <h3 class="text-md font-semibold text-gray-900 dark:text-white">Storage</h3>
-                            </div>
-                            <div id="dashboard-storage-summary" class="p-6">
-                                <div class="text-center py-4">
-                                    <div class="loading mx-auto mb-2"
-                                        style="width: 24px; height: 24px; border-width: 2px;">
-                                    </div>
-                                    <p class="text-xs text-gray-500 dark:text-gray-400">Loading...</p>
-                                </div>
-                            </div>
-                        </div>
-
-                        <!-- System Summary -->
-                        <div class="bg-white dark:bg-gray-800 rounded-lg shadow dark:shadow-gray-900/30">
-                            <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
-                                <h3 class="text-md font-semibold text-gray-900 dark:text-white">System</h3>
-                            </div>
-                            <div id="dashboard-system-summary" class="p-6">
-                                <div class="text-center py-4">
-                                    <div class="loading mx-auto mb-2"
-                                        style="width: 24px; height: 24px; border-width: 2px;">
-                                    </div>
-                                    <p class="text-xs text-gray-500 dark:text-gray-400">Loading...</p>
-                                </div>
-                            </div>
-                        </div>
+                    <div class="ui-col">
+                        <section id="dashboard-blacklist-card" class="ui-panel">
+                            <div class="ui-panel-head">Blacklist Status</div>
+                            <div id="dashboard-blacklist-summary"><div class="ui-loading"><div class="loading"></div><p>Loading...</p></div></div>
+                        </section>
+                        <section class="ui-panel">
+                            <div class="ui-panel-head">Containers</div>
+                            <div id="dashboard-containers-summary"><div class="ui-loading"><div class="loading"></div><p>Loading...</p></div></div>
+                        </section>
+                        <section class="ui-panel">
+                            <div class="ui-panel-head">Storage</div>
+                            <div id="dashboard-storage-summary"><div class="ui-loading"><div class="loading"></div><p>Loading...</p></div></div>
+                        </section>
+                        <section class="ui-panel">
+                            <div class="ui-panel-head">System</div>
+                            <div id="dashboard-system-summary"><div class="ui-loading"><div class="loading"></div><p>Loading...</p></div></div>
+                        </section>
                     </div>
                 </div>
             </div>
@@ -2394,9 +2280,9 @@
     </div> <!-- Close app-content div -->
 
     <!-- JavaScript -->
-    <script src="/static/utils.js?v=5"></script>
+    <script src="/static/utils.js?v=6"></script>
     <script src="/static/router.js?v=3"></script>
-    <script src="/static/app.js?v=38"></script>
+    <script src="/static/app.js?v=39"></script>
     <script src="/static/export.js?v=1"></script>
     <script src="/static/message-details.js?v=3"></script>
     <script src="/static/dmarc.js?v=5"></script>
