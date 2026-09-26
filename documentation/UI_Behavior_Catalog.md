@@ -327,11 +327,11 @@ Native `title` tooltips. Dynamic ones show the expression that builds the text.
 | Quarantine | "Close" | `frontend/app.js:3502` (testQuarantineRules) |
 | Quarantine | dynamic: `${escapeHtml(log.sender \|\| '')} → ${escapeHtml(log.recipient \|\| '')}` | `frontend/app.js:3554` (loadQuarantineRuleHistory) |
 | Quarantine | dynamic: `Rule: ${escapeHtml(log.rule_name \|\| '')}` | `frontend/app.js:3555` (loadQuarantineRuleHistory) |
-| Quarantine | "Help - Quarantine Auto-Rules" | `frontend/index.html:885` |
-| Spam filter | "Help - Spam Filter" | `frontend/index.html:933` |
-| Spam filter | "Clear all filters" | `frontend/index.html:985` |
-| Spam filter | "Sync suppression list to Rspamd" | `frontend/index.html:988` |
-| Spam filter | "More" | `frontend/index.html:990` |
+| Quarantine | "Help - Quarantine Auto-Rules" | `frontend/index.html:886` |
+| Spam filter | "Help - Spam Filter" | `frontend/index.html:935` |
+| Spam filter | "Clear all filters" | `frontend/index.html:987` |
+| Spam filter | "Sync suppression list to Rspamd" | `frontend/index.html:990` |
+| Spam filter | "More" | `frontend/index.html:992` |
 | Spam filter | dynamic: `${escapeHtml(displayDesc)}` | `frontend/spam_filter.js:136` (renderRspamdMapsList) |
 | Spam filter | "Close" | `frontend/spam_filter.js:193` (openMapEditor) |
 | Spam filter | "Synced to Rspamd" | `frontend/spam_filter.js:412` (renderSuppressionItem) |
@@ -354,33 +354,33 @@ Native `title` tooltips. Dynamic ones show the expression that builds the text.
 | Status | dynamic: `${escapeHtml(detail(r))}` | `frontend/app.js:4482` (renderBlacklistStatus) |
 | Status | dynamic: `${d.last_fetch_run ? escapeHtml(formatTime(d.last_fetch_run)) : ''}` | `frontend/app.js:4523` (renderStatusImport) |
 | Status | dynamic: `${d.last_import ? escapeHtml(formatTime(d.last_import)) : ''}` | `frontend/app.js:4524` (renderStatusImport) |
-| Status | "Help - IP Blacklist Monitor" | `frontend/index.html:1057` |
+| Status | "Help - IP Blacklist Monitor" | `frontend/index.html:1059` |
 | Domains | dynamic: `${data.last_dns_check ? escapeHtml(formatTime(data.last_dns_check)) : ''}` | `frontend/domains.js:72` (renderDomains) |
 | Domains | dynamic: `${escapeHtml(`${label}: ${check.message \|\| 'Not checked'}`)}` | `frontend/domains.js:151` (dnsStatusTag) |
 | Domains | dynamic: `${dns.checked_at ? escapeHtml(formatTime(dns.checked_at)) : ''}` | `frontend/domains.js:160` (renderDomainDnsSection) |
 | Domains | "Check DNS for this domain" | `frontend/domains.js:163` (renderDomainDnsSection) |
 | Domains | dynamic: `${escapeHtml(text)}` | `frontend/domains.js:274` (getAliasStatusIcon) |
-| Domains | "Help - Domains Information" | `frontend/index.html:1107` |
+| Domains | "Help - Domains Information" | `frontend/index.html:1109` |
 | DMARC | "TLS Reports" | `frontend/dmarc.js:347` (loadDmarcDomains) |
 | DMARC | dynamic: `${escapeHtml(day.organizations.join(', '))}` | `frontend/dmarc.js:652` (loadDomainTLSReports) |
 | DMARC | dynamic: `${escapeHtml(formatTime(sync.started_at))}` | `frontend/dmarc.js:984` (updateDmarcControls) |
 | DMARC | "Delete report" | `frontend/dmarc.js:1173` (renderReportsManagementTable) |
-| DMARC | "Help - DMARC Information" | `frontend/index.html:1127` |
-| Mailbox stats | "Help - Mailbox Statistics" | `frontend/index.html:1223` |
+| DMARC | "Help - DMARC Information" | `frontend/index.html:1129` |
+| Mailbox stats | "Help - Mailbox Statistics" | `frontend/index.html:1225` |
 | Mailbox stats | "Open these messages" | `frontend/mailbox-stats.js:291` (mailboxStatLink) |
 | Mailbox stats | "Address on a mailcow alias domain that points at this mailbox" | `frontend/mailbox-stats.js:371` (renderMailboxStatsAccordion) |
 | Mailbox stats | dynamic: `${escapeHtml(formatTime(group.last_seen))}` | `frontend/rate-limits.js:358` (renderRateLimitSendersTable) |
 | Mailbox stats | set in JS: dynamic: `isRateLimits ? 'Help - Rate Limits' : 'Help - Mailbox Statistics'` | `frontend/mailbox-stats.js:83` (mailboxStatsSwitchView) |
-| Logs | "Pause/Resume live updates" | `frontend/index.html:1342` |
-| Logs | "Live mode - show latest logs" | `frontend/index.html:1346` |
-| Logs | "Auto-scroll to new entries" | `frontend/index.html:1349` |
-| Logs | "Toggle sort order (newest at bottom / newest at top)" | `frontend/index.html:1352` |
-| Logs | "Toggle word wrap" | `frontend/index.html:1363` |
-| Logs | "Clear display" | `frontend/index.html:1366` |
-| Logs | "Search" | `frontend/index.html:1373` |
-| Logs | "Clear search" | `frontend/index.html:1374` |
-| Logs | "From date" | `frontend/index.html:1388` |
-| Logs | "To date" | `frontend/index.html:1390` |
+| Logs | "Pause/Resume live updates" | `frontend/index.html:1344` |
+| Logs | "Live mode - show latest logs" | `frontend/index.html:1348` |
+| Logs | "Auto-scroll to new entries" | `frontend/index.html:1351` |
+| Logs | "Toggle sort order (newest at bottom / newest at top)" | `frontend/index.html:1354` |
+| Logs | "Toggle word wrap" | `frontend/index.html:1365` |
+| Logs | "Clear display" | `frontend/index.html:1368` |
+| Logs | "Search" | `frontend/index.html:1375` |
+| Logs | "Clear search" | `frontend/index.html:1376` |
+| Logs | "From date" | `frontend/index.html:1390` |
+| Logs | "To date" | `frontend/index.html:1392` |
 | Logs | dynamic: `${escapeHtml(f.description \|\| '')}` | `frontend/logs-viewer.js:201` (loadSmartFilters) |
 | Logs | "Clear all filters" | `frontend/logs-viewer.js:1143` (updateFilterBadge) |
 | Settings | "Last delivery succeeded" | `frontend/notifications.js:67` (renderNotificationChannels) |
@@ -404,12 +404,12 @@ Native `title` tooltips. Dynamic ones show the expression that builds the text.
 | app.js (mixed) | dynamic: `Look up on ${escapeHtml(r.name)}` | `frontend/app.js:3905` (blocklistLookupLink) |
 | app.js (mixed) | set in JS: dynamic: `label` | `frontend/app.js:286` (setNavTabLabel) |
 | app.js (mixed) | set in JS: dynamic: `title \|\| ''` | `frontend/app.js:496` (setNavCount) |
-| Modal: changelog-modal | "Close" | `frontend/index.html:1474` |
+| Modal: changelog-modal | "Close" | `frontend/index.html:1476` |
 | Modal: container-logs-modal | "Refresh" | `frontend/index.html:497` |
 | Modal: container-logs-modal | "Close" | `frontend/index.html:505` |
-| Modal: dmarc-reports-management-modal | "Close" | `frontend/index.html:1522` |
-| Modal: dmarc-sync-history-modal | "Close" | `frontend/index.html:1509` |
-| Modal: message-modal | "Close" | `frontend/index.html:1447` |
+| Modal: dmarc-reports-management-modal | "Close" | `frontend/index.html:1524` |
+| Modal: dmarc-sync-history-modal | "Close" | `frontend/index.html:1511` |
+| Modal: message-modal | "Close" | `frontend/index.html:1449` |
 
 ### Toasts
 
@@ -667,12 +667,12 @@ Drop-down lists in the page markup with their options. The option wording and or
 | Messages | `messages-filter-status`: All Statuses / Delivered / Deferred / Bounced / Rejected / Spam / Discarded (Sieve) | `frontend/index.html:681` |
 | Security | `netfilter-filter-action`: All Actions / BAN / UNBAN / Warning / Info | `frontend/index.html:780` |
 | Security | `netfilter-filter-country`: All Countries | `frontend/index.html:787` |
-| Quarantine | `quarantine-sort`: Newest first / Score: high to low / Score: low to high | `frontend/index.html:873` |
-| Spam filter | `suppression-filter-reason`: All Reasons / Hard Bounce / Soft Bounce / Deferred Stuck / Rejected / Manual | `frontend/index.html:967` |
-| Spam filter | `suppression-filter-active`: Active Only / All / Inactive / Expired | `frontend/index.html:977` |
-| Mailbox stats | `mailbox-stats-domain-filter`: All Domains | `frontend/index.html:1280` |
-| Mailbox stats | `mailbox-stats-sort`: Sent (High to Low) / Received (High to Low) / Failure Rate (High to Low) / Quota Used (High to Low) / Username (A-Z) | `frontend/index.html:1283` |
-| Logs | `logs-fontsize`: 10px / 11px / 12px / 13px / 14px / 16px | `frontend/index.html:1355` |
+| Quarantine | `quarantine-sort`: Newest first / Score: high to low / Score: low to high | `frontend/index.html:874` |
+| Spam filter | `suppression-filter-reason`: All Reasons / Hard Bounce / Soft Bounce / Deferred Stuck / Rejected / Manual | `frontend/index.html:969` |
+| Spam filter | `suppression-filter-active`: Active Only / All / Inactive / Expired | `frontend/index.html:979` |
+| Mailbox stats | `mailbox-stats-domain-filter`: All Domains | `frontend/index.html:1282` |
+| Mailbox stats | `mailbox-stats-sort`: Sent (High to Low) / Received (High to Low) / Failure Rate (High to Low) / Quota Used (High to Low) / Username (A-Z) | `frontend/index.html:1285` |
+| Logs | `logs-fontsize`: 10px / 11px / 12px / 13px / 14px / 16px | `frontend/index.html:1357` |
 
 ### Charts
 
@@ -698,12 +698,12 @@ In-app help buttons; the topic is the Markdown file name under documentation/Hel
 | Page | What | Code |
 |---|---|---|
 | Security | topic "Abuse_Protection" | `frontend/index.html:822` |
-| Quarantine | topic "Quarantine" | `frontend/index.html:885` |
-| Spam filter | topic "Spam_Filter" | `frontend/index.html:932` |
-| Status | topic "IP_Blacklist_Monitor" | `frontend/index.html:1056` |
-| Domains | topic "Domains" | `frontend/index.html:1106` |
-| DMARC | topic "DMARC" | `frontend/index.html:1126` |
-| Mailbox stats | topic "Mailbox_Stats" | `frontend/index.html:1221` |
+| Quarantine | topic "Quarantine" | `frontend/index.html:886` |
+| Spam filter | topic "Spam_Filter" | `frontend/index.html:934` |
+| Status | topic "IP_Blacklist_Monitor" | `frontend/index.html:1058` |
+| Domains | topic "Domains" | `frontend/index.html:1108` |
+| DMARC | topic "DMARC" | `frontend/index.html:1128` |
+| Mailbox stats | topic "Mailbox_Stats" | `frontend/index.html:1223` |
 | Mailbox stats | topic dynamic: `'${isRateLimits ? 'Rate_Limits' : 'Mailbox_Stats'}'` | `frontend/mailbox-stats.js:82` (mailboxStatsSwitchView) |
 
 ### Empty states
