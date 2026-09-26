@@ -584,7 +584,7 @@
                     </div>
                 </div>
 
-                <div class="ui-dash-grid">
+                <div class="ui-dash-grid ui-scroll">
                     <div class="ui-col">
                         <!-- Needs attention: server checks and the security alerts (anomaly detection) -->
                         <section class="ui-panel" id="dashboard-attention-panel">
@@ -738,7 +738,7 @@
                     <button type="button" class="modal-tab" role="tab" aria-selected="false" id="security-tab-btn-abuse" onclick="securityShowTab('abuse')">Abuse protection <span class="ui-tag ui-tag-warn ui-tab-tag" title="This feature is new - please report any issues on GitHub">Beta</span></button>
                 </div>
 
-                <div id="security-tab-overview" class="ui-st-panel" role="tabpanel">
+                <div id="security-tab-overview" class="ui-scroll ui-st-panel" role="tabpanel">
                     <div class="ui-se-two">
                         <section class="ui-panel">
                             <div class="ui-panel-head">Need a decision <span id="security-decide-note" class="ui-count"></span></div>
@@ -771,7 +771,7 @@
                     </section>
                 </div>
 
-                <div id="security-tab-events" class="ui-st-panel hidden" role="tabpanel">
+                <div id="security-tab-events" class="ui-scroll ui-st-panel hidden" role="tabpanel">
                 <!-- Filters -->
                 <section class="ui-panel ui-filters">
                     <div class="ui-filters-row">
@@ -801,7 +801,7 @@
                 </section>
                 </div>
 
-                <div id="security-tab-fail2ban" class="ui-st-panel hidden" role="tabpanel">
+                <div id="security-tab-fail2ban" class="ui-scroll ui-st-panel hidden" role="tabpanel">
                     <div class="ui-se-f2b">
                 <!-- Fail2Ban Settings -->
                 <section class="ui-panel">
@@ -816,7 +816,7 @@
                     </div>
                 </div>
 
-                <div id="security-tab-abuse" class="ui-st-panel hidden" role="tabpanel">
+                <div id="security-tab-abuse" class="ui-scroll ui-st-panel hidden" role="tabpanel">
                     <section class="ui-panel">
                         <div class="ui-panel-head">Abuse protection <button type="button"
                                     onclick="event.preventDefault(); event.stopPropagation(); showHelpModal('Abuse_Protection')"
@@ -853,7 +853,7 @@
                         </div>
                     </div>
                 </section>
-                <section class="ui-sec-block">
+                <section class="ui-sec-block ui-scroll">
                     <div class="ui-list-head"><h2 class="ui-h2">Mail Queue</h2> <span id="queue-count" class="ui-count"></span></div>
                     <div id="queue-logs"><div class="ui-loading"><div class="loading"></div><p>Loading...</p></div></div>
                     <p class="ui-kv-note ui-list-foot">Queue IDs and the full log lines are one click away in Messages.</p>
@@ -868,6 +868,7 @@
                         <p class="ui-muted" id="quarantine-summary">Messages held by the spam filter, and the rules that handle them</p>
                     </div>
                 </div>
+                <div class="ui-scroll">
                 <section class="ui-sec-block">
                     <div class="ui-list-head"><h2 class="ui-h2">Quarantined Messages</h2> <span id="quarantine-count" class="ui-count"></span>
                         <select id="quarantine-sort" onchange="applyQuarantineSort()" class="ui-select ui-head-actions ui-select-auto" aria-label="Sort">
@@ -923,6 +924,7 @@
                         </div>
                     </div>
                 </details>
+                </div>
             </div>
 
             <!-- Spam Filter Tab -->
@@ -948,14 +950,14 @@
                 </div>
 
                 <!-- Maps sub-tab content (hidden by default) -->
-                <div id="spam-filter-maps-content" class="hidden">
+                <div id="spam-filter-maps-content" class="hidden ui-scroll">
                     <div id="rspamd-maps-list" class="ui-sec-block">
                         <div class="ui-loading"><div class="loading"></div><p>Loading Rspamd maps...</p></div>
                     </div>
                 </div>
 
                 <!-- Suppressions sub-tab content (visible by default) -->
-                <div id="spam-filter-suppressions-content" class="ui-sec-block">
+                <div id="spam-filter-suppressions-content" class="ui-sec-block ui-scroll">
                     <div id="suppression-stats" class="ui-kpis"></div>
 
                     <section class="ui-panel ui-filters ui-ms-filters">
@@ -1030,7 +1032,7 @@
                 </div>
 
                 <!-- Overview: one card per area, each opens its tab -->
-                <div id="status-tab-overview" class="ui-st-panel" role="tabpanel">
+                <div id="status-tab-overview" class="ui-scroll ui-st-panel" role="tabpanel">
                     <div class="ui-st-cards" id="status-kpis">
                         <button type="button" class="ui-st-card" onclick="statusShowTab('containers')"><span class="ui-st-card-label">Containers</span><b id="status-kpi-containers">-</b><small id="status-containers-note"></small></button>
                         <button type="button" class="ui-st-card" id="status-kpi-blocklists-cell" onclick="statusShowTab('blocklists')"><span class="ui-st-card-label">Blocklists</span><b id="status-kpi-blocklists">-</b><small id="status-kpi-blocklists-note">Addresses on a blocklist</small></button>
@@ -1041,7 +1043,7 @@
                     </div>
                 </div>
 
-                <div id="status-tab-containers" class="ui-st-panel hidden" role="tabpanel">
+                <div id="status-tab-containers" class="ui-scroll ui-st-panel hidden" role="tabpanel">
                     <div class="ui-list-head"><h2 class="ui-h2">Containers</h2> <span id="status-containers-summary" class="ui-count"></span>
                         <div class="ui-seg ui-head-actions" role="group" aria-label="Show">
                             <button type="button" aria-pressed="true" data-ctr-filter="all" onclick="statusContainerFilter('all')">All</button>
@@ -1050,7 +1052,7 @@
                     <div id="status-containers"><div class="ui-loading"><div class="loading"></div><p>Loading...</p></div></div>
                 </div>
 
-                <div id="status-tab-blocklists" class="ui-st-panel hidden" role="tabpanel">
+                <div id="status-tab-blocklists" class="ui-scroll ui-st-panel hidden" role="tabpanel">
                     <section id="blacklist-section" class="ui-sec-block">
                         <div class="ui-list-head"><h2 class="ui-h2">Blocklists</h2>
                             <button onclick="showHelpModal('IP_Blacklist_Monitor')" class="ui-icon-btn ui-help-btn"
@@ -1067,7 +1069,7 @@
                     </section>
                 </div>
 
-                <div id="status-tab-jobs" class="ui-st-panel hidden" role="tabpanel">
+                <div id="status-tab-jobs" class="ui-scroll ui-st-panel hidden" role="tabpanel">
                     <div class="ui-list-head"><h2 class="ui-h2">Background jobs</h2> <span id="status-jobs-summary" class="ui-count"></span>
                         <div class="ui-seg ui-head-actions" role="group" aria-label="Show">
                             <button type="button" aria-pressed="true" data-job-filter="all" onclick="statusJobFilter('all')">All</button>
@@ -1077,7 +1079,7 @@
                     <div id="status-jobs"><div class="ui-loading"><div class="loading"></div><p>Loading...</p></div></div>
                 </div>
 
-                <div id="status-tab-data" class="ui-st-panel hidden" role="tabpanel">
+                <div id="status-tab-data" class="ui-scroll ui-st-panel hidden" role="tabpanel">
                     <div class="ui-st-data">
                         <section class="ui-sec-block ui-st-wide">
                             <div class="ui-list-head"><h2 class="ui-h2">Log import</h2></div>
@@ -1115,7 +1117,7 @@
                     <div id="dns-check-info" class="ui-head-tools"></div>
                 </div>
                 <div id="domains-loading" class="ui-loading"><div class="loading"></div><p>Loading domains...</p></div>
-                <div id="domains-content" class="hidden ui-sec-block"></div>
+                <div id="domains-content" class="hidden ui-sec-block ui-scroll"></div>
             </div>
 
             <!-- DMARC Tab -->
@@ -1152,7 +1154,7 @@
                 <nav id="dmarc-breadcrumb" class="ui-crumbs hidden" aria-label="Breadcrumb"></nav>
 
                 <!-- Domains List View -->
-                <div id="dmarc-domains-view" class="ui-sec-block">
+                <div id="dmarc-domains-view" class="ui-sec-block ui-scroll">
                     <div id="dmarc-main-stats-container"></div>
 
                     <!-- Insights (policy recommendations + new-source detection) -->
@@ -1164,7 +1166,7 @@
                 </div>
 
                 <!-- Domain Overview View (hidden by default) -->
-                <div id="dmarc-overview-view" class="hidden ui-sec-block">
+                <div id="dmarc-overview-view" class="hidden ui-sec-block ui-scroll">
                     <div id="dmarc-overview-stats-container" class="ui-sec-block"></div>
 
                     <section class="ui-panel">
@@ -1192,14 +1194,14 @@
                 </div>
 
                 <!-- Report Details View (hidden by default) -->
-                <div id="dmarc-report-details-view" class="hidden ui-sec-block">
+                <div id="dmarc-report-details-view" class="hidden ui-sec-block ui-scroll">
                     <div id="report-details-stats-container"></div>
                     <div class="ui-list-head"><h2 class="ui-h2">Sources</h2></div>
                     <div id="report-detail-sources-list"><div class="ui-loading"><div class="loading"></div><p>Loading sources...</p></div></div>
                 </div>
 
                 <!-- Source Details View (hidden by default) -->
-                <div id="dmarc-source-details-view" class="hidden ui-sec-block">
+                <div id="dmarc-source-details-view" class="hidden ui-sec-block ui-scroll">
                     <section class="ui-panel ui-dmarc-source">
                         <img id="source-detail-flag" src="" alt="" class="ui-flag-lg">
                         <div>
@@ -1238,7 +1240,7 @@
                 </div>
 
                 <!-- Statistics view -->
-                <div id="mailbox-stats-statistics-view" class="ui-sec-block">
+                <div id="mailbox-stats-statistics-view" class="ui-sec-block ui-scroll">
                     <div id="mailbox-stats-summary" class="ui-kpis">
                         <div class="ui-kpi"><b id="mailbox-stats-sent">-</b>Messages Sent<small id="mailbox-stats-date-label-sent" class="ui-kpi-note">Last 30 days</small></div>
                         <div class="ui-kpi"><b id="mailbox-stats-received">-</b>Messages Received<small id="mailbox-stats-date-label-recv" class="ui-kpi-note">Last 30 days</small></div>
@@ -1304,7 +1306,7 @@
                     </div>
                 </div>
                 <!-- Rate Limits view -->
-                <div id="mailbox-stats-rate-limits-view" class="hidden">
+                <div id="mailbox-stats-rate-limits-view" class="hidden ui-scroll">
                     <div id="rate-limits-loading" class="ui-loading"><div class="loading"></div><p>Loading rate limits...</p></div>
                     <div id="rate-limits-content" class="hidden">
                         <div class="ui-sec-block">
@@ -1325,7 +1327,7 @@
                         <p class="ui-muted">Live and past log lines of each mailcow service</p>
                     </div>
                 </div>
-                <div class="ui-logs">
+                <div class="ui-logs ui-scroll">
                     <!-- Service Sidebar -->
                     <aside class="ui-panel ui-logs-side">
                         <input type="text" id="logs-service-search" placeholder="Filter services..." aria-label="Filter services"
@@ -1434,7 +1436,7 @@
                 <div id="settings-loading" class="ui-loading"><div class="loading"></div><p>Loading settings...</p></div>
 
                 <!-- Content -->
-                <div id="settings-content" class="hidden ui-settings"></div>
+                <div id="settings-content" class="hidden ui-settings ui-scroll"></div>
             </div>
         </div>
 
