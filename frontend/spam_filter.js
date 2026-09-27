@@ -363,9 +363,32 @@ async function saveMapContent(filename) {
 // SUPPRESSIONS
 // =============================================================================
 
+// Sending the list to Rspamd writes a map through the mailcow API, which
+// needs the read-write key; without it the list is kept here only
+function suppressionSyncLocked() {
+    return typeof mailcowRwConfigured !== 'undefined' && !mailcowRwConfigured;
+}
+
+function updateSuppressionSyncLock() {
+    const locked = suppressionSyncLocked();
+    const btn = document.getElementById('suppression-sync-btn');
+    if (btn) {
+        btn.disabled = locked;
+        btn.title = locked ? 'Syncing to Rspamd needs the Read-Write API key' : 'Sync suppression list to Rspamd';
+    }
+    const note = document.getElementById('suppression-rw-note');
+    if (note) {
+        note.innerHTML = locked ? `<div class="ui-list-note ui-flush">${uiLocked('Syncing to Rspamd is locked',
+            `Suppressions are kept here, but sending them to Rspamd so it rejects the mail ${UI_RW_KEY_TEXT}`)}</div>` : '';
+    }
+}
+
 async function loadSuppressions(page) {
     suppressionPage = page || suppressionPage || 1;
     const container = document.getElementById('suppression-list');
+    // The key status may not be loaded yet on the first page load
+    if (typeof mailcowRwConfigured !== 'undefined' && !mailcowRwConfigured) await fetchRwStatus();
+    updateSuppressionSyncLock();
 
     const search = document.getElementById('suppression-search')?.value || '';
     const reason = document.getElementById('suppression-filter-reason')?.value || '';
@@ -422,7 +445,7 @@ function renderSuppressionItem(s) {
     if (s.active) {
         syncBadge = s.synced_to_rspamd
             ? '<span class="ui-text-ok" title="Synced to Rspamd">✓ Synced</span>'
-            : '<span class="ui-text-warn" title="Pending sync to Rspamd">⟳ Pending</span>';
+            : `<span class="ui-text-warn" title="${suppressionSyncLocked() ? 'Not synced: syncing to Rspamd needs the Read-Write API key' : 'Pending sync to Rspamd'}">⟳ Pending</span>`;
     } else if (s.synced_to_rspamd) {
         // Inactive entries: show "Removed" if was synced, nothing if never synced
         syncBadge = '<span class="ui-muted" title="Will be removed from Rspamd on next sync">⊘ Will unsync</span>';
@@ -810,6 +833,8 @@ async function deleteSuppression(id, email) {
  * provides a more verbose experience.
  */
 async function autoSyncToRspamd() {
+    // Without the read-write key the sync can only fail
+    if (suppressionSyncLocked()) return;
     try {
         const response = await authenticatedFetch('/api/suppressions/sync', { method: 'POST' });
         if (response.ok) {
@@ -847,7 +872,7 @@ async function syncSuppressionsToRspamd() {
         showToast('Sync failed: ' + error.message, 'error');
     } finally {
         if (btn) {
-            btn.disabled = false;
+            btn.disabled = suppressionSyncLocked();
             btn.innerHTML = `
                 <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"

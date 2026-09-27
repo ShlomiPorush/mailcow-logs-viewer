@@ -167,7 +167,7 @@ Generated from the code. Do not edit by hand; run `node .github/scripts/ui-catal
 | Behaviour | Count |
 |---|---|
 | [Click to copy](#click-to-copy) | 42 |
-| [Tooltips](#tooltips) | 172 |
+| [Tooltips](#tooltips) | 173 |
 | [Toasts](#toasts) | 140 |
 | [Confirmation dialogs](#confirmation-dialogs) | 28 |
 | [Country flags](#country-flags) | 6 |
@@ -226,7 +226,7 @@ Fields that copy their value on click (hover shows a copy icon and "Click to cop
 | Quarantine | copies: `data.subject \|\| '-'` | `frontend/app.js:3226` (renderQuarantineDetailContent) |
 | Quarantine | copies: `data.header_from \|\| '-'` | `frontend/app.js:3227` (renderQuarantineDetailContent) |
 | Quarantine | copies: `data.env_from \|\| '-'` | `frontend/app.js:3228` (renderQuarantineDetailContent) |
-| Spam filter | copies: `displayEmail` | `frontend/spam_filter.js:440` (renderSuppressionItem) |
+| Spam filter | copies: `displayEmail` | `frontend/spam_filter.js:463` (renderSuppressionItem) |
 | Status | copies: `item.message_id \|\| 'N/A'` | `frontend/app.js:4678` (renderStatusCorrelation) |
 | Status | copies: `item.sender \|\| 'N/A'` | `frontend/app.js:4679` (renderStatusCorrelation) |
 | Status | copies: `item.recipient \|\| 'N/A'` | `frontend/app.js:4679` (renderStatusCorrelation) |
@@ -336,15 +336,16 @@ Native `title` tooltips. Dynamic ones show the expression that builds the text.
 | Spam filter | "More" | `frontend/index.html:963` |
 | Spam filter | dynamic: `${escapeHtml(displayDesc)}` | `frontend/spam_filter.js:141` (renderRspamdMapsList) |
 | Spam filter | "Close" | `frontend/spam_filter.js:199` (openMapEditor) |
-| Spam filter | "Synced to Rspamd" | `frontend/spam_filter.js:424` (renderSuppressionItem) |
-| Spam filter | "Pending sync to Rspamd" | `frontend/spam_filter.js:425` (renderSuppressionItem) |
-| Spam filter | "Will be removed from Rspamd on next sync" | `frontend/spam_filter.js:428` (renderSuppressionItem) |
-| Spam filter | dynamic: `${escapeHtml(s.email)}` | `frontend/spam_filter.js:441` (renderSuppressionItem) |
-| Spam filter | dynamic: `${escapeHtml(s.notes)}` | `frontend/spam_filter.js:444` (renderSuppressionItem) |
-| Spam filter | dynamic: `${escapeHtml(formatTime(s.created_at))}` | `frontend/spam_filter.js:450` (renderSuppressionItem) |
-| Spam filter | "Edit suppression" | `frontend/spam_filter.js:452` (renderSuppressionItem) |
-| Spam filter | dynamic: `${s.active ? 'Deactivate' : 'Reactivate'}` | `frontend/spam_filter.js:453` (renderSuppressionItem) |
-| Spam filter | "Delete permanently" | `frontend/spam_filter.js:454` (renderSuppressionItem) |
+| Spam filter | "Synced to Rspamd" | `frontend/spam_filter.js:447` (renderSuppressionItem) |
+| Spam filter | dynamic: `${suppressionSyncLocked() ? 'Not synced: syncing to Rspamd needs the Read-Wri...` | `frontend/spam_filter.js:448` (renderSuppressionItem) |
+| Spam filter | "Will be removed from Rspamd on next sync" | `frontend/spam_filter.js:451` (renderSuppressionItem) |
+| Spam filter | dynamic: `${escapeHtml(s.email)}` | `frontend/spam_filter.js:464` (renderSuppressionItem) |
+| Spam filter | dynamic: `${escapeHtml(s.notes)}` | `frontend/spam_filter.js:467` (renderSuppressionItem) |
+| Spam filter | dynamic: `${escapeHtml(formatTime(s.created_at))}` | `frontend/spam_filter.js:473` (renderSuppressionItem) |
+| Spam filter | "Edit suppression" | `frontend/spam_filter.js:475` (renderSuppressionItem) |
+| Spam filter | dynamic: `${s.active ? 'Deactivate' : 'Reactivate'}` | `frontend/spam_filter.js:476` (renderSuppressionItem) |
+| Spam filter | "Delete permanently" | `frontend/spam_filter.js:477` (renderSuppressionItem) |
+| Spam filter | set in JS: dynamic: `locked ? 'Syncing to Rspamd needs the Read-Write API key' : 'Sync suppression...` | `frontend/spam_filter.js:377` (updateSuppressionSyncLock) |
 | Status | dynamic: `Stop counting and alerting on ${escapeHtml(c.name)}` | `frontend/app.js:4049` (renderStatusAttention) |
 | Status | dynamic: `Keep checking ${escapeHtml(r.name)} but never count or alert on it` | `frontend/app.js:4056` (renderStatusAttention) |
 | Status | dynamic: `Stop counting and alerting on ${escapeHtml(c.name)}` | `frontend/app.js:4195` (loadStatusContainers) |
@@ -356,33 +357,33 @@ Native `title` tooltips. Dynamic ones show the expression that builds the text.
 | Status | dynamic: `${escapeHtml(detail(r))}` | `frontend/app.js:4603` (renderBlacklistStatus) |
 | Status | dynamic: `${d.last_fetch_run ? escapeHtml(formatTime(d.last_fetch_run)) : ''}` | `frontend/app.js:4644` (renderStatusImport) |
 | Status | dynamic: `${d.last_import ? escapeHtml(formatTime(d.last_import)) : ''}` | `frontend/app.js:4645` (renderStatusImport) |
-| Status | "Help - IP Blacklist Monitor" | `frontend/index.html:1026` |
+| Status | "Help - IP Blacklist Monitor" | `frontend/index.html:1027` |
 | Domains | dynamic: `${data.last_dns_check ? escapeHtml(formatTime(data.last_dns_check)) : ''}` | `frontend/domains.js:72` (renderDomains) |
 | Domains | dynamic: `${escapeHtml(`${label}: ${check.message \|\| 'Not checked'}`)}` | `frontend/domains.js:151` (dnsStatusTag) |
 | Domains | dynamic: `${dns.checked_at ? escapeHtml(formatTime(dns.checked_at)) : ''}` | `frontend/domains.js:160` (renderDomainDnsSection) |
 | Domains | "Check DNS for this domain" | `frontend/domains.js:163` (renderDomainDnsSection) |
 | Domains | dynamic: `${escapeHtml(text)}` | `frontend/domains.js:274` (getAliasStatusIcon) |
-| Domains | "Help - Domains Information" | `frontend/index.html:1056` |
+| Domains | "Help - Domains Information" | `frontend/index.html:1057` |
 | DMARC | "TLS Reports" | `frontend/dmarc.js:347` (loadDmarcDomains) |
 | DMARC | dynamic: `${escapeHtml(day.organizations.join(', '))}` | `frontend/dmarc.js:685` (loadDomainTLSReports) |
 | DMARC | dynamic: `${escapeHtml(formatTime(sync.started_at))}` | `frontend/dmarc.js:1017` (updateDmarcControls) |
 | DMARC | "Delete report" | `frontend/dmarc.js:1206` (renderReportsManagementTable) |
-| DMARC | "Help - DMARC Information" | `frontend/index.html:1076` |
-| Mailbox stats | "Help - Mailbox Statistics" | `frontend/index.html:1172` |
+| DMARC | "Help - DMARC Information" | `frontend/index.html:1077` |
+| Mailbox stats | "Help - Mailbox Statistics" | `frontend/index.html:1173` |
 | Mailbox stats | "Open these messages" | `frontend/mailbox-stats.js:291` (mailboxStatLink) |
 | Mailbox stats | "Address on a mailcow alias domain that points at this mailbox" | `frontend/mailbox-stats.js:371` (renderMailboxStatsAccordion) |
 | Mailbox stats | dynamic: `${escapeHtml(formatTime(group.last_seen))}` | `frontend/rate-limits.js:358` (renderRateLimitSendersTable) |
 | Mailbox stats | set in JS: dynamic: `isRateLimits ? 'Help - Rate Limits' : 'Help - Mailbox Statistics'` | `frontend/mailbox-stats.js:83` (mailboxStatsSwitchView) |
-| Logs | "Pause/Resume live updates" | `frontend/index.html:1291` |
-| Logs | "Live mode - show latest logs" | `frontend/index.html:1295` |
-| Logs | "Auto-scroll to new entries" | `frontend/index.html:1298` |
-| Logs | "Toggle sort order (newest at bottom / newest at top)" | `frontend/index.html:1301` |
-| Logs | "Toggle word wrap" | `frontend/index.html:1312` |
-| Logs | "Clear display" | `frontend/index.html:1315` |
-| Logs | "Search" | `frontend/index.html:1322` |
-| Logs | "Clear search" | `frontend/index.html:1323` |
-| Logs | "From date" | `frontend/index.html:1337` |
-| Logs | "To date" | `frontend/index.html:1339` |
+| Logs | "Pause/Resume live updates" | `frontend/index.html:1292` |
+| Logs | "Live mode - show latest logs" | `frontend/index.html:1296` |
+| Logs | "Auto-scroll to new entries" | `frontend/index.html:1299` |
+| Logs | "Toggle sort order (newest at bottom / newest at top)" | `frontend/index.html:1302` |
+| Logs | "Toggle word wrap" | `frontend/index.html:1313` |
+| Logs | "Clear display" | `frontend/index.html:1316` |
+| Logs | "Search" | `frontend/index.html:1323` |
+| Logs | "Clear search" | `frontend/index.html:1324` |
+| Logs | "From date" | `frontend/index.html:1338` |
+| Logs | "To date" | `frontend/index.html:1340` |
 | Logs | dynamic: `${escapeHtml(f.description \|\| '')}` | `frontend/logs-viewer.js:201` (loadSmartFilters) |
 | Logs | "Clear all filters" | `frontend/logs-viewer.js:1149` (updateFilterBadge) |
 | Settings | "Last delivery succeeded" | `frontend/notifications.js:67` (renderNotificationChannels) |
@@ -406,12 +407,12 @@ Native `title` tooltips. Dynamic ones show the expression that builds the text.
 | app.js (mixed) | dynamic: `Look up on ${escapeHtml(r.name)}` | `frontend/app.js:4036` (blocklistLookupLink) |
 | app.js (mixed) | set in JS: dynamic: `label` | `frontend/app.js:286` (setNavTabLabel) |
 | app.js (mixed) | set in JS: dynamic: `title \|\| ''` | `frontend/app.js:496` (setNavCount) |
-| Modal: changelog-modal | "Close" | `frontend/index.html:1423` |
-| Modal: container-logs-modal | "Refresh" | `frontend/index.html:1455` |
-| Modal: container-logs-modal | "Close" | `frontend/index.html:1463` |
-| Modal: dmarc-reports-management-modal | "Close" | `frontend/index.html:1511` |
-| Modal: dmarc-sync-history-modal | "Close" | `frontend/index.html:1498` |
-| Modal: message-modal | "Close" | `frontend/index.html:1396` |
+| Modal: changelog-modal | "Close" | `frontend/index.html:1424` |
+| Modal: container-logs-modal | "Refresh" | `frontend/index.html:1456` |
+| Modal: container-logs-modal | "Close" | `frontend/index.html:1464` |
+| Modal: dmarc-reports-management-modal | "Close" | `frontend/index.html:1512` |
+| Modal: dmarc-sync-history-modal | "Close" | `frontend/index.html:1499` |
+| Modal: message-modal | "Close" | `frontend/index.html:1397` |
 
 ### Toasts
 
@@ -471,23 +472,23 @@ Transient notifications from `showToast(message, type)` (utils.js). Type default
 | Spam filter | dynamic: ``Map saved (${result.entry_count} entries). ${result.normalized_entries} bare...` [success] | `frontend/spam_filter.js:345` (saveMapContent) |
 | Spam filter | dynamic: ``Map saved successfully (${result.entry_count} entries)`` [success] | `frontend/spam_filter.js:347` (saveMapContent) |
 | Spam filter | dynamic: `'Failed to save map: ' + error.message` [error] | `frontend/spam_filter.js:355` (saveMapContent) |
-| Spam filter | dynamic: `type === 'domain' ? 'Domain name is required' : 'Email address is required'` [error] | `frontend/spam_filter.js:600` (createSuppression) |
-| Spam filter | "Enter a plain domain name, for example example.com" [error] | `frontend/spam_filter.js:612` (createSuppression) |
-| Spam filter | "This address is already suppressed" [error] | `frontend/spam_filter.js:636` (createSuppression) |
-| Spam filter | dynamic: ``Suppression added: ${email}`` [success] | `frontend/spam_filter.js:645` (createSuppression) |
-| Spam filter | dynamic: `error.message` [error] | `frontend/spam_filter.js:653` (createSuppression) |
-| Spam filter | "Please set an expiry date" [error] | `frontend/spam_filter.js:741` (saveEditSuppression) |
-| Spam filter | "Suppression updated" [success] | `frontend/spam_filter.js:756` (saveEditSuppression) |
-| Spam filter | dynamic: `error.message` [error] | `frontend/spam_filter.js:762` (saveEditSuppression) |
-| Spam filter | dynamic: ``Suppression ${newActive ? 'activated' : 'deactivated'}`` [success] | `frontend/spam_filter.js:776` (toggleSuppression) |
-| Spam filter | dynamic: `error.message` [error] | `frontend/spam_filter.js:782` (toggleSuppression) |
-| Spam filter | dynamic: ``Suppression deleted: ${email}`` [success] | `frontend/spam_filter.js:793` (deleteSuppression) |
-| Spam filter | dynamic: `error.message` [error] | `frontend/spam_filter.js:799` (deleteSuppression) |
-| Spam filter | dynamic: ``Synced ${result.synced} suppressions to Rspamd (${result.newly_synced} new)`` [success] | `frontend/spam_filter.js:843` (syncSuppressionsToRspamd) |
-| Spam filter | dynamic: `'Sync failed: ' + error.message` [error] | `frontend/spam_filter.js:847` (syncSuppressionsToRspamd) |
-| Spam filter | dynamic: ``Imported ${result.imported} suppressions (${result.skipped} skipped)`` [success] | `frontend/spam_filter.js:883` (importSuppressions) |
-| Spam filter | dynamic: `'Import failed: ' + error.message` [error] | `frontend/spam_filter.js:889` (importSuppressions) |
-| Spam filter | dynamic: ``Pattern added: ${pattern}`` [success] | `frontend/spam_filter.js:1072` (regexWizardAdd) |
+| Spam filter | dynamic: `type === 'domain' ? 'Domain name is required' : 'Email address is required'` [error] | `frontend/spam_filter.js:623` (createSuppression) |
+| Spam filter | "Enter a plain domain name, for example example.com" [error] | `frontend/spam_filter.js:635` (createSuppression) |
+| Spam filter | "This address is already suppressed" [error] | `frontend/spam_filter.js:659` (createSuppression) |
+| Spam filter | dynamic: ``Suppression added: ${email}`` [success] | `frontend/spam_filter.js:668` (createSuppression) |
+| Spam filter | dynamic: `error.message` [error] | `frontend/spam_filter.js:676` (createSuppression) |
+| Spam filter | "Please set an expiry date" [error] | `frontend/spam_filter.js:764` (saveEditSuppression) |
+| Spam filter | "Suppression updated" [success] | `frontend/spam_filter.js:779` (saveEditSuppression) |
+| Spam filter | dynamic: `error.message` [error] | `frontend/spam_filter.js:785` (saveEditSuppression) |
+| Spam filter | dynamic: ``Suppression ${newActive ? 'activated' : 'deactivated'}`` [success] | `frontend/spam_filter.js:799` (toggleSuppression) |
+| Spam filter | dynamic: `error.message` [error] | `frontend/spam_filter.js:805` (toggleSuppression) |
+| Spam filter | dynamic: ``Suppression deleted: ${email}`` [success] | `frontend/spam_filter.js:816` (deleteSuppression) |
+| Spam filter | dynamic: `error.message` [error] | `frontend/spam_filter.js:822` (deleteSuppression) |
+| Spam filter | dynamic: ``Synced ${result.synced} suppressions to Rspamd (${result.newly_synced} new)`` [success] | `frontend/spam_filter.js:868` (syncSuppressionsToRspamd) |
+| Spam filter | dynamic: `'Sync failed: ' + error.message` [error] | `frontend/spam_filter.js:872` (syncSuppressionsToRspamd) |
+| Spam filter | dynamic: ``Imported ${result.imported} suppressions (${result.skipped} skipped)`` [success] | `frontend/spam_filter.js:908` (importSuppressions) |
+| Spam filter | dynamic: `'Import failed: ' + error.message` [error] | `frontend/spam_filter.js:914` (importSuppressions) |
+| Spam filter | dynamic: ``Pattern added: ${pattern}`` [success] | `frontend/spam_filter.js:1097` (regexWizardAdd) |
 | Status | dynamic: `ignored ? `${container.replace('-mailcow', '')} is ignored. It no longer coun...` [success] | `frontend/app.js:4133` (setContainerIgnored) |
 | Status | dynamic: ``Could not change the container: ${e.message}`` [error] | `frontend/app.js:4137` (setContainerIgnored) |
 | Status | "Starting blacklist check..." [info] | `frontend/app.js:4368` (checkBlacklists) |
@@ -584,7 +585,7 @@ Every action that asks before it acts. Losing one turns a guarded action into a 
 | Quarantine | showConfirmModal: dynamic: `{ title: 'Release All', message: `Release ALL ${allIds.length} quarantined me...` | `frontend/app.js:3094` (quarantineReleaseAll) |
 | Quarantine | showConfirmModal: dynamic: `{ title: 'Delete All', message: `Permanently delete ALL ${allIds.length} quar...` | `frontend/app.js:3101` (quarantineDeleteAll) |
 | Quarantine | showConfirmModal: dynamic: `{ title: 'Delete Rule', message: `Delete rule "${ruleName}"?`, confirmText: '...` | `frontend/app.js:3517` (deleteQuarantineRule) |
-| Spam filter | showConfirmModal: dynamic: `{ title: 'Delete Suppression', message: `Delete suppression for ${email}? Thi...` | `frontend/spam_filter.js:787` (deleteSuppression) |
+| Spam filter | showConfirmModal: dynamic: `{ title: 'Delete Suppression', message: `Delete suppression for ${email}? Thi...` | `frontend/spam_filter.js:810` (deleteSuppression) |
 | DMARC | showConfirmModal: dynamic: `{ title: 'Delete Report', message: `Are you sure you want to delete this ${re...` | `frontend/dmarc.js:1214` (deleteReport) |
 | Mailbox stats | showConfirmModal: dynamic: `{ title: 'Reset rate limit counter', message: `Let ${user} send again straigh...` | `frontend/rate-limits.js:569` (resetRateLimitCounter) |
 | Mailbox stats | showConfirmModal: dynamic: `{ title: value === 0 ? 'Remove rate limits' : 'Apply rate limit', message: va...` | `frontend/rate-limits.js:861` (applyRateLimitBulk) |
@@ -634,7 +635,7 @@ Buttons, tabs and fields whose behavior is attached with `addEventListener` inst
 | Security | click on `editIpBtn` | `frontend/app.js:2444` (loadFail2BanSettings) |
 | Security | submit on `settingsForm` | `frontend/app.js:2455` (loadFail2BanSettings) |
 | Security | submit on `ipForm` | `frontend/app.js:2508` (loadFail2BanSettings) |
-| Spam filter | click on `document` | `frontend/spam_filter.js:912` |
+| Spam filter | click on `document` | `frontend/spam_filter.js:937` |
 | DMARC | click on `modal` | `frontend/dmarc.js:1084` (showDmarcSyncHistory) |
 | Mailbox stats | click on `document` | `frontend/mailbox-stats.js:464` (toggleDateRangePicker) |
 | Settings | click on `cancelBtn` | `frontend/settings.js:90` (showBasicAuthVerifyModal) |
@@ -675,9 +676,9 @@ Drop-down lists in the page markup with their options. The option wording and or
 | Quarantine | `quarantine-sort`: Newest first / Score: high to low / Score: low to high | `frontend/index.html:850` |
 | Spam filter | `suppression-filter-reason`: All Reasons / Hard Bounce / Soft Bounce / Deferred Stuck / Rejected / Manual | `frontend/index.html:940` |
 | Spam filter | `suppression-filter-active`: Active Only / All / Inactive / Expired | `frontend/index.html:950` |
-| Mailbox stats | `mailbox-stats-domain-filter`: All Domains | `frontend/index.html:1229` |
-| Mailbox stats | `mailbox-stats-sort`: Sent (High to Low) / Received (High to Low) / Failure Rate (High to Low) / Quota Used (High to Low) / Username (A-Z) | `frontend/index.html:1232` |
-| Logs | `logs-fontsize`: 10px / 11px / 12px / 13px / 14px / 16px | `frontend/index.html:1304` |
+| Mailbox stats | `mailbox-stats-domain-filter`: All Domains | `frontend/index.html:1230` |
+| Mailbox stats | `mailbox-stats-sort`: Sent (High to Low) / Received (High to Low) / Failure Rate (High to Low) / Quota Used (High to Low) / Username (A-Z) | `frontend/index.html:1233` |
+| Logs | `logs-fontsize`: 10px / 11px / 12px / 13px / 14px / 16px | `frontend/index.html:1305` |
 
 ### Charts
 
@@ -705,10 +706,10 @@ In-app help buttons; the topic is the Markdown file name under documentation/Hel
 | Security | topic "Abuse_Protection" | `frontend/index.html:794` |
 | Quarantine | topic "Quarantine" | `frontend/index.html:839` |
 | Spam filter | topic "Spam_Filter" | `frontend/index.html:905` |
-| Status | topic "IP_Blacklist_Monitor" | `frontend/index.html:1025` |
-| Domains | topic "Domains" | `frontend/index.html:1055` |
-| DMARC | topic "DMARC" | `frontend/index.html:1075` |
-| Mailbox stats | topic "Mailbox_Stats" | `frontend/index.html:1170` |
+| Status | topic "IP_Blacklist_Monitor" | `frontend/index.html:1026` |
+| Domains | topic "Domains" | `frontend/index.html:1056` |
+| DMARC | topic "DMARC" | `frontend/index.html:1076` |
+| Mailbox stats | topic "Mailbox_Stats" | `frontend/index.html:1171` |
 | Mailbox stats | topic dynamic: `'${isRateLimits ? 'Rate_Limits' : 'Mailbox_Stats'}'` | `frontend/mailbox-stats.js:82` (mailboxStatsSwitchView) |
 
 ### Empty states
