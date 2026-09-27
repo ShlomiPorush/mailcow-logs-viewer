@@ -80,6 +80,23 @@ def test_udp_datagrams_to_a_public_address_are_blocked(guard):
         sock.close()
 
 
+def test_dns_to_a_loopback_resolver_is_blocked(guard):
+    # Docker's embedded resolver (127.0.0.11) forwards to the real upstream
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        with pytest.raises(OSError):
+            sock.sendto(b"x", ("127.0.0.11", 53))
+        with pytest.raises(OSError):
+            sock.connect(("127.0.0.1", 53))
+    finally:
+        sock.close()
+    tcp = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        assert tcp.connect_ex(("127.0.0.11", 853)) == errno.ENETUNREACH
+    finally:
+        tcp.close()
+
+
 def test_literal_ip_lookup_passes_but_connect_still_fails(guard):
     # getaddrinfo on a literal makes no DNS query, so it is allowed
     assert socket.getaddrinfo("192.0.2.10", 443)

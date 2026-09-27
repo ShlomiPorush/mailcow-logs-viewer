@@ -56,9 +56,18 @@ def _lookup_allowed(host) -> bool:
     return _host_allowed(host) or _ip(host) is not None
 
 
+# DNS and DNS over TLS stay blocked even on loopback: Docker's embedded
+# resolver listens on 127.0.0.11 and forwards unknown names to the host's
+# upstream servers. Name resolution for the database host goes through libc
+# in C and is not affected.
+_DNS_PORTS = frozenset({53, 853})
+
+
 def _address_allowed(sock, address) -> bool:
     if getattr(socket, "AF_UNIX", None) is not None and sock.family == socket.AF_UNIX:
         return True
+    if isinstance(address, tuple) and len(address) >= 2 and address[1] in _DNS_PORTS:
+        return False
     host = address[0] if isinstance(address, tuple) and address else address
     return _host_allowed(host)
 
