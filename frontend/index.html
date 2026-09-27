@@ -621,13 +621,13 @@
                         <!-- Server health: one card per area, each opens its Status tab -->
                         <section class="ui-panel" id="dashboard-health-panel">
                             <div class="ui-panel-head">Server health
-                                <button type="button" class="ui-more" onclick="openStatusTab('containers')">Status</button></div>
+                                <button type="button" class="ui-more" onclick="openStatusTab('server')">Status</button></div>
                             <div class="ui-dash-health">
-                                <button type="button" class="ui-st-card" onclick="openStatusTab('containers')"><span class="ui-st-card-label">Containers</span><b id="dash-kpi-containers">-</b><small id="dash-kpi-containers-note"></small></button>
+                                <button type="button" class="ui-st-card" onclick="openStatusTab('server')"><span class="ui-st-card-label">Containers</span><b id="dash-kpi-containers">-</b><small id="dash-kpi-containers-note"></small></button>
                                 <button type="button" class="ui-st-card" id="dashboard-blacklist-card" onclick="openStatusTab('blocklists')"><span class="ui-st-card-label">Blocklists</span><b id="dash-kpi-blocklists">-</b><small id="dash-kpi-blocklists-note"></small></button>
                                 <button type="button" class="ui-st-card" onclick="openStatusTab('jobs')"><span class="ui-st-card-label">Background jobs</span><b id="dash-kpi-jobs">-</b><small id="dash-kpi-jobs-note"></small></button>
-                                <button type="button" class="ui-st-card" onclick="openStatusTab('data')"><span class="ui-st-card-label">Mail storage</span><b id="dash-kpi-storage">-</b><small id="dash-kpi-storage-note"></small></button>
-                                <button type="button" class="ui-st-card" onclick="openStatusTab('data')"><span class="ui-st-card-label">Message linking</span><b id="dash-kpi-linking">-</b><small id="dash-kpi-linking-note"></small></button>
+                                <button type="button" class="ui-st-card" onclick="openStatusTab('server')"><span class="ui-st-card-label">Mail storage</span><b id="dash-kpi-storage">-</b><small id="dash-kpi-storage-note"></small></button>
+                                <button type="button" class="ui-st-card" onclick="openStatusTab('server')"><span class="ui-st-card-label">Message linking</span><b id="dash-kpi-linking">-</b><small id="dash-kpi-linking-note"></small></button>
                                 <button type="button" class="ui-st-card" onclick="navigateTo('settings')"><span class="ui-st-card-label">This app</span><b id="dash-kpi-version">-</b><small id="dash-kpi-version-note"></small></button>
                             </div>
                         </section>
@@ -1033,19 +1033,28 @@
                 </section>
 
                 <div class="ui-tabs ui-page-tabs ui-st-tabs" role="tablist" aria-label="Status sections">
-                    <button type="button" class="modal-tab active" role="tab" aria-selected="true" id="status-tab-btn-containers" onclick="statusShowTab('containers')">Containers <span id="status-tab-n-containers" class="ui-tab-n hidden"></span></button>
+                    <button type="button" class="modal-tab active" role="tab" aria-selected="true" id="status-tab-btn-server" onclick="statusShowTab('server')">Server <span id="status-tab-n-server" class="ui-tab-n hidden"></span></button>
                     <button type="button" class="modal-tab" role="tab" aria-selected="false" id="status-tab-btn-blocklists" onclick="statusShowTab('blocklists')">Blocklists <span id="status-tab-n-blocklists" class="ui-tab-n hidden"></span></button>
                     <button type="button" class="modal-tab" role="tab" aria-selected="false" id="status-tab-btn-jobs" onclick="statusShowTab('jobs')">Jobs <span id="status-tab-n-jobs" class="ui-tab-n hidden"></span></button>
-                    <button type="button" class="modal-tab" role="tab" aria-selected="false" id="status-tab-btn-data" onclick="statusShowTab('data')">Data &amp; storage</button>
                 </div>
 
-                <div id="status-tab-containers" class="ui-scroll ui-st-panel" role="tabpanel">
+                <div id="status-tab-server" class="ui-scroll ui-st-panel" role="tabpanel">
+                    <div class="ui-srv-cards">
+                        <section class="ui-srv-card"><h3>Mail storage</h3><div id="status-storage"><div class="ui-loading"><div class="loading"></div><p>Loading...</p></div></div></section>
+                        <section class="ui-srv-card"><h3>mailcow</h3><div id="status-system"><div class="ui-loading"><div class="loading"></div><p>Loading...</p></div></div></section>
+                        <section class="ui-srv-card"><h3>Message linking</h3><div id="status-correlation"><div class="ui-loading"><div class="loading"></div><p>Loading...</p></div></div></section>
+                    </div>
                     <div class="ui-list-head"><h2 class="ui-h2">Containers</h2> <span id="status-containers-summary" class="ui-count"></span>
                         <div class="ui-seg ui-head-actions" role="group" aria-label="Show">
                             <button type="button" aria-pressed="true" data-ctr-filter="all" onclick="statusContainerFilter('all')">All</button>
                             <button type="button" aria-pressed="false" data-ctr-filter="problems" onclick="statusContainerFilter('problems')">Problems</button>
                         </div></div>
                     <div id="status-containers"><div class="ui-loading"><div class="loading"></div><p>Loading...</p></div></div>
+                    <section class="ui-sec-block">
+                        <div class="ui-list-head"><h2 class="ui-h2">Log import</h2></div>
+                        <div id="status-import"><div class="ui-loading"><div class="loading"></div><p>Loading...</p></div></div>
+                    </section>
+                    <div id="status-correlation-pending"></div>
                 </div>
 
                 <div id="status-tab-blocklists" class="ui-scroll ui-st-panel hidden" role="tabpanel">
@@ -1075,26 +1084,6 @@
                     <div id="status-jobs"><div class="ui-loading"><div class="loading"></div><p>Loading...</p></div></div>
                 </div>
 
-                <div id="status-tab-data" class="ui-scroll ui-st-panel hidden" role="tabpanel">
-                    <div class="ui-st-data">
-                        <section class="ui-sec-block ui-st-wide">
-                            <div class="ui-list-head"><h2 class="ui-h2">Log import</h2></div>
-                            <div id="status-import"><div class="ui-loading"><div class="loading"></div><p>Loading...</p></div></div>
-                        </section>
-                        <section class="ui-sec-block ui-st-wide">
-                            <div class="ui-list-head"><h2 class="ui-h2">Message linking</h2></div>
-                            <div id="status-correlation"><div class="ui-loading"><div class="loading"></div><p>Loading...</p></div></div>
-                        </section>
-                        <section class="ui-panel">
-                            <div class="ui-panel-head">mailcow</div>
-                            <div id="status-system"><div class="ui-loading"><div class="loading"></div><p>Loading...</p></div></div>
-                        </section>
-                        <section class="ui-panel">
-                            <div class="ui-panel-head">Mail storage</div>
-                            <div id="status-storage"><div class="ui-loading"><div class="loading"></div><p>Loading...</p></div></div>
-                        </section>
-                    </div>
-                </div>
             </div>
 
             <!-- Domains Tab -->
