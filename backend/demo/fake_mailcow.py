@@ -279,7 +279,8 @@ class FakeMailcow:
         return _success("App password(s) deleted")
 
     def _get_dkim(self, request, domain):
-        if not any(d["domain_name"] == domain for d in self.domains):
+        known = {d["domain_name"] for d in self.domains} | {a["alias_domain"] for a in self.alias_domains}
+        if domain not in known:
             return _json([])
         return _json({"dkim_selector": "dkim",
                       "dkim_txt": f"v=DKIM1;k=rsa;t=s;s=email;p={world.DKIM_KEY}",
