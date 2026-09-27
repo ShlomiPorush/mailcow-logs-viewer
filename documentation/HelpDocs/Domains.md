@@ -125,6 +125,8 @@ When a scheduled or manual check finds that a domain's SPF, DKIM, DMARC, TLSA or
 - If persistent, check your DNS provider's status
 
 ### "Record Mismatch" Warnings
+- A mismatch means the published key, key type or allowed hash differs from mailcow, so signatures will fail
+- Tag order, spacing and optional tags such as `t=s` or `h=sha256` do not cause a mismatch; differences in them are shown as warnings
 - Compare the "Expected" vs "Actual" record values
 - Update your DNS to match the expected value
 - Wait for DNS propagation, then check again
