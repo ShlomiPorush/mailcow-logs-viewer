@@ -70,6 +70,59 @@ echo "${logs}" | grep -q "\[DEMO\] Demo mode active" || fail "demo entry point d
 docker exec "${APP}" sh -c 'cat /proc/1/cmdline | tr "\0" " "' | grep -q -- "--loop asyncio" \
     || fail "uvicorn is not running on the asyncio loop (uvloop bypasses the guard)"
 
+step "mailcow answers from the fictional server"
+# Evaluated inside the container so the host needs nothing beyond docker and curl.
+# Usage: check <path> <python expression over `d`> <description>
+check() {
+    docker exec "${APP}" python3 -c "
+import json, sys, urllib.request
+d = json.load(urllib.request.urlopen('http://localhost:8080$1'))
+sys.exit(0 if ($2) else 1)" || fail "$3"
+    echo "  ok: $3"
+}
+check /api/status/mailcow-connection 'd["connected"] is True' "mailcow connection test succeeds"
+check /api/status/mailcow-info 'd["domains"]["active"] == 3 and d["mailboxes"]["total"] >= 10' "domains and mailboxes are listed"
+check /api/status/containers 'len(json.dumps(d)) > 200 and "postfix-mailcow" in json.dumps(d)' "containers are reported"
+check /api/queue 'd["total"] >= 4' "the mail queue has entries"
+check /api/quarantine 'd["total"] >= 5' "the quarantine has entries"
+check /api/fail2ban 'len(d["active_bans"]) >= 2' "fail2ban shows bans"
+check /api/rspamd/maps/bad_words.map '"prize" in json.dumps(d)' "Rspamd maps are readable"
+
+step "A write action changes what the demo shows"
+before=$(docker exec "${APP}" python3 -c 'import json,urllib.request; print(json.load(urllib.request.urlopen("http://localhost:8080/api/quarantine"))["data"][0]["id"])')
+result=$(curl -fsS -X POST -H 'Content-Type: application/json' -d "{\"items\":[\"${before}\"]}" "${BASE}/api/quarantine/release")
+echo "${result}" | grep -q '"status": *"success"' || fail "quarantine release did not succeed: ${result}"
+check /api/quarantine "all(str(i['id']) != '${before}' for i in d['data'])" "the released item left the quarantine"
+
+step "Every background job runs against the fictional server"
+jobs=$(docker exec "${APP}" python3 -c 'import json,urllib.request; print(" ".join(json.load(urllib.request.urlopen("http://localhost:8080/api/settings/info"))["background_jobs"].keys()))')
+[ -n "${jobs}" ] || fail "/api/settings/info returned no background_jobs"
+for job in ${jobs}; do
+    code=$(curl -s -o /dev/null -w '%{http_code}' -X POST "${BASE}/api/settings/jobs/${job}/run")
+    case "${code}" in 200|409) ;; *) fail "job runner rejected ${job} (${code})" ;; esac
+done
+running=""
+for i in $(seq 1 90); do
+    running=$(docker exec "${APP}" python3 -c 'import json,urllib.request; j=json.load(urllib.request.urlopen("http://localhost:8080/api/settings/info"))["background_jobs"]; print(" ".join(k for k,v in j.items() if v.get("status")=="running"))')
+    [ -z "${running}" ] && break
+    sleep 2
+done
+[ -z "${running}" ] || echo "  still running after 180s: ${running}"
+[ "$(docker inspect -f '{{.State.Running}}' "${APP}")" = "true" ] || fail "the demo exited while running jobs"
+if docker logs "${APP}" 2>&1 | grep -E "(TypeError|AttributeError|NameError|KeyError|ImportError):"; then
+    fail "a job raised a programming error against the fictional server (see above)"
+fi
+
+step "No request to mailcow left the process"
+logs=$(docker logs "${APP}" 2>&1)
+if echo "${logs}" | grep -q "Fake mailcow has no answer"; then
+    echo "${logs}" | grep "Fake mailcow has no answer" | sort | uniq -c
+    fail "the application called a mailcow endpoint the fake server does not answer"
+fi
+if echo "${logs}" | grep -q "Blocked outbound connection to mail.example.com"; then
+    fail "a mailcow request reached the network guard instead of the fake server"
+fi
+
 step "No tracebacks during startup"
 if echo "${logs}" | grep -q "Traceback (most recent call last)"; then
     fail "a traceback was logged during startup"
