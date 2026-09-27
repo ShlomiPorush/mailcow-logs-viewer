@@ -914,7 +914,7 @@ function messagesQueryParams(page) {
 
 function messagesMoreText() {
     if (messagesPaging.page < messagesPaging.pages) return 'Loading more...';
-    return messagesPaging.total ? `All ${messagesPaging.total.toLocaleString()} messages shown` : '';
+    return messagesPaging.total ? `All ${messagesPaging.total} messages shown` : '';
 }
 
 function renderMessagesList(container, data) {
@@ -3865,7 +3865,7 @@ function renderFacetList(kind, entries, counts, current) {
         const tone = kind === 'status' && value ? (UI_STATUS_TONE[value] || '') : '';
         return `<button type="button" class="ui-fct" aria-pressed="${String(current === value)}" onclick="setMessagesFacet('${kind}', '${value}')">
             ${kind === 'status' && value ? `<i class="ui-fct-dot${tone ? ` ui-fct-${tone}` : ''}"></i>` : ''}${kind === 'direction' && value ? `<i class="ui-fct-dot ui-dir-${value}"></i>` : ''}<span>${escapeHtml(label)}</span>
-            <small>${count === undefined ? '' : count.toLocaleString()}</small></button>`;
+            <small>${count === undefined ? '' : String(count)}</small></button>`;
     }).join('');
 }
 
@@ -3891,13 +3891,13 @@ async function loadMessageFacets(filters) {
         const count = data && data.time ? data.time[btn.dataset.preset || 'all'] : undefined;
         let small = btn.querySelector('small');
         if (!small) { small = document.createElement('small'); btn.appendChild(small); }
-        small.textContent = count === undefined ? '' : count.toLocaleString();
+        small.textContent = count === undefined ? '' : String(count);
     });
     // Phones and tablets: the outcome facets as chips above the list
     if (chips) {
         chips.innerHTML = MESSAGE_STATUS_FACETS.map(([value, label]) => {
             const count = data && data.status ? data.status[value || 'all'] : undefined;
-            return `<button type="button" class="ui-chip" aria-pressed="${String(status === value)}" onclick="setMessagesFacet('status', '${value}')">${escapeHtml(value ? label : 'All')}${count === undefined ? '' : ` <small>${count.toLocaleString()}</small>`}</button>`;
+            return `<button type="button" class="ui-chip" aria-pressed="${String(status === value)}" onclick="setMessagesFacet('status', '${value}')">${escapeHtml(value ? label : 'All')}${count === undefined ? '' : ` <small>${String(count)}</small>`}</button>`;
         }).join('');
     }
 }
@@ -3940,7 +3940,7 @@ async function loadMessages(page = 1) {
         // Update count display
         const countEl = document.getElementById('messages-count');
         if (countEl) {
-            countEl.textContent = `${(data.total || 0).toLocaleString()} messages`;
+            countEl.textContent = `${data.total || 0} messages`;
         }
 
         if (!data.data || data.data.length === 0) {
