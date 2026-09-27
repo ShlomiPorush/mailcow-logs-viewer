@@ -123,14 +123,39 @@ result=$(curl -fsS -X POST -H 'Content-Type: application/json' -d "{\"items\":[\
 grep -q '"status": *"success"' <<< "${result}" || fail "quarantine release did not succeed: ${result}"
 check /api/quarantine "all(str(i['id']) != '${before}' for i in d['data'])" "the released item left the quarantine"
 
+step "Visitors cannot lock others out or change the demo's own limits"
+# Enabling Basic Auth with a valid confirmation would lock every other
+# visitor out; in the demo the setting is fixed by the image
+curl -s -o /dev/null -X PUT -H 'Content-Type: application/json' \
+    -d '{"basic_auth_enabled": true, "auth_username": "admin", "auth_password": "demo-lock", "verify_username": "admin", "verify_password": "demo-lock"}' \
+    "${BASE}/api/settings"
+curl -s -o /dev/null -X PUT -H 'Content-Type: application/json' -d '{"retention_days": 0}' "${BASE}/api/settings"
+code=$(curl -s -o /dev/null -w '%{http_code}' "${BASE}/api/stats/dashboard")
+[ "${code}" = "200" ] || fail "enabling Basic Auth from the UI locked the demo (${code})"
+check /api/settings 'd["configuration"]["basic_auth_enabled"] is False and d["configuration"]["retention_days"] == 7 and {"basic_auth_enabled", "retention_days", "app_logo_url"} <= set(d["env_locked_keys"])' "auth, retention and logo are fixed by the image"
+
+step "Writes are capped per visitor"
+codes=""
+for i in $(seq 1 35); do
+    codes="${codes} $(curl -s -o /dev/null -w '%{http_code}' -X POST -H 'CF-Connecting-IP: 198.51.100.250' -H 'Content-Type: application/json' -d '{"items":[]}' "${BASE}/api/quarantine/release")"
+done
+echo "${codes}" | grep -q "429" || fail "35 writes in a row were never refused"
+code=$(curl -s -o /dev/null -w '%{http_code}' -H 'CF-Connecting-IP: 198.51.100.250' "${BASE}/api/quarantine")
+[ "${code}" = "200" ] || fail "reads were limited too (${code})"
+echo "  ok: writes refused past the budget, reads still served"
+
 postfix_rows() { docker exec "${DB}" psql -U demo -d demo -tAc "SELECT count(*) FROM postfix_logs"; }
 rows_at_start=$(postfix_rows)
 
 step "Every background job runs against the fictional server"
 jobs=$(docker exec "${APP}" python3 -c 'import json,urllib.request; print(" ".join(json.load(urllib.request.urlopen("http://localhost:8080/api/settings/info"))["background_jobs"].keys()))')
 [ -n "${jobs}" ] || fail "/api/settings/info returned no background_jobs"
+n=0
 for job in ${jobs}; do
-    code=$(curl -s -o /dev/null -w '%{http_code}' -X POST "${BASE}/api/settings/jobs/${job}/run")
+    # One address per job: this loop is a test harness, not a visitor, and
+    # would otherwise run into the per-visitor write cap
+    n=$((n + 1))
+    code=$(curl -s -o /dev/null -w '%{http_code}' -H "CF-Connecting-IP: 192.0.2.${n}" -X POST "${BASE}/api/settings/jobs/${job}/run")
     case "${code}" in 200|409) ;; *) fail "job runner rejected ${job} (${code})" ;; esac
 done
 running=""
