@@ -871,7 +871,7 @@ function renderMessageRow(msg) {
             <p class="ui-msg-sub" dir="auto" title="${escapeHtml(msg.subject || 'No subject')}">${escapeHtml(msg.subject || 'No subject')}</p>
             <div class="ui-msg-l3">
                 ${uiCorrelationTag(msg)}
-                ${msg.direction ? `<span>${escapeHtml(msg.direction)}</span>` : ''}
+                ${msg.direction ? uiDirectionTag(msg.direction) : ''}
                 ${msg.is_spam ? '<span class="ui-tag ui-tag-spam">SPAM</span>' : ''}
                 <span class="ui-msg-to" title="${escapeHtml(msg.recipient || '')}">to ${escapeHtml(msg.recipient || 'Unknown')}</span>
                 ${renderMailboxFolderHint(msg)}
@@ -3714,6 +3714,16 @@ function toggleMessagesDateRangePicker() {
     arrow.style.transform = isHidden ? 'rotate(180deg)' : '';
 }
 
+// Where a Messages time preset starts ('' for all time)
+function messagesPresetStart(preset, now = new Date()) {
+    const d = new Date(now);
+    if (preset === 'today') { d.setHours(0, 0, 0, 0); return d.toISOString(); }
+    const days = { '7days': 7, '30days': 30, '90days': 90 }[preset];
+    if (!days) return '';
+    d.setDate(d.getDate() - days);
+    return d.toISOString();
+}
+
 function selectMessagesDatePreset(preset) {
     const labels = { '': 'All Time', 'today': 'Today', '7days': 'Last 7 Days', '30days': 'Last 30 Days', '90days': 'Last 90 Days' };
     document.getElementById('messages-date-range-label').textContent = labels[preset] || 'All Time';
@@ -3832,7 +3842,7 @@ function renderFacetList(kind, entries, counts, current) {
         const count = counts ? counts[value || 'all'] : undefined;
         const tone = kind === 'status' && value ? (UI_STATUS_TONE[value] || '') : '';
         return `<button type="button" class="ui-fct" aria-pressed="${String(current === value)}" onclick="setMessagesFacet('${kind}', '${value}')">
-            ${kind === 'status' && value ? `<i class="ui-fct-dot${tone ? ` ui-fct-${tone}` : ''}"></i>` : ''}<span>${escapeHtml(label)}</span>
+            ${kind === 'status' && value ? `<i class="ui-fct-dot${tone ? ` ui-fct-${tone}` : ''}"></i>` : ''}${kind === 'direction' && value ? `<i class="ui-fct-dot ui-dir-${value}"></i>` : ''}<span>${escapeHtml(label)}</span>
             <small>${count === undefined ? '' : count.toLocaleString()}</small></button>`;
     }).join('');
 }
@@ -3843,7 +3853,9 @@ async function loadMessageFacets(filters) {
     const chips = document.getElementById('messages-chips');
     let data = null;
     try {
-        const response = await authenticatedFetch(`/api/messages/facets?${messagesFilterParams(filters)}`);
+        const params = messagesFilterParams(filters);
+        for (const preset of ['today', '7days', '30days', '90days']) params.append('since', `${preset}:${messagesPresetStart(preset)}`);
+        const response = await authenticatedFetch(`/api/messages/facets?${params}`);
         if (response.ok) data = await response.json();
     } catch (e) {
         console.warn('Failed to load message facets:', e);
@@ -3852,6 +3864,13 @@ async function loadMessageFacets(filters) {
     const direction = filters.direction || '';
     if (statusList) statusList.innerHTML = renderFacetList('status', MESSAGE_STATUS_FACETS, data && data.status, status);
     if (directionList) directionList.innerHTML = renderFacetList('direction', MESSAGE_DIRECTION_FACETS, data && data.direction, direction);
+    // The time presets get their counts like the other facets
+    document.querySelectorAll('.messages-date-preset-btn').forEach(btn => {
+        const count = data && data.time ? data.time[btn.dataset.preset || 'all'] : undefined;
+        let small = btn.querySelector('small');
+        if (!small) { small = document.createElement('small'); btn.appendChild(small); }
+        small.textContent = count === undefined ? '' : count.toLocaleString();
+    });
     // Phones and tablets: the outcome facets as chips above the list
     if (chips) {
         chips.innerHTML = MESSAGE_STATUS_FACETS.map(([value, label]) => {
