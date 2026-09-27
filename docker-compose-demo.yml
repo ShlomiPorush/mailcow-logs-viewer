@@ -1,0 +1,49 @@
+# Public demo: fictional data, no connection to any mail server.
+# Fully separate from a real installation: its own containers, network and
+# database. The database lives in memory (tmpfs), so nothing is kept on disk.
+#
+#   docker compose -f docker-compose-demo.yml up -d
+#
+# The app listens on 127.0.0.1 only; publish it through a reverse proxy or a
+# tunnel, never directly.
+services:
+  demo-db:
+    image: postgres:15-alpine
+    container_name: mailcow-logs-demo-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: demo
+      POSTGRES_PASSWORD: demo
+      POSTGRES_DB: demo
+    tmpfs:
+      - /var/lib/postgresql/data
+    networks:
+      - mailcow-logs-demo
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U demo" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  demo-app:
+    image: ghcr.io/shlomiporush/mailcow-logs-viewer:demo
+    container_name: mailcow-logs-demo-app
+    restart: unless-stopped
+    depends_on:
+      demo-db:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:${DEMO_PORT:-8090}:8080"
+    environment:
+      POSTGRES_HOST: demo-db
+      POSTGRES_USER: demo
+      POSTGRES_PASSWORD: demo
+      POSTGRES_DB: demo
+      # The nightly reset runs at 00:00 in this time zone
+      TZ: ${TZ:-UTC}
+    networks:
+      - mailcow-logs-demo
+
+networks:
+  mailcow-logs-demo:
+    driver: bridge
