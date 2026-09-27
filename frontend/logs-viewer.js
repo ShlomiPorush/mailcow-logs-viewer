@@ -271,6 +271,8 @@ async function fetchOlderLogs() {
     if (logsState.isLoadingMore || logsState.oldestPageLoaded <= 1) return;
     
     logsState.isLoadingMore = true;
+    // Clear during the request makes its result stale
+    const view = logsState.viewId;
     const pageToLoad = logsState.oldestPageLoaded - 1;
     
     // Show loading indicator at the history edge (top normally, bottom in
@@ -301,6 +303,7 @@ async function fetchOlderLogs() {
         
         const data = await response.json();
         const entries = data.data || [];
+        if (view !== logsState.viewId) return;
         
         if (entries.length > 0) {
             logsState.oldestPageLoaded = pageToLoad;
@@ -397,6 +400,9 @@ function renderLogEntries(entries, serviceId, replace = false, prepend = false) 
     if (replace) {
         output.innerHTML = '';
         logsState.allEntries = [];
+    } else if (entries.length) {
+        // New lines after a Clear replace its note
+        output.querySelectorAll('.logs-placeholder').forEach(el => el.remove());
     }
     
     // Store entries
@@ -1147,10 +1153,16 @@ function clearLogDisplay() {
     // Clear display
     const output = document.getElementById('logs-output');
     if (output) {
-        output.innerHTML = '<span class="text-gray-500">Display cleared. New logs will appear here.</span>';
+        output.innerHTML = '<span class="text-gray-500 logs-placeholder">Display cleared. New logs will appear here.</span>';
     }
     logsState.entryCount = 0;
     logsState.allEntries = [];
+    // A cleared screen does not refill with history: no older pages, and a
+    // history request already on its way is dropped
+    logsState.oldestPageLoaded = 1;
+    logsState.viewId = (logsState.viewId || 0) + 1;
+    const loader = document.getElementById('logs-load-more-indicator');
+    if (loader) loader.remove();
     
     // Clear search
     const searchInput = document.getElementById('logs-search-input');
