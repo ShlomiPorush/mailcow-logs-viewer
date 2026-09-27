@@ -425,9 +425,11 @@
 .ui-md-truncate { margin: 4px 0 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
 
 /* The log timeline: header and filters stay, the entries scroll */
-.ui-md-timeline { display: flex; flex-direction: column; gap: 8px; flex: 1; min-height: 12rem; }
+.ui-md-timeline { display: flex; flex-direction: column; gap: 8px; }
 .ui-md-timeline-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
-.ui-md-timeline-entries { flex: 1; min-height: 0; overflow-y: auto; display: grid; gap: 6px; align-content: start; }
+.ui-md-timeline-entries { display: grid; gap: 6px; align-content: start; }
+.ui-md-timeline-head { position: sticky; top: 0; z-index: 2; padding: 6px 0; background: var(--ui-bg); }
+.ui-md-fill:has(.ui-md-timeline) { height: auto; }
 .ui-md-log { padding: 10px 12px; border-radius: var(--ui-radius-sm); background: var(--ui-panel); font-size: var(--ui-fs-sm); }
 .ui-md-log p { margin: 3px 0 0; }
 .ui-md-log-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; font-size: 12px; }
@@ -479,14 +481,21 @@
 .ui-fct .ui-select-arrow { margin-inline-start: auto; }
 .ui-fct-dot { width: 9px; height: 9px; flex: none; border-radius: 3px; background: var(--ui-muted); }
 .ui-fct-ok { background: var(--ui-ok); } .ui-fct-warn { background: var(--ui-warn); } .ui-fct-fail { background: var(--ui-fail); } .ui-fct-spam { background: var(--ui-spam); }
-.ui-fct-more { margin: 16px 8px 0; }
-.ui-fct-more summary { color: var(--ui-muted); font-size: 12.5px; font-weight: 600; cursor: pointer; }
-.ui-fct-more[open] { display: grid; gap: 8px; }
-.ui-fct-more .ui-filters-actions { margin-top: 2px; }
 .ui-fct-export { margin: 16px 8px 0; }
 
 .ui-msg-col { display: flex; flex-direction: column; min-height: 0; background: var(--ui-panel); border-inline-end: 1px solid var(--ui-line); }
-.ui-msg-searchbar { padding: 14px; border-bottom: 1px solid var(--ui-line); background: var(--ui-panel); }
+.ui-msg-searchbar { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0 8px; padding: 14px; border-bottom: 1px solid var(--ui-line); background: var(--ui-panel); }
+.ui-msg-searchbar > :not(.ui-search):not(.ui-msg-filter-btn) { grid-column: 1 / -1; }
+.ui-msg-filter-btn { position: relative; width: var(--ui-ctl-h); height: var(--ui-ctl-h); border: 1px solid var(--ui-line); border-radius: var(--ui-radius-sm); background: var(--ui-bg); }
+.ui-msg-filter-btn[aria-expanded="true"] { border-color: var(--ui-ink); color: var(--ui-ink); }
+.ui-msg-filter-n { position: absolute; top: -6px; inset-inline-end: -6px; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px;
+    background: var(--ui-accent); color: var(--ui-on-accent); font-size: 11px; font-weight: 700; line-height: 18px; text-align: center; }
+.ui-msg-filter-n.hidden { display: none; }
+.ui-msg-filters { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 10px; }
+.ui-msg-filters.hidden { display: none; }
+.ui-msg-filters .ui-filters-actions { grid-column: 1 / -1; display: flex; gap: 8px; }
+.ui-msg-clear { margin-inline-start: 8px; color: var(--ui-ink); font-size: 12.5px; text-decoration: underline; }
+.ui-msg-clear.hidden { display: none; }
 .ui-search { display: flex; align-items: center; gap: 8px; height: var(--ui-ctl-h); padding: 0 12px; border-radius: var(--ui-radius-sm);
     border: 1px solid var(--ui-line); background: var(--ui-bg); color: var(--ui-muted); }
 .ui-search:focus-within { border-color: var(--ui-accent); }
@@ -576,7 +585,8 @@
 .ui-md-idval { min-width: 0; overflow-wrap: anywhere; font-weight: 500; }
 .ui-md-idrow small { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 5px; color: var(--ui-muted); font-size: 12.5px; }
 .ui-md-idrow small img { display: inline-block; }
-.ui-md-idrow .ui-md-recipients { display: flex; flex-wrap: wrap; gap: 4px 14px; }
+.ui-md-idrow .ui-md-recipients { display: flex; flex-wrap: wrap; gap: 4px 14px; max-height: none; overflow: visible; }
+.ui-md-idrow .ui-md-idval:has(.ui-md-recipients) { flex: 1 1 100%; }
 @media (max-width: 760px) {
     .ui-md-idrow { grid-template-columns: minmax(0, 1fr); gap: 2px; }
 }
