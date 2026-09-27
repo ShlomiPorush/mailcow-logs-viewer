@@ -91,6 +91,9 @@
     --ui-fail: #C42B1C;
     --ui-spam: #A62A63;
     --ui-info: #1F5FBF;
+    --ui-dir-in: #4338CA;
+    --ui-dir-out: #1D4ED8;
+    --ui-dir-int: #0F766E;
 
     /* Navigation */
     --ui-side: #FFFFFF;
@@ -124,6 +127,9 @@
     --ui-side-card: #171B19;
     --ui-side-on: #F2F5F3;
     --ui-side-on-ink: #0E1110;
+    --ui-dir-in: #A5B4FC;
+    --ui-dir-out: #93C5FD;
+    --ui-dir-int: #5EEAD4;
 }
 
 /* ---------- Base ---------- */
@@ -480,6 +486,16 @@
 .ui-fct[aria-pressed="true"] small { color: inherit; }
 .ui-fct .ui-select-arrow { margin-inline-start: auto; }
 .ui-fct-dot { width: 9px; height: 9px; flex: none; border-radius: 3px; background: var(--ui-muted); }
+/* Direction colours (indigo, blue, teal), as before the redesign */
+.ui-fct-dot.ui-dir-inbound { background: var(--ui-dir-in); }
+.ui-fct-dot.ui-dir-outbound { background: var(--ui-dir-out); }
+.ui-fct-dot.ui-dir-internal { background: var(--ui-dir-int); }
+.ui-tag-dir { font-weight: 600; background: color-mix(in srgb, var(--ui-muted) 12%, transparent); color: var(--ui-muted); }
+.ui-tag-dir.ui-dir-inbound { color: var(--ui-dir-in); background: color-mix(in srgb, var(--ui-dir-in) 13%, transparent); }
+.ui-tag-dir.ui-dir-outbound { color: var(--ui-dir-out); background: color-mix(in srgb, var(--ui-dir-out) 13%, transparent); }
+.ui-tag-dir.ui-dir-internal { color: var(--ui-dir-int); background: color-mix(in srgb, var(--ui-dir-int) 13%, transparent); }
+/* Several recipients in the header, one per item */
+.ui-md-to { display: flex; flex-wrap: wrap; gap: 2px 14px; }
 .ui-fct-ok { background: var(--ui-ok); } .ui-fct-warn { background: var(--ui-warn); } .ui-fct-fail { background: var(--ui-fail); } .ui-fct-spam { background: var(--ui-spam); }
 .ui-fct-export { margin: 16px 8px 0; }
 
@@ -1642,4 +1658,16 @@ html, body { height: 100%; overflow: hidden; }
     .ui-mtop { position: relative; flex: none; }
     .ui-main { flex: 1; height: auto; padding-bottom: calc(64px + env(safe-area-inset-bottom)); }
     .ui-content { padding: 16px 12px 0; }
+}
+
+/* Help, changelog and release notes: the markdown styles follow the app theme,
+   not the operating system's (which left dark tables in light mode) */
+html .markdown-body {
+    color-scheme: inherit;
+    --color-fg-default: var(--ui-ink); --color-fg-muted: var(--ui-muted); --color-fg-subtle: var(--ui-muted);
+    --color-canvas-default: transparent; --color-canvas-subtle: var(--ui-panel);
+    --color-border-default: var(--ui-line); --color-border-muted: var(--ui-line);
+    --color-neutral-muted: color-mix(in srgb, var(--ui-ink) 9%, transparent);
+    --color-accent-fg: var(--ui-info); --color-accent-emphasis: var(--ui-info);
+    color: var(--ui-ink); background: transparent;
 }
