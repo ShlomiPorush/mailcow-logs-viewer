@@ -91,6 +91,14 @@ def test_only_fictional_names_and_documentation_addresses(week):
         assert domain.endswith((".test", "example.com", "example.org", "example.net")), domain
 
 
+def test_queue_recipients_cannot_be_suppressed_by_the_history():
+    from demo.traffic import REMOTE_PEOPLE
+    for item in world.build_queue(NOW):
+        for rcpt in item["recipients"]:
+            local = rcpt.split("@", 1)[0]
+            assert local not in REMOTE_PEOPLE, rcpt
+
+
 def test_rtl_subjects_are_present(week):
     # Bidi class R is Hebrew, AL is Arabic
     classes = {unicodedata.bidirectional(c) for e in week["rspamd-history"] for c in e["subject"]}
