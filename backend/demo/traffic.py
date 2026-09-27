@@ -42,7 +42,7 @@ REMOTE_PEOPLE = ["jordan", "mia", "sam", "noah", "lena", "omar", "yuki", "ines",
 
 @dataclass
 class Batch:
-    """Entries per mailcow log service, oldest first."""
+    """Entries per mailcow log service, in the order they were written."""
     logs: dict = field(default_factory=lambda: {svc: [] for svc in (
         "postfix", "rspamd-history", "dovecot", "netfilter", "ratelimited",
         "sogo", "acme", "watchdog", "api", "autodiscover")})
@@ -50,19 +50,13 @@ class Batch:
     def add(self, service, entry):
         self.logs[service].append(entry)
 
-    def sorted(self):
-        key = {"rspamd-history": "unix_time"}
-        for svc, entries in self.logs.items():
-            k = key.get(svc, "time")
-            entries.sort(key=lambda e: int(e[k]))
-        return self.logs
-
 
 class Traffic:
     """Deterministic for a given seed, so a reset rebuilds the same week."""
 
     def __init__(self, seed=None):
         self.rng = random.Random(seed)
+        self._future = {}
         self._qids = set()
         self._order = 1000
 
@@ -300,6 +294,21 @@ class Traffic:
             batch.add("netfilter", {"time": int(ts), "priority": "crit", "message": f"Banning {ip}/32 for 1800 seconds"})
             batch.add("netfilter", {"time": int(ts + 1800), "priority": "info", "message": f"Unbanning {ip}/32"})
 
+    def connection_noise(self, batch, t):
+        """A connection that never becomes a message: a scanner or a sender
+        that postscreen lets through and that hangs up."""
+        ip = self.rng.choice(world.REMOTE_IPS + world.SPAM_IPS + world.ATTACKER_IPS)
+        port = self.rng.randint(30000, 65000)
+        self._postfix(batch, t, "postfix/postscreen", f"CONNECT from [{ip}]:{port} to [{world.SERVER_IPV4}]:25")
+        verdict = self.rng.choice(["PASS OLD", "PASS NEW", "DNSBL rank 3 for"])
+        self._postfix(batch, t + 1, "postfix/postscreen", f"{verdict} [{ip}]:{port}")
+        if verdict.startswith("PASS"):
+            self._postfix(batch, t + 1, "postfix/smtpd", f"connect from unknown[{ip}]")
+            self._postfix(batch, t + 3, "postfix/smtpd",
+                          f"disconnect from unknown[{ip}] ehlo=1 quit=1 commands=2")
+        else:
+            self._postfix(batch, t + 2, "postfix/postscreen", f"DISCONNECT [{ip}]:{port}")
+
     def credential_attack(self, batch, t):
         """A distributed password-guessing run against one account, large
         enough for the anomaly detector's auth-failure burst alert."""
@@ -351,38 +360,62 @@ class Traffic:
                  1.6, 1.8, 1.9, 1.8, 1.5, 1.2, 0.9, 0.7, 0.6, 0.5, 0.4, 0.3]
         return curve[tm.tm_hour] * (1.0 if workday else 0.45)
 
-    def generate(self, start, end, per_hour=6.0):
-        """Traffic for [start, end). ``per_hour`` is the busiest weekday hour's
-        message count divided by two; the daily total lands near 100."""
+    def generate(self, start, end, per_hour=6.0, min_weight=0.0, noise_per_minute=0.0):
+        """Traffic that happens in [start, end).
+
+        Rates are per hour and scaled to the part of each hour inside the
+        window, so a one-minute window of the live trickle gets a minute's
+        worth. Lines a scenario writes after ``end`` (a retry, an unban) are
+        held back and returned by the call whose window reaches them, so no
+        line ever carries a future time. ``per_hour`` is half the busiest
+        weekday hour's message count; a weekday lands near 150 messages.
+        The live trickle raises the quiet
+        hours with ``min_weight`` and adds connection noise every minute, so
+        a visitor from any time zone sees the server working.
+        """
         batch = Batch()
         self._end = end
         hour = int(start) - int(start) % 3600
         while hour < end:
-            weight = self._hour_weight(hour)
-            self.background_services(batch, max(hour, start))
-            count = self._poisson(per_hour * weight)
-            for _ in range(count):
-                t = hour + self.rng.randint(0, 3599)
-                if not start <= t < end - 5:
-                    continue
-                self.message(batch, t)
-            for _ in range(self._poisson(1.2 * weight)):
-                t = hour + self.rng.randint(0, 3599)
-                if start <= t < end:
-                    self.noqueue(batch, t)
-            if self.rng.random() < 0.25:
-                t = hour + self.rng.randint(0, 3000)
-                if start <= t < end - 600:
-                    self.brute_force(batch, t)
-            if self.rng.random() < 0.2 * weight:
-                t = hour + self.rng.randint(0, 3599)
-                if start <= t < end:
-                    self.rate_limited(batch, t)
+            lo, hi = max(hour, start), min(hour + 3600, end)
+            frac = (hi - lo) / 3600
+            weight = max(self._hour_weight(hour), min_weight)
+
+            def when():
+                return self.rng.uniform(lo, hi)
+
+            if hour >= start:
+                self.background_services(batch, hour)
+            for _ in range(self._poisson(per_hour * weight * frac)):
+                self.message(batch, when())
+            for _ in range(self._poisson(1.2 * weight * frac)):
+                self.noqueue(batch, when())
+            if self.rng.random() < 0.25 * frac:
+                self.brute_force(batch, when())
+            if self.rng.random() < 0.2 * weight * frac:
+                self.rate_limited(batch, when())
+            for _ in range(self._poisson(noise_per_minute * 60 * frac)):
+                self.connection_noise(batch, when())
             hour += 3600
         if end - start > 86400:
             # History ends with an attack still in progress
             self.credential_attack(batch, end - 480)
-        return batch.sorted()
+        return self._release(batch, end)
+
+    def _release(self, batch, end):
+        """Entries before ``end``, oldest first; later ones wait for their time."""
+        key = {"rspamd-history": "unix_time"}
+        ready = {}
+        for svc, entries in batch.logs.items():
+            entries = self._future.pop(svc, []) + entries
+            k = key.get(svc, "time")
+            now_entries = [e for e in entries if int(e[k]) < end]
+            later = [e for e in entries if int(e[k]) >= end]
+            if later:
+                self._future[svc] = later
+            now_entries.sort(key=lambda e: int(e[k]))
+            ready[svc] = now_entries
+        return ready
 
     def message(self, batch, t):
         r = self.rng.random()
