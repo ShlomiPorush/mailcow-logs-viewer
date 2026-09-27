@@ -433,9 +433,17 @@ function renderMessageHeader(data) {
     const recipients = (data.recipients && data.recipients.length) ? data.recipients : (data.recipient ? [data.recipient] : []);
     const verdict = messageVerdict(data);
     const facts = [];
-    if (data.rspamd && typeof data.rspamd.score === 'number') facts.push(`Spam score ${data.rspamd.score.toFixed(1)}`);
     if (data.rspamd && data.rspamd.size) facts.push(formatSize(data.rspamd.size));
     if (data.direction) facts.push(data.direction);
+    // The spam summary sits here, in view, and opens the Spam Analysis tab
+    const r = data.rspamd;
+    const spamHtml = r && typeof r.score === 'number' ? `
+            <button type="button" class="ui-md-spam" onclick="switchModalTab('spam')" title="Open Spam Analysis">
+                <span><small>Spam score</small><b class="${r.score >= (r.required_score || 15) ? 'ui-text-fail' : 'ui-text-ok'}">${r.score.toFixed(2)}</b></span>
+                <span><small>Action</small><b>${escapeHtml(String(r.action || '-'))}</b></span>
+                <span><small>Class</small><b class="${r.is_spam ? 'ui-text-fail' : 'ui-text-ok'}">${r.is_spam ? 'SPAM' : 'CLEAN'}</b></span>
+                <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg>
+            </button>` : '';
     const hasSubject = data.subject && data.subject !== 'Postfix Log Details';
     header.innerHTML = `
         <h2 class="ui-md-subject" dir="auto" title="${escapeHtml(hasSubject ? data.subject : 'No subject')}">${escapeHtml(hasSubject ? data.subject : 'No subject')}</h2>
@@ -445,8 +453,9 @@ function renderMessageHeader(data) {
             <span>When</span><div>${formatTime(data.first_seen)}</div>
         </div>
         <div class="ui-md-verdict-bar${verdict.tone ? ` ui-md-verdict-${verdict.tone}` : ''}">
-            ${escapeHtml(verdict.text)}
-            ${facts.length ? `<small>${escapeHtml(facts.join(', '))}</small>` : ''}
+            <div>${escapeHtml(verdict.text)}
+            ${facts.length ? `<small>${escapeHtml(facts.join(', '))}</small>` : ''}</div>
+            ${spamHtml}
         </div>`;
 }
 
@@ -454,6 +463,7 @@ function renderMessageHeader(data) {
 // and what Dovecot did with it. Built from the same logs as the Logs tab.
 function buildDeliverySteps(data) {
     const steps = [];
+    const rspamd = data.rspamd || {};
     const add = (time, tone, title, detail) => steps.push({ time: time || '', tone, title, detail });
     for (const log of data.postfix || []) {
         const message = log.message || '';
@@ -464,9 +474,13 @@ function buildDeliverySteps(data) {
         } else if (/client=/.test(message) && /smtpd/.test(program)) {
             const ip = (message.match(/client=.*?\[([^\]]+)\]/) || [])[1];
             const user = (message.match(/sasl_username=(\S+)/) || [])[1];
-            add(log.time, 'ok', ip ? `Received from ${ip}` : 'Received', `${when}, ${program}${user ? `, authenticated as ${user}` : ''}`);
+            const showIp = ip && !rspamd.ip;
+            const showUser = user && !rspamd.user;
+            add(log.time, 'ok', showIp ? `Received from ${ip}` : 'Received',
+                `${when}, ${program}${user ? (showUser ? `, authenticated as ${user}` : ', authenticated') : ''}`);
         } else if (/cleanup/.test(program) && /message-id=/.test(message)) {
-            add(log.time, 'ok', log.queue_id || data.queue_id ? `Queued as ${log.queue_id || data.queue_id}` : 'Queued', `${when}, ${program}`);
+            const qid = log.queue_id || data.queue_id;
+            add(log.time, 'ok', qid && qid !== data.queue_id ? `Queued as ${qid}` : 'Queued', `${when}, ${program}`);
         } else if (log.status) {
             const target = relayHost(log.relay) || log.recipient || '';
             const detail = `${when}, status=${log.status}${log.dsn ? ` (${log.dsn})` : ''}`;
@@ -544,19 +558,7 @@ function renderOverviewTab(content, data) {
             ${renderDovecotSummary(data.dovecot)}
             ${renderRelatedDeliveries(data)}
             ${identifiers ? `<section><h4 class="ui-md-h">Identifiers</h4><div class="ui-md-facts ui-md-ids">${identifiers}</div></section>` : ''}
-            ${data.rspamd ? `
-                <section class="ui-md-card ui-md-clickable" onclick="switchModalTab('spam')">
-                    <div class="ui-md-card-head">
-                        <h4 class="ui-md-h">Quick Spam Summary</h4>
-                        <span class="ui-muted">See "Spam Analysis" tab for details</span>
-                    </div>
-                    <div class="ui-md-figures">
-                        <div><b class="${data.rspamd.score >= (data.rspamd.required_score || 15) ? 'ui-text-fail' : 'ui-text-ok'}">${data.rspamd.score.toFixed(2)}</b><span>Score</span></div>
-                        <div><b>${escapeHtml(String(data.rspamd.action))}</b><span>Action</span></div>
-                        <div><b class="${data.rspamd.is_spam ? 'ui-text-fail' : 'ui-text-ok'}">${data.rspamd.is_spam ? 'SPAM' : 'CLEAN'}</b><span>Class</span></div>
-                    </div>
-                </section>
-            ` : data.postfix && data.postfix.length > 0 ? `
+            ${data.rspamd ? '' : data.postfix && data.postfix.length > 0 ? `
                 <div class="ui-banner">
                     <div>Postfix Delivery Logs
                         <p>Click "Logs" tab to see complete delivery timeline (${data.postfix.length} entries)</p>
