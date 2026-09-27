@@ -58,6 +58,7 @@ ENV DEMO_MODE=true \
     MAILCOW_URL=https://mail.example.com \
     MAILCOW_API_KEY=demo \
     MAILCOW_API_KEY_RW=demo \
+    RSPAMD_PASSWORD=demo \
     SETTINGS_EDIT_VIA_UI_ENABLED=true
 
 # The regular image. Kept last so a plain `docker build` produces it.
