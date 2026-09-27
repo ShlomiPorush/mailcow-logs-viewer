@@ -488,7 +488,7 @@ function buildDeliverySteps(data) {
         } else if (log.status) {
             const target = relayHost(log.relay) || log.recipient || '';
             const detail = `${when}, status=${log.status}${log.dsn ? ` (${log.dsn})` : ''}`;
-            if (log.status === 'sent') add(log.time, 'ok', target ? `Delivered to ${target}` : 'Delivered', detail);
+            if (log.status === 'sent') add(log.time, 'ok', target ? `Delivered to ${target}` : 'Delivered', detail, { titleHtml: target ? `Delivered to ${copyableText(target)}` : '' });
             else if (log.status === 'deferred') add(log.time, 'warn', target ? `Deferred for ${target}` : 'Deferred', detail);
             else if (log.status === 'bounced') add(log.time, 'fail', target ? `Bounced for ${target}` : 'Bounced', detail);
             else add(log.time, 'fail', `${log.status.charAt(0).toUpperCase()}${log.status.slice(1)}`, detail);
@@ -548,10 +548,11 @@ function renderOverviewTab(content, data) {
     ].filter(Boolean).join(' ') : '';
     const identifiers = [
         data.queue_id ? mdIdRow('Queue ID', `<span class="ui-mono">${copyableText(data.queue_id)}</span>`) : '',
+        data.message_id ? mdIdRow('Message ID', `<span class="ui-mono">${copyableText(data.message_id)}</span>`) : '',
         rspamd.ip ? mdIdRow('Client IP', `<span class="ui-mono">${copyableText(rspamd.ip)}</span>`, geoNote) : '',
         rspamd.user || rspamd.has_auth ? mdIdRow('Authenticated user',
             rspamd.user ? copyableText(rspamd.user) : '<span class="ui-muted">Unknown user</span>', rspamd.has_auth ? 'Verified (MAILCOW_AUTH)' : '') : '',
-        data.message_id ? mdIdRow('Message ID', `<span class="ui-mono">${copyableText(data.message_id)}</span>`) : '',
+
         rspamd.size ? mdIdRow('Size', formatSize(rspamd.size)) : '',
         data.dovecot && data.dovecot.status === 'stored' && data.dovecot.mailbox ? mdIdRow('Folder', `<span class="ui-md-folder">${folderIconSvg('ui-md-folder-icon')}${escapeHtml(data.dovecot.mailbox)}</span>`) : '',
         recipientsToDisplay.length > 1 ? mdIdRow(`Recipients (${recipientsToDisplay.length})`,
