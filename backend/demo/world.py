@@ -199,23 +199,26 @@ def build_aliases():
 
 
 def build_queue(now=None):
+    # Recipients are outside the generated traffic's address pool: a bounce in
+    # the history would otherwise suppress them, and the suppression cleanup
+    # would delete these queue items before a visitor sees them.
     now = int(now or time.time())
     return [
         {"queue_name": "deferred", "queue_id": "4Qd7Kx2Lm9", "arrival_time": now - 5 * 3600,
          "message_size": 48213, "sender": "alice@example.com",
-         "recipients": ["jordan@customer-mail.test (connect to mx.customer-mail.test[198.51.100.34]:25: Connection timed out)"]},
+         "recipients": ["jordan.lee@customer-mail.test (connect to mx.customer-mail.test[198.51.100.34]:25: Connection timed out)"]},
         {"queue_name": "deferred", "queue_id": "4Qd8Pz5Rt1", "arrival_time": now - 2 * 3600,
          "message_size": 15320, "sender": "billing@example.com",
-         "recipients": ["accounts@travel.test (host mx.travel.test[192.0.2.72] said: 452 4.2.2 Mailbox full)"]},
+         "recipients": ["accounts-payable@travel.test (host mx.travel.test[192.0.2.72] said: 452 4.2.2 Mailbox full)"]},
         {"queue_name": "deferred", "queue_id": "4Qd9Wv3Hs6", "arrival_time": now - 40 * 60,
          "message_size": 9120, "sender": "orders@shop.test",
-         "recipients": ["mia@university.test (host mx.university.test[198.51.100.58] said: 421 4.7.0 Try again later)"]},
+         "recipients": ["mia.chen@university.test (host mx.university.test[198.51.100.58] said: 421 4.7.0 Try again later)"]},
         {"queue_name": "hold", "queue_id": "4QdAYn8Ce2", "arrival_time": now - 26 * 3600,
          "message_size": 212044, "sender": "frank@example.com",
-         "recipients": ["everyone@partner.test"]},
+         "recipients": ["all-staff@partner.test"]},
         {"queue_name": "active", "queue_id": "4QdBJm1Uf4", "arrival_time": now - 20,
          "message_size": 6620, "sender": "noreply@example.com",
-         "recipients": ["sam@cloud-tools.test"]},
+         "recipients": ["sam.ortiz@cloud-tools.test"]},
     ]
 
 
