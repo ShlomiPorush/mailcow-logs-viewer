@@ -222,7 +222,7 @@ function applyFeatureToggles() {
     const statusBlacklistKpi = document.getElementById('status-kpi-blocklists-cell');
     const statusBlacklistTab = document.getElementById('status-tab-btn-blocklists');
     const blacklistOff = window.disabledFeatures.includes('blacklist');
-    if (blacklistOff && typeof statusTab !== 'undefined' && statusTab === 'blocklists') statusShowTab('overview');
+    if (blacklistOff && typeof statusTab !== 'undefined' && statusTab === 'blocklists') statusShowTab('containers');
     [blacklistSection, dashboardBlacklistCard, statusBlacklistKpi, statusBlacklistTab].forEach(el => {
         if (el) el.style.display = blacklistOff ? 'none' : '';
     });
@@ -1677,6 +1677,7 @@ async function loadDashboard() {
         loadRecentActivity();
         loadDashboardStatusSummary();
         loadDashboardBlacklistSummary();
+        loadDashboardHealth();
         loadDashboardSecurityAlerts();
         loadDashboardAttention();
         loadMailFlowChart();
@@ -1855,6 +1856,36 @@ async function acknowledgeAllSecurityAlerts() {
     }
 }
 
+// One dashboard health card: the big value, its tone and the line under it
+function setDashKpi(id, value, tone, note) {
+    const el = document.getElementById(id);
+    if (el) { el.textContent = value; el.className = tone ? `ui-${tone}` : ''; }
+    const noteEl = document.getElementById(`${id}-note`);
+    if (noteEl && note !== undefined) noteEl.textContent = note;
+}
+
+// Jobs, message linking and the app version for the dashboard health cards
+async function loadDashboardHealth() {
+    try {
+        const [infoRes, versionRes] = await Promise.all([authenticatedFetch('/api/settings/info'), authenticatedFetch('/api/status/app-version')]);
+        if (infoRes.ok) {
+            const info = await infoRes.json();
+            const jobs = summarizeJobs(info.background_jobs || {});
+            setDashKpi('dash-kpi-jobs', `${jobs.healthy} of ${jobs.running} healthy`, jobs.failed.length ? 'fail' : '',
+                jobs.failed.length ? `${jobs.failed.map(([name]) => name).join(', ')} failed` : (jobs.off ? `${jobs.off} off with their feature` : 'None failed'));
+            const c = info.correlation_status || {};
+            setDashKpi('dash-kpi-linking', `${c.completion_rate || 0}%`, c.incomplete ? 'warn' : '',
+                `${(c.complete || 0).toLocaleString()} of ${(c.total || 0).toLocaleString()} complete`);
+        }
+        if (versionRes.ok) {
+            const v = await versionRes.json();
+            setDashKpi('dash-kpi-version', v.current_version || '-', '', v.update_available ? `${v.latest_version} available` : 'Up to date');
+        }
+    } catch (error) {
+        console.error('Failed to load dashboard health:', error);
+    }
+}
+
 async function loadDashboardStatusSummary() {
     try {
         console.log('Loading Dashboard Status Summary...');
@@ -1867,25 +1898,16 @@ async function loadDashboardStatusSummary() {
         const data = await response.json();
         console.log('Status summary data:', data);
 
-        // Containers: one line, red when one is stopped
-        const containersDiv = document.getElementById('dashboard-containers-summary');
+        // Containers: red when one is stopped; ignored ones are only mentioned
         const containers = data.containers || {};
-        containersDiv.innerHTML = `
-            <div class="ui-kv" title="Running ${containers.running || 0}, Stopped ${containers.stopped || 0}, Total ${containers.total || 0}"><span>Containers</span>
-                <b class="${containers.stopped > 0 ? 'ui-text-fail' : ''}">${containers.running || 0} of ${containers.total || 0} running</b></div>
-        `;
+        setDashKpi('dash-kpi-containers', `${containers.running || 0} of ${containers.total || 0} running`, containers.stopped > 0 ? 'fail' : '',
+            [containers.stopped ? `${containers.stopped} stopped` : 'All running', containers.ignored ? `${containers.ignored} ignored` : ''].filter(Boolean).join(', '));
 
         // Storage: amber above 75%, red above 90%
-        const storageDiv = document.getElementById('dashboard-storage-summary');
         const storage = data.storage || {};
         const usedPercent = parseInt(storage.used_percent) || 0;
-        const storageLevel = usedPercent > 90 ? 'fail' : usedPercent > 75 ? 'warn' : 'ok';
-        storageDiv.innerHTML = `
-            <div class="ui-kv" title="Available ${storage.used || '0'} / ${storage.total || '0'}"><span>Storage</span>
-                <b class="${storageLevel === 'ok' ? '' : `ui-text-${storageLevel}`}">${storage.used_percent || '0%'} used</b></div>
-            <div class="ui-meter ui-${storageLevel} ui-meter-panel"><i style="width: ${usedPercent}%"></i></div>
-            <p class="ui-kv-note">${storage.used || '0'} / ${storage.total || '0'}</p>
-        `;
+        const storageLevel = usedPercent > 90 ? 'fail' : usedPercent > 75 ? 'warn' : '';
+        setDashKpi('dash-kpi-storage', `${storage.used_percent || '0%'} used`, storageLevel, `${storage.used || '0'} of ${storage.total || '0'}`);
 
         const systemDiv = document.getElementById('dashboard-system-summary');
         const system = data.system || {};
@@ -3946,7 +3968,22 @@ async function loadMessages(page = 1) {
 // What each loader found, so the attention list and the tab counters can be
 // built from one place once any of them finishes
 const statusState = { containers: null, blocklists: null, jobs: null };
-let statusTab = 'overview';
+let statusTab = 'containers';
+
+// A dashboard card opens its tab on the Status page
+function openStatusTab(tab) {
+    statusShowTab(tab);
+    navigateTo('status');
+}
+
+// One summary of the background jobs for Status and the dashboard
+function summarizeJobs(jobs) {
+    const all = statusJobCategories(jobs || {}).flatMap(cat => cat.jobs.filter(j => j[2]));
+    const isOff = job => job.feature_disabled === true || job.status === 'disabled' || job.enabled === false;
+    const failed = all.filter(([, , job]) => !isOff(job) && job.status === 'failed');
+    const off = all.filter(([, , job]) => isOff(job)).length;
+    return { all, isOff, failed, off, healthy: all.length - failed.length - off, running: all.length - off };
+}
 let statusCtrFilter = 'all';
 let statusJobFilterValue = 'all';
 
@@ -4460,40 +4497,32 @@ async function loadBlacklistStatus() {
 
 
 async function loadDashboardBlacklistSummary() {
-    const container = document.getElementById('dashboard-blacklist-summary');
-    if (!container) return;
-
+    if (!document.getElementById('dash-kpi-blocklists')) return;
     try {
         const response = await authenticatedFetch('/api/blacklist/summary');
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const data = await response.json();
-        console.log('Status summary data:', data);
-
         if (!data.has_data) {
-            container.innerHTML = `<div class="ui-kv" title="The first check runs automatically"><span>Blocklists</span><b class="ui-muted">No blacklist data yet</b></div>`;
+            setDashKpi('dash-kpi-blocklists', '-', '', 'No check yet; the first one runs by itself');
             return;
         }
-
         // Count addresses, like the Status page, and name the listed ones
         const hosts = data.hosts || [];
         const listedHosts = hosts.filter(h => h.status === 'listed');
-        const value = {
-            listed: `<b class="ui-text-fail">${listedHosts.length || data.hosts_listed || 1} of ${hosts.length || 1} listed</b>`,
-            error: '<b class="ui-text-warn">! Check Error</b>',
-            clean: `<b class="ui-text-ok">Clean</b>`,
-            unknown: '<b class="ui-muted">Unknown</b>'
-        }[data.status] || `<b class="ui-muted">${escapeHtml(String(data.status))}</b>`;
-
-        const where = listedHosts.length
-            ? listedHosts.map(h => `${h.hostname} on ${h.listed_count} of ${h.total_blacklists || '?'} lists`).join(', ')
-            : (hosts.length > 1 ? `${hosts.length} addresses checked` : ((hosts[0] && hosts[0].hostname) || data.server_ip || ''));
         const checked = data.checked_at ? `checked ${formatAgo(data.checked_at)}` : '';
-        container.innerHTML = `
-            <div class="ui-kv"><span>Blocklists</span>${value}</div>
-            ${where || checked ? `<p class="ui-kv-note">${escapeHtml([where, checked].filter(Boolean).join(', '))}</p>` : ''}`;
+        if (data.status === 'listed') {
+            setDashKpi('dash-kpi-blocklists', `${listedHosts.length || data.hosts_listed || 1} of ${hosts.length || 1} listed`, 'fail',
+                listedHosts.map(h => `${h.hostname} on ${h.listed_count} of ${h.total_blacklists || '?'}`).join(', '));
+        } else if (data.status === 'error') {
+            setDashKpi('dash-kpi-blocklists', 'Check error', 'warn', checked);
+        } else if (data.status === 'clean') {
+            setDashKpi('dash-kpi-blocklists', `${hosts.length || 1} clean`, '', [`${hosts.length} address${hosts.length === 1 ? '' : 'es'}`, checked].filter(Boolean).join(', '));
+        } else {
+            setDashKpi('dash-kpi-blocklists', 'Unknown', '', checked);
+        }
     } catch (error) {
         console.error('Failed to load blacklist summary:', error);
-        container.innerHTML = `<div class="ui-kv"><span>Blocklists</span><b class="ui-muted">Error loading</b></div>`;
+        setDashKpi('dash-kpi-blocklists', '-', '', 'Could not load');
     }
 }
 
@@ -4667,8 +4696,12 @@ function renderStatusCorrelation(correlation, incompleteList) {
 
 function renderStatusJobs(jobs) {
     const container = document.getElementById('status-jobs');
-    
-    const categories = [
+    const categories = statusJobCategories(jobs);
+    renderStatusJobsTable(container, categories, jobs);
+}
+
+function statusJobCategories(jobs) {
+    return [
         {
             title: 'Log Processing',
             icon: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4"></path>',
@@ -4748,13 +4781,16 @@ function renderStatusJobs(jobs) {
             ]
         }
     ];
-    
+}
+
+function renderStatusJobsTable(container, categories, jobs) {
     // Failed and switched-off jobs feed the attention list, the card and the filter
-    const all = categories.flatMap(cat => cat.jobs.filter(j => j[2]));
-    const isOff = job => job.feature_disabled === true || job.status === 'disabled' || job.enabled === false;
+    const summary = summarizeJobs(jobs);
+    const all = summary.all;
+    const isOff = summary.isOff;
     statusState.jobs = all.map(([name, key, job]) => ({ name, key, failed: !isOff(job) && job.status === 'failed', error: job.error || '' }));
-    const failed = statusState.jobs.filter(j => j.failed).length;
-    const off = all.filter(j => isOff(j[2])).length;
+    const failed = summary.failed.length;
+    const off = summary.off;
     setStatusKpi('status-kpi-jobs', `${all.length - failed - off} of ${all.length - off} healthy`, failed ? 'fail' : '');
     const jobsNote = [failed ? `${failed} failed` : 'None failed', off ? `${off} off because a feature or setting is off` : ''].filter(Boolean).join(', ');
     const kpiNote = document.getElementById('status-kpi-jobs-note');
