@@ -2,8 +2,9 @@
 # Boot the demo image against PostgreSQL with nothing but database settings
 # (the image carries everything else) and prove it runs cut off from the
 # network: healthy, SPA served, the network guard active in the live process,
-# pages fed by the fictional mailcow and internet, writes that stick, every
-# background job run, and not one outbound attempt left for the guard.
+# pages fed by the fictional mailcow and internet, a week of history on every
+# page, writes that stick, every background job run, not one outbound
+# attempt left for the guard, and a reset that drops visitor changes.
 #
 # Usage: demo_smoke.sh <demo image tag>
 set -euo pipefail
@@ -38,25 +39,34 @@ for i in $(seq 1 30); do
     [ "$i" -eq 30 ] && fail "PostgreSQL did not become ready"
 done
 
-step "Start the demo application (${IMAGE})"
-docker run -d --name "${APP}" --network "${NET}" -p "${PORT}:8080" \
-    -e POSTGRES_HOST="${DB}" \
-    -e POSTGRES_USER=demo -e POSTGRES_PASSWORD=demo -e POSTGRES_DB=demo \
-    "${IMAGE}" >/dev/null
+# Extra arguments are passed to docker run (-e ...)
+start_app() {
+    docker run -d --name "${APP}" --network "${NET}" -p "${PORT}:8080" \
+        -e POSTGRES_HOST="${DB}" \
+        -e POSTGRES_USER=demo -e POSTGRES_PASSWORD=demo -e POSTGRES_DB=demo \
+        "$@" "${IMAGE}" >/dev/null
+}
 
-step "Wait for /api/health"
-healthy=0
-for i in $(seq 1 60); do
-    if body=$(curl -fsS "${BASE}/api/health" 2>/dev/null); then
-        if echo "${body}" | grep -q '"status": *"healthy"'; then healthy=1; break; fi
-    fi
-    if [ "$(docker inspect -f '{{.State.Running}}' "${APP}" 2>/dev/null)" != "true" ]; then
-        fail "demo container exited during startup"
-    fi
-    sleep 2
-done
-[ "${healthy}" -eq 1 ] || fail "/api/health did not report healthy within 120s"
-echo "health: ${body}"
+wait_healthy() {
+    local healthy=0
+    for i in $(seq 1 60); do
+        if body=$(curl -fsS "${BASE}/api/health" 2>/dev/null); then
+            if echo "${body}" | grep -q '"status": *"healthy"'; then healthy=1; break; fi
+        fi
+        if [ "$(docker inspect -f '{{.State.Running}}' "${APP}" 2>/dev/null)" != "true" ]; then
+            fail "demo container exited during startup"
+        fi
+        sleep 2
+    done
+    [ "${healthy}" -eq 1 ] || fail "/api/health did not report healthy within 120s"
+    echo "health: ${body}"
+}
+
+step "Start the demo application (${IMAGE})"
+start_app
+
+step "Wait for /api/health (the demo seeds a week of history first)"
+wait_healthy
 
 step "SPA is served without a login"
 for route in / /dashboard /messages /settings; do
@@ -88,6 +98,15 @@ check /api/queue 'd["total"] >= 4' "the mail queue has entries"
 check /api/quarantine 'd["total"] >= 5' "the quarantine has entries"
 check /api/fail2ban 'len(d["active_bans"]) >= 2' "fail2ban shows bans"
 check /api/rspamd/maps/bad_words.map '"prize" in json.dumps(d)' "Rspamd maps are readable"
+
+step "Every page has a week of fictional history"
+check /api/stats/dashboard 'd["messages"]["7d"] >= 400 and d["auth_failures"]["7d"] > 0' "dashboard counts a week of mail and attacks"
+check /api/messages/facets 'all(d["direction"][k] > 0 for k in ("inbound", "outbound", "internal")) and d["status"]["bounced"] > 0' "messages in every direction and outcome"
+check /api/dmarc/domains 'd["total"] == 2 and all(x["report_count"] > 0 for x in d["domains"])' "DMARC reports for both domains"
+check /api/suppressions/stats 'd["active"] > 0' "bounces became suppressions"
+check /api/mailbox-stats/summary 'd["total_messages"] > 0' "mailbox statistics"
+check /api/blacklist/summary 'd["listed_count"] == 1' "blocklist results"
+check /api/security-alerts 'len(d["alerts"]) >= 1' "a security alert was raised"
 
 step "The rest of the internet answers from fakes"
 code=$(curl -s -o /dev/null -w '%{http_code}' "${BASE}/api/docs/Domains")
@@ -138,6 +157,27 @@ step "No tracebacks during startup"
 if echo "${logs}" | grep -q "Traceback (most recent call last)"; then
     fail "a traceback was logged during startup"
 fi
+
+step "The nightly reset drops visitor changes and rebuilds the demo"
+# The same reset as at 00:00, brought forward so the test does not wait for midnight
+docker rm -f "${APP}" >/dev/null
+start_app -e DEMO_RESET_AFTER_SECONDS=45
+wait_healthy
+count() { docker exec "${APP}" python3 -c 'import json,urllib.request; print(json.load(urllib.request.urlopen("http://localhost:8080/api/quarantine"))["total"])'; }
+fresh=$(count)
+first=$(docker exec "${APP}" python3 -c 'import json,urllib.request; print(json.load(urllib.request.urlopen("http://localhost:8080/api/quarantine"))["data"][0]["id"])')
+curl -fsS -X POST -H 'Content-Type: application/json' -d "{\"items\":[\"${first}\"]}" "${BASE}/api/quarantine/release" >/dev/null
+[ "$(count)" -eq $((fresh - 1)) ] || fail "the visitor change did not show before the reset"
+for i in $(seq 1 60); do
+    [ "$(docker logs "${APP}" 2>&1 | grep -c "\[DEMO\] Demo ready")" -ge 2 ] && break
+    sleep 3
+done
+docker logs "${APP}" 2>&1 | grep -q "\[DEMO\] Nightly reset: restarting" || fail "the reset did not run"
+[ "$(docker logs "${APP}" 2>&1 | grep -c "\[DEMO\] Demo ready")" -ge 2 ] || fail "the demo did not come back after the reset"
+wait_healthy
+[ "$(count)" -eq "${fresh}" ] || fail "the reset did not restore the quarantine ($(count) != ${fresh})"
+[ "$(docker inspect -f '{{.RestartCount}}' "${APP}")" = "0" ] || fail "the reset relied on a container restart"
+echo "  ok: visitor change gone, demo rebuilt in the same container"
 
 echo
 echo "DEMO SMOKE OK"
