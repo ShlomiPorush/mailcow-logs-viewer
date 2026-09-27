@@ -302,10 +302,35 @@ function escapeRegex(string) {
 
 // Render markdown to sanitized HTML. marked passes raw HTML through
 // unchanged, so DOMPurify strips any script vectors before innerHTML.
+// GitHub callouts ("> [!NOTE]", TIP, IMPORTANT, WARNING, CAUTION): marked
+// leaves them as quotes, so give them their box and title. Works on the
+// already sanitized HTML and only moves nodes and adds a text title.
+function markdownCallouts(html) {
+    if (typeof document === 'undefined' || !/\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\]/i.test(html)) return html;
+    const tpl = document.createElement('template');
+    tpl.innerHTML = html;
+    tpl.content.querySelectorAll('blockquote').forEach(quote => {
+        const first = quote.querySelector('p');
+        const match = first && first.innerHTML.match(/^\s*\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\]\s*(<br>)?\s*/i);
+        if (!match) return;
+        const type = match[1].toLowerCase();
+        first.innerHTML = first.innerHTML.slice(match[0].length);
+        const box = document.createElement('div');
+        box.className = `markdown-alert markdown-alert-${type}`;
+        const title = document.createElement('p');
+        title.className = 'markdown-alert-title';
+        title.textContent = type.charAt(0).toUpperCase() + type.slice(1);
+        box.append(title, ...quote.childNodes);
+        if (!first.textContent.trim()) first.remove();
+        quote.replaceWith(box);
+    });
+    return tpl.innerHTML;
+}
+
 function renderMarkdown(markdownText) {
     const html = marked.parse(markdownText || '');
     if (typeof DOMPurify !== 'undefined') {
-        return DOMPurify.sanitize(html);
+        return markdownCallouts(DOMPurify.sanitize(html));
     }
     // Library failed to load - fail safe by escaping rather than injecting
     return escapeHtml(markdownText || '');
