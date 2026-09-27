@@ -3,7 +3,7 @@
 # on pushes to main: main only changes through merged PRs and releases,
 # and both of those are already covered.
 #
-# Three jobs, each catching a different class of failure:
+# Four jobs, each catching a different class of failure:
 #   backend-tests   unit + database tests against a real PostgreSQL. A test
 #                   that skips for lack of a database is treated as a failure,
 #                   so the suite cannot quietly go green by skipping.
@@ -12,6 +12,8 @@
 #                   health, SPA, static assets, Alembic head, and the manual
 #                   job runner accepting every job the Status page lists
 #                   (.github/scripts/smoke.sh).
+#   demo-smoke      builds the public demo image and boots it with nothing but
+#                   database settings (.github/scripts/demo_smoke.sh).
 name: CI
 
 on:
@@ -124,9 +126,37 @@ jobs:
         with:
           context: .
           load: true
+          target: app
           tags: mailcow-logs-viewer:ci
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      - name: The regular image does not contain the demo package
+        run: docker run --rm --entrypoint sh mailcow-logs-viewer:ci -c 'test ! -e /app/demo'
+
       - name: Boot the image against PostgreSQL and exercise it
         run: bash .github/scripts/smoke.sh mailcow-logs-viewer:ci
+
+  demo-smoke:
+    name: Demo image build and smoke test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build demo image (amd64, not pushed)
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          load: true
+          target: demo
+          tags: mailcow-logs-viewer:ci-demo
+          cache-from: |
+            type=gha
+            type=gha,scope=demo
+          cache-to: type=gha,mode=max,scope=demo
+
+      - name: Boot the demo image and check it is cut off from the network
+        run: bash .github/scripts/demo_smoke.sh mailcow-logs-viewer:ci-demo

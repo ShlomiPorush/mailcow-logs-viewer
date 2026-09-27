@@ -75,5 +75,6 @@ jobs:
           context: .
           push: true
           platforms: linux/amd64,linux/arm64
+          target: app
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
