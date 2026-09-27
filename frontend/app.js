@@ -222,7 +222,7 @@ function applyFeatureToggles() {
     const statusBlacklistKpi = document.getElementById('status-kpi-blocklists-cell');
     const statusBlacklistTab = document.getElementById('status-tab-btn-blocklists');
     const blacklistOff = window.disabledFeatures.includes('blacklist');
-    if (blacklistOff && typeof statusTab !== 'undefined' && statusTab === 'blocklists') statusShowTab('containers');
+    if (blacklistOff && typeof statusTab !== 'undefined' && statusTab === 'blocklists') statusShowTab('server');
     [blacklistSection, dashboardBlacklistCard, statusBlacklistKpi, statusBlacklistTab].forEach(el => {
         if (el) el.style.display = blacklistOff ? 'none' : '';
     });
@@ -3968,7 +3968,7 @@ async function loadMessages(page = 1) {
 // What each loader found, so the attention list and the tab counters can be
 // built from one place once any of them finishes
 const statusState = { containers: null, blocklists: null, jobs: null };
-let statusTab = 'containers';
+let statusTab = 'server';
 
 // A dashboard card opens its tab on the Status page
 function openStatusTab(tab) {
@@ -4008,7 +4008,7 @@ function setStatusTabCount(tab, count, isFail) {
 function statusContainerFilter(filter) {
     statusCtrFilter = filter;
     document.querySelectorAll('[data-ctr-filter]').forEach(b => b.setAttribute('aria-pressed', b.dataset.ctrFilter === filter));
-    document.querySelectorAll('#status-containers .ui-st-row').forEach(row => {
+    document.querySelectorAll('#status-containers .ui-ctr').forEach(row => {
         row.hidden = filter === 'problems' && !row.classList.contains('is-down');
     });
 }
@@ -4016,24 +4016,18 @@ function statusContainerFilter(filter) {
 function statusJobFilter(filter) {
     statusJobFilterValue = filter;
     document.querySelectorAll('[data-job-filter]').forEach(b => b.setAttribute('aria-pressed', b.dataset.jobFilter === filter));
-    const table = document.querySelector('#status-jobs .ui-table');
-    if (!table) return;
-    let group = null;
-    let groupHasRows = false;
-    const closeGroup = () => { if (group) group.hidden = !groupHasRows; };
-    table.querySelectorAll(':scope > .ui-tr:not(.ui-tr-head)').forEach(row => {
-        if (row.classList.contains('ui-tr-group')) {
-            closeGroup();
-            group = row;
-            groupHasRows = false;
-            return;
-        }
-        const show = filter === 'all' || (filter === 'problems' && row.classList.contains('is-failed'))
-            || (filter === 'off' && row.classList.contains('is-off'));
-        row.hidden = !show;
-        if (show) groupHasRows = true;
+    document.querySelectorAll('#status-jobs .ui-jg').forEach(group => {
+        let shown = 0;
+        group.querySelectorAll('.ui-jobrow').forEach(row => {
+            const show = filter === 'all' || (filter === 'problems' && row.classList.contains('is-failed'))
+                || (filter === 'off' && row.classList.contains('is-off'));
+            row.hidden = !show;
+            if (show) shown++;
+        });
+        group.hidden = shown === 0;
+        // Filtered: open what matches. All: back to failures plus what the user opened
+        group.open = filter === 'all' ? (group.hasAttribute('data-failed') || statusJobsOpen.has(group.dataset.group)) : shown > 0;
     });
-    closeGroup();
 }
 
 // A clickable link to a provider's own lookup page
@@ -4184,32 +4178,29 @@ async function loadStatusContainers() {
             if (note) note.textContent = summaryText;
             const summary = document.getElementById('status-containers-summary');
             if (summary) summary.textContent = summaryText;
-            setStatusTabCount('containers', stopped, true);
+            setStatusTabCount('server', stopped, true);
             statusState.containers = containersList.map(c => ({ ...c, running: isRunning(c) }));
 
             // Stopped containers first, so they are seen; ignored ones last
             const rank = c => c.ignored ? 2 : (isRunning(c) ? 1 : 0);
             const ordered = [...containersList].sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name));
-            container.innerHTML = `
-                <section class="ui-panel ui-st-rows">
-                    <div class="ui-st-row ui-st-row-head"><span>Container</span><span>State</span><span class="ui-st-hide-sm">Up for</span><span></span></div>
-                    ${ordered.map(c => {
-                        const up = isRunning(c);
-                        const since = c.started_at ? formatAgo(c.started_at).replace(' ago', '') : '-';
-                        const arg = escapeJsArg(c.container);
-                        // A stopped container can be ignored; an ignored one can be counted again
-                        const action = c.ignored
-                            ? `<button type="button" class="ui-btn ui-btn-sm" onclick="setContainerIgnored('${arg}', false)">Stop ignoring</button>`
-                            : (up ? '' : `<button type="button" class="ui-btn ui-btn-sm" onclick="setContainerIgnored('${arg}', true)" title="Stop counting and alerting on ${escapeHtml(c.name)}">Ignore</button>`);
-                        return `
-                        <div class="ui-st-row${c.ignored ? ' is-ignored' : (up ? '' : ' is-down')}" title="${escapeHtml(c.ignored ? 'Ignored: shown here but never counted or alerted' : (c.started_at ? `Started ${formatTime(c.started_at)}` : 'Start time unknown'))}">
-                            <span class="ui-st-name"><i class="ui-mdot${c.ignored ? '' : (up ? ' ui-mdot-ok' : ' ui-mdot-fail')}"></i>${escapeHtml(c.name)}</span>
-                            <span>${c.ignored ? 'ignored' : escapeHtml(String(c.state || 'unknown'))}</span>
-                            <span class="ui-st-hide-sm ui-muted">${up ? escapeHtml(since) : '-'}</span>
-                            <span class="ui-st-acts">${action}</span>
-                        </div>`;
-                    }).join('')}
-                </section>`;
+            // One tile per container: state dot, name, uptime, and Ignore where it applies
+            container.innerHTML = `<div class="ui-ctrs">${ordered.map(c => {
+                const up = isRunning(c);
+                const since = c.started_at ? formatAgo(c.started_at).replace(' ago', '') : '';
+                const arg = escapeJsArg(c.container);
+                // A stopped container can be ignored; an ignored one can be counted again
+                const action = c.ignored
+                    ? `<button type="button" class="ui-btn ui-btn-sm" onclick="setContainerIgnored('${arg}', false)">Stop ignoring</button>`
+                    : (up ? '' : `<button type="button" class="ui-btn ui-btn-sm" onclick="setContainerIgnored('${arg}', true)" title="Stop counting and alerting on ${escapeHtml(c.name)}">Ignore</button>`);
+                const state = c.ignored ? 'ignored' : (up ? (since ? `up ${since}` : 'running') : String(c.state || 'unknown'));
+                return `
+                <div class="ui-ctr${c.ignored ? ' is-ignored' : (up ? '' : ' is-down')}" title="${escapeHtml(c.ignored ? 'Ignored: shown here but never counted or alerted' : (c.started_at ? `Started ${formatTime(c.started_at)}` : 'Start time unknown'))}">
+                    <i class="ui-mdot${c.ignored ? '' : (up ? ' ui-mdot-ok' : ' ui-mdot-fail')}"></i>
+                    <b>${escapeHtml(c.name)}</b>
+                    <small>${escapeHtml(state)}</small>${action ? `<span class="ui-ctr-act">${action}</span>` : ''}
+                </div>`;
+            }).join('')}</div>`;
             statusContainerFilter(statusCtrFilter);
             renderStatusAttention();
         } else {
@@ -4255,15 +4246,17 @@ async function loadStatusSystem() {
             const updateBadge = versionData.update_available
                 ? ` <button onclick="showMailcowUpdateModal()" class="ui-tag ui-tag-info ui-tag-btn">Update Available</button>`
                 : '';
-            versionHtml = `<div class="ui-kv"><span>mailcow Version</span><b>v${escapeHtml(versionData.current_version)}${updateBadge}</b></div>`;
+            versionHtml = `v${escapeHtml(versionData.current_version)}${updateBadge}`;
         }
 
-        const row = (label, part) => `<div class="ui-kv"><span>${label}</span><b>${(part.total || 0).toLocaleString()} <small class="ui-muted">${(part.active || 0).toLocaleString()} active</small></b></div>`;
+        const row = (label, part) => `<dt>${label}</dt><dd>${(part.total || 0).toLocaleString()} <small>${(part.active || 0).toLocaleString()} active</small></dd>`;
         container.innerHTML = `
-            ${row('Domains', data.domains || {})}
-            ${row('Mailboxes', data.mailboxes || {})}
-            ${row('Aliases', data.aliases || {})}
-            ${versionHtml}
+            <div class="ui-srv-big">${versionHtml || 'mailcow'}</div>
+            <dl class="ui-srv-dl">
+                ${row('Domains', data.domains || {})}
+                ${row('Mailboxes', data.mailboxes || {})}
+                ${row('Aliases', data.aliases || {})}
+            </dl>
         `;
     } catch (error) {
         console.error('Failed to load system info:', error);
@@ -4310,12 +4303,11 @@ async function loadStatusStorage() {
         const storageNote = document.getElementById('status-kpi-storage-note');
         if (storageNote) storageNote.textContent = [data.used && data.total ? `${data.used} of ${data.total}` : '', data.disk || ''].filter(Boolean).join(', ');
 
+        const size = [data.used && data.total ? `${data.used} of ${data.total}` : '', data.disk ? `on ${data.disk}` : ''].filter(Boolean).join(' ');
         container.innerHTML = `
-            <div class="ui-kv"><span>Storage Used</span><b class="${level === 'ok' ? '' : `ui-text-${level}`}">${escapeHtml(String(data.used_percent || '0%'))}</b></div>
-            <div class="ui-meter ui-${level} ui-meter-panel"><i style="width: ${usedPercent}%"></i></div>
-            <div class="ui-kv"><span>Used</span><b>${escapeHtml(String(data.used || '-'))}</b></div>
-            <div class="ui-kv"><span>Total</span><b>${escapeHtml(String(data.total || '-'))}</b></div>
-            <div class="ui-kv"><span>Disk</span><b class="ui-mono ui-kv-small">${escapeHtml(String(data.disk || '-'))}</b></div>
+            <div class="ui-srv-big${level === 'ok' ? '' : ` ui-text-${level}`}">${escapeHtml(String(data.used_percent || '0%'))} used</div>
+            <div class="ui-meter ui-${level}"><i style="width: ${usedPercent}%"></i></div>
+            ${size ? `<small>${escapeHtml(size)}</small>` : ''}
         `;
     } catch (error) {
         console.error('Failed to load storage info:', error);
@@ -4671,17 +4663,16 @@ function renderStatusCorrelation(correlation, incompleteList) {
     const linkingNote = document.getElementById('status-kpi-linking-note');
     if (linkingNote) linkingNote.textContent = `${(correlation.complete || 0).toLocaleString()} of ${(correlation.total || 0).toLocaleString()} complete, ${(correlation.incomplete || 0).toLocaleString()} waiting`;
     container.innerHTML = `
-        <div class="ui-kpis">
-            <div class="ui-kpi"><b>${(correlation.total || 0).toLocaleString()}</b>Total</div>
-            <div class="ui-kpi"><b>${(correlation.complete || 0).toLocaleString()}</b>Complete</div>
-            <div class="ui-kpi"><b class="${correlation.incomplete ? 'ui-warn' : ''}">${(correlation.incomplete || 0).toLocaleString()}</b>Incomplete</div>
-            <div class="ui-kpi"><b>${(correlation.expired || 0).toLocaleString()}</b>Expired</div>
-            <div class="ui-kpi"><b>${correlation.completion_rate || 0}%</b>Success Rate</div>
-        </div>
-        ${correlation.last_update ? `<p class="ui-kv-note ui-list-foot">Last updated: ${formatTime(correlation.last_update)}</p>` : ''}
-        ${incompleteList.length > 0 ? `
+        <div class="ui-srv-big${correlation.incomplete ? ' ui-text-warn' : ''}">${correlation.completion_rate || 0}%</div>
+        <small>${(correlation.complete || 0).toLocaleString()} of ${(correlation.total || 0).toLocaleString()} complete, ${(correlation.incomplete || 0).toLocaleString()} incomplete, ${(correlation.expired || 0).toLocaleString()} expired</small>
+        ${correlation.last_update ? `<small>Updated ${formatTime(correlation.last_update)}</small>` : ''}
+    `;
+    const pending = document.getElementById('status-correlation-pending');
+    if (pending) pending.innerHTML = incompleteList.length > 0 ? `
+        <section class="ui-sec-block">
+            <div class="ui-list-head"><h2 class="ui-h2">Waiting to be linked</h2> <span class="ui-count">${incompleteList.length}</span></div>
             <div class="ui-table ui-stack" style="--ui-cols: minmax(180px, 1.4fr) minmax(220px, 2fr) 90px; --ui-table-min: 560px">
-                <div class="ui-tr ui-tr-head"><span>Recent Incomplete Correlations</span><span>From and to</span><span class="ui-td-end">Age</span></div>
+                <div class="ui-tr ui-tr-head"><span>Message ID</span><span>From and to</span><span class="ui-td-end">Age</span></div>
                 ${incompleteList.map(item => `
                     <div class="ui-tr">
                         <span class="ui-td ui-mono">${copyableText(item.message_id || 'N/A')}</span>
@@ -4690,8 +4681,7 @@ function renderStatusCorrelation(correlation, incompleteList) {
                     </div>`).join('')}
             </div>
             <p class="ui-kv-note ui-list-foot">These will be automatically completed or expired within 1-2 minutes</p>
-        ` : ''}
-    `;
+        </section>` : '';
 }
 
 function renderStatusJobs(jobs) {
@@ -4799,21 +4789,35 @@ function renderStatusJobsTable(container, categories, jobs) {
     if (jobsSummary) jobsSummary.textContent = `${all.length} jobs, ${jobsNote.charAt(0).toLowerCase()}${jobsNote.slice(1)}`;
     setStatusTabCount('jobs', failed, true);
 
+    const isFailed = job => !isOff(job) && job.status === 'failed';
+    const chevron = '<svg class="ui-collapse-chevron" width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>';
     let html = '';
     for (const cat of categories) {
         // Skip categories where no jobs exist
         const validJobs = cat.jobs.filter(j => j[2]);
         if (validJobs.length === 0) continue;
-        html += `<div class="ui-tr ui-tr-group">${escapeHtml(cat.title)}</div>`;
-        html += validJobs.map(j => renderJobCard(j[0], j[1], j[2])).join('');
+        const catFailed = validJobs.filter(j => isFailed(j[2])).length;
+        const catOff = validJobs.filter(j => isOff(j[2])).length;
+        const note = [catFailed ? `<span class="ui-text-fail">${catFailed} failed</span>` : 'all OK', catOff ? `${catOff} off` : ''].filter(Boolean).join(' · ');
+        // A group with a failure opens by itself; the others keep what the user chose
+        const open = catFailed > 0 || statusJobsOpen.has(cat.title);
+        html += `
+            <details class="ui-panel ui-collapse ui-jg" data-group="${escapeHtml(cat.title)}"${catFailed ? ' data-failed' : ''}${open ? ' open' : ''} ontoggle="statusJobGroupToggled(this)">
+                <summary class="ui-panel-head">${escapeHtml(cat.title)} <span class="ui-count">${validJobs.length} ${validJobs.length === 1 ? 'job' : 'jobs'} · ${note}</span>${chevron}</summary>
+                <div class="ui-jg-body">${validJobs.map(j => renderJobCard(j[0], j[1], j[2])).join('')}</div>
+            </details>`;
     }
-    container.innerHTML = `
-        <div class="ui-table ui-stack" style="--ui-cols: minmax(220px, 2fr) minmax(150px, 1.3fr) 110px 110px 84px; --ui-table-min: 760px">
-            <div class="ui-tr ui-tr-head"><span>Job</span><span>Runs</span><span>Last result</span><span>Last run</span><span class="ui-td-end">Actions</span></div>
-            ${html}
-        </div>`;
+    container.innerHTML = `<div class="ui-jgs">${html}</div>`;
     statusJobFilter(statusJobFilterValue);
     renderStatusAttention();
+}
+
+// Which job groups the user opened, so a refresh keeps them open
+const statusJobsOpen = new Set();
+function statusJobGroupToggled(el) {
+    // Only an unfiltered view records the choice; a filter opens groups by itself
+    if (statusJobFilterValue !== 'all') return;
+    if (el.open) statusJobsOpen.add(el.dataset.group); else statusJobsOpen.delete(el.dataset.group);
 }
 
 async function triggerBackgroundJob(jobKey, buttonEl, jobName = null) {
@@ -5215,3 +5219,97 @@ function closeContainerLogsModal() {
 function loadMailboxStatsPage(page) {
     loadMailboxStatsList(page);
 }
+
+// =============================================================================
+// Sidebar sub-pages: hovering or focusing a page with tabs shows its tabs next
+// to it. The items come from the page's own tab buttons, so a tab hidden by a
+// switched-off feature is not offered.
+// =============================================================================
+
+const NAV_SUBPAGE_TABS = {
+    netfilter: '.ui-se-tabs',
+    'spam-filter': '#content-spam-filter .ui-page-tabs',
+    status: '.ui-st-tabs',
+    'mailbox-stats': '#mailbox-stats-views'
+};
+let navFlyout = null;
+let navFlyoutTimer = null;
+
+function navSubpageTabs(page) {
+    const list = document.querySelector(NAV_SUBPAGE_TABS[page]);
+    if (!list) return [];
+    return [...list.querySelectorAll('[role="tab"]')].filter(btn => !btn.hidden && !btn.classList.contains('hidden') && btn.style.display !== 'none');
+}
+
+function hideNavFlyout() {
+    clearTimeout(navFlyoutTimer);
+    if (navFlyout) navFlyout.classList.remove('is-open');
+}
+
+function showNavFlyout(item, page) {
+    clearTimeout(navFlyoutTimer);
+    const tabs = navSubpageTabs(page);
+    if (tabs.length < 2) return hideNavFlyout();
+    if (!navFlyout) {
+        navFlyout = document.createElement('div');
+        navFlyout.className = 'ui-fly';
+        navFlyout.setAttribute('role', 'menu');
+        navFlyout.addEventListener('mouseenter', () => clearTimeout(navFlyoutTimer));
+        navFlyout.addEventListener('mouseleave', () => { navFlyoutTimer = setTimeout(hideNavFlyout, 150); });
+        navFlyout.addEventListener('keydown', e => {
+            const items = [...navFlyout.querySelectorAll('.ui-fly-item')];
+            const i = items.indexOf(document.activeElement);
+            if (e.key === 'ArrowDown') { e.preventDefault(); items[(i + 1) % items.length].focus(); }
+            if (e.key === 'ArrowUp') { e.preventDefault(); items[(i - 1 + items.length) % items.length].focus(); }
+            if (e.key === 'Escape' || e.key === 'ArrowLeft') { e.preventDefault(); hideNavFlyout(); navFlyout.owner && navFlyout.owner.focus(); }
+        });
+        navFlyout.addEventListener('focusout', e => { if (!navFlyout.contains(e.relatedTarget)) hideNavFlyout(); });
+        document.body.appendChild(navFlyout);
+    }
+    const onPage = item.getAttribute('aria-current') === 'page';
+    const label = item.querySelector('.ui-nav-label');
+    navFlyout.owner = item;
+    navFlyout.innerHTML = `<div class="ui-fly-title">${escapeHtml(label ? label.textContent : page)}</div>` + tabs.map((btn, i) => {
+        const copy = btn.cloneNode(true);
+        const count = copy.querySelector('.ui-tab-n');
+        const countText = count && !count.classList.contains('hidden') ? count.textContent.trim() : '';
+        if (count) count.remove();
+        const on = onPage && (btn.classList.contains('active') || btn.getAttribute('aria-selected') === 'true');
+        return `<button type="button" role="menuitem" class="ui-fly-item${on ? ' is-on' : ''}" data-i="${i}">
+            <span>${copy.innerHTML.trim()}</span>${countText ? `<small class="ui-nav-count${count.classList.contains('is-fail') ? ' is-fail' : ''}">${escapeHtml(countText)}</small>` : ''}</button>`;
+    }).join('');
+    navFlyout.querySelectorAll('.ui-fly-item').forEach(el => el.addEventListener('click', () => {
+        // The tab first, so the page opens on it
+        tabs[Number(el.dataset.i)].click();
+        hideNavFlyout();
+        navigateTo(page);
+    }));
+    const rect = item.getBoundingClientRect();
+    navFlyout.style.top = `${Math.max(8, Math.min(rect.top - 6, window.innerHeight - navFlyout.offsetHeight - 8))}px`;
+    navFlyout.style.left = `${rect.right + 8}px`;
+    navFlyout.classList.add('is-open');
+    navFlyout.style.top = `${Math.max(8, Math.min(rect.top - 6, window.innerHeight - navFlyout.offsetHeight - 8))}px`;
+}
+
+function initNavFlyouts() {
+    Object.keys(NAV_SUBPAGE_TABS).forEach(page => {
+        const item = document.getElementById(`tab-${page}`);
+        if (!item) return;
+        item.classList.add('has-sub');
+        item.setAttribute('aria-haspopup', 'menu');
+        item.addEventListener('mouseenter', () => showNavFlyout(item, page));
+        item.addEventListener('mouseleave', () => { navFlyoutTimer = setTimeout(hideNavFlyout, 150); });
+        item.addEventListener('focus', () => showNavFlyout(item, page));
+        item.addEventListener('blur', e => { if (!navFlyout || !navFlyout.contains(e.relatedTarget)) navFlyoutTimer = setTimeout(hideNavFlyout, 150); });
+        item.addEventListener('click', hideNavFlyout);
+        item.addEventListener('keydown', e => {
+            if (e.key !== 'ArrowRight') return;
+            e.preventDefault();
+            showNavFlyout(item, page);
+            const first = navFlyout && navFlyout.querySelector('.ui-fly-item');
+            if (first) first.focus();
+        });
+    });
+    window.addEventListener('resize', hideNavFlyout);
+}
+document.addEventListener('DOMContentLoaded', initNavFlyouts);

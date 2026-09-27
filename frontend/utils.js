@@ -659,29 +659,19 @@ function renderJobCard(name, jobKey, job) {
         job.expire_after ? `Expire: ${job.expire_after}` : '',
     ].filter(Boolean);
 
+    // A healthy job shows a green dot and no tag; everything else says what it is
+    const failed = !isDisabled && job.status === 'failed';
+    const dot = isDisabled ? '' : failed ? ' ui-mdot-fail' : job.status === 'running' ? ' ui-mdot-info' : job.status === 'success' ? ' ui-mdot-ok' : '';
     return `
-        <div class="ui-tr ui-job${isFeatureOff || isDisabled ? ' is-off' : ''}${!isDisabled && job.status === 'failed' ? ' is-failed' : ''}">
-            <div class="ui-td ui-q-who">
-                <div>${escapeHtml(name)}</div>
-                ${job.description ? `<small title="${escapeHtml(job.description)}">${escapeHtml(job.description)}</small>` : ''}
-            </div>
-            <div class="ui-td ui-td-wrap">
-                ${escapeHtml(runs.join(', ') || '-')}
-                ${job.pending_items !== undefined ? `<small class="ui-text-warn ui-job-pending">Pending: ${job.pending_items}</small>` : ''}
-            </div>
-            <span class="ui-td">${statusBadge}</span>
-            <span class="ui-td" title="${job.last_run ? escapeHtml(formatTime(job.last_run)) : ''}"><small class="ui-sec-unit">Last run </small>${job.last_run ? formatAgo(job.last_run) : '-'}</span>
-            <span class="ui-td ui-td-end ui-row-actions">
-                ${!isDisabled ? `
-                    <button
-                        onclick="triggerBackgroundJob('${escapeJsArg(jobKey)}', this, '${escapeJsArg(name)}')"
-                        class="ui-btn ui-btn-sm"
-                        ${isRunning ? 'disabled' : ''}
-                        title="${isRunning ? 'Job is running' : 'Run this job now'}">
-                        Run
-                    </button>
-                ` : ''}
-            </span>
+        <div class="ui-jobrow${isDisabled ? ' is-off' : ''}${failed ? ' is-failed' : ''}">
+            <i class="ui-mdot${dot}"></i>
+            <span class="ui-jobrow-name"><b>${escapeHtml(name)}</b>${job.description ? `<small title="${escapeHtml(job.description)}">${escapeHtml(job.description)}</small>` : ''}</span>
+            <span class="ui-jobrow-runs">${escapeHtml(runs.join(', ') || '-')}${job.pending_items !== undefined ? ` <small class="ui-text-warn">Pending: ${job.pending_items}</small>` : ''}</span>
+            <span class="ui-jobrow-last" title="${job.last_run ? escapeHtml(formatTime(job.last_run)) : ''}">${job.last_run ? formatAgo(job.last_run) : 'Not run yet'}</span>
+            <span class="ui-jobrow-tag">${job.status === 'success' && !isDisabled ? '' : statusBadge}</span>
+            <span class="ui-jobrow-act">${!isDisabled ? `
+                <button onclick="triggerBackgroundJob('${escapeJsArg(jobKey)}', this, '${escapeJsArg(name)}')"
+                    class="ui-btn ui-btn-sm" ${isRunning ? 'disabled' : ''} title="${isRunning ? 'Job is running' : 'Run this job now'}">Run</button>` : ''}</span>
             ${job.error ? `<p class="ui-job-error ui-mono">${escapeHtml(job.error)}</p>` : ''}
         </div>
     `;
