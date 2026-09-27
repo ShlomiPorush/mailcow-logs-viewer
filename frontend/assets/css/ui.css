@@ -556,7 +556,8 @@
 .ui-steps li.ui-step-fail::before { border-color: var(--ui-fail); background: var(--ui-fail); }
 .ui-steps li.ui-step-info::before { border-color: var(--ui-info); background: var(--ui-info); }
 .ui-steps b { display: block; font-weight: 500; }
-.ui-steps span { display: block; color: var(--ui-muted); font-size: .92em; overflow-wrap: anywhere; }
+.ui-steps li > span { display: block; color: var(--ui-muted); font-size: .92em; overflow-wrap: anywhere; }
+.ui-steps .copyable { display: inline-flex; font-size: inherit; }
 
 /* Identifiers: a bordered grid of labelled values */
 /* Cell lines are outlines, so a half-filled last row leaves no grey block */
@@ -566,6 +567,19 @@
 .ui-md-ids .ui-md-fact > div { font-weight: 500; }
 .ui-md-sub { display: block; margin-top: 2px; color: var(--ui-muted); font-size: 12px; font-weight: 500; }
 .ui-md-geo p { margin: 0; }
+/* Identifiers: a quiet label/value list, one value per row */
+.ui-md-idlist { display: grid; margin: 8px 0 0; }
+.ui-md-idrow { display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 4px 16px; align-items: baseline; padding: 9px 0; border-top: 1px solid var(--ui-line); }
+.ui-md-idrow:first-child { border-top: 0; }
+.ui-md-idrow dt { color: var(--ui-muted); font-size: 12.5px; font-weight: 600; }
+.ui-md-idrow dd { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 12px; min-width: 0; margin: 0; }
+.ui-md-idval { min-width: 0; overflow-wrap: anywhere; font-weight: 500; }
+.ui-md-idrow small { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 5px; color: var(--ui-muted); font-size: 12.5px; }
+.ui-md-idrow small img { display: inline-block; }
+.ui-md-idrow .ui-md-recipients { display: flex; flex-wrap: wrap; gap: 4px 14px; }
+@media (max-width: 760px) {
+    .ui-md-idrow { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+}
 
 @media (max-width: 1279px) {
     .ui-msgs { grid-template-columns: minmax(300px, 360px) minmax(0, 1fr); }
