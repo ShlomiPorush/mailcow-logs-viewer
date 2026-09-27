@@ -166,8 +166,8 @@ Generated from the code. Do not edit by hand; run `node .github/scripts/ui-catal
 
 | Behaviour | Count |
 |---|---|
-| [Click to copy](#click-to-copy) | 42 |
-| [Tooltips](#tooltips) | 174 |
+| [Click to copy](#click-to-copy) | 43 |
+| [Tooltips](#tooltips) | 175 |
 | [Toasts](#toasts) | 140 |
 | [Confirmation dialogs](#confirmation-dialogs) | 28 |
 | [Country flags](#country-flags) | 6 |
@@ -197,19 +197,20 @@ Fields that copy their value on click (hover shows a copy icon and "Click to cop
 | Message details | copies: `ip` | `frontend/message-details.js:482` (buildDeliverySteps) |
 | Message details | copies: `user` | `frontend/message-details.js:483` (buildDeliverySteps) |
 | Message details | copies: `qid` | `frontend/message-details.js:487` (buildDeliverySteps) |
+| Message details | copies: `target` | `frontend/message-details.js:491` (buildDeliverySteps) |
 | Message details | copies: `data.queue_id` | `frontend/message-details.js:550` (renderOverviewTab) |
-| Message details | copies: `rspamd.ip` | `frontend/message-details.js:551` (renderOverviewTab) |
-| Message details | copies: `rspamd.user` | `frontend/message-details.js:553` (renderOverviewTab) |
-| Message details | copies: `data.message_id` | `frontend/message-details.js:554` (renderOverviewTab) |
-| Message details | copies: `r` | `frontend/message-details.js:558` (renderOverviewTab) |
-| Message details | copies: `Array.from(recipientsFromPostfix)[0]` | `frontend/message-details.js:691` (renderPostfixTab) |
-| Message details | copies: `data.recipients[0]` | `frontend/message-details.js:693` (renderPostfixTab) |
-| Message details | copies: `sender` | `frontend/message-details.js:702` (renderPostfixTab) |
-| Message details | copies: `queueId` | `frontend/message-details.js:705` (renderPostfixTab) |
-| Message details | copies: `clientIp` | `frontend/message-details.js:706` (renderPostfixTab) |
-| Message details | copies: `recipient` | `frontend/message-details.js:720` (renderPostfixTab) |
-| Message details | copies: `log.ip` | `frontend/message-details.js:844` (renderNetfilterTab) |
-| Message details | copies: `log.username` | `frontend/message-details.js:847` (renderNetfilterTab) |
+| Message details | copies: `data.message_id` | `frontend/message-details.js:551` (renderOverviewTab) |
+| Message details | copies: `rspamd.ip` | `frontend/message-details.js:552` (renderOverviewTab) |
+| Message details | copies: `rspamd.user` | `frontend/message-details.js:554` (renderOverviewTab) |
+| Message details | copies: `r` | `frontend/message-details.js:559` (renderOverviewTab) |
+| Message details | copies: `Array.from(recipientsFromPostfix)[0]` | `frontend/message-details.js:692` (renderPostfixTab) |
+| Message details | copies: `data.recipients[0]` | `frontend/message-details.js:694` (renderPostfixTab) |
+| Message details | copies: `sender` | `frontend/message-details.js:703` (renderPostfixTab) |
+| Message details | copies: `queueId` | `frontend/message-details.js:706` (renderPostfixTab) |
+| Message details | copies: `clientIp` | `frontend/message-details.js:707` (renderPostfixTab) |
+| Message details | copies: `recipient` | `frontend/message-details.js:721` (renderPostfixTab) |
+| Message details | copies: `log.ip` | `frontend/message-details.js:845` (renderNetfilterTab) |
+| Message details | copies: `log.username` | `frontend/message-details.js:848` (renderNetfilterTab) |
 | Security | copies: `log.username` | `frontend/app.js:1055` (renderNetfilterData) |
 | Security | copies: `log.ip` | `frontend/app.js:1060` (renderNetfilterData) |
 | Security | copies: `src.ip` | `frontend/app.js:1260` (renderSecurityOverview) |
@@ -227,11 +228,11 @@ Fields that copy their value on click (hover shows a copy icon and "Click to cop
 | Quarantine | copies: `data.header_from \|\| '-'` | `frontend/app.js:3205` (renderQuarantineDetailContent) |
 | Quarantine | copies: `data.env_from \|\| '-'` | `frontend/app.js:3206` (renderQuarantineDetailContent) |
 | Spam filter | copies: `displayEmail` | `frontend/spam_filter.js:432` (renderSuppressionItem) |
-| Status | copies: `item.message_id \|\| 'N/A'` | `frontend/app.js:4616` (renderStatusCorrelation) |
-| Status | copies: `item.sender \|\| 'N/A'` | `frontend/app.js:4617` (renderStatusCorrelation) |
-| Status | copies: `item.recipient \|\| 'N/A'` | `frontend/app.js:4617` (renderStatusCorrelation) |
-| Shared | copies: `ip` | `frontend/app.js:4845` (renderGeoIPInfo) |
-| Shared | copies: `ip` | `frontend/app.js:4852` (renderGeoIPInfo) |
+| Status | copies: `item.message_id \|\| 'N/A'` | `frontend/app.js:4639` (renderStatusCorrelation) |
+| Status | copies: `item.sender \|\| 'N/A'` | `frontend/app.js:4640` (renderStatusCorrelation) |
+| Status | copies: `item.recipient \|\| 'N/A'` | `frontend/app.js:4640` (renderStatusCorrelation) |
+| Shared | copies: `ip` | `frontend/app.js:4868` (renderGeoIPInfo) |
+| Shared | copies: `ip` | `frontend/app.js:4875` (renderGeoIPInfo) |
 | Shared | copyToClipboard: `'${safeText}'` | `frontend/utils.js:493` (copyableText) |
 
 ### Tooltips
@@ -277,15 +278,16 @@ Native `title` tooltips. Dynamic ones show the expression that builds the text.
 | Dashboard | dynamic: `${escapeHtml(formatTime(msg.time))}` | `frontend/app.js:1927` (loadRecentActivity) |
 | Dashboard | dynamic: `${escapeHtml(state)}` | `frontend/app.js:1928` (loadRecentActivity) |
 | Dashboard | dynamic: `${escapeHtml(msg.subject \|\| 'No subject')}` | `frontend/app.js:1930` (loadRecentActivity) |
-| Dashboard | "The first check runs automatically" | `frontend/app.js:4431` (loadDashboardBlacklistSummary) |
+| Dashboard | "The first check runs automatically" | `frontend/app.js:4454` (loadDashboardBlacklistSummary) |
 | Messages | dynamic: `${escapeHtml(formatTime(msg.first_seen))}` | `frontend/app.js:869` (renderMessageRow) |
 | Messages | dynamic: `${escapeHtml(msg.subject \|\| 'No subject')}` | `frontend/app.js:871` (renderMessageRow) |
 | Messages | dynamic: `${escapeHtml(msg.recipient \|\| '')}` | `frontend/app.js:876` (renderMessageRow) |
+| Messages | "Filter by sender, recipient, user or IP" | `frontend/index.html:677` |
 | Message details | "This delivery attempt never reached a final outcome" | `frontend/message-details.js:360` (renderRelatedDeliveries) |
 | Message details | "Open Spam Analysis" | `frontend/message-details.js:446` (renderMessageHeader) |
 | Message details | dynamic: `${escapeHtml(hasSubject ? data.subject : 'No subject')}` | `frontend/message-details.js:454` (renderMessageHeader) |
-| Message details | dynamic: `${escapeHtml(sender)}` | `frontend/message-details.js:702` (renderPostfixTab) |
-| Message details | dynamic: `${escapeHtml(relay)}` | `frontend/message-details.js:707` (renderPostfixTab) |
+| Message details | dynamic: `${escapeHtml(sender)}` | `frontend/message-details.js:703` (renderPostfixTab) |
+| Message details | dynamic: `${escapeHtml(relay)}` | `frontend/message-details.js:708` (renderPostfixTab) |
 | Message details | set in JS: dynamic: `== step.title) { prev.count = (prev.count \|\| 1) + 1` | `frontend/message-details.js:512` (buildDeliverySteps) |
 | Security | dynamic: `${escapeHtml(formatTime(log.time))}` | `frontend/app.js:1059` (renderNetfilterData) |
 | Security | dynamic: `${escapeHtml(place + org)}` | `frontend/app.js:1063` (renderNetfilterData) |
@@ -301,9 +303,9 @@ Native `title` tooltips. Dynamic ones show the expression that builds the text.
 | Security | dynamic: `${escapeHtml(where)}` | `frontend/app.js:1290` (renderSecurityOverview) |
 | Security | dynamic: `${escapeHtml(formatTime(src.last_seen))}` | `frontend/app.js:1294` (renderSecurityOverview) |
 | Security | dynamic: `${escapeHtml(formatTime(row.time))}` | `frontend/app.js:1310` (renderSecurityOverview) |
-| Security | "Addresses that tried in the last hour, are not banned and are on neither Fail2ban list" | `frontend/index.html:731` |
-| Security | "This feature is new - please report any issues on GitHub" | `frontend/index.html:738` |
-| Security | "Help - Abuse Protection" | `frontend/index.html:824` |
+| Security | "Addresses that tried in the last hour, are not banned and are on neither Fail2ban list" | `frontend/index.html:734` |
+| Security | "This feature is new - please report any issues on GitHub" | `frontend/index.html:741` |
+| Security | "Help - Abuse Protection" | `frontend/index.html:827` |
 | Queue | "Retry delivery of every message in the queue" | `frontend/app.js:2647` (applyQueueFilters) |
 | Queue | dynamic: `Suppress ${escapeHtml(recipients[0].email)}` | `frontend/app.js:2670` (applyQueueFilters) |
 | Queue | dynamic: `${escapeHtml(formatTime(queued))}` | `frontend/app.js:2677` (applyQueueFilters) |
@@ -331,11 +333,11 @@ Native `title` tooltips. Dynamic ones show the expression that builds the text.
 | Quarantine | "Close" | `frontend/app.js:3573` (testQuarantineRules) |
 | Quarantine | dynamic: `${escapeHtml(log.sender \|\| '')} → ${escapeHtml(log.recipient \|\| '')}` | `frontend/app.js:3625` (loadQuarantineRuleHistory) |
 | Quarantine | dynamic: `Rule: ${escapeHtml(log.rule_name \|\| '')}` | `frontend/app.js:3626` (loadQuarantineRuleHistory) |
-| Quarantine | "Help - Quarantine Auto-Rules" | `frontend/index.html:886` |
-| Spam filter | "Help - Spam Filter" | `frontend/index.html:935` |
-| Spam filter | "Clear all filters" | `frontend/index.html:987` |
-| Spam filter | "Sync suppression list to Rspamd" | `frontend/index.html:990` |
-| Spam filter | "More" | `frontend/index.html:992` |
+| Quarantine | "Help - Quarantine Auto-Rules" | `frontend/index.html:889` |
+| Spam filter | "Help - Spam Filter" | `frontend/index.html:938` |
+| Spam filter | "Clear all filters" | `frontend/index.html:990` |
+| Spam filter | "Sync suppression list to Rspamd" | `frontend/index.html:993` |
+| Spam filter | "More" | `frontend/index.html:995` |
 | Spam filter | dynamic: `${escapeHtml(displayDesc)}` | `frontend/spam_filter.js:136` (renderRspamdMapsList) |
 | Spam filter | "Close" | `frontend/spam_filter.js:193` (openMapEditor) |
 | Spam filter | "Synced to Rspamd" | `frontend/spam_filter.js:416` (renderSuppressionItem) |
@@ -347,44 +349,44 @@ Native `title` tooltips. Dynamic ones show the expression that builds the text.
 | Spam filter | "Edit suppression" | `frontend/spam_filter.js:444` (renderSuppressionItem) |
 | Spam filter | dynamic: `${s.active ? 'Deactivate' : 'Reactivate'}` | `frontend/spam_filter.js:445` (renderSuppressionItem) |
 | Spam filter | "Delete permanently" | `frontend/spam_filter.js:446` (renderSuppressionItem) |
-| Status | dynamic: `Stop counting and alerting on ${escapeHtml(c.name)}` | `frontend/app.js:3976` (renderStatusAttention) |
-| Status | dynamic: `Keep checking ${escapeHtml(r.name)} but never count or alert on it` | `frontend/app.js:3983` (renderStatusAttention) |
-| Status | dynamic: `Stop counting and alerting on ${escapeHtml(c.name)}` | `frontend/app.js:4124` (loadStatusContainers) |
-| Status | dynamic: `${escapeHtml(c.ignored ? 'Ignored: shown here but never counted or alerted' :...` | `frontend/app.js:4126` (loadStatusContainers) |
-| Status | dynamic: `Look up on ${escapeHtml(r.name)}` | `frontend/app.js:4498` (renderBlacklistStatus) |
-| Status | dynamic: `${r.ignored ? 'Count and alert on this list again' : 'Keep checking this list...` | `frontend/app.js:4501` (renderBlacklistStatus) |
-| Status | dynamic: `${host.checked_at ? escapeHtml(formatTime(host.checked_at)) : ''}` | `frontend/app.js:4524` (renderBlacklistStatus) |
-| Status | "Run Check for this Host" | `frontend/app.js:4525` (renderBlacklistStatus) |
-| Status | dynamic: `${escapeHtml(detail(r))}` | `frontend/app.js:4540` (renderBlacklistStatus) |
-| Status | dynamic: `${d.last_fetch_run ? escapeHtml(formatTime(d.last_fetch_run)) : ''}` | `frontend/app.js:4581` (renderStatusImport) |
-| Status | dynamic: `${d.last_import ? escapeHtml(formatTime(d.last_import)) : ''}` | `frontend/app.js:4582` (renderStatusImport) |
-| Status | "Help - IP Blacklist Monitor" | `frontend/index.html:1059` |
+| Status | dynamic: `Stop counting and alerting on ${escapeHtml(c.name)}` | `frontend/app.js:3999` (renderStatusAttention) |
+| Status | dynamic: `Keep checking ${escapeHtml(r.name)} but never count or alert on it` | `frontend/app.js:4006` (renderStatusAttention) |
+| Status | dynamic: `Stop counting and alerting on ${escapeHtml(c.name)}` | `frontend/app.js:4147` (loadStatusContainers) |
+| Status | dynamic: `${escapeHtml(c.ignored ? 'Ignored: shown here but never counted or alerted' :...` | `frontend/app.js:4149` (loadStatusContainers) |
+| Status | dynamic: `Look up on ${escapeHtml(r.name)}` | `frontend/app.js:4521` (renderBlacklistStatus) |
+| Status | dynamic: `${r.ignored ? 'Count and alert on this list again' : 'Keep checking this list...` | `frontend/app.js:4524` (renderBlacklistStatus) |
+| Status | dynamic: `${host.checked_at ? escapeHtml(formatTime(host.checked_at)) : ''}` | `frontend/app.js:4547` (renderBlacklistStatus) |
+| Status | "Run Check for this Host" | `frontend/app.js:4548` (renderBlacklistStatus) |
+| Status | dynamic: `${escapeHtml(detail(r))}` | `frontend/app.js:4563` (renderBlacklistStatus) |
+| Status | dynamic: `${d.last_fetch_run ? escapeHtml(formatTime(d.last_fetch_run)) : ''}` | `frontend/app.js:4604` (renderStatusImport) |
+| Status | dynamic: `${d.last_import ? escapeHtml(formatTime(d.last_import)) : ''}` | `frontend/app.js:4605` (renderStatusImport) |
+| Status | "Help - IP Blacklist Monitor" | `frontend/index.html:1062` |
 | Domains | dynamic: `${data.last_dns_check ? escapeHtml(formatTime(data.last_dns_check)) : ''}` | `frontend/domains.js:72` (renderDomains) |
 | Domains | dynamic: `${escapeHtml(`${label}: ${check.message \|\| 'Not checked'}`)}` | `frontend/domains.js:151` (dnsStatusTag) |
 | Domains | dynamic: `${dns.checked_at ? escapeHtml(formatTime(dns.checked_at)) : ''}` | `frontend/domains.js:160` (renderDomainDnsSection) |
 | Domains | "Check DNS for this domain" | `frontend/domains.js:163` (renderDomainDnsSection) |
 | Domains | dynamic: `${escapeHtml(text)}` | `frontend/domains.js:274` (getAliasStatusIcon) |
-| Domains | "Help - Domains Information" | `frontend/index.html:1109` |
+| Domains | "Help - Domains Information" | `frontend/index.html:1112` |
 | DMARC | "TLS Reports" | `frontend/dmarc.js:347` (loadDmarcDomains) |
 | DMARC | dynamic: `${escapeHtml(day.organizations.join(', '))}` | `frontend/dmarc.js:657` (loadDomainTLSReports) |
 | DMARC | dynamic: `${escapeHtml(formatTime(sync.started_at))}` | `frontend/dmarc.js:989` (updateDmarcControls) |
 | DMARC | "Delete report" | `frontend/dmarc.js:1178` (renderReportsManagementTable) |
-| DMARC | "Help - DMARC Information" | `frontend/index.html:1129` |
-| Mailbox stats | "Help - Mailbox Statistics" | `frontend/index.html:1225` |
+| DMARC | "Help - DMARC Information" | `frontend/index.html:1132` |
+| Mailbox stats | "Help - Mailbox Statistics" | `frontend/index.html:1228` |
 | Mailbox stats | "Open these messages" | `frontend/mailbox-stats.js:291` (mailboxStatLink) |
 | Mailbox stats | "Address on a mailcow alias domain that points at this mailbox" | `frontend/mailbox-stats.js:371` (renderMailboxStatsAccordion) |
 | Mailbox stats | dynamic: `${escapeHtml(formatTime(group.last_seen))}` | `frontend/rate-limits.js:358` (renderRateLimitSendersTable) |
 | Mailbox stats | set in JS: dynamic: `isRateLimits ? 'Help - Rate Limits' : 'Help - Mailbox Statistics'` | `frontend/mailbox-stats.js:83` (mailboxStatsSwitchView) |
-| Logs | "Pause/Resume live updates" | `frontend/index.html:1344` |
-| Logs | "Live mode - show latest logs" | `frontend/index.html:1348` |
-| Logs | "Auto-scroll to new entries" | `frontend/index.html:1351` |
-| Logs | "Toggle sort order (newest at bottom / newest at top)" | `frontend/index.html:1354` |
-| Logs | "Toggle word wrap" | `frontend/index.html:1365` |
-| Logs | "Clear display" | `frontend/index.html:1368` |
-| Logs | "Search" | `frontend/index.html:1375` |
-| Logs | "Clear search" | `frontend/index.html:1376` |
-| Logs | "From date" | `frontend/index.html:1390` |
-| Logs | "To date" | `frontend/index.html:1392` |
+| Logs | "Pause/Resume live updates" | `frontend/index.html:1347` |
+| Logs | "Live mode - show latest logs" | `frontend/index.html:1351` |
+| Logs | "Auto-scroll to new entries" | `frontend/index.html:1354` |
+| Logs | "Toggle sort order (newest at bottom / newest at top)" | `frontend/index.html:1357` |
+| Logs | "Toggle word wrap" | `frontend/index.html:1368` |
+| Logs | "Clear display" | `frontend/index.html:1371` |
+| Logs | "Search" | `frontend/index.html:1378` |
+| Logs | "Clear search" | `frontend/index.html:1379` |
+| Logs | "From date" | `frontend/index.html:1393` |
+| Logs | "To date" | `frontend/index.html:1395` |
 | Logs | dynamic: `${escapeHtml(f.description \|\| '')}` | `frontend/logs-viewer.js:201` (loadSmartFilters) |
 | Logs | "Clear all filters" | `frontend/logs-viewer.js:1143` (updateFilterBadge) |
 | Settings | "Last delivery succeeded" | `frontend/notifications.js:67` (renderNotificationChannels) |
@@ -405,15 +407,15 @@ Native `title` tooltips. Dynamic ones show the expression that builds the text.
 | Shared | dynamic: `${escapeHtml(job.description)}` | `frontend/utils.js:639` (renderJobCard) |
 | Shared | dynamic: `${job.last_run ? escapeHtml(formatTime(job.last_run)) : ''}` | `frontend/utils.js:646` (renderJobCard) |
 | Shared | dynamic: `${isRunning ? 'Job is running' : 'Run this job now'}` | `frontend/utils.js:653` (renderJobCard) |
-| app.js (mixed) | dynamic: `Look up on ${escapeHtml(r.name)}` | `frontend/app.js:3963` (blocklistLookupLink) |
+| app.js (mixed) | dynamic: `Look up on ${escapeHtml(r.name)}` | `frontend/app.js:3986` (blocklistLookupLink) |
 | app.js (mixed) | set in JS: dynamic: `label` | `frontend/app.js:286` (setNavTabLabel) |
 | app.js (mixed) | set in JS: dynamic: `title \|\| ''` | `frontend/app.js:496` (setNavCount) |
-| Modal: changelog-modal | "Close" | `frontend/index.html:1476` |
+| Modal: changelog-modal | "Close" | `frontend/index.html:1479` |
 | Modal: container-logs-modal | "Refresh" | `frontend/index.html:497` |
 | Modal: container-logs-modal | "Close" | `frontend/index.html:505` |
-| Modal: dmarc-reports-management-modal | "Close" | `frontend/index.html:1524` |
-| Modal: dmarc-sync-history-modal | "Close" | `frontend/index.html:1511` |
-| Modal: message-modal | "Close" | `frontend/index.html:1449` |
+| Modal: dmarc-reports-management-modal | "Close" | `frontend/index.html:1527` |
+| Modal: dmarc-sync-history-modal | "Close" | `frontend/index.html:1514` |
+| Modal: message-modal | "Close" | `frontend/index.html:1452` |
 
 ### Toasts
 
@@ -421,8 +423,8 @@ Transient notifications from `showToast(message, type)` (utils.js). Type default
 
 | Page | What | Code |
 |---|---|---|
-| Messages | "Please select both start and end dates" [warning] | `frontend/app.js:3743` (applyMessagesCustomDateRange) |
-| Messages | "Start date must be before end date" [warning] | `frontend/app.js:3752` (applyMessagesCustomDateRange) |
+| Messages | "Please select both start and end dates" [warning] | `frontend/app.js:3765` (applyMessagesCustomDateRange) |
+| Messages | "Start date must be before end date" [warning] | `frontend/app.js:3774` (applyMessagesCustomDateRange) |
 | Security | "IP ' + ip + ' unbanned successfully" [success] | `frontend/app.js:1102` (unbanIP) |
 | Security | dynamic: `'Failed to unban: ' + (result.msg \|\| result.detail \|\| 'Unknown error')` [error] | `frontend/app.js:1109` (unbanIP) |
 | Security | dynamic: `'Failed to unban IP: ' + err.message` [error] | `frontend/app.js:1116` (unbanIP) |
@@ -490,15 +492,15 @@ Transient notifications from `showToast(message, type)` (utils.js). Type default
 | Spam filter | dynamic: ``Imported ${result.imported} suppressions (${result.skipped} skipped)`` [success] | `frontend/spam_filter.js:875` (importSuppressions) |
 | Spam filter | dynamic: `'Import failed: ' + error.message` [error] | `frontend/spam_filter.js:881` (importSuppressions) |
 | Spam filter | dynamic: ``Pattern added: ${pattern}`` [success] | `frontend/spam_filter.js:1064` (regexWizardAdd) |
-| Status | dynamic: `ignored ? `${container.replace('-mailcow', '')} is ignored. It no longer coun...` [success] | `frontend/app.js:4060` (setContainerIgnored) |
-| Status | dynamic: ``Could not change the container: ${e.message}`` [error] | `frontend/app.js:4064` (setContainerIgnored) |
-| Status | "Starting blacklist check..." [info] | `frontend/app.js:4297` (checkBlacklists) |
-| Status | "Blacklist check completed" [success] | `frontend/app.js:4341` (checkBlacklists) |
-| Status | dynamic: ``Check completed for ${host}`` [success] | `frontend/app.js:4369` (checkBlacklists) |
-| Status | dynamic: ``Failed to check: ${error.message}`` [error] | `frontend/app.js:4378` (checkBlacklists) |
-| Status | dynamic: ``Job "${displayName}" started successfully`` [success] | `frontend/app.js:4764` (triggerBackgroundJob) |
-| Status | dynamic: ``Job "${displayName}" is already running`` [warning] | `frontend/app.js:4773` (triggerBackgroundJob) |
-| Status | dynamic: ``Failed to start job: ${error.message}`` [error] | `frontend/app.js:4776` (triggerBackgroundJob) |
+| Status | dynamic: `ignored ? `${container.replace('-mailcow', '')} is ignored. It no longer coun...` [success] | `frontend/app.js:4083` (setContainerIgnored) |
+| Status | dynamic: ``Could not change the container: ${e.message}`` [error] | `frontend/app.js:4087` (setContainerIgnored) |
+| Status | "Starting blacklist check..." [info] | `frontend/app.js:4320` (checkBlacklists) |
+| Status | "Blacklist check completed" [success] | `frontend/app.js:4364` (checkBlacklists) |
+| Status | dynamic: ``Check completed for ${host}`` [success] | `frontend/app.js:4392` (checkBlacklists) |
+| Status | dynamic: ``Failed to check: ${error.message}`` [error] | `frontend/app.js:4401` (checkBlacklists) |
+| Status | dynamic: ``Job "${displayName}" started successfully`` [success] | `frontend/app.js:4787` (triggerBackgroundJob) |
+| Status | dynamic: ``Job "${displayName}" is already running`` [warning] | `frontend/app.js:4796` (triggerBackgroundJob) |
+| Status | dynamic: ``Failed to start job: ${error.message}`` [error] | `frontend/app.js:4799` (triggerBackgroundJob) |
 | Domains | "DNS check already in progress" [warning] | `frontend/domains.js:324` (checkAllDomainsDNS) |
 | Domains | dynamic: ``✓ Checked ${result.domains_checked} domains`` [success] | `frontend/domains.js:343` (checkAllDomainsDNS) |
 | Domains | "DNS check failed" [error] | `frontend/domains.js:346` (checkAllDomainsDNS) |
@@ -559,8 +561,8 @@ Transient notifications from `showToast(message, type)` (utils.js). Type default
 | app.js (mixed) | dynamic: ``IP ${ip} added to the allowlist`` [success] | `frontend/app.js:1334` (allowIP) |
 | app.js (mixed) | dynamic: `'Failed to allow: ' + (result.msg \|\| result.detail \|\| 'Unknown error')` [error] | `frontend/app.js:1340` (allowIP) |
 | app.js (mixed) | dynamic: `'Failed to allow IP: ' + err.message` [error] | `frontend/app.js:1342` (allowIP) |
-| app.js (mixed) | dynamic: `ignored ? `${data.name} is ignored for every address.` : `${data.name} counts...` [success] | `frontend/app.js:4567` (setBlocklistIgnored) |
-| app.js (mixed) | dynamic: ``Could not change the blocklist: ${e.message}`` [error] | `frontend/app.js:4571` (setBlocklistIgnored) |
+| app.js (mixed) | dynamic: `ignored ? `${data.name} is ignored for every address.` : `${data.name} counts...` [success] | `frontend/app.js:4590` (setBlocklistIgnored) |
+| app.js (mixed) | dynamic: ``Could not change the blocklist: ${e.message}`` [error] | `frontend/app.js:4594` (setBlocklistIgnored) |
 
 ### Confirmation dialogs
 
@@ -607,8 +609,8 @@ PNG flags served locally from `frontend/assets/flags/<size>/<cc>.png` (sizes 16x
 | Message details | getFlagUrl(rspamd.country_code, '16x12') | `frontend/message-details.js:545` (renderOverviewTab) |
 | Security | getFlagUrl(log.country_code, '16x12') | `frontend/app.js:1052` (renderNetfilterData) |
 | Security | getFlagUrl(d.country_code, '24x18') | `frontend/app.js:2019` (loadSecurityCountryChart) |
-| Shared | getFlagUrl(rspamdData.country_code, size) | `frontend/app.js:4848` (renderGeoIPInfo) |
-| Shared | getFlagUrl(record.country_code, size) | `frontend/app.js:4891` (renderGeoIPForDMARC) |
+| Shared | getFlagUrl(rspamdData.country_code, size) | `frontend/app.js:4871` (renderGeoIPInfo) |
+| Shared | getFlagUrl(record.country_code, size) | `frontend/app.js:4914` (renderGeoIPForDMARC) |
 
 ### Markdown rendering
 
@@ -619,7 +621,7 @@ Places that render Markdown (help pages, changelogs) through `renderMarkdown` (m
 | Settings | renders `versionInfo.changelog` | `frontend/settings.js:816` (updateVersionInfoUI) |
 | Settings | renders `changelogText` | `frontend/settings.js:1173` (renderSettings) |
 | Modal: changelog-modal | renders `markdownContent` | `frontend/app.js:652` (showMarkdownModal) |
-| Modal: changelog-modal | renders `changelog` | `frontend/app.js:4804` (showChangelogModal) |
+| Modal: changelog-modal | renders `changelog` | `frontend/app.js:4827` (showChangelogModal) |
 
 ### Controls wired in JavaScript
 
@@ -629,9 +631,9 @@ Buttons, tabs and fields whose behavior is attached with `addEventListener` inst
 |---|---|---|
 | Shell | change on `px)')` | `frontend/app.js:463` (loadAppInfo) |
 | Shell | click on `document` | `frontend/router.js:317` |
-| Messages | click on `document` | `frontend/app.js:3773` |
-| Message details | click on `messageModal` | `frontend/message-details.js:890` |
-| Message details | click on `modalContent` | `frontend/message-details.js:900` |
+| Messages | click on `document` | `frontend/app.js:3795` |
+| Message details | click on `messageModal` | `frontend/message-details.js:891` |
+| Message details | click on `modalContent` | `frontend/message-details.js:901` |
 | Security | click on `editSettingsBtn` | `frontend/app.js:2406` (loadFail2BanSettings) |
 | Security | click on `editIpBtn` | `frontend/app.js:2422` (loadFail2BanSettings) |
 | Security | submit on `settingsForm` | `frontend/app.js:2433` (loadFail2BanSettings) |
@@ -658,8 +660,8 @@ Buttons, tabs and fields whose behavior is attached with `addEventListener` inst
 | Settings | click on `modal` | `frontend/settings.js:2000` (showConnectionTestModal) |
 | Shared | click on `cancelBtn` | `frontend/utils.js:586` (showConfirmModal) |
 | Shared | click on `okBtn` | `frontend/utils.js:587` (showConfirmModal) |
-| app.js (mixed) | click on `changelogModal` | `frontend/app.js:4999` |
-| app.js (mixed) | click on `changelogContent` | `frontend/app.js:5007` |
+| app.js (mixed) | click on `changelogModal` | `frontend/app.js:5022` |
+| app.js (mixed) | click on `changelogContent` | `frontend/app.js:5030` |
 
 ### Filters, sorting and view options
 
@@ -668,16 +670,16 @@ Drop-down lists in the page markup with their options. The option wording and or
 | Page | What | Code |
 |---|---|---|
 | Dashboard | `dashboard-search-status`: All Statuses / Delivered / Sent / Deferred / Bounced / Rejected / Discarded (Sieve) / Expired | `frontend/index.html:573` |
-| Messages | `messages-filter-direction`: All Directions / Inbound / Outbound / Internal | `frontend/index.html:675` |
-| Messages | `messages-filter-status`: All Statuses / Delivered / Deferred / Bounced / Rejected / Spam / Discarded (Sieve) | `frontend/index.html:681` |
-| Security | `netfilter-filter-action`: All Actions / BAN / UNBAN / Warning / Info | `frontend/index.html:780` |
-| Security | `netfilter-filter-country`: All Countries | `frontend/index.html:787` |
-| Quarantine | `quarantine-sort`: Newest first / Score: high to low / Score: low to high | `frontend/index.html:874` |
-| Spam filter | `suppression-filter-reason`: All Reasons / Hard Bounce / Soft Bounce / Deferred Stuck / Rejected / Manual | `frontend/index.html:969` |
-| Spam filter | `suppression-filter-active`: Active Only / All / Inactive / Expired | `frontend/index.html:979` |
-| Mailbox stats | `mailbox-stats-domain-filter`: All Domains | `frontend/index.html:1282` |
-| Mailbox stats | `mailbox-stats-sort`: Sent (High to Low) / Received (High to Low) / Failure Rate (High to Low) / Quota Used (High to Low) / Username (A-Z) | `frontend/index.html:1285` |
-| Logs | `logs-fontsize`: 10px / 11px / 12px / 13px / 14px / 16px | `frontend/index.html:1357` |
+| Messages | `messages-filter-direction`: All Directions / Inbound / Outbound / Internal | `frontend/index.html:685` |
+| Messages | `messages-filter-status`: All Statuses / Delivered / Deferred / Bounced / Rejected / Spam / Discarded (Sieve) | `frontend/index.html:691` |
+| Security | `netfilter-filter-action`: All Actions / BAN / UNBAN / Warning / Info | `frontend/index.html:783` |
+| Security | `netfilter-filter-country`: All Countries | `frontend/index.html:790` |
+| Quarantine | `quarantine-sort`: Newest first / Score: high to low / Score: low to high | `frontend/index.html:877` |
+| Spam filter | `suppression-filter-reason`: All Reasons / Hard Bounce / Soft Bounce / Deferred Stuck / Rejected / Manual | `frontend/index.html:972` |
+| Spam filter | `suppression-filter-active`: Active Only / All / Inactive / Expired | `frontend/index.html:982` |
+| Mailbox stats | `mailbox-stats-domain-filter`: All Domains | `frontend/index.html:1285` |
+| Mailbox stats | `mailbox-stats-sort`: Sent (High to Low) / Received (High to Low) / Failure Rate (High to Low) / Quota Used (High to Low) / Username (A-Z) | `frontend/index.html:1288` |
+| Logs | `logs-fontsize`: 10px / 11px / 12px / 13px / 14px / 16px | `frontend/index.html:1360` |
 
 ### Charts
 
@@ -702,13 +704,13 @@ In-app help buttons; the topic is the Markdown file name under documentation/Hel
 
 | Page | What | Code |
 |---|---|---|
-| Security | topic "Abuse_Protection" | `frontend/index.html:822` |
-| Quarantine | topic "Quarantine" | `frontend/index.html:886` |
-| Spam filter | topic "Spam_Filter" | `frontend/index.html:934` |
-| Status | topic "IP_Blacklist_Monitor" | `frontend/index.html:1058` |
-| Domains | topic "Domains" | `frontend/index.html:1108` |
-| DMARC | topic "DMARC" | `frontend/index.html:1128` |
-| Mailbox stats | topic "Mailbox_Stats" | `frontend/index.html:1223` |
+| Security | topic "Abuse_Protection" | `frontend/index.html:825` |
+| Quarantine | topic "Quarantine" | `frontend/index.html:889` |
+| Spam filter | topic "Spam_Filter" | `frontend/index.html:937` |
+| Status | topic "IP_Blacklist_Monitor" | `frontend/index.html:1061` |
+| Domains | topic "Domains" | `frontend/index.html:1111` |
+| DMARC | topic "DMARC" | `frontend/index.html:1131` |
+| Mailbox stats | topic "Mailbox_Stats" | `frontend/index.html:1226` |
 | Mailbox stats | topic dynamic: `'${isRateLimits ? 'Rate_Limits' : 'Mailbox_Stats'}'` | `frontend/mailbox-stats.js:82` (mailboxStatsSwitchView) |
 
 ### Empty states
@@ -719,21 +721,21 @@ Text shown when a list or panel has nothing to show.
 |---|---|---|
 | Shell | "No changelog available" | `frontend/app.js:633` (loadAppVersionStatus) |
 | Shell | "No changelog available" | `frontend/app.js:694` (loadMailcowVersionStatus) |
-| Dashboard | "No blacklist data yet" | `frontend/app.js:4431` (loadDashboardBlacklistSummary) |
+| Dashboard | "No blacklist data yet" | `frontend/app.js:4454` (loadDashboardBlacklistSummary) |
 | Messages | "No messages found" | `frontend/app.js:895` (renderMessagesData) |
-| Messages | "No messages found" | `frontend/app.js:3883` (loadMessages) |
+| Messages | "No messages found" | `frontend/app.js:3906` (loadMessages) |
 | Message details | "No modal data available" | `frontend/message-details.js:70` (switchModalTab) |
 | Message details | "No delivery steps recorded yet" | `frontend/message-details.js:520` (renderDeliverySteps) |
-| Message details | "No Postfix delivery logs available" | `frontend/message-details.js:589` (renderPostfixTab) |
-| Message details | "No Postfix delivery logs available" | `frontend/message-details.js:594` (renderPostfixTab) |
-| Message details | "No spam analysis data available" | `frontend/message-details.js:756` (renderSpamTab) |
+| Message details | "No Postfix delivery logs available" | `frontend/message-details.js:590` (renderPostfixTab) |
+| Message details | "No Postfix delivery logs available" | `frontend/message-details.js:595` (renderPostfixTab) |
+| Message details | "No spam analysis data available" | `frontend/message-details.js:757` (renderSpamTab) |
 | Security | "No logs found" | `frontend/app.js:1003` (renderNetfilterData) |
 | Security | "No matching entries" | `frontend/smtp-abuse.js:137` (renderSmtpAbusePanel) |
 | Queue | "No matching queue entries" | `frontend/app.js:2626` (applyQueueFilters) |
 | Quarantine | "No quarantined messages" | `frontend/app.js:2932` (renderQuarantineData) |
 | Quarantine | "No actions recorded yet" | `frontend/app.js:3618` (loadQuarantineRuleHistory) |
-| Status | "No container information available" | `frontend/app.js:4139` (loadStatusContainers) |
-| Status | "No changelog available" | `frontend/app.js:4174` (loadStatusSystem) |
+| Status | "No container information available" | `frontend/app.js:4162` (loadStatusContainers) |
+| Status | "No changelog available" | `frontend/app.js:4197` (loadStatusSystem) |
 | Domains | "No domains found" | `frontend/domains.js:89` (renderDomains) |
 | Domains | "No domains with DNS issues found" | `frontend/domains.js:141` (filterDomains) |
 | Domains | "No domains found matching" | `frontend/domains.js:142` (filterDomains) |
@@ -751,8 +753,8 @@ Text shown when a list or panel has nothing to show.
 | Settings | "No changelog available" | `frontend/settings.js:1147` (renderSettings) |
 | Settings | "No logs available" | `frontend/settings.js:1937` (testSmtpConnection) |
 | Settings | "No logs available" | `frontend/settings.js:1963` (testImapConnection) |
-| Modal: changelog-modal | "No changelog available" | `frontend/app.js:4806` (showChangelogModal) |
-| Modal: container-logs-modal | "No logs available" | `frontend/app.js:5082` (fetchContainerLogs) |
+| Modal: changelog-modal | "No changelog available" | `frontend/app.js:4829` (showChangelogModal) |
+| Modal: container-logs-modal | "No logs available" | `frontend/app.js:5105` (fetchContainerLogs) |
 
 ### Loading states
 
@@ -760,15 +762,15 @@ Functions that render a spinner or "Loading..." while data is fetched.
 
 | Page | What | Code |
 |---|---|---|
-| Messages | 1 loading indicator(s) | `frontend/app.js:3857` (loadMessages) |
+| Messages | 1 loading indicator(s) | `frontend/app.js:3879` (loadMessages) |
 | Message details | 1 loading indicator(s) | `frontend/message-details.js:99` (viewMessageDetails) |
 | Security | 1 loading indicator(s) | `frontend/app.js:2203` (loadNetfilterLogs) |
 | Queue | 1 loading indicator(s) | `frontend/app.js:2558` (loadQueue) |
 | Quarantine | 1 loading indicator(s) | `frontend/app.js:2883` (loadQuarantine) |
 | Quarantine | 1 loading indicator(s) | `frontend/app.js:3610` (loadQuarantineRuleHistory) |
-| Status | 1 loading indicator(s) | `frontend/app.js:3995` (renderStatusAttention) |
-| Status | 2 loading indicator(s) | `frontend/app.js:4289` (checkBlacklists) |
-| Status | 1 loading indicator(s) | `frontend/app.js:4751` (triggerBackgroundJob) |
+| Status | 1 loading indicator(s) | `frontend/app.js:4018` (renderStatusAttention) |
+| Status | 2 loading indicator(s) | `frontend/app.js:4312` (checkBlacklists) |
+| Status | 1 loading indicator(s) | `frontend/app.js:4774` (triggerBackgroundJob) |
 | Logs | 1 loading indicator(s) | `frontend/logs-viewer.js:1025` (loadDateRangeLogs) |
 | Settings | 3 loading indicator(s) | `frontend/settings.js:1190` (renderSettings) |
 | Settings | 2 loading indicator(s) | `frontend/settings.js:1580` (showGeoIPSetupModal) |
@@ -781,8 +783,8 @@ Settings the browser remembers between visits.
 
 | Page | What | Code |
 |---|---|---|
-| Shell | localStorage getItem "theme" | `frontend/app.js:4957` (initDarkMode) |
-| Shell | localStorage setItem "theme" | `frontend/app.js:4972` (toggleDarkMode) |
+| Shell | localStorage getItem "theme" | `frontend/app.js:4980` (initDarkMode) |
+| Shell | localStorage setItem "theme" | `frontend/app.js:4995` (toggleDarkMode) |
 | Logs | localStorage getItem "logsNewestFirst" | `frontend/logs-viewer.js:17` |
 | Logs | localStorage setItem "logsNewestFirst" | `frontend/logs-viewer.js:483` (toggleLogSortOrder) |
 
@@ -794,9 +796,9 @@ Background refreshes and polling.
 |---|---|---|
 | Shell | every 5 * 60 * 1000 ms | `frontend/app.js:465` (loadAppInfo) |
 | Shell | every AUTO_REFRESH_INTERVAL ms | `frontend/app.js:753` (startAutoRefresh) |
-| Status | every 1000 ms | `frontend/app.js:4324` (checkBlacklists) |
+| Status | every 1000 ms | `frontend/app.js:4347` (checkBlacklists) |
 | Settings | every 2000 ms | `frontend/settings.js:1701` (showGeoIPSetupModal) |
-| Modal: container-logs-modal | every 2000 ms | `frontend/app.js:5118` (loadContainerLogs) |
+| Modal: container-logs-modal | every 2000 ms | `frontend/app.js:5141` (loadContainerLogs) |
 
 ### Address bar and deep links
 
@@ -817,11 +819,11 @@ Key handlers; the keys are read from the handler body.
 
 | Page | What | Code |
 |---|---|---|
-| Message details | keydown: Escape | `frontend/message-details.js:906` |
+| Message details | keydown: Escape | `frontend/message-details.js:907` |
 | Settings | keydown: Escape, Enter | `frontend/settings.js:94` (showBasicAuthVerifyModal) |
 | Settings | keydown: Escape, Enter | `frontend/settings.js:160` (showFeatureDisableConfirmModal) |
 | Shared | keydown | `frontend/utils.js:584` (showConfirmModal) |
-| Modal: changelog-modal | keydown: Escape | `frontend/app.js:4987` |
+| Modal: changelog-modal | keydown: Escape | `frontend/app.js:5010` |
 
 ### Badge colours
 

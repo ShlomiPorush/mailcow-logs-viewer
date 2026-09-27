@@ -665,33 +665,6 @@
                                 <input type="hidden" id="messages-end-date" value="">
                             </div>
                         </div>
-                        <details class="ui-fct-more">
-                            <summary>More filters</summary>
-                            <input type="text" id="messages-filter-sender" class="ui-input" placeholder="Sender" aria-label="Sender" onkeypress="if(event.key==='Enter') applyMessagesFilters()">
-                            <input type="text" id="messages-filter-recipient" class="ui-input" placeholder="Recipient" aria-label="Recipient" onkeypress="if(event.key==='Enter') applyMessagesFilters()">
-                            <input type="text" id="messages-filter-user" class="ui-input" placeholder="Authenticated User" aria-label="Authenticated User" onkeypress="if(event.key==='Enter') applyMessagesFilters()">
-                            <input type="text" id="messages-filter-ip" class="ui-input" placeholder="Source IP" aria-label="Source IP" onkeypress="if(event.key==='Enter') applyMessagesFilters()">
-                            <!-- The facets set these; they stay the single source of the outcome and direction filter -->
-                            <select id="messages-filter-direction" class="ui-select" aria-label="Direction">
-                                <option value="">All Directions</option>
-                                <option value="inbound">Inbound</option>
-                                <option value="outbound">Outbound</option>
-                                <option value="internal">Internal</option>
-                            </select>
-                            <select id="messages-filter-status" class="ui-select" aria-label="Status">
-                                <option value="">All Statuses</option>
-                                <option value="delivered">Delivered</option>
-                                <option value="deferred">Deferred</option>
-                                <option value="bounced">Bounced</option>
-                                <option value="rejected">Rejected</option>
-                                <option value="spam">Spam</option>
-                                <option value="discarded">Discarded (Sieve)</option>
-                            </select>
-                            <div class="ui-filters-actions">
-                                <button onclick="applyMessagesFilters()" class="ui-btn ui-btn-primary ui-btn-sm">Apply</button>
-                                <button onclick="clearMessagesFilters()" class="ui-btn ui-btn-sm">Clear</button>
-                            </div>
-                        </details>
                         <button onclick="exportCSV('messages')" class="ui-btn ui-btn-sm ui-fct-export">Export CSV</button>
                     </aside>
 
@@ -701,8 +674,38 @@
                             <label class="ui-search"><svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-4.35-4.35M17 11a6 6 0 11-12 0 6 6 0 0112 0z"></path></svg>
                                 <input type="text" id="messages-filter-search" placeholder="Search (sender, recipient, subject, IP, user)..." aria-label="Search" onkeypress="if(event.key==='Enter') applyMessagesFilters()">
                             </label>
+                            <button type="button" id="messages-filters-btn" class="ui-icon-btn ui-msg-filter-btn" aria-expanded="false" aria-controls="messages-more-filters" title="Filter by sender, recipient, user or IP" onclick="toggleMessagesFilters()"><svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z"></path></svg><span id="messages-filters-n" class="ui-msg-filter-n hidden"></span></button>
+                            <div id="messages-more-filters" class="ui-msg-filters hidden">
+                                <input type="text" id="messages-filter-sender" class="ui-input" placeholder="Sender" aria-label="Sender" onkeypress="if(event.key==='Enter') applyMessagesFilters()">
+                                <input type="text" id="messages-filter-recipient" class="ui-input" placeholder="Recipient" aria-label="Recipient" onkeypress="if(event.key==='Enter') applyMessagesFilters()">
+                                <input type="text" id="messages-filter-user" class="ui-input" placeholder="Authenticated User" aria-label="Authenticated User" onkeypress="if(event.key==='Enter') applyMessagesFilters()">
+                                <input type="text" id="messages-filter-ip" class="ui-input" placeholder="Source IP" aria-label="Source IP" onkeypress="if(event.key==='Enter') applyMessagesFilters()">
+                                <!-- The facets set these; they stay the single source of the outcome and direction filter -->
+                                <div class="hidden">
+                                <select id="messages-filter-direction" class="ui-select" aria-label="Direction">
+                                <option value="">All Directions</option>
+                                <option value="inbound">Inbound</option>
+                                <option value="outbound">Outbound</option>
+                                <option value="internal">Internal</option>
+                                </select>
+                                <select id="messages-filter-status" class="ui-select" aria-label="Status">
+                                <option value="">All Statuses</option>
+                                <option value="delivered">Delivered</option>
+                                <option value="deferred">Deferred</option>
+                                <option value="bounced">Bounced</option>
+                                <option value="rejected">Rejected</option>
+                                <option value="spam">Spam</option>
+                                <option value="discarded">Discarded (Sieve)</option>
+                                </select>
+                                </div>
+                                <div class="ui-filters-actions">
+                                    <button onclick="applyMessagesFilters()" class="ui-btn ui-btn-primary ui-btn-sm">Apply</button>
+                                    <button onclick="clearMessagesFilters()" class="ui-btn ui-btn-sm">Clear</button>
+                                </div>
+                            </div>
                             <div id="messages-chips" class="ui-chips"></div>
-                            <p class="ui-msg-summary"><span id="messages-count"></span> <span id="messages-date-range-label" class="ui-muted">All Time</span></p>
+                            <p class="ui-msg-summary"><span id="messages-count"></span> <span id="messages-date-range-label" class="ui-muted">All Time</span>
+                                <button type="button" id="messages-clear-filters" class="ui-link-row ui-msg-clear hidden" onclick="clearMessagesFilters()">Clear filters</button></p>
                         </div>
                         <div id="messages-logs" class="ui-msg-items">
                             <div class="ui-loading"><div class="loading"></div><p>Loading...</p></div>

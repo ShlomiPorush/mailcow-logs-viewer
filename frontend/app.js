@@ -3652,6 +3652,28 @@ function applyMessagesFilters() {
     loadMessages();
 }
 
+// The filters panel next to the search (sender, recipient, user, IP)
+function toggleMessagesFilters(open) {
+    const panel = document.getElementById('messages-more-filters');
+    const btn = document.getElementById('messages-filters-btn');
+    if (!panel) return;
+    const show = typeof open === 'boolean' ? open : panel.classList.contains('hidden');
+    panel.classList.toggle('hidden', !show);
+    if (btn) btn.setAttribute('aria-expanded', show);
+    if (show) { const first = panel.querySelector('input'); if (first) first.focus(); }
+}
+
+// How many filters are on, for the button badge and the Clear filters link
+function updateMessagesFilterState() {
+    const f = currentFilters.messages || {};
+    const advanced = ['sender', 'recipient', 'user', 'ip'].filter(k => f[k]).length;
+    const any = advanced || f.search || f.status || f.direction || f.start_date || f.end_date || f.date_range;
+    const badge = document.getElementById('messages-filters-n');
+    if (badge) { badge.textContent = advanced || ''; badge.classList.toggle('hidden', !advanced); }
+    const clear = document.getElementById('messages-clear-filters');
+    if (clear) clear.classList.toggle('hidden', !any);
+}
+
 function clearMessagesFilters() {
     document.getElementById('messages-filter-search').value = '';
     document.getElementById('messages-filter-sender').value = '';
@@ -3858,6 +3880,7 @@ async function loadMessages(page = 1) {
 
         const filters = currentFilters.messages || {};
         loadMessageFacets(filters);
+        updateMessagesFilterState();
         // The list grows as it scrolls, so a new load always starts at the top
         page = 1;
         const params = messagesQueryParams(page);
