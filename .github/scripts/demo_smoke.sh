@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Boot the demo image against PostgreSQL with nothing but database settings
 # (the image carries everything else) and prove it runs cut off from the
-# network: healthy, SPA served, and the network guard active in the live
-# process.
+# network: healthy, SPA served, the network guard active in the live process,
+# pages fed by the fictional mailcow and internet, writes that stick, every
+# background job run, and not one outbound attempt left for the guard.
 #
 # Usage: demo_smoke.sh <demo image tag>
 set -euo pipefail
@@ -89,6 +90,14 @@ check /api/quarantine 'd["total"] >= 5' "the quarantine has entries"
 check /api/fail2ban 'len(d["active_bans"]) >= 2' "fail2ban shows bans"
 check /api/rspamd/maps/bad_words.map '"prize" in json.dumps(d)' "Rspamd maps are readable"
 
+step "The rest of the internet answers from fakes"
+code=$(curl -s -o /dev/null -w '%{http_code}' "${BASE}/api/docs/Domains")
+[ "${code}" = "200" ] || fail "help document was not served (${code})"
+echo "  ok: help documents are served from the image"
+dns=$(curl -fsS -X POST "${BASE}/api/domains/example.com/check-dns" || true)
+grep -q '"dmarc"' <<< "${dns}" || fail "the DNS check for example.com did not return results: ${dns}"
+echo "  ok: domain DNS checks answer"
+
 step "A write action changes what the demo shows"
 before=$(docker exec "${APP}" python3 -c 'import json,urllib.request; print(json.load(urllib.request.urlopen("http://localhost:8080/api/quarantine"))["data"][0]["id"])')
 result=$(curl -fsS -X POST -H 'Content-Type: application/json' -d "{\"items\":[\"${before}\"]}" "${BASE}/api/quarantine/release")
@@ -114,14 +123,16 @@ if docker logs "${APP}" 2>&1 | grep -E "(TypeError|AttributeError|NameError|KeyE
     fail "a job raised a programming error against the fictional server (see above)"
 fi
 
-step "No request to mailcow left the process"
+step "Every outbound path was answered by a fake"
+# The guard is the last line of defence: in a correct demo nothing reaches it.
 logs=$(docker logs "${APP}" 2>&1)
 if grep -q "Fake mailcow has no answer" <<< "${logs}"; then
     echo "${logs}" | grep "Fake mailcow has no answer" | sort | uniq -c
     fail "the application called a mailcow endpoint the fake server does not answer"
 fi
-if grep -q "Blocked outbound connection to mail.example.com" <<< "${logs}"; then
-    fail "a mailcow request reached the network guard instead of the fake server"
+if grep -qE "\[DEMO\] (Blocked outbound connection|No fake answer)" <<< "${logs}"; then
+    echo "${logs}" | grep -E "\[DEMO\] (Blocked outbound connection|No fake answer)" | sort | uniq -c
+    fail "an outbound request was not answered by a fake (see above)"
 fi
 
 step "No tracebacks during startup"
