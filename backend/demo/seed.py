@@ -184,6 +184,35 @@ def run_ingest_blocking():
     logger.warning(f"[DEMO] Demo ready in {time.monotonic() - started:.0f}s")
 
 
+LIVE_INTERVAL_SECONDS = 60
+# About twelve messages an hour at any time of day, plus connection noise
+LIVE_MIN_WEIGHT = 2.0
+LIVE_NOISE_PER_MINUTE = 2.0
+
+
+def start_live_traffic(fake, traffic, interval=LIVE_INTERVAL_SECONDS):
+    """Keep mail flowing: every minute the fake server gets that minute's
+    traffic, which the scheduler's regular jobs pick up like new logs."""
+    def loop():
+        last = time.time()
+        while True:
+            time.sleep(interval)
+            now = time.time()
+            try:
+                batch = traffic.generate(last, now, min_weight=LIVE_MIN_WEIGHT,
+                                         noise_per_minute=LIVE_NOISE_PER_MINUTE)
+                for service, entries in batch.items():
+                    if entries:
+                        fake.push_logs(service, entries)
+            except Exception as e:
+                logger.error(f"[DEMO] Live traffic failed: {e}")
+            last = now
+
+    thread = threading.Thread(target=loop, name="demo-live-traffic", daemon=True)
+    thread.start()
+    return thread
+
+
 def seconds_until_midnight(now=None):
     """Seconds until the next 00:00 in the process's local time zone (TZ)."""
     now = now if now is not None else time.time()

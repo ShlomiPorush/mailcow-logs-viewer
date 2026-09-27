@@ -123,6 +123,9 @@ result=$(curl -fsS -X POST -H 'Content-Type: application/json' -d "{\"items\":[\
 grep -q '"status": *"success"' <<< "${result}" || fail "quarantine release did not succeed: ${result}"
 check /api/quarantine "all(str(i['id']) != '${before}' for i in d['data'])" "the released item left the quarantine"
 
+postfix_rows() { docker exec "${DB}" psql -U demo -d demo -tAc "SELECT count(*) FROM postfix_logs"; }
+rows_at_start=$(postfix_rows)
+
 step "Every background job runs against the fictional server"
 jobs=$(docker exec "${APP}" python3 -c 'import json,urllib.request; print(" ".join(json.load(urllib.request.urlopen("http://localhost:8080/api/settings/info"))["background_jobs"].keys()))')
 [ -n "${jobs}" ] || fail "/api/settings/info returned no background_jobs"
@@ -141,6 +144,15 @@ done
 if docker logs "${APP}" 2>&1 | grep -E "(TypeError|AttributeError|NameError|KeyError|ImportError):"; then
     fail "a job raised a programming error against the fictional server (see above)"
 fi
+
+step "Live traffic keeps arriving"
+# The trickle adds lines every minute and the regular fetch job imports them
+for i in $(seq 1 60); do
+    [ "$(postfix_rows)" -gt "${rows_at_start}" ] && break
+    sleep 3
+done
+[ "$(postfix_rows)" -gt "${rows_at_start}" ] || fail "no new Postfix lines arrived after startup"
+echo "  ok: ${rows_at_start} -> $(postfix_rows) Postfix lines"
 
 step "Every outbound path was answered by a fake"
 # The guard is the last line of defence: in a correct demo nothing reaches it.
