@@ -67,8 +67,34 @@ jobs:
           context: .
           push: true
           platforms: linux/amd64,linux/arm64
+          target: app
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+
+      # The public demo image of the same release: a moving `demo` tag and an
+      # immutable `X.Y.Z-demo` tag. It never takes `latest`.
+      - name: Extract metadata for the demo image
+        id: meta-demo
+        uses: docker/metadata-action@v6
+        with:
+          images: |
+            ${{ env.GH_REGISTRY }}/${{ github.repository }}
+            ${{ env.DOCKER_HUB_REPO }}
+          tags: |
+            type=semver,pattern={{version}},suffix=-demo
+            type=raw,value=demo
+          flavor: |
+            latest=false
+
+      - name: Build and push the demo image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          push: true
+          platforms: linux/amd64,linux/arm64
+          target: demo
+          tags: ${{ steps.meta-demo.outputs.tags }}
+          labels: ${{ steps.meta-demo.outputs.labels }}
 
   # The release notes are the changelog section for this version, so a release
   # can never describe something the changelog does not. Runs after the image is
