@@ -463,8 +463,7 @@ function renderMessageHeader(data) {
 // and what Dovecot did with it. Built from the same logs as the Logs tab.
 function buildDeliverySteps(data) {
     const steps = [];
-    const rspamd = data.rspamd || {};
-    const add = (time, tone, title, detail, extra) => steps.push({ time: time || '', tone, title, detail, ...(extra || {}) });
+    const add = (time, tone, title, detail) => steps.push({ time: time || '', tone, title, detail });
     for (const log of data.postfix || []) {
         const message = log.message || '';
         const program = log.program || 'postfix';
@@ -474,25 +473,9 @@ function buildDeliverySteps(data) {
         } else if (/client=/.test(message) && /smtpd/.test(program)) {
             const ip = (message.match(/client=.*?\[([^\]]+)\]/) || [])[1];
             const user = (message.match(/sasl_username=(\S+)/) || [])[1];
-            // The address and the account can be copied; where the address is from and how
-            // the sender signed in are shown right under it
-            const geo = ip && rspamd.ip === ip && rspamd.country_code ? [
-                rspamd.country_code ? `<img src="${getFlagUrl(rspamd.country_code, '16x12')}" alt="" width="16" height="12" onerror="this.style.display='none'">` : '',
-                escapeHtml([rspamd.country_name, rspamd.city].filter(Boolean).join(' ')),
-                rspamd.asn_org ? escapeHtml(`(${rspamd.asn_org})`) : ''
-            ].filter(Boolean).join(' ') : '';
-            add(log.time, 'ok', ip ? `Received from ${ip}` : 'Received', `${when}, ${program}${user ? `, authenticated as ${user}` : ''}`, {
-                titleHtml: ip ? `Received from ${copyableText(ip)}` : '',
-                detailHtml: `${escapeHtml(`${when}, ${program}`)}${user ? `, authenticated as ${copyableText(user)}` : ''}`,
-                extraHtml: [geo, user && rspamd.has_auth ? 'Verified (MAILCOW_AUTH)' : ''].filter(Boolean).join('<br>'),
-                shows: { ip: ip || '', user: user || '' }
-            });
+            add(log.time, 'ok', ip ? `Received from ${ip}` : 'Received', `${when}, ${program}${user ? `, authenticated as ${user}` : ''}`);
         } else if (/cleanup/.test(program) && /message-id=/.test(message)) {
-            const qid = log.queue_id || data.queue_id;
-            add(log.time, 'ok', qid ? `Queued as ${qid}` : 'Queued', `${when}, ${program}`, {
-                titleHtml: qid ? `Queued as <span class="ui-mono">${copyableText(qid)}</span>` : '',
-                shows: { queue: qid || '' }
-            });
+            add(log.time, 'ok', log.queue_id || data.queue_id ? `Queued as ${log.queue_id || data.queue_id}` : 'Queued', `${when}, ${program}`);
         } else if (log.status) {
             const target = relayHost(log.relay) || log.recipient || '';
             const detail = `${when}, status=${log.status}${log.dsn ? ` (${log.dsn})` : ''}`;
@@ -523,14 +506,13 @@ function buildDeliverySteps(data) {
     return merged;
 }
 
-function renderDeliverySteps(data, steps) {
-    steps = steps || buildDeliverySteps(data);
+function renderDeliverySteps(data) {
+    const steps = buildDeliverySteps(data);
     if (!steps.length) return '<p class="ui-muted">No delivery steps recorded yet.</p>';
     return `<ol class="ui-steps">${steps.map(step => `
         <li class="${step.tone ? `ui-step-${step.tone}` : ''}">
-            <b>${step.titleHtml || escapeHtml(step.title)}${step.count > 1 ? ` <span class="ui-tag">${step.count} attempts</span>` : ''}</b>
-            <span>${step.detailHtml || escapeHtml(step.detail)}</span>
-            ${step.extraHtml ? `<span class="ui-step-extra">${step.extraHtml}</span>` : ''}
+            <b>${escapeHtml(step.title)}${step.count > 1 ? ` <span class="ui-tag">${step.count} attempts</span>` : ''}</b>
+            <span>${escapeHtml(step.detail)}</span>
         </li>`).join('')}</ol>`;
 }
 
@@ -549,13 +531,11 @@ function renderOverviewTab(content, data) {
         : (data.recipients || []);
 
     const rspamd = data.rspamd || {};
-    const steps = buildDeliverySteps(data);
-    const shown = key => steps.some(step => step.shows && step.shows[key]);
     const identifiers = [
-        data.queue_id && !shown('queue') ? mdFact('Queue ID', `<span class="ui-mono">${copyableText(data.queue_id)}</span>`) : '',
-        rspamd.ip && !steps.some(step => step.shows && step.shows.ip === rspamd.ip) ? mdFact('Client IP', `<div class="ui-md-geo">${renderGeoIPInfo(rspamd, '16x12')}</div>`) : '',
+        data.queue_id ? mdFact('Queue ID', `<span class="ui-mono">${copyableText(data.queue_id)}</span>`) : '',
+        rspamd.ip ? mdFact('Client IP', `<div class="ui-md-geo">${renderGeoIPInfo(rspamd, '16x12')}</div>`) : '',
         // Who sent it and how they proved it, in one cell
-        (rspamd.user || rspamd.has_auth) && !shown('user') ? mdFact('Authenticated user',
+        rspamd.user || rspamd.has_auth ? mdFact('Authenticated user',
             `${rspamd.user ? copyableText(rspamd.user) : '<span class="ui-muted">Unknown user</span>'}${rspamd.has_auth ? '<small class="ui-md-sub">Verified (MAILCOW_AUTH)</small>' : ''}`) : '',
         rspamd.size ? mdFact('Message Size', formatSize(rspamd.size)) : '',
         data.dovecot && data.dovecot.status === 'stored' && data.dovecot.mailbox ? mdFact('Folder', `<span class="ui-md-folder">${folderIconSvg('ui-md-folder-icon')}${escapeHtml(data.dovecot.mailbox)}</span>`) : '',
@@ -568,7 +548,7 @@ function renderOverviewTab(content, data) {
         <div class="ui-md-stack">
             <section>
                 <h4 class="ui-md-h">What happened</h4>
-                ${renderDeliverySteps(data, steps)}
+                ${renderDeliverySteps(data)}
             </section>
             ${renderDovecotSummary(data.dovecot)}
             ${renderRelatedDeliveries(data)}
