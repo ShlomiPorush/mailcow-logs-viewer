@@ -896,11 +896,82 @@ function renderMessagesData(data) {
         return;
     }
 
+    renderMessagesList(container, data);
+    if (typeof markSelectedMessageRow === 'function' && window.openMessageKey) markSelectedMessageRow(window.openMessageKey);
+}
+
+// ---------- Messages list: the next page loads as the end scrolls into view ----------
+const messagesPaging = { page: 1, pages: 1, total: 0, loading: false, observer: null };
+
+function messagesQueryParams(page) {
+    const filters = currentFilters.messages || {};
+    const params = new URLSearchParams({ page: page, limit: 50 });
+    for (const key of ['search', 'sender', 'recipient', 'direction', 'user', 'status', 'ip', 'start_date', 'end_date']) {
+        if (filters[key]) params.append(key, filters[key]);
+    }
+    return params;
+}
+
+function messagesMoreText() {
+    if (messagesPaging.page < messagesPaging.pages) return 'Loading more...';
+    return messagesPaging.total ? `All ${messagesPaging.total.toLocaleString()} messages shown` : '';
+}
+
+function renderMessagesList(container, data) {
+    messagesPaging.page = data.page || 1;
+    messagesPaging.pages = data.pages || 1;
+    messagesPaging.total = data.total || data.data.length;
     container.innerHTML = `
         <div class="ui-msg-list">${data.data.map(renderMessageRow).join('')}</div>
-        ${renderPagination('messages', data.page, data.pages)}
+        <p id="messages-more" class="ui-msg-more" aria-live="polite">${messagesMoreText()}</p>
     `;
-    if (typeof markSelectedMessageRow === 'function' && window.openMessageKey) markSelectedMessageRow(window.openMessageKey);
+    watchMessagesEnd(container);
+}
+
+function watchMessagesEnd(container) {
+    if (messagesPaging.observer) messagesPaging.observer.disconnect();
+    const sentinel = document.getElementById('messages-more');
+    if (!sentinel || typeof IntersectionObserver === 'undefined') return;
+    // The list scrolls inside its own column; on narrow screens the page scrolls
+    const root = container.scrollHeight > container.clientHeight + 1 || getComputedStyle(container).overflowY !== 'visible' ? container : null;
+    messagesPaging.observer = new IntersectionObserver(entries => {
+        if (entries.some(e => e.isIntersecting)) loadMoreMessages();
+    }, { root, rootMargin: '0px 0px 600px 0px' });
+    messagesPaging.observer.observe(sentinel);
+}
+
+async function loadMoreMessages() {
+    if (messagesPaging.loading || messagesPaging.page >= messagesPaging.pages) return;
+    const list = document.querySelector('#messages-logs .ui-msg-list');
+    const more = document.getElementById('messages-more');
+    if (!list) return;
+    messagesPaging.loading = true;
+    const next = messagesPaging.page + 1;
+    try {
+        const response = await authenticatedFetch(`/api/messages?${messagesQueryParams(next)}`);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const data = await response.json();
+        // New mail can shift a page; never show the same message twice
+        const seen = new Set([...list.querySelectorAll('.ui-msg-item[data-key]')].map(row => row.dataset.key));
+        list.insertAdjacentHTML('beforeend', (data.data || []).filter(msg => !seen.has(msg.correlation_key || '')).map(renderMessageRow).join(''));
+        messagesPaging.page = next;
+        messagesPaging.pages = data.pages || messagesPaging.pages;
+        currentPage.messages = next;
+        if (more) more.textContent = messagesMoreText();
+        if (typeof markSelectedMessageRow === 'function' && window.openMessageKey) markSelectedMessageRow(window.openMessageKey);
+    } catch (error) {
+        if (more) more.innerHTML = `Could not load more messages. <button type="button" class="ui-link-row ui-link" onclick="loadMoreMessages()">Try again</button>`;
+    } finally {
+        messagesPaging.loading = false;
+    }
+    // A short page may leave the end still in view
+    const sentinel = document.getElementById('messages-more');
+    const container = document.getElementById('messages-logs');
+    if (sentinel && container && messagesPaging.page < messagesPaging.pages) {
+        const r = sentinel.getBoundingClientRect();
+        const box = container.getBoundingClientRect();
+        if (r.top < Math.max(box.bottom, window.innerHeight) + 600) loadMoreMessages();
+    }
 }
 
 // Deduplicate netfilter logs based on message + time + priority
@@ -3787,20 +3858,10 @@ async function loadMessages(page = 1) {
 
         const filters = currentFilters.messages || {};
         loadMessageFacets(filters);
-        const params = new URLSearchParams({
-            page: page,
-            limit: 50
-        });
-
-        if (filters.search) params.append('search', filters.search);
-        if (filters.sender) params.append('sender', filters.sender);
-        if (filters.recipient) params.append('recipient', filters.recipient);
-        if (filters.direction) params.append('direction', filters.direction);
-        if (filters.user) params.append('user', filters.user);
-        if (filters.status) params.append('status', filters.status);
-        if (filters.ip) params.append('ip', filters.ip);
-        if (filters.start_date) params.append('start_date', filters.start_date);
-        if (filters.end_date) params.append('end_date', filters.end_date);
+        // The list grows as it scrolls, so a new load always starts at the top
+        page = 1;
+        const params = messagesQueryParams(page);
+        container.scrollTop = 0;
 
         console.log('Loading Messages:', `/api/messages?${params}`);
 
@@ -3823,10 +3884,7 @@ async function loadMessages(page = 1) {
             return;
         }
 
-        container.innerHTML = `
-            <div class="ui-msg-list">${data.data.map(renderMessageRow).join('')}</div>
-            ${renderPagination('messages', data.page, data.pages)}
-        `;
+        renderMessagesList(container, data);
         afterMessagesRendered(data);
 
         currentPage.messages = page;

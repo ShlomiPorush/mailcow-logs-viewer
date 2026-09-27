@@ -12,6 +12,7 @@ import time
 
 from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
+from .frontend_assets import stamp_asset_versions
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.datastructures import MutableHeaders
@@ -387,7 +388,9 @@ def root():
     # If user reaches here, they are authenticated
     try:
         with open("/app/frontend/index.html", "r") as f:
-            return HTMLResponse(content=f.read())
+            html = f.read()
+        # Asset links carry a content hash, and the page itself is always revalidated
+        return HTMLResponse(content=stamp_asset_versions(html, "/app/frontend"), headers={"Cache-Control": "no-cache"})
     except FileNotFoundError:
         return HTMLResponse(
             content="<h1>mailcow Logs Viewer</h1><p>Frontend not found. Please check installation.</p>",
@@ -469,7 +472,9 @@ def spa_catch_all(full_path: str):
     # This catch-all only receives unmatched routes
     try:
         with open("/app/frontend/index.html", "r") as f:
-            return HTMLResponse(content=f.read())
+            html = f.read()
+        # Asset links carry a content hash, and the page itself is always revalidated
+        return HTMLResponse(content=stamp_asset_versions(html, "/app/frontend"), headers={"Cache-Control": "no-cache"})
     except FileNotFoundError:
         return HTMLResponse(
             content="<h1>mailcow Logs Viewer</h1><p>Frontend not found. Please check installation.</p>",
