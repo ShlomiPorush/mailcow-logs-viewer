@@ -435,6 +435,10 @@
 .ui-md-timeline-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
 .ui-md-timeline-entries { display: grid; gap: 6px; align-content: start; }
 .ui-md-timeline-head { position: sticky; top: 0; z-index: 2; padding: 6px 0; background: var(--ui-bg); }
+/* The scrolling body has top padding; the head sticks at the body's visible edge, not below the padding,
+   so no log line shows above it */
+.ui-dialog-body .ui-md-timeline-head { top: calc(-1 * var(--ui-pad-x)); }
+#message-modal.ui-docked .ui-dialog-body .ui-md-timeline-head { top: -20px; }
 .ui-md-fill:has(.ui-md-timeline) { height: auto; }
 .ui-md-log { padding: 10px 12px; border-radius: var(--ui-radius-sm); background: var(--ui-panel); font-size: var(--ui-fs-sm); }
 .ui-md-log p { margin: 3px 0 0; }
