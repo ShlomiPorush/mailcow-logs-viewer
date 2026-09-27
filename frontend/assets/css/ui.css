@@ -506,6 +506,8 @@
 .ui-msg-col .ui-msg-l3 { margin-top: 0; gap: 4px 8px; }
 .ui-msg-col .ui-msg-l3 .ui-tag { margin-inline-end: 0; }
 .ui-msg-to { max-width: 16ch; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.ui-msg-more { margin: 0; padding: 14px var(--ui-pad-x) 22px; color: var(--ui-muted); font-size: var(--ui-fs-sm); text-align: center; }
+.ui-msg-more:empty { padding: 0; }
 .ui-msg-col .ui-msg-item.is-selected { background: color-mix(in srgb, var(--ui-accent) 10%, transparent); border-inline-start-color: var(--ui-accent); }
 
 .ui-reader { position: relative; min-width: 0; overflow-y: auto; }
@@ -521,13 +523,23 @@
 /* Reading pane header: subject, who and when, the outcome */
 .ui-md-header { padding: 20px var(--ui-pad-x) 0; }
 .ui-md-header:empty { display: none; }
-.ui-md-header .ui-md-subject { margin: 0 0 14px; font-size: calc(var(--ui-h1) * .95); line-height: 1.15; letter-spacing: -.02em; font-weight: 750; max-width: 32ch; }
+.ui-md-header .ui-md-subject { margin: 0 0 14px; font-size: calc(var(--ui-h1) * .95); line-height: 1.15; letter-spacing: -.02em; font-weight: 750;
+    display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; }
 .ui-md-who { display: grid; grid-template-columns: 60px minmax(0, 1fr); gap: 4px 12px; }
 .ui-md-who > span { color: var(--ui-muted); }
 .ui-md-who > div { overflow-wrap: anywhere; font-weight: 600; }
 .ui-md-verdict-bar { margin: 18px 0 16px; padding: 14px 18px; border-radius: var(--ui-radius); font-weight: 600; font-size: 1.05em;
     color: var(--ui-muted); background: color-mix(in srgb, var(--ui-muted) 12%, transparent); }
 .ui-md-verdict-bar small { display: block; margin-top: 3px; color: var(--ui-ink); font-weight: 400; font-size: .85em; opacity: .85; }
+/* The verdict and the spam summary share the bar, the summary opens its tab */
+.ui-md-verdict-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 20px; }
+.ui-md-spam { display: flex; align-items: center; gap: 18px; padding: 6px 10px; border: 0; border-radius: var(--ui-radius-sm);
+    background: color-mix(in srgb, var(--ui-bg) 55%, transparent); color: var(--ui-ink); font: inherit; text-align: start; cursor: pointer; }
+.ui-md-spam:hover { background: var(--ui-bg); }
+.ui-md-spam > span { display: grid; gap: 1px; }
+.ui-md-spam small { color: var(--ui-muted); font-size: 11px; font-weight: 600; }
+.ui-md-spam b { font-size: 15px; }
+.ui-md-spam svg { color: var(--ui-muted); }
 .ui-md-verdict-ok { color: var(--ui-ok); background: color-mix(in srgb, var(--ui-ok) 13%, transparent); }
 .ui-md-verdict-warn { color: var(--ui-warn); background: color-mix(in srgb, var(--ui-warn) 14%, transparent); }
 .ui-md-verdict-fail { color: var(--ui-fail); background: color-mix(in srgb, var(--ui-fail) 13%, transparent); }
