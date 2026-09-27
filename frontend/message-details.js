@@ -454,7 +454,7 @@ function renderMessageHeader(data) {
         <h2 class="ui-md-subject" dir="auto" title="${escapeHtml(hasSubject ? data.subject : 'No subject')}">${escapeHtml(hasSubject ? data.subject : 'No subject')}</h2>
         <div class="ui-md-who">
             <span>From</span><div>${copyableText(data.sender || '-')}</div>
-            <span>To</span><div>${recipients.length > 1 ? `${recipients.length} recipients: ${recipients.map(r => copyableText(r)).join(', ')}` : copyableText(recipients[0] || '-')}</div>
+            <span>${recipients.length > 1 ? `To (${recipients.length})` : 'To'}</span><div class="ui-md-to">${recipients.length > 1 ? recipients.map(r => `<span>${copyableText(r)}</span>`).join('') : copyableText(recipients[0] || '-')}</div>
             <span>When</span><div>${formatTime(data.first_seen)}</div>
         </div>
         <div class="ui-md-verdict-bar${verdict.tone ? ` ui-md-verdict-${verdict.tone}` : ''}">
@@ -504,7 +504,10 @@ function buildDeliverySteps(data) {
         const last = (dovecot.logs || []).slice(-1)[0];
         add(last ? last.time : '9', verdict.tone || 'warn', verdict.label, getDovecotVerdictText(dovecot));
     }
-    steps.sort((a, b) => (a.time < b.time ? -1 : a.time > b.time ? 1 : 0));
+    // Steps logged in the same second keep the order mail flows in
+    const stage = step => /^(Rejected|Received)/.test(step.title) ? 0 : /^Queued/.test(step.title) ? 1 : /^Rspamd/.test(step.title) ? 2
+        : /^(Delivered|Deferred|Bounced)/.test(step.title) ? 3 : 4;
+    steps.sort((a, b) => (a.time < b.time ? -1 : a.time > b.time ? 1 : stage(a) - stage(b)));
     // A retry logs the same step again; one line with the number of attempts
     const merged = [];
     for (const step of steps) {
@@ -550,13 +553,9 @@ function renderOverviewTab(content, data) {
         data.queue_id ? mdIdRow('Queue ID', `<span class="ui-mono">${copyableText(data.queue_id)}</span>`) : '',
         data.message_id ? mdIdRow('Message ID', `<span class="ui-mono">${copyableText(data.message_id)}</span>`) : '',
         rspamd.ip ? mdIdRow('Client IP', `<span class="ui-mono">${copyableText(rspamd.ip)}</span>`, geoNote) : '',
-        rspamd.user || rspamd.has_auth ? mdIdRow('Authenticated user',
-            rspamd.user ? copyableText(rspamd.user) : '<span class="ui-muted">Unknown user</span>', rspamd.has_auth ? 'Verified (MAILCOW_AUTH)' : '') : '',
+        (rspamd.user && rspamd.user !== 'unknown') || rspamd.has_auth ? mdIdRow('Authenticated user',
+            rspamd.user && rspamd.user !== 'unknown' ? copyableText(rspamd.user) : '<span class="ui-muted">Unknown user</span>', rspamd.has_auth ? 'Verified (MAILCOW_AUTH)' : '') : '',
 
-        rspamd.size ? mdIdRow('Size', formatSize(rspamd.size)) : '',
-        data.dovecot && data.dovecot.status === 'stored' && data.dovecot.mailbox ? mdIdRow('Folder', `<span class="ui-md-folder">${folderIconSvg('ui-md-folder-icon')}${escapeHtml(data.dovecot.mailbox)}</span>`) : '',
-        recipientsToDisplay.length > 1 ? mdIdRow(`Recipients (${recipientsToDisplay.length})`,
-            `<span class="ui-md-recipients">${recipientsToDisplay.map(r => `<span>${copyableText(r)}</span>`).join('')}</span>`) : '',
     ].join('');
 
     content.innerHTML = `
