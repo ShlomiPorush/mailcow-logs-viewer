@@ -8,7 +8,7 @@
 // DOMAINS TAB - Domains management with DNS validation
 // =============================================================================
 
-const DNS_CHECKS = [['SPF', 'spf'], ['DKIM', 'dkim'], ['DMARC', 'dmarc'], ['TLSA', 'tlsa'], ['MTA-STS', 'mta_sts']];
+const DNS_CHECKS = [['SPF', 'spf'], ['DKIM', 'dkim'], ['DMARC', 'dmarc'], ['DNSSEC', 'dnssec'], ['DANE', 'tlsa'], ['MTA-STS', 'mta_sts']];
 const DNS_TAG = {
     success: ['OK', 'ok'],
     warning: ['Warning', 'warn'],
