@@ -45,6 +45,8 @@ services:
       POSTGRES_DB: demo
       # The nightly reset runs at 00:00 in this time zone
       TZ: ${TZ:-UTC}
+      # Optional label next to the demo notice, for example "v3 preview"
+      DEMO_PREVIEW_LABEL: ${DEMO_PREVIEW_LABEL:-}
     networks:
       - mailcow-logs-demo
 

@@ -17,7 +17,9 @@ regular image. The regular image does not contain any of the demo code.
 - New mail and log lines every minute, so the dashboard, Messages and Live
   Logs keep moving.
 - A notice at the top of every page that the data is fictional, with a link
-  to the installation guide.
+  to the installation guide. `DEMO_PREVIEW_LABEL` adds a short label next to
+  it, for example `DEMO_PREVIEW_LABEL="v3 preview"` while the demo runs a
+  version that is not released yet. It is empty by default.
 
 All names are reserved example names (`example.com`, `example.org`,
 `example.net`) or `.test` domains, and every address is from the
