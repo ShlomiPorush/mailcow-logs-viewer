@@ -68,10 +68,11 @@ start_app
 step "Wait for /api/health (the demo seeds a week of history first)"
 wait_healthy
 
-step "SPA is served without a login"
+step "SPA is served without a login, with the demo notice"
 for route in / /dashboard /messages /settings; do
     code=$(curl -s -o /dev/null -w '%{http_code}' "${BASE}${route}")
     [ "${code}" = "200" ] || fail "GET ${route} returned ${code}"
+    curl -s "${BASE}${route}" | grep -q 'class="demo-banner"' || fail "GET ${route} has no demo notice"
 done
 
 step "The demo runs on the asyncio loop with the network guard installed"
