@@ -419,9 +419,7 @@ async function loadSuppressions(page) {
         }
 
         suppressionItemsById.clear();
-
         data.items.forEach(s => suppressionItemsById.set(s.id, s));
-
         container.innerHTML = `
             <div class="ui-table ui-stack ui-supp-table">
                 <div class="ui-tr ui-tr-head"><span>Address</span><span>Reason</span><span>Bounces</span><span>Expiry</span><span>Rspamd</span><span>Added</span><span class="ui-td-end">Actions</span></div>
