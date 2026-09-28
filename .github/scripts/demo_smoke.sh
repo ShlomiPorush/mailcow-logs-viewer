@@ -132,7 +132,7 @@ curl -s -o /dev/null -X PUT -H 'Content-Type: application/json' \
 curl -s -o /dev/null -X PUT -H 'Content-Type: application/json' -d '{"retention_days": 0}' "${BASE}/api/settings"
 code=$(curl -s -o /dev/null -w '%{http_code}' "${BASE}/api/stats/dashboard")
 [ "${code}" = "200" ] || fail "enabling Basic Auth from the UI locked the demo (${code})"
-check /api/settings 'd["configuration"]["basic_auth_enabled"] is False and d["configuration"]["retention_days"] == 7 and {"basic_auth_enabled", "retention_days", "app_logo_url"} <= set(d["env_locked_keys"])' "auth, retention and logo are fixed by the image"
+check /api/settings 'd["configuration"]["basic_auth_enabled"] is False and d["configuration"]["retention_days"] == 7 and {"basic_auth_enabled", "retention_days", "app_logo_url", "raw_logs_services"} <= set(d["env_locked_keys"])' "auth, retention, logo and log services are fixed by the image"
 
 step "Writes are capped per visitor"
 codes=""
