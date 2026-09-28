@@ -2914,18 +2914,10 @@ async function loadQuarantine() {
         const data = await response.json();
         console.log('Quarantine data:', data);
 
-        // Update counter display
-        const countEl = document.getElementById('quarantine-count');
-        if (countEl) {
-            countEl.textContent = data.total ? `(${data.total.toLocaleString()} results)` : '';
-        }
-
         renderQuarantineData(data);
     } catch (error) {
         console.error('Failed to load quarantine:', error);
         document.getElementById('quarantine-logs').innerHTML = `<p class="ui-empty ui-text-fail">Failed to load quarantine: ${escapeHtml(error.message)}</p>`;
-        const countEl = document.getElementById('quarantine-count');
-        if (countEl) countEl.textContent = '';
     }
 }
 
@@ -2944,12 +2936,6 @@ function renderQuarantineData(data) {
             : 'Nothing is held right now.';
     }
 
-    // Update counter display
-    const countEl = document.getElementById('quarantine-count');
-    if (countEl) {
-        countEl.textContent = data.total ? `(${data.total.toLocaleString()} results)` : '';
-    }
-
     if (!data.data || data.data.length === 0) {
         container.innerHTML = '<p class="ui-empty">No quarantined messages</p>';
         return;
@@ -2960,7 +2946,7 @@ function renderQuarantineData(data) {
 
     const lockedNote = canAct ? '' : `<div class="ui-list-note">${uiLocked('Quarantine actions are locked', `Release, delete, spam learning and the auto-rules ${UI_RW_KEY_TEXT}`)}</div>`;
     const cols = canAct
-        ? '--ui-cols: 20px minmax(200px, 2fr) minmax(150px, 1.3fr) minmax(120px, 1fr) 56px 64px 214px; --ui-table-min: 960px'
+        ? '--ui-cols: 20px minmax(200px, 2fr) minmax(150px, 1.3fr) minmax(120px, 1fr) 56px 64px 336px; --ui-table-min: 1080px'
         : '--ui-cols: minmax(200px, 2fr) minmax(150px, 1.3fr) minmax(120px, 1fr) 56px 64px 76px; --ui-table-min: 760px';
 
     container.innerHTML = `
@@ -2985,7 +2971,7 @@ function renderQuarantineData(data) {
                 const idArg = escapeJsArg(String(itemId));
                 const hasScore = item.score !== undefined && item.score !== null;
                 return `
-                <div class="ui-tr ui-q-row" data-quarantine-id="${escapeHtml(String(itemId))}">
+                <div class="ui-tr ui-q-row" data-quarantine-id="${escapeHtml(String(itemId))}" onclick="quarantineRowClick(event, '${idArg}')">
                     ${canAct ? `<input type="checkbox" class="quarantine-checkbox ui-check" value="${escapeHtml(String(itemId))}" onchange="quarantineUpdateSelection()" aria-label="Select message" />` : ''}
                     <div class="ui-td ui-q-who">
                         <button type="button" class="ui-link-row" dir="auto" title="View details" onclick="showQuarantineDetails('${idArg}')">${escapeHtml(item.subject || 'No subject')}</button>
@@ -2998,12 +2984,10 @@ function renderQuarantineData(data) {
                     <span class="ui-td ui-td-end ui-row-actions">
                         ${canAct ? `
                             <button onclick="quarantineRelease('${idArg}')" title="Release message" class="quarantine-action-btn ui-btn ui-btn-sm">Release</button>
+                            <button onclick="quarantineLearnHam('${idArg}')" title="Release and train as not spam" class="quarantine-action-btn ui-btn ui-btn-sm">Not spam</button>
+                            <button onclick="quarantineLearnSpam('${idArg}')" title="Delete and train as spam" class="quarantine-action-btn ui-btn ui-btn-sm">Spam</button>
+                            <button onclick="showAddRuleFromQuarantine('${escapeJsArg(item.sender || '')}', '${escapeJsArg(item.rcpt || '')}', '${escapeJsArg(item.subject || '')}')" title="Create an auto-rule from this message" class="quarantine-action-btn ui-btn ui-btn-sm">Rule</button>
                             <button onclick="quarantineDelete('${idArg}')" title="Delete message" class="quarantine-action-btn ui-btn ui-btn-sm ui-btn-danger">Delete</button>
-                            ${uiMenu('More', `
-                                <button type="button" role="menuitem" onclick="showQuarantineDetails('${idArg}')">Details</button>
-                                <button type="button" role="menuitem" onclick="quarantineLearnHam('${idArg}')" title="Release & train as Not Spam">Not Spam</button>
-                                <button type="button" role="menuitem" onclick="quarantineLearnSpam('${idArg}')" title="Delete & train as Spam">Spam</button>
-                                <button type="button" role="menuitem" onclick="showAddRuleFromQuarantine('${escapeJsArg(item.sender || '')}', '${escapeJsArg(item.rcpt || '')}', '${escapeJsArg(item.subject || '')}')" title="Create auto-rule from this email">Rule</button>`)}
                         ` : `<button onclick="showQuarantineDetails('${idArg}')" title="View details" class="quarantine-action-btn ui-btn ui-btn-sm">Details</button>`}
                     </span>
                 </div>`;
@@ -3013,6 +2997,14 @@ function renderQuarantineData(data) {
 }
 
 // --- Quarantine action helpers ---
+
+// A click on the row opens the message, like the Messages list; its buttons,
+// checkbox and copyable values keep their own click
+function quarantineRowClick(event, itemId) {
+    if (event.target.closest('button, a, input, select, label, .copyable, [role="menu"]')) return;
+    if (window.getSelection && String(window.getSelection())) return;
+    showQuarantineDetails(itemId);
+}
 
 function quarantineUpdateSelection() {
     const checked = document.querySelectorAll('.quarantine-checkbox:checked');
