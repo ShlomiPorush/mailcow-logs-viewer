@@ -11,12 +11,13 @@ import pytest
 from app.mailcow_api import MailcowAPI
 from app.routers import domains
 from app.routers import settings as settings_router
-from app.services import (blacklist_service, connection_test, dmarc_imap_service, dns_resolver,
+from app.services import (blacklist_service, connection_test, dane, dmarc_imap_service, dns_resolver,
                           geoip_downloader, geoip_service, notification_channels, smtp_service)
 from demo import fake_internet, fake_mailcow, world
 
 _PATCHED = [
-    (dns_resolver, "resolve"), (dns_resolver, "resolve_for_blacklist"), (httpx, "AsyncClient"),
+    (dns_resolver, "resolve"), (dns_resolver, "resolve_for_blacklist"), (dns_resolver, "resolve_dnssec"),
+    (dane, "fetch_smtp_certificate"), (httpx, "AsyncClient"),
     (smtp_service.SmtpService, "send_email"), (connection_test, "test_smtp_connection"),
     (connection_test, "test_imap_connection"), (settings_router, "test_smtp_connection"),
     (settings_router, "test_imap_connection"), (dmarc_imap_service.DMARCImapService, "sync_reports"),
@@ -51,7 +52,11 @@ def test_domains_show_good_warning_and_error_states(internet):
 
     com, org, shop, net = asyncio.run(checks())
     assert statuses(com) == {"spf": "success", "dkim": "success", "dmarc": "success",
-                             "tlsa": "success", "mta_sts": "success"}
+                             "dnssec": "success", "tlsa": "success", "mta_sts": "success"}
+    # DANE works end to end: validated records that pin the mail host's certificate
+    assert com["tlsa"]["dane_active"] is True
+    assert com["tlsa"]["hosts"][0]["certificate"] == "match"
+    assert statuses(org)["dnssec"] == "warning"
     assert statuses(org)["dmarc"] == "warning"
     assert "~all" in org["spf"]["message"]
     assert statuses(shop)["dmarc"] == "error"

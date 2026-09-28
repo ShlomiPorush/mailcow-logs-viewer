@@ -10,7 +10,9 @@ reaching the network.
 
 The zones are consistent with the fake mailcow server: SPF authorises the
 server address mailcow reports, DKIM matches mailcow's key, and the MX,
-TLSA and MTA-STS records point at the same mail host. The three hosted
+TLSA and MTA-STS records point at the same mail host. The TLSA record pins
+the certificate the fake mail host presents, and the signed zones answer as
+DNSSEC validated, so DANE shows as working. The three hosted
 domains are deliberately in different shape (all good, warnings, an error)
 so the Domains page shows what the checks find.
 """
@@ -19,11 +21,16 @@ import hashlib
 import logging
 from pathlib import Path
 
+import dns.rcode
 import dns.rdata
 import dns.rdataclass
 import dns.rdatatype
 import dns.resolver
 import httpx
+from cryptography import x509
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import ec
+from cryptography.x509.oid import NameOID
 
 from . import world
 
@@ -34,7 +41,31 @@ _HERE = Path(__file__).resolve().parent
 HELP_DOCS_DIR = next((p for p in (_HERE / "HelpDocs", _HERE.parents[1] / "documentation" / "HelpDocs")
                       if p.is_dir()), _HERE / "HelpDocs")
 
-_TLSA_HASH = hashlib.sha256(b"demo mail.example.com certificate").hexdigest()
+
+def _mail_host_certificate() -> bytes:
+    """The certificate the fake mail host presents over STARTTLS.
+
+    The key is derived from a fixed seed, so the TLSA record below is the
+    same on every start and never looks like a DNS change.
+    """
+    seed = int.from_bytes(hashlib.sha256(b"demo mail host key").digest(), "big")
+    key = ec.derive_private_key(seed % (2 ** 255), ec.SECP256R1())
+    name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, world.MAIL_HOST)])
+    start = datetime.datetime(2026, 1, 1, tzinfo=datetime.timezone.utc)
+    cert = (x509.CertificateBuilder()
+            .subject_name(name).issuer_name(name)
+            .public_key(key.public_key())
+            .serial_number(1)
+            .not_valid_before(start).not_valid_after(start + datetime.timedelta(days=3650))
+            .sign(key, hashes.SHA256()))
+    return cert.public_bytes(serialization.Encoding.DER)
+
+
+MAIL_HOST_CERTIFICATE = _mail_host_certificate()
+_TLSA_HASH = hashlib.sha256(
+    x509.load_der_x509_certificate(MAIL_HOST_CERTIFICATE).public_key().public_bytes(
+        serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo)
+).hexdigest()
 _MX = f"10 {world.MAIL_HOST}."
 _DKIM = f'"v=DKIM1;k=rsa;t=s;s=email;p={world.DKIM_KEY}"'
 _SPF_STRICT = f'"v=spf1 mx ip4:{world.SERVER_IPV4} -all"'
@@ -63,6 +94,10 @@ ZONES = {
     world.MAIL_HOST: {"A": [world.SERVER_IPV4], "AAAA": [world.SERVER_IPV6]},
     f"_25._tcp.{world.MAIL_HOST}": {"TLSA": [f"3 1 1 {_TLSA_HASH}"]},
 }
+
+# Zones signed with DNSSEC. example.org and shop.test are not, which the
+# Domains page reports as a warning, in line with their other warnings.
+SIGNED_ZONES = ("example.com", "example.net")
 
 MTA_STS_POLICIES = {
     "example.com": f"version: STSv1\nmode: enforce\nmx: {world.MAIL_HOST}\nmax_age: 604800\n",
@@ -110,6 +145,29 @@ async def resolve(query, rdtype="A", timeout=5, **kwargs):
         raise dns.resolver.NoAnswer()
     rtype = dns.rdatatype.from_text(rdtype)
     return [dns.rdata.from_text(dns.rdataclass.IN, rtype, text) for text in texts]
+
+
+def _signed(name: str) -> bool:
+    return any(name == zone or name.endswith("." + zone) for zone in SIGNED_ZONES)
+
+
+async def resolve_dnssec(query, rdtype="A", timeout=5, checking_disabled=False):
+    from app.services.dns_resolver import DnssecAnswer
+    name = _normalize(query)
+    rdtype = str(rdtype).upper()
+    records = ZONES.get(name)
+    if records is None:
+        return DnssecAnswer(dns.rcode.NXDOMAIN, _signed(name), [])
+    rtype = dns.rdatatype.from_text(rdtype)
+    answers = [dns.rdata.from_text(dns.rdataclass.IN, rtype, text) for text in records.get(rdtype, [])]
+    return DnssecAnswer(dns.rcode.NOERROR, _signed(name), answers)
+
+
+async def fetch_smtp_certificate(host):
+    from app.services.dane import CertificateUnavailable
+    if _normalize(host) == world.MAIL_HOST:
+        return MAIL_HOST_CERTIFICATE
+    raise CertificateUnavailable("connection refused")
 
 
 async def resolve_for_blacklist(query, rdtype="A", timeout=10, **kwargs):
@@ -262,11 +320,13 @@ def _geoip_available():
 # ------------------------------------------------------------------ install
 
 def install():
-    from app.services import (connection_test, dmarc_imap_service, dns_resolver,
+    from app.services import (connection_test, dane, dmarc_imap_service, dns_resolver,
                               geoip_downloader, geoip_service, notification_channels, smtp_service)
     from app.routers import settings as settings_router
 
     dns_resolver.resolve = resolve
+    dns_resolver.resolve_dnssec = resolve_dnssec
+    dane.fetch_smtp_certificate = fetch_smtp_certificate
     dns_resolver.resolve_for_blacklist = resolve_for_blacklist
     httpx.AsyncClient = DemoAsyncClient
 
