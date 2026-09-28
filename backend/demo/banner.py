@@ -6,9 +6,9 @@ slim notice at the top of the main column of every HTML page the app
 serves, styled with the interface's own theme variables so it follows the
 light and dark themes.
 
-DEMO_PREVIEW_LABEL adds a second tag next to "Demo", for example
-"v3 preview" while the demo runs a version that is not released yet. It is
-empty by default, so a build that does not set it shows no label.
+DEMO_NOTICE replaces the notice text, for example to say that the demo
+runs an unreleased version. When it is empty the default text is shown.
+The "Demo" tag and the link to the installation guide always stay.
 """
 import html
 import os
@@ -22,8 +22,6 @@ STYLE = """
   border-bottom: 1px solid var(--ui-line); font-size: var(--ui-fs-sm, 12.5px); line-height: 1.4; }
 .demo-banner-tag { padding: 2px 8px; border-radius: 999px; background: var(--ui-accent);
   color: var(--ui-on-accent); font-weight: 600; letter-spacing: .02em; }
-.demo-banner-preview { padding: 1px 8px; border-radius: 999px; border: 1px solid var(--ui-line);
-  color: var(--ui-ink); font-weight: 600; white-space: nowrap; }
 .demo-banner-text { color: var(--ui-muted); }
 .demo-banner a { color: var(--ui-ink); font-weight: 600; text-decoration: underline;
   text-underline-offset: 3px; margin-inline-start: auto; }
@@ -37,27 +35,31 @@ STYLE = """
 """
 
 
-PREVIEW_LABEL_MAX = 40
+NOTICE_MAX = 200
 
 
-def banner_html(preview_label: str = "") -> bytes:
-    label = (preview_label or "").strip()[:PREVIEW_LABEL_MAX]
-    preview = f'<span class="demo-banner-preview">{html.escape(label)}</span>' if label else ""
+def banner_html(notice: str = "") -> bytes:
+    text = " ".join((notice or "").split())[:NOTICE_MAX]
+    if text:
+        message = f'<span class="demo-banner-text">{html.escape(text)}</span>'
+    else:
+        message = (
+            '<span class="demo-banner-text"><span class="demo-banner-long">Fictional data, no real mail server. '
+            "Anything you change is reset automatically on a regular schedule.</span>"
+            '<span class="demo-banner-short">Fictional data, resets automatically</span></span>'
+        )
     return (
         f"<style>{STYLE}</style>"
         '<aside class="demo-banner" aria-label="Demo notice">'
         '<span class="demo-banner-tag">Demo</span>'
-        f"{preview}"
-        '<span class="demo-banner-text"><span class="demo-banner-long">Fictional data, no real mail server. '
-        "Anything you change is reset automatically on a regular schedule.</span>"
-        '<span class="demo-banner-short">Fictional data, resets automatically</span></span>'
+        f"{message}"
         f'<a href="{INSTALL_URL}" target="_blank" rel="noopener">'
         '<span class="demo-banner-long">Install it on your server</span><span class="demo-banner-short">Install</span></a>'
         "</aside>"
     ).encode()
 
 
-BANNER = banner_html(os.environ.get("DEMO_PREVIEW_LABEL", ""))
+BANNER = banner_html(os.environ.get("DEMO_NOTICE", ""))
 
 
 def inject(body: bytes) -> bytes:

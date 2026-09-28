@@ -50,15 +50,18 @@ def test_other_responses_pass_untouched():
     assert body == PAGE
 
 
-def test_there_is_no_preview_label_unless_one_is_set():
+def test_the_default_text_is_shown_unless_a_notice_is_set():
     from demo.banner import banner_html
-    assert b'<span class="demo-banner-preview">' not in banner_html("")
-    assert b'<span class="demo-banner-preview">' not in banner_html("   ")
+    for value in ("", "   "):
+        assert b"reset automatically on a regular schedule" in banner_html(value)
 
 
-def test_the_preview_label_is_shown_escaped_and_short():
-    from demo.banner import PREVIEW_LABEL_MAX, banner_html
-    assert b'<span class="demo-banner-preview">v3 preview</span>' in banner_html(" v3 preview ")
-    assert b'<span class="demo-banner-preview">a&lt;b&gt;&quot;</span>' in banner_html('a<b>"')
-    long = banner_html("x" * 200)
-    assert b"x" * PREVIEW_LABEL_MAX in long and b"x" * (PREVIEW_LABEL_MAX + 1) not in long
+def test_a_notice_replaces_the_whole_text_escaped_and_short():
+    from demo.banner import NOTICE_MAX, banner_html
+    body = banner_html("  v3 preview.\t Fictional data.  ")
+    assert b'<span class="demo-banner-text">v3 preview. Fictional data.</span>' in body
+    assert b"reset automatically on a regular schedule" not in body
+    assert b"Install it on your server" in body and b">Demo<" in body
+    assert b"a&lt;b&gt;&quot;" in banner_html('a<b>"')
+    long = banner_html("x" * 500)
+    assert b"x" * NOTICE_MAX in long and b"x" * (NOTICE_MAX + 1) not in long
