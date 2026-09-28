@@ -284,16 +284,16 @@ Native `title` tooltips. Dynamic ones show the expression that builds the text.
 | Status | dynamic: `${escapeHtml(detail)}` | `frontend/app.js:4332` (renderBlacklistStatus) |
 | Status | "View info" | `frontend/app.js:4333` (renderBlacklistStatus) |
 | Status | "Help - IP Blacklist Monitor" | `frontend/index.html:1667` |
-| Domains | "OK" | `frontend/domains.js:242` (renderDomainAccordionRow) |
-| Domains | "Warning" | `frontend/domains.js:243` (renderDomainAccordionRow) |
-| Domains | "Error" | `frontend/domains.js:244` (renderDomainAccordionRow) |
-| Domains | "Unknown" | `frontend/domains.js:245` (renderDomainAccordionRow) |
-| Domains | "Check DNS for this domain" | `frontend/domains.js:412` (renderDomainAccordionRow) |
-| Domains | "Check DNS for this domain" | `frontend/domains.js:733` (checkSingleDomainDNS) |
-| Domains | "OK" | `frontend/domains.js:754` (checkSingleDomainDNS) |
-| Domains | "Warning" | `frontend/domains.js:755` (checkSingleDomainDNS) |
-| Domains | "Error" | `frontend/domains.js:756` (checkSingleDomainDNS) |
-| Domains | "Unknown" | `frontend/domains.js:757` (checkSingleDomainDNS) |
+| Domains | "OK" | `frontend/domains.js:243` (renderDomainAccordionRow) |
+| Domains | "Warning" | `frontend/domains.js:244` (renderDomainAccordionRow) |
+| Domains | "Error" | `frontend/domains.js:245` (renderDomainAccordionRow) |
+| Domains | "Unknown" | `frontend/domains.js:246` (renderDomainAccordionRow) |
+| Domains | "Check DNS for this domain" | `frontend/domains.js:413` (renderDomainAccordionRow) |
+| Domains | "Check DNS for this domain" | `frontend/domains.js:739` (checkSingleDomainDNS) |
+| Domains | "OK" | `frontend/domains.js:761` (checkSingleDomainDNS) |
+| Domains | "Warning" | `frontend/domains.js:762` (checkSingleDomainDNS) |
+| Domains | "Error" | `frontend/domains.js:763` (checkSingleDomainDNS) |
+| Domains | "Unknown" | `frontend/domains.js:764` (checkSingleDomainDNS) |
 | Domains | "Help - Domains Information" | `frontend/index.html:1776` |
 | DMARC | "DMARC Reports" | `frontend/dmarc.js:366` (loadDmarcDomains) |
 | DMARC | "TLS Reports" | `frontend/dmarc.js:367` (loadDmarcDomains) |
@@ -408,15 +408,15 @@ Transient notifications from `showToast(message, type)` (utils.js). Type default
 | Status | dynamic: ``Job "${displayName}" started successfully`` [success] | `frontend/app.js:4547` (triggerBackgroundJob) |
 | Status | dynamic: ``Job "${displayName}" is already running`` [warning] | `frontend/app.js:4556` (triggerBackgroundJob) |
 | Status | dynamic: ``Failed to start job: ${error.message}`` [error] | `frontend/app.js:4559` (triggerBackgroundJob) |
-| Domains | "DNS check already in progress" [warning] | `frontend/domains.js:634` (checkAllDomainsDNS) |
-| Domains | dynamic: ``✓ Checked ${result.domains_checked} domains`` [success] | `frontend/domains.js:654` (checkAllDomainsDNS) |
-| Domains | "DNS check failed" [error] | `frontend/domains.js:657` (checkAllDomainsDNS) |
-| Domains | "Failed to check DNS" [error] | `frontend/domains.js:661` (checkAllDomainsDNS) |
-| Domains | "DNS check already in progress" [warning] | `frontend/domains.js:675` (checkSingleDomainDNS) |
-| Domains | dynamic: ``Checking DNS for ${domainName}...`` [info] | `frontend/domains.js:680` (checkSingleDomainDNS) |
-| Domains | dynamic: ``✓ DNS checked for ${domainName}`` [success] | `frontend/domains.js:694` (checkSingleDomainDNS) |
-| Domains | dynamic: ``Failed to check DNS for ${domainName}`` [error] | `frontend/domains.js:782` (checkSingleDomainDNS) |
-| Domains | "Failed to check DNS" [error] | `frontend/domains.js:786` (checkSingleDomainDNS) |
+| Domains | "DNS check already in progress" [warning] | `frontend/domains.js:639` (checkAllDomainsDNS) |
+| Domains | dynamic: ``✓ Checked ${result.domains_checked} domains`` [success] | `frontend/domains.js:659` (checkAllDomainsDNS) |
+| Domains | "DNS check failed" [error] | `frontend/domains.js:662` (checkAllDomainsDNS) |
+| Domains | "Failed to check DNS" [error] | `frontend/domains.js:666` (checkAllDomainsDNS) |
+| Domains | "DNS check already in progress" [warning] | `frontend/domains.js:680` (checkSingleDomainDNS) |
+| Domains | dynamic: ``Checking DNS for ${domainName}...`` [info] | `frontend/domains.js:685` (checkSingleDomainDNS) |
+| Domains | dynamic: ``✓ DNS checked for ${domainName}`` [success] | `frontend/domains.js:699` (checkSingleDomainDNS) |
+| Domains | dynamic: ``Failed to check DNS for ${domainName}`` [error] | `frontend/domains.js:789` (checkSingleDomainDNS) |
+| Domains | "Failed to check DNS" [error] | `frontend/domains.js:793` (checkSingleDomainDNS) |
 | DMARC | "Manual upload is disabled" [error] | `frontend/dmarc.js:1321` (uploadDmarcReport) |
 | DMARC | dynamic: ``${reportType} report uploaded: ${count} ${countLabel}`` [success] | `frontend/dmarc.js:1334` (uploadDmarcReport) |
 | DMARC | dynamic: ``${reportType} report already exists`` [warning] | `frontend/dmarc.js:1346` (uploadDmarcReport) |
@@ -718,7 +718,7 @@ Functions that render a spinner or "Loading..." while data is fetched.
 | Quarantine | 1 loading indicator(s) | `frontend/app.js:3450` (loadQuarantineRuleHistory) |
 | Status | 2 loading indicator(s) | `frontend/app.js:4022` (checkBlacklists) |
 | Status | 1 loading indicator(s) | `frontend/app.js:4534` (triggerBackgroundJob) |
-| Domains | 1 loading indicator(s) | `frontend/domains.js:641` (checkAllDomainsDNS) |
+| Domains | 1 loading indicator(s) | `frontend/domains.js:646` (checkAllDomainsDNS) |
 | DMARC | 1 loading indicator(s) | `frontend/dmarc.js:134` (loadDmarc) |
 | Logs | 1 loading indicator(s) | `frontend/logs-viewer.js:1107` (loadDateRangeLogs) |
 | Settings | 3 loading indicator(s) | `frontend/settings.js:1558` (renderSettings) |

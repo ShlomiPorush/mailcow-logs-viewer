@@ -498,7 +498,7 @@ class Settings(BaseSettings):
     dns_change_alerts_enabled: bool = Field(
         default=True,
         env='DNS_CHANGE_ALERTS_ENABLED',
-        description='Alert when a domain SPF, DKIM, DMARC or TLSA record changes (sent to email and notification destinations)'
+        description='Alert when a domain SPF, DKIM, DMARC, TLSA or MTA-STS record changes, DNSSEC stops validating, or a TLSA record no longer matches the mail server certificate (sent to email and notification destinations)'
     )
 
     # Blacklist (RBL) checks

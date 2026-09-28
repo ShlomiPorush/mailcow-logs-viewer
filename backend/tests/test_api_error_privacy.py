@@ -98,7 +98,7 @@ def test_cached_dns_failures_from_previous_versions_are_safe():
     db = Mock()
     db.query.return_value.filter.return_value.first.return_value = SimpleNamespace(
         spf_check=legacy, dkim_check=None, dmarc_check=valid,
-        tlsa_check=None, mta_sts_check=None, checked_at=None,
+        dnssec_check=None, tlsa_check=None, mta_sts_check=None, checked_at=None,
     )
     result = get_cached_dns_check(db, "example.test")
     assert "synthetic-private-detail" not in result["spf"]["message"]

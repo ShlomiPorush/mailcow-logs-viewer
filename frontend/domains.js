@@ -234,6 +234,7 @@ function renderDomainAccordionRow(domain) {
     const spf = dns.spf || { status: 'unknown', message: 'Not checked' };
     const dkim = dns.dkim || { status: 'unknown', message: 'Not checked' };
     const dmarc = dns.dmarc || { status: 'unknown', message: 'Not checked' };
+    const dnssec = dns.dnssec || { status: 'unknown', message: 'Not checked' };
     const tlsa = dns.tlsa || { status: 'unknown', message: 'Not checked' };
     const mtaSts = dns.mta_sts || { status: 'unknown', message: 'Not checked' };
 
@@ -421,7 +422,8 @@ function renderDomainAccordionRow(domain) {
                         ${renderDNSCheck('SPF', spf)}
                         ${renderDNSCheck('DKIM', dkim)}
                         ${renderDNSCheck('DMARC', dmarc)}
-                        ${renderDNSCheck('TLSA', tlsa)}
+                        ${renderDNSCheck('DNSSEC', dnssec)}
+                        ${renderDNSCheck('DANE', tlsa)}
                         ${renderDNSCheck('MTA-STS', mtaSts)}
                     </div>
 
@@ -500,6 +502,7 @@ function renderAliasDomain(aliasDomain) {
     const spf = dns.spf || { status: 'unknown', message: 'Not checked yet' };
     const dkim = dns.dkim || { status: 'unknown', message: 'Not checked yet' };
     const dmarc = dns.dmarc || { status: 'unknown', message: 'Not checked yet' };
+    const dnssec = dns.dnssec || { status: 'unknown', message: 'Not checked yet' };
     const tlsa = dns.tlsa || { status: 'unknown', message: 'Not checked yet' };
     const mtaSts = dns.mta_sts || { status: 'unknown', message: 'Not checked yet' };
     const detailsId = `alias-domain-${aliasDomain.domain_name.replace(/[^a-z0-9]/gi, '-')}`;
@@ -515,7 +518,8 @@ function renderAliasDomain(aliasDomain) {
                     <span>SPF ${getAliasStatusIcon(spf.status)}</span>
                     <span>DKIM ${getAliasStatusIcon(dkim.status)}</span>
                     <span>DMARC ${getAliasStatusIcon(dmarc.status)}</span>
-                    <span>TLSA ${getAliasStatusIcon(tlsa.status)}</span>
+                    <span>DNSSEC ${getAliasStatusIcon(dnssec.status)}</span>
+                    <span>DANE ${getAliasStatusIcon(tlsa.status)}</span>
                     <span>MTA-STS ${getAliasStatusIcon(mtaSts.status)}</span>
                 </div>
             </div>
@@ -524,7 +528,8 @@ function renderAliasDomain(aliasDomain) {
                     ${renderDNSCheck('SPF', spf)}
                     ${renderDNSCheck('DKIM', dkim)}
                     ${renderDNSCheck('DMARC', dmarc)}
-                    ${renderDNSCheck('TLSA', tlsa)}
+                    ${renderDNSCheck('DNSSEC', dnssec)}
+                    ${renderDNSCheck('DANE', tlsa)}
                     ${renderDNSCheck('MTA-STS', mtaSts)}
                 </div>
             </div>
@@ -708,6 +713,7 @@ async function checkSingleDomainDNS(domainName) {
                         const spf = dns.spf || { status: 'unknown', message: 'Not checked' };
                         const dkim = dns.dkim || { status: 'unknown', message: 'Not checked' };
                         const dmarc = dns.dmarc || { status: 'unknown', message: 'Not checked' };
+                        const dnssec = dns.dnssec || { status: 'unknown', message: 'Not checked' };
                         const tlsa = dns.tlsa || { status: 'unknown', message: 'Not checked' };
                         const mtaSts = dns.mta_sts || { status: 'unknown', message: 'Not checked' };
 
@@ -742,7 +748,8 @@ async function checkSingleDomainDNS(domainName) {
                                 ${renderDNSCheck('SPF', spf)}
                                 ${renderDNSCheck('DKIM', dkim)}
                                 ${renderDNSCheck('DMARC', dmarc)}
-                                ${renderDNSCheck('TLSA', tlsa)}
+                                ${renderDNSCheck('DNSSEC', dnssec)}
+                                ${renderDNSCheck('DANE', tlsa)}
                                 ${renderDNSCheck('MTA-STS', mtaSts)}
                             </div>
                         `;

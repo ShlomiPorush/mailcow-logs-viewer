@@ -35,6 +35,8 @@ tenacity==8.2.3
 
 # DNS Queries - Required for domains management
 dnspython[doh]==2.6.1
+# TLSA matching for DANE checks (already installed through authlib)
+cryptography>=42.0.0
 
 # Secure XML parsing (DMARC reports are untrusted input)
 defusedxml>=0.7.1

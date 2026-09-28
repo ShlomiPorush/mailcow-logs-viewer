@@ -8,6 +8,7 @@ import ipaddress
 from fastapi import APIRouter, HTTPException, Depends
 from typing import Dict, Any, List, Optional
 import dns.resolver
+import dns.rcode
 import httpx
 import dns.asyncresolver
 from datetime import datetime, timezone, timedelta
@@ -1094,31 +1095,156 @@ async def check_dmarc_record(domain: str) -> Dict[str, Any]:
         }
 
 
-async def check_tlsa_record(domain: str) -> Dict[str, Any]:
-    """
-    Check TLSA (DANE) records for a domain's mail servers.
+async def resolve_dnssec_with_fallback(query: str, record_type: str = 'A', timeout: int = 5,
+                                       checking_disabled: bool = False):
+    """DNSSEC-aware lookup that reports the resolver's AD flag.
 
-    DANE for SMTP publishes TLSA records under the MX hostname, not the domain
-    itself: _25._tcp.<mx-host>. So we resolve MX first, then look up each host.
+    Kept module-level, like resolve_dns_with_fallback, so tests can inject a
+    fake resolver. See app.services.dns_resolver.resolve_dnssec.
+    """
+    from app.services.dns_resolver import resolve_dnssec
+    return await resolve_dnssec(query, record_type, timeout, checking_disabled)
+
+
+async def _fetch_mx_certificate(host: str) -> bytes:
+    """DER certificate the MX host presents over STARTTLS on port 25.
+
+    Module-level so tests can inject a fake instead of connecting.
+    """
+    from app.services import dane
+    return await dane.fetch_smtp_certificate(host)
+
+
+async def check_dnssec_record(domain: str) -> Dict[str, Any]:
+    """
+    Check whether the domain is DNSSEC signed and validates.
+
+    DNSSEC protects every record of the domain (MX, SPF, DKIM, DMARC) from
+    spoofing and is a prerequisite for DANE. The validating public resolvers
+    used for all DNS checks set the AD flag on a validated answer.
 
     Returns the same shape as the other checks (status/message/record/warnings).
     """
+    def result(status, message, validated, warnings=None, info=None):
+        return {
+            'status': status,
+            'message': message,
+            'record': None,
+            'validated': validated,
+            'warnings': warnings or [],
+            'info': info or [],
+        }
+
+    try:
+        try:
+            answer = await resolve_dnssec_with_fallback(domain, 'SOA', timeout=5)
+        except Exception as e:
+            logger.error("Could not check DNSSEC for %s: %s", domain, e)
+            return result('unknown', 'Could not check DNSSEC. Check the application logs.', None)
+
+        if answer.rcode == dns.rcode.SERVFAIL:
+            # Validating resolvers answer SERVFAIL for a broken signature. The
+            # same query with checking disabled succeeds when DNSSEC is the cause.
+            try:
+                unchecked = await resolve_dnssec_with_fallback(domain, 'SOA', timeout=5,
+                                                               checking_disabled=True)
+            except Exception:
+                unchecked = None
+            if unchecked is not None and unchecked.rcode in (dns.rcode.NOERROR, dns.rcode.NXDOMAIN):
+                return result(
+                    'error',
+                    'DNSSEC validation fails - resolvers that check signatures cannot resolve this domain',
+                    False,
+                    warnings=['Mail to and from this domain can fail. Check that the DS record at your '
+                              'registrar matches the keys your DNS provider publishes.'],
+                )
+            return result('unknown', 'DNS lookup failed for this domain', None)
+
+        if answer.rcode != dns.rcode.NOERROR:
+            return result('unknown', 'Domain not found in DNS - cannot check DNSSEC', None)
+
+        if answer.authenticated:
+            return result('success', 'DNSSEC signed and validated', True)
+
+        # Not validated. Keys without a DS record at the registrar are a
+        # common half-finished setup worth naming.
+        has_keys = False
+        try:
+            keys = await resolve_dnssec_with_fallback(domain, 'DNSKEY', timeout=5)
+            has_keys = bool(keys.records)
+        except Exception:
+            pass
+        if has_keys:
+            return result(
+                'warning',
+                'DNSSEC keys are published but not validated - the DS record is missing at the registrar',
+                False,
+                info=['Publish the DS record at your registrar to complete the DNSSEC setup.'],
+            )
+        return result(
+            'warning',
+            'DNSSEC not enabled for this domain',
+            False,
+            info=['DNSSEC protects your DNS records from spoofing and is required for DANE. '
+                  'Enable it at your DNS provider, then publish the DS record at your registrar.'],
+        )
+
+    except Exception as e:
+        logger.error(f"Error checking DNSSEC for {domain}: {e}")
+        return result('unknown', 'Could not check DNSSEC. Check the application logs.', None)
+
+
+async def _host_address_validated(host: str) -> Optional[bool]:
+    """Whether the MX host's address records are DNSSEC validated.
+
+    RFC 7672: senders only use the TLSA records of an MX host whose address
+    lookup is secure. None when the lookup failed.
+    """
+    for rtype in ('A', 'AAAA'):
+        try:
+            answer = await resolve_dnssec_with_fallback(host, rtype, timeout=5)
+        except Exception:
+            return None
+        if answer.rcode != dns.rcode.NOERROR:
+            return None
+        if answer.records:
+            return answer.authenticated
+    return None
+
+
+async def check_tlsa_record(domain: str) -> Dict[str, Any]:
+    """
+    Check DANE for a domain's mail servers: TLSA records, their DNSSEC
+    validation, and whether they match the certificate each MX presents.
+
+    DANE for SMTP publishes TLSA records under the MX hostname, not the domain
+    itself: _25._tcp.<mx-host>. So we resolve MX first, then look up each host.
+    Senders only use the records when the MX records, the MX host's address
+    and the TLSA records are all DNSSEC validated (RFC 7672).
+
+    Returns the same shape as the other checks (status/message/record/warnings).
+    """
+    from app.services import dane
+
     try:
         # 1. Which mail servers does this domain use?
         null_mx = False
+        mx_validated = False
+        hosts = set()
         try:
-            mx_answers = await resolve_dns_with_fallback(domain, 'MX', timeout=5)
-            hosts = set()
-            for r in mx_answers:
-                exchange = str(getattr(r, 'exchange', '') or '').rstrip('.').strip()
-                if not exchange:
-                    # RFC 7505 "null MX" (0 .) - the domain accepts no mail at all
-                    null_mx = True
-                    continue
-                hosts.add(exchange)
-            mx_hosts = sorted(hosts)
+            mx_answer = await resolve_dnssec_with_fallback(domain, 'MX', timeout=5)
+            if mx_answer.rcode == dns.rcode.NOERROR:
+                mx_validated = mx_answer.authenticated
+                for r in mx_answer.records:
+                    exchange = str(getattr(r, 'exchange', '') or '').rstrip('.').strip()
+                    if not exchange:
+                        # RFC 7505 "null MX" (0 .) - the domain accepts no mail at all
+                        null_mx = True
+                        continue
+                    hosts.add(exchange)
         except Exception:
-            mx_hosts = []
+            pass
+        mx_hosts = sorted(hosts)
 
         if not mx_hosts:
             return {
@@ -1132,36 +1258,80 @@ async def check_tlsa_record(domain: str) -> Dict[str, Any]:
                 'warnings': [],
             }
 
-        # 2. Look for TLSA records under each mail server
+        # 2. TLSA records under each mail server, and the certificate they pin.
+        # Hosts are checked in parallel: an unreachable port 25 costs a timeout.
+        async def check_host(host):
+            """(records, result) for one MX host; None when the lookup failed."""
+            try:
+                tlsa_answer = await resolve_dnssec_with_fallback(f"_25._tcp.{host}", 'TLSA', timeout=5)
+            except Exception:
+                return None
+            if tlsa_answer.rcode not in (dns.rcode.NOERROR, dns.rcode.NXDOMAIN):
+                return None
+
+            host_records = []
+            for rdata in tlsa_answer.records:
+                usage = getattr(rdata, 'usage', None)
+                selector = getattr(rdata, 'selector', None)
+                mtype = getattr(rdata, 'mtype', None)
+                cert = getattr(rdata, 'cert', b'')
+                cert_hex = cert.hex() if isinstance(cert, (bytes, bytearray)) else str(cert)
+                host_records.append({
+                    'host': host,
+                    'usage': usage,
+                    'selector': selector,
+                    'matching_type': mtype,
+                    'certificate': cert_hex,
+                    'record': f"{usage} {selector} {mtype} {cert_hex}",
+                })
+            if not host_records:
+                # No TLSA for this host - normal when DANE is off
+                return [], None
+
+            host_result = {
+                'host': host,
+                'tlsa_validated': tlsa_answer.authenticated,
+                'address_validated': await _host_address_validated(host),
+                'certificate': 'not_verifiable',
+            }
+            if any(r['usage'] == dane.USAGE_DANE_EE for r in host_records):
+                try:
+                    certificate = await _fetch_mx_certificate(host)
+                except Exception as e:
+                    host_result['certificate'] = 'unreachable'
+                    host_result['certificate_error'] = str(e)
+                else:
+                    host_result['certificate'] = (
+                        'match' if any(dane.matches_certificate(r, certificate) for r in host_records)
+                        else 'mismatch'
+                    )
+            return host_records, host_result
+
         all_records = []
         hosts_with_tlsa = []
-        for host in mx_hosts:
-            query = f"_25._tcp.{host}"
-            try:
-                answers = await resolve_dns_with_fallback(query, 'TLSA', timeout=5)
-                host_records = []
-                for rdata in answers:
-                    usage = getattr(rdata, 'usage', None)
-                    selector = getattr(rdata, 'selector', None)
-                    mtype = getattr(rdata, 'mtype', None)
-                    cert = getattr(rdata, 'cert', b'')
-                    cert_hex = cert.hex() if isinstance(cert, (bytes, bytearray)) else str(cert)
-                    host_records.append({
-                        'host': host,
-                        'usage': usage,
-                        'selector': selector,
-                        'matching_type': mtype,
-                        'certificate': cert_hex,
-                        'record': f"{usage} {selector} {mtype} {cert_hex}",
-                    })
-                if host_records:
-                    hosts_with_tlsa.append(host)
-                    all_records.extend(host_records)
-            except Exception:
-                # No TLSA for this host (NXDOMAIN/NoAnswer) - normal when DANE is off
+        lookup_failed = []
+        host_results = []
+        outcomes = await asyncio.gather(*(check_host(host) for host in mx_hosts))
+        for host, outcome in zip(mx_hosts, outcomes):
+            if outcome is None:
+                lookup_failed.append(host)
                 continue
+            host_records, host_result = outcome
+            if host_records:
+                hosts_with_tlsa.append(host)
+                all_records.extend(host_records)
+                host_results.append(host_result)
 
         if not all_records:
+            if lookup_failed:
+                return {
+                    'status': 'unknown',
+                    'message': f'Could not look up TLSA records for {", ".join(lookup_failed)}',
+                    'record': None,
+                    'records': [],
+                    'mx_hosts': mx_hosts,
+                    'warnings': [],
+                }
             return {
                 'status': 'warning',
                 'message': f'No DANE/TLSA records published for {", ".join(mx_hosts)}',
@@ -1176,12 +1346,15 @@ async def check_tlsa_record(domain: str) -> Dict[str, Any]:
 
         # 3. Assess what was published
         warnings = []
-        missing = [h for h in mx_hosts if h not in hosts_with_tlsa]
+        info = []
+        missing = [h for h in mx_hosts if h not in hosts_with_tlsa and h not in lookup_failed]
         if missing:
             warnings.append(
                 f'No TLSA record for: {", ".join(missing)}. Every MX host should publish one, '
                 'or senders may fail to deliver.'
             )
+        if lookup_failed:
+            warnings.append(f'Could not look up TLSA records for: {", ".join(lookup_failed)}')
         # 3 1 1 (DANE-EE / SPKI / SHA-256) is the recommended combination for SMTP
         if not any(r['usage'] == 3 and r['selector'] == 1 and r['matching_type'] == 1
                    for r in all_records):
@@ -1190,15 +1363,60 @@ async def check_tlsa_record(domain: str) -> Dict[str, Any]:
                 '(DANE-EE, SPKI, SHA-256), which is what mailcow publishes by default.'
             )
 
-        status = 'success' if not warnings else 'warning'
+        not_validated = []
+        if not mx_validated:
+            not_validated.append(f'MX records of {domain}')
+        for host_result in host_results:
+            if not host_result['tlsa_validated']:
+                not_validated.append(f'TLSA record of {host_result["host"]}')
+            if host_result['address_validated'] is False:
+                not_validated.append(f'address of {host_result["host"]}')
+        dane_active = not not_validated
+        if not dane_active:
+            warnings.append('Not DNSSEC validated: ' + ', '.join(not_validated))
+
+        certificate_lines = {
+            'match': 'certificate matches the TLSA record',
+            'mismatch': 'certificate does not match the TLSA record',
+            'unreachable': 'certificate not compared - could not connect on port 25 from this server',
+            'not_verifiable': 'certificate not compared - only DANE-EE (usage 3) records can be checked',
+        }
+        for host_result in host_results:
+            info.append(f'{host_result["host"]}: {certificate_lines[host_result["certificate"]]}')
+
+        mismatched = [r['host'] for r in host_results if r['certificate'] == 'mismatch']
+        matched = [r['host'] for r in host_results if r['certificate'] == 'match']
+
+        if mismatched and dane_active:
+            status = 'error'
+            message = (f'TLSA record does not match the certificate of {", ".join(mismatched)} - '
+                       'senders that use DANE will refuse to deliver')
+        elif mismatched:
+            status = 'warning'
+            message = (f'TLSA record does not match the certificate of {", ".join(mismatched)} - '
+                       'mail will fail once DNSSEC is enabled')
+        elif not dane_active:
+            status = 'warning'
+            message = 'TLSA records are published but not DNSSEC validated - senders ignore them, so DANE is not active'
+        else:
+            status = 'success' if not warnings else 'warning'
+            if len(matched) == len(host_results):
+                message = f'DANE active - TLSA records validated and matching the certificate on {len(matched)} mail server(s)'
+            else:
+                message = 'DANE active - TLSA records validated, certificate not compared on every mail server'
+
         return {
             'status': status,
-            'message': f'{len(all_records)} TLSA record(s) found for {len(hosts_with_tlsa)} mail server(s)',
+            'message': message,
             # `record` keeps the flat text form so change detection can diff it
             'record': ' | '.join(sorted(r['record'] for r in all_records)),
             'records': all_records,
             'mx_hosts': mx_hosts,
+            'hosts': host_results,
+            'dane_active': dane_active,
+            'certificate_mismatch': mismatched if dane_active else [],
             'warnings': warnings,
+            'info': info,
         }
 
     except Exception as e:
@@ -1417,7 +1635,7 @@ async def check_mta_sts_record(domain: str) -> Dict[str, Any]:
 
 async def check_domain_dns(domain: str, spf_source_ips: Optional[List[Dict[str, str]]] = None) -> Dict[str, Any]:
     """
-    Check all DNS records (SPF, DKIM, DMARC, TLSA, MTA-STS) for a domain
+    Check all DNS records (SPF, DKIM, DMARC, DNSSEC, TLSA/DANE, MTA-STS) for a domain
 
     Args:
         domain: Domain name to check
@@ -1430,10 +1648,11 @@ async def check_domain_dns(domain: str, spf_source_ips: Optional[List[Dict[str, 
     """
     try:
         # Run all checks in parallel
-        spf_result, dkim_result, dmarc_result, tlsa_result, mta_sts_result = await asyncio.gather(
+        spf_result, dkim_result, dmarc_result, dnssec_result, tlsa_result, mta_sts_result = await asyncio.gather(
             check_spf_record(domain, spf_source_ips),
             check_dkim_record(domain),
             check_dmarc_record(domain),
+            check_dnssec_record(domain),
             check_tlsa_record(domain),
             check_mta_sts_record(domain)
         )
@@ -1443,6 +1662,7 @@ async def check_domain_dns(domain: str, spf_source_ips: Optional[List[Dict[str, 
             'spf': spf_result,
             'dkim': dkim_result,
             'dmarc': dmarc_result,
+            'dnssec': dnssec_result,
             'tlsa': tlsa_result,
             'mta_sts': mta_sts_result,
             'checked_at': format_datetime_for_api(datetime.now(timezone.utc))
@@ -1611,6 +1831,24 @@ def detect_dns_changes(previous: Optional[DomainDNSCheck],
             changes.append({'type': label, 'old': old_value, 'new': '(removed)'})
         elif old_value is None and new_value and _definitely_absent(old_check):
             changes.append({'type': label, 'old': '(none)', 'new': new_value})
+
+    # States that break or weaken delivery without any record value changing
+    old_dnssec = getattr(previous, 'dnssec_check', None)
+    new_dnssec = dns_data.get('dnssec')
+    if (isinstance(old_dnssec, dict) and isinstance(new_dnssec, dict)
+            and old_dnssec.get('status') == 'success'
+            and new_dnssec.get('status') in ('warning', 'error')):
+        changes.append({'type': 'DNSSEC', 'old': old_dnssec.get('message') or 'validated',
+                        'new': new_dnssec.get('message') or 'not validated'})
+
+    old_tlsa = getattr(previous, 'tlsa_check', None)
+    new_tlsa = dns_data.get('tlsa')
+    if isinstance(new_tlsa, dict):
+        old_mismatch = set(old_tlsa.get('certificate_mismatch') or []) if isinstance(old_tlsa, dict) else set()
+        new_mismatch = [h for h in new_tlsa.get('certificate_mismatch') or [] if h not in old_mismatch]
+        if new_mismatch:
+            changes.append({'type': 'DANE', 'old': 'TLSA record matched the certificate',
+                            'new': f'TLSA record does not match the certificate of {", ".join(new_mismatch)}'})
     return changes
 
 
@@ -1675,6 +1913,7 @@ async def save_dns_check_to_db(db: Session, domain_name: str, dns_data: Dict[str
             existing.spf_check = dns_data.get('spf')
             existing.dkim_check = dns_data.get('dkim')
             existing.dmarc_check = dns_data.get('dmarc')
+            existing.dnssec_check = dns_data.get('dnssec')
             existing.tlsa_check = dns_data.get('tlsa')
             existing.mta_sts_check = dns_data.get('mta_sts')
             existing.checked_at = checked_at
@@ -1686,6 +1925,7 @@ async def save_dns_check_to_db(db: Session, domain_name: str, dns_data: Dict[str
                 spf_check=dns_data.get('spf'),
                 dkim_check=dns_data.get('dkim'),
                 dmarc_check=dns_data.get('dmarc'),
+                dnssec_check=dns_data.get('dnssec'),
                 tlsa_check=dns_data.get('tlsa'),
                 mta_sts_check=dns_data.get('mta_sts'),
                 checked_at=checked_at,
@@ -1737,6 +1977,7 @@ def get_cached_dns_check(db: Session, domain_name: str) -> Dict[str, Any]:
                 'spf': _public_cached_dns_result(cached.spf_check),
                 'dkim': _public_cached_dns_result(cached.dkim_check),
                 'dmarc': _public_cached_dns_result(cached.dmarc_check),
+                'dnssec': _public_cached_dns_result(cached.dnssec_check),
                 'tlsa': _public_cached_dns_result(cached.tlsa_check),
                 'mta_sts': _public_cached_dns_result(cached.mta_sts_check),
                 'checked_at': format_datetime_for_api(cached.checked_at) if cached.checked_at else None

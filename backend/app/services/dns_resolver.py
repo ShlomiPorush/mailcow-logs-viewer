@@ -13,6 +13,7 @@ import dns.rdatatype
 import dns.rdataclass
 import dns.rcode
 import dns.name
+import dns.flags
 
 logger = logging.getLogger(__name__)
 
@@ -256,3 +257,85 @@ async def _resolve_with_fallback(query: str, rdtype: str, timeout: int, udp_serv
         error_msg += f" - last error: {last_error}"
     logger.warning(error_msg)
     raise Exception(error_msg)
+
+
+class DnssecAnswer:
+    """Outcome of a DNSSEC-aware lookup.
+
+    rcode:          the DNS response code (dns.rcode.NOERROR, NXDOMAIN, SERVFAIL...)
+    authenticated:  the resolver validated the answer (AD flag)
+    records:        rdata of the requested type (CNAMEs followed by the resolver)
+    """
+
+    def __init__(self, rcode: int, authenticated: bool, records: list):
+        self.rcode = rcode
+        self.authenticated = authenticated
+        self.records = records
+
+
+def _dnssec_answer(response, rdtype: str) -> DnssecAnswer:
+    wanted = dns.rdatatype.from_text(rdtype)
+    records = [rdata for rrset in response.answer if rrset.rdtype == wanted for rdata in rrset]
+    return DnssecAnswer(
+        rcode=response.rcode(),
+        authenticated=bool(response.flags & dns.flags.AD),
+        records=records,
+    )
+
+
+async def resolve_dnssec(query: str, rdtype: str = 'A', timeout: int = 5,
+                         checking_disabled: bool = False) -> DnssecAnswer:
+    """
+    Resolve a query and report whether the resolver validated it with DNSSEC.
+
+    The public resolvers used by resolve() all validate DNSSEC, so the AD flag
+    in their answer is a reliable "signed and validated". A validation failure
+    comes back as SERVFAIL; asking again with checking_disabled tells a broken
+    signature apart from a server problem.
+
+    Unlike resolve(), NXDOMAIN and empty answers are returned, not raised:
+    the AD flag on a negative answer matters too.
+
+    Raises:
+        Exception: every resolver failed at the transport level
+    """
+    q = dns.message.make_query(dns.name.from_text(query), rdtype, want_dnssec=True)
+    q.flags |= dns.flags.AD           # RFC 6840: ask for the AD bit explicitly
+    if checking_disabled:
+        q.flags |= dns.flags.CD
+
+    last_error = None
+    servfail = None
+
+    # Phase 1: UDP (TCP on truncation), same servers as resolve()
+    for dns_servers in UDP_DNS_SERVERS:
+        for server in dns_servers:
+            try:
+                response, _ = await dns.asyncquery.udp_with_fallback(q, server, timeout=timeout)
+            except Exception as e:
+                last_error = str(e)
+                logger.debug(f"DNSSEC query failed ({server}) for {query}: {e}")
+                continue
+            if response.rcode() == dns.rcode.SERVFAIL:
+                servfail = response       # may be a bad signature - confirm with the next server
+                continue
+            return _dnssec_answer(response, rdtype)
+
+    # Phase 2: DoH when UDP/53 is blocked
+    if servfail is None:
+        for doh_url in DOH_URLS:
+            try:
+                response = await dns.asyncquery.https(q, doh_url, timeout=timeout)
+            except Exception as e:
+                last_error = str(e)
+                logger.debug(f"DNSSEC DoH failed ({doh_url}) for {query}: {e}")
+                continue
+            if response.rcode() == dns.rcode.SERVFAIL:
+                servfail = response
+                continue
+            return _dnssec_answer(response, rdtype)
+
+    if servfail is not None:
+        return _dnssec_answer(servfail, rdtype)
+
+    raise Exception(f"All DNS resolvers failed for {query} (DNSSEC) - last error: {last_error}")
