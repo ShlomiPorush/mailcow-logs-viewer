@@ -72,7 +72,10 @@ step "SPA is served without a login, with the demo notice"
 for route in / /dashboard /messages /settings; do
     code=$(curl -s -o /dev/null -w '%{http_code}' "${BASE}${route}")
     [ "${code}" = "200" ] || fail "GET ${route} returned ${code}"
-    curl -s "${BASE}${route}" | grep -q 'class="demo-banner"' || fail "GET ${route} has no demo notice"
+    # Read the whole page first: grep -q stops early, and under pipefail
+    # curl's broken pipe would fail the check even when the notice is there
+    page=$(curl -s "${BASE}${route}")
+    case "${page}" in *'class="demo-banner"'*) ;; *) fail "GET ${route} has no demo notice" ;; esac
 done
 
 step "The demo runs on the asyncio loop with the network guard installed"
