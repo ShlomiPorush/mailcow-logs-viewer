@@ -114,3 +114,20 @@ test('the Edit button opens the row it belongs to', () => {
     context.showEditSuppressionModalById(8);
     assert.deepEqual(opened.map(s => s.email), ['user@example.com']);
 });
+
+test('the Logs page passes a service name as data', () => {
+    const elements = {};
+    const document = new Proxy(stub(), {
+        get: (target, key) => key === 'getElementById'
+            ? id => (elements[id] = elements[id] || { innerHTML: '', classList: stub(), style: {} })
+            : stub(),
+    });
+    const context = load(['utils.js', 'logs-viewer.js'], { document });
+    const id = "x');window.injected=1;('\" data-injected=\"1";
+    context.renderLogServiceList([{ id, name: 'X', icon: 'file', log_count: 0 }]);
+    const html = elements['logs-service-list'].innerHTML;
+    assert.doesNotMatch(html, /data-injected="1"/);
+    const { calls, injected } = runHandlers(html, ['selectLogService']);
+    assert.equal(injected, undefined);
+    assert.deepEqual(calls, [['selectLogService', id]]);
+});

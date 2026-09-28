@@ -13,7 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
-- **Safer display of stored values** - Escape more values from reports and settings where the interface shows them, and reject report domains that are not valid domain names.
+- **Safer display of stored values** - Escape more values from reports and settings where the interface shows them, reject report domains that are not valid domain names, and accept only known services in the raw logs service list.
 
 ### Fixed
 
