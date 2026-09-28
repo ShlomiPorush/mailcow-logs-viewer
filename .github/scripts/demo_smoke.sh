@@ -47,7 +47,7 @@ step "Wait for /api/health"
 healthy=0
 for i in $(seq 1 60); do
     if body=$(curl -fsS "${BASE}/api/health" 2>/dev/null); then
-        if echo "${body}" | grep -q '"status": *"healthy"'; then healthy=1; break; fi
+        if grep -q '"status": *"healthy"' <<< "${body}"; then healthy=1; break; fi
     fi
     if [ "$(docker inspect -f '{{.State.Running}}' "${APP}" 2>/dev/null)" != "true" ]; then
         fail "demo container exited during startup"
@@ -65,13 +65,14 @@ done
 
 step "The demo runs on the asyncio loop with the network guard installed"
 logs=$(docker logs "${APP}" 2>&1)
-echo "${logs}" | grep -q "\[DEMO\] Outbound network disabled" || fail "network guard was not installed"
-echo "${logs}" | grep -q "\[DEMO\] Demo mode active" || fail "demo entry point did not load"
-docker exec "${APP}" sh -c 'cat /proc/1/cmdline | tr "\0" " "' | grep -q -- "--loop asyncio" \
+grep -q "\[DEMO\] Outbound network disabled" <<< "${logs}" || fail "network guard was not installed"
+grep -q "\[DEMO\] Demo mode active" <<< "${logs}" || fail "demo entry point did not load"
+cmdline=$(docker exec "${APP}" sh -c 'cat /proc/1/cmdline | tr "\0" " "')
+grep -q -- "--loop asyncio" <<< "${cmdline}" \
     || fail "uvicorn is not running on the asyncio loop (uvloop bypasses the guard)"
 
 step "No tracebacks during startup"
-if echo "${logs}" | grep -q "Traceback (most recent call last)"; then
+if grep -q "Traceback (most recent call last)" <<< "${logs}"; then
     fail "a traceback was logged during startup"
 fi
 
