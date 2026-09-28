@@ -65,8 +65,10 @@ ENV DEMO_MODE=true \
 # Settings set in ENV cannot be changed from the UI. Visitors can change
 # everything else; these would lock every other visitor out, load other
 # visitors' browsers with an outside image, or let one visitor slow down or
-# empty the demo for everyone until the nightly reset.
+# empty the demo for everyone until the nightly reset. RAW_LOGS_SERVICES is
+# free text the Logs page builds its service buttons from.
 ENV BASIC_AUTH_ENABLED=false \
+    RAW_LOGS_SERVICES=acme,api,autodiscover,dovecot,netfilter,postfix,ratelimited,rspamd-history,sogo,watchdog \
     OAUTH2_ENABLED=false \
     APP_LOGO_URL= \
     LOG_LEVEL=WARNING \
