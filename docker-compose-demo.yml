@@ -43,8 +43,9 @@ services:
       POSTGRES_USER: demo
       POSTGRES_PASSWORD: demo
       POSTGRES_DB: demo
-      # The nightly reset runs at 00:00 in this time zone
+      # The demo resets once a day at DEMO_RESET_TIME (HH:MM) in this time zone
       TZ: ${TZ:-UTC}
+      DEMO_RESET_TIME: ${DEMO_RESET_TIME:-00:00}
       # Optional: the notice text shown on every page (empty = the default text)
       DEMO_NOTICE: ${DEMO_NOTICE:-}
     networks:
