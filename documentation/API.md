@@ -801,7 +801,9 @@ POST /api/domains/example.com/check-dns
 **DKIM Validation:**
 - Fetches expected DKIM value from mailcow API (`/api/v1/get/dkim/{domain}`)
 - Queries DNS at `{selector}._domainkey.{domain}`
-- Compares expected vs actual records (whitespace-normalized)
+- Compares expected vs actual records tag by tag, in any order and spacing
+  - **Mismatch** (error): the key (`p=`), key type (`k=`, default `rsa`) or version differs, or `h=` does not allow `sha256`
+  - **Other tag differences** (warning): for example `t=s` missing or `h=sha256` added by the DNS provider; signatures still verify
 - **Parameter Validation**:
   - Parses all DKIM tags (v, k, t, h, p, etc.)
   - **Testing Mode Detection** (`t=y`): Returns critical error

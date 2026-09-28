@@ -646,13 +646,8 @@ def parse_dkim_parameters(dkim_record: str) -> Dict[str, Any]:
     issues = []
     info = []
     
-    params = {}
-    for part in dkim_record.split(';'):
-        part = part.strip()
-        if '=' in part:
-            key, value = part.split('=', 1)
-            params[key.strip()] = value.strip()
-    
+    params = normalize_dkim_record(dkim_record)
+
     if 'p' in params and params['p'] == '':
         issues.append({
             'level': 'error',
@@ -712,6 +707,66 @@ def normalize_dkim_record(record: str) -> Dict[str, str]:
             key, value = part.split('=', 1)
             params[key.strip()] = value.strip()
     return params
+
+
+# mailcow signs outgoing mail with rsa-sha256
+DKIM_SIGNING_HASH = 'sha256'
+
+
+def compare_dkim_records(expected: str, actual: str) -> Dict[str, List[str]]:
+    """
+    Compare mailcow's DKIM record with the published one, tag by tag.
+
+    DNS providers often reorder tags, add h=sha256 or drop t=s. Only a
+    different key, key type or a hash list without sha256 stops receivers
+    from verifying mailcow's signatures; other tags only narrow the policy.
+
+    Returns:
+        Dictionary with 'mismatches' (verification breaks) and
+        'differences' (tags that differ but still verify)
+    """
+    expected_params = normalize_dkim_record(expected)
+    actual_params = normalize_dkim_record(actual)
+    mismatches = []
+    differences = []
+
+    # Base64 in p= may contain folding whitespace (RFC 6376 section 3.6.1)
+    expected_key = re.sub(r'\s+', '', expected_params.get('p', ''))
+    actual_key = re.sub(r'\s+', '', actual_params.get('p', ''))
+    if expected_key != actual_key:
+        mismatches.append('Public key (p=) does not match the key in mailcow')
+
+    actual_version = actual_params.get('v', 'DKIM1')
+    if actual_version != 'DKIM1':
+        mismatches.append(f'Unsupported version (v={actual_version})')
+
+    expected_type = expected_params.get('k', 'rsa').lower()
+    actual_type = actual_params.get('k', 'rsa').lower()
+    if expected_type != actual_type:
+        mismatches.append(f'Key type k={actual_type} does not match mailcow (k={expected_type})')
+
+    reported_tags = {'v', 'p', 'k'}
+    if 'h' in actual_params:
+        hashes = [h.strip().lower() for h in actual_params['h'].split(':')]
+        if DKIM_SIGNING_HASH not in hashes:
+            mismatches.append(
+                f'h={actual_params["h"]} does not allow {DKIM_SIGNING_HASH}, which mailcow signs with'
+            )
+            reported_tags.add('h')
+
+    for tag in sorted((expected_params.keys() | actual_params.keys()) - reported_tags):
+        expected_value = expected_params.get(tag)
+        actual_value = actual_params.get(tag)
+        if expected_value == actual_value:
+            continue
+        if actual_value is None:
+            differences.append(f'{tag}={expected_value} from the mailcow record is missing')
+        elif expected_value is None:
+            differences.append(f'{tag}={actual_value} is not in the mailcow record')
+        else:
+            differences.append(f'{tag}={actual_value} differs from mailcow ({tag}={expected_value})')
+
+    return {'mismatches': mismatches, 'differences': differences}
 
 
 async def check_dkim_record(domain: str) -> Dict[str, Any]:
@@ -787,24 +842,16 @@ async def check_dkim_record(domain: str) -> Dict[str, Any]:
                 actual_record = b''.join(rdata.strings).decode('utf-8')
                 break
             
-            # Clean up records for comparison (remove whitespace)
-            expected_clean = expected_value.replace(' ', '').replace('\n', '').replace('\r', '').replace('\t', '')
-            actual_clean = actual_record.replace(' ', '').replace('\n', '').replace('\r', '').replace('\t', '')
-            
-            # Parse both records into parameters
-            expected_params = normalize_dkim_record(expected_value)
-            actual_params = normalize_dkim_record(actual_record)
-            
-            # Compare parameters, not raw strings
-            match = expected_params == actual_params
-            # match = expected_clean == actual_clean
-            
+            comparison = compare_dkim_records(expected_value, actual_record)
+            match = not comparison['mismatches']
+
             dkim_params = parse_dkim_parameters(actual_record)
-            
-            warnings = []
+
+            warnings = [f"❌ {m}" for m in comparison['mismatches']]
+            warnings += [f"⚠️ {d}" for d in comparison['differences']]
             info_messages = []
             critical_issues = []
-            
+
             for issue in dkim_params['issues']:
                 if issue['level'] == 'critical':
                     critical_issues.append(f"{issue['message']} - {issue['description']}")
