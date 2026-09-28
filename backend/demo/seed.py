@@ -7,9 +7,10 @@ them (fetch, correlation, Dovecot outcomes, mailbox and alias statistics,
 suppressions, DNS and blocklist checks) before the scheduler starts. DMARC
 and TLS reports go through the regular upload path.
 
-The nightly reset is a restart: at 00:00 in the container's time zone the
-process replaces itself (exec), which drops every visitor change, cache and
-background state at once and runs this startup again.
+The daily reset is a restart: at DEMO_RESET_TIME (00:00 by default) in the
+container's time zone the process replaces itself (exec), which drops every
+visitor change, cache and background state at once and runs this startup
+again.
 
 The database is only emptied when it is empty or carries the demo's marker
 table, so pointing the demo image at a real database cannot wipe it.
@@ -213,14 +214,39 @@ def start_live_traffic(fake, traffic, interval=LIVE_INTERVAL_SECONDS):
     return thread
 
 
-def seconds_until_midnight(now=None):
-    """Seconds until the next 00:00 in the process's local time zone (TZ)."""
+DEFAULT_RESET_TIME = (0, 0)
+
+
+def parse_reset_time(value):
+    """DEMO_RESET_TIME as (hour, minute). 'HH:MM' in 24-hour time; anything
+    else falls back to 00:00 with a warning, so a typo never stops the demo."""
+    text = (value or "").strip()
+    if not text:
+        return DEFAULT_RESET_TIME
+    try:
+        hour_text, minute_text = text.split(":")
+        hour, minute = int(hour_text), int(minute_text)
+        if 0 <= hour <= 23 and 0 <= minute <= 59 and len(minute_text) == 2:
+            return hour, minute
+    except ValueError:
+        pass
+    logger.warning(f"[DEMO] DEMO_RESET_TIME={text!r} is not a time like 03:30; resetting at 00:00")
+    return DEFAULT_RESET_TIME
+
+
+def seconds_until_reset(reset_time=DEFAULT_RESET_TIME, now=None):
+    """Seconds until the next reset_time (hour, minute) in the process's
+    local time zone (TZ). Always in the future: at exactly that minute the
+    next one is a day away."""
     now = now if now is not None else time.time()
-    local = datetime.datetime.fromtimestamp(now).astimezone()
-    tomorrow = (local + datetime.timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
-    # Normalise across a DST change: rebuild midnight in the zone it falls in
-    midnight = datetime.datetime(tomorrow.year, tomorrow.month, tomorrow.day).astimezone()
-    return max(midnight.timestamp() - now, 1.0)
+    hour, minute = reset_time
+    today = datetime.datetime.fromtimestamp(now).astimezone().date()
+    for day in (today, today + datetime.timedelta(days=1)):
+        # Built as a local wall-clock time, so a DST change lands on the right instant
+        at = datetime.datetime(day.year, day.month, day.day, hour, minute).astimezone()
+        if at.timestamp() > now + 1:
+            return at.timestamp() - now
+    return 86400.0
 
 
 def restart_process():
@@ -236,7 +262,8 @@ def restart_process():
 def schedule_nightly_reset():
     # DEMO_RESET_AFTER_SECONDS exists for tests of the reset itself
     override = os.environ.get("DEMO_RESET_AFTER_SECONDS", "").strip()
-    delay = float(override) if override else seconds_until_midnight()
+    reset_time = parse_reset_time(os.environ.get("DEMO_RESET_TIME"))
+    delay = float(override) if override else seconds_until_reset(reset_time)
     timer = threading.Timer(delay, restart_process)
     timer.daemon = True
     timer.name = "demo-nightly-reset"

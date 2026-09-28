@@ -119,17 +119,54 @@ def test_reports_parse_with_the_application_parsers():
         assert parsed and parsed["policies"], name
 
 
-def test_midnight_is_computed_in_the_container_time_zone(monkeypatch):
+@pytest.fixture
+def jerusalem(monkeypatch):
     if not hasattr(time, "tzset"):
         pytest.skip("time.tzset is POSIX only")
     monkeypatch.setenv("TZ", "Asia/Jerusalem")
     time.tzset()
-    try:
-        # 2026-09-27 21:30 in Jerusalem (UTC+3) is 18:30 UTC; midnight is 2.5 hours away
-        assert seed.seconds_until_midnight(1_790_533_800) == pytest.approx(2.5 * 3600)
-    finally:
-        monkeypatch.delenv("TZ")
-        time.tzset()
+    yield
+    monkeypatch.delenv("TZ")
+    time.tzset()
+
+
+# 2026-09-27 21:30 in Jerusalem (UTC+3)
+EVENING = 1_790_533_800
+
+
+def test_the_reset_defaults_to_midnight_in_the_container_time_zone(jerusalem):
+    assert seed.seconds_until_reset(seed.parse_reset_time(None), EVENING) == pytest.approx(2.5 * 3600)
+
+
+def test_the_reset_time_can_be_chosen(jerusalem):
+    # Later the same evening, and early the next morning
+    assert seed.seconds_until_reset(seed.parse_reset_time("22:15"), EVENING) == pytest.approx(45 * 60)
+    assert seed.seconds_until_reset(seed.parse_reset_time("04:30"), EVENING) == pytest.approx(7 * 3600)
+    # A time that just passed is tomorrow, never now
+    assert seed.seconds_until_reset(seed.parse_reset_time("21:30"), EVENING) == pytest.approx(24 * 3600)
+
+
+def test_the_reset_time_crosses_a_dst_change(jerusalem):
+    # Israel leaves summer time on 2026-10-25 at 02:00; from 20:00 the evening
+    # before, 04:30 is 8.5 hours of wall clock but 9.5 real hours away
+    evening_before = 1_792_861_200  # 2026-10-24 20:00 IDT
+    assert seed.seconds_until_reset(seed.parse_reset_time("04:30"), evening_before) == pytest.approx(9.5 * 3600)
+
+
+@pytest.mark.parametrize("value", ["", None, "  "])
+def test_an_unset_reset_time_is_midnight(value):
+    assert seed.parse_reset_time(value) == (0, 0)
+
+
+@pytest.mark.parametrize("value", ["24:00", "7", "07:5", "7pm", "12:60", "ab:cd"])
+def test_an_invalid_reset_time_falls_back_to_midnight(value, caplog):
+    assert seed.parse_reset_time(value) == (0, 0)
+    assert "DEMO_RESET_TIME" in caplog.text
+
+
+@pytest.mark.parametrize("value,expected", [("00:00", (0, 0)), ("4:30", (4, 30)), ("23:59", (23, 59))])
+def test_valid_reset_times(value, expected):
+    assert seed.parse_reset_time(value) == expected
 
 
 def _isolated_schema():

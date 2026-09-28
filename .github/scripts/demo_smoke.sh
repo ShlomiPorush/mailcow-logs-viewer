@@ -201,7 +201,7 @@ if grep -q "Traceback (most recent call last)" <<< "${logs}"; then
 fi
 
 step "The nightly reset drops visitor changes and rebuilds the demo"
-# The same reset as at 00:00, brought forward so the test does not wait for midnight
+# The same reset as the daily one at DEMO_RESET_TIME, brought forward so the test does not wait
 docker rm -f "${APP}" >/dev/null
 start_app -e DEMO_RESET_AFTER_SECONDS=45
 wait_healthy
