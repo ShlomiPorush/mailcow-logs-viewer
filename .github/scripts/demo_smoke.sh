@@ -139,7 +139,7 @@ codes=""
 for i in $(seq 1 35); do
     codes="${codes} $(curl -s -o /dev/null -w '%{http_code}' -X POST -H 'CF-Connecting-IP: 198.51.100.250' -H 'Content-Type: application/json' -d '{"items":[]}' "${BASE}/api/quarantine/release")"
 done
-echo "${codes}" | grep -q "429" || fail "35 writes in a row were never refused"
+grep -q "429" <<< "${codes}" || fail "35 writes in a row were never refused"
 code=$(curl -s -o /dev/null -w '%{http_code}' -H 'CF-Connecting-IP: 198.51.100.250' "${BASE}/api/quarantine")
 [ "${code}" = "200" ] || fail "reads were limited too (${code})"
 echo "  ok: writes refused past the budget, reads still served"
