@@ -819,13 +819,16 @@ class Settings(BaseSettings):
     @property
     def raw_logs_services_list(self) -> List[str]:
         """Parse raw_logs_services into a list of enabled service names.
-        Supports 'all' as a shortcut for all services."""
+        Supports 'all' as a shortcut for all services. Names that are not a
+        known mailcow service are dropped: the list goes into mailcow API
+        paths and into the Logs page."""
         if not self.raw_logs_services:
             return []
         val = self.raw_logs_services.strip()
         if val.lower() == 'all':
             return list(ALL_RAW_LOG_SERVICES)
-        return [s.strip().lower() for s in val.split(',') if s.strip()]
+        names = [s.strip().lower() for s in val.split(',') if s.strip()]
+        return [s for s in dict.fromkeys(names) if s in ALL_RAW_LOG_SERVICES]
     
     @property
     def suppression_whitelist_domains_list(self) -> List[str]:
