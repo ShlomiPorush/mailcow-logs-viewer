@@ -6,8 +6,6 @@ slim notice at the top of the main column of every HTML page the app
 serves, styled with the interface's own theme variables so it follows the
 light and dark themes.
 """
-import datetime
-import html
 
 INSTALL_URL = "https://github.com/ShlomiPorush/mailcow-logs-viewer/blob/main/documentation/GETTING_STARTED.md"
 MARKER = b'<div class="ui-main">'
@@ -31,32 +29,24 @@ STYLE = """
 """
 
 
-def reset_label(now=None):
-    """'00:00 (UTC+03:00)' in the process's time zone."""
-    local = datetime.datetime.fromtimestamp(now if now is not None else datetime.datetime.now().timestamp()).astimezone()
-    offset = local.strftime("%z")
-    return f"00:00 (UTC{offset[:3]}:{offset[3:]})"
+BANNER = (
+    f"<style>{STYLE}</style>"
+    '<aside class="demo-banner" aria-label="Demo notice">'
+    '<span class="demo-banner-tag">Demo</span>'
+    '<span class="demo-banner-text"><span class="demo-banner-long">Fictional data, no real mail server. '
+    "Anything you change is reset automatically on a regular schedule.</span>"
+    '<span class="demo-banner-short">Fictional data, resets automatically</span></span>'
+    f'<a href="{INSTALL_URL}" target="_blank" rel="noopener">'
+    '<span class="demo-banner-long">Install it on your server</span><span class="demo-banner-short">Install</span></a>'
+    "</aside>"
+).encode()
 
 
-def banner_html(now=None):
-    return (
-        f"<style>{STYLE}</style>"
-        '<aside class="demo-banner" aria-label="Demo notice">'
-        '<span class="demo-banner-tag">Demo</span>'
-        '<span class="demo-banner-text"><span class="demo-banner-long">Fictional data, no real mail server. '
-        f"Anything you change resets every night at {html.escape(reset_label(now))}.</span>"
-        '<span class="demo-banner-short">Fictional data, resets nightly</span></span>'
-        f'<a href="{INSTALL_URL}" target="_blank" rel="noopener">'
-        '<span class="demo-banner-long">Install it on your server</span><span class="demo-banner-short">Install</span></a>'
-        "</aside>"
-    ).encode()
-
-
-def inject(body: bytes, now=None) -> bytes:
+def inject(body: bytes) -> bytes:
     """Put the notice at the top of the main column, once."""
     if MARKER not in body or b'class="demo-banner"' in body:
         return body
-    return body.replace(MARKER, MARKER + banner_html(now), 1)
+    return body.replace(MARKER, MARKER + BANNER, 1)
 
 
 class DemoBannerMiddleware:

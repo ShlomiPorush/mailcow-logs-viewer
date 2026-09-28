@@ -33,7 +33,7 @@ def test_the_notice_opens_the_main_column_once():
     assert body.index(b'class="demo-banner"') > body.index(b'<div class="ui-main">')
     assert body.index(b'class="demo-banner"') < body.index(b'<div class="ui-content">')
     assert inject(body) == body
-    assert b"resets every night at 00:00 (UTC" in body
+    assert b"reset automatically on a regular schedule" in body
 
 
 def test_html_pages_get_the_notice_with_a_correct_length():
