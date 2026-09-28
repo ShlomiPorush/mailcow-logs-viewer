@@ -15,7 +15,7 @@ from typing import Dict, Any, Optional
 
 from ..database import get_db, get_db_context
 from ..models import PostfixLog, RspamdLog, NetfilterLog, MessageCorrelation
-from ..config import settings, EDITABLE_SETTING_KEYS, reload_settings, Settings
+from ..config import settings, EDITABLE_SETTING_KEYS, FEATURE_IDS, reload_settings, Settings
 from ..config import _get_field_annotations, get_env_locked_keys
 from ..scheduler import last_fetch_run_time, get_job_status, update_job_status, reschedule_interval_jobs, dovecot_correlation_available, cleanup_disabled_feature_data
 from ..services.settings_store import get_config_overrides_from_db, save_config_overrides_to_db, has_config_overrides_in_db, get_maxmind_validation_status, save_maxmind_validation_status, clear_maxmind_validation_status
@@ -526,6 +526,11 @@ def update_settings(body: Dict[str, Any], db: Session = Depends(get_db)):
     if not settings.edit_settings_via_ui_enabled:
         raise HTTPException(status_code=403, detail="Editing settings from UI is disabled. Set SETTINGS_EDIT_VIA_UI_ENABLED=true to enable.")
     allowed = {k: v for k, v in body.items() if k in EDITABLE_SETTING_KEYS}
+    if "disabled_features" in allowed:
+        features = [f.strip().lower() for f in str(allowed["disabled_features"] or "").split(",") if f.strip()]
+        if any(f not in FEATURE_IDS for f in features):
+            raise HTTPException(status_code=400, detail="disabled_features accepts only known feature names.")
+        allowed["disabled_features"] = ",".join(features)
     # For sensitive keys, mask placeholder means "do not change" - omit from payload
     # Empty string means "clear this value" and should be kept
     for sk in _SENSITIVE_SETTING_KEYS:

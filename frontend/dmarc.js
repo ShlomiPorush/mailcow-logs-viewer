@@ -63,22 +63,22 @@ function setDmarcBreadcrumb(type, data = {}) {
             break;
         case 'reportDetails':
             dmarcState.breadcrumb = [
-                { label: data.domain, action: `loadDomainOverview('${data.domain}')` },
-                { label: 'Daily Reports', action: `loadDomainOverview('${data.domain}'); setTimeout(() => dmarcSwitchSubTab('reports'), 100)` },
+                { label: data.domain, action: `loadDomainOverview('${escapeJsArg(data.domain)}')` },
+                { label: 'Daily Reports', action: `loadDomainOverview('${escapeJsArg(data.domain)}'); setTimeout(() => dmarcSwitchSubTab('reports'), 100)` },
                 { label: data.date, action: null }
             ];
             break;
         case 'sourceDetails':
             dmarcState.breadcrumb = [
-                { label: data.domain, action: `loadDomainOverview('${data.domain}')` },
-                { label: 'Source IPs', action: `loadDomainOverview('${data.domain}'); setTimeout(() => dmarcSwitchSubTab('sources'), 100)` },
+                { label: data.domain, action: `loadDomainOverview('${escapeJsArg(data.domain)}')` },
+                { label: 'Source IPs', action: `loadDomainOverview('${escapeJsArg(data.domain)}'); setTimeout(() => dmarcSwitchSubTab('sources'), 100)` },
                 { label: data.ip, action: null }
             ];
             break;
         case 'tlsDetails':
             dmarcState.breadcrumb = [
-                { label: data.domain, action: `loadDomainOverview('${data.domain}')` },
-                { label: 'TLS Reports', action: `loadDomainOverview('${data.domain}'); setTimeout(() => dmarcSwitchSubTab('tls'), 100)` },
+                { label: data.domain, action: `loadDomainOverview('${escapeJsArg(data.domain)}')` },
+                { label: 'TLS Reports', action: `loadDomainOverview('${escapeJsArg(data.domain)}'); setTimeout(() => dmarcSwitchSubTab('tls'), 100)` },
                 { label: data.date, action: null }
             ];
             break;
@@ -494,7 +494,12 @@ async function loadDomainOverview(domain, updateUrl = true) {
             const messageColor = policyTextColors[policyLevel] || policyTextColors.unknown;
             const labels = { policy: 'Policy', subdomain_policy: 'Subdomain policy', aggregate_report_uris: 'Aggregate report URIs (rua)', forensic_report_uris: 'Forensic report URIs (ruf)', dkim_alignment: 'DKIM alignment', spf_alignment: 'SPF alignment', percentage: 'Percentage', failure_reporting_options: 'Failure reporting options' };
             const formatVal = (v) => Array.isArray(v) ? v.join(', ') : String(v);
-            const formatUriAsEmail = (uri) => { const email = String(uri).replace(/^mailto:/i, '').trim(); return `<a href="${escapeHtml(uri)}" class="text-blue-600 dark:text-blue-400 hover:underline break-all">${escapeHtml(email)}</a>`; };
+            // Report URIs come from DNS: only mailto: becomes a link, anything else stays text
+            const formatUriAsEmail = (uri) => {
+                const text = String(uri).trim();
+                if (!/^mailto:/i.test(text)) return escapeHtml(text);
+                return `<a href="${escapeHtml(text)}" class="text-blue-600 dark:text-blue-400 hover:underline break-all">${escapeHtml(text.replace(/^mailto:/i, ''))}</a>`;
+            };
             const policyLevelColor = (p) => policyTextColors[(String(p || '').toLowerCase())] || policyTextColors.unknown;
             const formatCell = (k, v) => {
                 if ((k === 'aggregate_report_uris' || k === 'forensic_report_uris') && Array.isArray(v) && v.length) return v.map(formatUriAsEmail).join(', ');

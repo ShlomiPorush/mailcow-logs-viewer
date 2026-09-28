@@ -3152,7 +3152,7 @@ function _showQuarantineRuleModal(rule, prefill) {
     const title = isEdit ? 'Edit Rule' : 'Add Quarantine Rule';
     
     // Determine default values: edit mode uses rule data, prefill uses quarantine data
-    const defaultName = isEdit ? escapeHtml(rule.name) : (prefill ? `Rule for ${prefill.sender}` : '');
+    const defaultName = isEdit ? escapeHtml(rule.name) : (prefill ? escapeHtml(`Rule for ${prefill.sender}`) : '');
     const defaultMatchType = isEdit ? rule.match_type : (prefill ? 'sender' : 'sender');
     const defaultMatchValue = isEdit ? escapeHtml(rule.match_value) : (prefill ? escapeHtml(prefill.sender) : '');
     const defaultAction = isEdit ? rule.action : 'release';

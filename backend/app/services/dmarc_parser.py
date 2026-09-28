@@ -2,6 +2,7 @@
 DMARC Report Parser
 Handles parsing of DMARC aggregate reports in XML format (GZ or ZIP compressed)
 """
+import re
 import zipfile
 import xml.etree.ElementTree as ET
 import defusedxml.ElementTree as DET
@@ -17,6 +18,16 @@ from .safe_decompress import (
 )
 
 logger = logging.getLogger(__name__)
+
+# A DNS name: dot-separated labels of letters, digits and inner hyphens
+_DOMAIN_NAME = re.compile(r"^(?=.{1,253}$)(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)*"
+                          r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.?$")
+
+
+def is_valid_domain_name(value) -> bool:
+    """True for a plain DNS domain name. Reports arrive from outside, so a
+    domain field that is anything else is rejected, not stored."""
+    return isinstance(value, str) and bool(_DOMAIN_NAME.match(value))
 
 
 def parse_dmarc_file(file_content: bytes, filename: str) -> Optional[Dict[str, Any]]:
@@ -160,7 +171,9 @@ def parse_dmarc_xml(xml_string: str, raw_xml: str) -> Dict[str, Any]:
             raise ValueError("Missing policy_published element")
         
         domain = get_element_text(policy, 'domain', DMARC_NAMESPACES)
-        
+        if not is_valid_domain_name(domain):
+            raise ValueError("policy_published domain is not a valid domain name")
+
         policy_published = {
             'adkim': get_element_text(policy, 'adkim', DMARC_NAMESPACES),
             'aspf': get_element_text(policy, 'aspf', DMARC_NAMESPACES),

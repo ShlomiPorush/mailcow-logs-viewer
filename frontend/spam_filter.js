@@ -455,6 +455,8 @@ async function loadSuppressions(page) {
             return;
         }
         
+        suppressionItemsById.clear();
+        data.items.forEach(s => suppressionItemsById.set(s.id, s));
         container.innerHTML = `
             <div class="space-y-2">
                 ${data.items.map(s => renderSuppressionItem(s)).join('')}
@@ -524,7 +526,7 @@ function renderSuppressionItem(s) {
                     </div>
                 </div>
                 <div class="flex items-center gap-1 flex-shrink-0">
-                    <button onclick='showEditSuppressionModal(${JSON.stringify(s).replace(/'/g, "&#39;")})' class="px-2 py-1 text-xs rounded bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 hover:bg-blue-200" title="Edit suppression">
+                    <button onclick="showEditSuppressionModalById(${Number(s.id)})" class="px-2 py-1 text-xs rounded bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 hover:bg-blue-200" title="Edit suppression">
                         Edit
                     </button>
                     <button onclick="toggleSuppression(${s.id}, ${!s.active})" class="px-2 py-1 text-xs rounded ${s.active ? 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-300 hover:bg-yellow-200' : 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 hover:bg-green-200'}" title="${s.active ? 'Deactivate' : 'Reactivate'}">
@@ -759,6 +761,15 @@ async function createSuppression() {
     } catch (error) {
         showToast(error.message, 'error');
     }
+}
+
+// The rows of the list on screen, by id. The Edit button passes only the id,
+// so no stored value is ever written into an inline handler.
+const suppressionItemsById = new Map();
+
+function showEditSuppressionModalById(id) {
+    const s = suppressionItemsById.get(id);
+    if (s) showEditSuppressionModal(s);
 }
 
 function showEditSuppressionModal(s) {

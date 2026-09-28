@@ -924,6 +924,12 @@ def _get_field_annotations() -> Dict[str, Any]:
 
 EDITABLE_SETTING_KEYS = _get_editable_setting_keys()
 
+# Every feature DISABLED_FEATURES can switch off (TOGGLEABLE_FEATURES in app.js)
+FEATURE_IDS = frozenset({
+    "netfilter", "queue", "quarantine", "spam-filter", "domains", "dmarc",
+    "mailbox-stats", "rate-limits", "logs", "blacklist",
+})
+
 
 def _is_env_key_set(key: str) -> bool:
     """Check if a settings key has a corresponding ENV variable actually set in os.environ.

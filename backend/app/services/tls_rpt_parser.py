@@ -9,6 +9,7 @@ from typing import Dict, Any, Optional
 from datetime import datetime
 from io import BytesIO
 
+from .dmarc_parser import is_valid_domain_name
 from .safe_decompress import (
     DecompressionLimitError,
     MAX_COMPRESSED_BYTES,
@@ -160,6 +161,9 @@ def parse_tls_rpt_json(json_content: str) -> Optional[Dict[str, Any]]:
         
         if not policy_domain:
             logger.error("TLS-RPT report missing policy-domain")
+            return None
+        if not all(is_valid_domain_name(p['policy_domain']) for p in policies):
+            logger.error("TLS-RPT report has a policy-domain that is not a valid domain name")
             return None
         
         return {

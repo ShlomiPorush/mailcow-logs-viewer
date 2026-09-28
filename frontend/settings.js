@@ -561,7 +561,7 @@ function renderSettingsEditField(key, value, sensitiveKeys, description, envLock
         }
         
         html += `</div>
-            <input type="hidden" id="setting-disabled_features" name="disabled_features" value="${value || ''}">
+            <input type="hidden" id="setting-disabled_features" name="disabled_features" value="${escapeHtml(value || '')}">
         </div>`;
         
         return html;
