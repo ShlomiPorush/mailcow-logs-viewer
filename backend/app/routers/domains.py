@@ -1230,10 +1230,13 @@ async def check_tlsa_record(domain: str) -> Dict[str, Any]:
         # 1. Which mail servers does this domain use?
         null_mx = False
         mx_validated = False
+        mx_lookup_failed = False
         hosts = set()
         try:
             mx_answer = await resolve_dnssec_with_fallback(domain, 'MX', timeout=5)
-            if mx_answer.rcode == dns.rcode.NOERROR:
+            if mx_answer.rcode not in (dns.rcode.NOERROR, dns.rcode.NXDOMAIN):
+                mx_lookup_failed = True
+            elif mx_answer.rcode == dns.rcode.NOERROR:
                 mx_validated = mx_answer.authenticated
                 for r in mx_answer.records:
                     exchange = str(getattr(r, 'exchange', '') or '').rstrip('.').strip()
@@ -1243,15 +1246,20 @@ async def check_tlsa_record(domain: str) -> Dict[str, Any]:
                         continue
                     hosts.add(exchange)
         except Exception:
-            pass
+            mx_lookup_failed = True
         mx_hosts = sorted(hosts)
 
         if not mx_hosts:
+            if null_mx:
+                message = 'Domain does not accept mail (null MX) - DANE/TLSA does not apply'
+            elif mx_lookup_failed:
+                # A timeout or SERVFAIL says nothing about the MX records
+                message = 'Could not look up MX records - cannot check DANE/TLSA'
+            else:
+                message = 'No MX records found - cannot check DANE/TLSA'
             return {
                 'status': 'unknown',
-                'message': ('Domain does not accept mail (null MX) - DANE/TLSA does not apply'
-                            if null_mx else
-                            'No MX records found - cannot check DANE/TLSA'),
+                'message': message,
                 'record': None,
                 'records': [],
                 'mx_hosts': [],

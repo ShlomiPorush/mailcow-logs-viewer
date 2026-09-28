@@ -234,6 +234,19 @@ def test_failed_tlsa_lookup_is_not_absent(monkeypatch):
     assert not domains._definitely_absent(result)
 
 
+@pytest.mark.parametrize('mx_answer', [SERVFAIL, Exception('timed out')])
+def test_failed_mx_lookup_is_not_reported_as_missing_mx(monkeypatch, mx_answer):
+    """A resolver hiccup must not claim the domain has no MX records."""
+    result, _ = dane_check(monkeypatch, {('example.test', 'MX'): mx_answer})
+    assert result['status'] == 'unknown'
+    assert result['message'] == 'Could not look up MX records - cannot check DANE/TLSA'
+
+
+def test_domain_without_mx_says_so(monkeypatch):
+    result, _ = dane_check(monkeypatch, {('example.test', 'MX'): ok([])})
+    assert result['message'] == 'No MX records found - cannot check DANE/TLSA'
+
+
 def test_null_mx_is_skipped(monkeypatch):
     result, _ = dane_check(monkeypatch, {('example.test', 'MX'): ok([SimpleNamespace(exchange='.')])})
     assert result['status'] == 'unknown'
