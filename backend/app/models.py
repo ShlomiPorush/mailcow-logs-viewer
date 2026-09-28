@@ -213,6 +213,7 @@ class DomainDNSCheck(Base):
     spf_check = Column(JSONB)
     dkim_check = Column(JSONB)
     dmarc_check = Column(JSONB)
+    dnssec_check = Column(JSONB)    # DNSSEC validation of the domain
     tlsa_check = Column(JSONB)      # DANE/TLSA records for the domain's MX hosts
     mta_sts_check = Column(JSONB)   # MTA-STS record + policy (RFC 8461)
     

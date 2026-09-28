@@ -13,7 +13,7 @@ The Domains page displays all email domains configured in your mailcow server, a
 - **Storage**: Total storage used and quota (if applicable)
 
 ### DNS Security Validation
-The system automatically validates four critical DNS record types:
+The system automatically validates SPF, DKIM, DMARC, DNSSEC, DANE and MTA-STS for every domain:
 
 #### SPF (Sender Policy Framework)
 - **Purpose**: Specifies which mail servers can send email on behalf of your domain
@@ -56,11 +56,20 @@ Domains configured in mailcow as **alias domains** (a domain whose mail is deliv
 - Alias domains are included in the scheduled and manual "Check All DNS" runs
 - The mapping is synced from mailcow automatically (every 5 minutes, together with the domain list)
 
-#### TLSA (DANE)
+#### DNSSEC
+- **Purpose**: DNSSEC signs your DNS records so nobody can forge them - including your MX, SPF, DKIM and DMARC records. It is also required for DANE
+- **How it is checked**: The domain is looked up through validating resolvers; a validated answer means the domain is signed and the chain of trust from the registrar is intact
+- **Statuses**: Validated is a pass. A domain without DNSSEC, or with keys published but no DS record at the registrar, is a warning. A broken signature is an error - resolvers that check signatures cannot resolve the domain at all, so mail can fail
+- **Optional**: DNSSEC is recommended, not required. A failed lookup shows as unknown, never as "not enabled"
+
+#### DANE (TLSA)
 - **Purpose**: DANE lets senders verify your mail server's TLS certificate through DNS, preventing TLS downgrade and man-in-the-middle attacks
 - **Where the records live**: For SMTP, TLSA records are published under each MX hostname (`_25._tcp.<mx-host>`), not under the domain itself - the check resolves your MX hosts and looks there
-- **Validation**: Warns when some MX hosts have no TLSA record, or when no record uses the recommended `3 1 1` form (DANE-EE, SPKI, SHA-256 - mailcow's default)
-- **Optional**: DANE requires a DNSSEC-signed zone. A domain without TLSA records gets an informational warning, never an error. Domains that do not accept mail (null MX) are skipped
+- **Is DANE actually active**: Senders only use TLSA records when the domain's MX records, the MX host's address and the TLSA records are all DNSSEC validated. Records without that are a warning, because senders ignore them
+- **Certificate match**: The check connects to each MX host on port 25, starts TLS and compares the certificate with the TLSA records. A validated record that does not match is an error - senders that use DANE will refuse to deliver. This usually happens after the certificate key changed without updating the TLSA record. Only `3 x x` (DANE-EE) records can be compared; mailcow publishes `3 1 1` by default
+- **Port 25 blocked**: When this server cannot connect to the MX on port 25, the certificate is shown as "not compared", never as a mismatch
+- **Other warnings**: MX hosts without a TLSA record, or no record in the recommended `3 1 1` form (DANE-EE, SPKI, SHA-256)
+- **Optional**: A domain without TLSA records gets an informational warning, never an error. Domains that do not accept mail (null MX) are skipped
 
 #### MTA-STS
 - **Purpose**: MTA-STS (RFC 8461) lets your domain tell sending servers to require TLS and verified certificates when delivering mail to you, closing the TLS-downgrade gap without DNSSEC
@@ -96,6 +105,7 @@ When you expand a domain, the DNS Security section shows:
 
 ### DNS Change Alerts
 When a scheduled or manual check finds that a domain's SPF, DKIM, DMARC, TLSA or MTA-STS record has **changed** since the previous check, an alert is sent by email and to your notification destinations (alert type "DNS record changes").
+The same alert is sent when DNSSEC stops validating for a domain that was validated before, and when a DNSSEC-validated TLSA record stops matching the certificate of an MX host.
 - Only definite changes trigger an alert: a value that is present and different, or a record that verifiably disappeared
 - Failed lookups and timeouts are ignored, so a DNS hiccup never fires a false alarm
 - Controlled by the **DNS Change Alerts Enabled** toggle under **Settings → Notifications → Alert types** (on by default)

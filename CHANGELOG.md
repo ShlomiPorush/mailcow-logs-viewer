@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **DNSSEC and DANE checks** - The Domains page shows whether each domain is DNSSEC validated, and whether DANE actually works: TLSA records must be DNSSEC validated and match the certificate each mail server presents. A TLSA record that stops matching the certificate triggers a DNS change alert. [#287](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/287). Thanks to [@Neocridas](https://github.com/Neocridas).
+
 ### Security
 
 - **Safer display of stored values** - Escape more values from reports and settings where the interface shows them, and reject report domains that are not valid domain names.
