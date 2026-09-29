@@ -2728,6 +2728,9 @@ function clearQueueFilters() {
 
 function queueUpdateSelection() {
     const checked = document.querySelectorAll('.queue-checkbox:checked');
+    // With rows selected the actions are about them; Delete All steps aside
+    const deleteAll = document.getElementById('queue-delete-all-btn');
+    if (deleteAll) deleteAll.classList.toggle('hidden', checked.length > 0);
     const bulkRetry = document.getElementById('queue-bulk-retry-btn');
     const bulkDelete = document.getElementById('queue-bulk-delete-btn');
     const countLabel = document.getElementById('queue-selection-count');
@@ -3012,6 +3015,8 @@ function quarantineUpdateSelection() {
     const bulkBtns = ['quarantine-bulk-release-btn', 'quarantine-bulk-delete-btn', 'quarantine-bulk-learnham-btn', 'quarantine-bulk-learnspam-btn'];
     const countLabel = document.getElementById('quarantine-selection-count');
 
+    // With rows selected the actions are about them; Release All and Delete All step aside
+    ['quarantine-release-all-btn', 'quarantine-delete-all-btn'].forEach(id => { const el = document.getElementById(id); if (el) el.classList.toggle('hidden', checked.length > 0); });
     if (checked.length > 0) {
         bulkBtns.forEach(id => { const el = document.getElementById(id); if (el) { el.classList.remove('hidden'); el.classList.add('inline-flex'); } });
         if (countLabel) { countLabel.classList.remove('hidden'); countLabel.textContent = `${checked.length} selected`; }
