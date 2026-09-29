@@ -1291,8 +1291,15 @@ function renderSettings(content, data) {
             // On mobile, bring the sticky picker back to the top of the
             // viewport so the new category starts at its first field.
             if (scrollToTop && window.matchMedia('(max-width: 1023px)').matches) {
+                // Scroll the page's own area only: scrollIntoView also scrolled the
+                // app frame, which hid the top bar
                 const anchor = content.querySelector('.settings-mobile-nav');
-                if (anchor) anchor.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                let scroller = anchor && anchor.parentElement;
+                while (scroller && !/(auto|scroll)/.test(getComputedStyle(scroller).overflowY)) scroller = scroller.parentElement;
+                if (anchor && panel && scroller) {
+                    const target = panel.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop - anchor.offsetHeight - 8;
+                    if (target < scroller.scrollTop) scroller.scrollTo({ top: Math.max(0, target), behavior: 'smooth' });
+                }
             }
         };
 
