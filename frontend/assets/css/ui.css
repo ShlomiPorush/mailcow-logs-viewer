@@ -1767,3 +1767,16 @@ html .markdown-body .markdown-alert-caution .markdown-alert-title { color: var(-
 @media (max-width: 760px) {
     .ui-q-head .ui-select { height: 32px; font-size: 13px; }
 }
+
+/* Logs on narrow screens: the service picker is one closed row; it opens on demand */
+.ui-logs-side-toggle { display: none; }
+@media (max-width: 900px) {
+    .ui-logs-side-toggle { display: flex; align-items: center; gap: 10px; width: 100%; padding: 4px 2px; border: 0; background: none;
+        color: var(--ui-ink); font: inherit; text-align: start; cursor: pointer; }
+    .ui-logs-side-toggle span { color: var(--ui-muted); font-size: var(--ui-fs-sm); }
+    .ui-logs-side-toggle b { flex: 1; min-width: 0; overflow: hidden; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+    .ui-logs-side-toggle small { font-family: var(--ui-mono); font-size: 11px; color: var(--ui-muted); }
+    .ui-logs-side-toggle svg { flex: none; color: var(--ui-muted); transition: transform .15s ease; }
+    .ui-logs-side.is-open .ui-logs-side-toggle svg { transform: rotate(180deg); }
+    .ui-logs-side:not(.is-open) > :not(.ui-logs-side-toggle) { display: none; }
+}
