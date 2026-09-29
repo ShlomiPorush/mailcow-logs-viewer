@@ -1148,7 +1148,8 @@ button.ui-st-card:hover { outline: 1px solid var(--ui-line); }
 /* ---------- Domains (as the mockup) ---------- */
 .ui-page-head .ui-h1 .ui-help-btn { vertical-align: middle; }
 .ui-head-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-inline-start: auto; }
-.ui-domain-tools .ui-search { flex: 1 1 260px; max-width: 420px; background: var(--ui-panel); }
+.ui-domain-tools .ui-search { flex: 1 1 260px; max-width: 420px; background: var(--ui-bg); }
+.ui-domain-tools .ui-filters-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
 .ui-check-label { display: inline-flex; align-items: center; gap: 8px; font-size: var(--ui-fs-sm); cursor: pointer; }
 .ui-domain-tools .ui-check-label { margin-inline-start: auto; }
 .ui-domain-table { --ui-cols: minmax(220px, 2.4fr) repeat(6, minmax(64px, .6fr)) 90px; --ui-table-min: 850px; }
@@ -1795,3 +1796,13 @@ html .markdown-body .markdown-alert-caution .markdown-alert-title { color: var(-
 
 /* What happened: the time is a small label above each step, like a timeline */
 .ui-steps .ui-step-time { display: block; margin-bottom: 1px; color: var(--ui-muted); font-size: 11.5px; font-variant-numeric: tabular-nums; line-height: 1.3; }
+
+/* Summary numbers keep their height inside a scrolling page: with overflow hidden they were a scroll
+   container, whose minimum height in a grid is zero, so a long page squashed them to nothing.
+   clip keeps the rounded corners without that */
+.ui-kpis { overflow: clip; }
+/* A small note next to a page title, such as when the data was last updated */
+.ui-h1-note { margin-inline-start: 4px; color: var(--ui-muted); font-size: 12.5px; font-weight: 500; letter-spacing: 0; vertical-align: middle; }
+.ui-h1-note:empty, .ui-h1-note:has(> :empty:only-child) { display: none; }
+/* Quarantine Auto-Rules as a tab: the panel is the page, no fold */
+#quarantine-tab-rules .ui-rules-body { padding-top: 4px; }
