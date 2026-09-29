@@ -1409,12 +1409,28 @@ def _leg_for_dovecot_event(
     """
     recipient = (event.get('recipient') or '').strip().lower()
     if recipient:
-        for leg in legs:
-            if (leg.recipient or '').strip().lower() == recipient:
-                return leg
+        matches = [leg for leg in legs if (leg.recipient or '').strip().lower() == recipient]
+        if len(matches) > 1:
+            return _latest_leg_before(matches, event.get('time'))
+        if matches:
+            return matches[0]
     if len(legs) == 1:
         return legs[0]
     return None
+
+
+def _latest_leg_before(legs: List[MessageCorrelation], when: Optional[datetime]) -> MessageCorrelation:
+    """
+    Several legs share the recipient, as a message rejected into quarantine and
+    its later release do. A leg that was rejected or bounced never reached
+    Dovecot, so the line belongs to one that was not; among those, to the
+    latest one that had started by the time Dovecot logged it.
+    """
+    reached = [leg for leg in legs if leg.final_status not in ('rejected', 'bounced')] or legs
+    started = [leg for leg in reached if leg.first_seen and (when is None or leg.first_seen <= when)]
+    if started:
+        return max(started, key=lambda leg: leg.first_seen)
+    return min(reached, key=lambda leg: leg.first_seen or datetime.max)
 
 
 async def correlate_dovecot_logs():
