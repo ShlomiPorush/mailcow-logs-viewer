@@ -1844,3 +1844,33 @@ html .markdown-body .markdown-alert-caution .markdown-alert-title { color: var(-
 .ui-link-cell.ui-text-warn { color: var(--ui-warn); }
 .ui-link-cell.ui-text-fail { color: var(--ui-fail); }
 .ui-kpi b.ui-zero, .ui-link-cell.ui-zero { color: var(--ui-muted); }
+
+/* The desktop sidebar folds into the same icon rail as tablets; the toggle sits by the brand */
+.ui-sidenav { position: sticky; }
+.ui-nav-toggle { position: absolute; top: 16px; inset-inline-end: 8px; color: var(--ui-side-muted); }
+.ui-nav-toggle:hover { color: var(--ui-side-ink); }
+.ui-nav-toggle svg { transition: transform .15s ease; }
+.ui-brand { padding-inline-end: 34px; }
+@media (max-width: 1100px) {
+    .ui-nav-toggle { display: none; }
+    .ui-brand { padding-inline-end: 0; }
+}
+@media (min-width: 1101px) {
+    .ui-shell { transition: grid-template-columns .18s ease; }
+    html.ui-nav-collapsed .ui-shell { grid-template-columns: 72px minmax(0, 1fr); }
+    html.ui-nav-collapsed .ui-sidenav { padding: 14px 10px; align-items: center; }
+    html.ui-nav-collapsed .ui-brand { padding: 4px 0 8px; }
+    html.ui-nav-collapsed .ui-brand #app-title, html.ui-nav-collapsed .ui-server, html.ui-nav-collapsed .ui-sidenav .ui-nav-label,
+    html.ui-nav-collapsed .ui-sidenav .ui-nav-group-label, html.ui-nav-collapsed .ui-side-line { display: none; }
+    html.ui-nav-collapsed .ui-sidenav .ui-nav-group { align-items: center; }
+    html.ui-nav-collapsed .ui-sidenav .ui-nav-item { justify-content: center; width: 48px; height: 42px; padding: 0; }
+    html.ui-nav-collapsed .ui-sidenav .ui-nav-item.has-sub::after { display: none; }
+    html.ui-nav-collapsed .ui-sidenav .ui-nav-count { position: absolute; top: 7px; inset-inline-end: 8px; width: 8px; height: 8px; padding: 0; font-size: 0;
+        border-radius: 50%; background: var(--ui-warn); }
+    html.ui-nav-collapsed .ui-sidenav .ui-nav-count.is-fail { background: var(--ui-fail); }
+    html.ui-nav-collapsed .ui-side-foot { padding: 10px 0 0; }
+    html.ui-nav-collapsed .ui-utilities { flex-direction: column; margin: 0; }
+    /* Folded: the toggle sits under the logo and points the other way */
+    html.ui-nav-collapsed .ui-nav-toggle { position: static; margin: 0 auto 10px; }
+    html.ui-nav-collapsed .ui-nav-toggle svg { transform: scaleX(-1); }
+}
