@@ -813,21 +813,23 @@
                         <p class="ui-muted" id="queue-summary">Messages waiting in the Postfix queue</p>
                     </div>
                 </div>
-                <section class="ui-panel ui-filters">
-                    <div class="ui-filters-row">
-                        <input type="text" id="queue-filter-search" class="ui-input" placeholder="Search sender/recipient..." aria-label="Search sender or recipient"
-                            onkeypress="if(event.key==='Enter') applyQueueFilters()">
-                        <input type="text" id="queue-filter-queue-id" class="ui-input" placeholder="Queue ID" aria-label="Queue ID"
-                            onkeypress="if(event.key==='Enter') applyQueueFilters()">
-                        <div class="ui-filters-actions">
-                            <button onclick="applyQueueFilters()" class="ui-btn ui-btn-primary">Apply</button>
-                            <button onclick="clearQueueFilters()" class="ui-btn">Clear</button>
-                        </div>
-                    </div>
-                </section>
                 <section class="ui-sec-block ui-scroll">
                     <div class="ui-list-head"><h2 class="ui-h2">Mail Queue</h2> <span id="queue-count" class="ui-count"></span></div>
-                    <div id="queue-logs"><div class="ui-loading"><div class="loading"></div><p>Loading...</p></div></div>
+                    <div class="ui-panel ui-table-card">
+                    <section class="ui-panel ui-filters">
+                        <div class="ui-filters-row">
+                            <input type="text" id="queue-filter-search" class="ui-input" placeholder="Search sender/recipient..." aria-label="Search sender or recipient"
+                                onkeypress="if(event.key==='Enter') applyQueueFilters()">
+                            <input type="text" id="queue-filter-queue-id" class="ui-input" placeholder="Queue ID" aria-label="Queue ID"
+                                onkeypress="if(event.key==='Enter') applyQueueFilters()">
+                            <div class="ui-filters-actions">
+                                <button onclick="applyQueueFilters()" class="ui-btn ui-btn-primary">Apply</button>
+                                <button onclick="clearQueueFilters()" class="ui-btn">Clear</button>
+                            </div>
+                        </div>
+                    </section>
+                        <div id="queue-logs"><div class="ui-loading"><div class="loading"></div><p>Loading...</p></div></div>
+                    </div>
                     <p class="ui-kv-note ui-list-foot">Queue IDs and the full log lines are one click away in Messages.</p>
                 </section>
             </div>
@@ -937,6 +939,7 @@
                 <div id="spam-filter-suppressions-content" class="ui-sec-block ui-scroll">
                     <div id="suppression-stats" class="ui-kpis"></div>
 
+                    <div class="ui-panel ui-table-card">
                     <section class="ui-panel ui-filters ui-ms-filters">
                         <div class="ui-filters-row">
                             <label class="ui-search ui-ms-search"><svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
@@ -981,6 +984,7 @@
                     <div id="suppression-rw-note"></div>
                     <div id="suppression-list">
                         <div class="ui-loading"><div class="loading"></div><p>Loading...</p></div>
+                    </div>
                     </div>
                 </div>
             </div>
@@ -1065,7 +1069,7 @@
                                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                                             d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
                                     </svg>
-                                </button></h1>
+                                </button> <small id="domains-last-checked" class="ui-h1-note"></small></h1>
                         <p class="ui-muted" id="domains-summary">Domains and their DNS records</p>
                     </div>
                     <div id="dns-check-info" class="ui-head-tools"></div>
@@ -1201,6 +1205,7 @@
                         <div class="ui-kpi"><b id="mailbox-stats-failure-rate">-</b>Failure Rate<small id="mailbox-stats-date-label-rate" class="ui-kpi-note">Last 30 days</small></div>
                     </div>
 
+                    <div class="ui-panel ui-table-card">
                     <section class="ui-panel ui-filters ui-ms-filters">
                         <div class="ui-filters-row">
                             <label class="ui-search ui-ms-search"><svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
@@ -1255,6 +1260,7 @@
                     <div id="mailbox-stats-loading" class="ui-loading"><div class="loading"></div><p>Loading mailbox statistics...</p></div>
                     <div id="mailbox-stats-content" class="hidden">
                         <div id="mailbox-stats-list"></div>
+                    </div>
                     </div>
                     <div class="ui-list-head ui-list-foot"><span id="mailbox-stats-count" class="ui-count">0 mailboxes</span><span id="mailbox-stats-page-info" class="ui-muted ui-head-actions"></span></div>
                 </div>

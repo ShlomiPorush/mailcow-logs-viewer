@@ -34,6 +34,8 @@ let rateLimitSenderSearch = '';
 let rateLimitConfigSearch = '';
 // 'all' | 'mailbox' | 'domain'
 let rateLimitConfigFilter = 'all';
+// Hide the mailboxes and domains that have no limit set
+let rateLimitHideUnlimited = false;
 let rateLimitEventsData = null;
 let rateLimitConfigData = null;
 // { kind: 'mailbox' | 'domain', name: string } while one row's form is open
@@ -353,7 +355,7 @@ function renderRateLimitSendersTable(senders) {
         return `
             <tr data-rl-sender="${escapeHtml((group.user || '').toLowerCase())}" class="ui-dtable-link"
                 onclick="selectRateLimitSender('${escapeJsArg(group.user)}')">
-                <td class="ui-dtable-wrap">${escapeHtml(group.user)}</td>
+                <td class="ui-dtable-wrap">${copyableText(group.user)}</td>
                 <td>${uiTag(group.events, 'fail')}</td>
                 <td class="ui-nowrap" title="${escapeHtml(formatTime(group.last_seen))}">${formatAgo(group.last_seen)}</td>
                 <td class="hide-mobile">${renderRateLimitBadge(group.current_limit)}</td>
@@ -442,7 +444,7 @@ function renderRateLimitSenderDetail(group) {
         <div class="ui-rl-sender">
             <div>
                 <button type="button" onclick="backToRateLimitSenders()" class="ui-btn ui-btn-sm">← All senders</button>
-                <p class="ui-dtable-wrap"><b>${escapeHtml(group.user)}</b></p>
+                <p class="ui-dtable-wrap"><b>${copyableText(group.user)}</b></p>
                 <p class="ui-muted">Last hit ${escapeHtml(formatTime(group.last_seen))}</p>
                 <div class="ui-chip-row">
                     ${renderRateLimitBadge(group.current_limit)}
@@ -557,9 +559,9 @@ function renderRateLimitEventRow(event) {
     return `
         <tr>
             <td class="ui-nowrap"><span class="ui-phone-only">${escapeHtml(rateLimitShortTime(event.time))}</span><span class="ui-phone-hide">${escapeHtml(formatTime(event.time))}</span></td>
-            <td class="ui-dtable-wrap">${escapeHtml(event.rcpt)}</td>
+            <td class="ui-dtable-wrap">${copyableText(event.rcpt)}</td>
             <td>${shortened ? `<span dir="auto">${escapeHtml(shortened)}</span>` : '<span class="ui-muted">No subject</span>'}</td>
-            <td class="ui-mono ui-muted ui-nowrap hide-mobile">${escapeHtml(event.qid)}</td>
+            <td class="ui-mono ui-muted ui-nowrap hide-mobile">${copyableText(event.qid)}</td>
         </tr>
     `;
 }
@@ -660,6 +662,7 @@ function renderRateLimitConfigCard() {
         <section class="ui-panel">
             ${rateLimitCardHead('Configured limits', 'How much each mailbox and domain is allowed to send', `
                 ${chips}
+                <label class="ui-check-label"><input type="checkbox" class="ui-check" ${rateLimitHideUnlimited ? 'checked' : ''} onchange="setRateLimitHideUnlimited(this.checked)"> Hide no limit</label>
                 <input type="text" value="${escapeHtml(rateLimitConfigSearch)}" placeholder="Search..." aria-label="Search limits"
                     oninput="filterRateLimitConfigRows(this.value)" class="ui-input ui-rl-search">
                 ${canWrite && rows ? `<button type="button" onclick="toggleRateLimitBulkPanel()" class="${RATE_LIMIT_ACTION_BUTTON}">Apply to filtered</button>` : ''}`)}
@@ -686,6 +689,12 @@ function setRateLimitConfigFilter(kind) {
 }
 
 
+function setRateLimitHideUnlimited(hide) {
+    rateLimitHideUnlimited = !!hide;
+    applyRateLimitConfigFilters();
+}
+
+
 function filterRateLimitConfigRows(query) {
     rateLimitConfigSearch = query || '';
     applyRateLimitConfigFilters();
@@ -702,7 +711,8 @@ function applyRateLimitConfigFilters() {
     card.querySelectorAll('tbody tr[data-rl-name]').forEach(tr => {
         const matchesName = !q || (tr.dataset.rlName || '').includes(q);
         const matchesKind = rateLimitConfigFilter === 'all' || tr.dataset.rlKind === rateLimitConfigFilter;
-        const match = matchesName && matchesKind;
+        const matchesLimit = !rateLimitHideUnlimited || tr.dataset.rlLimited === '1';
+        const match = matchesName && matchesKind && matchesLimit;
         tr.classList.toggle('hidden', !match);
         if (match && !tr.hasAttribute('data-rl-editrow')) shown++;
     });
@@ -722,11 +732,12 @@ function applyRateLimitConfigFilters() {
 // The match applyRateLimitConfigFilters runs on the rows, run against the data
 // instead of the DOM - the counts have to be right even while the table is
 // being rebuilt, and the DOM is only ever a picture of this
-function rateLimitConfigMatches(kind, name) {
+function rateLimitConfigMatches(kind, name, value) {
     const q = rateLimitConfigSearch.trim().toLowerCase();
     const matchesName = !q || (name || '').toLowerCase().includes(q);
     const matchesKind = rateLimitConfigFilter === 'all' || kind === rateLimitConfigFilter;
-    return matchesName && matchesKind;
+    const matchesLimit = !rateLimitHideUnlimited || !!value;
+    return matchesName && matchesKind && matchesLimit;
 }
 
 
@@ -735,10 +746,10 @@ function rateLimitFilteredTargets() {
     const data = rateLimitConfigData || {};
     return {
         mailboxes: (data.mailboxes || [])
-            .filter(entry => rateLimitConfigMatches('mailbox', entry.username))
+            .filter(entry => rateLimitConfigMatches('mailbox', entry.username, entry.rl_value))
             .map(entry => entry.username),
         domains: (data.domains || [])
-            .filter(entry => rateLimitConfigMatches('domain', entry.domain))
+            .filter(entry => rateLimitConfigMatches('domain', entry.domain, entry.rl_value))
             .map(entry => entry.domain)
     };
 }
@@ -959,9 +970,9 @@ function renderRateLimitConfigRow(kind, name, value, frame, canWrite) {
             `);
 
     const row = `
-        <tr data-rl-name="${escapeHtml(name.toLowerCase())}" data-rl-kind="${kind}">
+        <tr data-rl-name="${escapeHtml(name.toLowerCase())}" data-rl-kind="${kind}" data-rl-limited="${value ? '1' : '0'}">
             <td class="hide-mobile">${uiTag(kind === 'domain' ? 'Domain' : 'Mailbox', '')}</td>
-            <td class="ui-dtable-wrap">${escapeHtml(name)}</td>
+            <td class="ui-dtable-wrap">${copyableText(name)}</td>
             <td>${renderRateLimitBadge(value ? { value: value, frame: frame } : null)}</td>
             <td class="ui-td-end ui-nowrap">${action}</td>
         </tr>

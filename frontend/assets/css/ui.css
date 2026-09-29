@@ -1210,7 +1210,9 @@ button.ui-st-card:hover { outline: 1px solid var(--ui-line); }
 .ui-crumb-sep { color: var(--ui-muted); }
 .ui-crumb-current { font-weight: 600; }
 #dmarc-header-actions { align-items: flex-start; }
-.ui-dmarc-sync { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+/* The last-sync note hangs under the Sync button, so its width does not push the buttons apart */
+.ui-dmarc-sync { position: relative; display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+.ui-dmarc-sync .ui-dmarc-sync-info { position: absolute; top: calc(100% + 4px); inset-inline-end: 0; white-space: nowrap; }
 .ui-dmarc-sync.hidden { display: none; }
 .ui-dmarc-sync-info { display: flex; gap: 10px; font-size: 12px; }
 .ui-dmarc-tab { padding: var(--ui-pad-y) var(--ui-pad-x) var(--ui-pad-x); }
@@ -1802,7 +1804,8 @@ html .markdown-body .markdown-alert-caution .markdown-alert-title { color: var(-
    clip keeps the rounded corners without that */
 .ui-kpis { overflow: clip; }
 /* A small note next to a page title, such as when the data was last updated */
-.ui-h1-note { margin-inline-start: 4px; color: var(--ui-muted); font-size: 12.5px; font-weight: 500; letter-spacing: 0; vertical-align: middle; }
+/* On its own line under the title */
+.ui-h1-note { display: block; margin-top: 2px; color: var(--ui-muted); font-size: 12.5px; font-weight: 500; letter-spacing: 0; line-height: 1.4; }
 .ui-h1-note:empty, .ui-h1-note:has(> :empty:only-child) { display: none; }
 /* Quarantine Auto-Rules as a tab: the panel is the page, no fold */
 #quarantine-tab-rules .ui-rules-body { padding-top: 4px; }
@@ -1816,3 +1819,11 @@ html .markdown-body .markdown-alert-caution .markdown-alert-title { color: var(-
 [aria-sort="descending"]:is(.ui-tr-head > *, thead th)::after { border-top: 5px solid currentColor; opacity: 1; }
 [aria-sort="ascending"]:is(.ui-tr-head > *, thead th)::after { border-bottom: 5px solid currentColor; opacity: 1; }
 [aria-sort="ascending"], [aria-sort="descending"] { color: var(--ui-ink); }
+
+/* Filters and their table as one card: one panel, the filter row on top, the rows under it */
+.ui-table-card { display: grid; padding: 0; overflow: clip; }
+.ui-table-card > .ui-panel, .ui-table-card .ui-table, .ui-table-card .ui-empty.ui-panel { background: transparent; border-radius: 0; }
+.ui-table-card > .ui-filters { border-bottom: 1px solid var(--ui-line); }
+.ui-table-card > .ui-loading { padding: 24px 0; }
+/* A long DNS record wraps while it copies */
+.copyable.ui-copy-wrap { display: inline; overflow-wrap: anywhere; font-size: inherit; }
