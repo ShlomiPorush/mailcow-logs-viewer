@@ -355,11 +355,11 @@ function renderRelatedDeliveries(data) {
                         <span class="ui-md-leg-who">${escapeHtml(leg.sender || '-')} =&gt; ${escapeHtml(leg.recipient || '-')}</span>
                         ${leg.current ? '<span class="ui-tag ui-tag-info">viewing</span>' : ''}
                         <span class="ui-md-leg-meta">
+                            <span class="ui-mono ui-muted ui-md-leg-time">${formatTime(leg.first_seen)}</span>
                             ${leg.final_status
                                 ? uiStatusTag(leg.final_status)
                                 : '<span class="ui-tag" title="This delivery attempt never reached a final outcome">no final status</span>'}
                             ${leg.dovecot_status === 'stored' && leg.dovecot_mailbox ? `<span class="ui-tag ui-tag-warn ui-md-folder">${folderIconSvg('ui-md-folder-icon')}${escapeHtml(leg.dovecot_mailbox)}</span>` : ''}
-                            <span class="ui-mono ui-muted">${formatTime(leg.first_seen)}</span>
                         </span>
                     </div>
                 `).join('')}
@@ -472,22 +472,21 @@ function buildDeliverySteps(data) {
     for (const log of data.postfix || []) {
         const message = log.message || '';
         const program = log.program || 'postfix';
-        const when = formatTime(log.time);
         if (/NOQUEUE: reject/i.test(message)) {
-            add(log.time, 'fail', 'Rejected while receiving', `${when}, ${program}`);
+            add(log.time, 'fail', 'Rejected while receiving', program);
         } else if (/client=/.test(message) && /smtpd/.test(program)) {
             const ip = (message.match(/client=.*?\[([^\]]+)\]/) || [])[1];
             const user = (message.match(/sasl_username=(\S+)/) || [])[1];
-            add(log.time, 'ok', ip ? `Received from ${ip}` : 'Received', `${when}, ${program}${user ? `, authenticated as ${user}` : ''}`, {
+            add(log.time, 'ok', ip ? `Received from ${ip}` : 'Received', `${program}${user ? `, authenticated as ${user}` : ''}`, {
                 titleHtml: ip ? `Received from ${copyableText(ip)}` : '',
-                detailHtml: `${escapeHtml(`${when}, ${program}`)}${user ? `, authenticated as ${copyableText(user)}` : ''}`
+                detailHtml: `${escapeHtml(program)}${user ? `, authenticated as ${copyableText(user)}` : ''}`
             });
         } else if (/cleanup/.test(program) && /message-id=/.test(message)) {
             const qid = log.queue_id || data.queue_id;
-            add(log.time, 'ok', qid ? `Queued as ${qid}` : 'Queued', `${when}, ${program}`, { titleHtml: qid ? `Queued as ${copyableText(qid)}` : '' });
+            add(log.time, 'ok', qid ? `Queued as ${qid}` : 'Queued', program, { titleHtml: qid ? `Queued as ${copyableText(qid)}` : '' });
         } else if (log.status) {
             const target = relayHost(log.relay) || log.recipient || '';
-            const detail = `${when}, status=${log.status}${log.dsn ? ` (${log.dsn})` : ''}`;
+            const detail = `status=${log.status}${log.dsn ? ` (${log.dsn})` : ''}`;
             if (log.status === 'sent') add(log.time, 'ok', target ? `Delivered to ${target}` : 'Delivered', detail, { titleHtml: target ? `Delivered to ${copyableText(target)}` : '' });
             else if (log.status === 'deferred') add(log.time, 'warn', target ? `Deferred for ${target}` : 'Deferred', detail);
             else if (log.status === 'bounced') add(log.time, 'fail', target ? `Bounced for ${target}` : 'Bounced', detail);
@@ -496,13 +495,15 @@ function buildDeliverySteps(data) {
     }
     if (data.rspamd && typeof data.rspamd.score === 'number') {
         add(data.rspamd.time, data.rspamd.is_spam ? 'fail' : 'ok', `Rspamd score ${data.rspamd.score.toFixed(1)}`,
-            `${data.rspamd.time ? `${formatTime(data.rspamd.time)}, ` : ''}${data.rspamd.action || ''}`);
+            data.rspamd.action || '');
     }
     const dovecot = data.dovecot;
     if (dovecot && dovecot.status && DOVECOT_VERDICTS[dovecot.status]) {
         const verdict = DOVECOT_VERDICTS[dovecot.status];
         const last = (dovecot.logs || []).slice(-1)[0];
-        add(last ? last.time : '9', verdict.tone || 'warn', verdict.label, getDovecotVerdictText(dovecot));
+        const handOver = (data.postfix || []).filter(log => log.status === 'sent' && /dovecot/i.test(log.relay || '')).slice(-1)[0];
+        const time = last ? last.time : handOver ? handOver.time : '';
+        add(time || '9', verdict.tone || 'warn', verdict.label, getDovecotVerdictText(dovecot), { showTime: !!time });
     }
     // Steps logged in the same second keep the order mail flows in
     const stage = step => /^(Rejected|Received)/.test(step.title) ? 0 : /^Queued/.test(step.title) ? 1 : /^Rspamd/.test(step.title) ? 2
@@ -512,7 +513,7 @@ function buildDeliverySteps(data) {
     const merged = [];
     for (const step of steps) {
         const prev = merged[merged.length - 1];
-        if (prev && prev.title === step.title) { prev.count = (prev.count || 1) + 1; prev.detail = step.detail; prev.detailHtml = step.detailHtml; continue; }
+        if (prev && prev.title === step.title) { prev.count = (prev.count || 1) + 1; prev.time = step.time; prev.detail = step.detail; prev.detailHtml = step.detailHtml; continue; }
         merged.push({ ...step });
     }
     return merged;
@@ -523,6 +524,7 @@ function renderDeliverySteps(data) {
     if (!steps.length) return '<p class="ui-muted">No delivery steps recorded yet.</p>';
     return `<ol class="ui-steps">${steps.map(step => `
         <li class="${step.tone ? `ui-step-${step.tone}` : ''}">
+            ${step.time && step.time !== '9' && step.showTime !== false ? `<time class="ui-step-time" datetime="${escapeHtml(step.time)}">${escapeHtml(formatTime(step.time))}</time>` : ''}
             <b>${step.titleHtml || escapeHtml(step.title)}${step.count > 1 ? ` <span class="ui-tag">${step.count} attempts</span>` : ''}</b>
             <span>${step.detailHtml || escapeHtml(step.detail)}</span>
         </li>`).join('')}</ol>`;
@@ -567,13 +569,6 @@ function renderOverviewTab(content, data) {
             ${renderDovecotSummary(data.dovecot)}
             ${renderRelatedDeliveries(data)}
             ${identifiers ? `<section><h4 class="ui-md-h">Identifiers</h4><dl class="ui-md-idlist">${identifiers}</dl></section>` : ''}
-            ${data.rspamd ? '' : data.postfix && data.postfix.length > 0 ? `
-                <div class="ui-banner">
-                    <div>Postfix Delivery Logs
-                        <p>Click "Logs" tab to see complete delivery timeline (${data.postfix.length} entries)</p>
-                    </div>
-                </div>
-            ` : ''}
         </div>
     `;
 }

@@ -378,6 +378,29 @@ def test_details_endpoint_lists_the_other_delivery(env):
         legs[queue_a].correlation_key]
 
 
+def test_details_endpoint_takes_the_subject_from_another_delivery(env):
+    """A delivery Rspamd did not scan (a release from quarantine) has no subject
+    of its own; the dialog shows the one another delivery of the message has."""
+    from fastapi.testclient import TestClient
+    from app.main import app
+    from app.database import get_db_context
+    from app.models import MessageCorrelation
+
+    msgid, queue_a, queue_b, rspamd_a, rspamd_b = _seed_forward_scenario()
+    _correlate(rspamd_a)
+    _correlate(rspamd_b)
+    legs = {leg.queue_id: leg for leg in _legs(msgid)}
+    with get_db_context() as db:
+        db.query(MessageCorrelation).filter_by(correlation_key=legs[queue_a].correlation_key).update({'subject': 'Quarterly report'})
+        db.query(MessageCorrelation).filter_by(correlation_key=legs[queue_b].correlation_key).update({'subject': None})
+        db.commit()
+
+    client = TestClient(app)
+    assert client.get(f'/api/message/{legs[queue_b].correlation_key}/details').json()['subject'] == 'Quarterly report'
+    # A delivery with a subject keeps its own
+    assert client.get(f'/api/message/{legs[queue_a].correlation_key}/details').json()['subject'] == 'Quarterly report'
+
+
 def test_details_endpoint_has_no_related_deliveries_for_a_single_delivery(env):
     from fastapi.testclient import TestClient
     from app.main import app

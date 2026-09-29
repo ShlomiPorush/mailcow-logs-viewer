@@ -194,22 +194,22 @@ Fields that copy their value on click (hover shows a copy icon and "Click to cop
 | Message details | copies: `data.sender \|\| '-'` | `frontend/message-details.js:456` (renderMessageHeader) |
 | Message details | copies: `r` | `frontend/message-details.js:457` (renderMessageHeader) |
 | Message details | copies: `recipients[0] \|\| '-'` | `frontend/message-details.js:457` (renderMessageHeader) |
-| Message details | copies: `ip` | `frontend/message-details.js:482` (buildDeliverySteps) |
-| Message details | copies: `user` | `frontend/message-details.js:483` (buildDeliverySteps) |
-| Message details | copies: `qid` | `frontend/message-details.js:487` (buildDeliverySteps) |
-| Message details | copies: `target` | `frontend/message-details.js:491` (buildDeliverySteps) |
-| Message details | copies: `data.queue_id` | `frontend/message-details.js:553` (renderOverviewTab) |
-| Message details | copies: `data.message_id` | `frontend/message-details.js:554` (renderOverviewTab) |
-| Message details | copies: `rspamd.ip` | `frontend/message-details.js:555` (renderOverviewTab) |
-| Message details | copies: `rspamd.user` | `frontend/message-details.js:557` (renderOverviewTab) |
-| Message details | copies: `Array.from(recipientsFromPostfix)[0]` | `frontend/message-details.js:691` (renderPostfixTab) |
-| Message details | copies: `data.recipients[0]` | `frontend/message-details.js:693` (renderPostfixTab) |
-| Message details | copies: `sender` | `frontend/message-details.js:702` (renderPostfixTab) |
-| Message details | copies: `queueId` | `frontend/message-details.js:705` (renderPostfixTab) |
-| Message details | copies: `clientIp` | `frontend/message-details.js:706` (renderPostfixTab) |
-| Message details | copies: `recipient` | `frontend/message-details.js:720` (renderPostfixTab) |
-| Message details | copies: `log.ip` | `frontend/message-details.js:844` (renderNetfilterTab) |
-| Message details | copies: `log.username` | `frontend/message-details.js:847` (renderNetfilterTab) |
+| Message details | copies: `ip` | `frontend/message-details.js:481` (buildDeliverySteps) |
+| Message details | copies: `user` | `frontend/message-details.js:482` (buildDeliverySteps) |
+| Message details | copies: `qid` | `frontend/message-details.js:486` (buildDeliverySteps) |
+| Message details | copies: `target` | `frontend/message-details.js:490` (buildDeliverySteps) |
+| Message details | copies: `data.queue_id` | `frontend/message-details.js:555` (renderOverviewTab) |
+| Message details | copies: `data.message_id` | `frontend/message-details.js:556` (renderOverviewTab) |
+| Message details | copies: `rspamd.ip` | `frontend/message-details.js:557` (renderOverviewTab) |
+| Message details | copies: `rspamd.user` | `frontend/message-details.js:559` (renderOverviewTab) |
+| Message details | copies: `Array.from(recipientsFromPostfix)[0]` | `frontend/message-details.js:686` (renderPostfixTab) |
+| Message details | copies: `data.recipients[0]` | `frontend/message-details.js:688` (renderPostfixTab) |
+| Message details | copies: `sender` | `frontend/message-details.js:697` (renderPostfixTab) |
+| Message details | copies: `queueId` | `frontend/message-details.js:700` (renderPostfixTab) |
+| Message details | copies: `clientIp` | `frontend/message-details.js:701` (renderPostfixTab) |
+| Message details | copies: `recipient` | `frontend/message-details.js:715` (renderPostfixTab) |
+| Message details | copies: `log.ip` | `frontend/message-details.js:839` (renderNetfilterTab) |
+| Message details | copies: `log.username` | `frontend/message-details.js:842` (renderNetfilterTab) |
 | Security | copies: `log.username` | `frontend/app.js:1055` (renderNetfilterData) |
 | Security | copies: `log.ip` | `frontend/app.js:1060` (renderNetfilterData) |
 | Security | copies: `src.ip` | `frontend/app.js:1260` (renderSecurityOverview) |
@@ -279,12 +279,12 @@ Native `title` tooltips. Dynamic ones show the expression that builds the text.
 | Messages | dynamic: `${escapeHtml(msg.subject \|\| 'No subject')}` | `frontend/app.js:871` (renderMessageRow) |
 | Messages | dynamic: `${escapeHtml(msg.recipient \|\| '')}` | `frontend/app.js:876` (renderMessageRow) |
 | Messages | "Filter by sender, recipient, user or IP" | `frontend/index.html:646` |
-| Message details | "This delivery attempt never reached a final outcome" | `frontend/message-details.js:360` (renderRelatedDeliveries) |
+| Message details | "This delivery attempt never reached a final outcome" | `frontend/message-details.js:361` (renderRelatedDeliveries) |
 | Message details | "Open Spam Analysis" | `frontend/message-details.js:446` (renderMessageHeader) |
 | Message details | dynamic: `${escapeHtml(hasSubject ? data.subject : 'No subject')}` | `frontend/message-details.js:454` (renderMessageHeader) |
-| Message details | dynamic: `${escapeHtml(sender)}` | `frontend/message-details.js:702` (renderPostfixTab) |
-| Message details | dynamic: `${escapeHtml(relay)}` | `frontend/message-details.js:707` (renderPostfixTab) |
-| Message details | set in JS: dynamic: `== step.title) { prev.count = (prev.count \|\| 1) + 1` | `frontend/message-details.js:515` (buildDeliverySteps) |
+| Message details | dynamic: `${escapeHtml(sender)}` | `frontend/message-details.js:697` (renderPostfixTab) |
+| Message details | dynamic: `${escapeHtml(relay)}` | `frontend/message-details.js:702` (renderPostfixTab) |
+| Message details | set in JS: dynamic: `== step.title) { prev.count = (prev.count \|\| 1) + 1` | `frontend/message-details.js:516` (buildDeliverySteps) |
 | Security | dynamic: `${escapeHtml(formatTime(log.time))}` | `frontend/app.js:1059` (renderNetfilterData) |
 | Security | dynamic: `${escapeHtml(place + org)}` | `frontend/app.js:1063` (renderNetfilterData) |
 | Security | dynamic: `Unban ${escapeHtml(log.ip)}/32` | `frontend/app.js:1065` (renderNetfilterData) |
@@ -602,8 +602,8 @@ PNG flags served locally from `frontend/assets/flags/<size>/<cc>.png` (sizes 16x
 
 | Page | What | Code |
 |---|---|---|
-| Message details | getFlagUrl(rspamd.country_code, '16x12') | `frontend/message-details.js:548` (renderOverviewTab) |
-| Message details | getFlagUrl(rspamd.country_code, '16x12') | `frontend/message-details.js:548` (renderOverviewTab) |
+| Message details | getFlagUrl(rspamd.country_code, '16x12') | `frontend/message-details.js:550` (renderOverviewTab) |
+| Message details | getFlagUrl(rspamd.country_code, '16x12') | `frontend/message-details.js:550` (renderOverviewTab) |
 | Security | getFlagUrl(log.country_code, '16x12') | `frontend/app.js:1052` (renderNetfilterData) |
 | Security | getFlagUrl(d.country_code, '24x18') | `frontend/app.js:2041` (loadSecurityCountryChart) |
 | Shared | getFlagUrl(rspamdData.country_code, size) | `frontend/app.js:4922` (renderGeoIPInfo) |
@@ -629,8 +629,8 @@ Buttons, tabs and fields whose behavior is attached with `addEventListener` inst
 | Shell | change on `px)')` | `frontend/app.js:463` (loadAppInfo) |
 | Shell | click on `document` | `frontend/router.js:396` |
 | Messages | click on `document` | `frontend/app.js:3819` |
-| Message details | click on `messageModal` | `frontend/message-details.js:890` |
-| Message details | click on `modalContent` | `frontend/message-details.js:900` |
+| Message details | click on `messageModal` | `frontend/message-details.js:885` |
+| Message details | click on `modalContent` | `frontend/message-details.js:895` |
 | Security | click on `editSettingsBtn` | `frontend/app.js:2428` (loadFail2BanSettings) |
 | Security | click on `editIpBtn` | `frontend/app.js:2444` (loadFail2BanSettings) |
 | Security | submit on `settingsForm` | `frontend/app.js:2455` (loadFail2BanSettings) |
@@ -723,10 +723,10 @@ Text shown when a list or panel has nothing to show.
 | Messages | "No messages found" | `frontend/app.js:895` (renderMessagesData) |
 | Messages | "No messages found" | `frontend/app.js:3939` (loadMessages) |
 | Message details | "No modal data available" | `frontend/message-details.js:70` (switchModalTab) |
-| Message details | "No delivery steps recorded yet" | `frontend/message-details.js:523` (renderDeliverySteps) |
+| Message details | "No delivery steps recorded yet" | `frontend/message-details.js:524` (renderDeliverySteps) |
+| Message details | "No Postfix delivery logs available" | `frontend/message-details.js:584` (renderPostfixTab) |
 | Message details | "No Postfix delivery logs available" | `frontend/message-details.js:589` (renderPostfixTab) |
-| Message details | "No Postfix delivery logs available" | `frontend/message-details.js:594` (renderPostfixTab) |
-| Message details | "No spam analysis data available" | `frontend/message-details.js:756` (renderSpamTab) |
+| Message details | "No spam analysis data available" | `frontend/message-details.js:751` (renderSpamTab) |
 | Security | "No logs found" | `frontend/app.js:1003` (renderNetfilterData) |
 | Security | "No matching entries" | `frontend/smtp-abuse.js:137` (renderSmtpAbusePanel) |
 | Queue | "No matching queue entries" | `frontend/app.js:2648` (applyQueueFilters) |
@@ -819,7 +819,7 @@ Key handlers; the keys are read from the handler body.
 
 | Page | What | Code |
 |---|---|---|
-| Message details | keydown: Escape | `frontend/message-details.js:906` |
+| Message details | keydown: Escape | `frontend/message-details.js:901` |
 | Settings | keydown: Escape, Enter | `frontend/settings.js:94` (showBasicAuthVerifyModal) |
 | Settings | keydown: Escape, Enter | `frontend/settings.js:160` (showFeatureDisableConfirmModal) |
 | Shared | keydown | `frontend/utils.js:611` (showConfirmModal) |
