@@ -1780,3 +1780,14 @@ html .markdown-body .markdown-alert-caution .markdown-alert-title { color: var(-
     .ui-logs-side.is-open .ui-logs-side-toggle svg { transform: rotate(180deg); }
     .ui-logs-side:not(.is-open) > :not(.ui-logs-side-toggle) { display: none; }
 }
+
+/* Logs: the custom range opens under the presets; quick filters fold */
+.ui-logs-custom { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; flex: 1 1 100%; }
+.ui-logs-custom.hidden { display: none; }
+.ui-logs-quick { align-items: flex-start; }
+.ui-logs-quick > .ui-muted { line-height: 30px; }
+.ui-logs-quick .ui-chip-row { flex: 1 1 auto; min-width: 0; }
+.ui-logs-quick .ui-chip-row.is-folded { max-height: var(--ui-fold-h, 52px); overflow: hidden;
+    -webkit-mask-image: linear-gradient(to bottom, #000 55%, transparent); mask-image: linear-gradient(to bottom, #000 55%, transparent); }
+.ui-logs-quick-more { flex: 1 1 100%; font-size: 12.5px; text-align: start; }
+.ui-logs-quick-more.hidden { display: none; }
