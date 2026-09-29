@@ -1827,3 +1827,9 @@ html .markdown-body .markdown-alert-caution .markdown-alert-title { color: var(-
 .ui-table-card > .ui-loading { padding: 24px 0; }
 /* A long DNS record wraps while it copies */
 .copyable.ui-copy-wrap { display: inline; overflow-wrap: anywhere; font-size: inherit; }
+
+/* DMARC: room under the head buttons for the last-sync note that hangs below Sync */
+#dmarc-header-actions:has(.ui-dmarc-sync:not(.hidden)) { padding-bottom: 22px; }
+/* DMARC Record: each value next to its label, not across the card */
+.ui-dmarc-record .ui-kv { display: grid; grid-template-columns: minmax(150px, 220px) minmax(0, 1fr); }
+.ui-dmarc-record .ui-kv > b { margin-inline-start: 0; text-align: start; }
