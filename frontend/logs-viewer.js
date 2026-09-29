@@ -127,17 +127,6 @@ function renderLogServiceList(services) {
     updateLogServiceToggle();
 }
 
-
-function filterLogServices(query) {
-    const buttons = document.querySelectorAll('.log-service-btn');
-    const q = query.toLowerCase();
-    buttons.forEach(btn => {
-        const service = btn.dataset.service || '';
-        const text = btn.textContent.toLowerCase();
-        btn.style.display = (text.includes(q) || service.includes(q)) ? '' : 'none';
-    });
-}
-
 // Narrow screens: the service list folds into one row that names the current service
 function toggleLogServices(open) {
     const side = document.getElementById('logs-side');
