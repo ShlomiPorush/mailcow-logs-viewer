@@ -374,18 +374,18 @@ Native `title` tooltips. Dynamic ones show the expression that builds the text.
 | Mailbox stats | "Address on a mailcow alias domain that points at this mailbox" | `frontend/mailbox-stats.js:371` (renderMailboxStatsAccordion) |
 | Mailbox stats | dynamic: `${escapeHtml(formatTime(group.last_seen))}` | `frontend/rate-limits.js:358` (renderRateLimitSendersTable) |
 | Mailbox stats | set in JS: dynamic: `isRateLimits ? 'Help - Rate Limits' : 'Help - Mailbox Statistics'` | `frontend/mailbox-stats.js:83` (mailboxStatsSwitchView) |
-| Logs | "Pause/Resume live updates" | `frontend/index.html:1296` |
-| Logs | "Live mode - show latest logs" | `frontend/index.html:1300` |
-| Logs | "Auto-scroll to new entries" | `frontend/index.html:1303` |
-| Logs | "Toggle sort order (newest at bottom / newest at top)" | `frontend/index.html:1306` |
-| Logs | "Toggle word wrap" | `frontend/index.html:1317` |
-| Logs | "Clear display" | `frontend/index.html:1320` |
-| Logs | "Search" | `frontend/index.html:1327` |
-| Logs | "Clear search" | `frontend/index.html:1328` |
-| Logs | "From date" | `frontend/index.html:1344` |
-| Logs | "To date" | `frontend/index.html:1346` |
-| Logs | dynamic: `${escapeHtml(f.description \|\| '')}` | `frontend/logs-viewer.js:222` (loadSmartFilters) |
-| Logs | "Clear all filters" | `frontend/logs-viewer.js:1220` (updateFilterBadge) |
+| Logs | "Pause/Resume live updates" | `frontend/index.html:1294` |
+| Logs | "Live mode - show latest logs" | `frontend/index.html:1298` |
+| Logs | "Auto-scroll to new entries" | `frontend/index.html:1301` |
+| Logs | "Toggle sort order (newest at bottom / newest at top)" | `frontend/index.html:1304` |
+| Logs | "Toggle word wrap" | `frontend/index.html:1315` |
+| Logs | "Clear display" | `frontend/index.html:1318` |
+| Logs | "Search" | `frontend/index.html:1325` |
+| Logs | "Clear search" | `frontend/index.html:1326` |
+| Logs | "From date" | `frontend/index.html:1342` |
+| Logs | "To date" | `frontend/index.html:1344` |
+| Logs | dynamic: `${escapeHtml(f.description \|\| '')}` | `frontend/logs-viewer.js:211` (loadSmartFilters) |
+| Logs | "Clear all filters" | `frontend/logs-viewer.js:1209` (updateFilterBadge) |
 | Settings | "Last delivery succeeded" | `frontend/notifications.js:67` (renderNotificationChannels) |
 | Settings | "Last delivery failed" | `frontend/notifications.js:69` (renderNotificationChannels) |
 | Settings | "Not used yet" | `frontend/notifications.js:70` (renderNotificationChannels) |
@@ -407,12 +407,12 @@ Native `title` tooltips. Dynamic ones show the expression that builds the text.
 | app.js (mixed) | dynamic: `Look up on ${escapeHtml(r.name)}` | `frontend/app.js:4028` (blocklistLookupLink) |
 | app.js (mixed) | set in JS: dynamic: `label` | `frontend/app.js:286` (setNavTabLabel) |
 | app.js (mixed) | set in JS: dynamic: `title \|\| ''` | `frontend/app.js:496` (setNavCount) |
-| Modal: changelog-modal | "Close" | `frontend/index.html:1434` |
-| Modal: container-logs-modal | "Refresh" | `frontend/index.html:1466` |
-| Modal: container-logs-modal | "Close" | `frontend/index.html:1474` |
-| Modal: dmarc-reports-management-modal | "Close" | `frontend/index.html:1522` |
-| Modal: dmarc-sync-history-modal | "Close" | `frontend/index.html:1509` |
-| Modal: message-modal | "Close" | `frontend/index.html:1407` |
+| Modal: changelog-modal | "Close" | `frontend/index.html:1432` |
+| Modal: container-logs-modal | "Refresh" | `frontend/index.html:1464` |
+| Modal: container-logs-modal | "Close" | `frontend/index.html:1472` |
+| Modal: dmarc-reports-management-modal | "Close" | `frontend/index.html:1520` |
+| Modal: dmarc-sync-history-modal | "Close" | `frontend/index.html:1507` |
+| Modal: message-modal | "Close" | `frontend/index.html:1405` |
 
 ### Toasts
 
@@ -678,7 +678,7 @@ Drop-down lists in the page markup with their options. The option wording and or
 | Spam filter | `suppression-filter-active`: Active Only / All / Inactive / Expired | `frontend/index.html:950` |
 | Mailbox stats | `mailbox-stats-domain-filter`: All Domains | `frontend/index.html:1230` |
 | Mailbox stats | `mailbox-stats-sort`: Sent (High to Low) / Received (High to Low) / Failure Rate (High to Low) / Quota Used (High to Low) / Username (A-Z) | `frontend/index.html:1233` |
-| Logs | `logs-fontsize`: 10px / 11px / 12px / 13px / 14px / 16px | `frontend/index.html:1309` |
+| Logs | `logs-fontsize`: 10px / 11px / 12px / 13px / 14px / 16px | `frontend/index.html:1307` |
 
 ### Charts
 
@@ -745,7 +745,7 @@ Text shown when a list or panel has nothing to show.
 | DMARC | "No reports found" | `frontend/dmarc.js:1173` (renderReportsManagementTable) |
 | Mailbox stats | "No mailboxes found" | `frontend/mailbox-stats.js:306` (renderMailboxStatsAccordion) |
 | Logs | "No log services available" | `frontend/logs-viewer.js:90` (loadLogViewer) |
-| Logs | "No log entries found" | `frontend/logs-viewer.js:487` (renderLogEntries) |
+| Logs | "No log entries found" | `frontend/logs-viewer.js:476` (renderLogEntries) |
 | Settings | "No logs available" | `frontend/notifications.js:269` (testNotificationChannel) |
 | Settings | "No logs available" | `frontend/notifications.js:286` (testNotificationChannelDraft) |
 | Settings | "No changelog available" | `frontend/settings.js:1147` (renderSettings) |
@@ -769,7 +769,7 @@ Functions that render a spinner or "Loading..." while data is fetched.
 | Status | 1 loading indicator(s) | `frontend/app.js:4060` (renderStatusAttention) |
 | Status | 2 loading indicator(s) | `frontend/app.js:4352` (checkBlacklists) |
 | Status | 1 loading indicator(s) | `frontend/app.js:4825` (triggerBackgroundJob) |
-| Logs | 1 loading indicator(s) | `frontend/logs-viewer.js:1102` (loadDateRangeLogs) |
+| Logs | 1 loading indicator(s) | `frontend/logs-viewer.js:1091` (loadDateRangeLogs) |
 | Settings | 3 loading indicator(s) | `frontend/settings.js:1190` (renderSettings) |
 | Settings | 2 loading indicator(s) | `frontend/settings.js:1587` (showGeoIPSetupModal) |
 | Settings | 1 loading indicator(s) | `frontend/settings.js:1777` (validateMaxMindLicense) |
@@ -784,7 +784,7 @@ Settings the browser remembers between visits.
 | Shell | localStorage getItem "theme" | `frontend/app.js:5031` (initDarkMode) |
 | Shell | localStorage setItem "theme" | `frontend/app.js:5046` (toggleDarkMode) |
 | Logs | localStorage getItem "logsNewestFirst" | `frontend/logs-viewer.js:17` |
-| Logs | localStorage setItem "logsNewestFirst" | `frontend/logs-viewer.js:560` (toggleLogSortOrder) |
+| Logs | localStorage setItem "logsNewestFirst" | `frontend/logs-viewer.js:549` (toggleLogSortOrder) |
 
 ### Auto refresh and timers
 
