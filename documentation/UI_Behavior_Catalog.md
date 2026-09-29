@@ -181,7 +181,7 @@ Generated from the code. Do not edit by hand; run `node .github/scripts/ui-catal
 | [Loading states](#loading-states) | 14 |
 | [Persisted preferences](#persisted-preferences) | 4 |
 | [Auto refresh and timers](#auto-refresh-and-timers) | 5 |
-| [Address bar and deep links](#address-bar-and-deep-links) | 6 |
+| [Address bar and deep links](#address-bar-and-deep-links) | 8 |
 | [Keyboard handling](#keyboard-handling) | 7 |
 | [Badge colours](#badge-colours) | 11 |
 
@@ -627,7 +627,7 @@ Buttons, tabs and fields whose behavior is attached with `addEventListener` inst
 | Page | What | Code |
 |---|---|---|
 | Shell | change on `px)')` | `frontend/app.js:463` (loadAppInfo) |
-| Shell | click on `document` | `frontend/router.js:317` |
+| Shell | click on `document` | `frontend/router.js:396` |
 | Messages | click on `document` | `frontend/app.js:3819` |
 | Message details | click on `messageModal` | `frontend/message-details.js:890` |
 | Message details | click on `modalContent` | `frontend/message-details.js:900` |
@@ -805,8 +805,10 @@ Places that change the URL so a view can be bookmarked or shared.
 | Page | What | Code |
 |---|---|---|
 | Shell | replaceState | `frontend/app.js:1545` (switchTab) |
-| Shell | pushState | `frontend/router.js:154` (navigateTo) |
-| Shell | replaceState | `frontend/router.js:222` (initRouter) |
+| Shell | replaceState | `frontend/router.js:157` (navigateTo) |
+| Shell | pushState | `frontend/router.js:159` (navigateTo) |
+| Shell | pushState | `frontend/router.js:209` (syncOverlayHistory) |
+| Shell | replaceState | `frontend/router.js:301` (initRouter) |
 | DMARC | pushState | `frontend/dmarc.js:381` (loadDomainOverview) |
 | DMARC | pushState | `frontend/dmarc.js:769` (loadReportDetails) |
 | DMARC | pushState | `frontend/dmarc.js:837` (loadSourceDetails) |
