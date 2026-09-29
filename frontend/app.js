@@ -4101,12 +4101,11 @@ async function loadStatus() {
             loadStatusExtended(),
             loadStatusAppVersion()
         ]);
-        const subtitle = document.getElementById('status-subtitle');
-        const host = document.getElementById('ui-server-host');
-        if (subtitle) {
+        const lastChecked = document.getElementById('status-last-checked');
+        if (lastChecked) {
             const now = new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit', hour12: false,
                 timeZone: appTimezone && appTimezone !== 'UTC' ? appTimezone : undefined }).format(new Date());
-            subtitle.textContent = `${host && host.textContent && host.textContent !== 'mailcow' ? `${host.textContent}, checked` : 'Checked'} at ${now}`;
+            lastChecked.textContent = `Last checked: ${now}`;
         }
         renderStatusAttention();
     } catch (error) {

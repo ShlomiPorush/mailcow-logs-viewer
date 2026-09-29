@@ -324,7 +324,7 @@ function renderMailboxStatsAccordion(mailboxes, page = 1, totalPages = 1) {
         return `
             <div class="ui-tr ui-ms-row" onclick="toggleMailboxAccordion('${escapeJsArg(mb.username)}')">
                 <div class="ui-td ui-q-who">
-                    <div><svg id="accordion-icon-${index}" class="ui-domain-chevron" width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"${isExpanded ? ' style="transform: rotate(90deg)"' : ''}><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg>${escapeHtml(mb.username)} ${mb.active ? '' : uiTag('Inactive', 'fail')}</div>
+                    <div><svg id="accordion-icon-${index}" class="ui-domain-chevron" width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"${isExpanded ? ' style="transform: rotate(90deg)"' : ''}><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg>${copyableText(mb.username)} ${mb.active ? '' : uiTag('Inactive', 'fail')}</div>
                     ${mb.name ? `<small>${escapeHtml(mb.name)}</small>` : ''}
                 </div>
                 <span class="ui-td ui-td-end"><small class="ui-sec-unit">Sent </small>${mb.combined_sent.toLocaleString()}</span>
@@ -366,7 +366,7 @@ function renderMailboxStatsAccordion(mailboxes, page = 1, totalPages = 1) {
             const go = (filter, value, label, tone) => `<button type="button" class="ui-td ui-td-end ui-link-cell${tone ? ` ui-text-${tone}` : ''}" onclick="event.stopPropagation(); navigateToMessagesWithFilter({ email: '${escapeJsArg(alias.alias_address)}', filterType: 'search', ${filter} })"><small class="ui-sec-unit">${label} </small>${value || 0}</button>`;
             return `
                             <div class="ui-tr">
-                                <span class="ui-td">${escapeHtml(alias.alias_address)}
+                                <span class="ui-td">${copyableText(alias.alias_address)}
                                     ${alias.is_catch_all ? uiTag('catch-all', 'warn') : ''}
                                     ${alias.is_domain_alias ? '<span class="ui-tag ui-tag-info" title="Address on a mailcow alias domain that points at this mailbox">domain alias</span>' : ''}
                                     ${!alias.active ? uiTag('inactive', '') : ''}</span>
