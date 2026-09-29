@@ -352,12 +352,12 @@ async function loadDmarcDomains() {
                 </div>`;
         }).join('')}`;
 
-        // Update the manage reports link with total count
-        const manageReportsLink = document.getElementById('dmarc-manage-reports-link');
-        if (manageReportsLink) {
+        // Manage Reports sits with Upload Report in the page head
+        const manageBtn = document.getElementById('dmarc-manage-btn');
+        if (manageBtn) {
             const totalReports = domains.reduce((sum, d) => sum + (d.report_count || 0) + (d.tls_report_count || 0), 0);
-            manageReportsLink.innerHTML = `<button type="button" class="ui-btn ui-btn-sm" onclick="showReportsManagementModal()">Manage Reports (${totalReports} total)</button>`;
-            manageReportsLink.classList.remove('hidden');
+            manageBtn.textContent = `Manage Reports (${totalReports})`;
+            manageBtn.classList.toggle('hidden', totalReports === 0);
         }
 
     } catch (error) {
