@@ -407,12 +407,12 @@ Native `title` tooltips. Dynamic ones show the expression that builds the text.
 | app.js (mixed) | dynamic: `Look up on ${escapeHtml(r.name)}` | `frontend/app.js:4028` (blocklistLookupLink) |
 | app.js (mixed) | set in JS: dynamic: `label` | `frontend/app.js:286` (setNavTabLabel) |
 | app.js (mixed) | set in JS: dynamic: `title \|\| ''` | `frontend/app.js:496` (setNavCount) |
-| Modal: changelog-modal | "Close" | `frontend/index.html:1432` |
-| Modal: container-logs-modal | "Refresh" | `frontend/index.html:1464` |
-| Modal: container-logs-modal | "Close" | `frontend/index.html:1472` |
-| Modal: dmarc-reports-management-modal | "Close" | `frontend/index.html:1520` |
-| Modal: dmarc-sync-history-modal | "Close" | `frontend/index.html:1507` |
-| Modal: message-modal | "Close" | `frontend/index.html:1405` |
+| Modal: changelog-modal | "Close" | `frontend/index.html:1434` |
+| Modal: container-logs-modal | "Refresh" | `frontend/index.html:1466` |
+| Modal: container-logs-modal | "Close" | `frontend/index.html:1474` |
+| Modal: dmarc-reports-management-modal | "Close" | `frontend/index.html:1522` |
+| Modal: dmarc-sync-history-modal | "Close" | `frontend/index.html:1509` |
+| Modal: message-modal | "Close" | `frontend/index.html:1407` |
 
 ### Toasts
 
