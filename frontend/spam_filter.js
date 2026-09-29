@@ -383,6 +383,16 @@ function updateSuppressionSyncLock() {
     }
 }
 
+// The suppression list is paged on the server, so its column headers sort there
+let suppressionSort = { by: 'created_at', dir: 'desc' };
+function suppressionSortAttr(key) {
+    return ` aria-sort="${suppressionSort.by === key ? (suppressionSort.dir === 'asc' ? 'ascending' : 'descending') : 'none'}"`;
+}
+function suppressionSortBy(key, dir) {
+    suppressionSort = { by: key, dir };
+    loadSuppressions(1);
+}
+
 async function loadSuppressions(page) {
     suppressionPage = page || suppressionPage || 1;
     const container = document.getElementById('suppression-list');
@@ -401,6 +411,8 @@ async function loadSuppressions(page) {
     if (search) params.append('search', search);
     if (reason) params.append('reason_filter', reason);
     if (active) params.append('active_filter', active);
+    params.append('sort_by', suppressionSort.by);
+    params.append('sort_dir', suppressionSort.dir);
 
     try {
         const response = await authenticatedFetch(`/api/suppressions?${params}`);
@@ -423,8 +435,8 @@ async function loadSuppressions(page) {
         data.items.forEach(s => suppressionItemsById.set(s.id, s));
 
         container.innerHTML = `
-            <div class="ui-table ui-stack ui-supp-table">
-                <div class="ui-tr ui-tr-head"><span>Address</span><span>Reason</span><span>Bounces</span><span>Expiry</span><span>Rspamd</span><span>Added</span><span class="ui-td-end">Actions</span></div>
+            <div class="ui-table ui-stack ui-supp-table" data-sort-handler="suppressionSortBy">
+                <div class="ui-tr ui-tr-head"><span data-sort-key="email"${suppressionSortAttr('email')}>Address</span><span data-sort-key="reason"${suppressionSortAttr('reason')}>Reason</span><span data-sort-key="bounce_count"${suppressionSortAttr('bounce_count')}>Bounces</span><span data-sort-key="expires_at"${suppressionSortAttr('expires_at')}>Expiry</span><span>Rspamd</span><span data-sort-key="created_at"${suppressionSortAttr('created_at')}>Added</span><span class="ui-td-end">Actions</span></div>
                 ${data.items.map(s => renderSuppressionItem(s)).join('')}
             </div>
             ${data.total_pages > 1 ? renderSuppressionPagination(data.page, data.total_pages, data.total) : ''}

@@ -1806,3 +1806,13 @@ html .markdown-body .markdown-alert-caution .markdown-alert-title { color: var(-
 .ui-h1-note:empty, .ui-h1-note:has(> :empty:only-child) { display: none; }
 /* Quarantine Auto-Rules as a tab: the panel is the page, no fold */
 #quarantine-tab-rules .ui-rules-body { padding-top: 4px; }
+
+/* Sortable table headers */
+[aria-sort]:is(.ui-tr-head > *, thead th) { cursor: pointer; user-select: none; }
+[aria-sort]:is(.ui-tr-head > *, thead th):hover { color: var(--ui-ink); }
+[aria-sort]:is(.ui-tr-head > *, thead th)::after { content: ""; display: inline-block; width: 0; height: 0; margin-inline-start: 5px; vertical-align: middle;
+    border-inline: 4px solid transparent; opacity: 0; }
+[aria-sort="none"]:is(.ui-tr-head > *, thead th):hover::after { border-top: 5px solid currentColor; opacity: .35; }
+[aria-sort="descending"]:is(.ui-tr-head > *, thead th)::after { border-top: 5px solid currentColor; opacity: 1; }
+[aria-sort="ascending"]:is(.ui-tr-head > *, thead th)::after { border-bottom: 5px solid currentColor; opacity: 1; }
+[aria-sort="ascending"], [aria-sort="descending"] { color: var(--ui-ink); }

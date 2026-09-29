@@ -2889,6 +2889,7 @@ function sortQuarantineItems(items) {
 
 // Handler for the #quarantine-sort dropdown - re-sorts the already-fetched list
 function applyQuarantineSort() {
+    if (typeof uiClearTableSort === 'function') uiClearTableSort('quarantine-logs');
     const select = document.getElementById('quarantine-sort');
     if (select) quarantineSortOrder = select.value;
     if (quarantineLastData) {
