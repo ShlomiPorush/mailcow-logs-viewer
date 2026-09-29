@@ -696,3 +696,152 @@ function renderDeliveriesChip(msg) {
     if (deliveries < 2) return '';
     return `<span>Deliveries: ${deliveries}</span>`;
 }
+
+// =============================================================================
+// Sortable table headers. A click on a column header sorts the rows: numbers
+// high to low first, text A to Z first, and a second click turns it around.
+// The order survives the page's own refreshes. A table paged on the server
+// names a handler instead (data-sort-handler) and its sortable headers carry
+// the server's field (data-sort-key), so the order covers every page. A table
+// or a header with data-nosort, and headers with no text, do not sort.
+// =============================================================================
+
+const uiTableSorts = new Map();
+
+function uiSortHeads(table) {
+    const head = table.tagName === 'TABLE' ? table.querySelector('thead tr') : table.querySelector(':scope > .ui-tr-head');
+    return head ? [...head.children] : [];
+}
+
+function uiTableKey(table) {
+    const owner = table.id ? table : table.closest('[id]');
+    return `${owner ? owner.id : ''}|${uiSortHeads(table).map(h => h.textContent.trim()).join('|')}`;
+}
+
+function uiSortable(table, cell) {
+    if (!cell || table.hasAttribute('data-nosort') || cell.hasAttribute('data-nosort')) return false;
+    if (table.hasAttribute('data-sort-handler')) return cell.hasAttribute('data-sort-key');
+    return cell.textContent.trim() !== '' && !/^actions?$/i.test(cell.textContent.trim());
+}
+
+// The value a cell sorts by: its data-sort, else its text read as a number,
+// a size, a time ago or a date when it is one
+function uiSortValue(cell) {
+    if (!cell) return { n: null, t: '' };
+    if (cell.hasAttribute && cell.hasAttribute('data-sort')) {
+        const v = cell.getAttribute('data-sort');
+        return isNaN(Number(v)) ? { n: null, t: v.toLowerCase() } : { n: Number(v), t: v };
+    }
+    const copy = cell.cloneNode(true);
+    copy.querySelectorAll('.ui-sec-unit, .ui-phone-only').forEach(el => el.remove());
+    const text = copy.textContent.replace(/\s+/g, ' ').trim();
+    const t = text.toLowerCase();
+    if (!text || text === '-') return { n: null, t: '' };
+    const size = text.match(/^(-?\d+(?:[.,]\d+)?)\s*(b|kb|mb|gb|tb)$/i);
+    if (size) return { n: parseFloat(size[1].replace(',', '.')) * 1024 ** ['b', 'kb', 'mb', 'gb', 'tb'].indexOf(size[2].toLowerCase()), t };
+    // A time ago (recent first when high to low) or a plain duration (longest first)
+    const span = t.match(/^(?:up\s+)?(\d+(?:\.\d+)?)\s*(sec|s|min|mo|m|h|d|w|y)[a-z]*(\s+ago)?$/);
+    if (span || t === 'just now') {
+        const unit = { s: 1, sec: 1, m: 60, min: 60, h: 3600, d: 86400, w: 604800, mo: 2592000, y: 31536000 };
+        if (!span) return { n: 0, t };
+        const secs = Number(span[1]) * unit[span[2]];
+        return { n: span[3] ? -secs : secs, t };
+    }
+    const num = text.replace(/,/g, '').match(/^(-?\d+(?:\.\d+)?)\s*(%|k|m)?(\s|$)/i);
+    if (num) return { n: parseFloat(num[1]) * ({ k: 1e3, m: 1e6 }[(num[2] || '').toLowerCase()] || 1), t };
+    if (/\d{1,4}[./-]\d{1,2}[./-]\d{1,4}/.test(text)) {
+        const [a, b, c, rest] = text.split(/[^\d]+/).filter(Boolean);
+        // The app writes dates as MM/DD/YYYY or DD.MM.YYYY; either reads in order once the year leads
+        const dotted = /\d\.\d/.test(text);
+        const y = String(c).length === 4 ? c : a;
+        const mo = dotted ? b : a, da = dotted ? a : b;
+        const time = Date.parse(`${y}-${String(mo).padStart(2, '0')}-${String(da).padStart(2, '0')}T${(text.match(/\d{1,2}:\d{2}(:\d{2})?/) || ['00:00'])[0].padStart(5, '0')}`);
+        if (!isNaN(time)) return { n: time, t };
+    }
+    return { n: null, t };
+}
+
+// Rows travel with what follows them up to the next row (an opened detail)
+function uiSortUnits(table) {
+    if (table.tagName === 'TABLE') {
+        const body = table.tBodies[0];
+        return body ? [{ parent: body, units: [...body.rows].filter(r => !r.hasAttribute('data-sort-fixed') && r.cells.length > 1).map(r => [r]),
+            fixed: [...body.rows].filter(r => r.hasAttribute('data-sort-fixed') || r.cells.length <= 1) }] : [];
+    }
+    const kids = [...table.children];
+    const start = kids.findIndex(k => k.classList.contains('ui-tr-head')) + 1;
+    const segments = [];
+    let seg = { parent: table, units: [], fixed: [] };
+    for (const el of kids.slice(start)) {
+        if (el.classList.contains('ui-tr-group')) { segments.push(seg); seg = { parent: table, units: [], fixed: [], after: el }; continue; }
+        if (el.classList.contains('ui-tr')) seg.units.push([el]);
+        else if (seg.units.length) seg.units[seg.units.length - 1].push(el);
+        else seg.fixed.push(el);
+    }
+    segments.push(seg);
+    return segments;
+}
+
+function uiApplyTableSort(table, index, dir) {
+    const heads = uiSortHeads(table);
+    heads.forEach((h, i) => { if (uiSortable(table, h)) h.setAttribute('aria-sort', i === index ? (dir > 0 ? 'ascending' : 'descending') : 'none'); });
+    for (const seg of uiSortUnits(table)) {
+        const keyed = seg.units.map((unit, pos) => ({ unit, pos, v: uiSortValue(unit[0].children[index]) }));
+        keyed.sort((a, b) => {
+            // Empty values go last either way
+            const ae = a.v.n === null && !a.v.t, be = b.v.n === null && !b.v.t;
+            if (ae !== be) return ae ? 1 : -1;
+            let c;
+            if (a.v.n !== null && b.v.n !== null) c = a.v.n - b.v.n;
+            else c = a.v.t.localeCompare(b.v.t, undefined, { sensitivity: 'base' });
+            return c ? c * dir : a.pos - b.pos;
+        });
+        // Put them back in order, ahead of anything fixed at the end (a "No matches" row)
+        let anchor = seg.after ? seg.after.nextSibling : (seg.parent.tagName === 'TBODY' ? seg.parent.firstChild : uiSortHeads(table)[0].parentNode.nextSibling);
+        for (const { unit } of keyed) for (const el of unit) { seg.parent.insertBefore(el, anchor); anchor = el.nextSibling; }
+        for (const el of seg.fixed) if (seg.parent.tagName === 'TBODY') seg.parent.appendChild(el);
+    }
+    table.dataset.sortedBy = `${index}:${dir}`;
+}
+
+function uiClearTableSort(owner) {
+    for (const key of [...uiTableSorts.keys()]) if (key.startsWith(`${owner}|`)) uiTableSorts.delete(key);
+}
+
+document.addEventListener('click', event => {
+    const cell = event.target.closest('.ui-tr-head > *, thead th');
+    if (!cell) return;
+    const table = cell.closest('.ui-table, table');
+    if (!table || !uiSortable(table, cell)) return;
+    const index = uiSortHeads(table).indexOf(cell);
+    const current = cell.getAttribute('aria-sort');
+    const numeric = uiSortUnits(table).some(seg => seg.units.some(u => uiSortValue(u[0].children[index]).n !== null));
+    const dir = current === 'descending' ? 1 : current === 'ascending' ? -1 : (numeric ? -1 : 1);
+    const handler = table.getAttribute('data-sort-handler');
+    if (handler) {
+        if (typeof window[handler] === 'function') window[handler](cell.getAttribute('data-sort-key'), dir > 0 ? 'asc' : 'desc');
+        return;
+    }
+    uiTableSorts.set(uiTableKey(table), { index, dir });
+    uiApplyTableSort(table, index, dir);
+});
+
+// Mark the sortable headers, and put a remembered order back after a refresh
+let uiTableSortQueued = false;
+function uiRefreshTableSorts() {
+    uiTableSortQueued = false;
+    document.querySelectorAll('.ui-table, table').forEach(table => {
+        uiSortHeads(table).forEach(h => { if (uiSortable(table, h) && !h.hasAttribute('aria-sort')) h.setAttribute('aria-sort', 'none'); });
+        if (table.hasAttribute('data-sort-handler')) return;
+        const state = uiTableSorts.get(uiTableKey(table));
+        if (state && table.dataset.sortedBy !== `${state.index}:${state.dir}`) uiApplyTableSort(table, state.index, state.dir);
+    });
+}
+document.addEventListener('DOMContentLoaded', () => {
+    new MutationObserver(() => {
+        if (uiTableSortQueued) return;
+        uiTableSortQueued = true;
+        requestAnimationFrame(uiRefreshTableSorts);
+    }).observe(document.body, { subtree: true, childList: true });
+    uiRefreshTableSorts();
+});
