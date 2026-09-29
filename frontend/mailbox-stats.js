@@ -289,7 +289,7 @@ async function loadMailboxStatsList(page = 1) {
 function mailboxStatLink(email, filter, value, label, tone) {
     const args = `{ email: '${escapeJsArg(email)}', filterType: 'search', ${filter} }`;
     return `<button type="button" class="ui-kpi ui-kpi-btn" onclick="event.stopPropagation(); navigateToMessagesWithFilter(${args})" title="Open these messages">
-        <b class="${tone ? `ui-${tone}` : ''}">${(value || 0).toLocaleString()}</b>${label}</button>`;
+        <b class="${!value ? 'ui-zero' : tone ? `ui-${tone}` : ''}">${(value || 0).toLocaleString()}</b>${label}</button>`;
 }
 
 function mailboxRateLimitLabel(mb) {
@@ -349,9 +349,9 @@ function renderMailboxStatsAccordion(mailboxes, page = 1, totalPages = 1) {
 
                     <h4 class="ui-md-h">Message Statistics</h4>
                     <div class="ui-kpis ui-ms-counts">
-                        ${mailboxStatLink(email, "direction: 'outbound'", mb.combined_sent, 'Sent')}
-                        ${mailboxStatLink(email, "direction: 'inbound'", mb.combined_received, 'Received')}
-                        ${mailboxStatLink(email, "direction: 'internal'", mb.combined_internal, 'Internal')}
+                        ${mailboxStatLink(email, "direction: 'outbound'", mb.combined_sent, 'Sent', 'dir-out')}
+                        ${mailboxStatLink(email, "direction: 'inbound'", mb.combined_received, 'Received', 'dir-in')}
+                        ${mailboxStatLink(email, "direction: 'internal'", mb.combined_internal, 'Internal', 'dir-int')}
                         ${mailboxStatLink(email, "status: 'delivered'", mb.combined_delivered, 'Delivered', 'ok')}
                         ${mailboxStatLink(email, "status: 'deferred'", (mb.mailbox_counts?.sent_deferred || 0) + sum(mb, 'sent_deferred'), 'Deferred', 'warn')}
                         ${mailboxStatLink(email, "status: 'bounced'", (mb.mailbox_counts?.sent_bounced || 0) + sum(mb, 'sent_bounced'), 'Bounced', 'fail')}
@@ -363,16 +363,16 @@ function renderMailboxStatsAccordion(mailboxes, page = 1, totalPages = 1) {
                         <div class="ui-table ui-stack ui-ms-aliases">
                             <div class="ui-tr ui-tr-head"><span>Alias</span><span class="ui-td-end">Sent</span><span class="ui-td-end">Received</span><span class="ui-td-end">Internal</span><span class="ui-td-end">Delivered</span><span class="ui-td-end">Deferred</span><span class="ui-td-end">Bounced</span><span class="ui-td-end">Rejected</span><span class="ui-td-end">Fail %</span></div>
                             ${aliases.map(alias => {
-            const go = (filter, value, label, tone) => `<button type="button" class="ui-td ui-td-end ui-link-cell${tone ? ` ui-text-${tone}` : ''}" onclick="event.stopPropagation(); navigateToMessagesWithFilter({ email: '${escapeJsArg(alias.alias_address)}', filterType: 'search', ${filter} })"><small class="ui-sec-unit">${label} </small>${value || 0}</button>`;
+            const go = (filter, value, label, tone) => `<button type="button" class="ui-td ui-td-end ui-link-cell${!value ? ' ui-zero' : tone ? ` ui-text-${tone}` : ''}" onclick="event.stopPropagation(); navigateToMessagesWithFilter({ email: '${escapeJsArg(alias.alias_address)}', filterType: 'search', ${filter} })"><small class="ui-sec-unit">${label} </small>${value || 0}</button>`;
             return `
                             <div class="ui-tr">
                                 <span class="ui-td">${copyableText(alias.alias_address)}
                                     ${alias.is_catch_all ? uiTag('catch-all', 'warn') : ''}
                                     ${alias.is_domain_alias ? '<span class="ui-tag ui-tag-info" title="Address on a mailcow alias domain that points at this mailbox">domain alias</span>' : ''}
                                     ${!alias.active ? uiTag('inactive', '') : ''}</span>
-                                ${go("direction: 'outbound'", alias.sent_total, 'Sent')}
-                                ${go("direction: 'inbound'", alias.received_total, 'Received')}
-                                ${go("direction: 'internal'", alias.direction_internal, 'Internal')}
+                                ${go("direction: 'outbound'", alias.sent_total, 'Sent', 'dir-out')}
+                                ${go("direction: 'inbound'", alias.received_total, 'Received', 'dir-in')}
+                                ${go("direction: 'internal'", alias.direction_internal, 'Internal', 'dir-int')}
                                 ${go("status: 'delivered'", alias.sent_delivered, 'Delivered', 'ok')}
                                 ${go("status: 'deferred'", alias.sent_deferred, 'Deferred', 'warn')}
                                 ${go("status: 'bounced'", alias.sent_bounced, 'Bounced', 'fail')}

@@ -1008,7 +1008,9 @@ body { font-family: var(--ui-font); background: var(--ui-bg); color: var(--ui-in
 .ui-q-who small { overflow: hidden; text-overflow: ellipsis; color: var(--ui-muted); font-size: 12px; }
 .ui-q-resp { font-size: 12.5px; line-height: 1.45; }
 /* Compact lines copy on click too; the icon would open gaps in the text */
+/* ...but it shows while the pointer is on the value, so the value says it copies */
 .ui-q-who .copy-icon { display: none; }
+.ui-q-who .copyable:hover .copy-icon { display: inline-block; }
 .ui-q-who .copyable { margin: 0; padding: 0; }
 .ui-row-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 6px; overflow: visible; }
 .ui-link-row { padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: start; cursor: pointer; }
@@ -1833,3 +1835,12 @@ html .markdown-body .markdown-alert-caution .markdown-alert-title { color: var(-
 /* DMARC Record: each value next to its label, not across the card */
 .ui-dmarc-record .ui-kv { display: grid; grid-template-columns: minmax(150px, 220px) minmax(0, 1fr); }
 .ui-dmarc-record .ui-kv > b { margin-inline-start: 0; text-align: start; }
+
+/* Mailbox Statistics use the Messages colours: directions indigo, blue and teal, outcomes green, amber and red; a zero stays quiet */
+.ui-kpi b.ui-dir-out, .ui-link-cell.ui-text-dir-out { color: var(--ui-dir-out); }
+.ui-kpi b.ui-dir-in, .ui-link-cell.ui-text-dir-in { color: var(--ui-dir-in); }
+.ui-kpi b.ui-dir-int, .ui-link-cell.ui-text-dir-int { color: var(--ui-dir-int); }
+.ui-link-cell.ui-text-ok { color: var(--ui-ok); }
+.ui-link-cell.ui-text-warn { color: var(--ui-warn); }
+.ui-link-cell.ui-text-fail { color: var(--ui-fail); }
+.ui-kpi b.ui-zero, .ui-link-cell.ui-zero { color: var(--ui-muted); }
