@@ -14,6 +14,8 @@
     <link rel="apple-touch-icon" sizes="180x180" href="/static/assets/icons/apple-touch-icon.png">
     <meta name="theme-color" content="#0f172a">
 
+    <!-- A folded sidebar is set before the page draws, so it never flashes open -->
+    <script>try { if (localStorage.getItem('navCollapsed') === '1') document.documentElement.classList.add('ui-nav-collapsed'); } catch (e) {}</script>
     <!-- The .hidden rule the scripts rely on, before any stylesheet loads -->
     <style>.hidden{display:none}</style>
     <script src="/static/assets/libs/marked.min.js"></script>
@@ -393,6 +395,7 @@
                 <img id="default-logo" src="/static/assets/icons/app-icon.svg" alt="">
                 <span id="app-title">mailcow Logs Viewer</span>
             </a>
+            <button type="button" id="ui-nav-toggle" class="ui-icon-btn ui-nav-toggle" onclick="toggleNavCollapsed()" aria-label="Collapse menu" title="Collapse menu"><svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 19l-7-7 7-7m8 14l-7-7 7-7"></path></svg></button>
             <button type="button" class="ui-server" onclick="navigateTo('status')" title="Server status">
                 <span id="mailcow-connection-indicator" class="hidden" title="mailcow connection status">
                             <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
