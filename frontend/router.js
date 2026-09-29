@@ -149,9 +149,15 @@ function navigateTo(route, params = {}, updateHistory = true) {
     // Build the new path
     const newPath = buildPath(route, params);
 
-    // Update history if path actually changed
+    // Update history if path actually changed. With a dialog open, its history
+    // entry becomes the new page instead of stacking one more entry
     if (updateHistory && window.location.pathname !== newPath) {
-        history.pushState({ route, params }, '', newPath);
+        if (overlayHistoryEntry) {
+            overlayHistoryEntry = false;
+            history.replaceState({ route, params }, '', newPath);
+        } else {
+            history.pushState({ route, params }, '', newPath);
+        }
     }
 
     // Always switch to the tab (even if URL is same, to handle returning to main view)
@@ -161,6 +167,66 @@ function navigateTo(route, params = {}, updateHistory = true) {
         console.error('switchTab function not found');
     }
 }
+
+// =============================================================================
+// Dialogs and the phone More sheet own one history entry while open, so the
+// Back button (a phone's back gesture above all) closes them instead of
+// leaving the page. The entry has the same address as the page.
+// =============================================================================
+
+// The docked message pane on the desktop Messages page is part of the page, not a dialog
+const OVERLAY_SELECTOR = '.ui-dialog-backdrop:not(.hidden):not(.ui-docked), #container-logs-modal:not(.hidden), #mobile-menu.active';
+let overlayHistoryEntry = false;
+let overlayIgnorePop = false;
+let overlaySyncQueued = false;
+
+function openOverlays() {
+    return [...document.querySelectorAll(OVERLAY_SELECTOR)].filter(el => el.getClientRects().length > 0);
+}
+
+// Close the dialog on top the way a user would: its Close or Cancel button
+function closeTopOverlay() {
+    const open = openOverlays();
+    const top = open[open.length - 1];
+    if (!top) return false;
+    if (top.id === 'mobile-menu') {
+        closeMobileMenu();
+        return true;
+    }
+    const button = top.querySelector('[aria-label="Close"], [id$="-cancel"]')
+        || [...top.querySelectorAll('button')].find(b => /^(cancel|close)$/i.test(b.textContent.trim())
+            || /^close/i.test(b.getAttribute('onclick') || ''));
+    if (button) button.click();
+    else top.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    return true;
+}
+
+// Keep one history entry while anything is open, and drop it when all is closed
+function syncOverlayHistory() {
+    overlaySyncQueued = false;
+    const open = openOverlays().length > 0;
+    if (open && !overlayHistoryEntry) {
+        history.pushState({ ...(history.state || {}), overlay: true }, '', window.location.href);
+        overlayHistoryEntry = true;
+    } else if (!open && overlayHistoryEntry) {
+        overlayHistoryEntry = false;
+        if (history.state && history.state.overlay) {
+            overlayIgnorePop = true;
+            history.back();
+        }
+    }
+}
+
+function watchOverlays() {
+    const queue = () => {
+        if (overlaySyncQueued) return;
+        overlaySyncQueued = true;
+        requestAnimationFrame(syncOverlayHistory);
+    };
+    // Dialogs open by a class change or by being added to the page
+    new MutationObserver(queue).observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ['class'] });
+}
+document.addEventListener('DOMContentLoaded', watchOverlays);
 
 /**
  * Navigate specifically within DMARC section
@@ -203,6 +269,19 @@ function initRouter() {
 
     // Handle browser back/forward buttons
     window.addEventListener('popstate', (event) => {
+        // Back with a dialog or sheet open closes it and stays on the page
+        if (overlayIgnorePop) {
+            overlayIgnorePop = false;
+            return;
+        }
+        if (overlayHistoryEntry) {
+            overlayHistoryEntry = false;
+            closeTopOverlay();
+            // Another dialog may still be open under it
+            setTimeout(syncOverlayHistory, 0);
+            return;
+        }
+
         const routeInfo = event.state || parseRoute();
         const route = routeInfo.route || routeInfo.baseRoute || getCurrentRoute();
         const params = routeInfo.params || {};
