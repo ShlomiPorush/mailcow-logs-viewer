@@ -41,12 +41,17 @@ Writes are capped at 30 per minute per visitor and 300 per minute in total.
 A visitor over the cap gets a message to wait a moment. Pages and reads are
 not limited.
 
-## Every night at 00:00
+## Once a day
 
-At 00:00 in the container's time zone (`TZ`) the demo rebuilds itself: every
-change is dropped and a fresh week of history is generated. This takes about
-half a minute, during which the demo does not answer. The same happens on
-every start.
+Once a day the demo rebuilds itself: every change is dropped and a fresh week
+of history is generated. This takes about half a minute, during which the
+demo does not answer. The same happens on every start.
+
+The reset runs at `DEMO_RESET_TIME` in the container's time zone (`TZ`),
+written as 24-hour `HH:MM`. It defaults to `00:00`; pick a quiet hour for
+your visitors, for example `DEMO_RESET_TIME=04:30`. A value that is not a
+valid time is logged and the demo resets at 00:00. The notice visitors see
+only says that the demo resets automatically, not when.
 
 The demo empties its database on every start. It refuses to start against a
 database that holds tables it did not create, so it cannot wipe a real
@@ -57,7 +62,7 @@ below keeps it in memory.
 
 ```bash
 curl -O https://raw.githubusercontent.com/ShlomiPorush/mailcow-logs-viewer/main/docker-compose-demo.yml
-TZ=Europe/Berlin docker compose -f docker-compose-demo.yml up -d
+TZ=Europe/Berlin DEMO_RESET_TIME=04:30 docker compose -f docker-compose-demo.yml up -d
 ```
 
 The demo listens on `127.0.0.1:8090` (change it with `DEMO_PORT`). It needs
