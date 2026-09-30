@@ -358,3 +358,47 @@ def test_the_api_refuses_to_ban_without_the_rw_key(db, monkeypatch):
     saved = client.put('/api/protection/rules', json={'rules': {'trap': {'mode': 'enforce'}}})
     assert saved.status_code == 400 and 'Read-Write' in saved.json()['detail']
     assert api.edits == []
+
+
+# ---------- review follow-ups ----------
+
+def test_a_watched_address_that_attacks_again_after_the_switch_to_ban_is_banned(db):
+    from app.services import protection_rules
+    _rules(db, trap={'enabled': True, 'names': ['admin']})
+    _fail(db, TRAP_IP, 'admin')
+    protection_rules.evaluate(db, _context())
+    assert [h.status for h in _hits(db)] == ['watching']
+
+    _rules(db, trap={'mode': 'enforce', 'ban_hours': 24})
+    protection_rules.evaluate(db, _context())
+    assert [h.status for h in _fresh(db)] == ['watching']  # switching alone bans nothing
+
+    _fail(db, TRAP_IP, 'admin')
+    protection_rules.evaluate(db, _context())
+    hit = _fresh(db)[0]
+    assert (hit.status, hit.ban_hours) == ('pending', 24)
+
+
+def test_blacklist_entries_do_not_count_as_fail2ban_bans(db):
+    from app.models import NetfilterLog
+    from app.services import protection_rules
+    _rules(db, repeat_offender={'enabled': True, 'threshold': 3, 'window_days': 30})
+    for _ in range(4):
+        db.add(NetfilterLog(time=datetime.utcnow(), priority=MARKER, ip=SPRAY_IP, action='ban',
+                            message=f'Added host/network {SPRAY_IP}/32 to denylist'))
+    db.commit()
+    protection_rules.evaluate(db, _context())
+    assert _hits(db) == []
+
+
+def test_the_notification_names_the_bans_and_the_alerts(monkeypatch):
+    from app import scheduler
+    from app.services import notification_service
+    sent = []
+    monkeypatch.setattr(notification_service, 'notify', lambda subject, text, **kw: sent.append((subject, text, kw)))
+    scheduler._notify_protection(
+        banned=[(TRAP_IP, 'trap', 'Tried the trap account admin', True)], failed=[],
+        alerts=[(SPRAY_IP, 'breach', f'info@{DOMAIN} logged in after 3 failed tries from the same address')])
+    subject, text, kw = sent[0]
+    assert subject == 'Possible stolen password' and kw == {'alert_type': 'security'}
+    assert TRAP_IP in text and SPRAY_IP in text and 'Banned 1 address:' in text
