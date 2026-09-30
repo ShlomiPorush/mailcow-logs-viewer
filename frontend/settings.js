@@ -359,7 +359,11 @@ var SETTINGS_EDIT_TABS = [
         id: 'application', label: 'Application', description: 'Web app port, title and logo. Log level: DEBUG, INFO, WARNING, ERROR, CRITICAL. Debug mode shows detailed errors (do not enable in production). Search/CSV limits and scheduler worker count.', groups: [
             { label: 'Basic', keys: ['app_port', 'app_title', 'app_logo_url'] },
             { label: 'Logging', keys: ['log_level', 'debug'] },
-            { label: 'Limits', keys: ['max_search_results', 'csv_export_limit', 'scheduler_workers'] },
+            { label: 'Limits', keys: ['max_search_results', 'csv_export_limit', 'scheduler_workers'] }
+        ]
+    },
+    {
+        id: 'features', label: 'Features', description: 'Turn off what you do not use. A feature that is off disappears from the menu and stops its background jobs. Turning a feature off deletes its stored data, so you are asked first.', groups: [
             { label: 'Features', keys: ['disabled_features'] }
         ]
     },
@@ -465,12 +469,43 @@ var SETTINGS_EDIT_TABS = [
 // listed here falls into the last group automatically (so new tabs never
 // silently disappear).
 var SETTINGS_TAB_GROUPS = [
-    { label: 'Connection', tabs: ['mailcow', 'fetch', 'correlation', 'logs'] },
-    { label: 'Notifications', tabs: ['notifications', 'smtp'] },
+    { label: 'General', tabs: ['about', 'features', 'application'] },
+    { label: 'mailcow', tabs: ['mailcow', 'fetch', 'correlation', 'logs'] },
+    { label: 'Alerts', tabs: ['notifications', 'smtp'] },
     { label: 'Security', tabs: ['auth', 'anomaly', 'smtp_abuse'] },
-    { label: 'Email Data', tabs: ['domains', 'dmarc', 'dmarc_imap', 'maxmind'] },
-    { label: 'Features & Advanced', tabs: ['blacklist', 'spam_filter', 'quarantine', 'application', 'other'] }
+    { label: 'Data', tabs: ['domains', 'dmarc', 'dmarc_imap', 'maxmind', 'blacklist', 'spam_filter', 'quarantine', 'other'] }
 ];
+
+// A stored secret shows as Stored with Replace and Remove; the hidden field
+// keeps the mask, which the save leaves untouched
+function settingsReplaceSecret(btn) {
+    const box = btn.closest('.ui-set-secret');
+    if (!box) return;
+    const hidden = box.querySelector('input[type="hidden"]');
+    const input = document.createElement('input');
+    input.type = 'password';
+    input.name = hidden.name;
+    input.id = hidden.id;
+    input.className = 'ui-input';
+    input.placeholder = 'New value';
+    input.autocomplete = 'new-password';
+    box.replaceWith(input);
+    input.focus();
+    input.form && input.form.dispatchEvent(new Event('input', { bubbles: true }));
+}
+
+function settingsRemoveSecret(btn) {
+    const box = btn.closest('.ui-set-secret');
+    if (!box) return;
+    const hidden = box.querySelector('input[type="hidden"]');
+    const state = box.querySelector('.ui-set-secret-state');
+    const removing = hidden.value === '********';
+    hidden.value = removing ? '' : '********';
+    if (state) state.textContent = removing ? 'Removed when you save' : 'Stored';
+    box.classList.toggle('is-removing', removing);
+    btn.textContent = removing ? 'Keep' : 'Remove';
+    hidden.form && hidden.form.dispatchEvent(new Event('input', { bubbles: true }));
+}
 
 function renderSettingsEditField(key, value, sensitiveKeys, description, envLocked, defaultValue) {
     const LOCK = '<svg width="12" height="12" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true"><path fill-rule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clip-rule="evenodd"></path></svg>';
@@ -481,12 +516,10 @@ function renderSettingsEditField(key, value, sensitiveKeys, description, envLock
         );
         const isLocked = envLocked;
 
-        let html = `<div class="ui-set-field ui-set-wide">
-            <span class="ui-label">Feature Toggles</span>
-            <p class="ui-set-desc">Uncheck features to hide them from the UI and stop their background jobs. <b class="ui-text-fail">Disabling a feature permanently deletes its stored data.</b></p>`;
+        let html = `<div class="ui-set-wide ui-set-featurelist">`;
 
         if (isLocked) {
-            html += `<p class="ui-set-env">${LOCK} Locked by ENV (DISABLED_FEATURES)</p>`;
+            html += `<p class="ui-set-env">${LOCK} Set by ENV (DISABLED_FEATURES), change it there</p>`;
         }
 
         html += `<div class="ui-set-features">`;
@@ -559,8 +592,8 @@ function renderSettingsEditField(key, value, sensitiveKeys, description, envLock
         .replace(/\bDb\b/gi, 'DB').replace(/\bRw\b/g, '(read-write)').replace(/^Mailcow\b/, 'mailcow');
     const descHtml = (description && description.trim()) ? '<p class="ui-set-desc">' + escapeHtml(description) + '</p>' : '';
     const disabledAttr = envLocked ? 'disabled' : '';
-    const envLockedHtml = envLocked ? '<p class="ui-set-env">' + LOCK + ' Controlled by ENV variable - cannot be changed from here.</p>' : '';
-    const labelLockIcon = envLocked ? ' <span class="ui-set-lock" title="Controlled by ENV">' + LOCK + '</span>' : '';
+    const envLockedHtml = '';
+    const labelLockIcon = envLocked ? ' <span class="ui-set-pill" title="Set by an environment variable, change it there">' + LOCK + ' Set by ENV</span>' : '';
 
     // Determine if changed from default
     const hasDefault = defaultValue !== null && defaultValue !== undefined;
@@ -605,12 +638,22 @@ function renderSettingsEditField(key, value, sensitiveKeys, description, envLock
 
     // A value that differs from its default is marked, so a changed setting stands out
     const changed = (isChanged || isSensitiveChanged) && !envLocked ? ' is-changed' : '';
+    const changedPill = changed ? ' <span class="ui-set-pill is-changed" title="Differs from the default">Changed</span>' : '';
+
+    // A stored secret: say so, and offer Replace and Remove instead of a masked field
+    if (sensitive && displayVal === '********') {
+        return '<div class="ui-set-field' + (envLocked ? ' is-locked' : '') + '"><label class="ui-label">' + escapeHtml(label) + labelLockIcon + '</label>' + descHtml +
+            '<div class="ui-set-secret"><span class="ui-set-secret-state">' + (envLocked ? 'Stored in the environment' : 'Stored') + '</span>' +
+            (envLocked ? '' : '<button type="button" class="ui-btn ui-btn-sm" onclick="settingsReplaceSecret(this)">Replace</button>' +
+                '<button type="button" class="ui-btn ui-btn-sm" onclick="settingsRemoveSecret(this)">Remove</button>') +
+            '<input type="hidden" id="edit-' + key + '" name="' + key + '" value="********"' + (envLocked ? ' disabled' : '') + '></div></div>';
+    }
 
     if (isBool) {
         return '<div class="ui-set-bool' + (envLocked ? ' is-locked' : (isChanged ? ' is-changed' : '')) + '">' +
             '<div class="ui-set-bool-main">' +
             '<input type="checkbox" id="edit-' + key + '" name="' + key + '" ' + (displayVal ? 'checked' : '') + ' ' + disabledAttr + ' class="ui-check">' +
-            '<div><label for="edit-' + key + '" class="ui-set-bool-label">' + escapeHtml(label) + labelLockIcon + '</label>' + descHtml + envLockedHtml + '</div></div>' +
+            '<div><label for="edit-' + key + '" class="ui-set-bool-label">' + escapeHtml(label) + labelLockIcon + (envLocked ? '' : (isChanged ? ' <span class="ui-set-pill is-changed" title="Differs from the default">Changed</span>' : '')) + '</label>' + descHtml + envLockedHtml + '</div></div>' +
             clearBtnHtml + '</div>';
     }
 
@@ -622,7 +665,7 @@ function renderSettingsEditField(key, value, sensitiveKeys, description, envLock
             const selected = String(displayVal) === opt.value ? 'selected' : '';
             optionsHtml += '<option value="' + escapeHtml(opt.value) + '" ' + selected + '>' + escapeHtml(opt.label) + '</option>';
         });
-        return '<div class="ui-set-field' + (envLocked ? ' is-locked' : '') + '"><label for="edit-' + key + '" class="ui-label">' + escapeHtml(label) + labelLockIcon + '</label>' +
+        return '<div class="ui-set-field' + (envLocked ? ' is-locked' : '') + '"><label for="edit-' + key + '" class="ui-label">' + escapeHtml(label) + labelLockIcon + changedPill + '</label>' +
             descHtml +
             '<select id="edit-' + key + '" name="' + key + '" ' + disabledAttr + ' class="ui-select' + changed + '">' +
             optionsHtml + '</select>' +
@@ -631,9 +674,9 @@ function renderSettingsEditField(key, value, sensitiveKeys, description, envLock
     }
 
     const inputType = sensitive ? 'password' : (isNum ? 'number' : 'text');
-    const placeholder = envLocked ? 'Controlled by ENV' : '';
+    const placeholder = envLocked ? 'Set by ENV' : (sensitive ? 'Not set' : '');
     const valAttr = (isBool ? '' : displayVal);
-    return '<div class="ui-set-field' + (envLocked ? ' is-locked' : '') + '"><label for="edit-' + key + '" class="ui-label">' + escapeHtml(label) + labelLockIcon + '</label>' +
+    return '<div class="ui-set-field' + (envLocked ? ' is-locked' : '') + '"><label for="edit-' + key + '" class="ui-label">' + escapeHtml(label) + labelLockIcon + changedPill + '</label>' +
         descHtml +
         '<input type="' + inputType + '" id="edit-' + key + '" name="' + key + '" value="' + escapeHtml(valAttr) + '" placeholder="' + escapeHtml(placeholder) + '" ' + disabledAttr + ' class="ui-input' + changed + '">' +
         clearBtnHtml +
@@ -806,19 +849,17 @@ function renderSettings(content, data) {
         ['Scheduler Workers', `${config.scheduler_workers || 4}`],
     ];
 
-    content.innerHTML = `
-        ${!data.settings_edit_via_ui_enabled ? `<div class="ui-list-note ui-flush">${uiLocked('Editing settings is off',
-            'These values come from the environment and are shown read-only. To change them here, set <code>SETTINGS_EDIT_VIA_UI_ENABLED=true</code> and restart the container.', '')}</div>` : ''}
-
+    const editing = !!(data.settings_edit_via_ui_enabled && data.editable_config);
+    const aboutHtml = `
         <div class="ui-dash-grid ui-status-pair">
             <!-- Version Information Section -->
             <section class="ui-panel">
-                <div class="ui-panel-head">Version Information</div>
+                <div class="ui-panel-head">Version</div>
                 <div class="ui-kv"><span>Current Version</span><b><button type="button" id="current-version-text" class="ui-link-row ui-link" title="Click to view changelog">v${escapeHtml(appVersion)}</button></b></div>
                 <div class="ui-kv"><span>Latest Version</span><b id="settings-latest-version">${renderLatestVersionState(versionInfo)}</b></div>
                 <div class="ui-set-version-foot">
                     <span id="settings-version-checked" class="ui-muted">${versionInfo.last_checked ? `Last checked: ${formatDate(versionInfo.last_checked)}` : ''}</span>
-                    <button id="check-version-btn" class="ui-btn ui-btn-sm">
+                    <button type="button" id="check-version-btn" class="ui-btn ui-btn-sm">
                         <svg id="check-version-icon" width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
                         </svg>
@@ -845,7 +886,13 @@ function renderSettings(content, data) {
         <section class="ui-panel">
             <div class="ui-panel-head">Local Domains <span class="ui-count">${config.local_domains.length}</span></div>
             <div class="ui-set-domains">${config.local_domains.map(domain => `<span class="ui-code-chip" title="${escapeHtml(domain)}">${escapeHtml(domain)}</span>`).join('')}</div>
-        </section>` : ''}
+        </section>` : ''}`;
+
+    content.innerHTML = `
+        ${!data.settings_edit_via_ui_enabled ? `<div class="ui-list-note ui-flush">${uiLocked('Editing settings is off',
+            'These values come from the environment and are shown read-only. To change them here, set <code>SETTINGS_EDIT_VIA_UI_ENABLED=true</code> and restart the container.', '')}</div>` : ''}
+
+        ${editing ? '' : aboutHtml}
 
         ${!data.settings_edit_via_ui_enabled ? `
         <section class="ui-panel">
@@ -900,7 +947,8 @@ function renderSettings(content, data) {
                     .flatMap(function (g) { return g.keys; })
                     .some(function (k) { return data.editable_config[k] !== undefined; });
             };
-            const visibleIds = filteredTabs.filter(isTabVisible).map(function (t) { return t.id; });
+            const visibleIds = ['about'].concat(filteredTabs.filter(isTabVisible).map(function (t) { return t.id; }));
+            tabById.about = { id: 'about', label: 'About this app' };
 
             // Group the visible tabs. Groups with none are dropped; any visible
             // tab not assigned to a group is appended to the last group.
@@ -933,8 +981,10 @@ function renderSettings(content, data) {
             });
             mobileNavHtml += '</select></div>';
 
-            // Desktop: grouped category sidebar
-            let navHtml = '<nav class="settings-edit-nav" aria-label="Settings categories">';
+            // Desktop: grouped category sidebar, with a search over every field
+            let navHtml = '<nav class="settings-edit-nav" aria-label="Settings categories">'
+                + '<label class="ui-search ui-set-search"><svg width="15" height="15" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>'
+                + '<input type="search" id="settings-search" placeholder="Search settings" aria-label="Search settings"></label>';
             grouped.forEach(function (group) {
                 if (!group.tabs.length) return;
                 navHtml += '<div class="ui-set-navgroup"><p>' + escapeHtml(group.label) + '</p><div>';
@@ -951,24 +1001,22 @@ function renderSettings(content, data) {
 
             // Mobile picker sits above the layout so it can stick to the top;
             // on desktop the sidebar sits beside the content.
-            let tabsHtml = mobileNavHtml
-                + '<div class="settings-edit-layout">' + navHtml
-                + '<div class="settings-edit-content">';
+            let tabsHtml = '';
             filteredTabs.forEach(function (tab, idx) {
                 const allKeysInTab = (tab.groups || []).flatMap(function (g) { return g.keys; });
                 const keysInTab = allKeysInTab.filter(function (k) { return data.editable_config[k] !== undefined; });
                 // Show tab if it has keys OR if it's maxmind tab (which shows status)
                 if (keysInTab.length === 0 && tab.id !== 'maxmind') return;
                 // The visible panel is the one matching the active sidebar item
-                const hidden = tab.id === firstVisibleId ? '' : ' hidden';
-                const desc = tab.description ? '<p class="ui-set-tabdesc">' + escapeHtml(tab.description) + '</p>' : '';
+                const hidden = ' hidden';
+                const desc = '<h2 class="ui-set-title">' + escapeHtml(tab.label) + '</h2>' + (tab.description ? '<p class="ui-set-tabdesc">' + escapeHtml(tab.description) + '</p>' : '');
                 tabsHtml += '<div id="settings-tab-panel-' + tab.id + '" class="settings-edit-panel' + hidden + '">' + desc;
 
                 // A small grid of facts at the top of a tab: SMTP, DMARC IMAP and MaxMind status
                 const statusBlock = function (facts) {
-                    return '<div class="ui-set-group"><h4 class="ui-md-h">Status</h4><div class="ui-md-ids ui-set-facts">'
+                    return '<section class="ui-panel ui-set-group"><h3 class="ui-set-group-title">Status</h3><div class="ui-md-ids ui-set-facts">'
                         + facts.map(function (f) { return '<div class="ui-md-fact"><span>' + f[0] + '</span><div class="ui-chip-row">' + f[1] + '</div></div>'; }).join('')
-                        + '</div></div>';
+                        + '</div></section>';
                 };
                 const onOff = function (on, offTone) { return on ? uiTag('Enabled', 'ok') : uiTag('Disabled', offTone || ''); };
 
@@ -984,7 +1032,7 @@ function renderSettings(content, data) {
 
                 // Notifications tab - channel manager (rendered by notifications.js)
                 if (tab.id === 'notifications') {
-                    tabsHtml += '<div id="notification-channels-panel" class="ui-set-group"></div>';
+                    tabsHtml += '<section id="notification-channels-panel" class="ui-panel ui-set-channels"></section>';
                 }
 
                 // Special handling for DMARC IMAP tab - add DMARC Management
@@ -1025,32 +1073,39 @@ function renderSettings(content, data) {
                     const groupKeys = group.keys.filter(function (k) { return data.editable_config[k] !== undefined; });
                     if (groupKeys.length === 0) return;
                     renderedGroups++;
-                    tabsHtml += '<div class="ui-set-group"><h4 class="ui-md-h">' + escapeHtml(group.label) + '</h4><div class="ui-set-grid">';
+                    tabsHtml += '<section class="ui-panel ui-set-group"><h3 class="ui-set-group-title">' + escapeHtml(group.label) + '</h3><div class="ui-set-grid">';
                     groupKeys.forEach(function (key) {
                         tabsHtml += renderSettingsEditField(key, data.editable_config[key], sensitiveKeys, SETTINGS_FIELD_DESCRIPTIONS[key] || '', envLockedKeys.has(key), defaults[key]);
                     });
-                    tabsHtml += '</div></div>';
+                    tabsHtml += '</div></section>';
                 });
                 tabsHtml += '</div>';
             });
-            tabsHtml += '</div></div>';  // close .settings-edit-content and .settings-edit-layout
-            return `
+            return mobileNavHtml + `
         <!-- Edit Configuration (only when SETTINGS_EDIT_VIA_UI_ENABLED) -->
-        <section class="ui-panel ui-set-edit">
-            <div class="ui-panel-head ui-rl-head">
-                <div>
-                    <h3 class="ui-h2">Edit configuration</h3>
-                    <p class="ui-muted">Priority: Default → DB → ENV. Environment variables always override DB values and cannot be changed from here.</p>
+        <div class="settings-edit-layout ui-set-edit">
+            ${navHtml}
+            <div class="settings-edit-content">
+                <div id="settings-tab-panel-about" class="settings-edit-panel">
+                    <h2 class="ui-set-title">About this app</h2>
+                    <div class="ui-set-actions" id="settings-edit-actions">
+                        <p class="ui-muted">Values come from the defaults, then this page, then the environment. A value set by an environment variable always wins and is locked here.</p>
+                        ${!data.settings_migrated ? '<button type="button" id="settings-import-env-btn" class="ui-btn ui-btn-primary">Migrate Settings from ENV</button>' : ''}
+                    </div>
+                    ${aboutHtml}
                 </div>
-                <div class="ui-rl-tools" id="settings-edit-actions">
-                    ${!data.settings_migrated ? '<button type="button" id="settings-import-env-btn" class="ui-btn ui-btn-primary">Migrate Settings from ENV</button>' : ''}
-                    ${data.settings_migrated ? '<button type="submit" form="settings-edit-form" id="settings-save-btn" class="ui-btn ui-btn-primary">Save changes</button>' : ''}
-                </div>
+                <p id="settings-search-empty" class="ui-empty hidden">No setting matches this search.</p>
+                <form id="settings-edit-form" class="ui-set-form">
+                    ` + tabsHtml + `
+                </form>
             </div>
-            <form id="settings-edit-form" class="ui-set-form">
-                ` + tabsHtml + `
-            </form>
-        </section>
+        </div>
+        ${data.settings_migrated ? `
+        <div class="ui-set-savebar hidden" id="settings-savebar" role="region" aria-label="Unsaved changes">
+            <span id="settings-dirty-count"></span>
+            <button type="button" id="settings-discard-btn" class="ui-btn">Discard</button>
+            <button type="submit" form="settings-edit-form" id="settings-save-btn" class="ui-btn ui-btn-primary">Save changes</button>
+        </div>` : ''}
         `;
         })() : ''}
 
@@ -1293,6 +1348,73 @@ function renderSettings(content, data) {
 
         const form = content.querySelector('#settings-edit-form');
         const importBtn = content.querySelector('#settings-import-env-btn');
+
+        // Unsaved changes: compare every field with the value it loaded with
+        const fieldValue = el => el.type === 'checkbox' ? String(el.checked) : el.value;
+        const initialValues = new Map();
+        if (form) form.querySelectorAll('[name]').forEach(el => initialValues.set(el.name, fieldValue(el)));
+        const updateDirty = () => {
+            if (!form) return;
+            const dirty = new Set();
+            form.querySelectorAll('[name]').forEach(el => {
+                if (initialValues.has(el.name) && initialValues.get(el.name) !== fieldValue(el)) dirty.add(el.name);
+            });
+            const bar = content.querySelector('#settings-savebar');
+            const count = content.querySelector('#settings-dirty-count');
+            if (bar) bar.classList.toggle('hidden', dirty.size === 0);
+            if (count) count.textContent = `${dirty.size} unsaved change${dirty.size === 1 ? '' : 's'}`;
+            // Mark the sections that hold a change
+            content.querySelectorAll('.settings-edit-tab').forEach(tabBtn => {
+                const panel = content.querySelector('#settings-tab-panel-' + tabBtn.getAttribute('data-tab'));
+                const has = !!panel && [...panel.querySelectorAll('[name]')].some(el => dirty.has(el.name));
+                tabBtn.classList.toggle('has-changes', has);
+            });
+        };
+        if (form) {
+            form.addEventListener('input', updateDirty);
+            form.addEventListener('change', updateDirty);
+            // Clearing and resetting change a field without an input event
+            content.querySelectorAll('.settings-clear-btn').forEach(btn => btn.addEventListener('click', () => setTimeout(updateDirty)));
+        }
+        const discardBtn = content.querySelector('#settings-discard-btn');
+        if (discardBtn) discardBtn.onclick = () => loadSettings();
+
+        // Search: show every matching field from all sections at once
+        const search = content.querySelector('#settings-search');
+        let openTab = 'about';
+        content.querySelectorAll('.settings-edit-tab').forEach(btn => btn.addEventListener('click', () => { openTab = btn.getAttribute('data-tab'); if (search) search.value = ''; }));
+        if (search) {
+            search.addEventListener('input', () => {
+                const q = search.value.trim().toLowerCase();
+                const panels = [...content.querySelectorAll('.settings-edit-panel')];
+                const empty = content.querySelector('#settings-search-empty');
+                if (!q) {
+                    content.querySelectorAll('.ui-set-field, .ui-set-bool, .ui-set-group').forEach(el => { el.hidden = false; });
+                    switchSettingsTab(openTab, false);
+                    if (empty) empty.classList.add('hidden');
+                    return;
+                }
+                let any = false;
+                panels.forEach(panel => {
+                    if (panel.id === 'settings-tab-panel-about') { panel.classList.add('hidden'); return; }
+                    let panelHas = false;
+                    panel.querySelectorAll('.ui-set-group').forEach(group => {
+                        let groupHas = false;
+                        group.querySelectorAll('.ui-set-field, .ui-set-bool').forEach(field => {
+                            const match = field.textContent.toLowerCase().includes(q) || (field.querySelector('[name]')?.name || '').replace(/_/g, ' ').includes(q);
+                            field.hidden = !match;
+                            if (match) groupHas = true;
+                        });
+                        group.hidden = !groupHas;
+                        if (groupHas) panelHas = true;
+                    });
+                    panel.classList.toggle('hidden', !panelHas);
+                    if (panelHas) any = true;
+                });
+                content.querySelectorAll('.settings-edit-tab').forEach(b => b.removeAttribute('aria-current'));
+                if (empty) empty.classList.toggle('hidden', any);
+            });
+        }
         if (form) {
             form.onsubmit = async (e) => {
                 e.preventDefault();
