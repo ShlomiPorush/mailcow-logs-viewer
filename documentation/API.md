@@ -3802,6 +3802,7 @@ Get list of all domains with DMARC statistics.
 - `policy_p`: Published DMARC policy (none, quarantine, reject)
 - `policy_sp`: Subdomain policy (if different from main policy)
 - `last_report_date`: Unix timestamp of most recent report
+- `tls_rpt_status`: Result of the last DNS check of the domain's TLS-RPT record (`success`, `warning`, `error`, `unknown`), or `null` when the domain has not been checked. The daily DNS check covers the mailcow domains only
 
 ---
 
@@ -4382,6 +4383,26 @@ Get history of IMAP sync operations.
 ### Overview
 
 TLS-RPT (TLS Reporting) provides visibility into TLS connection failures when other mail servers attempt to deliver emails to your domain. This helps identify MTA-STS policy issues and certificate problems.
+
+---
+
+### GET /api/dmarc/domains/{domain}/tls-rpt-record
+
+The domain's TLS-RPT record, for the TLS tab of the DMARC & TLS page. Comes from the cached DNS check, or a live lookup when the domain has not been checked.
+
+**Response:**
+```json
+{
+  "domain": "example.com",
+  "tls_rpt_record": {
+    "status": "success",
+    "message": "TLS-RPT configured",
+    "record": "v=TLSRPTv1; rua=mailto:tls-reports@example.com",
+    "report_uris": ["mailto:tls-reports@example.com"],
+    "warnings": []
+  }
+}
+```
 
 ---
 
