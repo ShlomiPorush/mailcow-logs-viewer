@@ -723,7 +723,6 @@ async function loadTlsDomains() {
     setDmarcBreadcrumb('domains');
 
     const list = document.getElementById('dmarc-tls-domains-list');
-    const quiet = document.getElementById('dmarc-tls-quiet-domains');
     if (list) list.innerHTML = '<div class="ui-loading"><div class="loading"></div><p>Loading TLS reports...</p></div>';
     try {
         const response = await authenticatedFetch('/api/dmarc/domains');
@@ -746,13 +745,6 @@ async function loadTlsDomains() {
                 [`${overallPct}%`, 'TLS Success', sessions ? dmarcTone(overallPct) : ''],
                 [checked ? `${published} of ${checked}` : '-', 'TLS-RPT Published', checked && published < checked ? 'warn' : ''],
             ]);
-        }
-
-        // Domains with DMARC reports and no TLS report: most often no TLS-RPT record
-        const noTls = allDomains.filter(d => !d.has_tls);
-        if (quiet) {
-            quiet.classList.toggle('hidden', !noTls.length);
-            quiet.innerHTML = noTls.length ? `No TLS reports from ${noTls.map(d => `<button type="button" class="ui-link" onclick="loadTlsDomain('${escapeJsArg(d.domain)}')">${escapeHtml(d.domain)}</button>`).join(', ')}. Open a domain to check its TLS-RPT record.` : '';
         }
 
         if (!list) return;
