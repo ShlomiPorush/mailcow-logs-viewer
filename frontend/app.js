@@ -659,7 +659,7 @@ function showMarkdownModal(title, markdownContent) {
         }
 
         // Add some basic styling for markdown content
-        content.innerHTML = `<div class="markdown-body prose dark:prose-invert max-w-none">${htmlContent}</div>`;
+        content.innerHTML = `<div class="markdown-body">${htmlContent}</div>`;
         modal.classList.remove('hidden');
         document.body.style.overflow = 'hidden';
     }
@@ -1401,21 +1401,9 @@ function switchTab(tab, params = {}) {
         if (tabContent) {
             tabContent.classList.remove('hidden');
             tabContent.innerHTML = `
-                <div class="flex items-center justify-center min-h-[60vh]">
-                    <div class="text-center max-w-md">
-                        <div class="w-16 h-16 mx-auto mb-6 rounded-full bg-gray-100 dark:bg-gray-700 flex items-center justify-center">
-                            <svg class="w-8 h-8 text-gray-400 dark:text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
-                                    d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
-                            </svg>
-                        </div>
-                        <h2 class="text-xl font-semibold text-gray-700 dark:text-gray-300 mb-2">${escapeHtml(featureLabel)} is disabled</h2>
-                        <p class="text-gray-500 dark:text-gray-400 mb-6">This feature has been turned off by the administrator in Settings → Application → Features.</p>
-                        <button onclick="navigateTo('dashboard')"
-                            class="px-5 py-2.5 bg-blue-500 hover:bg-blue-600 text-white rounded-lg text-sm font-medium transition-colors">
-                            Go to Dashboard
-                        </button>
-                    </div>
+                <div class="ui-disabled-page">
+                    ${uiLocked(`${featureLabel} is disabled`, 'This feature has been turned off by the administrator in Settings → Application → Features.',
+                        `<button onclick="navigateTo('dashboard')" class="ui-btn ui-btn-primary">Go to Dashboard</button>`)}
                 </div>`;
         }
 
@@ -2159,87 +2147,44 @@ async function loadFail2BanSettings() {
 
         settingsContainer.innerHTML = `
             ${rwBanner}
-            <form id="fail2ban-edit-form">
+            <form id="fail2ban-edit-form" class="ui-f2b-form">
                 ${canEdit ? `
-                    <div class="mb-3 flex justify-end" id="fail2ban-edit-btn-row">
-                        <button type="button" id="fail2ban-enable-edit-btn"
-                            class="px-3 py-1.5 bg-gray-200 dark:bg-gray-600 hover:bg-gray-300 dark:hover:bg-gray-500 text-gray-700 dark:text-gray-200 text-sm font-medium rounded-lg transition-colors flex items-center gap-1.5">
-                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg>
-                            Edit Settings
-                        </button>
+                    <div class="ui-f2b-actions" id="fail2ban-edit-btn-row">
+                        <button type="button" id="fail2ban-enable-edit-btn" class="ui-btn ui-btn-sm">Edit Settings</button>
                     </div>
                 ` : ''}
-                <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
-                    <div class="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3">
-                        <label class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1 block">Ban Time (seconds)</label>
-                        <input type="number" name="ban_time" value="${data.ban_time}" min="60"
-                            class="w-full px-2 py-1.5 text-sm font-semibold rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                            disabled />
-                        <div class="text-xs text-gray-400 dark:text-gray-500 mt-0.5">${formatSeconds(data.ban_time)}</div>
+                <div class="ui-f2b-grid">
+                    <label class="ui-set-field"><span class="ui-label">Ban Time (seconds)</span>
+                        <input type="number" name="ban_time" value="${data.ban_time}" min="60" class="ui-input" disabled />
+                        <small class="ui-muted">${formatSeconds(data.ban_time)}</small>
+                    </label>
+                    <label class="ui-set-field"><span class="ui-label">Max. Ban Time (seconds)</span>
+                        <input type="number" name="max_ban_time" value="${data.max_ban_time}" min="60" class="ui-input" disabled />
+                        <small class="ui-muted">${formatSeconds(data.max_ban_time)}</small>
+                    </label>
+                    <div class="ui-set-field"><span class="ui-label">Ban Time Increment</span>
+                        <label class="ui-check-label opacity-60" id="fail2ban-increment-label">
+                            <input type="checkbox" name="ban_time_increment" ${data.ban_time_increment ? 'checked' : ''} disabled class="ui-check" />
+                            ${data.ban_time_increment ? 'Enabled' : 'Disabled'}
+                        </label>
                     </div>
-
-                    <div class="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3">
-                        <label class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1 block">Max. Ban Time (seconds)</label>
-                        <input type="number" name="max_ban_time" value="${data.max_ban_time}" min="60"
-                            class="w-full px-2 py-1.5 text-sm font-semibold rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                            disabled />
-                        <div class="text-xs text-gray-400 dark:text-gray-500 mt-0.5">${formatSeconds(data.max_ban_time)}</div>
-                    </div>
-
-                    <div class="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3">
-                        <label class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1 block">Ban Time Increment</label>
-                        <div class="mt-1">
-                            <label class="relative inline-flex items-center cursor-pointer opacity-60" id="fail2ban-increment-label">
-                                <input type="checkbox" name="ban_time_increment" ${data.ban_time_increment ? 'checked' : ''} disabled
-                                    class="sr-only peer" />
-                                <div class="w-9 h-5 bg-gray-300 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 rounded-full peer dark:bg-gray-600 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all dark:border-gray-600 peer-checked:bg-blue-600"></div>
-                                <span class="ml-2 text-sm text-gray-700 dark:text-gray-300">${data.ban_time_increment ? 'Enabled' : 'Disabled'}</span>
-                            </label>
-                        </div>
-                    </div>
-
-                    <div class="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3">
-                        <label class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1 block">Max. Attempts</label>
-                        <input type="number" name="max_attempts" value="${data.max_attempts}" min="1"
-                            class="w-full px-2 py-1.5 text-sm font-semibold rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                            disabled />
-                    </div>
-
-                    <div class="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3">
-                        <label class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1 block">Retry Window (seconds)</label>
-                        <input type="number" name="retry_window" value="${data.retry_window}" min="1"
-                            class="w-full px-2 py-1.5 text-sm font-semibold rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                            disabled />
-                        <div class="text-xs text-gray-400 dark:text-gray-500 mt-0.5">${formatSeconds(data.retry_window)}</div>
-                    </div>
-
-                    <div class="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3">
-                        <label class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1 block">Subnet Ban IPv4</label>
-                        <div class="flex items-center gap-1">
-                            <span class="text-sm text-gray-500 dark:text-gray-400">/</span>
-                            <input type="number" name="netban_ipv4" value="${data.netban_ipv4}" min="8" max="32"
-                                class="w-full px-2 py-1.5 text-sm font-semibold font-mono rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                                disabled />
-                        </div>
-                    </div>
-
-                    <div class="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3">
-                        <label class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1 block">Subnet Ban IPv6</label>
-                        <div class="flex items-center gap-1">
-                            <span class="text-sm text-gray-500 dark:text-gray-400">/</span>
-                            <input type="number" name="netban_ipv6" value="${data.netban_ipv6}" min="8" max="128"
-                                class="w-full px-2 py-1.5 text-sm font-semibold font-mono rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                                disabled />
-                        </div>
-                    </div>
+                    <label class="ui-set-field"><span class="ui-label">Max. Attempts</span>
+                        <input type="number" name="max_attempts" value="${data.max_attempts}" min="1" class="ui-input" disabled />
+                    </label>
+                    <label class="ui-set-field"><span class="ui-label">Retry Window (seconds)</span>
+                        <input type="number" name="retry_window" value="${data.retry_window}" min="1" class="ui-input" disabled />
+                        <small class="ui-muted">${formatSeconds(data.retry_window)}</small>
+                    </label>
+                    <label class="ui-set-field"><span class="ui-label">Subnet Ban IPv4 (/)</span>
+                        <input type="number" name="netban_ipv4" value="${data.netban_ipv4}" min="8" max="32" class="ui-input ui-mono" disabled />
+                    </label>
+                    <label class="ui-set-field"><span class="ui-label">Subnet Ban IPv6 (/)</span>
+                        <input type="number" name="netban_ipv6" value="${data.netban_ipv6}" min="8" max="128" class="ui-input ui-mono" disabled />
+                    </label>
                 </div>
 
-                <div class="mt-4 flex justify-end" id="fail2ban-save-row" style="display:none">
-                    <button type="submit" id="fail2ban-save-btn"
-                        class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg shadow transition-colors focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:focus:ring-offset-gray-800 flex items-center gap-2">
-                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
-                        Save Settings
-                    </button>
+                <div class="ui-f2b-actions" id="fail2ban-save-row" style="display:none">
+                    <button type="submit" id="fail2ban-save-btn" class="ui-btn ui-btn-primary">Save Settings</button>
                 </div>
             </form>
         `;
@@ -2258,78 +2203,54 @@ async function loadFail2BanSettings() {
         // Render IP lists in separate accordion (editable textareas)
         if (ipListsContainer) {
             ipListsContainer.innerHTML = `
-                <form id="fail2ban-ip-form">
+                <form id="fail2ban-ip-form" class="ui-f2b-form">
                     ${canEdit ? `
-                        <div class="mb-3 flex justify-end" id="fail2ban-ip-edit-btn-row">
-                            <button type="button" id="fail2ban-ip-enable-edit-btn"
-                                class="px-3 py-1.5 bg-gray-200 dark:bg-gray-600 hover:bg-gray-300 dark:hover:bg-gray-500 text-gray-700 dark:text-gray-200 text-sm font-medium rounded-lg transition-colors flex items-center gap-1.5">
-                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg>
-                                Edit IP Lists
-                            </button>
+                        <div class="ui-f2b-actions" id="fail2ban-ip-edit-btn-row">
+                            <button type="button" id="fail2ban-ip-enable-edit-btn" class="ui-btn ui-btn-sm">Edit IP Lists</button>
                         </div>
                     ` : ''}
-                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div class="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3">
-                            <label class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2 block">Allowlisted <span class="text-gray-400 dark:text-gray-500">(${whitelistEntries.length})</span></label>
-                            <textarea name="whitelist" rows="4" placeholder="One IP/network per line"
-                                class="w-full px-2 py-1.5 text-sm font-mono rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-green-700 dark:text-green-400 focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-y"
-                                disabled>${escapeHtml((data.whitelist || '').replace(/,/g, '\n'))}</textarea>
-                        </div>
-
-                        <div class="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3">
-                            <label class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2 block">Denylisted <span class="text-gray-400 dark:text-gray-500">(${blacklistEntries.length})</span></label>
-                            <textarea name="blacklist" rows="4" placeholder="One IP/network per line"
-                                class="w-full px-2 py-1.5 text-sm font-mono rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-red-700 dark:text-red-400 focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-y"
-                                disabled>${escapeHtml((data.blacklist || '').replace(/,/g, '\n'))}</textarea>
-                        </div>
+                    <div class="ui-f2b-lists">
+                        <label class="ui-set-field"><span class="ui-label">Allowlisted <span class="ui-count">${whitelistEntries.length}</span></span>
+                            <textarea name="whitelist" rows="4" placeholder="One IP/network per line" class="ui-textarea ui-mono ui-f2b-allow" disabled>${escapeHtml((data.whitelist || '').replace(/,/g, '\n'))}</textarea>
+                        </label>
+                        <label class="ui-set-field"><span class="ui-label">Denylisted <span class="ui-count">${blacklistEntries.length}</span></span>
+                            <textarea name="blacklist" rows="4" placeholder="One IP/network per line" class="ui-textarea ui-mono ui-f2b-deny" disabled>${escapeHtml((data.blacklist || '').replace(/,/g, '\n'))}</textarea>
+                        </label>
                     </div>
 
-                    <div class="mt-3 px-1 text-xs text-gray-500 dark:text-gray-400 italic">
-                        A denylisted host or network will always outweigh an allowlisted entity. List updates will take a few seconds to be applied.
-                    </div>
+                    <p class="ui-set-desc">A denylisted host or network will always outweigh an allowlisted entity. List updates will take a few seconds to be applied.</p>
 
-                    <div class="mt-3 flex justify-end" id="fail2ban-ip-save-row" style="display:none">
-                        <button type="submit" id="fail2ban-ip-save-btn"
-                            class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg shadow transition-colors focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:focus:ring-offset-gray-800 flex items-center gap-2">
-                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
-                            Save IP Lists
-                        </button>
+                    <div class="ui-f2b-actions" id="fail2ban-ip-save-row" style="display:none">
+                        <button type="submit" id="fail2ban-ip-save-btn" class="ui-btn ui-btn-primary">Save IP Lists</button>
                     </div>
                 </form>
 
                 <!-- Active Bans List -->
-                <div class="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700">
-                    <div class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-3">
-                        Active Bans <span class="text-gray-400 dark:text-gray-500">(${totalBans})</span>
-                    </div>
+                <div class="ui-f2b-bans">
+                    <div class="ui-list-head"><h4 class="ui-md-h">Active Bans</h4> <span class="ui-count">${totalBans}</span></div>
                     ${totalBans > 0 ? `
-                        <div class="space-y-2">
+                        <div class="ui-table ui-stack" style="--ui-cols: 110px minmax(160px, 1fr) minmax(120px, 1fr) 100px; --ui-table-min: 520px">
                             ${permBans.map(ban => `
-                                <div class="flex items-center justify-between bg-gray-50 dark:bg-gray-700/50 rounded-lg px-3 py-2">
-                                    <div class="flex items-center gap-3">
-                                        <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400">Permanent</span>
-                                        <span class="text-sm font-mono text-gray-900 dark:text-white">${escapeHtml(ban.network || ban.ip)}</span>
-                                    </div>
+                                <div class="ui-tr">
+                                    <span class="ui-td">${uiTag('Permanent', 'fail')}</span>
+                                    <span class="ui-td ui-mono">${escapeHtml(ban.network || ban.ip)}</span>
+                                    <span class="ui-td"></span>
+                                    <span class="ui-td"></span>
                                 </div>
                             `).join('')}
                             ${tempBans.map(ban => `
-                                <div class="flex items-center justify-between bg-gray-50 dark:bg-gray-700/50 rounded-lg px-3 py-2">
-                                    <div class="flex items-center gap-3">
-                                        <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400">Temporary</span>
-                                        <span class="text-sm font-mono text-gray-900 dark:text-white">${escapeHtml(ban.network || ban.ip)}</span>
-                                        ${ban.banned_until ? `<span class="text-xs text-gray-500 dark:text-gray-400">${escapeHtml(ban.banned_until)} left</span>` : ''}
-                                        ${ban.queued_for_unban ? `<span class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400">Unbanning...</span>` : ''}
-                                    </div>
-                                    ${canEdit && !ban.queued_for_unban ? `
-                                        <button type="button" onclick="unbanIP('${escapeJsArg(ban.ip || ban.network)}', this)"
-                                            class="px-2.5 py-1 text-xs font-medium rounded-md border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-400 hover:bg-red-50 hover:border-red-300 hover:text-red-700 dark:hover:bg-red-900/20 dark:hover:border-red-700 dark:hover:text-red-400 transition-colors">
-                                            Unban
-                                        </button>
-                                    ` : ''}
+                                <div class="ui-tr">
+                                    <span class="ui-td">${uiTag('Temporary', 'warn')}</span>
+                                    <span class="ui-td ui-mono">${escapeHtml(ban.network || ban.ip)}</span>
+                                    <span class="ui-td">${ban.banned_until ? `<span class="ui-muted">${escapeHtml(ban.banned_until)} left</span>` : ''}
+                                        ${ban.queued_for_unban ? uiTag('Unbanning...', 'info') : ''}</span>
+                                    <span class="ui-td ui-td-end">${canEdit && !ban.queued_for_unban ? `
+                                        <button type="button" onclick="unbanIP('${escapeJsArg(ban.ip || ban.network)}', this)" class="ui-btn ui-btn-sm">Unban</button>
+                                    ` : ''}</span>
                                 </div>
                             `).join('')}
                         </div>
-                    ` : '<div class="text-sm text-gray-400 dark:text-gray-500">No active bans</div>'}
+                    ` : '<p class="ui-empty">No active bans</p>'}
                 </div>
             `;
         }
@@ -2371,7 +2292,7 @@ async function loadFail2BanSettings() {
                     const btn = document.getElementById('fail2ban-save-btn');
                     const origText = btn.innerHTML;
                     btn.disabled = true;
-                    btn.innerHTML = '<div class="loading-sm mr-2"></div> Saving...';
+                    btn.textContent = 'Saving...';
 
                     try {
                         // Collect ALL settings values (must send everything)
@@ -2424,7 +2345,7 @@ async function loadFail2BanSettings() {
                     const btn = document.getElementById('fail2ban-ip-save-btn');
                     const origText = btn.innerHTML;
                     btn.disabled = true;
-                    btn.innerHTML = '<div class="loading-sm mr-2"></div> Saving...';
+                    btn.textContent = 'Saving...';
 
                     try {
                         // Collect ALL values from both forms (must send everything)
@@ -3048,27 +2969,25 @@ async function quarantineAction(action, itemIds) {
 // --- Quarantine Detail View ---
 
 async function showQuarantineDetails(itemId) {
-    // Create modal backdrop
     const existing = document.getElementById('quarantine-detail-modal');
     if (existing) existing.remove();
 
     const modal = document.createElement('div');
     modal.id = 'quarantine-detail-modal';
-    modal.className = 'fixed inset-0 z-[9999] flex items-center justify-center p-4';
+    modal.className = 'ui-dialog-backdrop';
+    modal.setAttribute('role', 'dialog');
+    modal.setAttribute('aria-label', 'Quarantine Item Details');
+    modal.onclick = event => { if (event.target === modal) closeQuarantineDetails(); };
     modal.innerHTML = `
-        <div class="absolute inset-0 bg-black/60 backdrop-blur-sm" onclick="closeQuarantineDetails()"></div>
-        <div class="relative bg-white dark:bg-gray-800 rounded-xl shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
-            <div class="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700">
-                <h3 class="text-lg font-semibold text-gray-900 dark:text-white">Quarantine Item Details</h3>
-                <button onclick="closeQuarantineDetails()" class="p-1 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
-                    <svg class="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+        <div class="ui-dialog ui-dialog-fit">
+            <div class="ui-dialog-head">
+                <h3>Quarantine Item Details</h3>
+                <button onclick="closeQuarantineDetails()" class="ui-icon-btn" title="Close" aria-label="Close">
+                    <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
                 </button>
             </div>
-            <div class="flex-1 overflow-y-auto p-4" id="quarantine-detail-content">
-                <div class="flex items-center justify-center py-12">
-                    <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
-                    <span class="ml-3 text-gray-500 dark:text-gray-400">Loading details...</span>
-                </div>
+            <div class="ui-dialog-body" id="quarantine-detail-content">
+                <div class="ui-loading"><div class="loading"></div><p>Loading details...</p></div>
             </div>
             <div id="quarantine-detail-footer" class="hidden"></div>
         </div>
@@ -3083,9 +3002,9 @@ async function showQuarantineDetails(itemId) {
         renderQuarantineDetailContent(data, itemId);
     } catch (err) {
         document.getElementById('quarantine-detail-content').innerHTML = `
-            <div class="text-center py-12 text-red-500">
-                <p class="font-medium">Failed to load details</p>
-                <p class="text-sm mt-1">${escapeHtml(err.message)}</p>
+            <div class="ui-empty">
+                <p class="ui-text-fail">Failed to load details</p>
+                <p>${escapeHtml(err.message)}</p>
             </div>`;
     }
 }
@@ -3106,129 +3025,75 @@ function renderQuarantineDetailContent(data, itemId) {
     const zeroSymbols = allSymbols.filter(s => (s.score || 0) === 0).sort((a, b) => (a.name || '').localeCompare(b.name || ''));
 
     const recipientsHtml = (data.recipients || []).map(r =>
-        `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300">
-            <span class="font-medium uppercase text-[10px] ${r.type === 'smtp' ? 'text-blue-500' : 'text-gray-400'}">${escapeHtml(r.type)}</span>
-            ${copyableText(r.address)}
-        </span>`
+        `<span class="ui-qd-rcpt"><small class="${r.type === 'smtp' ? 'ui-text-info' : 'ui-muted'}">${escapeHtml(r.type)}</small> ${copyableText(r.address)}</span>`
     ).join(' ');
 
-    const scoreColor = (data.score || 0) >= 15 ? 'text-red-600 dark:text-red-400' :
-                       (data.score || 0) >= 6 ? 'text-orange-500 dark:text-orange-400' :
-                       'text-green-600 dark:text-green-400';
+    const score = data.score || 0;
+    const scoreTone = score >= 15 ? 'fail' : score >= 6 ? 'warn' : 'ok';
 
     const buildSymbolRows = (syms) => syms.map(s => {
         const sc = s.score || 0;
-        const cls = sc > 0 ? 'text-red-600 dark:text-red-400 font-semibold' :
-                    sc < 0 ? 'text-green-600 dark:text-green-400 font-semibold' :
-                    'text-gray-400 dark:text-gray-500';
+        const tone = sc > 0 ? 'ui-text-fail' : sc < 0 ? 'ui-text-ok' : 'ui-muted';
         const opts = (s.options || []).join(', ');
-        return `<tr class="border-b border-gray-100 dark:border-gray-700/50 hover:bg-gray-50 dark:hover:bg-gray-700/30">
-            <td class="py-1.5 px-2 font-mono text-gray-800 dark:text-gray-200">${escapeHtml(s.name || '')}</td>
-            <td class="py-1.5 px-2 text-gray-500 dark:text-gray-400">${escapeHtml(s.group || '')}</td>
-            <td class="py-1.5 px-2 text-right ${cls}">${sc !== 0 ? (sc > 0 ? '+' : '') + sc.toFixed(2) : '0'}</td>
-            <td class="py-1.5 px-2 text-gray-400 dark:text-gray-500 max-w-xs truncate" title="${escapeHtml(opts)}">${escapeHtml(opts)}</td>
+        return `<tr>
+            <td class="ui-mono">${escapeHtml(s.name || '')}</td>
+            <td class="ui-muted">${escapeHtml(s.group || '')}</td>
+            <td class="ui-td-end ${tone}"><b>${sc !== 0 ? (sc > 0 ? '+' : '') + sc.toFixed(2) : '0'}</b></td>
+            <td class="ui-muted ui-qd-opts" title="${escapeHtml(opts)}">${escapeHtml(opts)}</td>
         </tr>`;
     }).join('');
 
-    const symbolTableHead = `<table class="w-full text-xs"><thead><tr class="border-b border-gray-200 dark:border-gray-700 text-left">
-        <th class="py-2 px-2 font-medium text-gray-500 dark:text-gray-400">Symbol</th>
-        <th class="py-2 px-2 font-medium text-gray-500 dark:text-gray-400">Group</th>
-        <th class="py-2 px-2 font-medium text-gray-500 dark:text-gray-400 text-right">Score</th>
-        <th class="py-2 px-2 font-medium text-gray-500 dark:text-gray-400">Details</th>
-    </tr></thead>`;
+    const symbolTable = rows => `<div class="ui-dtable-scroll"><table class="ui-dtable"><thead><tr>
+        <th>Symbol</th><th>Group</th><th class="ui-td-end">Score</th><th>Details</th>
+    </tr></thead><tbody>${rows}</tbody></table></div>`;
 
     const textContent = data.text_plain || data.text_html || '';
     const canAct = mailcowRwConfigured;
 
     content.innerHTML = `
-        <div class="space-y-5">
-            <div class="space-y-3">
-                <div>
-                    <label class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Subject</label>
-                    <p class="text-sm font-medium text-gray-900 dark:text-white mt-0.5">${copyableText(data.subject || '-')}</p>
-                </div>
-                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <div>
-                        <label class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">From (Header)</label>
-                        <p class="text-sm text-gray-800 dark:text-gray-200 mt-0.5">${copyableText(data.header_from || '-')}</p>
-                    </div>
-                    <div>
-                        <label class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Envelope From</label>
-                        <p class="text-sm text-gray-800 dark:text-gray-200 mt-0.5 font-mono">${copyableText(data.env_from || '-')}</p>
-                    </div>
-                </div>
-                <div>
-                    <label class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Recipients</label>
-                    <div class="flex flex-wrap gap-1 mt-1">${recipientsHtml || '<span class="text-sm text-gray-500">-</span>'}</div>
-                </div>
-                <div class="flex items-center gap-4">
-                    <div>
-                        <label class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Score</label>
-                        <p class="text-lg font-bold ${scoreColor} mt-0.5">${(data.score || 0).toFixed(2)}</p>
-                    </div>
-                    <div>
-                        <label class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Action</label>
-                        <p class="mt-0.5"><span class="inline-block px-2 py-0.5 text-xs font-medium rounded bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-300">${escapeHtml(data.action || '-')}</span></p>
-                    </div>
-                </div>
+        <div class="ui-qd">
+            <div class="ui-md-ids ui-qd-facts">
+                <div class="ui-md-fact ui-qd-wide"><span>Subject</span><div dir="auto">${copyableText(data.subject || '-')}</div></div>
+                <div class="ui-md-fact"><span>From (Header)</span><div>${copyableText(data.header_from || '-')}</div></div>
+                <div class="ui-md-fact"><span>Envelope From</span><div class="ui-mono">${copyableText(data.env_from || '-')}</div></div>
+                <div class="ui-md-fact ui-qd-wide"><span>Recipients</span><div class="ui-chip-row">${recipientsHtml || '<span class="ui-muted">-</span>'}</div></div>
+                <div class="ui-md-fact"><span>Score</span><div class="ui-text-${scoreTone}"><b>${score.toFixed(2)}</b></div></div>
+                <div class="ui-md-fact"><span>Action</span><div>${uiTag(data.action || '-', 'fail')}</div></div>
             </div>
 
             <div>
-                <h4 class="text-sm font-semibold text-gray-900 dark:text-white mb-2 flex items-center gap-2">
-                    <svg class="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"></path></svg>
-                    Rspamd Symbols
-                </h4>
-                ${activeSymbols.length > 0 ? `<div class="overflow-x-auto">${symbolTableHead}<tbody>${buildSymbolRows(activeSymbols)}</tbody></table></div>` : '<p class="text-gray-500 text-sm">No active symbols</p>'}
+                <h4 class="ui-md-h">Rspamd Symbols</h4>
+                ${activeSymbols.length > 0 ? symbolTable(buildSymbolRows(activeSymbols)) : '<p class="ui-muted">No active symbols</p>'}
                 ${zeroSymbols.length > 0 ? `
-                <details class="mt-2">
-                    <summary class="text-xs text-gray-500 dark:text-gray-400 cursor-pointer hover:text-gray-700 dark:hover:text-gray-300 select-none py-1">
-                        Informational symbols (score 0) - ${zeroSymbols.length} items
-                    </summary>
-                    <div class="overflow-x-auto mt-1">${symbolTableHead}<tbody>${buildSymbolRows(zeroSymbols)}</tbody></table></div>
+                <details class="ui-dns-more">
+                    <summary>Informational symbols (score 0) - ${zeroSymbols.length} items</summary>
+                    ${symbolTable(buildSymbolRows(zeroSymbols))}
                 </details>` : ''}
             </div>
 
             ${textContent ? `
             <div>
-                <h4 class="text-sm font-semibold text-gray-900 dark:text-white mb-2 flex items-center gap-2">
-                    <svg class="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path></svg>
-                    Email Content
-                </h4>
-                <pre class="text-xs bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg p-3 overflow-x-auto whitespace-pre-wrap max-h-64 overflow-y-auto text-gray-800 dark:text-gray-200">${escapeHtml(textContent)}</pre>
+                <h4 class="ui-md-h">Email Content</h4>
+                <pre class="ui-qd-text" dir="auto">${escapeHtml(textContent)}</pre>
             </div>` : ''}
 
             ${data.fuzzy_hashes && data.fuzzy_hashes.length > 0 ? `
             <div>
-                <h4 class="text-sm font-semibold text-gray-900 dark:text-white mb-2">Fuzzy Hashes</h4>
-                <div class="text-xs font-mono bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg p-3">${data.fuzzy_hashes.map(h => escapeHtml(JSON.stringify(h))).join('<br>')}</div>
+                <h4 class="ui-md-h">Fuzzy Hashes</h4>
+                <div class="ui-qd-text">${data.fuzzy_hashes.map(h => escapeHtml(JSON.stringify(h))).join('<br>')}</div>
             </div>` : ''}
         </div>
     `;
 
-    // Render sticky footer with action buttons
+    // Footer with the actions
     if (footer && canAct) {
-        footer.className = 'grid grid-cols-4 gap-1.5 p-3 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/50';
+        footer.className = 'ui-dialog-foot';
         footer.innerHTML = `
-            <button onclick="closeQuarantineDetails(); quarantineRelease('${itemId}')"
-                class="py-2 text-xs font-medium rounded-md bg-green-500 text-white hover:bg-green-600 transition-colors flex items-center justify-center gap-1">
-                <svg class="w-3.5 h-3.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
-                Release
-            </button>
-            <button onclick="closeQuarantineDetails(); quarantineDelete('${itemId}')"
-                class="py-2 text-xs font-medium rounded-md bg-red-500 text-white hover:bg-red-600 transition-colors flex items-center justify-center gap-1">
-                <svg class="w-3.5 h-3.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
-                Delete
-            </button>
-            <button onclick="closeQuarantineDetails(); quarantineLearnHam('${itemId}')"
-                class="py-2 text-xs font-medium rounded-md bg-emerald-500 text-white hover:bg-emerald-600 transition-colors flex items-center justify-center gap-1">
-                <svg class="w-3.5 h-3.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"></path></svg>
-                Not Spam
-            </button>
-            <button onclick="closeQuarantineDetails(); quarantineLearnSpam('${itemId}')"
-                class="py-2 text-xs font-medium rounded-md bg-orange-500 text-white hover:bg-orange-600 transition-colors flex items-center justify-center gap-1">
-                <svg class="w-3.5 h-3.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"></path></svg>
-                Spam
-            </button>
+            <button onclick="closeQuarantineDetails(); quarantineLearnSpam('${itemId}')" class="ui-btn" title="Delete & train as Spam">Spam</button>
+            <button onclick="closeQuarantineDetails(); quarantineLearnHam('${itemId}')" class="ui-btn" title="Release & train as Not Spam">Not Spam</button>
+            <span class="ui-toolbar-gap"></span>
+            <button onclick="closeQuarantineDetails(); quarantineDelete('${itemId}')" class="ui-btn ui-btn-danger">Delete</button>
+            <button onclick="closeQuarantineDetails(); quarantineRelease('${itemId}')" class="ui-btn ui-btn-primary">Release</button>
         `;
     }
 }
@@ -3269,56 +3134,33 @@ async function loadQuarantineRules() {
         if (countEl) countEl.textContent = activeCount > 0 ? `(${activeCount} active)` : '';
         
         if (!data.data || data.data.length === 0) {
-            container.innerHTML = '<p class="text-gray-500 dark:text-gray-400 text-center py-4 text-sm">No rules configured. Click "Add Rule" to create one.</p>';
+            container.innerHTML = '<p class="ui-empty">No rules configured. Click "Add Rule" to create one.</p>';
             return;
         }
         
-        container.innerHTML = data.data.map(rule => {
+        container.innerHTML = `<div class="ui-table ui-stack ui-qr-table">${data.data.map(rule => {
             const matchLabels = { sender: 'Sender', sender_domain: 'Sender Domain', recipient: 'Recipient', subject: 'Subject' };
-            const actionColor = rule.action === 'delete' ? 'red' : 'green';
             const actionLabel = rule.action === 'delete' ? 'Delete' : 'Release';
-            
+
             return `
-            <div class="border ${rule.enabled ? 'border-gray-200 dark:border-gray-700' : 'border-gray-100 dark:border-gray-800 opacity-60'} rounded-lg p-3 bg-white dark:bg-gray-800 hover:border-gray-300 dark:hover:border-gray-600 transition">
-                <div class="flex items-center justify-between gap-3">
-                    <div class="flex-1 min-w-0">
-                        <div class="flex items-center gap-2 mb-1 flex-wrap">
-                            <span class="font-medium text-sm text-gray-900 dark:text-white" dir="auto">${escapeHtml(rule.name)}</span>
-                            <span class="px-2 py-0.5 text-xs rounded-full bg-${actionColor}-100 dark:bg-${actionColor}-900/30 text-${actionColor}-700 dark:text-${actionColor}-300">${actionLabel}</span>
-                            ${rule.is_regex ? '<span class="px-2 py-0.5 text-xs rounded-full bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300">Regex</span>' : ''}
-                            ${!rule.enabled ? '<span class="px-2 py-0.5 text-xs rounded-full bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400">Disabled</span>' : ''}
-                        </div>
-                        <p class="text-xs text-gray-500 dark:text-gray-400">
-                            <span class="font-medium">${matchLabels[rule.match_type] || rule.match_type}:</span> 
-                            <code class="bg-gray-100 dark:bg-gray-700 px-1 rounded" dir="auto">${escapeHtml(rule.match_value)}</code>
-                        </p>
-                        <p class="text-xs text-gray-400 dark:text-gray-500 mt-1">
-                            Hits: ${rule.hit_count}${rule.last_hit_at ? ' · Last: ' + formatTime(rule.last_hit_at) : ''}
-                            ${rule.notes ? ' · ' + escapeHtml(rule.notes) : ''}
-                        </p>
-                    </div>
-                    <div class="flex items-center gap-1 flex-shrink-0">
-                        <button onclick="toggleQuarantineRule(${rule.id})" title="${rule.enabled ? 'Click to disable this rule' : 'Click to enable this rule'}"
-                            class="px-2 py-1 text-xs rounded-md font-medium transition ${rule.enabled 
-                                ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 hover:bg-green-200 dark:hover:bg-green-900/50' 
-                                : 'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-600'}">
-                            ${rule.enabled ? 'Enabled' : 'Disabled'}
-                        </button>
-                        <button onclick="showEditQuarantineRuleModal(${rule.id})" title="Edit"
-                            class="p-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-700 transition text-gray-400 hover:text-blue-500">
-                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg>
-                        </button>
-                        <button onclick="deleteQuarantineRule(${rule.id}, '${escapeJsArg(rule.name)}')" title="Delete"
-                            class="p-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-700 transition text-gray-400 hover:text-red-500">
-                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
-                        </button>
-                    </div>
+            <div class="ui-tr${rule.enabled ? '' : ' ui-row-off'}">
+                <div class="ui-td ui-q-who">
+                    <div><b dir="auto">${escapeHtml(rule.name)}</b> ${uiTag(actionLabel, rule.action === 'delete' ? 'fail' : 'ok')}
+                        ${rule.is_regex ? uiTag('Regex', 'info') : ''} ${!rule.enabled ? uiTag('Disabled', '') : ''}</div>
+                    <small>${matchLabels[rule.match_type] || rule.match_type}: <code class="ui-mono" dir="auto">${escapeHtml(rule.match_value)}</code></small>
+                    <small>Hits: ${rule.hit_count}${rule.last_hit_at ? ' · Last: ' + formatTime(rule.last_hit_at) : ''}${rule.notes ? ' · ' + escapeHtml(rule.notes) : ''}</small>
                 </div>
+                <span class="ui-td ui-td-end ui-row-actions">
+                    <button onclick="toggleQuarantineRule(${rule.id})" title="${rule.enabled ? 'Click to disable this rule' : 'Click to enable this rule'}"
+                        class="ui-btn ui-btn-sm${rule.enabled ? ' ui-btn-on' : ''}">${rule.enabled ? 'Enabled' : 'Disabled'}</button>
+                    <button onclick="showEditQuarantineRuleModal(${rule.id})" title="Edit" class="ui-btn ui-btn-sm">Edit</button>
+                    <button onclick="deleteQuarantineRule(${rule.id}, '${escapeJsArg(rule.name)}')" title="Delete" class="ui-btn ui-btn-sm ui-btn-danger">Delete</button>
+                </span>
             </div>`;
-        }).join('');
+        }).join('')}</div>`;
     } catch (err) {
         console.error('Failed to load quarantine rules:', err);
-        container.innerHTML = `<p class="text-red-500 text-center py-4 text-sm">Failed to load rules: ${escapeHtml(err.message)}</p>`;
+        container.innerHTML = `<p class="ui-empty ui-text-fail">Failed to load rules: ${escapeHtml(err.message)}</p>`;
     }
 }
 
@@ -3353,86 +3195,72 @@ function _showQuarantineRuleModal(rule, prefill) {
     
     // For pre-fill mode, provide quick-fill buttons for sender/domain/recipient
     const prefillButtons = prefill ? `
-        <div class="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-3 mb-4">
-            <p class="text-xs font-medium text-blue-700 dark:text-blue-300 mb-2">Quick fill from email:</p>
-            <div class="flex flex-wrap gap-1.5">
-                <button type="button" onclick="qrulePrefill('sender', '${escapeJsArg(prefill.sender)}')"
-                    class="px-2 py-1 text-xs rounded bg-blue-100 dark:bg-blue-800 text-blue-700 dark:text-blue-300 hover:bg-blue-200 dark:hover:bg-blue-700 transition">Sender: ${escapeHtml(prefill.sender)}</button>
-                ${prefill.senderDomain ? `<button type="button" onclick="qrulePrefill('sender_domain', '${escapeJsArg(prefill.senderDomain)}')"
-                    class="px-2 py-1 text-xs rounded bg-blue-100 dark:bg-blue-800 text-blue-700 dark:text-blue-300 hover:bg-blue-200 dark:hover:bg-blue-700 transition">Domain: ${escapeHtml(prefill.senderDomain)}</button>` : ''}
-                <button type="button" onclick="qrulePrefill('recipient', '${escapeJsArg(prefill.recipient)}')"
-                    class="px-2 py-1 text-xs rounded bg-blue-100 dark:bg-blue-800 text-blue-700 dark:text-blue-300 hover:bg-blue-200 dark:hover:bg-blue-700 transition">Recipient: ${escapeHtml(prefill.recipient)}</button>
+        <div class="ui-qr-prefill">
+            <span class="ui-label">Quick fill from email:</span>
+            <div class="ui-chip-row">
+                <button type="button" onclick="qrulePrefill('sender', '${escapeJsArg(prefill.sender)}')" class="ui-chip">Sender: ${escapeHtml(prefill.sender)}</button>
+                ${prefill.senderDomain ? `<button type="button" onclick="qrulePrefill('sender_domain', '${escapeJsArg(prefill.senderDomain)}')" class="ui-chip">Domain: ${escapeHtml(prefill.senderDomain)}</button>` : ''}
+                <button type="button" onclick="qrulePrefill('recipient', '${escapeJsArg(prefill.recipient)}')" class="ui-chip">Recipient: ${escapeHtml(prefill.recipient)}</button>
             </div>
         </div>
     ` : '';
-    
+
     const html = `
-    <div class="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4" id="quarantine-rule-modal-overlay">
-        <div class="bg-white dark:bg-gray-800 rounded-xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
-            <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
-                <h3 class="text-lg font-semibold text-gray-900 dark:text-white">${title}</h3>
-                <button onclick="closeQuarantineRuleModal()" class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">
-                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+    <div class="ui-dialog-backdrop" id="quarantine-rule-modal-overlay" role="dialog" aria-label="${title}">
+        <div class="ui-dialog ui-dialog-fit ui-dialog-sm">
+            <div class="ui-dialog-head">
+                <h3>${title}</h3>
+                <button onclick="closeQuarantineRuleModal()" class="ui-icon-btn" title="Close" aria-label="Close">
+                    <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
                 </button>
             </div>
-            <div class="p-6 space-y-4">
+            <div class="ui-dialog-body ui-form">
                 ${prefillButtons}
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Rule Name</label>
-                    <input type="text" id="qrule-name" value="${defaultName}" 
-                        class="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-lg" placeholder="e.g., Allow notifications from service X">
-                </div>
-                <div class="grid grid-cols-2 gap-4">
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Match Type</label>
-                        <select id="qrule-match-type" class="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-lg">
+                <label><span class="ui-label">Rule Name</span>
+                    <input type="text" id="qrule-name" value="${defaultName}" class="ui-input" placeholder="e.g., Allow notifications from service X">
+                </label>
+                <div class="ui-qr-pair">
+                    <label><span class="ui-label">Match Type</span>
+                        <select id="qrule-match-type" class="ui-select">
                             <option value="sender" ${defaultMatchType === 'sender' ? 'selected' : ''}>Sender</option>
                             <option value="sender_domain" ${defaultMatchType === 'sender_domain' ? 'selected' : ''}>Sender Domain</option>
                             <option value="recipient" ${defaultMatchType === 'recipient' ? 'selected' : ''}>Recipient</option>
                             <option value="subject" ${defaultMatchType === 'subject' ? 'selected' : ''}>Subject</option>
                         </select>
-                    </div>
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Action</label>
-                        <select id="qrule-action" class="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-lg">
+                    </label>
+                    <label><span class="ui-label">Action</span>
+                        <select id="qrule-action" class="ui-select">
                             <option value="release" ${defaultAction === 'release' ? 'selected' : ''}>✅ Release</option>
                             <option value="delete" ${defaultAction === 'delete' ? 'selected' : ''}>🗑️ Delete</option>
                         </select>
-                    </div>
+                    </label>
                 </div>
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Match Value</label>
-                    <input type="text" id="qrule-match-value" value="${defaultMatchValue}"
-                        class="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-lg font-mono" placeholder="e.g., noreply@example.com">
-                    <div class="mt-2">
-                        <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Match Mode</label>
-                        <select id="qrule-match-mode" onchange="updateQRuleMatchHelp()" class="w-full px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-lg">
-                            <option value="exact" ${!defaultIsRegex ? 'selected' : ''}>Exact Match - matches the full value exactly</option>
-                            <option value="contains" ${defaultIsRegex && !(isEdit && rule.match_value.startsWith('^')) ? 'selected' : ''}>Contains - matches if value appears anywhere</option>
-                            <option value="regex" ${defaultIsRegex && isEdit && rule.match_value.startsWith('^') ? 'selected' : ''}>Regex (advanced) - custom regular expression</option>
-                        </select>
-                        <p id="qrule-match-help" class="text-xs text-gray-400 dark:text-gray-500 mt-1"></p>
-                    </div>
-                </div>
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Notes (optional)</label>
-                    <textarea id="qrule-notes" rows="2" class="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-lg" placeholder="Why this rule exists...">${defaultNotes}</textarea>
-                </div>
-                <div class="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg p-3">
-                    <p class="text-xs text-amber-700 dark:text-amber-300">
-                        <strong>Priority:</strong> Delete rules always take priority over Release rules. If both match, the email will be deleted.
-                    </p>
+                <label><span class="ui-label">Match Value</span>
+                    <input type="text" id="qrule-match-value" value="${defaultMatchValue}" class="ui-input ui-mono" placeholder="e.g., noreply@example.com">
+                </label>
+                <label><span class="ui-label">Match Mode</span>
+                    <select id="qrule-match-mode" onchange="updateQRuleMatchHelp()" class="ui-select">
+                        <option value="exact" ${!defaultIsRegex ? 'selected' : ''}>Exact Match - matches the full value exactly</option>
+                        <option value="contains" ${defaultIsRegex && !(isEdit && rule.match_value.startsWith('^')) ? 'selected' : ''}>Contains - matches if value appears anywhere</option>
+                        <option value="regex" ${defaultIsRegex && isEdit && rule.match_value.startsWith('^') ? 'selected' : ''}>Regex (advanced) - custom regular expression</option>
+                    </select>
+                    <small id="qrule-match-help" class="ui-muted"></small>
+                </label>
+                <label><span class="ui-label">Notes (optional)</span>
+                    <textarea id="qrule-notes" rows="2" class="ui-textarea" placeholder="Why this rule exists...">${defaultNotes}</textarea>
+                </label>
+                <div class="ui-alert ui-alert-warn ui-qr-note">
+                    <span class="ui-alert-bar"></span>
+                    <div class="ui-alert-text"><p><b>Priority:</b> Delete rules always take priority over Release rules. If both match, the email will be deleted.</p></div>
                 </div>
             </div>
-            <div class="px-6 py-4 border-t border-gray-200 dark:border-gray-700 flex justify-end gap-2">
-                <button onclick="closeQuarantineRuleModal()" class="px-4 py-2 text-sm font-medium rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition">Cancel</button>
-                <button onclick="saveQuarantineRule(${isEdit ? rule.id : 'null'})" class="px-4 py-2 text-sm font-medium rounded-lg bg-amber-500 hover:bg-amber-600 text-white transition">
-                    ${isEdit ? 'Save Changes' : 'Create Rule'}
-                </button>
+            <div class="ui-dialog-foot">
+                <button onclick="closeQuarantineRuleModal()" class="ui-btn">Cancel</button>
+                <button onclick="saveQuarantineRule(${isEdit ? rule.id : 'null'})" class="ui-btn ui-btn-primary">${isEdit ? 'Save Changes' : 'Create Rule'}</button>
             </div>
         </div>
     </div>`;
-    
+
     document.body.insertAdjacentHTML('beforeend', html); // nosemgrep: typescript.react.security.audit.react-unsanitized-method.react-unsanitized-method
     updateQRuleMatchHelp();
 }
@@ -3566,54 +3394,46 @@ async function testQuarantineRules() {
         }
         
         const groupsHtml = Object.values(byRule).map(group => {
-            const actionColor = group.action === 'delete' ? 'red' : 'green';
+            const tone = group.action === 'delete' ? 'fail' : 'ok';
             const itemsHtml = group.items.map(m => `
-                <div class="py-1.5 pl-3 border-l-2 ${group.rule_enabled ? 'border-' + actionColor + '-300 dark:border-' + actionColor + '-700' : 'border-gray-300 dark:border-gray-600'}">
-                    <div class="text-xs text-gray-700 dark:text-gray-300">${escapeHtml(m.sender || '?')} → ${escapeHtml(m.recipient || '?')}</div>
-                    <div class="text-xs text-gray-400 dark:text-gray-500 truncate" dir="auto" title="${escapeHtml(m.subject || '')}">${escapeHtml((m.subject || 'No subject').substring(0, 80))}</div>
+                <div class="ui-qt-item${group.rule_enabled ? ` ui-qt-${tone}` : ''}">
+                    <div>${escapeHtml(m.sender || '?')} → ${escapeHtml(m.recipient || '?')}</div>
+                    <small class="ui-muted" dir="auto" title="${escapeHtml(m.subject || '')}">${escapeHtml((m.subject || 'No subject').substring(0, 80))}</small>
                 </div>
             `).join('');
-            
+
             return `
-            <div class="mb-4 ${!group.rule_enabled ? 'opacity-50' : ''}">
-                <div class="flex items-center gap-2 mb-1.5 flex-wrap">
-                    <span class="font-medium text-sm text-gray-900 dark:text-white" dir="auto">${escapeHtml(group.rule_name)}</span>
-                    <span class="px-1.5 py-0.5 text-xs rounded bg-${actionColor}-100 dark:bg-${actionColor}-900/30 text-${actionColor}-700 dark:text-${actionColor}-300">${group.action}</span>
-                    ${!group.rule_enabled ? '<span class="px-1.5 py-0.5 text-xs rounded bg-gray-200 dark:bg-gray-700 text-gray-500 dark:text-gray-400">Disabled - will not execute</span>' : ''}
-                    <span class="text-xs text-gray-400 ml-auto">${group.items.length} match${group.items.length !== 1 ? 'es' : ''}</span>
+            <div class="ui-qt-group${!group.rule_enabled ? ' ui-row-off' : ''}">
+                <div class="ui-list-head">
+                    <b dir="auto">${escapeHtml(group.rule_name)}</b> ${uiTag(group.action, tone)}
+                    ${!group.rule_enabled ? uiTag('Disabled - will not execute', '') : ''}
+                    <span class="ui-muted ui-head-actions">${group.items.length} match${group.items.length !== 1 ? 'es' : ''}</span>
                 </div>
-                <div class="space-y-1">${itemsHtml}</div>
+                <div class="ui-qt-items">${itemsHtml}</div>
             </div>`;
         }).join('');
-        
+
         const disabledCount = data.matches.filter(m => !m.rule_enabled).length;
         const activeCount = data.matches.length - disabledCount;
         const noMatches = data.total_matches === 0;
-        
+
         const html = `
-        <div class="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4" id="qrule-test-modal">
-            <div class="bg-white dark:bg-gray-800 rounded-xl shadow-2xl w-full max-w-lg max-h-[80vh] overflow-y-auto">
-                <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
-                    <h3 class="text-lg font-semibold text-gray-900 dark:text-white">Test Results</h3>
-                    <button onclick="document.getElementById('qrule-test-modal').remove()" class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">
-                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+        <div class="ui-dialog-backdrop" id="qrule-test-modal" role="dialog" aria-label="Test Results">
+            <div class="ui-dialog ui-dialog-fit ui-dialog-sm">
+                <div class="ui-dialog-head">
+                    <h3>Test Results</h3>
+                    <button onclick="document.getElementById('qrule-test-modal').remove()" class="ui-icon-btn" title="Close" aria-label="Close">
+                        <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
                     </button>
                 </div>
-                <div class="p-6">
-                    <div class="flex items-center gap-3 mb-4 pb-3 border-b border-gray-100 dark:border-gray-700">
-                        <div class="text-center">
-                            <div class="text-2xl font-bold text-gray-900 dark:text-white">${data.total_matches}</div>
-                            <div class="text-xs text-gray-500">matched</div>
-                        </div>
-                        <div class="text-center text-gray-300 dark:text-gray-600">/</div>
-                        <div class="text-center">
-                            <div class="text-2xl font-bold text-gray-400">${data.total_quarantine}</div>
-                            <div class="text-xs text-gray-500">total</div>
-                        </div>
-                        ${disabledCount > 0 ? `<div class="ml-auto text-xs text-amber-600 dark:text-amber-400">⚠ ${disabledCount} from disabled rules</div>` : ''}
+                <div class="ui-dialog-body ui-form">
+                    <div class="ui-kpis">
+                        <div class="ui-kpi"><b>${data.total_matches}</b>matched</div>
+                        <div class="ui-kpi"><b class="ui-muted">${data.total_quarantine}</b>total</div>
                     </div>
-                    ${noMatches ? '<p class="text-sm text-gray-500 text-center py-4">No quarantine items matched any rules.</p>' : groupsHtml}
-                    <p class="text-xs text-gray-400 dark:text-gray-500 mt-4 pt-3 border-t border-gray-100 dark:border-gray-700 text-center">This is a dry-run preview. No actions were taken.</p>
+                    ${disabledCount > 0 ? `<p class="ui-text-warn">⚠ ${disabledCount} from disabled rules</p>` : ''}
+                    ${noMatches ? '<p class="ui-empty">No quarantine items matched any rules.</p>' : groupsHtml}
+                    <p class="ui-kv-note ui-list-foot">This is a dry-run preview. No actions were taken.</p>
                 </div>
             </div>
         </div>`;
@@ -3639,29 +3459,27 @@ async function loadQuarantineRuleHistory() {
     const container = document.getElementById('quarantine-rules-history-list');
     if (!container) return;
     
-    container.innerHTML = '<p class="text-gray-400 text-xs text-center py-2">Loading...</p>';
-    
+    container.innerHTML = '<p class="ui-empty">Loading...</p>';
+
     try {
         const res = await authenticatedFetch('/api/quarantine/rules/logs?limit=20');
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
-        
+
         if (!data.data || data.data.length === 0) {
-            container.innerHTML = '<p class="text-gray-400 text-xs text-center py-2">No actions recorded yet</p>';
+            container.innerHTML = '<p class="ui-empty">No actions recorded yet</p>';
             return;
         }
-        
-        container.innerHTML = data.data.map(log => `
-            <div class="flex items-center gap-2 py-1.5 border-b border-gray-100 dark:border-gray-700/50 text-xs">
-                <span class="px-1.5 py-0.5 rounded ${log.action === 'delete' ? 'bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400' : 'bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400'}">${log.action}</span>
-                <span class="text-gray-500 dark:text-gray-400 flex-1 truncate" title="${escapeHtml(log.sender || '')} → ${escapeHtml(log.recipient || '')}">
-                    ${escapeHtml(log.sender || '?')} → ${escapeHtml(log.recipient || '?')}
-                </span>
-                <span class="text-gray-400 dark:text-gray-500 flex-shrink-0" title="Rule: ${escapeHtml(log.rule_name || '')}">${formatTime(log.created_at)}</span>
+
+        container.innerHTML = `<div class="ui-qt-history">${data.data.map(log => `
+            <div class="ui-qt-hrow">
+                ${uiTag(log.action, log.action === 'delete' ? 'fail' : 'ok')}
+                <span class="ui-q-who" title="${escapeHtml(log.sender || '')} → ${escapeHtml(log.recipient || '')}">${escapeHtml(log.sender || '?')} → ${escapeHtml(log.recipient || '?')}</span>
+                <span class="ui-muted" title="Rule: ${escapeHtml(log.rule_name || '')}">${formatTime(log.created_at)}</span>
             </div>
-        `).join('');
+        `).join('')}</div>`;
     } catch (err) {
-        container.innerHTML = `<p class="text-red-500 text-xs text-center py-2">Failed: ${escapeHtml(err.message)}</p>`;
+        container.innerHTML = `<p class="ui-empty ui-text-fail">Failed: ${escapeHtml(err.message)}</p>`;
     }
 }
 
