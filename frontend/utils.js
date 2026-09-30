@@ -191,6 +191,36 @@ function uiLocked(title, textHtml, action = 'settings') {
 // The Read-Write key sentence used by every locked area that needs it
 const UI_RW_KEY_TEXT = 'needs a <strong>Read-Write API key</strong> (<code>MAILCOW_API_KEY_RW</code>). Configure it in Settings → Mailcow → Connection.';
 
+// The floating save bar every editable page uses, shown only with unsaved changes.
+// Place it inside the page or tab it saves: a hidden page hides its bar too.
+// save and discard are onclick code; with form, Save submits that form instead.
+function uiSaveBar(id, { save = '', discard = '', form = '' } = {}) {
+    const saveAttrs = form ? `type="submit" form="${form}"` : `type="button" onclick="${save}"`;
+    return `<div class="ui-savebar hidden" id="${id}" role="region" aria-label="Unsaved changes">
+            <span class="ui-savebar-count" aria-live="polite"></span>
+            <button type="button" class="ui-btn ui-savebar-discard" onclick="${discard}">Discard</button>
+            <button ${saveAttrs} class="ui-btn ui-savebar-save">Save changes</button>
+        </div>`;
+}
+
+// Show the bar with the number of unsaved changes, or hide it at zero
+function uiSaveBarUpdate(id, count) {
+    const bar = document.getElementById(id);
+    if (!bar) return;
+    bar.classList.toggle('hidden', !count);
+    const label = bar.querySelector('.ui-savebar-count');
+    if (label) label.textContent = `${count} unsaved change${count === 1 ? '' : 's'}`;
+}
+
+// While saving: both buttons off and Save says so
+function uiSaveBarBusy(id, busy) {
+    const bar = document.getElementById(id);
+    if (!bar) return;
+    bar.querySelectorAll('button').forEach(b => { b.disabled = busy; });
+    const save = bar.querySelector('.ui-savebar-save');
+    if (save) save.textContent = busy ? 'Saving...' : 'Save changes';
+}
+
 function getCorrelationStatusDisplay(msg) {
     // If there's a final_status, show it with emoji
     if (msg.final_status) {

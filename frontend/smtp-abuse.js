@@ -9,7 +9,7 @@
 
 let smtpAbuseStatus = null;
 let smtpAbuseWhitelist = [];
-let smtpAbuseWhitelistEditing = false;
+let smtpAbuseWhitelistDraft = null;  // unsaved whitelist text; survives the panel re-rendering
 let smtpAbusePage = 1;
 const SMTP_ABUSE_PAGE_SIZE = 5;
 
@@ -111,17 +111,16 @@ function renderSmtpAbusePanel() {
             </div>
 
             <div class="ui-sa-block ui-sa-whitelist">
-                <form onsubmit="saveSmtpAbuseWhitelist(event)" class="ui-form">
+                <form onsubmit="event.preventDefault(); saveSmtpAbuseWhitelist()" class="ui-form">
                     <div class="ui-list-head">
                         <div>
                             <label for="smtp-abuse-whitelist-textarea" class="ui-md-h">Whitelist</label>
                             <p class="ui-set-desc">One address per line. Whitelisted mailboxes are never blocked automatically.</p>
                         </div>
-                        ${(!locked && !smtpAbuseWhitelistEditing) ? '<button type="button" onclick="editSmtpAbuseWhitelist()" class="ui-btn ui-btn-sm ui-head-actions">Edit whitelist</button>' : ''}
                     </div>
-                    <textarea id="smtp-abuse-whitelist-textarea" rows="4" placeholder="newsletter@example.com&#10;monitoring@example.com" ${smtpAbuseWhitelistEditing ? '' : 'disabled'} class="ui-textarea ui-mono">${escapeHtml(smtpAbuseWhitelist.map(i => i.email).join('\n'))}</textarea>
-                    ${smtpAbuseWhitelistEditing ? '<div class="ui-form-actions"><span class="ui-toolbar-gap"></span><button type="button" onclick="cancelSmtpAbuseWhitelistEdit()" class="ui-btn">Cancel</button><button type="submit" class="ui-btn ui-btn-primary">Save whitelist</button></div>' : ''}
+                    <textarea id="smtp-abuse-whitelist-textarea" rows="4" placeholder="newsletter@example.com&#10;monitoring@example.com" ${locked ? 'disabled' : ''} oninput="onSmtpAbuseWhitelistInput(this.value)" class="ui-textarea ui-mono">${escapeHtml(smtpAbuseWhitelistDraft ?? smtpAbuseWhitelistSavedText())}</textarea>
                 </form>
+                ${locked ? '' : uiSaveBar('smtp-abuse-savebar', { save: 'saveSmtpAbuseWhitelist()', discard: 'discardSmtpAbuseWhitelist()' })}
 
                 ${smtpAbuseWhitelist.length ? `
                 <div class="ui-sa-list">
@@ -139,6 +138,7 @@ function renderSmtpAbusePanel() {
                 </div>` : ''}
             </div>
         </div>`;
+    uiSaveBarUpdate('smtp-abuse-savebar', smtpAbuseWhitelistDraft !== null ? 1 : 0);
 
     if (locked) {
         const reasons = [];
@@ -177,21 +177,29 @@ async function smtpAbuseAction(email, action) {
     }
 }
 
-function editSmtpAbuseWhitelist() {
-    smtpAbuseWhitelistEditing = true;
-    renderSmtpAbusePanel();
-    document.getElementById('smtp-abuse-whitelist-textarea')?.focus();
+function smtpAbuseWhitelistSavedText() {
+    return smtpAbuseWhitelist.map(i => i.email).join('\n');
 }
 
-function cancelSmtpAbuseWhitelistEdit() {
-    smtpAbuseWhitelistEditing = false;
+function smtpAbuseWhitelistLines(text) {
+    return text.split(/\r?\n/).map(e => e.trim()).filter(Boolean);
+}
+
+// The whitelist counts as one change, however many lines were edited
+function onSmtpAbuseWhitelistInput(text) {
+    const changed = smtpAbuseWhitelistLines(text).join('\n') !== smtpAbuseWhitelistLines(smtpAbuseWhitelistSavedText()).join('\n');
+    smtpAbuseWhitelistDraft = changed ? text : null;
+    uiSaveBarUpdate('smtp-abuse-savebar', changed ? 1 : 0);
+}
+
+function discardSmtpAbuseWhitelist() {
+    smtpAbuseWhitelistDraft = null;
     renderSmtpAbusePanel();
 }
 
-async function saveSmtpAbuseWhitelist(event) {
-    event.preventDefault();
-    const emails = (document.getElementById('smtp-abuse-whitelist-textarea')?.value || '')
-        .split(/\r?\n/).map(e => e.trim()).filter(Boolean);
+async function saveSmtpAbuseWhitelist() {
+    const emails = smtpAbuseWhitelistLines(document.getElementById('smtp-abuse-whitelist-textarea')?.value || '');
+    uiSaveBarBusy('smtp-abuse-savebar', true);
     try {
         const response = await authenticatedFetch('/api/smtp-abuse/whitelist', {
             method: 'PUT',
@@ -201,13 +209,15 @@ async function saveSmtpAbuseWhitelist(event) {
         if (!response.ok) {
             const detail = await response.json().catch(() => ({}));
             showToast(detail.detail || 'Could not save whitelist', 'error');
+            uiSaveBarBusy('smtp-abuse-savebar', false);
             return;
         }
-        smtpAbuseWhitelistEditing = false;
+        smtpAbuseWhitelistDraft = null;
         showToast('Whitelist saved', 'success');
         loadSmtpAbusePanel();
     } catch (e) {
         showToast('Could not save whitelist', 'error');
+        uiSaveBarBusy('smtp-abuse-savebar', false);
     }
 }
 

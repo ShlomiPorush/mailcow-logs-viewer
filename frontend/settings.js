@@ -1101,11 +1101,7 @@ function renderSettings(content, data) {
             </div>
         </div>
         ${data.settings_migrated ? `
-        <div class="ui-set-savebar hidden" id="settings-savebar" role="region" aria-label="Unsaved changes">
-            <span id="settings-dirty-count"></span>
-            <button type="button" id="settings-discard-btn" class="ui-btn">Discard</button>
-            <button type="submit" form="settings-edit-form" id="settings-save-btn" class="ui-btn ui-btn-primary">Save changes</button>
-        </div>` : ''}
+        ${uiSaveBar('settings-savebar', { form: 'settings-edit-form', discard: 'loadSettings()' })}` : ''}
         `;
         })() : ''}
 
@@ -1366,10 +1362,7 @@ function renderSettings(content, data) {
             form.querySelectorAll('[name]').forEach(el => {
                 if (initialValues.has(el.name) && initialValues.get(el.name) !== fieldValue(el)) dirty.add(el.name);
             });
-            const bar = content.querySelector('#settings-savebar');
-            const count = content.querySelector('#settings-dirty-count');
-            if (bar) bar.classList.toggle('hidden', dirty.size === 0);
-            if (count) count.textContent = `${dirty.size} unsaved change${dirty.size === 1 ? '' : 's'}`;
+            uiSaveBarUpdate('settings-savebar', dirty.size);
             // Mark the sections that hold a change
             content.querySelectorAll('.settings-edit-tab').forEach(tabBtn => {
                 const panel = content.querySelector('#settings-tab-panel-' + tabBtn.getAttribute('data-tab'));
@@ -1383,8 +1376,6 @@ function renderSettings(content, data) {
             // Clearing and resetting change a field without an input event
             content.querySelectorAll('.settings-clear-btn').forEach(btn => btn.addEventListener('click', () => setTimeout(updateDirty)));
         }
-        const discardBtn = content.querySelector('#settings-discard-btn');
-        if (discardBtn) discardBtn.onclick = () => loadSettings();
 
         // Search: show every matching field from all sections at once
         const search = content.querySelector('#settings-search');
@@ -1489,14 +1480,13 @@ function renderSettings(content, data) {
                 // ──────────────────────────────────────────────────────────
 
                 try {
-                    const saveBtn = content.querySelector('#settings-save-btn');
-                    if (saveBtn) saveBtn.disabled = true;
+                    uiSaveBarBusy('settings-savebar', true);
                     const res = await authenticatedFetch('/api/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
                     if (!res.ok) {
                         const err = await res.json().catch(() => ({}));
                         throw new Error(err.detail || res.statusText);
                     }
-                    if (saveBtn) saveBtn.disabled = false;
+                    uiSaveBarBusy('settings-savebar', false);
                     if (isEnablingBasicAuth) {
                         showToast('Basic Auth enabled successfully! You will need to log in on your next visit.', 'success');
                     }
@@ -1536,8 +1526,7 @@ function renderSettings(content, data) {
 
                     await loadSettings();
                 } catch (err) {
-                    const saveBtn = content.querySelector('#settings-save-btn');
-                    if (saveBtn) saveBtn.disabled = false;
+                    uiSaveBarBusy('settings-savebar', false);
                     showToast('Failed to save: ' + (err.message || err), 'error');
                 }
             };

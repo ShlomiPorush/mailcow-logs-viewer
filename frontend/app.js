@@ -2249,9 +2249,72 @@ let fail2banTotalBans = null;
 let fail2banBlacklist = [];
 let fail2banWhitelist = [];
 
+let fail2banInitial = null;  // the values the two Fail2ban forms loaded with
+
+// Every Fail2ban setting, in the shape mailcow expects (it must get all of them)
+function fail2banFormValues() {
+    const s = document.getElementById('fail2ban-edit-form');
+    const ip = document.getElementById('fail2ban-ip-form');
+    if (!s || !ip) return null;
+    const val = name => s.querySelector(`[name="${name}"]`).value;
+    const list = name => ip.querySelector(`[name="${name}"]`).value.split('\n').map(l => l.trim()).filter(Boolean).join(',');
+    return {
+        ban_time: val('ban_time'),
+        max_ban_time: val('max_ban_time'),
+        ban_time_increment: s.querySelector('[name="ban_time_increment"]').checked ? '1' : '0',
+        max_attempts: val('max_attempts'),
+        retry_window: val('retry_window'),
+        netban_ipv4: val('netban_ipv4'),
+        netban_ipv6: val('netban_ipv6'),
+        whitelist: list('whitelist'),
+        blacklist: list('blacklist')
+    };
+}
+
+function fail2banChangeCount() {
+    const now = fail2banFormValues();
+    if (!now || !fail2banInitial) return 0;
+    return Object.keys(now).filter(k => now[k] !== fail2banInitial[k]).length;
+}
+
+function updateFail2banDirty() {
+    uiSaveBarUpdate('fail2ban-savebar', fail2banChangeCount());
+}
+
+function discardFail2banChanges() {
+    fail2banInitial = null;
+    fail2banSettingsLoaded = false;
+    loadFail2BanSettings();
+}
+
+async function saveFail2banSettings() {
+    const attr = fail2banFormValues();
+    if (!attr) return;
+    uiSaveBarBusy('fail2ban-savebar', true);
+    try {
+        const res = await authenticatedFetch('/api/fail2ban', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ attr })
+        });
+        const result = await res.json();
+        if (res.ok && result.status === 'success') {
+            showToast('Fail2ban settings saved', 'success');
+            discardFail2banChanges();  // reload what mailcow stored
+            return;
+        }
+        showToast('Failed to save the Fail2ban settings: ' + (result.msg || result.detail || 'Unknown error'), 'error');
+    } catch (err) {
+        showToast('Failed to save the Fail2ban settings: ' + err.message, 'error');
+    }
+    uiSaveBarBusy('fail2ban-savebar', false);
+}
+
 async function loadFail2BanSettings() {
     // Only load once per session (settings don't change often)
     if (fail2banSettingsLoaded) return;
+    // A refresh must not wipe what the admin is typing
+    if (fail2banChangeCount() > 0) return;
 
     const settingsContainer = document.getElementById('fail2ban-settings');
     const ipListsContainer = document.getElementById('fail2ban-ip-lists');
@@ -2266,6 +2329,7 @@ async function loadFail2BanSettings() {
 
         const data = await response.json();
         const canEdit = mailcowRwConfigured;
+        const f2bOff = canEdit ? '' : 'disabled';
         fail2banSettingsLoaded = true;
         fail2banActiveBans = data.active_bans || [];
         // Same count as the Active Bans list: permanent bans plus the temporary ones not among them
@@ -2294,46 +2358,38 @@ async function loadFail2BanSettings() {
 
         settingsContainer.innerHTML = `
             ${rwBanner}
-            <form id="fail2ban-edit-form" class="ui-f2b-form">
-                ${canEdit ? `
-                    <div class="ui-f2b-actions" id="fail2ban-edit-btn-row">
-                        <button type="button" id="fail2ban-enable-edit-btn" class="ui-btn ui-btn-sm">Edit Settings</button>
-                    </div>
-                ` : ''}
+            <form id="fail2ban-edit-form" class="ui-f2b-form" onsubmit="event.preventDefault(); saveFail2banSettings()">
                 <div class="ui-f2b-grid">
                     <label class="ui-set-field"><span class="ui-label">Ban Time (seconds)</span>
-                        <input type="number" name="ban_time" value="${data.ban_time}" min="60" class="ui-input" disabled />
+                        <input type="number" name="ban_time" value="${data.ban_time}" min="60" class="ui-input" ${f2bOff} />
                         <small class="ui-muted">${formatSeconds(data.ban_time)}</small>
                     </label>
                     <label class="ui-set-field"><span class="ui-label">Max. Ban Time (seconds)</span>
-                        <input type="number" name="max_ban_time" value="${data.max_ban_time}" min="60" class="ui-input" disabled />
+                        <input type="number" name="max_ban_time" value="${data.max_ban_time}" min="60" class="ui-input" ${f2bOff} />
                         <small class="ui-muted">${formatSeconds(data.max_ban_time)}</small>
                     </label>
                     <div class="ui-set-field"><span class="ui-label">Ban Time Increment</span>
-                        <label class="ui-check-label opacity-60" id="fail2ban-increment-label">
-                            <input type="checkbox" name="ban_time_increment" ${data.ban_time_increment ? 'checked' : ''} disabled class="ui-check" />
+                        <label class="ui-check-label${canEdit ? '' : ' opacity-60'}" id="fail2ban-increment-label">
+                            <input type="checkbox" name="ban_time_increment" ${data.ban_time_increment ? 'checked' : ''} ${f2bOff} class="ui-check" />
                             ${data.ban_time_increment ? 'Enabled' : 'Disabled'}
                         </label>
                     </div>
                     <label class="ui-set-field"><span class="ui-label">Max. Attempts</span>
-                        <input type="number" name="max_attempts" value="${data.max_attempts}" min="1" class="ui-input" disabled />
+                        <input type="number" name="max_attempts" value="${data.max_attempts}" min="1" class="ui-input" ${f2bOff} />
                     </label>
                     <label class="ui-set-field"><span class="ui-label">Retry Window (seconds)</span>
-                        <input type="number" name="retry_window" value="${data.retry_window}" min="1" class="ui-input" disabled />
+                        <input type="number" name="retry_window" value="${data.retry_window}" min="1" class="ui-input" ${f2bOff} />
                         <small class="ui-muted">${formatSeconds(data.retry_window)}</small>
                     </label>
                     <label class="ui-set-field"><span class="ui-label">Subnet Ban IPv4 (/)</span>
-                        <input type="number" name="netban_ipv4" value="${data.netban_ipv4}" min="8" max="32" class="ui-input ui-mono" disabled />
+                        <input type="number" name="netban_ipv4" value="${data.netban_ipv4}" min="8" max="32" class="ui-input ui-mono" ${f2bOff} />
                     </label>
                     <label class="ui-set-field"><span class="ui-label">Subnet Ban IPv6 (/)</span>
-                        <input type="number" name="netban_ipv6" value="${data.netban_ipv6}" min="8" max="128" class="ui-input ui-mono" disabled />
+                        <input type="number" name="netban_ipv6" value="${data.netban_ipv6}" min="8" max="128" class="ui-input ui-mono" ${f2bOff} />
                     </label>
                 </div>
-
-                <div class="ui-f2b-actions" id="fail2ban-save-row" style="display:none">
-                    <button type="submit" id="fail2ban-save-btn" class="ui-btn ui-btn-primary">Save Settings</button>
-                </div>
             </form>
+            ${canEdit ? uiSaveBar('fail2ban-savebar', { save: 'saveFail2banSettings()', discard: 'discardFail2banChanges()' }) : ''}
         `;
 
         // Build unified active bans list (permanent + temporary)
@@ -2350,26 +2406,17 @@ async function loadFail2BanSettings() {
         // Render IP lists in separate accordion (editable textareas)
         if (ipListsContainer) {
             ipListsContainer.innerHTML = `
-                <form id="fail2ban-ip-form" class="ui-f2b-form">
-                    ${canEdit ? `
-                        <div class="ui-f2b-actions" id="fail2ban-ip-edit-btn-row">
-                            <button type="button" id="fail2ban-ip-enable-edit-btn" class="ui-btn ui-btn-sm">Edit IP Lists</button>
-                        </div>
-                    ` : ''}
+                <form id="fail2ban-ip-form" class="ui-f2b-form" onsubmit="event.preventDefault(); saveFail2banSettings()">
                     <div class="ui-f2b-lists">
                         <label class="ui-set-field"><span class="ui-label">Allowlisted <span class="ui-count">${whitelistEntries.length}</span></span>
-                            <textarea name="whitelist" rows="4" placeholder="One IP/network per line" class="ui-textarea ui-mono ui-f2b-allow" disabled>${escapeHtml((data.whitelist || '').replace(/,/g, '\n'))}</textarea>
+                            <textarea name="whitelist" rows="4" placeholder="One IP/network per line" class="ui-textarea ui-mono ui-f2b-allow" ${f2bOff}>${escapeHtml((data.whitelist || '').replace(/,/g, '\n'))}</textarea>
                         </label>
                         <label class="ui-set-field"><span class="ui-label">Denylisted <span class="ui-count">${blacklistEntries.length}</span></span>
-                            <textarea name="blacklist" rows="4" placeholder="One IP/network per line" class="ui-textarea ui-mono ui-f2b-deny" disabled>${escapeHtml((data.blacklist || '').replace(/,/g, '\n'))}</textarea>
+                            <textarea name="blacklist" rows="4" placeholder="One IP/network per line" class="ui-textarea ui-mono ui-f2b-deny" ${f2bOff}>${escapeHtml((data.blacklist || '').replace(/,/g, '\n'))}</textarea>
                         </label>
                     </div>
 
                     <p class="ui-set-desc">A denylisted host or network will always outweigh an allowlisted entity. List updates will take a few seconds to be applied.</p>
-
-                    <div class="ui-f2b-actions" id="fail2ban-ip-save-row" style="display:none">
-                        <button type="submit" id="fail2ban-ip-save-btn" class="ui-btn ui-btn-primary">Save IP Lists</button>
-                    </div>
                 </form>
 
                 <!-- Active Bans List -->
@@ -2402,139 +2449,13 @@ async function loadFail2BanSettings() {
             `;
         }
 
-        // Attach save handlers if edit is enabled
+        // Unsaved changes across both forms: one save bar, like the Settings page
         if (canEdit) {
-            // Edit Settings button handler
-            const editSettingsBtn = document.getElementById('fail2ban-enable-edit-btn');
-            if (editSettingsBtn) {
-                editSettingsBtn.addEventListener('click', () => {
-                    // Enable all inputs in settings form
-                    const form = document.getElementById('fail2ban-edit-form');
-                    form.querySelectorAll('input').forEach(el => { el.disabled = false; });
-                    // Fix toggle opacity
-                    const incrementLabel = document.getElementById('fail2ban-increment-label');
-                    if (incrementLabel) incrementLabel.classList.remove('opacity-60');
-                    // Hide edit button, show save button
-                    document.getElementById('fail2ban-edit-btn-row').style.display = 'none';
-                    document.getElementById('fail2ban-save-row').style.display = 'flex';
-                });
-            }
-
-            // Edit IP Lists button handler
-            const editIpBtn = document.getElementById('fail2ban-ip-enable-edit-btn');
-            if (editIpBtn) {
-                editIpBtn.addEventListener('click', () => {
-                    const form = document.getElementById('fail2ban-ip-form');
-                    form.querySelectorAll('textarea').forEach(el => { el.disabled = false; });
-                    document.getElementById('fail2ban-ip-edit-btn-row').style.display = 'none';
-                    document.getElementById('fail2ban-ip-save-row').style.display = 'flex';
-                });
-            }
-
-            // Save settings form
-            const settingsForm = document.getElementById('fail2ban-edit-form');
-            if (settingsForm) {
-                settingsForm.addEventListener('submit', async (e) => {
-                    e.preventDefault();
-                    const btn = document.getElementById('fail2ban-save-btn');
-                    const origText = btn.innerHTML;
-                    btn.disabled = true;
-                    btn.textContent = 'Saving...';
-
-                    try {
-                        // Collect ALL settings values (must send everything)
-                        const ipForm = document.getElementById('fail2ban-ip-form');
-                        const whitelist = ipForm ? ipForm.querySelector('[name="whitelist"]').value.split('\n').filter(l => l.trim()).join(',') : data.whitelist || '';
-                        const blacklist = ipForm ? ipForm.querySelector('[name="blacklist"]').value.split('\n').filter(l => l.trim()).join(',') : data.blacklist || '';
-
-                        const payload = {
-                            attr: {
-                                ban_time: settingsForm.querySelector('[name="ban_time"]').value,
-                                max_ban_time: settingsForm.querySelector('[name="max_ban_time"]').value,
-                                ban_time_increment: settingsForm.querySelector('[name="ban_time_increment"]').checked ? '1' : '0',
-                                max_attempts: settingsForm.querySelector('[name="max_attempts"]').value,
-                                retry_window: settingsForm.querySelector('[name="retry_window"]').value,
-                                netban_ipv4: settingsForm.querySelector('[name="netban_ipv4"]').value,
-                                netban_ipv6: settingsForm.querySelector('[name="netban_ipv6"]').value,
-                                whitelist: whitelist,
-                                blacklist: blacklist
-                            }
-                        };
-
-                        const res = await authenticatedFetch('/api/fail2ban', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify(payload)
-                        });
-
-                        const result = await res.json();
-                        if (res.ok && result.status === 'success') {
-                            showToast('Fail2Ban settings saved successfully', 'success');
-                            // Reset loaded flag so next open fetches fresh data
-                            fail2banSettingsLoaded = false;
-                        } else {
-                            showToast('Failed to save Fail2Ban settings: ' + (result.msg || result.detail || 'Unknown error'), 'error');
-                        }
-                    } catch (err) {
-                        showToast('Failed to save Fail2Ban settings: ' + err.message, 'error');
-                    } finally {
-                        btn.disabled = false;
-                        btn.innerHTML = origText;
-                    }
-                });
-            }
-
-            // Save IP lists form
-            const ipForm = document.getElementById('fail2ban-ip-form');
-            if (ipForm) {
-                ipForm.addEventListener('submit', async (e) => {
-                    e.preventDefault();
-                    const btn = document.getElementById('fail2ban-ip-save-btn');
-                    const origText = btn.innerHTML;
-                    btn.disabled = true;
-                    btn.textContent = 'Saving...';
-
-                    try {
-                        // Collect ALL values from both forms (must send everything)
-                        const sForm = document.getElementById('fail2ban-edit-form');
-                        const whitelist = ipForm.querySelector('[name="whitelist"]').value.split('\n').filter(l => l.trim()).join(',');
-                        const blacklist = ipForm.querySelector('[name="blacklist"]').value.split('\n').filter(l => l.trim()).join(',');
-
-                        const payload = {
-                            attr: {
-                                ban_time: sForm.querySelector('[name="ban_time"]').value,
-                                max_ban_time: sForm.querySelector('[name="max_ban_time"]').value,
-                                ban_time_increment: sForm.querySelector('[name="ban_time_increment"]').checked ? '1' : '0',
-                                max_attempts: sForm.querySelector('[name="max_attempts"]').value,
-                                retry_window: sForm.querySelector('[name="retry_window"]').value,
-                                netban_ipv4: sForm.querySelector('[name="netban_ipv4"]').value,
-                                netban_ipv6: sForm.querySelector('[name="netban_ipv6"]').value,
-                                whitelist: whitelist,
-                                blacklist: blacklist
-                            }
-                        };
-
-                        const res = await authenticatedFetch('/api/fail2ban', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify(payload)
-                        });
-
-                        const result = await res.json();
-                        if (res.ok && result.status === 'success') {
-                            showToast('Fail2Ban IP lists saved successfully', 'success');
-                            fail2banSettingsLoaded = false;
-                        } else {
-                            showToast('Failed to save Fail2Ban IP lists: ' + (result.msg || result.detail || 'Unknown error'), 'error');
-                        }
-                    } catch (err) {
-                        showToast('Failed to save Fail2Ban IP lists: ' + err.message, 'error');
-                    } finally {
-                        btn.disabled = false;
-                        btn.innerHTML = origText;
-                    }
-                });
-            }
+            fail2banInitial = fail2banFormValues();
+            ['fail2ban-edit-form', 'fail2ban-ip-form'].forEach(id => {
+                const form = document.getElementById(id);
+                if (form) ['input', 'change'].forEach(ev => form.addEventListener(ev, updateFail2banDirty));
+            });
         }
     } catch (error) {
         console.error('Failed to load Fail2Ban settings:', error);
