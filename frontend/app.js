@@ -833,7 +833,7 @@ function renderNetfilterData(data) {
     if (!container) return;
 
     if (!data.data || data.data.length === 0) {
-        container.innerHTML = '<p class="text-gray-500 dark:text-gray-400 text-center py-8">No logs found</p>';
+        container.innerHTML = '<p class="ui-empty">No logs found</p>';
         return;
     }
 
@@ -860,8 +860,12 @@ function renderNetfilterData(data) {
         });
     }
 
+    // Without a Read-Write key the Ban and Unban buttons are not offered; say so
+    const lockedNote = mailcowRwConfigured ? '' : `<div class="ui-list-note">${uiLocked('Ban and Unban are locked', `Banning or unbanning an IP from this list ${UI_RW_KEY_TEXT}`)}</div>`;
+
     container.innerHTML = `
-        <div class="space-y-3">
+        ${lockedNote}
+        <div class="ui-sec-list">
             ${uniqueLogs.map(log => {
                 const isBan = log.action === 'ban' || log.action === 'banned';
                 const isWarningOrUnban = log.action === 'warning' || log.action === 'unban';
@@ -882,27 +886,25 @@ function renderNetfilterData(data) {
                     if (log.city) geoParts.push(escapeHtml(log.city));
                     if (log.asn_org) geoParts.push('(' + escapeHtml(log.asn_org) + ')');
                     if (geoParts.length > 0) {
-                        geoHtml = '<div class="text-xs text-gray-500 dark:text-gray-400 mt-1 flex items-center gap-1 flex-wrap">' +
-                            '<svg class="w-3 h-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>' +
+                        geoHtml = '<div class="ui-sec-geo">' +
+                            '<svg width="12" height="12" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>' +
                             geoParts.join(' ') + '</div>';
                     }
                 }
                 return `
-                <div class="border border-gray-200 dark:border-gray-700 rounded-lg p-4 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition">
-                    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-2">
-                        <div class="flex flex-wrap items-center gap-2">
-                            <span class="font-mono text-sm font-semibold text-gray-900 dark:text-white">${log.ip ? copyableText(log.ip) : '-'}</span>
-                            ${log.username && log.username !== '-' ? `<span class="text-sm text-blue-600 dark:text-blue-400">${copyableText(log.username)}</span>` : ''}
-                            <span class="inline-block px-2 py-0.5 text-xs font-medium rounded ${getActionClass(log.action)}">${getActionLabel(log.action)}</span>
-                            ${log.attempts_left !== null && log.attempts_left !== undefined ? `<span class="text-xs text-gray-500 dark:text-gray-400">${log.attempts_left} attempts left</span>` : ''}
-                        </div>
-                        <div class="flex items-center gap-2">
-                            <span class="text-xs text-gray-500 dark:text-gray-400">${formatTime(log.time)}</span>
-                            ${showUnban ? `<button onclick="unbanIP('${escapeJsArg(log.ip)}', this)" class="inline-flex items-center gap-1.5 px-3 py-1 text-xs font-semibold rounded-md bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-400 hover:bg-green-200 dark:hover:bg-green-800/60 border border-green-300 dark:border-green-700 transition-colors cursor-pointer" title="Unban ${escapeHtml(log.ip)}/32"><svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 11V7a4 4 0 118 0m-4 8v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2z"></path></svg>Unban</button>` : ''}
-                            ${showBan ? `<button onclick="banIP('${escapeJsArg(log.ip)}', this)" class="inline-flex items-center gap-1.5 px-3 py-1 text-xs font-semibold rounded-md bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-400 hover:bg-red-200 dark:hover:bg-red-800/60 border border-red-300 dark:border-red-700 transition-colors cursor-pointer" title="Ban ${escapeHtml(log.ip)}/32"><svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path></svg>Ban</button>` : ''}
-                        </div>
+                <div class="ui-sec-row ui-msg-${uiActionTone(log.action)}">
+                    <div class="ui-sec-l1">
+                        <b class="ui-mono">${log.ip ? copyableText(log.ip) : '-'}</b>
+                        ${log.username && log.username !== '-' ? `<span class="ui-sec-user">${copyableText(log.username)}</span>` : ''}
+                        ${uiActionTag(log.action)}
+                        ${log.attempts_left !== null && log.attempts_left !== undefined ? `<span class="ui-muted">${log.attempts_left} attempts left</span>` : ''}
+                        <span class="ui-sec-meta">
+                            <time>${formatTime(log.time)}</time>
+                            ${showUnban ? `<button onclick="unbanIP('${escapeJsArg(log.ip)}', this)" class="ui-btn ui-btn-sm" title="Unban ${escapeHtml(log.ip)}/32">Unban</button>` : ''}
+                            ${showBan ? `<button onclick="banIP('${escapeJsArg(log.ip)}', this)" class="ui-btn ui-btn-sm ui-btn-danger" title="Ban ${escapeHtml(log.ip)}/32">Ban</button>` : ''}
+                        </span>
                     </div>
-                    <p class="text-sm text-gray-700 dark:text-gray-300 break-words">${escapeHtml(log.message || '-')}</p>
+                    <p class="ui-sec-msg">${escapeHtml(log.message || '-')}</p>
                     ${geoHtml}
                 </div>`;
             }).join('')}
@@ -1533,14 +1535,10 @@ function clearNetfilterFilters() {
 let securityCountryChart = null;
 
 async function loadSecurityCountryChart(days = 30) {
-    // Update period button styles
+    // Mark the chosen period
     document.querySelectorAll('.country-chart-period-btn').forEach(btn => {
-        btn.className = 'country-chart-period-btn px-3 py-1.5 text-xs font-medium rounded-md border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors';
+        btn.setAttribute('aria-pressed', String(btn.id === `country-chart-${days}d`));
     });
-    const activeBtn = document.getElementById(`country-chart-${days}d`);
-    if (activeBtn) {
-        activeBtn.className = 'country-chart-period-btn px-3 py-1.5 text-xs font-medium rounded-md border border-blue-500 bg-blue-500 text-white transition-colors';
-    }
 
     try {
         const response = await authenticatedFetch(`/api/logs/netfilter/stats/by-country?days=${days}`);
@@ -1584,18 +1582,19 @@ async function loadSecurityCountryChart(days = 30) {
             securityCountryChart = null;
         }
 
-        const isDark = document.documentElement.classList.contains('dark');
-        const gridColor = isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)';
-        const textColor = isDark ? '#d1d5db' : '#374151';
+        // Colours come from the design tokens, so the chart follows both themes
+        const token = name => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+        const gridColor = token('--ui-line');
+        const textColor = token('--ui-muted');
 
         // Dataset visibility state: track which action types are shown
         const datasetKeys = ['ban', 'warning', 'unban'];
         const visibleSets = { ban: true, warning: true, unban: true };
 
         const datasetColors = {
-            ban:     isDark ? 'rgba(239,68,68,0.8)' : 'rgba(220,38,38,0.8)',
-            warning: isDark ? 'rgba(251,191,36,0.8)' : 'rgba(217,119,6,0.8)',
-            unban:   isDark ? 'rgba(34,197,94,0.8)' : 'rgba(22,163,74,0.8)'
+            ban:     token('--ui-fail'),
+            warning: token('--ui-warn'),
+            unban:   token('--ui-ok')
         };
         const datasetLabels = { ban: 'Ban', warning: 'Warning', unban: 'Unban' };
 
@@ -1749,7 +1748,7 @@ async function loadNetfilterLogs(page = 1) {
     const container = document.getElementById('netfilter-logs');
 
     try {
-        container.innerHTML = '<div class="text-center py-8"><div class="loading mx-auto mb-4"></div><p class="text-gray-500 dark:text-gray-400">Loading...</p></div>';
+        container.innerHTML = '<div class="ui-loading"><div class="loading"></div><p>Loading...</p></div>';
 
         const filters = currentFilters.netfilter || {};
         const params = new URLSearchParams({
@@ -1777,7 +1776,7 @@ async function loadNetfilterLogs(page = 1) {
         currentPage.netfilter = page;
     } catch (error) {
         console.error('Failed to load Netfilter logs:', error);
-        document.getElementById('netfilter-logs').innerHTML = `<p class="text-red-500 text-center py-8">Failed to load logs: ${escapeHtml(error.message)}</p>`;
+        document.getElementById('netfilter-logs').innerHTML = `<p class="ui-empty ui-text-fail">Failed to load logs: ${escapeHtml(error.message)}</p>`;
         const countEl = document.getElementById('security-count');
         if (countEl) countEl.textContent = '';
     }
@@ -1827,12 +1826,7 @@ async function loadFail2BanSettings() {
         const permBans = data.perm_bans || [];
 
         // Render settings as editable form or read-only
-        const rwBanner = canEdit ? '' : `
-            <div class="mb-4 px-4 py-3 rounded-lg bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 text-yellow-800 dark:text-yellow-300 text-sm flex items-center gap-2">
-                <span class="text-lg">🔒</span>
-                <span>Editing requires a <strong>Read-Write API key</strong> (<code>MAILCOW_API_KEY_RW</code>). Configure it in Settings → Mailcow → Connection.</span>
-            </div>
-        `;
+        const rwBanner = canEdit ? '' : `<div class="ui-list-note">${uiLocked('Editing Fail2ban is locked', `Editing ${UI_RW_KEY_TEXT}`)}</div>`;
 
         settingsContainer.innerHTML = `
             ${rwBanner}
