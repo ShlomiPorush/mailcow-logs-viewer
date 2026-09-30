@@ -303,6 +303,7 @@ job_status = {
     'cleanup_deferred_queue': {'last_run': None, 'status': 'idle', 'error': None},
     'anomaly_detection': {'last_run': None, 'status': 'idle', 'error': None},
     'smtp_abuse': {'last_run': None, 'status': 'idle', 'error': None},
+    'protection_rules': {'last_run': None, 'status': 'idle', 'error': None},
 }
 
 # Number of hosts that were listed on actionable blacklists in the previous blacklist check run (for "cleared" notification)
@@ -1197,6 +1198,11 @@ async def fetch_all_logs():
         
         logger.debug("[FETCH] Completed fetch_all_logs")
         update_job_status('fetch_logs', 'success')
+
+        # The protection rules read the netfilter lines just stored, so they
+        # react within one fetch instead of waiting for a job of their own
+        if settings.is_feature_enabled('netfilter'):
+            await run_protection_rules()
     
     except asyncio.CancelledError:
         logger.info("[FETCH] Log fetch cancelled (application shutting down)")
@@ -1205,6 +1211,72 @@ async def fetch_all_logs():
         update_job_status('fetch_logs', 'failed', str(e))
         logger.error(f"[ERROR] Fetch all logs error: {e}", exc_info=True)
 
+
+
+# ---------------------------------------------------------------------------
+# Protection rules (watch mode): what the rules would ban and why
+# ---------------------------------------------------------------------------
+
+_protection_context_cache = {'at': None, 'context': None}
+_PROTECTION_CONTEXT_TTL = timedelta(minutes=5)
+
+
+async def _protection_context():
+    """The Fail2ban allowlist and the server's own addresses, read at most every few minutes."""
+    from .services.protection_rules import ProtectionContext
+    cached = _protection_context_cache
+    if cached['context'] is not None and cached['at'] and datetime.utcnow() - cached['at'] < _PROTECTION_CONTEXT_TTL:
+        return cached['context']
+    allowlist, protected = [], set()
+    try:
+        f2b = await mailcow_api.get_fail2ban() or {}
+        allowlist = [e.strip() for e in re.split(r'[\s,]+', str(f2b.get('whitelist') or '')) if e.strip()]
+    except Exception as e:
+        logger.warning(f"Protection rules: could not read the Fail2ban allowlist: {e}")
+    try:
+        host_ip = await mailcow_api.get_status_host_ip()
+        if host_ip:
+            protected.add(host_ip)
+    except Exception as e:
+        logger.warning(f"Protection rules: could not read the mailcow host address: {e}")
+    try:
+        import ipaddress as _ipaddress
+        with get_db_context() as db:
+            for (hostname,) in db.query(MonitoredHost.hostname).filter(MonitoredHost.active.is_(True)).all():
+                try:
+                    protected.add(str(_ipaddress.ip_address(hostname)))
+                except ValueError:
+                    continue  # a host name, not an address
+    except Exception as e:
+        logger.warning(f"Protection rules: could not read the monitored hosts: {e}")
+    context = ProtectionContext(allowlist=allowlist, protected_ips=protected)
+    _protection_context_cache.update({'at': datetime.utcnow(), 'context': context})
+    return context
+
+
+def _run_protection_rules_sync(context):
+    from .services import protection_rules
+    with get_db_context() as db:
+        protection_rules.evaluate(db, context)
+
+
+async def run_protection_rules():
+    """Evaluate the protection rules on the netfilter lines read since the last run."""
+    from .services.protection_rules import ProtectionContext, RULE_NAMES, load_rules
+    update_job_status('protection_rules', 'running')
+    try:
+        with get_db_context() as db:
+            rules = load_rules(db)
+        # With every rule off only the reading moves on; no call to mailcow is needed
+        active = any(rules[name]['enabled'] for name in RULE_NAMES)
+        context = await _protection_context() if active else ProtectionContext()
+        await asyncio.to_thread(_run_protection_rules_sync, context)
+        update_job_status('protection_rules', 'success')
+    except asyncio.CancelledError:
+        raise
+    except Exception as e:
+        update_job_status('protection_rules', 'failed', str(e))
+        logger.error(f"[ERROR] Protection rules failed: {e}", exc_info=True)
 
 
 async def cleanup_blacklisted_queues():

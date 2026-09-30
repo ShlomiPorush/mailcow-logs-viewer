@@ -432,6 +432,14 @@ def get_settings_info(db: Session = Depends(get_db)):
                     "status": jobs_status.get('smtp_abuse', {}).get('status', 'idle') if (settings.smtp_abuse_enabled and mailcow_api.has_rw_key) else 'disabled',
                     "last_run": format_datetime_utc(jobs_status.get('smtp_abuse', {}).get('last_run')) if (settings.smtp_abuse_enabled and mailcow_api.has_rw_key) else None,
                     "error": jobs_status.get('smtp_abuse', {}).get('error') if (settings.smtp_abuse_enabled and mailcow_api.has_rw_key) else None
+                },
+                "protection_rules": {
+                    "interval": "After each log fetch" if settings.is_feature_enabled('netfilter') else "Disabled (Security feature off)",
+                    "description": "Notes the addresses the protection rules would ban (watch mode)",
+                    "enabled": settings.is_feature_enabled('netfilter'),
+                    "status": jobs_status.get('protection_rules', {}).get('status', 'idle') if settings.is_feature_enabled('netfilter') else 'disabled',
+                    "last_run": format_datetime_utc(jobs_status.get('protection_rules', {}).get('last_run')) if settings.is_feature_enabled('netfilter') else None,
+                    "error": jobs_status.get('protection_rules', {}).get('error') if settings.is_feature_enabled('netfilter') else None
                 }
             },
             "smtp_configuration": {
@@ -1005,7 +1013,8 @@ def trigger_job(job_name: str, background_tasks: BackgroundTasks):
         process_quarantine_rules_job,
         cleanup_deferred_queue_job,
         anomaly_detection_job,
-        smtp_abuse_job
+        smtp_abuse_job,
+        run_protection_rules
     )
     from ..raw_logs_worker import fetch_raw_service_logs, cleanup_raw_service_logs
     
@@ -1037,6 +1046,7 @@ def trigger_job(job_name: str, background_tasks: BackgroundTasks):
         'cleanup_deferred_queue': ('cleanup_deferred_queue', cleanup_deferred_queue_job, False),
         'anomaly_detection': ('anomaly_detection', anomaly_detection_job, False),
         'smtp_abuse': ('smtp_abuse', smtp_abuse_job, False),
+        'protection_rules': ('protection_rules', run_protection_rules, False),
         'fetch_raw_logs': ('fetch_raw_logs', fetch_raw_service_logs, True),
         'cleanup_raw_logs': ('cleanup_raw_logs', cleanup_raw_service_logs, True),
     }

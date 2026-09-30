@@ -789,6 +789,42 @@ class SMTPAbuseAction(Base):
         return f"<SMTPAbuseAction(email={self.email}, action={self.action}, count={self.message_count})>"
 
 
+class ProtectionHit(Base):
+    """
+    An address a protection rule caught, and what happened to it.
+
+    One open hit per address and rule: later tries by the same address are
+    added to it rather than opening a new one. In watch mode a hit only records
+    what the rule would have banned (status 'watching'); the usernames tried and
+    the netfilter log ids are the evidence shown to the admin.
+    """
+    __tablename__ = "protection_hits"
+
+    id = Column(Integer, primary_key=True, index=True)
+    ip = Column(String(50), nullable=False, index=True)
+    rule = Column(String(40), nullable=False, index=True)
+    mode = Column(String(20), nullable=False, default="watch")        # 'watch' | 'enforce'
+    status = Column(String(20), nullable=False, default="watching", index=True)  # 'watching' | 'dismissed'
+    reason = Column(Text)
+    usernames = Column(JSONB, default=list)
+    log_ids = Column(JSONB, default=list)
+    attempts = Column(Integer, nullable=False, default=0)
+    country_code = Column(String(2))
+    country_name = Column(String(100))
+
+    first_seen = Column(DateTime, nullable=False)
+    last_seen = Column(DateTime, nullable=False, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    ended_at = Column(DateTime)
+
+    __table_args__ = (
+        Index('idx_protection_hits_ip_rule_status', 'ip', 'rule', 'status'),
+    )
+
+    def __repr__(self):
+        return f"<ProtectionHit(ip={self.ip}, rule={self.rule}, status={self.status})>"
+
+
 class NotificationChannel(Base):
     """
     A configured destination for alerts (Slack, Telegram, ntfy, ...).

@@ -709,6 +709,7 @@
                 <div class="ui-tabs ui-page-tabs ui-se-tabs" role="tablist" aria-label="Security sections">
                     <button type="button" class="modal-tab active" role="tab" aria-selected="true" id="security-tab-btn-overview" onclick="securityShowTab('overview')">Overview</button>
                     <button type="button" class="modal-tab" role="tab" aria-selected="false" id="security-tab-btn-events" onclick="securityShowTab('events')">Events <span id="security-tab-n-events" class="ui-tab-n hidden"></span></button>
+                    <button type="button" class="modal-tab" role="tab" aria-selected="false" id="security-tab-btn-protection" onclick="securityShowTab('protection')">Protection <span id="security-tab-n-protection" class="ui-tab-n hidden"></span></button>
                     <button type="button" class="modal-tab" role="tab" aria-selected="false" id="security-tab-btn-fail2ban" onclick="securityShowTab('fail2ban')">Fail2ban</button>
                     <button type="button" class="modal-tab" role="tab" aria-selected="false" id="security-tab-btn-abuse" onclick="securityShowTab('abuse')">Abuse protection <span class="ui-tag ui-tag-warn ui-tab-tag" title="This feature is new - please report any issues on GitHub">Beta</span></button>
                 </div>
@@ -789,6 +790,10 @@
                     <div id="fail2ban-ip-lists" class="ui-se-body"><div class="ui-loading"><div class="loading"></div><p>Loading IP lists...</p></div></div>
                 </section>
                     </div>
+                </div>
+
+                <div id="security-tab-protection" class="ui-scroll ui-st-panel hidden" role="tabpanel">
+                    <div id="protection-panel"><div class="ui-loading"><div class="loading"></div><p>Loading...</p></div></div>
                 </div>
 
                 <div id="security-tab-abuse" class="ui-scroll ui-st-panel hidden" role="tabpanel">
@@ -1510,6 +1515,7 @@
     <script src="/static/mailbox-stats.js?v=5"></script>
     <script src="/static/rate-limits.js?v=24"></script>
     <script src="/static/smtp-abuse.js?v=3"></script>
+    <script src="/static/protection.js?v=1"></script>
     <script src="/static/notifications.js?v=5"></script>
     <script src="/static/spam_filter.js?v=6"></script>
 
