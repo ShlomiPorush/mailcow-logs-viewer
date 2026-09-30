@@ -40,6 +40,7 @@ from .routers import (
     quarantine_rules as quarantine_rules_router,
     security_alerts as security_alerts_router,
     smtp_abuse as smtp_abuse_router,
+    protection as protection_router,
     notifications as notifications_router,
     rate_limits as rate_limits_router,
 )
@@ -352,6 +353,7 @@ app.include_router(suppressions_router.router, prefix="/api", tags=["Suppression
 app.include_router(quarantine_rules_router.router, tags=["Quarantine Rules"])
 app.include_router(security_alerts_router.router, prefix="/api", tags=["Security Alerts"])
 app.include_router(smtp_abuse_router.router, prefix="/api", tags=["SMTP Abuse Protection"])
+app.include_router(protection_router.router, prefix="/api", tags=["Protection Rules"])
 app.include_router(notifications_router.router, prefix="/api", tags=["Notifications"])
 app.include_router(rate_limits_router.router, prefix="/api", tags=["Rate Limits"])
 
