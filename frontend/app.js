@@ -1240,30 +1240,10 @@ function renderSecurityOverview() {
         el.textContent = value;
         el.className = tone || '';
     };
-    const decide = states.filter(st => st.key === 'open').length;
     setKpi('security-kpi-failed', (data.failed_logins || 0).toLocaleString());
     setKpi('security-kpi-banned', known ? (fail2banTotalBans ?? fail2banActiveBans.length).toLocaleString() : '-');
     setKpi('security-kpi-sources', (data.source_count || 0).toLocaleString());
-    setKpi('security-kpi-decide', known ? decide.toLocaleString() : '-', decide > 0 ? 'ui-fail' : '');
-
-    const decideEl = document.getElementById('security-decide');
-    const decideNote = document.getElementById('security-decide-note');
-    if (decideEl) {
-        const open = data.sources.map((src, i) => ({ src, st: states[i] })).filter(x => x.st.key === 'open');
-        if (decideNote) decideNote.textContent = open.length ? `${open.length} address${open.length === 1 ? '' : 'es'} kept trying and ${open.length === 1 ? 'is' : 'are'} not banned` : '';
-        decideEl.innerHTML = !known ? '<p class="ui-empty">Waiting for the Fail2ban lists...</p>'
-            : !open.length ? '<p class="ui-st-allgood">Nobody needs a decision. Addresses that keep trying after a warning show up here.</p>'
-            : `${mailcowRwConfigured ? '' : `<div class="ui-list-note">${uiLocked('Ban and Allow are locked', `Changing Fail2ban from this list ${UI_RW_KEY_TEXT}`)}</div>`}
-               ${open.map(({ src }) => {
-                   const ipArg = escapeJsArg(src.ip);
-                   const where = [src.country_name, src.usernames.length ? `tried ${src.usernames.join(', ')}` : ''].filter(Boolean).join(', ');
-                   return `<div class="ui-st-listing">
-                       <div><b class="ui-mono">${copyableText(src.ip)}</b><small title="${escapeHtml(where)}">${escapeHtml(where || src.services.join(', '))}, ${src.attempts} ${src.attempts === 1 ? 'attempt' : 'attempts'}, ${formatAgo(src.last_seen)}</small></div>
-                       ${mailcowRwConfigured ? `<span class="ui-st-acts"><button onclick="banIP('${ipArg}', this)" class="ui-btn ui-btn-sm ui-btn-danger" title="Ban ${escapeHtml(src.ip)}/32">Ban</button>
-                           <button onclick="allowIP('${ipArg}', this)" class="ui-btn ui-btn-sm" title="Never ban ${escapeHtml(src.ip)}/32">Allow</button></span>` : ''}
-                   </div>`;
-               }).join('')}`;
-    }
+    // The To review figure and its panel come from the protection rules (protection.js)
 
     if (!data.sources.length) {
         sourcesEl.innerHTML = '<p class="ui-empty ui-panel">No attempts in the last 24 hours.</p>';

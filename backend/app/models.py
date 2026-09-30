@@ -803,8 +803,10 @@ class ProtectionHit(Base):
     id = Column(Integer, primary_key=True, index=True)
     ip = Column(String(50), nullable=False, index=True)
     rule = Column(String(40), nullable=False, index=True)
-    mode = Column(String(20), nullable=False, default="watch")        # 'watch' | 'enforce'
-    status = Column(String(20), nullable=False, default="watching", index=True)  # 'watching' | 'dismissed'
+    mode = Column(String(20), nullable=False, default="watch")        # 'watch' | 'enforce' | 'manual' (Ban now)
+    # Open: 'watching' (watch mode), 'pending' (to be banned), 'banned', 'alert' (breach alert, never banned)
+    # Closed: 'dismissed', 'expired', 'undone'
+    status = Column(String(20), nullable=False, default="watching", index=True)
     reason = Column(Text)
     usernames = Column(JSONB, default=list)
     log_ids = Column(JSONB, default=list)
@@ -816,6 +818,15 @@ class ProtectionHit(Base):
     last_seen = Column(DateTime, nullable=False, index=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     ended_at = Column(DateTime)
+
+    # Enforcement: the ban length (0 = permanent), when it was written and when
+    # it ends, and whether this app added the entry to the Fail2ban blacklist.
+    # Only entries the app added are ever removed by it.
+    ban_hours = Column(Integer)
+    banned_at = Column(DateTime)
+    expires_at = Column(DateTime, index=True)
+    owned = Column(Boolean)
+    error = Column(Text)
 
     __table_args__ = (
         Index('idx_protection_hits_ip_rule_status', 'ip', 'rule', 'status'),

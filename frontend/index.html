@@ -703,7 +703,7 @@
                     <div class="ui-kpi"><b id="security-kpi-failed">-</b>Failed logins</div>
                     <div class="ui-kpi"><b id="security-kpi-banned">-</b>Banned now</div>
                     <div class="ui-kpi"><b id="security-kpi-sources">-</b>Source addresses</div>
-                    <div class="ui-kpi" title="Addresses that tried in the last hour, are not banned and are on neither Fail2ban list"><b id="security-kpi-decide">-</b>Needs a decision</div>
+                    <div class="ui-kpi" title="What the protection rules caught that you have not reviewed: would ban, waiting to be banned, or an alert"><b id="security-kpi-decide">-</b>To review</div>
                 </div>
 
                 <div class="ui-tabs ui-page-tabs ui-se-tabs" role="tablist" aria-label="Security sections">
@@ -717,7 +717,7 @@
                 <div id="security-tab-overview" class="ui-scroll ui-st-panel" role="tabpanel">
                     <div class="ui-se-two">
                         <section class="ui-panel">
-                            <div class="ui-panel-head">Need a decision <span id="security-decide-note" class="ui-count"></span></div>
+                            <div class="ui-panel-head">Caught by the rules <span id="security-decide-note" class="ui-count"></span></div>
                             <div id="security-decide"><div class="ui-loading"><div class="loading"></div><p>Loading...</p></div></div>
                         </section>
                         <!-- Country Chart -->
@@ -1515,7 +1515,7 @@
     <script src="/static/mailbox-stats.js?v=5"></script>
     <script src="/static/rate-limits.js?v=24"></script>
     <script src="/static/smtp-abuse.js?v=3"></script>
-    <script src="/static/protection.js?v=1"></script>
+    <script src="/static/protection.js?v=2"></script>
     <script src="/static/notifications.js?v=5"></script>
     <script src="/static/spam_filter.js?v=6"></script>
 
