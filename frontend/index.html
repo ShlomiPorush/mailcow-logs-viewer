@@ -1351,9 +1351,11 @@
 
                             <!-- Smart Filters (Postfix only) -->
                             <div id="logs-smart-filters" class="ui-logs-row ui-logs-quick hidden">
-                                <span class="ui-muted">Quick Filters:</span>
+                                <div class="ui-logs-quick-head">
+                                    <span class="ui-muted">Quick Filters:</span>
+                                    <button type="button" id="logs-quick-more" class="ui-link-row ui-logs-quick-more hidden" aria-expanded="false" aria-controls="logs-smart-filter-chips" onclick="toggleQuickFilters()">Show all</button>
+                                </div>
                                 <div id="logs-smart-filter-chips" class="ui-chip-row"></div>
-                                <button type="button" id="logs-quick-more" class="ui-link-row ui-logs-quick-more hidden" aria-expanded="false" aria-controls="logs-smart-filter-chips" onclick="toggleQuickFilters()">Show all</button>
                             </div>
                         </div>
 
