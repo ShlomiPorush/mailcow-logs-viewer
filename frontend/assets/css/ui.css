@@ -1651,7 +1651,10 @@ html, body { height: 100%; overflow: hidden; }
 .ui-page > * { flex: none; }
 /* A page with a marked region keeps its header, tabs and filters in place */
 .ui-page:not(.hidden):has(> .ui-scroll) { overflow: hidden; padding-bottom: 0; }
-.ui-page > .ui-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding-bottom: 28px; align-content: start; }
+.ui-page > .ui-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding-bottom: 28px; align-content: start;
+    /* Rows keep their content's height and the region scrolls: a grid row would
+       otherwise shrink a panel with overflow hidden to fit, cutting its content off */
+    grid-auto-rows: max-content; }
 .ui-page > .ui-scroll.hidden { display: none; }
 
 /* Messages: the three columns fill the frame and scroll on their own */
