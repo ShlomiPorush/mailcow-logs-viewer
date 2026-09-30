@@ -383,24 +383,24 @@ Native `title` tooltips. Dynamic ones show the expression that builds the text.
 | Domains | dynamic: `${escapeHtml(text)}` | `frontend/domains.js:280` (getAliasStatusIcon) |
 | Domains | "Help - Domains Information" | `frontend/index.html:1075` |
 | DMARC | "The daily DNS check covers the mailcow domains. Open the domain to check it now." | `frontend/dmarc.js:710` (tlsRptStatusTag) |
-| DMARC | dynamic: `${escapeHtml(formatTime(sync.started_at))}` | `frontend/dmarc.js:1220` (updateDmarcControls) |
-| DMARC | "Delete report" | `frontend/dmarc.js:1409` (renderReportsManagementTable) |
+| DMARC | dynamic: `${escapeHtml(formatTime(sync.started_at))}` | `frontend/dmarc.js:1212` (updateDmarcControls) |
+| DMARC | "Delete report" | `frontend/dmarc.js:1401` (renderReportsManagementTable) |
 | DMARC | "Help - DMARC Information" | `frontend/index.html:1094` |
-| Mailbox stats | "Help - Mailbox Statistics" | `frontend/index.html:1230` |
+| Mailbox stats | "Help - Mailbox Statistics" | `frontend/index.html:1229` |
 | Mailbox stats | "Open these messages" | `frontend/mailbox-stats.js:294` (mailboxStatLink) |
 | Mailbox stats | "Address on a mailcow alias domain that points at this mailbox" | `frontend/mailbox-stats.js:374` (renderMailboxStatsAccordion) |
 | Mailbox stats | dynamic: `${escapeHtml(formatTime(group.last_seen))}` | `frontend/rate-limits.js:360` (renderRateLimitSendersTable) |
 | Mailbox stats | set in JS: dynamic: `isRateLimits ? 'Help - Rate Limits' : 'Help - Mailbox Statistics'` | `frontend/mailbox-stats.js:86` (mailboxStatsSwitchView) |
-| Logs | "Pause/Resume live updates" | `frontend/index.html:1352` |
-| Logs | "Live mode - show latest logs" | `frontend/index.html:1356` |
-| Logs | "Auto-scroll to new entries" | `frontend/index.html:1359` |
-| Logs | "Toggle sort order (newest at bottom / newest at top)" | `frontend/index.html:1362` |
-| Logs | "Toggle word wrap" | `frontend/index.html:1373` |
-| Logs | "Clear display" | `frontend/index.html:1376` |
-| Logs | "Search" | `frontend/index.html:1383` |
-| Logs | "Clear search" | `frontend/index.html:1384` |
-| Logs | "From date" | `frontend/index.html:1400` |
-| Logs | "To date" | `frontend/index.html:1402` |
+| Logs | "Pause/Resume live updates" | `frontend/index.html:1351` |
+| Logs | "Live mode - show latest logs" | `frontend/index.html:1355` |
+| Logs | "Auto-scroll to new entries" | `frontend/index.html:1358` |
+| Logs | "Toggle sort order (newest at bottom / newest at top)" | `frontend/index.html:1361` |
+| Logs | "Toggle word wrap" | `frontend/index.html:1372` |
+| Logs | "Clear display" | `frontend/index.html:1375` |
+| Logs | "Search" | `frontend/index.html:1382` |
+| Logs | "Clear search" | `frontend/index.html:1383` |
+| Logs | "From date" | `frontend/index.html:1399` |
+| Logs | "To date" | `frontend/index.html:1401` |
 | Logs | dynamic: `${escapeHtml(f.description \|\| '')}` | `frontend/logs-viewer.js:211` (loadSmartFilters) |
 | Logs | "Clear all filters" | `frontend/logs-viewer.js:1209` (updateFilterBadge) |
 | Settings | "Last delivery succeeded" | `frontend/notifications.js:67` (renderNotificationChannels) |
@@ -430,12 +430,12 @@ Native `title` tooltips. Dynamic ones show the expression that builds the text.
 | app.js (mixed) | dynamic: `${escapeHtml(formatTime(hit.last_seen))}` | `frontend/protection.js:282` (renderProtectionHits) |
 | app.js (mixed) | set in JS: dynamic: `label` | `frontend/app.js:286` (setNavTabLabel) |
 | app.js (mixed) | set in JS: dynamic: `title \|\| ''` | `frontend/app.js:496` (setNavCount) |
-| Modal: changelog-modal | "Close" | `frontend/index.html:1490` |
-| Modal: container-logs-modal | "Refresh" | `frontend/index.html:1522` |
-| Modal: container-logs-modal | "Close" | `frontend/index.html:1530` |
-| Modal: dmarc-reports-management-modal | "Close" | `frontend/index.html:1579` |
-| Modal: dmarc-sync-history-modal | "Close" | `frontend/index.html:1566` |
-| Modal: message-modal | "Close" | `frontend/index.html:1463` |
+| Modal: changelog-modal | "Close" | `frontend/index.html:1489` |
+| Modal: container-logs-modal | "Refresh" | `frontend/index.html:1521` |
+| Modal: container-logs-modal | "Close" | `frontend/index.html:1529` |
+| Modal: dmarc-reports-management-modal | "Close" | `frontend/index.html:1578` |
+| Modal: dmarc-sync-history-modal | "Close" | `frontend/index.html:1565` |
+| Modal: message-modal | "Close" | `frontend/index.html:1462` |
 
 ### Toasts
 
@@ -527,17 +527,17 @@ Transient notifications from `showToast(message, type)` (utils.js). Type default
 | Domains | dynamic: ``✓ DNS checked for ${domainName}`` [success] | `frontend/domains.js:382` (checkSingleDomainDNS) |
 | Domains | dynamic: ``Failed to check DNS for ${domainName}`` [error] | `frontend/domains.js:397` (checkSingleDomainDNS) |
 | Domains | "Failed to check DNS" [error] | `frontend/domains.js:401` (checkSingleDomainDNS) |
-| DMARC | "Manual upload is disabled" [error] | `frontend/dmarc.js:1147` (uploadDmarcReport) |
-| DMARC | dynamic: ``${reportType} report uploaded: ${count} ${countLabel}`` [success] | `frontend/dmarc.js:1160` (uploadDmarcReport) |
-| DMARC | dynamic: ``${reportType} report already exists`` [warning] | `frontend/dmarc.js:1165` (uploadDmarcReport) |
-| DMARC | "Failed to upload report" [error] | `frontend/dmarc.js:1170` (uploadDmarcReport) |
-| DMARC | "IMAP sync is not enabled" [error] | `frontend/dmarc.js:1236` (triggerDmarcSync) |
-| DMARC | "Sync is already in progress" [info] | `frontend/dmarc.js:1251` (triggerDmarcSync) |
-| DMARC | "IMAP sync started" [success] | `frontend/dmarc.js:1253` (triggerDmarcSync) |
-| DMARC | "Failed to start sync" [error] | `frontend/dmarc.js:1267` (triggerDmarcSync) |
-| DMARC | "Report deletion is disabled" [error] | `frontend/dmarc.js:1427` (deleteReport) |
-| DMARC | dynamic: ``${reportType.toUpperCase()} report deleted`` [success] | `frontend/dmarc.js:1435` (deleteReport) |
-| DMARC | "Failed to delete report" [error] | `frontend/dmarc.js:1449` (deleteReport) |
+| DMARC | "Manual upload is disabled" [error] | `frontend/dmarc.js:1139` (uploadDmarcReport) |
+| DMARC | dynamic: ``${reportType} report uploaded: ${count} ${countLabel}`` [success] | `frontend/dmarc.js:1152` (uploadDmarcReport) |
+| DMARC | dynamic: ``${reportType} report already exists`` [warning] | `frontend/dmarc.js:1157` (uploadDmarcReport) |
+| DMARC | "Failed to upload report" [error] | `frontend/dmarc.js:1162` (uploadDmarcReport) |
+| DMARC | "IMAP sync is not enabled" [error] | `frontend/dmarc.js:1228` (triggerDmarcSync) |
+| DMARC | "Sync is already in progress" [info] | `frontend/dmarc.js:1243` (triggerDmarcSync) |
+| DMARC | "IMAP sync started" [success] | `frontend/dmarc.js:1245` (triggerDmarcSync) |
+| DMARC | "Failed to start sync" [error] | `frontend/dmarc.js:1259` (triggerDmarcSync) |
+| DMARC | "Report deletion is disabled" [error] | `frontend/dmarc.js:1419` (deleteReport) |
+| DMARC | dynamic: ``${reportType.toUpperCase()} report deleted`` [success] | `frontend/dmarc.js:1427` (deleteReport) |
+| DMARC | "Failed to delete report" [error] | `frontend/dmarc.js:1441` (deleteReport) |
 | Mailbox stats | "Please select both start and end dates" [error] | `frontend/mailbox-stats.js:531` (applyCustomDateRange) |
 | Mailbox stats | "Start date must be before end date" [error] | `frontend/mailbox-stats.js:539` (applyCustomDateRange) |
 | Mailbox stats | dynamic: `detail.detail \|\| 'Could not reset the counter'` [error] | `frontend/rate-limits.js:587` (resetRateLimitCounter) |
@@ -610,7 +610,7 @@ Every action that asks before it acts. Losing one turns a guarded action into a 
 | Quarantine | showConfirmModal: dynamic: `{ title: 'Delete All', message: `Permanently delete ALL ${allIds.length} quar...` | `frontend/app.js:3020` (quarantineDeleteAll) |
 | Quarantine | showConfirmModal: dynamic: `{ title: 'Delete Rule', message: `Delete rule "${ruleName}"?`, confirmText: '...` | `frontend/app.js:3455` (deleteQuarantineRule) |
 | Spam filter | showConfirmModal: dynamic: `{ title: 'Delete Suppression', message: `Delete suppression for ${email}? Thi...` | `frontend/spam_filter.js:830` (deleteSuppression) |
-| DMARC | showConfirmModal: dynamic: `{ title: 'Delete Report', message: `Are you sure you want to delete this ${re...` | `frontend/dmarc.js:1417` (deleteReport) |
+| DMARC | showConfirmModal: dynamic: `{ title: 'Delete Report', message: `Are you sure you want to delete this ${re...` | `frontend/dmarc.js:1409` (deleteReport) |
 | Mailbox stats | showConfirmModal: dynamic: `{ title: 'Reset rate limit counter', message: `Let ${user} send again straigh...` | `frontend/rate-limits.js:571` (resetRateLimitCounter) |
 | Mailbox stats | showConfirmModal: dynamic: `{ title: value === 0 ? 'Remove rate limits' : 'Apply rate limit', message: va...` | `frontend/rate-limits.js:872` (applyRateLimitBulk) |
 | Mailbox stats | showConfirmModal: dynamic: `{ title: 'Remove rate limit', message: `Remove the rate limit on ${name}? It ...` | `frontend/rate-limits.js:1045` (removeRateLimit) |
@@ -656,7 +656,7 @@ Buttons, tabs and fields whose behavior is attached with `addEventListener` inst
 | Message details | click on `messageModal` | `frontend/message-details.js:885` |
 | Message details | click on `modalContent` | `frontend/message-details.js:895` |
 | Spam filter | click on `document` | `frontend/spam_filter.js:957` |
-| DMARC | click on `modal` | `frontend/dmarc.js:1287` (showDmarcSyncHistory) |
+| DMARC | click on `modal` | `frontend/dmarc.js:1279` (showDmarcSyncHistory) |
 | Mailbox stats | click on `document` | `frontend/mailbox-stats.js:467` (toggleDateRangePicker) |
 | Settings | click on `cancelBtn` | `frontend/settings.js:93` (showBasicAuthVerifyModal) |
 | Settings | click on `confirmBtn` | `frontend/settings.js:94` (showBasicAuthVerifyModal) |
@@ -697,9 +697,9 @@ Drop-down lists in the page markup with their options. The option wording and or
 | Quarantine | `quarantine-sort`: Newest first / Score: high to low / Score: low to high | `frontend/index.html:865` |
 | Spam filter | `suppression-filter-reason`: All Reasons / Hard Bounce / Soft Bounce / Deferred Stuck / Rejected / Manual | `frontend/index.html:957` |
 | Spam filter | `suppression-filter-active`: Active Only / All / Inactive / Expired | `frontend/index.html:967` |
-| Mailbox stats | `mailbox-stats-domain-filter`: All Domains | `frontend/index.html:1287` |
-| Mailbox stats | `mailbox-stats-sort`: Sent (High to Low) / Received (High to Low) / Failure Rate (High to Low) / Quota Used (High to Low) / Username (A-Z) | `frontend/index.html:1290` |
-| Logs | `logs-fontsize`: 10px / 11px / 12px / 13px / 14px / 16px | `frontend/index.html:1365` |
+| Mailbox stats | `mailbox-stats-domain-filter`: All Domains | `frontend/index.html:1286` |
+| Mailbox stats | `mailbox-stats-sort`: Sent (High to Low) / Received (High to Low) / Failure Rate (High to Low) / Quota Used (High to Low) / Username (A-Z) | `frontend/index.html:1289` |
+| Logs | `logs-fontsize`: 10px / 11px / 12px / 13px / 14px / 16px | `frontend/index.html:1364` |
 
 ### Charts
 
@@ -730,7 +730,7 @@ In-app help buttons; the topic is the Markdown file name under documentation/Hel
 | Status | topic "IP_Blacklist_Monitor" | `frontend/index.html:1044` |
 | Domains | topic "Domains" | `frontend/index.html:1074` |
 | DMARC | topic "DMARC" | `frontend/index.html:1093` |
-| Mailbox stats | topic "Mailbox_Stats" | `frontend/index.html:1228` |
+| Mailbox stats | topic "Mailbox_Stats" | `frontend/index.html:1227` |
 | Mailbox stats | topic dynamic: `'${isRateLimits ? 'Rate_Limits' : 'Mailbox_Stats'}'` | `frontend/mailbox-stats.js:85` (mailboxStatsSwitchView) |
 
 ### Empty states
@@ -763,14 +763,14 @@ Text shown when a list or panel has nothing to show.
 | DMARC | "No DMARC reports yet" | `frontend/dmarc.js:369` (loadDmarcDomains) |
 | DMARC | "No daily reports available" | `frontend/dmarc.js:593` (loadDomainReports) |
 | DMARC | "No sources found" | `frontend/dmarc.js:627` (loadDomainSources) |
-| DMARC | "No TLS reports yet" | `frontend/dmarc.js:760` (loadTlsDomains) |
-| DMARC | "No daily reports available" | `frontend/dmarc.js:872` (loadTlsDomain) |
-| DMARC | "No providers found" | `frontend/dmarc.js:887` (loadTlsDomain) |
-| DMARC | "No providers found" | `frontend/dmarc.js:945` (loadTLSReportDetails) |
-| DMARC | "No sources found" | `frontend/dmarc.js:1005` (loadReportDetails) |
-| DMARC | "No data found" | `frontend/dmarc.js:1089` (loadSourceDetails) |
-| DMARC | "No sync history yet" | `frontend/dmarc.js:1294` (showDmarcSyncHistory) |
-| DMARC | "No reports found" | `frontend/dmarc.js:1376` (renderReportsManagementTable) |
+| DMARC | "No TLS reports yet" | `frontend/dmarc.js:752` (loadTlsDomains) |
+| DMARC | "No daily reports available" | `frontend/dmarc.js:864` (loadTlsDomain) |
+| DMARC | "No providers found" | `frontend/dmarc.js:879` (loadTlsDomain) |
+| DMARC | "No providers found" | `frontend/dmarc.js:937` (loadTLSReportDetails) |
+| DMARC | "No sources found" | `frontend/dmarc.js:997` (loadReportDetails) |
+| DMARC | "No data found" | `frontend/dmarc.js:1081` (loadSourceDetails) |
+| DMARC | "No sync history yet" | `frontend/dmarc.js:1286` (showDmarcSyncHistory) |
+| DMARC | "No reports found" | `frontend/dmarc.js:1368` (renderReportsManagementTable) |
 | Mailbox stats | "No mailboxes found" | `frontend/mailbox-stats.js:309` (renderMailboxStatsAccordion) |
 | Logs | "No log services available" | `frontend/logs-viewer.js:90` (loadLogViewer) |
 | Logs | "No log entries found" | `frontend/logs-viewer.js:476` (renderLogEntries) |
@@ -845,12 +845,12 @@ Places that change the URL so a view can be bookmarked or shared.
 | DMARC | pushState | `frontend/dmarc.js:434` (loadDomainOverview) |
 | DMARC | replaceState | `frontend/dmarc.js:663` (dmarcSwitchSubTab) |
 | DMARC | pushState | `frontend/dmarc.js:664` (dmarcSwitchSubTab) |
-| DMARC | replaceState | `frontend/dmarc.js:805` (tlsSwitchSubTab) |
-| DMARC | pushState | `frontend/dmarc.js:806` (tlsSwitchSubTab) |
-| DMARC | pushState | `frontend/dmarc.js:822` (loadTlsDomain) |
-| DMARC | pushState | `frontend/dmarc.js:919` (loadTLSReportDetails) |
-| DMARC | pushState | `frontend/dmarc.js:979` (loadReportDetails) |
-| DMARC | pushState | `frontend/dmarc.js:1047` (loadSourceDetails) |
+| DMARC | replaceState | `frontend/dmarc.js:797` (tlsSwitchSubTab) |
+| DMARC | pushState | `frontend/dmarc.js:798` (tlsSwitchSubTab) |
+| DMARC | pushState | `frontend/dmarc.js:814` (loadTlsDomain) |
+| DMARC | pushState | `frontend/dmarc.js:911` (loadTLSReportDetails) |
+| DMARC | pushState | `frontend/dmarc.js:971` (loadReportDetails) |
+| DMARC | pushState | `frontend/dmarc.js:1039` (loadSourceDetails) |
 
 ### Keyboard handling
 
