@@ -1257,9 +1257,33 @@ async def _protection_context():
 
 
 def _run_protection_rules_sync(context):
+    """Evaluate the rules; returns the new breach alerts to notify about."""
     from .services import protection_rules
     with get_db_context() as db:
-        protection_rules.evaluate(db, context)
+        created = protection_rules.evaluate(db, context)
+        notify_on = protection_rules.load_rules(db)['breach'].get('notify', True)
+        return [(h.ip, h.rule, h.reason) for h in created if h.rule == 'breach' and notify_on]
+
+
+def _notify_protection(banned, failed, alerts):
+    """One message per run about what the protection rules did."""
+    from .services.notification_service import notify
+    lines = []
+    if alerts:
+        lines.append('Possible stolen password:')
+        lines += [f'  {reason} ({ip})' for ip, rule, reason in alerts]
+    if banned:
+        lines.append(f'Banned {len(banned)} address{"es" if len(banned) != 1 else ""}:')
+        lines += [f'  {ip}: {reason}' for ip, rule, reason, _ in banned]
+    if failed:
+        lines.append(f'Could not ban {len(failed)} address{"es" if len(failed) != 1 else ""}; the next run tries again:')
+        lines += [f'  {ip}: {reason}' for ip, rule, reason, _ in failed]
+    if not lines:
+        return
+    subject = 'Possible stolen password' if alerts else 'Protection rules banned addresses' if banned else 'Protection rules could not ban'
+    lines.append('')
+    lines.append('Review them on the Security page, Protection tab.')
+    notify(subject, '\n'.join(lines), alert_type='security')
 
 
 _protection_lock = asyncio.Lock()
@@ -1281,7 +1305,25 @@ async def _run_protection_rules_locked():
         # With every rule off only the reading moves on; no call to mailcow is needed
         active = any(rules[name]['enabled'] for name in RULE_NAMES)
         context = await _protection_context() if active else ProtectionContext()
-        await asyncio.to_thread(_run_protection_rules_sync, context)
+        # The breach alert reads its logins even with the rule off, so turning it on never reaches back
+        context = ProtectionContext(
+            allowlist=context.allowlist, protected_ips=context.protected_ips,
+            geoip=geoip_service.is_geoip_available(),
+            raw_logs=bool(settings.raw_logs_enabled and settings.is_feature_enabled('logs')),
+        )
+        alerts = await asyncio.to_thread(_run_protection_rules_sync, context)
+        banned, failed = [], []
+        if mailcow_api.has_rw_key:
+            from .services.protection_rules import enforce
+            # Bans reviewed by hand and bans that ended are written even with every rule off
+            result = await enforce(mailcow_api)
+            banned = [b for b in result['banned'] if b[3]]
+            failed = [f for f in result['failed'] if isinstance(f, tuple) and f[3]]
+        if alerts or banned or failed:
+            try:
+                await asyncio.to_thread(_notify_protection, banned, failed, alerts)
+            except Exception as e:
+                logger.warning(f"Protection rules: could not send the notification: {e}")
         update_job_status('protection_rules', 'success')
     except asyncio.CancelledError:
         raise

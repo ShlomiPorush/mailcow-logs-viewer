@@ -1898,4 +1898,13 @@ html .markdown-body .markdown-alert-caution .markdown-alert-title { color: var(-
 .ui-prot-save > span { flex: 1; font-weight: 600; }
 .ui-prot-save.hidden { display: none; }
 .ui-prot-tried { display: block; margin-top: 2px; font-size: 12px; }
+.ui-prot-intro { margin: 0 0 12px; font-size: 13px; }
+.ui-prot-rule-head h3 .ui-tag { margin-inline-start: 6px; vertical-align: 2px; }
+.ui-prot-off > :not(.ui-prot-rule-head) { opacity: .6; }
+.ui-prot-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; padding-top: 12px; border-top: 1px solid var(--ui-line); }
+.ui-prot-controls .ui-seg { background: var(--ui-bg); }
+.ui-prot-controls .ui-seg button:disabled { opacity: .5; cursor: not-allowed; }
+.ui-prot-inline { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }
+.ui-prot-inline .ui-select { height: 30px; }
+.ui-prot-acts { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
 @media (max-width: 900px) { .ui-prot-rules { grid-template-columns: minmax(0, 1fr); } }
