@@ -62,6 +62,31 @@ ENV DEMO_MODE=true \
     MAILCOW_API_KEY_RW=demo \
     RSPAMD_PASSWORD=demo \
     SETTINGS_EDIT_VIA_UI_ENABLED=true
+# Settings set in ENV cannot be changed from the UI. Visitors can change
+# everything else; these would lock every other visitor out, load other
+# visitors' browsers with an outside image, or let one visitor slow down or
+# empty the demo for everyone until the nightly reset. RAW_LOGS_SERVICES is
+# free text the Logs page builds its service buttons from.
+ENV BASIC_AUTH_ENABLED=false \
+    RAW_LOGS_SERVICES=acme,api,autodiscover,dovecot,netfilter,postfix,ratelimited,rspamd-history,sogo,watchdog \
+    OAUTH2_ENABLED=false \
+    APP_LOGO_URL= \
+    LOG_LEVEL=WARNING \
+    RETENTION_DAYS=7 \
+    RAW_LOGS_RETENTION_DAYS=2 \
+    DMARC_RETENTION_DAYS=60 \
+    FETCH_INTERVAL=60 \
+    FETCH_COUNT_POSTFIX=2000 \
+    FETCH_COUNT_RSPAMD=500 \
+    FETCH_COUNT_NETFILTER=500 \
+    FETCH_MAX_PAGES=50 \
+    RAW_LOGS_FETCH_INTERVAL=30 \
+    RAW_LOGS_FETCH_COUNT=1000 \
+    MAX_CORRELATION_AGE_MINUTES=10 \
+    CORRELATION_CHECK_INTERVAL=120 \
+    SCHEDULER_WORKERS=4 \
+    MAX_SEARCH_RESULTS=1000 \
+    CSV_EXPORT_LIMIT=10000
 
 # The regular image. Kept last so a plain `docker build` produces it.
 FROM base AS app
