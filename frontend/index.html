@@ -1163,13 +1163,38 @@
                 <!-- TLS tab: every domain with its TLS-RPT record and TLS reports -->
                 <div id="dmarc-tls-domains-view" class="hidden ui-sec-block ui-scroll">
                     <div id="dmarc-tls-stats-container"></div>
-                    <div id="dmarc-tls-domains-list" class="ui-table ui-stack" style="--ui-cols: minmax(180px, 1.6fr) minmax(150px, 1fr) 110px minmax(130px, 1fr); --ui-table-min: 640px"></div>
+                    <div id="dmarc-tls-domains-list" class="ui-table ui-stack" style="--ui-cols: minmax(180px, 1.6fr) minmax(120px, 1fr) 90px 120px 120px minmax(120px, 1fr); --ui-table-min: 810px"></div>
                 </div>
 
-                <!-- TLS tab: one domain, its TLS-RPT record and daily TLS reports -->
+                <!-- TLS tab: one domain, built like the DMARC domain view -->
                 <div id="dmarc-tls-domain-view" class="hidden ui-sec-block ui-scroll">
-                    <div id="dmarc-tls-record-container"></div>
-                    <div id="dmarc-tls-list" class="ui-sec-block"><div class="ui-loading"><div class="loading"></div><p>Loading TLS reports...</p></div></div>
+                    <div id="dmarc-tls-overview-stats-container" class="ui-sec-block"></div>
+
+                    <section class="ui-panel">
+                        <div class="ui-panel-head">Sessions (Last 30 Days)</div>
+                        <div class="ui-chart-body ui-dmarc-chart"><canvas id="dmarc-tls-chart"></canvas></div>
+                    </section>
+
+                    <!-- Sub-tabs: Reports | Providers -->
+                    <section class="ui-panel">
+                        <div class="ui-tabs" role="tablist">
+                            <button onclick="tlsSwitchSubTab('reports')" id="tls-subtab-reports" class="modal-tab active" role="tab" aria-selected="true">Daily Reports</button>
+                            <button onclick="tlsSwitchSubTab('providers')" id="tls-subtab-providers" class="modal-tab" role="tab" aria-selected="false">Providers</button>
+                        </div>
+                        <div id="tls-reports-content" class="ui-dmarc-tab">
+                            <div id="dmarc-tls-list"><div class="ui-loading"><div class="loading"></div><p>Loading reports...</p></div></div>
+                        </div>
+                        <div id="tls-providers-content" class="ui-dmarc-tab hidden">
+                            <div id="dmarc-tls-providers-list"><div class="ui-loading"><div class="loading"></div><p>Loading providers...</p></div></div>
+                        </div>
+                    </section>
+                </div>
+
+                <!-- TLS tab: one day, built like the DMARC report details -->
+                <div id="dmarc-tls-details-view" class="hidden ui-sec-block ui-scroll">
+                    <div id="tls-details-stats-container"></div>
+                    <div class="ui-list-head"><h2 class="ui-h2">Providers</h2></div>
+                    <div id="tls-detail-providers-list"><div class="ui-loading"><div class="loading"></div><p>Loading providers...</p></div></div>
                 </div>
 
                 <!-- Report Details View (hidden by default) -->

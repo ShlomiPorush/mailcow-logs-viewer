@@ -1245,6 +1245,8 @@ button.ui-st-card:hover { outline: 1px solid var(--ui-line); }
 
 @media (max-width: 760px) {
     .ui-dmarc-sync { align-items: flex-start; }
+    /* The last sync line starts under the button instead of running off the screen */
+    .ui-dmarc-sync .ui-dmarc-sync-info { inset-inline-end: auto; inset-inline-start: 0; }
     .ui-dialog.ui-dialog-fit { max-height: 100%; }
 }
 #dmarc-header-actions { align-items: flex-start; }
