@@ -295,10 +295,10 @@ Native `title` tooltips. Dynamic ones show the expression that builds the text.
 | Domains | "Error" | `frontend/domains.js:763` (checkSingleDomainDNS) |
 | Domains | "Unknown" | `frontend/domains.js:764` (checkSingleDomainDNS) |
 | Domains | "Help - Domains Information" | `frontend/index.html:1776` |
-| DMARC | "DMARC Reports" | `frontend/dmarc.js:366` (loadDmarcDomains) |
-| DMARC | "TLS Reports" | `frontend/dmarc.js:367` (loadDmarcDomains) |
-| DMARC | "Delete report" | `frontend/dmarc.js:1651` (renderReportsManagementTable) |
-| DMARC | "Delete" | `frontend/dmarc.js:1686` (renderReportsManagementTable) |
+| DMARC | "DMARC Reports" | `frontend/dmarc.js:367` (loadDmarcDomains) |
+| DMARC | "TLS Reports" | `frontend/dmarc.js:368` (loadDmarcDomains) |
+| DMARC | "Delete report" | `frontend/dmarc.js:1683` (renderReportsManagementTable) |
+| DMARC | "Delete" | `frontend/dmarc.js:1718` (renderReportsManagementTable) |
 | DMARC | "Help - DMARC Information" | `frontend/index.html:1809` |
 | Mailbox stats | "Help - Mailbox Statistics" | `frontend/index.html:2031` |
 | Mailbox stats | "Address on a mailcow alias domain that points at this mailbox" | `frontend/mailbox-stats.js:556` (renderMailboxStatsAccordion) |
@@ -417,17 +417,17 @@ Transient notifications from `showToast(message, type)` (utils.js). Type default
 | Domains | dynamic: ``✓ DNS checked for ${domainName}`` [success] | `frontend/domains.js:699` (checkSingleDomainDNS) |
 | Domains | dynamic: ``Failed to check DNS for ${domainName}`` [error] | `frontend/domains.js:789` (checkSingleDomainDNS) |
 | Domains | "Failed to check DNS" [error] | `frontend/domains.js:793` (checkSingleDomainDNS) |
-| DMARC | "Manual upload is disabled" [error] | `frontend/dmarc.js:1321` (uploadDmarcReport) |
-| DMARC | dynamic: ``${reportType} report uploaded: ${count} ${countLabel}`` [success] | `frontend/dmarc.js:1334` (uploadDmarcReport) |
-| DMARC | dynamic: ``${reportType} report already exists`` [warning] | `frontend/dmarc.js:1346` (uploadDmarcReport) |
-| DMARC | "Failed to upload report" [error] | `frontend/dmarc.js:1351` (uploadDmarcReport) |
-| DMARC | "IMAP sync is not enabled" [error] | `frontend/dmarc.js:1429` (triggerDmarcSync) |
-| DMARC | "Sync is already in progress" [info] | `frontend/dmarc.js:1444` (triggerDmarcSync) |
-| DMARC | "IMAP sync started" [success] | `frontend/dmarc.js:1446` (triggerDmarcSync) |
-| DMARC | "Failed to start sync" [error] | `frontend/dmarc.js:1460` (triggerDmarcSync) |
-| DMARC | "Report deletion is disabled" [error] | `frontend/dmarc.js:1727` (deleteReport) |
-| DMARC | dynamic: ``${reportType.toUpperCase()} report deleted`` [success] | `frontend/dmarc.js:1735` (deleteReport) |
-| DMARC | "Failed to delete report" [error] | `frontend/dmarc.js:1749` (deleteReport) |
+| DMARC | "Manual upload is disabled" [error] | `frontend/dmarc.js:1353` (uploadDmarcReport) |
+| DMARC | dynamic: ``${reportType} report uploaded: ${count} ${countLabel}`` [success] | `frontend/dmarc.js:1366` (uploadDmarcReport) |
+| DMARC | dynamic: ``${reportType} report already exists`` [warning] | `frontend/dmarc.js:1378` (uploadDmarcReport) |
+| DMARC | "Failed to upload report" [error] | `frontend/dmarc.js:1383` (uploadDmarcReport) |
+| DMARC | "IMAP sync is not enabled" [error] | `frontend/dmarc.js:1461` (triggerDmarcSync) |
+| DMARC | "Sync is already in progress" [info] | `frontend/dmarc.js:1476` (triggerDmarcSync) |
+| DMARC | "IMAP sync started" [success] | `frontend/dmarc.js:1478` (triggerDmarcSync) |
+| DMARC | "Failed to start sync" [error] | `frontend/dmarc.js:1492` (triggerDmarcSync) |
+| DMARC | "Report deletion is disabled" [error] | `frontend/dmarc.js:1759` (deleteReport) |
+| DMARC | dynamic: ``${reportType.toUpperCase()} report deleted`` [success] | `frontend/dmarc.js:1767` (deleteReport) |
+| DMARC | "Failed to delete report" [error] | `frontend/dmarc.js:1781` (deleteReport) |
 | Mailbox stats | "Please select both start and end dates" [error] | `frontend/mailbox-stats.js:740` (applyCustomDateRange) |
 | Mailbox stats | "Start date must be before end date" [error] | `frontend/mailbox-stats.js:748` (applyCustomDateRange) |
 | Mailbox stats | dynamic: `detail.detail \|\| 'Could not reset the counter'` [error] | `frontend/rate-limits.js:650` (resetRateLimitCounter) |
@@ -491,7 +491,7 @@ Every action that asks before it acts. Losing one turns a guarded action into a 
 | Quarantine | showConfirmModal: dynamic: `{ title: 'Delete All', message: `Permanently delete ALL ${allIds.length} quar...` | `frontend/app.js:2818` (quarantineDeleteAll) |
 | Quarantine | showConfirmModal: dynamic: `{ title: 'Delete Rule', message: `Delete rule "${ruleName}"?`, confirmText: '...` | `frontend/app.js:3327` (deleteQuarantineRule) |
 | Spam filter | showConfirmModal: dynamic: `{ title: 'Delete Suppression', message: `Delete suppression for ${email}? Thi...` | `frontend/spam_filter.js:923` (deleteSuppression) |
-| DMARC | showConfirmModal: dynamic: `{ title: 'Delete Report', message: `Are you sure you want to delete this ${re...` | `frontend/dmarc.js:1717` (deleteReport) |
+| DMARC | showConfirmModal: dynamic: `{ title: 'Delete Report', message: `Are you sure you want to delete this ${re...` | `frontend/dmarc.js:1749` (deleteReport) |
 | Mailbox stats | showConfirmModal: dynamic: `{ title: 'Reset rate limit counter', message: `Let ${user} send again straigh...` | `frontend/rate-limits.js:634` (resetRateLimitCounter) |
 | Mailbox stats | showConfirmModal: dynamic: `{ title: value === 0 ? 'Remove rate limits' : 'Apply rate limit', message: va...` | `frontend/rate-limits.js:952` (applyRateLimitBulk) |
 | Mailbox stats | showConfirmModal: dynamic: `{ title: 'Remove rate limit', message: `Remove the rate limit on ${name}? It ...` | `frontend/rate-limits.js:1130` (removeRateLimit) |
@@ -538,7 +538,7 @@ Buttons, tabs and fields whose behavior is attached with `addEventListener` inst
 | Security | submit on `settingsForm` | `frontend/app.js:2075` (loadFail2BanSettings) |
 | Security | submit on `ipForm` | `frontend/app.js:2128` (loadFail2BanSettings) |
 | Spam filter | click on `document` | `frontend/spam_filter.js:1048` |
-| DMARC | click on `modal` | `frontend/dmarc.js:1480` (showDmarcSyncHistory) |
+| DMARC | click on `modal` | `frontend/dmarc.js:1512` (showDmarcSyncHistory) |
 | Mailbox stats | click on `document` | `frontend/mailbox-stats.js:671` (toggleDateRangePicker) |
 | Settings | click on `cancelBtn` | `frontend/settings.js:114` (showBasicAuthVerifyModal) |
 | Settings | click on `confirmBtn` | `frontend/settings.js:115` (showBasicAuthVerifyModal) |
@@ -582,7 +582,7 @@ Chart.js charts (local library). Check hover tooltips, legend and both themes.
 | Page | What | Code |
 |---|---|---|
 | Security | bar chart on `ctx` | `frontend/app.js:1688` (loadSecurityCountryChart) |
-| DMARC | line chart on `ctx` | `frontend/dmarc.js:597` (renderDmarcChart) |
+| DMARC | line chart on `ctx` | `frontend/dmarc.js:599` (renderDmarcChart) |
 | Mailbox stats | bar chart on `canvas.getContext('2d')` | `frontend/rate-limits.js:281` (renderRateLimitChart) |
 
 ### Colour thresholds
@@ -607,39 +607,39 @@ Values whose colour changes at a threshold (for example storage turns yellow and
 | Status | `usedPercent > 75` turns yellow | `frontend/app.js:3937` (loadStatusStorage) |
 | Status | `usedPercent > 90` turns red | `frontend/app.js:3939` (loadStatusStorage) |
 | Status | `usedPercent > 75` turns yellow | `frontend/app.js:3940` (loadStatusStorage) |
-| DMARC | `passRate >= 95` turns green | `frontend/dmarc.js:345` (loadDmarcDomains) |
-| DMARC | `passRate >= 80` turns yellow | `frontend/dmarc.js:345` (loadDmarcDomains) |
 | DMARC | `passRate >= 95` turns green | `frontend/dmarc.js:346` (loadDmarcDomains) |
 | DMARC | `passRate >= 80` turns yellow | `frontend/dmarc.js:346` (loadDmarcDomains) |
 | DMARC | `passRate >= 95` turns green | `frontend/dmarc.js:347` (loadDmarcDomains) |
-| DMARC | `stats.tls_success_pct >= 95` turns green | `frontend/dmarc.js:390` (loadDmarcDomains) |
-| DMARC | `stats.tls_success_pct >= 80` turns yellow | `frontend/dmarc.js:390` (loadDmarcDomains) |
-| DMARC | `stats.tls_success_pct >= 95` turns green | `frontend/dmarc.js:392` (loadDmarcDomains) |
-| DMARC | `stats.tls_success_pct >= 80` turns yellow | `frontend/dmarc.js:392` (loadDmarcDomains) |
-| DMARC | `passRate >= 95` turns green | `frontend/dmarc.js:404` (loadDmarcDomains) |
-| DMARC | `passPct >= 95` turns green | `frontend/dmarc.js:644` (loadDomainReports) |
-| DMARC | `passPct >= 95` turns green | `frontend/dmarc.js:707` (loadDomainSources) |
-| DMARC | `s.spf_pass_pct >= 95` turns green | `frontend/dmarc.js:746` (loadDomainSources) |
-| DMARC | `s.dkim_pass_pct >= 95` turns green | `frontend/dmarc.js:751` (loadDomainSources) |
-| DMARC | `successRate >= 95` turns green | `frontend/dmarc.js:821` (loadDomainTLSReports) |
-| DMARC | `successRate >= 80` turns yellow | `frontend/dmarc.js:821` (loadDomainTLSReports) |
-| DMARC | `day.success_rate >= 95` turns green | `frontend/dmarc.js:848` (loadDomainTLSReports) |
-| DMARC | `day.success_rate >= 80` turns yellow | `frontend/dmarc.js:849` (loadDomainTLSReports) |
-| DMARC | `day.success_rate >= 95` turns green | `frontend/dmarc.js:851` (loadDomainTLSReports) |
-| DMARC | `day.success_rate >= 80` turns yellow | `frontend/dmarc.js:851` (loadDomainTLSReports) |
-| DMARC | `successRate >= 95` turns green | `frontend/dmarc.js:936` (loadTLSReportDetails) |
-| DMARC | `successRate >= 80` turns yellow | `frontend/dmarc.js:936` (loadTLSReportDetails) |
-| DMARC | `p.success_rate >= 95` turns green | `frontend/dmarc.js:997` (loadTLSReportDetails) |
-| DMARC | `p.success_rate >= 80` turns yellow | `frontend/dmarc.js:997` (loadTLSReportDetails) |
-| DMARC | `p.success_rate >= 95` turns green | `frontend/dmarc.js:1017` (loadTLSReportDetails) |
-| DMARC | `p.success_rate >= 80` turns yellow | `frontend/dmarc.js:1017` (loadTLSReportDetails) |
-| DMARC | `s.dmarc_pass_pct >= 95` turns green | `frontend/dmarc.js:1116` (loadReportDetails) |
-| DMARC | `s.spf_pass_pct >= 95` turns green | `frontend/dmarc.js:1117` (loadReportDetails) |
-| DMARC | `s.dkim_pass_pct >= 95` turns green | `frontend/dmarc.js:1118` (loadReportDetails) |
-| DMARC | `dmarcPct >= 95` turns green | `frontend/dmarc.js:1235` (loadSourceDetails) |
-| DMARC | `spfPct >= 95` turns green | `frontend/dmarc.js:1236` (loadSourceDetails) |
-| DMARC | `dkimPct >= 95` turns green | `frontend/dmarc.js:1237` (loadSourceDetails) |
-| DMARC | `sync.reports_failed > 0` turns red | `frontend/dmarc.js:1525` (showDmarcSyncHistory) |
+| DMARC | `passRate >= 80` turns yellow | `frontend/dmarc.js:347` (loadDmarcDomains) |
+| DMARC | `passRate >= 95` turns green | `frontend/dmarc.js:348` (loadDmarcDomains) |
+| DMARC | `stats.tls_success_pct >= 95` turns green | `frontend/dmarc.js:391` (loadDmarcDomains) |
+| DMARC | `stats.tls_success_pct >= 80` turns yellow | `frontend/dmarc.js:391` (loadDmarcDomains) |
+| DMARC | `stats.tls_success_pct >= 95` turns green | `frontend/dmarc.js:393` (loadDmarcDomains) |
+| DMARC | `stats.tls_success_pct >= 80` turns yellow | `frontend/dmarc.js:393` (loadDmarcDomains) |
+| DMARC | `passRate >= 95` turns green | `frontend/dmarc.js:405` (loadDmarcDomains) |
+| DMARC | `passPct >= 95` turns green | `frontend/dmarc.js:646` (loadDomainReports) |
+| DMARC | `passPct >= 95` turns green | `frontend/dmarc.js:709` (loadDomainSources) |
+| DMARC | `s.spf_pass_pct >= 95` turns green | `frontend/dmarc.js:748` (loadDomainSources) |
+| DMARC | `s.dkim_pass_pct >= 95` turns green | `frontend/dmarc.js:753` (loadDomainSources) |
+| DMARC | `successRate >= 95` turns green | `frontend/dmarc.js:853` (loadDomainTLSReports) |
+| DMARC | `successRate >= 80` turns yellow | `frontend/dmarc.js:853` (loadDomainTLSReports) |
+| DMARC | `day.success_rate >= 95` turns green | `frontend/dmarc.js:880` (loadDomainTLSReports) |
+| DMARC | `day.success_rate >= 80` turns yellow | `frontend/dmarc.js:881` (loadDomainTLSReports) |
+| DMARC | `day.success_rate >= 95` turns green | `frontend/dmarc.js:883` (loadDomainTLSReports) |
+| DMARC | `day.success_rate >= 80` turns yellow | `frontend/dmarc.js:883` (loadDomainTLSReports) |
+| DMARC | `successRate >= 95` turns green | `frontend/dmarc.js:968` (loadTLSReportDetails) |
+| DMARC | `successRate >= 80` turns yellow | `frontend/dmarc.js:968` (loadTLSReportDetails) |
+| DMARC | `p.success_rate >= 95` turns green | `frontend/dmarc.js:1029` (loadTLSReportDetails) |
+| DMARC | `p.success_rate >= 80` turns yellow | `frontend/dmarc.js:1029` (loadTLSReportDetails) |
+| DMARC | `p.success_rate >= 95` turns green | `frontend/dmarc.js:1049` (loadTLSReportDetails) |
+| DMARC | `p.success_rate >= 80` turns yellow | `frontend/dmarc.js:1049` (loadTLSReportDetails) |
+| DMARC | `s.dmarc_pass_pct >= 95` turns green | `frontend/dmarc.js:1148` (loadReportDetails) |
+| DMARC | `s.spf_pass_pct >= 95` turns green | `frontend/dmarc.js:1149` (loadReportDetails) |
+| DMARC | `s.dkim_pass_pct >= 95` turns green | `frontend/dmarc.js:1150` (loadReportDetails) |
+| DMARC | `dmarcPct >= 95` turns green | `frontend/dmarc.js:1267` (loadSourceDetails) |
+| DMARC | `spfPct >= 95` turns green | `frontend/dmarc.js:1268` (loadSourceDetails) |
+| DMARC | `dkimPct >= 95` turns green | `frontend/dmarc.js:1269` (loadSourceDetails) |
+| DMARC | `sync.reports_failed > 0` turns red | `frontend/dmarc.js:1557` (showDmarcSyncHistory) |
 | Mailbox stats | `mb.combined_failure_rate >= 10` turns red | `frontend/mailbox-stats.js:315` (renderMailboxStatsAccordion) |
 | Mailbox stats | `mb.combined_failure_rate >= 5` turns yellow | `frontend/mailbox-stats.js:316` (renderMailboxStatsAccordion) |
 | Mailbox stats | `quotaPercent >= 90` turns red | `frontend/mailbox-stats.js:321` (renderMailboxStatsAccordion) |
@@ -687,12 +687,12 @@ Text shown when a list or panel has nothing to show.
 | Domains | "No domains found" | `frontend/domains.js:83` (renderDomains) |
 | Domains | "No domains with DNS issues found" | `frontend/domains.js:216` (filterDomains) |
 | Domains | "No domains found matching" | `frontend/domains.js:217` (filterDomains) |
-| DMARC | "No daily reports available" | `frontend/dmarc.js:636` (loadDomainReports) |
-| DMARC | "No sources found" | `frontend/dmarc.js:694` (loadDomainSources) |
-| DMARC | "No sources found" | `frontend/dmarc.js:1093` (loadReportDetails) |
-| DMARC | "No data found" | `frontend/dmarc.js:1213` (loadSourceDetails) |
-| DMARC | "No sync history yet" | `frontend/dmarc.js:1487` (showDmarcSyncHistory) |
-| DMARC | "No reports found" | `frontend/dmarc.js:1603` (renderReportsManagementTable) |
+| DMARC | "No daily reports available" | `frontend/dmarc.js:638` (loadDomainReports) |
+| DMARC | "No sources found" | `frontend/dmarc.js:696` (loadDomainSources) |
+| DMARC | "No sources found" | `frontend/dmarc.js:1125` (loadReportDetails) |
+| DMARC | "No data found" | `frontend/dmarc.js:1245` (loadSourceDetails) |
+| DMARC | "No sync history yet" | `frontend/dmarc.js:1519` (showDmarcSyncHistory) |
+| DMARC | "No reports found" | `frontend/dmarc.js:1635` (renderReportsManagementTable) |
 | Mailbox stats | "No mailboxes found" | `frontend/mailbox-stats.js:301` (renderMailboxStatsAccordion) |
 | Logs | "No log entries found" | `frontend/logs-viewer.js:470` (renderLogEntries) |
 | Settings | "No logs available" | `frontend/notifications.js:288` (testNotificationChannel) |
@@ -719,7 +719,7 @@ Functions that render a spinner or "Loading..." while data is fetched.
 | Status | 2 loading indicator(s) | `frontend/app.js:4022` (checkBlacklists) |
 | Status | 1 loading indicator(s) | `frontend/app.js:4534` (triggerBackgroundJob) |
 | Domains | 1 loading indicator(s) | `frontend/domains.js:646` (checkAllDomainsDNS) |
-| DMARC | 1 loading indicator(s) | `frontend/dmarc.js:134` (loadDmarc) |
+| DMARC | 1 loading indicator(s) | `frontend/dmarc.js:135` (loadDmarc) |
 | Logs | 1 loading indicator(s) | `frontend/logs-viewer.js:1107` (loadDateRangeLogs) |
 | Settings | 3 loading indicator(s) | `frontend/settings.js:1558` (renderSettings) |
 | Settings | 2 loading indicator(s) | `frontend/settings.js:1895` (showGeoIPSetupModal) |
@@ -759,9 +759,9 @@ Places that change the URL so a view can be bookmarked or shared.
 | Shell | replaceState | `frontend/app.js:1187` (switchTab) |
 | Shell | pushState | `frontend/router.js:154` (navigateTo) |
 | Shell | replaceState | `frontend/router.js:222` (initRouter) |
-| DMARC | pushState | `frontend/dmarc.js:467` (loadDomainOverview) |
-| DMARC | pushState | `frontend/dmarc.js:1061` (loadReportDetails) |
-| DMARC | pushState | `frontend/dmarc.js:1167` (loadSourceDetails) |
+| DMARC | pushState | `frontend/dmarc.js:468` (loadDomainOverview) |
+| DMARC | pushState | `frontend/dmarc.js:1093` (loadReportDetails) |
+| DMARC | pushState | `frontend/dmarc.js:1199` (loadSourceDetails) |
 
 ### Keyboard handling
 
