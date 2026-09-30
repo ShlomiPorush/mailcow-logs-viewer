@@ -484,16 +484,18 @@ function placeShellUtilities() {
     }
 }
 
+// The sidebar and the phone More sheet show the same counters
 function setNavCount(page, count, isFail, title) {
-    const el = document.getElementById(`nav-count-${page}`);
-    if (!el) return;
-    if (count > 0) {
-        el.textContent = count.toLocaleString();
-        el.classList.toggle('is-fail', !!isFail);
-        el.title = title || '';
-        el.classList.remove('hidden');
-    } else {
-        el.classList.add('hidden');
+    for (const el of [document.getElementById(`nav-count-${page}`), document.getElementById(`mobile-nav-count-${page}`)]) {
+        if (!el) continue;
+        if (count > 0) {
+            el.textContent = count.toLocaleString();
+            el.classList.toggle('is-fail', !!isFail);
+            el.title = title || '';
+            el.classList.remove('hidden');
+        } else {
+            el.classList.add('hidden');
+        }
     }
 }
 
@@ -619,6 +621,8 @@ async function loadAppVersionStatus() {
         if (updateBadge && data.update_available) {
             updateBadge.classList.remove('hidden');
             updateBadge.title = `Update available: v${data.latest_version}`;
+            // Say which product the update is for (the mailcow line has its own)
+            updateBadge.textContent = `v${data.latest_version} available`;
 
             // Allow clicking badge to view changelog
             updateBadge.onclick = (e) => {
@@ -686,6 +690,7 @@ async function loadMailcowVersionStatus() {
             window.mailcowUpdateVersion = data.latest_version;
             window.mailcowUpdateName = data.name || '';
             window.mailcowUpdateChangelog = data.changelog || 'No changelog available';
+            if (footerUpdateBadge) footerUpdateBadge.textContent = `mailcow ${data.latest_version} available`;
 
             // Function to handle clicks using the shared logic
             const handleClick = (e) => {
@@ -1113,6 +1118,21 @@ function securitySourceState(source) {
     return recent ? { key: 'open', text: 'Not banned', tone: 'warn' } : { key: 'quiet', text: 'Quiet', tone: '' };
 }
 
+// The two Security lists open with their first rows; "Show all" expands them
+const SECURITY_LIST_PREVIEW = 10;
+let securityShowAll = { sources: false, latest: false };
+
+function toggleSecurityList(which) {
+    securityShowAll[which] = !securityShowAll[which];
+    renderSecurityOverview();
+}
+
+function securityShowAllButton(which, total) {
+    if (total <= SECURITY_LIST_PREVIEW) return '';
+    const label = securityShowAll[which] ? 'Show fewer' : `Show all ${total}`;
+    return `<div class="ui-list-more"><button type="button" class="ui-btn ui-btn-sm" onclick="toggleSecurityList('${which}')" aria-expanded="${securityShowAll[which]}">${label}</button></div>`;
+}
+
 function renderSecurityOverview() {
     const data = securityOverview;
     const sourcesEl = document.getElementById('security-sources');
@@ -1138,10 +1158,11 @@ function renderSecurityOverview() {
     } else {
         const lockedNote = mailcowRwConfigured ? '' : `<div class="ui-list-note">${uiLocked('Ban, Allow and Unban are locked', `Changing Fail2ban from this list ${UI_RW_KEY_TEXT}`)}</div>`;
         const more = data.source_count > data.sources.length ? `<p class="ui-kv-note">The ${data.sources.length} addresses with the most attempts of ${data.source_count.toLocaleString()}.</p>` : '';
+        const sourceRows = securityShowAll.sources ? data.sources : data.sources.slice(0, SECURITY_LIST_PREVIEW);
         sourcesEl.innerHTML = `${lockedNote}
             <div class="ui-table ui-sec-table" style="--ui-cols: minmax(190px, 2.2fr) minmax(90px, 1fr) 72px 96px minmax(130px, 1.2fr) 136px; --ui-table-min: 820px">
                 <div class="ui-tr ui-tr-head"><span>Address</span><span>Service</span><span class="ui-td-end">Attempts</span><span>Last seen</span><span>State</span><span class="ui-td-end">Actions</span></div>
-                ${data.sources.map((src, i) => {
+                ${sourceRows.map((src, i) => {
                     const st = states[i];
                     const where = [src.country_name, src.usernames.length ? `tried ${src.usernames.join(', ')}` : ''].filter(Boolean).join(', ');
                     const ipArg = escapeJsArg(src.ip);
@@ -1158,29 +1179,29 @@ function renderSecurityOverview() {
                             ${where ? `<small title="${escapeHtml(where)}">${escapeHtml(where)}</small>` : ''}
                         </div>
                         <span class="ui-td">${escapeHtml(src.services.join(', ') || '-')}</span>
-                        <span class="ui-td ui-td-end">${src.attempts.toLocaleString()}<small class="ui-sec-unit"> attempts</small></span>
+                        <span class="ui-td ui-td-end">${src.attempts.toLocaleString()}<small class="ui-sec-unit"> ${src.attempts === 1 ? 'attempt' : 'attempts'}</small></span>
                         <time class="ui-td" title="${escapeHtml(formatTime(src.last_seen))}">${formatAgo(src.last_seen)}</time>
                         <span class="ui-td">${st.tone || st.key === 'quiet' ? uiTag(st.text, st.tone) : escapeHtml(st.text)}</span>
                         <span class="ui-td ui-td-end ui-sec-actions">${actions}</span>
                     </div>`;
                 }).join('')}
-            </div>${more}`;
+            </div>${securityShowAllButton('sources', data.sources.length)}${more}`;
     }
 
     if (!data.latest.length) {
         latestEl.innerHTML = '<p class="ui-empty ui-panel">No failed logins in the last 24 hours.</p>';
     } else {
         latestEl.innerHTML = `
-            <div class="ui-table ui-sec-table" style="--ui-cols: 64px minmax(130px, 1fr) minmax(160px, 1.6fr) minmax(90px, .8fr); --ui-table-min: 520px">
+            <div class="ui-table ui-sec-table ui-sec-latest" style="--ui-cols: 64px minmax(130px, 1fr) minmax(160px, 1.6fr) minmax(90px, .8fr); --ui-table-min: 520px">
                 <div class="ui-tr ui-tr-head"><span>When</span><span>Address</span><span>Account tried</span><span>Service</span></div>
-                ${data.latest.map(row => `
+                ${(securityShowAll.latest ? data.latest : data.latest.slice(0, SECURITY_LIST_PREVIEW)).map(row => `
                     <div class="ui-tr">
                         <time class="ui-td" title="${escapeHtml(formatTime(row.time))}">${formatListTime(row.time)}</time>
                         <span class="ui-td ui-mono">${copyableText(row.ip)}</span>
                         <span class="ui-td">${row.username ? copyableText(row.username) : '<span class="ui-muted">-</span>'}</span>
                         <span class="ui-td">${escapeHtml(row.service || '-')}</span>
                     </div>`).join('')}
-            </div>`;
+            </div>${securityShowAllButton('latest', data.latest.length)}`;
     }
 }
 
@@ -1632,10 +1653,16 @@ async function loadDashboardAttention() {
         items.push({ tone: 'fail', title: 'mailcow is not reachable', detail: 'The mailcow API did not answer, so logs and server data may be out of date.', action: 'Open settings', onclick: "navigateTo('settings')" });
     }
     if (blacklist && blacklist.status === 'listed') {
-        const host = (blacklist.hosts && blacklist.hosts[0] && blacklist.hosts[0].hostname) || blacklist.server_ip || 'Your server';
-        items.push({ tone: 'fail', title: `${host} is on a blocklist`,
-            detail: `Listed on ${blacklist.listed_count} of ${blacklist.total_blacklists} lists${blacklist.server_ip ? ` (${blacklist.server_ip})` : ''}. Outbound mail to some providers may bounce.`,
-            action: 'Check listing', onclick: "navigateTo('status')" });
+        // Name the host that is actually listed, with its own list count
+        const listedHosts = (blacklist.hosts || []).filter(h => h.status === 'listed');
+        const first = listedHosts[0];
+        const title = listedHosts.length > 1
+            ? `${listedHosts.length} of your addresses are on a blocklist`
+            : `${first ? first.hostname : (blacklist.server_ip || 'Your server')} is on a blocklist`;
+        const detail = listedHosts.length > 1
+            ? `${listedHosts.map(h => h.hostname).join(', ')}. Outbound mail to some providers may bounce.`
+            : `Listed on ${first ? first.listed_count : blacklist.listed_count} of ${first && first.total_blacklists ? first.total_blacklists : blacklist.total_blacklists} lists. Outbound mail to some providers may bounce.`;
+        items.push({ tone: 'fail', title, detail, action: 'Check listing', onclick: "navigateTo('status')" });
     }
     const containers = summary && summary.containers ? summary.containers : null;
     if (containers && containers.stopped > 0) {
@@ -2700,6 +2727,11 @@ let quarantineLastData = null;
 
 // Return a sorted copy of quarantine items based on quarantineSortOrder.
 // Items without a numeric score are placed last in both score directions.
+// Reject is the strong verdict; add header and the softer ones read as a warning
+function quarantineActionTone(action) {
+    return ['reject', 'discard'].includes(String(action || '').toLowerCase()) ? 'fail' : 'warn';
+}
+
 function sortQuarantineItems(items) {
     const sorted = [...items];
     if (quarantineSortOrder !== 'score_desc' && quarantineSortOrder !== 'score_asc') {
@@ -2822,7 +2854,7 @@ function renderQuarantineData(data) {
                         <small>${copyableText(item.sender || 'Unknown')}${item.qid ? `, ID ${copyableText(item.qid)}` : ''}</small>
                     </div>
                     <span class="ui-td">${copyableText(item.rcpt || 'Unknown')}</span>
-                    <span class="ui-td ui-td-wrap">${uiTag(item.action || 'Quarantined', 'fail')}${item.virus_flag ? ` ${uiTag('Virus', 'spam')}` : ''}</span>
+                    <span class="ui-td ui-td-wrap">${uiTag(item.action || 'Quarantined', quarantineActionTone(item.action))}${item.virus_flag ? ` ${uiTag('Virus', 'spam')}` : ''}</span>
                     <span class="ui-td ui-td-end${hasScore && item.score >= 15 ? ' ui-text-fail' : ''}"><small class="ui-sec-unit">Score </small>${hasScore ? item.score.toFixed(1) : '-'}</span>
                     <time class="ui-td" title="${escapeHtml(formatTime(item.created))}"><small class="ui-sec-unit">Held </small>${formatAgo(item.created).replace(' ago', '')}</time>
                     <span class="ui-td ui-td-end ui-row-actions">
@@ -3058,7 +3090,7 @@ function renderQuarantineDetailContent(data, itemId) {
                 <div class="ui-md-fact"><span>Envelope From</span><div class="ui-mono">${copyableText(data.env_from || '-')}</div></div>
                 <div class="ui-md-fact ui-qd-wide"><span>Recipients</span><div class="ui-chip-row">${recipientsHtml || '<span class="ui-muted">-</span>'}</div></div>
                 <div class="ui-md-fact"><span>Score</span><div class="ui-text-${scoreTone}"><b>${score.toFixed(2)}</b></div></div>
-                <div class="ui-md-fact"><span>Action</span><div>${uiTag(data.action || '-', 'fail')}</div></div>
+                <div class="ui-md-fact"><span>Action</span><div>${uiTag(data.action || '-', quarantineActionTone(data.action))}</div></div>
             </div>
 
             <div>
@@ -4161,17 +4193,20 @@ async function loadDashboardBlacklistSummary() {
             return;
         }
 
+        // Count addresses, like the Status page, and name the listed ones
+        const hosts = data.hosts || [];
+        const listedHosts = hosts.filter(h => h.status === 'listed');
         const value = {
-            listed: `<b class="ui-text-fail">Listed on ${data.listed_count} of ${data.total_blacklists}</b>`,
+            listed: `<b class="ui-text-fail">${listedHosts.length || data.hosts_listed || 1} of ${hosts.length || 1} listed</b>`,
             error: '<b class="ui-text-warn">! Check Error</b>',
-            clean: `<b class="ui-text-ok">Clean on ${data.total_blacklists}</b>`,
+            clean: `<b class="ui-text-ok">Clean</b>`,
             unknown: '<b class="ui-muted">Unknown</b>'
         }[data.status] || `<b class="ui-muted">${escapeHtml(String(data.status))}</b>`;
 
-        const where = (data.hosts_total || 0) > 1
-            ? `Hosts Listed ${data.hosts_listed}/${data.hosts_total}`
-            : ((data.hosts && data.hosts[0] && data.hosts[0].hostname) || data.server_ip || '');
-        const checked = data.checked_at ? `Last Check ${new Date(data.checked_at).toLocaleString()}` : '';
+        const where = listedHosts.length
+            ? listedHosts.map(h => `${h.hostname} on ${h.listed_count} of ${h.total_blacklists || '?'} lists`).join(', ')
+            : (hosts.length > 1 ? `${hosts.length} addresses checked` : ((hosts[0] && hosts[0].hostname) || data.server_ip || ''));
+        const checked = data.checked_at ? `checked ${formatAgo(data.checked_at)}` : '';
         container.innerHTML = `
             <div class="ui-kv"><span>Blocklists</span>${value}</div>
             ${where || checked ? `<p class="ui-kv-note">${escapeHtml([where, checked].filter(Boolean).join(', '))}</p>` : ''}`;
@@ -4197,10 +4232,10 @@ function renderBlacklistStatus(data) {
         return;
     }
 
+    // Addresses on at least one list, out of the checked addresses (same as the dashboard)
     const withData = data.hosts.filter(host => host.has_data);
-    const listed = data.hosts.reduce((sum, host) => sum + (host.listed_count || 0), 0);
-    const lists = Math.max(0, ...data.hosts.map(host => host.total_blacklists || 0));
-    setStatusKpi('status-kpi-blocklists', withData.length ? `${listed} of ${lists}` : '-', listed > 0 ? 'fail' : '');
+    const listed = withData.filter(host => (host.listed_count || 0) > 0).length;
+    setStatusKpi('status-kpi-blocklists', withData.length ? `${listed} of ${withData.length}` : '-', listed > 0 ? 'fail' : '');
 
     // Preserve which hosts show all their lists
     const openStates = {};
