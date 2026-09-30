@@ -38,6 +38,7 @@ Click a domain to see:
 - **Top Sending Sources**: Most active IP addresses
 - **Compliance Summary**: Pass/fail statistics
 - **Policy Effectiveness**: How well your DMARC policy is working
+- **TLS Reports**: TLS-RPT reports for the domain, with the TLS-RPT record check at the top (see below)
 
 #### 3. Individual Report Details
 Click a specific report to view:
@@ -189,6 +190,21 @@ If the receiving domain handles reports for many different domains, or if you pr
 
 *Note: Not all DNS provider support wildcard records. use Cloudflare / Route53.*
 
+### 4. TLS Reports (TLS-RPT)
+
+TLS-RPT reports (RFC 8460) tell you whether other mail servers could connect to yours over TLS, and why they failed when they could not. They matter most when the domain uses MTA-STS or DANE, because a TLS failure then means mail is not delivered.
+
+To receive them, create a **TXT** record at the `_smtp._tls` subdomain (e.g., `_smtp._tls.example.com`):
+
+```text
+v=TLSRPTv1; rua=mailto:dmarc@example.net
+```
+
+* **`rua=`**: Where reports are sent. Use the mailbox configured under **Settings → DMARC IMAP**; the same sync imports DMARC and TLS reports. Senders deliver only to `mailto:` and `https:` addresses.
+* Publish exactly one such record. Senders ignore the domain when there is more than one.
+
+The reports appear in the **TLS Reports** tab of the domain. The **TLS-RPT Record** card at the top of that tab shows whether the record is published and where reports go. A change to the record triggers a DNS change alert, like the other records.
+
 ---
 
 ## Best Practices
@@ -221,6 +237,7 @@ When using email services (marketing, support desk, etc.):
 
 ### No Reports Appearing
 - **Check DMARC Record**: Verify `rua=` tag has correct email
+- **No TLS reports**: Check the TLS-RPT Record card on the TLS Reports tab; without a `_smtp._tls` record no TLS reports are sent
 - **Wait**: Reports can take 24-48 hours to arrive
 - **Email Access**: Ensure reporting email is accessible
 

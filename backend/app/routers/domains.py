@@ -1641,9 +1641,108 @@ async def check_mta_sts_record(domain: str) -> Dict[str, Any]:
         }
 
 
+_TLS_RPT_VERSION = re.compile(r'^v\s*=\s*tlsrptv1\s*(;|$)', re.IGNORECASE)
+
+
+def parse_tls_rpt_record(record: str) -> Dict[str, Any]:
+    """Split a TLS-RPT record (RFC 8460) into its report URIs.
+
+    rua holds a comma-separated list; senders deliver to mailto: and https:
+    URIs only, so anything else is returned as unsupported.
+    """
+    rua = None
+    for part in record.split(';'):
+        key, sep, value = part.partition('=')
+        if sep and key.strip().lower() == 'rua':
+            rua = value
+            break
+    uris = [u.strip() for u in (rua or '').split(',') if u.strip()]
+    supported = [u for u in uris if re.match(r'^(mailto:\S+@\S+|https://\S+)$', u, re.IGNORECASE)]
+    return {
+        'report_uris': supported,
+        'unsupported_uris': [u for u in uris if u not in supported],
+    }
+
+
+async def check_tls_rpt_record(domain: str) -> Dict[str, Any]:
+    """
+    Check the TLS-RPT record (RFC 8460) at _smtp._tls.<domain>: the address
+    that sending servers deliver their TLS reports to.
+
+    Returns the same shape as the other checks (status/message/record/warnings)
+    plus report_uris. TLS-RPT is optional, so a domain without it is a warning
+    whose message carries the "not published" marker used by change detection.
+    """
+    try:
+        records = []
+        try:
+            answers = await resolve_dns_with_fallback(f'_smtp._tls.{domain}', 'TXT', timeout=5)
+            for rdata in answers:
+                txt = ''.join(
+                    s.decode() if isinstance(s, bytes) else str(s)
+                    for s in getattr(rdata, 'strings', [])
+                ) or str(rdata).strip('"')
+                if _TLS_RPT_VERSION.match(txt.strip()):
+                    records.append(txt.strip())
+        except (dns.resolver.NXDOMAIN, dns.resolver.NoAnswer):
+            pass
+
+        if not records:
+            return {
+                'status': 'warning',
+                'message': 'TLS-RPT record not published',
+                'record': None,
+                'report_uris': [],
+                'warnings': [],
+                'info': [f'Publish a TXT record at _smtp._tls.{domain} with a rua address '
+                         'to receive TLS reports from sending servers'],
+            }
+
+        if len(records) > 1:
+            return {
+                'status': 'error',
+                'message': f'{len(records)} TLS-RPT records published - senders ignore them unless there is exactly one',
+                'record': '; '.join(records),
+                'report_uris': [],
+                'warnings': [],
+            }
+
+        record = records[0]
+        parsed = parse_tls_rpt_record(record)
+        warnings = [f'Senders only deliver to mailto: and https: addresses, not {uri}'
+                    for uri in parsed['unsupported_uris']]
+
+        if not parsed['report_uris']:
+            return {
+                'status': 'error',
+                'message': 'TLS-RPT record has no valid rua address - no reports will be sent',
+                'record': record,
+                'report_uris': [],
+                'warnings': warnings,
+            }
+
+        return {
+            'status': 'success',
+            'message': 'TLS-RPT configured',
+            'record': record,
+            'report_uris': parsed['report_uris'],
+            'warnings': warnings,
+        }
+
+    except Exception as e:
+        logger.error(f"Error checking TLS-RPT for {domain}: {e}")
+        return {
+            'status': 'unknown',
+            'message': 'Could not check TLS-RPT record. Check the application logs.',
+            'record': None,
+            'report_uris': [],
+            'warnings': [],
+        }
+
+
 async def check_domain_dns(domain: str, spf_source_ips: Optional[List[Dict[str, str]]] = None) -> Dict[str, Any]:
     """
-    Check all DNS records (SPF, DKIM, DMARC, DNSSEC, TLSA/DANE, MTA-STS) for a domain
+    Check all DNS records (SPF, DKIM, DMARC, DNSSEC, TLSA/DANE, MTA-STS, TLS-RPT) for a domain
 
     Args:
         domain: Domain name to check
@@ -1656,13 +1755,15 @@ async def check_domain_dns(domain: str, spf_source_ips: Optional[List[Dict[str, 
     """
     try:
         # Run all checks in parallel
-        spf_result, dkim_result, dmarc_result, dnssec_result, tlsa_result, mta_sts_result = await asyncio.gather(
+        (spf_result, dkim_result, dmarc_result, dnssec_result, tlsa_result, mta_sts_result,
+         tls_rpt_result) = await asyncio.gather(
             check_spf_record(domain, spf_source_ips),
             check_dkim_record(domain),
             check_dmarc_record(domain),
             check_dnssec_record(domain),
             check_tlsa_record(domain),
-            check_mta_sts_record(domain)
+            check_mta_sts_record(domain),
+            check_tls_rpt_record(domain)
         )
 
         return {
@@ -1673,6 +1774,7 @@ async def check_domain_dns(domain: str, spf_source_ips: Optional[List[Dict[str, 
             'dnssec': dnssec_result,
             'tlsa': tlsa_result,
             'mta_sts': mta_sts_result,
+            'tls_rpt': tls_rpt_result,
             'checked_at': format_datetime_for_api(datetime.now(timezone.utc))
         }
         
@@ -1827,6 +1929,7 @@ def detect_dns_changes(previous: Optional[DomainDNSCheck],
         ('dmarc', 'DMARC', 'dmarc_check'),
         ('tlsa', 'TLSA (DANE)', 'tlsa_check'),
         ('mta_sts', 'MTA-STS', 'mta_sts_check'),
+        ('tls_rpt', 'TLS-RPT', 'tls_rpt_check'),
     ):
         old_check = getattr(previous, column, None)
         new_check = dns_data.get(key)
@@ -1924,6 +2027,7 @@ async def save_dns_check_to_db(db: Session, domain_name: str, dns_data: Dict[str
             existing.dnssec_check = dns_data.get('dnssec')
             existing.tlsa_check = dns_data.get('tlsa')
             existing.mta_sts_check = dns_data.get('mta_sts')
+            existing.tls_rpt_check = dns_data.get('tls_rpt')
             existing.checked_at = checked_at
             existing.updated_at = checked_at
             existing.is_full_check = is_full_check
@@ -1936,6 +2040,7 @@ async def save_dns_check_to_db(db: Session, domain_name: str, dns_data: Dict[str
                 dnssec_check=dns_data.get('dnssec'),
                 tlsa_check=dns_data.get('tlsa'),
                 mta_sts_check=dns_data.get('mta_sts'),
+                tls_rpt_check=dns_data.get('tls_rpt'),
                 checked_at=checked_at,
                 is_full_check=is_full_check
             )
@@ -1988,6 +2093,7 @@ def get_cached_dns_check(db: Session, domain_name: str) -> Dict[str, Any]:
                 'dnssec': _public_cached_dns_result(cached.dnssec_check),
                 'tlsa': _public_cached_dns_result(cached.tlsa_check),
                 'mta_sts': _public_cached_dns_result(cached.mta_sts_check),
+                'tls_rpt': _public_cached_dns_result(cached.tls_rpt_check),
                 'checked_at': format_datetime_for_api(cached.checked_at) if cached.checked_at else None
             }
         return None

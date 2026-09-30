@@ -104,7 +104,7 @@ When you expand a domain, the DNS Security section shows:
 - Time of last validation
 
 ### DNS Change Alerts
-When a scheduled or manual check finds that a domain's SPF, DKIM, DMARC, TLSA or MTA-STS record has **changed** since the previous check, an alert is sent by email and to your notification destinations (alert type "DNS record changes").
+When a scheduled or manual check finds that a domain's SPF, DKIM, DMARC, TLSA, MTA-STS or TLS-RPT record has **changed** since the previous check, an alert is sent by email and to your notification destinations (alert type "DNS record changes").
 The same alert is sent when DNSSEC stops validating for a domain that was validated before, and when a DNSSEC-validated TLSA record stops matching the certificate of an MX host.
 - Only definite changes trigger an alert: a value that is present and different, or a record that verifiably disappeared
 - Failed lookups and timeouts are ignored, so a DNS hiccup never fires a false alarm

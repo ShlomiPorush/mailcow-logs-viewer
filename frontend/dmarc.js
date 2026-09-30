@@ -16,6 +16,7 @@ let dmarcState = {
     currentReportDate: null,
     currentSourceIp: null,
     chartInstance: null,
+    tlsRptRecord: null, // TLS-RPT DNS check of the current domain, shown on the TLS Reports sub-tab
     // Breadcrumb tracking: { label: string, action: function or null }
     breadcrumb: [],
     detailType: null // 'report', 'source', 'tls'
@@ -482,6 +483,7 @@ async function loadDomainOverview(domain, updateUrl = true) {
         const data = await response.json();
         const totals = data.totals || {};
         const dmarcRecord = data.dmarc_record || null;
+        dmarcState.tlsRptRecord = data.tls_rpt_record || null;
 
         // Build DMARC Record card HTML (status + settings from DNS). Card and policy colors by policy level.
         const dmarcRecordCardHtml = (() => {
@@ -791,6 +793,34 @@ function dmarcSwitchSubTab(tab) {
     }
 }
 
+// TLS-RPT Record card: where sending servers deliver TLS reports (the _smtp._tls
+// record). Same recipe as the DMARC Record card; card color follows the check status.
+function renderTlsRptRecordCard(record) {
+    if (!record) return '';
+    const cardColors = { success: 'border-green-500 bg-green-50 dark:bg-green-900/20', warning: 'border-amber-500 bg-amber-50 dark:bg-amber-900/20', error: 'border-red-500 bg-red-50 dark:bg-red-900/20', unknown: 'border-gray-300 bg-gray-50 dark:bg-gray-800' };
+    const textColors = { success: 'text-green-700 dark:text-green-400', warning: 'text-amber-700 dark:text-amber-400', error: 'text-red-700 dark:text-red-400', unknown: 'text-gray-600 dark:text-gray-400' };
+    const status = cardColors[record.status] ? record.status : 'unknown';
+    // Report URIs come from DNS: only mailto: becomes a link, anything else stays text
+    const formatUri = (uri) => {
+        const text = String(uri).trim();
+        if (!/^mailto:/i.test(text)) return escapeHtml(text);
+        return `<a href="${escapeHtml(text)}" class="text-blue-600 dark:text-blue-400 hover:underline break-all">${escapeHtml(text.replace(/^mailto:/i, ''))}</a>`;
+    };
+    const uris = Array.isArray(record.report_uris) ? record.report_uris : [];
+    const urisRow = uris.length ? `<div class="overflow-x-auto"><table class="w-full text-left"><tbody><tr class="border-b border-gray-100 dark:border-gray-700"><td class="py-1.5 pr-3 text-xs font-medium text-gray-500 dark:text-gray-400">Report addresses (rua)</td><td class="py-1.5 text-xs text-gray-900 dark:text-gray-200 break-all">${uris.map(formatUri).join(', ')}</td></tr></tbody></table></div>` : '';
+    const notes = (items, color) => (Array.isArray(items) && items.length) ? `<div class="mt-3 space-y-1">${items.map(n => `<div class="flex items-start gap-2 text-xs ${color}"><span>${escapeHtml(n)}</span></div>`).join('')}</div>` : '';
+    return `
+        <div class="mb-6 border ${cardColors[status]} rounded-lg p-4">
+            <h3 class="text-sm font-semibold text-gray-900 dark:text-white mb-2">TLS-RPT Record</h3>
+            <p class="text-sm ${textColors[status]} font-medium mb-3">${escapeHtml(record.message || 'No information')}</p>
+            ${urisRow}
+            ${record.record ? `<details class="mt-3"><summary class="text-xs text-gray-600 dark:text-gray-400 cursor-pointer hover:text-gray-900 dark:hover:text-gray-200 font-medium">View Record</summary><div class="mt-2 p-2 bg-white dark:bg-gray-900 rounded border border-gray-200 dark:border-gray-700"><code class="text-xs text-gray-700 dark:text-gray-300 break-all block leading-relaxed">${escapeHtml(record.record)}</code></div></details>` : ''}
+            ${notes(record.warnings, textColors.error)}
+            ${notes(record.info, textColors.unknown)}
+        </div>
+    `;
+}
+
 async function loadDomainTLSReports(domain) {
     const tlsList = document.getElementById('dmarc-tls-list');
     if (!tlsList) return;
@@ -804,8 +834,10 @@ async function loadDomainTLSReports(domain) {
         const dailyReports = data.data || [];
         const totals = data.totals || {};
 
+        const recordCardHtml = renderTlsRptRecordCard(dmarcState.tlsRptRecord);
+
         if (dailyReports.length === 0) {
-            tlsList.innerHTML = `
+            tlsList.innerHTML = `${recordCardHtml}
                 <div class="text-center py-12">
                     <svg class="w-12 h-12 mx-auto text-gray-400 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path>
@@ -820,7 +852,7 @@ async function loadDomainTLSReports(domain) {
         const successRate = totals.overall_success_rate || 100;
         const successColor = successRate >= 95 ? 'text-green-500' : successRate >= 80 ? 'text-yellow-500' : 'text-red-500';
 
-        tlsList.innerHTML = `
+        tlsList.innerHTML = `${recordCardHtml}
             <!-- TLS Summary -->
             <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
                 <div class="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-4 text-center">

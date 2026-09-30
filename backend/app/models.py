@@ -216,6 +216,7 @@ class DomainDNSCheck(Base):
     dnssec_check = Column(JSONB)    # DNSSEC validation of the domain
     tlsa_check = Column(JSONB)      # DANE/TLSA records for the domain's MX hosts
     mta_sts_check = Column(JSONB)   # MTA-STS record + policy (RFC 8461)
+    tls_rpt_check = Column(JSONB)   # TLS-RPT reporting record (RFC 8460)
     
     checked_at = Column(DateTime, nullable=False)
     is_full_check = Column(Boolean, default=False)
