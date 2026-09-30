@@ -92,3 +92,17 @@ def test_each_facet_ignores_its_own_filter(client):
     # Outcome counts keep the direction filter, direction counts keep the outcome filter
     assert facets['status']['all'] == 1 and facets['status']['delivered'] == 1
     assert facets['direction']['all'] == 1 and facets['direction']['outbound'] == 1
+
+
+def test_time_ranges_are_counted(client):
+    _add('delivered', 'inbound', minutes_ago=5)
+    _add('delivered', 'inbound', minutes_ago=60 * 24 * 3)
+    _add('delivered', 'outbound', minutes_ago=60 * 24 * 40)
+    now = datetime.utcnow()
+    since = [f"day:{(now - timedelta(days=1)).isoformat()}Z", f"week:{(now - timedelta(days=7)).isoformat()}Z", 'bad key:x', 'x:not-a-date']
+    facets = client.get('/api/messages/facets', params={'sender': MARKER, 'since': since}).json()
+    assert facets['time'] == {'all': 3, 'day': 1, 'week': 2}
+    # A chosen date range does not narrow the time counts
+    dated = client.get('/api/messages/facets', params={'sender': MARKER, 'since': since,
+                                                       'start_date': (now - timedelta(days=1)).isoformat()}).json()
+    assert dated['time']['all'] == 3

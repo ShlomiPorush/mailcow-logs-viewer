@@ -8,7 +8,8 @@ from fastapi import APIRouter, Depends, Query, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import or_, and_, desc, func, select
 from datetime import datetime, timedelta, timezone
-from typing import Optional
+import re
+from typing import List, Optional
 
 from ..database import get_db
 from ..models import MessageCorrelation, PostfixLog, RspamdLog, NetfilterLog, RawServiceLog
@@ -271,10 +272,13 @@ def get_message_facets(
     ip: Optional[str] = Query(None),
     start_date: Optional[datetime] = Query(None),
     end_date: Optional[datetime] = Query(None),
+    since: List[str] = Query([], description="Time ranges to count, as name:ISO-start (e.g. today:2026-09-27T00:00:00Z)"),
     db: Session = Depends(get_db)
 ):
     """
     Message counts per outcome and per direction for the Messages facets.
+    With since=name:start pairs it also counts each time range (every other
+    filter applies, the chosen date range does not).
 
     Each outcome count applies every filter except the outcome itself, and each
     direction count every filter except the direction, so the numbers say what
@@ -291,10 +295,24 @@ def get_message_facets(
             value: _count_messages(_filtered_messages_query(db, direction=value, status=status, **common))
             for value in FACET_DIRECTIONS
         }
-        return {
+        result = {
             "status": {"all": _count_messages(_filtered_messages_query(db, direction=direction, **common)), **by_status},
             "direction": {"all": _count_messages(_filtered_messages_query(db, status=status, **common)), **by_direction},
         }
+        if since:
+            undated = dict(search=search, sender=sender, recipient=recipient, user=user, ip=ip)
+            by_time = {"all": _count_messages(_filtered_messages_query(db, direction=direction, status=status, **undated))}
+            for item in since[:8]:
+                name, _, iso = item.partition(':')
+                if not re.fullmatch(r'[a-z0-9]{1,16}', name):
+                    continue
+                try:
+                    start = datetime.fromisoformat(iso.replace('Z', '+00:00'))
+                except ValueError:
+                    continue
+                by_time[name] = _count_messages(_filtered_messages_query(db, direction=direction, status=status, start_date=start, **undated))
+            result["time"] = by_time
+        return result
     except Exception as e:
         logger.error(f"Error counting message facets: {e}")
         raise internal_error(e)
