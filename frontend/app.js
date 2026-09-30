@@ -482,7 +482,7 @@ function placeShellUtilities() {
     if (window.matchMedia('(max-width: 760px)').matches) {
         if (tools.parentNode !== phoneSlot) phoneSlot.appendChild(tools);
     } else if (tools.parentNode !== foot) {
-        foot.insertBefore(tools, document.getElementById('container-logs-modal'));
+        foot.appendChild(tools);
     }
 }
 
