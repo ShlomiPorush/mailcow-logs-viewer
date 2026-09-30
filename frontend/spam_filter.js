@@ -23,6 +23,7 @@ function loadSpamFilter() {
 
 function spamFilterSwitchSubTab(tab) {
     spamFilterSubTab = tab;
+    routerSyncSubpage('spam-filter', tab);
     
     // Update sub-tab buttons
     document.querySelectorAll('[id^="spam-subtab-"]').forEach(btn => {
