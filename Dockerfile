@@ -50,6 +50,8 @@ ENTRYPOINT ["./entrypoint.sh"]
 # stage copies backend/demo, so the regular image never contains it.
 FROM base AS demo
 COPY --chown=appuser:appuser backend/demo/ /app/demo/
+# Help panels normally fetch these from GitHub; the demo serves them locally
+COPY --chown=appuser:appuser documentation/HelpDocs/ /app/demo/HelpDocs/
 # The asyncio loop matters: uvloop connects in C and would bypass the
 # Python-level network guard in demo/network_guard.py.
 ENV DEMO_MODE=true \
