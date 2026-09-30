@@ -68,8 +68,10 @@ function renderDomains(container, data) {
     const dnsCheckInfo = document.getElementById('dns-check-info');
     if (dnsCheckInfo) {
         const lastCheck = data.last_dns_check ? formatTime(data.last_dns_check) : 'Never';
+        // When the DNS was last checked sits on a line under the page title
+        const lastChecked = document.getElementById('domains-last-checked');
+        if (lastChecked) lastChecked.innerHTML = `<span title="${data.last_dns_check ? escapeHtml(formatTime(data.last_dns_check)) : ''}">Last checked: ${data.last_dns_check ? formatAgo(data.last_dns_check) : escapeHtml(lastCheck)}</span>`;
         dnsCheckInfo.innerHTML = `
-            <span class="ui-muted" title="${data.last_dns_check ? escapeHtml(formatTime(data.last_dns_check)) : ''}">Last checked: ${data.last_dns_check ? formatAgo(data.last_dns_check) : escapeHtml(lastCheck)}</span>
             <button id="check-all-dns-btn" onclick="checkAllDomainsDNS()" class="ui-btn ui-btn-primary">
                 <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
                 Check Now
@@ -91,6 +93,7 @@ function renderDomains(container, data) {
     }
 
     container.innerHTML = `
+        <div class="ui-panel ui-table-card">
         <section class="ui-panel ui-filters ui-domain-tools">
             <div class="ui-filters-row">
             <label class="ui-search ui-ms-search">
@@ -106,6 +109,7 @@ function renderDomains(container, data) {
         </section>
         <div id="domains-list" class="ui-table ui-stack ui-domain-table">
             ${renderDomainRows(domains)}
+        </div>
         </div>
     `;
 
@@ -185,7 +189,7 @@ function renderDomainAccordionRow(domain, open = false) {
             <div class="ui-td ui-q-who">
                 <div>
                     <svg id="${domainId}-icon-desktop" class="ui-domain-chevron" width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"${open ? ' style="transform: rotate(90deg)"' : ''}><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg>
-                    ${escapeHtml(domain.domain_name)}
+                    ${copyableText(domain.domain_name)}
                     ${domain.active ? '' : uiTag('Inactive', '')}
                 </div>
                 <small>${domain.mboxes_in_domain} mailboxes, ${domain.aliases_in_domain} aliases${issues ? ', needs a DNS change' : ''}</small>
@@ -238,7 +242,7 @@ function renderSpfCheckedIps(check) {
     const rows = checkedIps.map(entry => `
         <div class="ui-dns-ip">
             <div>
-                <code>${escapeHtml(entry.ip || '')}</code>
+                <code>${copyableText(entry.ip || '')}</code>
                 <small class="ui-muted">${escapeHtml(spfIpSourceLabel(entry.source))}</small>
             </div>
             ${entry.authorized ? uiTag('Authorized', 'ok') : uiTag('Not authorized', 'fail')}
@@ -261,7 +265,7 @@ function renderAliasDomain(aliasDomain) {
     return `
         <div class="ui-alias-domain">
             <button type="button" class="ui-alias-head" onclick="document.getElementById('${detailsId}').classList.toggle('hidden')">
-                <span><b>${escapeHtml(aliasDomain.domain_name)}</b> ${uiTag('alias', 'info')}</span>
+                <span><b>${copyableText(aliasDomain.domain_name)}</b> ${uiTag('alias', 'info')}</span>
                 <span class="ui-alias-checks">${checks.map(([label, check]) => `<span>${label} ${getAliasStatusIcon(check.status)}</span>`).join('')}</span>
             </button>
             <div id="${detailsId}" class="hidden ui-dns-grid">
@@ -289,8 +293,8 @@ function renderDNSCheck(type, check) {
                 <details class="ui-dns-more">
                     <summary>View Record</summary>
                     <div class="ui-dns-code">
-                        ${check.dkim_domain ? `<p><span class="ui-muted">Record Name:</span> <code>${escapeHtml(check.dkim_domain)}</code></p>` : ''}
-                        <code>${escapeHtml(check.record || check.actual_record)}</code>
+                        ${check.dkim_domain ? `<p><span class="ui-muted">Record Name:</span> <code>${copyableText(check.dkim_domain, 'ui-copy-wrap')}</code></p>` : ''}
+                        <code>${copyableText(check.record || check.actual_record, 'ui-copy-wrap')}</code>
                     </div>
                 </details>
             ` : ''}
@@ -312,7 +316,7 @@ function renderDNSCheck(type, check) {
             ${check.status === 'error' && check.expected_record ? `
                 <details class="ui-dns-more">
                     <summary>Expected Value</summary>
-                    <div class="ui-dns-code"><code>${escapeHtml(check.expected_record)}</code></div>
+                    <div class="ui-dns-code"><code>${copyableText(check.expected_record, 'ui-copy-wrap')}</code></div>
                 </details>
             ` : ''}
         </div>
