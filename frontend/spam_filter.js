@@ -93,6 +93,7 @@ async function loadRspamdMaps() {
             return;
         }
         
+        rspamdMapsCanSave = data.rw_key_configured !== false;
         renderRspamdMapsList(data.maps, data.rw_key_configured);
         
     } catch (error) {
@@ -100,6 +101,10 @@ async function loadRspamdMaps() {
         container.innerHTML = `<p class="ui-empty ui-text-fail">Failed to load maps: ${escapeHtml(error.message)}</p>`;
     }
 }
+
+// Saving a map needs the read-write mailcow API key; without it the editor only shows the map
+let rspamdMapsCanSave = true;
+const RSPAMD_MAPS_READONLY_TEXT = '<code>MAILCOW_API_KEY_RW</code> is not configured, so maps can be viewed but not saved. Add a read-write mailcow API key in Settings → Mailcow → Connection.';
 
 function renderRspamdMapsList(maps, rwKeyConfigured) {
     const container = document.getElementById('rspamd-maps-list');
@@ -148,7 +153,7 @@ function renderRspamdMapsList(maps, rwKeyConfigured) {
     }
 
     if (!rwKeyConfigured) {
-        html = `<div class="ui-list-note ui-flush">${uiLocked('Read-Only Mode', '<code>MAILCOW_API_KEY_RW</code> is not configured. You can view maps but cannot save changes.')}</div>` + html;
+        html = `<div class="ui-list-note ui-flush">${uiLocked('Read-Only Mode', RSPAMD_MAPS_READONLY_TEXT)}</div>` + html;
     }
 
     container.innerHTML = html;
@@ -165,6 +170,7 @@ async function openMapEditor(filename) {
 
         const data = await response.json();
         const meta = data.metadata || {};
+        const canSave = rspamdMapsCanSave;
 
         container.innerHTML = `
             <div class="ui-list-head">
@@ -184,7 +190,7 @@ async function openMapEditor(filename) {
                     </div>
                 </div>
                 <div class="ui-map-body">
-                    ${meta.supports_regex ? `
+                    ${meta.supports_regex && canSave ? `
                         <div>
                             <button onclick="toggleRegexWizard()" id="regex-wizard-toggle" class="ui-btn ui-btn-sm">+ Regex Wizard</button>
                             <div id="regex-wizard-panel" class="hidden ui-wizard">
@@ -216,17 +222,19 @@ async function openMapEditor(filename) {
                             </div>
                         </div>
                     ` : ''}
-                    <textarea id="map-editor-content" class="ui-textarea ui-map-editor"
-                        placeholder="Enter entries, one per line..."
+                    <textarea id="map-editor-content" class="ui-textarea ui-map-editor"${canSave ? '' : ' readonly aria-readonly="true"'}
+                        placeholder="${canSave ? 'Enter entries, one per line...' : 'This map is empty.'}"
                         oninput="onMapContentChange('${escapeJsArg(filename)}')">${escapeHtml(data.content || '')}</textarea>
                     <div id="map-validation-errors" class="hidden ui-map-errors"></div>
                     <div class="ui-map-foot">
                         <p class="ui-muted">Lines starting with # are comments. Empty lines are ignored.</p>
+                        ${canSave ? `
                         <div class="ui-row-actions">
                             <button onclick="validateMapContent('${escapeJsArg(filename)}')" class="ui-btn">Validate</button>
                             <button onclick="saveMapContent('${escapeJsArg(filename)}')" id="map-save-btn" class="ui-btn ui-btn-primary">Save Changes</button>
-                        </div>
+                        </div>` : ''}
                     </div>
+                    ${canSave ? '' : uiLocked('Read-Only Mode', RSPAMD_MAPS_READONLY_TEXT)}
                 </div>
             </section>
         `;
