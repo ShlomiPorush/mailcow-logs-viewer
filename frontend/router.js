@@ -234,7 +234,7 @@ const TAB_LABELS = {
     'quarantine': 'Quarantine',
     'status': 'Status',
     'domains': 'Domains',
-    'dmarc': 'DMARC',
+    'dmarc': 'DMARC & TLS',
     'mailbox-stats': 'Mailbox Stats',
     'logs': 'Logs',
     'settings': 'Settings',

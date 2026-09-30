@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **DNSSEC and DANE checks** - The Domains page shows whether each domain is DNSSEC validated, and whether DANE actually works: TLSA records must be DNSSEC validated and match the certificate each mail server presents. A TLSA record that stops matching the certificate triggers a DNS change alert. [#287](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/287). Thanks to [@Neocridas](https://github.com/Neocridas).
+- **TLS-RPT record check** - The DMARC page is now called **DMARC & TLS**, and each domain shows a TLS-RPT Record card next to the DMARC Record card: whether the domain publishes a TLS-RPT record and where TLS reports are sent, so a missing or broken record explains why no reports arrive. A change to the record triggers a DNS change alert. [#328](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/328). Thanks to [@homonto](https://github.com/homonto).
 
 ### Security
 

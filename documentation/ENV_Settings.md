@@ -115,7 +115,7 @@ You can add as many destinations as you like, and choose **which alerts each one
 |------------|-----------|
 | **Security** | A mailbox looks compromised (outbound spike), an authentication attack is detected, or SMTP is disabled by abuse protection |
 | **IP blacklist** | Your server IP appears on a spam blacklist, or is no longer listed |
-| **DNS record changes** | A domain's SPF, DKIM, DMARC, TLSA or MTA-STS record changed, DNSSEC stopped validating, or a TLSA record no longer matches the mail server certificate |
+| **DNS record changes** | A domain's SPF, DKIM, DMARC, TLSA, MTA-STS or TLS-RPT record changed, DNSSEC stopped validating, or a TLSA record no longer matches the mail server certificate |
 | **DMARC processing errors** | A DMARC report could not be imported or parsed |
 
 A destination with all types ticked receives everything. Destinations created before this existed keep receiving all alerts.
@@ -178,7 +178,7 @@ Automatically disables **sending** for a mailbox that exceeds a hard outbound li
 
 | Variable | Type | Default | Description |
 |----------|------|---------|-------------|
-| `DNS_CHANGE_ALERTS_ENABLED` | boolean | `true` | Alert when a domain's SPF, DKIM, DMARC, TLSA or MTA-STS record changes, when DNSSEC stops validating, or when a TLSA record no longer matches the mail server certificate. The alert names the domain and shows the old and new value, so you can update the records at your registrar. A failed DNS lookup is never treated as a change, so a temporary resolver problem cannot cause a false alarm |
+| `DNS_CHANGE_ALERTS_ENABLED` | boolean | `true` | Alert when a domain's SPF, DKIM, DMARC, TLSA, MTA-STS or TLS-RPT record changes, when DNSSEC stops validating, or when a TLSA record no longer matches the mail server certificate. The alert names the domain and shows the old and new value, so you can update the records at your registrar. A failed DNS lookup is never treated as a change, so a temporary resolver problem cannot cause a false alarm |
 | `BLACKLIST_DNS_SERVERS` | string | (empty) | DNS resolvers used for IP blacklist (RBL) lookups, comma-separated. **Spamhaus rejects queries that arrive through public resolvers** (Google, Cloudflare, Quad9 and all DoH endpoints) and answers with a `127.255.255.x` rejection code instead of a real result. Point this at your own recursive resolver - in a mailcow deployment: `172.22.1.254` (unbound-mailcow). Leave empty to use the container's own resolver, which is correct in most setups |
 | `BLACKLIST_SOURCE_SERVER_IP` | boolean | `true` | Monitor the auto-detected WAN IP (reported by the mailcow status API) on spam blacklists (RBLs). Set to `false` when outbound mail goes through a relay host: the auto-detected WAN entry is deactivated (not deleted) and only the other enabled sources are monitored |
 | `BLACKLIST_SOURCE_TRANSPORTS` | boolean | `true` | Monitor the public IPs of active mailcow transports on spam blacklists. Each transport nexthop is resolved to **all** of its public IPs, so relay pools with several addresses are fully covered |
@@ -213,7 +213,7 @@ Which sending IPs must pass each domain's SPF record on the Domains page. With a
 
 ### DMARC Insights (Policy Recommendations)
 
-Turns collected DMARC report data into advice: when a domain's pass rate and volume are healthy under a lax policy, the DMARC page suggests tightening it (`p=none` → `p=quarantine` → `p=reject`), and it flags source IPs that only recently started sending for a domain **and** are failing DMARC (possible spoofing).
+Turns collected DMARC report data into advice: when a domain's pass rate and volume are healthy under a lax policy, the DMARC & TLS page suggests tightening it (`p=none` → `p=quarantine` → `p=reject`), and it flags source IPs that only recently started sending for a domain **and** are failing DMARC (possible spoofing).
 
 | Variable | Type | Default | Description |
 |----------|------|---------|-------------|
@@ -221,7 +221,7 @@ Turns collected DMARC report data into advice: when a domain's pass rate and vol
 | `DMARC_INSIGHTS_PASS_THRESHOLD` | float | `99.5` | Minimum DMARC pass rate (%) before a stricter policy is recommended |
 | `DMARC_INSIGHTS_MIN_VOLUME` | integer | `100` | Minimum reported messages in the window before any recommendation is made (avoids advice based on a handful of messages) |
 
-> Read-only: this feature never changes DNS records - it only shows recommendations on the DMARC page.
+> Read-only: this feature never changes DNS records - it only shows recommendations on the DMARC & TLS page.
 
 ### DMARC IMAP Auto-Import Configuration
 

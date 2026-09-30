@@ -3770,6 +3770,8 @@ Get detailed overview for a specific domain with daily breakdown.
 - `dkim_pass_pct`: DKIM pass rate
 - `policy`: Published DMARC policy object
 - `daily_stats`: Array of daily statistics
+- `dmarc_record`: DNS check of the domain's DMARC record (`status`, `message`, `record`, `policy`, `settings`, `warnings`)
+- `tls_rpt_record`: DNS check of the domain's TLS-RPT record at `_smtp._tls` (`status`, `message`, `record`, `report_uris`, `warnings`). Both come from the cached DNS check, or a live lookup when none is cached
 
 **Policy Object:**
 - `p`: Domain policy (none, quarantine, reject)
@@ -5874,7 +5876,7 @@ Field specification per service type - used by the settings UI to render only th
   "alert_types": [
     {"id": "security", "label": "Security", "description": "Compromised mailbox detected, authentication attacks, SMTP disabled by abuse protection"},
     {"id": "blacklist", "label": "IP blacklist", "description": "Your server IP was listed on a spam blacklist, or is listed no more"},
-    {"id": "dns_changes", "label": "DNS record changes", "description": "A domain SPF, DKIM, DMARC, TLSA or MTA-STS record changed, DNSSEC stopped validating, or DANE broke"},
+    {"id": "dns_changes", "label": "DNS record changes", "description": "A domain SPF, DKIM, DMARC, TLSA, MTA-STS or TLS-RPT record changed, DNSSEC stopped validating, or DANE broke"},
     {"id": "dmarc_errors", "label": "DMARC processing errors", "description": "A DMARC report could not be imported or parsed"}
   ]
 }

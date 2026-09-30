@@ -246,7 +246,7 @@ var SETTINGS_FIELD_DESCRIPTIONS = {
     rspamd_url: 'Address of the Rspamd controller. Leave empty to reach it through mailcow itself (mailcow URL + /rspamd) - correct for most setups, including when this app runs on a different server. Only set it if this app can reach Rspamd directly on the network and the path through mailcow fails (for example a 302 from a reverse proxy). Same Docker network as mailcow: http://rspamd-mailcow:11334',
 
     // DNS change alerts
-    dns_change_alerts_enabled: 'Alert when a domain SPF, DKIM, DMARC, TLSA or MTA-STS record changes, when DNSSEC stops validating, or when a TLSA record no longer matches the mail server certificate, so you can update the records at your registrar. The alert names the domain and shows the old and new value. A failed DNS lookup never counts as a change.',
+    dns_change_alerts_enabled: 'Alert when a domain SPF, DKIM, DMARC, TLSA, MTA-STS or TLS-RPT record changes, when DNSSEC stops validating, or when a TLSA record no longer matches the mail server certificate, so you can update the records at your registrar. The alert names the domain and shows the old and new value. A failed DNS lookup never counts as a change.',
 
     // Blacklist checks
     blacklist_dns_servers: 'DNS resolvers used for blacklist (RBL) lookups, comma-separated. Spamhaus rejects queries coming from public resolvers (Google, Cloudflare, Quad9), so this should be your own resolver - in a mailcow setup: 172.22.1.254. Leave empty to use the container default.',

@@ -24,7 +24,7 @@ from ..services.dmarc_cache import (
 )
 from ..config import settings
 from ..scheduler import update_job_status
-from .domains import get_cached_dns_check, check_dmarc_record, parse_dmarc_record_tags
+from .domains import get_cached_dns_check, check_dmarc_record, check_tls_rpt_record, parse_dmarc_record_tags
 from ..utils import internal_error
 
 logger = logging.getLogger(__name__)
@@ -424,30 +424,37 @@ def get_domains_list(
 
 @router.get("/dmarc/domains/{domain}/overview")
 async def get_domain_overview(domain: str, days: int = 30):
-    """Get daily domain statistics and cached or live DMARC DNS status."""
+    """Get daily domain statistics and cached or live DMARC and TLS-RPT DNS status."""
     try:
-        dmarc_record = await asyncio.to_thread(_load_overview_dns, domain)
+        dmarc_record, tls_rpt_record = await asyncio.to_thread(_load_overview_dns, domain)
         if dmarc_record is None:
             dmarc_record = await check_dmarc_record(domain)
-        return await asyncio.to_thread(_load_domain_overview, domain, days, dmarc_record)
+        if tls_rpt_record is None:
+            tls_rpt_record = await check_tls_rpt_record(domain)
+        return await asyncio.to_thread(_load_domain_overview, domain, days, dmarc_record, tls_rpt_record)
     except Exception as e:
         logger.error(f"Error fetching domain overview: {e}")
         raise internal_error(e)
 
 
 def _load_overview_dns(domain: str):
-    """Close the cache session before any live DNS lookup."""
+    """Close the cache session before any live DNS lookup.
+
+    Returns the cached (dmarc, tls_rpt) checks; either is None when not cached.
+    """
+    dmarc_record = tls_rpt_record = None
     with SessionLocal() as db:
-        dns_checks = get_cached_dns_check(db, domain)
-        if dns_checks and dns_checks.get('dmarc'):
-            record = dns_checks['dmarc'].copy()
-            if 'settings' not in record and record.get('record'):
-                record['settings'] = parse_dmarc_record_tags(record['record'])
-            return record
-    return None
+        dns_checks = get_cached_dns_check(db, domain) or {}
+        if dns_checks.get('dmarc'):
+            dmarc_record = dns_checks['dmarc'].copy()
+            if 'settings' not in dmarc_record and dmarc_record.get('record'):
+                dmarc_record['settings'] = parse_dmarc_record_tags(dmarc_record['record'])
+        if dns_checks.get('tls_rpt'):
+            tls_rpt_record = dns_checks['tls_rpt']
+    return dmarc_record, tls_rpt_record
 
 
-def _load_domain_overview(domain: str, days: int, dmarc_record: dict):
+def _load_domain_overview(domain: str, days: int, dmarc_record: dict, tls_rpt_record: dict):
     """Read and aggregate reports entirely within a worker-owned session."""
     with SessionLocal() as db:
         cutoff_timestamp = int((datetime.now() - timedelta(days=days)).timestamp())
@@ -471,7 +478,8 @@ def _load_domain_overview(domain: str, days: int, dmarc_record: dict):
                     'unique_ips': 0,
                     'unique_reporters': 0
                 },
-                'dmarc_record': dmarc_record
+                'dmarc_record': dmarc_record,
+                'tls_rpt_record': tls_rpt_record
             }
         
         latest_report = max(reports, key=lambda r: r.end_date)
@@ -540,7 +548,8 @@ def _load_domain_overview(domain: str, days: int, dmarc_record: dict):
                 'unique_ips': len(all_ips),
                 'unique_reporters': len(all_reporters)
             },
-            'dmarc_record': dmarc_record
+            'dmarc_record': dmarc_record,
+            'tls_rpt_record': tls_rpt_record
         }
 
 
