@@ -47,6 +47,7 @@ function initMailboxStatsPage() {
 
 
 function mailboxStatsSwitchView(view) {
+    const requested = view;
     const disabled = window.disabledFeatures || [];
     // The feature can be turned off while the Rate Limits view is open
     if (view === 'rate-limits' && disabled.includes('rate-limits')) {
@@ -60,6 +61,8 @@ function mailboxStatsSwitchView(view) {
         view = 'rate-limits';
     }
     mailboxStatsView = view;
+    // A view this page cannot show corrects the address instead of adding a Back step
+    routerSyncSubpage('mailbox-stats', view, view !== requested);
 
     document.querySelectorAll('[id^="mailbox-stats-view-"]').forEach(btn => {
         btn.classList.remove('active');

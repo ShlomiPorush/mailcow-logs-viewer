@@ -29,6 +29,47 @@ const ROUTE_DISPLAY = {
     'netfilter': 'security'
 };
 
+// Pages with tabs: every tab has its own address (/security/protection), so a
+// tab can be reloaded, shared and reached with Back. The first tab is the
+// page's own address. select() picks the tab before the page loads; show()
+// switches it on a page already open. tabs: null takes any section name.
+const SUBPAGES = {
+    netfilter: { tabs: ['overview', 'events', 'protection', 'fail2ban', 'abuse'], current: () => securityTab,
+        select: t => securityShowTab(t), show: t => securityShowTab(t) },
+    quarantine: { tabs: ['messages', 'rules'], current: () => quarantineTab,
+        select: t => quarantineShowTab(t), show: t => quarantineShowTab(t) },
+    status: { tabs: ['server', 'blocklists', 'jobs'], current: () => statusTab,
+        select: t => statusShowTab(t), show: t => statusShowTab(t) },
+    'spam-filter': { tabs: ['suppressions', 'maps'], current: () => spamFilterSubTab,
+        select: t => { spamFilterSubTab = t; }, show: t => spamFilterSwitchSubTab(t) },
+    'mailbox-stats': { tabs: ['statistics', 'rate-limits'], current: () => mailboxStatsView,
+        select: t => { mailboxStatsView = t; }, show: t => mailboxStatsSwitchView(t) },
+    settings: { tabs: null, first: 'about', current: () => settingsTab,
+        select: t => { settingsTab = t; }, show: t => { settingsTab = t; if (window.settingsShowTab) window.settingsShowTab(t); } }
+};
+
+function subpageFirst(route) {
+    const page = SUBPAGES[route];
+    return page.first || page.tabs[0];
+}
+
+function isSubpage(route, name) {
+    const page = SUBPAGES[route];
+    if (!page || !name) return false;
+    return page.tabs ? page.tabs.includes(name) : /^[a-z0-9-]+$/.test(name);
+}
+
+// A tab was opened on the page on screen: give it its address. While a page
+// loads (replace), the address is corrected instead of adding a Back step.
+function routerSyncSubpage(route, name, replace = false) {
+    if (typeof currentTab === 'undefined' || currentTab !== route || !SUBPAGES[route]) return;
+    const path = buildPath(route, { sub: name });
+    if (window.location.pathname === path) return;
+    const state = { route, params: { sub: name } };
+    if (replace) history.replaceState(state, '', path);
+    else history.pushState(state, '', path);
+}
+
 /**
  * Parse the current URL path into route components
  * @returns {Object} Route info with baseRoute and optional params
@@ -60,6 +101,12 @@ function parseRoute() {
     if (!VALID_ROUTES.includes(baseRoute)) {
         console.warn(`Unknown route: ${baseRoute}, defaulting to dashboard`);
         return { baseRoute: 'dashboard', params: {} };
+    }
+
+    // A tab of the page; an unknown one opens the page's first tab
+    if (SUBPAGES[baseRoute]) {
+        const sub = decodeURIComponent(segments[1] || '');
+        return { baseRoute, params: { sub: isSubpage(baseRoute, sub) ? sub : subpageFirst(baseRoute) } };
     }
 
     return { baseRoute, params: {} };
@@ -108,6 +155,11 @@ function buildPath(baseRoute, params = {}) {
     const urlSegment = ROUTE_DISPLAY[baseRoute] || baseRoute;
     let path = `/${urlSegment}`;
 
+    // A page's tab; the first tab is the page's own address
+    if (SUBPAGES[baseRoute] && params.sub && params.sub !== subpageFirst(baseRoute)) {
+        path += `/${encodeURIComponent(params.sub)}`;
+    }
+
     // Handle DMARC nested routes
     if (baseRoute === 'dmarc' && params.domain) {
         path += `/${encodeURIComponent(params.domain)}`;
@@ -145,6 +197,11 @@ function navigateTo(route, params = {}, updateHistory = true) {
     }
 
     // Note: disabled feature guard is in switchTab() which shows a "Feature Disabled" page
+
+    // A page with tabs opens on the tab it was left on
+    if (SUBPAGES[route] && !params.sub) {
+        params = { ...params, sub: SUBPAGES[route].current() };
+    }
 
     // Build the new path
     const newPath = buildPath(route, params);
@@ -413,6 +470,8 @@ window.getCurrentRoute = getCurrentRoute;
 window.getFullRoute = getFullRoute;
 window.parseRoute = parseRoute;
 window.buildPath = buildPath;
+window.SUBPAGES = SUBPAGES;
+window.routerSyncSubpage = routerSyncSubpage;
 window.initRouter = initRouter;
 window.VALID_ROUTES = VALID_ROUTES;
 window.toggleMobileMenu = toggleMobileMenu;
