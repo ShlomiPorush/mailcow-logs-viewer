@@ -306,6 +306,18 @@ def get_domains_list(
         # Add TLS-only domains
         all_domains.update(tls_domain_set)
 
+        # The first and last TLS report of each domain, for the TLS tab's activity period
+        tls_period = {
+            name: (first, last)
+            for name, first, last in db.query(
+                TLSReport.policy_domain, func.min(TLSReport.start_datetime), func.max(TLSReport.end_datetime)
+            ).group_by(TLSReport.policy_domain).all()
+        }
+
+        def tls_ts(domain, i):
+            value = tls_period.get(domain, (None, None))[i]
+            return int(value.timestamp()) if value else None
+
         # The TLS-RPT record result from the last DNS check, for the TLS tab;
         # None until the domain has been checked
         tls_rpt_status = {
@@ -374,11 +386,14 @@ def get_domains_list(
                     'has_dmarc': True,
                     'has_tls': domain in tls_domain_set,
                     'tls_rpt_status': tls_rpt_status.get(domain),
+                    'tls_first_report': tls_ts(domain, 0),
+                    'tls_last_report': tls_ts(domain, 1),
                     'stats_30d': {
                         'total_messages': total_msgs,
                         'unique_ips': stats.unique_ips or 0,
                         'dmarc_pass_pct': round((dmarc_pass / total_msgs * 100) if total_msgs > 0 else 0, 2),
-                        'tls_success_pct': tls_success_pct
+                        'tls_success_pct': tls_success_pct,
+                        'tls_sessions': tls_total
                     }
                 })
             else:
@@ -400,11 +415,14 @@ def get_domains_list(
                     'has_dmarc': False,
                     'has_tls': True,
                     'tls_rpt_status': tls_rpt_status.get(domain),
+                    'tls_first_report': tls_ts(domain, 0),
+                    'tls_last_report': tls_ts(domain, 1),
                     'stats_30d': {
                         'total_messages': 0,
                         'unique_ips': 0,
                         'dmarc_pass_pct': 0,
-                        'tls_success_pct': tls_success_pct
+                        'tls_success_pct': tls_success_pct,
+                        'tls_sessions': tls_total
                     }
                 })
         
