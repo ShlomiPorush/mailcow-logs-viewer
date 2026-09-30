@@ -1228,6 +1228,8 @@ button.ui-st-card:hover { outline: 1px solid var(--ui-line); }
 .ui-dmarc-record.ui-dmarc-warn { border-inline-start-color: var(--ui-warn); }
 .ui-dmarc-record.ui-dmarc-fail { border-inline-start-color: var(--ui-fail); }
 .ui-dmarc-record-msg { margin: -4px var(--ui-pad-x) 10px; font-weight: 600; }
+/* The DMARC and TLS-RPT records side by side, stacked on narrow screens */
+.ui-dmarc-records { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr)); gap: var(--ui-gap); align-items: start; }
 .ui-dmarc-record-raw, .ui-dmarc-record-warn { margin: 10px var(--ui-pad-x) 14px; }
 .ui-dmarc-source { display: flex; align-items: center; gap: 16px; padding: var(--ui-pad-x); }
 .ui-dmarc-source p { margin: 4px 0 0; }

@@ -420,7 +420,7 @@
                 <div class="ui-nav-group-label">Protection</div>
                 <button onclick="navigateTo('netfilter')" id="tab-netfilter" class="ui-nav-item" title="Security"><svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"> <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"> </path> </svg><span class="ui-nav-label">Security</span><span id="nav-count-netfilter" class="ui-nav-count hidden"></span></button>
                 <button onclick="navigateTo('spam-filter')" id="tab-spam-filter" class="ui-nav-item" title="Spam Filter"><svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"> <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z"> </path> </svg><span class="ui-nav-label">Spam Filter</span></button>
-                <button onclick="navigateTo('dmarc')" id="tab-dmarc" class="ui-nav-item" title="DMARC"><svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"> <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path> </svg><span class="ui-nav-label">DMARC</span><span id="nav-count-dmarc" class="ui-nav-count hidden"></span></button>
+                <button onclick="navigateTo('dmarc')" id="tab-dmarc" class="ui-nav-item" title="DMARC &amp; TLS"><svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"> <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path> </svg><span class="ui-nav-label">DMARC &amp; TLS</span><span id="nav-count-dmarc" class="ui-nav-count hidden"></span></button>
             </div>
             <div class="ui-nav-group" data-nav-group>
                 <div class="ui-nav-group-label">Server</div>
@@ -506,7 +506,7 @@
                 <div class="ui-nav-group-label">Protection</div>
                 <button onclick="navigateToMobile('netfilter')" id="mobile-tab-netfilter" class="mobile-menu-item"><svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"> <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"> </path> </svg><span class="ui-nav-label">Security</span><span id="mobile-nav-count-netfilter" class="ui-nav-count hidden"></span></button>
                 <button onclick="navigateToMobile('spam-filter')" id="mobile-tab-spam-filter" class="mobile-menu-item"><svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"> <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z"> </path> </svg><span class="ui-nav-label">Spam Filter</span></button>
-                <button onclick="navigateToMobile('dmarc')" id="mobile-tab-dmarc" class="mobile-menu-item"><svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"> <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path> </svg><span class="ui-nav-label">DMARC</span><span id="mobile-nav-count-dmarc" class="ui-nav-count hidden"></span></button>
+                <button onclick="navigateToMobile('dmarc')" id="mobile-tab-dmarc" class="mobile-menu-item"><svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"> <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path> </svg><span class="ui-nav-label">DMARC &amp; TLS</span><span id="mobile-nav-count-dmarc" class="ui-nav-count hidden"></span></button>
             </div>
             <div class="ui-nav-group" data-nav-group>
                 <div class="ui-nav-group-label">Server</div>
@@ -1090,7 +1090,7 @@
             <div id="content-dmarc" class="tab-content hidden ui-page">
                 <div class="ui-page-head">
                     <div>
-                        <h1 class="ui-h1"><span id="dmarc-page-title">DMARC Reports</span> <button onclick="showHelpModal('DMARC')" class="ui-icon-btn ui-help-btn"
+                        <h1 class="ui-h1"><span id="dmarc-page-title">DMARC &amp; TLS Reports</span> <button onclick="showHelpModal('DMARC')" class="ui-icon-btn ui-help-btn"
                                         title="Help - DMARC Information">
                                         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"

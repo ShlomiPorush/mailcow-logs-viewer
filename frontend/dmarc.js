@@ -68,7 +68,7 @@ function updateDmarcBreadcrumb() {
 
     container.classList.remove('hidden');
     container.innerHTML = `
-        <button type="button" class="ui-crumb" onclick="navigateTo('dmarc')">DMARC</button>
+        <button type="button" class="ui-crumb" onclick="navigateTo('dmarc')">DMARC &amp; TLS</button>
         ${dmarcState.breadcrumb.map((item, idx) => {
         const isLast = idx === dmarcState.breadcrumb.length - 1;
         const separator = '<span class="ui-crumb-sep" aria-hidden="true">/</span>';
@@ -150,7 +150,7 @@ async function loadDmarc() {
 
     // Hide all sub-views and show main domains view
     dmarcShowView('dmarc-domains-view');
-    document.getElementById('dmarc-page-title').textContent = 'DMARC Reports';
+    document.getElementById('dmarc-page-title').textContent = 'DMARC & TLS Reports';
 
     // Update breadcrumb
     setDmarcBreadcrumb('domains');
@@ -355,6 +355,32 @@ async function loadDmarcDomains() {
     }
 }
 
+// TLS-RPT record (_smtp._tls): where sending servers deliver their TLS reports.
+// Same card as the DMARC record; the edge colour follows the check result.
+function renderTlsRptRecordCard(record) {
+    if (!record) return '';
+    const tone = { success: 'ok', warning: 'warn', error: 'fail' }[record.status] || '';
+    // Report URIs come from DNS: only mailto: becomes a link, anything else stays text
+    const formatUri = (uri) => {
+        const text = String(uri).trim();
+        if (!/^mailto:/i.test(text)) return escapeHtml(text);
+        return `<a href="${escapeHtml(text)}" class="ui-link">${escapeHtml(text.replace(/^mailto:/i, ''))}</a>`;
+    };
+    const uris = Array.isArray(record.report_uris) ? record.report_uris : [];
+    const list = (items, cls) => (Array.isArray(items) && items.length)
+        ? `<ul class="${cls} ui-dmarc-record-warn">${items.map(n => `<li>${escapeHtml(n)}</li>`).join('')}</ul>` : '';
+    return `
+        <section class="ui-panel ui-dmarc-record${tone ? ` ui-dmarc-${tone}` : ''}">
+            <div class="ui-panel-head">TLS-RPT Record</div>
+            <p class="ui-dmarc-record-msg${tone ? ` ui-text-${tone}` : ''}">${escapeHtml(record.message || 'No information')}</p>
+            ${uris.length ? `<div class="ui-kv"><span>Report addresses (rua)</span><b class="ui-kv-small">${uris.map(formatUri).join(', ')}</b></div>` : ''}
+            ${record.record ? `<details class="ui-dns-more ui-dmarc-record-raw"><summary>View Record</summary><div class="ui-dns-code"><code>${escapeHtml(record.record)}</code></div></details>` : ''}
+            ${list(record.warnings, 'ui-dns-warnings')}
+            ${list(record.info, 'ui-dns-info')}
+        </section>
+    `;
+}
+
 async function loadDomainOverview(domain, updateUrl = true) {
     dmarcState.currentView = 'overview';
     dmarcState.currentDomain = domain;
@@ -412,6 +438,9 @@ async function loadDomainOverview(domain, updateUrl = true) {
             `;
         })();
 
+        // The two DNS records next to each other: DMARC, and TLS-RPT for the TLS reports
+        const tlsRptRecordCardHtml = renderTlsRptRecordCard(data.tls_rpt_record || null);
+
         const statsContainer = document.getElementById('dmarc-overview-stats-container');
         if (statsContainer) {
             statsContainer.innerHTML = `
@@ -420,7 +449,7 @@ async function loadDomainOverview(domain, updateUrl = true) {
                     [totals.dmarc_pass_pct ? `${totals.dmarc_pass_pct}%` : '-', 'DMARC Pass', totals.dmarc_pass_pct ? dmarcTone(totals.dmarc_pass_pct) : '', 'SPF + DKIM Pass'],
                     [(totals.unique_ips || 0).toLocaleString(), 'Sources', '', `${totals.unique_reporters || 0} reporters`],
                 ])}
-                ${dmarcRecordCardHtml}
+                ${(dmarcRecordCardHtml || tlsRptRecordCardHtml) ? `<div class="ui-dmarc-records">${dmarcRecordCardHtml}${tlsRptRecordCardHtml}</div>` : ''}
             `;
         }
 
@@ -743,7 +772,7 @@ async function loadReportDetails(domain, reportDate, updateUrl = true) {
     dmarcShowView('dmarc-report-details-view');
 
     const shortDate = new Date(reportDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-    // Title stays static as "DMARC Reports"
+    // Title stays static as "DMARC & TLS Reports"
 
     // Update breadcrumb
     setDmarcBreadcrumb('reportDetails', { domain, date: shortDate });
@@ -809,7 +838,7 @@ async function loadSourceDetails(domain, sourceIp, updateUrl = true) {
     }
 
     dmarcShowView('dmarc-source-details-view');
-    // Title stays static as "DMARC Reports"
+    // Title stays static as "DMARC & TLS Reports"
 
     // Update breadcrumb
     setDmarcBreadcrumb('sourceDetails', { domain, ip: sourceIp });
