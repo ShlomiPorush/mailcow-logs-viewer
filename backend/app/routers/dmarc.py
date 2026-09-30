@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session, load_only
 from sqlalchemy import func, and_, or_, case, literal
 
 from ..database import SessionLocal, get_db
-from ..models import DMARCReport, DMARCRecord, DMARCSync, TLSReport, TLSReportPolicy
+from ..models import DMARCReport, DMARCRecord, DMARCSync, DomainDNSCheck, TLSReport, TLSReportPolicy
 from ..services.dmarc_parser import parse_dmarc_file
 from ..services.geoip_service import enrich_dmarc_record
 from ..services.dmarc_imap_service import sync_dmarc_reports_from_imap
@@ -305,6 +305,13 @@ def get_domains_list(
         
         # Add TLS-only domains
         all_domains.update(tls_domain_set)
+
+        # The TLS-RPT record result from the last DNS check, for the TLS tab;
+        # None until the domain has been checked
+        tls_rpt_status = {
+            name: (check or {}).get('status')
+            for name, check in db.query(DomainDNSCheck.domain_name, DomainDNSCheck.tls_rpt_check).all()
+        }
         
         domains_list = []
         
@@ -366,6 +373,7 @@ def get_domains_list(
                     'last_report': dmarc_data['last_report'],
                     'has_dmarc': True,
                     'has_tls': domain in tls_domain_set,
+                    'tls_rpt_status': tls_rpt_status.get(domain),
                     'stats_30d': {
                         'total_messages': total_msgs,
                         'unique_ips': stats.unique_ips or 0,
@@ -391,6 +399,7 @@ def get_domains_list(
                     'last_report': int(tls_report.end_datetime.timestamp()) if tls_report and tls_report.end_datetime else None,
                     'has_dmarc': False,
                     'has_tls': True,
+                    'tls_rpt_status': tls_rpt_status.get(domain),
                     'stats_30d': {
                         'total_messages': 0,
                         'unique_ips': 0,
@@ -434,6 +443,19 @@ async def get_domain_overview(domain: str, days: int = 30):
         return await asyncio.to_thread(_load_domain_overview, domain, days, dmarc_record, tls_rpt_record)
     except Exception as e:
         logger.error(f"Error fetching domain overview: {e}")
+        raise internal_error(e)
+
+
+@router.get("/dmarc/domains/{domain}/tls-rpt-record")
+async def get_domain_tls_rpt_record(domain: str):
+    """The domain's TLS-RPT record for the TLS tab: the cached check, or a live lookup when none is cached."""
+    try:
+        _, record = await asyncio.to_thread(_load_overview_dns, domain)
+        if record is None:
+            record = await check_tls_rpt_record(domain)
+        return {'domain': domain, 'tls_rpt_record': record}
+    except Exception as e:
+        logger.error(f"Error fetching the TLS-RPT record: {e}")
         raise internal_error(e)
 
 
