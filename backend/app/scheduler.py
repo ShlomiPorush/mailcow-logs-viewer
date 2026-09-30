@@ -1185,8 +1185,14 @@ async def fetch_all_logs():
         ]
         if settings.is_feature_enabled('netfilter'):
             tasks.append(fetch_and_store_netfilter())
-        
-        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        # The protection rules must not read the netfilter lines while this
+        # fetch is still storing them, or they would skip ids not yet committed
+        async with _protection_lock:
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            protection_due = settings.is_feature_enabled('netfilter')
+            if protection_due:
+                await _run_protection_rules_locked()
         
         log_types = ["Postfix", "Rspamd"]
         if settings.is_feature_enabled('netfilter'):
@@ -1199,10 +1205,6 @@ async def fetch_all_logs():
         logger.debug("[FETCH] Completed fetch_all_logs")
         update_job_status('fetch_logs', 'success')
 
-        # The protection rules read the netfilter lines just stored, so they
-        # react within one fetch instead of waiting for a job of their own
-        if settings.is_feature_enabled('netfilter'):
-            await run_protection_rules()
     
     except asyncio.CancelledError:
         logger.info("[FETCH] Log fetch cancelled (application shutting down)")
@@ -1260,8 +1262,17 @@ def _run_protection_rules_sync(context):
         protection_rules.evaluate(db, context)
 
 
+_protection_lock = asyncio.Lock()
+
+
 async def run_protection_rules():
-    """Evaluate the protection rules on the netfilter lines read since the last run."""
+    """Evaluate the protection rules (the Status page Run button); waits for a fetch in progress."""
+    async with _protection_lock:
+        await _run_protection_rules_locked()
+
+
+async def _run_protection_rules_locked():
+    """Evaluate the protection rules on the netfilter lines read since the last run. Hold _protection_lock."""
     from .services.protection_rules import ProtectionContext, RULE_NAMES, load_rules
     update_job_status('protection_rules', 'running')
     try:

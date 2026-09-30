@@ -32,6 +32,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Dict, Iterable, List, Optional, Set
 
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from .alias_domains import aliases_of_domain, expand_addresses, get_alias_domain_map
@@ -197,7 +198,8 @@ def _logged_in_recently(db: Session, ip: str, now: datetime) -> bool:
     smtp = db.query(PostfixLog.id).filter(
         PostfixLog.time >= since,
         PostfixLog.message.like("%sasl_username=%"),
-        PostfixLog.message.like(f"%[{ip}]%"),
+        # Postfix writes an IPv6 client as [IPv6:2001:db8::1]
+        or_(PostfixLog.message.like(f"%[{ip}]%"), PostfixLog.message.like(f"%[IPv6:{ip}]%")),
     ).first()
     if smtp:
         return True
@@ -222,10 +224,18 @@ def _is_unknown(username: str, known: Set[str], catch_all: Set[str]) -> bool:
     return name.split("@", 1)[1] not in catch_all
 
 
-def _record(db: Session, found: Dict[tuple, dict], ip: str, rule: str, reason: str, lines: List[NetfilterLog]) -> None:
-    entry = found.setdefault((ip, rule), {"reason": reason, "lines": []})
-    entry["reason"] = reason
+def _record(db: Session, found: Dict[tuple, dict], ip: str, rule: str, reason: str, lines: List[NetfilterLog],
+            trap: Optional[str] = None) -> None:
+    entry = found.setdefault((ip, rule), {"reason": reason, "lines": [], "traps": set()})
+    entry["reason"] = reason or entry["reason"]
     entry["lines"].extend(lines)
+    if trap:
+        entry["traps"].add(trap)
+
+
+def _trap_reason(names: Iterable[str]) -> str:
+    names = sorted(set(names))
+    return f"Tried the trap account{'s' if len(names) > 1 else ''} {', '.join(names)}"
 
 
 def _upsert(db: Session, ip: str, rule: str, reason: str, lines: List[NetfilterLog]) -> ProtectionHit:
@@ -248,10 +258,17 @@ def _upsert(db: Session, ip: str, rule: str, reason: str, lines: List[NetfilterL
     hit.usernames = sorted(set(hit.usernames or []) | set(names))
     hit.log_ids = (list(hit.log_ids or []) + fresh)[:MAX_EVIDENCE]
     hit.attempts = (hit.attempts or 0) + len(set(fresh))
-    hit.reason = reason
+    if reason:
+        hit.reason = reason
     hit.first_seen = min(hit.first_seen, first)
     hit.last_seen = max(hit.last_seen, last)
     return hit
+
+
+def _traps_in(reason: Optional[str]) -> Set[str]:
+    """The trap names an earlier run already put in a trap hit's reason."""
+    match = re.match(r"^Tried the trap accounts? (.+)$", reason or "")
+    return {n.strip() for n in match.group(1).split(",")} if match else set()
 
 
 def evaluate(db: Session, context: ProtectionContext, now: Optional[datetime] = None) -> List[ProtectionHit]:
@@ -281,14 +298,22 @@ def evaluate(db: Session, context: ProtectionContext, now: Optional[datetime] = 
         candidates = [r for r in rows if r.username and not never_ban(r.ip, allow, context.protected_ips)]
 
         if rules["trap"]["enabled"] and rules["trap"]["names"]:
-            traps = set(rules["trap"]["names"])
+            # A trap saved before its mailbox existed must never ban the real user
+            known, _ = _known_accounts(db)
+            local_parts = {address.split("@", 1)[0] for address in known}
+            traps = set()
+            for name in rules["trap"]["names"]:
+                if (name in known) if "@" in name else (name in local_parts):
+                    logger.warning("Protection rules: trap %s is now a real mailbox or alias and is skipped", name)
+                else:
+                    traps.add(name)
             for row in candidates:
                 # A full trap address matches exactly; a bare trap name matches the part before the @
                 name = row.username.lower()
                 local = name.split("@", 1)[0]
                 matched = name if name in traps else local if local in traps else None
                 if matched:
-                    _record(db, found, row.ip, "trap", f"Tried the trap account {matched}", [row])
+                    _record(db, found, row.ip, "trap", "", [row], matched)
 
         ua = rules["unknown_accounts"]
         if ua["enabled"]:
@@ -305,7 +330,14 @@ def evaluate(db: Session, context: ProtectionContext, now: Optional[datetime] = 
                 _record(db, found, ip, "unknown_accounts",
                         f"Tried {len(accounts)} accounts that do not exist within {ua['window_minutes']} minutes", unknown)
 
-    hits = [_upsert(db, ip, rule, entry["reason"], entry["lines"]) for (ip, rule), entry in found.items()]
+    hits = []
+    for (ip, rule), entry in found.items():
+        hit = _upsert(db, ip, rule, entry["reason"], entry["lines"])
+        if rule == "trap":
+            # Every trap this address tried, including those from earlier runs
+            tried = entry["traps"] | _traps_in(hit.reason)
+            hit.reason = _trap_reason(tried)
+        hits.append(hit)
     _store(db, WATERMARK_KEY, str(new_watermark))
     db.commit()
     if hits:
