@@ -13,6 +13,7 @@ let protectionHits = [];
 let protectionCounts = {};
 let protectionFilter = 'active';
 let protectionDirty = false;
+let protectionSaved = null;  // the rules as stored, to count unsaved changes
 
 const PROTECTION_RULE_LABELS = {
     trap: 'Trap account',
@@ -37,7 +38,10 @@ async function loadProtection() {
         const rulesData = await rulesRes.json();
         const hitsData = await hitsRes.json();
         // Unsaved edits stay on screen through the page's own refresh
-        if (!protectionDirty) protectionRules = rulesData.rules;
+        if (!protectionDirty) {
+            protectionRules = rulesData.rules;
+            protectionSaved = JSON.parse(JSON.stringify(rulesData.rules));
+        }
         protectionCaps = rulesData.capabilities || protectionCaps;
         protectionSuggestions = rulesData.trap_suggestions || [];
         protectionCountrySuggestions = rulesData.country_suggestions || [];
@@ -214,11 +218,7 @@ function renderProtection() {
                 ${protectionNotify('breach', 'Email me on every alert')}
                 <p class="ui-muted ui-prot-note">${protectionCaps.raw_logs ? 'SMTP and IMAP logins are checked.' : 'Only SMTP logins are checked. IMAP logins need Live Logs to be on.'}</p>`)}
         </div>
-        <div class="ui-prot-save${protectionDirty ? '' : ' hidden'}" id="protection-savebar">
-            <span>Unsaved changes to the rules</span>
-            <button type="button" class="ui-btn" onclick="protectionDirty = false; loadProtection()">Discard</button>
-            <button type="button" class="ui-btn ui-btn-primary" onclick="saveProtectionRules()">Save</button>
-        </div>
+        ${uiSaveBar('protection-savebar', { save: 'saveProtectionRules()', discard: 'discardProtectionRules()' })}
         <div class="ui-list-head">
             <h2 class="ui-h2">What the rules caught</h2>
             <div class="ui-seg ui-head-actions" role="group" aria-label="Show">
@@ -229,6 +229,7 @@ function renderProtection() {
         <div id="protection-hits">${renderProtectionHits()}</div>
     `;
     updateProtectionCounts();
+    markProtectionDirty();
 }
 
 function protectionCountryName(code) {
@@ -324,10 +325,30 @@ async function loadProtectionOverview() {
 
 // ----------------------------------------------------------------- editing
 
+// Count the settings that differ from the stored rules, like the Settings page
+function protectionChangeCount() {
+    if (!protectionRules || !protectionSaved) return 0;
+    let n = 0;
+    for (const [rule, values] of Object.entries(protectionRules)) {
+        for (const [key, value] of Object.entries(values)) {
+            const saved = (protectionSaved[rule] || {})[key];
+            // Number inputs hand over strings; 5 and "5" are the same setting
+            if (String(JSON.stringify(value)).replace(/"/g, '') !== String(JSON.stringify(saved)).replace(/"/g, '')) n++;
+        }
+    }
+    return n;
+}
+
 function markProtectionDirty() {
-    protectionDirty = true;
-    const bar = document.getElementById('protection-savebar');
-    if (bar) bar.classList.remove('hidden');
+    const n = protectionChangeCount();
+    protectionDirty = n > 0;
+    uiSaveBarUpdate('protection-savebar', n);
+}
+
+function discardProtectionRules() {
+    protectionRules = JSON.parse(JSON.stringify(protectionSaved));
+    protectionDirty = false;
+    renderProtection();
 }
 
 function setProtectionRule(rule, key, value) {
@@ -339,7 +360,6 @@ function setProtectionRule(rule, key, value) {
 function setProtectionMode(rule, mode) {
     if (!protectionRules) return;
     protectionRules[rule].mode = mode;
-    protectionDirty = true;
     renderProtection();
 }
 
@@ -347,14 +367,12 @@ function addTrapName(value) {
     const name = String(value || '').trim().toLowerCase();
     if (!name || !protectionRules) return;
     if (!protectionRules.trap.names.includes(name)) protectionRules.trap.names.push(name);
-    protectionDirty = true;
     renderProtection();
 }
 
 function removeTrapName(name) {
     if (!protectionRules) return;
     protectionRules.trap.names = protectionRules.trap.names.filter(n => n !== name);
-    protectionDirty = true;
     renderProtection();
 }
 
@@ -362,18 +380,17 @@ function addProtectionCountry(value) {
     const code = String(value || '').trim().toUpperCase();
     if (!code || !protectionRules) return;
     if (!protectionRules.country.countries.includes(code)) protectionRules.country.countries.push(code);
-    protectionDirty = true;
     renderProtection();
 }
 
 function removeProtectionCountry(code) {
     if (!protectionRules) return;
     protectionRules.country.countries = protectionRules.country.countries.filter(c => c !== code);
-    protectionDirty = true;
     renderProtection();
 }
 
 async function saveProtectionRules() {
+    uiSaveBarBusy('protection-savebar', true);
     try {
         const res = await authenticatedFetch('/api/protection/rules', {
             method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ rules: protectionRules })
@@ -381,11 +398,14 @@ async function saveProtectionRules() {
         const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
         protectionRules = data.rules;
+        protectionSaved = JSON.parse(JSON.stringify(data.rules));
         protectionDirty = false;
         showToast('Protection rules saved', 'success');
         loadProtection();
     } catch (error) {
         showToast(`Could not save the rules: ${error.message}`, 'error');
+    } finally {
+        uiSaveBarBusy('protection-savebar', false);
     }
 }
 

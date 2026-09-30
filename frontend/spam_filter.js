@@ -171,6 +171,7 @@ async function openMapEditor(filename) {
         const data = await response.json();
         const meta = data.metadata || {};
         const canSave = rspamdMapsCanSave;
+        mapEditorSaved = data.content || '';
 
         container.innerHTML = `
             <div class="ui-list-head">
@@ -231,9 +232,9 @@ async function openMapEditor(filename) {
                         ${canSave ? `
                         <div class="ui-row-actions">
                             <button onclick="validateMapContent('${escapeJsArg(filename)}')" class="ui-btn">Validate</button>
-                            <button onclick="saveMapContent('${escapeJsArg(filename)}')" id="map-save-btn" class="ui-btn ui-btn-primary">Save Changes</button>
                         </div>` : ''}
                     </div>
+                    ${canSave ? uiSaveBar('map-savebar', { save: `saveMapContent('${escapeJsArg(filename)}')`, discard: `openMapEditor('${escapeJsArg(filename)}')` }) : ''}
                     ${canSave ? '' : uiLocked('Read-Only Mode', RSPAMD_MAPS_READONLY_TEXT)}
                 </div>
             </section>
@@ -250,11 +251,17 @@ async function openMapEditor(filename) {
     }
 }
 
+let mapEditorSaved = null;  // the map text as stored, to tell whether there is anything to save
+
 function onMapContentChange(filename) {
+    const textarea = document.getElementById('map-editor-content');
+    const changed = !!textarea && mapEditorSaved !== null && textarea.value !== mapEditorSaved;
     const statusEl = document.getElementById('map-validation-status');
-    if (statusEl) {
+    if (statusEl && changed) {
         statusEl.innerHTML = uiTag('Modified', 'warn');
     }
+    // The map is one setting: any edit is one unsaved change
+    uiSaveBarUpdate('map-savebar', changed ? 1 : 0);
 }
 
 async function validateMapContent(filename) {
@@ -300,7 +307,6 @@ async function validateMapContent(filename) {
 
 async function saveMapContent(filename) {
     const content = document.getElementById('map-editor-content').value;
-    const saveBtn = document.getElementById('map-save-btn');
     
     // Validate first
     try {
@@ -322,8 +328,7 @@ async function saveMapContent(filename) {
     }
     
     // Save
-    saveBtn.disabled = true;
-    saveBtn.textContent = 'Saving...';
+    uiSaveBarBusy('map-savebar', true);
     
     try {
         const response = await authenticatedFetch(`/api/rspamd/maps/${filename}`, {
@@ -342,20 +347,22 @@ async function saveMapContent(filename) {
             // Bare addresses were anchored server side - reflect the saved form
             const textarea = document.getElementById('map-editor-content');
             if (textarea && typeof result.content === 'string') textarea.value = result.content;
+            mapEditorSaved = typeof result.content === 'string' ? result.content : content;
             showToast(`Map saved (${result.entry_count} entries). ${result.normalized_entries} bare address entr${result.normalized_entries === 1 ? 'y was' : 'ies were'} anchored automatically.`, 'success');
         } else {
             showToast(`Map saved successfully (${result.entry_count} entries)`, 'success');
         }
 
+        if (!(result.normalized_entries > 0)) mapEditorSaved = content;
         const statusEl = document.getElementById('map-validation-status');
         if (statusEl) statusEl.innerHTML = uiTag('✓ Saved', 'ok');
+        uiSaveBarUpdate('map-savebar', 0);
         document.getElementById('map-entry-count').textContent = `${result.entry_count} entries`;
         
     } catch (error) {
         showToast('Failed to save map: ' + error.message, 'error');
     } finally {
-        saveBtn.disabled = false;
-        saveBtn.textContent = 'Save Changes';
+        uiSaveBarBusy('map-savebar', false);
     }
 }
 
