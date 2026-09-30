@@ -1615,7 +1615,8 @@ function switchTab(tab, params = {}) {
             loadDomains();
             break;
         case 'dmarc':
-            handleDmarcRoute(params);
+            // Refresh passes no params: reload what the address shows (the TLS tab stays open)
+            handleDmarcRoute(Object.keys(params).length ? params : parseRoute().params);
             break;
         case 'mailbox-stats':
             initMailboxStatsPage();
@@ -5169,7 +5170,8 @@ const NAV_SUBPAGE_TABS = {
     netfilter: '.ui-se-tabs',
     'spam-filter': '#content-spam-filter .ui-page-tabs',
     status: '.ui-st-tabs',
-    'mailbox-stats': '#mailbox-stats-views'
+    'mailbox-stats': '#mailbox-stats-views',
+    dmarc: '#dmarc-page-tabs'
 };
 let navFlyout = null;
 let navFlyoutTimer = null;
@@ -5218,10 +5220,10 @@ function showNavFlyout(item, page) {
             <span>${copy.innerHTML.trim()}</span>${countText ? `<small class="ui-nav-count${count.classList.contains('is-fail') ? ' is-fail' : ''}">${escapeHtml(countText)}</small>` : ''}</button>`;
     }).join('');
     navFlyout.querySelectorAll('.ui-fly-item').forEach(el => el.addEventListener('click', () => {
-        // The tab first, so the page opens on it
+        // The tab first, so the page opens on it; a tab that navigates by itself needs nothing more
         tabs[Number(el.dataset.i)].click();
         hideNavFlyout();
-        navigateTo(page);
+        if (currentTab !== page) navigateTo(page);
     }));
     const rect = item.getBoundingClientRect();
     navFlyout.style.top = `${Math.max(8, Math.min(rect.top - 6, window.innerHeight - navFlyout.offsetHeight - 8))}px`;

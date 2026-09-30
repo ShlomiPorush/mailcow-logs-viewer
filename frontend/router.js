@@ -125,6 +125,15 @@ function parseDmarcRoute(segments) {
 
     const params = { domain: null, type: null, id: null };
 
+    // The TLS tab: /dmarc/tls, /dmarc/tls/<domain>, /dmarc/tls/<domain>/<date>
+    if (segments[1] === 'tls') {
+        return { baseRoute: 'dmarc', params: {
+            tab: 'tls',
+            domain: segments[2] ? decodeURIComponent(segments[2]) : null,
+            id: segments[3] ? decodeURIComponent(segments[3]) : null
+        } };
+    }
+
     if (segments.length >= 2) {
         params.domain = decodeURIComponent(segments[1]);
     }
@@ -158,6 +167,16 @@ function buildPath(baseRoute, params = {}) {
     // A page's tab; the first tab is the page's own address
     if (SUBPAGES[baseRoute] && params.sub && params.sub !== subpageFirst(baseRoute)) {
         path += `/${encodeURIComponent(params.sub)}`;
+    }
+
+    // The DMARC page's TLS tab
+    if (baseRoute === 'dmarc' && params.tab === 'tls') {
+        path += '/tls';
+        if (params.domain) {
+            path += `/${encodeURIComponent(params.domain)}`;
+            if (params.id) path += `/${encodeURIComponent(params.id)}`;
+        }
+        return path;
     }
 
     // Handle DMARC nested routes
@@ -201,6 +220,10 @@ function navigateTo(route, params = {}, updateHistory = true) {
     // A page with tabs opens on the tab it was left on
     if (SUBPAGES[route] && !params.sub) {
         params = { ...params, sub: SUBPAGES[route].current() };
+    }
+    // DMARC & TLS too: the sidebar reopens the TLS tab when it was left there
+    if (route === 'dmarc' && !Object.keys(params).length && typeof dmarcState !== 'undefined' && dmarcState.tab === 'tls') {
+        params = { tab: 'tls' };
     }
 
     // Build the new path
