@@ -23,11 +23,14 @@ _COLUMNS = (
 
 
 def upgrade() -> None:
-    existing = {c["name"] for c in sa.inspect(op.get_bind()).get_columns("protection_hits")}
+    # A fresh install creates the table from the model, columns and index included
+    inspector = sa.inspect(op.get_bind())
+    existing = {c["name"] for c in inspector.get_columns("protection_hits")}
     for name, kind in _COLUMNS:
         if name not in existing:
             op.add_column("protection_hits", sa.Column(name, kind))
-    op.create_index("ix_protection_hits_expires_at", "protection_hits", ["expires_at"])
+    if "ix_protection_hits_expires_at" not in {i["name"] for i in inspector.get_indexes("protection_hits")}:
+        op.create_index("ix_protection_hits_expires_at", "protection_hits", ["expires_at"])
 
 
 def downgrade() -> None:
