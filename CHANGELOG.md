@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **DKIM records rewritten by DNS providers** - A published record with reordered tags, an added `h=sha256`, a missing `t=s` or a folded key is no longer reported as a mismatch. Only a different key, key type or hash that breaks signing is an error; other tag differences show as warnings. [#292](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/292). Thanks to [@phende](https://github.com/phende).
+- **DMARC reports with empty rows** - Some providers send aggregate reports whose rows have no source IP and a count of 0. Such a report failed on every sync with a database error; the empty rows are now skipped and the report is stored. [#324](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/324). Thanks to [@fadorator](https://github.com/fadorator).
 
 ## [2.8.0] - 2026-09-24
 
