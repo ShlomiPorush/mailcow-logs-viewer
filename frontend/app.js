@@ -180,7 +180,7 @@ const TOGGLEABLE_FEATURES = [
     { id: 'quarantine', label: 'Quarantine', description: 'Quarantined emails and auto-rules' },
     { id: 'spam-filter', label: 'Spam Filter', description: 'Bounce suppression and Rspamd maps' },
     { id: 'domains', label: 'Domains', description: 'Domain DNS analysis and transports' },
-    { id: 'dmarc', label: 'DMARC', description: 'DMARC/TLS reports and IMAP sync' },
+    { id: 'dmarc', label: 'DMARC & TLS', description: 'DMARC/TLS reports and IMAP sync' },
     { id: 'mailbox-stats', label: 'Mailbox Stats', description: 'Mailbox and alias statistics' },
     { id: 'rate-limits', label: 'Rate Limits', description: 'Sender rate limit hits and the configured limits' },
     { id: 'logs', label: 'Logs', description: 'Raw service log viewer' },

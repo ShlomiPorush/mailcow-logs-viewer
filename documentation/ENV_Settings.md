@@ -213,7 +213,7 @@ Which sending IPs must pass each domain's SPF record on the Domains page. With a
 
 ### DMARC Insights (Policy Recommendations)
 
-Turns collected DMARC report data into advice: when a domain's pass rate and volume are healthy under a lax policy, the DMARC page suggests tightening it (`p=none` → `p=quarantine` → `p=reject`), and it flags source IPs that only recently started sending for a domain **and** are failing DMARC (possible spoofing).
+Turns collected DMARC report data into advice: when a domain's pass rate and volume are healthy under a lax policy, the DMARC & TLS page suggests tightening it (`p=none` → `p=quarantine` → `p=reject`), and it flags source IPs that only recently started sending for a domain **and** are failing DMARC (possible spoofing).
 
 | Variable | Type | Default | Description |
 |----------|------|---------|-------------|
@@ -221,7 +221,7 @@ Turns collected DMARC report data into advice: when a domain's pass rate and vol
 | `DMARC_INSIGHTS_PASS_THRESHOLD` | float | `99.5` | Minimum DMARC pass rate (%) before a stricter policy is recommended |
 | `DMARC_INSIGHTS_MIN_VOLUME` | integer | `100` | Minimum reported messages in the window before any recommendation is made (avoids advice based on a handful of messages) |
 
-> Read-only: this feature never changes DNS records - it only shows recommendations on the DMARC page.
+> Read-only: this feature never changes DNS records - it only shows recommendations on the DMARC & TLS page.
 
 ### DMARC IMAP Auto-Import Configuration
 

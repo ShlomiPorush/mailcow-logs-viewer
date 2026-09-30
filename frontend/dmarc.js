@@ -16,7 +16,6 @@ let dmarcState = {
     currentReportDate: null,
     currentSourceIp: null,
     chartInstance: null,
-    tlsRptRecord: null, // TLS-RPT DNS check of the current domain, shown on the TLS Reports sub-tab
     // Breadcrumb tracking: { label: string, action: function or null }
     breadcrumb: [],
     detailType: null // 'report', 'source', 'tls'
@@ -49,7 +48,7 @@ function updateDmarcBreadcrumb() {
     </div>`;
 }
 
-// Set breadcrumb for different views (without "DMARC Reports" since title is static)
+// Set breadcrumb for different views (without "DMARC & TLS Reports" since title is static)
 function setDmarcBreadcrumb(type, data = {}) {
     switch (type) {
         case 'domains':
@@ -124,7 +123,7 @@ async function loadDmarc() {
     document.getElementById('dmarc-report-details-view').classList.add('hidden');
     document.getElementById('dmarc-source-details-view').classList.add('hidden');
     document.getElementById('dmarc-domains-view').classList.remove('hidden');
-    document.getElementById('dmarc-page-title').textContent = 'DMARC Reports';
+    document.getElementById('dmarc-page-title').textContent = 'DMARC & TLS Reports';
 
     // Update breadcrumb
     setDmarcBreadcrumb('domains');
@@ -476,14 +475,13 @@ async function loadDomainOverview(domain, updateUrl = true) {
     document.getElementById('dmarc-overview-view').classList.remove('hidden');
     document.getElementById('dmarc-report-details-view').classList.add('hidden');
     document.getElementById('dmarc-source-details-view').classList.add('hidden');
-    // Title stays static as "DMARC Reports"
+    // Title stays static as "DMARC & TLS Reports"
 
     try {
         const response = await authenticatedFetch(`/api/dmarc/domains/${encodeURIComponent(domain)}/overview?days=30`);
         const data = await response.json();
         const totals = data.totals || {};
         const dmarcRecord = data.dmarc_record || null;
-        dmarcState.tlsRptRecord = data.tls_rpt_record || null;
 
         // Build DMARC Record card HTML (status + settings from DNS). Card and policy colors by policy level.
         const dmarcRecordCardHtml = (() => {
@@ -510,7 +508,7 @@ async function loadDomainOverview(domain, updateUrl = true) {
             };
             const settingsRows = Object.keys(labels).filter(k => settings[k] !== undefined && settings[k] !== '').map(k => `<tr class="border-b border-gray-100 dark:border-gray-700"><td class="py-1.5 pr-3 text-xs font-medium text-gray-500 dark:text-gray-400">${escapeHtml(labels[k])}</td><td class="py-1.5 text-xs text-gray-900 dark:text-gray-200 break-all">${formatCell(k, settings[k])}</td></tr>`).join('');
             return `
-                <div class="mb-6 border ${cardColor} rounded-lg p-4">
+                <div class="border ${cardColor} rounded-lg p-4">
                     <h3 class="text-sm font-semibold text-gray-900 dark:text-white mb-2">DMARC Record</h3>
                     <p class="text-sm ${messageColor} font-medium mb-3">${escapeHtml(dmarcRecord.message || 'No information')}</p>
                     ${settingsRows ? `<div class="overflow-x-auto"><table class="w-full text-left"><tbody>${settingsRows}</tbody></table></div>` : ''}
@@ -519,6 +517,12 @@ async function loadDomainOverview(domain, updateUrl = true) {
                 </div>
             `;
         })();
+
+        // DNS record cards side by side: DMARC and TLS-RPT (stacked on small screens)
+        const tlsRptRecordCardHtml = renderTlsRptRecordCard(data.tls_rpt_record || null);
+        const recordCardsHtml = (dmarcRecordCardHtml || tlsRptRecordCardHtml)
+            ? `<div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">${dmarcRecordCardHtml}${tlsRptRecordCardHtml}</div>`
+            : '';
 
         // Render the stats grid with 3 columns on mobile and icons
         // This replaces the old manual textContent updates
@@ -559,7 +563,7 @@ async function loadDomainOverview(domain, updateUrl = true) {
                         <div class="text-[9px] sm:text-xs text-gray-500 dark:text-gray-400 mt-1">${totals.unique_reporters || 0} reporters</div>
                     </div>
                 </div>
-                ${dmarcRecordCardHtml}
+                ${recordCardsHtml}
             `;
         }
 
@@ -794,7 +798,7 @@ function dmarcSwitchSubTab(tab) {
 }
 
 // TLS-RPT Record card: where sending servers deliver TLS reports (the _smtp._tls
-// record). Same recipe as the DMARC Record card; card color follows the check status.
+// record). Shown next to the DMARC Record card, same recipe; color follows the check status.
 function renderTlsRptRecordCard(record) {
     if (!record) return '';
     const cardColors = { success: 'border-green-500 bg-green-50 dark:bg-green-900/20', warning: 'border-amber-500 bg-amber-50 dark:bg-amber-900/20', error: 'border-red-500 bg-red-50 dark:bg-red-900/20', unknown: 'border-gray-300 bg-gray-50 dark:bg-gray-800' };
@@ -810,7 +814,7 @@ function renderTlsRptRecordCard(record) {
     const urisRow = uris.length ? `<div class="overflow-x-auto"><table class="w-full text-left"><tbody><tr class="border-b border-gray-100 dark:border-gray-700"><td class="py-1.5 pr-3 text-xs font-medium text-gray-500 dark:text-gray-400">Report addresses (rua)</td><td class="py-1.5 text-xs text-gray-900 dark:text-gray-200 break-all">${uris.map(formatUri).join(', ')}</td></tr></tbody></table></div>` : '';
     const notes = (items, color) => (Array.isArray(items) && items.length) ? `<div class="mt-3 space-y-1">${items.map(n => `<div class="flex items-start gap-2 text-xs ${color}"><span>${escapeHtml(n)}</span></div>`).join('')}</div>` : '';
     return `
-        <div class="mb-6 border ${cardColors[status]} rounded-lg p-4">
+        <div class="border ${cardColors[status]} rounded-lg p-4">
             <h3 class="text-sm font-semibold text-gray-900 dark:text-white mb-2">TLS-RPT Record</h3>
             <p class="text-sm ${textColors[status]} font-medium mb-3">${escapeHtml(record.message || 'No information')}</p>
             ${urisRow}
@@ -834,10 +838,8 @@ async function loadDomainTLSReports(domain) {
         const dailyReports = data.data || [];
         const totals = data.totals || {};
 
-        const recordCardHtml = renderTlsRptRecordCard(dmarcState.tlsRptRecord);
-
         if (dailyReports.length === 0) {
-            tlsList.innerHTML = `${recordCardHtml}
+            tlsList.innerHTML = `
                 <div class="text-center py-12">
                     <svg class="w-12 h-12 mx-auto text-gray-400 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path>
@@ -852,7 +854,7 @@ async function loadDomainTLSReports(domain) {
         const successRate = totals.overall_success_rate || 100;
         const successColor = successRate >= 95 ? 'text-green-500' : successRate >= 80 ? 'text-yellow-500' : 'text-red-500';
 
-        tlsList.innerHTML = `${recordCardHtml}
+        tlsList.innerHTML = `
             <!-- TLS Summary -->
             <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
                 <div class="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-4 text-center">
@@ -1102,7 +1104,7 @@ async function loadReportDetails(domain, reportDate, updateUrl = true) {
     const dateObj = new Date(reportDate);
     const dateStr = dateObj.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
     const shortDate = dateObj.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-    // Title stays static as "DMARC Reports"
+    // Title stays static as "DMARC & TLS Reports"
 
     // Update breadcrumb
     setDmarcBreadcrumb('reportDetails', { domain, date: shortDate });
@@ -1204,7 +1206,7 @@ async function loadSourceDetails(domain, sourceIp, updateUrl = true) {
     document.getElementById('dmarc-overview-view').classList.add('hidden');
     document.getElementById('dmarc-report-details-view').classList.add('hidden');
     document.getElementById('dmarc-source-details-view').classList.remove('hidden');
-    // Title stays static as "DMARC Reports"
+    // Title stays static as "DMARC & TLS Reports"
 
     // Update breadcrumb
     setDmarcBreadcrumb('sourceDetails', { domain, ip: sourceIp });
