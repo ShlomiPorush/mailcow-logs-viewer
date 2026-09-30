@@ -541,6 +541,110 @@ def get_netfilter_logs(
         raise internal_error(e)
 
 
+# What a netfilter "matched rule" line was about, from the log text itself
+_NETFILTER_SERVICES = (
+    ('SASL ', 'SMTP auth', True),
+    ('non-SMTP command', 'SMTP probe', False),
+    ('Protocol error', 'SMTP probe', False),
+    ('imap-login', 'IMAP', True),
+    ('pop3-login', 'POP3', True),
+    ('managesieve-login', 'Sieve', True),
+    ('SOGo', 'SOGo', True),
+    ('mailcow UI', 'mailcow UI', True),
+    ('Rspamd UI', 'Rspamd UI', True),
+)
+
+
+def netfilter_service(message: Optional[str]):
+    """Return (service, is_login) for a netfilter line, or (None, False)."""
+    text = message or ''
+    for needle, service, is_login in _NETFILTER_SERVICES:
+        if needle in text:
+            return service, is_login
+    return None, False
+
+
+@router.get("/logs/netfilter/overview")
+def get_netfilter_overview(
+    hours: int = Query(24, ge=1, le=168),
+    db: Session = Depends(get_db)
+):
+    """
+    Attempts against the server over the last hours, grouped by source address.
+
+    Only lines where netfilter matched a rule count as an attempt; the
+    "N more attempts ... until banned" lines that follow each one are not
+    counted again. Ban and unban lines give the last Fail2ban action per address.
+    """
+    try:
+        cutoff = datetime.utcnow() - timedelta(hours=hours)
+        rows = db.query(
+            NetfilterLog.time, NetfilterLog.ip, NetfilterLog.message, NetfilterLog.username,
+            NetfilterLog.action, NetfilterLog.rule_id, NetfilterLog.country_code, NetfilterLog.country_name
+        ).filter(
+            NetfilterLog.time >= cutoff,
+            NetfilterLog.ip.isnot(None)
+        ).order_by(desc(NetfilterLog.time)).limit(50000).all()
+
+        sources = {}
+        latest = []
+        attempts_total = 0
+        failed_logins = 0
+        for row in rows:
+            entry = sources.get(row.ip)
+            if row.rule_id is not None:
+                service, is_login = netfilter_service(row.message)
+                attempts_total += 1
+                if is_login:
+                    failed_logins += 1
+                if entry is None:
+                    entry = sources[row.ip] = {
+                        "ip": row.ip, "attempts": 0, "failed_logins": 0, "last_seen": row.time,
+                        "services": [], "usernames": [], "country_code": row.country_code,
+                        "country_name": row.country_name, "last_action": None,
+                    }
+                entry["attempts"] += 1
+                if is_login:
+                    entry["failed_logins"] += 1
+                if service and service not in entry["services"]:
+                    entry["services"].append(service)
+                if row.username and row.username not in entry["usernames"] and len(entry["usernames"]) < 5:
+                    entry["usernames"].append(row.username)
+                if is_login and len(latest) < 20:
+                    latest.append({
+                        "time": format_datetime_utc(row.time), "ip": row.ip, "username": row.username,
+                        "service": service, "country_code": row.country_code, "country_name": row.country_name,
+                    })
+            elif row.action in ('ban', 'banned', 'unban'):
+                if entry is None:
+                    entry = sources[row.ip] = {
+                        "ip": row.ip, "attempts": 0, "failed_logins": 0, "last_seen": row.time,
+                        "services": [], "usernames": [], "country_code": row.country_code,
+                        "country_name": row.country_name, "last_action": None,
+                    }
+                if entry["last_action"] is None:
+                    entry["last_action"] = 'unban' if row.action == 'unban' else 'ban'
+
+        ordered = sorted(
+            (e for e in sources.values() if e["attempts"] > 0),
+            key=lambda e: (e["attempts"], e["last_seen"]), reverse=True
+        )
+        for entry in ordered:
+            entry["last_seen"] = format_datetime_utc(entry["last_seen"])
+
+        return {
+            "hours": hours,
+            "attempts": attempts_total,
+            "failed_logins": failed_logins,
+            "source_count": len(ordered),
+            "sources": ordered[:50],
+            "latest": latest,
+        }
+    except Exception as e:
+        logger.error(f"Error building netfilter overview: {e}")
+        raise internal_error(e)
+
+
 @router.get("/fail2ban")
 async def get_fail2ban():
     """
@@ -627,74 +731,81 @@ async def unban_fail2ban(request: Request):
         raise internal_error(e)
 
 
+def _split_ip_list(value) -> List[str]:
+    """mailcow returns the Fail2ban lists comma or newline separated."""
+    return [e.strip() for e in (value or '').replace('\n', ',').split(',') if e.strip()]
+
+
+async def _add_to_fail2ban_list(ip: str, list_name: str) -> dict:
+    """Add an address to the Fail2ban blacklist or whitelist, keeping every other setting."""
+    current = await mailcow_api.get_fail2ban()
+    if current is None:
+        raise HTTPException(status_code=503, detail="Could not fetch current Fail2Ban settings")
+
+    lists = {name: _split_ip_list(current.get(name, "")) for name in ("blacklist", "whitelist")}
+    label = "blacklist" if list_name == "blacklist" else "allowlist"
+    if ip in lists[list_name]:
+        return {"status": "success", "msg": f"IP {ip} is already in the {label}"}
+    lists[list_name].append(ip)
+
+    # ban_time_increment must be "1" or "0" as string
+    bti = current.get("ban_time_increment", 1)
+    attrs = {
+        "ban_time": str(current.get("ban_time", "86400")),
+        "ban_time_increment": "1" if bti in (True, 1, "1") else "0",
+        "blacklist": ",".join(lists["blacklist"]),
+        "max_attempts": str(current.get("max_attempts", "5")),
+        "max_ban_time": str(current.get("max_ban_time", "86400")),
+        "netban_ipv4": str(current.get("netban_ipv4", "24")),
+        "netban_ipv6": str(current.get("netban_ipv6", "64")),
+        "retry_window": str(current.get("retry_window", "600")),
+        "whitelist": ",".join(lists["whitelist"]),
+    }
+
+    logger.info(f"Adding IP {ip} to the Fail2Ban {label}")
+    result = await mailcow_api.edit_fail2ban(attrs)
+    if isinstance(result, list) and len(result) > 0:
+        first = result[0]
+        if first.get("type") != "success":
+            return {"status": "error", "msg": first.get("msg", "Update failed")}
+    return {"status": "success", "msg": f"IP {ip} added to {label}"}
+
+
+async def _ip_from_body(request: Request) -> str:
+    body = await request.json()
+    ip = body.get("ip")
+    if not ip:
+        raise HTTPException(status_code=400, detail="Missing 'ip' field")
+    return ip
+
+
 @router.post("/fail2ban/ban")
 async def ban_fail2ban(request: Request):
     """
     Ban an IP address in Fail2Ban on mailcow by adding it to the blacklist.
-    Fetches current settings, appends IP to blacklist, and saves back.
     Requires Read-Write API key.
     """
     try:
-        body = await request.json()
-        ip = body.get("ip")
-        if not ip:
-            raise HTTPException(status_code=400, detail="Missing 'ip' field")
-        
-        # Get current fail2ban settings to read the existing blacklist
-        current = await mailcow_api.get_fail2ban()
-        if current is None:
-            raise HTTPException(status_code=503, detail="Could not fetch current Fail2Ban settings")
-        
-        # Parse current blacklist (may be comma or newline separated from GET API)
-        current_blacklist = current.get("blacklist", "")
-        # Normalize: split by both commas and newlines
-        blacklist_entries = [e.strip() for e in current_blacklist.replace('\n', ',').split(",") if e.strip()] if current_blacklist else []
-        
-        # Check if IP is already in the blacklist
-        if ip in blacklist_entries:
-            return {"status": "success", "msg": f"IP {ip} is already in the blacklist"}
-        
-        # Add IP to blacklist
-        blacklist_entries.append(ip)
-        new_blacklist = ",".join(blacklist_entries)
-        
-        # Normalize whitelist the same way
-        current_whitelist = current.get("whitelist", "")
-        whitelist_normalized = ",".join([e.strip() for e in current_whitelist.replace('\n', ',').split(",") if e.strip()]) if current_whitelist else ""
-        
-        # Build full attribute set (required by mailcow API - ALL params must be sent)
-        # ban_time_increment must be "1" or "0" as string
-        bti = current.get("ban_time_increment", 1)
-        bti_str = "1" if bti in (True, 1, "1") else "0"
-        
-        attrs = {
-            "ban_time": str(current.get("ban_time", "86400")),
-            "ban_time_increment": bti_str,
-            "blacklist": new_blacklist,
-            "max_attempts": str(current.get("max_attempts", "5")),
-            "max_ban_time": str(current.get("max_ban_time", "86400")),
-            "netban_ipv4": str(current.get("netban_ipv4", "24")),
-            "netban_ipv6": str(current.get("netban_ipv6", "64")),
-            "retry_window": str(current.get("retry_window", "600")),
-            "whitelist": whitelist_normalized
-        }
-        
-        logger.info(f"Banning IP {ip} - sending attrs: {attrs}")
-        result = await mailcow_api.edit_fail2ban(attrs)
-        
-        if isinstance(result, list) and len(result) > 0:
-            first = result[0]
-            if first.get("type") == "success":
-                return {"status": "success", "msg": f"IP {ip} added to blacklist"}
-            else:
-                return {"status": "error", "msg": first.get("msg", "Ban failed")}
-        
-        return {"status": "success", "msg": f"IP {ip} added to blacklist", "raw": result}
-        
+        return await _add_to_fail2ban_list(await _ip_from_body(request), "blacklist")
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Error banning IP in Fail2Ban: {e}")
+        raise internal_error(e)
+
+
+@router.post("/fail2ban/allow")
+async def allow_fail2ban(request: Request):
+    """
+    Allow an IP address in Fail2Ban on mailcow by adding it to the whitelist,
+    so its failed attempts never lead to a ban. Requires Read-Write API key.
+    """
+    try:
+        return await _add_to_fail2ban_list(await _ip_from_body(request), "whitelist")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error allowing IP in Fail2Ban: {e}")
         raise internal_error(e)
 
 
