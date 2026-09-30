@@ -358,6 +358,10 @@ def _upsert(db: Session, target: str, rule: str, reason: str, lines: list, rules
         hit.reason = reason
     hit.first_seen = min(hit.first_seen, first)
     hit.last_seen = max(hit.last_seen, last)
+    # Still attacking after its rule was switched to ban: ban it now
+    config = rules.get(rule, {})
+    if fresh and hit.status == "watching" and rule in BAN_RULES and config.get("mode") == "enforce":
+        hit.status, hit.mode, hit.ban_hours = "pending", "enforce", config.get("ban_hours")
     return hit, False
 
 
@@ -441,9 +445,13 @@ def _evaluate_netfilter(db: Session, context: ProtectionContext, rules: dict, no
         ro = rules["repeat_offender"]
         if ro["enabled"]:
             since = now - timedelta(days=ro["window_days"])
-            for ip in sorted({r.ip for r in candidates if (r.action or "") == "ban"}):
+            # Only Fail2ban's own bans count: mailcow also logs a blacklist entry
+            # ("Added host/network ... to denylist") as a ban, including the ones this app adds
+            fail2ban_ban = lambda r: (r.action or "") == "ban" and (r.message or "").startswith("Banning ")
+            for ip in sorted({r.ip for r in candidates if fail2ban_ban(r)}):
                 bans = db.query(NetfilterLog).filter(
-                    NetfilterLog.ip == ip, NetfilterLog.action == "ban", NetfilterLog.time >= since
+                    NetfilterLog.ip == ip, NetfilterLog.action == "ban", NetfilterLog.message.like("Banning %"),
+                    NetfilterLog.time >= since,
                 ).all()
                 if len(bans) >= ro["threshold"]:
                     _record(found, ip, "repeat_offender",
