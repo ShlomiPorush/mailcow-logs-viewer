@@ -5346,3 +5346,26 @@ function resetWindowPan() {
 window.addEventListener('scroll', resetWindowPan, { passive: true });
 document.addEventListener('focusout', () => setTimeout(resetWindowPan, 300));
 if (window.visualViewport) window.visualViewport.addEventListener('resize', () => setTimeout(resetWindowPan, 100));
+
+// =============================================================================
+// The desktop sidebar folds into the icon rail and stays that way next time.
+// The class is set in the page head before it draws; this only toggles it.
+// =============================================================================
+
+function syncNavToggle() {
+    const collapsed = document.documentElement.classList.contains('ui-nav-collapsed');
+    const btn = document.getElementById('ui-nav-toggle');
+    if (!btn) return;
+    const label = collapsed ? 'Expand menu' : 'Collapse menu';
+    btn.setAttribute('aria-label', label);
+    btn.title = label;
+    btn.setAttribute('aria-expanded', String(!collapsed));
+}
+
+function toggleNavCollapsed() {
+    const collapsed = document.documentElement.classList.toggle('ui-nav-collapsed');
+    try { localStorage.setItem('navCollapsed', collapsed ? '1' : '0'); } catch (e) { /* private mode: it just is not remembered */ }
+    if (typeof hideNavFlyout === 'function') hideNavFlyout();
+    syncNavToggle();
+}
+document.addEventListener('DOMContentLoaded', syncNavToggle);
