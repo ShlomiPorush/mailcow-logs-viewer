@@ -1193,7 +1193,7 @@ function renderReportsManagementTable(reports, allowDelete, { total, page, total
             Total: <span class="ui-strong">${total}</span> reports
             ${!allowDelete ? '<span class="ui-tag ui-tag-warn">Deletion disabled</span>' : ''}
         </p>
-        <div class="ui-table ui-stack" style="${cols}; --ui-table-min: 780px">
+        <div data-nosort class="ui-table ui-stack" style="${cols}; --ui-table-min: 780px">
             <div class="ui-tr ui-tr-head"><span>Import Date</span><span>Type</span><span>Domain</span><span>Reporter</span><span class="ui-td-end">Records</span><span>Period</span>${allowDelete ? '<span class="ui-td-end">Actions</span>' : ''}</div>
             ${reports.map(report => `
             <div class="ui-tr">
