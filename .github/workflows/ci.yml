@@ -97,6 +97,19 @@ jobs:
           done
           node --test .github/tests/*.test.cjs
 
+      # The Tailwind utilities are compiled once into a committed file instead of
+      # in the browser; a class added to the markup without a rebuild would have
+      # no style, so the build must reproduce the committed file exactly.
+      - name: Utility CSS matches the markup
+        run: |
+          npm install --silent --no-save --prefix /tmp/tw tailwindcss@3.4.17
+          printf '@tailwind base;\n@tailwind components;\n@tailwind utilities;\n' > /tmp/in.css
+          /tmp/tw/node_modules/.bin/tailwindcss -c .github/tailwind/tailwind.config.cjs -i /tmp/in.css -o /tmp/utilities.css --minify
+          if ! cmp -s /tmp/utilities.css frontend/assets/css/utilities.css; then
+            echo "::error::frontend/assets/css/utilities.css is out of date; run: bash .github/scripts/build-utilities-css.sh"
+            exit 1
+          fi
+
   image-smoke:
     name: Image build and smoke test
     runs-on: ubuntu-latest
