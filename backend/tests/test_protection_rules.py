@@ -253,3 +253,42 @@ def test_an_address_on_an_alias_domain_is_a_real_account(db):
     finally:
         persist_alias_domain_map(db, {})
         set_cached_alias_domain_map({})
+
+
+# ---------- review follow-ups ----------
+
+def test_a_trap_that_became_a_real_mailbox_catches_nobody(db):
+    """A trap saved before the mailbox existed must not ban its real user later."""
+    from app.models import MailboxStatistics
+    from app.services import protection_rules
+    _rules(db, trap={'enabled': True, 'names': ['newhire']})
+    db.add(MailboxStatistics(username=f'newhire@{DOMAIN}', domain=DOMAIN))
+    db.commit()
+    _fail(db, TRAP_IP, f'newhire@{DOMAIN}')
+    protection_rules.evaluate(db, _context())
+    assert _hits(db) == []
+
+
+def test_a_successful_ipv6_login_protects_the_address(db):
+    from app.models import PostfixLog
+    from app.services import protection_rules
+    ip6 = '2001:db8::77'
+    ALL_IPS.append(ip6)
+    db.add(PostfixLog(time=datetime.utcnow() - timedelta(hours=1), queue_id=MARKER[:20], program='postfix/submission/smtpd',
+                      message=f'{MARKER[:10]}: client=unknown[IPv6:{ip6}], sasl_method=PLAIN, sasl_username=info@{DOMAIN}'))
+    db.commit()
+    _rules(db, unknown_accounts={'enabled': True, 'threshold': 3, 'window_minutes': 60})
+    for name in ('inof', 'ifno', 'nifo'):
+        _fail(db, ip6, name)
+    protection_rules.evaluate(db, _context())
+    assert _hits(db) == []
+
+
+def test_the_trap_reason_names_every_trap_tried(db):
+    from app.services import protection_rules
+    _rules(db, trap={'enabled': True, 'names': ['admin', 'root']})
+    _fail(db, TRAP_IP, 'admin')
+    _fail(db, TRAP_IP, 'root')
+    protection_rules.evaluate(db, _context())
+    hits = _hits(db)
+    assert len(hits) == 1 and 'admin' in hits[0].reason and 'root' in hits[0].reason
