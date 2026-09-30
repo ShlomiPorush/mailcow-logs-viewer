@@ -2,6 +2,7 @@
 DMARC Report Parser
 Handles parsing of DMARC aggregate reports in XML format (GZ or ZIP compressed)
 """
+import ipaddress
 import re
 import zipfile
 import xml.etree.ElementTree as ET
@@ -22,6 +23,15 @@ logger = logging.getLogger(__name__)
 # A DNS name: dot-separated labels of letters, digits and inner hyphens
 _DOMAIN_NAME = re.compile(r"^(?=.{1,253}$)(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)*"
                           r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.?$")
+
+
+def is_valid_ip(value) -> bool:
+    """True for a plain IPv4 or IPv6 address."""
+    try:
+        ipaddress.ip_address(value)
+        return True
+    except ValueError:
+        return False
 
 
 def is_valid_domain_name(value) -> bool:
@@ -157,6 +167,10 @@ def parse_dmarc_xml(xml_string: str, raw_xml: str) -> Dict[str, Any]:
         email = get_element_text(metadata, 'email', DMARC_NAMESPACES)
         extra_contact_info = get_element_text(metadata, 'extra_contact_info', DMARC_NAMESPACES)
         report_id = get_element_text(metadata, 'report_id', DMARC_NAMESPACES)
+        if not report_id:
+            raise ValueError("Missing report_id element")
+        if not org_name:
+            raise ValueError("Missing org_name element")
         
         date_range = find_element(metadata, 'date_range', DMARC_NAMESPACES)
         if date_range is None:
@@ -229,6 +243,10 @@ def parse_dmarc_record(record_elem: ET.Element) -> Optional[Dict[str, Any]]:
         
         # Source and count
         source_ip = get_element_text(row, 'source_ip', DMARC_NAMESPACES)
+        # Some reporters send placeholder rows with no source IP; there is
+        # nothing to attribute them to, so they are skipped, not stored
+        if not is_valid_ip(source_ip):
+            return None
         count = int(get_element_text(row, 'count', DMARC_NAMESPACES, '0'))
         
         # Policy evaluation
