@@ -319,6 +319,10 @@
 .ui-select-arrow { transition: transform .15s ease; }
 .ui-chip-row { display: flex; flex-wrap: wrap; gap: 6px; }
 .ui-date-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+/* In the narrow Messages filter column the range opens in place, one field per line */
+.ui-facets .ui-popover { position: static; width: auto; max-width: none; margin: 6px 0 4px; box-shadow: none; }
+.ui-facets .ui-date-pair { grid-template-columns: minmax(0, 1fr); }
+.ui-facets .ui-popover .ui-btn-block { margin-top: 10px; }
 
 /* Message list rows: a coloured edge for the final status */
 .ui-msg-item { padding: var(--ui-pad-y) var(--ui-pad-x) var(--ui-pad-y) calc(var(--ui-pad-x) - 3px); border-top: 1px solid var(--ui-line);
@@ -548,6 +552,7 @@
     grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); }
 .ui-md-ids .ui-md-fact { padding: 10px 14px; background: var(--ui-bg); outline: 1px solid var(--ui-line); }
 .ui-md-ids .ui-md-fact > div { font-weight: 500; }
+.ui-md-sub { display: block; margin-top: 2px; color: var(--ui-muted); font-size: 12px; font-weight: 500; }
 .ui-md-geo p { margin: 0; }
 
 @media (max-width: 1279px) {
@@ -936,7 +941,7 @@ body { font-family: var(--ui-font); background: var(--ui-bg); color: var(--ui-in
 .ui-menu button:hover, .ui-menu button:focus-visible { background: color-mix(in srgb, var(--ui-ink) 7%, transparent); outline: none; }
 
 /* ---------- Status (as the mockup) ---------- */
-.ui-ctr-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 1px; background: var(--ui-bg);
+.ui-ctr-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 1px; background: var(--ui-bg);
     border: 1px solid var(--ui-line); border-radius: var(--ui-radius); overflow: hidden; }
 .ui-ctr { display: flex; align-items: center; gap: 9px; min-width: 0; padding: 10px 14px; background: var(--ui-bg); outline: 1px solid var(--ui-line); }
 .ui-list-head .ui-head-actions { margin-inline-start: auto; }
@@ -945,6 +950,16 @@ body { font-family: var(--ui-font); background: var(--ui-bg); color: var(--ui-in
 .ui-ctr.is-down { background: color-mix(in srgb, var(--ui-fail) 10%, var(--ui-bg)); color: var(--ui-fail); font-weight: 600; }
 .ui-ctr.is-down small { color: var(--ui-fail); }
 .ui-ctr .ui-mdot { flex: none; }
+/* Ignored containers stay visible but quiet; the action is a small text button */
+.ui-ctr.is-ignored { color: var(--ui-muted); }
+.ui-ctr.is-ignored .ui-mdot { background: var(--ui-line); }
+.ui-ctr-act, .ui-bl-ign { flex: none; padding: 2px 6px; border: 1px solid var(--ui-line); border-radius: 6px; background: var(--ui-bg);
+    color: var(--ui-ink); font: inherit; font-size: 11.5px; font-weight: 600; cursor: pointer; }
+.ui-ctr-act:hover, .ui-bl-ign:hover { border-color: var(--ui-ink); }
+.ui-bl-ign { padding: 1px 5px; font-size: 11px; font-weight: 500; color: var(--ui-muted); }
+.ui-bl-item.is-ignored { color: var(--ui-muted); }
+.ui-bl-item.is-ignored .ui-mdot { background: var(--ui-line); }
+.ui-code-chip.is-ignored { opacity: .6; text-decoration: line-through; }
 
 .ui-tr-group { display: block; padding-top: 14px; padding-bottom: 6px; color: var(--ui-muted); font-size: 12px; font-weight: 650;
     text-transform: uppercase; letter-spacing: .04em; }
@@ -957,8 +972,11 @@ body { font-family: var(--ui-font); background: var(--ui-bg); color: var(--ui-in
 .ui-code-chip { padding: 1px 6px; border: 1px solid var(--ui-line); border-radius: 4px; font-family: var(--ui-mono); font-size: 11.5px; color: var(--ui-muted); }
 .ui-bl-all { grid-column: 1 / -1; }
 .ui-bl-all summary { width: fit-content; color: var(--ui-muted); font-size: 12.5px; cursor: pointer; }
-.ui-bl-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 4px 14px; margin-top: 8px; max-height: 320px; overflow-y: auto; }
+.ui-bl-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 6px 18px; margin-top: 8px; max-height: 320px; overflow-y: auto; }
 .ui-bl-item { display: flex; align-items: center; gap: 7px; min-width: 0; font-size: 12.5px; }
+.ui-bl-link { display: inline-flex; margin-inline-start: 4px; color: var(--ui-muted); vertical-align: middle; }
+.ui-bl-link:hover { color: var(--ui-ink); }
+.ui-bl-link svg { display: block; }
 .ui-bl-item small { margin-inline-start: auto; color: var(--ui-muted); }
 .ui-bl-fail { color: var(--ui-fail); font-weight: 600; }
 .ui-bl-progress { padding: 12px var(--ui-pad-x); margin-bottom: 8px; }
@@ -1395,6 +1413,10 @@ body { font-family: var(--ui-font); background: var(--ui-bg); color: var(--ui-in
 .ui-toast-warning .ui-toast-icon { color: var(--ui-warn); }
 .ui-dialog-backdrop.ui-confirm { z-index: 99999; }
 .ui-confirm-text { margin: 0; line-height: 1.55; }
+.ui-form-stack { display: grid; gap: 14px; }
+.ui-form-stack .ui-label .ui-input { margin-top: 5px; color: var(--ui-ink); font-weight: 400; }
+.ui-form-stack .ui-banner { margin: 0; }
+.ui-disable-list { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; font-size: var(--ui-fs-sm); }
 
 @media (max-width: 900px) {
     .ui-logs { grid-template-columns: minmax(0, 1fr); }

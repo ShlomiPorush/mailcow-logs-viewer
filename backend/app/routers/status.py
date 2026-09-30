@@ -5,6 +5,7 @@ import asyncio
 import logging
 import httpx
 from fastapi import APIRouter, HTTPException, Query
+from pydantic import BaseModel
 from datetime import datetime, timedelta, timezone
 from typing import Dict, Any
 
@@ -13,6 +14,7 @@ from ..version import __version__
 from ..scheduler import check_app_version_update, get_app_version_cache
 from ..database import SessionLocal
 from ..models import KnownContainer
+from ..services.ignore_lists import load_ignored, set_ignored, IGNORED_CONTAINERS_KEY
 from ..utils import internal_error
 
 logger = logging.getLogger(__name__)
@@ -45,6 +47,10 @@ def _store_container_status_worker(containers_data):
 
             # Load known containers from database
             known_containers = {kc.container_name: kc for kc in db.query(KnownContainer).all()}
+            # Containers stopped on purpose (e.g. ipv6nat without IPv6) are
+            # listed but never counted, so they raise no alert
+            ignored = load_ignored(db, IGNORED_CONTAINERS_KEY)
+            ignored_count = 0
 
             # Track which containers are active (appear in API response)
             active_container_names = set(containers_dict.keys())
@@ -85,7 +91,9 @@ def _store_container_status_worker(containers_data):
                     known_containers[container_key] = known_container
 
                 # Count containers: only 'running' is considered running, everything else is stopped
-                if state == 'running':
+                if container_key in ignored:
+                    ignored_count += 1
+                elif state == 'running':
                     running_count += 1
                 else:
                     stopped_count += 1
@@ -94,7 +102,8 @@ def _store_container_status_worker(containers_data):
                 simplified_containers[container_key] = {
                     "name": display_name,
                     "state": state,
-                    "started_at": info.get('started_at', None)
+                    "started_at": info.get('started_at', None),
+                    "ignored": container_key in ignored
                 }
 
             # Process known containers that are not in API response (stopped containers)
@@ -106,9 +115,13 @@ def _store_container_status_worker(containers_data):
                     simplified_containers[container_key] = {
                         "name": display_name,
                         "state": "stopped",
-                        "started_at": None
+                        "started_at": None,
+                        "ignored": container_key in ignored
                     }
-                    stopped_count += 1
+                    if container_key in ignored:
+                        ignored_count += 1
+                    else:
+                        stopped_count += 1
 
             # Commit database changes
             try:
@@ -123,7 +136,8 @@ def _store_container_status_worker(containers_data):
                 "summary": {
                     "running": running_count,
                     "stopped": stopped_count,
-                    "total": len(simplified_containers)
+                    "total": len(simplified_containers) - ignored_count,
+                    "ignored": ignored_count
                 }
             }
 
@@ -150,6 +164,20 @@ async def get_containers_status():
     except Exception as e:
         logger.error("Failed to fetch container status: %s", e)
         raise HTTPException(status_code=500, detail="Failed to fetch container status. Check the application logs.")
+
+
+class ContainerIgnoreRequest(BaseModel):
+    ignored: bool
+
+
+@router.put("/status/containers/{container}/ignore")
+def ignore_container(container: str, body: ContainerIgnoreRequest):
+    """Ignore or stop ignoring one mailcow container (by its full name, e.g. ipv6nat-mailcow)."""
+    with SessionLocal() as db:
+        if not db.query(KnownContainer).filter(KnownContainer.container_name == container).first():
+            raise HTTPException(status_code=404, detail="Unknown container.")
+        set_ignored(db, IGNORED_CONTAINERS_KEY, container, body.ignored)
+    return {"container": container, "ignored": body.ignored}
 
 
 @router.get("/status/storage")
