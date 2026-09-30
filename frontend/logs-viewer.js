@@ -66,19 +66,8 @@ async function loadLogViewer() {
         if (data.raw_logs_enabled === false) {
             const output = document.getElementById('logs-output');
             if (output) {
-                output.innerHTML = `
-                    <div class="flex flex-col items-center justify-center py-16 text-center">
-                        <svg class="w-16 h-16 text-gray-400 dark:text-gray-500 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"></path>
-                        </svg>
-                        <h3 class="text-lg font-semibold text-gray-300 mb-2">Live Log Viewer is Disabled</h3>
-                        <p class="text-sm text-gray-500 max-w-md">
-                            Raw log collection is currently turned off. Enable it in
-                            <a href="#" onclick="event.preventDefault(); navigateTo('settings')" class="text-blue-400 hover:text-blue-300 underline">Settings → Raw Logs</a>
-                            to start viewing live logs.
-                        </p>
-                    </div>
-                `;
+                output.innerHTML = `<div class="ui-logs-locked">${uiLocked('Live Log Viewer is Disabled',
+                    'Raw log collection is currently turned off. Enable it in Settings → Raw Logs to start viewing live logs.')}</div>`;
             }
             // Hide the service sidebar
             const sidebar = document.getElementById('logs-service-list');
@@ -98,7 +87,7 @@ async function loadLogViewer() {
         } else {
             const output = document.getElementById('logs-output');
             if (output) {
-                output.innerHTML = '<span class="text-yellow-400">No log services available. Enable services in Settings → Raw Logs.</span>';
+                output.innerHTML = `<div class="ui-logs-locked">${uiLocked('No log services available', 'Enable services in Settings → Raw Logs.')}</div>`;
             }
         }
     } catch (error) {
