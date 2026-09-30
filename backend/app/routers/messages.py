@@ -507,6 +507,7 @@ def get_message_full_details(
         # sender, recipient and verdict, so neither leg tells the whole story
         # on its own and the detail view links them.
         related_deliveries = []
+        other_legs = []
         if correlation.message_id:
             other_legs = db.query(MessageCorrelation).filter(
                 MessageCorrelation.message_id == correlation.message_id,
@@ -526,6 +527,13 @@ def get_message_full_details(
                 }
                 for leg in other_legs
             ]
+
+        # A delivery Rspamd did not scan, such as a release from quarantine,
+        # has no subject of its own; it is the same message, so it takes the
+        # subject another delivery of the same Message-ID recorded
+        subject = correlation.subject
+        if not subject and correlation.message_id:
+            subject = next((leg.subject for leg in other_legs if leg.subject), None)
 
         # Get the Dovecot delivery lines for the last hop (issue #65)
         dovecot_logs = _get_dovecot_logs(
@@ -554,7 +562,7 @@ def get_message_full_details(
             "recipient": correlation.recipient,  # Primary recipient (for backwards compatibility)
             "recipients": recipients,  # ALL recipients
             "recipient_count": len(recipients),
-            "subject": correlation.subject,
+            "subject": subject,
             "direction": correlation.direction,
             "final_status": correlation.final_status,
             "is_complete": correlation.is_complete,

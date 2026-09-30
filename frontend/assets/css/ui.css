@@ -457,7 +457,8 @@
 .ui-md-leg:hover { background: color-mix(in srgb, var(--ui-accent) 6%, var(--ui-bg)); }
 .ui-md-leg.is-current { cursor: default; box-shadow: inset 0 0 0 1px var(--ui-info); }
 .ui-md-leg-who { overflow-wrap: anywhere; }
-.ui-md-leg-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-inline-start: auto; }
+.ui-md-leg-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; flex: 1 1 100%; padding-inline-start: 18px; }
+.ui-md-leg-time { font-size: 12px; }
 
 /* Spam symbols */
 .ui-md-symbols { display: grid; gap: 6px; max-height: 29rem; overflow-y: auto; }
@@ -1791,3 +1792,6 @@ html .markdown-body .markdown-alert-caution .markdown-alert-title { color: var(-
     -webkit-mask-image: linear-gradient(to bottom, #000 55%, transparent); mask-image: linear-gradient(to bottom, #000 55%, transparent); }
 .ui-logs-quick-more { font-size: 12.5px; }
 .ui-logs-quick-more.hidden { display: none; }
+
+/* What happened: the time is a small label above each step, like a timeline */
+.ui-steps .ui-step-time { display: block; margin-bottom: 1px; color: var(--ui-muted); font-size: 11.5px; font-variant-numeric: tabular-nums; line-height: 1.3; }
