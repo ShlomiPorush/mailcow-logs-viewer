@@ -507,6 +507,25 @@
 .ui-q-row .flex-wrap { gap: 6px; }
 .ui-q-row input[type="checkbox"] { width: 16px; height: 16px; }
 
+/* ---------- Generic page frames (cards converted to panels) ---------- */
+
+.ui-panel-title { margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 15px; font-weight: 650; }
+.ui-panel-head > .ui-panel-title + * { margin-inline-start: auto; }
+.ui-panel-body { padding: 12px var(--ui-pad-x) 16px; }
+.ui-panel > .ui-panel-head + .ui-panel-body { border-top: 1px solid var(--ui-line); }
+.ui-block { min-width: 0; }
+.ui-grid-3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--ui-gap); align-items: start; }
+.ui-grid-2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--ui-gap); align-items: start; }
+.ui-collapse > summary.ui-panel-head { border-bottom: 0; }
+
+/* Background job cards (Status) */
+.ui-job { padding: 10px 12px; border-radius: var(--ui-radius-sm); background: var(--ui-bg); }
+.ui-job.is-off { opacity: .55; }
+
+@media (max-width: 1000px) {
+    .ui-grid-3, .ui-grid-2 { grid-template-columns: minmax(0, 1fr); }
+}
+
 /* ---------- Token bridge for markup not rebuilt on components yet ----------
  *
  * Deep templates (settings forms, Fail2ban forms, older dialogs) still use
