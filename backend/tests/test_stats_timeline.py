@@ -62,3 +62,44 @@ def test_timeline_counts_spam_instead_of_erroring(seeded):
     spam = sum(row['spam'] for row in result['timeline'])
     assert total >= 2
     assert spam >= 1
+
+
+@pytest.fixture()
+def seeded_hours():
+    """Linked messages and failed logins, for the per-hour dashboard figures."""
+    if not _postgres_available():
+        pytest.skip('PostgreSQL not available')
+    from app.database import init_db, get_db_context
+    from app.models import MessageCorrelation, NetfilterLog
+    init_db()
+    now = datetime.utcnow()
+    with get_db_context() as db:
+        for status in ('delivered', 'rejected', 'spam', 'deferred'):
+            db.add(MessageCorrelation(
+                correlation_key=f'{MARKER}-{status}', message_id=f'<{MARKER}-{status}@example.test>',
+                sender='a@example.test', recipient='b@example.test', direction='inbound',
+                final_status=status, first_seen=now - timedelta(minutes=3), last_seen=now, created_at=now))
+        db.add(NetfilterLog(time=now - timedelta(minutes=3), priority=MARKER[-12:], ip='198.51.100.9', rule_id=3,
+                            message='SASL LOGIN authentication failed'))
+        db.commit()
+    yield
+    with get_db_context() as db:
+        db.query(MessageCorrelation).filter(MessageCorrelation.correlation_key.like(f'{MARKER}%')).delete(synchronize_session=False)
+        db.query(NetfilterLog).filter(NetfilterLog.priority == MARKER[-12:]).delete(synchronize_session=False)
+        db.commit()
+
+
+def test_each_hour_carries_the_dashboard_figures_and_they_add_up(seeded_hours):
+    """A picked hour on the dashboard chart shows its own numbers: the hours of the
+    timeline must add up to the dashboard's 24-hour figures."""
+    from app.database import get_db_context
+    from app.routers.stats import get_dashboard_stats, get_timeline_stats
+    with get_db_context() as db:
+        timeline = get_timeline_stats(hours=24, db=db)['timeline']
+        dashboard = get_dashboard_stats(db=db)
+    total = lambda key: sum(row[key] for row in timeline)
+    assert total('messages') == dashboard['messages']['24h'] >= 4
+    assert total('blocked') == dashboard['blocked']['24h'] >= 2
+    assert total('deferred') == dashboard['deferred']['24h'] >= 1
+    assert total('auth_failures') == dashboard['auth_failures']['24h'] >= 1
+    assert all({'total', 'spam', 'clean'} <= set(row) for row in timeline)
