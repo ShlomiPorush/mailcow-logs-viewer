@@ -167,7 +167,7 @@ Generated from the code. Do not edit by hand; run `node .github/scripts/ui-catal
 | Behaviour | Count |
 |---|---|
 | [Click to copy](#click-to-copy) | 53 |
-| [Tooltips](#tooltips) | 190 |
+| [Tooltips](#tooltips) | 191 |
 | [Toasts](#toasts) | 141 |
 | [Confirmation dialogs](#confirmation-dialogs) | 28 |
 | [Country flags](#country-flags) | 6 |
@@ -290,6 +290,7 @@ Native `title` tooltips. Dynamic ones show the expression that builds the text.
 | Dashboard | dynamic: `${escapeHtml(formatTime(msg.time))}` | `frontend/app.js:2045` (loadRecentActivity) |
 | Dashboard | dynamic: `${escapeHtml(state)}` | `frontend/app.js:2046` (loadRecentActivity) |
 | Dashboard | dynamic: `${escapeHtml(msg.subject \|\| 'No subject')}` | `frontend/app.js:2048` (loadRecentActivity) |
+| Dashboard | "Each message counts once, as on the Messages page; a message to three recipients is one message and three d..." | `frontend/index.html:577` |
 | Messages | dynamic: `${escapeHtml(formatTime(msg.first_seen))}` | `frontend/app.js:889` (renderMessageRow) |
 | Messages | dynamic: `${escapeHtml(msg.subject \|\| 'No subject')}` | `frontend/app.js:891` (renderMessageRow) |
 | Messages | dynamic: `${escapeHtml(msg.recipient \|\| '')}` | `frontend/app.js:896` (renderMessageRow) |

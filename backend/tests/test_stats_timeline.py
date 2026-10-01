@@ -103,3 +103,21 @@ def test_each_hour_carries_the_dashboard_figures_and_they_add_up(seeded_hours):
     assert total('deferred') == dashboard['deferred']['24h'] >= 1
     assert total('auth_failures') == dashboard['auth_failures']['24h'] >= 1
     assert all({'total', 'spam', 'clean'} <= set(row) for row in timeline)
+
+
+def test_the_message_count_matches_the_messages_page(seeded_hours):
+    """The dashboard shows messages as the Messages page counts them (one per
+    message), so opening an hour on Messages lists the number the chart named."""
+    from fastapi.testclient import TestClient
+    from app.database import get_db_context
+    from app.main import app
+    from app.routers.stats import get_dashboard_stats, get_timeline_stats
+    with get_db_context() as db:
+        dashboard = get_dashboard_stats(db=db)
+        timeline = get_timeline_stats(hours=24, db=db)['timeline']
+    since = (datetime.utcnow() - timedelta(days=1)).isoformat()
+    listed = TestClient(app).get('/api/messages', params={'start_date': since, 'limit': 1}).json()
+    assert dashboard['messages']['unique_24h'] == listed['total']
+    assert dashboard['messages']['unique_24h'] <= dashboard['messages']['24h']
+    assert all(row['unique_messages'] <= row['messages'] for row in timeline)
+    assert sum(row['unique_messages'] for row in timeline) >= 4
