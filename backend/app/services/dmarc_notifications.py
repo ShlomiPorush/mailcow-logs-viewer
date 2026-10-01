@@ -35,7 +35,7 @@ def send_dmarc_error_notification(failed_emails: List[Dict], sync_id: int) -> bo
         logger.warning("No notification channel configured (DMARC_ERROR_EMAIL/ADMIN_EMAIL or webhook)")
         return False
 
-    subject = f"DMARC Processing Errors - Sync #{sync_id}"
+    subject = f"DMARC & TLS Report Import Errors - Sync #{sync_id}"
     text_content = _create_text_content(failed_emails, sync_id)
     html_content = _create_html_content(failed_emails, sync_id)
 
