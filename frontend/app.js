@@ -3733,19 +3733,27 @@ function setMessagesDatePresetActive(preset) {
     });
 }
 
-// The time filter where the facets are hidden: a panel under the range label
+// Where the facets are hidden: outcome, direction and time open their choices in a panel, one at a time
+const MESSAGES_PICKERS = ['status', 'direction', 'time'];
+
+function toggleMessagesPicker(kind, open) {
+    MESSAGES_PICKERS.forEach(k => {
+        const panel = document.getElementById(`messages-${k}-panel`);
+        const button = document.getElementById(k === 'time' ? 'messages-date-range-label' : `messages-${k}-pick`);
+        if (!panel || !button) return;
+        const show = k === kind && (open === undefined ? panel.classList.contains('hidden') : open);
+        panel.classList.toggle('hidden', !show);
+        button.setAttribute('aria-expanded', String(show));
+        if (show && k === 'time') {
+            // The custom range starts from the one in use
+            document.getElementById('messages-time-start').value = document.getElementById('messages-date-range-start').value;
+            document.getElementById('messages-time-end').value = document.getElementById('messages-date-range-end').value;
+        }
+    });
+}
+
 function toggleMessagesTimePanel(open) {
-    const panel = document.getElementById('messages-time-panel');
-    const label = document.getElementById('messages-date-range-label');
-    if (!panel || !label) return;
-    const show = open === undefined ? panel.classList.contains('hidden') : open;
-    panel.classList.toggle('hidden', !show);
-    label.setAttribute('aria-expanded', String(show));
-    if (show) {
-        // The custom range starts from the one in use
-        document.getElementById('messages-time-start').value = document.getElementById('messages-date-range-start').value;
-        document.getElementById('messages-time-end').value = document.getElementById('messages-date-range-end').value;
-    }
+    toggleMessagesPicker('time', open);
 }
 
 function applyMessagesTimePanelRange() {
@@ -3853,8 +3861,8 @@ function applyMessagesCustomDateRange() {
 
 // Close messages date range picker on outside click
 document.addEventListener('click', function(e) {
-    const timeHost = document.getElementById('messages-time-host');
-    if (timeHost && !timeHost.contains(e.target)) toggleMessagesTimePanel(false);
+    const pickers = document.getElementById('messages-pickers');
+    if (pickers && !pickers.contains(e.target)) toggleMessagesPicker(null, false);
     const container = document.getElementById('messages-date-range-picker-container');
     if (container && !container.contains(e.target)) {
         const dropdown = document.getElementById('messages-date-range-dropdown');
@@ -3886,6 +3894,7 @@ function messagesFilterParams(filters) {
 function setMessagesFacet(kind, value) {
     const select = document.getElementById(kind === 'status' ? 'messages-filter-status' : 'messages-filter-direction');
     if (select) select.value = value;
+    toggleMessagesPicker(null, false);
     applyMessagesFilters();
 }
 
@@ -3902,7 +3911,6 @@ function renderFacetList(kind, entries, counts, current) {
 async function loadMessageFacets(filters) {
     const statusList = document.getElementById('messages-facet-status');
     const directionList = document.getElementById('messages-facet-direction');
-    const chips = document.getElementById('messages-chips');
     let data = null;
     try {
         const params = messagesFilterParams(filters);
@@ -3923,13 +3931,21 @@ async function loadMessageFacets(filters) {
         if (!small) { small = document.createElement('small'); btn.appendChild(small); }
         small.textContent = count === undefined ? '' : String(count);
     });
-    // Phones and tablets: the outcome facets as chips above the list
-    if (chips) {
-        chips.innerHTML = MESSAGE_STATUS_FACETS.map(([value, label]) => {
-            const count = data && data.status ? data.status[value || 'all'] : undefined;
-            return `<button type="button" class="ui-chip" aria-pressed="${String(status === value)}" onclick="setMessagesFacet('status', '${value}')">${escapeHtml(value ? label : 'All')}${count === undefined ? '' : ` <small>${String(count)}</small>`}</button>`;
-        }).join('');
-    }
+    // Phones and tablets: the same facets behind the Outcome and Direction buttons, which name the choice in use
+    const pick = (kind, entries, counts, current, anyLabel) => {
+        const options = document.getElementById(`messages-${kind}-options`);
+        if (options) options.innerHTML = renderFacetList(kind, entries, counts, current);
+        const button = document.getElementById(`messages-${kind}-pick`);
+        const chosen = entries.find(([value]) => value === current);
+        if (button) {
+            button.textContent = current && chosen ? chosen[1] : anyLabel;
+            button.classList.toggle('is-set', !!current);
+        }
+    };
+    pick('status', MESSAGE_STATUS_FACETS, data && data.status, status, 'All outcomes');
+    pick('direction', MESSAGE_DIRECTION_FACETS, data && data.direction, direction, 'Any direction');
+    const timeButton = document.getElementById('messages-date-range-label');
+    if (timeButton) timeButton.classList.toggle('is-set', !!(filters.start_date || filters.end_date));
 }
 
 // After the list renders: keep the open message marked, and on wide screens
