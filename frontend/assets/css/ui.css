@@ -741,9 +741,13 @@
 
 /* ---------- Login page ---------- */
 
-.ui-login { min-height: 100vh; margin: 0; display: flex; align-items: center; justify-content: center; padding: 16px;
+/* As tall as the visible screen, not a phone's larger 100vh, and scrolls when the
+   keyboard leaves too little room; margin auto centers the card without cutting its top */
+html:has(body.ui-login) { overflow: auto; }
+body.ui-login { height: 100vh; height: 100dvh; overflow: auto; margin: 0; display: flex; padding: 16px;
     background: var(--ui-bg); color: var(--ui-ink); font-family: var(--ui-font); font-size: var(--ui-fs); }
-.ui-login-card { width: 100%; max-width: 400px; padding: 28px 24px; }
+/* The form sits on the page itself, without a card around it */
+.ui-login-card { width: 100%; max-width: 400px; margin: auto; padding: 0 8px; background: none; border: 0; box-shadow: none; }
 .ui-login-head { text-align: center; margin-bottom: 22px; }
 .ui-login-head p { margin: 8px 0 0; }
 .ui-login-logo { width: 56px; height: 56px; margin: 0 auto 14px; object-fit: contain; display: block; }
@@ -752,7 +756,7 @@
 .ui-login-or-rule { position: absolute; inset: 0; display: flex; align-items: center; }
 .ui-login-or-line { width: 100%; border-top: 1px solid var(--ui-line); }
 .ui-login-or-text { position: relative; display: flex; justify-content: center; }
-.ui-login-or-text span { padding: 0 8px; background: var(--ui-panel); color: var(--ui-muted); font-size: 12px; }
+.ui-login-or-text span { padding: 0 8px; background: var(--ui-bg); color: var(--ui-muted); font-size: 12px; }
 .ui-login-form { display: grid; gap: 14px; }
 .ui-login-form .ui-input { height: 40px; }
 .ui-btn-block { width: 100%; height: 40px; }
