@@ -1837,21 +1837,21 @@ function renderMailFlowStats() {
     const set = (id, text) => { const el = document.getElementById(id); if (el) el.textContent = text; };
     const n = v => (v || 0).toLocaleString();
     if (slot) {
-        set('stat-messages-24h', n(slot.messages));
+        set('stat-messages-24h', n(slot.unique_messages));
         set('stat-blocked-24h', n(slot.blocked));
         set('stat-deferred-24h', n(slot.deferred));
         set('stat-auth-failures-24h', n(slot.auth_failures));
-        set('stat-messages-note', `24h: ${n(d.messages['24h'])}`);
+        set('stat-messages-note', `${n(slot.messages)} deliveries, 24h: ${n(d.messages.unique_24h)}`);
         set('stat-blocked-note', `24h: ${n(d.blocked['24h'])}`);
         set('stat-deferred-note', `24h: ${n(d.deferred['24h'])}`);
         set('stat-auth-failures-note', `24h: ${n(d.auth_failures['24h'])}`);
         set('dashboard-flow-title', `Mail flow, ${mailFlowHour(slot.t)} to ${mailFlowHour(slot.t + 3600000)}`);
     } else {
-        set('stat-messages-24h', n(d.messages['24h']));
+        set('stat-messages-24h', n(d.messages.unique_24h ?? d.messages['24h']));
         set('stat-blocked-24h', n(d.blocked['24h']));
         set('stat-deferred-24h', n(d.deferred['24h']));
         set('stat-auth-failures-24h', n(d.auth_failures['24h']));
-        set('stat-messages-note', `7d: ${n(d.messages['7d'])}`);
+        set('stat-messages-note', `${n(d.messages['24h'])} deliveries, 7d: ${n(d.messages.unique_7d ?? d.messages['7d'])}`);
         set('stat-blocked-note', `7d: ${n(d.blocked['7d'])} (${d.blocked.percentage_24h}%)`);
         set('stat-deferred-note', `7d: ${n(d.deferred['7d'])}`);
         set('stat-auth-failures-note', `7d: ${n(d.auth_failures['7d'])}`);
@@ -1912,7 +1912,7 @@ async function loadMailFlowChart() {
     for (let i = 23; i >= 0; i--) {
         const t = now - i * 3600 * 1000;
         const r = byHour.get(t) || {};
-        slots.push({ t, clean: r.clean || 0, spam: r.spam || 0, messages: r.messages || 0, blocked: r.blocked || 0,
+        slots.push({ t, clean: r.clean || 0, spam: r.spam || 0, messages: r.messages || 0, unique_messages: r.unique_messages || 0, blocked: r.blocked || 0,
             deferred: r.deferred || 0, auth_failures: r.auth_failures || 0 });
     }
     mailFlowSlots = slots;
