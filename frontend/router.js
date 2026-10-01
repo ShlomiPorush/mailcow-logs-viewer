@@ -56,7 +56,7 @@ function subpageFirst(route) {
 function isSubpage(route, name) {
     const page = SUBPAGES[route];
     if (!page || !name) return false;
-    return page.tabs ? page.tabs.includes(name) : /^[a-z0-9-]+$/.test(name);
+    return page.tabs ? page.tabs.includes(name) : /^[a-z0-9_-]+$/.test(name);
 }
 
 // A tab was opened on the page on screen: give it its address. While a page
