@@ -906,7 +906,7 @@ function renderSettings(content, data) {
                     <div class="ui-chip-row">
                         <span id="maxmind-license-status">${renderMaxMindStatus(data.configuration.maxmind_status)}</span>
                         ${data.geoip_configuration ? renderGeoIPDbStatus(data.geoip_configuration) : ''}
-                        ${data.geoip_configuration && data.geoip_configuration.enabled ? '<button type="button" onclick="validateMaxMindLicense()" class="ui-btn ui-btn-sm">Validate</button>' : ''}
+                        ${maxmindValidateButton(data.geoip_configuration)}
                     </div>
                 </div>
             </div>
@@ -1063,8 +1063,8 @@ function renderSettings(content, data) {
                     };
                     tabsHtml += statusBlock([
                         ['License', '<span id="maxmind-license-status-tab">' + renderMaxMindStatus(data.configuration.maxmind_status) + '</span>'
-                            + (data.geoip_configuration && data.geoip_configuration.enabled ? '<button type="button" onclick="validateMaxMindLicense()" class="ui-btn ui-btn-sm">Validate</button>' : '')],
-                        ['Database Health', '<span id="geoip-db-status" class="ui-chip-row">' + renderGeoIPDbStatus(geoipCfg) + '</span>'],
+                            + maxmindValidateButton(data.geoip_configuration)],
+                        ['Database Health', '<span id="geoip-db-status" class="ui-chip-row">' + (renderGeoIPDbStatus(geoipCfg) || '<span class="ui-muted">Not configured</span>') + '</span>'],
                         ['Databases', (cityDb.available || asnDb.available) ? dbLine('City', cityDb) + dbLine('ASN', asnDb) : '<span class="ui-muted">Not installed</span>']
                     ]);
                 }
@@ -1103,8 +1103,7 @@ function renderSettings(content, data) {
                 </form>
             </div>
         </div>
-        ${data.settings_migrated ? `
-        ${uiSaveBar('settings-savebar', { form: 'settings-edit-form', discard: 'loadSettings()' })}` : ''}
+        ${uiSaveBar('settings-savebar', { form: 'settings-edit-form', discard: 'loadSettings()' })}
         `;
         })() : ''}
 
@@ -1900,6 +1899,14 @@ function renderMaxMindStatus(status) {
     if (status === null || status === undefined) return uiTag('Not checked', '');
     if (!status.configured) return uiTag('Not configured', '');
     return status.valid ? uiTag('License Valid', 'ok') : uiTag(status.error || 'Invalid', 'fail');
+}
+
+// Validate needs a MaxMind Account ID and License Key; without them the button stays, disabled, and says so
+function maxmindValidateButton(geoipConfig) {
+    if (!geoipConfig) return '';
+    return geoipConfig.enabled
+        ? '<button type="button" onclick="validateMaxMindLicense()" class="ui-btn ui-btn-sm">Validate</button>'
+        : '<button type="button" class="ui-btn ui-btn-sm" disabled title="Add a MaxMind Account ID and License Key first">Validate</button>';
 }
 
 function renderGeoIPDbStatus(geoipConfig) {

@@ -660,8 +660,8 @@ function renderJobCard(name, jobKey, job) {
     if (isFeatureOff) {
         statusBadge = '<span class="ui-tag ui-tag-warn" title="The feature this job belongs to is turned off in Settings">feature off</span>';
     } else if (isDisabled) {
-        // Without this tag the missing Run button had no explanation
-        statusBadge = '<span class="ui-tag" title="This job is turned off in its settings, so it cannot be run">disabled</span>';
+        // The reason comes from the server (no IMAP, no MaxMind key, no Read-Write key, a setting that is off)
+        statusBadge = `<span class="ui-tag" title="${escapeHtml(job.disabled_reason || 'This job is turned off in its settings, so it cannot be run')}">off</span>`;
     } else {
         switch (job.status) {
             case 'running':
@@ -695,13 +695,16 @@ function renderJobCard(name, jobKey, job) {
     return `
         <div class="ui-jobrow${isDisabled ? ' is-off' : ''}${failed ? ' is-failed' : ''}">
             <i class="ui-mdot${dot}"></i>
-            <span class="ui-jobrow-name"><b>${escapeHtml(name)}</b>${job.description ? `<small title="${escapeHtml(job.description)}">${escapeHtml(job.description)}</small>` : ''}</span>
+            <span class="ui-jobrow-name"><b>${escapeHtml(name)}</b>${job.description ? `<small title="${escapeHtml(job.description)}">${escapeHtml(job.description)}</small>` : ''}${isDisabled && !isFeatureOff && job.disabled_reason ? `<small class="ui-text-warn">${escapeHtml(job.disabled_reason)}</small>` : ''}</span>
             <span class="ui-jobrow-runs">${escapeHtml(runs.join(', ') || '-')}${job.pending_items !== undefined ? ` <small class="ui-text-warn">Pending: ${job.pending_items}</small>` : ''}</span>
             <span class="ui-jobrow-last" title="${job.last_run ? escapeHtml(formatTime(job.last_run)) : ''}">${job.last_run ? formatAgo(job.last_run) : 'Not run yet'}</span>
             <span class="ui-jobrow-tag">${job.status === 'success' && !isDisabled ? '' : statusBadge}</span>
             <span class="ui-jobrow-act">${!isDisabled ? `
                 <button onclick="triggerBackgroundJob('${escapeJsArg(jobKey)}', this, '${escapeJsArg(name)}')"
-                    class="ui-btn ui-btn-sm" ${isRunning ? 'disabled' : ''} title="${isRunning ? 'Job is running' : 'Run this job now'}">Run</button>` : ''}</span>
+                    class="ui-btn ui-btn-sm" ${isRunning ? 'disabled' : ''} title="${isRunning ? 'Job is running' : 'Run this job now'}">Run</button>`
+                : !isFeatureOff && job.settings_section ? `
+                <button onclick="navigateTo('settings', { sub: '${escapeJsArg(job.settings_section)}' })" class="ui-btn ui-btn-sm"
+                    title="${escapeHtml(job.disabled_reason || '')}">Settings</button>` : ''}</span>
             ${job.error ? `<p class="ui-job-error ui-mono">${escapeHtml(job.error)}</p>` : ''}
         </div>
     `;
