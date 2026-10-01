@@ -1439,15 +1439,8 @@ async function smartRefreshDashboard() {
             lastDataCache.dashboard = data;
 
             // Update stats without full reload
-            document.getElementById('stat-messages-24h').textContent = data.messages['24h'].toLocaleString();
-            document.getElementById('stat-messages-7d').textContent = data.messages['7d'].toLocaleString();
-            document.getElementById('stat-blocked-24h').textContent = data.blocked['24h'].toLocaleString();
-            document.getElementById('stat-blocked-7d').textContent = data.blocked['7d'].toLocaleString();
-            document.getElementById('stat-blocked-percentage').textContent = data.blocked.percentage_24h;
-            document.getElementById('stat-deferred-24h').textContent = data.deferred['24h'].toLocaleString();
-            document.getElementById('stat-deferred-7d').textContent = data.deferred['7d'].toLocaleString();
-            document.getElementById('stat-auth-failures-24h').textContent = data.auth_failures['24h'].toLocaleString();
-            document.getElementById('stat-auth-failures-7d').textContent = data.auth_failures['7d'].toLocaleString();
+            dashboardStats = data;
+            renderMailFlowStats();
         }
 
         // Also refresh recent activity and status summary
@@ -1678,15 +1671,8 @@ async function loadDashboard() {
         const data = await response.json();
         console.log('Dashboard data:', data);
 
-        document.getElementById('stat-messages-24h').textContent = data.messages['24h'].toLocaleString();
-        document.getElementById('stat-messages-7d').textContent = data.messages['7d'].toLocaleString();
-        document.getElementById('stat-blocked-24h').textContent = data.blocked['24h'].toLocaleString();
-        document.getElementById('stat-blocked-7d').textContent = data.blocked['7d'].toLocaleString();
-        document.getElementById('stat-blocked-percentage').textContent = data.blocked.percentage_24h;
-        document.getElementById('stat-deferred-24h').textContent = data.deferred['24h'].toLocaleString();
-        document.getElementById('stat-deferred-7d').textContent = data.deferred['7d'].toLocaleString();
-        document.getElementById('stat-auth-failures-24h').textContent = data.auth_failures['24h'].toLocaleString();
-        document.getElementById('stat-auth-failures-7d').textContent = data.auth_failures['7d'].toLocaleString();
+        dashboardStats = data;
+        renderMailFlowStats();
 
         loadRecentActivity();
         loadDashboardStatusSummary();
@@ -1819,7 +1805,59 @@ async function loadDashboardAttention() {
     updateAttentionState();
 }
 
-// Hourly messages over the last 24 hours, clean and spam (Rspamd), as bars
+// The dashboard's mail flow: the 24-hour figures, or those of one hour picked on the chart
+let dashboardStats = null;
+let mailFlowSlots = [];
+let mailFlowPicked = null; // start of the picked hour (ms), or null for all 24 hours
+
+function mailFlowHour(t) {
+    return new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit', hour12: false,
+        timeZone: appTimezone && appTimezone !== 'UTC' ? appTimezone : undefined }).format(new Date(t));
+}
+
+// A click on a bar shows that hour's numbers; the same bar again, or All 24 hours, goes back
+function pickMailFlowHour(t) {
+    mailFlowPicked = t === null || mailFlowPicked === t ? null : t;
+    renderMailFlowStats();
+}
+
+function renderMailFlowStats() {
+    const d = dashboardStats;
+    if (!d) return;
+    const slot = mailFlowPicked === null ? null : mailFlowSlots.find(s => s.t === mailFlowPicked);
+    if (!slot) mailFlowPicked = null;
+    const set = (id, text) => { const el = document.getElementById(id); if (el) el.textContent = text; };
+    const n = v => (v || 0).toLocaleString();
+    if (slot) {
+        set('stat-messages-24h', n(slot.messages));
+        set('stat-blocked-24h', n(slot.blocked));
+        set('stat-deferred-24h', n(slot.deferred));
+        set('stat-auth-failures-24h', n(slot.auth_failures));
+        set('stat-messages-note', `24h: ${n(d.messages['24h'])}`);
+        set('stat-blocked-note', `24h: ${n(d.blocked['24h'])}`);
+        set('stat-deferred-note', `24h: ${n(d.deferred['24h'])}`);
+        set('stat-auth-failures-note', `24h: ${n(d.auth_failures['24h'])}`);
+        set('dashboard-flow-title', `Mail flow, ${mailFlowHour(slot.t)} to ${mailFlowHour(slot.t + 3600000)}`);
+    } else {
+        set('stat-messages-24h', n(d.messages['24h']));
+        set('stat-blocked-24h', n(d.blocked['24h']));
+        set('stat-deferred-24h', n(d.deferred['24h']));
+        set('stat-auth-failures-24h', n(d.auth_failures['24h']));
+        set('stat-messages-note', `7d: ${n(d.messages['7d'])}`);
+        set('stat-blocked-note', `7d: ${n(d.blocked['7d'])} (${d.blocked.percentage_24h}%)`);
+        set('stat-deferred-note', `7d: ${n(d.deferred['7d'])}`);
+        set('stat-auth-failures-note', `7d: ${n(d.auth_failures['7d'])}`);
+        set('dashboard-flow-title', 'Mail flow, last 24 hours');
+    }
+    document.getElementById('dashboard-flow-reset')?.classList.toggle('hidden', !slot);
+    const bars = document.querySelector('#dashboard-flow-chart .ui-flow-bars');
+    if (bars) {
+        bars.classList.toggle('has-pick', !!slot);
+        bars.querySelectorAll('.ui-flow-bar').forEach(b => b.setAttribute('aria-pressed', String(!!slot && Number(b.dataset.t) === slot.t)));
+    }
+}
+
+// Hourly messages over the last 24 hours, clean and spam (Rspamd), as bars over a time axis
 async function loadMailFlowChart() {
     const chart = document.getElementById('dashboard-flow-chart');
     if (!chart) return;
@@ -1836,19 +1874,26 @@ async function loadMailFlowChart() {
     const slots = [];
     for (let i = 23; i >= 0; i--) {
         const t = now - i * 3600 * 1000;
-        const r = byHour.get(t) || { total: 0, spam: 0, clean: 0 };
-        slots.push({ t, clean: r.clean || 0, spam: r.spam || 0 });
+        const r = byHour.get(t) || {};
+        slots.push({ t, clean: r.clean || 0, spam: r.spam || 0, messages: r.messages || 0, blocked: r.blocked || 0,
+            deferred: r.deferred || 0, auth_failures: r.auth_failures || 0 });
     }
+    mailFlowSlots = slots;
     const max = Math.max(1, ...slots.map(s => s.clean + s.spam));
-    const hour = t => new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit', hour12: false,
-        timeZone: appTimezone && appTimezone !== 'UTC' ? appTimezone : undefined }).format(new Date(t));
+    // The axis names every third hour (every sixth on phones) and ends at now
+    const label = (s, i) => i === slots.length - 1 ? '<span class="is-major">Now</span>'
+        : i % 6 === 0 ? `<span class="is-major">${mailFlowHour(s.t)}</span>`
+        : i % 3 === 0 ? `<span class="is-minor">${mailFlowHour(s.t)}</span>` : '<span></span>';
     chart.innerHTML = `
-        <div class="ui-flow-bars">${slots.map(s => `
-            <div class="ui-flow-bar" title="${hour(s.t)}: ${s.clean.toLocaleString()} clean, ${s.spam.toLocaleString()} spam">
+        <div class="ui-flow-bars" role="group" aria-label="Messages per hour">${slots.map(s => `
+            <button type="button" class="ui-flow-bar" data-t="${s.t}" aria-pressed="false" onclick="pickMailFlowHour(${s.t})"
+                title="${mailFlowHour(s.t)} to ${mailFlowHour(s.t + 3600000)}: ${s.clean.toLocaleString()} clean, ${s.spam.toLocaleString()} spam. Click for this hour's numbers">
                 <i class="ui-flow-spam" style="height: ${(s.spam / max) * 100}%"></i>
                 <i class="ui-flow-clean" style="height: ${(s.clean / max) * 100}%"></i>
-            </div>`).join('')}</div>
+            </button>`).join('')}</div>
+        <div class="ui-flow-axis" aria-hidden="true">${slots.map(label).join('')}</div>
         <div class="ui-flow-legend"><span><i class="ui-flow-clean"></i>Clean</span><span><i class="ui-flow-spam"></i>Spam</span></div>`;
+    renderMailFlowStats();
 }
 
 async function acknowledgeSecurityAlert(alertId) {
@@ -2915,9 +2960,9 @@ function renderQuarantineData(data) {
                     ${canAct ? `<input type="checkbox" class="quarantine-checkbox ui-check" value="${escapeHtml(String(itemId))}" onchange="quarantineUpdateSelection()" aria-label="Select message" />` : ''}
                     <div class="ui-td ui-q-who">
                         <button type="button" class="ui-link-row" dir="auto" title="View details" onclick="showQuarantineDetails('${idArg}')">${escapeHtml(item.subject || 'No subject')}</button>
-                        <small>${copyableText(item.sender || 'Unknown')}${item.qid ? `, ID ${copyableText(item.qid)}` : ''}</small>
+                        <small>${escapeHtml(item.sender || 'Unknown')}${item.qid ? `, ID ${escapeHtml(item.qid)}` : ''}</small>
                     </div>
-                    <span class="ui-td">${copyableText(item.rcpt || 'Unknown')}</span>
+                    <span class="ui-td">${escapeHtml(item.rcpt || 'Unknown')}</span>
                     <span class="ui-td ui-td-wrap">${uiTag(item.action || 'Quarantined', quarantineActionTone(item.action))}${item.virus_flag ? ` ${uiTag('Virus', 'spam')}` : ''}</span>
                     <span class="ui-td ui-td-end${hasScore && item.score >= 15 ? ' ui-text-fail' : ''}"><small class="ui-sec-unit">Score </small>${hasScore ? item.score.toFixed(1) : '-'}</span>
                     <time class="ui-td" title="${escapeHtml(formatTime(item.created))}"><small class="ui-sec-unit">Held </small>${formatAgo(item.created).replace(' ago', '')}</time>

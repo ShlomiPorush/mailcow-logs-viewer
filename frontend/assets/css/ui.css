@@ -595,6 +595,8 @@
     grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); }
 .ui-md-ids .ui-md-fact { padding: 10px 14px; background: var(--ui-bg); outline: 1px solid var(--ui-line); }
 .ui-md-ids .ui-md-fact > div { font-weight: 500; }
+/* A tag next to a button (Enabled, Test IMAP) sits on the button's middle instead of stretching to its height */
+.ui-md-fact .ui-chip-row { align-items: center; }
 .ui-md-sub { display: block; margin-top: 2px; color: var(--ui-muted); font-size: 12px; font-weight: 500; }
 .ui-md-geo p { margin: 0; }
 /* Identifiers: a quiet label/value list, one value per row */
@@ -938,7 +940,16 @@ body { font-family: var(--ui-font); background: var(--ui-bg); color: var(--ui-in
 .ui-flow { padding: 0 var(--ui-pad-x) 14px; }
 .ui-flow:empty { display: none; }
 .ui-flow-bars { display: flex; align-items: flex-end; gap: 3px; height: 120px; }
-.ui-flow-bar { flex: 1; display: flex; flex-direction: column; justify-content: flex-end; gap: 2px; height: 100%; min-width: 0; }
+.ui-flow-bar { flex: 1; display: flex; flex-direction: column; justify-content: flex-end; gap: 2px; height: 100%; min-width: 0;
+    padding: 0; border: 0; border-radius: 3px; background: none; cursor: pointer; }
+.ui-flow-bar:hover { background: color-mix(in srgb, var(--ui-ink) 6%, transparent); }
+.ui-flow-bar:focus-visible { outline: 2px solid var(--ui-focus); outline-offset: 1px; }
+/* With an hour picked, the other hours step back */
+.ui-flow-bars.has-pick .ui-flow-bar[aria-pressed="false"] i { opacity: .3; }
+/* The time axis: one cell per bar, a label on every third */
+.ui-flow-axis { display: flex; gap: 3px; margin-top: 6px; color: var(--ui-muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+.ui-flow-axis span { flex: 1; min-width: 0; white-space: nowrap; overflow: visible; }
+.ui-flow-axis span:last-child { text-align: end; direction: rtl; }
 .ui-flow-bar i { display: block; border-radius: 2px; }
 .ui-flow-bar i[style*="height: 0%"] { display: none; }
 .ui-flow-clean { background: var(--ui-ink); }
@@ -963,6 +974,8 @@ body { font-family: var(--ui-font); background: var(--ui-bg); color: var(--ui-in
     .ui-mrow { grid-template-columns: 44px 8px minmax(0, 1fr); row-gap: 2px; }
     .ui-mrow-sub { grid-column: 3; }
     .ui-flow-bars { height: 90px; gap: 2px; }
+    .ui-flow-axis { gap: 2px; }
+    .ui-flow-axis .is-minor { visibility: hidden; }
 }
 
 /* ---------- Security (as the mockup) ---------- */
@@ -1207,6 +1220,8 @@ button.ui-st-card:hover { outline: 1px solid var(--ui-line); }
 .ui-flag-lg { width: 48px; height: 34px; border-radius: 4px; object-fit: cover; border: 1px solid var(--ui-line); }
 .ui-crumbs { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: -6px; font-size: var(--ui-fs-sm); }
 .ui-crumbs.hidden { display: none; }
+/* Inside a scroll region the pull-up would cut its top off (Rspamd maps) */
+.ui-scroll .ui-crumbs { margin-top: 0; }
 .ui-crumb { padding: 0; border: 0; background: none; color: var(--ui-muted); font: inherit; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
 .ui-crumb:hover { color: var(--ui-ink); }
 .ui-crumb-sep { color: var(--ui-muted); }

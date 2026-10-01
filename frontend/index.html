@@ -561,16 +561,13 @@
                         </section>
 
                         <section class="ui-panel">
-                            <div class="ui-panel-head">Mail flow, last 24 hours</div>
+                            <div class="ui-panel-head"><span id="dashboard-flow-title">Mail flow, last 24 hours</span>
+                                <button type="button" id="dashboard-flow-reset" class="ui-more hidden" onclick="pickMailFlowHour(null)">All 24 hours</button></div>
                             <div class="ui-stats">
-                                <div class="ui-stat"><span>Messages</span><b id="stat-messages-24h">0</b>
-                                    <small>7d: <span id="stat-messages-7d">0</span></small></div>
-                                <div class="ui-stat"><span>Blocked</span><b id="stat-blocked-24h" class="ui-text-fail">0</b>
-                                    <small>7d: <span id="stat-blocked-7d">0</span> (<span id="stat-blocked-percentage">0</span>%)</small></div>
-                                <div class="ui-stat"><span>Deferred</span><b id="stat-deferred-24h" class="ui-text-warn">0</b>
-                                    <small>7d: <span id="stat-deferred-7d">0</span></small></div>
-                                <div class="ui-stat"><span>Auth Fails</span><b id="stat-auth-failures-24h">0</b>
-                                    <small>7d: <span id="stat-auth-failures-7d">0</span></small></div>
+                                <div class="ui-stat"><span>Messages</span><b id="stat-messages-24h">0</b><small id="stat-messages-note"></small></div>
+                                <div class="ui-stat"><span>Blocked</span><b id="stat-blocked-24h" class="ui-text-fail">0</b><small id="stat-blocked-note"></small></div>
+                                <div class="ui-stat"><span>Deferred</span><b id="stat-deferred-24h" class="ui-text-warn">0</b><small id="stat-deferred-note"></small></div>
+                                <div class="ui-stat"><span>Auth Fails</span><b id="stat-auth-failures-24h">0</b><small id="stat-auth-failures-note"></small></div>
                             </div>
                             <div id="dashboard-flow-chart" class="ui-flow"></div>
                         </section>
@@ -838,7 +835,6 @@
                     </section>
                         <div id="queue-logs"><div class="ui-loading"><div class="loading"></div><p>Loading...</p></div></div>
                     </div>
-                    <p class="ui-kv-note ui-list-foot">Queue IDs and the full log lines are one click away in Messages.</p>
                 </section>
             </div>
 

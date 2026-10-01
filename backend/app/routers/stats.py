@@ -153,14 +153,18 @@ def get_timeline_stats(
 ):
     """
     Get message timeline for charts
-    Returns hourly message counts
+    Returns hourly message counts: clean and spam (Rspamd) for the bars, and
+    the dashboard figures for each hour (messages, blocked, deferred, auth
+    failures), counted the same way as /stats/dashboard, so a picked hour
+    shows its own numbers
     """
     try:
         cutoff = datetime.utcnow() - timedelta(hours=hours)
-        
+        hour = func.date_trunc('hour', RspamdLog.time).label('hour')
+
         # Query for hourly counts
         timeline = db.query(
-            func.date_trunc('hour', RspamdLog.time).label('hour'),
+            hour,
             func.count(RspamdLog.id).label('count'),
             func.sum(cast(RspamdLog.is_spam, Integer)).label('spam_count')
         ).filter(
@@ -170,16 +174,44 @@ def get_timeline_stats(
         ).order_by(
             'hour'
         ).all()
-        
+
+        corr_hour = func.date_trunc('hour', MessageCorrelation.first_seen).label('hour')
+        messages = db.query(
+            corr_hour,
+            func.count(MessageCorrelation.id),
+            func.sum(cast(MessageCorrelation.final_status.in_(['bounced', 'rejected', 'spam']), Integer)),
+            func.sum(cast(MessageCorrelation.final_status == 'deferred', Integer)),
+        ).filter(MessageCorrelation.first_seen >= cutoff).group_by('hour').all()
+
+        nf_hour = func.date_trunc('hour', NetfilterLog.time).label('hour')
+        auth_failures = dict(db.query(nf_hour, func.count(NetfilterLog.id)).filter(
+            and_(NetfilterLog.time >= cutoff, NetfilterLog.rule_id == 3)
+        ).group_by('hour').all())
+
+        hours_seen = {}
+        for row in timeline:
+            hours_seen[row.hour] = {
+                "total": row.count,
+                "spam": row.spam_count or 0,
+                "clean": row.count - (row.spam_count or 0),
+            }
+        for at, count, blocked, deferred in messages:
+            hours_seen.setdefault(at, {"total": 0, "spam": 0, "clean": 0}).update(
+                {"messages": count, "blocked": blocked or 0, "deferred": deferred or 0})
+        for at in auth_failures:
+            hours_seen.setdefault(at, {"total": 0, "spam": 0, "clean": 0})
+
         return {
             "timeline": [
                 {
-                    "hour": format_datetime_utc(row.hour),
-                    "total": row.count,
-                    "spam": row.spam_count or 0,
-                    "clean": row.count - (row.spam_count or 0)
+                    "hour": format_datetime_utc(at),
+                    **values,
+                    "messages": values.get("messages", 0),
+                    "blocked": values.get("blocked", 0),
+                    "deferred": values.get("deferred", 0),
+                    "auth_failures": auth_failures.get(at, 0),
                 }
-                for row in timeline
+                for at, values in sorted(hours_seen.items())
             ]
         }
     except Exception as e:
