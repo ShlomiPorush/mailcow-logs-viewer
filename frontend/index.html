@@ -382,8 +382,13 @@
     <div id="app-content" class="ui-shell">
         <!-- Phones: a slim top bar with the page name and the problems pill -->
         <header class="ui-mtop">
-            <img src="/static/assets/icons/app-icon.svg" alt="" class="ui-mtop-logo">
-            <span id="current-tab-label" class="ui-page-label">Dashboard</span>
+            <a href="/" onclick="navigateTo('dashboard'); return false;" class="ui-mtop-home" aria-label="Dashboard" title="Dashboard">
+                <img id="mtop-logo" src="/static/assets/icons/app-icon.svg" alt="" class="ui-mtop-logo">
+            </a>
+            <span class="ui-mtop-titles">
+                <small id="mtop-app-title" class="ui-mtop-app">mailcow Logs Viewer</small>
+                <span id="current-tab-label" class="ui-page-label">Dashboard</span>
+            </span>
             <button type="button" id="ui-problems-pill" class="ui-problems hidden" onclick="navigateTo('status')"></button>
             <div id="ui-mtop-actions" class="ui-mtop-actions"></div>
         </header>
@@ -431,6 +436,7 @@
             </div>
             <div class="ui-nav-group" data-nav-group>
                 <button onclick="navigateTo('settings')" id="tab-settings" class="ui-nav-item" title="Settings"><svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"> <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"> </path> <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path> </svg><span class="ui-nav-label">Settings</span></button>
+                <button onclick="navigateTo('about')" id="tab-about" class="ui-nav-item" title="About"><svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg><span class="ui-nav-label">About</span></button>
             </div>
         
             <footer id="app-footer" class="ui-side-foot">
@@ -517,6 +523,7 @@
             </div>
             <div class="ui-nav-group" data-nav-group>
                 <button onclick="navigateToMobile('settings')" id="mobile-tab-settings" class="mobile-menu-item"><svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"> <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"> </path> <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path> </svg><span class="ui-nav-label">Settings</span></button>
+                <button onclick="navigateToMobile('about')" id="mobile-tab-about" class="mobile-menu-item"><svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg><span class="ui-nav-label">About</span></button>
             </div>
             </div>
         </div>
@@ -590,7 +597,7 @@
                                 <button type="button" class="ui-st-card" onclick="openStatusTab('jobs')"><span class="ui-st-card-label">Background jobs</span><b id="dash-kpi-jobs">-</b><small id="dash-kpi-jobs-note"></small></button>
                                 <button type="button" class="ui-st-card" onclick="openStatusTab('server')"><span class="ui-st-card-label">Mail storage</span><b id="dash-kpi-storage">-</b><small id="dash-kpi-storage-note"></small></button>
                                 <button type="button" class="ui-st-card" onclick="openStatusTab('server')"><span class="ui-st-card-label">Message linking</span><b id="dash-kpi-linking">-</b><small id="dash-kpi-linking-note"></small></button>
-                                <button type="button" class="ui-st-card" onclick="navigateTo('settings')"><span class="ui-st-card-label">This app</span><b id="dash-kpi-version">-</b><small id="dash-kpi-version-note"></small></button>
+                                <button type="button" class="ui-st-card" onclick="navigateTo('about')"><span class="ui-st-card-label">This app</span><b id="dash-kpi-version">-</b><small id="dash-kpi-version-note"></small></button>
                             </div>
                         </section>
                         <section class="ui-panel">
@@ -1434,6 +1441,17 @@
             </div>
 
             <!-- Settings Tab -->
+            <!-- About: the health of what this app connects to, its version and configuration -->
+            <div id="content-about" class="tab-content hidden ui-page">
+                <div class="ui-page-head">
+                    <div>
+                        <h1 class="ui-h1">About</h1>
+                        <p class="ui-muted">This app: whether what it connects to works, its version and its configuration</p>
+                    </div>
+                </div>
+                <div id="about-content" class="ui-sec-block ui-scroll"><div class="ui-loading"><div class="loading"></div><p>Loading...</p></div></div>
+            </div>
+
             <div id="content-settings" class="tab-content hidden ui-page">
                 <div class="ui-page-head">
                     <div>
@@ -1546,6 +1564,7 @@
     <script src="/static/dmarc.js?v=6"></script>
     <script src="/static/logs-viewer.js?v=4"></script>
     <script src="/static/settings.js?v=22"></script>
+    <script src="/static/about.js?v=1"></script>
     <script src="/static/domains.js?v=7"></script>
     <script src="/static/mailbox-stats.js?v=5"></script>
     <script src="/static/rate-limits.js?v=24"></script>

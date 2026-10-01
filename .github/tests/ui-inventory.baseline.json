@@ -1,5 +1,6 @@
 {
   "pages": [
+    "about",
     "dashboard",
     "dmarc",
     "domains",
@@ -106,6 +107,7 @@
     "loadTlsDomain",
     "mailboxStatsSwitchView:rate-limits",
     "mailboxStatsSwitchView:statistics",
+    "navigateTo:about",
     "navigateTo:dashboard",
     "navigateTo:dmarc",
     "navigateTo:domains",
@@ -119,6 +121,7 @@
     "navigateTo:spam-filter",
     "navigateTo:status",
     "navigateToMessagesWithFilter",
+    "navigateToMobile:about",
     "navigateToMobile:dashboard",
     "navigateToMobile:dmarc",
     "navigateToMobile:domains",
@@ -547,6 +550,7 @@
     "/api/fail2ban/allow",
     "/api/fail2ban/ban",
     "/api/fail2ban/unban",
+    "/api/health",
     "/api/info",
     "/api/logs/netfilter",
     "/api/logs/netfilter/countries",

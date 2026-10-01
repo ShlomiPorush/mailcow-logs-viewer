@@ -213,6 +213,7 @@ def get_settings_info(db: Session = Depends(get_db)):
                 "max_search_results": settings.max_search_results,
                 "csv_export_limit": settings.csv_export_limit,
                 "scheduler_workers": settings.scheduler_workers,
+                "rspamd_configured": settings.is_rspamd_configured,
                 "auth_enabled": settings.is_authentication_enabled,
                 "basic_auth_enabled": settings.is_basic_auth_enabled,
                 "oauth2_enabled": settings.is_oauth2_enabled,

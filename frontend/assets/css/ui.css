@@ -888,7 +888,12 @@ body { font-family: var(--ui-font); background: var(--ui-bg); color: var(--ui-in
     .ui-mtop-actions { display: flex; }
     .ui-problems.hidden + .ui-mtop-actions { margin-inline-start: auto; }
     .ui-mtop-actions .ui-utilities { flex-direction: row; margin: 0; flex-wrap: nowrap; }
-    .ui-mtop-actions .ui-utilities > :not(#theme-toggle):not([onclick="refreshAllData()"]) { display: none; }
+    .ui-mtop-actions .ui-utilities > :not(#theme-toggle):not([onclick="refreshAllData()"]):not(#logout-btn) { display: none; }
+    .ui-mtop-actions .ui-utilities > #logout-btn.hidden { display: none; }
+    .ui-mtop-home { display: flex; flex: none; border-radius: var(--ui-radius-sm); }
+    .ui-mtop-home:focus-visible { outline: 2px solid var(--ui-focus); outline-offset: 2px; }
+    .ui-mtop-titles { display: grid; min-width: 0; line-height: 1.15; }
+    .ui-mtop-app { overflow: hidden; color: var(--ui-muted); font-size: 11px; font-weight: 600; white-space: nowrap; text-overflow: ellipsis; }
     .ui-content { padding: 16px 12px calc(80px + env(safe-area-inset-bottom)); }
 
     .ui-tabbar { display: flex; position: fixed; inset: auto 0 0 0; z-index: 36; height: calc(64px + env(safe-area-inset-bottom));
@@ -1757,6 +1762,12 @@ html .markdown-body .markdown-alert-caution .markdown-alert-title { color: var(-
 .dark #changelog-content .markdown-alert-caution .markdown-alert-title, .dark .update-changelog-content .markdown-alert-caution .markdown-alert-title { color: var(--ui-fail) !important; }
 
 /* Dashboard server health: the Status cards, two per row in the side column */
+/* About: one card per thing the app depends on, with where to fix it */
+.ui-about-card { background: var(--ui-panel); }
+.ui-about-card b { font-size: 18px; }
+.ui-about-card b.ui-ok { color: var(--ui-ok); }
+.ui-about-card small { overflow-wrap: anywhere; }
+.ui-about-card .ui-chip-row { margin-top: 6px; }
 .ui-dash-health { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; padding: 4px 12px 12px; }
 .ui-dash-health .ui-st-card { padding: 11px 12px; background: var(--ui-bg); }
 .ui-dash-health .ui-st-card b { font-size: 17px; }

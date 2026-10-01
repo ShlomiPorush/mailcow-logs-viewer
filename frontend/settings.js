@@ -8,8 +8,9 @@
 // SETTINGS PAGE
 // =============================================================================
 
-// The open section; it has its own address (/settings/notifications)
-let settingsTab = 'about';
+// The open section; it has its own address (/settings/notifications). null: the first one
+let settingsTab = null;
+let settingsFirstTab = null;
 
 // Labels the key cannot spell well. Next to the other addresses, "Error Email" alone would not say whose errors
 const SETTINGS_LABEL_OVERRIDES = {
@@ -477,7 +478,7 @@ var SETTINGS_EDIT_TABS = [
 // listed here falls into the last group automatically (so new tabs never
 // silently disappear).
 var SETTINGS_TAB_GROUPS = [
-    { label: 'General', tabs: ['about', 'features', 'application'] },
+    { label: 'General', tabs: ['features', 'application'] },
     { label: 'mailcow', tabs: ['mailcow', 'fetch', 'correlation', 'logs'] },
     { label: 'Alerts', tabs: ['notifications', 'smtp'] },
     { label: 'Security', tabs: ['auth', 'anomaly', 'smtp_abuse'] },
@@ -864,49 +865,9 @@ function renderSettings(content, data) {
     ];
 
     const editing = !!(data.settings_edit_via_ui_enabled && data.editable_config);
-    const aboutHtml = `
-        <div class="ui-dash-grid ui-status-pair">
-            <!-- Version Information Section -->
-            <section class="ui-panel">
-                <div class="ui-panel-head">Version</div>
-                <div class="ui-kv"><span>Current Version</span><b><button type="button" id="current-version-text" class="ui-link-row ui-link" title="Click to view changelog">v${escapeHtml(appVersion)}</button></b></div>
-                <div class="ui-kv"><span>Latest Version</span><b id="settings-latest-version">${renderLatestVersionState(versionInfo)}</b></div>
-                <div class="ui-set-version-foot">
-                    <span id="settings-version-checked" class="ui-muted">${versionInfo.last_checked ? `Last checked: ${formatDate(versionInfo.last_checked)}` : ''}</span>
-                    <button type="button" id="check-version-btn" class="ui-btn ui-btn-sm">
-                        <svg id="check-version-icon" width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
-                        </svg>
-                        <span id="check-version-text">Check Now</span>
-                    </button>
-                </div>
-                <div id="settings-update-note">${renderUpdateNote(versionInfo)}</div>
-            </section>
-
-            <!-- Configuration Section -->
-            <section class="ui-panel">
-                <div class="ui-panel-head">Configuration</div>
-                ${kv('mailcow URL', escapeHtml(config.mailcow_url || 'N/A'), 'ui-mono ui-kv-small')}
-                ${kv('Server IP', config.server_ip ? `<span class="ui-text-ok">✓</span> ${escapeHtml(config.server_ip)}` : '<span class="ui-muted">Not available</span>', 'ui-mono ui-kv-small')}
-                ${kv('Authentication', config.auth_enabled
-                    ? `${uiTag('Enabled', 'ok')} ${config.basic_auth_enabled ? uiTag('Basic Auth', 'info') : ''} ${config.oauth2_enabled ? uiTag(`OAuth2${config.oauth2_provider_name ? ` (${config.oauth2_provider_name})` : ''}`, 'spam') : ''}`
-                    : uiTag('Disabled', ''))}
-                ${config.auth_enabled && config.basic_auth_enabled && config.auth_username ? `<p class="ui-kv-note">Basic Auth Username: ${escapeHtml(config.auth_username)}</p>` : ''}
-                ${config.local_domains && config.local_domains.length > 0 ? '' : kv('Local Domains', '<span class="ui-muted">N/A</span>')}
-            </section>
-        </div>
-
-        ${config.local_domains && config.local_domains.length > 0 ? `
-        <section class="ui-panel">
-            <div class="ui-panel-head">Local Domains <span class="ui-count">${config.local_domains.length}</span></div>
-            <div class="ui-set-domains">${config.local_domains.map(domain => `<span class="ui-code-chip" title="${escapeHtml(domain)}">${escapeHtml(domain)}</span>`).join('')}</div>
-        </section>` : ''}`;
-
     content.innerHTML = `
         ${!data.settings_edit_via_ui_enabled ? `<div class="ui-list-note ui-flush">${uiLocked('Editing settings is off',
             'These values come from the environment and are shown read-only. To change them here, set <code>SETTINGS_EDIT_VIA_UI_ENABLED=true</code> and restart the container.', '')}</div>` : ''}
-
-        ${editing ? '' : aboutHtml}
 
         ${!data.settings_edit_via_ui_enabled ? `
         <section class="ui-panel">
@@ -961,8 +922,7 @@ function renderSettings(content, data) {
                     .flatMap(function (g) { return g.keys; })
                     .some(function (k) { return data.editable_config[k] !== undefined; });
             };
-            const visibleIds = ['about'].concat(filteredTabs.filter(isTabVisible).map(function (t) { return t.id; }));
-            tabById.about = { id: 'about', label: 'About this app' };
+            const visibleIds = filteredTabs.filter(isTabVisible).map(function (t) { return t.id; });
 
             // Group the visible tabs. Groups with none are dropped; any visible
             // tab not assigned to a group is appended to the last group.
@@ -1100,13 +1060,9 @@ function renderSettings(content, data) {
         <div class="settings-edit-layout ui-set-edit">
             ${navHtml}
             <div class="settings-edit-content">
-                <div id="settings-tab-panel-about" class="settings-edit-panel">
-                    <h2 class="ui-set-title">About this app</h2>
-                    <div class="ui-set-actions" id="settings-edit-actions">
-                        <p class="ui-muted">Values come from the defaults, then this page, then the environment. A value set by an environment variable always wins and is locked here.</p>
-                        ${!data.settings_migrated ? '<button type="button" id="settings-import-env-btn" class="ui-btn ui-btn-primary">Migrate Settings from ENV</button>' : ''}
-                    </div>
-                    ${aboutHtml}
+                <div class="ui-set-actions" id="settings-edit-actions">
+                    <p class="ui-muted">Values come from the defaults, then this page, then the environment. A value set by an environment variable always wins and is locked here. Version and health are on the <button type="button" class="ui-link" onclick="navigateTo('about')">About</button> page.</p>
+                    ${!data.settings_migrated ? '<button type="button" id="settings-import-env-btn" class="ui-btn ui-btn-primary">Migrate Settings from ENV</button>' : ''}
                 </div>
                 <p id="settings-search-empty" class="ui-empty hidden">No setting matches this search.</p>
                 <form id="settings-edit-form" class="ui-set-form">
@@ -1142,136 +1098,6 @@ function renderSettings(content, data) {
         </div>
         ` : ''}
     `;
-
-    // Add event listener for version number click (changelog popup)
-    const currentVersionText = document.getElementById('current-version-text');
-
-    const loadCurrentVersionChangelog = async () => {
-        try {
-            // Remove 'v' prefix if present for API call
-            const versionForApi = appVersion.startsWith('v') ? appVersion.substring(1) : appVersion;
-            const response = await authenticatedFetch(`/api/status/app-version/changelog/${versionForApi}`);
-            if (response.ok) {
-                const data = await response.json();
-                showChangelogModal(data.changelog || 'No changelog available');
-            } else {
-                showChangelogModal('Failed to load changelog');
-            }
-        } catch (error) {
-            console.error('Failed to load changelog:', error);
-            showChangelogModal('Failed to load changelog');
-        }
-    };
-
-    if (currentVersionText) {
-        currentVersionText.onclick = loadCurrentVersionChangelog;
-    }
-
-    // Render markdown in changelog sections if marked.js is available
-    // Use versionInfo from the data object directly instead of data attributes
-    if (typeof marked !== 'undefined' && versionInfo && versionInfo.changelog) {
-        marked.setOptions({
-            breaks: true,
-            gfm: true
-        });
-        const changelogElements = content.querySelectorAll('.update-changelog-content');
-        changelogElements.forEach(el => {
-            // Use the changelog directly from versionInfo object
-            const changelogText = versionInfo.changelog;
-            if (changelogText) {
-                el.innerHTML = renderMarkdown(changelogText);
-            }
-        });
-    }
-
-    // Add event listener for version check button
-    const checkVersionBtn = document.getElementById('check-version-btn');
-    if (checkVersionBtn) {
-        // Use onclick to avoid duplicate listeners (simpler approach)
-        checkVersionBtn.onclick = async () => {
-            const btn = checkVersionBtn;
-            const icon = document.getElementById('check-version-icon');
-            const text = document.getElementById('check-version-text');
-
-            // Disable button and show loading state
-            btn.disabled = true;
-            if (icon) {
-                icon.classList.add('animate-spin');
-            }
-            if (text) {
-                text.textContent = 'Checking...';
-            }
-
-            try {
-                // Force check for updates
-                const response = await authenticatedFetch('/api/status/app-version?force=true');
-                const versionInfo = await response.json();
-
-                // Update cache
-                versionInfoCache.version_info = versionInfo;
-
-                // Update UI directly without reloading the page
-                updateVersionInfoUI(versionInfo);
-
-                // Show success state - green button with "Done"
-                btn.classList.add('ui-btn-done');
-                if (text) {
-                    text.textContent = 'Done';
-                }
-                if (icon) {
-                    icon.classList.remove('animate-spin');
-                    // Change icon to checkmark
-                    const path = icon.querySelector('path');
-                    if (path) {
-                        path.setAttribute('d', 'M5 13l4 4L19 7');
-                    }
-                }
-
-                // Re-enable button immediately after success (but keep green color)
-                btn.disabled = false;
-
-                // Reset button after 3 seconds
-                setTimeout(() => {
-                    btn.classList.remove('ui-btn-done');
-                    if (text) {
-                        text.textContent = 'Check Now';
-                    }
-                    if (icon) {
-                        const path = icon.querySelector('path');
-                        if (path) {
-                            path.setAttribute('d', 'M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15');
-                        }
-                    }
-                }, 3000);
-
-            } catch (error) {
-                console.error('Failed to check version:', error);
-                // Show error message
-                btn.classList.add('ui-btn-failed');
-                if (text) {
-                    text.textContent = 'Error';
-                }
-                if (icon) {
-                    icon.classList.remove('animate-spin');
-                }
-
-                // Reset button after 2 seconds
-                setTimeout(() => {
-                    btn.classList.remove('ui-btn-failed');
-                    if (text) {
-                        text.textContent = 'Check Now';
-                    }
-                    if (icon) {
-                        const path = icon.querySelector('path');
-                        if (path) {
-                            path.setAttribute('d', 'M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15');
-                        }
-                    }
-                    btn.disabled = false;
-                }, 2000);
-            }
-        };
-    }
 
     // Edit configuration: form submit, Import from ENV, and tab switching
     if (data.settings_edit_via_ui_enabled && data.editable_config) {
@@ -1320,13 +1146,17 @@ function renderSettings(content, data) {
             });
         });
 
-        // The section the address names (/settings/notifications), or About
+        // The section the address names (/settings/notifications), or the first one
         window.settingsShowTab = id => switchSettingsTab(id, false);
-        if (settingsTab !== 'about' && content.querySelector('#settings-tab-panel-' + CSS.escape(settingsTab))) {
+        const firstTabBtn = content.querySelector('.settings-edit-tab');
+        settingsFirstTab = firstTabBtn ? firstTabBtn.getAttribute('data-tab') : null;
+        if (settingsTab && content.querySelector('#settings-tab-panel-' + CSS.escape(settingsTab))) {
             switchSettingsTab(settingsTab, false);
-        } else if (settingsTab !== 'about') {
-            settingsTab = 'about';
-            if (typeof routerSyncSubpage === 'function') routerSyncSubpage('settings', 'about', true);
+        } else if (settingsFirstTab) {
+            const named = settingsTab;
+            settingsTab = settingsFirstTab;
+            if (named && typeof routerSyncSubpage === 'function') routerSyncSubpage('settings', settingsFirstTab, true);
+            switchSettingsTab(settingsFirstTab, false);
         }
 
         const tabSelect = content.querySelector('#settings-tab-select');
@@ -1418,7 +1248,6 @@ function renderSettings(content, data) {
                 }
                 let any = false;
                 panels.forEach(panel => {
-                    if (panel.id === 'settings-tab-panel-about') { panel.classList.add('hidden'); return; }
                     let panelHas = false;
                     panel.querySelectorAll('.ui-set-group').forEach(group => {
                         let groupHas = false;
