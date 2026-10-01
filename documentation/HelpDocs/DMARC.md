@@ -166,7 +166,7 @@ v=DMARC1; p=none; rua=mailto:dmarc@example.net;
 ### 2. Parameter Details
 
 * **`p=none` (Monitoring Mode):** The recommended starting point. It ensures no mail is blocked while you collect data to verify that all legitimate sources are correctly authenticated.
-* **`rua=mailto:...`:** This is the feedback loop trigger. Ensure this address is the mailbox configured under **Settings → DMARC IMAP** in mailcow Logs Viewer.
+* **`rua=mailto:...`:** This is the feedback loop trigger. Ensure this address is the mailbox configured under **Settings → DMARC & TLS IMAP** in mailcow Logs Viewer.
 * **`v=DMARC1`:** Required version prefix.
 
 ### 3. External Domain Reporting (Verification)
@@ -201,7 +201,7 @@ To receive them, create a **TXT** record at the `_smtp._tls` subdomain (e.g., `_
 v=TLSRPTv1; rua=mailto:dmarc@example.net
 ```
 
-* **`rua=`**: Where reports are sent. Use the mailbox configured under **Settings → DMARC IMAP**; the same sync imports DMARC and TLS reports. Senders deliver only to `mailto:` and `https:` addresses.
+* **`rua=`**: Where reports are sent. Use the mailbox configured under **Settings → DMARC & TLS IMAP**; the same sync imports DMARC and TLS reports. Senders deliver only to `mailto:` and `https:` addresses.
 * Publish exactly one such record. Senders ignore the domain when there is more than one.
 
 The reports appear in the **TLS Reports** tab of the domain. The **TLS-RPT Record** card at the top of the domain page, next to the DMARC Record card, shows whether the record is published and where reports go. A change to the record triggers a DNS change alert, like the other records.

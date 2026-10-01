@@ -239,7 +239,7 @@ var SETTINGS_FIELD_DESCRIPTIONS = {
     debug: 'Enable debug mode (shows detailed errors). Use only for development. Never enable in production. Default: false.',
     max_search_results: 'Maximum records to return in search results. Default: 1000.',
     csv_export_limit: 'CSV export row limit. Default: 10000.',
-    scheduler_workers: 'Thread pool size for blocking scheduler jobs (e.g. DMARC IMAP sync). Valid range: 1-64. Default: 4.',
+    scheduler_workers: 'Thread pool size for blocking scheduler jobs (e.g. the DMARC & TLS IMAP import). Valid range: 1-64. Default: 4.',
     blacklist_emails: 'Comma-separated email addresses to hide from logs (e.g. BCC archive, monitoring). These emails are NOT stored in the database.',
     auth_enabled: 'Deprecated: use Basic auth enabled. When enabled, enables Basic Auth. Default: false.',
     basic_auth_enabled: 'Enable Basic HTTP authentication. When enabled, ALL pages and API require login. Default: false.',
@@ -271,23 +271,23 @@ var SETTINGS_FIELD_DESCRIPTIONS = {
     smtp_relay_mode: 'Relay mode: for local relay servers that do not require authentication. When enabled, username and password are not required.',
     admin_email: 'Administrator email for system notifications.',
     blacklist_alert_email: 'Email for IP blacklist alerts (uses Admin email if not set).',
-    dmarc_retention_days: 'DMARC reports retention in days. Default: 60.',
-    dmarc_manual_upload_enabled: 'Allow manual upload of DMARC reports via the UI. Default: true.',
-    dmarc_allow_report_delete: 'Allow deleting DMARC/TLS reports from the UI. Default: false.',
+    dmarc_retention_days: 'How many days DMARC and TLS reports are kept. Default: 60.',
+    dmarc_manual_upload_enabled: 'Allow uploading DMARC and TLS reports by hand on the DMARC & TLS page. Default: true.',
+    dmarc_allow_report_delete: 'Allow deleting DMARC and TLS reports from the UI. Default: false.',
     enable_weekly_summary: 'Enable weekly summary email report (sent to admin email). Default: true.',
-    dmarc_imap_enabled: 'Enable automatic DMARC report import from IMAP mailbox.',
+    dmarc_imap_enabled: 'Import DMARC and TLS reports automatically from an IMAP mailbox.',
     dmarc_imap_host: 'IMAP server hostname (e.g. imap.gmail.com).',
     dmarc_imap_port: 'IMAP server port (993 for SSL, 143 for non-SSL). Default: 993.',
     dmarc_imap_use_ssl: 'Use SSL/TLS for IMAP connection. Default: true.',
     dmarc_imap_user: 'IMAP username (email address).',
     dmarc_imap_password: 'IMAP password.',
-    dmarc_imap_folder: 'IMAP folder to scan for DMARC reports. Default: INBOX.',
+    dmarc_imap_folder: 'IMAP folder to scan for DMARC and TLS reports. Default: INBOX.',
     dmarc_imap_delete_after: 'Delete emails after successful processing. Default: true.',
     dmarc_imap_interval: 'Interval between IMAP syncs in seconds. Default: 3600 (1 hour).',
     dmarc_imap_run_on_startup: 'Run IMAP sync once on application startup. Default: true.',
     dmarc_imap_batch_size: 'Number of emails to process per batch. Default: 10.',
     dmarc_imap_scan_all_unseen: 'Scan all unread emails for DMARC/TLS-RPT attachments, not just those matching known subject patterns. Enable if you receive reports from providers that use non-English subjects. Only recommended for dedicated DMARC mailboxes.',
-    dmarc_error_email: 'Email for DMARC error notifications (defaults to Admin email if not set).',
+    dmarc_error_email: 'Email for errors while importing DMARC and TLS reports (defaults to the Admin email if not set).',
     maxmind_account_id: 'MaxMind Account ID for GeoIP database downloads. Required to download GeoLite2 databases.',
     maxmind_license_key: 'MaxMind License Key for GeoIP database downloads. Required to download GeoLite2 databases. Keep this secret.',
     disabled_features: 'Disable features to hide their pages and stop their background jobs. Core features (Dashboard, Messages, Settings, Status) are always enabled.',
@@ -422,14 +422,14 @@ var SETTINGS_EDIT_TABS = [
         ]
     },
     {
-        id: 'dmarc', label: 'DMARC', description: 'DMARC reports retention (days). Allow manual upload of reports via UI. Allow deleting DMARC/TLS reports from the UI. Weekly summary: enable email report sent to admin.', groups: [
+        id: 'dmarc', label: 'DMARC & TLS', description: 'How long DMARC and TLS reports are kept (days). Allow uploading reports by hand and deleting them from the UI. Weekly summary: enable email report sent to admin.', groups: [
             { label: 'Retention', keys: ['dmarc_retention_days'] },
             { label: 'Features', keys: ['dmarc_manual_upload_enabled', 'dmarc_allow_report_delete'] },
             { label: 'Insights (policy recommendations)', keys: ['dmarc_insights_window_days', 'dmarc_insights_pass_threshold', 'dmarc_insights_min_volume'] }
         ]
     },
     {
-        id: 'dmarc_imap', label: 'DMARC IMAP', description: 'Automatically import DMARC reports from an IMAP mailbox. Set host, port, user, password and folder (e.g. INBOX). Delete after: remove emails after processing. Interval in seconds; run on startup to sync once at start.', groups: [
+        id: 'dmarc_imap', label: 'DMARC & TLS IMAP', description: 'Import DMARC and TLS reports automatically from an IMAP mailbox: the address in the rua= of your DMARC and TLS-RPT records. Set host, port, user, password and folder (e.g. INBOX). Delete after: remove emails after processing. Interval in seconds; run on startup to sync once at start.', groups: [
             { label: 'Enable', keys: ['dmarc_imap_enabled'] },
             { label: 'Connection', keys: ['dmarc_imap_host', 'dmarc_imap_port', 'dmarc_imap_use_ssl'] },
             { label: 'Authentication', keys: ['dmarc_imap_user', 'dmarc_imap_password'] },
@@ -1017,7 +1017,7 @@ function renderSettings(content, data) {
                 const desc = '<h2 class="ui-set-title">' + escapeHtml(tab.label) + '</h2>' + (tab.description ? '<p class="ui-set-tabdesc">' + escapeHtml(tab.description) + '</p>' : '');
                 tabsHtml += '<div id="settings-tab-panel-' + tab.id + '" class="settings-edit-panel' + hidden + '">' + desc;
 
-                // A small grid of facts at the top of a tab: SMTP, DMARC IMAP and MaxMind status
+                // A small grid of facts at the top of a tab: SMTP, DMARC & TLS IMAP and MaxMind status
                 const statusBlock = function (facts) {
                     return '<section class="ui-panel ui-set-group"><h3 class="ui-set-group-title">Status</h3><div class="ui-md-ids ui-set-facts">'
                         + facts.map(function (f) { return '<div class="ui-md-fact"><span>' + f[0] + '</span><div class="ui-chip-row">' + f[1] + '</div></div>'; }).join('')
@@ -1040,7 +1040,7 @@ function renderSettings(content, data) {
                     tabsHtml += '<section id="notification-channels-panel" class="ui-panel ui-set-channels"></section>';
                 }
 
-                // Special handling for DMARC IMAP tab - add DMARC Management
+                // Special handling for the DMARC & TLS IMAP tab - add the report management facts
                 if (tab.id === 'dmarc_imap' && data.dmarc_configuration) {
                     const facts = [
                         ['IMAP Auto-Import', onOff(data.dmarc_configuration.imap_sync_enabled) + '<button type="button" onclick="testImapConnection()" class="ui-btn ui-btn-sm">Test IMAP</button>'],
@@ -1122,9 +1122,9 @@ function renderSettings(content, data) {
                 ` : ''}
             </section>
 
-            <!-- DMARC Management -->
+            <!-- DMARC & TLS report management -->
             <section class="ui-panel">
-                <div class="ui-panel-head">DMARC Management
+                <div class="ui-panel-head">DMARC &amp; TLS Reports
                     <button type="button" onclick="testImapConnection()" class="ui-btn ui-btn-sm ui-head-actions">Test IMAP</button></div>
                 <div class="ui-kv"><span>IMAP Auto-Import</span><b>${data.dmarc_configuration?.imap_sync_enabled ? uiTag('Enabled', 'ok') : uiTag('Disabled', '')}</b></div>
                 <div class="ui-kv"><span>Manual Upload</span><b>${data.dmarc_configuration?.manual_upload_enabled ? uiTag('Enabled', 'ok') : uiTag('Disabled', 'fail')}</b></div>
