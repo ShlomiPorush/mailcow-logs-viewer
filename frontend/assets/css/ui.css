@@ -523,6 +523,12 @@
 .ui-search input { flex: 1; min-width: 0; height: 100%; border: 0; outline: none; background: none; color: var(--ui-ink); font: inherit; }
 .ui-msg-summary { margin: 8px 2px 0; color: var(--ui-muted); font-size: 12.5px; }
 .ui-msg-summary #messages-count { color: var(--ui-ink); font-weight: 600; }
+/* The range label: plain text beside the facets; below 1280px, where they hide, it opens the time choices */
+.ui-msg-range-host { position: relative; display: inline-block; }
+.ui-msg-range { padding: 0; border: 0; background: none; color: var(--ui-muted); font: inherit; pointer-events: none; }
+.ui-msg-time-panel { display: grid; gap: 8px; inset-inline-start: 0; top: calc(100% + 6px); width: min(300px, calc(100vw - 32px)); }
+.ui-msg-time-panel.hidden { display: none; }
+.ui-msg-time-panel .ui-date-pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
 .ui-chips { display: none; gap: 6px; overflow-x: auto; margin: 10px -14px 0; padding: 0 14px; scrollbar-width: none; }
 .ui-chips::-webkit-scrollbar { display: none; }
 .ui-chips .ui-chip { flex: none; }
@@ -618,6 +624,13 @@
     .ui-msgs { grid-template-columns: minmax(300px, 360px) minmax(0, 1fr); }
     .ui-facets { display: none; }
     .ui-chips { display: flex; }
+    .ui-msg-range { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border: 1px solid var(--ui-line); border-radius: 999px;
+        background: var(--ui-bg); color: var(--ui-ink); font-weight: 600; cursor: pointer; pointer-events: auto; }
+    .ui-msg-range::after { content: ""; width: 6px; height: 6px; margin-top: -3px; border: solid currentColor; border-width: 0 1.5px 1.5px 0; transform: rotate(45deg); }
+    .ui-msg-range[aria-expanded="true"]::after { margin-top: 3px; transform: rotate(-135deg); }
+    /* The panel opens from the start of the summary row, so it stays on the screen */
+    .ui-msg-summary { position: relative; }
+    .ui-msg-range-host { position: static; }
 }
 @media (max-width: 999px) {
     .ui-msgs { display: block; height: auto; }

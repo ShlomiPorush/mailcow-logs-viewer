@@ -3733,6 +3733,27 @@ function setMessagesDatePresetActive(preset) {
     });
 }
 
+// The time filter where the facets are hidden: a panel under the range label
+function toggleMessagesTimePanel(open) {
+    const panel = document.getElementById('messages-time-panel');
+    const label = document.getElementById('messages-date-range-label');
+    if (!panel || !label) return;
+    const show = open === undefined ? panel.classList.contains('hidden') : open;
+    panel.classList.toggle('hidden', !show);
+    label.setAttribute('aria-expanded', String(show));
+    if (show) {
+        // The custom range starts from the one in use
+        document.getElementById('messages-time-start').value = document.getElementById('messages-date-range-start').value;
+        document.getElementById('messages-time-end').value = document.getElementById('messages-date-range-end').value;
+    }
+}
+
+function applyMessagesTimePanelRange() {
+    document.getElementById('messages-date-range-start').value = document.getElementById('messages-time-start').value;
+    document.getElementById('messages-date-range-end').value = document.getElementById('messages-time-end').value;
+    applyMessagesCustomDateRange();
+}
+
 function toggleMessagesDateRangePicker() {
     const dropdown = document.getElementById('messages-date-range-dropdown');
     const arrow = document.getElementById('messages-date-range-arrow');
@@ -3791,6 +3812,7 @@ function selectMessagesDatePreset(preset) {
     // Close dropdown and apply
     document.getElementById('messages-date-range-dropdown').classList.add('hidden');
     document.getElementById('messages-date-range-arrow').style.transform = '';
+    toggleMessagesTimePanel(false);
     applyMessagesFilters();
 }
 
@@ -3825,11 +3847,14 @@ function applyMessagesCustomDateRange() {
     // Close dropdown and apply
     document.getElementById('messages-date-range-dropdown').classList.add('hidden');
     document.getElementById('messages-date-range-arrow').style.transform = '';
+    toggleMessagesTimePanel(false);
     applyMessagesFilters();
 }
 
 // Close messages date range picker on outside click
 document.addEventListener('click', function(e) {
+    const timeHost = document.getElementById('messages-time-host');
+    if (timeHost && !timeHost.contains(e.target)) toggleMessagesTimePanel(false);
     const container = document.getElementById('messages-date-range-picker-container');
     if (container && !container.contains(e.target)) {
         const dropdown = document.getElementById('messages-date-range-dropdown');
