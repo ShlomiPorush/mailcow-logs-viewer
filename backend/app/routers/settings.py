@@ -32,6 +32,39 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+def _job_off_reason(key: str):
+    """Why a background job does not run, and the Settings section that changes it.
+
+    A job of a feature switched off is not covered: the feature itself says so.
+    Returns (reason, settings section) or None while the job can run.
+    """
+    rw = mailcow_api.has_rw_key
+    checks = {
+        'dmarc_imap_sync': [(not settings.dmarc_imap_enabled, 'IMAP import of DMARC reports is not set up', 'dmarc_imap')],
+        'update_geoip': [(not is_license_configured(), 'Needs a MaxMind Account ID and License Key', 'maxmind')],
+        'send_weekly_summary': [(not settings.enable_weekly_summary, 'The weekly summary is turned off', 'notifications')],
+        'fetch_raw_logs': [(not settings.raw_logs_enabled, 'Live Logs are turned off', 'logs')],
+        'cleanup_raw_logs': [(not settings.raw_logs_enabled, 'Live Logs are turned off', 'logs')],
+        'detect_suppressions': [(not settings.suppression_enabled, 'Suppressions are turned off', 'spam_filter'),
+                                (not settings.suppression_auto_detect, 'Automatic bounce detection is turned off', 'spam_filter')],
+        'sync_suppressions': [(not settings.suppression_enabled, 'Suppressions are turned off', 'spam_filter'),
+                              (not settings.suppression_rspamd_sync, 'Syncing suppressions to Rspamd is turned off', 'spam_filter'),
+                              (not settings.is_rspamd_configured, 'Needs the Rspamd password', 'mailcow')],
+        'expire_suppressions': [(not settings.suppression_enabled, 'Suppressions are turned off', 'spam_filter')],
+        'process_quarantine_rules': [(not rw, 'Needs the Read-Write API key (MAILCOW_API_KEY_RW)', 'mailcow')],
+        'cleanup_deferred_queue': [(not settings.suppression_enabled, 'Suppressions are turned off', 'spam_filter'),
+                                   (not settings.queue_cleanup_enabled, 'Deferred queue cleanup is turned off', 'spam_filter'),
+                                   (not rw, 'Needs the Read-Write API key (MAILCOW_API_KEY_RW)', 'mailcow')],
+        'anomaly_detection': [(not settings.anomaly_detection_enabled, 'Anomaly detection is turned off', 'anomaly')],
+        'smtp_abuse': [(not settings.smtp_abuse_enabled, 'SMTP abuse protection is turned off', 'smtp_abuse'),
+                       (not rw, 'Needs the Read-Write API key (MAILCOW_API_KEY_RW)', 'mailcow')],
+    }
+    for off, reason, section in checks.get(key, []):
+        if off:
+            return reason, section
+    return None
+
+
 def _get_raw_logs_job_status(job_key: str, field: str, enabled: bool):
     """Get raw logs job status from the separate worker module."""
     if not enabled:
@@ -482,6 +515,11 @@ def get_settings_info(db: Session = Depends(get_db)):
                 for corr in recent_incomplete
             ]
         }
+        # A job that cannot run says why, and where to change it
+        for key, job in result.get("background_jobs", {}).items():
+            off = None if job.get("feature_disabled") else _job_off_reason(key)
+            if off:
+                job["disabled_reason"], job["settings_section"] = off
         # When UI editing is enabled, include full editable config and migration status
         if settings.edit_settings_via_ui_enabled:
             result["editable_config"] = _effective_config_for_editable(settings)

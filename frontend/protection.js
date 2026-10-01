@@ -312,7 +312,8 @@ async function loadProtectionOverview() {
         const shown = review.sort((a, b) => (a.status === 'alert' ? 0 : 1) - (b.status === 'alert' ? 0 : 1)).slice(0, 6);
         box.innerHTML = !shown.length
             ? `<p class="ui-st-allgood">Nothing to review. ${counts.banned ? 'The rules are banning what they catch.' : 'What the protection rules catch shows up here.'}</p>`
-            : `${shown.map(hit => `
+            : `${!mailcowRwConfigured && shown.some(h => h.status === 'watching') ? `<div class="ui-list-note">${uiLocked('Ban now is locked', `Banning ${UI_RW_KEY_TEXT}`)}</div>` : ''}
+               ${shown.map(hit => `
                 <div class="ui-st-listing">
                     <div><b class="ui-mono">${copyableText(hit.ip)}</b> ${protectionStatus(hit)}<small title="${escapeHtml(hit.reason || '')}">${escapeHtml(PROTECTION_RULE_LABELS[hit.rule] || hit.rule)}: ${escapeHtml(hit.reason || '')}, ${formatAgo(hit.last_seen)}</small></div>
                     <span class="ui-st-acts">${protectionActions(hit)}</span>

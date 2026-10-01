@@ -855,7 +855,7 @@
                     </div>
                 </div>
                 <!-- Tabs appear with the read-write key, when the Auto-Rules can be managed -->
-                <div id="quarantine-tabs" class="ui-tabs ui-page-tabs hidden" role="tablist" aria-label="Quarantine sections">
+                <div id="quarantine-tabs" class="ui-tabs ui-page-tabs" role="tablist" aria-label="Quarantine sections">
                     <button type="button" class="modal-tab active" role="tab" aria-selected="true" id="quarantine-tab-btn-messages" onclick="quarantineShowTab('messages')">Messages</button>
                     <button type="button" class="modal-tab" role="tab" aria-selected="false" id="quarantine-tab-btn-rules" onclick="quarantineShowTab('rules')">Auto-Rules <span id="quarantine-tab-n-rules" class="ui-tab-n hidden"></span></button>
                 </div>
@@ -873,6 +873,7 @@
                 </div>
                 <!-- Auto-Rules tab (only with the read-write key) -->
                 <div class="ui-scroll hidden" id="quarantine-tab-rules" role="tabpanel">
+                <div id="quarantine-rules-locked" class="ui-list-note hidden"></div>
                 <section id="quarantine-rules-section" class="ui-panel hidden">
                     <div class="ui-panel-head">Quarantine Auto-Rules
                         <span id="quarantine-rules-count" class="ui-count"></span>

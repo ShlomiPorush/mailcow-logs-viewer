@@ -1359,6 +1359,7 @@ button.ui-st-card:hover { outline: 1px solid var(--ui-line); }
 .ui-text-spam { color: var(--ui-spam); }
 .ui-dialog.ui-dialog-sm { width: min(460px, 100%); }
 .ui-dialog-foot { display: flex; justify-content: flex-end; gap: 8px; padding: 12px var(--ui-pad-x); border-top: 1px solid var(--ui-line); }
+.ui-dialog-foot-note { display: block; }
 .ui-form { display: grid; gap: 14px; }
 .ui-form > label, .ui-form-sub { display: grid; gap: 4px; }
 .ui-form .ui-label { margin: 0; }
