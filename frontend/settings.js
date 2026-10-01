@@ -653,10 +653,12 @@ function renderSettingsEditField(key, value, sensitiveKeys, description, envLock
     }
 
     if (isBool) {
+        // The whole row toggles, like a Features row: the row is the label (so its text is phrasing content)
+        const asSpan = html => html.replace(/^<p /, '<span ').replace(/<\/p>$/, '</span>');
         return '<div class="ui-set-bool' + (envLocked ? ' is-locked' : (isChanged ? ' is-changed' : '')) + '">' +
-            '<div class="ui-set-bool-main">' +
+            '<label for="edit-' + key + '" class="ui-set-bool-main">' +
             '<input type="checkbox" id="edit-' + key + '" name="' + key + '" ' + (displayVal ? 'checked' : '') + ' ' + disabledAttr + ' class="ui-check">' +
-            '<div><label for="edit-' + key + '" class="ui-set-bool-label">' + escapeHtml(label) + labelLockIcon + (envLocked ? '' : (isChanged ? ' <span class="ui-set-pill is-changed" title="Differs from the default">Changed</span>' : '')) + '</label>' + descHtml + envLockedHtml + '</div></div>' +
+            '<span class="ui-set-bool-text"><span class="ui-set-bool-label">' + escapeHtml(label) + labelLockIcon + (envLocked ? '' : (isChanged ? ' <span class="ui-set-pill is-changed" title="Differs from the default">Changed</span>' : '')) + '</span>' + asSpan(descHtml) + asSpan(envLockedHtml) + '</span></label>' +
             clearBtnHtml + '</div>';
     }
 
