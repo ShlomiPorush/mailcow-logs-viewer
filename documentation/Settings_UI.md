@@ -43,7 +43,7 @@ Sensitive fields (passwords, API key, etc.) are shown as masked in the form. Lea
 
 ## Scheduler / intervals
 
-Changes to **fetch interval**, **correlation check interval**, **DMARC IMAP interval**, and **scheduler workers** take effect immediately after you save. The application reschedules the relevant background jobs and updates the thread pool without requiring a restart.
+Changes to **fetch interval**, **correlation check interval**, **DMARC & TLS IMAP interval**, and **scheduler workers** take effect immediately after you save. The application reschedules the relevant background jobs and updates the thread pool without requiring a restart.
 
 ## Disabling UI editing
 

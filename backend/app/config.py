@@ -279,20 +279,20 @@ class Settings(BaseSettings):
     dmarc_manual_upload_enabled: bool = Field(
         default=True,
         env='DMARC_MANUAL_UPLOAD_ENABLED',
-        description='Allow manual upload of DMARC reports via UI'
+        description='Allow uploading DMARC and TLS reports by hand in the UI'
     )
 
     dmarc_allow_report_delete: bool = Field(
         default=False,
         env='DMARC_ALLOW_REPORT_DELETE',
-        description='Allow deleting DMARC/TLS reports from the UI'
+        description='Allow deleting DMARC and TLS reports from the UI'
     )
 
-    # DMARC IMAP Configuration
+    # DMARC & TLS report import over IMAP (the env names keep DMARC_IMAP_)
     dmarc_imap_enabled: bool = Field(
         default=False,
         env='DMARC_IMAP_ENABLED',
-        description='Enable automatic DMARC report import from IMAP'
+        description='Import DMARC and TLS reports automatically from IMAP'
     )
 
     dmarc_imap_host: Optional[str] = Field(
@@ -328,7 +328,7 @@ class Settings(BaseSettings):
     dmarc_imap_folder: str = Field(
         default='INBOX',
         env='DMARC_IMAP_FOLDER',
-        description='IMAP folder to scan for DMARC reports'
+        description='IMAP folder to scan for DMARC and TLS reports'
     )
 
     dmarc_imap_delete_after: bool = Field(
