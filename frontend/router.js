@@ -16,7 +16,8 @@ const VALID_ROUTES = [
     'dmarc',
     'mailbox-stats',
     'logs',
-    'settings'
+    'settings',
+    'about'
 ];
 
 // URL aliases: URL path -> internal route name
@@ -44,7 +45,7 @@ const SUBPAGES = {
         select: t => { spamFilterSubTab = t; }, show: t => spamFilterSwitchSubTab(t) },
     'mailbox-stats': { tabs: ['statistics', 'rate-limits'], current: () => mailboxStatsView,
         select: t => { mailboxStatsView = t; }, show: t => mailboxStatsSwitchView(t) },
-    settings: { tabs: null, first: 'about', current: () => settingsTab,
+    settings: { tabs: null, get first() { return settingsFirstTab || 'features'; }, current: () => settingsTab,
         select: t => { settingsTab = t; }, show: t => { settingsTab = t; if (window.settingsShowTab) window.settingsShowTab(t); } }
 };
 
@@ -397,7 +398,8 @@ const TAB_LABELS = {
     'mailbox-stats': 'Mailbox Stats',
     'logs': 'Logs',
     'settings': 'Settings',
-    'spam-filter': 'Spam Filter'
+    'spam-filter': 'Spam Filter',
+    'about': 'About'
 };
 
 /**

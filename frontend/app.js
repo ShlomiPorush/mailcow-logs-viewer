@@ -420,6 +420,9 @@ async function loadAppInfo() {
         if (data.app_title) {
             document.getElementById('app-title').textContent = data.app_title;
             document.title = data.app_title;
+            // The phone top bar names the app above the page
+            const phoneTitle = document.getElementById('mtop-app-title');
+            if (phoneTitle) phoneTitle.textContent = data.app_title;
 
             // Update footer app name
             const footerName = document.getElementById('app-name-footer');
@@ -433,6 +436,8 @@ async function loadAppInfo() {
             logoImg.src = data.app_logo_url;
             logoImg.classList.remove('hidden');
             document.getElementById('default-logo').classList.add('hidden');
+            const phoneLogo = document.getElementById('mtop-logo');
+            if (phoneLogo) phoneLogo.src = data.app_logo_url;
         }
 
         // Update footer version
@@ -1634,6 +1639,9 @@ function switchTab(tab, params = {}) {
         case 'settings':
             loadSettings();
             break;
+        case 'about':
+            loadAbout();
+            break;
         case 'spam-filter':
             loadSpamFilter();
             break;
@@ -1790,7 +1798,7 @@ async function loadDashboardAttention() {
     }
     if (appVersion && appVersion.update_available) {
         items.push({ tone: 'info', title: `Version ${appVersion.latest_version} is available`,
-            detail: `You are running ${appVersion.current_version}. See what changed before updating.`, action: 'Read changes', onclick: "switchTab('settings')" });
+            detail: `You are running ${appVersion.current_version}. See what changed before updating.`, action: 'Read changes', onclick: "navigateTo('about')" });
     }
     if (mailcowVersion && mailcowVersion.update_available) {
         items.push({ tone: 'info', title: `mailcow ${mailcowVersion.latest_version} is available`,
