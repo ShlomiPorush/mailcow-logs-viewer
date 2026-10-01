@@ -11,6 +11,11 @@
 // The open section; it has its own address (/settings/notifications)
 let settingsTab = 'about';
 
+// Labels the key cannot spell well. Next to the other addresses, "Error Email" alone would not say whose errors
+const SETTINGS_LABEL_OVERRIDES = {
+    dmarc_error_email: 'Report Import Error Email'
+};
+
 // Settings the API returns masked as ******** (same list as the backend)
 const SETTINGS_SENSITIVE_KEYS = ['mailcow_api_key', 'mailcow_api_key_rw', 'auth_password', 'oauth2_client_secret', 'smtp_password',
     'dmarc_imap_password', 'session_secret_key', 'maxmind_license_key', 'rspamd_password'];
@@ -584,8 +589,12 @@ function renderSettingsEditField(key, value, sensitiveKeys, description, envLock
     const isNum = typeof value === 'number';
     const sensitive = sensitiveKeys.includes(key);
     const displayVal = value === null || value === undefined ? '' : (isBool ? value : String(value));
-    // Convert key to label with proper acronym capitalization (SSL, IMAP, TLS, etc.)
-    let label = key.replace(/_/g, ' ').replace(/\b\w/g, function (l) { return l.toUpperCase(); });
+    // Convert key to label with proper acronym capitalization (SSL, IMAP, TLS, etc.).
+    // Settings for both DMARC and TLS reports drop the DMARC_ prefix of their key (IMAP Host, Retention Days);
+    // the DMARC-only ones (Insights) keep it
+    const labelKey = SETTINGS_LABEL_OVERRIDES[key] ? null
+        : /^dmarc_(imap_|retention_days$|manual_upload_enabled$|allow_report_delete$)/.test(key) ? key.slice('dmarc_'.length) : key;
+    let label = SETTINGS_LABEL_OVERRIDES[key] || labelKey.replace(/_/g, ' ').replace(/\b\w/g, function (l) { return l.toUpperCase(); });
     // Fix common acronyms
     label = label.replace(/\bSsl\b/gi, 'SSL').replace(/\bImap\b/gi, 'IMAP').replace(/\bTls\b/gi, 'TLS')
         .replace(/\bOauth\b/gi, 'OAuth').replace(/\bOidc\b/gi, 'OIDC').replace(/\bApi\b/gi, 'API')
