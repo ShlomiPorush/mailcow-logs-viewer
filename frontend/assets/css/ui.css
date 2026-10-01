@@ -1220,6 +1220,8 @@ button.ui-st-card:hover { outline: 1px solid var(--ui-line); }
 .ui-flag-lg { width: 48px; height: 34px; border-radius: 4px; object-fit: cover; border: 1px solid var(--ui-line); }
 .ui-crumbs { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: -6px; font-size: var(--ui-fs-sm); }
 .ui-crumbs.hidden { display: none; }
+/* Inside a scroll region the pull-up would cut its top off (Rspamd maps) */
+.ui-scroll .ui-crumbs { margin-top: 0; }
 .ui-crumb { padding: 0; border: 0; background: none; color: var(--ui-muted); font: inherit; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
 .ui-crumb:hover { color: var(--ui-ink); }
 .ui-crumb-sep { color: var(--ui-muted); }
