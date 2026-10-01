@@ -680,7 +680,27 @@
                                 </div>
                             </div>
                             <div id="messages-chips" class="ui-chips"></div>
-                            <p class="ui-msg-summary"><span id="messages-count"></span> <span id="messages-date-range-label" class="ui-muted">All Time</span>
+                            <p class="ui-msg-summary"><span id="messages-count"></span>
+                                <!-- The time filter: plain text beside the facets, a button that opens the choices where they are hidden -->
+                                <span class="ui-popover-host ui-msg-range-host" id="messages-time-host">
+                                    <button type="button" id="messages-date-range-label" class="ui-msg-range" aria-expanded="false" aria-controls="messages-time-panel" onclick="toggleMessagesTimePanel()">All Time</button>
+                                    <span id="messages-time-panel" class="ui-popover ui-msg-time-panel hidden" role="dialog" aria-label="Time">
+                                        <span class="ui-label">Time</span>
+                                        <span class="ui-fct-list">
+                                        <button type="button" onclick="selectMessagesDatePreset('')" data-preset="" class="messages-date-preset-btn ui-fct" aria-pressed="true"><span>All Time</span></button>
+                                        <button type="button" onclick="selectMessagesDatePreset('today')" data-preset="today" class="messages-date-preset-btn ui-fct" aria-pressed="false"><span>Today</span></button>
+                                        <button type="button" onclick="selectMessagesDatePreset('7days')" data-preset="7days" class="messages-date-preset-btn ui-fct" aria-pressed="false"><span>7 Days</span></button>
+                                        <button type="button" onclick="selectMessagesDatePreset('30days')" data-preset="30days" class="messages-date-preset-btn ui-fct" aria-pressed="false"><span>30 Days</span></button>
+                                        <button type="button" onclick="selectMessagesDatePreset('90days')" data-preset="90days" class="messages-date-preset-btn ui-fct" aria-pressed="false"><span>90 Days</span></button>
+                                        </span>
+                                        <span class="ui-label">Custom range</span>
+                                        <span class="ui-date-pair">
+                                            <label><span class="ui-label">From</span><input type="date" id="messages-time-start" class="ui-input"></label>
+                                            <label><span class="ui-label">To</span><input type="date" id="messages-time-end" class="ui-input"></label>
+                                        </span>
+                                        <button type="button" onclick="applyMessagesTimePanelRange()" class="ui-btn ui-btn-primary ui-btn-block">Apply</button>
+                                    </span>
+                                </span>
                                 <button type="button" id="messages-clear-filters" class="ui-link-row ui-msg-clear hidden" onclick="clearMessagesFilters()">Clear filters</button></p>
                         </div>
                         <div id="messages-logs" class="ui-msg-items">
