@@ -756,10 +756,21 @@
 .ui-sec-card .ui-locked { margin: 0; }
 .ui-sec-card h4 { margin: 4px 0 0; font-size: 12.5px; color: var(--ui-muted); font-weight: 650; }
 .ui-sec-caught { font-size: 12px; font-weight: 700; color: var(--ui-warn); }
-.ui-sec-toggle { border: 0; padding: 0; background: none; cursor: pointer; display: inline-grid; }
-.ui-sec-toggle:disabled { cursor: not-allowed; opacity: .6; }
-.ui-sec-toggle .ui-prot-mark { width: 22px; height: 22px; font-size: 12px; }
-.ui-sec-toggle.is-on .ui-prot-mark { color: #fff; background: var(--ui-ok); box-shadow: none; }
+.ui-sec-mark { width: 22px; height: 22px; font-size: 12px; }
+.ui-sec-mark.is-on { color: #fff; background: var(--ui-ok); box-shadow: none; }
+.ui-sec-card-act { display: inline-flex; align-items: center; gap: 12px; }
+/* On/Off switch */
+.ui-sec-switch { position: relative; display: inline-flex; align-items: center; gap: 7px; cursor: pointer; font-size: 13px; font-weight: 650; color: var(--ui-muted); }
+.ui-sec-switch input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.ui-sec-switch-track { position: relative; width: 36px; height: 20px; border-radius: 999px; background: color-mix(in srgb, var(--ui-muted) 45%, transparent); transition: background .15s; }
+.ui-sec-switch-track::after { content: ""; position: absolute; top: 2px; inset-inline-start: 2px; width: 16px; height: 16px; border-radius: 50%; background: #fff;
+    box-shadow: 0 1px 2px rgb(0 0 0 / .25); transition: transform .15s; }
+.ui-sec-switch input:checked + .ui-sec-switch-track { background: var(--ui-ok); }
+.ui-sec-switch input:checked + .ui-sec-switch-track::after { transform: translateX(16px); }
+[dir="rtl"] .ui-sec-switch input:checked + .ui-sec-switch-track::after { transform: translateX(-16px); }
+.ui-sec-switch.is-on { color: var(--ui-ink); }
+.ui-sec-switch input:focus-visible + .ui-sec-switch-track { outline: 2px solid var(--ui-focus); outline-offset: 2px; }
+.ui-sec-switch:has(input:disabled) { cursor: not-allowed; opacity: .55; }
 .ui-sec-sent { margin: 0; font-size: 14px; line-height: 1.6; }
 .ui-sec-card.is-open .ui-sec-sent { font-size: 15px; line-height: 2.3; }
 .ui-sec-in { font: inherit; font-size: 14.5px; font-weight: 700; padding: 1px 6px; border: 1px solid var(--ui-line); border-bottom: 2px solid var(--ui-ink);
