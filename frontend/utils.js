@@ -878,3 +878,98 @@ document.addEventListener('DOMContentLoaded', () => {
     }).observe(document.body, { subtree: true, childList: true });
     uiRefreshTableSorts();
 });
+
+// =============================================================================
+// SHEET - a panel from the bottom of the screen on phones. Its handle and head
+// stay on top while its body scrolls. Pulling it down (by the head, or by the
+// body scrolled to the top) closes it, and a short pull springs back. With
+// expand it opens part way and grows to the full screen once its body scrolls.
+// =============================================================================
+
+const uiSheetClosers = {};  // sheet id -> what closing it does
+const uiIsPhone = () => window.matchMedia('(max-width: 760px)').matches;
+
+// Show the sheet, or redraw it in place: the body keeps its scroll and a grown
+// sheet stays full screen
+function uiSheetShow(id, { label = '', head = '', body = '', expand = false, onClose = null } = {}) {
+    let sheet = document.getElementById(id);
+    const fresh = !sheet;
+    if (fresh) {
+        sheet = document.createElement('div');
+        sheet.id = id;
+        sheet.className = 'ui-sheet';
+        document.body.appendChild(sheet);
+    }
+    uiSheetClosers[id] = onClose;
+    const old = sheet.querySelector('.ui-sheet-body');
+    const keep = old ? old.scrollTop : 0;
+    sheet.classList.toggle('is-expand', expand);
+    sheet.innerHTML = `
+        <div class="ui-sheet-back" onclick="uiSheetDismiss('${id}')"></div>
+        <section class="ui-sheet-panel" role="dialog" aria-modal="true" aria-label="${escapeHtml(label)}">
+            <span class="ui-sheet-grip" aria-hidden="true"></span>
+            <div class="ui-sheet-head">${head}<button type="button" class="ui-icon-btn ui-sheet-x" onclick="uiSheetDismiss('${id}')" aria-label="Close" title="Close">&times;</button></div>
+            <div class="ui-sheet-body">${body}</div>
+        </section>`;
+    const bodyEl = sheet.querySelector('.ui-sheet-body');
+    bodyEl.scrollTop = keep;
+    if (expand) {
+        bodyEl.addEventListener('scroll', () => {
+            if (bodyEl.scrollTop > 0) sheet.classList.add('is-full');
+        }, { passive: true });
+    }
+    uiSheetSwipe(sheet, bodyEl, id);
+    document.body.classList.add('ui-sheet-on');
+    return sheet;
+}
+
+// Close as its owner wants (an owner may keep state of what is open)
+function uiSheetDismiss(id) {
+    const closer = uiSheetClosers[id];
+    if (typeof closer === 'function') closer();
+    else uiSheetClose(id);
+}
+
+function uiSheetClose(id) {
+    const sheet = document.getElementById(id);
+    if (sheet) sheet.remove();
+    delete uiSheetClosers[id];
+    if (!document.querySelector('.ui-sheet')) document.body.classList.remove('ui-sheet-on');
+}
+
+function uiSheetSwipe(sheet, body, id) {
+    const panel = sheet.querySelector('.ui-sheet-panel');
+    let startY = null, pulled = 0;
+    panel.addEventListener('touchstart', event => {
+        const byHead = !!event.target.closest('.ui-sheet-head, .ui-sheet-grip');
+        if (!byHead && body.scrollTop > 0) { startY = null; return; }
+        startY = event.touches[0].clientY;
+        pulled = 0;
+        panel.style.transition = 'none';
+    }, { passive: true });
+    panel.addEventListener('touchmove', event => {
+        if (startY === null) return;
+        pulled = Math.max(0, event.touches[0].clientY - startY);
+        panel.style.transform = pulled ? `translateY(${pulled}px)` : '';
+    }, { passive: true });
+    const end = () => {
+        if (startY === null) return;
+        startY = null;
+        panel.style.transition = 'transform .2s ease';
+        if (pulled > Math.min(120, panel.offsetHeight / 4)) {
+            panel.style.transform = 'translateY(100%)';
+            setTimeout(() => uiSheetDismiss(id), 200);
+        } else {
+            panel.style.transform = '';
+        }
+    };
+    panel.addEventListener('touchend', end);
+    panel.addEventListener('touchcancel', end);
+}
+
+// Escape closes the sheet on top
+document.addEventListener('keydown', event => {
+    if (event.key !== 'Escape') return;
+    const sheets = document.querySelectorAll('.ui-sheet');
+    if (sheets.length) uiSheetDismiss(sheets[sheets.length - 1].id);
+});

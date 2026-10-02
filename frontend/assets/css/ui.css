@@ -804,17 +804,24 @@ select.ui-sec-in { text-align: start; }
 .ui-sec-cpanel .ui-sec-bars { padding: 0; }
 .ui-sec-cpanel-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 13px; }
 .ui-sec-call { justify-self: start; }
-.ui-sec-sheet { position: fixed; inset: 0; z-index: 70; display: flex; flex-direction: column; justify-content: flex-end; }
-.ui-sec-sheet-back { position: absolute; inset: 0; background: rgb(0 0 0 / .4); }
-.ui-sec-sheet-panel { position: relative; display: flex; flex-direction: column; max-height: 88vh; max-height: 88dvh; background: var(--ui-bg);
-    border-radius: 16px 16px 0 0; box-shadow: 0 -8px 30px rgb(0 0 0 / .2); }
-.ui-sec-sheet-grip { align-self: center; width: 40px; height: 4px; margin-top: 8px; border-radius: 2px; background: var(--ui-line); }
-.ui-sec-sheet-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 14px var(--ui-pad-x) 10px; border-bottom: 1px solid var(--ui-line); }
-.ui-sec-sheet-head .ui-icon-btn { font-size: 22px; line-height: 1; }
-.ui-sec-sheet-body { overflow-y: auto; overscroll-behavior: contain; padding: 12px var(--ui-pad-x) calc(20px + env(safe-area-inset-bottom)); display: grid; gap: 10px; }
-.ui-sec-sheet-body > .ui-sec-why { font-size: 13.5px; }
-.ui-sec-sheet-body .ui-sec-detail { padding: 0; }
-body.ui-sec-sheet-on { overflow: hidden; }
+/* Sheet: a panel from the bottom on phones (utils.js uiSheetShow) */
+.ui-sheet { position: fixed; inset: 0; z-index: 70; display: flex; flex-direction: column; justify-content: flex-end; }
+.ui-sheet-back { position: absolute; inset: 0; background: rgb(0 0 0 / .4); }
+.ui-sheet-panel { position: relative; display: flex; flex-direction: column; max-height: 88vh; max-height: 88dvh; background: var(--ui-bg);
+    border-radius: 16px 16px 0 0; box-shadow: 0 -8px 30px rgb(0 0 0 / .2); transition: max-height .25s ease, height .25s ease, border-radius .25s ease; }
+/* A long read opens part way and grows to the full screen once it scrolls */
+.ui-sheet.is-expand .ui-sheet-panel { max-height: 62vh; max-height: 62dvh; }
+.ui-sheet.is-expand.is-full .ui-sheet-panel { height: 100vh; height: 100dvh; max-height: none; border-radius: 0; padding-top: env(safe-area-inset-top); }
+.ui-sheet-grip { align-self: center; width: 40px; height: 4px; margin-top: 8px; border-radius: 2px; background: var(--ui-line); }
+.ui-sheet-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 14px var(--ui-pad-x) 10px; border-bottom: 1px solid var(--ui-line); }
+.ui-sheet-head > :first-child { min-width: 0; }
+.ui-sheet-title { margin: 0; font-size: 16px; font-weight: 700; }
+.ui-sheet-x { flex: none; font-size: 22px; line-height: 1; }
+.ui-sheet-body { overflow-y: auto; overscroll-behavior: contain; padding: 12px var(--ui-pad-x) calc(20px + env(safe-area-inset-bottom)); display: grid; gap: 10px; align-content: start; }
+.ui-sheet-body > .ui-sec-why { font-size: 13.5px; }
+.ui-sheet-body .ui-sec-detail { padding: 0; }
+.ui-sheet .markdown-body { font-family: inherit; background: transparent; color: var(--ui-ink); font-size: 14px; }
+body.ui-sheet-on { overflow: hidden; }
 @media (max-width: 760px) {
     /* The Protection row folds into one chip; open, it lists every protection */
     .ui-prot-sum { display: inline-flex; align-items: center; gap: 6px; border: 0; background: none; padding: 2px 0; font: inherit; font-size: 13.5px; color: var(--ui-ink); cursor: pointer; }
