@@ -1476,7 +1476,8 @@ function switchTab(tab, params = {}) {
             if (typeof loadProtection === 'function') loadProtection();
             loadNetfilterCountries();
             loadSmtpAbusePanel();
-            loadSecurityCountryChart(30);
+            loadSecurityAppSettings();
+            loadSecurityCountryChart(securityChartDays);
             break;
         case 'queue':
             loadQueue();
@@ -2010,236 +2011,41 @@ async function loadNetfilterLogs(page = 1) {
 // =============================================================================
 
 let fail2banSettingsLoaded = false;
-let fail2banActiveBans = null;
-// Permanent plus temporary bans, as the Active Bans list shows them
-let fail2banTotalBans = null;
+let fail2banActiveBans = null;   // null until mailcow has answered
 let fail2banBlacklist = [];
 let fail2banWhitelist = [];
 let fail2banPermBans = [];
-let fail2banPolicy = null;  // ban time, attempts and window, for the Overview's sentences
+let fail2banPolicy = null;       // how Fail2ban bans: times, attempts, window, network size
 
-let fail2banInitial = null;  // the values the two Fail2ban forms loaded with
-
-// Every Fail2ban setting, in the shape mailcow expects (it must get all of them)
-function fail2banFormValues() {
-    const s = document.getElementById('fail2ban-edit-form');
-    const ip = document.getElementById('fail2ban-ip-form');
-    if (!s || !ip) return null;
-    const val = name => s.querySelector(`[name="${name}"]`).value;
-    const list = name => ip.querySelector(`[name="${name}"]`).value.split('\n').map(l => l.trim()).filter(Boolean).join(',');
-    return {
-        ban_time: val('ban_time'),
-        max_ban_time: val('max_ban_time'),
-        ban_time_increment: s.querySelector('[name="ban_time_increment"]').checked ? '1' : '0',
-        max_attempts: val('max_attempts'),
-        retry_window: val('retry_window'),
-        netban_ipv4: val('netban_ipv4'),
-        netban_ipv6: val('netban_ipv6'),
-        whitelist: list('whitelist'),
-        blacklist: list('blacklist')
-    };
-}
-
-function fail2banChangeCount() {
-    const now = fail2banFormValues();
-    if (!now || !fail2banInitial) return 0;
-    return Object.keys(now).filter(k => now[k] !== fail2banInitial[k]).length;
-}
-
-function updateFail2banDirty() {
-    uiSaveBarUpdate('fail2ban-savebar', fail2banChangeCount());
-}
-
-function discardFail2banChanges() {
-    fail2banInitial = null;
-    fail2banSettingsLoaded = false;
-    loadFail2BanSettings();
-}
-
-async function saveFail2banSettings() {
-    const attr = fail2banFormValues();
-    if (!attr) return;
-    uiSaveBarBusy('fail2ban-savebar', true);
-    try {
-        const res = await authenticatedFetch('/api/fail2ban', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ attr })
-        });
-        const result = await res.json();
-        if (res.ok && result.status === 'success') {
-            showToast('Fail2ban settings saved', 'success');
-            discardFail2banChanges();  // reload what mailcow stored
-            return;
-        }
-        showToast('Failed to save the Fail2ban settings: ' + (result.msg || result.detail || 'Unknown error'), 'error');
-    } catch (err) {
-        showToast('Failed to save the Fail2ban settings: ' + err.message, 'error');
-    }
-    uiSaveBarBusy('fail2ban-savebar', false);
-}
-
+// Fail2ban's bans, lists and policy from mailcow. The Security page shows them in
+// the Overview, the Lists and the Fail2ban card; an action resets the flag to reload.
 async function loadFail2BanSettings() {
-    // Only load once per session (settings don't change often)
     if (fail2banSettingsLoaded) return;
-    // A refresh must not wipe what the admin is typing
-    if (fail2banChangeCount() > 0) return;
-
-    const settingsContainer = document.getElementById('fail2ban-settings');
-    const ipListsContainer = document.getElementById('fail2ban-ip-lists');
-    if (!settingsContainer) return;
-
     try {
         const response = await authenticatedFetch('/api/fail2ban');
-
-        if (!response.ok) {
-            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-        }
-
+        if (!response.ok) throw new Error(`HTTP ${response.status}: ${response.statusText}`);
         const data = await response.json();
-        const canEdit = mailcowRwConfigured;
-        const f2bOff = canEdit ? '' : 'disabled';
+        const list = value => (value || '').replace(/\n/g, ',').split(',').map(e => e.trim()).filter(e => e);
         fail2banSettingsLoaded = true;
         fail2banLoadError = false;
         fail2banActiveBans = data.active_bans || [];
         fail2banPermBans = data.perm_bans || [];
-        fail2banPolicy = { ban_time: data.ban_time, max_ban_time: data.max_ban_time, ban_time_increment: data.ban_time_increment,
-            max_attempts: data.max_attempts, retry_window: data.retry_window };
-        // Same count as the Active Bans list: permanent bans plus the temporary ones not among them
-        const permNetworks = new Set((data.perm_bans || []).map(ban => ban.network || ban.ip));
-        fail2banTotalBans = (data.perm_bans || []).length + fail2banActiveBans.filter(ban => !permNetworks.has(ban.network)).length;
-
-        // Store blacklist entries globally for button logic
-        const rawBlacklist = data.blacklist || '';
-        fail2banBlacklist = rawBlacklist.replace(/\n/g, ',').split(',').map(e => e.trim()).filter(e => e);
-        fail2banWhitelist = (data.whitelist || '').replace(/\n/g, ',').split(',').map(e => e.trim()).filter(e => e);
-        renderSecurityOverview();
-
-        // Re-render netfilter logs if they were already loaded (race condition fix)
-        // Now after blacklist is loaded, so buttons correctly reflect blacklist state
-        if (lastDataCache.netfilter && mailcowRwConfigured) {
-            renderNetfilterData(lastDataCache.netfilter);
-        }
-
-        // Parse for UI display
-        const whitelistEntries = (data.whitelist || '').split('\n').filter(e => e.trim());
-        const blacklistEntries = fail2banBlacklist;
-        const permBans = data.perm_bans || [];
-
-        // Render settings as editable form or read-only
-        const rwBanner = canEdit ? '' : `<div class="ui-list-note">${uiLocked('Editing Fail2ban is locked', `Editing ${UI_RW_KEY_TEXT}`)}</div>`;
-
-        settingsContainer.innerHTML = `
-            ${rwBanner}
-            <form id="fail2ban-edit-form" class="ui-f2b-form" onsubmit="event.preventDefault(); saveFail2banSettings()">
-                <div class="ui-f2b-grid">
-                    <label class="ui-set-field"><span class="ui-label">Ban Time (seconds)</span>
-                        <input type="number" name="ban_time" value="${data.ban_time}" min="60" class="ui-input" ${f2bOff} />
-                        <small class="ui-muted">${formatSeconds(data.ban_time)}</small>
-                    </label>
-                    <label class="ui-set-field"><span class="ui-label">Max. Ban Time (seconds)</span>
-                        <input type="number" name="max_ban_time" value="${data.max_ban_time}" min="60" class="ui-input" ${f2bOff} />
-                        <small class="ui-muted">${formatSeconds(data.max_ban_time)}</small>
-                    </label>
-                    <div class="ui-set-field"><span class="ui-label">Ban Time Increment</span>
-                        <label class="ui-check-label${canEdit ? '' : ' opacity-60'}" id="fail2ban-increment-label">
-                            <input type="checkbox" name="ban_time_increment" ${data.ban_time_increment ? 'checked' : ''} ${f2bOff} class="ui-check" />
-                            ${data.ban_time_increment ? 'Enabled' : 'Disabled'}
-                        </label>
-                    </div>
-                    <label class="ui-set-field"><span class="ui-label">Max. Attempts</span>
-                        <input type="number" name="max_attempts" value="${data.max_attempts}" min="1" class="ui-input" ${f2bOff} />
-                    </label>
-                    <label class="ui-set-field"><span class="ui-label">Retry Window (seconds)</span>
-                        <input type="number" name="retry_window" value="${data.retry_window}" min="1" class="ui-input" ${f2bOff} />
-                        <small class="ui-muted">${formatSeconds(data.retry_window)}</small>
-                    </label>
-                    <label class="ui-set-field"><span class="ui-label">Subnet Ban IPv4 (/)</span>
-                        <input type="number" name="netban_ipv4" value="${data.netban_ipv4}" min="8" max="32" class="ui-input ui-mono" ${f2bOff} />
-                    </label>
-                    <label class="ui-set-field"><span class="ui-label">Subnet Ban IPv6 (/)</span>
-                        <input type="number" name="netban_ipv6" value="${data.netban_ipv6}" min="8" max="128" class="ui-input ui-mono" ${f2bOff} />
-                    </label>
-                </div>
-            </form>
-            ${canEdit ? uiSaveBar('fail2ban-savebar', { save: 'saveFail2banSettings()', discard: 'discardFail2banChanges()' }) : ''}
-        `;
-
-        // Build unified active bans list (permanent + temporary)
-        const activeBans = data.active_bans || [];
-        const permBanNetworks = new Set(permBans.map(b => b.network || b.ip));
-        // Temporary bans = active_bans entries NOT in perm_bans
-        const tempBans = activeBans.filter(b => !permBanNetworks.has(b.network));
-        // Sort both lists by IP address
-        const ipSort = (a, b) => (a.ip || a.network || '').localeCompare(b.ip || b.network || '', undefined, { numeric: true });
-        permBans.sort(ipSort);
-        tempBans.sort(ipSort);
-        const totalBans = permBans.length + tempBans.length;
-
-        // Render IP lists in separate accordion (editable textareas)
-        if (ipListsContainer) {
-            ipListsContainer.innerHTML = `
-                ${canEdit ? '' : `<div class="ui-list-note">${uiLocked('Editing the lists and unbanning are locked', `Changing the allowlist and denylist and unbanning ${UI_RW_KEY_TEXT}`)}</div>`}
-                <form id="fail2ban-ip-form" class="ui-f2b-form" onsubmit="event.preventDefault(); saveFail2banSettings()">
-                    <div class="ui-f2b-lists">
-                        <label class="ui-set-field"><span class="ui-label">Allowlisted <span class="ui-count">${whitelistEntries.length}</span></span>
-                            <textarea name="whitelist" rows="4" placeholder="One IP/network per line" class="ui-textarea ui-mono ui-f2b-allow" ${f2bOff}>${escapeHtml((data.whitelist || '').replace(/,/g, '\n'))}</textarea>
-                        </label>
-                        <label class="ui-set-field"><span class="ui-label">Denylisted <span class="ui-count">${blacklistEntries.length}</span></span>
-                            <textarea name="blacklist" rows="4" placeholder="One IP/network per line" class="ui-textarea ui-mono ui-f2b-deny" ${f2bOff}>${escapeHtml((data.blacklist || '').replace(/,/g, '\n'))}</textarea>
-                        </label>
-                    </div>
-
-                    <p class="ui-set-desc">A denylisted host or network will always outweigh an allowlisted entity. List updates will take a few seconds to be applied.</p>
-                </form>
-
-                <!-- Active Bans List -->
-                <div class="ui-f2b-bans">
-                    <div class="ui-list-head"><h4 class="ui-md-h">Active Bans</h4> <span class="ui-count">${totalBans}</span></div>
-                    ${totalBans > 0 ? `
-                        <div class="ui-table ui-stack" style="--ui-cols: 110px minmax(160px, 1fr) minmax(120px, 1fr) 100px; --ui-table-min: 520px">
-                            ${permBans.map(ban => `
-                                <div class="ui-tr">
-                                    <span class="ui-td">${uiTag('Permanent', 'fail')}</span>
-                                    <span class="ui-td ui-mono">${escapeHtml(ban.network || ban.ip)}</span>
-                                    <span class="ui-td"></span>
-                                    <span class="ui-td"></span>
-                                </div>
-                            `).join('')}
-                            ${tempBans.map(ban => `
-                                <div class="ui-tr">
-                                    <span class="ui-td">${uiTag('Temporary', 'warn')}</span>
-                                    <span class="ui-td ui-mono">${escapeHtml(ban.network || ban.ip)}</span>
-                                    <span class="ui-td">${ban.banned_until ? `<span class="ui-muted">${escapeHtml(ban.banned_until)} left</span>` : ''}
-                                        ${ban.queued_for_unban ? uiTag('Unbanning...', 'info') : ''}</span>
-                                    <span class="ui-td ui-td-end">${canEdit && !ban.queued_for_unban ? `
-                                        <button type="button" onclick="unbanIP('${escapeJsArg(ban.ip || ban.network)}', this)" class="ui-btn ui-btn-sm">Unban</button>
-                                    ` : ''}</span>
-                                </div>
-                            `).join('')}
-                        </div>
-                    ` : '<p class="ui-empty">No active bans</p>'}
-                </div>
-            `;
-        }
-
-        // Unsaved changes across both forms: one save bar, like the Settings page
-        if (canEdit) {
-            fail2banInitial = fail2banFormValues();
-            ['fail2ban-edit-form', 'fail2ban-ip-form'].forEach(id => {
-                const form = document.getElementById(id);
-                if (form) ['input', 'change'].forEach(ev => form.addEventListener(ev, updateFail2banDirty));
-            });
-        }
+        fail2banBlacklist = list(data.blacklist);
+        fail2banWhitelist = list(data.whitelist);
+        fail2banPolicy = {
+            ban_time: data.ban_time, max_ban_time: data.max_ban_time, ban_time_increment: !!Number(data.ban_time_increment),
+            max_attempts: data.max_attempts, retry_window: data.retry_window,
+            netban_ipv4: data.netban_ipv4, netban_ipv6: data.netban_ipv6
+        };
     } catch (error) {
         console.error('Failed to load Fail2Ban settings:', error);
         fail2banLoadError = true;
-        renderSecurityOverview();
-        settingsContainer.innerHTML = `<p class="text-red-500 text-center py-4">Failed to load Fail2Ban settings: ${escapeHtml(error.message)}</p>`;
-        if (ipListsContainer) {
-            ipListsContainer.innerHTML = `<p class="text-red-500 text-center py-4">Failed to load IP lists</p>`;
-        }
     }
+    renderSecurityOverview();
+    renderSecurityLists();
+    renderSecuritySettings();
+    // The events' Ban and Unban buttons depend on the denylist
+    if (lastDataCache.netfilter && mailcowRwConfigured) renderNetfilterData(lastDataCache.netfilter);
 }
 
 // =============================================================================

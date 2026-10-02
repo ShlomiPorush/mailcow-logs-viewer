@@ -726,8 +726,51 @@
 .ui-sec-legend i { width: 10px; height: 10px; border-radius: 2px; }
 .ui-sec-net { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 10px; align-items: center; padding: 8px var(--ui-pad-x); border-top: 1px solid var(--ui-line); font-size: 12.5px; }
 .ui-sec-net span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-@media (max-width: 1000px) {
+/* Lists: the allowlist and the denylist side by side, one address per row */
+.ui-sec-lists { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--ui-gap); align-items: start; }
+.ui-sec-ladd { display: flex; gap: 8px; padding: 0 var(--ui-pad-x) 12px; }
+.ui-sec-ladd.ui-flush { padding: 0; }
+.ui-sec-ladd .ui-input { flex: 1; min-width: 0; }
+.ui-sec-lrow { display: grid; grid-template-columns: minmax(150px, auto) minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 9px var(--ui-pad-x); border-top: 1px solid var(--ui-line); }
+.ui-sec-lrow > b { font-size: 13px; }
+/* Settings: one card per protection; a closed card is one sentence, an open one its fields */
+.ui-sec-intro { margin: 0; }
+.ui-sec-cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--ui-gap); align-items: start; }
+.ui-sec-card { display: grid; gap: 10px; padding: 14px var(--ui-pad-x); border-radius: var(--ui-radius); background: var(--ui-panel); cursor: pointer; min-width: 0; }
+.ui-sec-card:not(.is-open):hover { box-shadow: inset 0 0 0 1px var(--ui-line); }
+.ui-sec-card.is-open { grid-column: 1 / -1; cursor: default; box-shadow: inset 0 0 0 1.5px var(--ui-ink); padding-block: 16px; }
+.ui-sec-card.is-off .ui-sec-sent, .ui-sec-card.is-off .ui-sec-sent b { color: var(--ui-muted); }
+.ui-sec-card-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.ui-sec-card-head h3 { margin: 0; font-size: 15px; font-weight: 700; }
+.ui-sec-card-act { margin-inline-start: auto; }
+.ui-sec-card .ui-locked { margin: 0; }
+.ui-sec-card h4 { margin: 4px 0 0; font-size: 12.5px; color: var(--ui-muted); font-weight: 650; }
+.ui-sec-caught { font-size: 12px; font-weight: 700; color: var(--ui-warn); }
+.ui-sec-toggle { border: 0; padding: 0; background: none; cursor: pointer; display: inline-grid; }
+.ui-sec-toggle:disabled { cursor: not-allowed; opacity: .6; }
+.ui-sec-toggle .ui-prot-mark { width: 22px; height: 22px; font-size: 12px; }
+.ui-sec-toggle.is-on .ui-prot-mark { color: #fff; background: var(--ui-ok); box-shadow: none; }
+.ui-sec-sent { margin: 0; font-size: 14px; line-height: 1.6; }
+.ui-sec-card.is-open .ui-sec-sent { font-size: 15px; line-height: 2.3; }
+.ui-sec-in { font: inherit; font-size: 14.5px; font-weight: 700; padding: 1px 6px; border: 1px solid var(--ui-line); border-bottom: 2px solid var(--ui-ink);
+    border-radius: 6px 6px 2px 2px; background: var(--ui-bg); color: var(--ui-ink); text-align: center; }
+select.ui-sec-in { text-align: start; }
+.ui-sec-in:disabled { border-bottom-color: var(--ui-line); color: var(--ui-muted); }
+.ui-sec-hint { font-size: 12px; color: var(--ui-muted); font-weight: 500; }
+.ui-sec-inline { display: inline-flex; align-items: center; gap: 6px; font-size: 13.5px; }
+.ui-sec-mode { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; font-size: 13px; }
+.ui-sec-card-foot { display: flex; align-items: center; gap: 10px; padding-top: 8px; border-top: 1px solid var(--ui-line); }
+.ui-sec-chip button { border: 0; background: none; padding: 0 0 0 4px; cursor: pointer; color: var(--ui-muted); font-size: 13px; }
+.ui-sec-fields { display: grid; }
+.ui-sec-field { display: grid; grid-template-columns: minmax(0, 1fr) 200px; gap: 10px; align-items: center; padding: 8px 0; border-top: 1px solid var(--ui-line); font-size: 13.5px; }
+.ui-sec-field small { display: block; color: var(--ui-muted); font-size: 12px; }
+.ui-sec-note.ui-flush { padding: 0; }
+.ui-sec-card #smtp-abuse-panel { border-top: 1px solid var(--ui-line); padding-top: 8px; }
+.ui-sec-alerts { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; padding: 12px var(--ui-pad-x); }
+.ui-sec-alerts > span { flex: 1; min-width: 240px; }
+#security-tab-settings { padding-bottom: 90px; }@media (max-width: 1000px) {
     .ui-sec-two { grid-template-columns: minmax(0, 1fr); }
+    .ui-sec-lists, .ui-sec-cards { grid-template-columns: minmax(0, 1fr); }
     .ui-sec-two > .ui-sec-side { order: -1; }
     .ui-sec-side .ui-sec-networks { display: none; }
     .ui-sec-side .ui-sec-bars > :nth-child(n+6) { display: none; }
@@ -741,6 +784,9 @@
     .ui-sec-acts { justify-content: flex-start; }
     .ui-sec-facts { grid-template-columns: minmax(0, 1fr); }
     .ui-sec-bar { grid-template-columns: 110px minmax(0, 1fr) 40px; }
+    .ui-sec-lrow { grid-template-columns: minmax(0, 1fr) auto; }
+    .ui-sec-lrow .ui-sec-why { grid-column: 1 / -1; grid-row: 2; }
+    .ui-sec-field { grid-template-columns: minmax(0, 1fr); }
 }
 /* One event per line; the raw log line opens on demand */
 .ui-ev-list { display: grid; }
