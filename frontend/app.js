@@ -1182,141 +1182,6 @@ async function banIP(ip, btnEl) {
     }
 }
 
-// ---------- Security overview: key figures, sources, latest failed logins ----------
-
-let securityOverview = null;
-
-async function loadSecurityOverview() {
-    try {
-        const res = await authenticatedFetch('/api/logs/netfilter/overview?hours=24');
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        securityOverview = await res.json();
-        renderSecurityOverview();
-    } catch (err) {
-        console.error('Failed to load security overview:', err);
-        const msg = `<p class="ui-empty ui-text-fail">Failed to load: ${escapeHtml(err.message)}</p>`;
-        ['security-sources', 'security-latest'].forEach(id => {
-            const el = document.getElementById(id);
-            if (el) el.innerHTML = msg;
-        });
-    }
-}
-
-// Where an address stands with Fail2ban. Unknown until the Fail2ban data has loaded.
-function securitySourceState(source) {
-    if (fail2banActiveBans === null) return { key: 'unknown', text: '-', tone: '' };
-    const ip = source.ip;
-    const onList = list => list.some(entry => entry === ip || entry === `${ip}/32`);
-    const ban = fail2banActiveBans.find(b => b.ip === ip || (b.network && (b.network === ip || b.network.split('/')[0] === ip)));
-    if (ban) return { key: 'banned', text: ban.banned_until ? `Banned, ${ban.banned_until} left` : 'Banned', tone: 'fail' };
-    if (onList(fail2banBlacklist)) return { key: 'blocklisted', text: 'On the blacklist', tone: 'fail' };
-    if (onList(fail2banWhitelist)) return { key: 'allowed', text: 'Allowlisted', tone: 'ok' };
-    const recent = Date.now() - new Date(source.last_seen).getTime() < 3600 * 1000;
-    return recent ? { key: 'open', text: 'Not banned', tone: 'warn' } : { key: 'quiet', text: 'Quiet', tone: '' };
-}
-
-// Security page tabs: every section loads with the page, the tabs only show one
-let securityTab = 'overview';
-function securityShowTab(tab) {
-    securityTab = tab;
-    routerSyncSubpage('netfilter', tab);
-    document.querySelectorAll('.ui-se-tabs .modal-tab').forEach(btn => {
-        const on = btn.id === `security-tab-btn-${tab}`;
-        btn.classList.toggle('active', on);
-        btn.setAttribute('aria-selected', on);
-    });
-    ['overview', 'events', 'protection', 'fail2ban', 'abuse'].forEach(name => {
-        const panel = document.getElementById(`security-tab-${name}`);
-        if (panel) panel.classList.toggle('hidden', name !== tab);
-    });
-}
-
-// The two Security lists open with their first rows; "Show all" expands them
-const SECURITY_LIST_PREVIEW = 10;
-let securityShowAll = { sources: false, latest: false };
-
-function toggleSecurityList(which) {
-    securityShowAll[which] = !securityShowAll[which];
-    renderSecurityOverview();
-}
-
-function securityShowAllButton(which, total) {
-    if (total <= SECURITY_LIST_PREVIEW) return '';
-    const label = securityShowAll[which] ? 'Show fewer' : `Show all ${total}`;
-    return `<div class="ui-list-more"><button type="button" class="ui-btn ui-btn-sm" onclick="toggleSecurityList('${which}')" aria-expanded="${securityShowAll[which]}">${label}</button></div>`;
-}
-
-function renderSecurityOverview() {
-    const data = securityOverview;
-    const sourcesEl = document.getElementById('security-sources');
-    const latestEl = document.getElementById('security-latest');
-    if (!data || !sourcesEl || !latestEl) return;
-
-    const states = data.sources.map(securitySourceState);
-    const known = fail2banActiveBans !== null;
-    const setKpi = (id, value, tone) => {
-        const el = document.getElementById(id);
-        if (!el) return;
-        el.textContent = value;
-        el.className = tone || '';
-    };
-    setKpi('security-kpi-failed', (data.failed_logins || 0).toLocaleString());
-    setKpi('security-kpi-banned', known ? (fail2banTotalBans ?? fail2banActiveBans.length).toLocaleString() : '-');
-    setKpi('security-kpi-sources', (data.source_count || 0).toLocaleString());
-    // The To review figure and its panel come from the protection rules (protection.js)
-
-    if (!data.sources.length) {
-        sourcesEl.innerHTML = '<p class="ui-empty ui-panel">No attempts in the last 24 hours.</p>';
-    } else {
-        const lockedNote = mailcowRwConfigured ? '' : `<div class="ui-list-note">${uiLocked('Ban, Allow and Unban are locked', `Changing Fail2ban from this list ${UI_RW_KEY_TEXT}`)}</div>`;
-        const more = data.source_count > data.sources.length ? `<p class="ui-kv-note">The ${data.sources.length} addresses with the most attempts of ${data.source_count.toLocaleString()}.</p>` : '';
-        const sourceRows = securityShowAll.sources ? data.sources : data.sources.slice(0, SECURITY_LIST_PREVIEW);
-        sourcesEl.innerHTML = `${lockedNote}
-            <div class="ui-table ui-sec-table" style="--ui-cols: minmax(190px, 2.2fr) minmax(90px, 1fr) 72px 96px minmax(130px, 1.2fr) 136px; --ui-table-min: 820px">
-                <div class="ui-tr ui-tr-head"><span>Address</span><span>Service</span><span class="ui-td-end">Attempts</span><span>Last seen</span><span>State</span><span class="ui-td-end">Actions</span></div>
-                ${sourceRows.map((src, i) => {
-                    const st = states[i];
-                    const where = [src.country_name, src.usernames.length ? `tried ${src.usernames.join(', ')}` : ''].filter(Boolean).join(', ');
-                    const ipArg = escapeJsArg(src.ip);
-                    const actions = !mailcowRwConfigured || st.key === 'unknown' ? '' :
-                        (st.key === 'banned' || st.key === 'blocklisted')
-                            ? `<button onclick="unbanIP('${ipArg}', this)" class="ui-btn ui-btn-sm" title="Unban ${escapeHtml(src.ip)}/32">Unban</button>`
-                            : st.key === 'allowed' ? ''
-                            : `<button onclick="banIP('${ipArg}', this)" class="ui-btn ui-btn-sm ui-btn-danger" title="Ban ${escapeHtml(src.ip)}/32">Ban</button>
-                               <button onclick="allowIP('${ipArg}', this)" class="ui-btn ui-btn-sm" title="Never ban ${escapeHtml(src.ip)}/32">Allow</button>`;
-                    return `
-                    <div class="ui-tr${st.key === 'open' ? ' ui-tr-attn' : ''}">
-                        <div class="ui-td ui-sec-addr">
-                            <b class="ui-mono">${copyableText(src.ip)}</b>
-                            ${where ? `<small title="${escapeHtml(where)}">${escapeHtml(where)}</small>` : ''}
-                        </div>
-                        <span class="ui-td">${escapeHtml(src.services.join(', ') || '-')}</span>
-                        <span class="ui-td ui-td-end">${src.attempts.toLocaleString()}<small class="ui-sec-unit"> ${src.attempts === 1 ? 'attempt' : 'attempts'}</small></span>
-                        <time class="ui-td" title="${escapeHtml(formatTime(src.last_seen))}">${formatAgo(src.last_seen)}</time>
-                        <span class="ui-td">${st.tone || st.key === 'quiet' ? uiTag(st.text, st.tone) : escapeHtml(st.text)}</span>
-                        <span class="ui-td ui-td-end ui-sec-actions">${actions}</span>
-                    </div>`;
-                }).join('')}
-            </div>${securityShowAllButton('sources', data.sources.length)}${more}`;
-    }
-
-    if (!data.latest.length) {
-        latestEl.innerHTML = '<p class="ui-empty ui-panel">No failed logins in the last 24 hours.</p>';
-    } else {
-        latestEl.innerHTML = `
-            <div class="ui-table ui-sec-table ui-sec-latest" style="--ui-cols: 64px minmax(130px, 1fr) minmax(160px, 1.6fr) minmax(90px, .8fr); --ui-table-min: 520px">
-                <div class="ui-tr ui-tr-head"><span>When</span><span>Address</span><span>Account tried</span><span>Service</span></div>
-                ${(securityShowAll.latest ? data.latest : data.latest.slice(0, SECURITY_LIST_PREVIEW)).map(row => `
-                    <div class="ui-tr">
-                        <time class="ui-td" title="${escapeHtml(formatTime(row.time))}">${formatListTime(row.time)}</time>
-                        <span class="ui-td ui-mono">${copyableText(row.ip)}</span>
-                        <span class="ui-td">${row.username ? copyableText(row.username) : '<span class="ui-muted">-</span>'}</span>
-                        <span class="ui-td">${escapeHtml(row.service || '-')}</span>
-                    </div>`).join('')}
-            </div>${securityShowAllButton('latest', data.latest.length)}`;
-    }
-}
-
 async function allowIP(ip, btnEl) {
     const ipWithMask = ip.includes('/') ? ip : ip + '/32';
     if (!await showConfirmModal({ title: 'Allow IP', message: `Add ${ipWithMask} to the Fail2Ban allowlist?\n\nFailed attempts from this address will never lead to a ban.`, confirmText: 'Allow' })) return;
@@ -2102,218 +1967,6 @@ function clearNetfilterFilters() {
     loadNetfilterLogs();
 }
 
-let securityCountryChart = null;
-
-async function loadSecurityCountryChart(days = 30) {
-    // Mark the chosen period
-    document.querySelectorAll('.country-chart-period-btn').forEach(btn => {
-        btn.setAttribute('aria-pressed', String(btn.id === `country-chart-${days}d`));
-    });
-
-    try {
-        const response = await authenticatedFetch(`/api/logs/netfilter/stats/by-country?days=${days}`);
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        const result = await response.json();
-        const data = result.data || [];
-
-        const container = document.getElementById('country-chart-container');
-        const emptyMsg = document.getElementById('country-chart-empty');
-
-        // Filter out countries with 0 total (ban+warning+unban)
-        const filteredData = data.filter(d => (d.ban + d.warning + d.unban) > 0);
-
-        if (filteredData.length === 0) {
-            container.classList.add('hidden');
-            emptyMsg.classList.remove('hidden');
-            return;
-        }
-        container.classList.remove('hidden');
-        emptyMsg.classList.add('hidden');
-
-
-        // Preload flag images for chart labels
-        const flagImages = {};
-        const flagPromises = filteredData.map(d => {
-            const url = getFlagUrl(d.country_code, '24x18');
-            if (!url) return Promise.resolve();
-            return new Promise(resolve => {
-                const img = new Image();
-                img.onload = () => { flagImages[d.country_code] = img; resolve(); };
-                img.onerror = () => resolve();
-                img.src = url;
-            });
-        });
-        await Promise.all(flagPromises);
-
-
-        // Destroy old chart if exists
-        if (securityCountryChart) {
-            securityCountryChart.destroy();
-            securityCountryChart = null;
-        }
-
-        // Colours come from the design tokens, so the chart follows both themes
-        const token = name => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-        const gridColor = token('--ui-line');
-        const textColor = token('--ui-muted');
-
-        // Dataset visibility state: track which action types are shown
-        const datasetKeys = ['ban', 'warning', 'unban'];
-        const visibleSets = { ban: true, warning: true, unban: true };
-
-        const datasetColors = {
-            ban:     token('--ui-fail'),
-            warning: token('--ui-warn'),
-            unban:   token('--ui-ok')
-        };
-        const datasetLabels = { ban: 'Ban', warning: 'Warning', unban: 'Unban' };
-
-        // Build chart data filtered by visible datasets
-        function buildChartData() {
-            // Filter: only keep countries that have > 0 events in any VISIBLE dataset
-            const visible = filteredData.filter(d => {
-                let sum = 0;
-                for (const key of datasetKeys) {
-                    if (visibleSets[key]) sum += d[key];
-                }
-                return sum > 0;
-            });
-
-            // Sort by visible total descending
-            visible.sort((a, b) => {
-                let sumA = 0, sumB = 0;
-                for (const key of datasetKeys) {
-                    if (visibleSets[key]) { sumA += a[key]; sumB += b[key]; }
-                }
-                return sumB - sumA;
-            });
-
-            return visible;
-        }
-
-        function updateChart() {
-            const visible = buildChartData();
-
-            if (visible.length === 0) {
-                container.classList.add('hidden');
-                emptyMsg.classList.remove('hidden');
-                return;
-            }
-            container.classList.remove('hidden');
-            emptyMsg.classList.add('hidden');
-
-            // Dynamic height
-            const chartHeight = Math.min(350, Math.max(120, visible.length * 32));
-            container.style.height = chartHeight + 'px';
-
-            // Update chart data in place
-            securityCountryChart.data.labels = visible.map(d => d.country_name);
-            datasetKeys.forEach((key, i) => {
-                securityCountryChart.data.datasets[i].data = visible.map(d => d[key]);
-            });
-
-            // Store visible data reference for flag plugin and tooltip
-            securityCountryChart._visibleData = visible;
-
-            securityCountryChart.update();
-        }
-
-        const initialVisible = buildChartData();
-
-        // Dynamic height
-        const chartHeight = Math.min(350, Math.max(120, initialVisible.length * 32));
-        container.style.height = chartHeight + 'px';
-
-        const ctx = document.getElementById('security-country-chart').getContext('2d');
-        securityCountryChart = new Chart(ctx, {
-            type: 'bar',
-            data: {
-                labels: initialVisible.map(d => d.country_name),
-                datasets: datasetKeys.map(key => ({
-                    label: datasetLabels[key],
-                    data: initialVisible.map(d => d[key]),
-                    backgroundColor: datasetColors[key],
-                    borderRadius: 3
-                }))
-            },
-            options: {
-                indexAxis: 'y',
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: {
-                    legend: {
-                        position: 'top',
-                        labels: { color: textColor, padding: 15, usePointStyle: true, pointStyle: 'rectRounded' },
-                        onClick: (e, legendItem, legend) => {
-                            const key = datasetKeys[legendItem.datasetIndex];
-                            visibleSets[key] = !visibleSets[key];
-
-                            // Toggle the dataset hidden state
-                            const meta = legend.chart.getDatasetMeta(legendItem.datasetIndex);
-                            meta.hidden = !visibleSets[key];
-
-                            // Rebuild data with only countries that have visible events
-                            updateChart();
-                        }
-                    },
-                    tooltip: {
-                        callbacks: {
-                            title: (items) => items[0].label,
-                            afterTitle: (items) => {
-                                const d = securityCountryChart._visibleData?.[items[0].dataIndex];
-                                if (!d) return '';
-                                let sum = 0;
-                                for (const key of datasetKeys) {
-                                    if (visibleSets[key]) sum += d[key];
-                                }
-                                return `Total: ${sum} events`;
-                            }
-                        }
-                    }
-                },
-                scales: {
-                    x: {
-                        stacked: true,
-                        grid: { color: gridColor },
-                        ticks: { color: textColor }
-                    },
-                    y: {
-                        stacked: true,
-                        grid: { display: false },
-                        ticks: { color: textColor, padding: 30 }
-                    }
-                },
-                layout: {
-                    padding: { left: 8 }
-                }
-            },
-            plugins: [{
-                id: 'flagIcons',
-                afterDraw: (chart) => {
-                    const yScale = chart.scales.y;
-                    if (!yScale) return;
-                    const visible = chart._visibleData || initialVisible;
-                    const ctx = chart.ctx;
-                    yScale.ticks.forEach((tick, i) => {
-                        const d = visible[i];
-                        if (!d) return;
-                        const flagImg = flagImages[d.country_code];
-                        if (!flagImg) return;
-                        const y = yScale.getPixelForTick(i);
-                        const xPos = yScale.right - 28;
-                        ctx.drawImage(flagImg, xPos, y - 6, 24, 18);
-                    });
-                }
-            }]
-        });
-
-        // Store initial visible data reference
-        securityCountryChart._visibleData = initialVisible;
-    } catch (e) {
-        console.error('Failed to load security country chart:', e);
-    }
-}
-
 async function loadNetfilterLogs(page = 1) {
     const container = document.getElementById('netfilter-logs');
 
@@ -2362,6 +2015,8 @@ let fail2banActiveBans = null;
 let fail2banTotalBans = null;
 let fail2banBlacklist = [];
 let fail2banWhitelist = [];
+let fail2banPermBans = [];
+let fail2banPolicy = null;  // ban time, attempts and window, for the Overview's sentences
 
 let fail2banInitial = null;  // the values the two Fail2ban forms loaded with
 
@@ -2445,7 +2100,11 @@ async function loadFail2BanSettings() {
         const canEdit = mailcowRwConfigured;
         const f2bOff = canEdit ? '' : 'disabled';
         fail2banSettingsLoaded = true;
+        fail2banLoadError = false;
         fail2banActiveBans = data.active_bans || [];
+        fail2banPermBans = data.perm_bans || [];
+        fail2banPolicy = { ban_time: data.ban_time, max_ban_time: data.max_ban_time, ban_time_increment: data.ban_time_increment,
+            max_attempts: data.max_attempts, retry_window: data.retry_window };
         // Same count as the Active Bans list: permanent bans plus the temporary ones not among them
         const permNetworks = new Set((data.perm_bans || []).map(ban => ban.network || ban.ip));
         fail2banTotalBans = (data.perm_bans || []).length + fail2banActiveBans.filter(ban => !permNetworks.has(ban.network)).length;
@@ -2574,6 +2233,8 @@ async function loadFail2BanSettings() {
         }
     } catch (error) {
         console.error('Failed to load Fail2Ban settings:', error);
+        fail2banLoadError = true;
+        renderSecurityOverview();
         settingsContainer.innerHTML = `<p class="text-red-500 text-center py-4">Failed to load Fail2Ban settings: ${escapeHtml(error.message)}</p>`;
         if (ipListsContainer) {
             ipListsContainer.innerHTML = `<p class="text-red-500 text-center py-4">Failed to load IP lists</p>`;

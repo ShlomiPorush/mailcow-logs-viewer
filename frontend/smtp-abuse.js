@@ -26,6 +26,7 @@ async function loadSmtpAbusePanel() {
         smtpAbuseStatus = await statusResponse.json();
         smtpAbuseWhitelist = await whitelistResponse.json();
         renderSmtpAbusePanel();
+        renderSecurityOverview();  // whether Outgoing spam is on
     } catch (error) {
         console.error('SMTP abuse panel error:', error);
         panel.innerHTML = '<p class="ui-empty ui-text-fail">Could not load abuse protection.</p>';
