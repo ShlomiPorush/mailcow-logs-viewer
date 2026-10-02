@@ -1,5 +1,5 @@
 // =============================================================================
-// SMTP ABUSE PROTECTION - Security page panel
+// SMTP ABUSE PROTECTION - the mailboxes in the Security page's Outgoing spam card
 // =============================================================================
 // Lists outbound activity per mailbox, shows which mailboxes this system has
 // blocked, and provides the whitelist plus manual block/unblock controls.
@@ -13,10 +13,9 @@ let smtpAbuseWhitelistDraft = null;  // unsaved whitelist text; survives the pan
 let smtpAbusePage = 1;
 const SMTP_ABUSE_PAGE_SIZE = 5;
 
+// The status loads with the Security page: the Overview shows whether it is on, and
+// the Outgoing spam card shows the mailboxes when it is open
 async function loadSmtpAbusePanel() {
-    const panel = document.getElementById('smtp-abuse-panel');
-    if (!panel) return;
-
     try {
         const [statusResponse, whitelistResponse] = await Promise.all([
             authenticatedFetch('/api/smtp-abuse/status?limit=200'),
@@ -29,13 +28,15 @@ async function loadSmtpAbusePanel() {
         renderSecurityOverview();  // whether Outgoing spam is on
     } catch (error) {
         console.error('SMTP abuse panel error:', error);
-        panel.innerHTML = '<p class="ui-empty ui-text-fail">Could not load abuse protection.</p>';
+        const panel = document.getElementById('smtp-abuse-panel');
+        if (panel) panel.innerHTML = '<p class="ui-empty ui-text-fail">Could not load abuse protection.</p>';
     }
 }
 
 function renderSmtpAbusePanel() {
     const panel = document.getElementById('smtp-abuse-panel');
-    if (!panel || !smtpAbuseStatus) return;
+    if (!panel) return;
+    if (!smtpAbuseStatus) { panel.innerHTML = '<div class="ui-loading"><div class="loading"></div><p>Loading...</p></div>'; return; }
 
     const status = smtpAbuseStatus;
     const locked = !status.enabled || !status.rw_key_configured;
@@ -80,8 +81,8 @@ function renderSmtpAbusePanel() {
             <div class="ui-list-head">
                 <p class="ui-set-desc ui-sa-intro">
                     ${status.enabled
-                        ? `Mailboxes sending more than <strong>${status.threshold}</strong> messages in <strong>${status.window_minutes}</strong> minutes have SMTP disabled automatically. Receiving (IMAP) is never affected.`
-                        : 'Automatic protection is off. Enable it under Settings → SMTP Abuse.'}
+                        ? 'Mailboxes stopped automatically and the outbound activity of the last window. Receiving (IMAP) is never affected.'
+                        : 'Automatic protection is off. Outbound activity of the last window:'}
                 </p>
                 <button type="button" onclick="loadSmtpAbusePanel()" class="ui-btn ui-btn-sm ui-head-actions">Refresh</button>
             </div>
@@ -121,7 +122,6 @@ function renderSmtpAbusePanel() {
                     </div>
                     <textarea id="smtp-abuse-whitelist-textarea" rows="4" placeholder="newsletter@example.com&#10;monitoring@example.com" ${locked ? 'disabled' : ''} oninput="onSmtpAbuseWhitelistInput(this.value)" class="ui-textarea ui-mono">${escapeHtml(smtpAbuseWhitelistDraft ?? smtpAbuseWhitelistSavedText())}</textarea>
                 </form>
-                ${locked ? '' : uiSaveBar('smtp-abuse-savebar', { save: 'saveSmtpAbuseWhitelist()', discard: 'discardSmtpAbuseWhitelist()' })}
 
                 ${smtpAbuseWhitelist.length ? `
                 <div class="ui-sa-list">
@@ -139,15 +139,15 @@ function renderSmtpAbusePanel() {
                 </div>` : ''}
             </div>
         </div>`;
-    uiSaveBarUpdate('smtp-abuse-savebar', smtpAbuseWhitelistDraft !== null ? 1 : 0);
+    securityUpdateSaveBar();
 
     if (locked) {
-        const reasons = [];
-        if (!status.enabled) reasons.push('SMTP abuse protection is disabled');
-        if (!status.rw_key_configured) reasons.push('a Read-Write mailcow API key is not configured');
-        // The locked area explains the missing controls and leads to Settings;
-        // the activity below stays readable
-        panel.insertAdjacentHTML('afterbegin', `<div class="ui-list-note">${uiLocked('Abuse protection controls are locked', `${escapeHtml(reasons.join(' and '))}.`)}</div>`);
+        // The locked area says what is missing; the activity below stays readable. The
+        // card's own switch turns the protection on, so only the key leads to Settings.
+        const note = !status.rw_key_configured
+            ? uiLocked('Abuse protection controls are locked', `Stopping a mailbox and editing the whitelist ${UI_RW_KEY_TEXT}`)
+            : uiLocked('Abuse protection controls are locked', 'Turn Outgoing spam on with the switch above to stop a mailbox, let it send again or edit the whitelist.', '');
+        panel.insertAdjacentHTML('afterbegin', `<div class="ui-list-note ui-flush">${note}</div>`);
     }
 }
 
@@ -190,17 +190,11 @@ function smtpAbuseWhitelistLines(text) {
 function onSmtpAbuseWhitelistInput(text) {
     const changed = smtpAbuseWhitelistLines(text).join('\n') !== smtpAbuseWhitelistLines(smtpAbuseWhitelistSavedText()).join('\n');
     smtpAbuseWhitelistDraft = changed ? text : null;
-    uiSaveBarUpdate('smtp-abuse-savebar', changed ? 1 : 0);
+    securityUpdateSaveBar();
 }
 
-function discardSmtpAbuseWhitelist() {
-    smtpAbuseWhitelistDraft = null;
-    renderSmtpAbusePanel();
-}
-
-async function saveSmtpAbuseWhitelist() {
-    const emails = smtpAbuseWhitelistLines(document.getElementById('smtp-abuse-whitelist-textarea')?.value || '');
-    uiSaveBarBusy('smtp-abuse-savebar', true);
+async function saveSmtpAbuseWhitelist(quiet = false) {
+    const emails = smtpAbuseWhitelistLines(smtpAbuseWhitelistDraft ?? smtpAbuseWhitelistSavedText());
     try {
         const response = await authenticatedFetch('/api/smtp-abuse/whitelist', {
             method: 'PUT',
@@ -210,15 +204,15 @@ async function saveSmtpAbuseWhitelist() {
         if (!response.ok) {
             const detail = await response.json().catch(() => ({}));
             showToast(detail.detail || 'Could not save whitelist', 'error');
-            uiSaveBarBusy('smtp-abuse-savebar', false);
-            return;
+            return false;
         }
         smtpAbuseWhitelistDraft = null;
-        showToast('Whitelist saved', 'success');
-        loadSmtpAbusePanel();
+        if (!quiet) showToast('Whitelist saved', 'success');
+        await loadSmtpAbusePanel();
+        return true;
     } catch (e) {
         showToast('Could not save whitelist', 'error');
-        uiSaveBarBusy('smtp-abuse-savebar', false);
+        return false;
     }
 }
 

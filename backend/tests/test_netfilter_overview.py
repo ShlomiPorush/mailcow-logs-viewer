@@ -191,3 +191,36 @@ def test_remove_takes_an_address_off_a_list_and_keeps_the_rest(client, monkeypat
 
     assert client.post('/api/fail2ban/remove', json={'ip': '192.0.2.1', 'list': 'other'}).status_code == 400
     assert client.post('/api/fail2ban/remove', json={'list': 'whitelist'}).status_code == 400
+
+
+def test_the_policy_keeps_the_lists_read_right_before_writing(client, monkeypatch):
+    from app.mailcow_api import mailcow_api
+    saved = {}
+    lists = {'whitelist': '192.0.2.0/24', 'blacklist': '203.0.113.9/32'}
+
+    async def fake_get():
+        return {'ban_time': 1800, 'ban_time_increment': 1, 'max_attempts': 10, 'max_ban_time': 86400,
+                'netban_ipv4': 32, 'netban_ipv6': 128, 'retry_window': 600, **lists}
+
+    async def fake_edit(attrs):
+        saved.update(attrs)
+        return [{'type': 'success', 'msg': ['fail2ban_edit_ok']}]
+
+    monkeypatch.setattr(mailcow_api, 'get_fail2ban', fake_get)
+    monkeypatch.setattr(mailcow_api, 'edit_fail2ban', fake_edit)
+    policy = {'ban_time': 3600, 'max_ban_time': 604800, 'ban_time_increment': False, 'max_attempts': 5,
+              'retry_window': 900, 'netban_ipv4': 24, 'netban_ipv6': 64}
+
+    # A rule added an address after the page loaded: it is still there after the save
+    lists['blacklist'] = '203.0.113.9/32\n198.51.100.7/32'
+    res = client.post('/api/fail2ban/policy', json=policy)
+    assert res.json()['status'] == 'success'
+    assert saved == {'ban_time': '3600', 'max_ban_time': '604800', 'ban_time_increment': '0', 'max_attempts': '5',
+                     'retry_window': '900', 'netban_ipv4': '24', 'netban_ipv6': '64',
+                     'blacklist': '203.0.113.9/32,198.51.100.7/32', 'whitelist': '192.0.2.0/24'}
+
+    saved.clear()
+    assert client.post('/api/fail2ban/policy', json={**policy, 'netban_ipv4': 33}).status_code == 400
+    assert client.post('/api/fail2ban/policy', json={**policy, 'max_attempts': 'x'}).status_code == 400
+    assert client.post('/api/fail2ban/policy', json={**policy, 'max_ban_time': 60}).status_code == 400
+    assert saved == {}
