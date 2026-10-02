@@ -808,10 +808,11 @@ select.ui-sec-in { text-align: start; }
 .ui-sheet { position: fixed; inset: 0; z-index: 70; display: flex; flex-direction: column; justify-content: flex-end; }
 .ui-sheet-back { position: absolute; inset: 0; background: rgb(0 0 0 / .4); }
 .ui-sheet-panel { position: relative; display: flex; flex-direction: column; max-height: 88vh; max-height: 88dvh; background: var(--ui-bg);
-    border-radius: 16px 16px 0 0; box-shadow: 0 -8px 30px rgb(0 0 0 / .2); transition: max-height .25s ease, height .25s ease, border-radius .25s ease; }
-/* A long read opens part way and grows to the full screen once it scrolls */
-.ui-sheet.is-expand .ui-sheet-panel { max-height: 62vh; max-height: 62dvh; }
-.ui-sheet.is-expand.is-full .ui-sheet-panel { height: 100vh; height: 100dvh; max-height: none; border-radius: 0; padding-top: env(safe-area-inset-top); }
+    border-radius: 16px 16px 0 0; box-shadow: 0 -8px 30px rgb(0 0 0 / .2); transition: border-radius .2s ease; }
+/* A long read opens at three quarters and rises with the scroll to the full screen (utils.js) */
+.ui-sheet.is-expand .ui-sheet-panel { max-height: 100vh; max-height: 100dvh; height: auto; }
+.ui-sheet.is-expand:not(.is-full) .ui-sheet-panel:not([style*="height"]) { max-height: 75vh; max-height: 75dvh; }
+.ui-sheet.is-expand.is-full .ui-sheet-panel { border-radius: 0; padding-top: env(safe-area-inset-top); }
 .ui-sheet-grip { align-self: center; width: 40px; height: 4px; margin-top: 8px; border-radius: 2px; background: var(--ui-line); }
 .ui-sheet-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 14px var(--ui-pad-x) 10px; border-bottom: 1px solid var(--ui-line); }
 .ui-sheet-head > :first-child { min-width: 0; }
@@ -820,7 +821,7 @@ select.ui-sec-in { text-align: start; }
 .ui-sheet-body { overflow-y: auto; overscroll-behavior: contain; padding: 12px var(--ui-pad-x) calc(20px + env(safe-area-inset-bottom)); display: grid; gap: 10px; align-content: start; }
 .ui-sheet-body > .ui-sec-why { font-size: 13.5px; }
 .ui-sheet-body .ui-sec-detail { padding: 0; }
-.ui-sheet .markdown-body { font-family: inherit; background: transparent; color: var(--ui-ink); font-size: 14px; }
+.ui-sheet .markdown-body { font-family: inherit; background: transparent; color: var(--ui-ink); }
 body.ui-sheet-on { overflow: hidden; }
 @media (max-width: 760px) {
     /* The Protection row folds into one chip; open, it lists every protection */
