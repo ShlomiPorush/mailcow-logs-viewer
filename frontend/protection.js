@@ -162,7 +162,7 @@ function removeProtectionCountry(code) {
     renderProtection();
 }
 
-async function saveProtectionRules() {
+async function saveProtectionRules(quiet = false) {
     try {
         const res = await authenticatedFetch('/api/protection/rules', {
             method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ rules: protectionRules })
@@ -172,7 +172,7 @@ async function saveProtectionRules() {
         protectionRules = data.rules;
         protectionSaved = JSON.parse(JSON.stringify(data.rules));
         protectionDirty = false;
-        showToast('Protection rules saved', 'success');
+        if (!quiet) showToast('Protection rules saved', 'success');
         loadProtection();
     } catch (error) {
         showToast(`Could not save the rules: ${error.message}`, 'error');

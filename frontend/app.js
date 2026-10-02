@@ -337,6 +337,12 @@ async function fetchRwStatus() {
         mailcowRwConfigured = false;
     }
     showQuarantineRulesAccess();
+    // The key decides which actions the Security page offers; the flag may land after it drew
+    if (currentTab === 'netfilter') {
+        renderSecurityOverview();
+        renderSecurityLists();
+        renderSecuritySettings();
+    }
 }
 
 // Auto-Rules release and delete held mail in mailcow, so they need the Read-Write key.
