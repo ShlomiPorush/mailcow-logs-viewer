@@ -193,7 +193,7 @@ function onSmtpAbuseWhitelistInput(text) {
     securityUpdateSaveBar();
 }
 
-async function saveSmtpAbuseWhitelist() {
+async function saveSmtpAbuseWhitelist(quiet = false) {
     const emails = smtpAbuseWhitelistLines(smtpAbuseWhitelistDraft ?? smtpAbuseWhitelistSavedText());
     try {
         const response = await authenticatedFetch('/api/smtp-abuse/whitelist', {
@@ -204,13 +204,15 @@ async function saveSmtpAbuseWhitelist() {
         if (!response.ok) {
             const detail = await response.json().catch(() => ({}));
             showToast(detail.detail || 'Could not save whitelist', 'error');
-            return;
+            return false;
         }
         smtpAbuseWhitelistDraft = null;
-        showToast('Whitelist saved', 'success');
+        if (!quiet) showToast('Whitelist saved', 'success');
         await loadSmtpAbusePanel();
+        return true;
     } catch (e) {
         showToast('Could not save whitelist', 'error');
+        return false;
     }
 }
 

@@ -77,10 +77,13 @@ async function loadProtectionOverview() {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
         securityHits = data.hits || [];
-        if (securityFilter === 'history') securityHistory = null;
+        if (securityFilter === 'history') loadSecurityHistory();
         renderSecurityOverview();
-        renderSecurityLists();      // which denylist entries a rule wrote
-        renderSecuritySettings();   // how many each rule would ban
+        // The page's timer must not redraw a card or a list someone is working in
+        if (!securityEditing()) {
+            renderSecurityLists();      // which denylist entries a rule wrote
+            renderSecuritySettings();   // how many each rule would ban
+        }
     } catch (error) {
         console.error('Failed to load the protection hits:', error);
     }
@@ -309,6 +312,14 @@ function securityOpenEvents(ip) {
     const field = document.getElementById('netfilter-filter-ip');
     if (field) field.value = ip;
     applyNetfilterFilters();
+}
+
+// Someone is working in the Settings cards or the Lists: an open card, unsaved
+// changes, or the focus in one of their fields
+function securityEditing() {
+    const focus = document.activeElement;
+    return securityCard !== null || securityChangeCount() > 0
+        || !!(focus && focus.closest && focus.closest('#security-cards, #security-lists'));
 }
 
 function setSecurityFilter(key) {
@@ -634,15 +645,21 @@ function discardSecuritySettings() {
     securityUpdateSaveBar();
 }
 
-// Save what changed, group by group; a group that fails keeps its changes on screen
+// Save what changed, group by group, and say in one message what was saved. A group
+// that fails says why in its own message and keeps its changes on screen.
 async function saveSecuritySettings() {
     uiSaveBarBusy('security-savebar', true);
-    if (protectionChangeCount()) await saveProtectionRules();
-    if (securityF2bChanges().length) await saveSecurityF2b();
-    if (securityAbuseChanges().length) await saveSecurityAbuse();
-    if (smtpAbuseWhitelistDraft !== null) await saveSmtpAbuseWhitelist();
+    const saved = [];
+    if (protectionChangeCount() && await saveProtectionRules(true)) saved.push('the protection rules');
+    if (securityF2bChanges().length && await saveSecurityF2b()) saved.push('Fail2ban');
+    if (securityAbuseChanges().length && await saveSecurityAbuse()) saved.push('outgoing spam');
+    if (smtpAbuseWhitelistDraft !== null && await saveSmtpAbuseWhitelist(true)) saved.push('the whitelist');
     uiSaveBarBusy('security-savebar', false);
     securityUpdateSaveBar();
+    if (saved.length) {
+        const list = saved.length > 1 ? `${saved.slice(0, -1).join(', ')} and ${saved[saved.length - 1]}` : saved[0];
+        showToast(`Saved ${list}`, 'success');
+    }
 }
 
 async function saveSecurityF2b() {
@@ -654,12 +671,13 @@ async function saveSecurityF2b() {
         });
         const result = await res.json().catch(() => ({}));
         if (!res.ok || result.status !== 'success') throw new Error(result.msg || result.detail || `HTTP ${res.status}`);
-        showToast('Fail2ban settings saved', 'success');
         securityF2bDraft = null;
         fail2banSettingsLoaded = false;
         await loadFail2BanSettings();
+        return true;
     } catch (error) {
         showToast(`Failed to save the Fail2ban settings: ${error.message}`, 'error');
+        return false;
     }
 }
 
@@ -671,12 +689,13 @@ async function saveSecurityAbuse() {
         });
         const result = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(result.detail || `HTTP ${res.status}`);
-        showToast('Outgoing spam settings saved', 'success');
         securityAbuseDraft = {};
         await loadSecurityAppSettings();
         loadSmtpAbusePanel();
+        return true;
     } catch (error) {
         showToast(`Could not save the outgoing spam settings: ${error.message}`, 'error');
+        return false;
     }
 }
 
@@ -743,8 +762,8 @@ function securityAbuseSentence(edit) {
         return `Stops a mailbox from sending when it sends more than <b>${val('smtp_abuse_threshold')} messages</b> within <b>${val('smtp_abuse_window_minutes')} minutes</b>. Receiving is never affected.`;
     }
     const n = (key, min, label, width) => securityNum(val(key), `setSecurityAbuse('${key}', Number(this.value))`, min, 0, label, width, locked(key));
-    return `Stop a mailbox from sending when it sends more than ${n('smtp_abuse_threshold', 1, 'Messages', 5)} messages within ${n('smtp_abuse_window_minutes', 1, 'Minutes', 4)} minutes.
-        After you let it send again, wait ${n('smtp_abuse_unblock_grace_minutes', 0, 'Minutes', 4)} minutes before it can be stopped again.`;
+    return `Stop a mailbox from sending when it sends more than ${n('smtp_abuse_threshold', 1, 'Messages', 5)} messages within ${n('smtp_abuse_window_minutes', 1, 'Minutes the messages are counted in', 4)} minutes.
+        After you let it send again, wait ${n('smtp_abuse_unblock_grace_minutes', 0, 'Minutes before it can be stopped again', 4)} minutes before it can be stopped again.`;
 }
 
 // The parts of a card that only an open card shows
