@@ -89,7 +89,7 @@ async function loadProtectionOverview() {
         // The page's timer must not redraw a card or a list someone is working in
         if (!securityEditing()) {
             renderSecurityLists();      // which denylist entries a rule wrote
-            renderSecuritySettings();   // how many each rule would ban
+            renderSecuritySettings();   // the rules' cards
         }
     } catch (error) {
         console.error('Failed to load the protection hits:', error);
@@ -215,6 +215,11 @@ function securityRuleName(rule) {
     return SECURITY_RULE_NAMES[rule] || rule;
 }
 
+// One tag per rule that caught the address
+function securityRuleTags(hits) {
+    return `<span class="ui-sec-tags">${[...new Set(hits.map(h => securityRuleName(h.rule)))].map(name => uiTag(escapeHtml(name), 'warn')).join('')}</span>`;
+}
+
 // The tag, the sentence that says why, and what can be done
 function securityDescribe(a) {
     const rw = mailcowRwConfigured;
@@ -259,7 +264,7 @@ function securityDescribe(a) {
     if (a.state === 'review') {
         const canBan = typeof protectionCaps !== 'undefined' && protectionCaps.can_ban;
         return {
-            tag: uiTag(`Would ban: ${securityRuleName(hit.rule)}`, 'warn'),
+            tag: securityRuleTags(a.hits.filter(h => h.status === 'watching')),
             why: `${escapeHtml(hit.reason || '')}, ${formatAgo(hit.last_seen)}. The rule is watching, so nothing was banned.`,
             acts: (canBan ? `<button type="button" class="ui-btn ui-btn-sm ui-btn-danger" onclick="banProtectionHit(${id}, this)" title="Put it on the Fail2ban blacklist now">Ban now</button>` : '') + dismiss
         };
@@ -384,7 +389,7 @@ function securityDetail(a) {
             <div class="ui-sec-facts">
                 ${fact('From', `<span title="${escapeHtml([a.city, a.country].filter(Boolean).join(', '))}">${place}</span>`)}
                 ${fact('Failed logins', securityFailedText(a, lines))}
-                ${a.hits.length ? fact('Caught by', escapeHtml([...new Set(a.hits.map(h => securityRuleName(h.rule)))].join(', '))) : ''}
+                ${a.hits.length ? fact('Caught by', securityRuleTags(a.hits)) : ''}
             </div>
             ${a.users.length ? `<div><h4>Accounts it tried</h4><div class="ui-chip-row">${a.users.map(u => `<span class="ui-sec-chip">${copyableText(u)}</span>`).join('')}</div></div>` : ''}
             ${hitsText ? `<div><h4>What the rules said</h4>${hitsText}</div>` : ''}
@@ -923,14 +928,20 @@ function securityRuleSentence(key, edit) {
         ? securityNum(r[field], `setProtectionRule('${key}', '${field}', this.value)`, min, max, label, width)
         : `<b>${escapeHtml(String(r[field]))}</b>`;
     const banning = r.mode === 'enforce' && caps.can_ban;
-    const verb = edit ? `Ban ${securityBanSelect(key, r.ban_hours)}` : banning ? `Bans ${securityBanText(r.ban_hours)}` : `Watches, and would ban ${securityBanText(r.ban_hours)},`;
     const mail = !edit && r.notify ? ' You get an email.' : '';
+    const who = {
+        trap: () => `anyone who tries one of <b>${r.names.length} trap name${r.names.length === 1 ? '' : 's'}</b>`,
+        unknown_accounts: () => `an address that tries ${num('threshold', 2, 100, 'Number of accounts', 3)} accounts that do not exist within ${num('window_minutes', 5, 1440, 'Minutes', 4)} minutes`,
+        repeat_offender: () => `an address Fail2ban banned ${num('threshold', 2, 50, 'Number of bans', 3)} times within ${num('window_days', 1, 365, 'Days', 3)} days`,
+        subnet: () => `a whole network (IPv4 /24) when ${num('threshold', 2, 256, 'Number of addresses', 3)} of its addresses attack within ${num('window_hours', 1, 168, 'Hours', 3)} hours`,
+        country: () => `an address that fails to log in from one of <b>${r.countries.length} countr${r.countries.length === 1 ? 'y' : 'ies'}</b>`,
+    }[key];
+    if (who) {
+        if (edit) return `Ban ${securityBanSelect(key, r.ban_hours)} ${who()}.`;
+        if (banning) return `Bans ${securityBanText(r.ban_hours)} ${who()}.${mail}`;
+        return `Notes ${who()}, and bans no one. Set to Ban, it bans ${securityBanText(r.ban_hours)}.${mail}`;
+    }
     switch (key) {
-        case 'trap': return `${verb} anyone who tries one of <b>${r.names.length} trap name${r.names.length === 1 ? '' : 's'}</b>.${mail}`;
-        case 'unknown_accounts': return `${verb} an address that tries ${num('threshold', 2, 100, 'Number of accounts', 3)} accounts that do not exist within ${num('window_minutes', 5, 1440, 'Minutes', 4)} minutes.${mail}`;
-        case 'repeat_offender': return `${verb} an address Fail2ban banned ${num('threshold', 2, 50, 'Number of bans', 3)} times within ${num('window_days', 1, 365, 'Days', 3)} days.${mail}`;
-        case 'subnet': return `${verb} a whole network (IPv4 /24) when ${num('threshold', 2, 256, 'Number of addresses', 3)} of its addresses attack within ${num('window_hours', 1, 168, 'Hours', 3)} hours.${mail}`;
-        case 'country': return `${verb} an address that fails to log in from one of <b>${r.countries.length} countr${r.countries.length === 1 ? 'y' : 'ies'}</b>.${mail}`;
         case 'breach': return `${edit ? 'Alert' : 'Alerts'} when an account logs in after ${num('failures', 1, 50, 'Number of failed tries', 3)} failed tries from the same address within ${num('window_minutes', 5, 1440, 'Minutes', 4)} minutes${!edit && r.new_country && caps.geoip ? ', or from a country it did not use in 30 days' : ''}. Never bans.${mail}`;
         default: return '';
     }
@@ -997,10 +1008,10 @@ function securityCardBody(key) {
     const mode = key === 'breach' ? '' : `
         <div class="ui-sec-mode">
             <div class="ui-seg" role="group" aria-label="What the rule does">
-                <button type="button" aria-pressed="${r.mode !== 'enforce'}" onclick="setProtectionMode('${key}', 'watch')" title="Note what it would ban; ban nothing">Watch first</button>
+                <button type="button" aria-pressed="${r.mode !== 'enforce'}" onclick="setProtectionMode('${key}', 'watch')" title="Note what it catches; ban nothing">Watch first</button>
                 <button type="button" aria-pressed="${r.mode === 'enforce'}" onclick="setProtectionMode('${key}', 'enforce')" ${caps.can_ban ? '' : 'disabled'} title="${caps.can_ban ? 'Put what it catches on the Fail2ban blacklist' : 'Banning needs the Read-Write API key'}">Ban</button>
             </div>
-            <span class="ui-muted">${r.mode === 'enforce' ? 'Bans as soon as it catches an address.' : 'Notes who it would ban, and bans nothing. You decide on the Overview.'}</span>
+            <span class="ui-muted">${r.mode === 'enforce' ? 'Bans as soon as it catches an address.' : 'Notes who it catches, and bans nothing. You decide on the Overview.'}</span>
         </div>`;
     const notify = `<label class="ui-sec-inline"><input type="checkbox" class="ui-check" ${r.notify ? 'checked' : ''} onchange="setProtectionRule('${key}', 'notify', this.checked)"> ${key === 'breach' ? 'Email me on every alert' : 'Email me when it bans'}</label>`;
     let extra = '';
@@ -1057,7 +1068,7 @@ function securityCardHtml(key) {
             && !(securityAppSettings.env_locked_keys || []).includes('smtp_abuse_enabled');
         on = !!enabled;
         toggle = securityToggle(name, on, !editable, `setSecurityAbuse('smtp_abuse_enabled', this.checked)`, editable ? '' : 'Editing settings is off');
-        status = `${on ? uiTag('Stops mailboxes', 'fail') : uiTag('Off', '')}<span class="ui-tag ui-tag-warn ui-tab-tag" title="This feature is new - please report any issues on GitHub">Beta</span>
+        status = `${on ? uiTag('Stops mailboxes', 'fail') : ''}<span class="ui-tag ui-tag-warn ui-tab-tag" title="This feature is new - please report any issues on GitHub">Beta</span>
             <button type="button" onclick="event.stopPropagation(); showHelpModal('Abuse_Protection')" class="ui-icon-btn ui-help-btn" title="Help - Abuse Protection" aria-label="Help - Abuse Protection"><svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg></button>`;
         sentence = securityAbuseSentence(open);
     } else {
@@ -1067,10 +1078,9 @@ function securityCardHtml(key) {
         const needsGeo = key === 'country' && !protectionCaps.geoip;
         on = r.enabled && !needsGeo;
         toggle = securityToggle(name, on, needsGeo, `setProtectionRule('${key}', 'enabled', this.checked)`, needsGeo ? 'Needs MaxMind GeoIP' : '');
-        status = needsGeo ? uiTag('Needs MaxMind GeoIP', '') : !r.enabled ? uiTag('Off', '') : key === 'breach' ? uiTag('Alerts', 'warn')
+        // The switch says on or off; the tag says what an enabled rule does
+        status = needsGeo ? uiTag('Needs MaxMind GeoIP', '') : !r.enabled ? '' : key === 'breach' ? uiTag('Alerts', 'warn')
             : r.mode === 'enforce' && protectionCaps.can_ban ? uiTag('Bans', 'fail') : uiTag('Watching', 'warn');
-        const would = key === 'breach' ? 0 : securityHits.filter(h => h.rule === key && h.status === 'watching').length;
-        caught = r.enabled && would ? `<span class="ui-sec-caught">${would.toLocaleString()} would ban</span>` : '';
         if (needsGeo) locked = uiLocked('Needs GeoIP', 'This rule knows the country of an address only with the MaxMind GeoIP databases.');
         sentence = securityRuleSentence(key, open);
     }
@@ -1081,13 +1091,13 @@ function securityCardHtml(key) {
 function securityToggle(name, on, disabled, action, why) {
     return `<label class="ui-sec-switch${on ? ' is-on' : ''}" onclick="event.stopPropagation()" title="${escapeHtml(disabled ? why : on ? `Turn ${name} off` : `Turn ${name} on`)}">
         <input type="checkbox" role="switch" ${on ? 'checked' : ''} ${disabled ? 'disabled' : ''} onchange="${action}" aria-label="${escapeHtml(name)}">
-        <span class="ui-sec-switch-track" aria-hidden="true"></span><span class="ui-sec-switch-text">${on ? 'On' : 'Off'}</span></label>`;
+        <span class="ui-sec-switch-track" aria-hidden="true"></span></label>`;
 }
 
 function securityCardShell(key, name, open, status, toggle, locked, sentence, body, on = true) {
     return `
         <article class="ui-sec-card${open ? ' is-open' : ''}${on ? '' : ' is-off'}" id="security-card-${key}" tabindex="-1" aria-label="${escapeHtml(name)}" ${open ? '' : `onclick="securityOpenCard('${key}')"`}>
-            <div class="ui-sec-card-head"><span class="ui-prot-mark ui-sec-mark${on ? ' is-on' : ''}" aria-hidden="true">${on ? '✓' : '✕'}</span><h3>${escapeHtml(name)}</h3>${status}
+            <div class="ui-sec-card-head"><span class="ui-sec-card-name"><h3>${escapeHtml(name)}</h3>${status}</span>
                 <span class="ui-sec-card-act">${toggle}${open
                     ? `<button type="button" class="ui-btn ui-btn-sm" onclick="event.stopPropagation(); securityOpenCard(null)">Done</button>`
                     : `<button type="button" class="ui-btn ui-btn-sm" aria-label="Edit ${escapeHtml(name)}">Edit</button>`}</span></div>

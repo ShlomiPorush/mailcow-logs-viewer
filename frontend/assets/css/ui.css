@@ -750,9 +750,11 @@
 .ui-sec-pflag { display: none; }
 .ui-sec-where { display: inline-flex; align-items: center; }
 .ui-sec-card.is-off .ui-sec-sent, .ui-sec-card.is-off .ui-sec-sent b { color: var(--ui-muted); }
-.ui-sec-card-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.ui-sec-card-head { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px 12px; }
+.ui-sec-card-name { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; min-width: 0; }
+.ui-sec-tags { display: inline-flex; flex-wrap: wrap; gap: 4px; }
 .ui-sec-card-head h3 { margin: 0; font-size: 15px; font-weight: 700; }
-.ui-sec-card-act { margin-inline-start: auto; }
+.ui-sec-card-act { justify-self: end; }
 .ui-sec-card .ui-locked { margin: 0; }
 .ui-sec-card h4 { margin: 4px 0 0; font-size: 12.5px; color: var(--ui-muted); font-weight: 650; }
 .ui-sec-caught { font-size: 12px; font-weight: 700; color: var(--ui-warn); }
