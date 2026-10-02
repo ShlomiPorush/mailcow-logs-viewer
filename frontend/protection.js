@@ -1,7 +1,7 @@
 // =============================================================================
 // PROTECTION RULES (Security page: their data and editing; security.js draws them)
 // The rules read the failed logins and catch the addresses that attack. A rule
-// in watch mode only notes what it would ban; in ban mode the address goes on
+// in watch mode only notes what it catches; in ban mode the address goes on
 // the Fail2ban blacklist for the rule's ban length. The breach alert never bans.
 // =============================================================================
 
@@ -85,7 +85,7 @@ function protectionCountryName(code) {
 
 function protectionStatus(hit) {
     switch (hit.status) {
-        case 'watching': return uiTag('Would ban', 'warn');
+        case 'watching': return uiTag('Watching', 'warn');
         case 'pending': return uiTag(hit.error ? 'Not banned yet' : 'Banning', 'warn');
         case 'banned': return uiTag(hit.expires_at ? `Banned until ${formatTime(hit.expires_at)}` : 'Banned until removed', 'fail');
         case 'alert': return uiTag('Alert', 'fail');
