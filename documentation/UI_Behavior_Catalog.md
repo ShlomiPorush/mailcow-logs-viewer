@@ -167,7 +167,7 @@ Generated from the code. Do not edit by hand; run `node .github/scripts/ui-catal
 | Behaviour | Count |
 |---|---|
 | [Click to copy](#click-to-copy) | 53 |
-| [Tooltips](#tooltips) | 191 |
+| [Tooltips](#tooltips) | 190 |
 | [Toasts](#toasts) | 141 |
 | [Confirmation dialogs](#confirmation-dialogs) | 28 |
 | [Country flags](#country-flags) | 6 |
@@ -364,7 +364,7 @@ Native `title` tooltips. Dynamic ones show the expression that builds the text.
 | Spam filter | dynamic: `${s.active ? 'Deactivate' : 'Reactivate'}` | `frontend/spam_filter.js:501` (renderSuppressionItem) |
 | Spam filter | "Delete permanently" | `frontend/spam_filter.js:502` (renderSuppressionItem) |
 | Spam filter | set in JS: dynamic: `locked ? 'Syncing to Rspamd needs the Read-Write API key' : 'Sync suppression...` | `frontend/spam_filter.js:390` (updateSuppressionSyncLock) |
-| Status | "Click to view changelog" | `frontend/about.js:110` (aboutVersionPanel) |
+| Status | "Click to view changelog" | `frontend/about.js:123` (aboutVersionPanel) |
 | Status | dynamic: `Stop counting and alerting on ${escapeHtml(c.name)}` | `frontend/app.js:4125` (renderStatusAttention) |
 | Status | dynamic: `Keep checking ${escapeHtml(r.name)} but never count or alert on it` | `frontend/app.js:4132` (renderStatusAttention) |
 | Status | dynamic: `Stop counting and alerting on ${escapeHtml(c.name)}` | `frontend/app.js:4270` (loadStatusContainers) |
@@ -435,7 +435,6 @@ Native `title` tooltips. Dynamic ones show the expression that builds the text.
 | app.js (mixed) | dynamic: `${escapeHtml(formatTime(hit.last_seen))}` | `frontend/protection.js:282` (renderProtectionHits) |
 | app.js (mixed) | set in JS: dynamic: `label` | `frontend/app.js:286` (setNavTabLabel) |
 | app.js (mixed) | set in JS: dynamic: `title \|\| ''` | `frontend/app.js:515` (setNavCount) |
-| about | dynamic: `${escapeHtml(domain)}` | `frontend/about.js:41` (loadAbout) |
 | Modal: changelog-modal | "Close" | `frontend/index.html:1543` |
 | Modal: container-logs-modal | "Refresh" | `frontend/index.html:1575` |
 | Modal: container-logs-modal | "Close" | `frontend/index.html:1583` |
@@ -645,7 +644,7 @@ Places that render Markdown (help pages, changelogs) through `renderMarkdown` (m
 
 | Page | What | Code |
 |---|---|---|
-| Status | renders `versionInfo.changelog` | `frontend/about.js:162` (wireVersionPanel) |
+| Status | renders `versionInfo.changelog` | `frontend/about.js:172` (wireVersionPanel) |
 | Settings | renders `versionInfo.changelog` | `frontend/settings.js:831` (updateVersionInfoUI) |
 | Modal: changelog-modal | renders `markdownContent` | `frontend/app.js:671` (showMarkdownModal) |
 | Modal: changelog-modal | renders `changelog` | `frontend/app.js:4962` (showChangelogModal) |
@@ -761,7 +760,7 @@ Text shown when a list or panel has nothing to show.
 | Queue | "No matching queue entries" | `frontend/app.js:2666` (applyQueueFilters) |
 | Quarantine | "No quarantined messages" | `frontend/app.js:2962` (renderQuarantineData) |
 | Quarantine | "No actions recorded yet" | `frontend/app.js:3674` (loadQuarantineRuleHistory) |
-| Status | "No changelog available" | `frontend/about.js:148` (wireVersionPanel) |
+| Status | "No changelog available" | `frontend/about.js:158` (wireVersionPanel) |
 | Status | "No container information available" | `frontend/app.js:4284` (loadStatusContainers) |
 | Status | "No changelog available" | `frontend/app.js:4319` (loadStatusSystem) |
 | Domains | "No domains found" | `frontend/domains.js:91` (renderDomains) |
@@ -800,7 +799,7 @@ Functions that render a spinner or "Loading..." while data is fetched.
 | Queue | 1 loading indicator(s) | `frontend/app.js:2598` (loadQueue) |
 | Quarantine | 1 loading indicator(s) | `frontend/app.js:2927` (loadQuarantine) |
 | Quarantine | 1 loading indicator(s) | `frontend/app.js:3666` (loadQuarantineRuleHistory) |
-| Status | 3 loading indicator(s) | `frontend/about.js:180` (wireVersionPanel) |
+| Status | 3 loading indicator(s) | `frontend/about.js:190` (wireVersionPanel) |
 | Status | 1 loading indicator(s) | `frontend/app.js:4144` (renderStatusAttention) |
 | Status | 2 loading indicator(s) | `frontend/app.js:4435` (checkBlacklists) |
 | Status | 1 loading indicator(s) | `frontend/app.js:4909` (triggerBackgroundJob) |

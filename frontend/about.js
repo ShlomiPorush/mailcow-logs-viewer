@@ -29,22 +29,18 @@ async function loadAbout() {
     const config = info.configuration || {};
 
     box.innerHTML = `
-        <div class="ui-list-head"><h2 class="ui-h2">Health of this app</h2></div>
+        <div class="ui-list-head"><h2 class="ui-h2">What the app relies on</h2></div>
         <div class="ui-st-cards ui-about-health">${aboutHealthCards(info, mailcow, rw, health).join('')}</div>
         <div class="ui-dash-grid ui-status-pair">
             ${aboutVersionPanel(appVersion, versionInfo)}
             ${aboutConfigurationPanel(config)}
         </div>
-        ${config.local_domains && config.local_domains.length ? `
-        <section class="ui-panel">
-            <div class="ui-panel-head">Local Domains <span class="ui-count">${config.local_domains.length}</span></div>
-            <div class="ui-set-domains">${config.local_domains.map(domain => `<span class="ui-code-chip" title="${escapeHtml(domain)}">${escapeHtml(domain)}</span>`).join('')}</div>
-        </section>` : ''}
     `;
     wireVersionPanel(box, appVersion, versionInfo);
 }
 
-// One card per thing the app depends on: is it set up, does it work, and where to fix it
+// One card per thing the app depends on: is it set up, does it work, and where to fix it.
+// The database comes first: without it nothing else works.
 function aboutHealthCards(info, mailcow, rw, health) {
     const card = (label, tone, value, detail, actions) => `
         <div class="ui-st-card ui-about-card">
@@ -54,6 +50,7 @@ function aboutHealthCards(info, mailcow, rw, health) {
             ${actions ? `<div class="ui-chip-row">${actions}</div>` : ''}
         </div>`;
     const settingsBtn = section => `<button type="button" class="ui-btn ui-btn-sm" onclick="navigateTo('settings', { sub: '${section}' })">Settings</button>`;
+    const mono = text => `<span class="ui-mono">${escapeHtml(text)}</span>`;
     const config = info.configuration || {};
     const smtp = info.smtp_configuration || {};
     const imap = info.dmarc_configuration || {};
@@ -61,45 +58,61 @@ function aboutHealthCards(info, mailcow, rw, health) {
     const maxmind = config.maxmind_status;
     const cards = [];
 
+    const dbOk = health && health.database === 'connected';
+    const postgres = `PostgreSQL${config.database_version ? ` ${escapeHtml(config.database_version)}` : ''}`;
+    cards.push(card('Database', health ? (dbOk ? 'ok' : 'fail') : 'warn', health ? (dbOk ? 'Connected' : 'Not connected') : 'Unknown',
+        !health ? `Could not check ${postgres}.`
+            : dbOk ? `${postgres}. Every log, message and report is stored here.`
+                : `${postgres} is not answering. Nothing can be read or saved until it is back.`, ''));
+
     cards.push(card('mailcow API', !mailcow ? 'warn' : mailcow.connected ? 'ok' : 'fail',
         !mailcow ? 'Unknown' : mailcow.connected ? 'Connected' : 'Not connected',
-        escapeHtml(config.mailcow_url || 'No mailcow URL set'), settingsBtn('mailcow')));
+        !config.mailcow_url ? 'Add the mailcow address and API key to start reading the logs.'
+            : !mailcow ? `Could not check ${mono(config.mailcow_url)}.`
+                : mailcow.connected ? `Logs are read from ${mono(config.mailcow_url)}.`
+                    : `No new logs until ${mono(config.mailcow_url)} can be reached.`, settingsBtn('mailcow')));
 
     const rwOn = rw ? rw.rw_configured : mailcowRwConfigured;
-    cards.push(card('Read-Write API key', rwOn ? 'ok' : 'warn', rwOn ? 'Configured' : 'Not configured',
-        rwOn ? 'Banning, releasing, Fail2ban and map edits are available'
-            : 'Read-only: banning, releasing and editing in mailcow are locked (MAILCOW_API_KEY_RW)', settingsBtn('mailcow')));
-
-    const dbOk = health && health.database === 'connected';
-    cards.push(card('Database', health ? (dbOk ? 'ok' : 'fail') : 'warn', health ? (dbOk ? 'Connected' : 'Not connected') : 'Unknown',
-        'PostgreSQL, where the logs and reports are kept', ''));
+    cards.push(card('Read-write API key', rwOn ? 'ok' : 'warn', rwOn ? 'Configured' : 'Not configured',
+        rwOn ? 'You can ban addresses, release messages and edit maps in mailcow from here.'
+            : 'View only. Add a read-write key to ban, release and edit from here.', settingsBtn('mailcow')));
 
     const smtpOn = smtp.enabled && smtp.configured !== false;
-    cards.push(card('SMTP (alerts)', smtpOn ? 'ok' : '', smtpOn ? 'Configured' : 'Not set up',
-        smtpOn ? `<span class="ui-mono">${escapeHtml(`${smtp.host || ''}${smtp.port ? `:${smtp.port}` : ''}`)}</span>` : 'Email alerts and the weekly summary need it',
+    cards.push(card('Email alerts (SMTP)', smtpOn ? 'ok' : '', smtpOn ? 'Configured' : 'Not set up',
+        smtpOn ? `Alerts and the weekly summary are sent through ${mono(`${smtp.host || ''}${smtp.port ? `:${smtp.port}` : ''}`)}.`
+            : 'Set it up to get alerts and the weekly summary by email.',
         (smtpOn ? '<button type="button" class="ui-btn ui-btn-sm" onclick="testSmtpConnection()">Test SMTP</button>' : '') + settingsBtn('smtp')));
 
-    cards.push(card('DMARC & TLS IMAP', imap.imap_sync_enabled ? 'ok' : '', imap.imap_sync_enabled ? 'Importing' : 'Not set up',
-        imap.imap_sync_enabled ? `<span class="ui-mono">${escapeHtml(imap.imap_host || '')}</span>` : 'Reports can still be uploaded by hand',
+    cards.push(card('Report mailbox (IMAP)', imap.imap_sync_enabled ? 'ok' : '', imap.imap_sync_enabled ? 'Collecting' : 'Not set up',
+        imap.imap_sync_enabled ? `DMARC and TLS reports are collected from ${mono(imap.imap_host || '')}.`
+            : 'Reports arrive only when you upload them. Connect a mailbox to collect them automatically.',
         (imap.imap_sync_enabled ? '<button type="button" class="ui-btn ui-btn-sm" onclick="testImapConnection()">Test IMAP</button>' : '') + settingsBtn('dmarc_imap')));
 
-    let geoTone = '', geoValue = 'Not set up', geoDetail = 'Countries and networks of addresses need it';
+    let geoTone = '', geoValue = 'Not set up', geoDetail = 'Add a free MaxMind license key to see where IP addresses come from.';
     if (geoip.enabled) {
         const licenseBad = maxmind && maxmind.configured && maxmind.valid === false;
         const dbBad = geoip.db_valid === false;
         geoTone = licenseBad || dbBad ? 'fail' : 'ok';
         geoValue = licenseBad ? 'License invalid' : dbBad ? 'Database damaged' : 'Working';
-        geoDetail = licenseBad ? escapeHtml(maxmind.error || 'MaxMind refused the license key')
-            : dbBad ? 'Repair it in Settings, MaxMind' : (maxmind ? 'License valid, databases installed' : 'Databases installed, license not checked yet');
+        geoDetail = licenseBad ? `MaxMind refused the license key${maxmind.error ? `: ${escapeHtml(maxmind.error)}` : '.'}`
+            : dbBad ? 'The location databases are damaged. Download them again in Settings.'
+                : maxmind ? 'Shows the country and network of every IP address.'
+                    : 'Shows the country and network of every IP address. The license has not been checked yet.';
     }
     cards.push(card('MaxMind GeoIP', geoTone, geoValue, geoDetail, settingsBtn('maxmind')));
 
     cards.push(card('Rspamd', config.rspamd_configured ? 'ok' : '', config.rspamd_configured ? 'Configured' : 'Not set up',
-        config.rspamd_configured ? 'Maps can be read and synced' : 'Spam Filter maps and suppression sync need the Rspamd password', settingsBtn('mailcow')));
+        config.rspamd_configured ? 'Spam Filter maps are read and kept in sync.'
+            : 'Add the Rspamd password to see and sync the Spam Filter maps.', settingsBtn('mailcow')));
 
-    const methods = [config.basic_auth_enabled ? 'Basic Auth' : '', config.oauth2_enabled ? `OAuth2${config.oauth2_provider_name ? ` (${config.oauth2_provider_name})` : ''}` : ''].filter(Boolean);
+    // Basic Auth names its user, OAuth2 its provider
+    const methods = [
+        config.basic_auth_enabled ? `Basic Auth${config.auth_username ? ` (${escapeHtml(config.auth_username)})` : ''}` : '',
+        config.oauth2_enabled ? `OAuth2${config.oauth2_provider_name ? ` (${escapeHtml(config.oauth2_provider_name)})` : ''}` : '',
+    ].filter(Boolean);
     cards.push(card('Sign-in', config.auth_enabled ? 'ok' : 'warn', config.auth_enabled ? 'Required' : 'Open',
-        config.auth_enabled ? escapeHtml(methods.join(', ') || 'Enabled') : 'Anyone who reaches this app can use it', settingsBtn('auth')));
+        config.auth_enabled ? `Signing in with ${methods.join(' or ') || 'a password'}.`
+            : 'Anyone who can reach this app can see everything in it.', settingsBtn('auth')));
     return cards;
 }
 
@@ -129,9 +142,6 @@ function aboutConfigurationPanel(config) {
             <div class="ui-panel-head">Configuration</div>
             ${kv('mailcow URL', escapeHtml(config.mailcow_url || 'N/A'), 'ui-mono ui-kv-small')}
             ${kv('Server IP', config.server_ip ? `<span class="ui-text-ok">✓</span> ${escapeHtml(config.server_ip)}` : '<span class="ui-muted">Not available</span>', 'ui-mono ui-kv-small')}
-            ${kv('Timezone', escapeHtml(config.timezone || 'N/A'))}
-            ${config.auth_enabled && config.basic_auth_enabled && config.auth_username ? kv('Basic Auth Username', escapeHtml(config.auth_username), 'ui-mono ui-kv-small') : ''}
-            ${config.local_domains && config.local_domains.length ? '' : kv('Local Domains', '<span class="ui-muted">N/A</span>')}
         </section>`;
 }
 
