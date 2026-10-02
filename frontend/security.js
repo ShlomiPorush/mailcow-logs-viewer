@@ -15,7 +15,8 @@ let securityFilter = 'review';
 let securityCountry = null;      // a country picked in the chart filters the list
 let securityOpenRow = null;      // the address whose details are open
 let securityRawLog = {};         // ip -> log lines, or 'loading' / 'error'
-let securityShowAll = false;
+let securityShown = 25;         // the rows drawn so far; more load as the list scrolls
+let securityMoreObserver = null;
 let securityChartDays = 30;
 let securityCountries = null;    // /stats/by-country
 let securityNetworks = null;     // /stats/by-network
@@ -444,7 +445,7 @@ function securityEditing() {
 function setSecurityFilter(key) {
     securityFilter = key;
     securityOpenRow = null;
-    securityShowAll = false;
+    securityShown = SECURITY_LIST_PREVIEW;
     if (key === 'history' && securityHistory === null) { loadSecurityHistory(); }
     renderSecurityOverview();
 }
@@ -452,6 +453,7 @@ function setSecurityFilter(key) {
 function pickSecurityCountry(name) {
     securityCountry = securityCountry === name ? null : name;
     securityOpenRow = null;
+    securityShown = SECURITY_LIST_PREVIEW;
     securityCountryPicker = false;
     renderSecurityOverview();
     renderSecurityCountries();
@@ -499,7 +501,7 @@ function renderSecurityOverview() {
         return `<button type="button" aria-pressed="${securityFilter === key}" onclick="setSecurityFilter('${key}')">${label}${n === null ? '' : ` <b>${typeof n === 'number' ? n.toLocaleString() : n}</b>`}</button>`;
     }).join('');
     const list = securityList(securityFilter, addresses).filter(inCountry);
-    const shown = securityShowAll ? list : list.slice(0, SECURITY_LIST_PREVIEW);
+    const shown = list.slice(0, securityShown);
     const rwNote = !mailcowRwConfigured && securityFilter !== 'history'
         ? `<div class="ui-list-note">${uiLocked('Ban, Allow and Unban are locked', `Changing Fail2ban from this list ${UI_RW_KEY_TEXT}`)}</div>` : '';
     const f2bNote = fail2banLoadError && securityFilter !== 'history'
@@ -526,12 +528,28 @@ function renderSecurityOverview() {
         ${rwNote}${f2bNote}
         <div class="ui-sec-list">${securityFilter === 'history' ? securityHistoryRows()
             : shown.map(securityRow).join('') || `<p class="ui-empty">${escapeHtml(empty)}</p>`}</div>
-        ${list.length > SECURITY_LIST_PREVIEW ? `<div class="ui-list-more"><button type="button" class="ui-btn ui-btn-sm" onclick="securityShowAll = !securityShowAll; renderSecurityOverview()" aria-expanded="${securityShowAll}">${securityShowAll ? 'Show fewer' : `Show all ${list.length.toLocaleString()}`}</button></div>` : ''}
+        ${securityFilter !== 'history' && list.length > SECURITY_LIST_PREVIEW ? `<p id="security-more" class="ui-msg-more" aria-live="polite">${list.length > shown.length ? 'Loading more...' : `All ${list.length.toLocaleString()} shown`}</p>` : ''}
         ${more}`;
     // The filters stick right under the tabs, which stick to the top on a phone
     const tabs = document.querySelector('.ui-se-tabs');
     if (tabs) box.style.setProperty('--ui-sec-stick', `${tabs.offsetHeight}px`);
     renderSecuritySheet(addresses);
+    securityWatchMore(list.length > shown.length);
+}
+
+// When the end of the list comes near, the next rows are drawn
+function securityWatchMore(more) {
+    if (securityMoreObserver) securityMoreObserver.disconnect();
+    securityMoreObserver = null;
+    const sentinel = document.getElementById('security-more');
+    if (!more || !sentinel || typeof IntersectionObserver === 'undefined') return;
+    securityMoreObserver = new IntersectionObserver(entries => {
+        if (!entries.some(e => e.isIntersecting)) return;
+        securityMoreObserver.disconnect();
+        securityShown += SECURITY_LIST_PREVIEW;
+        renderSecurityOverview();
+    }, { rootMargin: '0px 0px 400px 0px' });
+    securityMoreObserver.observe(sentinel);
 }
 
 // ----------------------------------------------------------------- where attacks come from
@@ -1038,7 +1056,7 @@ function securityCardHtml(key) {
         const editable = securityAppSettings && securityAppSettings.settings_edit_via_ui_enabled
             && !(securityAppSettings.env_locked_keys || []).includes('smtp_abuse_enabled');
         on = !!enabled;
-        toggle = securityToggle(key, on, !editable, `setSecurityAbuse('smtp_abuse_enabled', ${!on})`, editable ? '' : 'Editing settings is off');
+        toggle = securityToggle(name, on, !editable, `setSecurityAbuse('smtp_abuse_enabled', this.checked)`, editable ? '' : 'Editing settings is off');
         status = `${on ? uiTag('Stops mailboxes', 'fail') : uiTag('Off', '')}<span class="ui-tag ui-tag-warn ui-tab-tag" title="This feature is new - please report any issues on GitHub">Beta</span>
             <button type="button" onclick="event.stopPropagation(); showHelpModal('Abuse_Protection')" class="ui-icon-btn ui-help-btn" title="Help - Abuse Protection" aria-label="Help - Abuse Protection"><svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg></button>`;
         sentence = securityAbuseSentence(open);
@@ -1048,7 +1066,7 @@ function securityCardHtml(key) {
         const r = protectionRules[key];
         const needsGeo = key === 'country' && !protectionCaps.geoip;
         on = r.enabled && !needsGeo;
-        toggle = securityToggle(key, on, needsGeo, `setProtectionRule('${key}', 'enabled', ${!r.enabled})`, needsGeo ? 'Needs MaxMind GeoIP' : '');
+        toggle = securityToggle(name, on, needsGeo, `setProtectionRule('${key}', 'enabled', this.checked)`, needsGeo ? 'Needs MaxMind GeoIP' : '');
         status = needsGeo ? uiTag('Needs MaxMind GeoIP', '') : !r.enabled ? uiTag('Off', '') : key === 'breach' ? uiTag('Alerts', 'warn')
             : r.mode === 'enforce' && protectionCaps.can_ban ? uiTag('Bans', 'fail') : uiTag('Watching', 'warn');
         const would = key === 'breach' ? 0 : securityHits.filter(h => h.rule === key && h.status === 'watching').length;
@@ -1059,16 +1077,18 @@ function securityCardHtml(key) {
     return securityCardShell(key, name, open, `${status}${caught}`, toggle, locked, `<p class="ui-sec-sent">${sentence}</p>`, open ? securityCardBody(key) : '', on);
 }
 
-function securityToggle(key, on, disabled, action, why) {
-    return `<button type="button" class="ui-sec-toggle${on ? ' is-on' : ''}" aria-pressed="${on}" ${disabled ? `disabled title="${escapeHtml(why)}"` : `title="${on ? 'Turn off' : 'Turn on'}"`}
-        onclick="event.stopPropagation(); ${action}" aria-label="${on ? 'On' : 'Off'}"><span class="ui-prot-mark">${on ? '✓' : '✕'}</span></button>`;
+// The On/Off switch of a card; a click on it does not open the card
+function securityToggle(name, on, disabled, action, why) {
+    return `<label class="ui-sec-switch${on ? ' is-on' : ''}" onclick="event.stopPropagation()" title="${escapeHtml(disabled ? why : on ? `Turn ${name} off` : `Turn ${name} on`)}">
+        <input type="checkbox" role="switch" ${on ? 'checked' : ''} ${disabled ? 'disabled' : ''} onchange="${action}" aria-label="${escapeHtml(name)}">
+        <span class="ui-sec-switch-track" aria-hidden="true"></span><span class="ui-sec-switch-text">${on ? 'On' : 'Off'}</span></label>`;
 }
 
 function securityCardShell(key, name, open, status, toggle, locked, sentence, body, on = true) {
     return `
         <article class="ui-sec-card${open ? ' is-open' : ''}${on ? '' : ' is-off'}" id="security-card-${key}" tabindex="-1" aria-label="${escapeHtml(name)}" ${open ? '' : `onclick="securityOpenCard('${key}')"`}>
-            <div class="ui-sec-card-head">${toggle}<h3>${escapeHtml(name)}</h3>${status}
-                <span class="ui-sec-card-act">${open
+            <div class="ui-sec-card-head"><span class="ui-prot-mark ui-sec-mark${on ? ' is-on' : ''}" aria-hidden="true">${on ? '✓' : '✕'}</span><h3>${escapeHtml(name)}</h3>${status}
+                <span class="ui-sec-card-act">${toggle}${open
                     ? `<button type="button" class="ui-btn ui-btn-sm" onclick="event.stopPropagation(); securityOpenCard(null)">Done</button>`
                     : `<button type="button" class="ui-btn ui-btn-sm" aria-label="Edit ${escapeHtml(name)}">Edit</button>`}</span></div>
             ${locked}
