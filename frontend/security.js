@@ -1097,8 +1097,8 @@ function securityToggle(name, on, disabled, action, why) {
 function securityCardShell(key, name, open, status, toggle, locked, sentence, body, on = true) {
     return `
         <article class="ui-sec-card${open ? ' is-open' : ''}${on ? '' : ' is-off'}" id="security-card-${key}" tabindex="-1" aria-label="${escapeHtml(name)}" ${open ? '' : `onclick="securityOpenCard('${key}')"`}>
-            <div class="ui-sec-card-head"><span class="ui-sec-card-name"><h3>${escapeHtml(name)}</h3>${status}</span>
-                <span class="ui-sec-card-act">${toggle}${open
+            <div class="ui-sec-card-head">${toggle || '<span class="ui-sec-switch-space"></span>'}<span class="ui-sec-card-name"><h3>${escapeHtml(name)}</h3>${status}</span>
+                <span class="ui-sec-card-act">${open
                     ? `<button type="button" class="ui-btn ui-btn-sm" onclick="event.stopPropagation(); securityOpenCard(null)">Done</button>`
                     : `<button type="button" class="ui-btn ui-btn-sm" aria-label="Edit ${escapeHtml(name)}">Edit</button>`}</span></div>
             ${locked}

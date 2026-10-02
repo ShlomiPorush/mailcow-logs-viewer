@@ -742,15 +742,15 @@
 .ui-sec-card:not(.is-open):hover { box-shadow: inset 0 0 0 1px var(--ui-line); }
 .ui-sec-card.is-open { grid-column: 1 / -1; cursor: default; box-shadow: inset 0 0 0 1.5px var(--ui-ink); padding-block: 16px; }
 .ui-sec-card { scroll-margin-top: 10px; }
-/* Room under the grid while a card is open, so even the last card can reach the top */
-.ui-sec-cards:has(.ui-sec-card.is-open) { padding-bottom: 50vh; }
 .ui-sec-card:focus { outline: none; }
 .ui-sec-card:focus-visible { outline: 2px solid var(--ui-focus); outline-offset: 2px; }
 .ui-sec-flag { display: inline-block; width: 16px; height: 12px; margin-inline-end: 5px; vertical-align: -1px; border-radius: 2px; }
 .ui-sec-pflag { display: none; }
 .ui-sec-where { display: inline-flex; align-items: center; }
 .ui-sec-card.is-off .ui-sec-sent, .ui-sec-card.is-off .ui-sec-sent b { color: var(--ui-muted); }
-.ui-sec-card-head { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px 12px; }
+.ui-sec-card-head { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 8px 12px; }
+/* Fail2ban has no switch; its name lines up with the others */
+.ui-sec-switch-space { width: 36px; }
 .ui-sec-card-name { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; min-width: 0; }
 .ui-sec-tags { display: inline-flex; flex-wrap: wrap; gap: 4px; }
 .ui-sec-card-head h3 { margin: 0; font-size: 15px; font-weight: 700; }
@@ -791,7 +791,8 @@ select.ui-sec-in { text-align: start; }
 .ui-sec-card #smtp-abuse-panel { border-top: 1px solid var(--ui-line); padding-top: 8px; }
 .ui-sec-alerts { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; padding: 12px var(--ui-pad-x); }
 .ui-sec-alerts > span { flex: 1; min-width: 240px; }
-#security-tab-settings { padding-bottom: 90px; }@media (max-width: 1000px) {
+/* Room for the save bar only while it shows */
+#security-tab-settings:has(#security-savebar:not(.hidden)) { padding-bottom: 90px; }@media (max-width: 1000px) {
     .ui-sec-two { grid-template-columns: minmax(0, 1fr); }
     .ui-sec-lists, .ui-sec-cards { grid-template-columns: minmax(0, 1fr); }
     .ui-sec-two > .ui-sec-side { order: -1; }
