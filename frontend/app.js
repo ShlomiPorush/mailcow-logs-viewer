@@ -680,6 +680,17 @@ function showMarkdownModal(title, markdownContent) {
         console.error('Failed to parse markdown:', e);
     }
 
+    // On a phone it opens in a sheet that grows to the full screen as it is read
+    if (uiIsPhone()) {
+        uiSheetShow('markdown-sheet', {
+            label: title,
+            head: `<h3 class="ui-sheet-title">${escapeHtml(title)}</h3>`,
+            body: `<div class="markdown-body">${htmlContent}</div>`,
+            expand: true
+        });
+        return;
+    }
+
     const modal = document.getElementById('changelog-modal');
     const modalTitle = modal?.querySelector('h3');
     const content = document.getElementById('changelog-content');
@@ -4659,6 +4670,11 @@ async function showHelpModal(docName) {
 
     } catch (error) {
         console.error('Failed to load help documentation:', error);
+        if (uiIsPhone()) {
+            uiSheetShow('markdown-sheet', { label: 'Help', head: '<h3 class="ui-sheet-title">Help</h3>',
+                body: '<p class="ui-text-fail">Failed to load help documentation. Please try again later.</p>' });
+            return;
+        }
 
         const modal = document.getElementById('changelog-modal');
         const modalTitle = modal?.querySelector('h3');
