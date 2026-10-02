@@ -697,7 +697,9 @@
 .ui-sec-acts { display: flex; gap: 6px; justify-content: flex-end; flex-wrap: wrap; }
 .ui-sec-detail { grid-column: 1 / -1; display: grid; gap: 12px; padding: 8px 0 4px; cursor: default; font-size: 13px; }
 .ui-sec-detail h4 { margin: 0 0 4px; font-size: 12px; color: var(--ui-muted); font-weight: 650; }
-.ui-sec-facts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.ui-sec-facts { display: grid; gap: 4px; }
+.ui-sec-kv { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 10px; align-items: baseline; }
+.ui-sec-kv > span:first-child { color: var(--ui-muted); font-size: 12px; font-weight: 650; }
 .ui-sec-chip { font-family: var(--ui-mono); font-size: 12px; padding: 2px 7px; border-radius: 6px; background: var(--ui-panel); }
 .ui-sec-ev { display: grid; grid-template-columns: 80px minmax(0, 1fr) auto; gap: 4px 10px; align-items: center; font-size: 12.5px; padding: 3px 0; }
 .ui-sec-ev time { color: var(--ui-muted); }
@@ -792,6 +794,7 @@ select.ui-sec-in { text-align: start; }
 .ui-sec-sheet-back { position: absolute; inset: 0; background: rgb(0 0 0 / .4); }
 .ui-sec-sheet-panel { position: relative; display: flex; flex-direction: column; max-height: 88vh; max-height: 88dvh; background: var(--ui-bg);
     border-radius: 16px 16px 0 0; box-shadow: 0 -8px 30px rgb(0 0 0 / .2); }
+.ui-sec-sheet-grip { align-self: center; width: 40px; height: 4px; margin-top: 8px; border-radius: 2px; background: var(--ui-line); }
 .ui-sec-sheet-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 14px var(--ui-pad-x) 10px; border-bottom: 1px solid var(--ui-line); }
 .ui-sec-sheet-head .ui-icon-btn { font-size: 22px; line-height: 1; }
 .ui-sec-sheet-body { overflow-y: auto; overscroll-behavior: contain; padding: 12px var(--ui-pad-x) calc(20px + env(safe-area-inset-bottom)); display: grid; gap: 10px; }
@@ -830,7 +833,6 @@ body.ui-sec-sheet-on { overflow: hidden; }
     .ui-sec-row .ui-sec-why { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .ui-sec-row { grid-template-columns: minmax(0, 1fr); }
     .ui-sec-acts { justify-content: flex-start; }
-    .ui-sec-facts { grid-template-columns: minmax(0, 1fr); }
     .ui-sec-bar { grid-template-columns: 110px minmax(0, 1fr) 40px; }
     .ui-sec-lrow { grid-template-columns: minmax(0, 1fr) auto; }
     .ui-sec-lrow .ui-sec-why { grid-column: 1 / -1; grid-row: 2; }
