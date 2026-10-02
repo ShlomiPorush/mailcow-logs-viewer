@@ -233,7 +233,7 @@ function securityDescribe(a) {
         };
     }
     if (a.state === 'banned') {
-        const tries = a.tries ? `${a.tries.toLocaleString()} failed login${a.tries === 1 ? '' : 's'} today. ` : '';
+        const tries = a.tries ? `${a.tries.toLocaleString()} failed login${a.tries === 1 ? '' : 's'} in the last 24 hours. ` : '';
         return {
             tag: `${uiTag('Banned', 'fail')}<span class="ui-sec-by">by Fail2ban</span>`,
             why: `${tries}<b>${a.f2b.banned_until ? `${escapeHtml(a.f2b.banned_until)} left` : 'Banned now'}</b>, then Fail2ban lets it try again.${a.f2b.queued_for_unban ? ' Unbanning...' : ''}`,
@@ -266,7 +266,7 @@ function securityDescribe(a) {
     const policy = fail2banPolicy ? ` Fail2ban bans at ${fail2banPolicy.max_attempts} within ${formatSeconds(fail2banPolicy.retry_window)}.` : '';
     return {
         tag: uiTag('Not banned', ''),
-        why: `${a.tries.toLocaleString()} failed login${a.tries === 1 ? '' : 's'} today${a.services.length ? ` (${escapeHtml(a.services.join(', '))})` : ''}.${policy}`,
+        why: `${a.tries.toLocaleString()} failed login${a.tries === 1 ? '' : 's'} in the last 24 hours${a.services.length ? ` (${escapeHtml(a.services.join(', '))})` : ''}.${policy}`,
         acts: rw && known ? `<button type="button" class="ui-btn ui-btn-sm ui-btn-danger" onclick="banIP('${ipArg}', this)" title="Ban ${escapeHtml(a.ip)}/32">Ban</button>
             <button ${B} onclick="allowIP('${ipArg}', this)" title="Never ban ${escapeHtml(a.ip)}/32">Allow</button>` : ''
     };
@@ -309,6 +309,7 @@ function renderSecuritySheet(addresses) {
     sheet.innerHTML = `
         <div class="ui-sec-sheet-back" onclick="securityCloseSheet()"></div>
         <section class="ui-sec-sheet-panel" role="dialog" aria-label="${escapeHtml(a.ip)}">
+            <span class="ui-sec-sheet-grip" aria-hidden="true"></span>
             <div class="ui-sec-sheet-head">
                 <div class="ui-sec-top"><b class="ui-mono">${copyableText(a.ip)}</b>${d.tag}</div>
                 <button type="button" class="ui-icon-btn" onclick="securityCloseSheet()" aria-label="Close" title="Close">&times;</button>
@@ -321,7 +322,40 @@ function renderSecuritySheet(addresses) {
         </section>`;
     const body = sheet.querySelector('.ui-sec-sheet-body');
     if (body) body.scrollTop = keep;
+    securitySheetSwipe(sheet.querySelector('.ui-sec-sheet-panel'), body);
     document.body.classList.add('ui-sec-sheet-on');
+}
+
+// Pulling the sheet down closes it: from its head, or from its content once that is
+// scrolled to the top. A short pull springs back.
+function securitySheetSwipe(panel, body) {
+    if (!panel) return;
+    let startY = null, pulled = 0;
+    panel.addEventListener('touchstart', event => {
+        const fromHead = !!event.target.closest('.ui-sec-sheet-head, .ui-sec-sheet-grip');
+        if (!fromHead && body && body.scrollTop > 0) { startY = null; return; }
+        startY = event.touches[0].clientY;
+        pulled = 0;
+        panel.style.transition = 'none';
+    }, { passive: true });
+    panel.addEventListener('touchmove', event => {
+        if (startY === null) return;
+        pulled = Math.max(0, event.touches[0].clientY - startY);
+        panel.style.transform = pulled ? `translateY(${pulled}px)` : '';
+    }, { passive: true });
+    const end = () => {
+        if (startY === null) return;
+        startY = null;
+        panel.style.transition = 'transform .2s ease';
+        if (pulled > Math.min(120, panel.offsetHeight / 4)) {
+            panel.style.transform = 'translateY(100%)';
+            setTimeout(securityCloseSheet, 200);
+        } else {
+            panel.style.transform = '';
+        }
+    };
+    panel.addEventListener('touchend', end);
+    panel.addEventListener('touchcancel', end);
 }
 
 function securityCloseSheet() {
@@ -337,12 +371,19 @@ function securityDetail(a) {
         : lines === 'error' ? '<p class="ui-text-fail">Could not load the log lines.</p>'
         : !lines || !lines.length ? '<p class="ui-muted">No log lines for this address.</p>'
         : `<pre class="ui-sec-raw">${lines.map(e => `<span class="ui-muted">${escapeHtml(formatTime(e.time))}</span> <span class="ui-sec-act is-${escapeHtml(e.action || '')}">${escapeHtml((e.action || '').padEnd(7))}</span> ${escapeHtml(e.message || '')}`).join('\n')}</pre>`;
+    // An address outside the overview's busiest has its place in its own log lines
+    const logged = Array.isArray(lines) ? lines.find(e => e.country_name || e.asn_org) : null;
+    if (logged) a = { ...a, country: a.country || logged.country_name || '', countryCode: a.countryCode || logged.country_code || '', city: a.city || logged.city || '', org: a.org || logged.asn_org || '' };
+    const fact = (label, value) => `<div class="ui-sec-kv"><span>${label}</span><span>${value}</span></div>`;
+    const place = a.country || a.org
+        ? `${a.country ? `${securityFlag(a.countryCode)}${escapeHtml(a.country)}` : ''}${a.org ? `${a.country ? ' ' : ''}<span class="ui-muted">(${escapeHtml(a.org)})</span>` : ''}`
+        : '<span class="ui-muted">Unknown</span>';
     return `
         <div class="ui-sec-detail" onclick="event.stopPropagation()">
             <div class="ui-sec-facts">
-                <div><h4>From</h4>${a.country ? securityFlag(a.countryCode) : ''}${escapeHtml([a.city, a.country].filter(Boolean).join(', ') || 'Unknown')}${a.org ? `<br><span class="ui-muted">${escapeHtml(a.org)}</span>` : ''}</div>
-                <div><h4>Failed logins today</h4>${a.tries ? a.tries.toLocaleString() : '<span class="ui-muted">None</span>'}${a.services.length ? `<br><span class="ui-muted">${escapeHtml(a.services.join(', '))}</span>` : ''}</div>
-                ${a.hits.length ? `<div><h4>Caught by</h4>${escapeHtml([...new Set(a.hits.map(h => securityRuleName(h.rule)))].join(', '))}</div>` : ''}
+                ${fact('From', `<span title="${escapeHtml([a.city, a.country].filter(Boolean).join(', '))}">${place}</span>`)}
+                ${fact('Failed logins', securityFailedText(a, lines))}
+                ${a.hits.length ? fact('Caught by', escapeHtml([...new Set(a.hits.map(h => securityRuleName(h.rule)))].join(', '))) : ''}
             </div>
             ${a.users.length ? `<div><h4>Accounts it tried</h4><div class="ui-chip-row">${a.users.map(u => `<span class="ui-sec-chip">${copyableText(u)}</span>`).join('')}</div></div>` : ''}
             ${hitsText ? `<div><h4>What the rules said</h4>${hitsText}</div>` : ''}
@@ -355,6 +396,18 @@ function securityDetail(a) {
 function securityRowClick(event, ip) {
     if (event.target.closest('button, a, input, .copyable, .ui-sec-detail')) return;
     securityToggleRow(ip);
+}
+
+// Failed logins in the last 24 hours. The overview counts them for its busiest
+// addresses only; for any other one they are counted in its own log lines.
+function securityFailedText(a, lines) {
+    const services = a.services.length ? ` <span class="ui-muted">(${escapeHtml(a.services.join(', '))})</span>` : '';
+    if (a.tries) return `${a.tries.toLocaleString()} in the last 24 hours${services}`;
+    if (!Array.isArray(lines)) return '<span class="ui-muted">Counting...</span>';
+    const tries = lines.filter(e => e.rule_id !== null && e.rule_id !== undefined);
+    const recent = tries.filter(e => Date.now() - new Date(e.time).getTime() < 24 * 3600 * 1000);
+    if (recent.length) return `${recent.length.toLocaleString()}${lines.length >= 40 && recent.length === tries.length ? '+' : ''} in the last 24 hours`;
+    return tries.length ? `None in the last 24 hours. The last was ${formatAgo(tries[0].time)}` : '<span class="ui-muted">None</span>';
 }
 
 async function securityToggleRow(ip) {
@@ -454,11 +507,11 @@ function renderSecurityOverview() {
     const empty = {
         review: 'Nothing to review. What the protection rules catch while they watch shows up here.',
         banned: known ? 'Nothing is banned right now.' : fail2banLoadError ? 'The bans are not known while mailcow does not answer.' : 'Checking Fail2ban...',
-        quiet: 'No address failed to log in today without being stopped.',
+        quiet: 'No address failed to log in in the last 24 hours without being stopped.',
     }[securityFilter];
     const source = securityOverview;
     const more = securityFilter === 'quiet' && source.source_count > source.sources.length
-        ? `<p class="ui-sec-note">The ${source.sources.length} addresses with the most attempts today, of ${source.source_count.toLocaleString()}.</p>` : '';
+        ? `<p class="ui-sec-note">The ${source.sources.length} addresses with the most attempts in the last 24 hours, of ${source.source_count.toLocaleString()}.</p>` : '';
 
     box.innerHTML = `
         <div class="ui-panel-head ui-sec-head">

@@ -170,7 +170,7 @@ Generated from the code. Do not edit by hand; run `node .github/scripts/ui-catal
 | Behaviour | Count |
 |---|---|
 | [Click to copy](#click-to-copy) | 53 |
-| [Tooltips](#tooltips) | 197 |
+| [Tooltips](#tooltips) | 198 |
 | [Toasts](#toasts) | 144 |
 | [Confirmation dialogs](#confirmation-dialogs) | 29 |
 | [Country flags](#country-flags) | 6 |
@@ -216,9 +216,9 @@ Fields that copy their value on click (hover shows a copy icon and "Click to cop
 | Security | copies: `log.username` | `frontend/app.js:1081` (renderNetfilterData) |
 | Security | copies: `log.ip` | `frontend/app.js:1086` (renderNetfilterData) |
 | Security | copies: `a.ip` | `frontend/security.js:283` (securityRow) |
-| Security | copies: `u` | `frontend/security.js:347` (securityDetail) |
-| Security | copies: `h.ip` | `frontend/security.js:414` (securityHistoryRows) |
-| Security | copies: `entry` | `frontend/security.js:606` (renderSecurityLists) |
+| Security | copies: `u` | `frontend/security.js:388` (securityDetail) |
+| Security | copies: `h.ip` | `frontend/security.js:467` (securityHistoryRows) |
+| Security | copies: `entry` | `frontend/security.js:659` (renderSecurityLists) |
 | Queue | copies: `r.email` | `frontend/app.js:2189` (applyQueueFilters) |
 | Queue | copies: `item.sender` | `frontend/app.js:2190` (applyQueueFilters) |
 | Queue | copies: `qid` | `frontend/app.js:2190` (applyQueueFilters) |
@@ -246,7 +246,7 @@ Fields that copy their value on click (hover shows a copy icon and "Click to cop
 | Shared | copies: `ip` | `frontend/app.js:4476` (renderGeoIPInfo) |
 | Shared | copies: `ip` | `frontend/app.js:4483` (renderGeoIPInfo) |
 | Shared | copyToClipboard: `'${safeText}'` | `frontend/utils.js:550` (copyableText) |
-| Not rendered (possible dead code) | copies: `a.ip` | `frontend/security.js:313` (renderSecuritySheet) |
+| Not rendered (possible dead code) | copies: `a.ip` | `frontend/security.js:314` (renderSecuritySheet) |
 
 ### Tooltips
 
@@ -319,22 +319,23 @@ Native `title` tooltips. Dynamic ones show the expression that builds the text.
 | Security | dynamic: `Ban ${escapeHtml(a.ip)}/32` | `frontend/security.js:270` (securityDescribe) |
 | Security | dynamic: `Never ban ${escapeHtml(a.ip)}/32` | `frontend/security.js:271` (securityDescribe) |
 | Security | dynamic: `${escapeHtml(a.country)}` | `frontend/security.js:283` (securityRow) |
-| Security | dynamic: `${escapeHtml(formatTime(h.last_seen))}` | `frontend/security.js:335` (securityDetail) |
-| Security | "Show every country" | `frontend/security.js:471` (renderSecurityOverview) |
-| Security | dynamic: `${n.toLocaleString()} ${label}` | `frontend/security.js:527` (securityCountryBars) |
-| Security | dynamic: `${escapeHtml(`${r.country_name}: ${r.total.toLocaleString()} events`)}` | `frontend/security.js:530` (securityCountryBars) |
-| Security | "Watched by the Countries rule" | `frontend/security.js:531` (securityCountryBars) |
-| Security | dynamic: `${escapeHtml(n.asn)}` | `frontend/security.js:567` (renderSecurityCountries) |
-| Security | "Lift the ban; the rule leaves it alone for a week" | `frontend/security.js:616` (renderSecurityLists) |
-| Security | "Note what it would ban; ban nothing" | `frontend/security.js:929` (securityCardBody) |
-| Security | dynamic: `${caps.can_ban ? 'Put what it catches on the Fail2ban blacklist' : 'Banning n...` | `frontend/security.js:930` (securityCardBody) |
-| Security | "Remove" | `frontend/security.js:940` (securityCardBody) |
-| Security | dynamic: `${s.tries} tries from ${s.addresses} address${s.addresses === 1 ? '' : 'es'}` | `frontend/security.js:946` (securityCardBody) |
-| Security | "Remove" | `frontend/security.js:952` (securityCardBody) |
-| Security | dynamic: `${s.tries} failed logins` | `frontend/security.js:958` (securityCardBody) |
-| Security | "This feature is new - please report any issues on GitHub" | `frontend/security.js:989` (securityCardHtml) |
-| Security | "Help - Abuse Protection" | `frontend/security.js:990` (securityCardHtml) |
-| Security | dynamic: `${escapeHtml(why)}` | `frontend/security.js:1010` (securityToggle) |
+| Security | dynamic: `${escapeHtml(formatTime(h.last_seen))}` | `frontend/security.js:369` (securityDetail) |
+| Security | dynamic: `${escapeHtml([a.city, a.country].filter(Boolean).join(', '))}` | `frontend/security.js:384` (securityDetail) |
+| Security | "Show every country" | `frontend/security.js:524` (renderSecurityOverview) |
+| Security | dynamic: `${n.toLocaleString()} ${label}` | `frontend/security.js:580` (securityCountryBars) |
+| Security | dynamic: `${escapeHtml(`${r.country_name}: ${r.total.toLocaleString()} events`)}` | `frontend/security.js:583` (securityCountryBars) |
+| Security | "Watched by the Countries rule" | `frontend/security.js:584` (securityCountryBars) |
+| Security | dynamic: `${escapeHtml(n.asn)}` | `frontend/security.js:620` (renderSecurityCountries) |
+| Security | "Lift the ban; the rule leaves it alone for a week" | `frontend/security.js:669` (renderSecurityLists) |
+| Security | "Note what it would ban; ban nothing" | `frontend/security.js:982` (securityCardBody) |
+| Security | dynamic: `${caps.can_ban ? 'Put what it catches on the Fail2ban blacklist' : 'Banning n...` | `frontend/security.js:983` (securityCardBody) |
+| Security | "Remove" | `frontend/security.js:993` (securityCardBody) |
+| Security | dynamic: `${s.tries} tries from ${s.addresses} address${s.addresses === 1 ? '' : 'es'}` | `frontend/security.js:999` (securityCardBody) |
+| Security | "Remove" | `frontend/security.js:1005` (securityCardBody) |
+| Security | dynamic: `${s.tries} failed logins` | `frontend/security.js:1011` (securityCardBody) |
+| Security | "This feature is new - please report any issues on GitHub" | `frontend/security.js:1042` (securityCardHtml) |
+| Security | "Help - Abuse Protection" | `frontend/security.js:1043` (securityCardHtml) |
+| Security | dynamic: `${escapeHtml(why)}` | `frontend/security.js:1063` (securityToggle) |
 | Queue | "Retry delivery of every message in the queue" | `frontend/app.js:2160` (applyQueueFilters) |
 | Queue | dynamic: `Suppress ${escapeHtml(recipients[0].email)}` | `frontend/app.js:2183` (applyQueueFilters) |
 | Queue | dynamic: `${escapeHtml(formatTime(queued))}` | `frontend/app.js:2190` (applyQueueFilters) |
@@ -444,7 +445,7 @@ Native `title` tooltips. Dynamic ones show the expression that builds the text.
 | app.js (mixed) | dynamic: `Look up on ${escapeHtml(r.name)}` | `frontend/app.js:3585` (blocklistLookupLink) |
 | app.js (mixed) | set in JS: dynamic: `label` | `frontend/app.js:286` (setNavTabLabel) |
 | app.js (mixed) | set in JS: dynamic: `title \|\| ''` | `frontend/app.js:521` (setNavCount) |
-| Not rendered (possible dead code) | "Close" | `frontend/security.js:314` (renderSecuritySheet) |
+| Not rendered (possible dead code) | "Close" | `frontend/security.js:315` (renderSecuritySheet) |
 | Modal: changelog-modal | "Close" | `frontend/index.html:1493` |
 | Modal: container-logs-modal | "Refresh" | `frontend/index.html:1525` |
 | Modal: container-logs-modal | "Close" | `frontend/index.html:1533` |
@@ -470,11 +471,11 @@ Transient notifications from `showToast(message, type)` (utils.js). Type default
 | Security | "All security alerts dismissed" [success] | `frontend/app.js:1821` (acknowledgeAllSecurityAlerts) |
 | Security | "Failed to dismiss alerts" [error] | `frontend/app.js:1823` (acknowledgeAllSecurityAlerts) |
 | Security | dynamic: ``Could not load the history: ${error.message}`` [error] | `frontend/security.js:105` (loadSecurityHistory) |
-| Security | dynamic: ``${entry} removed from the ${label}`` [success] | `frontend/security.js:658` (securityRemoveFromList) |
-| Security | dynamic: ``Could not remove ${entry}: ${error.message}`` [error] | `frontend/security.js:662` (securityRemoveFromList) |
-| Security | dynamic: ``Saved ${list}`` [success] | `frontend/security.js:787` (saveSecuritySettings) |
-| Security | dynamic: ``Failed to save the Fail2ban settings: ${error.message}`` [error] | `frontend/security.js:805` (saveSecurityF2b) |
-| Security | dynamic: ``Could not save the outgoing spam settings: ${error.message}`` [error] | `frontend/security.js:823` (saveSecurityAbuse) |
+| Security | dynamic: ``${entry} removed from the ${label}`` [success] | `frontend/security.js:711` (securityRemoveFromList) |
+| Security | dynamic: ``Could not remove ${entry}: ${error.message}`` [error] | `frontend/security.js:715` (securityRemoveFromList) |
+| Security | dynamic: ``Saved ${list}`` [success] | `frontend/security.js:840` (saveSecuritySettings) |
+| Security | dynamic: ``Failed to save the Fail2ban settings: ${error.message}`` [error] | `frontend/security.js:858` (saveSecurityF2b) |
+| Security | dynamic: ``Could not save the outgoing spam settings: ${error.message}`` [error] | `frontend/security.js:876` (saveSecurityAbuse) |
 | Security | dynamic: `detail.detail \|\| `Could not ${action} SMTP`` [error] | `frontend/smtp-abuse.js:171` (smtpAbuseAction) |
 | Security | dynamic: `action === 'block' ? 'SMTP disabled' : 'SMTP re-enabled'` [success] | `frontend/smtp-abuse.js:174` (smtpAbuseAction) |
 | Security | dynamic: ``Could not ${action} SMTP`` [error] | `frontend/smtp-abuse.js:177` (smtpAbuseAction) |
@@ -611,7 +612,7 @@ Every action that asks before it acts. Losing one turns a guarded action into a 
 |---|---|---|
 | Security | showConfirmModal: dynamic: `{ title: 'Unban IP', message: 'Unban IP ' + ipWithMask + '?', confirmText: 'U...` | `frontend/app.js:1115` (unbanIP) |
 | Security | showConfirmModal: dynamic: `{ title: 'Ban IP', message: `Are you sure you want to permanently ban ${ipWit...` | `frontend/app.js:1152` (banIP) |
-| Security | showConfirmModal: dynamic: `{ title: `Remove from the ${label}`, message: `Remove ${entry} from the Fail2...` | `frontend/security.js:650` (securityRemoveFromList) |
+| Security | showConfirmModal: dynamic: `{ title: `Remove from the ${label}`, message: `Remove ${entry} from the Fail2...` | `frontend/security.js:703` (securityRemoveFromList) |
 | Security | showConfirmModal: dynamic: `{ title: action === 'block' ? 'Disable SMTP' : 'Re-enable SMTP', message: `${...` | `frontend/smtp-abuse.js:156` (smtpAbuseAction) |
 | Queue | showConfirmModal: dynamic: `{ title: 'Retry Delivery', message: `Retry delivery of ${ids.length} message(...` | `frontend/app.js:2256` (queueBulkRetry) |
 | Queue | showConfirmModal: dynamic: `{ title: 'Delete Messages', message: `Permanently delete ${ids.length} messag...` | `frontend/app.js:2263` (queueBulkDelete) |
@@ -701,7 +702,7 @@ Buttons, tabs and fields whose behavior is attached with `addEventListener` inst
 | app.js (mixed) | click on `changelogContent` | `frontend/app.js:4638` |
 | app.js (mixed) | click on `el` | `frontend/app.js:4832` (showNavFlyout) |
 | app.js (mixed) | click on `item` | `frontend/app.js:4855` (initNavFlyouts) |
-| Not rendered (possible dead code) | click on `document` | `frontend/security.js:506` |
+| Not rendered (possible dead code) | click on `document` | `frontend/security.js:559` |
 
 ### Filters, sorting and view options
 
@@ -743,7 +744,7 @@ In-app help buttons; the topic is the Markdown file name under documentation/Hel
 
 | Page | What | Code |
 |---|---|---|
-| Security | topic "Abuse_Protection" | `frontend/security.js:990` (securityCardHtml) |
+| Security | topic "Abuse_Protection" | `frontend/security.js:1043` (securityCardHtml) |
 | Quarantine | topic "Quarantine" | `frontend/index.html:841` |
 | Spam filter | topic "Spam_Filter" | `frontend/index.html:914` |
 | Status | topic "IP_Blacklist_Monitor" | `frontend/index.html:1037` |
@@ -768,9 +769,9 @@ Text shown when a list or panel has nothing to show.
 | Message details | "No Postfix delivery logs available" | `frontend/message-details.js:590` (renderPostfixTab) |
 | Message details | "No spam analysis data available" | `frontend/message-details.js:752` (renderSpamTab) |
 | Security | "No logs found" | `frontend/app.js:1029` (renderNetfilterData) |
-| Security | "No network data yet" | `frontend/security.js:566` (renderSecurityCountries) |
-| Security | "No trap names yet" | `frontend/security.js:940` (securityCardBody) |
-| Security | "No countries yet" | `frontend/security.js:952` (securityCardBody) |
+| Security | "No network data yet" | `frontend/security.js:619` (renderSecurityCountries) |
+| Security | "No trap names yet" | `frontend/security.js:993` (securityCardBody) |
+| Security | "No countries yet" | `frontend/security.js:1005` (securityCardBody) |
 | Security | "No matching entries" | `frontend/smtp-abuse.js:137` (renderSmtpAbusePanel) |
 | Queue | "No matching queue entries" | `frontend/app.js:2139` (applyQueueFilters) |
 | Quarantine | "No quarantined messages" | `frontend/app.js:2435` (renderQuarantineData) |
@@ -811,12 +812,12 @@ Functions that render a spinner or "Loading..." while data is fetched.
 | Messages | 1 loading indicator(s) | `frontend/app.js:3468` (loadMessages) |
 | Message details | 1 loading indicator(s) | `frontend/message-details.js:99` (viewMessageDetails) |
 | Security | 1 loading indicator(s) | `frontend/app.js:1981` (loadNetfilterLogs) |
-| Security | 1 loading indicator(s) | `frontend/security.js:336` (securityDetail) |
-| Security | 1 loading indicator(s) | `frontend/security.js:408` (securityHistoryRows) |
-| Security | 1 loading indicator(s) | `frontend/security.js:542` (securityCountryPanel) |
-| Security | 1 loading indicator(s) | `frontend/security.js:558` (renderSecurityCountries) |
-| Security | 1 loading indicator(s) | `frontend/security.js:590` (renderSecurityLists) |
-| Security | 2 loading indicator(s) | `frontend/security.js:979` (securityCardHtml) |
+| Security | 1 loading indicator(s) | `frontend/security.js:370` (securityDetail) |
+| Security | 1 loading indicator(s) | `frontend/security.js:461` (securityHistoryRows) |
+| Security | 1 loading indicator(s) | `frontend/security.js:595` (securityCountryPanel) |
+| Security | 1 loading indicator(s) | `frontend/security.js:611` (renderSecurityCountries) |
+| Security | 1 loading indicator(s) | `frontend/security.js:643` (renderSecurityLists) |
+| Security | 2 loading indicator(s) | `frontend/security.js:1032` (securityCardHtml) |
 | Security | 1 loading indicator(s) | `frontend/smtp-abuse.js:39` (renderSmtpAbusePanel) |
 | Queue | 1 loading indicator(s) | `frontend/app.js:2071` (loadQueue) |
 | Quarantine | 1 loading indicator(s) | `frontend/app.js:2400` (loadQuarantine) |
@@ -891,7 +892,7 @@ Key handlers; the keys are read from the handler body.
 | Shared | keydown | `frontend/utils.js:641` (showConfirmModal) |
 | app.js (mixed) | keydown: ArrowDown, ArrowUp, Escape, ArrowLeft | `frontend/app.js:4810` (showNavFlyout) |
 | app.js (mixed) | keydown | `frontend/app.js:4856` (initNavFlyouts) |
-| Not rendered (possible dead code) | keydown | `frontend/security.js:512` |
+| Not rendered (possible dead code) | keydown | `frontend/security.js:565` |
 | Modal: changelog-modal | keydown: Escape | `frontend/app.js:4618` |
 
 ### Badge colours
