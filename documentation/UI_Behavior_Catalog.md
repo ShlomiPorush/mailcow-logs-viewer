@@ -890,7 +890,7 @@ Key handlers; the keys are read from the handler body.
 | Settings | keydown: Escape, Enter | `frontend/settings.js:103` (showBasicAuthVerifyModal) |
 | Settings | keydown: Escape, Enter | `frontend/settings.js:169` (showFeatureDisableConfirmModal) |
 | Shared | keydown | `frontend/utils.js:641` (showConfirmModal) |
-| Shared | keydown | `frontend/utils.js:971` |
+| Shared | keydown | `frontend/utils.js:982` |
 | app.js (mixed) | keydown: ArrowDown, ArrowUp, Escape, ArrowLeft | `frontend/app.js:4826` (showNavFlyout) |
 | app.js (mixed) | keydown | `frontend/app.js:4872` (initNavFlyouts) |
 | app.js (mixed) | keydown | `frontend/security.js:534` |

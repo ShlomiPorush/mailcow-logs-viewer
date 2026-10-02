@@ -883,7 +883,7 @@ document.addEventListener('DOMContentLoaded', () => {
 // SHEET - a panel from the bottom of the screen on phones. Its handle and head
 // stay on top while its body scrolls. Pulling it down (by the head, or by the
 // body scrolled to the top) closes it, and a short pull springs back. With
-// expand it opens part way and grows to the full screen once its body scrolls.
+// expand it opens at three quarters and rises with the reader's scroll to the full screen.
 // =============================================================================
 
 const uiSheetClosers = {};  // sheet id -> what closing it does
@@ -914,8 +914,19 @@ function uiSheetShow(id, { label = '', head = '', body = '', expand = false, onC
     const bodyEl = sheet.querySelector('.ui-sheet-body');
     bodyEl.scrollTop = keep;
     if (expand) {
+        // The sheet rises with the reader's scroll: what the body scrolls goes into the
+        // sheet's height first, until it fills the screen; then the body scrolls
+        const panel = sheet.querySelector('.ui-sheet-panel');
+        if (sheet.dataset.height) panel.style.height = `${sheet.dataset.height}px`;
         bodyEl.addEventListener('scroll', () => {
-            if (bodyEl.scrollTop > 0) sheet.classList.add('is-full');
+            const height = panel.getBoundingClientRect().height;
+            const room = window.innerHeight - height;
+            const grow = Math.min(bodyEl.scrollTop, room);
+            if (grow <= 0) return;
+            panel.style.height = `${height + grow}px`;
+            sheet.dataset.height = height + grow;
+            bodyEl.scrollTop -= grow;
+            sheet.classList.toggle('is-full', room - grow < 1);
         }, { passive: true });
     }
     uiSheetSwipe(sheet, bodyEl, id);
