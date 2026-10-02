@@ -744,7 +744,8 @@
 .ui-sec-cards:has(.ui-sec-card.is-open) { padding-bottom: 50vh; }
 .ui-sec-card:focus { outline: none; }
 .ui-sec-card:focus-visible { outline: 2px solid var(--ui-focus); outline-offset: 2px; }
-.ui-sec-flag { width: 16px; height: 12px; margin-inline-end: 5px; vertical-align: -1px; border-radius: 2px; }
+.ui-sec-flag { display: inline-block; width: 16px; height: 12px; margin-inline-end: 5px; vertical-align: -1px; border-radius: 2px; }
+.ui-sec-pflag { display: none; }
 .ui-sec-where { display: inline-flex; align-items: center; }
 .ui-sec-card.is-off .ui-sec-sent, .ui-sec-card.is-off .ui-sec-sent b { color: var(--ui-muted); }
 .ui-sec-card-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
@@ -782,11 +783,51 @@ select.ui-sec-in { text-align: start; }
     .ui-sec-side .ui-sec-networks { display: none; }
     .ui-sec-side .ui-sec-bars > :nth-child(n+6) { display: none; }
 }
+.ui-prot-sum, .ui-sec-chost { display: none; }
+.ui-sec-cpanel { width: 340px; display: grid; gap: 8px; }
+.ui-sec-cpanel .ui-sec-bars { padding: 0; }
+.ui-sec-cpanel-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 13px; }
+.ui-sec-call { justify-self: start; }
+.ui-sec-sheet { position: fixed; inset: 0; z-index: 70; display: flex; flex-direction: column; justify-content: flex-end; }
+.ui-sec-sheet-back { position: absolute; inset: 0; background: rgb(0 0 0 / .4); }
+.ui-sec-sheet-panel { position: relative; display: flex; flex-direction: column; max-height: 88vh; max-height: 88dvh; background: var(--ui-bg);
+    border-radius: 16px 16px 0 0; box-shadow: 0 -8px 30px rgb(0 0 0 / .2); }
+.ui-sec-sheet-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 14px var(--ui-pad-x) 10px; border-bottom: 1px solid var(--ui-line); }
+.ui-sec-sheet-head .ui-icon-btn { font-size: 22px; line-height: 1; }
+.ui-sec-sheet-body { overflow-y: auto; overscroll-behavior: contain; padding: 12px var(--ui-pad-x) calc(20px + env(safe-area-inset-bottom)); display: grid; gap: 10px; }
+.ui-sec-sheet-body > .ui-sec-why { font-size: 13.5px; }
+.ui-sec-sheet-body .ui-sec-detail { padding: 0; }
+body.ui-sec-sheet-on { overflow: hidden; }
 @media (max-width: 760px) {
-    .ui-prot-strip { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
-    .ui-prot-item { flex: none; }
-    .ui-sec-seg { display: flex; width: 100%; overflow-x: auto; }
-    .ui-sec-seg button { flex: 1 0 auto; padding: 6px 8px; font-size: 12.5px; }
+    /* The Protection row folds into one chip; open, it lists every protection */
+    .ui-prot-sum { display: inline-flex; align-items: center; gap: 6px; border: 0; background: none; padding: 2px 0; font: inherit; font-size: 13.5px; color: var(--ui-ink); cursor: pointer; }
+    .ui-prot-sum b { font-weight: 700; }
+    .ui-prot-sum::after { content: ""; width: 6px; height: 6px; margin: -3px 0 0 4px; border: solid currentColor; border-width: 0 1.5px 1.5px 0; transform: rotate(45deg); }
+    .ui-prot-sum[aria-expanded="true"]::after { margin-top: 3px; transform: rotate(-135deg); }
+    .ui-prot-strip .ui-prot-title, .ui-prot-strip .ui-prot-item { display: none; }
+    .ui-prot-strip.is-open { flex-direction: column; align-items: stretch; }
+    .ui-prot-strip.is-open .ui-prot-item { display: flex; }
+    /* The countries open from the filter row; the chart beside the list goes */
+    .ui-sec-two > .ui-sec-side { display: none; }
+    .ui-sec-chost { display: inline-block; position: static; }
+    .ui-sec-row .ui-sec-top .ui-tag { flex: none; }
+    .ui-sec-head .ui-sec-filter { display: none; }
+    .ui-sec-cpanel { width: auto; inset-inline: var(--ui-pad-x); }
+    /* The filters stay in sight while the list scrolls, under the tabs */
+    #security-list { overflow: visible; }
+    .ui-sec-head { position: sticky; top: var(--ui-sec-stick, 44px); z-index: 4; background: var(--ui-panel); }
+    /* One line per address; its details open in a sheet */
+    .ui-sec-row { padding-block: 9px; }
+    .ui-sec-row .ui-sec-acts { display: none; }
+    .ui-sec-row .ui-sec-top { flex-wrap: nowrap; min-width: 0; }
+    /* The top line is the flag, the address and the tag; where and when are in the sentence */
+    .ui-sec-row .ui-sec-top > small { display: none; }
+    .ui-sec-row .ui-sec-pflag { display: inline-flex; }
+    .ui-sec-row .ui-sec-pflag .ui-sec-flag { margin: 0; }
+    /* The four filters two by two, so History is in sight */
+    .ui-sec-seg { display: grid; grid-template-columns: 1fr 1fr; width: 100%; overflow: visible; }
+    .ui-sec-seg button { padding: 6px 8px; font-size: 12.5px; }
+    .ui-sec-row .ui-sec-why { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .ui-sec-row { grid-template-columns: minmax(0, 1fr); }
     .ui-sec-acts { justify-content: flex-start; }
     .ui-sec-facts { grid-template-columns: minmax(0, 1fr); }
