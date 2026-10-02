@@ -230,6 +230,9 @@ function renderProtection() {
     `;
     updateProtectionCounts();
     markProtectionDirty();
+    // The Overview shows which rules are on, and the countries the Countries rule watches
+    renderSecurityOverview();
+    renderSecurityCountries();
 }
 
 function protectionCountryName(code) {
@@ -287,41 +290,6 @@ function renderProtectionHits() {
                     <span class="ui-td ui-td-end ui-prot-acts">${protectionActions(hit)}</span>
                 </div>`).join('')}
         </div>`;
-}
-
-// ----------------------------------------------------------------- Security Overview
-
-// The Overview shows what the rules caught that still needs a look
-async function loadProtectionOverview() {
-    const box = document.getElementById('security-decide');
-    if (!box) return;
-    try {
-        const res = await authenticatedFetch('/api/protection/hits?status=active&limit=200');
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = await res.json();
-        const hits = data.hits || [];
-        const counts = data.counts || {};
-        const review = hits.filter(h => ['alert', 'watching', 'pending'].includes(h.status));
-        const kpi = document.getElementById('security-kpi-decide');
-        if (kpi) {
-            kpi.textContent = protectionOpenCount(counts).toLocaleString();
-            kpi.className = counts.alert ? 'ui-fail' : protectionOpenCount(counts) ? 'ui-warn' : '';
-        }
-        const note = document.getElementById('security-decide-note');
-        if (note) note.textContent = counts.banned ? `${counts.banned} banned by the rules now` : '';
-        const shown = review.sort((a, b) => (a.status === 'alert' ? 0 : 1) - (b.status === 'alert' ? 0 : 1)).slice(0, 6);
-        box.innerHTML = !shown.length
-            ? `<p class="ui-st-allgood">Nothing to review. ${counts.banned ? 'The rules are banning what they catch.' : 'What the protection rules catch shows up here.'}</p>`
-            : `${!mailcowRwConfigured && shown.some(h => h.status === 'watching') ? `<div class="ui-list-note">${uiLocked('Ban now is locked', `Banning ${UI_RW_KEY_TEXT}`)}</div>` : ''}
-               ${shown.map(hit => `
-                <div class="ui-st-listing">
-                    <div><b class="ui-mono">${copyableText(hit.ip)}</b> ${protectionStatus(hit)}<small title="${escapeHtml(hit.reason || '')}">${escapeHtml(PROTECTION_RULE_LABELS[hit.rule] || hit.rule)}: ${escapeHtml(hit.reason || '')}, ${formatAgo(hit.last_seen)}</small></div>
-                    <span class="ui-st-acts">${protectionActions(hit)}</span>
-                </div>`).join('')}
-               <div class="ui-list-more"><button type="button" class="ui-btn ui-btn-sm" onclick="securityShowTab('protection')">${review.length > shown.length ? `Review all ${review.length}` : 'Open the rules'}</button></div>`;
-    } catch (error) {
-        box.innerHTML = `<p class="ui-empty ui-text-fail">Failed to load: ${escapeHtml(error.message)}</p>`;
-    }
 }
 
 // ----------------------------------------------------------------- editing
