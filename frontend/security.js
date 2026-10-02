@@ -20,6 +20,11 @@ let securityChartDays = 30;
 let securityCountries = null;    // /stats/by-country
 let securityNetworks = null;     // /stats/by-network
 let fail2banLoadError = false;   // mailcow could not be asked about Fail2ban
+let securityStripOpen = false;   // on a phone the Protection row folds into one chip
+let securityCountryPicker = false;  // on a phone the countries open from the filter row
+
+// A phone: the list gets its own layout (one line per address, details in a sheet)
+const securityPhone = () => window.matchMedia('(max-width: 760px)').matches;
 
 const SECURITY_LIST_PREVIEW = 25;
 const SECURITY_FILTERS = [['review', 'To review'], ['banned', 'Banned'], ['quiet', 'Tried, not banned'], ['history', 'History']];
@@ -52,6 +57,7 @@ function securityShowTab(tab) {
         const panel = document.getElementById(`security-tab-${name}`);
         if (panel) panel.classList.toggle('hidden', name !== tab);
     });
+    if (tab !== 'overview' && document.getElementById('security-sheet')) securityCloseSheet();
     if (card) securityOpenCard(card);
 }
 
@@ -194,7 +200,12 @@ function securityProtections() {
     };
     const abuse = typeof smtpAbuseStatus !== 'undefined' && smtpAbuseStatus
         ? item(smtpAbuseStatus.enabled ? 'on' : 'off', 'Outgoing spam', '', "securityOpenProtection('abuse')") : '';
-    return `<span class="ui-prot-title">Protection</span>${f2b}${SECURITY_RULE_ORDER.map(rule).join('')}${abuse}`;
+    const items = [f2b, ...SECURITY_RULE_ORDER.map(rule), abuse].filter(Boolean);
+    const on = items.filter(html => html.includes('is-on')).length;
+    // On a phone the row folds into one chip that opens the list
+    const summary = `<button type="button" class="ui-prot-sum" aria-expanded="${securityStripOpen}" onclick="securityStripOpen = !securityStripOpen; renderSecurityOverview()">
+        Protection <b>${on} of ${items.length} on</b></button>`;
+    return `${summary}<span class="ui-prot-title">Protection</span>${items.join('')}`;
 }
 
 // ----------------------------------------------------------------- one row
@@ -269,12 +280,53 @@ function securityRow(a) {
         <div class="ui-sec-row${open ? ' is-open' : ''}" onclick="securityRowClick(event, '${escapeJsArg(a.ip)}')" role="button" tabindex="0"
              onkeydown="if (event.key === 'Enter' && event.target === this) securityToggleRow('${escapeJsArg(a.ip)}')" aria-expanded="${open}">
             <div class="ui-sec-main">
-                <div class="ui-sec-top"><b class="ui-mono">${copyableText(a.ip)}</b>${d.tag}${where ? `<small class="ui-muted ui-sec-where">${where}</small>` : ''}</div>
+                <div class="ui-sec-top">${a.country ? `<span class="ui-sec-pflag" title="${escapeHtml(a.country)}">${securityFlag(a.countryCode)}</span>` : ''}<b class="ui-mono">${copyableText(a.ip)}</b>${d.tag}${where ? `<small class="ui-muted ui-sec-where">${where}</small>` : ''}</div>
                 <p class="ui-sec-why">${d.why}</p>
             </div>
             <div class="ui-sec-acts">${d.acts}</div>
-            ${open ? securityDetail(a) : ''}
+            ${open && !securityPhone() ? securityDetail(a) : ''}
         </div>`;
+}
+
+// On a phone an address opens in a sheet from the bottom, so the list stays where it was
+function renderSecuritySheet(addresses) {
+    let sheet = document.getElementById('security-sheet');
+    const a = securityPhone() && securityOpenRow && securityTab === 'overview' && addresses.find(x => x.ip === securityOpenRow);
+    if (!a) {
+        if (sheet) sheet.remove();
+        document.body.classList.remove('ui-sec-sheet-on');
+        return;
+    }
+    if (!sheet) {
+        sheet = document.createElement('div');
+        sheet.id = 'security-sheet';
+        sheet.className = 'ui-sec-sheet';
+        document.body.appendChild(sheet);
+    }
+    const d = securityDescribe(a);
+    const scroll = sheet.querySelector('.ui-sec-sheet-body');
+    const keep = scroll ? scroll.scrollTop : 0;
+    sheet.innerHTML = `
+        <div class="ui-sec-sheet-back" onclick="securityCloseSheet()"></div>
+        <section class="ui-sec-sheet-panel" role="dialog" aria-label="${escapeHtml(a.ip)}">
+            <div class="ui-sec-sheet-head">
+                <div class="ui-sec-top"><b class="ui-mono">${copyableText(a.ip)}</b>${d.tag}</div>
+                <button type="button" class="ui-icon-btn" onclick="securityCloseSheet()" aria-label="Close" title="Close">&times;</button>
+            </div>
+            <div class="ui-sec-sheet-body">
+                <p class="ui-sec-why">${d.why}</p>
+                ${d.acts ? `<div class="ui-sec-acts">${d.acts}</div>` : ''}
+                ${securityDetail(a)}
+            </div>
+        </section>`;
+    const body = sheet.querySelector('.ui-sec-sheet-body');
+    if (body) body.scrollTop = keep;
+    document.body.classList.add('ui-sec-sheet-on');
+}
+
+function securityCloseSheet() {
+    securityOpenRow = null;
+    renderSecurityOverview();
 }
 
 // The summary of one address, then its raw log lines
@@ -347,6 +399,7 @@ function setSecurityFilter(key) {
 function pickSecurityCountry(name) {
     securityCountry = securityCountry === name ? null : name;
     securityOpenRow = null;
+    securityCountryPicker = false;
     renderSecurityOverview();
     renderSecurityCountries();
 }
@@ -369,7 +422,10 @@ function securityHistoryRows() {
 
 function renderSecurityOverview() {
     const strip = document.getElementById('security-protections');
-    if (strip) strip.innerHTML = securityProtections();
+    if (strip) {
+        strip.innerHTML = securityProtections();
+        strip.classList.toggle('is-open', securityStripOpen);
+    }
     const box = document.getElementById('security-list');
     if (!box) return;
     if (!securityOverview) return;
@@ -405,8 +461,13 @@ function renderSecurityOverview() {
         ? `<p class="ui-sec-note">The ${source.sources.length} addresses with the most attempts today, of ${source.source_count.toLocaleString()}.</p>` : '';
 
     box.innerHTML = `
-        <div class="ui-panel-head">
+        <div class="ui-panel-head ui-sec-head">
             <div class="ui-seg ui-sec-seg" role="group" aria-label="Show">${segs}</div>
+            <span class="ui-popover-host ui-sec-chost">
+                <button type="button" class="ui-msg-range${securityCountry ? ' is-set' : ''}" aria-expanded="${securityCountryPicker}" aria-controls="security-country-panel"
+                    onclick="securityCountryPicker = !securityCountryPicker; renderSecurityOverview()">${securityCountry ? `${securityFlag(securityCountryCode(securityCountry))}${escapeHtml(securityCountry)}` : 'Country: All'}</button>
+                <span id="security-country-panel" class="ui-popover ui-sec-cpanel${securityCountryPicker ? '' : ' hidden'}" role="dialog" aria-label="Where attacks come from">${securityCountryPanel()}</span>
+            </span>
             ${securityCountry ? `<span class="ui-sec-filter">${securityFlag(securityCountryCode(securityCountry))}${escapeHtml(securityCountry)}<button type="button" onclick="pickSecurityCountry(null)" aria-label="Show every country" title="Show every country">&times;</button></span>` : ''}
         </div>
         ${rwNote}${f2bNote}
@@ -414,6 +475,10 @@ function renderSecurityOverview() {
             : shown.map(securityRow).join('') || `<p class="ui-empty">${escapeHtml(empty)}</p>`}</div>
         ${list.length > SECURITY_LIST_PREVIEW ? `<div class="ui-list-more"><button type="button" class="ui-btn ui-btn-sm" onclick="securityShowAll = !securityShowAll; renderSecurityOverview()" aria-expanded="${securityShowAll}">${securityShowAll ? 'Show fewer' : `Show all ${list.length.toLocaleString()}`}</button></div>` : ''}
         ${more}`;
+    // The filters stick right under the tabs, which stick to the top on a phone
+    const tabs = document.querySelector('.ui-se-tabs');
+    if (tabs) box.style.setProperty('--ui-sec-stick', `${tabs.offsetHeight}px`);
+    renderSecuritySheet(addresses);
 }
 
 // ----------------------------------------------------------------- where attacks come from
@@ -434,16 +499,31 @@ async function loadSecurityCountryChart(days = securityChartDays) {
         securityNetworks = securityNetworks || { data: [] };
     }
     renderSecurityCountries();
+    if (securityCountryPicker) renderSecurityOverview();
 }
 
-function renderSecurityCountries() {
-    const box = document.getElementById('security-countries');
-    if (!box) return;
-    const watched = new Set(((typeof protectionSaved !== 'undefined' && protectionSaved && protectionSaved.country) || {}).countries || []);
-    const range = [7, 30, 90].map(d => `<button type="button" id="country-chart-${d}d" aria-pressed="${securityChartDays === d}" onclick="loadSecurityCountryChart(${d})">${d}D</button>`).join('');
-    const rows = securityCountries ? securityCountries.data : null;
-    const max = rows && rows.length ? Math.max(...rows.map(r => r.total)) : 1;
-    const bar = r => {
+// A tap outside the country picker closes it; Escape closes it and the sheet
+document.addEventListener('click', event => {
+    if (securityCountryPicker && !event.target.closest('.ui-sec-chost')) {
+        securityCountryPicker = false;
+        renderSecurityOverview();
+    }
+});
+document.addEventListener('keydown', event => {
+    if (event.key !== 'Escape') return;
+    if (securityCountryPicker) { securityCountryPicker = false; renderSecurityOverview(); }
+    else if (document.getElementById('security-sheet')) securityCloseSheet();
+});
+
+function securityWatchedCountries() {
+    return new Set(((typeof protectionSaved !== 'undefined' && protectionSaved && protectionSaved.country) || {}).countries || []);
+}
+
+function securityCountryBars() {
+    const watched = securityWatchedCountries();
+    const rows = securityCountries ? securityCountries.data : [];
+    const max = rows.length ? Math.max(...rows.map(r => r.total)) : 1;
+    return rows.map(r => {
         const part = (n, cls, label) => n ? `<i class="${cls}" style="width:${(n / max) * 100}%" title="${n.toLocaleString()} ${label}"></i>` : '';
 
         return `<button type="button" class="ui-sec-bar${securityCountry === r.country_name ? ' is-on' : ''}" onclick="pickSecurityCountry('${escapeJsArg(r.country_name)}')"
@@ -451,14 +531,33 @@ function renderSecurityCountries() {
             <span class="ui-sec-bar-name">${securityFlag(r.country_code)}${escapeHtml(r.country_name)}${watched.has(r.country_code) ? '<i class="ui-sec-watch" title="Watched by the Countries rule"></i>' : ''}</span>
             <span class="ui-sec-bar-track">${part(r.ban, 'is-ban', 'bans')}${part(r.warning, 'is-warn', 'warnings')}${part(r.unban, 'is-unban', 'unbans')}</span>
             <em>${r.total.toLocaleString()}</em></button>`;
-    };
+    }).join('');
+}
+
+// The phone's country picker: the period, the countries, and All
+function securityCountryPanel() {
+    const rows = securityCountries ? securityCountries.data : null;
+    const range = [7, 30, 90].map(d => `<button type="button" aria-pressed="${securityChartDays === d}" onclick="loadSecurityCountryChart(${d})">${d}D</button>`).join('');
+    return `<span class="ui-sec-cpanel-head"><b>Where attacks come from</b><span class="ui-seg" role="group" aria-label="Period">${range}</span></span>
+        ${rows === null ? '<span class="ui-muted">Loading...</span>'
+            : !rows.length ? '<span class="ui-muted">No GeoIP data available. Configure MaxMind to enable country statistics.</span>'
+            : `<span class="ui-sec-bars">${securityCountryBars()}</span>`}
+        ${securityCountry ? '<button type="button" class="ui-btn ui-btn-sm ui-sec-call" onclick="pickSecurityCountry(null)">Every country</button>' : ''}`;
+}
+
+function renderSecurityCountries() {
+    const box = document.getElementById('security-countries');
+    if (!box) return;
+    const watched = securityWatchedCountries();
+    const range = [7, 30, 90].map(d => `<button type="button" id="country-chart-${d}d" aria-pressed="${securityChartDays === d}" onclick="loadSecurityCountryChart(${d})">${d}D</button>`).join('');
+    const rows = securityCountries ? securityCountries.data : null;
     const networks = securityNetworks ? securityNetworks.data : null;
     box.innerHTML = `
         <section class="ui-panel">
             <div class="ui-panel-head">Where attacks come from <div class="ui-seg ui-head-actions" role="group" aria-label="Period">${range}</div></div>
             ${rows === null ? '<div class="ui-loading"><div class="loading"></div><p>Loading...</p></div>'
                 : !rows.length ? '<p id="country-chart-empty" class="ui-empty">No GeoIP data available. Configure MaxMind to enable country statistics.</p>'
-                : `<div class="ui-sec-bars">${rows.map(bar).join('')}</div>
+                : `<div class="ui-sec-bars">${securityCountryBars()}</div>
                    <p class="ui-sec-legend"><span><i class="is-ban"></i>Ban</span><span><i class="is-warn"></i>Warning</span><span><i class="is-unban"></i>Unban</span>${watched.size ? '<span><i class="ui-sec-watch"></i>Watched by the Countries rule</span>' : ''}</p>
                    <p class="ui-sec-note">Pick a country to see its addresses.</p>`}
         </section>
