@@ -739,18 +739,11 @@
                 <div class="ui-page-head">
                     <div>
                         <h1 class="ui-h1">Security</h1>
-                        <p class="ui-muted">Failed logins and Fail2ban bans over the last 24 hours</p>
+                        <p class="ui-muted">Who tries to get in, what stops them, and what is waiting for you</p>
                     </div>
                 </div>
-                <div class="ui-kpis" id="security-kpis">
-                    <div class="ui-kpi"><b id="security-kpi-failed">-</b>Failed logins</div>
-                    <div class="ui-kpi"><b id="security-kpi-banned">-</b>Banned now</div>
-                    <div class="ui-kpi"><b id="security-kpi-sources">-</b>Source addresses</div>
-                    <div class="ui-kpi" title="What the protection rules caught that you have not reviewed: would ban, waiting to be banned, or an alert"><b id="security-kpi-decide">-</b>To review</div>
-                </div>
-
                 <div class="ui-tabs ui-page-tabs ui-se-tabs" role="tablist" aria-label="Security sections">
-                    <button type="button" class="modal-tab active" role="tab" aria-selected="true" id="security-tab-btn-overview" onclick="securityShowTab('overview')">Overview</button>
+                    <button type="button" class="modal-tab active" role="tab" aria-selected="true" id="security-tab-btn-overview" onclick="securityShowTab('overview')">Overview <span id="security-tab-n-overview" class="ui-tab-n hidden" title="Caught by a rule and waiting for you"></span></button>
                     <button type="button" class="modal-tab" role="tab" aria-selected="false" id="security-tab-btn-events" onclick="securityShowTab('events')">Events <span id="security-tab-n-events" class="ui-tab-n hidden"></span></button>
                     <button type="button" class="modal-tab" role="tab" aria-selected="false" id="security-tab-btn-protection" onclick="securityShowTab('protection')">Protection <span id="security-tab-n-protection" class="ui-tab-n hidden"></span></button>
                     <button type="button" class="modal-tab" role="tab" aria-selected="false" id="security-tab-btn-fail2ban" onclick="securityShowTab('fail2ban')">Fail2ban</button>
@@ -758,36 +751,11 @@
                 </div>
 
                 <div id="security-tab-overview" class="ui-scroll ui-st-panel" role="tabpanel">
-                    <div class="ui-se-two">
-                        <section class="ui-panel">
-                            <div class="ui-panel-head">Caught by the rules <span id="security-decide-note" class="ui-count"></span></div>
-                            <div id="security-decide"><div class="ui-loading"><div class="loading"></div><p>Loading...</p></div></div>
-                        </section>
-                        <!-- Country Chart -->
-                <section class="ui-panel">
-                    <div class="ui-panel-head">Events by Country
-                        <div class="ui-chip-row ui-head-actions">
-                            <button onclick="loadSecurityCountryChart(7)" id="country-chart-7d" class="country-chart-period-btn ui-chip" aria-pressed="false">7D</button>
-                            <button onclick="loadSecurityCountryChart(30)" id="country-chart-30d" class="country-chart-period-btn ui-chip" aria-pressed="true">30D</button>
-                            <button onclick="loadSecurityCountryChart(90)" id="country-chart-90d" class="country-chart-period-btn ui-chip" aria-pressed="false">90D</button>
-                        </div>
+                    <section id="security-protections" class="ui-panel ui-prot-strip" aria-label="Which protections are on"></section>
+                    <div class="ui-sec-two">
+                        <section id="security-list" class="ui-panel"><div class="ui-loading"><div class="loading"></div><p>Loading...</p></div></section>
+                        <div id="security-countries" class="ui-sec-side"></div>
                     </div>
-                    <div class="ui-chart-body">
-                        <div id="country-chart-container" style="position: relative;">
-                            <canvas id="security-country-chart"></canvas>
-                        </div>
-                        <p id="country-chart-empty" class="hidden ui-empty">No GeoIP data available. Configure MaxMind to enable country statistics.</p>
-                    </div>
-                </section>
-                    </div>
-                    <section class="ui-sec-block">
-                        <h2 class="ui-h2">Addresses with the most attempts</h2>
-                        <div id="security-sources"><div class="ui-loading"><div class="loading"></div><p>Loading...</p></div></div>
-                    </section>
-                    <section class="ui-sec-block">
-                        <h2 class="ui-h2">Latest failed logins</h2>
-                        <div id="security-latest"><div class="ui-loading"><div class="loading"></div><p>Loading...</p></div></div>
-                    </section>
                 </div>
 
                 <div id="security-tab-events" class="ui-scroll ui-st-panel hidden" role="tabpanel">
@@ -1609,6 +1577,7 @@
     <script src="/static/rate-limits.js?v=24"></script>
     <script src="/static/smtp-abuse.js?v=3"></script>
     <script src="/static/protection.js?v=2"></script>
+    <script src="/static/security.js?v=1"></script>
     <script src="/static/notifications.js?v=5"></script>
     <script src="/static/spam_filter.js?v=6"></script>
 
