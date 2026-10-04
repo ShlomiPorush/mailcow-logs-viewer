@@ -216,7 +216,7 @@ def test_the_policy_keeps_the_lists_read_right_before_writing(client, monkeypatc
     res = client.post('/api/fail2ban/policy', json=policy)
     assert res.json()['status'] == 'success'
     assert saved == {'ban_time': '3600', 'max_ban_time': '604800', 'ban_time_increment': '0', 'max_attempts': '5',
-                     'retry_window': '900', 'netban_ipv4': '24', 'netban_ipv6': '64',
+                     'retry_window': '900', 'netban_ipv4': '24', 'netban_ipv6': '64', 'manage_external': '0',
                      'blacklist': '203.0.113.9/32,198.51.100.7/32', 'whitelist': '192.0.2.0/24'}
 
     saved.clear()
@@ -224,3 +224,58 @@ def test_the_policy_keeps_the_lists_read_right_before_writing(client, monkeypatc
     assert client.post('/api/fail2ban/policy', json={**policy, 'max_attempts': 'x'}).status_code == 400
     assert client.post('/api/fail2ban/policy', json={**policy, 'max_ban_time': 60}).status_code == 400
     assert saved == {}
+
+
+def test_unban_is_the_edit_mailcow_takes(client, monkeypatch):
+    """mailcow has no delete/fail2ban; an unban is edit/fail2ban with action unban
+    and the networks as items, which mailcow handles before touching any setting."""
+    from app.mailcow_api import mailcow_api
+    calls = []
+
+    async def fake_rw(endpoint, method='POST', **kwargs):
+        calls.append((endpoint, kwargs.get('json')))
+        return [{'type': 'success', 'msg': ['object_modified', '198.51.100.7/32']}]
+
+    monkeypatch.setattr(mailcow_api, '_make_rw_request', fake_rw)
+    assert client.post('/api/fail2ban/unban', json={'ip': '198.51.100.7'}).json()['status'] == 'success'
+    assert calls == [('/api/v1/edit/fail2ban', {'items': ['198.51.100.7/32'], 'attr': {'action': 'unban'}})]
+
+
+def test_an_unban_mailcow_refuses_says_so(client, monkeypatch):
+    from app.mailcow_api import mailcow_api, MailcowAPIError
+
+    async def refused(ip):
+        raise MailcowAPIError('RW API request failed with status 404')
+
+    monkeypatch.setattr(mailcow_api, 'unban_fail2ban', refused)
+    res = client.post('/api/fail2ban/unban', json={'ip': '198.51.100.7'})
+    assert res.status_code == 502 and 'unban' in res.json()['detail']
+
+
+def test_every_full_edit_keeps_the_external_firewall_switch(client, monkeypatch):
+    """mailcow turns manage_external off on an edit that leaves it out."""
+    from app.mailcow_api import mailcow_api
+    from app.services.protection_rules import fail2ban_attrs
+    saved = []
+    current = {'ban_time': 1800, 'ban_time_increment': 1, 'max_attempts': 10, 'max_ban_time': 86400,
+               'netban_ipv4': 32, 'netban_ipv6': 128, 'retry_window': 600, 'manage_external': 1,
+               'whitelist': '192.0.2.1', 'blacklist': '203.0.113.9/32'}
+
+    async def fake_get():
+        return dict(current)
+
+    async def fake_edit(attrs):
+        saved.append(attrs)
+        return [{'type': 'success', 'msg': ['fail2ban_edit_ok']}]
+
+    monkeypatch.setattr(mailcow_api, 'get_fail2ban', fake_get)
+    monkeypatch.setattr(mailcow_api, 'edit_fail2ban', fake_edit)
+    client.post('/api/fail2ban/allow', json={'ip': '192.0.2.50'})
+    client.post('/api/fail2ban/ban', json={'ip': '192.0.2.51'})
+    client.post('/api/fail2ban/remove', json={'ip': '203.0.113.9', 'list': 'blacklist'})
+    client.post('/api/fail2ban/policy', json={'ban_time': 1800, 'max_ban_time': 86400, 'ban_time_increment': True,
+                                              'max_attempts': 8, 'retry_window': 600, 'netban_ipv4': 32, 'netban_ipv6': 128})
+    assert len(saved) == 4 and all(attrs['manage_external'] == '1' for attrs in saved)
+    # The protection rules' writes too
+    assert fail2ban_attrs(current, [], [])['manage_external'] == '1'
+    assert fail2ban_attrs({**current, 'manage_external': 0}, [], [])['manage_external'] == '0'

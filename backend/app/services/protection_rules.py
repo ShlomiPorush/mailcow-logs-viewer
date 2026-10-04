@@ -613,6 +613,8 @@ def fail2ban_attrs(current: dict, blacklist: List[str], whitelist: List[str]) ->
         "netban_ipv6": str(current.get("netban_ipv6", "64")),
         "retry_window": str(current.get("retry_window", "600")),
         "whitelist": ",".join(whitelist),
+        # mailcow turns this off on any edit that leaves it out
+        "manage_external": "1" if current.get("manage_external") in (True, 1, "1") else "0",
     }
 
 
