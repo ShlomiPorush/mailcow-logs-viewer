@@ -127,7 +127,7 @@ The v3 redesign replaces these with one consistent locked-area component that sa
 |---|---|---|
 | `SETTINGS_EDIT_VIA_UI_ENABLED` is off | Read-only cards with the current values, **with no explanation** of how to enable editing | `renderSettings` |
 | Editing is on | "Edit configuration" with the note "Priority: Default → DB → ENV. Environment variables always override DB values and cannot be changed from here." | `renderSettings` |
-| Settings not migrated yet | Only a "Migrate Settings from ENV" button, no Save button | `renderSettings` |
+| Settings not migrated yet | Only a "Migrate Settings from ENV" button with a short explanation, no Save button; the form fields are read-only until the migration | `renderSettings` |
 | A key is set by an environment variable | The field is disabled, with a lock icon and "Controlled by ENV variable - cannot be changed from here." | `renderSettingsEditField` |
 | `DISABLED_FEATURES` or `RAW_LOGS_SERVICES` set by the environment | Checkboxes disabled, "Locked by ENV (DISABLED_FEATURES)" or "Controlled by ENV variable." | `renderSettingsEditField` |
 | A value differs from its default | Amber highlight with "Reset to default" or "Clear" | `renderSettingsEditField` |
