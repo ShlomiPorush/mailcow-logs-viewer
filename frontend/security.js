@@ -701,6 +701,11 @@ const SECURITY_ABUSE_KEYS = ['smtp_abuse_enabled', 'smtp_abuse_threshold', 'smtp
     'smtp_abuse_unblock_grace_minutes', 'smtp_abuse_revoke_app_passwords', 'smtp_abuse_help_address'];
 const SECURITY_F2B_KEYS = ['max_attempts', 'retry_window', 'ban_time', 'ban_time_increment', 'max_ban_time', 'netban_ipv4', 'netban_ipv6'];
 
+// The app settings can be changed from here: editing is on and they were migrated from ENV
+function securityAppSettingsEditable() {
+    return !!(securityAppSettings && securityAppSettings.settings_edit_via_ui_enabled && securityAppSettings.settings_migrated);
+}
+
 async function loadSecurityAppSettings() {
     try {
         const res = await authenticatedFetch('/api/settings');
@@ -909,7 +914,7 @@ function securityF2bSentence(edit) {
 function securityAbuseSentence(edit) {
     const val = key => securityAbuseValue(key);
     if (!securityAppSettings) return 'Stops a mailbox from sending when it suddenly sends far more than usual.';
-    const editable = securityAppSettings.settings_edit_via_ui_enabled;
+    const editable = securityAppSettingsEditable();
     const locked = key => !editable || (securityAppSettings.env_locked_keys || []).includes(key);
     if (!edit) {
         return `Stops a mailbox from sending when it sends more than <b>${val('smtp_abuse_threshold')} messages</b> within <b>${val('smtp_abuse_window_minutes')} minutes</b>. Receiving is never affected.`;
@@ -936,11 +941,13 @@ function securityCardBody(key) {
             <p class="ui-sec-note ui-flush">The allowlist and the denylist are on the Lists tab.</p>`;
     }
     if (key === 'abuse') {
-        const editable = securityAppSettings && securityAppSettings.settings_edit_via_ui_enabled;
+        const editable = securityAppSettingsEditable();
         const envLocked = k => securityAppSettings && (securityAppSettings.env_locked_keys || []).includes(k);
         const revoke = securityAbuseValue('smtp_abuse_revoke_app_passwords');
         return `
-            ${securityAppSettings && !editable ? uiLocked('Editing settings is off', 'These values come from the environment and are shown read-only. To change them here, set <code>SETTINGS_EDIT_VIA_UI_ENABLED=true</code> and restart the container.') : ''}
+            ${securityAppSettings && !securityAppSettings.settings_edit_via_ui_enabled ? uiLocked('Editing settings is off', 'These values come from the environment and are shown read-only. To change them here, set <code>SETTINGS_EDIT_VIA_UI_ENABLED=true</code> and restart the container.') : ''}
+            ${securityAppSettings && securityAppSettings.settings_edit_via_ui_enabled && !securityAppSettings.settings_migrated
+                ? uiLocked('Settings are not migrated yet', 'These values are read-only until the configuration is copied into the database: click <strong>Migrate Settings from ENV</strong> on the Settings page.', `<button type="button" class="ui-btn ui-btn-sm" onclick="navigateTo('settings')">Open Settings</button>`) : ''}
             <div class="ui-sec-fields">
                 <label class="ui-sec-field"><span>Revoke its app passwords<small>When a mailbox is stopped, its app passwords stop working too</small></span>
                     <span><input type="checkbox" class="ui-check" ${revoke ? 'checked' : ''} ${!editable || envLocked('smtp_abuse_revoke_app_passwords') ? 'disabled' : ''} onchange="setSecurityAbuse('smtp_abuse_revoke_app_passwords', this.checked)"> On</span></label>
@@ -1009,10 +1016,11 @@ function securityCardHtml(key) {
         if (open && !mailcowRwConfigured) locked = uiLocked('Editing Fail2ban is locked', `Editing ${UI_RW_KEY_TEXT}`);
     } else if (key === 'abuse') {
         const enabled = securityAbuseValue('smtp_abuse_enabled');
-        const editable = securityAppSettings && securityAppSettings.settings_edit_via_ui_enabled
+        const editable = securityAppSettingsEditable()
             && !(securityAppSettings.env_locked_keys || []).includes('smtp_abuse_enabled');
         on = !!enabled;
-        toggle = securityToggle(name, on, !editable, `setSecurityAbuse('smtp_abuse_enabled', this.checked)`, editable ? '' : 'Editing settings is off');
+        toggle = securityToggle(name, on, !editable, `setSecurityAbuse('smtp_abuse_enabled', this.checked)`, editable ? ''
+            : securityAppSettings && securityAppSettings.settings_edit_via_ui_enabled && !securityAppSettings.settings_migrated ? 'Settings are not migrated yet' : 'Editing settings is off');
         status = `${on ? uiTag('Stops mailboxes', 'fail') : ''}<span class="ui-tag ui-tag-warn ui-tab-tag" title="This feature is new - please report any issues on GitHub">Beta</span>
             <button type="button" onclick="event.stopPropagation(); showHelpModal('Abuse_Protection')" class="ui-icon-btn ui-help-btn" title="Help - Abuse Protection" aria-label="Help - Abuse Protection"><svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg></button>`;
         sentence = securityAbuseSentence(open);

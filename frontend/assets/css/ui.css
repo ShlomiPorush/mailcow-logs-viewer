@@ -737,6 +737,10 @@
 .ui-sec-lrow > b { font-size: 13px; }
 /* Settings: one card per protection; a closed card is one sentence, an open one its fields */
 .ui-sec-intro { margin: 0; }
+/* Settings before the first migration: read-only, with the reason by the button */
+.ui-set-fieldset { min-width: 0; margin: 0; padding: 0; border: 0; display: contents; }
+.ui-set-fieldset:disabled .ui-set-group { opacity: .6; }
+.ui-set-migrate-note { margin: 0; font-size: 13px; color: var(--ui-muted); }
 .ui-sec-cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--ui-gap); align-items: start; }
 .ui-sec-card { display: grid; gap: 10px; padding: 14px var(--ui-pad-x); border-radius: var(--ui-radius); background: var(--ui-panel); cursor: pointer; min-width: 0; }
 .ui-sec-card:not(.is-open):hover { box-shadow: inset 0 0 0 1px var(--ui-line); }
@@ -778,7 +782,7 @@
 .ui-sec-in { font: inherit; font-size: 14.5px; font-weight: 700; padding: 1px 6px; border: 1px solid var(--ui-line); border-bottom: 2px solid var(--ui-ink);
     border-radius: 6px 6px 2px 2px; background: var(--ui-bg); color: var(--ui-ink); text-align: center; }
 select.ui-sec-in { text-align: start; }
-.ui-sec-in:disabled { border-bottom-color: var(--ui-line); color: var(--ui-muted); }
+.ui-sec-in:disabled { border-bottom-color: var(--ui-line); color: var(--ui-muted); opacity: .6; cursor: not-allowed; }
 .ui-sec-hint { font-size: 12px; color: var(--ui-muted); font-weight: 500; }
 .ui-sec-inline { display: inline-flex; align-items: center; gap: 6px; font-size: 13.5px; }
 .ui-sec-mode { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; font-size: 13px; }
