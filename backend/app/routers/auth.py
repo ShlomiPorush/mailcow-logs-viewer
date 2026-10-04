@@ -10,8 +10,9 @@ import re
 import time
 from fastapi import APIRouter, Request, Response, HTTPException, status
 from fastapi.responses import JSONResponse, RedirectResponse
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
+from ..auth import safe_return_path
 from ..config import settings
 from ..session import (
     create_session,
@@ -34,6 +35,8 @@ OAUTH_STATE_TTL = 600
 MAX_PENDING_OAUTH_STATES = 1024
 OAUTH_COOKIE_PREFIX = "oauth_state_"
 _state_store: Dict[str, tuple[str, float]] = {}
+# The page each pending login returns to, by state
+_return_paths: Dict[str, str] = {}
 
 
 def _cleanup_oauth_states() -> None:
@@ -41,6 +44,9 @@ def _cleanup_oauth_states() -> None:
     for token, (_, expires_at) in list(_state_store.items()):
         if expires_at <= now:
             del _state_store[token]
+    for token in list(_return_paths):
+        if token not in _state_store:
+            del _return_paths[token]
 
 
 def _oauth_redirect(url: str, state: str, request: Request) -> RedirectResponse:
@@ -112,10 +118,10 @@ def get_provider_info():
 
 
 @router.get("/auth/login")
-async def oauth2_login(request: Request):
+async def oauth2_login(request: Request, next: Optional[str] = None):
     """
     Initiate OAuth2 login flow
-    Redirects user to OAuth2 provider
+    Redirects user to OAuth2 provider; `next` is the local page to return to
     """
     if not settings.is_oauth2_enabled:
         raise HTTPException(
@@ -151,6 +157,7 @@ async def oauth2_login(request: Request):
             secure=is_secure_request(request), samesite="lax", path="/",
         )
         _state_store[state] = (browser_nonce, time.monotonic() + OAUTH_STATE_TTL)
+        _return_paths[state] = safe_return_path(next)
         logger.info(f"Redirecting to OAuth2 provider: {settings.oauth2_provider_name}")
         return response
         
@@ -197,6 +204,7 @@ async def oauth2_callback(
     # Consume before any await, including on provider errors or missing codes.
     # A callback from another browser must not consume the owner's state.
     del _state_store[state]
+    return_to = _return_paths.pop(state, "/")
     if error:
         logger.warning("OAuth2 provider declined authorization")
         return _oauth_redirect("/login?error=oauth2_error", state, request)
@@ -221,7 +229,7 @@ async def oauth2_callback(
         session_id = create_session(user_info)
         
         # Create response with redirect
-        response = _oauth_redirect("/", state, request)
+        response = _oauth_redirect(return_to, state, request)
         
         # Set session cookie
         set_session_cookie(response, session_id, request)
