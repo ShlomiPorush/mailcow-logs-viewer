@@ -652,10 +652,11 @@ async function loadAppVersionStatus() {
             updateBadge.textContent = `v${data.latest_version} available`;
 
             // Allow clicking badge to view changelog
+            appUpdateInfo = data;
             updateBadge.onclick = (e) => {
                 e.preventDefault();
                 e.stopPropagation();
-                showMarkdownModal(`Update: v${data.latest_version}`, data.changelog || 'No changelog available');
+                showAppUpdateModal();
             };
         } else if (updateBadge) {
             updateBadge.classList.add('hidden');
@@ -663,6 +664,14 @@ async function loadAppVersionStatus() {
     } catch (error) {
         console.error('Failed to load app version status:', error);
     }
+}
+
+// The available app update; the header badge and the dashboard alert open its changelog
+let appUpdateInfo = null;
+
+function showAppUpdateModal() {
+    if (!appUpdateInfo) return;
+    showMarkdownModal(`Update: v${appUpdateInfo.latest_version}`, appUpdateInfo.changelog || 'No changelog available');
 }
 
 // Helper to show markdown content in the changelog modal
@@ -1684,8 +1693,9 @@ async function loadDashboardAttention() {
             detail: first ? first.message : 'New sources are failing DMARC.', action: 'Open DMARC', onclick: "navigateTo('dmarc')" });
     }
     if (appVersion && appVersion.update_available) {
+        appUpdateInfo = appVersion;
         items.push({ tone: 'info', title: `Version ${appVersion.latest_version} is available`,
-            detail: `You are running ${appVersion.current_version}. See what changed before updating.`, action: 'Read changes', onclick: "navigateTo('about')" });
+            detail: `You are running ${appVersion.current_version}. See what changed before updating.`, action: 'Read changes', onclick: 'showAppUpdateModal()' });
     }
     if (mailcowVersion && mailcowVersion.update_available) {
         items.push({ tone: 'info', title: `mailcow ${mailcowVersion.latest_version} is available`,
