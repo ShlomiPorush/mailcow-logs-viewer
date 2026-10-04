@@ -151,7 +151,7 @@ function securityAddresses() {
     }
     const permanent = new Set(fail2banPermBans.map(b => b.network || b.ip));
     for (const ban of fail2banActiveBans || []) {
-        if (permanent.has(ban.network)) continue;
+        if (permanent.has(ban.network) || Number(ban.queued_for_unban)) continue;
         const a = get(securityBare(ban.ip || ban.network));
         a.f2b = ban;
     }
