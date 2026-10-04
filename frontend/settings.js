@@ -1253,7 +1253,10 @@ function renderSettings(content, data) {
             // on desktop the sidebar sits beside the content.
             let tabsHtml = mobileNavHtml
                 + '<div class="settings-edit-layout flex flex-col lg:flex-row gap-4">' + navHtml
-                + '<div class="settings-edit-content flex-1 min-w-0 space-y-6">';
+                + '<div class="settings-edit-content flex-1 min-w-0 space-y-6">'
+                // Until the first migration there is no Save button, so the
+                // fields stay read-only instead of accepting edits that are lost.
+                + '<fieldset class="min-w-0 space-y-6' + (data.settings_migrated ? '"' : ' opacity-60" disabled') + '>';
             filteredTabs.forEach(function (tab, idx) {
                 const allKeysInTab = (tab.groups || []).flatMap(function (g) { return g.keys; });
                 const keysInTab = allKeysInTab.filter(function (k) { return data.editable_config[k] !== undefined; });
@@ -1365,7 +1368,7 @@ function renderSettings(content, data) {
                 });
                 tabsHtml += '</div>';
             });
-            tabsHtml += '</div></div>';  // close .settings-edit-content and .settings-edit-layout
+            tabsHtml += '</fieldset></div></div>';  // close the fieldset, .settings-edit-content and .settings-edit-layout
             return `
         <!-- Edit Configuration (only when SETTINGS_EDIT_VIA_UI_ENABLED) -->
         <div class="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700">
@@ -1381,8 +1384,9 @@ function renderSettings(content, data) {
                 </p>
             </div>
             <div class="p-4 space-y-4">
-                <div class="flex flex-wrap gap-2" id="settings-edit-actions">
+                <div class="flex flex-wrap items-center gap-x-4 gap-y-2" id="settings-edit-actions">
                     ${!data.settings_migrated ? '<button type="button" id="settings-import-env-btn" class="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-lg text-sm font-medium transition-colors">Migrate Settings from ENV</button>' : ''}
+                    ${!data.settings_migrated ? '<p class="text-sm text-gray-600 dark:text-gray-300">Click once to copy your current configuration into the database. After that you can edit the fields below and save.</p>' : ''}
                     ${data.settings_migrated ? '<button type="submit" form="settings-edit-form" id="settings-save-btn" class="px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-lg text-sm font-medium transition-colors">Save changes</button>' : ''}
                 </div>
                 <form id="settings-edit-form" class="space-y-4 pr-2">
