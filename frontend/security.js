@@ -1,8 +1,8 @@
 // =============================================================================
 // SECURITY PAGE - Overview
 // Every address that tried to sign in or that a protection caught, once, with
-// what happened to it and why: to review, banned (by Fail2ban or by a rule),
-// tried and not banned, and the rules' history. Above it, which protections are
+// what happened to it and why: to review (not banned, tagged with the rule that
+// caught it, if one did), banned (by Fail2ban or by a rule), and the rules' history. Above it, which protections are
 // on; beside it, where the attacks come from.
 // Classic script sharing the global scope; loaded after app.js, smtp-abuse.js
 // and protection.js, whose loaders call back into the functions here.
@@ -28,7 +28,7 @@ let securityCountryPicker = false;  // on a phone the countries open from the fi
 const securityPhone = () => window.matchMedia('(max-width: 760px)').matches;
 
 const SECURITY_LIST_PREVIEW = 25;
-const SECURITY_FILTERS = [['review', 'To review'], ['banned', 'Banned'], ['quiet', 'Tried, not banned'], ['history', 'History']];
+const SECURITY_FILTERS = [['review', 'To review'], ['banned', 'Banned'], ['history', 'History']];
 const SECURITY_RULE_ORDER = ['trap', 'unknown_accounts', 'repeat_offender', 'subnet', 'country', 'breach'];
 const SECURITY_RULE_NAMES = {
     trap: 'Trap accounts', unknown_accounts: 'Unknown accounts', repeat_offender: 'Repeat offenders',
@@ -170,9 +170,12 @@ function securityState(a) {
     return 'quiet';
 }
 
+// An address is banned or it is not: To review holds every one that is not, what a
+// rule caught (tagged with the rule) and what only failed to log in (no tag)
 function securityList(key, addresses) {
     if (key === 'history') return [];
-    return addresses.filter(a => a.state === key && (key !== 'quiet' || a.tries > 0))
+    const inList = key === 'review' ? a => a.state === 'review' || (a.state === 'quiet' && a.tries > 0) : a => a.state === key;
+    return addresses.filter(inList)
         .sort((x, y) => (y.last || '').localeCompare(x.last || ''));
 }
 
@@ -271,7 +274,7 @@ function securityDescribe(a) {
     }
     const policy = fail2banPolicy ? ` Fail2ban bans at ${fail2banPolicy.max_attempts} within ${formatSeconds(fail2banPolicy.retry_window)}.` : '';
     return {
-        tag: uiTag('Not banned', ''),
+        tag: '',
         why: `${a.tries.toLocaleString()} failed login${a.tries === 1 ? '' : 's'} in the last 24 hours${a.services.length ? ` (${escapeHtml(a.services.join(', '))})` : ''}.${policy}`,
         acts: rw && known ? `<button type="button" class="ui-btn ui-btn-sm ui-btn-danger" onclick="banIP('${ipArg}', this)" title="Ban ${escapeHtml(a.ip)}/32">Ban</button>
             <button ${B} onclick="allowIP('${ipArg}', this)" title="Never ban ${escapeHtml(a.ip)}/32">Allow</button>` : ''
@@ -458,13 +461,12 @@ function renderSecurityOverview() {
     const f2bNote = fail2banLoadError && securityFilter !== 'history'
         ? `<p class="ui-sec-note ui-text-fail">mailcow did not answer about Fail2ban, so its bans are not shown and nothing can be banned from here. The next refresh tries again.</p>` : '';
     const empty = {
-        review: 'Nothing to review. What the protection rules catch while they watch shows up here.',
+        review: 'Nothing to review. Addresses that fail to log in, and what the protection rules catch while they watch, show up here.',
         banned: known ? 'Nothing is banned right now.' : fail2banLoadError ? 'The bans are not known while mailcow does not answer.' : 'Checking Fail2ban...',
-        quiet: 'No address failed to log in in the last 24 hours without being stopped.',
     }[securityFilter];
     const source = securityOverview;
-    const more = securityFilter === 'quiet' && source.source_count > source.sources.length
-        ? `<p class="ui-sec-note">The ${source.sources.length} addresses with the most attempts in the last 24 hours, of ${source.source_count.toLocaleString()}.</p>` : '';
+    const more = securityFilter === 'review' && source.source_count > source.sources.length
+        ? `<p class="ui-sec-note">Of the addresses that only failed to log in, the ${source.sources.length} with the most attempts in the last 24 hours are listed, of ${source.source_count.toLocaleString()}.</p>` : '';
 
     box.innerHTML = `
         <div class="ui-panel-head ui-sec-head">
