@@ -1655,7 +1655,7 @@ button.ui-st-card:hover { outline: 1px solid var(--ui-line); }
 .settings-edit-panel.hidden { display: none; }
 .ui-set-title { margin: 0; font-size: 22px; font-weight: 800; letter-spacing: -.02em; }
 .ui-set-tabdesc { margin: -8px 0 0; max-width: 75ch; color: var(--ui-muted); font-size: var(--ui-fs-sm); line-height: 1.5; }
-.ui-set-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; margin-top: -8px; }
+.ui-set-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; }
 .ui-set-actions p { flex: 1 1 360px; margin: 0; font-size: var(--ui-fs-sm); }
 .ui-set-form { display: grid; gap: 18px; }
 
