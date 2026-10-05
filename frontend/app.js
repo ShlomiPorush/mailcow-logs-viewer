@@ -1161,7 +1161,7 @@ function renderNetfilterData(data) {
     // Update count display with total count from API (like Messages page)
     const countEl = document.getElementById('security-count');
     if (countEl) {
-        countEl.textContent = data.total ? `(${data.total.toLocaleString()} results)` : '';
+        countEl.textContent = uiCountLabel(data.total || 0, 'event', 'events');
     }
 
     // Build a set of currently banned IPs for quick lookup
@@ -2331,7 +2331,7 @@ function applyQueueFilters() {
     // Update count display
     const countEl = document.getElementById('queue-count');
     if (countEl) {
-        countEl.textContent = `(${filteredData.length.toLocaleString()} items)`;
+        countEl.textContent = uiCountLabel(filteredData.length, 'message', 'messages');
     }
 
     if (filteredData.length === 0) {
@@ -2623,6 +2623,8 @@ function renderQuarantineData(data) {
     // Keep the latest payload so sort changes can re-render without a re-fetch
     quarantineLastData = data;
     const summary = document.getElementById('quarantine-summary');
+    const countEl = document.getElementById('quarantine-count');
+    if (countEl) countEl.textContent = uiCountLabel(data.total || (data.data || []).length, 'message', 'messages');
     if (summary) {
         const total = data.total || (data.data || []).length;
         summary.textContent = total
@@ -3005,7 +3007,7 @@ async function loadQuarantineRules() {
         
         const countEl = document.getElementById('quarantine-rules-count');
         const activeCount = data.data.filter(r => r.enabled).length;
-        if (countEl) countEl.textContent = activeCount > 0 ? `(${activeCount} active)` : '';
+        if (countEl) countEl.textContent = uiCountLabel(data.data.length, 'rule', 'rules');
         const tabCount = document.getElementById('quarantine-tab-n-rules');
         if (tabCount) { tabCount.textContent = activeCount || ''; tabCount.classList.toggle('hidden', !activeCount); }
         
@@ -3687,7 +3689,7 @@ async function loadMessages(page = 1) {
         // Update count display
         const countEl = document.getElementById('messages-count');
         if (countEl) {
-            countEl.textContent = `${data.total || 0} messages`;
+            countEl.textContent = uiCountLabel(data.total || 0, 'message', 'messages');
         }
 
         if (!data.data || data.data.length === 0) {

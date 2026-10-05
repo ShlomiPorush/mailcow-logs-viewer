@@ -775,10 +775,11 @@
 
                 <div id="security-tab-events" class="ui-scroll ui-st-panel hidden" role="tabpanel">
                 <!-- Filters -->
-                <section class="ui-panel ui-filters">
+                <section class="ui-panel ui-filters ui-count-row">
                     <div class="ui-filters-row">
                         <input type="text" id="netfilter-filter-ip" class="ui-input" placeholder="IP Address" aria-label="IP Address" onkeypress="if(event.key==='Enter') applyNetfilterFilters()">
                         <input type="text" id="netfilter-filter-username" class="ui-input" placeholder="Username" aria-label="Username" onkeypress="if(event.key==='Enter') applyNetfilterFilters()">
+                        <span id="security-count" class="ui-count"></span>
                         <select id="netfilter-filter-action" class="ui-select" aria-label="Action">
                             <option value="">All Actions</option>
                             <option value="ban">BAN</option>
@@ -796,7 +797,7 @@
                     </div>
                 </section>
                 <section class="ui-panel">
-                    <div class="ui-panel-head">Security Events <span id="security-count" class="ui-count"></span>
+                    <div class="ui-panel-head">Security Events
                         <button onclick="exportCSV('netfilter')" class="ui-btn ui-btn-sm ui-head-actions">Export CSV</button>
                     </div>
                     <div id="netfilter-logs"><div class="ui-loading"><div class="loading"></div><p>Loading...</p></div></div>
@@ -831,14 +832,15 @@
                     </div>
                 </div>
                 <section class="ui-sec-block ui-scroll">
-                    <div class="ui-list-head"><h2 class="ui-h2">Mail Queue</h2> <span id="queue-count" class="ui-count"></span></div>
+                    <div class="ui-list-head"><h2 class="ui-h2">Mail Queue</h2></div>
                     <div class="ui-panel ui-table-card">
-                    <section class="ui-panel ui-filters">
+                    <section class="ui-panel ui-filters ui-count-row">
                         <div class="ui-filters-row">
                             <input type="text" id="queue-filter-search" class="ui-input" placeholder="Search sender/recipient..." aria-label="Search sender or recipient"
                                 onkeypress="if(event.key==='Enter') applyQueueFilters()">
                             <input type="text" id="queue-filter-queue-id" class="ui-input" placeholder="Queue ID" aria-label="Queue ID"
                                 onkeypress="if(event.key==='Enter') applyQueueFilters()">
+                            <span id="queue-count" class="ui-count"></span>
                             <div class="ui-filters-actions">
                                 <button onclick="applyQueueFilters()" class="ui-btn ui-btn-primary">Apply</button>
                                 <button onclick="clearQueueFilters()" class="ui-btn">Clear</button>
@@ -869,7 +871,7 @@
                 </div>
                 <div class="ui-scroll" id="quarantine-tab-messages" role="tabpanel">
                 <section class="ui-sec-block">
-                    <div class="ui-list-head ui-q-head"><h2 class="ui-h2">Quarantined Messages</h2>
+                    <div class="ui-list-head ui-q-head"><h2 class="ui-h2">Quarantined Messages</h2> <span id="quarantine-count" class="ui-count"></span>
                         <select id="quarantine-sort" onchange="applyQuarantineSort()" class="ui-select ui-head-actions ui-select-auto" aria-label="Sort">
                             <option value="newest">Newest first</option>
                             <option value="score_desc">Score: high to low</option>
@@ -957,12 +959,13 @@
                     <div id="suppression-stats" class="ui-kpis"></div>
 
                     <div class="ui-panel ui-table-card">
-                    <section class="ui-panel ui-filters ui-ms-filters">
+                    <section class="ui-panel ui-filters ui-ms-filters ui-count-row">
                         <div class="ui-filters-row">
                             <label class="ui-search ui-ms-search"><svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
                                 <input type="text" id="suppression-search" placeholder="Search email, notes..." aria-label="Search suppressions"
                                     onkeypress="if(event.key==='Enter') loadSuppressions()">
                             </label>
+                            <span id="suppression-count" class="ui-count"></span>
                             <select id="suppression-filter-reason"
                                 class="ui-select ui-select-auto" aria-label="Reason"
                                 onchange="loadSuppressions()">
@@ -1261,11 +1264,12 @@
                     </div>
 
                     <div class="ui-panel ui-table-card">
-                    <section class="ui-panel ui-filters ui-ms-filters">
+                    <section class="ui-panel ui-filters ui-ms-filters ui-count-row">
                         <div class="ui-filters-row">
                             <label class="ui-search ui-ms-search"><svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
                                 <input type="text" id="mailbox-stats-search" oninput="applyMailboxStatsFilters()" placeholder="Search mailboxes..." aria-label="Search mailboxes">
                             </label>
+                            <span id="mailbox-stats-count" class="ui-count"></span>
                             <div class="ui-ms-picker" id="date-range-picker-container">
                                 <button type="button" onclick="toggleDateRangePicker()" id="date-range-picker-btn" class="ui-btn">
                                     <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
@@ -1317,7 +1321,7 @@
                         <div id="mailbox-stats-list"></div>
                     </div>
                     </div>
-                    <div class="ui-list-head ui-list-foot"><span id="mailbox-stats-count" class="ui-count">0 mailboxes</span><span id="mailbox-stats-page-info" class="ui-muted ui-head-actions"></span></div>
+                    <div class="ui-list-head ui-list-foot"><span id="mailbox-stats-page-info" class="ui-muted ui-head-actions"></span></div>
                 </div>
                 <!-- Rate Limits view -->
                 <div id="mailbox-stats-rate-limits-view" class="hidden ui-scroll">
@@ -1349,7 +1353,7 @@
 
                 <div class="ui-sec-block ui-scroll">
                     <div class="ui-panel ui-table-card">
-                    <section class="ui-panel ui-filters ui-domain-tools ui-dev-tools">
+                    <section class="ui-panel ui-filters ui-count-row">
                         <div class="ui-filters-row">
                             <label class="ui-search"><svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
                                 <input type="text" id="devices-search" oninput="applyDevicesFilters()" placeholder="Search user, device or IP..." aria-label="Search devices">

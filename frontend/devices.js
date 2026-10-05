@@ -78,7 +78,7 @@ function renderDevicesTypes(types, picked) {
 
 function renderDevicesList(container, data) {
     const pager = document.getElementById('devices-pager');
-    document.getElementById('devices-count').textContent = `${data.total.toLocaleString()} ${data.total === 1 ? 'device' : 'devices'}`;
+    document.getElementById('devices-count').textContent = uiCountLabel(data.total, 'device', 'devices');
     // The count sits by the search, as on Domains; the foot shows only to page through
     document.getElementById('devices-foot').classList.toggle('hidden', data.total_pages <= 1);
     pager.innerHTML = data.total_pages > 1 ? `

@@ -432,6 +432,8 @@ async function loadSuppressions(page) {
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
         const data = await response.json();
+        const countEl = document.getElementById('suppression-count');
+        if (countEl) countEl.textContent = uiCountLabel(data.total || 0, 'suppression', 'suppressions');
 
         if (!data.items || data.items.length === 0) {
             container.innerHTML = `
