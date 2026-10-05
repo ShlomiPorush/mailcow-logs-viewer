@@ -202,7 +202,7 @@ function securityProtectionItems() {
     const caps = typeof protectionCaps !== 'undefined' ? protectionCaps : {};
     const item = (state, name, note, key) => ({ state, name, note, key });
     const f2b = fail2banLoadError ? item('unknown', 'Fail2ban', 'mailcow did not answer', 'fail2ban')
-        : fail2banPolicy ? item('on', 'Fail2ban', `${fail2banPolicy.max_attempts} tries, ${formatSeconds(fail2banPolicy.ban_time)}`, 'fail2ban')
+        : fail2banPolicy ? item('on', 'Fail2ban', `${fail2banPolicy.max_attempts} attempts, ${formatSeconds(fail2banPolicy.ban_time)}`, 'fail2ban')
         : item('unknown', 'Fail2ban', '', 'fail2ban');
     const rule = key => {
         if (!rules || !rules[key]) return '';
