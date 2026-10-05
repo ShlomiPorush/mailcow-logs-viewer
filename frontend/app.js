@@ -1895,10 +1895,14 @@ async function loadDashboardSecurity() {
         }
     }
     if (abuse) smtpAbuseStatus = abuse;
-    renderDashboardSecurity(page);
+    renderDashboardSecurity(page || dashboardSecurityPage);
 }
 
-function renderDashboardSecurity(page) {
+let dashboardSecurityPage = null;
+let dashboardProtectionsOpen = false;   // the protection line folds out into every protection
+
+function renderDashboardSecurity(page = dashboardSecurityPage) {
+    dashboardSecurityPage = page;
     const box = document.getElementById('dashboard-security');
     if (!box) return;
     const counts = page ? page.all_counts : null;
@@ -1910,10 +1914,12 @@ function renderDashboardSecurity(page) {
             <button type="button" class="ui-stat" onclick="openSecurityList('review')"><span>To review</span><b>${n('review')}</b><small>Not banned</small></button>
             <button type="button" class="ui-stat" onclick="openSecurityList('banned')"><span>Banned now</span><b${counts && counts.banned ? ' class="ui-text-fail"' : ''}>${n('banned')}</b><small>By Fail2ban and the rules</small></button>
         </div>
-        <button type="button" class="ui-dash-sec-prot${on.length ? ' is-on' : ''}" onclick="openSecuritySettings()" title="Open the protection settings">
-            <span class="ui-prot-mark" aria-hidden="true">${on.length ? '✓' : '✕'}</span><b>Protection ${on.length} of ${protections.length} on</b>
-            ${on.length ? `<span class="ui-dash-sec-on">${on.map(p => escapeHtml(p.name)).join(' · ')}</span>` : ''}
-        </button>`;
+        <button type="button" class="ui-dash-sec-prot${on.length ? ' is-on' : ''}" aria-expanded="${dashboardProtectionsOpen}" aria-controls="dashboard-protections"
+            onclick="dashboardProtectionsOpen = !dashboardProtectionsOpen; renderDashboardSecurity()">
+            <span class="ui-prot-mark" aria-hidden="true">${on.length ? '✓' : '✕'}</span><b>Protection ${on.length} of ${protections.length} on</b><span class="ui-dash-sec-chev" aria-hidden="true"></span>
+            ${on.length && !dashboardProtectionsOpen ? `<span class="ui-dash-sec-on">${on.map(p => escapeHtml(p.name)).join(' · ')}</span>` : ''}
+        </button>
+        ${dashboardProtectionsOpen ? `<div id="dashboard-protections" class="ui-dash-sec-list">${protections.map(p => securityProtectionButton(p, 'openSecurityProtection')).join('')}</div>` : ''}`;
 }
 
 // Jobs, message linking and the app version for the dashboard health cards
