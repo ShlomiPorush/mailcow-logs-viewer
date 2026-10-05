@@ -15,7 +15,13 @@ let securityFilter = 'review';
 let securityCountry = null;      // a country picked in the chart filters the list
 let securityOpenRow = null;      // the address whose details are open
 let securityRawLog = {};         // ip -> log lines, or 'loading' / 'error'
-let securityShown = 25;         // the rows drawn so far; more load as the list scrolls
+let securityPage = null;         // the loaded part of the chosen list: items, next cursor, real counts
+let securityPageError = null;
+let securityPageLoading = false;
+let securityPageSeq = 0;         // an answer for a list or country no longer chosen is dropped
+let securityRefreshTimer = null;
+let securityLastCounts = null;   // the counts shown while another list or country loads
+let securityToTop = false;       // a new list or country goes to its first row once it is drawn
 let securityMoreObserver = null;
 let securityChartDays = 30;
 let securityCountries = null;    // /stats/by-country
@@ -27,7 +33,7 @@ let securityCountryPicker = false;  // on a phone the countries open from the fi
 // A phone: the list gets its own layout (one line per address, details in a sheet)
 const securityPhone = () => window.matchMedia('(max-width: 760px)').matches;
 
-const SECURITY_LIST_PREVIEW = 25;
+const SECURITY_PAGE_SIZE = 50;
 const SECURITY_FILTERS = [['review', 'To review'], ['banned', 'Banned'], ['history', 'History']];
 const SECURITY_RULE_ORDER = ['trap', 'unknown_accounts', 'repeat_offender', 'subnet', 'country', 'breach'];
 const SECURITY_RULE_NAMES = {
@@ -70,6 +76,7 @@ async function loadSecurityOverview() {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         securityOverview = await res.json();
         renderSecurityOverview();
+        refreshSecurityAddresses();
     } catch (err) {
         console.error('Failed to load security overview:', err);
         const list = document.getElementById('security-list');
@@ -85,6 +92,7 @@ async function loadProtectionOverview() {
         const data = await res.json();
         securityHits = data.hits || [];
         if (securityFilter === 'history') loadSecurityHistory();
+        refreshSecurityAddresses();
         renderSecurityOverview();
         // The page's timer must not redraw a card or a list someone is working in
         if (!securityEditing()) {
@@ -123,60 +131,66 @@ function securityCountryCode(name) {
     const row = securityCountries && securityCountries.data.find(r => r.country_name === name);
     if (row) return row.country_code;
     const source = securityOverview && securityOverview.sources.find(s => s.country_name === name);
-    return source ? source.country_code : '';
+    if (source) return source.country_code;
+    const listed = securityPage && securityPage.items.find(a => a.country === name);
+    return listed ? listed.countryCode : '';
 }
-const securityOnList = (list, ip) => list.some(entry => securityBare(entry) === ip);
-
-// One entry per address, from the last day's attempts, the rules' hits and Fail2ban's bans
-function securityAddresses() {
-    const map = new Map();
-    const get = ip => {
-        if (!map.has(ip)) map.set(ip, { ip, tries: 0, users: [], services: [], hits: [], country: '', countryCode: '', city: '', org: '', last: '' });
-        return map.get(ip);
+// An address from the server, in the shape the rows are drawn from. The server
+// builds the lists (an address is banned, or it is to review) and counts them all.
+function securityFromServer(x) {
+    return {
+        ip: x.ip, state: x.state, tries: x.tries, attempts: x.attempts, users: x.users, services: x.services, hits: x.hits,
+        country: x.country || '', countryCode: x.country_code || '', city: x.city || '', org: x.org || '', last: x.last_seen || '', f2b: x.f2b
     };
-    const seen = (a, iso) => { if (iso && iso > a.last) a.last = iso; };
-    for (const s of (securityOverview && securityOverview.sources) || []) {
-        const a = get(s.ip);
-        Object.assign(a, { tries: s.failed_logins, attempts: s.attempts, users: s.usernames.slice(), services: s.services.slice(),
-            country: s.country_name || '', countryCode: s.country_code || '', city: s.city || '', org: s.asn_org || '' });
-        seen(a, s.last_seen);
-    }
-    for (const h of securityHits) {
-        const a = get(h.ip);
-        a.hits.push(h);
-        a.country = a.country || h.country_name || '';
-        a.countryCode = a.countryCode || h.country_code || '';
-        (h.usernames || []).forEach(u => { if (!a.users.includes(u)) a.users.push(u); });
-        seen(a, h.last_seen);
-    }
-    const permanent = new Set(fail2banPermBans.map(b => b.network || b.ip));
-    for (const ban of fail2banActiveBans || []) {
-        if (permanent.has(ban.network) || Number(ban.queued_for_unban)) continue;
-        const a = get(securityBare(ban.ip || ban.network));
-        a.f2b = ban;
-    }
-    for (const a of map.values()) a.state = securityState(a);
-    return [...map.values()];
 }
 
-// Where an address stands: review, banned, quiet, or a list (shown on the Lists, not here)
-function securityState(a) {
-    const open = a.hits.find(h => h.status === 'banned');
-    if (fail2banActiveBans !== null && securityOnList(fail2banWhitelist, a.ip)) return 'allow';
-    if (open) return 'banned';
-    if (a.f2b) return 'banned';
-    if (fail2banActiveBans !== null && securityOnList(fail2banBlacklist, a.ip)) return 'deny';
-    if (a.hits.some(h => ['watching', 'pending', 'alert'].includes(h.status))) return 'review';
-    return 'quiet';
+// The first page of the chosen list, or (more) the next one as the list scrolls.
+// limit lets a refresh reload as many rows as are already shown.
+async function loadSecurityAddresses(more = false, limit = SECURITY_PAGE_SIZE) {
+    if (securityFilter === 'history') return;
+    if (more && (!securityPage || !securityPage.next || securityPageLoading)) return;
+    const seq = ++securityPageSeq;
+    securityPageLoading = true;
+    const params = new URLSearchParams({ list: securityFilter, limit: String(limit) });
+    if (securityCountry) params.set('country', securityCountry);
+    if (more) params.set('after', securityPage.next);
+    try {
+        const res = await authenticatedFetch(`/api/security/addresses?${params}`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        if (seq !== securityPageSeq) return;
+        const items = data.items.map(securityFromServer);
+        if (more) {
+            const have = new Set(securityPage.items.map(a => a.ip));
+            data.items = securityPage.items.concat(items.filter(a => !have.has(a.ip)));
+        } else {
+            data.items = items;
+        }
+        securityPage = data;
+        securityPageError = null;
+    } catch (err) {
+        if (seq !== securityPageSeq) return;
+        console.error('Failed to load the security addresses:', err);
+        securityPageError = err.message;
+    } finally {
+        if (seq === securityPageSeq) securityPageLoading = false;
+    }
+    if (seq !== securityPageSeq) return;
+    renderSecurityOverview();
+    if (securityToTop && !more) {
+        securityToTop = false;
+        securityListToTop();
+    }
 }
 
-// An address is banned or it is not: To review holds every one that is not, what a
-// rule caught (tagged with the rule) and what only failed to log in (no tag)
-function securityList(key, addresses) {
-    if (key === 'history') return [];
-    const inList = key === 'review' ? a => a.state === 'review' || (a.state === 'quiet' && a.tries > 0) : a => a.state === key;
-    return addresses.filter(inList)
-        .sort((x, y) => (y.last || '').localeCompare(x.last || ''));
+// Read the list again, keeping as many rows as are shown. The page timer, Fail2ban
+// and the rules' loaders all call this; together they make one request.
+function refreshSecurityAddresses() {
+    clearTimeout(securityRefreshTimer);
+    securityRefreshTimer = setTimeout(() => {
+        const shown = securityPage ? securityPage.items.length : 0;
+        loadSecurityAddresses(false, Math.min(200, Math.max(SECURITY_PAGE_SIZE, shown)));
+    }, 150);
 }
 
 // ----------------------------------------------------------------- what protects the server
@@ -399,17 +413,31 @@ function securityEditing() {
 function setSecurityFilter(key) {
     securityFilter = key;
     securityOpenRow = null;
-    securityShown = SECURITY_LIST_PREVIEW;
-    if (key === 'history' && securityHistory === null) { loadSecurityHistory(); }
+    securityPage = null;
+    if (key === 'history' && securityHistory === null) loadSecurityHistory();
+    securityToTop = key !== 'history';
+    if (key !== 'history') loadSecurityAddresses();
     renderSecurityOverview();
+    securityListToTop();
+}
+
+// A new list or country starts at its first row, not where the last one was scrolled to.
+// It is done again once the rows are drawn: while they load the content is short, and
+// the browser's scroll anchoring would carry the new rows down to where the old ones ended.
+function securityListToTop() {
+    const box = document.getElementById('security-list');
+    if (box) requestAnimationFrame(() => securityScrollTo(box, true));
 }
 
 function pickSecurityCountry(name) {
     securityCountry = securityCountry === name ? null : name;
     securityOpenRow = null;
-    securityShown = SECURITY_LIST_PREVIEW;
+    securityPage = null;
     securityCountryPicker = false;
+    securityToTop = true;
+    loadSecurityAddresses();
     renderSecurityOverview();
+    securityListToTop();
     renderSecurityCountries();
 }
 
@@ -437,36 +465,39 @@ function renderSecurityOverview() {
     }
     const box = document.getElementById('security-list');
     if (!box) return;
-    if (!securityOverview) return;
 
-    const addresses = securityAddresses();
-    const inCountry = a => !securityCountry || a.country === securityCountry;
-    const count = key => key === 'history' ? null : securityList(key, addresses).filter(inCountry).length;
-    const reviewCount = securityList('review', addresses).length;
+    // The page holds the chosen list for the chosen country; until it does, the last counts stay
+    const page = securityPage && securityPage.list === securityFilter && (securityPage.country || null) === (securityCountry || null) ? securityPage : null;
+    if (page) securityLastCounts = { counts: page.counts, review: page.all_counts.review };
+    const counts = securityLastCounts ? securityLastCounts.counts : null;
+    const reviewCount = securityLastCounts ? securityLastCounts.review : 0;
     const tabCount = document.getElementById('security-tab-n-overview');
     if (tabCount) {
         tabCount.textContent = reviewCount ? reviewCount.toLocaleString() : '';
         tabCount.classList.toggle('hidden', !reviewCount);
     }
 
-    const known = fail2banActiveBans !== null;
     const segs = SECURITY_FILTERS.map(([key, label]) => {
-        const n = key === 'banned' && !known && !fail2banLoadError ? '-' : count(key);
-        return `<button type="button" aria-pressed="${securityFilter === key}" onclick="setSecurityFilter('${key}')">${label}${n === null ? '' : ` <b>${typeof n === 'number' ? n.toLocaleString() : n}</b>`}</button>`;
+        const n = key === 'history' || !counts ? null : counts[key];
+        return `<button type="button" aria-pressed="${securityFilter === key}" onclick="setSecurityFilter('${key}')">${label}${n === null || n === undefined ? '' : ` <b>${n.toLocaleString()}</b>`}</button>`;
     }).join('');
-    const list = securityList(securityFilter, addresses).filter(inCountry);
-    const shown = list.slice(0, securityShown);
+    const list = page ? page.items : [];
     const rwNote = !mailcowRwConfigured && securityFilter !== 'history'
         ? `<div class="ui-list-note">${uiLocked('Ban, Allow and Unban are locked', `Changing Fail2ban from this list ${UI_RW_KEY_TEXT}`)}</div>` : '';
-    const f2bNote = fail2banLoadError && securityFilter !== 'history'
+    const f2bDown = fail2banLoadError || (page && page.fail2ban_known === false);
+    const f2bNote = f2bDown && securityFilter !== 'history'
         ? `<p class="ui-sec-note ui-text-fail">mailcow did not answer about Fail2ban, so its bans are not shown and nothing can be banned from here. The next refresh tries again.</p>` : '';
     const empty = {
         review: 'Nothing to review. Addresses that fail to log in, and what the protection rules catch while they watch, show up here.',
-        banned: known ? 'Nothing is banned right now.' : fail2banLoadError ? 'The bans are not known while mailcow does not answer.' : 'Checking Fail2ban...',
+        banned: f2bDown ? 'The bans are not known while mailcow does not answer.' : 'Nothing is banned right now.',
     }[securityFilter];
-    const source = securityOverview;
-    const more = securityFilter === 'review' && source.source_count > source.sources.length
-        ? `<p class="ui-sec-note">Of the addresses that only failed to log in, the ${source.sources.length} with the most attempts in the last 24 hours are listed, of ${source.source_count.toLocaleString()}.</p>` : '';
+    const rows = securityFilter === 'history' ? securityHistoryRows()
+        : !page && securityPageError ? `<p class="ui-empty ui-text-fail">Failed to load: ${escapeHtml(securityPageError)}</p>`
+        : !page ? '<div class="ui-loading"><div class="loading"></div><p>Loading...</p></div>'
+        : list.map(securityRow).join('') || `<p class="ui-empty">${escapeHtml(empty)}</p>`;
+    const footer = securityFilter === 'history' || !page ? ''
+        : page.next ? `<p id="security-more" class="ui-msg-more" aria-live="polite">${securityPageError ? `Could not load more: ${escapeHtml(securityPageError)}` : 'Loading more...'}</p>`
+        : page.total > SECURITY_PAGE_SIZE ? `<p class="ui-msg-more">All ${page.total.toLocaleString()} shown</p>` : '';
 
     box.innerHTML = `
         <div class="ui-panel-head ui-sec-head">
@@ -479,18 +510,16 @@ function renderSecurityOverview() {
             ${securityCountry ? `<span class="ui-sec-filter">${securityFlag(securityCountryCode(securityCountry))}${escapeHtml(securityCountry)}<button type="button" onclick="pickSecurityCountry(null)" aria-label="Show every country" title="Show every country">&times;</button></span>` : ''}
         </div>
         ${rwNote}${f2bNote}
-        <div class="ui-sec-list">${securityFilter === 'history' ? securityHistoryRows()
-            : shown.map(securityRow).join('') || `<p class="ui-empty">${escapeHtml(empty)}</p>`}</div>
-        ${securityFilter !== 'history' && list.length > SECURITY_LIST_PREVIEW ? `<p id="security-more" class="ui-msg-more" aria-live="polite">${list.length > shown.length ? 'Loading more...' : `All ${list.length.toLocaleString()} shown`}</p>` : ''}
-        ${more}`;
+        <div class="ui-sec-list">${rows}</div>
+        ${footer}`;
     // The filters stick right under the tabs, which stick to the top on a phone
     const tabs = document.querySelector('.ui-se-tabs');
     if (tabs) box.style.setProperty('--ui-sec-stick', `${tabs.offsetHeight}px`);
-    renderSecuritySheet(addresses);
-    securityWatchMore(list.length > shown.length);
+    renderSecuritySheet(list);
+    securityWatchMore(!!(page && page.next && !securityPageError));
 }
 
-// When the end of the list comes near, the next rows are drawn
+// When the end of the list comes near, the next page is asked for
 function securityWatchMore(more) {
     if (securityMoreObserver) securityMoreObserver.disconnect();
     securityMoreObserver = null;
@@ -499,8 +528,7 @@ function securityWatchMore(more) {
     securityMoreObserver = new IntersectionObserver(entries => {
         if (!entries.some(e => e.isIntersecting)) return;
         securityMoreObserver.disconnect();
-        securityShown += SECURITY_LIST_PREVIEW;
-        renderSecurityOverview();
+        loadSecurityAddresses(true);
     }, { rootMargin: '0px 0px 400px 0px' });
     securityMoreObserver.observe(sentinel);
 }
@@ -736,16 +764,27 @@ function securityOpenCard(key) {
     requestAnimationFrame(() => {
         const card = document.getElementById(`security-card-${key}`);
         if (!card) return;
-        let scroller = card.parentElement;
-        while (scroller && !(scroller.scrollHeight > scroller.clientHeight && /(auto|scroll)/.test(getComputedStyle(scroller).overflowY))) {
-            scroller = scroller.parentElement;
-        }
-        // On a phone the tabs stick to the top of the page and would cover the card's head
-        const tabs = document.querySelector('.ui-se-tabs');
-        const covered = tabs && scroller && scroller.contains(tabs) && getComputedStyle(tabs).position === 'sticky' ? tabs.offsetHeight : 0;
-        if (scroller) scroller.scrollTop += card.getBoundingClientRect().top - scroller.getBoundingClientRect().top - covered - 10;
+        securityScrollTo(card);
         card.focus({ preventScroll: true });
     });
+}
+
+// Bring an element's top to the top of whatever scrolls it (the tab on a wide screen,
+// the page on a phone). onlyIfAbove: leave it when its top is already in view.
+function securityScrollTo(el, onlyIfAbove = false) {
+    let scroller = el.parentElement;
+    while (scroller && !(scroller.scrollHeight > scroller.clientHeight && /(auto|scroll)/.test(getComputedStyle(scroller).overflowY))) {
+        scroller = scroller.parentElement;
+    }
+    scroller = scroller || document.scrollingElement;
+    if (!scroller) return;
+    const view = scroller === document.scrollingElement ? 0 : scroller.getBoundingClientRect().top;
+    // On a phone the tabs stick to the top of the page and would cover the element's head
+    const tabs = document.querySelector('.ui-se-tabs');
+    const covered = tabs && scroller.contains(tabs) && getComputedStyle(tabs).position === 'sticky' ? tabs.offsetHeight : 0;
+    const offset = el.getBoundingClientRect().top - view - covered - 10;
+    if (onlyIfAbove && offset >= 0) return;
+    scroller.scrollTop += offset;
 }
 
 // ----------------------------------------------------------------- unsaved changes, one save bar

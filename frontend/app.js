@@ -1155,6 +1155,7 @@ async function unbanIP(ip, btnEl) {
             const bare = entry => String(entry || '').replace(/\/(32|128)$/, '');
             if (fail2banActiveBans) fail2banActiveBans = fail2banActiveBans.filter(b => bare(b.ip || b.network) !== bare(ip));
             renderSecurityOverview();
+            refreshSecurityAddresses();
             setTimeout(() => { fail2banSettingsLoaded = false; loadFail2BanSettings(); }, 5000);
             smartRefreshNetfilter();
         } else {
@@ -2075,6 +2076,7 @@ async function loadFail2BanSettings() {
         fail2banLoadError = true;
     }
     renderSecurityOverview();
+    refreshSecurityAddresses();   // a ban, an unban or a list entry moves an address between the lists
     if (!securityEditing()) {
         renderSecurityLists();
         renderSecuritySettings();
