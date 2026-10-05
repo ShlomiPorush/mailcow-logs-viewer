@@ -73,7 +73,7 @@ These settings **must** be configured in your `.env` file:
 | `MAX_SEARCH_RESULTS` | integer | `1000` | Maximum records to return in search results |
 | `CSV_EXPORT_LIMIT` | integer | `10000` | CSV export row limit |
 | `SCHEDULER_WORKERS` | integer | `4` | Thread pool size for blocking scheduler jobs (e.g. the DMARC & TLS IMAP import). Valid range: 1-64. Higher values allow more blocking jobs to run in parallel |
-| `DISABLED_FEATURES` | string | (empty) | Comma-separated list of features to disable (hides navigation, stops background jobs). Valid values: `netfilter`, `queue`, `quarantine`, `spam-filter`, `domains`, `dmarc`, `mailbox-stats`, `rate-limits`, `logs`, `blacklist`. Can also be managed from the Settings UI when `SETTINGS_EDIT_VIA_UI_ENABLED=true` |
+| `DISABLED_FEATURES` | string | (empty) | Comma-separated list of features to disable (hides navigation, stops background jobs). Valid values: `netfilter`, `queue`, `quarantine`, `spam-filter`, `domains`, `dmarc`, `mailbox-stats`, `rate-limits`, `logs`, `blacklist`, `devices`. Can also be managed from the Settings UI when `SETTINGS_EDIT_VIA_UI_ENABLED=true` |
 
 ---
 
@@ -272,6 +272,16 @@ Settings for the background raw log collector that powers the Logs page. Logs ar
 | `RAW_LOGS_FETCH_COUNT` | integer | `1000` | Number of log entries to fetch per service per cycle. Higher values catch more logs but increase API load |
 | `RAW_LOGS_RETENTION_DAYS` | integer | `2` | Days to keep raw logs in the database. Older logs are automatically deleted daily at 3:00 AM |
 | `RAW_LOGS_SERVICES` | string | `all` | Which mailcow services to collect logs from. Use `all` for all 10 services, or comma-separated list: `postfix,dovecot,sogo,api`. Available: `acme`, `api`, `autodiscover`, `dovecot`, `netfilter`, `postfix`, `ratelimited`, `rspamd-history`, `sogo`, `watchdog` |
+
+---
+
+## Devices (ActiveSync)
+
+The Devices page lists the phones and tablets that sync over ActiveSync. It reads the SOGo log through the mailcow API every minute, independent of the raw log settings above.
+
+| Variable | Type | Default | Description |
+|----------|------|---------|-------------|
+| `EAS_DEVICES_RETENTION_DAYS` | integer | `90` | Days to keep a device that stopped syncing. `0` keeps every device. Removed daily at 3:30 AM |
 
 ---
 

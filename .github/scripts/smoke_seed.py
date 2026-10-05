@@ -143,6 +143,17 @@ def seed_mailboxes(db):
                              is_catch_all=True, primary_mailbox='noa@example.org'))
 
 
+def seed_devices(db):
+    # A connected phone, a new tablet failing to sign in, and a phone gone quiet
+    for user, device_id, kind, ip, command, status, first, last in [
+        ('dana@example.com', 'F2C8A1D94B7E4C1A', 'iPhone', '192.0.2.10', 'Ping', 200, ago(days=40), ago(minutes=12)),
+        ('noa@example.org', '9B1E77C3A0D24E68', 'iPad', '2001:db8::7', 'Sync', 401, ago(days=2), ago(hours=3)),
+        ('maya@example.com', 'androidc8f1e2d3a4b5', 'SAMSUNGSMS918B', '198.51.100.12', 'FolderSync', 200, ago(days=80), ago(days=35)),
+    ]:
+        db.add(m.EasDevice(username=user, device_id=device_id, device_type=kind, last_ip=ip, last_command=command,
+                           last_status=status, first_seen=first, last_seen=last))
+
+
 def seed_status_and_lists(db):
     db.add(m.MonitoredHost(hostname='mail.example.com', source='system', active=True, last_seen=NOW))
     db.add(m.BlacklistCheck(
@@ -186,6 +197,7 @@ def main():
         seed_security(db)
         seed_dmarc(db)
         seed_mailboxes(db)
+        seed_devices(db)
         seed_status_and_lists(db)
         db.commit()
     finally:

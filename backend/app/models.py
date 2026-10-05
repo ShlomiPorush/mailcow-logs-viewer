@@ -604,6 +604,33 @@ class RawServiceLog(Base):
         return f"<RawServiceLog(service={self.service}, time={self.time})>"
 
 
+class EasDevice(Base):
+    """
+    One ActiveSync device of one user, built from SOGo's access log lines for
+    /Microsoft-Server-ActiveSync. Each row keeps the newest request seen for
+    the pair (user, device id) and when the pair was first and last seen.
+    """
+    __tablename__ = "eas_devices"
+
+    id = Column(Integer, primary_key=True, index=True)
+    username = Column(String(255), nullable=False)
+    device_id = Column(String(255), nullable=False)
+    device_type = Column(String(100))
+    last_ip = Column(String(255))
+    last_command = Column(String(64))
+    last_status = Column(Integer)
+    first_seen = Column(DateTime, nullable=False)
+    last_seen = Column(DateTime, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint('username', 'device_id', name='uq_eas_device'),
+        Index('idx_eas_device_last_seen', 'last_seen'),
+    )
+
+    def __repr__(self):
+        return f"<EasDevice(username={self.username}, device_id={self.device_id})>"
+
+
 class SpamSuppression(Base):
     """
     Spam suppression list for blocking outgoing emails to recipients

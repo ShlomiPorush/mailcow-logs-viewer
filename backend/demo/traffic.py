@@ -341,6 +341,7 @@ class Traffic:
             user = self._active_mailbox()
             batch.add("sogo", {"time": str(int(t + self.rng.randint(0, 3599))), "program": "sogod", "priority": "info",
                                "message": f'{self.rng.choice(world.CLIENT_IPS)} "POST /SOGo/so/{user}/Mail/0/folderINBOX/changes HTTP/1.1" 200 312/64 0.041 - - 0'})
+        self.activesync(batch, t)
         batch.add("api", {"time": str(int(t + self.rng.randint(0, 3599))), "uri": "/api/v1/get/logs/postfix/2000",
                           "method": "GET", "remote": "172.22.1.1", "data": ""})
         if self.rng.random() < 0.2:
@@ -349,6 +350,23 @@ class Traffic:
         if time.localtime(t).tm_hour == 3:
             batch.add("acme", {"time": str(int(t + 60)), "program": "acme", "priority": "info",
                                "message": f"Certificate {world.MAIL_HOST} is valid for 57 more days, not renewing"})
+
+    def activesync(self, batch, hour_start):
+        """SOGo access lines of the phones that synced in this hour, in the
+        shape mailcow returns them, for the Devices page."""
+        for user, device_id, device_type, share, ips in world.EAS_DEVICES:
+            if self.rng.random() >= share:
+                continue
+            t = hour_start + self.rng.randint(0, 3599)
+            command = self.rng.choices(["Ping", "Sync", "FolderSync", "MoveItems", "SendMail"], [70, 22, 4, 2, 2])[0]
+            failing = device_id == world.EAS_FAILING_DEVICE and t > (self._end or t) - 2 * 86400
+            status = 401 if failing else 200
+            seconds = 0.004 if failing else (self.rng.uniform(60, 1800) if command == "Ping" else self.rng.uniform(0.05, 0.6))
+            query = (f"User={user.replace('@', '%40')}&DeviceId={device_id}&DeviceType={device_type}&Cmd={command}")
+            batch.add("sogo", {"time": str(int(t)), "program": "sogod", "priority": "notice",
+                               "message": f'[{self.rng.randint(40, 90)}]: {self.rng.choice(ips)} '
+                                          f'"POST /SOGo/Microsoft-Server-ActiveSync?{query} HTTP/1.1" '
+                                          f'{status} {self.rng.randint(13, 900)}/{self.rng.randint(0, 400)} {seconds:.3f} - - 0 - 15'})
 
     # ------------------------------------------------------------------ rates
 

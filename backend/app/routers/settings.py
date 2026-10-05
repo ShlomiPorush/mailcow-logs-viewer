@@ -368,6 +368,23 @@ def get_settings_info(db: Session = Depends(get_db)):
                     "last_run": format_datetime_utc(jobs_status.get('alias_stats', {}).get('last_run')) if settings.is_feature_enabled('mailbox-stats') else None,
                     "error": jobs_status.get('alias_stats', {}).get('error') if settings.is_feature_enabled('mailbox-stats') else None
                 },
+                "eas_devices": {
+                    "interval": "1 minute" if settings.is_feature_enabled('devices') else "Disabled (feature off)",
+                    "description": "Records ActiveSync devices from the SOGo log",
+                    "feature_disabled": not settings.is_feature_enabled('devices'),
+                    "status": jobs_status.get('eas_devices', {}).get('status', 'unknown') if settings.is_feature_enabled('devices') else 'disabled',
+                    "last_run": format_datetime_utc(jobs_status.get('eas_devices', {}).get('last_run')) if settings.is_feature_enabled('devices') else None,
+                    "error": jobs_status.get('eas_devices', {}).get('error') if settings.is_feature_enabled('devices') else None
+                },
+                "cleanup_eas_devices": {
+                    "schedule": "Daily at 3:30 AM" if settings.is_feature_enabled('devices') else "Disabled (feature off)",
+                    "description": "Removes ActiveSync devices not seen within the retention period",
+                    "retention": (f"{settings.eas_devices_retention_days} days" if settings.eas_devices_retention_days > 0 else "Forever") if settings.is_feature_enabled('devices') else None,
+                    "feature_disabled": not settings.is_feature_enabled('devices'),
+                    "status": jobs_status.get('cleanup_eas_devices', {}).get('status', 'unknown') if settings.is_feature_enabled('devices') else 'disabled',
+                    "last_run": format_datetime_utc(jobs_status.get('cleanup_eas_devices', {}).get('last_run')) if settings.is_feature_enabled('devices') else None,
+                    "error": jobs_status.get('cleanup_eas_devices', {}).get('error') if settings.is_feature_enabled('devices') else None
+                },
                 "blacklist_check": {
                     "schedule": "Daily at 5 AM" if settings.is_feature_enabled('blacklist') else "Disabled (feature off)",
                     "description": "Checks monitored hosts against DNS blacklists",
@@ -726,6 +743,7 @@ _FEATURE_TABLES = {
     'blacklist': ['blacklist_checks', 'monitored_hosts'],
     'spam-filter': ['spam_suppressions'],
     'quarantine': ['quarantine_rule_logs', 'quarantine_rules'],
+    'devices': ['eas_devices'],
 }
 
 
@@ -1058,7 +1076,9 @@ def trigger_job(job_name: str, background_tasks: BackgroundTasks):
         cleanup_deferred_queue_job,
         anomaly_detection_job,
         smtp_abuse_job,
-        run_protection_rules
+        run_protection_rules,
+        update_eas_devices,
+        cleanup_eas_devices
     )
     from ..raw_logs_worker import fetch_raw_service_logs, cleanup_raw_service_logs
     
@@ -1091,6 +1111,8 @@ def trigger_job(job_name: str, background_tasks: BackgroundTasks):
         'anomaly_detection': ('anomaly_detection', anomaly_detection_job, False),
         'smtp_abuse': ('smtp_abuse', smtp_abuse_job, False),
         'protection_rules': ('protection_rules', run_protection_rules, False),
+        'eas_devices': ('eas_devices', update_eas_devices, False),
+        'cleanup_eas_devices': ('cleanup_eas_devices', cleanup_eas_devices, False),
         'fetch_raw_logs': ('fetch_raw_logs', fetch_raw_service_logs, True),
         'cleanup_raw_logs': ('cleanup_raw_logs', cleanup_raw_service_logs, True),
     }

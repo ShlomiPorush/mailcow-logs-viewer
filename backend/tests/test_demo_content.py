@@ -71,6 +71,14 @@ def test_netfilter_lines_parse_and_include_a_live_attack(week):
     assert len(recent) >= 20  # the auth-failure burst alert threshold
 
 
+def test_activesync_lines_parse_into_every_demo_device(week):
+    from app.services.eas_devices import collect_devices
+    devices = {(d["username"], d["device_id"]): d for d in collect_devices(week["sogo"])}
+    assert set(devices) == {(user, device_id) for user, device_id, *_ in world.EAS_DEVICES}
+    assert devices[("heidi@example.org", world.EAS_FAILING_DEVICE)]["last_status"] == 401
+    assert any(":" in (d["last_ip"] or "") for d in devices.values())
+
+
 def test_volumes_fit_one_ingest_cycle(week):
     # netfilter is fetched as the newest 500 only; services without raw-log
     # catch-up are read as the newest 1000
