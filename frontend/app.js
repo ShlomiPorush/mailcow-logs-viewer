@@ -1199,6 +1199,7 @@ async function banIP(ip, btnEl) {
             fail2banActiveBans = null;
             loadFail2BanSettings();
             smartRefreshNetfilter();
+            return true;
         } else {
             showToast('Failed to ban: ' + (result.msg || result.detail || 'Unknown error'), 'error');
             if (btnEl) {
@@ -1234,7 +1235,7 @@ async function allowIP(ip, btnEl) {
             fail2banSettingsLoaded = false;
             fail2banActiveBans = null;
             loadFail2BanSettings();
-            return;
+            return true;
         }
         showToast('Failed to allow: ' + (result.msg || result.detail || 'Unknown error'), 'error');
     } catch (err) {
@@ -2139,10 +2140,8 @@ async function loadFail2BanSettings() {
     }
     renderSecurityOverview();
     refreshSecurityAddresses();   // a ban, an unban or a list entry moves an address between the lists
-    if (!securityEditing()) {
-        renderSecurityLists();
-        renderSecuritySettings();
-    }
+    if (!securityListsTyping()) renderSecurityLists();
+    if (!securityEditing()) renderSecuritySettings();
     // The events' Ban and Unban buttons depend on the denylist
     if (lastDataCache.netfilter && mailcowRwConfigured) renderNetfilterData(lastDataCache.netfilter);
 }
