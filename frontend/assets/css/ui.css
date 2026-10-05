@@ -1415,6 +1415,8 @@ button.ui-st-card:hover { outline: 1px solid var(--ui-line); }
 .ui-domain-tools .ui-filters-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
 .ui-check-label { display: inline-flex; align-items: center; gap: 8px; font-size: var(--ui-fs-sm); cursor: pointer; }
 .ui-domain-tools .ui-check-label { margin-inline-start: auto; }
+/* Devices: the same row, with the count by the search and the filters at the end */
+.ui-dev-tools #devices-type-filter { margin-inline-start: auto; }
 .ui-domain-table { --ui-cols: minmax(220px, 2.4fr) repeat(6, minmax(64px, .6fr)) 90px; --ui-table-min: 850px; }
 .ui-domain-row { cursor: pointer; }
 .ui-domain-row:hover { background: color-mix(in srgb, var(--ui-accent) 4%, transparent); }
@@ -1454,6 +1456,7 @@ button.ui-st-card:hover { outline: 1px solid var(--ui-line); }
 
 @media (max-width: 760px) {
     .ui-domain-tools .ui-check-label { margin-inline-start: 0; }
+    .ui-dev-tools #devices-type-filter { margin-inline-start: 0; }
     .ui-domain-table .ui-tr:not(.ui-tr-head) > .ui-td:not(.ui-q-who) { flex: 0 0 auto; }
     .ui-domain-details { flex: 1 1 100%; }
 }

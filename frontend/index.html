@@ -1349,11 +1349,12 @@
 
                 <div class="ui-sec-block ui-scroll">
                     <div class="ui-panel ui-table-card">
-                    <section class="ui-panel ui-filters">
+                    <section class="ui-panel ui-filters ui-domain-tools ui-dev-tools">
                         <div class="ui-filters-row">
                             <label class="ui-search"><svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
                                 <input type="text" id="devices-search" oninput="applyDevicesFilters()" placeholder="Search user, device or IP..." aria-label="Search devices">
                             </label>
+                            <span id="devices-count" class="ui-count"></span>
                             <select id="devices-type-filter" onchange="applyDevicesFilters()" class="ui-select ui-select-auto" aria-label="Device type">
                                 <option value="">All device types</option>
                             </select>
@@ -1368,7 +1369,7 @@
                     </section>
                     <div id="devices-list"><div class="ui-loading"><div class="loading"></div><p>Loading devices...</p></div></div>
                     </div>
-                    <div class="ui-list-head ui-list-foot"><span id="devices-count" class="ui-count"></span><span id="devices-pager" class="ui-head-actions"></span></div>
+                    <div id="devices-foot" class="ui-list-head ui-list-foot hidden"><span id="devices-pager" class="ui-head-actions"></span></div>
                 </div>
             </div>
 

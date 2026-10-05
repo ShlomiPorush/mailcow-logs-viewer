@@ -248,8 +248,8 @@ Fields that copy their value on click (hover shows a copy icon and "Click to cop
 | Shared | copies: `ip` | `frontend/app.js:4692` (renderGeoIPInfo) |
 | Shared | copies: `ip` | `frontend/app.js:4699` (renderGeoIPInfo) |
 | Shared | copyToClipboard: `'${safeText}'` | `frontend/utils.js:550` (copyableText) |
-| Devices | copies: `d.username` | `frontend/devices.js:142` (renderDeviceRow) |
-| Devices | copies: `d.last_ip` | `frontend/devices.js:146` (renderDeviceRow) |
+| Devices | copies: `d.username` | `frontend/devices.js:144` (renderDeviceRow) |
+| Devices | copies: `d.last_ip` | `frontend/devices.js:148` (renderDeviceRow) |
 
 ### Tooltips
 
@@ -416,16 +416,16 @@ Native `title` tooltips. Dynamic ones show the expression that builds the text.
 | Mailbox stats | "Resetting a counter needs the Read-Write API key (MAILCOW_API_KEY_RW)" | `frontend/rate-limits.js:141` |
 | Mailbox stats | dynamic: `${escapeHtml(formatTime(group.last_seen))}` | `frontend/rate-limits.js:364` (renderRateLimitSendersTable) |
 | Mailbox stats | set in JS: dynamic: `isRateLimits ? 'Help - Rate Limits' : 'Help - Mailbox Statistics'` | `frontend/mailbox-stats.js:86` (mailboxStatsSwitchView) |
-| Logs | "Pause/Resume live updates" | `frontend/index.html:1398` |
-| Logs | "Live mode - show latest logs" | `frontend/index.html:1402` |
-| Logs | "Auto-scroll to new entries" | `frontend/index.html:1405` |
-| Logs | "Toggle sort order (newest at bottom / newest at top)" | `frontend/index.html:1408` |
-| Logs | "Toggle word wrap" | `frontend/index.html:1419` |
-| Logs | "Clear display" | `frontend/index.html:1422` |
-| Logs | "Search" | `frontend/index.html:1429` |
-| Logs | "Clear search" | `frontend/index.html:1430` |
-| Logs | "From date" | `frontend/index.html:1446` |
-| Logs | "To date" | `frontend/index.html:1448` |
+| Logs | "Pause/Resume live updates" | `frontend/index.html:1399` |
+| Logs | "Live mode - show latest logs" | `frontend/index.html:1403` |
+| Logs | "Auto-scroll to new entries" | `frontend/index.html:1406` |
+| Logs | "Toggle sort order (newest at bottom / newest at top)" | `frontend/index.html:1409` |
+| Logs | "Toggle word wrap" | `frontend/index.html:1420` |
+| Logs | "Clear display" | `frontend/index.html:1423` |
+| Logs | "Search" | `frontend/index.html:1430` |
+| Logs | "Clear search" | `frontend/index.html:1431` |
+| Logs | "From date" | `frontend/index.html:1447` |
+| Logs | "To date" | `frontend/index.html:1449` |
 | Logs | dynamic: `${escapeHtml(f.description \|\| '')}` | `frontend/logs-viewer.js:211` (loadSmartFilters) |
 | Logs | "Clear all filters" | `frontend/logs-viewer.js:1209` (updateFilterBadge) |
 | Settings | "Last delivery succeeded" | `frontend/notifications.js:67` (renderNotificationChannels) |
@@ -450,20 +450,20 @@ Native `title` tooltips. Dynamic ones show the expression that builds the text.
 | app.js (mixed) | dynamic: `Look up on ${escapeHtml(r.name)}` | `frontend/app.js:3784` (blocklistLookupLink) |
 | app.js (mixed) | set in JS: dynamic: `label` | `frontend/app.js:289` (setNavTabLabel) |
 | app.js (mixed) | set in JS: dynamic: `title \|\| ''` | `frontend/app.js:625` (setNavCount) |
-| Devices | dynamic: `SOGo answered HTTP ${Number(status)}` | `frontend/devices.js:117` (deviceStatusTag) |
-| Devices | dynamic: `${escapeHtml(network)}` | `frontend/devices.js:126` (deviceLocation) |
-| Devices | dynamic: `${escapeHtml(`Device ID ${d.device_id}${d.model ? ` (reported as ${d.device_t...` | `frontend/devices.js:144` (renderDeviceRow) |
-| Devices | dynamic: `${escapeHtml(DEVICE_CLIENT_NOTE[client] \|\| 'Recognised from how the app nam...` | `frontend/devices.js:144` (renderDeviceRow) |
-| Devices | dynamic: `${escapeHtml(formatTime(d.first_seen))}` | `frontend/devices.js:148` (renderDeviceRow) |
-| Devices | dynamic: `${escapeHtml(formatTime(d.last_seen))}` | `frontend/devices.js:149` (renderDeviceRow) |
+| Devices | dynamic: `SOGo answered HTTP ${Number(status)}` | `frontend/devices.js:119` (deviceStatusTag) |
+| Devices | dynamic: `${escapeHtml(network)}` | `frontend/devices.js:128` (deviceLocation) |
+| Devices | dynamic: `${escapeHtml(`Device ID ${d.device_id}${d.model ? ` (reported as ${d.device_t...` | `frontend/devices.js:146` (renderDeviceRow) |
+| Devices | dynamic: `${escapeHtml(DEVICE_CLIENT_NOTE[client] \|\| 'Recognised from how the app nam...` | `frontend/devices.js:146` (renderDeviceRow) |
+| Devices | dynamic: `${escapeHtml(formatTime(d.first_seen))}` | `frontend/devices.js:150` (renderDeviceRow) |
+| Devices | dynamic: `${escapeHtml(formatTime(d.last_seen))}` | `frontend/devices.js:151` (renderDeviceRow) |
 | Devices | "Help - Devices" | `frontend/index.html:1340` |
 | Devices | set in JS: dynamic: `data.last_run ? formatTime(data.last_run) : ''` | `frontend/devices.js:66` (renderDevicesSummary) |
-| Modal: changelog-modal | "Close" | `frontend/index.html:1547` |
-| Modal: container-logs-modal | "Refresh" | `frontend/index.html:1579` |
-| Modal: container-logs-modal | "Close" | `frontend/index.html:1587` |
-| Modal: dmarc-reports-management-modal | "Close" | `frontend/index.html:1639` |
-| Modal: dmarc-sync-history-modal | "Close" | `frontend/index.html:1626` |
-| Modal: message-modal | "Close" | `frontend/index.html:1520` |
+| Modal: changelog-modal | "Close" | `frontend/index.html:1548` |
+| Modal: container-logs-modal | "Refresh" | `frontend/index.html:1580` |
+| Modal: container-logs-modal | "Close" | `frontend/index.html:1588` |
+| Modal: dmarc-reports-management-modal | "Close" | `frontend/index.html:1640` |
+| Modal: dmarc-sync-history-modal | "Close" | `frontend/index.html:1627` |
+| Modal: message-modal | "Close" | `frontend/index.html:1521` |
 
 ### Toasts
 
@@ -665,7 +665,7 @@ PNG flags served locally from `frontend/assets/flags/<size>/<cc>.png` (sizes 16x
 | Security | getFlagUrl(code, '16x12') | `frontend/security.js:123` (securityFlag) |
 | Shared | getFlagUrl(rspamdData.country_code, size) | `frontend/app.js:4695` (renderGeoIPInfo) |
 | Shared | getFlagUrl(record.country_code, size) | `frontend/app.js:4738` (renderGeoIPForDMARC) |
-| Devices | getFlagUrl(d.country_code, '16x12') | `frontend/devices.js:124` (deviceLocation) |
+| Devices | getFlagUrl(d.country_code, '16x12') | `frontend/devices.js:126` (deviceLocation) |
 
 ### Markdown rendering
 
@@ -735,9 +735,9 @@ Drop-down lists in the page markup with their options. The option wording and or
 | Spam filter | `suppression-filter-active`: Active Only / All / Inactive / Expired | `frontend/index.html:976` |
 | Mailbox stats | `mailbox-stats-domain-filter`: All Domains | `frontend/index.html:1295` |
 | Mailbox stats | `mailbox-stats-sort`: Sent (High to Low) / Received (High to Low) / Failure Rate (High to Low) / Quota Used (High to Low) / Username (A-Z) | `frontend/index.html:1298` |
-| Logs | `logs-fontsize`: 10px / 11px / 12px / 13px / 14px / 16px | `frontend/index.html:1411` |
-| Devices | `devices-type-filter`: All device types | `frontend/index.html:1357` |
-| Devices | `devices-seen-filter`: Any time / Seen in 24 hours / New this week / Not seen for 30 days | `frontend/index.html:1360` |
+| Logs | `logs-fontsize`: 10px / 11px / 12px / 13px / 14px / 16px | `frontend/index.html:1412` |
+| Devices | `devices-type-filter`: All device types | `frontend/index.html:1358` |
+| Devices | `devices-seen-filter`: Any time / Seen in 24 hours / New this week / Not seen for 30 days | `frontend/index.html:1361` |
 
 ### Charts
 
@@ -818,7 +818,7 @@ Text shown when a list or panel has nothing to show.
 | Settings | "No logs available" | `frontend/settings.js:1815` (testSmtpConnection) |
 | Settings | "No logs available" | `frontend/settings.js:1841` (testImapConnection) |
 | app.js (mixed) | "No changelog available" | `frontend/app.js:778` (showAppUpdateModal) |
-| Devices | "No ActiveSync devices yet" | `frontend/devices.js:92` (renderDevicesList) |
+| Devices | "No ActiveSync devices yet" | `frontend/devices.js:94` (renderDevicesList) |
 | Modal: changelog-modal | "No changelog available" | `frontend/app.js:4644` (showChangelogModal) |
 | Modal: container-logs-modal | "No logs available" | `frontend/app.js:4933` (fetchContainerLogs) |
 
