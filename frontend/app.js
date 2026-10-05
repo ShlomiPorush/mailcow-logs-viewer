@@ -714,8 +714,7 @@ function showMarkdownModal(title, markdownContent) {
 
         // Add some basic styling for markdown content
         content.innerHTML = `<div class="markdown-body">${htmlContent}</div>`;
-        modal.classList.remove('hidden');
-        document.body.style.overflow = 'hidden';
+        revealChangelogModal(modal);
     }
 }
 
@@ -4542,9 +4541,18 @@ function showChangelogModal(changelog) {
         } else {
             content.textContent = changelog || 'No changelog available';
         }
-        modal.classList.remove('hidden');
-        document.body.style.overflow = 'hidden';
+        revealChangelogModal(modal);
     }
+}
+
+// The changelog, help and update texts share one dialog: each opens at the top of
+// what it holds, not where the one before was scrolled to
+function revealChangelogModal(modal) {
+    modal.classList.remove('hidden');
+    document.body.style.overflow = 'hidden';
+    // Only once it is shown: a hidden element cannot be scrolled
+    const body = modal.querySelector('.ui-dialog-body');
+    if (body) body.scrollTop = 0;
 }
 
 function closeChangelogModal() {
@@ -4780,8 +4788,7 @@ async function showHelpModal(docName) {
                 modalTitle.textContent = 'Help';
             }
             content.innerHTML = '<p class="text-red-500">Failed to load help documentation. Please try again later.</p>';
-            modal.classList.remove('hidden');
-            document.body.style.overflow = 'hidden';
+            revealChangelogModal(modal);
         }
     }
 }
