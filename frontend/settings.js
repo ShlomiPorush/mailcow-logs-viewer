@@ -298,7 +298,7 @@ var SETTINGS_FIELD_DESCRIPTIONS = {
     maxmind_account_id: 'MaxMind Account ID for GeoIP database downloads. Required to download GeoLite2 databases.',
     maxmind_license_key: 'MaxMind License Key for GeoIP database downloads. Required to download GeoLite2 databases. Keep this secret.',
     disabled_features: 'Disable features to hide their pages and stop their background jobs. Core features (Dashboard, Messages, Settings, Status) are always enabled.',
-    raw_logs_enabled: 'Enable background raw log collection for the Logs page. When disabled, no logs are fetched and the Logs page shows historical data only.',
+    raw_logs_enabled: 'Collect the services ticked below for the Logs page. When disabled, the Logs page shows historical data only. The services other pages read (listed under Services) are collected either way.',
     raw_logs_fetch_interval: 'Seconds between raw log fetch cycles. Lower = more frequent updates. Default: 20.',
     raw_logs_fetch_count: 'Number of log entries to fetch per service per cycle. Higher values catch more logs but increase API load. Default: 1000.',
     raw_logs_retention_days: 'Days to keep raw logs in the database. Older logs are automatically deleted at 3:00 AM daily. Default: 2.',
@@ -523,6 +523,19 @@ function settingsRemoveSecret(btn) {
     hidden.form && hidden.form.dispatchEvent(new Event('input', { bubbles: true }));
 }
 
+// Raw log services other pages read (/api/settings/info), collected whatever is ticked
+let settingsRawLogsRequired = {};
+
+// Which services keep coming in for other pages, so unticking one does not
+// look like it stops them
+function settingsRawLogsRequiredNote(labels) {
+    const parts = Object.entries(settingsRawLogsRequired).map(([svc, pages]) =>
+        `<b>${escapeHtml(labels[svc] || svc)}</b> for ${escapeHtml(pages.join(', '))}`);
+    if (!parts.length) return '';
+    return '<p class="ui-set-desc">Collected either way, because other pages read them: ' + parts.join('; ')
+        + '. The Logs page shows only the services ticked here.</p>';
+}
+
 function renderSettingsEditField(key, value, sensitiveKeys, description, envLocked, defaultValue) {
     const LOCK = '<svg width="12" height="12" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true"><path fill-rule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clip-rule="evenodd"></path></svg>';
     // Special renderer for disabled_features - checkboxes for feature toggles
@@ -586,6 +599,7 @@ function renderSettingsEditField(key, value, sensitiveKeys, description, envLock
                 escapeHtml(svc.label) + '</label>';
         });
         checkboxesHtml += '</div>';
+        checkboxesHtml += settingsRawLogsRequiredNote(Object.fromEntries(ALL_LOG_SERVICES.map(function (s) { return [s.id, s.label]; })));
 
         // Hidden input that holds the comma-separated value
         checkboxesHtml += '<input type="hidden" id="edit-raw_logs_services" name="raw_logs_services" value="' + escapeHtml(value || '') + '">';
@@ -726,6 +740,7 @@ async function loadSettings() {
         }
 
         const data = await settingsResponse.json();
+        settingsRawLogsRequired = data.raw_logs_required || {};
 
         // Always fetch GET /api/settings so we have the UI-edit flag and editable_config (in case /info omits them or env just enabled)
         try {

@@ -43,8 +43,6 @@ def _job_off_reason(key: str):
         'dmarc_imap_sync': [(not settings.dmarc_imap_enabled, 'IMAP import of DMARC and TLS reports is not set up', 'dmarc_imap')],
         'update_geoip': [(not is_license_configured(), 'Needs a MaxMind Account ID and License Key', 'maxmind')],
         'send_weekly_summary': [(not settings.enable_weekly_summary, 'The weekly summary is turned off', 'notifications')],
-        'fetch_raw_logs': [(not settings.raw_logs_enabled, 'Live Logs are turned off', 'logs')],
-        'cleanup_raw_logs': [(not settings.raw_logs_enabled, 'Live Logs are turned off', 'logs')],
         'detect_suppressions': [(not settings.suppression_enabled, 'Suppressions are turned off', 'spam_filter'),
                                 (not settings.suppression_auto_detect, 'Automatic bounce detection is turned off', 'spam_filter')],
         'sync_suppressions': [(not settings.suppression_enabled, 'Suppressions are turned off', 'spam_filter'),
@@ -410,23 +408,22 @@ def get_settings_info(db: Session = Depends(get_db)):
                     "error": jobs_status.get('send_weekly_summary', {}).get('error') if settings.enable_weekly_summary else None
                 },
                 "fetch_raw_logs": {
-                    "interval": f"{settings.raw_logs_fetch_interval} seconds" if (settings.is_feature_enabled('logs') and settings.raw_logs_enabled) else ("Disabled (feature off)" if not settings.is_feature_enabled('logs') else "Disabled"),
-                    "description": "Fetches raw logs from mailcow services for the Logs page",
-                    "enabled": settings.is_feature_enabled('logs') and settings.raw_logs_enabled,
-                    "feature_disabled": not settings.is_feature_enabled('logs'),
-                    "status": _get_raw_logs_job_status('fetch_raw_logs', 'status', settings.is_feature_enabled('logs') and settings.raw_logs_enabled),
-                    "last_run": _get_raw_logs_job_status('fetch_raw_logs', 'last_run', settings.is_feature_enabled('logs') and settings.raw_logs_enabled),
-                    "error": _get_raw_logs_job_status('fetch_raw_logs', 'error', settings.is_feature_enabled('logs') and settings.raw_logs_enabled)
+                    "interval": f"{settings.raw_logs_fetch_interval} seconds",
+                    "description": "Fetches raw logs from mailcow services for the Logs page and the pages that read them",
+                    "services": ", ".join(settings.raw_logs_collected_list),
+                    "enabled": True,
+                    "status": _get_raw_logs_job_status('fetch_raw_logs', 'status', True),
+                    "last_run": _get_raw_logs_job_status('fetch_raw_logs', 'last_run', True),
+                    "error": _get_raw_logs_job_status('fetch_raw_logs', 'error', True)
                 },
                 "cleanup_raw_logs": {
-                    "schedule": "Daily at 3:00 AM" if (settings.is_feature_enabled('logs') and settings.raw_logs_enabled) else ("Disabled (feature off)" if not settings.is_feature_enabled('logs') else "Disabled"),
+                    "schedule": "Daily at 3:00 AM",
                     "description": "Removes raw logs older than retention period",
-                    "retention": f"{settings.raw_logs_retention_days} days" if (settings.is_feature_enabled('logs') and settings.raw_logs_enabled) else None,
-                    "enabled": settings.is_feature_enabled('logs') and settings.raw_logs_enabled,
-                    "feature_disabled": not settings.is_feature_enabled('logs'),
-                    "status": _get_raw_logs_job_status('cleanup_raw_logs', 'status', settings.is_feature_enabled('logs') and settings.raw_logs_enabled),
-                    "last_run": _get_raw_logs_job_status('cleanup_raw_logs', 'last_run', settings.is_feature_enabled('logs') and settings.raw_logs_enabled),
-                    "error": _get_raw_logs_job_status('cleanup_raw_logs', 'error', settings.is_feature_enabled('logs') and settings.raw_logs_enabled)
+                    "retention": f"{settings.raw_logs_retention_days} days",
+                    "enabled": True,
+                    "status": _get_raw_logs_job_status('cleanup_raw_logs', 'status', True),
+                    "last_run": _get_raw_logs_job_status('cleanup_raw_logs', 'last_run', True),
+                    "error": _get_raw_logs_job_status('cleanup_raw_logs', 'error', True)
                 },
                 "detect_suppressions": {
                     "interval": "5 minutes" if (settings.is_feature_enabled('spam-filter') and settings.suppression_enabled) else ("Disabled (feature off)" if not settings.is_feature_enabled('spam-filter') else "Disabled (suppression off)"),
@@ -543,6 +540,8 @@ def get_settings_info(db: Session = Depends(get_db)):
             off = None if job.get("feature_disabled") else _job_off_reason(key)
             if off:
                 job["disabled_reason"], job["settings_section"] = off
+        # Raw log services other pages read, collected whatever the Logs page settings are
+        result["raw_logs_required"] = settings.raw_logs_required
         # When UI editing is enabled, include full editable config and migration status
         if settings.edit_settings_via_ui_enabled:
             result["editable_config"] = _effective_config_for_editable(settings)
@@ -773,6 +772,12 @@ def purge_feature_data(body: Dict[str, Any], db: Session = Depends(get_db)):
         for table_name in tables:
             if not _TABLE_NAME_RE.match(table_name):
                 raise ValueError(f"Invalid table name: {table_name}")
+            if table_name == 'raw_service_logs':
+                # Other pages read some services from this table; only the rows
+                # nothing collects any more go
+                from ..raw_logs_worker import delete_uncollected_raw_logs
+                deleted_counts[table_name] = delete_uncollected_raw_logs(db)
+                continue
             # nosemgrep: python.sqlalchemy.security.audit.avoid-sqlalchemy-text.avoid-sqlalchemy-text
             count = db.execute(text(f"SELECT COUNT(*) FROM {table_name}")).scalar() or 0
             if count > 0:

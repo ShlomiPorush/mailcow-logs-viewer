@@ -836,6 +836,34 @@ class Settings(BaseSettings):
             return list(ALL_RAW_LOG_SERVICES)
         names = [s.strip().lower() for s in val.split(',') if s.strip()]
         return [s for s in dict.fromkeys(names) if s in ALL_RAW_LOG_SERVICES]
+
+    @property
+    def raw_logs_page_on(self) -> bool:
+        """The Logs page is on: its service selection is collected too."""
+        return self.is_feature_enabled('logs') and self.raw_logs_enabled
+
+    @property
+    def raw_logs_required(self) -> Dict[str, List[str]]:
+        """Services other pages read from the raw logs, with those pages.
+
+        These are collected whatever the Logs page settings are, so turning
+        the Logs page off or unticking a service does not quietly empty them.
+        """
+        required = {'dovecot': ['Message details (Sieve and delivery results)']}
+        if self.is_feature_enabled('netfilter'):
+            required['dovecot'].append('Security (login after failed attempts alert)')
+        if self.is_feature_enabled('rate-limits'):
+            required['ratelimited'] = ['Rate Limits']
+        if self.is_feature_enabled('devices'):
+            required['sogo'] = ['Devices']
+        return required
+
+    @property
+    def raw_logs_collected_list(self) -> List[str]:
+        """Every service the raw logs worker fetches: the Logs page selection
+        while that page is on, plus what other pages need."""
+        page = self.raw_logs_services_list if self.raw_logs_page_on else []
+        return list(dict.fromkeys(page + list(self.raw_logs_required)))
     
     @property
     def suppression_whitelist_domains_list(self) -> List[str]:

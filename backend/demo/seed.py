@@ -141,7 +141,6 @@ async def ingest():
     await _step("sync_local_domains", scheduler.sync_local_domains)
     await _step("mailbox_stats", scheduler.update_mailbox_statistics)
     await _step("alias_stats", scheduler.update_alias_statistics)
-    await _step("eas_devices", scheduler.update_eas_devices)
     await _step("fetch_logs", scheduler.fetch_all_logs)
 
     # The correlation job takes 100 messages per run
@@ -158,6 +157,7 @@ async def ingest():
     await _step("update_final_status", scheduler.update_final_status_for_correlations)
     for _ in range(3):
         await _step("fetch_raw_logs", fetch_raw_service_logs)
+    await _step("eas_devices", scheduler.update_eas_devices)
     await _step("correlate_dovecot", scheduler.correlate_dovecot_logs)
     await _step("detect_suppressions", scheduler.detect_suppressions_job)
     await _step("dns_check", scheduler.check_all_domains_dns_background)

@@ -31,7 +31,7 @@ def _capabilities() -> dict:
     return {
         "can_ban": bool(mailcow_api.has_rw_key),
         "geoip": bool(geoip_service.is_geoip_available()),
-        "raw_logs": bool(settings.raw_logs_enabled and settings.is_feature_enabled("logs")),
+        "raw_logs": "dovecot" in settings.raw_logs_collected_list,
     }
 
 

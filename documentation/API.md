@@ -3285,7 +3285,7 @@ When a feature is disabled, this endpoint permanently deletes all stored data fr
 | `domains` | `domain_dns_checks` |
 | `dmarc` | `dmarc_reports`, `dmarc_records`, `dmarc_syncs`, `tls_reports`, `tls_report_policies` |
 | `mailbox-stats` | `mailbox_statistics`, `alias_statistics` |
-| `logs` | `raw_service_logs` |
+| `logs` | `raw_service_logs` (only the services no other page reads; `dovecot`, `ratelimited` and `sogo` stay while their pages are on) |
 | `blacklist` | `blacklist_checks`, `monitored_hosts` |
 | `spam-filter` | `spam_suppressions` |
 | `quarantine` | `quarantine_rules`, `quarantine_rule_logs` |
