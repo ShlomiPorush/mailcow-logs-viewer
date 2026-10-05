@@ -58,15 +58,6 @@ async function loadDevices(page) {
 }
 
 function renderDevicesSummary(data) {
-    const s = data.summary;
-    document.getElementById('devices-kpi-total').textContent = s.devices.toLocaleString();
-    document.getElementById('devices-kpi-users').textContent = `${s.users.toLocaleString()} ${s.users === 1 ? 'user' : 'users'}`;
-    document.getElementById('devices-kpi-recent').textContent = s.recent.toLocaleString();
-    document.getElementById('devices-kpi-new').textContent = s.new.toLocaleString();
-    document.getElementById('devices-kpi-stale').textContent = s.stale.toLocaleString();
-    document.getElementById('devices-kpi-retention').textContent = data.retention_days > 0
-        ? `Removed after ${data.retention_days} days` : 'Kept forever';
-
     const note = document.getElementById('devices-last-update');
     if (data.last_status === 'failed') {
         note.innerHTML = '<span class="ui-text-warn">The last check failed. See Status → Background Jobs.</span>';
@@ -145,7 +136,7 @@ function renderDeviceRow(d, newAfter, staleBefore) {
                 <div><bdi>${escapeHtml(d.device_type || 'Unknown device')}</bdi> ${isNew ? uiTag('New', 'info') : ''}</div>
                 <small>${copyableText(d.device_id, 'ui-mono')}</small>
             </div>
-            <div class="ui-td ui-q-who"><div><small class="ui-sec-unit">IP </small>${d.last_ip ? copyableText(d.last_ip, 'ui-mono') : '<span class="ui-muted">-</span>'}</div>${deviceLocation(d)}</div>
+            <div class="ui-td ui-q-who ui-dev-ip"><div><small class="ui-sec-unit">IP </small>${d.last_ip ? copyableText(d.last_ip, 'ui-mono') : '<span class="ui-muted">-</span>'}</div>${deviceLocation(d)}</div>
             <span class="ui-td ui-td-wrap"><small class="ui-sec-unit">Last request </small>${escapeHtml(d.last_command || '-')} ${deviceStatusTag(d.last_status)}</span>
             <span class="ui-td" title="${escapeHtml(formatTime(d.first_seen))}"><small class="ui-sec-unit">First seen </small>${formatAgo(d.first_seen)}</span>
             <span class="ui-td${isStale ? ' ui-muted' : ''}" title="${escapeHtml(formatTime(d.last_seen))}"><small class="ui-sec-unit">Last seen </small>${formatAgo(d.last_seen)}</span>

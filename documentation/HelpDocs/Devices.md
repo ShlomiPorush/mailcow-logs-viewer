@@ -8,16 +8,10 @@ The list is built from the SOGo log, which the app reads through the mailcow API
 
 > **Note**: A device that syncs over IMAP, CalDAV or CardDAV does not use ActiveSync and is not listed here.
 
-### Summary Cards
-*   **DEVICES**: Every device recorded, and how many users they belong to.
-*   **SEEN IN 24 HOURS**: Devices that made at least one request in the last 24 hours.
-*   **NEW THIS WEEK**: Devices first seen in the last 7 days. A new device on an account nobody expected is worth a look.
-*   **NOT SEEN FOR 30 DAYS**: Devices that stopped syncing, for example a replaced phone. The card also shows how long such a device is kept.
-
 ### Search & Filtering
 1.  **Search**: User, device ID, device type or IP address.
 2.  **Device type**: The type the device reports, such as `iPhone`, `iPad`, `Outlook` or a phone model.
-3.  **Last seen**: Seen in 24 hours, new this week, or not seen for 30 days.
+3.  **Last seen**: Seen in 24 hours, new this week (first seen in the last 7 days), or not seen for 30 days, for example a replaced phone.
 
 Click a column heading to sort by it.
 
