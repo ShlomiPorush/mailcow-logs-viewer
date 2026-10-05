@@ -171,7 +171,7 @@ Generated from the code. Do not edit by hand; run `node .github/scripts/ui-catal
 |---|---|
 | [Click to copy](#click-to-copy) | 53 |
 | [Tooltips](#tooltips) | 198 |
-| [Toasts](#toasts) | 144 |
+| [Toasts](#toasts) | 145 |
 | [Confirmation dialogs](#confirmation-dialogs) | 29 |
 | [Country flags](#country-flags) | 6 |
 | [Markdown rendering](#markdown-rendering) | 4 |
@@ -332,10 +332,10 @@ Native `title` tooltips. Dynamic ones show the expression that builds the text.
 | Security | "Remove" | `frontend/security.js:1049` (securityCardBody) |
 | Security | dynamic: `${s.tries} tries from ${s.addresses} address${s.addresses === 1 ? '' : 'es'}` | `frontend/security.js:1055` (securityCardBody) |
 | Security | "Remove" | `frontend/security.js:1061` (securityCardBody) |
-| Security | dynamic: `${s.tries} failed logins` | `frontend/security.js:1067` (securityCardBody) |
-| Security | "This feature is new - please report any issues on GitHub" | `frontend/security.js:1099` (securityCardHtml) |
-| Security | "Help - Abuse Protection" | `frontend/security.js:1100` (securityCardHtml) |
-| Security | dynamic: `${escapeHtml(disabled ? why : on ? `Turn ${name} off` : `Turn ${name} on`)}` | `frontend/security.js:1120` (securityToggle) |
+| Security | dynamic: `${s.tries} failed logins` | `frontend/security.js:1070` (securityCardBody) |
+| Security | "This feature is new - please report any issues on GitHub" | `frontend/security.js:1102` (securityCardHtml) |
+| Security | "Help - Abuse Protection" | `frontend/security.js:1103` (securityCardHtml) |
+| Security | dynamic: `${escapeHtml(disabled ? why : on ? `Turn ${name} off` : `Turn ${name} on`)}` | `frontend/security.js:1123` (securityToggle) |
 | Queue | "Retry delivery of every message in the queue" | `frontend/app.js:2252` (applyQueueFilters) |
 | Queue | dynamic: `Suppress ${escapeHtml(recipients[0].email)}` | `frontend/app.js:2275` (applyQueueFilters) |
 | Queue | dynamic: `${escapeHtml(formatTime(queued))}` | `frontend/app.js:2282` (applyQueueFilters) |
@@ -599,10 +599,11 @@ Transient notifications from `showToast(message, type)` (utils.js). Type default
 | app.js (mixed) | dynamic: `'Failed to allow IP: ' + err.message` [error] | `frontend/app.js:1242` (allowIP) |
 | app.js (mixed) | dynamic: `ignored ? `${data.name} is ignored for every address.` : `${data.name} counts...` [success] | `frontend/app.js:4270` (setBlocklistIgnored) |
 | app.js (mixed) | dynamic: ``Could not change the blocklist: ${e.message}`` [error] | `frontend/app.js:4274` (setBlocklistIgnored) |
-| app.js (mixed) | "Protection rules saved" [success] | `frontend/protection.js:176` (saveProtectionRules) |
-| app.js (mixed) | dynamic: ``Could not save the rules: ${error.message}`` [error] | `frontend/protection.js:179` (saveProtectionRules) |
-| app.js (mixed) | dynamic: `done(data)` [success] | `frontend/protection.js:191` (protectionHitAction) |
-| app.js (mixed) | dynamic: ``Could not ${action === 'ban' ? 'ban' : action}: ${error.message}`` [error] | `frontend/protection.js:199` (protectionHitAction) |
+| app.js (mixed) | "No such country. Pick one from the list, or type its two-letter code." [error] | `frontend/protection.js:198` (addProtectionCountry) |
+| app.js (mixed) | "Protection rules saved" [success] | `frontend/protection.js:225` (saveProtectionRules) |
+| app.js (mixed) | dynamic: ``Could not save the rules: ${error.message}`` [error] | `frontend/protection.js:228` (saveProtectionRules) |
+| app.js (mixed) | dynamic: `done(data)` [success] | `frontend/protection.js:240` (protectionHitAction) |
+| app.js (mixed) | dynamic: ``Could not ${action === 'ban' ? 'ban' : action}: ${error.message}`` [error] | `frontend/protection.js:248` (protectionHitAction) |
 
 ### Confirmation dialogs
 
@@ -744,7 +745,7 @@ In-app help buttons; the topic is the Markdown file name under documentation/Hel
 
 | Page | What | Code |
 |---|---|---|
-| Security | topic "Abuse_Protection" | `frontend/security.js:1100` (securityCardHtml) |
+| Security | topic "Abuse_Protection" | `frontend/security.js:1103` (securityCardHtml) |
 | Quarantine | topic "Quarantine" | `frontend/index.html:847` |
 | Spam filter | topic "Spam_Filter" | `frontend/index.html:920` |
 | Status | topic "IP_Blacklist_Monitor" | `frontend/index.html:1043` |
@@ -818,7 +819,7 @@ Functions that render a spinner or "Loading..." while data is fetched.
 | Security | 1 loading indicator(s) | `frontend/security.js:607` (securityCountryPanel) |
 | Security | 1 loading indicator(s) | `frontend/security.js:623` (renderSecurityCountries) |
 | Security | 1 loading indicator(s) | `frontend/security.js:655` (renderSecurityLists) |
-| Security | 2 loading indicator(s) | `frontend/security.js:1088` (securityCardHtml) |
+| Security | 2 loading indicator(s) | `frontend/security.js:1091` (securityCardHtml) |
 | Security | 1 loading indicator(s) | `frontend/smtp-abuse.js:39` (renderSmtpAbusePanel) |
 | Queue | 1 loading indicator(s) | `frontend/app.js:2163` (loadQueue) |
 | Quarantine | 1 loading indicator(s) | `frontend/app.js:2492` (loadQuarantine) |

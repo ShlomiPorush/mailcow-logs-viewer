@@ -1059,8 +1059,11 @@ function securityCardBody(key) {
         extra = `
             <h4>Countries</h4>
             <div class="ui-chip-row">${r.countries.length ? r.countries.map(code => `<span class="ui-sec-chip">${securityFlag(code)}${escapeHtml(protectionCountryName(code))}<button type="button" onclick="removeProtectionCountry('${escapeJsArg(code)}')" aria-label="Remove ${escapeHtml(code)}" title="Remove">&times;</button></span>`).join('') : '<span class="ui-muted">No countries yet</span>'}</div>
-            <form class="ui-sec-ladd ui-flush" onsubmit="event.preventDefault(); addProtectionCountry(this.elements.code.value); this.reset();">
-                <input type="text" name="code" class="ui-input" placeholder="Two-letter code, for example CN" aria-label="Country code" maxlength="2">
+            <form class="ui-sec-ladd ui-flush" onsubmit="event.preventDefault(); if (addProtectionCountry(this.elements.code.value)) this.reset();">
+                <input type="text" name="code" class="ui-input" placeholder="Start typing a country, or its two-letter code" aria-label="Country"
+                    list="protection-country-options" autocomplete="off" maxlength="80" oninput="protectionCountryPicked(this)">
+                <datalist id="protection-country-options">${protectionCountries().filter(c => !r.countries.includes(c.code))
+                    .map(c => `<option value="${escapeHtml(`${c.name} (${c.code})`)}"></option>`).join('')}</datalist>
                 <button type="submit" class="ui-btn">Add</button>
             </form>
             ${suggest.length ? `<h4>Failed logins in the last 7 days came from</h4>
