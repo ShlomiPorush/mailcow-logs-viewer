@@ -599,10 +599,10 @@ Transient notifications from `showToast(message, type)` (utils.js). Type default
 | app.js (mixed) | dynamic: `'Failed to allow IP: ' + err.message` [error] | `frontend/app.js:1240` (allowIP) |
 | app.js (mixed) | dynamic: `ignored ? `${data.name} is ignored for every address.` : `${data.name} counts...` [success] | `frontend/app.js:4207` (setBlocklistIgnored) |
 | app.js (mixed) | dynamic: ``Could not change the blocklist: ${e.message}`` [error] | `frontend/app.js:4211` (setBlocklistIgnored) |
-| app.js (mixed) | "Protection rules saved" [success] | `frontend/protection.js:175` (saveProtectionRules) |
-| app.js (mixed) | dynamic: ``Could not save the rules: ${error.message}`` [error] | `frontend/protection.js:178` (saveProtectionRules) |
-| app.js (mixed) | dynamic: `done(data)` [success] | `frontend/protection.js:190` (protectionHitAction) |
-| app.js (mixed) | dynamic: ``Could not ${action === 'ban' ? 'ban' : action}: ${error.message}`` [error] | `frontend/protection.js:198` (protectionHitAction) |
+| app.js (mixed) | "Protection rules saved" [success] | `frontend/protection.js:176` (saveProtectionRules) |
+| app.js (mixed) | dynamic: ``Could not save the rules: ${error.message}`` [error] | `frontend/protection.js:179` (saveProtectionRules) |
+| app.js (mixed) | dynamic: `done(data)` [success] | `frontend/protection.js:191` (protectionHitAction) |
+| app.js (mixed) | dynamic: ``Could not ${action === 'ban' ? 'ban' : action}: ${error.message}`` [error] | `frontend/protection.js:199` (protectionHitAction) |
 
 ### Confirmation dialogs
 

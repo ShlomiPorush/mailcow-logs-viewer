@@ -413,7 +413,7 @@ function pickSecurityCountry(name) {
 function securityHistoryRows() {
     if (securityHistory === null) return '<div class="ui-loading"><div class="loading"></div><p>Loading...</p></div>';
     const rows = securityHistory.filter(h => !securityCountry || h.country_name === securityCountry);
-    if (!rows.length) return '<p class="ui-empty">Nothing here yet. Ended, undone and dismissed catches are kept here.</p>';
+    if (!rows.length) return '<p class="ui-empty">Nothing here yet. Ended, undone and dismissed catches are kept here, and the watched ones with no new activity for a week.</p>';
     return rows.map(h => `
         <div class="ui-sec-row is-static">
             <div class="ui-sec-main">

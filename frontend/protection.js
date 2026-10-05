@@ -89,7 +89,8 @@ function protectionStatus(hit) {
         case 'pending': return uiTag(hit.error ? 'Not banned yet' : 'Banning', 'warn');
         case 'banned': return uiTag(hit.expires_at ? `Banned until ${formatTime(hit.expires_at)}` : 'Banned until removed', 'fail');
         case 'alert': return uiTag('Alert', 'fail');
-        case 'expired': return uiTag('Ban ended', '');
+        // A watched catch that went quiet was never banned
+        case 'expired': return uiTag(hit.mode === 'watch' ? 'No new activity' : 'Ban ended', '');
         case 'undone': return uiTag('Ban undone', '');
         case 'dismissed': return uiTag('Dismissed', '');
         default: return uiTag(hit.status, '');
