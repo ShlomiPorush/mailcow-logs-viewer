@@ -86,6 +86,12 @@ A modern, self-hosted dashboard for monitoring, analyzing, and managing your mai
 - Quota usage, login times, rate limits
 - Sorting and filtering by date range, domain, activity
 
+### 📱 Devices (ActiveSync)
+- Phones, tablets and Outlook clients that sync over ActiveSync, read from the SOGo log
+- Per device: user, type, device ID, last IP, last request, first and last seen
+- Marks new devices and devices whose password is refused
+- Filter by device type and last seen; configurable retention
+
 ### 📧 DMARC Reports
 - DMARC/SMTP-TLS report viewer with compliance analysis
 - GeoIP enrichment with MaxMind (City + ASN)

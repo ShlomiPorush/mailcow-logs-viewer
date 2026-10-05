@@ -31,9 +31,10 @@ logger = logging.getLogger(__name__)
 
 EAS_PATH = '/microsoft-server-activesync'
 
-# "[pid]: " is optional: the prefix is not part of every SOGo line
+# "[pid]: " is optional: the prefix is not part of every SOGo line. Behind a
+# second proxy the client can be an X-Forwarded-For list ("client, proxy").
 _LINE_RE = re.compile(
-    r'^(?:\[\d+\]:\s*)?(?P<remote>\S+)\s+"(?P<method>[A-Z]+)\s+(?P<target>\S+)\s+HTTP/[\d.]+"\s+(?P<status>\d{3})\b'
+    r'^(?:\[\d+\]:\s*)?(?P<remote>[^"]*?)\s+"(?P<method>[A-Z]+)\s+(?P<target>\S+)\s+HTTP/[\d.]+"\s+(?P<status>\d{3})\b'
 )
 
 
@@ -47,8 +48,9 @@ def _param(query: Dict[str, List[str]], name: str) -> Optional[str]:
 
 
 def _ip_or_none(remote: str) -> Optional[str]:
+    """The client address; of a forwarded list, the first (the client's)."""
     try:
-        return str(ipaddress.ip_address(remote))
+        return str(ipaddress.ip_address(remote.split(',')[0].strip()))
     except ValueError:
         return None
 

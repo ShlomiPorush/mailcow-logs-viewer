@@ -43,6 +43,11 @@ def test_a_hostname_in_the_client_slot_is_not_shown_as_an_ip():
     assert parsed is not None and parsed['last_ip'] is None
 
 
+def test_a_forwarded_list_gives_the_client_address():
+    parsed = parse_eas_line(line('User=jane@example.com&DeviceId=A', remote='203.0.113.7, 198.51.100.2'))
+    assert parsed['last_ip'] == '203.0.113.7'
+
+
 def test_a_line_without_the_pid_prefix_still_parses():
     assert parse_eas_line(line('User=jane@example.com&DeviceId=A', pid=''))['device_id'] == 'A'
 
