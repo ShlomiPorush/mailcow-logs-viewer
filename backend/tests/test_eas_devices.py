@@ -10,7 +10,7 @@ import starlette.staticfiles as sf
 _orig_init = sf.StaticFiles.__init__
 sf.StaticFiles.__init__ = lambda s, *a, **k: _orig_init(s, *a, **{**k, 'check_dir': False})
 
-from app.services.eas_devices import collect_devices, parse_eas_line
+from app.services.eas_devices import collect_devices, describe_device, parse_eas_line
 
 EAS = '/SOGo/Microsoft-Server-ActiveSync'
 
@@ -100,6 +100,19 @@ def test_the_batch_keeps_the_newest_request_and_the_oldest_time():
     assert device['last_command'] == 'Ping' and device['last_ip'] == '203.0.113.9'
     assert device['first_seen'] == datetime(1970, 1, 1, 0, 16, 40)
     assert device['last_seen'] == datetime(1970, 1, 1, 0, 50, 0)
+
+
+@pytest.mark.parametrize('device_id,device_type,client,model', [
+    ('androidc1234567890', 'Android', 'Gmail or Android Email', None),
+    ('SEC1A2B3C4D5E6F7', 'SAMSUNGSMS918B', 'Samsung Email', 'SM-S918B'),
+    ('ApplF2C8A1D94B7E', 'iPhone', 'Apple Mail', None),
+    ('OUTLOOKA4E2C9F1', 'Outlook', 'Outlook', None),
+    ('F2C8A1D94B7E4C1A', 'iPhone', None, None),
+    ('nine1234', 'Android', None, None),
+    (None, None, None, None),
+])
+def test_the_app_and_model_are_named_only_when_recognised(device_id, device_type, client, model):
+    assert describe_device(device_id, device_type) == {'client': client, 'model': model}
 
 
 # --- database ---------------------------------------------------------------

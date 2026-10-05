@@ -1273,7 +1273,7 @@ List the recorded devices, filtered, sorted and paged.
     {
       "id": 12,
       "username": "jane@example.com",
-      "device_id": "F2C8A1D94B7E4C1A",
+      "device_id": "ApplF2C8A1D94B7E",
       "device_type": "iPhone",
       "last_ip": "203.0.113.7",
       "country_code": "DE",
@@ -1281,6 +1281,8 @@ List the recorded devices, filtered, sorted and paged.
       "city": "Berlin",
       "asn": "AS64500",
       "asn_org": "Example Mobile",
+      "client": "Apple Mail",
+      "model": null,
       "last_command": "Ping",
       "last_status": 200,
       "first_seen": "2026-09-02T08:14:03Z",
@@ -1305,6 +1307,7 @@ List the recorded devices, filtered, sorted and paged.
 - `summary` counts every device, not only the filtered page
 - `last_ip` is `null` when SOGo logged something other than an IP address
 - The location fields come from the MaxMind GeoIP databases, looked up when the list is read; they are `null` when `geoip` is `false` or the address is not in the database
+- `client` is the mail app recognised from the device ID and type (`Apple Mail`, `Samsung Email`, `Outlook`, `Windows Mail`, `Gmail or Android Email`), `null` when not recognised; `model` is a Samsung model code such as `SM-S918B`, else `null`
 - `last_status` is the HTTP status SOGo answered; `401` means the device's password was refused
 - A connected phone's `last_seen` can be up to an hour old: SOGo logs a `Ping` when it ends, and mailcow allows a Ping of up to 59 minutes
 

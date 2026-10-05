@@ -88,7 +88,7 @@ A modern, self-hosted dashboard for monitoring, analyzing, and managing your mai
 
 ### 📱 Devices (ActiveSync)
 - Phones, tablets and Outlook clients that sync over ActiveSync, read from the SOGo log
-- Per device: user, type, device ID, last IP, last request, first and last seen
+- Per device: user, type or model, mail app, device ID, last IP with its location, last request, first and last seen
 - Marks new devices and devices whose password is refused
 - Filter by device type and last seen; configurable retention
 

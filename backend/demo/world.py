@@ -81,14 +81,14 @@ CLIENT_IPS = ["192.0.2.10", "192.0.2.11", "198.51.100.12", "198.51.100.13"]
 # hours with a request, addresses it connects from). heidi's phone keeps the
 # old password after a change, so its recent requests fail.
 EAS_DEVICES = [
-    ("alice@example.com", "F2C8A1D94B7E4C1A", "iPhone", 0.9, ["192.0.2.10", "198.51.100.13"]),
-    ("alice@example.com", "9B1E77C3A0D24E68", "iPad", 0.3, ["192.0.2.10"]),
-    ("bob@example.com", "androidc8f1e2d3a4b5", "SAMSUNGSMS918B", 0.7, ["198.51.100.12"]),
-    ("carol@example.com", "7D3F0B9E2A6C4815", "iPhone", 0.8, ["198.51.100.13", "192.0.2.11"]),
+    ("alice@example.com", "ApplF2C8A1D94B7E", "iPhone", 0.9, ["192.0.2.10", "198.51.100.13"]),
+    ("alice@example.com", "ApplDMPXK2LZ9B1E", "iPad", 0.3, ["192.0.2.10"]),
+    ("bob@example.com", "SEC1A2B3C4D5E6F7", "SAMSUNGSMS918B", 0.7, ["198.51.100.12"]),
+    ("carol@example.com", "ApplC7D3F0B9E2A6", "iPhone", 0.8, ["198.51.100.13", "192.0.2.11"]),
     ("grace@example.org", "OUTLOOKA4E2C9F1", "Outlook", 0.5, ["2001:db8:4::1a"]),
-    ("heidi@example.org", "5E8A2C4F7B1D9036", "iPhone", 0.4, ["198.51.100.12"]),
+    ("heidi@example.org", "Appl5E8A2C4F7B1D", "iPhone", 0.4, ["198.51.100.12"]),
 ]
-EAS_FAILING_DEVICE = "5E8A2C4F7B1D9036"
+EAS_FAILING_DEVICE = "Appl5E8A2C4F7B1D"
 
 CONTAINERS = ["acme", "clamd", "dockerapi", "dovecot", "memcached", "mysql", "netfilter",
               "nginx", "ofelia", "olefy", "php-fpm", "postfix", "redis", "rspamd", "sogo",

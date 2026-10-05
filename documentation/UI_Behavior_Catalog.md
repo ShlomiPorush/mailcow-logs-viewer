@@ -170,7 +170,7 @@ Generated from the code. Do not edit by hand; run `node .github/scripts/ui-catal
 | Behaviour | Count |
 |---|---|
 | [Click to copy](#click-to-copy) | 56 |
-| [Tooltips](#tooltips) | 205 |
+| [Tooltips](#tooltips) | 207 |
 | [Toasts](#toasts) | 145 |
 | [Confirmation dialogs](#confirmation-dialogs) | 29 |
 | [Country flags](#country-flags) | 7 |
@@ -247,9 +247,9 @@ Fields that copy their value on click (hover shows a copy icon and "Click to cop
 | Shared | copies: `ip` | `frontend/app.js:4580` (renderGeoIPInfo) |
 | Shared | copies: `ip` | `frontend/app.js:4587` (renderGeoIPInfo) |
 | Shared | copyToClipboard: `'${safeText}'` | `frontend/utils.js:550` (copyableText) |
-| Devices | copies: `d.username` | `frontend/devices.js:134` (renderDeviceRow) |
-| Devices | copies: `d.device_id` | `frontend/devices.js:137` (renderDeviceRow) |
-| Devices | copies: `d.last_ip` | `frontend/devices.js:139` (renderDeviceRow) |
+| Devices | copies: `d.username` | `frontend/devices.js:137` (renderDeviceRow) |
+| Devices | copies: `d.device_id` | `frontend/devices.js:140` (renderDeviceRow) |
+| Devices | copies: `d.last_ip` | `frontend/devices.js:142` (renderDeviceRow) |
 
 ### Tooltips
 
@@ -452,8 +452,10 @@ Native `title` tooltips. Dynamic ones show the expression that builds the text.
 | app.js (mixed) | set in JS: dynamic: `title \|\| ''` | `frontend/app.js:524` (setNavCount) |
 | Devices | dynamic: `SOGo answered HTTP ${Number(status)}` | `frontend/devices.js:117` (deviceStatusTag) |
 | Devices | dynamic: `${escapeHtml(network)}` | `frontend/devices.js:126` (deviceLocation) |
-| Devices | dynamic: `${escapeHtml(formatTime(d.first_seen))}` | `frontend/devices.js:141` (renderDeviceRow) |
-| Devices | dynamic: `${escapeHtml(formatTime(d.last_seen))}` | `frontend/devices.js:142` (renderDeviceRow) |
+| Devices | dynamic: `${escapeHtml(d.device_type)}` | `frontend/devices.js:139` (renderDeviceRow) |
+| Devices | "Recognised from how the app names the device" | `frontend/devices.js:139` (renderDeviceRow) |
+| Devices | dynamic: `${escapeHtml(formatTime(d.first_seen))}` | `frontend/devices.js:144` (renderDeviceRow) |
+| Devices | dynamic: `${escapeHtml(formatTime(d.last_seen))}` | `frontend/devices.js:145` (renderDeviceRow) |
 | Devices | "Help - Devices" | `frontend/index.html:1332` |
 | Devices | set in JS: dynamic: `data.last_run ? formatTime(data.last_run) : ''` | `frontend/devices.js:66` (renderDevicesSummary) |
 | Modal: changelog-modal | "Close" | `frontend/index.html:1539` |

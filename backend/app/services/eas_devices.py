@@ -83,6 +83,32 @@ def parse_eas_line(message: str) -> Optional[Dict[str, Any]]:
     }
 
 
+# The mail app behind a device, recognised by how it names itself. These are
+# conventions of each app, not part of the protocol, so an app that matches
+# none of them gets no name rather than a guess.
+_CLIENTS = (
+    (lambda i, t: t == 'outlook', 'Outlook'),
+    (lambda i, t: t == 'windowsmail', 'Windows Mail'),
+    (lambda i, t: i.startswith('appl'), 'Apple Mail'),
+    (lambda i, t: i.startswith('sec') or t.startswith('samsung'), 'Samsung Email'),
+    (lambda i, t: i.startswith('androidc') and t == 'android', 'Gmail or Android Email'),
+)
+
+# Samsung Email reports the model code: SAMSUNGSMS918B is the SM-S918B
+_SAMSUNG_MODEL = re.compile(r'^SAMSUNG(SM)([A-Z0-9]+)$', re.IGNORECASE)
+
+
+def describe_device(device_id: Optional[str], device_type: Optional[str]) -> Dict[str, Optional[str]]:
+    """The likely mail app and a readable model for a recorded device."""
+    i, t = (device_id or '').lower(), (device_type or '').lower()
+    client = next((name for match, name in _CLIENTS if match(i, t)), None)
+    model = _SAMSUNG_MODEL.match(device_type or '')
+    return {
+        'client': client,
+        'model': f"{model.group(1).upper()}-{model.group(2).upper()}" if model else None,
+    }
+
+
 def _entry_time(entry: Dict[str, Any]) -> Optional[datetime]:
     """The line's own time as naive UTC, like the other tables."""
     try:

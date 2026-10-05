@@ -16,6 +16,7 @@ from ..database import get_db
 from ..models import EasDevice
 from ..scheduler import get_job_status
 from ..services import geoip_service
+from ..services.eas_devices import describe_device
 from ..utils import format_datetime_for_api as format_datetime_utc
 
 logger = logging.getLogger(__name__)
@@ -53,6 +54,7 @@ def _location(ip: Optional[str], geoip: bool) -> dict:
 def _device_json(d: EasDevice, geoip: bool) -> dict:
     return {
         **_location(d.last_ip, geoip),
+        **describe_device(d.device_id, d.device_type),
         'id': d.id,
         'username': d.username,
         'device_id': d.device_id,

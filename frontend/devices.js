@@ -127,13 +127,16 @@ function deviceLocation(d) {
 }
 
 function renderDeviceRow(d, newAfter, staleBefore) {
+    const name = d.model || d.device_type || 'Unknown device';
+    // Outlook names its device "Outlook": no need to say it twice
+    const client = d.client && d.client.toLowerCase() !== name.toLowerCase() ? d.client : '';
     const isNew = new Date(d.first_seen).getTime() >= newAfter;
     const isStale = new Date(d.last_seen).getTime() < staleBefore;
     return `
         <div class="ui-tr">
             <span class="ui-td">${copyableText(d.username)}</span>
             <div class="ui-td ui-q-who">
-                <div><bdi>${escapeHtml(d.device_type || 'Unknown device')}</bdi> ${isNew ? uiTag('New', 'info') : ''}</div>
+                <div><bdi${d.model ? ` title="${escapeHtml(d.device_type)}"` : ''}>${escapeHtml(name)}</bdi>${client ? ` <small class="ui-muted" title="Recognised from how the app names the device">${escapeHtml(client)}</small>` : ''} ${isNew ? uiTag('New', 'info') : ''}</div>
                 <small>${copyableText(d.device_id, 'ui-mono')}</small>
             </div>
             <div class="ui-td ui-q-who ui-dev-ip"><div><small class="ui-sec-unit">IP </small>${d.last_ip ? copyableText(d.last_ip, 'ui-mono') : '<span class="ui-muted">-</span>'}</div>${deviceLocation(d)}</div>
