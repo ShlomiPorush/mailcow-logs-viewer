@@ -48,6 +48,18 @@ def test_a_forwarded_list_gives_the_client_address():
     assert parsed['last_ip'] == '203.0.113.7'
 
 
+def test_a_line_in_the_shape_a_real_mailcow_logs_it():
+    # Seen on a live mailcow: nginx's X-Forwarded-For repeats the client
+    message = ('[126]: 203.0.113.7, 203.0.113.7 "POST /SOGo/Microsoft-Server-ActiveSync?Cmd=Sync'
+               '&User=jane%40example.com&DeviceId=androidc1234567890&DeviceType=Android HTTP/1.1" '
+               '200 0/69 0.234 - - 288K - 13')
+    assert parse_eas_line(message) == {
+        'username': 'jane@example.com', 'device_id': 'androidc1234567890', 'device_type': 'Android',
+        'last_command': 'Sync', 'last_ip': '203.0.113.7', 'last_status': 200,
+    }
+    assert parse_eas_line('[126]: <0x0x5555d9fdb620[SOGoActiveSyncDispatcher]> Change detected during Sync, we push the content.') is None
+
+
 def test_a_line_without_the_pid_prefix_still_parses():
     assert parse_eas_line(line('User=jane@example.com&DeviceId=A', pid=''))['device_id'] == 'A'
 
