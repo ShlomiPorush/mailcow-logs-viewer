@@ -849,9 +849,11 @@ class Settings(BaseSettings):
         These are collected whatever the Logs page settings are, so turning
         the Logs page off or unticking a service does not quietly empty them.
         """
-        required = {'dovecot': ['Message details (Sieve and delivery results)']}
+        # Dovecot: Sieve and delivery results in message details, and the
+        # Security alert on a login after failed attempts
+        required = {'dovecot': ['Message details']}
         if self.is_feature_enabled('netfilter'):
-            required['dovecot'].append('Security (login after failed attempts alert)')
+            required['dovecot'].append('Security')
         if self.is_feature_enabled('rate-limits'):
             required['ratelimited'] = ['Rate Limits']
         if self.is_feature_enabled('devices'):

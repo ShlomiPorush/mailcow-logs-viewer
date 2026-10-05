@@ -1726,8 +1726,10 @@ button.ui-st-card:hover { outline: 1px solid var(--ui-line); }
 .ui-feature > span { display: grid; gap: 2px; }
 .ui-feature small { color: var(--ui-muted); font-size: 12.5px; }
 .ui-feature.is-off > span { opacity: .65; }
+.ui-feature .ui-set-also { color: var(--ui-ok); font-weight: 500; }
+.ui-feature.is-off > span:has(.ui-set-also) { opacity: 1; }
 .ui-feature.is-locked { cursor: not-allowed; }
-.ui-set-featurelist > .ui-set-env { padding: 12px var(--ui-pad-x) 0; }
+.ui-set-featurelist > .ui-set-env, .ui-set-featurelist > .ui-set-desc { padding: 12px var(--ui-pad-x) 0; }
 
 /* Floating save bar (uiSaveBar), shown only with unsaved changes, on every editable page */
 .ui-savebar { position: fixed; inset: auto 0 18px 0; z-index: 60; display: flex; align-items: center; gap: 12px; width: fit-content; margin: 0 auto;

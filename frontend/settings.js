@@ -303,7 +303,7 @@ var SETTINGS_FIELD_DESCRIPTIONS = {
     raw_logs_fetch_count: 'Number of log entries to fetch per service per cycle. Higher values catch more logs but increase API load. Default: 1000.',
     raw_logs_retention_days: 'Days to keep raw logs in the database. Older logs are automatically deleted at 3:00 AM daily. Default: 2.',
     eas_devices_retention_days: 'Days to keep a device that stopped syncing before it is removed from the Devices page. 0 keeps every device. Default: 90.',
-    raw_logs_services: 'Select which mailcow services to collect logs from. Unchecked services will not be fetched or displayed.',
+    raw_logs_services: 'The services the Logs page shows. A service marked Always collected keeps coming in when switched off here, because another page reads it; the Logs page then just does not show it.',
     rspamd_password: 'Rspamd UI/API password for reading Rspamd map data. Required to view and edit Rspamd maps.',
     suppression_enabled: 'Master switch for the spam suppression system. When enabled, bounced/rejected recipients are automatically blocked from receiving future emails.',
     suppression_auto_detect: 'Automatically scan Postfix logs to detect hard bounce (5.x.x) errors and add recipients to the suppression list.',
@@ -526,16 +526,6 @@ function settingsRemoveSecret(btn) {
 // Raw log services other pages read (/api/settings/info), collected whatever is ticked
 let settingsRawLogsRequired = {};
 
-// Which services keep coming in for other pages, so unticking one does not
-// look like it stops them
-function settingsRawLogsRequiredNote(labels) {
-    const parts = Object.entries(settingsRawLogsRequired).map(([svc, pages]) =>
-        `<b>${escapeHtml(labels[svc] || svc)}</b> for ${escapeHtml(pages.join(', '))}`);
-    if (!parts.length) return '';
-    return '<p class="ui-set-desc">Collected either way, because other pages read them: ' + parts.join('; ')
-        + '. The Logs page shows only the services ticked here.</p>';
-}
-
 function renderSettingsEditField(key, value, sensitiveKeys, description, envLocked, defaultValue) {
     const LOCK = '<svg width="12" height="12" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true"><path fill-rule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clip-rule="evenodd"></path></svg>';
     // Special renderer for disabled_features - checkboxes for feature toggles
@@ -572,39 +562,41 @@ function renderSettingsEditField(key, value, sensitiveKeys, description, envLock
         return html;
     }
 
-    // Special renderer for raw_logs_services - checkboxes
+    // Special renderer for raw_logs_services: one row per service with a
+    // switch, like Features. A service another page reads says so on its row:
+    // it keeps coming in with the switch off, which the switch alone would hide.
     if (key === 'raw_logs_services') {
         const ALL_LOG_SERVICES = [
-            { id: 'acme', label: 'ACME (SSL Certificates)' },
-            { id: 'api', label: 'API (Access Logs)' },
-            { id: 'autodiscover', label: 'Autodiscover' },
-            { id: 'dovecot', label: 'Dovecot (IMAP/POP3)' },
-            { id: 'netfilter', label: 'Netfilter (Firewall)' },
-            { id: 'postfix', label: 'Postfix (MTA)' },
-            { id: 'ratelimited', label: 'Ratelimited' },
-            { id: 'rspamd-history', label: 'Rspamd (Spam Filter)' },
-            { id: 'sogo', label: 'SOGo (Groupware)' },
-            { id: 'watchdog', label: 'Watchdog (Monitoring)' }
+            { id: 'postfix', label: 'Postfix', description: 'Mail sent and received (MTA)' },
+            { id: 'rspamd-history', label: 'Rspamd', description: 'Spam filter verdicts' },
+            { id: 'dovecot', label: 'Dovecot', description: 'IMAP and POP3 logins and mail delivery' },
+            { id: 'sogo', label: 'SOGo', description: 'Webmail, calendars, contacts and ActiveSync' },
+            { id: 'netfilter', label: 'Netfilter', description: 'Fail2ban bans and failed logins' },
+            { id: 'ratelimited', label: 'Ratelimited', description: 'Senders that hit a rate limit' },
+            { id: 'acme', label: 'ACME', description: 'TLS certificate renewals' },
+            { id: 'api', label: 'API', description: 'Requests to the mailcow API' },
+            { id: 'autodiscover', label: 'Autodiscover', description: 'Mail client setup requests' },
+            { id: 'watchdog', label: 'Watchdog', description: 'Container health checks' }
         ];
         const enabledServices = (value || '').split(',').map(function(s) { return s.trim().toLowerCase(); }).filter(Boolean);
+        const all = enabledServices.includes('all');
         const disabledAttr = envLocked ? 'disabled' : '';
-        const envLockedHtml = envLocked ? '<p class="ui-set-env">' + LOCK + ' Controlled by ENV variable.</p>' : '';
-        const descHtml = (description && description.trim()) ? '<p class="ui-set-desc">' + escapeHtml(description) + '</p>' : '';
 
-        let checkboxesHtml = '<div class="ui-set-checks">';
+        let html = '<div class="ui-set-wide ui-set-featurelist">';
+        if (description && description.trim()) html += '<p class="ui-set-desc">' + escapeHtml(description) + '</p>';
+        if (envLocked) html += '<p class="ui-set-env">' + LOCK + ' Set by ENV (RAW_LOGS_SERVICES), change it there</p>';
+        html += '<div class="ui-set-features">';
         ALL_LOG_SERVICES.forEach(function(svc) {
-            const checked = enabledServices.includes(svc.id) ? 'checked' : '';
-            checkboxesHtml += '<label class="ui-check-label">' +
-                '<input type="checkbox" class="raw-logs-service-cb ui-check" data-service="' + svc.id + '" ' + checked + ' ' + disabledAttr + '>' +
-                escapeHtml(svc.label) + '</label>';
+            const on = all || enabledServices.includes(svc.id);
+            const usedBy = settingsRawLogsRequired[svc.id];
+            const also = usedBy ? '<small class="ui-set-also">Always collected for ' + escapeHtml(usedBy.join(', ')) + '</small>' : '';
+            html += '<label class="ui-feature ' + (on ? 'is-on' : 'is-off') + (envLocked ? ' is-locked' : '') + '">' +
+                '<input type="checkbox" class="raw-logs-service-cb ui-check" data-service="' + svc.id + '" ' + (on ? 'checked' : '') + ' ' + disabledAttr + '>' +
+                '<span><b>' + escapeHtml(svc.label) + '</b><small>' + escapeHtml(svc.description) + '</small>' + also + '</span></label>';
         });
-        checkboxesHtml += '</div>';
-        checkboxesHtml += settingsRawLogsRequiredNote(Object.fromEntries(ALL_LOG_SERVICES.map(function (s) { return [s.id, s.label]; })));
-
-        // Hidden input that holds the comma-separated value
-        checkboxesHtml += '<input type="hidden" id="edit-raw_logs_services" name="raw_logs_services" value="' + escapeHtml(value || '') + '">';
-
-        return '<div class="ui-set-field ui-set-wide' + (envLocked ? ' is-locked' : '') + '">' + descHtml + checkboxesHtml + envLockedHtml + '</div>';
+        html += '</div>';
+        html += '<input type="hidden" id="edit-raw_logs_services" name="raw_logs_services" value="' + escapeHtml(value || '') + '">';
+        return html + '</div>';
     }
 
     const isBool = typeof value === 'boolean';
@@ -1226,6 +1218,8 @@ function renderSettings(content, data) {
                 const allCbs = content.querySelectorAll('.raw-logs-service-cb');
                 const selected = [];
                 allCbs.forEach(function(c) { if (c.checked) selected.push(c.getAttribute('data-service')); });
+                const row = cb.closest('.ui-feature');
+                if (row) { row.classList.toggle('is-on', cb.checked); row.classList.toggle('is-off', !cb.checked); }
                 const hiddenInput = content.querySelector('#edit-raw_logs_services');
                 if (hiddenInput) hiddenInput.value = selected.join(',');
             });

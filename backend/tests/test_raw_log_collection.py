@@ -39,7 +39,7 @@ def test_the_logs_page_selection_is_collected_with_what_other_pages_read(monkeyp
 def test_a_page_turned_off_stops_needing_its_service(monkeypatch):
     monkeypatch.setattr(settings._inner, 'disabled_features', 'logs,rate-limits,devices,netfilter')
     assert settings.raw_logs_collected_list == ['dovecot']
-    assert settings.raw_logs_required == {'dovecot': ['Message details (Sieve and delivery results)']}
+    assert settings.raw_logs_required == {'dovecot': ['Message details']}
 
 
 def test_sieve_results_and_the_breach_alert_work_with_the_logs_page_off(logs_page_off):
