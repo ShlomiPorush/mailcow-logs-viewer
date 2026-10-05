@@ -126,6 +126,11 @@ function deviceLocation(d) {
     return `<small${network ? ` title="${escapeHtml(network)}"` : ''}>${flag ? `<img class="ui-sec-flag" src="${flag}" alt="" width="16" height="12" onerror="this.remove()">` : ''}${escapeHtml(place)}</small>`;
 }
 
+// Why an app name is a recognition and not a fact
+const DEVICE_CLIENT_NOTE = {
+    Gmail: 'Gmail, or another app built on the Android mail code: they name devices the same way',
+};
+
 function renderDeviceRow(d, newAfter, staleBefore) {
     const name = d.model || d.device_type || 'Unknown device';
     // Outlook names its device "Outlook": no need to say it twice
@@ -136,8 +141,7 @@ function renderDeviceRow(d, newAfter, staleBefore) {
         <div class="ui-tr">
             <span class="ui-td">${copyableText(d.username)}</span>
             <div class="ui-td ui-q-who">
-                <div><bdi${d.model ? ` title="${escapeHtml(d.device_type)}"` : ''}>${escapeHtml(name)}</bdi>${client ? ` <small class="ui-muted" title="Recognised from how the app names the device">${escapeHtml(client)}</small>` : ''} ${isNew ? uiTag('New', 'info') : ''}</div>
-                <small>${copyableText(d.device_id, 'ui-mono')}</small>
+                <div><bdi title="${escapeHtml(`Device ID ${d.device_id}${d.model ? ` (reported as ${d.device_type})` : ''}`)}">${escapeHtml(name)}</bdi>${client ? ` <small class="ui-muted" title="${escapeHtml(DEVICE_CLIENT_NOTE[client] || 'Recognised from how the app names the device')}">${escapeHtml(client)}</small>` : ''} ${isNew ? uiTag('New', 'info') : ''}</div>
             </div>
             <div class="ui-td ui-q-who ui-dev-ip"><div><small class="ui-sec-unit">IP </small>${d.last_ip ? copyableText(d.last_ip, 'ui-mono') : '<span class="ui-muted">-</span>'}</div>${deviceLocation(d)}</div>
             <span class="ui-td ui-td-wrap"><small class="ui-sec-unit">Last request </small>${escapeHtml(d.last_command || '-')} ${deviceStatusTag(d.last_status)}</span>

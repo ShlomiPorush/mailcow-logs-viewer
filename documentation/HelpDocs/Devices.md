@@ -18,8 +18,8 @@ Click a column heading to sort by it.
 ## The List
 
 *   **User**: The account the device signs in with.
-*   **Device**: The device type (a Samsung model code such as `SM-S918B` when the phone reports one), the mail app when it can be recognised, and the ActiveSync device ID. A **New** tag marks a device first seen in the last 7 days.
-    *   The app is recognised from how it names the device: Apple Mail, Samsung Email, Outlook, Windows Mail, or Gmail and the built-in Android mail app (they name devices the same way). An app that is not recognised shows no name.
+*   **Device**: The device type (a Samsung model code such as `SM-S918B` when the phone reports one) and the mail app when it can be recognised. A **New** tag marks a device first seen in the last 7 days. Hover the device to see its ActiveSync device ID; the search finds devices by it too.
+    *   The app is recognised from how it names the device: Apple Mail, Samsung Email, Outlook, Windows Mail or Gmail. A few phone makers' mail apps name devices the way Gmail does, so they show as Gmail. An app that is not recognised shows no name.
     *   The log has no operating system version or phone name: the phone sends those inside the request, and SOGo does not write them to the log the app can read.
 *   **Last IP**: The address of the newest request, with its country and city. Hover the location to see the network (provider) it belongs to. The location needs the MaxMind GeoIP databases (Settings → MaxMind).
 *   **Last request**: The newest ActiveSync command (`Ping`, `Sync`, `FolderSync`, `SendMail` ...). **Sign-in failed** means SOGo refused the password, which usually means the device still has an old password.

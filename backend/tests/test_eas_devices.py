@@ -103,7 +103,7 @@ def test_the_batch_keeps_the_newest_request_and_the_oldest_time():
 
 
 @pytest.mark.parametrize('device_id,device_type,client,model', [
-    ('androidc1234567890', 'Android', 'Gmail or Android Email', None),
+    ('androidc1234567890', 'Android', 'Gmail', None),
     ('SEC1A2B3C4D5E6F7', 'SAMSUNGSMS918B', 'Samsung Email', 'SM-S918B'),
     ('ApplF2C8A1D94B7E', 'iPhone', 'Apple Mail', None),
     ('OUTLOOKA4E2C9F1', 'Outlook', 'Outlook', None),

@@ -91,7 +91,9 @@ _CLIENTS = (
     (lambda i, t: t == 'windowsmail', 'Windows Mail'),
     (lambda i, t: i.startswith('appl'), 'Apple Mail'),
     (lambda i, t: i.startswith('sec') or t.startswith('samsung'), 'Samsung Email'),
-    (lambda i, t: i.startswith('androidc') and t == 'android', 'Gmail or Android Email'),
+    # Gmail names devices the way Android's own mail code does, which a few
+    # phone makers' mail apps share; the page says so in a tooltip
+    (lambda i, t: i.startswith('androidc') and t == 'android', 'Gmail'),
 )
 
 # Samsung Email reports the model code: SAMSUNGSMS918B is the SM-S918B
