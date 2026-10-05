@@ -2161,6 +2161,31 @@ html .markdown-body .markdown-alert-caution .markdown-alert-title { color: var(-
     html.ui-nav-collapsed .ui-nav-toggle svg { transform: scaleX(-1); }
 }
 
+/* Wide screens: the top bar (placeTopbar in app.js) with the app's name, the menu
+   toggle, the page's title and its actions; the page starts with breadcrumbs */
+.ui-topbar { display: none; }
+@media (min-width: 761px) {
+    html.ui-has-topbar .ui-shell { grid-template-rows: 60px minmax(0, 1fr); grid-template-areas: "top top" "side main"; }
+    html.ui-has-topbar .ui-topbar { grid-area: top; display: flex; align-items: center; min-width: 0; padding-inline-end: 28px;
+        background: var(--ui-side); color: var(--ui-side-ink); border-bottom: 1px solid var(--ui-line); }
+    html.ui-has-topbar .ui-main { height: auto; min-height: 0; }
+    .ui-topbar-brand { flex: none; min-width: 240px; display: flex; align-items: center; gap: 4px; padding: 0 10px; }
+    .ui-topbar .ui-brand, html.ui-nav-collapsed .ui-topbar .ui-brand { padding: 0 10px; }
+    html.ui-nav-collapsed .ui-topbar .ui-brand #app-title { display: inline; }
+    .ui-topbar .ui-nav-toggle, html.ui-nav-collapsed .ui-topbar .ui-nav-toggle { position: static; margin: 0; }
+    .ui-topbar-title { min-width: 0; padding-inline-start: 18px; }
+    .ui-topbar-title .ui-h1 { margin: 0; font-size: 20px; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .ui-topbar-actions { display: flex; align-items: center; gap: 8px; min-width: 0; margin-inline-start: auto; padding-inline-start: 16px; }
+    .ui-topbar-actions > * { margin: 0; }
+    /* DMARC keeps room under its buttons for the sync note, which stays in the page here */
+    #ui-topbar #dmarc-header-actions { padding-bottom: 0; }
+    .ui-page-crumbs { margin: 0 0 6px; }
+    .ui-page-crumbs .ui-crumb-group, .ui-page-crumbs .ui-crumb-sep { color: var(--ui-muted); }
+    .ui-page-crumbs .ui-crumb { text-decoration: none; }
+    .ui-page-crumbs .ui-crumb:hover { text-decoration: underline; }
+    .ui-page-crumbs .ui-crumb-current { font-weight: 600; color: var(--ui-ink); }
+}
+
 /* Protection rules (Security > Protection) */
 .ui-prot-rules { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; align-items: start; }
 .ui-prot-rule { display: grid; gap: 12px; padding: 16px var(--ui-pad-x); }

@@ -489,6 +489,8 @@ async function loadAppInfo() {
         // Sidebar counters and server card
         placeShellUtilities();
         window.matchMedia('(max-width: 760px)').addEventListener('change', placeShellUtilities);
+        window.matchMedia('(max-width: 760px)').addEventListener('change', () => placeTopbar());
+        watchTopbarCrumbs();
         loadNavCounters();
         setInterval(loadNavCounters, 5 * 60 * 1000);
     } catch (error) {
@@ -512,6 +514,105 @@ function placeShellUtilities() {
     } else if (tools.parentNode !== foot) {
         foot.appendChild(tools);
     }
+}
+
+// =============================================================================
+// WIDE SCREENS: THE TOP BAR
+// =============================================================================
+// One bar runs across the top: the app's name with the menu toggle, the page's
+// title and the page's actions. They are the page's own elements, moved up while
+// the page is open and put back when it is left, so every id, button and listener
+// stays as it was. Under the bar the page starts with breadcrumbs, then its
+// description. Messages keeps its own layout and has no bar; phones keep theirs.
+const TOPBAR_SKIP = new Set(['messages']);
+let topbarMoves = [];     // [element, placeholder] pairs, to put back in reverse
+let topbarRoute = null;
+
+function topbarMove(el, target) {
+    if (!el || !target) return;
+    const mark = document.createComment('topbar');
+    el.replaceWith(mark);
+    target.appendChild(el);
+    topbarMoves.push([el, mark]);
+}
+
+function topbarRestore() {
+    for (const [el, mark] of topbarMoves.reverse()) mark.replaceWith(el);
+    topbarMoves = [];
+    document.querySelectorAll('.ui-page-crumbs').forEach(nav => nav.remove());
+}
+
+function placeTopbar(route = topbarRoute) {
+    topbarRoute = route;
+    const bar = document.getElementById('ui-topbar');
+    if (!bar) return;
+    topbarRestore();
+    const page = route ? document.getElementById(`content-${route}`) : null;
+    const head = page ? page.querySelector('.ui-page-head') : null;
+    const intro = head ? head.firstElementChild : null;
+    const title = intro ? intro.querySelector('.ui-h1') : null;
+    const on = !!title && !TOPBAR_SKIP.has(route) && !window.matchMedia('(max-width: 760px)').matches;
+    document.documentElement.classList.toggle('ui-has-topbar', on);
+    if (!on) return;
+
+    const brandSlot = document.getElementById('ui-topbar-brand');
+    topbarMove(document.querySelector('.ui-sidenav .ui-brand'), brandSlot);
+    topbarMove(document.getElementById('ui-nav-toggle'), brandSlot);
+    const crumbs = document.createElement('nav');
+    crumbs.className = 'ui-crumbs ui-page-crumbs';
+    crumbs.setAttribute('aria-label', 'You are here');
+    title.before(crumbs);
+    topbarMove(title, document.getElementById('ui-topbar-title'));
+    [...head.children].filter(el => el !== intro).forEach(el => topbarMove(el, document.getElementById('ui-topbar-actions')));
+    // The DMARC sync note is too tall for the bar: it stays with the description
+    if (route === 'dmarc') topbarMove(document.getElementById('dmarc-last-sync-info'), intro);
+    updateTopbarCrumbs();
+}
+
+// The tab open on the page: Security's Overview, a Status tab, a Settings section
+function topbarSubLabel(route) {
+    const page = document.getElementById(`content-${route}`);
+    const tab = page && page.querySelector('[role="tab"][aria-selected="true"], [role="tab"].active, .settings-edit-nav [aria-current="true"]');
+    if (!tab) return '';
+    const label = tab.cloneNode(true);
+    label.querySelectorAll('.ui-tab-n, .ui-count, .ui-nav-count, .hidden').forEach(n => n.remove());
+    return label.textContent.replace(/\s+/g, ' ').trim();
+}
+
+function updateTopbarCrumbs() {
+    const nav = document.querySelector('.ui-page-crumbs');
+    if (!nav || !topbarRoute) return;
+    const route = topbarRoute;
+    const item = document.getElementById(`tab-${route}`);
+    const group = item && item.closest('.ui-nav-group');
+    const groupLabel = group && group.querySelector('.ui-nav-group-label');
+    const name = TAB_LABELS[route] || route;
+    const sub = topbarSubLabel(route);
+    const parts = [];
+    if (groupLabel) parts.push(`<span class="ui-crumb-group">${escapeHtml(groupLabel.textContent.trim())}</span>`);
+    parts.push(sub ? `<button type="button" class="ui-crumb" onclick="topbarOpenPage('${escapeJsArg(route)}')">${escapeHtml(name)}</button>`
+        : `<span class="ui-crumb-current" aria-current="page">${escapeHtml(name)}</span>`);
+    if (sub && sub !== name) parts.push(`<span class="ui-crumb-current" aria-current="page">${escapeHtml(sub)}</span>`);
+    nav.innerHTML = parts.join('<span class="ui-crumb-sep" aria-hidden="true">›</span>');
+}
+
+// The page's name in the crumbs opens the page at its first tab
+function topbarOpenPage(route) {
+    if (typeof SUBPAGES !== 'undefined' && SUBPAGES[route]) navigateTo(route, { sub: subpageFirst(route) });
+    else if (route === 'dmarc' && typeof dmarcOpenTab === 'function') dmarcOpenTab('dmarc');
+    else navigateTo(route);
+}
+
+// A tab opened on the page, by a click or by Back, changes the last crumb
+function watchTopbarCrumbs() {
+    const content = document.querySelector('.ui-content');
+    if (!content || typeof MutationObserver === 'undefined') return;
+    let queued = false;
+    new MutationObserver(records => {
+        if (queued || !records.some(r => r.target.matches && r.target.matches('[role="tab"], .settings-edit-tab'))) return;
+        queued = true;
+        requestAnimationFrame(() => { queued = false; updateTopbarCrumbs(); });
+    }).observe(content, { subtree: true, attributes: true, attributeFilter: ['aria-selected', 'aria-current', 'class'] });
 }
 
 // The sidebar and the phone More sheet show the same counters
@@ -1469,6 +1570,7 @@ function switchTab(tab, params = {}) {
     if (typeof updateCurrentTabLabel === 'function') {
         updateCurrentTabLabel(tab);
     }
+    placeTopbar(tab);
 
     // Hide all tab contents
     document.querySelectorAll('.tab-content').forEach(content => {
