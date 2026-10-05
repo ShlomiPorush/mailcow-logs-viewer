@@ -15,6 +15,7 @@ from ..config import settings
 from ..database import get_db
 from ..models import EasDevice
 from ..scheduler import get_job_status
+from ..services import geoip_service
 from ..utils import format_datetime_for_api as format_datetime_utc
 
 logger = logging.getLogger(__name__)
@@ -42,8 +43,16 @@ def _like(term: str) -> str:
     return f"%{escaped}%"
 
 
-def _device_json(d: EasDevice) -> dict:
+def _location(ip: Optional[str], geoip: bool) -> dict:
+    """Country, city and network of the last IP, looked up when the page is
+    read so a newer GeoIP database applies to every device."""
+    geo = geoip_service.lookup_ip(ip) if (geoip and ip) else {}
+    return {key: geo.get(key) for key in ('country_code', 'country_name', 'city', 'asn', 'asn_org')}
+
+
+def _device_json(d: EasDevice, geoip: bool) -> dict:
     return {
+        **_location(d.last_ip, geoip),
         'id': d.id,
         'username': d.username,
         'device_id': d.device_id,
@@ -108,8 +117,10 @@ def list_devices(
     rows = query.order_by(order, EasDevice.id).offset((page - 1) * per_page).limit(per_page).all()
 
     job = get_job_status().get('eas_devices', {})
+    geoip = bool(geoip_service.is_geoip_available())
     return {
-        'items': [_device_json(d) for d in rows],
+        'items': [_device_json(d, geoip) for d in rows],
+        'geoip': geoip,
         'total': total,
         'page': page,
         'per_page': per_page,

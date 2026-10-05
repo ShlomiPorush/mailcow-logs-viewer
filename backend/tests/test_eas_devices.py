@@ -244,6 +244,47 @@ def test_the_list_filters_sorts_and_counts(db):
     assert [d['device_id'] for d in typed['items']] == ['TAB']
     assert {'iPhone', 'iPad'} <= set(body['device_types'])
 
+    # Without GeoIP the location fields are there and empty
+    assert body['items'][0]['country_code'] is None
+
     # A wildcard typed into the search is a character, not a pattern
     assert client.get('/api/devices', params={'search': 'eas_test'}).json()['total'] == 0
     assert client.get('/api/devices', params={'sort_by': 'nope'}).status_code == 422
+
+
+def test_each_device_carries_the_location_of_its_last_ip(db, monkeypatch):
+    from fastapi.testclient import TestClient
+    from app.main import app
+    from app.routers import devices as devices_router
+    from app.services.eas_devices import store_devices
+    looked_up = []
+
+    def fake_lookup(ip):
+        looked_up.append(ip)
+        return {'country_code': 'IL', 'country_name': 'Israel', 'city': 'Tel Aviv', 'asn': 'AS64500', 'asn_org': 'Example Mobile'}
+    monkeypatch.setattr(devices_router.geoip_service, 'is_geoip_available', lambda: True)
+    monkeypatch.setattr(devices_router.geoip_service, 'lookup_ip', fake_lookup)
+    store_devices(db, collect_devices([_entry(datetime.utcnow(), f'User={USER}&DeviceId=A&DeviceType=Android')]))
+
+    body = TestClient(app).get('/api/devices', params={'search': 'eas-test'}).json()
+    assert body['geoip'] is True
+    [item] = body['items']
+    assert (item['country_code'], item['city'], item['asn_org']) == ('IL', 'Tel Aviv', 'Example Mobile')
+    assert looked_up == ['203.0.113.7']
+
+
+def test_the_job_ignores_the_logs_feature_and_its_settings(db, monkeypatch):
+    # Like the message pipeline: the Devices page reads the SOGo log itself,
+    # so turning the Logs page or raw log collection off does not empty it
+    from app import scheduler
+    from app.config import settings
+    now = datetime.utcnow().replace(microsecond=0)
+
+    async def sogo_log(service, count):
+        return [_entry(now, f'User={USER}&DeviceId=A&DeviceType=iPhone&Cmd=Ping')]
+    monkeypatch.setattr(settings._inner, 'disabled_features', 'logs')
+    monkeypatch.setattr(settings._inner, 'raw_logs_enabled', False)
+    monkeypatch.setattr(settings._inner, 'raw_logs_services', 'postfix')
+    monkeypatch.setattr(scheduler.mailcow_api, 'get_raw_logs', sogo_log)
+    asyncio.run(scheduler.update_eas_devices())
+    assert [r.device_id for r in _rows(db)] == ['A']

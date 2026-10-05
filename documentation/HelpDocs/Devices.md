@@ -25,7 +25,7 @@ Click a column heading to sort by it.
 
 *   **User**: The account the device signs in with.
 *   **Device**: The device type and its ActiveSync device ID. A **New** tag marks a device first seen in the last 7 days.
-*   **Last IP**: The address of the newest request.
+*   **Last IP**: The address of the newest request, with its country and city. Hover the location to see the network (provider) it belongs to. The location needs the MaxMind GeoIP databases (Settings → MaxMind).
 *   **Last request**: The newest ActiveSync command (`Ping`, `Sync`, `FolderSync`, `SendMail` ...). **Sign-in failed** means SOGo refused the password, which usually means the device still has an old password.
 *   **First seen / Last seen**: Hover to see the exact time.
 

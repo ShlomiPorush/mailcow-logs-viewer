@@ -108,9 +108,12 @@ function renderDevicesList(container, data) {
         return;
     }
 
+    // Locked, not hidden: say what the location needs instead of leaving it out
+    const geoNote = data.geoip ? '' : `<div class="ui-list-note ui-flush">${uiLocked('Location needs GeoIP',
+        'The country, city and network of each address come from the MaxMind GeoIP databases. Add the MaxMind keys in Settings → MaxMind.')}</div>`;
     const newAfter = Date.now() - data.thresholds.new_days * 86400000;
     const staleBefore = Date.now() - data.thresholds.stale_days * 86400000;
-    container.innerHTML = `
+    container.innerHTML = `${geoNote}
         <div class="ui-table ui-stack" data-sort-handler="devicesSortBy" style="--ui-cols: minmax(200px, 1.6fr) minmax(170px, 1.4fr) minmax(120px, 1fr) minmax(120px, 1fr) 100px 100px; --ui-table-min: 880px">
             <div class="ui-tr ui-tr-head"><span${devicesSortAttr('username')}>User</span><span${devicesSortAttr('device_type')}>Device</span><span${devicesSortAttr('last_ip')}>Last IP</span><span${devicesSortAttr('last_command')}>Last request</span><span${devicesSortAttr('first_seen')}>First seen</span><span${devicesSortAttr('last_seen')}>Last seen</span></div>
             ${data.items.map(d => renderDeviceRow(d, newAfter, staleBefore)).join('')}
@@ -123,6 +126,15 @@ function deviceStatusTag(status) {
     return `<span class="ui-tag ui-tag-fail" title="SOGo answered HTTP ${Number(status)}">${label}</span>`;
 }
 
+// Flag, then "Country, City"; the network (ASN) in the tooltip
+function deviceLocation(d) {
+    const place = [d.country_name, d.city].filter(Boolean).join(', ');
+    if (!place) return '';
+    const flag = d.country_code ? getFlagUrl(d.country_code, '16x12') : '';
+    const network = [d.asn, d.asn_org].filter(Boolean).join(' ');
+    return `<small${network ? ` title="${escapeHtml(network)}"` : ''}>${flag ? `<img class="ui-sec-flag" src="${flag}" alt="" width="16" height="12" onerror="this.remove()">` : ''}${escapeHtml(place)}</small>`;
+}
+
 function renderDeviceRow(d, newAfter, staleBefore) {
     const isNew = new Date(d.first_seen).getTime() >= newAfter;
     const isStale = new Date(d.last_seen).getTime() < staleBefore;
@@ -133,7 +145,7 @@ function renderDeviceRow(d, newAfter, staleBefore) {
                 <div><bdi>${escapeHtml(d.device_type || 'Unknown device')}</bdi> ${isNew ? uiTag('New', 'info') : ''}</div>
                 <small>${copyableText(d.device_id, 'ui-mono')}</small>
             </div>
-            <span class="ui-td"><small class="ui-sec-unit">IP </small>${d.last_ip ? copyableText(d.last_ip, 'ui-mono') : '<span class="ui-muted">-</span>'}</span>
+            <div class="ui-td ui-q-who"><div><small class="ui-sec-unit">IP </small>${d.last_ip ? copyableText(d.last_ip, 'ui-mono') : '<span class="ui-muted">-</span>'}</div>${deviceLocation(d)}</div>
             <span class="ui-td ui-td-wrap"><small class="ui-sec-unit">Last request </small>${escapeHtml(d.last_command || '-')} ${deviceStatusTag(d.last_status)}</span>
             <span class="ui-td" title="${escapeHtml(formatTime(d.first_seen))}"><small class="ui-sec-unit">First seen </small>${formatAgo(d.first_seen)}</span>
             <span class="ui-td${isStale ? ' ui-muted' : ''}" title="${escapeHtml(formatTime(d.last_seen))}"><small class="ui-sec-unit">Last seen </small>${formatAgo(d.last_seen)}</span>

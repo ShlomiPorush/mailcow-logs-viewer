@@ -170,10 +170,10 @@ Generated from the code. Do not edit by hand; run `node .github/scripts/ui-catal
 | Behaviour | Count |
 |---|---|
 | [Click to copy](#click-to-copy) | 56 |
-| [Tooltips](#tooltips) | 204 |
+| [Tooltips](#tooltips) | 205 |
 | [Toasts](#toasts) | 145 |
 | [Confirmation dialogs](#confirmation-dialogs) | 29 |
-| [Country flags](#country-flags) | 6 |
+| [Country flags](#country-flags) | 7 |
 | [Markdown rendering](#markdown-rendering) | 4 |
 | [Controls wired in JavaScript](#controls-wired-in-javascript) | 33 |
 | [Filters, sorting and view options](#filters-sorting-and-view-options) | 13 |
@@ -247,9 +247,9 @@ Fields that copy their value on click (hover shows a copy icon and "Click to cop
 | Shared | copies: `ip` | `frontend/app.js:4580` (renderGeoIPInfo) |
 | Shared | copies: `ip` | `frontend/app.js:4587` (renderGeoIPInfo) |
 | Shared | copyToClipboard: `'${safeText}'` | `frontend/utils.js:550` (copyableText) |
-| Devices | copies: `d.username` | `frontend/devices.js:131` (renderDeviceRow) |
-| Devices | copies: `d.device_id` | `frontend/devices.js:134` (renderDeviceRow) |
-| Devices | copies: `d.last_ip` | `frontend/devices.js:136` (renderDeviceRow) |
+| Devices | copies: `d.username` | `frontend/devices.js:143` (renderDeviceRow) |
+| Devices | copies: `d.device_id` | `frontend/devices.js:146` (renderDeviceRow) |
+| Devices | copies: `d.last_ip` | `frontend/devices.js:148` (renderDeviceRow) |
 
 ### Tooltips
 
@@ -450,9 +450,10 @@ Native `title` tooltips. Dynamic ones show the expression that builds the text.
 | app.js (mixed) | dynamic: `Look up on ${escapeHtml(r.name)}` | `frontend/app.js:3681` (blocklistLookupLink) |
 | app.js (mixed) | set in JS: dynamic: `label` | `frontend/app.js:289` (setNavTabLabel) |
 | app.js (mixed) | set in JS: dynamic: `title \|\| ''` | `frontend/app.js:524` (setNavCount) |
-| Devices | dynamic: `SOGo answered HTTP ${Number(status)}` | `frontend/devices.js:123` (deviceStatusTag) |
-| Devices | dynamic: `${escapeHtml(formatTime(d.first_seen))}` | `frontend/devices.js:138` (renderDeviceRow) |
-| Devices | dynamic: `${escapeHtml(formatTime(d.last_seen))}` | `frontend/devices.js:139` (renderDeviceRow) |
+| Devices | dynamic: `SOGo answered HTTP ${Number(status)}` | `frontend/devices.js:126` (deviceStatusTag) |
+| Devices | dynamic: `${escapeHtml(network)}` | `frontend/devices.js:135` (deviceLocation) |
+| Devices | dynamic: `${escapeHtml(formatTime(d.first_seen))}` | `frontend/devices.js:150` (renderDeviceRow) |
+| Devices | dynamic: `${escapeHtml(formatTime(d.last_seen))}` | `frontend/devices.js:151` (renderDeviceRow) |
 | Devices | "Help - Devices" | `frontend/index.html:1332` |
 | Devices | set in JS: dynamic: `data.last_run ? formatTime(data.last_run) : ''` | `frontend/devices.js:75` (renderDevicesSummary) |
 | Modal: changelog-modal | "Close" | `frontend/index.html:1546` |
@@ -662,6 +663,7 @@ PNG flags served locally from `frontend/assets/flags/<size>/<cc>.png` (sizes 16x
 | Security | getFlagUrl(code, '16x12') | `frontend/security.js:123` (securityFlag) |
 | Shared | getFlagUrl(rspamdData.country_code, size) | `frontend/app.js:4583` (renderGeoIPInfo) |
 | Shared | getFlagUrl(record.country_code, size) | `frontend/app.js:4626` (renderGeoIPForDMARC) |
+| Devices | getFlagUrl(d.country_code, '16x12') | `frontend/devices.js:133` (deviceLocation) |
 
 ### Markdown rendering
 
