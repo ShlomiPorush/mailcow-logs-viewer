@@ -193,8 +193,9 @@ function refreshSecurityAddresses() {
 
 // ----------------------------------------------------------------- what protects the server
 
-// Every protection with whether it is on: Fail2ban, the rules, and outgoing spam.
-// The Overview's row and the dashboard's Security card are drawn from it.
+// Every protection and its state: 'on' when it acts (bans or blocks), 'watch' when it
+// only notes or alerts, 'off', or 'unknown'. The Overview's row and the dashboard's
+// Security card are drawn from it.
 function securityProtectionItems() {
     const rules = (typeof protectionSaved !== 'undefined' && protectionSaved) || (typeof protectionRules !== 'undefined' && protectionRules);
     const caps = typeof protectionCaps !== 'undefined' ? protectionCaps : {};
@@ -208,26 +209,36 @@ function securityProtectionItems() {
         const needs = key === 'country' && !caps.geoip ? 'needs MaxMind GeoIP' : '';
         if (needs) return item('off', SECURITY_RULE_NAMES[key], needs, key);
         if (!r.enabled) return item('off', SECURITY_RULE_NAMES[key], '', key);
-        const doing = key === 'breach' ? 'alerts' : r.mode === 'enforce' && caps.can_ban ? 'bans' : 'watching';
-        return item('on', SECURITY_RULE_NAMES[key], doing, key);
+        if (key === 'breach') return item('watch', SECURITY_RULE_NAMES[key], 'alerts', key);
+        const bans = r.mode === 'enforce' && caps.can_ban;
+        return item(bans ? 'on' : 'watch', SECURITY_RULE_NAMES[key], bans ? 'bans' : 'watching', key);
     };
     const abuse = typeof smtpAbuseStatus !== 'undefined' && smtpAbuseStatus
         ? item(smtpAbuseStatus.enabled ? 'on' : 'off', 'Outgoing spam', '', 'abuse') : '';
     return [f2b, ...SECURITY_RULE_ORDER.map(rule), abuse].filter(Boolean);
 }
 
+// A protection that acts or only watches counts as on
+const securityProtectionOn = p => p.state === 'on' || p.state === 'watch';
+
+// The mark of a protection: a green tick when it acts, an eye when it only watches
+const SECURITY_EYE = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
+    + '<path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"></path><circle cx="12" cy="12" r="3"></circle></svg>';
+function securityProtectionMark(state) {
+    return state === 'on' ? '✓' : state === 'watch' ? SECURITY_EYE : state === 'unknown' ? '?' : '✕';
+}
+
 // One protection, with its mark and what it does; a click opens its settings card
 function securityProtectionButton({ state, name, note, key }, opener = 'securityOpenProtection') {
-    const mark = state === 'on' ? '✓' : state === 'unknown' ? '?' : '✕';
-    const label = state === 'on' ? 'On' : state === 'unknown' ? 'Unknown' : 'Off';
+    const label = { on: 'On', watch: 'Watching only', unknown: 'Unknown' }[state] || 'Off';
     return `<button type="button" class="ui-prot-item is-${state}" onclick="${opener}('${key}')" title="${escapeHtml(`${name}: ${label}${note ? `, ${note}` : ''}`)}">
-        <span class="ui-prot-mark" aria-label="${label}">${mark}</span>${escapeHtml(name)}${note ? `<small>${escapeHtml(note)}</small>` : ''}</button>`;
+        <span class="ui-prot-mark" aria-label="${label}">${securityProtectionMark(state)}</span>${escapeHtml(name)}${note ? `<small>${escapeHtml(note)}</small>` : ''}</button>`;
 }
 
 function securityProtections() {
     const protections = securityProtectionItems();
     const items = protections.map(p => securityProtectionButton(p));
-    const on = protections.filter(p => p.state === 'on').length;
+    const on = protections.filter(securityProtectionOn).length;
     // On a phone the row folds into one chip that opens the list
     const summary = `<button type="button" class="ui-prot-sum" aria-expanded="${securityStripOpen}" onclick="securityStripOpen = !securityStripOpen; renderSecurityOverview()">
         Protection <b>${on} of ${items.length} on</b></button>`;
