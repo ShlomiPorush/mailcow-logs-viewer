@@ -446,12 +446,46 @@ def get_netfilter_stats_by_country(
         raise internal_error(e)
 
 
+@router.get("/logs/netfilter/stats/by-network")
+def get_netfilter_stats_by_network(
+    days: int = Query(30, ge=1, le=365, description="Number of days to look back"),
+    db: Session = Depends(get_db)
+):
+    """
+    The networks (by ASN) that attempts came from, most attempts first.
+    An attempt is a line where netfilter matched a rule, as on the overview.
+    """
+    try:
+        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+        rows = db.query(
+            NetfilterLog.asn,
+            func.max(NetfilterLog.asn_org),
+            func.count(NetfilterLog.id),
+            func.count(func.distinct(NetfilterLog.ip)),
+        ).filter(
+            NetfilterLog.time >= cutoff,
+            NetfilterLog.rule_id.isnot(None),
+            NetfilterLog.asn.isnot(None),
+        ).group_by(NetfilterLog.asn).order_by(desc(func.count(NetfilterLog.id))).limit(8).all()
+        return {
+            "days": days,
+            "data": [
+                {"asn": asn, "asn_org": org or asn, "attempts": attempts, "addresses": addresses}
+                for asn, org, attempts, addresses in rows
+            ]
+        }
+    except Exception as e:
+        logger.error(f"Error fetching netfilter stats by network: {e}")
+        raise internal_error(e)
+
+
 @router.get("/logs/netfilter")
 def get_netfilter_logs(
     page: int = Query(1, ge=1),
     limit: int = Query(50, ge=1, le=500),
     search: Optional[str] = Query(None),
     ip: Optional[str] = Query(None),
+    exact_ip: bool = Query(False, description="Match the IP exactly instead of as a part"),
     username: Optional[str] = Query(None),
     action: Optional[str] = Query(None),
     country_code: Optional[str] = Query(None, description="Filter by country code (e.g., US, IL)"),
@@ -476,7 +510,9 @@ def get_netfilter_logs(
                 )
             )
         
-        if ip:
+        if ip and exact_ip:
+            query = query.filter(NetfilterLog.ip == ip)
+        elif ip:
             query = query.filter(NetfilterLog.ip.ilike(f"%{ip}%"))
         
         if username:
@@ -580,7 +616,8 @@ def get_netfilter_overview(
         cutoff = datetime.utcnow() - timedelta(hours=hours)
         rows = db.query(
             NetfilterLog.time, NetfilterLog.ip, NetfilterLog.message, NetfilterLog.username,
-            NetfilterLog.action, NetfilterLog.rule_id, NetfilterLog.country_code, NetfilterLog.country_name
+            NetfilterLog.action, NetfilterLog.rule_id, NetfilterLog.country_code, NetfilterLog.country_name,
+            NetfilterLog.city, NetfilterLog.asn_org
         ).filter(
             NetfilterLog.time >= cutoff,
             NetfilterLog.ip.isnot(None)
@@ -601,7 +638,8 @@ def get_netfilter_overview(
                     entry = sources[row.ip] = {
                         "ip": row.ip, "attempts": 0, "failed_logins": 0, "last_seen": row.time,
                         "services": [], "usernames": [], "country_code": row.country_code,
-                        "country_name": row.country_name, "last_action": None,
+                        "country_name": row.country_name, "city": row.city, "asn_org": row.asn_org,
+                        "last_action": None,
                     }
                 entry["attempts"] += 1
                 if is_login:
@@ -620,7 +658,8 @@ def get_netfilter_overview(
                     entry = sources[row.ip] = {
                         "ip": row.ip, "attempts": 0, "failed_logins": 0, "last_seen": row.time,
                         "services": [], "usernames": [], "country_code": row.country_code,
-                        "country_name": row.country_name, "last_action": None,
+                        "country_name": row.country_name, "city": row.city, "asn_org": row.asn_org,
+                        "last_action": None,
                     }
                 if entry["last_action"] is None:
                     entry["last_action"] = 'unban' if row.action == 'unban' else 'ban'
@@ -736,17 +775,31 @@ def _split_ip_list(value) -> List[str]:
     return [e.strip() for e in (value or '').replace('\n', ',').split(',') if e.strip()]
 
 
-async def _add_to_fail2ban_list(ip: str, list_name: str) -> dict:
-    """Add an address to the Fail2ban blacklist or whitelist, keeping every other setting."""
+def _same_entry(a: str, b: str) -> bool:
+    """1.2.3.4 and 1.2.3.4/32 (or /128) are the same list entry."""
+    bare = lambda v: v[:-3] if v.endswith("/32") else v[:-4] if v.endswith("/128") else v
+    return bare(a.strip()) == bare(b.strip())
+
+
+async def _add_to_fail2ban_list(ip: str, list_name: str, remove: bool = False) -> dict:
+    """Add an address to the Fail2ban blacklist or whitelist, or remove it, keeping every
+    other setting. The lists are read fresh right before writing, so a change made in
+    mailcow meanwhile is not overwritten."""
     current = await mailcow_api.get_fail2ban()
     if current is None:
         raise HTTPException(status_code=503, detail="Could not fetch current Fail2Ban settings")
 
     lists = {name: _split_ip_list(current.get(name, "")) for name in ("blacklist", "whitelist")}
     label = "blacklist" if list_name == "blacklist" else "allowlist"
-    if ip in lists[list_name]:
+    if remove:
+        kept = [entry for entry in lists[list_name] if not _same_entry(entry, ip)]
+        if len(kept) == len(lists[list_name]):
+            return {"status": "success", "msg": f"IP {ip} is not in the {label}"}
+        lists[list_name] = kept
+    elif ip in lists[list_name]:
         return {"status": "success", "msg": f"IP {ip} is already in the {label}"}
-    lists[list_name].append(ip)
+    else:
+        lists[list_name].append(ip)
 
     # ban_time_increment must be "1" or "0" as string
     bti = current.get("ban_time_increment", 1)
@@ -762,13 +815,13 @@ async def _add_to_fail2ban_list(ip: str, list_name: str) -> dict:
         "whitelist": ",".join(lists["whitelist"]),
     }
 
-    logger.info(f"Adding IP {ip} to the Fail2Ban {label}")
+    logger.info(f"{'Removing' if remove else 'Adding'} IP {ip} {'from' if remove else 'to'} the Fail2Ban {label}")
     result = await mailcow_api.edit_fail2ban(attrs)
     if isinstance(result, list) and len(result) > 0:
         first = result[0]
         if first.get("type") != "success":
             return {"status": "error", "msg": first.get("msg", "Update failed")}
-    return {"status": "success", "msg": f"IP {ip} added to {label}"}
+    return {"status": "success", "msg": f"IP {ip} {'removed from' if remove else 'added to'} {label}"}
 
 
 async def _ip_from_body(request: Request) -> str:
@@ -806,6 +859,27 @@ async def allow_fail2ban(request: Request):
         raise
     except Exception as e:
         logger.error(f"Error allowing IP in Fail2Ban: {e}")
+        raise internal_error(e)
+
+
+@router.post("/fail2ban/remove")
+async def remove_from_fail2ban_list(request: Request):
+    """
+    Take an address off the Fail2ban blacklist or whitelist. Body: {"ip", "list":
+    "blacklist" | "whitelist"}. Requires Read-Write API key.
+    """
+    try:
+        body = await request.json()
+        ip, list_name = body.get("ip"), body.get("list")
+        if not ip:
+            raise HTTPException(status_code=400, detail="Missing 'ip' field")
+        if list_name not in ("blacklist", "whitelist"):
+            raise HTTPException(status_code=400, detail="'list' must be blacklist or whitelist")
+        return await _add_to_fail2ban_list(ip, list_name, remove=True)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error removing IP from the Fail2Ban list: {e}")
         raise internal_error(e)
 
 

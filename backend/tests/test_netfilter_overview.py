@@ -48,12 +48,12 @@ def client():
     _cleanup()
 
 
-def _add(ip, message, action='warning', rule_id=None, username=None, minutes_ago=5):
+def _add(ip, message, action='warning', rule_id=None, username=None, minutes_ago=5, **extra):
     from app.database import get_db_context
     from app.models import NetfilterLog
     with get_db_context() as db:
         db.add(NetfilterLog(time=datetime.utcnow() - timedelta(minutes=minutes_ago), priority=MARKER,
-                            message=message, ip=ip, rule_id=rule_id, username=username, action=action))
+                            message=message, ip=ip, rule_id=rule_id, username=username, action=action, **extra))
         db.commit()
 
 
@@ -129,3 +129,65 @@ def test_allow_adds_to_the_whitelist_and_keeps_the_rest(client, monkeypatch):
     assert saved == {}
 
     assert client.post('/api/fail2ban/allow', json={}).status_code == 400
+
+
+def test_attempts_are_counted_by_network(client):
+    """The networks attempts come from: only matched-rule lines count, as on the overview."""
+    asn, org = f'AS{uuid.uuid4().int % 10**9}', 'Example Hosting'
+    line = lambda ip: f'{ip} matched rule id 3 (warning: unknown[{ip}]: SASL LOGIN authentication failed: x)'
+    for ip in (IP_A, IP_A, IP_B):
+        _add(ip, line(ip), rule_id=3, asn=asn, asn_org=org, city='Exampleton', country_name='Example')
+    _add(IP_A, f'9 more attempts in the next 600 seconds until {IP_A}/32 is banned', asn=asn, asn_org=org)
+
+    rows = {r['asn']: r for r in client.get('/api/logs/netfilter/stats/by-network?days=7').json()['data']}
+    assert rows[asn] == {'asn': asn, 'asn_org': org, 'attempts': 3, 'addresses': 2}
+
+    # The overview carries where each address is
+    source = {s['ip']: s for s in client.get('/api/logs/netfilter/overview').json()['sources']}[IP_A]
+    assert source['city'] == 'Exampleton' and source['asn_org'] == org
+
+
+def test_an_exact_ip_does_not_match_a_longer_one(client):
+    longer = IP_A + '0'  # 198.51.100.230 contains 198.51.100.23
+    _add(IP_A, f'{IP_A} matched rule id 3 (x)', rule_id=3)
+    _add(longer, f'{longer} matched rule id 3 (x)', rule_id=3)
+    loose = {r['ip'] for r in client.get('/api/logs/netfilter', params={'ip': IP_A}).json()['data']}
+    exact = {r['ip'] for r in client.get('/api/logs/netfilter', params={'ip': IP_A, 'exact_ip': True}).json()['data']}
+    assert {IP_A, longer} <= loose
+    assert exact == {IP_A}
+
+
+def test_remove_takes_an_address_off_a_list_and_keeps_the_rest(client, monkeypatch):
+    from app.mailcow_api import mailcow_api
+    saved = {}
+
+    async def fake_get():
+        return {'ban_time': 1800, 'ban_time_increment': 1, 'max_attempts': 10, 'max_ban_time': 86400,
+                'netban_ipv4': 32, 'netban_ipv6': 128, 'retry_window': 600,
+                'whitelist': '192.0.2.0/24\n192.0.2.1', 'blacklist': '203.0.113.9/32,203.0.113.10'}
+
+    async def fake_edit(attrs):
+        saved.update(attrs)
+        return [{'type': 'success', 'msg': ['fail2ban_edit_ok']}]
+
+    monkeypatch.setattr(mailcow_api, 'get_fail2ban', fake_get)
+    monkeypatch.setattr(mailcow_api, 'edit_fail2ban', fake_edit)
+
+    # 203.0.113.9 and 203.0.113.9/32 are the same entry
+    res = client.post('/api/fail2ban/remove', json={'ip': '203.0.113.9', 'list': 'blacklist'})
+    assert res.json()['status'] == 'success'
+    assert saved['blacklist'] == '203.0.113.10'
+    assert saved['whitelist'] == '192.0.2.0/24,192.0.2.1'
+    assert saved['ban_time'] == '1800' and saved['max_attempts'] == '10'
+
+    saved.clear()
+    res = client.post('/api/fail2ban/remove', json={'ip': '192.0.2.0/24', 'list': 'whitelist'})
+    assert saved['whitelist'] == '192.0.2.1' and saved['blacklist'] == '203.0.113.9/32,203.0.113.10'
+
+    # Not on the list: nothing is written
+    saved.clear()
+    res = client.post('/api/fail2ban/remove', json={'ip': '198.51.100.99', 'list': 'blacklist'})
+    assert 'not in' in res.json()['msg'] and saved == {}
+
+    assert client.post('/api/fail2ban/remove', json={'ip': '192.0.2.1', 'list': 'other'}).status_code == 400
+    assert client.post('/api/fail2ban/remove', json={'list': 'whitelist'}).status_code == 400
