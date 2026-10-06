@@ -826,6 +826,11 @@ select.ui-sec-in { text-align: start; }
 .ui-sheet-body > .ui-sec-why { font-size: 13.5px; }
 .ui-sheet-body .ui-sec-detail { padding: 0; }
 .ui-sheet .markdown-body { font-family: inherit; background: transparent; color: var(--ui-ink); }
+/* The reset drops list markers; the dialog gets them back from #changelog-content, the sheet here */
+.ui-sheet .markdown-body ul { list-style: disc; }
+.ui-sheet .markdown-body ol { list-style: decimal; }
+.ui-sheet .markdown-body ul ul { list-style: circle; }
+.ui-sheet .markdown-body ul ul ul { list-style: square; }
 body.ui-sheet-on { overflow: hidden; }
 @media (max-width: 760px) {
     /* The Protection row folds into one chip; open, it lists every protection */
