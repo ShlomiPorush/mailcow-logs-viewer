@@ -89,6 +89,12 @@ function updateDmarcBreadcrumb() {
     const container = document.getElementById('dmarc-breadcrumb');
     if (!container) return;
 
+    // With the top bar these join its breadcrumbs, and this row is hidden (kept on a phone)
+    const tabLabel = dmarcState.tab === 'tls' ? 'TLS' : 'DMARC';
+    if (typeof setPageCrumbs === 'function') {
+        setPageCrumbs('dmarc', tabLabel, `dmarcOpenTab('${dmarcState.tab === 'tls' ? 'tls' : 'dmarc'}')`, dmarcState.breadcrumb);
+    }
+
     if (dmarcState.breadcrumb.length === 0) {
         container.innerHTML = '';
         container.classList.add('hidden');

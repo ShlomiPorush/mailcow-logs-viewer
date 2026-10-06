@@ -579,9 +579,10 @@ function topbarSubLabel(route) {
     return label.textContent.replace(/\s+/g, ' ').trim();
 }
 
-// Something opened inside a tab (a Rspamd map) joins the crumbs, and the tab's crumb
-// leads back to its list. It holds only while that tab of that page is open.
-let topbarPageCrumbs = null;   // { route, sub, back, labels }
+// Something opened inside a tab (a Rspamd map, a DMARC domain or report) joins the
+// crumbs, and the tab's crumb leads back to its list. A level in between that has an
+// action ({ label, action }) leads back to it. It holds only while that tab is open.
+let topbarPageCrumbs = null;   // { route, sub, back, labels: [label or { label, action }] }
 
 function setPageCrumbs(route, sub, back, labels) {
     topbarPageCrumbs = labels && labels.length ? { route, sub, back, labels } : null;
@@ -607,8 +608,13 @@ function updateTopbarCrumbs() {
             : `<span class="ui-crumb-current" aria-current="page">${escapeHtml(sub)}</span>`);
     }
     if (inner) {
-        inner.labels.forEach((label, i) => parts.push(i === inner.labels.length - 1
-            ? `<span class="ui-crumb-current" aria-current="page">${escapeHtml(label)}</span>` : `<span class="ui-crumb-group">${escapeHtml(label)}</span>`));
+        inner.labels.forEach((item, i) => {
+            const label = typeof item === 'string' ? item : item.label;
+            const action = typeof item === 'string' ? null : item.action;
+            parts.push(i === inner.labels.length - 1 ? `<span class="ui-crumb-current" aria-current="page">${escapeHtml(label)}</span>`
+                : action ? `<button type="button" class="ui-crumb" onclick="${escapeHtml(action)}">${escapeHtml(label)}</button>`
+                : `<span class="ui-crumb-group">${escapeHtml(label)}</span>`);
+        });
     }
     nav.innerHTML = parts.join('<span class="ui-crumb-sep" aria-hidden="true">›</span>');
 }
