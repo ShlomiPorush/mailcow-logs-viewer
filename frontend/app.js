@@ -579,6 +579,16 @@ function topbarSubLabel(route) {
     return label.textContent.replace(/\s+/g, ' ').trim();
 }
 
+// Something opened inside a tab (a Rspamd map, a DMARC domain or report) joins the
+// crumbs, and the tab's crumb leads back to its list. A level in between that has an
+// action ({ label, action }) leads back to it. It holds only while that tab is open.
+let topbarPageCrumbs = null;   // { route, sub, back, labels: [label or { label, action }] }
+
+function setPageCrumbs(route, sub, back, labels) {
+    topbarPageCrumbs = labels && labels.length ? { route, sub, back, labels } : null;
+    updateTopbarCrumbs();
+}
+
 function updateTopbarCrumbs() {
     const nav = document.querySelector('.ui-page-crumbs');
     if (!nav || !topbarRoute) return;
@@ -592,7 +602,20 @@ function updateTopbarCrumbs() {
     if (groupLabel) parts.push(`<span class="ui-crumb-group">${escapeHtml(groupLabel.textContent.trim())}</span>`);
     parts.push(sub ? `<button type="button" class="ui-crumb" onclick="topbarOpenPage('${escapeJsArg(route)}')">${escapeHtml(name)}</button>`
         : `<span class="ui-crumb-current" aria-current="page">${escapeHtml(name)}</span>`);
-    if (sub && sub !== name) parts.push(`<span class="ui-crumb-current" aria-current="page">${escapeHtml(sub)}</span>`);
+    const inner = topbarPageCrumbs && topbarPageCrumbs.route === route && topbarPageCrumbs.sub === sub ? topbarPageCrumbs : null;
+    if (sub && sub !== name) {
+        parts.push(inner ? `<button type="button" class="ui-crumb" onclick="${inner.back}">${escapeHtml(sub)}</button>`
+            : `<span class="ui-crumb-current" aria-current="page">${escapeHtml(sub)}</span>`);
+    }
+    if (inner) {
+        inner.labels.forEach((item, i) => {
+            const label = typeof item === 'string' ? item : item.label;
+            const action = typeof item === 'string' ? null : item.action;
+            parts.push(i === inner.labels.length - 1 ? `<span class="ui-crumb-current" aria-current="page">${escapeHtml(label)}</span>`
+                : action ? `<button type="button" class="ui-crumb" onclick="${escapeHtml(action)}">${escapeHtml(label)}</button>`
+                : `<span class="ui-crumb-group">${escapeHtml(label)}</span>`);
+        });
+    }
     nav.innerHTML = parts.join('<span class="ui-crumb-sep" aria-hidden="true">›</span>');
 }
 
@@ -4985,10 +5008,6 @@ function closeContainerLogsModal() {
         clearInterval(containerLogsInterval);
         containerLogsInterval = null;
     }
-}
-
-function loadMailboxStatsPage(page) {
-    loadMailboxStatsList(page);
 }
 
 // =============================================================================

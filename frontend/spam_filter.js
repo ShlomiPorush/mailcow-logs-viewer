@@ -72,6 +72,7 @@ async function smartRefreshSpamFilter() {
 // =============================================================================
 
 async function loadRspamdMaps() {
+    if (typeof setPageCrumbs === 'function') setPageCrumbs('spam-filter', null);
     const container = document.getElementById('rspamd-maps-list');
     
     try {
@@ -160,9 +161,11 @@ function renderRspamdMapsList(maps, rwKeyConfigured) {
     container.innerHTML = html;
 }
 
-// The way back to the maps list, as a breadcrumb like the DMARC & TLS page
+// The way back to the maps list. With the top bar the map joins its breadcrumbs, and
+// this one is hidden; on a phone, which has no top bar, it is the way back.
 function rspamdMapCrumbs(name) {
-    return `<nav class="ui-crumbs" aria-label="Breadcrumb">
+    if (typeof setPageCrumbs === 'function') setPageCrumbs('spam-filter', 'Rspamd Maps', 'loadRspamdMaps()', [name]);
+    return `<nav class="ui-crumbs ui-crumbs-local" aria-label="Breadcrumb">
         <button type="button" class="ui-crumb" onclick="loadRspamdMaps()">Rspamd Maps</button>
         <span class="ui-crumb-sep" aria-hidden="true">/</span>
         <span class="ui-crumb-current">${escapeHtml(name)}</span>
@@ -194,7 +197,7 @@ async function openMapEditor(filename) {
                         <p class="ui-mono ui-muted">${escapeHtml(filename)}</p>
                     </div>
                     <div class="ui-rl-tools">
-                        <span id="map-entry-count" class="ui-muted">${data.entry_count} entries</span>
+                        <span id="map-entry-count" class="ui-muted">${uiCountLabel(data.entry_count, 'entry', 'entries')}</span>
                         <span id="map-validation-status"></span>
                     </div>
                 </div>
@@ -284,7 +287,7 @@ async function validateMapContent(filename) {
 
         const data = await response.json();
 
-        document.getElementById('map-entry-count').textContent = `${data.entry_count} entries`;
+        document.getElementById('map-entry-count').textContent = uiCountLabel(data.entry_count, 'entry', 'entries');
 
         const line = (entry, tone) => `
             <div class="ui-map-error ui-text-${tone}">
@@ -354,16 +357,16 @@ async function saveMapContent(filename) {
             const textarea = document.getElementById('map-editor-content');
             if (textarea && typeof result.content === 'string') textarea.value = result.content;
             mapEditorSaved = typeof result.content === 'string' ? result.content : content;
-            showToast(`Map saved (${result.entry_count} entries). ${result.normalized_entries} bare address entr${result.normalized_entries === 1 ? 'y was' : 'ies were'} anchored automatically.`, 'success');
+            showToast(`Map saved (${uiCountLabel(result.entry_count, 'entry', 'entries')}). ${result.normalized_entries} bare address entr${result.normalized_entries === 1 ? 'y was' : 'ies were'} anchored automatically.`, 'success');
         } else {
-            showToast(`Map saved successfully (${result.entry_count} entries)`, 'success');
+            showToast(`Map saved successfully (${uiCountLabel(result.entry_count, 'entry', 'entries')})`, 'success');
         }
 
         if (!(result.normalized_entries > 0)) mapEditorSaved = content;
         const statusEl = document.getElementById('map-validation-status');
         if (statusEl) statusEl.innerHTML = uiTag('✓ Saved', 'ok');
         uiSaveBarUpdate('map-savebar', 0);
-        document.getElementById('map-entry-count').textContent = `${result.entry_count} entries`;
+        document.getElementById('map-entry-count').textContent = uiCountLabel(result.entry_count, 'entry', 'entries');
         
     } catch (error) {
         showToast('Failed to save map: ' + error.message, 'error');

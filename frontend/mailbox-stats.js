@@ -235,8 +235,16 @@ function populateMailboxStatsDomainFilter(domains) {
 
 // Current page for pagination
 let mailboxStatsPage = 1;
+let mailboxStatsTotalPages = 1;
+let mailboxStatsLoading = false;
+let mailboxStatsSeq = 0;          // an answer for filters no longer chosen is dropped
+let mailboxStatsMoreObserver = null;
 
+// The first 50 mailboxes, or (page > 1) the next 50 as the list scrolls
 async function loadMailboxStatsList(page = 1) {
+    if (page > 1 && (mailboxStatsLoading || page > mailboxStatsTotalPages)) return;
+    const seq = ++mailboxStatsSeq;
+    mailboxStatsLoading = true;
     mailboxStatsPage = page;
     const dateRange = document.getElementById('mailbox-stats-date-range')?.value || '30days';
     const customStartDate = document.getElementById('mailbox-stats-start-date')?.value || '';
@@ -267,25 +275,41 @@ async function loadMailboxStatsList(page = 1) {
         if (!response.ok) throw new Error('Failed to fetch mailboxes');
 
         const data = await response.json();
-        mailboxStatsCache.mailboxes = data.mailboxes || [];
+        if (seq !== mailboxStatsSeq) return;
+        const loaded = data.mailboxes || [];
+        if (page > 1) {
+            const have = new Set(mailboxStatsCache.mailboxes.map(m => m.username));
+            mailboxStatsCache.mailboxes = mailboxStatsCache.mailboxes.concat(loaded.filter(m => !have.has(m.username)));
+        } else {
+            mailboxStatsCache.mailboxes = loaded;
+        }
+        mailboxStatsTotalPages = data.total_pages || 1;
 
         // Update count
         const countEl = document.getElementById('mailbox-stats-count');
         if (countEl) countEl.textContent = uiCountLabel(data.total || 0, 'mailbox', 'mailboxes');
 
-        // Update pagination info
-        const pageInfoEl = document.getElementById('mailbox-stats-page-info');
-        if (pageInfoEl && data.total_pages > 1) {
-            pageInfoEl.textContent = `Page ${data.page} of ${data.total_pages}`;
-        } else if (pageInfoEl) {
-            pageInfoEl.textContent = '';
-        }
-
-        renderMailboxStatsAccordion(data.mailboxes || [], data.page, data.total_pages);
+        renderMailboxStatsAccordion(mailboxStatsCache.mailboxes, data.page, data.total_pages, data.total || 0);
 
     } catch (error) {
         console.error('Error loading mailbox list:', error);
+    } finally {
+        if (seq === mailboxStatsSeq) mailboxStatsLoading = false;
     }
+}
+
+// When the end of the list comes near, the next page is asked for
+function mailboxStatsWatchMore(more) {
+    if (mailboxStatsMoreObserver) mailboxStatsMoreObserver.disconnect();
+    mailboxStatsMoreObserver = null;
+    const sentinel = document.getElementById('mailbox-stats-more');
+    if (!more || !sentinel || typeof IntersectionObserver === 'undefined') return;
+    mailboxStatsMoreObserver = new IntersectionObserver(entries => {
+        if (!entries.some(e => e.isIntersecting)) return;
+        mailboxStatsMoreObserver.disconnect();
+        loadMailboxStatsList(mailboxStatsPage + 1);
+    }, { rootMargin: '0px 0px 400px 0px' });
+    mailboxStatsMoreObserver.observe(sentinel);
 }
 
 // A count that opens Messages filtered on this address
@@ -301,12 +325,13 @@ function mailboxRateLimitLabel(mb) {
     return `${mb.rl_value}/${frame}`;
 }
 
-function renderMailboxStatsAccordion(mailboxes, page = 1, totalPages = 1) {
+function renderMailboxStatsAccordion(mailboxes, page = 1, totalPages = 1, total = 0) {
     const container = document.getElementById('mailbox-stats-list');
     if (!container) return;
 
     if (mailboxes.length === 0) {
         container.innerHTML = '<p class="ui-empty ui-panel">No mailboxes found</p>';
+        mailboxStatsWatchMore(false);
         return;
     }
 
@@ -390,21 +415,12 @@ function renderMailboxStatsAccordion(mailboxes, page = 1, totalPages = 1) {
     }).join('')}
         </div>`;
 
-    // Add pagination controls if there are multiple pages
-    if (totalPages > 1) {
-        const pageButton = (label, target, disabled) => `<button onclick="loadMailboxStatsPage(${target})" ${disabled ? 'disabled' : ''} class="ui-btn ui-btn-sm">${label}</button>`;
-        html += `
-            <nav class="ui-pager" aria-label="Mailbox pages">
-                ${pageButton('First', 1, page === 1)}
-                ${pageButton('Previous', page - 1, page === 1)}
-                <span class="ui-muted">Page ${page} of ${totalPages}</span>
-                ${pageButton('Next', page + 1, page === totalPages)}
-                ${pageButton('Last', totalPages, page === totalPages)}
-            </nav>
-        `;
-    }
+    // More load as the list scrolls; at the end, a line says all are shown
+    if (page < totalPages) html += '<p id="mailbox-stats-more" class="ui-msg-more" aria-live="polite">Loading more...</p>';
+    else if (totalPages > 1) html += `<p class="ui-msg-more">All ${uiCountLabel(total || mailboxes.length, 'mailbox', 'mailboxes')} shown</p>`;
 
     container.innerHTML = html;
+    mailboxStatsWatchMore(page < totalPages);
 }
 
 function toggleMailboxAccordion(username) {
