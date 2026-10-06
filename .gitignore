@@ -63,6 +63,9 @@ backup/
 htmlcov/
 .tox/
 docker-compose-dev.yml
+# The demo's compose file and notes are kept locally, outside the repository
+docker-compose-demo.yml
+documentation/Demo.md
 Dev/
 /scripts/
 
