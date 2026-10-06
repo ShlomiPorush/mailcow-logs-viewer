@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **DMARC & TLS page redesigned** - One page for DMARC and TLS, without tabs. All domains shows the last 30 days, messages per day across the domains and a domains table with each domain's policy, TLS-RPT record and failing senders, beside a To do list of what needs attention first. A domain shows its messages per day, the mail flow from the domain through its senders to the receivers that reported them, its senders grouped by network, its daily reports and the encryption of mail to it, beside its To do list and records. A record opens a window with what is published, the three policies with whether the domain is ready for the next one, and a record to copy. Old addresses keep working.
 - **The Dashboard search moved to the top bar** - The search box and its status filter on the Dashboard are gone; the search in the top bar replaces them. To see messages with a given status, filter by status on the Messages page.
 
 ### Fixed

@@ -35,7 +35,6 @@ const GS_PAGE_TABS = {
     quarantine: 'quarantine-tab-btn-',
     'spam-filter': 'spam-subtab-',
     status: 'status-tab-btn-',
-    dmarc: 'dmarc-tab-btn-',
     'mailbox-stats': 'mailbox-stats-view-'
 };
 
