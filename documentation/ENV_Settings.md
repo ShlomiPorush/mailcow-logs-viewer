@@ -265,9 +265,11 @@ One mailbox receives both kinds of report: point the `rua=` of your DMARC and TL
 
 Settings for the background raw log collector that powers the Logs page. Logs are fetched from mailcow services and stored in a dedicated database table, then streamed to the UI via WebSocket.
 
+Other pages read some services from the same table, so those are collected whatever these settings are, even with the Logs page turned off: `dovecot` (Sieve and delivery results in message details, and the Security login alert), `ratelimited` (Rate Limits) and `sogo` (Devices). Each is collected only while its page is on. The Logs page shows only the services in `RAW_LOGS_SERVICES`.
+
 | Variable | Type | Default | Description |
 |----------|------|---------|-------------|
-| `RAW_LOGS_ENABLED` | boolean | `true` | Enable background raw log collection for the Logs page. When disabled, no logs are fetched and the Logs page shows historical data only |
+| `RAW_LOGS_ENABLED` | boolean | `true` | Collect `RAW_LOGS_SERVICES` for the Logs page. When disabled, the Logs page shows historical data only; the services other pages read are still collected |
 | `RAW_LOGS_FETCH_INTERVAL` | integer | `20` | Seconds between raw log fetch cycles. Lower = more real-time, higher = less API load |
 | `RAW_LOGS_FETCH_COUNT` | integer | `1000` | Number of log entries to fetch per service per cycle. Higher values catch more logs but increase API load |
 | `RAW_LOGS_RETENTION_DAYS` | integer | `2` | Days to keep raw logs in the database. Older logs are automatically deleted daily at 3:00 AM |

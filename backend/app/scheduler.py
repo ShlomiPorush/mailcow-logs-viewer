@@ -1311,7 +1311,7 @@ async def _run_protection_rules_locked():
         context = ProtectionContext(
             allowlist=context.allowlist, protected_ips=context.protected_ips,
             geoip=geoip_service.is_geoip_available(),
-            raw_logs=bool(settings.raw_logs_enabled and settings.is_feature_enabled('logs')),
+            raw_logs='dovecot' in settings.raw_logs_collected_list,
         )
         alerts = await asyncio.to_thread(_run_protection_rules_sync, context)
         banned, failed = [], []
@@ -1493,14 +1493,11 @@ _dovecot_correlation_lock = threading.Lock()
 
 def dovecot_correlation_available() -> bool:
     """
-    Dovecot correlation reads the raw logs the Live Logs worker already ingests,
-    so it is only possible while that worker actually collects Dovecot.
+    Dovecot correlation reads the raw logs the raw logs worker ingests. Dovecot
+    is among the services collected for other pages (raw_logs_required), so
+    this holds with the Logs page off too.
     """
-    return (
-        settings.is_feature_enabled('logs')
-        and settings.raw_logs_enabled
-        and 'dovecot' in settings.raw_logs_services_list
-    )
+    return 'dovecot' in settings.raw_logs_collected_list
 
 
 def _apply_dovecot_verdict(correlation: MessageCorrelation) -> None:
@@ -2722,29 +2719,54 @@ async def update_mailbox_statistics():
 # ACTIVESYNC DEVICES
 # =============================================================================
 
-# Newest SOGo lines read per run. A busy webmail can write hundreds a minute;
-# a phone that is missed once is caught on its next request.
-EAS_DEVICES_FETCH_COUNT = 1000
+# ActiveSync lines read per batch; a backlog is worked off batch by batch
+EAS_DEVICES_BATCH_SIZE = 5000
+EAS_DEVICES_WATERMARK_KEY = 'eas_devices:last_raw_id'
 
 
-def _store_eas_devices(entries):
+def _store_eas_devices() -> int:
+    """Record the devices in the SOGo rows the raw logs worker stored since
+    the last run. SOGo is among the services collected for other pages, so
+    this works with the Logs page off. Returns the device rows written."""
     from .services.eas_devices import collect_devices, store_devices
-    devices = collect_devices(entries)
+    written = 0
     with get_db_context() as db:
-        return store_devices(db, devices)
+        mark_row = db.query(SystemSetting).filter(SystemSetting.key == EAS_DEVICES_WATERMARK_KEY).first()
+        try:
+            mark = int(mark_row.value) if mark_row and mark_row.value else 0
+        except (TypeError, ValueError):
+            mark = 0
+        while True:
+            rows = db.query(RawServiceLog.id, RawServiceLog.raw_data).filter(
+                RawServiceLog.service == 'sogo',
+                RawServiceLog.id > mark,
+                RawServiceLog.raw_data['message'].astext.like('%Microsoft-Server-ActiveSync%'),
+            ).order_by(RawServiceLog.id).limit(EAS_DEVICES_BATCH_SIZE).all()
+            if not rows:
+                break
+            written += store_devices(db, collect_devices(raw for _, raw in rows))
+            mark = rows[-1][0]
+            if mark_row is None:
+                mark_row = SystemSetting(key=EAS_DEVICES_WATERMARK_KEY, value=str(mark))
+                db.add(mark_row)
+            else:
+                mark_row.value = str(mark)
+            db.commit()
+            if len(rows) < EAS_DEVICES_BATCH_SIZE:
+                break
+    return written
 
 
 async def update_eas_devices():
-    """Read the newest SOGo access lines and record the ActiveSync devices in
-    them. Runs every minute; registered whatever the feature state, so turning
-    Devices on in Settings starts it without a restart."""
+    """Record the ActiveSync devices in the newly stored SOGo lines. Runs every
+    minute; registered whatever the feature state, so turning Devices on in
+    Settings starts it without a restart."""
     if not settings.is_feature_enabled('devices'):
         return
     update_job_status('eas_devices', 'running')
     try:
-        entries = await mailcow_api.get_raw_logs('sogo', count=EAS_DEVICES_FETCH_COUNT)
         stored = await asyncio.get_running_loop().run_in_executor(
-            get_thread_pool_executor(), _store_eas_devices, entries or []
+            get_thread_pool_executor(), _store_eas_devices
         )
         if stored:
             logger.debug(f"[DEVICES] Recorded {stored} ActiveSync device(s)")
@@ -3337,6 +3359,15 @@ def _run_disabled_feature_cleanup(db: Session) -> None:
         removed = db.query(EasDevice).delete(synchronize_session=False)
         if removed:
             deleted['eas_devices'] = removed
+        # Turned on again, it reads the SOGo lines still stored from the start
+        db.query(SystemSetting).filter(SystemSetting.key == EAS_DEVICES_WATERMARK_KEY).delete(synchronize_session=False)
+
+    # Raw log rows of services nothing collects any more (the Logs page was
+    # turned off); what other pages read stays
+    from .raw_logs_worker import delete_uncollected_raw_logs
+    removed = delete_uncollected_raw_logs(db)
+    if removed:
+        deleted['raw_service_logs'] = removed
 
     if rate_limits_off:
         # The audit of "who reset which counter", kept in system_settings

@@ -206,34 +206,6 @@ def test_retention_forgets_devices_not_seen_for_that_long(db, retention, kept):
     assert [r.device_id for r in _rows(db)] == kept
 
 
-def test_the_job_does_nothing_while_the_feature_is_off(monkeypatch):
-    from app import scheduler
-    from app.config import settings
-
-    async def must_not_fetch(*a, **k):
-        raise AssertionError('a disabled feature must not read the SOGo log')
-    monkeypatch.setattr(settings._inner, 'disabled_features', 'devices')
-    monkeypatch.setattr(scheduler.mailcow_api, 'get_raw_logs', must_not_fetch)
-    asyncio.run(scheduler.update_eas_devices())
-
-
-def test_the_job_records_devices_from_the_sogo_log(db, monkeypatch):
-    from app import scheduler
-    from app.config import settings
-    now = datetime.utcnow().replace(microsecond=0)
-    requested = []
-
-    async def sogo_log(service, count):
-        requested.append(service)
-        return [_entry(now, f'User={USER}&DeviceId=A&DeviceType=iPhone&Cmd=Ping')]
-    monkeypatch.setattr(settings._inner, 'disabled_features', '')
-    monkeypatch.setattr(scheduler.mailcow_api, 'get_raw_logs', sogo_log)
-    asyncio.run(scheduler.update_eas_devices())
-    assert requested == ['sogo']
-    [row] = _rows(db)
-    assert (row.username, row.device_type, row.last_seen) == (USER, 'iPhone', now)
-
-
 def test_the_list_filters_sorts_and_counts(db):
     from fastapi.testclient import TestClient
     from app.main import app
@@ -286,18 +258,57 @@ def test_each_device_carries_the_location_of_its_last_ip(db, monkeypatch):
     assert looked_up == ['203.0.113.7']
 
 
-def test_the_job_ignores_the_logs_feature_and_its_settings(db, monkeypatch):
-    # Like the message pipeline: the Devices page reads the SOGo log itself,
-    # so turning the Logs page or raw log collection off does not empty it
+def _store_raw(db, rows):
+    """Put SOGo lines in the raw log table, as the raw logs worker does."""
+    import hashlib
+    from app.models import RawServiceLog
+    for entry in rows:
+        db.add(RawServiceLog(service='sogo', time=datetime.utcfromtimestamp(int(entry['time'])),
+                             message_hash=hashlib.sha256(repr(entry).encode()).hexdigest(), raw_data=entry))
+    db.commit()
+
+
+@pytest.fixture()
+def raw(db):
+    from app.models import RawServiceLog, SystemSetting
+    from app.scheduler import EAS_DEVICES_WATERMARK_KEY
+
+    def cleanup():
+        db.query(RawServiceLog).filter(RawServiceLog.raw_data['message'].astext.like('%eas-test%')).delete(synchronize_session=False)
+        db.query(SystemSetting).filter(SystemSetting.key == EAS_DEVICES_WATERMARK_KEY).delete(synchronize_session=False)
+        db.commit()
+    cleanup()
+    yield db
+    cleanup()
+
+
+def test_the_job_does_nothing_while_the_feature_is_off(monkeypatch):
     from app import scheduler
     from app.config import settings
-    now = datetime.utcnow().replace(microsecond=0)
 
-    async def sogo_log(service, count):
-        return [_entry(now, f'User={USER}&DeviceId=A&DeviceType=iPhone&Cmd=Ping')]
-    monkeypatch.setattr(settings._inner, 'disabled_features', 'logs')
-    monkeypatch.setattr(settings._inner, 'raw_logs_enabled', False)
-    monkeypatch.setattr(settings._inner, 'raw_logs_services', 'postfix')
-    monkeypatch.setattr(scheduler.mailcow_api, 'get_raw_logs', sogo_log)
+    def must_not_read():
+        raise AssertionError('a disabled feature must not read the SOGo lines')
+    monkeypatch.setattr(settings._inner, 'disabled_features', 'devices')
+    monkeypatch.setattr(scheduler, '_store_eas_devices', must_not_read)
     asyncio.run(scheduler.update_eas_devices())
-    assert [r.device_id for r in _rows(db)] == ['A']
+
+
+def test_the_job_records_devices_from_the_stored_sogo_lines(raw, monkeypatch):
+    from app import scheduler
+    from app.config import settings
+    monkeypatch.setattr(settings._inner, 'disabled_features', '')
+    now = datetime.utcnow().replace(microsecond=0)
+    _store_raw(raw, [
+        _entry(now - timedelta(minutes=2), f'User={USER}&DeviceId=A&DeviceType=iPhone&Cmd=Sync'),
+        {'time': str(int(now.timestamp())), 'message': '[1]: eas-test.example.test "GET /SOGo.index/ HTTP/1.1" 200 1/0 0.003'},
+    ])
+    asyncio.run(scheduler.update_eas_devices())
+    [row] = _rows(raw)
+    assert (row.device_type, row.last_command) == ('iPhone', 'Sync')
+
+    # Only lines stored after the last run are read: a newer Ping moves it on
+    _store_raw(raw, [_entry(now, f'User={USER}&DeviceId=A&DeviceType=iPhone&Cmd=Ping')])
+    asyncio.run(scheduler.update_eas_devices())
+    [row] = _rows(raw)
+    assert (row.last_command, row.last_seen) == ('Ping', now)
+
