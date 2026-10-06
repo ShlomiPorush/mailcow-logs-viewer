@@ -2185,3 +2185,8 @@ html .markdown-body .markdown-alert-caution .markdown-alert-title { color: var(-
 .ui-prot-inline .ui-select { height: 30px; }
 .ui-prot-acts { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
 @media (max-width: 900px) { .ui-prot-rules { grid-template-columns: minmax(0, 1fr); } }
+
+/* Devices: on a phone the last IP and its location share one line */
+@media (max-width: 760px) {
+    .ui-stack .ui-dev-ip { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 8px; flex: 1 1 100%; }
+}

@@ -165,7 +165,7 @@ if [ "${UI_SMOKE:-0}" = "1" ]; then
     step "Browser pass over every page (every feature off, settings read-only)"
     docker rm -f "${APP}" >/dev/null
     start_app -e SETTINGS_EDIT_VIA_UI_ENABLED=false \
-        -e DISABLED_FEATURES=netfilter,queue,quarantine,spam-filter,domains,dmarc,mailbox-stats,rate-limits,logs,blacklist
+        -e DISABLED_FEATURES=netfilter,queue,quarantine,spam-filter,domains,dmarc,mailbox-stats,rate-limits,logs,blacklist,devices
     wait_healthy
     browser_pass "locked"
 fi

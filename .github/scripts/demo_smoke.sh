@@ -110,6 +110,7 @@ check /api/messages/facets 'all(d["direction"][k] > 0 for k in ("inbound", "outb
 check /api/dmarc/domains 'd["total"] == 2 and all(x["report_count"] > 0 for x in d["domains"])' "DMARC reports for both domains"
 check /api/suppressions/stats 'd["active"] > 0' "bounces became suppressions"
 check /api/mailbox-stats/summary 'd["total_messages"] > 0' "mailbox statistics"
+check /api/devices 'd["summary"]["devices"] == 6 and any(x["last_status"] == 401 for x in d["items"])' "ActiveSync devices, one failing to sign in"
 check /api/blacklist/summary 'd["listed_count"] == 1' "blocklist results"
 check /api/security-alerts 'len(d["alerts"]) >= 1' "a security alert was raised"
 

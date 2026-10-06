@@ -153,7 +153,7 @@ class Settings(BaseSettings):
     app_logo_url: str = Field(default="", description="Application logo URL (optional)")
     disabled_features: str = Field(
         default="",
-        description="Comma-separated list of features to disable (hides page and stops related jobs). Valid: netfilter, queue, quarantine, spam-filter, domains, dmarc, mailbox-stats, rate-limits, logs, blacklist"
+        description="Comma-separated list of features to disable (hides page and stops related jobs). Valid: netfilter, queue, quarantine, spam-filter, domains, dmarc, mailbox-stats, rate-limits, logs, blacklist, devices"
     )
     
     # Settings UI: allow editing config from web UI (overrides stored in DB). ENV only; default False.
@@ -749,6 +749,13 @@ class Settings(BaseSettings):
         description='Days to keep quarantine auto-rule action history (older logs are automatically cleaned up)'
     )
 
+    # ActiveSync devices (Devices page)
+    eas_devices_retention_days: int = Field(
+        default=90, ge=0,
+        env='EAS_DEVICES_RETENTION_DAYS',
+        description='Days to keep an ActiveSync device that stopped connecting (0 = keep forever)'
+    )
+
     @field_validator('smtp_port', 'dmarc_imap_port', 'dmarc_imap_interval', mode='before')
     @classmethod
     def empty_str_to_none(cls, v):
@@ -930,7 +937,7 @@ EDITABLE_SETTING_KEYS = _get_editable_setting_keys()
 # Every feature DISABLED_FEATURES can switch off (TOGGLEABLE_FEATURES in app.js)
 FEATURE_IDS = frozenset({
     "netfilter", "queue", "quarantine", "spam-filter", "domains", "dmarc",
-    "mailbox-stats", "rate-limits", "logs", "blacklist",
+    "mailbox-stats", "rate-limits", "logs", "blacklist", "devices",
 })
 
 

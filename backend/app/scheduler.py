@@ -20,7 +20,7 @@ from sqlalchemy.exc import IntegrityError
 from .config import settings, set_cached_active_domains
 from .database import get_db_context, SessionLocal
 from .mailcow_api import mailcow_api
-from .models import PostfixLog, RspamdLog, NetfilterLog, MessageCorrelation, DMARCSync, DomainDNSCheck, MailboxStatistics, AliasStatistics, MonitoredHost, BlacklistCheck, DMARCReport, DMARCRecord, TLSReport, TLSReportPolicy, SpamSuppression, RawServiceLog, SystemSetting
+from .models import EasDevice, PostfixLog, RspamdLog, NetfilterLog, MessageCorrelation, DMARCSync, DomainDNSCheck, MailboxStatistics, AliasStatistics, MonitoredHost, BlacklistCheck, DMARCReport, DMARCRecord, TLSReport, TLSReportPolicy, SpamSuppression, RawServiceLog, SystemSetting
 from .correlation import (
     detect_direction,
     ensure_leg,
@@ -304,6 +304,8 @@ job_status = {
     'anomaly_detection': {'last_run': None, 'status': 'idle', 'error': None},
     'smtp_abuse': {'last_run': None, 'status': 'idle', 'error': None},
     'protection_rules': {'last_run': None, 'status': 'idle', 'error': None},
+    'eas_devices': {'last_run': None, 'status': 'idle', 'error': None},
+    'cleanup_eas_devices': {'last_run': None, 'status': 'idle', 'error': None},
 }
 
 # Number of hosts that were listed on actionable blacklists in the previous blacklist check run (for "cleared" notification)
@@ -2717,6 +2719,66 @@ async def update_mailbox_statistics():
 
 
 # =============================================================================
+# ACTIVESYNC DEVICES
+# =============================================================================
+
+# Newest SOGo lines read per run. A busy webmail can write hundreds a minute;
+# a phone that is missed once is caught on its next request.
+EAS_DEVICES_FETCH_COUNT = 1000
+
+
+def _store_eas_devices(entries):
+    from .services.eas_devices import collect_devices, store_devices
+    devices = collect_devices(entries)
+    with get_db_context() as db:
+        return store_devices(db, devices)
+
+
+async def update_eas_devices():
+    """Read the newest SOGo access lines and record the ActiveSync devices in
+    them. Runs every minute; registered whatever the feature state, so turning
+    Devices on in Settings starts it without a restart."""
+    if not settings.is_feature_enabled('devices'):
+        return
+    update_job_status('eas_devices', 'running')
+    try:
+        entries = await mailcow_api.get_raw_logs('sogo', count=EAS_DEVICES_FETCH_COUNT)
+        stored = await asyncio.get_running_loop().run_in_executor(
+            get_thread_pool_executor(), _store_eas_devices, entries or []
+        )
+        if stored:
+            logger.debug(f"[DEVICES] Recorded {stored} ActiveSync device(s)")
+        update_job_status('eas_devices', 'success')
+    except Exception as e:
+        logger.error(f"[DEVICES] Failed to update ActiveSync devices: {e}")
+        update_job_status('eas_devices', 'failed', str(e))
+
+
+def _cleanup_eas_devices_worker():
+    from .services.eas_devices import delete_stale_devices
+    with get_db_context() as db:
+        return delete_stale_devices(db, settings.eas_devices_retention_days)
+
+
+async def cleanup_eas_devices():
+    """Forget devices not seen for EAS_DEVICES_RETENTION_DAYS (daily)."""
+    if not settings.is_feature_enabled('devices'):
+        return
+    update_job_status('cleanup_eas_devices', 'running')
+    try:
+        deleted = await asyncio.get_running_loop().run_in_executor(
+            get_thread_pool_executor(), _cleanup_eas_devices_worker
+        )
+        if deleted:
+            logger.info(f"[DEVICES] Removed {deleted} device(s) not seen for "
+                        f"{settings.eas_devices_retention_days} days")
+        update_job_status('cleanup_eas_devices', 'success')
+    except Exception as e:
+        logger.error(f"[DEVICES] Cleanup failed: {e}")
+        update_job_status('cleanup_eas_devices', 'failed', str(e))
+
+
+# =============================================================================
 # ALIAS STATISTICS
 # =============================================================================
 
@@ -3271,6 +3333,11 @@ def _run_disabled_feature_cleanup(db: Session) -> None:
         if removed:
             deleted['mailbox_statistics'] = removed
 
+    if not settings.is_feature_enabled('devices'):
+        removed = db.query(EasDevice).delete(synchronize_session=False)
+        if removed:
+            deleted['eas_devices'] = removed
+
     if rate_limits_off:
         # The audit of "who reset which counter", kept in system_settings
         removed = db.query(SystemSetting).filter(
@@ -3579,6 +3646,25 @@ def start_scheduler():
             logger.info("Scheduled alias statistics job (interval: 5 minutes)")
         else:
             logger.info("   [FEATURE] Mailbox Stats feature disabled - skipping alias stats job")
+
+        # ActiveSync devices: every minute, plus a daily cleanup. Both check
+        # the feature themselves, so they are always registered.
+        scheduler.add_job(
+            update_eas_devices,
+            IntervalTrigger(minutes=1),
+            id='eas_devices',
+            name='Update ActiveSync Devices',
+            replace_existing=True,
+            max_instances=1
+        )
+        scheduler.add_job(
+            cleanup_eas_devices,
+            trigger=CronTrigger(hour=3, minute=30),
+            id='cleanup_eas_devices',
+            name='Cleanup ActiveSync Devices',
+            replace_existing=True,
+            max_instances=1
+        )
 
         # Job 15: Blacklist Check (daily at 5 AM)
         if settings.is_feature_enabled('blacklist'):

@@ -141,6 +141,7 @@ async def ingest():
     await _step("sync_local_domains", scheduler.sync_local_domains)
     await _step("mailbox_stats", scheduler.update_mailbox_statistics)
     await _step("alias_stats", scheduler.update_alias_statistics)
+    await _step("eas_devices", scheduler.update_eas_devices)
     await _step("fetch_logs", scheduler.fetch_all_logs)
 
     # The correlation job takes 100 messages per run

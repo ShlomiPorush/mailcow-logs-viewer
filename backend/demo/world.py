@@ -77,6 +77,19 @@ SPAM_IPS = ["203.0.113.66", "203.0.113.77", "203.0.113.88", "203.0.113.99"]
 ATTACKER_IPS = ["203.0.113.5", "203.0.113.45", "198.51.100.200", "192.0.2.150", "192.0.2.201"]
 CLIENT_IPS = ["192.0.2.10", "192.0.2.11", "198.51.100.12", "198.51.100.13"]
 
+# ActiveSync phones and tablets: (mailbox, device id, device type, share of
+# hours with a request, addresses it connects from). heidi's phone keeps the
+# old password after a change, so its recent requests fail.
+EAS_DEVICES = [
+    ("alice@example.com", "ApplF2C8A1D94B7E", "iPhone", 0.9, ["192.0.2.10", "198.51.100.13"]),
+    ("alice@example.com", "ApplDMPXK2LZ9B1E", "iPad", 0.3, ["192.0.2.10"]),
+    ("bob@example.com", "SEC1A2B3C4D5E6F7", "SAMSUNGSMS918B", 0.7, ["198.51.100.12"]),
+    ("carol@example.com", "ApplC7D3F0B9E2A6", "iPhone", 0.8, ["198.51.100.13", "192.0.2.11"]),
+    ("grace@example.org", "OUTLOOKA4E2C9F1", "Outlook", 0.5, ["2001:db8:4::1a"]),
+    ("heidi@example.org", "Appl5E8A2C4F7B1D", "iPhone", 0.4, ["198.51.100.12"]),
+]
+EAS_FAILING_DEVICE = "Appl5E8A2C4F7B1D"
+
 CONTAINERS = ["acme", "clamd", "dockerapi", "dovecot", "memcached", "mysql", "netfilter",
               "nginx", "ofelia", "olefy", "php-fpm", "postfix", "redis", "rspamd", "sogo",
               "solr", "unbound", "watchdog"]

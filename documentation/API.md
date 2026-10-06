@@ -20,29 +20,30 @@ When authentication is enabled, all API endpoints (except public endpoints liste
 4. [Job Status Tracking](#job-status-tracking)
 5. [Domains](#domains)
 6. [Mailbox Statistics](#mailbox-statistics)
-7. [Rate Limits](#rate-limits)
-8. [Messages (Unified View)](#messages-unified-view)
-9. [Logs](#logs)
+7. [Devices](#devices)
+8. [Rate Limits](#rate-limits)
+9. [Messages (Unified View)](#messages-unified-view)
+10. [Logs](#logs)
    - [Postfix Logs](#postfix-logs)
    - [Rspamd Logs](#rspamd-logs)
    - [Netfilter Logs](#netfilter-logs)
    - [Fail2Ban Configuration](#fail2ban-configuration)
-10. [Queue & Quarantine](#queue--quarantine)
-11. [Statistics](#statistics)
-12. [Status](#status)
-13. [Settings](#settings)
+11. [Queue & Quarantine](#queue--quarantine)
+12. [Statistics](#statistics)
+13. [Status](#status)
+14. [Settings](#settings)
     - [GeoIP Management](#geoip-management)
     - [SMTP & IMAP Test](#smtp--imap-test)
-14. [Export](#export)
-15. [DMARC](#dmarc)
+15. [Export](#export)
+16. [DMARC](#dmarc)
     - [DMARC IMAP Auto-Import](#dmarc-imap-auto-import)
-16. [Blacklist Monitoring](#blacklist-monitoring)
-17. [Reporting](#reporting)
-18. [Raw Logs (Live Log Viewer)](#raw-logs-live-log-viewer)
-19. [Spam Filter](#spam-filter)
+17. [Blacklist Monitoring](#blacklist-monitoring)
+18. [Reporting](#reporting)
+19. [Raw Logs (Live Log Viewer)](#raw-logs-live-log-viewer)
+20. [Spam Filter](#spam-filter)
     - [Rspamd Maps](#rspamd-maps)
     - [Suppressions](#suppressions)
-20. [Quarantine Auto-Rules](#quarantine-auto-rules)
+21. [Quarantine Auto-Rules](#quarantine-auto-rules)
 
 ---
 
@@ -200,7 +201,7 @@ Application information and configuration.
 - `auth_enabled`: Boolean - Whether any authentication is enabled
 - `basic_auth_enabled`: Boolean - Whether Basic Authentication is enabled
 - `oauth2_enabled`: Boolean - Whether OAuth2/OIDC authentication is enabled
-- `disabled_features`: Array of strings - List of currently disabled feature IDs. Valid values: `netfilter`, `queue`, `quarantine`, `spam-filter`, `domains`, `dmarc`, `mailbox-stats`, `rate-limits`, `logs`, `blacklist`. Empty array if all features are enabled
+- `disabled_features`: Array of strings - List of currently disabled feature IDs. Valid values: `netfilter`, `queue`, `quarantine`, `spam-filter`, `domains`, `dmarc`, `mailbox-stats`, `rate-limits`, `logs`, `blacklist`, `devices`. Empty array if all features are enabled
 
 ---
 
@@ -1242,6 +1243,73 @@ from app.routers.mailbox_stats import clear_stats_cache
 # Clear all stats cache (e.g., after data import)
 clear_stats_cache()
 ```
+
+---
+
+## Devices
+
+ActiveSync devices recorded from SOGo's access log. The `eas_devices` job reads the newest SOGo lines through the mailcow API every minute and keeps one row per user and device ID: the newest request, and when the device was first and last seen. Devices not seen for `EAS_DEVICES_RETENTION_DAYS` (default 90, `0` = forever) are removed daily.
+
+### GET /api/devices
+
+List the recorded devices, filtered, sorted and paged.
+
+**Query Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `search` | string | - | Matches user, device ID, device type or IP (case-insensitive substring) |
+| `device_type` | string | - | Exact device type, as listed in `device_types` |
+| `seen` | string | `all` | `all`, `recent` (seen in 24 hours), `new` (first seen in 7 days) or `stale` (not seen for 30 days) |
+| `sort_by` | string | `last_seen` | `username`, `device_type`, `last_ip`, `last_command`, `first_seen` or `last_seen` |
+| `sort_dir` | string | `desc` | `asc` or `desc` |
+| `page` | integer | `1` | Page number |
+| `per_page` | integer | `50` | Rows per page (1-200) |
+
+**Response:**
+```json
+{
+  "items": [
+    {
+      "id": 12,
+      "username": "jane@example.com",
+      "device_id": "ApplF2C8A1D94B7E",
+      "device_type": "iPhone",
+      "last_ip": "203.0.113.7",
+      "country_code": "DE",
+      "country_name": "Germany",
+      "city": "Berlin",
+      "asn": "AS64500",
+      "asn_org": "Example Mobile",
+      "client": "Apple Mail",
+      "model": null,
+      "last_command": "Ping",
+      "last_status": 200,
+      "first_seen": "2026-09-02T08:14:03Z",
+      "last_seen": "2026-10-05T14:02:51Z"
+    }
+  ],
+  "total": 1,
+  "page": 1,
+  "per_page": 50,
+  "total_pages": 1,
+  "summary": {"devices": 16, "users": 11, "recent": 14, "new": 2, "stale": 1},
+  "device_types": ["iPad", "iPhone", "Outlook"],
+  "thresholds": {"recent_hours": 24, "new_days": 7, "stale_days": 30},
+  "retention_days": 90,
+  "geoip": true,
+  "last_run": "2026-10-05T14:03:00Z",
+  "last_status": "success"
+}
+```
+
+**Notes:**
+- `summary` counts every device, not only the filtered page
+- `last_ip` is `null` when SOGo logged something other than an IP address
+- The location fields come from the MaxMind GeoIP databases, looked up when the list is read; they are `null` when `geoip` is `false` or the address is not in the database
+- `client` is the mail app recognised from the device ID and type (`Apple Mail`, `Samsung Email`, `Outlook`, `Windows Mail`, `Gmail`), `null` when not recognised; `model` is a Samsung model code such as `SM-S918B`, else `null`
+- `last_status` is the HTTP status SOGo answered; `401` means the device's password was refused
+- A connected phone's `last_seen` can be up to an hour old: SOGo logs a `Ping` when it ends, and mailcow allows a Ping of up to 59 minutes
 
 ---
 
@@ -3207,7 +3275,7 @@ When a feature is disabled, this endpoint permanently deletes all stored data fr
 ```
 
 **Request Fields:**
-- `feature`: Feature ID to purge. Valid values: `netfilter`, `domains`, `dmarc`, `mailbox-stats`, `logs`, `blacklist`, `spam-filter`, `quarantine`
+- `feature`: Feature ID to purge. Valid values: `netfilter`, `domains`, `dmarc`, `mailbox-stats`, `logs`, `blacklist`, `spam-filter`, `quarantine`, `devices`
 
 **Feature → Tables Mapping:**
 
@@ -3221,6 +3289,7 @@ When a feature is disabled, this endpoint permanently deletes all stored data fr
 | `blacklist` | `blacklist_checks`, `monitored_hosts` |
 | `spam-filter` | `spam_suppressions` |
 | `quarantine` | `quarantine_rules`, `quarantine_rule_logs` |
+| `devices` | `eas_devices` |
 
 **Response:**
 ```json
@@ -3323,6 +3392,8 @@ Manually trigger a background job.
 - `expire_suppressions`: Expire old suppressions
 - `process_quarantine_rules`: Process quarantine auto-rules
 - `cleanup_deferred_queue`: Clean up stuck deferred queue items
+- `eas_devices`: Record ActiveSync devices from the SOGo log
+- `cleanup_eas_devices`: Remove ActiveSync devices not seen within the retention period
 
 **Response:**
 ```json

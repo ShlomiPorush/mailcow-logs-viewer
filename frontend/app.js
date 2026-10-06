@@ -185,6 +185,7 @@ const TOGGLEABLE_FEATURES = [
     { id: 'dmarc', label: 'DMARC & TLS', description: 'DMARC/TLS reports and IMAP sync' },
     { id: 'mailbox-stats', label: 'Mailbox Stats', description: 'Mailbox and alias statistics' },
     { id: 'rate-limits', label: 'Rate Limits', description: 'Sender rate limit hits and the configured limits' },
+    { id: 'devices', label: 'Devices', description: 'ActiveSync phones and tablets, read from the SOGo log' },
     { id: 'logs', label: 'Logs', description: 'Raw service log viewer' },
     { id: 'blacklist', label: 'IP Blacklist Monitor', description: 'DNS blacklist monitoring for your IPs' },
 ];
@@ -1533,6 +1534,9 @@ function switchTab(tab, params = {}) {
             break;
         case 'mailbox-stats':
             initMailboxStatsPage();
+            break;
+        case 'devices':
+            loadDevices();
             break;
         case 'logs':
             loadLogViewer();
@@ -4392,6 +4396,14 @@ function statusJobCategories(jobs) {
             jobs: [
                 ['Fetch Raw Logs', 'fetch_raw_logs', jobs.fetch_raw_logs],
                 ['Cleanup Raw Logs', 'cleanup_raw_logs', jobs.cleanup_raw_logs]
+            ]
+        },
+        {
+            title: 'Devices',
+            icon: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z"></path>',
+            jobs: [
+                ['ActiveSync Devices', 'eas_devices', jobs.eas_devices],
+                ['Cleanup ActiveSync Devices', 'cleanup_eas_devices', jobs.cleanup_eas_devices]
             ]
         },
         {

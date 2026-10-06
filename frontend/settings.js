@@ -14,7 +14,8 @@ let settingsFirstTab = null;
 
 // Labels the key cannot spell well. Next to the other addresses, "Error Email" alone would not say whose errors
 const SETTINGS_LABEL_OVERRIDES = {
-    dmarc_error_email: 'Report Import Error Email'
+    dmarc_error_email: 'Report Import Error Email',
+    eas_devices_retention_days: 'Retention Days'
 };
 
 // Settings the API returns masked as ******** (same list as the backend)
@@ -301,6 +302,7 @@ var SETTINGS_FIELD_DESCRIPTIONS = {
     raw_logs_fetch_interval: 'Seconds between raw log fetch cycles. Lower = more frequent updates. Default: 20.',
     raw_logs_fetch_count: 'Number of log entries to fetch per service per cycle. Higher values catch more logs but increase API load. Default: 1000.',
     raw_logs_retention_days: 'Days to keep raw logs in the database. Older logs are automatically deleted at 3:00 AM daily. Default: 2.',
+    eas_devices_retention_days: 'Days to keep a device that stopped syncing before it is removed from the Devices page. 0 keeps every device. Default: 90.',
     raw_logs_services: 'Select which mailcow services to collect logs from. Unchecked services will not be fetched or displayed.',
     rspamd_password: 'Rspamd UI/API password for reading Rspamd map data. Required to view and edit Rspamd maps.',
     suppression_enabled: 'Master switch for the spam suppression system. When enabled, bounced/rejected recipients are automatically blocked from receiving future emails.',
@@ -457,6 +459,11 @@ var SETTINGS_EDIT_TABS = [
         ]
     },
     {
+        id: 'devices', label: 'Devices', description: 'The Devices page lists the phones and tablets that sync over ActiveSync. It reads the SOGo log through the mailcow API every minute.', groups: [
+            { label: 'Retention', keys: ['eas_devices_retention_days'] }
+        ]
+    },
+    {
         id: 'spam_filter', label: 'Spam Filter', description: 'Automatic bounce handling. Hard bounces are detected from Postfix logs, deferred (soft bounce) emails directly in the mail queue, and the block duration grows with each repeat bounce. The Rspamd connection itself (password and address) is configured under Mailcow.', groups: [
             { label: 'Suppression', keys: ['suppression_enabled', 'suppression_auto_detect', 'suppression_rspamd_sync'] },
             { label: 'Hard Bounces (5.x.x)', keys: ['suppression_hard_bounce_action'] },
@@ -482,7 +489,7 @@ var SETTINGS_TAB_GROUPS = [
     { label: 'mailcow', tabs: ['mailcow', 'fetch', 'correlation', 'logs'] },
     { label: 'Alerts', tabs: ['notifications', 'smtp'] },
     { label: 'Security', tabs: ['auth', 'anomaly', 'smtp_abuse'] },
-    { label: 'Data', tabs: ['domains', 'dmarc', 'dmarc_imap', 'maxmind', 'blacklist', 'spam_filter', 'quarantine', 'other'] }
+    { label: 'Data', tabs: ['domains', 'dmarc', 'dmarc_imap', 'maxmind', 'blacklist', 'spam_filter', 'quarantine', 'devices', 'other'] }
 ];
 
 // A stored secret shows as Stored with Replace and Remove; the hidden field
@@ -902,7 +909,8 @@ function renderSettings(content, data) {
                 'dmarc_imap': 'dmarc',
                 'logs': 'logs',
                 'spam_filter': 'spam-filter',
-                'quarantine': 'quarantine'
+                'quarantine': 'quarantine',
+                'devices': 'devices'
             };
             const filteredTabs = tabs.filter(function (tab) {
                 const feature = SETTINGS_TAB_FEATURE_MAP[tab.id];
@@ -1317,7 +1325,7 @@ function renderSettings(content, data) {
 
                 // ── Feature disable confirmation ─────────────────────────
                 // Detect if any features are being newly disabled
-                const PURGEABLE_FEATURES = ['netfilter', 'domains', 'dmarc', 'mailbox-stats', 'logs', 'blacklist', 'spam-filter', 'quarantine'];
+                const PURGEABLE_FEATURES = ['netfilter', 'domains', 'dmarc', 'mailbox-stats', 'logs', 'blacklist', 'spam-filter', 'quarantine', 'devices'];
                 let newlyDisabledFeatures = [];
                 if ('disabled_features' in payload) {
                     const oldDisabled = new Set(

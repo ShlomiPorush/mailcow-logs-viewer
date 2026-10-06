@@ -31,6 +31,7 @@ from .routers import (
     domains as domains_router,
     dmarc as dmarc_router,
     mailbox_stats as mailbox_stats_router,
+    devices as devices_router,
     documentation,
     blacklist as blacklist_router,
     reporting,
@@ -347,6 +348,7 @@ if settings_router:
 app.include_router(domains_router.router, prefix="/api", tags=["Domains"])
 app.include_router(dmarc_router.router, prefix="/api", tags=["DMARC"])
 app.include_router(mailbox_stats_router.router, prefix="/api", tags=["Mailbox Stats"])
+app.include_router(devices_router.router, prefix="/api", tags=["Devices"])
 app.include_router(documentation.router, prefix="/api", tags=["Documentation"])
 app.include_router(blacklist_router.router, prefix="/api/blacklist", tags=["Blacklist"])
 app.include_router(raw_logs_router.router, prefix="/api", tags=["Raw Logs"])
