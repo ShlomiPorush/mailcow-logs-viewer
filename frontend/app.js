@@ -959,10 +959,17 @@ function renderNetfilterData(data) {
     // Without a Read-Write key the Ban and Unban buttons are not offered; say so
     const lockedNote = mailcowRwConfigured ? '' : `<div class="ui-list-note">${uiLocked('Ban and Unban are locked', `Banning or unbanning an IP from this list ${UI_RW_KEY_TEXT}`)}</div>`;
 
+    const tabCount = document.getElementById('security-tab-n-events');
+    if (tabCount) {
+        tabCount.textContent = data.total ? data.total.toLocaleString() : '';
+        tabCount.classList.toggle('hidden', !data.total);
+    }
+
     container.innerHTML = `
         ${lockedNote}
-        <div class="ui-sec-list">
-            ${uniqueLogs.map(log => {
+        <div class="ui-ev-list">
+            <div class="ui-ev-row ui-ev-head"><span>When</span><span>Address</span><span>Account</span><span>Action</span><span>Where</span><span></span></div>
+            ${uniqueLogs.map((log, index) => {
                 const isBan = log.action === 'ban' || log.action === 'banned';
                 const isWarningOrUnban = log.action === 'warning' || log.action === 'unban';
                 // Check if IP is in the blacklist (with or without /32)
@@ -971,42 +978,39 @@ function renderNetfilterData(data) {
                 const showUnban = mailcowRwConfigured && log.ip && (isBan || ipInBlacklist);
                 // Show ban if: warning/unban AND NOT already in blacklist
                 const showBan = mailcowRwConfigured && log.ip && isWarningOrUnban && !ipInBlacklist;
-                // GeoIP rendering
-                let geoHtml = '';
-                if (log.country_code) {
-                    const flagUrl = getFlagUrl(log.country_code, '16x12');
-                    let geoParts = [];
-                    if (log.country_name && flagUrl) {
-                        geoParts.push('<img src="' + flagUrl + '" alt="' + escapeHtml(log.country_name) + '" style="width:16px;height:12px;display:inline-block;vertical-align:middle" onerror="this.style.display=\'none\'"> ' + escapeHtml(log.country_name));
-                    }
-                    if (log.city) geoParts.push(escapeHtml(log.city));
-                    if (log.asn_org) geoParts.push('(' + escapeHtml(log.asn_org) + ')');
-                    if (geoParts.length > 0) {
-                        geoHtml = '<div class="ui-sec-geo">' +
-                            '<svg width="12" height="12" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>' +
-                            geoParts.join(' ') + '</div>';
-                    }
-                }
+                const flagUrl = log.country_code ? getFlagUrl(log.country_code, '16x12') : '';
+                const place = [log.country_name, log.city].filter(Boolean).join(', ');
+                const org = log.asn_org ? ` (${log.asn_org})` : '';
+                const account = log.username && log.username !== '-' ? copyableText(log.username)
+                    : (log.attempts_left !== null && log.attempts_left !== undefined ? `<span class="ui-muted">${log.attempts_left} attempts left</span>` : '<span class="ui-muted">-</span>');
                 return `
-                <div class="ui-sec-row ui-msg-${uiActionTone(log.action)}">
-                    <div class="ui-sec-l1">
-                        <b class="ui-mono">${log.ip ? copyableText(log.ip) : '-'}</b>
-                        ${log.username && log.username !== '-' ? `<span class="ui-sec-user">${copyableText(log.username)}</span>` : ''}
-                        ${uiActionTag(log.action)}
-                        ${log.attempts_left !== null && log.attempts_left !== undefined ? `<span class="ui-muted">${log.attempts_left} attempts left</span>` : ''}
-                        <span class="ui-sec-meta">
-                            <time>${formatTime(log.time)}</time>
-                            ${showUnban ? `<button onclick="unbanIP('${escapeJsArg(log.ip)}', this)" class="ui-btn ui-btn-sm" title="Unban ${escapeHtml(log.ip)}/32">Unban</button>` : ''}
-                            ${showBan ? `<button onclick="banIP('${escapeJsArg(log.ip)}', this)" class="ui-btn ui-btn-sm ui-btn-danger" title="Ban ${escapeHtml(log.ip)}/32">Ban</button>` : ''}
-                        </span>
+                <div class="ui-ev-row ui-msg-${uiActionTone(log.action)}">
+                    <time class="ui-muted" title="${escapeHtml(formatTime(log.time))}">${formatListTime(log.time)}</time>
+                    <b class="ui-mono">${log.ip ? copyableText(log.ip) : '-'}</b>
+                    <span class="ui-ev-account">${account}</span>
+                    <span>${uiActionTag(log.action)}</span>
+                    <span class="ui-ev-where" title="${escapeHtml(place + org)}">${flagUrl ? `<img src="${flagUrl}" alt="" width="16" height="12" onerror="this.style.display='none'">` : ''}${escapeHtml(place || '-')}</span>
+                    <span class="ui-st-acts">
+                        ${showUnban ? `<button onclick="unbanIP('${escapeJsArg(log.ip)}', this)" class="ui-btn ui-btn-sm" title="Unban ${escapeHtml(log.ip)}/32">Unban</button>` : ''}
+                        ${showBan ? `<button onclick="banIP('${escapeJsArg(log.ip)}', this)" class="ui-btn ui-btn-sm ui-btn-danger" title="Ban ${escapeHtml(log.ip)}/32">Ban</button>` : ''}
+                        <button type="button" class="ui-icon-btn ui-icon-btn-sm ui-ev-toggle" aria-expanded="false" aria-controls="ev-detail-${index}" title="Show the log line" onclick="toggleEventDetail(this)"><svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg></button>
+                    </span>
+                    <div class="ui-ev-detail" id="ev-detail-${index}" hidden>
+                        <p class="ui-mono">${escapeHtml(log.message || '-')}</p>
+                        ${place || org ? `<p class="ui-muted">${escapeHtml([log.country_name, log.city].filter(Boolean).join(' '))}${escapeHtml(org)}</p>` : ''}
                     </div>
-                    <p class="ui-sec-msg">${escapeHtml(log.message || '-')}</p>
-                    ${geoHtml}
                 </div>`;
             }).join('')}
         </div>
         ${renderPagination('netfilter', data.page, data.pages)}
     `;
+}
+
+function toggleEventDetail(btn) {
+    const detail = document.getElementById(btn.getAttribute('aria-controls'));
+    if (!detail) return;
+    detail.hidden = !detail.hidden;
+    btn.setAttribute('aria-expanded', !detail.hidden);
 }
 
 async function unbanIP(ip, btnEl) {
@@ -1120,6 +1124,21 @@ function securitySourceState(source) {
     return recent ? { key: 'open', text: 'Not banned', tone: 'warn' } : { key: 'quiet', text: 'Quiet', tone: '' };
 }
 
+// Security page tabs: every section loads with the page, the tabs only show one
+let securityTab = 'overview';
+function securityShowTab(tab) {
+    securityTab = tab;
+    document.querySelectorAll('.ui-se-tabs .modal-tab').forEach(btn => {
+        const on = btn.id === `security-tab-btn-${tab}`;
+        btn.classList.toggle('active', on);
+        btn.setAttribute('aria-selected', on);
+    });
+    ['overview', 'events', 'fail2ban', 'abuse'].forEach(name => {
+        const panel = document.getElementById(`security-tab-${name}`);
+        if (panel) panel.classList.toggle('hidden', name !== tab);
+    });
+}
+
 // The two Security lists open with their first rows; "Show all" expands them
 const SECURITY_LIST_PREVIEW = 10;
 let securityShowAll = { sources: false, latest: false };
@@ -1151,9 +1170,28 @@ function renderSecurityOverview() {
     };
     const decide = states.filter(st => st.key === 'open').length;
     setKpi('security-kpi-failed', (data.failed_logins || 0).toLocaleString());
-    setKpi('security-kpi-banned', known ? fail2banActiveBans.length.toLocaleString() : '-');
+    setKpi('security-kpi-banned', known ? (fail2banTotalBans ?? fail2banActiveBans.length).toLocaleString() : '-');
     setKpi('security-kpi-sources', (data.source_count || 0).toLocaleString());
     setKpi('security-kpi-decide', known ? decide.toLocaleString() : '-', decide > 0 ? 'ui-fail' : '');
+
+    const decideEl = document.getElementById('security-decide');
+    const decideNote = document.getElementById('security-decide-note');
+    if (decideEl) {
+        const open = data.sources.map((src, i) => ({ src, st: states[i] })).filter(x => x.st.key === 'open');
+        if (decideNote) decideNote.textContent = open.length ? `${open.length} address${open.length === 1 ? '' : 'es'} kept trying and ${open.length === 1 ? 'is' : 'are'} not banned` : '';
+        decideEl.innerHTML = !known ? '<p class="ui-empty">Waiting for the Fail2ban lists...</p>'
+            : !open.length ? '<p class="ui-st-allgood">Nobody needs a decision. Addresses that keep trying after a warning show up here.</p>'
+            : `${mailcowRwConfigured ? '' : `<div class="ui-list-note">${uiLocked('Ban and Allow are locked', `Changing Fail2ban from this list ${UI_RW_KEY_TEXT}`)}</div>`}
+               ${open.map(({ src }) => {
+                   const ipArg = escapeJsArg(src.ip);
+                   const where = [src.country_name, src.usernames.length ? `tried ${src.usernames.join(', ')}` : ''].filter(Boolean).join(', ');
+                   return `<div class="ui-st-listing">
+                       <div><b class="ui-mono">${copyableText(src.ip)}</b><small title="${escapeHtml(where)}">${escapeHtml(where || src.services.join(', '))}, ${src.attempts} ${src.attempts === 1 ? 'attempt' : 'attempts'}, ${formatAgo(src.last_seen)}</small></div>
+                       ${mailcowRwConfigured ? `<span class="ui-st-acts"><button onclick="banIP('${ipArg}', this)" class="ui-btn ui-btn-sm ui-btn-danger" title="Ban ${escapeHtml(src.ip)}/32">Ban</button>
+                           <button onclick="allowIP('${ipArg}', this)" class="ui-btn ui-btn-sm" title="Never ban ${escapeHtml(src.ip)}/32">Allow</button></span>` : ''}
+                   </div>`;
+               }).join('')}`;
+    }
 
     if (!data.sources.length) {
         sourcesEl.innerHTML = '<p class="ui-empty ui-panel">No attempts in the last 24 hours.</p>';
@@ -2131,6 +2169,8 @@ async function loadNetfilterLogs(page = 1) {
 
 let fail2banSettingsLoaded = false;
 let fail2banActiveBans = null;
+// Permanent plus temporary bans, as the Active Bans list shows them
+let fail2banTotalBans = null;
 let fail2banBlacklist = [];
 let fail2banWhitelist = [];
 
@@ -2153,6 +2193,9 @@ async function loadFail2BanSettings() {
         const canEdit = mailcowRwConfigured;
         fail2banSettingsLoaded = true;
         fail2banActiveBans = data.active_bans || [];
+        // Same count as the Active Bans list: permanent bans plus the temporary ones not among them
+        const permNetworks = new Set((data.perm_bans || []).map(ban => ban.network || ban.ip));
+        fail2banTotalBans = (data.perm_bans || []).length + fail2banActiveBans.filter(ban => !permNetworks.has(ban.network)).length;
 
         // Store blacklist entries globally for button logic
         const rawBlacklist = data.blacklist || '';
