@@ -13,10 +13,11 @@ import time
 from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
 from .frontend_assets import stamp_asset_versions
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.datastructures import MutableHeaders
 from contextlib import asynccontextmanager, suppress
+from typing import Optional
 
 from .config import settings, set_cached_active_domains, reload_settings
 from .database import init_db, check_db_connection
@@ -45,7 +46,8 @@ from .routers import (
     rate_limits as rate_limits_router,
 )
 from .migrations import run_migrations
-from .auth import BasicAuthMiddleware
+from .auth import BasicAuthMiddleware, safe_return_path
+from .session import get_session_from_request
 from .services.auth_cleanup import auth_store_maintenance
 from .version import __version__
 
@@ -371,8 +373,10 @@ app.mount("/static", StaticFiles(directory="/app/frontend"), name="static")
 
 
 @app.get("/login", response_class=HTMLResponse)
-def login_page():
-    """Serve the login page"""
+def login_page(request: Request, next: Optional[str] = None):
+    """Serve the login page, or skip it when there is nothing to sign in to"""
+    if not settings.is_authentication_enabled or get_session_from_request(request):
+        return RedirectResponse(url=safe_return_path(next), status_code=302, headers={"Cache-Control": "no-store"})
     try:
         with open("/app/frontend/login.html", "r") as f:
             return HTMLResponse(content=f.read())

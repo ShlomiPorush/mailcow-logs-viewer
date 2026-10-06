@@ -78,9 +78,11 @@ function navigateToMessagesWithFilter(options) {
 let dmarcImapStatus = null;
 let dmarcConfiguration = null;
 
-// Send the browser to the login page, dropping any client-side state.
+// Send the browser to the login page, dropping any client-side state; signing
+// in again returns to the page that was open
 function redirectToLogin() {
-    window.location.replace('/login');
+    const here = window.location.pathname + window.location.search;
+    window.location.replace(here === '/' ? '/login' : `/login?next=${encodeURIComponent(here)}`);
 }
 
 // Enhanced fetch with authentication.

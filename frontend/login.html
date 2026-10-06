@@ -132,6 +132,17 @@
         
         // Initialize dark mode immediately
         initDarkMode();
+
+        // The page asked for before signing in (?next=), checked the same way as
+        // the server's safe_return_path: only a local path, never another site
+        function safeReturnPath(value) {
+            if (!value || value.length > 2048 || !value.startsWith('/') || value.startsWith('//')
+                || /[\\\x00-\x1f\x7f]/.test(value)) return '/';
+            const path = value.split(/[?#]/)[0];
+            if (path === '/login' || /^\/(login|api|static)\//.test(path)) return '/';
+            return value;
+        }
+        const returnTo = safeReturnPath(new URLSearchParams(window.location.search).get('next'));
         
         // The credentials are used once, here, to obtain a session cookie.
         // Nothing about them is kept in the browser: the cookie the backend
@@ -171,7 +182,7 @@
                 const response = await startSession(username, password);
                 if (response.ok) {
                     // Success - redirect to main app using replace to avoid loop
-                    window.location.replace('/');
+                    window.location.replace(returnTo);
                 } else {
                     const message = response.status === 429
                         ? 'Too many login attempts. Please try again later.'
@@ -207,7 +218,7 @@
 
         // OAuth2 login handler
         function handleOAuth2Login() {
-            window.location.href = '/api/auth/login';
+            window.location.href = '/api/auth/login' + (returnTo !== '/' ? `?next=${encodeURIComponent(returnTo)}` : '');
         }
         
         // Check for OAuth2 callback errors
@@ -259,7 +270,7 @@
                     const infoData = await infoResponse.json();
                     // If authentication is disabled, redirect to main app
                     if (!infoData.auth_enabled) {
-                        window.location.replace('/');
+                        window.location.replace(returnTo);
                         return;
                     }
                 }
@@ -321,7 +332,7 @@
                 if (statusResponse.ok) {
                     const statusData = await statusResponse.json();
                     if (statusData.authenticated) {
-                        window.location.replace('/');
+                        window.location.replace(returnTo);
                         return;
                     }
                 }

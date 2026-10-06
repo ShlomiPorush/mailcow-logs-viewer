@@ -7,10 +7,11 @@ import logging
 import time
 from threading import RLock
 from collections import deque
-from typing import Dict, Deque
+from typing import Dict, Deque, Optional
+from urllib.parse import quote
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
-from starlette.responses import Response
+from starlette.responses import RedirectResponse, Response
 from fastapi import HTTPException, status
 import secrets
 import base64
@@ -171,6 +172,39 @@ def is_request_authenticated(request: Request) -> bool:
     return False
 
 
+def safe_return_path(value: Optional[str]) -> str:
+    """The local page to return to after signing in, or / for anything else.
+
+    Only a path on this site is accepted, so the login page cannot be used to
+    send someone to another site.
+    """
+    if not value or len(value) > 2048 or not value.startswith("/") or value.startswith("//"):
+        return "/"
+    if "\\" in value or any(ord(c) < 32 or ord(c) == 127 for c in value):
+        return "/"
+    path = value.split("?", 1)[0].split("#", 1)[0]
+    if path == "/login" or path.startswith(("/login/", "/api/", "/static/")):
+        return "/"
+    return value
+
+
+def _login_redirect(request: Request) -> Response:
+    """Send a signed-out page request to the login page, keeping the page asked for.
+
+    Done here rather than by the page's own script, so the browser never draws
+    the app before finding out there is no session.
+    """
+    target = request.url.path + (f"?{request.url.query}" if request.url.query else "")
+    url = "/login"
+    if safe_return_path(target) != "/":
+        url += "?next=" + quote(target, safe="")
+    return RedirectResponse(
+        url=url,
+        status_code=status.HTTP_302_FOUND,
+        headers={"Cache-Control": "no-store"},
+    )
+
+
 class BasicAuthMiddleware(BaseHTTPMiddleware):
     """
     Middleware that enforces authentication on ALL requests
@@ -219,8 +253,7 @@ class BasicAuthMiddleware(BaseHTTPMiddleware):
                     content="Authentication required",
                     status_code=status.HTTP_401_UNAUTHORIZED,
                 )
-            # For frontend routes, allow through (frontend will redirect)
-            return await call_next(request)
+            return _login_redirect(request)
         
         # Fall back to Basic Auth (if enabled)
         if not settings.is_basic_auth_enabled:
@@ -230,8 +263,8 @@ class BasicAuthMiddleware(BaseHTTPMiddleware):
                     content="Authentication required",
                     status_code=status.HTTP_401_UNAUTHORIZED,
                 )
-            return await call_next(request)
-        
+            return _login_redirect(request)
+
         # Check if password is configured
         if not settings.auth_password:
             logger.error("Authentication enabled but password not set")
@@ -243,11 +276,10 @@ class BasicAuthMiddleware(BaseHTTPMiddleware):
         # Extract credentials from Authorization header
         authorization = request.headers.get("Authorization", "")
         
-        # For frontend routes (not API), allow access without Authorization header
-        # The frontend JavaScript will handle authentication and redirect if needed
-        # This enables clean URLs like /dashboard, /messages, /dmarc etc.
+        # Pages (clean URLs like /dashboard, /messages, /dmarc) need the session
+        # cookie; without one they go to the login page
         if not path.startswith("/api/"):
-            return await call_next(request)
+            return _login_redirect(request)
         
         # For all other paths (API endpoints), require authentication
         if not authorization.startswith("Basic "):

@@ -24,9 +24,11 @@ def oauth(monkeypatch):
     monkeypatch.setattr(auth.oauth2_client, "get_user_info",
                         AsyncMock(return_value={"email": "user@example.com"}))
     auth._state_store.clear()
+    auth._return_paths.clear()
     session._session_store.clear()
     yield
     auth._state_store.clear()
+    auth._return_paths.clear()
     session._session_store.clear()
 
 
@@ -93,6 +95,19 @@ def test_parallel_flows_in_one_browser_remain_independent():
     assert finish(client, second).headers["location"] == "/"
 
 
+@pytest.mark.parametrize("next_page,expected", [
+    ("/messages?status=bounced", "/messages?status=bounced"),
+    ("//evil.example.com", "/"),
+    ("https://evil.example.com", "/"),
+])
+def test_login_returns_to_the_page_asked_for(next_page, expected):
+    client = TestClient(app)
+    response = client.get("/api/auth/login", params={"next": next_page}, follow_redirects=False)
+    state = parse_qs(urlsplit(response.headers["location"]).query)["state"][0]
+    assert finish(client, state).headers["location"] == expected
+    assert state not in auth._return_paths
+
+
 def test_expired_state_is_rejected_and_pending_records_are_pruned(monkeypatch):
     now = [100.0]
     monkeypatch.setattr(auth.time, "monotonic", lambda: now[0])
@@ -107,6 +122,7 @@ def test_expired_state_is_rejected_and_pending_records_are_pruned(monkeypatch):
     active = start(client)
     assert abandoned not in auth._state_store
     assert list(auth._state_store) == [active]
+    assert list(auth._return_paths) == [active]
 
 
 def test_capacity_rejects_new_logins_without_evicting_active_flow(monkeypatch):
