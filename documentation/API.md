@@ -3802,6 +3802,8 @@ Get list of all domains with DMARC statistics.
 - `policy_p`: Published DMARC policy (none, quarantine, reject)
 - `policy_sp`: Subdomain policy (if different from main policy)
 - `last_report_date`: Unix timestamp of most recent report
+- `tls_first_report`, `tls_last_report`: Unix timestamps of the domain's first and last TLS report, or `null` without TLS reports
+- `stats_30d.tls_sessions`: TLS sessions reported in the last 30 days
 - `tls_rpt_status`: Result of the last DNS check of the domain's TLS-RPT record (`success`, `warning`, `error`, `unknown`), or `null` when the domain has not been checked. The daily DNS check covers the mailcow domains only
 
 ---

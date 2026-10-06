@@ -92,3 +92,6 @@ def test_the_domains_list_carries_each_domains_tls_rpt_status(seeded):
     assert rows[checked]['tls_rpt_status'] == 'warning'
     # Not checked yet: no status rather than a guess
     assert rows[unchecked]['tls_rpt_status'] is None
+    # No TLS reports: no TLS period and no sessions
+    assert rows[checked]['tls_first_report'] is None and rows[checked]['tls_last_report'] is None
+    assert rows[checked]['stats_30d']['tls_sessions'] == 0
