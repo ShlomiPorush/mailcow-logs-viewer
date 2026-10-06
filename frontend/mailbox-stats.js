@@ -314,8 +314,8 @@ function renderMailboxStatsAccordion(mailboxes, page = 1, totalPages = 1) {
             ${last !== undefined ? `<div>${last ? formatTime(last) : 'Never'}</div>` : `<div>${on ? 'On' : 'Off'}</div>`}</div>`;
 
     let html = `
-        <div class="ui-table ui-stack ui-ms-table">
-            <div class="ui-tr ui-tr-head"><span>Mailbox</span><span class="ui-td-end">Sent</span><span class="ui-td-end">Received</span><span class="ui-td-end">Delivered</span><span class="ui-td-end">Failed</span><span class="ui-td-end">Aliases</span><span class="ui-td-end">Storage</span></div>
+        <div class="ui-table ui-stack ui-ms-table" data-sort-handler="mailboxStatsSortBy">
+            <div class="ui-tr ui-tr-head"><span data-sort-key="username"${mailboxStatsSortAttr('username')}>Mailbox</span><span class="ui-td-end" data-sort-key="sent_total"${mailboxStatsSortAttr('sent_total')}>Sent</span><span class="ui-td-end" data-sort-key="received_total"${mailboxStatsSortAttr('received_total')}>Received</span><span class="ui-td-end">Delivered</span><span class="ui-td-end" data-sort-key="failure_rate"${mailboxStatsSortAttr('failure_rate')}>Failed</span><span class="ui-td-end">Aliases</span><span class="ui-td-end" data-sort-key="quota_used"${mailboxStatsSortAttr('quota_used')}>Storage</span></div>
             ${mailboxes.map((mb, index) => {
         const isExpanded = mailboxStatsCache.expandedMailboxes.has(mb.username);
         const failTone = mb.combined_failure_rate >= 10 ? 'fail' : mb.combined_failure_rate >= 5 ? 'warn' : '';
@@ -611,4 +611,24 @@ function resetMailboxStatsFilters() {
 
     // Reload everything
     loadMailboxStats();
+}
+
+// The mailbox list is paged on the server, so its column headers sort there
+function mailboxStatsSortAttr(key) {
+    const [by, order] = (document.getElementById('mailbox-stats-sort')?.value || 'sent_total-desc').split('-');
+    return ` aria-sort="${by === key ? (order === 'asc' ? 'ascending' : 'descending') : 'none'}"`;
+}
+
+function mailboxStatsSortBy(key, order) {
+    const select = document.getElementById('mailbox-stats-sort');
+    if (!select) return;
+    const value = `${key}-${order}`;
+    if (![...select.options].some(o => o.value === value)) {
+        const option = document.createElement('option');
+        option.value = value;
+        option.textContent = `${select.querySelector(`option[value^="${key}-"]`)?.textContent.replace(/\s*\(.*\)$/, '') || key} (${order === 'asc' ? 'Low to High' : 'High to Low'})`;
+        select.appendChild(option);
+    }
+    select.value = value;
+    applyMailboxStatsFilters();
 }
