@@ -35,7 +35,8 @@ const ROUTE_DISPLAY = {
 // page's own address. select() picks the tab before the page loads; show()
 // switches it on a page already open. tabs: null takes any section name.
 const SUBPAGES = {
-    netfilter: { tabs: ['overview', 'events', 'protection', 'fail2ban', 'abuse'], current: () => securityTab,
+    // protection, fail2ban and abuse are the old addresses of what is now the Settings tab
+    netfilter: { tabs: ['overview', 'lists', 'settings', 'events', 'protection', 'fail2ban', 'abuse'], current: () => securityTab,
         select: t => securityShowTab(t), show: t => securityShowTab(t) },
     quarantine: { tabs: ['messages', 'rules'], current: () => quarantineTab,
         select: t => quarantineShowTab(t), show: t => quarantineShowTab(t) },

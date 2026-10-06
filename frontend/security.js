@@ -32,18 +32,27 @@ const SECURITY_RULE_NAMES = {
 // ----------------------------------------------------------------- tabs
 
 let securityTab = 'overview';
+// The old addresses of the tabs that became Settings cards still open them
+const SECURITY_TAB_ALIASES = { protection: null, fail2ban: 'fail2ban', abuse: 'abuse' };
+
 function securityShowTab(tab) {
+    let card;
+    if (tab in SECURITY_TAB_ALIASES) {
+        card = SECURITY_TAB_ALIASES[tab];
+        tab = 'settings';
+    }
     securityTab = tab;
-    routerSyncSubpage('netfilter', tab);
+    routerSyncSubpage('netfilter', tab, card !== undefined);
     document.querySelectorAll('.ui-se-tabs .modal-tab').forEach(btn => {
         const on = btn.id === `security-tab-btn-${tab}`;
         btn.classList.toggle('active', on);
         btn.setAttribute('aria-selected', on);
     });
-    ['overview', 'events', 'protection', 'fail2ban', 'abuse'].forEach(name => {
+    ['overview', 'lists', 'settings', 'events'].forEach(name => {
         const panel = document.getElementById(`security-tab-${name}`);
         if (panel) panel.classList.toggle('hidden', name !== tab);
     });
+    if (card) securityOpenCard(card);
 }
 
 // ----------------------------------------------------------------- loading
@@ -68,8 +77,13 @@ async function loadProtectionOverview() {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
         securityHits = data.hits || [];
-        if (securityFilter === 'history') securityHistory = null;
+        if (securityFilter === 'history') loadSecurityHistory();
         renderSecurityOverview();
+        // The page's timer must not redraw a card or a list someone is working in
+        if (!securityEditing()) {
+            renderSecurityLists();      // which denylist entries a rule wrote
+            renderSecuritySettings();   // how many each rule would ban
+        }
     } catch (error) {
         console.error('Failed to load the protection hits:', error);
     }
@@ -167,11 +181,6 @@ function securityProtections() {
     const abuse = typeof smtpAbuseStatus !== 'undefined' && smtpAbuseStatus
         ? item(smtpAbuseStatus.enabled ? 'on' : 'off', 'Outgoing spam', '', "securityOpenProtection('abuse')") : '';
     return `<span class="ui-prot-title">Protection</span>${f2b}${SECURITY_RULE_ORDER.map(rule).join('')}${abuse}`;
-}
-
-// A protection opens where it is set up
-function securityOpenProtection(key) {
-    securityShowTab(key === 'fail2ban' ? 'fail2ban' : key === 'abuse' ? 'abuse' : 'protection');
 }
 
 // ----------------------------------------------------------------- one row
@@ -305,6 +314,14 @@ function securityOpenEvents(ip) {
     applyNetfilterFilters();
 }
 
+// Someone is working in the Settings cards or the Lists: an open card, unsaved
+// changes, or the focus in one of their fields
+function securityEditing() {
+    const focus = document.activeElement;
+    return securityCard !== null || securityChangeCount() > 0
+        || !!(focus && focus.closest && focus.closest('#security-cards, #security-lists'));
+}
+
 function setSecurityFilter(key) {
     securityFilter = key;
     securityOpenRow = null;
@@ -436,4 +453,455 @@ function renderSecurityCountries() {
             ${networks === null ? '' : !networks.length ? '<p class="ui-empty">No network data yet.</p>'
                 : networks.map(n => `<div class="ui-sec-net"><span title="${escapeHtml(n.asn)}">${escapeHtml(n.asn_org)}</span><small class="ui-muted">${n.addresses.toLocaleString()} address${n.addresses === 1 ? '' : 'es'}</small><b>${n.attempts.toLocaleString()}</b></div>`).join('')}
         </section>`;
+}
+
+
+// =============================================================================
+// SECURITY PAGE - Lists: the allowlist and the denylist, one address per row
+// =============================================================================
+
+function renderSecurityLists() {
+    const box = document.getElementById('security-lists');
+    if (!box) return;
+    const count = document.getElementById('security-tab-n-lists');
+    if (count) {
+        const n = fail2banActiveBans === null ? 0 : fail2banWhitelist.length + fail2banBlacklist.length;
+        count.textContent = n ? n.toLocaleString() : '';
+        count.classList.toggle('hidden', !n);
+    }
+    if (fail2banLoadError) {
+        box.innerHTML = '<p class="ui-empty ui-text-fail">mailcow did not answer about Fail2ban, so its lists cannot be shown. The next refresh tries again.</p>';
+        return;
+    }
+    if (fail2banActiveBans === null) {
+        box.innerHTML = '<div class="ui-loading"><div class="loading"></div><p>Loading...</p></div>';
+        return;
+    }
+    const rw = mailcowRwConfigured;
+    const tried = ip => {
+        const s = securityOverview && securityOverview.sources.find(src => src.ip === securityBare(ip));
+        return s ? s.failed_logins : 0;
+    };
+    // A ban a rule wrote is on the denylist too; it is lifted through the rule
+    const ruleBans = new Map(securityHits.filter(h => h.status === 'banned' && h.owned).map(h => [h.ip, h]));
+    const addForm = (list, placeholder) => rw ? `
+        <form class="ui-sec-ladd" onsubmit="event.preventDefault(); securityAddToList('${list}', this.elements.ip.value, this)">
+            <input type="text" name="ip" class="ui-input" placeholder="${placeholder}" aria-label="Address or network" maxlength="64">
+            <button type="submit" class="ui-btn">Add</button>
+        </form>` : '';
+    const row = (entry, note, action) => `
+        <div class="ui-sec-lrow"><b class="ui-mono">${copyableText(entry)}</b><span class="ui-sec-why">${note}</span><span class="ui-sec-acts">${action}</span></div>`;
+    const allowRows = fail2banWhitelist.map(entry => {
+        const n = tried(entry);
+        return row(entry, n ? `Failed ${n.toLocaleString()} login${n === 1 ? '' : 's'} today, never banned` : '',
+            rw ? `<button type="button" class="ui-btn ui-btn-sm" onclick="securityRemoveFromList('whitelist', '${escapeJsArg(entry)}', this)">Remove</button>` : '');
+    }).join('');
+    const denyRows = fail2banBlacklist.map(entry => {
+        const hit = ruleBans.get(securityBare(entry));
+        if (hit) {
+            return row(entry, `Added by ${escapeHtml(securityRuleName(hit.rule))}, ${hit.expires_at ? `until ${escapeHtml(formatTime(hit.expires_at))}` : 'until removed'}`,
+                `<button type="button" class="ui-btn ui-btn-sm" onclick="undoProtectionHit(${Number(hit.id)}, this)" title="Lift the ban; the rule leaves it alone for a week">Remove</button>`);
+        }
+        const n = tried(entry);
+        return row(entry, `Added by hand${n ? `, still tried ${n.toLocaleString()} time${n === 1 ? '' : 's'} today` : ''}`,
+            rw ? `<button type="button" class="ui-btn ui-btn-sm" onclick="securityRemoveFromList('blacklist', '${escapeJsArg(entry)}', this)">Remove</button>` : '');
+    }).join('');
+    box.innerHTML = `
+        ${rw ? '' : `<div class="ui-list-note ui-flush">${uiLocked('The lists are read-only here', `Changing the allowlist and the denylist ${UI_RW_KEY_TEXT}`)}</div>`}
+        <div class="ui-sec-lists">
+            <section class="ui-panel">
+                <div class="ui-panel-head">Allowlist <span class="ui-count">${fail2banWhitelist.length}</span></div>
+                <p class="ui-sec-note">Never banned, by Fail2ban or by the rules. Your own offices and monitoring belong here.</p>
+                ${addForm('whitelist', 'Address or network, like 192.0.2.0/24')}
+                ${allowRows || '<p class="ui-empty">The allowlist is empty.</p>'}
+            </section>
+            <section class="ui-panel">
+                <div class="ui-panel-head">Denylist <span class="ui-count">${fail2banBlacklist.length}</span></div>
+                <p class="ui-sec-note">Banned until removed. The denylist wins over the allowlist. Changes take a few seconds to apply.</p>
+                ${addForm('blacklist', 'Address or network')}
+                ${denyRows || '<p class="ui-empty">The denylist is empty.</p>'}
+            </section>
+        </div>`;
+}
+
+async function securityAddToList(list, value, form) {
+    const ip = String(value || '').trim();
+    if (!ip) return;
+    const button = form && form.querySelector('button');
+    if (list === 'whitelist') await allowIP(ip, button);
+    else await banIP(ip, button);
+}
+
+async function securityRemoveFromList(list, entry, button) {
+    const label = list === 'whitelist' ? 'allowlist' : 'denylist';
+    if (!await showConfirmModal({ title: `Remove from the ${label}`, message: `Remove ${entry} from the Fail2ban ${label}?`, confirmText: 'Remove' })) return;
+    if (button) button.disabled = true;
+    try {
+        const res = await authenticatedFetch('/api/fail2ban/remove', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ip: entry, list })
+        });
+        const result = await res.json().catch(() => ({}));
+        if (!res.ok || result.status !== 'success') throw new Error(result.msg || result.detail || `HTTP ${res.status}`);
+        showToast(`${entry} removed from the ${label}`, 'success');
+        fail2banSettingsLoaded = false;
+        loadFail2BanSettings();
+    } catch (error) {
+        showToast(`Could not remove ${entry}: ${error.message}`, 'error');
+        if (button) button.disabled = false;
+    }
+}
+
+// =============================================================================
+// SECURITY PAGE - Settings: one card per protection, the same ones as the
+// Overview's Protection row. A closed card says in one sentence what the
+// protection does; an open card turns that sentence into fields.
+// =============================================================================
+
+let securityCard = null;          // the open card
+let securityF2bDraft = null;      // unsaved Fail2ban policy
+let securityAppSettings = null;   // GET /api/settings, for the outgoing spam settings
+let securityAbuseDraft = {};      // unsaved outgoing spam settings
+
+const SECURITY_CARDS = ['fail2ban', 'trap', 'unknown_accounts', 'repeat_offender', 'subnet', 'country', 'breach', 'abuse'];
+const SECURITY_ABUSE_KEYS = ['smtp_abuse_enabled', 'smtp_abuse_threshold', 'smtp_abuse_window_minutes',
+    'smtp_abuse_unblock_grace_minutes', 'smtp_abuse_revoke_app_passwords', 'smtp_abuse_help_address'];
+const SECURITY_F2B_KEYS = ['max_attempts', 'retry_window', 'ban_time', 'ban_time_increment', 'max_ban_time', 'netban_ipv4', 'netban_ipv6'];
+
+async function loadSecurityAppSettings() {
+    try {
+        const res = await authenticatedFetch('/api/settings');
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        securityAppSettings = await res.json();
+    } catch (error) {
+        console.error('Failed to load the app settings:', error);
+        securityAppSettings = null;
+    }
+    renderSecuritySettings();
+}
+
+// A protection in the Overview's row opens its own card
+function securityOpenProtection(key) {
+    securityShowTab('settings');
+    securityOpenCard(key);
+}
+
+function securityOpenCard(key) {
+    securityCard = key;
+    renderSecuritySettings();
+    if (!key) return;
+    const card = document.getElementById(`security-card-${key}`);
+    const scroller = document.getElementById('security-tab-settings');
+    if (card && scroller) scroller.scrollTop = card.offsetTop - scroller.offsetTop - 8;
+}
+
+// ----------------------------------------------------------------- unsaved changes, one save bar
+
+function securityF2bValues() {
+    return { ...(fail2banPolicy || {}), ...(securityF2bDraft || {}) };
+}
+
+function securityF2bChanges() {
+    if (!securityF2bDraft || !fail2banPolicy) return [];
+    return SECURITY_F2B_KEYS.filter(k => k in securityF2bDraft && String(securityF2bDraft[k]) !== String(fail2banPolicy[k]));
+}
+
+function securityAbuseValue(key) {
+    if (key in securityAbuseDraft) return securityAbuseDraft[key];
+    return securityAppSettings ? securityAppSettings.configuration[key] : undefined;
+}
+
+function securityAbuseChanges() {
+    if (!securityAppSettings) return [];
+    return Object.keys(securityAbuseDraft).filter(k => String(securityAbuseDraft[k]) !== String(securityAppSettings.configuration[k]));
+}
+
+function securityChangeCount() {
+    return protectionChangeCount() + securityF2bChanges().length + securityAbuseChanges().length
+        + (smtpAbuseWhitelistDraft !== null ? 1 : 0);
+}
+
+function securityUpdateSaveBar() {
+    uiSaveBarUpdate('security-savebar', securityChangeCount());
+}
+
+function setSecurityF2b(key, value) {
+    securityF2bDraft = { ...(securityF2bDraft || {}), [key]: value };
+    renderSecuritySettings();
+}
+
+function setSecurityAbuse(key, value) {
+    securityAbuseDraft = { ...securityAbuseDraft, [key]: value };
+    renderSecuritySettings();
+}
+
+function discardSecuritySettings() {
+    if (protectionSaved) protectionRules = JSON.parse(JSON.stringify(protectionSaved));
+    protectionDirty = false;
+    securityF2bDraft = null;
+    securityAbuseDraft = {};
+    smtpAbuseWhitelistDraft = null;
+    renderProtection();
+    renderSmtpAbusePanel();
+    securityUpdateSaveBar();
+}
+
+// Save what changed, group by group, and say in one message what was saved. A group
+// that fails says why in its own message and keeps its changes on screen.
+async function saveSecuritySettings() {
+    uiSaveBarBusy('security-savebar', true);
+    const saved = [];
+    if (protectionChangeCount() && await saveProtectionRules(true)) saved.push('the protection rules');
+    if (securityF2bChanges().length && await saveSecurityF2b()) saved.push('Fail2ban');
+    if (securityAbuseChanges().length && await saveSecurityAbuse()) saved.push('outgoing spam');
+    if (smtpAbuseWhitelistDraft !== null && await saveSmtpAbuseWhitelist(true)) saved.push('the whitelist');
+    uiSaveBarBusy('security-savebar', false);
+    securityUpdateSaveBar();
+    if (saved.length) {
+        const list = saved.length > 1 ? `${saved.slice(0, -1).join(', ')} and ${saved[saved.length - 1]}` : saved[0];
+        showToast(`Saved ${list}`, 'success');
+    }
+}
+
+async function saveSecurityF2b() {
+    const values = securityF2bValues();
+    try {
+        const res = await authenticatedFetch('/api/fail2ban/policy', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(Object.fromEntries(SECURITY_F2B_KEYS.map(k => [k, values[k]])))
+        });
+        const result = await res.json().catch(() => ({}));
+        if (!res.ok || result.status !== 'success') throw new Error(result.msg || result.detail || `HTTP ${res.status}`);
+        securityF2bDraft = null;
+        fail2banSettingsLoaded = false;
+        await loadFail2BanSettings();
+        return true;
+    } catch (error) {
+        showToast(`Failed to save the Fail2ban settings: ${error.message}`, 'error');
+        return false;
+    }
+}
+
+async function saveSecurityAbuse() {
+    const body = Object.fromEntries(securityAbuseChanges().map(k => [k, securityAbuseDraft[k]]));
+    try {
+        const res = await authenticatedFetch('/api/settings', {
+            method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+        });
+        const result = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(result.detail || `HTTP ${res.status}`);
+        securityAbuseDraft = {};
+        await loadSecurityAppSettings();
+        loadSmtpAbusePanel();
+        return true;
+    } catch (error) {
+        showToast(`Could not save the outgoing spam settings: ${error.message}`, 'error');
+        return false;
+    }
+}
+
+// ----------------------------------------------------------------- the cards
+
+const securityNum = (value, onchange, min, max, label, width = 5, disabled = false) =>
+    `<input type="number" class="ui-sec-in" style="width:${width + 2}ch" min="${min}"${max ? ` max="${max}"` : ''} value="${escapeHtml(String(value ?? ''))}"
+        onchange="${onchange}" aria-label="${escapeHtml(label)}" ${disabled ? 'disabled' : ''}>`;
+
+function securityBanText(hours) {
+    const h = Number(hours);
+    const known = PROTECTION_BAN_LENGTHS.find(([v]) => v === h);
+    return h === 0 ? 'until removed by hand' : `for ${known ? known[1] : `${h} hours`}`;
+}
+
+function securityBanSelect(rule, hours) {
+    const h = Number(hours);
+    const lengths = PROTECTION_BAN_LENGTHS.some(([v]) => v === h) ? PROTECTION_BAN_LENGTHS : [...PROTECTION_BAN_LENGTHS, [h, `${h} hours`]];
+    return `<select class="ui-sec-in" onchange="setProtectionRule('${rule}', 'ban_hours', this.value)" aria-label="Ban length">
+        ${lengths.map(([v, text]) => `<option value="${v}" ${v === h ? 'selected' : ''}>${v === 0 ? 'until removed by hand' : `for ${escapeHtml(text)}`}</option>`).join('')}</select>`;
+}
+
+// What a rule does, as one sentence; with edit, its values are fields
+function securityRuleSentence(key, edit) {
+    const r = protectionRules[key];
+    const caps = protectionCaps;
+    const num = (field, min, max, label, width) => edit
+        ? securityNum(r[field], `setProtectionRule('${key}', '${field}', this.value)`, min, max, label, width)
+        : `<b>${escapeHtml(String(r[field]))}</b>`;
+    const banning = r.mode === 'enforce' && caps.can_ban;
+    const verb = edit ? `Ban ${securityBanSelect(key, r.ban_hours)}` : banning ? `Bans ${securityBanText(r.ban_hours)}` : `Watches, and would ban ${securityBanText(r.ban_hours)},`;
+    const mail = !edit && r.notify ? ' You get an email.' : '';
+    switch (key) {
+        case 'trap': return `${verb} anyone who tries one of <b>${r.names.length} trap name${r.names.length === 1 ? '' : 's'}</b>.${mail}`;
+        case 'unknown_accounts': return `${verb} an address that tries ${num('threshold', 2, 100, 'Number of accounts', 3)} accounts that do not exist within ${num('window_minutes', 5, 1440, 'Minutes', 4)} minutes.${mail}`;
+        case 'repeat_offender': return `${verb} an address Fail2ban banned ${num('threshold', 2, 50, 'Number of bans', 3)} times within ${num('window_days', 1, 365, 'Days', 3)} days.${mail}`;
+        case 'subnet': return `${verb} a whole network (IPv4 /24) when ${num('threshold', 2, 256, 'Number of addresses', 3)} of its addresses attack within ${num('window_hours', 1, 168, 'Hours', 3)} hours.${mail}`;
+        case 'country': return `${verb} an address that fails to log in from one of <b>${r.countries.length} countr${r.countries.length === 1 ? 'y' : 'ies'}</b>.${mail}`;
+        case 'breach': return `${edit ? 'Alert' : 'Alerts'} when an account logs in after ${num('failures', 1, 50, 'Number of failed tries', 3)} failed tries from the same address within ${num('window_minutes', 5, 1440, 'Minutes', 4)} minutes${!edit && r.new_country && caps.geoip ? ', or from a country it did not use in 30 days' : ''}. Never bans.${mail}`;
+        default: return '';
+    }
+}
+
+function securityF2bSentence(edit) {
+    const v = securityF2bValues();
+    const off = !mailcowRwConfigured;
+    if (!edit) {
+        return `An address that fails <b>${v.max_attempts} logins</b> within <b>${formatSeconds(v.retry_window)}</b> is banned for <b>${formatSeconds(v.ban_time)}</b>${v.ban_time_increment ? `, longer each time it comes back, up to <b>${formatSeconds(v.max_ban_time)}</b>` : ''}.`;
+    }
+    const n = (key, min, max, label, width) => securityNum(v[key], `setSecurityF2b('${key}', this.value)`, min, max, label, width, off);
+    const hint = key => `<span class="ui-sec-hint">${formatSeconds(v[key])}</span>`;
+    return `An address that fails ${n('max_attempts', 1, 0, 'Failed logins before a ban', 3)} logins within ${n('retry_window', 1, 0, 'Retry window in seconds', 6)} seconds ${hint('retry_window')}
+        is banned for ${n('ban_time', 60, 0, 'Ban time in seconds', 6)} seconds ${hint('ban_time')},
+        <label class="ui-sec-inline"><input type="checkbox" class="ui-check" ${v.ban_time_increment ? 'checked' : ''} ${off ? 'disabled' : ''} onchange="setSecurityF2b('ban_time_increment', this.checked)"> longer each time it comes back</label>,
+        up to ${n('max_ban_time', 60, 0, 'Longest ban in seconds', 7)} seconds ${hint('max_ban_time')}.`;
+}
+
+function securityAbuseSentence(edit) {
+    const val = key => securityAbuseValue(key);
+    if (!securityAppSettings) return 'Stops a mailbox from sending when it suddenly sends far more than usual.';
+    const editable = securityAppSettings.settings_edit_via_ui_enabled;
+    const locked = key => !editable || (securityAppSettings.env_locked_keys || []).includes(key);
+    if (!edit) {
+        return `Stops a mailbox from sending when it sends more than <b>${val('smtp_abuse_threshold')} messages</b> within <b>${val('smtp_abuse_window_minutes')} minutes</b>. Receiving is never affected.`;
+    }
+    const n = (key, min, label, width) => securityNum(val(key), `setSecurityAbuse('${key}', Number(this.value))`, min, 0, label, width, locked(key));
+    return `Stop a mailbox from sending when it sends more than ${n('smtp_abuse_threshold', 1, 'Messages', 5)} messages within ${n('smtp_abuse_window_minutes', 1, 'Minutes the messages are counted in', 4)} minutes.
+        After you let it send again, wait ${n('smtp_abuse_unblock_grace_minutes', 0, 'Minutes before it can be stopped again', 4)} minutes before it can be stopped again.`;
+}
+
+// The parts of a card that only an open card shows
+function securityCardBody(key) {
+    const caps = protectionCaps;
+    const R = protectionRules;
+    if (key === 'fail2ban') {
+        const v = securityF2bValues();
+        const off = mailcowRwConfigured ? '' : 'disabled';
+        return `
+            <div class="ui-sec-fields">
+                <label class="ui-sec-field"><span>Ban the network, IPv4<small>Prefix length; ${escapeHtml(String(v.netban_ipv4))} bans ${Number(v.netban_ipv4) === 32 ? 'just the address' : 'the whole network'}</small></span>
+                    <input type="number" class="ui-input" min="8" max="32" value="${escapeHtml(String(v.netban_ipv4))}" onchange="setSecurityF2b('netban_ipv4', this.value)" ${off}></label>
+                <label class="ui-sec-field"><span>Ban the network, IPv6<small>Prefix length; ${escapeHtml(String(v.netban_ipv6))} bans ${Number(v.netban_ipv6) === 128 ? 'just the address' : 'the whole network'}</small></span>
+                    <input type="number" class="ui-input" min="8" max="128" value="${escapeHtml(String(v.netban_ipv6))}" onchange="setSecurityF2b('netban_ipv6', this.value)" ${off}></label>
+            </div>
+            <p class="ui-sec-note ui-flush">The allowlist and the denylist are on the Lists tab.</p>`;
+    }
+    if (key === 'abuse') {
+        const editable = securityAppSettings && securityAppSettings.settings_edit_via_ui_enabled;
+        const envLocked = k => securityAppSettings && (securityAppSettings.env_locked_keys || []).includes(k);
+        const revoke = securityAbuseValue('smtp_abuse_revoke_app_passwords');
+        return `
+            ${securityAppSettings && !editable ? uiLocked('Editing settings is off', 'These values come from the environment and are shown read-only. To change them here, set <code>SETTINGS_EDIT_VIA_UI_ENABLED=true</code> and restart the container.') : ''}
+            <div class="ui-sec-fields">
+                <label class="ui-sec-field"><span>Revoke its app passwords<small>When a mailbox is stopped, its app passwords stop working too</small></span>
+                    <span><input type="checkbox" class="ui-check" ${revoke ? 'checked' : ''} ${!editable || envLocked('smtp_abuse_revoke_app_passwords') ? 'disabled' : ''} onchange="setSecurityAbuse('smtp_abuse_revoke_app_passwords', this.checked)"> On</span></label>
+                <label class="ui-sec-field"><span>Who users should contact<small>Shown to the mailbox owner when sending is stopped</small></span>
+                    <input type="text" class="ui-input" value="${escapeHtml(securityAbuseValue('smtp_abuse_help_address') || '')}" ${!editable || envLocked('smtp_abuse_help_address') ? 'disabled' : ''} onchange="setSecurityAbuse('smtp_abuse_help_address', this.value)" placeholder="support@example.com"></label>
+            </div>
+            <div id="smtp-abuse-panel"></div>`;
+    }
+    const r = R[key];
+    const mode = key === 'breach' ? '' : `
+        <div class="ui-sec-mode">
+            <div class="ui-seg" role="group" aria-label="What the rule does">
+                <button type="button" aria-pressed="${r.mode !== 'enforce'}" onclick="setProtectionMode('${key}', 'watch')" title="Note what it would ban; ban nothing">Watch first</button>
+                <button type="button" aria-pressed="${r.mode === 'enforce'}" onclick="setProtectionMode('${key}', 'enforce')" ${caps.can_ban ? '' : 'disabled'} title="${caps.can_ban ? 'Put what it catches on the Fail2ban blacklist' : 'Banning needs the Read-Write API key'}">Ban</button>
+            </div>
+            <span class="ui-muted">${r.mode === 'enforce' ? 'Bans as soon as it catches an address.' : 'Notes who it would ban, and bans nothing. You decide on the Overview.'}</span>
+        </div>`;
+    const notify = `<label class="ui-sec-inline"><input type="checkbox" class="ui-check" ${r.notify ? 'checked' : ''} onchange="setProtectionRule('${key}', 'notify', this.checked)"> ${key === 'breach' ? 'Email me on every alert' : 'Email me when it bans'}</label>`;
+    let extra = '';
+    if (key === 'trap') {
+        const suggest = protectionSuggestions.filter(s => !r.names.includes(s.name));
+        extra = `
+            <h4>Trap names</h4>
+            <div class="ui-chip-row">${r.names.length ? r.names.map(name => `<span class="ui-sec-chip">${escapeHtml(name)}<button type="button" onclick="removeTrapName('${escapeJsArg(name)}')" aria-label="Remove ${escapeHtml(name)}" title="Remove">&times;</button></span>`).join('') : '<span class="ui-muted">No trap names yet</span>'}</div>
+            <form class="ui-sec-ladd ui-flush" onsubmit="event.preventDefault(); addTrapName(this.elements.name.value); this.reset();">
+                <input type="text" name="name" class="ui-input" placeholder="admin or admin@example.com" aria-label="Trap account name" maxlength="255">
+                <button type="submit" class="ui-btn">Add</button>
+            </form>
+            ${suggest.length ? `<h4>Tried in the last 7 days, and no such mailbox here</h4>
+                <div class="ui-chip-row">${suggest.map(s => `<button type="button" class="ui-chip" onclick="addTrapName('${escapeJsArg(s.name)}')" title="${s.tries} tries from ${s.addresses} address${s.addresses === 1 ? '' : 'es'}">+ ${escapeHtml(s.name)} <small>${s.tries}</small></button>`).join('')}</div>` : ''}
+            <p class="ui-sec-note ui-flush">A real mailbox or alias can never be a trap name.</p>`;
+    } else if (key === 'country') {
+        const suggest = protectionCountrySuggestions.filter(s => !r.countries.includes(s.code));
+        extra = `
+            <h4>Countries</h4>
+            <div class="ui-chip-row">${r.countries.length ? r.countries.map(code => `<span class="ui-sec-chip">${escapeHtml(protectionCountryName(code))}<button type="button" onclick="removeProtectionCountry('${escapeJsArg(code)}')" aria-label="Remove ${escapeHtml(code)}" title="Remove">&times;</button></span>`).join('') : '<span class="ui-muted">No countries yet</span>'}</div>
+            <form class="ui-sec-ladd ui-flush" onsubmit="event.preventDefault(); addProtectionCountry(this.elements.code.value); this.reset();">
+                <input type="text" name="code" class="ui-input" placeholder="Two-letter code, for example CN" aria-label="Country code" maxlength="2">
+                <button type="submit" class="ui-btn">Add</button>
+            </form>
+            ${suggest.length ? `<h4>Failed logins in the last 7 days came from</h4>
+                <div class="ui-chip-row">${suggest.map(s => `<button type="button" class="ui-chip" onclick="addProtectionCountry('${escapeJsArg(s.code)}')" title="${s.tries} failed logins">+ ${escapeHtml(s.name)} <small>${s.tries}</small></button>`).join('')}</div>` : ''}
+            <p class="ui-sec-note ui-flush">Only failed logins are caught. A user who logs in from one of these countries is not affected.</p>`;
+    } else if (key === 'unknown_accounts') {
+        extra = '<p class="ui-sec-note ui-flush">An address with a successful login in the last day is never caught, so a user who mistyped the address is safe.</p>';
+    } else if (key === 'subnet') {
+        extra = '<p class="ui-sec-note ui-flush">A network that holds an allowlisted address, an internal address or the mailcow server is never caught.</p>';
+    } else if (key === 'breach') {
+        extra = `
+            <label class="ui-sec-inline"><input type="checkbox" class="ui-check" ${r.new_country ? 'checked' : ''} ${caps.geoip ? '' : 'disabled'} onchange="setProtectionRule('breach', 'new_country', this.checked)"> Also alert on a login from a country the account did not use in 30 days${caps.geoip ? '' : ' (needs GeoIP)'}</label>
+            <p class="ui-sec-note ui-flush">${caps.raw_logs ? 'SMTP and IMAP logins are checked.' : 'Only SMTP logins are checked. IMAP logins need Live Logs to be on.'}</p>`;
+    }
+    return `${mode}<div class="ui-sec-card-foot">${notify}</div>${extra}`;
+}
+
+function securityCardHtml(key) {
+    const open = securityCard === key;
+    const isRule = !!SECURITY_RULE_NAMES[key];
+    const name = isRule ? SECURITY_RULE_NAMES[key] : key === 'fail2ban' ? 'Fail2ban' : 'Outgoing spam';
+    let on = true, toggle = '', status = '', locked = '', sentence = '', caught = '';
+    if (key === 'fail2ban') {
+        if (fail2banLoadError) return securityCardShell(key, name, open, uiTag('No answer', 'warn'), '', '', '<p class="ui-text-fail">mailcow did not answer about Fail2ban. The next refresh tries again.</p>', '');
+        if (!fail2banPolicy) return securityCardShell(key, name, open, '', '', '', '<p class="ui-muted">Loading...</p>', '');
+        status = uiTag('Always on', 'ok');
+        sentence = securityF2bSentence(open);
+        if (open && !mailcowRwConfigured) locked = uiLocked('Editing Fail2ban is locked', `Editing ${UI_RW_KEY_TEXT}`);
+    } else if (key === 'abuse') {
+        const enabled = securityAbuseValue('smtp_abuse_enabled');
+        const editable = securityAppSettings && securityAppSettings.settings_edit_via_ui_enabled
+            && !(securityAppSettings.env_locked_keys || []).includes('smtp_abuse_enabled');
+        on = !!enabled;
+        toggle = securityToggle(key, on, !editable, `setSecurityAbuse('smtp_abuse_enabled', ${!on})`, editable ? '' : 'Editing settings is off');
+        status = `${on ? uiTag('Stops mailboxes', 'fail') : uiTag('Off', '')}<span class="ui-tag ui-tag-warn ui-tab-tag" title="This feature is new - please report any issues on GitHub">Beta</span>
+            <button type="button" onclick="event.stopPropagation(); showHelpModal('Abuse_Protection')" class="ui-icon-btn ui-help-btn" title="Help - Abuse Protection" aria-label="Help - Abuse Protection"><svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg></button>`;
+        sentence = securityAbuseSentence(open);
+    } else {
+        if (protectionLoadError) return securityCardShell(key, name, open, '', '', '', `<p class="ui-text-fail">Failed to load the protection rules: ${escapeHtml(protectionLoadError)}</p>`, '');
+        if (!protectionRules) return securityCardShell(key, name, open, '', '', '', '<p class="ui-muted">Loading...</p>', '');
+        const r = protectionRules[key];
+        const needsGeo = key === 'country' && !protectionCaps.geoip;
+        on = r.enabled && !needsGeo;
+        toggle = securityToggle(key, on, needsGeo, `setProtectionRule('${key}', 'enabled', ${!r.enabled})`, needsGeo ? 'Needs MaxMind GeoIP' : '');
+        status = needsGeo ? uiTag('Needs MaxMind GeoIP', '') : !r.enabled ? uiTag('Off', '') : key === 'breach' ? uiTag('Alerts', 'warn')
+            : r.mode === 'enforce' && protectionCaps.can_ban ? uiTag('Bans', 'fail') : uiTag('Watching', 'warn');
+        const would = key === 'breach' ? 0 : securityHits.filter(h => h.rule === key && h.status === 'watching').length;
+        caught = r.enabled && would ? `<span class="ui-sec-caught">${would.toLocaleString()} would ban</span>` : '';
+        if (needsGeo) locked = uiLocked('Needs GeoIP', 'This rule knows the country of an address only with the MaxMind GeoIP databases.');
+        sentence = securityRuleSentence(key, open);
+    }
+    return securityCardShell(key, name, open, `${status}${caught}`, toggle, locked, `<p class="ui-sec-sent">${sentence}</p>`, open ? securityCardBody(key) : '', on);
+}
+
+function securityToggle(key, on, disabled, action, why) {
+    return `<button type="button" class="ui-sec-toggle${on ? ' is-on' : ''}" aria-pressed="${on}" ${disabled ? `disabled title="${escapeHtml(why)}"` : `title="${on ? 'Turn off' : 'Turn on'}"`}
+        onclick="event.stopPropagation(); ${action}" aria-label="${on ? 'On' : 'Off'}"><span class="ui-prot-mark">${on ? '✓' : '✕'}</span></button>`;
+}
+
+function securityCardShell(key, name, open, status, toggle, locked, sentence, body, on = true) {
+    return `
+        <article class="ui-sec-card${open ? ' is-open' : ''}${on ? '' : ' is-off'}" id="security-card-${key}" ${open ? '' : `onclick="securityOpenCard('${key}')"`}>
+            <div class="ui-sec-card-head">${toggle}<h3>${escapeHtml(name)}</h3>${status}
+                <span class="ui-sec-card-act">${open
+                    ? `<button type="button" class="ui-btn ui-btn-sm" onclick="event.stopPropagation(); securityOpenCard(null)">Done</button>`
+                    : `<button type="button" class="ui-btn ui-btn-sm" aria-label="Edit ${escapeHtml(name)}">Edit</button>`}</span></div>
+            ${locked}
+            ${sentence}
+            ${body}
+        </article>`;
+}
+
+function renderSecuritySettings() {
+    const box = document.getElementById('security-cards');
+    if (!box) return;
+    box.innerHTML = SECURITY_CARDS.map(securityCardHtml).join('');
+    if (securityCard === 'abuse') renderSmtpAbusePanel();
+    securityUpdateSaveBar();
 }

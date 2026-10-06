@@ -744,10 +744,9 @@
                 </div>
                 <div class="ui-tabs ui-page-tabs ui-se-tabs" role="tablist" aria-label="Security sections">
                     <button type="button" class="modal-tab active" role="tab" aria-selected="true" id="security-tab-btn-overview" onclick="securityShowTab('overview')">Overview <span id="security-tab-n-overview" class="ui-tab-n hidden" title="Caught by a rule and waiting for you"></span></button>
+                    <button type="button" class="modal-tab" role="tab" aria-selected="false" id="security-tab-btn-lists" onclick="securityShowTab('lists')">Lists <span id="security-tab-n-lists" class="ui-tab-n hidden"></span></button>
+                    <button type="button" class="modal-tab" role="tab" aria-selected="false" id="security-tab-btn-settings" onclick="securityShowTab('settings')">Settings</button>
                     <button type="button" class="modal-tab" role="tab" aria-selected="false" id="security-tab-btn-events" onclick="securityShowTab('events')">Events <span id="security-tab-n-events" class="ui-tab-n hidden"></span></button>
-                    <button type="button" class="modal-tab" role="tab" aria-selected="false" id="security-tab-btn-protection" onclick="securityShowTab('protection')">Protection <span id="security-tab-n-protection" class="ui-tab-n hidden"></span></button>
-                    <button type="button" class="modal-tab" role="tab" aria-selected="false" id="security-tab-btn-fail2ban" onclick="securityShowTab('fail2ban')">Fail2ban</button>
-                    <button type="button" class="modal-tab" role="tab" aria-selected="false" id="security-tab-btn-abuse" onclick="securityShowTab('abuse')">Abuse protection <span class="ui-tag ui-tag-warn ui-tab-tag" title="This feature is new - please report any issues on GitHub">Beta</span></button>
                 </div>
 
                 <div id="security-tab-overview" class="ui-scroll ui-st-panel" role="tabpanel">
@@ -788,39 +787,22 @@
                 </section>
                 </div>
 
-                <div id="security-tab-fail2ban" class="ui-scroll ui-st-panel hidden" role="tabpanel">
-                    <div class="ui-se-f2b">
-                <!-- Fail2Ban Settings -->
-                <section class="ui-panel">
-                    <div class="ui-panel-head">Ban policy</div>
-                    <div id="fail2ban-settings" class="ui-se-body"><div class="ui-loading"><div class="loading"></div><p>Loading Fail2ban settings...</p></div></div>
-                </section>
-                <!-- Fail2Ban IP Lists -->
-                <section class="ui-panel">
-                    <div class="ui-panel-head">IP lists and active bans</div>
-                    <div id="fail2ban-ip-lists" class="ui-se-body"><div class="ui-loading"><div class="loading"></div><p>Loading IP lists...</p></div></div>
-                </section>
-                    </div>
+                <div id="security-tab-lists" class="ui-scroll ui-st-panel hidden" role="tabpanel">
+                    <div id="security-lists"><div class="ui-loading"><div class="loading"></div><p>Loading...</p></div></div>
                 </div>
 
-                <div id="security-tab-protection" class="ui-scroll ui-st-panel hidden" role="tabpanel">
-                    <div id="protection-panel"><div class="ui-loading"><div class="loading"></div><p>Loading...</p></div></div>
-                </div>
-
-                <div id="security-tab-abuse" class="ui-scroll ui-st-panel hidden" role="tabpanel">
-                    <section class="ui-panel">
-                        <div class="ui-panel-head">Abuse protection <button type="button"
-                                    onclick="event.preventDefault(); event.stopPropagation(); showHelpModal('Abuse_Protection')"
-                                    class="ui-icon-btn ui-help-btn"
-                                    title="Help - Abuse Protection">
-                                    <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                            d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z">
-                                        </path>
-                                    </svg>
-                                </button></div>
-                        <div id="smtp-abuse-panel" class="ui-se-body"><div class="ui-loading"><div class="loading"></div><p>Loading abuse protection...</p></div></div>
+                <div id="security-tab-settings" class="ui-scroll ui-st-panel hidden" role="tabpanel">
+                    <p class="ui-muted ui-sec-intro">The same protections as on the Overview. Each says what it does now; open one to change it. The allowlist, internal networks and the mailcow server are never caught.</p>
+                    <div id="security-cards" class="ui-sec-cards"></div>
+                    <section class="ui-panel ui-sec-alerts">
+                        <span><b>Email alerts</b> <span class="ui-muted">The rules' emails, and a mailbox stopped for outgoing spam, go to the destinations that receive the Security topic.</span></span>
+                        <button type="button" class="ui-btn ui-btn-sm" onclick="navigateTo('settings', { sub: 'notifications' })">Notifications</button>
                     </section>
+                    <div class="ui-savebar hidden" id="security-savebar" role="region" aria-label="Unsaved changes">
+                        <span class="ui-savebar-count" aria-live="polite"></span>
+                        <button type="button" class="ui-btn ui-savebar-discard" onclick="discardSecuritySettings()">Discard</button>
+                        <button type="button" class="ui-btn ui-savebar-save" onclick="saveSecuritySettings()">Save changes</button>
+                    </div>
                 </div>
             </div>
 

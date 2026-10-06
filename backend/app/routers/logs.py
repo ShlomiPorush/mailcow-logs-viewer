@@ -740,6 +740,53 @@ async def edit_fail2ban(request: Request):
         raise internal_error(e)
 
 
+# The Fail2ban policy fields and their allowed range, as mailcow's own form takes them
+_FAIL2BAN_POLICY = {
+    "ban_time": (60, None), "max_ban_time": (60, None), "max_attempts": (1, None),
+    "retry_window": (1, None), "netban_ipv4": (8, 32), "netban_ipv6": (8, 128),
+}
+
+
+@router.post("/fail2ban/policy")
+async def edit_fail2ban_policy(request: Request):
+    """
+    Change how Fail2ban bans (times, attempts, network size) without touching the
+    allowlist and denylist: they are read fresh right before writing, so an address
+    added meanwhile in mailcow or by a protection rule is kept. Requires the
+    Read-Write API key.
+    """
+    try:
+        body = await request.json()
+        policy = {}
+        for key, (low, high) in _FAIL2BAN_POLICY.items():
+            try:
+                value = int(body[key])
+            except (KeyError, TypeError, ValueError):
+                raise HTTPException(status_code=400, detail=f"'{key}' must be a whole number")
+            if value < low or (high is not None and value > high):
+                raise HTTPException(status_code=400, detail=f"'{key}' must be between {low} and {high}" if high else f"'{key}' must be at least {low}")
+            policy[key] = str(value)
+        if int(policy["max_ban_time"]) < int(policy["ban_time"]):
+            raise HTTPException(status_code=400, detail="The longest ban cannot be shorter than the first ban")
+        policy["ban_time_increment"] = "1" if body.get("ban_time_increment") in (True, 1, "1") else "0"
+
+        current = await mailcow_api.get_fail2ban()
+        if current is None:
+            raise HTTPException(status_code=503, detail="Could not fetch current Fail2Ban settings")
+        attrs = {**policy,
+                 "blacklist": ",".join(_split_ip_list(current.get("blacklist", ""))),
+                 "whitelist": ",".join(_split_ip_list(current.get("whitelist", "")))}
+        result = await mailcow_api.edit_fail2ban(attrs)
+        if isinstance(result, list) and result and result[0].get("type") != "success":
+            return {"status": "error", "msg": result[0].get("msg", "Update failed")}
+        logger.info("Fail2ban policy changed: %s", policy)
+        return {"status": "success", "msg": "Fail2ban policy saved"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating the Fail2Ban policy: {e}")
+        raise internal_error(e)
+
 @router.post("/fail2ban/unban")
 async def unban_fail2ban(request: Request):
     """
