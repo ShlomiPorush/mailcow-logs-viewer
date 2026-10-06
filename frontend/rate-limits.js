@@ -136,6 +136,10 @@ function rateLimitCardHead(title, subtitle, tools = '') {
 }
 
 
+// Without the Read-Write key a counter cannot be reset: the button stays, disabled, and says why
+const RATE_LIMIT_RESET_LOCKED = `<button type="button" class="ui-btn ui-btn-sm" disabled onclick="event.stopPropagation()"
+    title="Resetting a counter needs the Read-Write API key (MAILCOW_API_KEY_RW)">Reset counter</button>`;
+
 // Read-only notice above the configured limits - same banner Fail2ban
 // Settings shows when the Read-Write key is missing
 function renderRateLimitReadOnlyNotice() {
@@ -343,15 +347,15 @@ function renderRateLimitSendersTable(senders) {
     const canWrite = !rateLimitConfigData || rateLimitConfigData.rw_key_configured !== false;
 
     const rows = senders.map(group => {
-        const resetButton = (canWrite && group.last_rl_hash)
-            ? `
+        const resetButton = !group.last_rl_hash ? ''
+            : canWrite ? `
                 <button type="button"
                     onclick="event.stopPropagation(); resetRateLimitCounter('${escapeJsArg(group.user)}', '${escapeJsArg(group.last_rl_hash)}')"
                     class="ui-btn ui-btn-sm ui-btn-primary">
                     Reset counter
                 </button>
             `
-            : '';
+            : RATE_LIMIT_RESET_LOCKED;
         return `
             <tr data-rl-sender="${escapeHtml((group.user || '').toLowerCase())}" class="ui-dtable-link"
                 onclick="selectRateLimitSender('${escapeJsArg(group.user)}')">
@@ -426,15 +430,15 @@ function renderRateLimitSenderDetail(group) {
 
     const canWrite = !rateLimitConfigData || rateLimitConfigData.rw_key_configured !== false;
 
-    const resetButton = (canWrite && group.last_rl_hash)
-        ? `
+    const resetButton = !group.last_rl_hash ? ''
+        : canWrite ? `
             <button type="button"
                 onclick="resetRateLimitCounter('${escapeJsArg(group.user)}', '${escapeJsArg(group.last_rl_hash)}')"
                 class="ui-btn ui-btn-sm ui-btn-primary">
                 Reset counter
             </button>
         `
-        : '';
+        : RATE_LIMIT_RESET_LOCKED;
 
     const resetBadge = group.last_reset
         ? uiTag(`Reset ${formatTime(group.last_reset)}`, 'ok')

@@ -1191,18 +1191,33 @@ function updateDmarcControls() {
     const syncContainer = document.getElementById('dmarc-sync-container');
     const lastSyncInfo = document.getElementById('dmarc-last-sync-info');
 
-    // Toggle upload button
+    // Upload Report: shown once the settings are known; off in Settings means a disabled button that says so
     if (uploadBtn) {
-        if (dmarcConfiguration?.manual_upload_enabled === true) {
-            uploadBtn.classList.remove('hidden');
-        } else {
-            uploadBtn.classList.add('hidden');
-        }
+        const known = !!dmarcConfiguration;
+        const allowed = dmarcConfiguration?.manual_upload_enabled === true;
+        uploadBtn.classList.toggle('hidden', !known);
+        uploadBtn.setAttribute('aria-disabled', allowed ? 'false' : 'true');
+        uploadBtn.title = allowed ? '' : 'Manual upload is turned off in Settings, DMARC';
+        const input = document.getElementById('dmarc-file-input');
+        if (input) input.disabled = !allowed;
     }
 
-    // Toggle sync container
-    if (dmarcImapStatus && dmarcImapStatus.enabled) {
+    // Sync from IMAP: without IMAP set up the button stays, disabled, and the line under it says why
+    const syncBtn = document.getElementById('dmarc-sync-btn');
+    if (dmarcImapStatus && !dmarcImapStatus.enabled) {
         syncContainer.classList.remove('hidden');
+        if (syncBtn) {
+            syncBtn.disabled = true;
+            syncBtn.title = 'IMAP sync is not set up';
+        }
+        lastSyncInfo.innerHTML = `<span class="ui-muted">Not set up</span>
+            <button type="button" onclick="navigateTo('settings', { sub: 'dmarc_imap' })" class="ui-link-row ui-link">Set up IMAP</button>`;
+    } else if (dmarcImapStatus && dmarcImapStatus.enabled) {
+        syncContainer.classList.remove('hidden');
+        if (syncBtn && syncBtn.title === 'IMAP sync is not set up') {
+            syncBtn.disabled = false;
+            syncBtn.title = '';
+        }
 
         if (dmarcImapStatus.latest_sync) {
             const sync = dmarcImapStatus.latest_sync;
@@ -1386,8 +1401,9 @@ function renderReportsManagementTable(reports, allowDelete, { total, page, total
     content.innerHTML = `
         <p class="ui-muted ui-mgmt-total">
             Total: <span class="ui-strong">${total}</span> reports
-            ${!allowDelete ? '<span class="ui-tag ui-tag-warn">Deletion disabled</span>' : ''}
         </p>
+        ${allowDelete ? '' : `<div class="ui-list-note">${uiLocked('Deleting reports is off', 'Turn on report deletion in Settings, DMARC.',
+            `<button type="button" class="ui-btn ui-btn-sm" onclick="closeReportsManagementModal(); navigateTo('settings', { sub: 'dmarc' })">Open Settings</button>`)}</div>`}
         <div data-nosort class="ui-table ui-stack" style="${cols}; --ui-table-min: 780px">
             <div class="ui-tr ui-tr-head"><span>Import Date</span><span>Type</span><span>Domain</span><span>Reporter</span><span class="ui-td-end">Records</span><span>Period</span>${allowDelete ? '<span class="ui-td-end">Actions</span>' : ''}</div>
             ${reports.map(report => `

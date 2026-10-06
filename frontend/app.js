@@ -336,17 +336,20 @@ async function fetchRwStatus() {
         console.warn('Failed to fetch RW status:', e);
         mailcowRwConfigured = false;
     }
-    // The Quarantine tabs (and the sidebar sub-menu built from them) are known from the start
-    showQuarantineTabs();
+    showQuarantineRulesAccess();
 }
 
-// Auto-Rules needs the Read-Write key: with it, Quarantine gets its tabs
-function showQuarantineTabs() {
-    if (!mailcowRwConfigured) return false;
-    document.getElementById('quarantine-rules-section')?.classList.remove('hidden');
-    document.getElementById('quarantine-tabs')?.classList.remove('hidden');
-    document.getElementById('tab-quarantine')?.classList.add('has-sub');
-    return true;
+// Auto-Rules release and delete held mail in mailcow, so they need the Read-Write key.
+// The tab is always there; without the key it says what is missing. Returns whether rules can run.
+function showQuarantineRulesAccess() {
+    document.getElementById('quarantine-rules-section')?.classList.toggle('hidden', !mailcowRwConfigured);
+    const locked = document.getElementById('quarantine-rules-locked');
+    if (locked) {
+        locked.classList.toggle('hidden', mailcowRwConfigured);
+        locked.innerHTML = mailcowRwConfigured ? ''
+            : uiLocked('Auto-Rules are locked', `Rules release or delete held messages in mailcow by themselves, so they ${UI_RW_KEY_TEXT}`);
+    }
+    return mailcowRwConfigured;
 }
 
 // Auto-refresh configuration
@@ -2435,6 +2438,7 @@ async function loadFail2BanSettings() {
         // Render IP lists in separate accordion (editable textareas)
         if (ipListsContainer) {
             ipListsContainer.innerHTML = `
+                ${canEdit ? '' : `<div class="ui-list-note">${uiLocked('Editing the lists and unbanning are locked', `Changing the allowlist and denylist and unbanning ${UI_RW_KEY_TEXT}`)}</div>`}
                 <form id="fail2ban-ip-form" class="ui-f2b-form" onsubmit="event.preventDefault(); saveFail2banSettings()">
                     <div class="ui-f2b-lists">
                         <label class="ui-set-field"><span class="ui-label">Allowlisted <span class="ui-count">${whitelistEntries.length}</span></span>
@@ -3195,6 +3199,10 @@ function renderQuarantineDetailContent(data, itemId) {
             <button onclick="closeQuarantineDetails(); quarantineDelete('${itemId}')" class="ui-btn ui-btn-danger">Delete</button>
             <button onclick="closeQuarantineDetails(); quarantineRelease('${itemId}')" class="ui-btn ui-btn-primary">Release</button>
         `;
+    } else if (footer) {
+        // The list's locked note sits behind the dialog: say it here too
+        footer.className = 'ui-dialog-foot ui-dialog-foot-note';
+        footer.innerHTML = uiLocked('Quarantine actions are locked', `Release, delete and spam learning ${UI_RW_KEY_TEXT}`);
     }
 }
 
@@ -3213,7 +3221,7 @@ async function initQuarantineRules() {
         await fetchRwStatus();
     }
     
-    if (showQuarantineTabs()) {
+    if (showQuarantineRulesAccess()) {
         loadQuarantineRules();
     }
 }
