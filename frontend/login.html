@@ -134,13 +134,21 @@
         initDarkMode();
 
         // The page asked for before signing in (?next=), checked the same way as
-        // the server's safe_return_path: only a local path, never another site
+        // the server's safe_return_path: only a local path, never another site.
+        // What is returned is rebuilt from the parsed address on this site's
+        // origin, never the value as given.
         function safeReturnPath(value) {
             if (!value || value.length > 2048 || !value.startsWith('/') || value.startsWith('//')
                 || /[\\\x00-\x1f\x7f]/.test(value)) return '/';
-            const path = value.split(/[?#]/)[0];
-            if (path === '/login' || /^\/(login|api|static)\//.test(path)) return '/';
-            return value;
+            let url;
+            try {
+                url = new URL(value, window.location.origin);
+            } catch (e) {
+                return '/';
+            }
+            if (url.origin !== window.location.origin) return '/';
+            if (url.pathname === '/login' || /^\/(login|api|static)\//.test(url.pathname)) return '/';
+            return url.pathname + url.search + url.hash;
         }
         const returnTo = safeReturnPath(new URLSearchParams(window.location.search).get('next'));
         
