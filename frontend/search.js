@@ -123,7 +123,9 @@ async function gsSearchMessages(q, signal) {
             title: m.subject || '(no subject)',
             sub: (m.sender || '') + ' → ' + (m.recipient || ''),
             at: formatAgo(m.first_seen || m.last_seen),
-            open: () => viewMessageDetails(m.correlation_key)
+            open: () => viewMessageDetails(m.correlation_key),
+            // A message opens over the search, which stays for the next one
+            keep: true
         })),
         more: { label: 'Open in Messages', open: () => navigateToMessagesWithFilter({ email: q, filterType: 'search' }) }
     };
@@ -228,7 +230,7 @@ function gsIcon(id) {
 }
 
 function gsItem(category, item, q) {
-    const index = gsShown.push(item.open) - 1;
+    const index = gsShown.push(item) - 1;
     return `<button type="button" class="ui-gs-item${index === gsActive ? ' is-active' : ''}" data-gs-index="${index}" role="option" aria-selected="${index === gsActive}">
         <span class="ui-gs-ic">${gsIcon(category)}</span><b>${gsMark(item.title, q)}</b><small>${gsMark(item.sub, q)}</small>${item.at ? `<span class="ui-gs-at">${escapeHtml(item.at)}</span>` : ''}</button>`;
 }
@@ -278,7 +280,7 @@ function gsRender() {
     } else {
         const r = gsResults[gsTab] || { count: 0, items: [] };
         if (r.more && r.count) {
-            const index = gsShown.push(r.more.open) - 1;
+            const index = gsShown.push(r.more) - 1;
             body += `<button type="button" class="ui-gs-more${index === gsActive ? ' is-active' : ''}" data-gs-index="${index}"><span><b>${r.count.toLocaleString()}</b> found</span><span class="ui-link">${escapeHtml(r.more.label)}</span></button>`;
         }
         body += r.items.map(item => gsItem(gsTab, item, q)).join('');
@@ -338,10 +340,26 @@ function gsClose(clear) {
 }
 
 function gsChoose(index) {
-    const open = gsShown[index];
-    if (!open) return;
+    const item = gsShown[index];
+    if (!item) return;
+    if (item.keep) {
+        const input = gsEl('ui-gs-input');
+        input.blur();
+        item.open();
+        // Back from the message, the keys work in the search again (not on a phone: no keyboard)
+        const modal = gsEl('message-modal');
+        if (modal && !gsPhone()) {
+            const watch = new MutationObserver(() => {
+                if (!modal.classList.contains('hidden')) return;
+                watch.disconnect();
+                if (gsEl('ui-gs').classList.contains('is-open')) input.focus({ preventScroll: true });
+            });
+            watch.observe(modal, { attributes: true, attributeFilter: ['class'] });
+        }
+        return;
+    }
     gsClose(true);
-    open();
+    item.open();
 }
 
 function gsSetTab(id) {
@@ -363,9 +381,28 @@ function gsWaitFor(find, timeout = 8000) {
     });
 }
 
-function gsReveal(el) {
+// A bar that stays at the top while scrolling (a page's tabs on a phone) can hide the
+// start of what was opened: scroll it out from under the bar
+function gsUncover(el) {
+    const top = el.getBoundingClientRect();
+    const hit = document.elementFromPoint(top.left + Math.min(top.width / 2, 40), Math.max(top.top, 0) + 2);
+    if (!hit || el.contains(hit)) return;
+    let cover = hit;
+    while (cover && !['sticky', 'fixed'].includes(getComputedStyle(cover).position)) cover = cover.parentElement;
+    if (!cover) return;
+    const gap = cover.getBoundingClientRect().bottom - top.top + 12;
+    if (gap <= 0) return;
+    let scroller = el.parentElement;
+    while (scroller && !(/(auto|scroll)/.test(getComputedStyle(scroller).overflowY) && scroller.scrollHeight > scroller.clientHeight)) scroller = scroller.parentElement;
+    (scroller || document.scrollingElement).scrollBy(0, -gap);
+}
+
+// A field is brought to the middle; details (block 'start') from their top, below the bar
+function gsReveal(el, block = 'center') {
     if (!el) return;
-    el.scrollIntoView({ block: 'center' });
+    el.classList.add('ui-gs-target');
+    el.scrollIntoView({ block });
+    if (block === 'start') gsUncover(el);
     el.classList.remove('ui-gs-flash');
     void el.offsetWidth;
     el.classList.add('ui-gs-flash');
@@ -410,7 +447,7 @@ async function gsOpenDomain(name) {
     const details = await gsWaitFor(() => gsEl(id + '-details'));
     if (!details) return;
     if (details.classList.contains('hidden')) toggleDomainDetails(id);
-    gsReveal([...document.querySelectorAll('[data-domain-row]')].find(el => el.dataset.domainRow === name) || details);
+    gsReveal([...document.querySelectorAll('[data-domain-row]')].find(el => el.dataset.domainRow === name) || details, 'start');
 }
 
 // One mailbox opened, or the list searched for the text (username null)
@@ -426,7 +463,7 @@ async function gsOpenMailbox(username, text) {
     const index = mailboxStatsCache.mailboxes.findIndex(m => m.username === username);
     const content = gsEl('accordion-content-' + index);
     if (content && content.classList.contains('hidden')) toggleMailboxAccordion(username);
-    gsReveal(content ? content.parentElement : null);
+    gsReveal(content ? content.parentElement : null, 'start');
 }
 
 // The Security page's events for the address
@@ -495,6 +532,8 @@ function initGlobalSearch() {
 
     // A click outside closes it; an empty field goes back to its narrow size
     document.addEventListener('mousedown', event => {
+        // A message opened from the search is a dialog over it: the search waits behind
+        if (event.target.closest && event.target.closest('.ui-dialog-backdrop, .ui-sheet')) return;
         if (root.classList.contains('is-open') && !root.contains(event.target) && !root.classList.contains('is-sheet')) gsClose(false);
     });
     input.addEventListener('blur', () => {

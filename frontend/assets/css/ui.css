@@ -2249,7 +2249,7 @@ html .markdown-body .markdown-alert-caution .markdown-alert-title { color: var(-
 .ui-gs-key, .ui-gs-keys kbd { font: 600 11px var(--ui-mono); padding: 2px 6px; border: 1px solid var(--ui-line); border-radius: 6px; color: var(--ui-muted); background: none; }
 .ui-gs.has-q .ui-gs-key { display: none; }
 .ui-gs-cancel { display: none; }
-.ui-gs-panel { display: none; position: absolute; top: calc(100% + 6px); inset-inline: 0; z-index: 60; height: min(560px, calc(100vh - 90px));
+.ui-gs-panel { display: none; position: absolute; top: calc(100% + 6px); inset-inline: 0; z-index: 45; height: min(560px, calc(100vh - 90px));
     grid-template-columns: 180px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto; overflow: hidden;
     background: var(--ui-raise); color: var(--ui-ink); border: 1px solid var(--ui-line); border-radius: 14px; box-shadow: 0 22px 50px rgb(0 0 0 / .16); }
 .ui-gs.is-open.has-q .ui-gs-panel { display: grid; }
@@ -2280,7 +2280,8 @@ html .markdown-body .markdown-alert-caution .markdown-alert-title { color: var(-
 .ui-gs-wait { margin: 6px 10px 0; color: var(--ui-muted); font-size: 12px; }
 .ui-gs-keys { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 14px; padding: 8px 12px; border-top: 1px solid var(--ui-line); font-size: 11.5px; color: var(--ui-muted); }
 .ui-gs-keys kbd { margin-inline-end: 3px; }
-/* A result that was opened shows where it is for a moment */
+/* A result that was opened shows where it is for a moment, below the top bar */
+.ui-gs-target { scroll-margin-top: 80px; }
 .ui-gs-flash { animation: ui-gs-flash 2s ease; border-radius: var(--ui-radius-sm); }
 @keyframes ui-gs-flash { 0%, 40% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--ui-focus) 45%, transparent); } 100% { box-shadow: 0 0 0 3px transparent; } }
 
@@ -2303,4 +2304,6 @@ html .markdown-body .markdown-alert-caution .markdown-alert-title { color: var(-
     .ui-gs.is-sheet .ui-gs-item { padding: 10px; }
     .ui-gs.is-sheet .ui-gs-keys { display: none; }
     html.ui-gs-locked, html.ui-gs-locked body { overflow: hidden; }
+    /* A message opened from the search comes over it */
+    html:has(#message-modal:not(.hidden)) .ui-gs.is-sheet { z-index: 49; }
 }
