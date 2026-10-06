@@ -1779,11 +1779,12 @@ html .markdown-body .markdown-alert-caution .markdown-alert-title { color: var(-
 
 /* Dashboard server health: the Status cards, two per row in the side column */
 /* About: one card per thing the app depends on, with where to fix it */
-.ui-about-card { background: var(--ui-panel); }
+/* Buttons sit on the bottom of the card, level across a row whatever the text above */
+.ui-about-card { background: var(--ui-panel); display: flex; flex-direction: column; }
 .ui-about-card b { font-size: 18px; }
 .ui-about-card b.ui-ok { color: var(--ui-ok); }
 .ui-about-card small { overflow-wrap: anywhere; }
-.ui-about-card .ui-chip-row { margin-top: 6px; }
+.ui-about-card .ui-chip-row { margin-top: auto; padding-top: 10px; }
 .ui-dash-health { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; padding: 4px 12px 12px; }
 .ui-dash-health .ui-st-card { padding: 11px 12px; background: var(--ui-bg); }
 .ui-dash-health .ui-st-card b { font-size: 17px; }

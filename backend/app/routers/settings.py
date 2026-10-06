@@ -191,6 +191,10 @@ def get_settings_info(db: Session = Depends(get_db)):
         
         jobs_status = get_job_status()
 
+        # "16.4 (Debian 16.4-1.pgdg120+1)" -> "16.4"
+        server_version = db.execute(text("SHOW server_version")).scalar() or ''
+        database_version = server_version.split()[0] if server_version else None
+
         result = {
             "settings_edit_via_ui_enabled": settings.edit_settings_via_ui_enabled,
             "configuration": {
@@ -214,6 +218,7 @@ def get_settings_info(db: Session = Depends(get_db)):
                 "csv_export_limit": settings.csv_export_limit,
                 "scheduler_workers": settings.scheduler_workers,
                 "rspamd_configured": settings.is_rspamd_configured,
+                "database_version": database_version,
                 "auth_enabled": settings.is_authentication_enabled,
                 "basic_auth_enabled": settings.is_basic_auth_enabled,
                 "oauth2_enabled": settings.is_oauth2_enabled,
