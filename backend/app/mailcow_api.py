@@ -16,6 +16,12 @@ from .config import settings
 logger = logging.getLogger(__name__)
 
 
+def _forget_security_addresses() -> None:
+    """Fail2ban changed: the Security page's lists are read again on the next request."""
+    from .services import security_addresses
+    security_addresses.forget()
+
+
 class MailcowAPIError(Exception):
     """Custom exception for mailcow API errors"""
     pass
@@ -1295,6 +1301,7 @@ class MailcowAPI:
             json=payload
         )
         logger.info(f"Fail2Ban update response: {data}")
+        _forget_security_addresses()
         return data
 
     async def unban_fail2ban(self, ip: str) -> Dict[str, Any]:
@@ -1322,6 +1329,7 @@ class MailcowAPI:
             json=payload
         )
         logger.info(f"Fail2Ban unban response: {data}")
+        _forget_security_addresses()
         return data
 
     async def release_quarantine(self, item_ids: List[str]) -> Any:

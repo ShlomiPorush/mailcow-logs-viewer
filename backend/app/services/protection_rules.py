@@ -50,6 +50,7 @@ from sqlalchemy.orm import Session
 
 from .alias_domains import aliases_of_domain, expand_addresses, get_alias_domain_map
 from ..models import AliasStatistics, MailboxStatistics, NetfilterLog, PostfixLog, ProtectionHit, RawServiceLog, SystemSetting
+from ..utils import format_datetime_for_api
 
 logger = logging.getLogger(__name__)
 
@@ -298,6 +299,30 @@ def _is_unknown(username: str, known: Set[str], catch_all: Set[str]) -> bool:
     if name in known:
         return False
     return name.split("@", 1)[1] not in catch_all
+
+
+def hit_dict(hit: ProtectionHit) -> dict:
+    """A catch as the API and the Security page see it."""
+    return {
+        "id": hit.id,
+        "ip": hit.ip,
+        "rule": hit.rule,
+        "mode": hit.mode,
+        "status": hit.status,
+        "reason": hit.reason,
+        "usernames": hit.usernames or [],
+        "attempts": hit.attempts or 0,
+        "country_code": hit.country_code,
+        "country_name": hit.country_name,
+        "first_seen": format_datetime_for_api(hit.first_seen),
+        "last_seen": format_datetime_for_api(hit.last_seen),
+        "ended_at": format_datetime_for_api(hit.ended_at),
+        "ban_hours": hit.ban_hours,
+        "banned_at": format_datetime_for_api(hit.banned_at),
+        "expires_at": format_datetime_for_api(hit.expires_at),
+        "owned": bool(hit.owned),
+        "error": hit.error,
+    }
 
 
 def _record(found: Dict[tuple, dict], target: str, rule: str, reason: str, lines: List[NetfilterLog],

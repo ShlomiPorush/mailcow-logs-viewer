@@ -637,6 +637,7 @@
     "/api/security-alerts",
     "/api/security-alerts/acknowledge-all",
     "/api/security-alerts/{param}/acknowledge",
+    "/api/security/addresses",
     "/api/settings",
     "/api/settings/geoip/download",
     "/api/settings/geoip/status",

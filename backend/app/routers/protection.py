@@ -16,34 +16,14 @@ from ..mailcow_api import mailcow_api
 from ..models import NetfilterLog, ProtectionHit
 from ..services import geoip_service
 from ..services import protection_rules as rules_service
-from ..utils import format_datetime_for_api as format_datetime_utc
+from ..services import security_addresses
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/protection")
 
 
-def _hit(hit: ProtectionHit) -> dict:
-    return {
-        "id": hit.id,
-        "ip": hit.ip,
-        "rule": hit.rule,
-        "mode": hit.mode,
-        "status": hit.status,
-        "reason": hit.reason,
-        "usernames": hit.usernames or [],
-        "attempts": hit.attempts or 0,
-        "country_code": hit.country_code,
-        "country_name": hit.country_name,
-        "first_seen": format_datetime_utc(hit.first_seen),
-        "last_seen": format_datetime_utc(hit.last_seen),
-        "ended_at": format_datetime_utc(hit.ended_at),
-        "ban_hours": hit.ban_hours,
-        "banned_at": format_datetime_utc(hit.banned_at),
-        "expires_at": format_datetime_utc(hit.expires_at),
-        "owned": bool(hit.owned),
-        "error": hit.error,
-    }
+_hit = rules_service.hit_dict
 
 
 def _capabilities() -> dict:
@@ -134,6 +114,7 @@ def dismiss_hit(hit_id: int, db: Session = Depends(get_db)):
         hit.status = "dismissed"
         hit.ended_at = datetime.utcnow()
         db.commit()
+        security_addresses.forget()
         logger.info("Protection hit dismissed: %s (%s)", hit.ip, hit.rule)
     return _hit(hit)
 
@@ -153,6 +134,7 @@ async def ban_hit(hit_id: int, db: Session = Depends(get_db)):
         rules_service.request_ban(db, hit_id)
         await rules_service.enforce(mailcow_api)
     db.expire_all()
+    security_addresses.forget()
     hit = _get_or_404(db, hit_id)
     if hit.status != "banned":
         raise HTTPException(status_code=502, detail=hit.error or "The ban could not be written to mailcow; the next run tries again")
@@ -174,4 +156,6 @@ async def undo_hit(hit_id: int, db: Session = Depends(get_db)):
             done = await rules_service.undo(mailcow_api, hit_id)
         except RuntimeError as e:
             raise HTTPException(status_code=502, detail=str(e))
+        finally:
+            security_addresses.forget()
     return _hit(done)

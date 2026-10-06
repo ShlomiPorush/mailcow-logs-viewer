@@ -3,6 +3,7 @@ API endpoints for log retrieval and search
 """
 import logging
 from fastapi import APIRouter, Depends, Query, HTTPException, Request
+from starlette.concurrency import run_in_threadpool
 from sqlalchemy.orm import Session
 from sqlalchemy import or_, and_, desc, func
 from datetime import datetime, timedelta, timezone
@@ -12,7 +13,8 @@ from ..database import get_db
 from ..models import PostfixLog, RspamdLog, NetfilterLog, MessageCorrelation
 from ..mailcow_api import mailcow_api
 from ..config import settings
-from ..services import geoip_service
+from ..services import geoip_service, security_addresses
+from ..services.security_addresses import netfilter_service  # noqa: F401  (tests import it from here)
 from ..utils import internal_error, format_datetime_for_api as format_datetime_utc
 
 logger = logging.getLogger(__name__)
@@ -577,29 +579,6 @@ def get_netfilter_logs(
         raise internal_error(e)
 
 
-# What a netfilter "matched rule" line was about, from the log text itself
-_NETFILTER_SERVICES = (
-    ('SASL ', 'SMTP auth', True),
-    ('non-SMTP command', 'SMTP probe', False),
-    ('Protocol error', 'SMTP probe', False),
-    ('imap-login', 'IMAP', True),
-    ('pop3-login', 'POP3', True),
-    ('managesieve-login', 'Sieve', True),
-    ('SOGo', 'SOGo', True),
-    ('mailcow UI', 'mailcow UI', True),
-    ('Rspamd UI', 'Rspamd UI', True),
-)
-
-
-def netfilter_service(message: Optional[str]):
-    """Return (service, is_login) for a netfilter line, or (None, False)."""
-    text = message or ''
-    for needle, service, is_login in _NETFILTER_SERVICES:
-        if needle in text:
-            return service, is_login
-    return None, False
-
-
 @router.get("/logs/netfilter/overview")
 def get_netfilter_overview(
     hours: int = Query(24, ge=1, le=168),
@@ -613,56 +592,13 @@ def get_netfilter_overview(
     counted again. Ban and unban lines give the last Fail2ban action per address.
     """
     try:
-        cutoff = datetime.utcnow() - timedelta(hours=hours)
-        rows = db.query(
-            NetfilterLog.time, NetfilterLog.ip, NetfilterLog.message, NetfilterLog.username,
-            NetfilterLog.action, NetfilterLog.rule_id, NetfilterLog.country_code, NetfilterLog.country_name,
-            NetfilterLog.city, NetfilterLog.asn_org
-        ).filter(
-            NetfilterLog.time >= cutoff,
-            NetfilterLog.ip.isnot(None)
-        ).order_by(desc(NetfilterLog.time)).limit(50000).all()
-
-        sources = {}
-        latest = []
-        attempts_total = 0
-        failed_logins = 0
-        for row in rows:
-            entry = sources.get(row.ip)
-            if row.rule_id is not None:
-                service, is_login = netfilter_service(row.message)
-                attempts_total += 1
-                if is_login:
-                    failed_logins += 1
-                if entry is None:
-                    entry = sources[row.ip] = {
-                        "ip": row.ip, "attempts": 0, "failed_logins": 0, "last_seen": row.time,
-                        "services": [], "usernames": [], "country_code": row.country_code,
-                        "country_name": row.country_name, "city": row.city, "asn_org": row.asn_org,
-                        "last_action": None,
-                    }
-                entry["attempts"] += 1
-                if is_login:
-                    entry["failed_logins"] += 1
-                if service and service not in entry["services"]:
-                    entry["services"].append(service)
-                if row.username and row.username not in entry["usernames"] and len(entry["usernames"]) < 5:
-                    entry["usernames"].append(row.username)
-                if is_login and len(latest) < 20:
-                    latest.append({
-                        "time": format_datetime_utc(row.time), "ip": row.ip, "username": row.username,
-                        "service": service, "country_code": row.country_code, "country_name": row.country_name,
-                    })
-            elif row.action in ('ban', 'banned', 'unban'):
-                if entry is None:
-                    entry = sources[row.ip] = {
-                        "ip": row.ip, "attempts": 0, "failed_logins": 0, "last_seen": row.time,
-                        "services": [], "usernames": [], "country_code": row.country_code,
-                        "country_name": row.country_name, "city": row.city, "asn_org": row.asn_org,
-                        "last_action": None,
-                    }
-                if entry["last_action"] is None:
-                    entry["last_action"] = 'unban' if row.action == 'unban' else 'ban'
+        sources, totals = security_addresses.netfilter_sources(db, hours)
+        attempts_total, failed_logins = totals["attempts"], totals["failed_logins"]
+        latest = [{
+            "time": format_datetime_utc(row.time), "ip": row.ip, "username": row.username,
+            "service": security_addresses.netfilter_service(row.message)[0],
+            "country_code": row.country_code, "country_name": row.country_name,
+        } for row in totals["latest"]]
 
         ordered = sorted(
             (e for e in sources.values() if e["attempts"] > 0),
@@ -681,6 +617,45 @@ def get_netfilter_overview(
         }
     except Exception as e:
         logger.error(f"Error building netfilter overview: {e}")
+        raise internal_error(e)
+
+
+def _security_item(a: dict) -> dict:
+    return {
+        "ip": a["ip"], "state": a["state"], "tries": a["tries"], "attempts": a["attempts"],
+        "users": a["users"], "services": a["services"], "hits": a["hits"],
+        "country": a["country"], "country_code": a["country_code"], "city": a["city"], "org": a["org"],
+        "last_seen": format_datetime_utc(a["last"]), "f2b": a["f2b"],
+    }
+
+
+@router.get("/security/addresses")
+async def get_security_addresses(
+    list_name: str = Query("review", alias="list", pattern="^(review|banned)$"),
+    country: Optional[str] = Query(None, max_length=100),
+    after: Optional[str] = Query(None, max_length=200),
+    limit: int = Query(50, ge=1, le=200),
+    db: Session = Depends(get_db)
+):
+    """
+    One page of the Security page's To review or Banned list, newest activity
+    first, with the real count of both lists (for the country, when one is
+    given). `after` is the `next` cursor of the page before.
+    """
+    try:
+        found = security_addresses.cached()
+        if found is None:
+            f2b = await mailcow_api.get_fail2ban()
+            addresses = await run_in_threadpool(security_addresses.collect, db, f2b)
+            security_addresses.remember(addresses, f2b is not None)
+            found = (addresses, f2b is not None)
+        addresses, fail2ban_known = found
+        result = security_addresses.page(addresses, list_name, country or None, after, limit)
+        result["items"] = [_security_item(a) for a in result["items"]]
+        result["fail2ban_known"] = fail2ban_known
+        return result
+    except Exception as e:
+        logger.error(f"Error building the security address list: {e}")
         raise internal_error(e)
 
 
