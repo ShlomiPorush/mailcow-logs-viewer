@@ -1200,6 +1200,7 @@ function securitySourceState(source) {
 let securityTab = 'overview';
 function securityShowTab(tab) {
     securityTab = tab;
+    routerSyncSubpage('netfilter', tab);
     document.querySelectorAll('.ui-se-tabs .modal-tab').forEach(btn => {
         const on = btn.id === `security-tab-btn-${tab}`;
         btn.classList.toggle('active', on);
@@ -1528,6 +1529,15 @@ function switchTab(tab, params = {}) {
         return;
     }
 
+    // The page is already open and only its tab changed (Back, Forward, the
+    // sidebar flyout): switch the tab without loading the page again
+    const tabPage = typeof SUBPAGES !== 'undefined' ? SUBPAGES[tab] : null;
+    const pageEl = document.getElementById(`content-${tab}`);
+    if (tabPage && params.sub && currentTab === tab && pageEl && !pageEl.classList.contains('hidden')) {
+        tabPage.show(params.sub);
+        return;
+    }
+
     currentTab = tab;
 
     // Mark the current page in the sidebar and in the phone tab bar; "More"
@@ -1559,6 +1569,13 @@ function switchTab(tab, params = {}) {
         tabContent.classList.remove('hidden');
     } else {
         console.error(`Tab content not found: content-${tab}`);
+    }
+
+    // Open the tab the address names, and correct an address that named none
+    if (tabPage) {
+        const sub = params.sub || tabPage.current();
+        routerSyncSubpage(tab, sub, true);
+        tabPage.select(sub);
     }
 
     // Load tab data
@@ -3198,6 +3215,7 @@ async function initQuarantineRules() {
 let quarantineTab = 'messages';
 function quarantineShowTab(tab) {
     quarantineTab = tab;
+    routerSyncSubpage('quarantine', tab);
     ['messages', 'rules'].forEach(name => {
         const btn = document.getElementById(`quarantine-tab-btn-${name}`);
         if (btn) { btn.classList.toggle('active', name === tab); btn.setAttribute('aria-selected', name === tab); }
@@ -3908,6 +3926,7 @@ let statusJobFilterValue = 'all';
 
 function statusShowTab(tab) {
     statusTab = tab;
+    routerSyncSubpage('status', tab);
     document.querySelectorAll('.ui-st-tabs .modal-tab').forEach(btn => {
         const on = btn.id === `status-tab-btn-${tab}`;
         btn.classList.toggle('active', on);

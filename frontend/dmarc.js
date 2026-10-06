@@ -208,23 +208,9 @@ async function handleDmarcRoute(params = {}) {
         }
     }
 
-    // Load the domain overview (don't update URL since we came from router)
+    // The address names the tab (/dmarc/example.com/sources); the overview opens on it
+    dmarcState.currentSubTab = DMARC_SUBTABS.includes(params.type) ? params.type : 'reports';
     await loadDomainOverview(params.domain, false);
-
-    // If type is specified (without id), navigate to sub-tab
-    if (params.type) {
-        switch (params.type) {
-            case 'reports':
-                dmarcSwitchSubTab('reports');
-                break;
-            case 'sources':
-                dmarcSwitchSubTab('sources');
-                break;
-            case 'tls':
-                dmarcSwitchSubTab('tls');
-                break;
-        }
-    }
 }
 
 // =============================================================================
@@ -373,6 +359,7 @@ async function loadDomainOverview(domain, updateUrl = true) {
     dmarcState.currentView = 'overview';
     dmarcState.currentDomain = domain;
     dmarcState.detailType = null;
+    if (updateUrl) dmarcState.currentSubTab = 'reports';
 
     // Update URL if requested (skip when called from handleDmarcRoute to avoid duplicate history)
     if (updateUrl && typeof buildPath === 'function') {
@@ -440,6 +427,7 @@ async function loadDomainOverview(domain, updateUrl = true) {
         renderDmarcChart(data.daily_stats || []);
 
         // Load initial sub-tab content based on current state
+        dmarcShowSubTabPanel(dmarcState.currentSubTab);
         if (dmarcState.currentSubTab === 'reports') {
             await loadDomainReports(domain);
         } else if (dmarcState.currentSubTab === 'sources') {
@@ -587,61 +575,43 @@ async function loadDomainSources(domain) {
 // TLS REPORTS TAB
 // =============================================================================
 
-function dmarcSwitchSubTab(tab) {
+function dmarcSwitchSubTab(tab, replaceUrl = false) {
     dmarcState.currentSubTab = tab;
 
-    // Update tab buttons
-    ['reports', 'sources', 'tls'].forEach(name => {
-        const button = document.getElementById(`dmarc-subtab-${name}`);
-        if (!button) return;
-        button.classList.toggle('active', name === tab);
-        button.setAttribute('aria-selected', name === tab ? 'true' : 'false');
-    });
+    // Each tab has its own address (/dmarc/example.com/sources); Daily Reports is the domain's own
+    if (typeof currentTab !== 'undefined' && currentTab === 'dmarc' && dmarcState.currentDomain && typeof buildPath === 'function') {
+        const params = tab === 'reports' ? { domain: dmarcState.currentDomain } : { domain: dmarcState.currentDomain, type: tab };
+        const path = buildPath('dmarc', params);
+        if (window.location.pathname !== path) {
+            if (replaceUrl) history.replaceState({ route: 'dmarc', params }, '', path);
+            else history.pushState({ route: 'dmarc', params }, '', path);
+        }
+    }
 
-    // Update tab content
-    document.getElementById('dmarc-reports-content').classList.add('hidden');
-    document.getElementById('dmarc-sources-content').classList.add('hidden');
-    document.getElementById('dmarc-tls-content')?.classList.add('hidden');
+    dmarcShowSubTabPanel(tab);
 
-    // Show selected tab content
+    // Load the selected tab's content
     if (tab === 'reports') {
-        document.getElementById('dmarc-reports-content').classList.remove('hidden');
         loadDomainReports(dmarcState.currentDomain);
     } else if (tab === 'sources') {
-        document.getElementById('dmarc-sources-content').classList.remove('hidden');
         loadDomainSources(dmarcState.currentDomain);
     } else if (tab === 'tls') {
-        document.getElementById('dmarc-tls-content')?.classList.remove('hidden');
         loadDomainTLSReports(dmarcState.currentDomain);
     }
 }
 
-// TLS-RPT Record card: where sending servers deliver TLS reports (the _smtp._tls
-// record). Shown next to the DMARC Record card, same recipe; color follows the check status.
-function renderTlsRptRecordCard(record) {
-    if (!record) return '';
-    const cardColors = { success: 'border-green-500 bg-green-50 dark:bg-green-900/20', warning: 'border-amber-500 bg-amber-50 dark:bg-amber-900/20', error: 'border-red-500 bg-red-50 dark:bg-red-900/20', unknown: 'border-gray-300 bg-gray-50 dark:bg-gray-800' };
-    const textColors = { success: 'text-green-700 dark:text-green-400', warning: 'text-amber-700 dark:text-amber-400', error: 'text-red-700 dark:text-red-400', unknown: 'text-gray-600 dark:text-gray-400' };
-    const status = cardColors[record.status] ? record.status : 'unknown';
-    // Report URIs come from DNS: only mailto: becomes a link, anything else stays text
-    const formatUri = (uri) => {
-        const text = String(uri).trim();
-        if (!/^mailto:/i.test(text)) return escapeHtml(text);
-        return `<a href="${escapeHtml(text)}" class="text-blue-600 dark:text-blue-400 hover:underline break-all">${escapeHtml(text.replace(/^mailto:/i, ''))}</a>`;
-    };
-    const uris = Array.isArray(record.report_uris) ? record.report_uris : [];
-    const urisRow = uris.length ? `<div class="overflow-x-auto"><table class="w-full text-left"><tbody><tr class="border-b border-gray-100 dark:border-gray-700"><td class="py-1.5 pr-3 text-xs font-medium text-gray-500 dark:text-gray-400">Report addresses (rua)</td><td class="py-1.5 text-xs text-gray-900 dark:text-gray-200 break-all">${uris.map(formatUri).join(', ')}</td></tr></tbody></table></div>` : '';
-    const notes = (items, color) => (Array.isArray(items) && items.length) ? `<div class="mt-3 space-y-1">${items.map(n => `<div class="flex items-start gap-2 text-xs ${color}"><span>${escapeHtml(n)}</span></div>`).join('')}</div>` : '';
-    return `
-        <div class="border ${cardColors[status]} rounded-lg p-4">
-            <h3 class="text-sm font-semibold text-gray-900 dark:text-white mb-2">TLS-RPT Record</h3>
-            <p class="text-sm ${textColors[status]} font-medium mb-3">${escapeHtml(record.message || 'No information')}</p>
-            ${urisRow}
-            ${record.record ? `<details class="mt-3"><summary class="text-xs text-gray-600 dark:text-gray-400 cursor-pointer hover:text-gray-900 dark:hover:text-gray-200 font-medium">View Record</summary><div class="mt-2 p-2 bg-white dark:bg-gray-900 rounded border border-gray-200 dark:border-gray-700"><code class="text-xs text-gray-700 dark:text-gray-300 break-all block leading-relaxed">${escapeHtml(record.record)}</code></div></details>` : ''}
-            ${notes(record.warnings, textColors.error)}
-            ${notes(record.info, textColors.unknown)}
-        </div>
-    `;
+const DMARC_SUBTABS = ['reports', 'sources', 'tls'];
+
+// Mark the tab and show its panel, without loading anything
+function dmarcShowSubTabPanel(tab) {
+    DMARC_SUBTABS.forEach(name => {
+        const button = document.getElementById(`dmarc-subtab-${name}`);
+        if (button) {
+            button.classList.toggle('active', name === tab);
+            button.setAttribute('aria-selected', name === tab ? 'true' : 'false');
+        }
+        document.getElementById(`dmarc-${name}-content`)?.classList.toggle('hidden', name !== tab);
+    });
 }
 
 async function loadDomainTLSReports(domain) {

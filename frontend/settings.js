@@ -8,6 +8,9 @@
 // SETTINGS PAGE
 // =============================================================================
 
+// The open section; it has its own address (/settings/notifications)
+let settingsTab = 'about';
+
 // Settings the API returns masked as ******** (same list as the backend)
 const SETTINGS_SENSITIVE_KEYS = ['mailcow_api_key', 'mailcow_api_key_rw', 'auth_password', 'oauth2_client_secret', 'smtp_password',
     'dmarc_imap_password', 'session_secret_key', 'maxmind_license_key', 'rspamd_password'];
@@ -1270,6 +1273,8 @@ function renderSettings(content, data) {
         // Switching is shared by the desktop sidebar and the mobile picker, so
         // the two can never disagree about which category is open.
         const switchSettingsTab = function (tabId, scrollToTop) {
+            settingsTab = tabId;
+            if (typeof routerSyncSubpage === 'function') routerSyncSubpage('settings', tabId);
             content.querySelectorAll('.settings-edit-tab').forEach(function (b) {
                 const isActive = b.getAttribute('data-tab') === tabId;
                 if (isActive) b.setAttribute('aria-current', 'true');
@@ -1304,6 +1309,15 @@ function renderSettings(content, data) {
                 switchSettingsTab(btn.getAttribute('data-tab'), false);
             });
         });
+
+        // The section the address names (/settings/notifications), or About
+        window.settingsShowTab = id => switchSettingsTab(id, false);
+        if (settingsTab !== 'about' && content.querySelector('#settings-tab-panel-' + CSS.escape(settingsTab))) {
+            switchSettingsTab(settingsTab, false);
+        } else if (settingsTab !== 'about') {
+            settingsTab = 'about';
+            if (typeof routerSyncSubpage === 'function') routerSyncSubpage('settings', 'about', true);
+        }
 
         const tabSelect = content.querySelector('#settings-tab-select');
         if (tabSelect) {
@@ -1379,7 +1393,7 @@ function renderSettings(content, data) {
 
         // Search: show every matching field from all sections at once
         const search = content.querySelector('#settings-search');
-        let openTab = 'about';
+        let openTab = settingsTab;
         content.querySelectorAll('.settings-edit-tab').forEach(btn => btn.addEventListener('click', () => { openTab = btn.getAttribute('data-tab'); if (search) search.value = ''; }));
         if (search) {
             search.addEventListener('input', () => {
