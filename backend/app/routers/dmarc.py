@@ -24,7 +24,7 @@ from ..services.dmarc_cache import (
 )
 from ..config import settings
 from ..scheduler import update_job_status
-from .domains import get_cached_dns_check, check_dmarc_record, check_tls_rpt_record, parse_dmarc_record_tags
+from .domains import get_cached_dns_check, check_dmarc_record, check_tls_rpt_record, parse_dmarc_record_tags, _public_cached_dns_result
 from ..utils import internal_error
 
 logger = logging.getLogger(__name__)
@@ -262,19 +262,69 @@ def delete_report(
 
 
 @router.get("/dmarc/domains")
-def get_domains_list(
-    db: Session = Depends(get_db)
-):
+async def get_domains_list():
     """
-    Get list of all domains with DMARC and/or TLS-RPT reports and their statistics
+    Get list of all domains with DMARC and/or TLS-RPT reports and their statistics,
+    each with the state of its DMARC and TLS-RPT records and how many senders fail
+    DMARC. The records come from the stored DNS checks; a domain that has none (one
+    that is not a mailcow domain) is looked up live, once per cache period.
     """
     try:
-        # Check cache first
         cache_key = get_dmarc_cache_key("domains_list")
-        cached_result = get_dmarc_cached(cache_key, db)
+        cached_result = await asyncio.to_thread(_cached_domains_list, cache_key)
         if cached_result is not None:
             return cached_result
-        
+
+        response, stored = await asyncio.to_thread(_build_domains_list)
+        names = [d['domain'] for d in response['domains']]
+        checks = await asyncio.gather(*(_live_record_checks(name, *stored.get(name, (None, None))) for name in names))
+        checks = dict(zip(names, checks))
+        for entry in response['domains']:
+            dmarc_check, tls_check = checks[entry['domain']]
+            entry['dmarc_record'] = _record_state(dmarc_check, with_policy=True)
+            entry['tls_rpt_record'] = _record_state(tls_check)
+
+        set_dmarc_cache(cache_key, response)
+        return response
+    except Exception as e:
+        logger.error(f"Error fetching domains list: {e}")
+        raise internal_error(e)
+
+
+def _cached_domains_list(cache_key: str):
+    with SessionLocal() as db:
+        return get_dmarc_cached(cache_key, db)
+
+
+async def _live_record_checks(domain: str, dmarc_check=None, tls_check=None):
+    """The domain's DMARC and TLS-RPT records: the stored check, or one read from DNS
+    when there is none; None for one that could not be read."""
+    async def one(stored, check):
+        if stored:
+            return stored
+        try:
+            return await asyncio.wait_for(check(domain), timeout=8)
+        except Exception as e:
+            logger.debug(f"Live record check failed for {domain}: {e}")
+            return None
+    return tuple(await asyncio.gather(one(dmarc_check, check_dmarc_record), one(tls_check, check_tls_rpt_record)))
+
+
+def _record_state(check, with_policy: bool = False) -> dict:
+    """What the domains list says about a record: checked, found, its status, and the DMARC policy."""
+    if not check:
+        state = {'checked': False, 'found': False, 'status': None}
+    else:
+        state = {'checked': True, 'found': bool(check.get('record')), 'status': check.get('status')}
+    if with_policy:
+        policy = (check or {}).get('policy') or ((check or {}).get('settings') or {}).get('policy')
+        state['policy'] = str(policy).lower() if state['found'] and policy else None
+    return state
+
+
+def _build_domains_list():
+    """The domains with their statistics, and the stored DNS checks by domain: (dmarc, tls_rpt)."""
+    with SessionLocal() as db:
         # Get domains from DMARC reports
         dmarc_domains = db.query(
             DMARCReport.domain,
@@ -426,22 +476,32 @@ def get_domains_list(
                     }
                 })
         
+        # Senders that fail DMARC for most of their mail in the last 30 days, per domain
+        failing = {}
+        for name, total, passed in db.query(
+            DMARCReport.domain,
+            func.sum(DMARCRecord.count),
+            func.sum(case((or_(DMARCRecord.spf_result == 'pass', DMARCRecord.dkim_result == 'pass'), DMARCRecord.count), else_=0))
+        ).join(DMARCReport, DMARCRecord.dmarc_report_id == DMARCReport.id).filter(
+            DMARCReport.begin_date >= int((datetime.now() - timedelta(days=30)).timestamp())
+        ).group_by(DMARCReport.domain, DMARCRecord.source_ip).all():
+            if total and (passed or 0) / total < 0.5:
+                failing[name] = failing.get(name, 0) + 1
+        for entry in domains_list:
+            entry['failing_sources'] = failing.get(entry['domain'], 0)
+
+        # The stored DNS checks of the domains in the list
+        stored = {
+            name: (_public_cached_dns_result(dmarc), _public_cached_dns_result(tls))
+            for name, dmarc, tls in db.query(DomainDNSCheck.domain_name, DomainDNSCheck.dmarc_check, DomainDNSCheck.tls_rpt_check)
+            .filter(DomainDNSCheck.domain_name.in_(all_domains)).all()
+            if dmarc or tls
+        }
+
         # Sort by last_report, handling None values
         domains_list.sort(key=lambda x: x['last_report'] or 0, reverse=True)
-        
-        response = {
-            'domains': domains_list,
-            'total': len(domains_list)
-        }
-        
-        # Cache the result
-        set_dmarc_cache(cache_key, response)
-        
-        return response
-        
-    except Exception as e:
-        logger.error(f"Error fetching domains list: {e}")
-        raise internal_error(e)
+
+        return {'domains': domains_list, 'total': len(domains_list)}, stored
 
 
 
@@ -897,16 +957,31 @@ def get_domain_sources(
         total = len(sources_list)
         start = (page - 1) * limit
         end = start + limit
-        
+        page_rows = sources_list[start:end]
+
+        # Who reported each address: the receivers the mail went to, for the mail flow
+        reporters = {}
+        for ip, org, count, passed in db.query(
+            DMARCRecord.source_ip, DMARCReport.org_name, func.sum(DMARCRecord.count),
+            func.sum(case((or_(DMARCRecord.spf_result == 'pass', DMARCRecord.dkim_result == 'pass'), DMARCRecord.count), else_=0))
+        ).join(DMARCReport, DMARCRecord.dmarc_report_id == DMARCReport.id).filter(
+            DMARCReport.domain == domain,
+            DMARCReport.begin_date >= cutoff_timestamp,
+            DMARCRecord.source_ip.in_([row['source_ip'] for row in page_rows])
+        ).group_by(DMARCRecord.source_ip, DMARCReport.org_name).all():
+            reporters.setdefault(ip, []).append({'org_name': org, 'count': count or 0, 'dmarc_pass': passed or 0})
+        for row in page_rows:
+            row['reporters'] = sorted(reporters.get(row['source_ip'], []), key=lambda r: -r['count'])
+
         return {
             'domain': domain,
             'total': total,
             'page': page,
             'limit': limit,
             'pages': (total + limit - 1) // limit if total > 0 else 0,
-            'data': sources_list[start:end]
+            'data': page_rows
         }
-        
+
     except Exception as e:
         logger.error(f"Error fetching domain sources: {e}")
         raise internal_error(e)
