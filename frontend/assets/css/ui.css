@@ -1874,3 +1874,28 @@ html .markdown-body .markdown-alert-caution .markdown-alert-title { color: var(-
     html.ui-nav-collapsed .ui-nav-toggle { position: static; margin: 0 auto 10px; }
     html.ui-nav-collapsed .ui-nav-toggle svg { transform: scaleX(-1); }
 }
+
+/* Protection rules (Security > Protection) */
+.ui-prot-rules { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; align-items: start; }
+.ui-prot-rule { display: grid; gap: 12px; padding: 16px var(--ui-pad-x); }
+.ui-prot-rule-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.ui-prot-rule-head h3 { margin: 0 0 2px; font-size: 15px; font-weight: 700; }
+.ui-prot-rule-head p { margin: 0; font-size: 12.5px; }
+.ui-prot-names { display: flex; flex-wrap: wrap; gap: 6px; }
+.ui-prot-name { display: inline-flex; align-items: center; gap: 4px; padding: 3px 4px 3px 10px; border-radius: 999px; background: var(--ui-bg);
+    border: 1px solid var(--ui-line); font: 13px var(--ui-mono); }
+.ui-prot-name button { width: 20px; height: 20px; border: 0; border-radius: 50%; background: none; color: var(--ui-muted); font-size: 15px; line-height: 1; cursor: pointer; }
+.ui-prot-name button:hover { background: color-mix(in srgb, var(--ui-fail) 14%, transparent); color: var(--ui-fail); }
+.ui-prot-add { display: flex; gap: 8px; }
+.ui-prot-add .ui-input { flex: 1; min-width: 0; }
+.ui-prot-suggest { display: grid; gap: 6px; font-size: 12.5px; }
+.ui-prot-suggest .ui-chip small { margin-inline-start: 4px; color: var(--ui-muted); }
+.ui-prot-sentence { margin: 0; line-height: 2.2; }
+.ui-prot-num { display: inline-block; width: 72px; height: 30px; margin: 0 4px; text-align: center; }
+.ui-prot-note { margin: 0; font-size: 12.5px; }
+.ui-prot-save { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-radius: var(--ui-radius); background: var(--ui-panel);
+    border: 1px solid var(--ui-line); }
+.ui-prot-save > span { flex: 1; font-weight: 600; }
+.ui-prot-save.hidden { display: none; }
+.ui-prot-tried { display: block; margin-top: 2px; font-size: 12px; }
+@media (max-width: 900px) { .ui-prot-rules { grid-template-columns: minmax(0, 1fr); } }

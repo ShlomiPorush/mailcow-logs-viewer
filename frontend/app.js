@@ -784,6 +784,7 @@ async function smartRefreshCurrentTab() {
             case 'netfilter':
                 await smartRefreshNetfilter();
                 await loadSecurityOverview();
+                if (typeof refreshProtectionHits === 'function') refreshProtectionHits();
                 break;
             case 'queue':
                 await smartRefreshQueue();
@@ -1204,7 +1205,7 @@ function securityShowTab(tab) {
         btn.classList.toggle('active', on);
         btn.setAttribute('aria-selected', on);
     });
-    ['overview', 'events', 'fail2ban', 'abuse'].forEach(name => {
+    ['overview', 'events', 'protection', 'fail2ban', 'abuse'].forEach(name => {
         const panel = document.getElementById(`security-tab-${name}`);
         if (panel) panel.classList.toggle('hidden', name !== tab);
     });
@@ -1598,6 +1599,7 @@ function switchTab(tab, params = {}) {
             loadSecurityOverview();
             loadNetfilterLogs(1);
             loadFail2BanSettings();
+            if (typeof loadProtection === 'function') loadProtection();
             loadNetfilterCountries();
             loadSmtpAbusePanel();
             loadSecurityCountryChart(30);
@@ -4749,7 +4751,8 @@ function statusJobCategories(jobs) {
             icon: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path>',
             jobs: [
                 ['DNS Check (All Domains)', 'dns_check', jobs.dns_check],
-                ['IP Blacklist Check (All Hosts)', 'blacklist_check', jobs.blacklist_check]
+                ['IP Blacklist Check (All Hosts)', 'blacklist_check', jobs.blacklist_check],
+                ['Protection Rules', 'protection_rules', jobs.protection_rules]
             ]
         },
         {
