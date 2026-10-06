@@ -624,7 +624,7 @@ async def unban_fail2ban(request: Request):
         raise
     except Exception as e:
         logger.error(f"Error unbanning IP from Fail2Ban: {e}")
-        raise internal_error(e)
+        raise HTTPException(status_code=502, detail="mailcow did not accept the unban. Check the Read-Write API key and try again.")
 
 
 @router.post("/fail2ban/ban")

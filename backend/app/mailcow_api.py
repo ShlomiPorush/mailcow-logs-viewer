@@ -1282,6 +1282,12 @@ class MailcowAPI:
             MailcowAPIError: If request fails or RW key is not configured
         """
         logger.info("Updating Fail2Ban configuration")
+        # mailcow turns "manage external" off on any edit that leaves it out:
+        # keep what is set unless the caller sets it
+        if "manage_external" not in attrs:
+            current = await self.get_fail2ban()
+            if current is not None:
+                attrs = {**attrs, "manage_external": "1" if current.get("manage_external") in (True, 1, "1") else "0"}
         payload = {"attr": attrs}
         data = await self._make_rw_request(
             "/api/v1/edit/fail2ban",
@@ -1305,9 +1311,13 @@ class MailcowAPI:
             MailcowAPIError: If request fails or RW key is not configured
         """
         logger.info(f"Unbanning IP {ip} from Fail2Ban")
-        payload = {"attr": {"ip": ip}}
+        # mailcow has no delete/fail2ban: an unban is an edit with action "unban"
+        # and the networks as items. mailcow handles it before its settings code,
+        # so nothing else is sent or changed.
+        network = ip if "/" in ip else f"{ip}/128" if ":" in ip else f"{ip}/32"
+        payload = {"items": [network], "attr": {"action": "unban"}}
         data = await self._make_rw_request(
-            "/api/v1/delete/fail2ban",
+            "/api/v1/edit/fail2ban",
             method="POST",
             json=payload
         )

@@ -10,10 +10,13 @@ Set in your `.env`:
 SETTINGS_EDIT_VIA_UI_ENABLED=true
 ```
 
-Restart the application. The Settings tab will then show an **Edit configuration** section with a form and two actions:
+Restart the application. The Settings tab will then show an **Edit configuration** section.
 
-- **Import from ENV to DB** – copies the current effective configuration (defaults + ENV) into the database so you can later remove ENV vars and manage everything from the UI.
-- **Save changes** – saves the form values to the database.
+## First step: migrate settings from ENV
+
+The first time you open it, the form is read-only and the section shows a **Migrate Settings from ENV** button instead of **Save changes**. Click it once: it copies the current effective configuration (defaults + ENV) into the database. The form then becomes editable and the **Save changes** button appears.
+
+You only do this once. After that, you can remove ENV variables and manage those settings from the UI.
 
 ## Priority order
 
@@ -25,7 +28,7 @@ Configuration is resolved in this order (later overrides earlier):
 
 So: ENV overrides DB, and DB overrides defaults. If an environment variable is explicitly set, it takes precedence over the value stored in the database. This prevents lockout: if you make a configuration mistake in the UI, you can always fix it by setting the correct value in your `.env` / `docker-compose.yml` and restarting.
 
-Fields where an ENV variable is active are marked with a 🔒 lock icon in the UI. You can still edit the DB value (it will be used as a fallback when the ENV variable is removed).
+Fields where an ENV variable is active are marked with a 🔒 lock icon and cannot be edited in the UI. To manage such a setting from the UI, remove its ENV variable and restart the application.
 
 ## Lockout recovery
 
