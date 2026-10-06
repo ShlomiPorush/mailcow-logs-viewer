@@ -624,7 +624,6 @@
     .ui-msg-searchbar { position: sticky; top: 0; z-index: 5; }
 }
 @media (max-width: 760px) {
-    .ui-msg-searchbar { top: 56px; }
     .ui-md-header .ui-md-subject { font-size: calc(var(--ui-h1) * .75); }
 }
 
@@ -981,7 +980,8 @@ body { font-family: var(--ui-font); background: var(--ui-bg); color: var(--ui-in
     .ui-stack .ui-tr-head { display: none; }
     .ui-stack .ui-q-who { flex: 1 1 calc(100% - 40px); }
     .ui-stack .ui-td-wrap { flex: 1 1 100%; }
-    .ui-stack .ui-row-actions { flex: 1 1 100%; justify-content: flex-start; }
+    .ui-stack .ui-row-actions { flex: 1 1 100%; justify-content: flex-start; flex-wrap: wrap; }
+    .ui-stack .ui-table-tools, .ui-stack > .ui-toolbar { min-width: 0; flex-wrap: wrap; }
     .ui-sec-table .ui-tr { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; min-width: 0; }
     .ui-sec-table .ui-tr-head { display: none; }
     .ui-sec-table .ui-sec-addr { flex: 1 1 100%; }
@@ -1489,7 +1489,7 @@ button.ui-st-card:hover { outline: 1px solid var(--ui-line); }
     .ui-set-field { grid-template-columns: minmax(0, 1fr); }
     .ui-set-field > *, .ui-set-field > .ui-label, .ui-set-field > .ui-set-desc { grid-column: 1; grid-row: auto; }
     .ui-set-field > .ui-input, .ui-set-field > .ui-select, .ui-set-field > .ui-set-secret, .ui-set-field > .ui-set-checks { grid-row: auto; }
-    .settings-mobile-nav { top: 56px; }
+    .settings-mobile-nav { top: 0; }
     .ui-set-savebar { inset: auto 10px calc(76px + env(safe-area-inset-bottom)) 10px; width: auto; }
     .ui-set-savebar #settings-dirty-count { flex: 1; }
 }
@@ -1755,4 +1755,15 @@ html .markdown-body .markdown-alert-caution .markdown-alert-title { color: var(-
 }
 @media (hover: none) {
     .ui-fly { display: none; }
+}
+
+/* Quarantine: a row opens its details; the sort stays on the heading's line */
+.ui-q-row[onclick] { cursor: pointer; }
+.ui-q-row[onclick]:hover { background: color-mix(in srgb, var(--ui-accent) 5%, transparent); }
+.ui-q-row .ui-row-actions { flex-wrap: wrap; }
+.ui-q-head { flex-wrap: nowrap; }
+.ui-q-head .ui-h2 { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ui-q-head .ui-select { flex: none; }
+@media (max-width: 760px) {
+    .ui-q-head .ui-select { height: 32px; font-size: 13px; }
 }
