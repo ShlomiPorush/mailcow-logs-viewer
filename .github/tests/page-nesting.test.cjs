@@ -6,9 +6,26 @@ const { test } = require('node:test');
 // Every page must sit directly in the content area. A wrapper opened in one
 // page and closed in the wrong place nests the following pages inside it, and
 // they vanish whenever that page is hidden - while the div count stays even.
-const html = fs.readFileSync(process.env.INDEX_HTML || path.join(__dirname, '../../frontend/index.html'), 'utf8')
-    .replace(/<!--[\s\S]*?-->/g, '')
-    .replace(/<script[\s\S]*?<\/script>/gi, '');
+// Comments and scripts are cut out by position rather than by a pattern, so nothing
+// inside them is read as markup. A script ends at the '>' after '</script', so
+// '</script >' ends it too.
+function cutBlocks(text, open, close) {
+    const lower = text.toLowerCase();
+    let out = '';
+    let at = 0;
+    for (;;) {
+        const start = lower.indexOf(open, at);
+        if (start < 0) return out + text.slice(at);
+        out += text.slice(at, start);
+        const end = lower.indexOf(close, start + open.length);
+        if (end < 0) return out;
+        const gt = close.endsWith('>') ? end + close.length - 1 : lower.indexOf('>', end);
+        if (gt < 0) return out;
+        at = gt + 1;
+    }
+}
+const raw = fs.readFileSync(process.env.INDEX_HTML || path.join(__dirname, '../../frontend/index.html'), 'utf8');
+const html = cutBlocks(cutBlocks(raw, '<!--', '-->'), '<script', '</script');
 
 const VOID = new Set(['area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link', 'meta', 'source', 'track', 'wbr', 'path', 'circle', 'rect', 'line', 'polyline', 'polygon', 'use']);
 

@@ -8,7 +8,7 @@ import time
 from threading import RLock
 from collections import deque
 from typing import Dict, Deque, Optional
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit, urlunsplit
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import RedirectResponse, Response
@@ -182,10 +182,13 @@ def safe_return_path(value: Optional[str]) -> str:
         return "/"
     if "\\" in value or any(ord(c) < 32 or ord(c) == 127 for c in value):
         return "/"
-    path = value.split("?", 1)[0].split("#", 1)[0]
-    if path == "/login" or path.startswith(("/login/", "/api/", "/static/")):
+    # Rebuilt from its parts: a path on this site, never a scheme or a host
+    parts = urlsplit(value)
+    if parts.scheme or parts.netloc or not parts.path.startswith("/"):
         return "/"
-    return value
+    if parts.path == "/login" or parts.path.startswith(("/login/", "/api/", "/static/")):
+        return "/"
+    return urlunsplit(("", "", parts.path, parts.query, parts.fragment))
 
 
 def _login_redirect(request: Request) -> Response:
