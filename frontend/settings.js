@@ -25,53 +25,25 @@ function showBasicAuthVerifyModal() {
 
         const overlay = document.createElement('div');
         overlay.id = 'basic-auth-verify-modal';
-        overlay.style.cssText = 'position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.6);backdrop-filter:blur(4px);';
+        overlay.className = 'ui-dialog-backdrop ui-confirm';
+        overlay.setAttribute('role', 'dialog');
+        overlay.setAttribute('aria-label', 'Verify Credentials');
 
         overlay.innerHTML = `
-            <div style="background:var(--color-bg-primary, #1f2937);border:1px solid var(--color-border, #374151);border-radius:12px;padding:28px;max-width:420px;width:90%;box-shadow:0 25px 50px rgba(0,0,0,0.4);">
-                <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px;">
-                    <div style="width:40px;height:40px;border-radius:10px;background:linear-gradient(135deg,#f59e0b,#d97706);display:flex;align-items:center;justify-content:center;flex-shrink:0;">
-                        <svg width="20" height="20" fill="none" stroke="white" stroke-width="2" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path>
-                        </svg>
-                    </div>
-                    <div>
-                        <h3 style="margin:0;font-size:16px;font-weight:600;color:#f3f4f6;">Verify Credentials</h3>
-                        <p style="margin:4px 0 0;font-size:13px;color:#9ca3af;">Confirm your username and password before enabling Basic Auth</p>
-                    </div>
+            <div class="ui-dialog ui-dialog-fit ui-dialog-sm">
+                <div class="ui-dialog-head"><h3>Verify Credentials</h3></div>
+                <div class="ui-dialog-body ui-form-stack">
+                    <div class="ui-banner ui-banner-warn"><div><b>Confirm before enabling Basic Auth</b>
+                        <p>Type the credentials you configured to verify you can log in after enabling authentication.</p></div></div>
+                    <label class="ui-label" for="verify-auth-username">Username
+                        <input type="text" id="verify-auth-username" class="ui-input" autocomplete="off" placeholder="Enter username"></label>
+                    <label class="ui-label" for="verify-auth-password">Password
+                        <input type="password" id="verify-auth-password" class="ui-input" autocomplete="off" placeholder="Enter password"></label>
+                    <p id="verify-auth-error" class="ui-banner ui-banner-fail" style="display:none"></p>
                 </div>
-                <div style="background:#292524;border:1px solid #44403c;border-radius:8px;padding:14px;margin-bottom:20px;">
-                    <p style="margin:0;font-size:12px;color:#fbbf24;display:flex;align-items:center;gap:6px;">
-                        <svg width="14" height="14" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd"></path></svg>
-                        Type the credentials you configured to verify you can log in after enabling authentication.
-                    </p>
-                </div>
-                <div style="margin-bottom:14px;">
-                    <label style="display:block;font-size:13px;font-weight:500;color:#d1d5db;margin-bottom:6px;">Username</label>
-                    <input type="text" id="verify-auth-username" autocomplete="off" placeholder="Enter username"
-                        style="width:100%;padding:9px 12px;border-radius:6px;border:1px solid #4b5563;background:#111827;color:#f3f4f6;font-size:14px;outline:none;box-sizing:border-box;"
-                        onfocus="this.style.borderColor='#3b82f6';this.style.boxShadow='0 0 0 2px rgba(59,130,246,0.3)'"
-                        onblur="this.style.borderColor='#4b5563';this.style.boxShadow='none'">
-                </div>
-                <div style="margin-bottom:22px;">
-                    <label style="display:block;font-size:13px;font-weight:500;color:#d1d5db;margin-bottom:6px;">Password</label>
-                    <input type="password" id="verify-auth-password" autocomplete="off" placeholder="Enter password"
-                        style="width:100%;padding:9px 12px;border-radius:6px;border:1px solid #4b5563;background:#111827;color:#f3f4f6;font-size:14px;outline:none;box-sizing:border-box;"
-                        onfocus="this.style.borderColor='#3b82f6';this.style.boxShadow='0 0 0 2px rgba(59,130,246,0.3)'"
-                        onblur="this.style.borderColor='#4b5563';this.style.boxShadow='none'">
-                </div>
-                <p id="verify-auth-error" style="display:none;margin:0 0 14px;font-size:12px;color:#ef4444;padding:8px 12px;background:#1c1917;border:1px solid #7f1d1d;border-radius:6px;"></p>
-                <div style="display:flex;justify-content:flex-end;gap:10px;">
-                    <button type="button" id="verify-auth-cancel"
-                        style="padding:9px 18px;border-radius:6px;border:1px solid #4b5563;background:transparent;color:#d1d5db;font-size:13px;font-weight:500;cursor:pointer;transition:all 0.15s;"
-                        onmouseover="this.style.background='#374151'" onmouseout="this.style.background='transparent'">
-                        Cancel
-                    </button>
-                    <button type="button" id="verify-auth-confirm"
-                        style="padding:9px 18px;border-radius:6px;border:none;background:linear-gradient(135deg,#f59e0b,#d97706);color:#1f2937;font-size:13px;font-weight:600;cursor:pointer;transition:all 0.15s;"
-                        onmouseover="this.style.opacity='0.9'" onmouseout="this.style.opacity='1'">
-                        Verify & Enable
-                    </button>
+                <div class="ui-dialog-foot">
+                    <button type="button" id="verify-auth-cancel" class="ui-btn">Cancel</button>
+                    <button type="button" id="verify-auth-confirm" class="ui-btn ui-btn-primary">Verify & Enable</button>
                 </div>
             </div>
         `;
@@ -101,13 +73,13 @@ function showBasicAuthVerifyModal() {
             const password = passwordInput.value;
             if (!username) {
                 errorEl.textContent = 'Please enter a username.';
-                errorEl.style.display = 'block';
+                errorEl.style.display = 'flex';
                 usernameInput.focus();
                 return;
             }
             if (!password) {
                 errorEl.textContent = 'Please enter a password.';
-                errorEl.style.display = 'block';
+                errorEl.style.display = 'flex';
                 passwordInput.focus();
                 return;
             }
@@ -150,50 +122,27 @@ function showFeatureDisableConfirmModal(featureIds) {
         // Build feature list HTML
         const featureListHtml = featureIds.map(id => {
             const feat = TOGGLEABLE_FEATURES.find(f => f.id === id);
-            return `<li style="padding:4px 0;color:#f3f4f6;font-size:14px;">
-                <span style="color:#ef4444;margin-right:6px;">✕</span>${feat ? feat.label : id}
-                <span style="color:#6b7280;font-size:12px;margin-left:4px;">- ${feat ? feat.description : ''}</span>
-            </li>`;
+            return `<li><b>${escapeHtml(feat ? feat.label : id)}</b>${feat && feat.description ? ` <span class="ui-muted">${escapeHtml(feat.description)}</span>` : ''}</li>`;
         }).join('');
+        const many = featureIds.length !== 1;
 
         const overlay = document.createElement('div');
         overlay.id = 'feature-disable-confirm-modal';
-        overlay.style.cssText = 'position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.6);backdrop-filter:blur(4px);';
+        overlay.className = 'ui-dialog-backdrop ui-confirm';
+        overlay.setAttribute('role', 'alertdialog');
+        overlay.setAttribute('aria-label', 'Disable features');
 
         overlay.innerHTML = `
-            <div style="background:var(--color-bg-primary, #1f2937);border:1px solid var(--color-border, #374151);border-radius:12px;padding:28px;max-width:520px;width:90%;box-shadow:0 25px 50px rgba(0,0,0,0.4);">
-                <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px;">
-                    <div style="width:40px;height:40px;border-radius:10px;background:linear-gradient(135deg,#ef4444,#dc2626);display:flex;align-items:center;justify-content:center;flex-shrink:0;">
-                        <svg width="20" height="20" fill="none" stroke="white" stroke-width="2" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4.5c-.77-.833-2.694-.833-3.464 0L3.34 16.5c-.77.833.192 2.5 1.732 2.5z"></path>
-                        </svg>
-                    </div>
-                    <div>
-                        <h3 style="margin:0;font-size:16px;font-weight:600;color:#f3f4f6;">Disable ${featureIds.length === 1 ? 'Feature' : featureIds.length + ' Features'}?</h3>
-                        <p style="margin:4px 0 0;font-size:13px;color:#9ca3af;">This action will permanently delete stored data</p>
-                    </div>
+            <div class="ui-dialog ui-dialog-fit ui-dialog-sm">
+                <div class="ui-dialog-head"><h3>Disable ${many ? featureIds.length + ' Features' : 'Feature'}?</h3></div>
+                <div class="ui-dialog-body ui-form-stack">
+                    <div class="ui-banner ui-banner-fail"><div><b>Stored data will be deleted</b>
+                        <p>All database records for ${many ? 'these features' : 'this feature'} will be permanently deleted. This cannot be undone.</p></div></div>
+                    <div><p class="ui-label">Features being disabled</p><ul class="ui-disable-list">${featureListHtml}</ul></div>
                 </div>
-                <div style="background:#1c1917;border:1px solid #7f1d1d;border-radius:8px;padding:14px;margin-bottom:16px;">
-                    <p style="margin:0 0 8px;font-size:12px;color:#fca5a5;display:flex;align-items:center;gap:6px;font-weight:500;">
-                        <svg width="14" height="14" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd"></path></svg>
-                        All database records for ${featureIds.length === 1 ? 'this feature' : 'these features'} will be permanently deleted. This cannot be undone.
-                    </p>
-                </div>
-                <div style="margin-bottom:20px;">
-                    <p style="margin:0 0 8px;font-size:13px;color:#9ca3af;font-weight:500;">Features being disabled:</p>
-                    <ul style="margin:0;padding:0 0 0 4px;list-style:none;">${featureListHtml}</ul>
-                </div>
-                <div style="display:flex;justify-content:flex-end;gap:10px;">
-                    <button type="button" id="feature-disable-cancel"
-                        style="padding:9px 18px;border-radius:6px;border:1px solid #4b5563;background:transparent;color:#d1d5db;font-size:13px;font-weight:500;cursor:pointer;transition:all 0.15s;"
-                        onmouseover="this.style.background='#374151'" onmouseout="this.style.background='transparent'">
-                        Cancel
-                    </button>
-                    <button type="button" id="feature-disable-confirm"
-                        style="padding:9px 18px;border-radius:6px;border:none;background:linear-gradient(135deg,#ef4444,#dc2626);color:white;font-size:13px;font-weight:600;cursor:pointer;transition:all 0.15s;"
-                        onmouseover="this.style.opacity='0.9'" onmouseout="this.style.opacity='1'">
-                        Disable & Delete Data
-                    </button>
+                <div class="ui-dialog-foot">
+                    <button type="button" id="feature-disable-cancel" class="ui-btn">Cancel</button>
+                    <button type="button" id="feature-disable-confirm" class="ui-btn ui-btn-danger-solid">Disable & Delete Data</button>
                 </div>
             </div>
         `;

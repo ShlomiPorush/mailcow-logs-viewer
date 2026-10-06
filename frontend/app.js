@@ -3844,6 +3844,20 @@ async function loadStatusAppVersion() {
     }
 }
 
+async function setContainerIgnored(container, ignored) {
+    try {
+        const res = await authenticatedFetch(`/api/status/containers/${encodeURIComponent(container)}/ignore`, {
+            method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ignored })
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        showToast(ignored ? `${container.replace('-mailcow', '')} is ignored. It no longer counts or alerts.` : `${container.replace('-mailcow', '')} counts again.`, 'success');
+        loadStatusContainers();
+        loadNavCounters();
+    } catch (e) {
+        showToast(`Could not change the container: ${e.message}`, 'error');
+    }
+}
+
 async function loadStatusContainers() {
     try {
         const response = await authenticatedFetch('/api/status/containers');
@@ -3865,33 +3879,44 @@ async function loadStatusContainers() {
                 name: (value.name || key).replace('-mailcow', ''),
                 container: key,
                 state: value.state || 'unknown',
-                started_at: value.started_at || null
+                started_at: value.started_at || null,
+                ignored: !!value.ignored
             }));
         }
 
         const note = document.getElementById('status-containers-note');
         if (containersList.length > 0) {
             // Only 'running' is running; paused, exited, restarting, dead and the rest count as stopped
+            // Ignored containers (stopped on purpose) are shown but never counted
             const isRunning = c => (c.state || 'unknown').toString().toLowerCase().trim() === 'running';
-            const running = containersList.filter(isRunning).length;
-            const stopped = containersList.length - running;
-            const total = containersList.length;
-            setStatusKpi('status-kpi-containers', `${running} of ${total}`, stopped > 0 ? 'fail' : '');
-            if (note) note.textContent = stopped ? `${stopped} stopped` : 'All running';
+            const counted = containersList.filter(c => !c.ignored);
+            const running = counted.filter(isRunning).length;
+            const stopped = counted.length - running;
+            const ignoredCount = containersList.length - counted.length;
+            setStatusKpi('status-kpi-containers', `${running} of ${counted.length}`, stopped > 0 ? 'fail' : '');
+            if (note) note.textContent = [stopped ? `${stopped} stopped` : 'All running', ignoredCount ? `${ignoredCount} ignored` : ''].filter(Boolean).join(', ');
 
-            // Stopped containers first, so they are seen
-            const ordered = [...containersList].sort((a, b) => Number(isRunning(a)) - Number(isRunning(b)));
+            // Stopped containers first, so they are seen; ignored ones last
+            const rank = c => c.ignored ? 2 : (isRunning(c) ? 1 : 0);
+            const ordered = [...containersList].sort((a, b) => rank(a) - rank(b));
             container.innerHTML = `
                 <div class="ui-ctr-grid">
                     ${ordered.map(c => {
                         const up = isRunning(c);
                         const since = c.started_at ? formatAgo(c.started_at).replace(' ago', '') : '';
-                        const title = c.started_at ? `Started ${formatTime(c.started_at)}` : 'Start time unknown';
+                        const title = c.ignored ? 'Ignored: shown here but never counted or alerted'
+                            : (c.started_at ? `Started ${formatTime(c.started_at)}` : 'Start time unknown');
+                        const arg = escapeJsArg(c.container);
+                        // A stopped container can be ignored; an ignored one can be counted again
+                        const action = c.ignored
+                            ? `<button type="button" class="ui-ctr-act" onclick="setContainerIgnored('${arg}', false)">Stop ignoring</button>`
+                            : (up ? '' : `<button type="button" class="ui-ctr-act" onclick="setContainerIgnored('${arg}', true)" title="Stop counting and alerting on ${escapeHtml(c.name)}">Ignore</button>`);
                         return `
-                        <div class="ui-ctr${up ? '' : ' is-down'}" title="${escapeHtml(title)}">
-                            <i class="ui-mdot ${up ? 'ui-mdot-ok' : 'ui-mdot-fail'}"></i>
+                        <div class="ui-ctr${c.ignored ? ' is-ignored' : (up ? '' : ' is-down')}" title="${escapeHtml(title)}">
+                            <i class="ui-mdot ${c.ignored ? '' : (up ? 'ui-mdot-ok' : 'ui-mdot-fail')}"></i>
                             <span class="ui-ctr-name">${escapeHtml(c.name)}</span>
-                            <small>${up ? escapeHtml(since) : escapeHtml(String(c.state || 'unknown'))}</small>
+                            <small>${c.ignored ? 'ignored' : (up ? escapeHtml(since) : escapeHtml(String(c.state || 'unknown')))}</small>
+                            ${action}
                         </div>`;
                     }).join('')}
                 </div>
@@ -4249,7 +4274,8 @@ function renderBlacklistStatus(data) {
             <div class="ui-tr ui-tr-head"><span>Address</span><span>Result</span><span>Checked</span><span class="ui-td-end">Actions</span></div>
             ${data.hosts.map((host, index) => {
                 const hostId = `host-${index}`;
-                const listedOn = (host.results || []).filter(r => r.listed);
+                const listedOn = (host.results || []).filter(r => r.listed && !r.ignored);
+                const ignoredOn = (host.results || []).filter(r => r.listed && r.ignored);
                 const total = host.total_blacklists || 0;
                 const result = !host.has_data ? uiTag('Not checked yet', '')
                     : host.status === 'listed' ? uiTag(`Listed on ${host.listed_count || 0} of ${total}`, 'fail')
@@ -4257,6 +4283,10 @@ function renderBlacklistStatus(data) {
                     : host.status === 'clean' ? uiTag(`Not listed on ${total}`, 'ok')
                     : uiTag('Unknown', '');
                 const detail = r => r.response ? `${r.name}: ${r.response}` : r.name;
+                // The provider's own lookup page, to check or request removal yourself
+                const lookup = r => /^https:\/\//.test(r.info_url || '')
+                    ? `<a href="${escapeHtml(r.info_url)}" target="_blank" rel="noopener noreferrer" class="ui-bl-link" title="Look up on ${escapeHtml(r.name)}" aria-label="Look up on ${escapeHtml(r.name)}"><svg width="12" height="12" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path></svg></a>`
+                    : '';
                 return `
                 <div class="ui-tr ui-bl-row">
                     <div class="ui-td ui-q-who">
@@ -4264,7 +4294,8 @@ function renderBlacklistStatus(data) {
                     </div>
                     <div class="ui-td ui-td-wrap ui-bl-result">
                         ${result}
-                        ${listedOn.map(r => `<code class="ui-code-chip" title="${escapeHtml(detail(r))}">${escapeHtml(r.name)}</code>`).join('')}
+                        ${listedOn.map(r => `<code class="ui-code-chip" title="${escapeHtml(detail(r))}">${escapeHtml(r.name)}${lookup(r)}</code>`).join('')}
+                        ${ignoredOn.map(r => `<code class="ui-code-chip is-ignored" title="${escapeHtml(detail(r))}. Ignored: not counted or alerted">${escapeHtml(r.name)} ignored${lookup(r)}</code>`).join('')}
                     </div>
                     <span class="ui-td" title="${host.checked_at ? escapeHtml(formatTime(host.checked_at)) : ''}">${host.checked_at ? formatAgo(host.checked_at) : 'Never'}</span>
                     <span class="ui-td ui-td-end ui-row-actions">
@@ -4275,9 +4306,13 @@ function renderBlacklistStatus(data) {
                         <summary>All ${host.results.length} lists</summary>
                         <div class="ui-bl-grid">
                             ${host.results.map(r => {
-                                const tone = r.listed ? 'fail' : (RESULT_TONE[r.status] || '');
-                                const state = r.listed ? 'listed' : (r.status || 'unknown');
-                                return `<span class="ui-bl-item${tone ? ` ui-bl-${tone}` : ''}" title="${escapeHtml(detail(r))}"><i class="ui-mdot${tone ? ` ui-mdot-${tone}` : ''}"></i>${escapeHtml(r.name)}<small>${escapeHtml(state)}</small></span>`;
+                                const tone = r.ignored ? '' : (r.listed ? 'fail' : (RESULT_TONE[r.status] || ''));
+                                const state = r.listed ? (r.ignored ? 'listed, ignored' : 'listed') : (r.status || 'unknown');
+                                // Ignoring a list applies to every monitored address
+                                const toggle = r.zone && r.zone !== 'unknown'
+                                    ? `<button type="button" class="ui-bl-ign" onclick="setBlocklistIgnored('${escapeJsArg(r.zone)}', ${!r.ignored})" title="${r.ignored ? 'Count and alert on this list again' : 'Keep checking this list but never count or alert on it'}">${r.ignored ? 'Stop ignoring' : 'Ignore'}</button>`
+                                    : '';
+                                return `<span class="ui-bl-item${tone ? ` ui-bl-${tone}` : ''}${r.ignored ? ' is-ignored' : ''}" title="${escapeHtml(detail(r))}"><i class="ui-mdot${tone ? ` ui-mdot-${tone}` : ''}"></i>${escapeHtml(r.name)}${lookup(r)}<small>${escapeHtml(state)}</small>${toggle}</span>`;
                             }).join('')}
                         </div>
                     </details>` : ''}
@@ -4285,6 +4320,21 @@ function renderBlacklistStatus(data) {
             }).join('')}
         </div>
     `;
+}
+
+async function setBlocklistIgnored(zone, ignored) {
+    try {
+        const res = await authenticatedFetch(`/api/blacklist/lists/${encodeURIComponent(zone)}/ignore`, {
+            method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ignored })
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        showToast(ignored ? `${data.name} is ignored for every address.` : `${data.name} counts again.`, 'success');
+        loadBlacklistStatus();
+        loadNavCounters();
+    } catch (e) {
+        showToast(`Could not change the blocklist: ${e.message}`, 'error');
+    }
 }
 
 function renderStatusImport(imports) {
