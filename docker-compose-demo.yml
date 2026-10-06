@@ -5,7 +5,11 @@
 #   docker compose -f docker-compose-demo.yml up -d
 #
 # The app listens on 127.0.0.1 only; publish it through a reverse proxy or a
-# tunnel, never directly.
+# tunnel, never directly. With a Cloudflare Tunnel token in .env:
+#
+#   CLOUDFLARE_TUNNEL_TOKEN=... docker compose -f docker-compose-demo.yml --profile tunnel up -d
+#
+# See documentation/Demo.md.
 services:
   demo-db:
     image: postgres:15-alpine
@@ -41,6 +45,22 @@ services:
       POSTGRES_DB: demo
       # The nightly reset runs at 00:00 in this time zone
       TZ: ${TZ:-UTC}
+      # Optional: the notice text shown on every page (empty = the default text)
+      DEMO_NOTICE: ${DEMO_NOTICE:-}
+    networks:
+      - mailcow-logs-demo
+
+  # Optional: publish the demo through Cloudflare with no open port
+  demo-tunnel:
+    image: cloudflare/cloudflared:latest
+    container_name: mailcow-logs-demo-tunnel
+    profiles: [ "tunnel" ]
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:-}
+    depends_on:
+      - demo-app
     networks:
       - mailcow-logs-demo
 
