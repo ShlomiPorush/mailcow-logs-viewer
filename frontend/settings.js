@@ -1063,10 +1063,15 @@ function renderSettings(content, data) {
                 <div class="ui-set-actions" id="settings-edit-actions">
                     <p class="ui-muted">Values come from the defaults, then this page, then the environment. A value set by an environment variable always wins and is locked here. Version and health are on the <button type="button" class="ui-link" onclick="navigateTo('about')">About</button> page.</p>
                     ${!data.settings_migrated ? '<button type="button" id="settings-import-env-btn" class="ui-btn ui-btn-primary">Migrate Settings from ENV</button>' : ''}
+                    ${!data.settings_migrated ? '<p class="ui-set-migrate-note">Click once to copy your current configuration into the database. After that you can edit the fields below and save.</p>' : ''}
                 </div>
                 <p id="settings-search-empty" class="ui-empty hidden">No setting matches this search.</p>
                 <form id="settings-edit-form" class="ui-set-form">
+                    <!-- Until the first migration nothing can be saved, so the fields stay
+                         read-only instead of accepting edits that would be lost -->
+                    <fieldset class="ui-set-fieldset"${data.settings_migrated ? '' : ' disabled'}>
                     ` + tabsHtml + `
+                    </fieldset>
                 </form>
             </div>
         </div>

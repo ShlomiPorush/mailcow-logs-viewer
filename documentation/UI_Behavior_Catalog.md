@@ -327,15 +327,15 @@ Native `title` tooltips. Dynamic ones show the expression that builds the text.
 | Security | "Watched by the Countries rule" | `frontend/security.js:552` (securityCountryBars) |
 | Security | dynamic: `${escapeHtml(n.asn)}` | `frontend/security.js:588` (renderSecurityCountries) |
 | Security | "Lift the ban; the rule leaves it alone for a week" | `frontend/security.js:637` (renderSecurityLists) |
-| Security | "Note what it catches; ban nothing" | `frontend/security.js:956` (securityCardBody) |
-| Security | dynamic: `${caps.can_ban ? 'Put what it catches on the Fail2ban blacklist' : 'Banning n...` | `frontend/security.js:957` (securityCardBody) |
-| Security | "Remove" | `frontend/security.js:967` (securityCardBody) |
-| Security | dynamic: `${s.tries} tries from ${s.addresses} address${s.addresses === 1 ? '' : 'es'}` | `frontend/security.js:973` (securityCardBody) |
-| Security | "Remove" | `frontend/security.js:979` (securityCardBody) |
-| Security | dynamic: `${s.tries} failed logins` | `frontend/security.js:985` (securityCardBody) |
-| Security | "This feature is new - please report any issues on GitHub" | `frontend/security.js:1016` (securityCardHtml) |
-| Security | "Help - Abuse Protection" | `frontend/security.js:1017` (securityCardHtml) |
-| Security | dynamic: `${escapeHtml(disabled ? why : on ? `Turn ${name} off` : `Turn ${name} on`)}` | `frontend/security.js:1037` (securityToggle) |
+| Security | "Note what it catches; ban nothing" | `frontend/security.js:963` (securityCardBody) |
+| Security | dynamic: `${caps.can_ban ? 'Put what it catches on the Fail2ban blacklist' : 'Banning n...` | `frontend/security.js:964` (securityCardBody) |
+| Security | "Remove" | `frontend/security.js:974` (securityCardBody) |
+| Security | dynamic: `${s.tries} tries from ${s.addresses} address${s.addresses === 1 ? '' : 'es'}` | `frontend/security.js:980` (securityCardBody) |
+| Security | "Remove" | `frontend/security.js:986` (securityCardBody) |
+| Security | dynamic: `${s.tries} failed logins` | `frontend/security.js:992` (securityCardBody) |
+| Security | "This feature is new - please report any issues on GitHub" | `frontend/security.js:1024` (securityCardHtml) |
+| Security | "Help - Abuse Protection" | `frontend/security.js:1025` (securityCardHtml) |
+| Security | dynamic: `${escapeHtml(disabled ? why : on ? `Turn ${name} off` : `Turn ${name} on`)}` | `frontend/security.js:1045` (securityToggle) |
 | Queue | "Retry delivery of every message in the queue" | `frontend/app.js:2177` (applyQueueFilters) |
 | Queue | dynamic: `Suppress ${escapeHtml(recipients[0].email)}` | `frontend/app.js:2200` (applyQueueFilters) |
 | Queue | dynamic: `${escapeHtml(formatTime(queued))}` | `frontend/app.js:2207` (applyQueueFilters) |
@@ -432,8 +432,8 @@ Native `title` tooltips. Dynamic ones show the expression that builds the text.
 | Settings | "Set by an environment variable, change it there" | `frontend/settings.js:609` (renderSettingsEditField) |
 | Settings | "Differs from the default" | `frontend/settings.js:654` (renderSettingsEditField) |
 | Settings | "Differs from the default" | `frontend/settings.js:671` (renderSettingsEditField) |
-| Settings | "Add a MaxMind Account ID and License Key first" | `frontend/settings.js:1749` (maxmindValidateButton) |
-| Settings | "Close" | `frontend/settings.js:1841` (showConnectionTestModal) |
+| Settings | "Add a MaxMind Account ID and License Key first" | `frontend/settings.js:1754` (maxmindValidateButton) |
+| Settings | "Close" | `frontend/settings.js:1846` (showConnectionTestModal) |
 | Shared | dynamic: `${escapeHtml(title)}` | `frontend/utils.js:164` (uiCorrelationTag) |
 | Shared | "Close" | `frontend/utils.js:575` (showToast) |
 | Shared | "The feature this job belongs to is turned off in Settings" | `frontend/utils.js:661` (renderJobCard) |
@@ -473,9 +473,9 @@ Transient notifications from `showToast(message, type)` (utils.js). Type default
 | Security | dynamic: ``Could not load the history: ${error.message}`` [error] | `frontend/security.js:106` (loadSecurityHistory) |
 | Security | dynamic: ``${entry} removed from the ${label}`` [success] | `frontend/security.js:679` (securityRemoveFromList) |
 | Security | dynamic: ``Could not remove ${entry}: ${error.message}`` [error] | `frontend/security.js:683` (securityRemoveFromList) |
-| Security | dynamic: ``Saved ${list}`` [success] | `frontend/security.js:808` (saveSecuritySettings) |
-| Security | dynamic: ``Failed to save the Fail2ban settings: ${error.message}`` [error] | `frontend/security.js:826` (saveSecurityF2b) |
-| Security | dynamic: ``Could not save the outgoing spam settings: ${error.message}`` [error] | `frontend/security.js:844` (saveSecurityAbuse) |
+| Security | dynamic: ``Saved ${list}`` [success] | `frontend/security.js:813` (saveSecuritySettings) |
+| Security | dynamic: ``Failed to save the Fail2ban settings: ${error.message}`` [error] | `frontend/security.js:831` (saveSecurityF2b) |
+| Security | dynamic: ``Could not save the outgoing spam settings: ${error.message}`` [error] | `frontend/security.js:849` (saveSecurityAbuse) |
 | Security | dynamic: `detail.detail \|\| `Could not ${action} SMTP`` [error] | `frontend/smtp-abuse.js:171` (smtpAbuseAction) |
 | Security | dynamic: `action === 'block' ? 'SMTP disabled' : 'SMTP re-enabled'` [success] | `frontend/smtp-abuse.js:174` (smtpAbuseAction) |
 | Security | dynamic: ``Could not ${action} SMTP`` [error] | `frontend/smtp-abuse.js:177` (smtpAbuseAction) |
@@ -577,19 +577,19 @@ Transient notifications from `showToast(message, type)` (utils.js). Type default
 | Settings | "Could not delete destination" [error] | `frontend/notifications.js:256` (deleteNotificationChannel) |
 | Settings | "Destination deleted" [success] | `frontend/notifications.js:257` (deleteNotificationChannel) |
 | Settings | "Could not delete destination" [error] | `frontend/notifications.js:260` (deleteNotificationChannel) |
-| Settings | "Cannot enable Basic Auth without a password. Please set a password first." [error] | `frontend/settings.js:1299` (renderSettings) |
-| Settings | "Basic Auth enabled successfully! You will need to log in on your next visit." [success] | `frontend/settings.js:1344` (renderSettings) |
-| Settings | dynamic: ``Purging data for ${purgeableNewlyDisabled.length} disabled feature(s)...`` [info] | `frontend/settings.js:1361` (renderSettings) |
-| Settings | "Features updated - reloading..." [success] | `frontend/settings.js:1375` (renderSettings) |
-| Settings | dynamic: `'Failed to save: ' + (err.message \|\| err)` [error] | `frontend/settings.js:1383` (renderSettings) |
-| Settings | "MaxMind license is valid" [success] | `frontend/settings.js:1645` (validateMaxMindLicense) |
-| Settings | dynamic: `'MaxMind license validation failed: ' + result.error` [error] | `frontend/settings.js:1647` (validateMaxMindLicense) |
-| Settings | "Failed to validate MaxMind license" [error] | `frontend/settings.js:1656` (validateMaxMindLicense) |
-| Settings | "GeoIP database re-download started…" [info] | `frontend/settings.js:1681` (repairGeoIPDatabase) |
-| Settings | "GeoIP databases repaired successfully" [success] | `frontend/settings.js:1704` (repairGeoIPDatabase) |
-| Settings | "GeoIP databases re-downloaded but validation still failed" [error] | `frontend/settings.js:1706` (repairGeoIPDatabase) |
-| Settings | "GeoIP repair timed out - check Status page for progress" [warning] | `frontend/settings.js:1719` (repairGeoIPDatabase) |
-| Settings | dynamic: `'Failed to repair GeoIP databases: ' + error.message` [error] | `frontend/settings.js:1730` (repairGeoIPDatabase) |
+| Settings | "Cannot enable Basic Auth without a password. Please set a password first." [error] | `frontend/settings.js:1304` (renderSettings) |
+| Settings | "Basic Auth enabled successfully! You will need to log in on your next visit." [success] | `frontend/settings.js:1349` (renderSettings) |
+| Settings | dynamic: ``Purging data for ${purgeableNewlyDisabled.length} disabled feature(s)...`` [info] | `frontend/settings.js:1366` (renderSettings) |
+| Settings | "Features updated - reloading..." [success] | `frontend/settings.js:1380` (renderSettings) |
+| Settings | dynamic: `'Failed to save: ' + (err.message \|\| err)` [error] | `frontend/settings.js:1388` (renderSettings) |
+| Settings | "MaxMind license is valid" [success] | `frontend/settings.js:1650` (validateMaxMindLicense) |
+| Settings | dynamic: `'MaxMind license validation failed: ' + result.error` [error] | `frontend/settings.js:1652` (validateMaxMindLicense) |
+| Settings | "Failed to validate MaxMind license" [error] | `frontend/settings.js:1661` (validateMaxMindLicense) |
+| Settings | "GeoIP database re-download started…" [info] | `frontend/settings.js:1686` (repairGeoIPDatabase) |
+| Settings | "GeoIP databases repaired successfully" [success] | `frontend/settings.js:1709` (repairGeoIPDatabase) |
+| Settings | "GeoIP databases re-downloaded but validation still failed" [error] | `frontend/settings.js:1711` (repairGeoIPDatabase) |
+| Settings | "GeoIP repair timed out - check Status page for progress" [warning] | `frontend/settings.js:1724` (repairGeoIPDatabase) |
+| Settings | dynamic: `'Failed to repair GeoIP databases: ' + error.message` [error] | `frontend/settings.js:1735` (repairGeoIPDatabase) |
 | Shared | "Download started." [success] | `frontend/export.js:34` (exportCSV) |
 | Shared | dynamic: `error.message \|\| 'Could not export CSV. Please try again.'` [error] | `frontend/export.js:37` (exportCSV) |
 | Shared | dynamic: `'Copied: ' + text` [success] | `frontend/utils.js:525` (copyToClipboard) |
@@ -635,8 +635,8 @@ Every action that asks before it acts. Losing one turns a guarded action into a 
 | Mailbox stats | showConfirmModal: dynamic: `{ title: value === 0 ? 'Remove rate limits' : 'Apply rate limit', message: va...` | `frontend/rate-limits.js:876` (applyRateLimitBulk) |
 | Mailbox stats | showConfirmModal: dynamic: `{ title: 'Remove rate limit', message: `Remove the rate limit on ${name}? It ...` | `frontend/rate-limits.js:1049` (removeRateLimit) |
 | Settings | showConfirmModal: dynamic: `{ title: 'Delete destination', message: `Delete "${channel ? channel.name : '...` | `frontend/notifications.js:247` (deleteNotificationChannel) |
-| Settings | showFeatureDisableConfirmModal: dynamic: `purgeableNewlyDisabled` | `frontend/settings.js:1329` (renderSettings) |
-| Settings | showConfirmModal: dynamic: `{ title: 'Import from ENV', message: 'Import current configuration from ENV i...` | `frontend/settings.js:1389` (renderSettings) |
+| Settings | showFeatureDisableConfirmModal: dynamic: `purgeableNewlyDisabled` | `frontend/settings.js:1334` (renderSettings) |
+| Settings | showConfirmModal: dynamic: `{ title: 'Import from ENV', message: 'Import current configuration from ENV i...` | `frontend/settings.js:1394` (renderSettings) |
 | Shared | confirm: dynamic: `` | `frontend/utils.js:595` |
 | app.js (mixed) | showConfirmModal: dynamic: `{ title: 'Allow IP', message: `Add ${ipWithMask} to the Fail2Ban allowlist?\\...` | `frontend/app.js:1208` (allowIP) |
 
@@ -684,17 +684,17 @@ Buttons, tabs and fields whose behavior is attached with `addEventListener` inst
 | Settings | click on `cancelBtn` | `frontend/settings.js:166` (showFeatureDisableConfirmModal) |
 | Settings | click on `confirmBtn` | `frontend/settings.js:167` (showFeatureDisableConfirmModal) |
 | Settings | click on `overlay` | `frontend/settings.js:174` (showFeatureDisableConfirmModal) |
-| Settings | click on `btn` | `frontend/settings.js:1144` (renderSettings) |
-| Settings | change on `tabSelect` | `frontend/settings.js:1164` (renderSettings) |
-| Settings | click on `btn` | `frontend/settings.js:1171` (renderSettings) |
-| Settings | change on `cb` | `frontend/settings.js:1197` (renderSettings) |
-| Settings | input on `form` | `frontend/settings.js:1228` (renderSettings) |
-| Settings | change on `form` | `frontend/settings.js:1229` (renderSettings) |
-| Settings | click on `btn` | `frontend/settings.js:1231` (renderSettings) |
-| Settings | click on `btn` | `frontend/settings.js:1237` (renderSettings) |
-| Settings | input on `search` | `frontend/settings.js:1239` (renderSettings) |
-| Settings | click on `closeBtn` | `frontend/settings.js:1472` (showGeoIPSetupModal) |
-| Settings | click on `modal` | `frontend/settings.js:1857` (showConnectionTestModal) |
+| Settings | click on `btn` | `frontend/settings.js:1149` (renderSettings) |
+| Settings | change on `tabSelect` | `frontend/settings.js:1169` (renderSettings) |
+| Settings | click on `btn` | `frontend/settings.js:1176` (renderSettings) |
+| Settings | change on `cb` | `frontend/settings.js:1202` (renderSettings) |
+| Settings | input on `form` | `frontend/settings.js:1233` (renderSettings) |
+| Settings | change on `form` | `frontend/settings.js:1234` (renderSettings) |
+| Settings | click on `btn` | `frontend/settings.js:1236` (renderSettings) |
+| Settings | click on `btn` | `frontend/settings.js:1242` (renderSettings) |
+| Settings | input on `search` | `frontend/settings.js:1244` (renderSettings) |
+| Settings | click on `closeBtn` | `frontend/settings.js:1477` (showGeoIPSetupModal) |
+| Settings | click on `modal` | `frontend/settings.js:1862` (showConnectionTestModal) |
 | Shared | click on `cancelBtn` | `frontend/utils.js:643` (showConfirmModal) |
 | Shared | click on `okBtn` | `frontend/utils.js:644` (showConfirmModal) |
 | Shared | click on `document` | `frontend/utils.js:844` |
@@ -744,7 +744,7 @@ In-app help buttons; the topic is the Markdown file name under documentation/Hel
 
 | Page | What | Code |
 |---|---|---|
-| Security | topic "Abuse_Protection" | `frontend/security.js:1017` (securityCardHtml) |
+| Security | topic "Abuse_Protection" | `frontend/security.js:1025` (securityCardHtml) |
 | Quarantine | topic "Quarantine" | `frontend/index.html:841` |
 | Spam filter | topic "Spam_Filter" | `frontend/index.html:914` |
 | Status | topic "IP_Blacklist_Monitor" | `frontend/index.html:1037` |
@@ -770,8 +770,8 @@ Text shown when a list or panel has nothing to show.
 | Message details | "No spam analysis data available" | `frontend/message-details.js:752` (renderSpamTab) |
 | Security | "No logs found" | `frontend/app.js:1042` (renderNetfilterData) |
 | Security | "No network data yet" | `frontend/security.js:587` (renderSecurityCountries) |
-| Security | "No trap names yet" | `frontend/security.js:967` (securityCardBody) |
-| Security | "No countries yet" | `frontend/security.js:979` (securityCardBody) |
+| Security | "No trap names yet" | `frontend/security.js:974` (securityCardBody) |
+| Security | "No countries yet" | `frontend/security.js:986` (securityCardBody) |
 | Security | "No matching entries" | `frontend/smtp-abuse.js:137` (renderSmtpAbusePanel) |
 | Queue | "No matching queue entries" | `frontend/app.js:2156` (applyQueueFilters) |
 | Quarantine | "No quarantined messages" | `frontend/app.js:2452` (renderQuarantineData) |
@@ -798,8 +798,8 @@ Text shown when a list or panel has nothing to show.
 | Logs | "No log entries found" | `frontend/logs-viewer.js:476` (renderLogEntries) |
 | Settings | "No logs available" | `frontend/notifications.js:269` (testNotificationChannel) |
 | Settings | "No logs available" | `frontend/notifications.js:286` (testNotificationChannelDraft) |
-| Settings | "No logs available" | `frontend/settings.js:1794` (testSmtpConnection) |
-| Settings | "No logs available" | `frontend/settings.js:1820` (testImapConnection) |
+| Settings | "No logs available" | `frontend/settings.js:1799` (testSmtpConnection) |
+| Settings | "No logs available" | `frontend/settings.js:1825` (testImapConnection) |
 | Modal: changelog-modal | "No changelog available" | `frontend/app.js:4454` (showChangelogModal) |
 | Modal: container-logs-modal | "No logs available" | `frontend/app.js:4735` (fetchContainerLogs) |
 
@@ -817,7 +817,7 @@ Functions that render a spinner or "Loading..." while data is fetched.
 | Security | 1 loading indicator(s) | `frontend/security.js:563` (securityCountryPanel) |
 | Security | 1 loading indicator(s) | `frontend/security.js:579` (renderSecurityCountries) |
 | Security | 1 loading indicator(s) | `frontend/security.js:611` (renderSecurityLists) |
-| Security | 2 loading indicator(s) | `frontend/security.js:1006` (securityCardHtml) |
+| Security | 2 loading indicator(s) | `frontend/security.js:1013` (securityCardHtml) |
 | Security | 1 loading indicator(s) | `frontend/smtp-abuse.js:39` (renderSmtpAbusePanel) |
 | Queue | 1 loading indicator(s) | `frontend/app.js:2088` (loadQueue) |
 | Quarantine | 1 loading indicator(s) | `frontend/app.js:2417` (loadQuarantine) |
@@ -827,9 +827,9 @@ Functions that render a spinner or "Loading..." while data is fetched.
 | Status | 2 loading indicator(s) | `frontend/app.js:3925` (checkBlacklists) |
 | Status | 1 loading indicator(s) | `frontend/app.js:4399` (triggerBackgroundJob) |
 | Logs | 1 loading indicator(s) | `frontend/logs-viewer.js:1091` (loadDateRangeLogs) |
-| Settings | 2 loading indicator(s) | `frontend/settings.js:1429` (showGeoIPSetupModal) |
-| Settings | 1 loading indicator(s) | `frontend/settings.js:1619` (validateMaxMindLicense) |
-| Settings | 1 loading indicator(s) | `frontend/settings.js:1665` (repairGeoIPDatabase) |
+| Settings | 2 loading indicator(s) | `frontend/settings.js:1434` (showGeoIPSetupModal) |
+| Settings | 1 loading indicator(s) | `frontend/settings.js:1624` (validateMaxMindLicense) |
+| Settings | 1 loading indicator(s) | `frontend/settings.js:1670` (repairGeoIPDatabase) |
 
 ### Persisted preferences
 
@@ -853,7 +853,7 @@ Background refreshes and polling.
 | Shell | every 5 * 60 * 1000 ms | `frontend/app.js:490` (loadAppInfo) |
 | Shell | every AUTO_REFRESH_INTERVAL ms | `frontend/app.js:789` (startAutoRefresh) |
 | Status | every 1000 ms | `frontend/app.js:3960` (checkBlacklists) |
-| Settings | every 2000 ms | `frontend/settings.js:1550` (showGeoIPSetupModal) |
+| Settings | every 2000 ms | `frontend/settings.js:1555` (showGeoIPSetupModal) |
 | Modal: container-logs-modal | every 2000 ms | `frontend/app.js:4771` (loadContainerLogs) |
 
 ### Address bar and deep links
