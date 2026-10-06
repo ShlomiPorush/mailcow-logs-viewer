@@ -10,6 +10,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **Devices page** - A new page under Server lists the phones, tablets and Outlook clients that sync over ActiveSync: the user, device type, last IP with its country, last request and when each device was first and last seen. A device whose password is refused is marked, and new devices are tagged for a week. The list is read from the SOGo log through the mailcow API, so nothing changes in mailcow. Devices that stop syncing are removed after 90 days (`EAS_DEVICES_RETENTION_DAYS`, `0` keeps them), and the page can be turned off under Features. Thanks to AonH and DocFraggle on the [mailcow community forum](https://community.mailcow.email/d/6177-kleines-eas-monitoringscript).
+- **Search everything** - A search in the top bar finds pages and their tabs, settings (by name or by key), messages, domains, mailboxes and IP addresses from the Security page. All shows the first few of each kind, and each kind has its own tab with its full count. Press `/` to start typing from any page; on phones the search button opens it over the whole screen.
+
+### Changed
+
+- **The Dashboard search moved to the top bar** - The search box and its status filter on the Dashboard are gone; the search in the top bar replaces them. To see messages with a given status, filter by status on the Messages page.
 
 ### Fixed
 

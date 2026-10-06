@@ -526,6 +526,53 @@ function settingsRemoveSecret(btn) {
 // Raw log services other pages read (/api/settings/info), collected whatever is ticked
 let settingsRawLogsRequired = {};
 
+// A setting's label, spelled from its key with the acronyms in capitals (SSL, IMAP, TLS, etc.).
+// Settings for both DMARC and TLS reports drop the DMARC_ prefix of their key (IMAP Host, Retention Days);
+// the DMARC-only ones (Insights) keep it
+function settingsFieldLabel(key) {
+    const labelKey = SETTINGS_LABEL_OVERRIDES[key] ? null
+        : /^dmarc_(imap_|retention_days$|manual_upload_enabled$|allow_report_delete$)/.test(key) ? key.slice('dmarc_'.length) : key;
+    const label = SETTINGS_LABEL_OVERRIDES[key] || labelKey.replace(/_/g, ' ').replace(/\b\w/g, function (l) { return l.toUpperCase(); });
+    return label.replace(/\bSsl\b/gi, 'SSL').replace(/\bImap\b/gi, 'IMAP').replace(/\bTls\b/gi, 'TLS')
+        .replace(/\bOauth\b/gi, 'OAuth').replace(/\bOidc\b/gi, 'OIDC').replace(/\bApi\b/gi, 'API')
+        .replace(/\bUrl\b/gi, 'URL').replace(/\bIp\b/gi, 'IP').replace(/\bDns\b/gi, 'DNS')
+        .replace(/\bDmarc\b/gi, 'DMARC').replace(/\bSpf\b/gi, 'SPF').replace(/\bDkim\b/gi, 'DKIM')
+        .replace(/\bSmtp\b/gi, 'SMTP').replace(/\bCsv\b/gi, 'CSV').replace(/\bEnv\b/gi, 'ENV')
+        .replace(/\bDb\b/gi, 'DB').replace(/\bRw\b/g, '(read-write)').replace(/^Mailcow\b/, 'mailcow');
+}
+
+// Settings sections that belong to a feature: they are hidden while it is off
+const SETTINGS_TAB_FEATURE_MAP = {
+    'domains': 'domains',
+    'blacklist': 'blacklist',
+    'dmarc': 'dmarc',
+    'dmarc_imap': 'dmarc',
+    'logs': 'logs',
+    'spam_filter': 'spam-filter',
+    'quarantine': 'quarantine',
+    'devices': 'devices'
+};
+
+function settingsTabOff(tabId) {
+    const feature = SETTINGS_TAB_FEATURE_MAP[tabId];
+    return !!(feature && window.disabledFeatures && window.disabledFeatures.includes(feature));
+}
+
+// Every setting with its label and section, for the search in the top bar. It
+// comes from the sections above, so the Settings page need not be open
+function settingsSearchIndex() {
+    const items = [];
+    SETTINGS_EDIT_TABS.forEach(function (tab) {
+        if (settingsTabOff(tab.id)) return;
+        (tab.groups || []).forEach(function (group) {
+            group.keys.forEach(function (key) {
+                items.push({ key: key, label: settingsFieldLabel(key), tab: tab.id, tabLabel: tab.label, group: group.label });
+            });
+        });
+    });
+    return items;
+}
+
 function renderSettingsEditField(key, value, sensitiveKeys, description, envLocked, defaultValue) {
     const LOCK = '<svg width="12" height="12" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true"><path fill-rule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clip-rule="evenodd"></path></svg>';
     // Special renderer for disabled_features - checkboxes for feature toggles
@@ -603,19 +650,7 @@ function renderSettingsEditField(key, value, sensitiveKeys, description, envLock
     const isNum = typeof value === 'number';
     const sensitive = sensitiveKeys.includes(key);
     const displayVal = value === null || value === undefined ? '' : (isBool ? value : String(value));
-    // Convert key to label with proper acronym capitalization (SSL, IMAP, TLS, etc.).
-    // Settings for both DMARC and TLS reports drop the DMARC_ prefix of their key (IMAP Host, Retention Days);
-    // the DMARC-only ones (Insights) keep it
-    const labelKey = SETTINGS_LABEL_OVERRIDES[key] ? null
-        : /^dmarc_(imap_|retention_days$|manual_upload_enabled$|allow_report_delete$)/.test(key) ? key.slice('dmarc_'.length) : key;
-    let label = SETTINGS_LABEL_OVERRIDES[key] || labelKey.replace(/_/g, ' ').replace(/\b\w/g, function (l) { return l.toUpperCase(); });
-    // Fix common acronyms
-    label = label.replace(/\bSsl\b/gi, 'SSL').replace(/\bImap\b/gi, 'IMAP').replace(/\bTls\b/gi, 'TLS')
-        .replace(/\bOauth\b/gi, 'OAuth').replace(/\bOidc\b/gi, 'OIDC').replace(/\bApi\b/gi, 'API')
-        .replace(/\bUrl\b/gi, 'URL').replace(/\bIp\b/gi, 'IP').replace(/\bDns\b/gi, 'DNS')
-        .replace(/\bDmarc\b/gi, 'DMARC').replace(/\bSpf\b/gi, 'SPF').replace(/\bDkim\b/gi, 'DKIM')
-        .replace(/\bSmtp\b/gi, 'SMTP').replace(/\bCsv\b/gi, 'CSV').replace(/\bEnv\b/gi, 'ENV')
-        .replace(/\bDb\b/gi, 'DB').replace(/\bRw\b/g, '(read-write)').replace(/^Mailcow\b/, 'mailcow');
+    const label = settingsFieldLabel(key);
     const descHtml = (description && description.trim()) ? '<p class="ui-set-desc">' + escapeHtml(description) + '</p>' : '';
     const disabledAttr = envLocked ? 'disabled' : '';
     const envLockedHtml = '';
@@ -908,22 +943,8 @@ function renderSettings(content, data) {
             const otherKeys = configKeys.filter(function (k) { return !allAssignedKeys.has(k); });
             const tabs = otherKeys.length ? SETTINGS_EDIT_TABS.concat([{ id: 'other', label: 'Other', groups: [{ label: 'Settings', keys: otherKeys }] }]) : SETTINGS_EDIT_TABS;
 
-            // Map settings tabs to features - hide tabs for disabled features
-            const SETTINGS_TAB_FEATURE_MAP = {
-                'domains': 'domains',
-                'blacklist': 'blacklist',
-                'dmarc': 'dmarc',
-                'dmarc_imap': 'dmarc',
-                'logs': 'logs',
-                'spam_filter': 'spam-filter',
-                'quarantine': 'quarantine',
-                'devices': 'devices'
-            };
-            const filteredTabs = tabs.filter(function (tab) {
-                const feature = SETTINGS_TAB_FEATURE_MAP[tab.id];
-                if (feature && window.disabledFeatures && window.disabledFeatures.includes(feature)) return false;
-                return true;
-            });
+            // Hide tabs for disabled features
+            const filteredTabs = tabs.filter(function (tab) { return !settingsTabOff(tab.id); });
 
             // A tab is shown only if it's feature-enabled (already in filteredTabs)
             // AND has at least one editable key (maxmind is the exception - it

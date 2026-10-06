@@ -2147,29 +2147,6 @@ async function loadRecentActivity() {
     }
 }
 
-function performDashboardSearch() {
-    const query = document.getElementById('dashboard-search-query').value;
-    const status = document.getElementById('dashboard-search-status').value;
-
-    // Set filters on Messages page
-    document.getElementById('messages-filter-search').value = query;
-    document.getElementById('messages-filter-sender').value = '';
-    document.getElementById('messages-filter-recipient').value = '';
-    document.getElementById('messages-filter-direction').value = '';
-    document.getElementById('messages-filter-status').value = status;
-    document.getElementById('messages-filter-user').value = '';
-
-    // Apply filters
-    currentFilters.messages = {
-        search: query,
-        status: status
-    };
-    currentPage.messages = 1;
-
-    // Switch to Messages tab and load
-    switchTab('messages');
-}
-
 // =============================================================================
 // NETFILTER LOGS
 // =============================================================================

@@ -155,6 +155,22 @@ def test_the_counts_are_for_the_country_and_cover_every_address(client):
     assert page['all_counts']['review'] >= 10
 
 
+def test_a_search_keeps_the_addresses_that_contain_it_and_counts_only_those(client, fail2ban):
+    for ip in IPS[:5]:
+        _failed(ip)
+    _hit(IPS[5], 'banned')
+    everything = _get(client, list='review')
+    assert everything['counts'] == {'review': 5, 'banned': 1}
+    # 192.0.2.1 is in 192.0.2.10 to 192.0.2.14 and in 192.0.2.15
+    page = _get(client, list='review', q='192.0.2.1')
+    assert page['counts'] == {'review': 5, 'banned': 1}
+    page = _get(client, list='review', q='2.12')
+    assert _ips(page) == [IPS[2]] and page['counts'] == {'review': 1, 'banned': 0}
+    banned = _get(client, list='banned', q=' 2.15 ')
+    assert _ips(banned) == [IPS[5]] and banned['total'] == 1
+    assert _get(client, list='review', q='198.51.100')['counts'] == {'review': 0, 'banned': 0}
+
+
 def test_the_pages_neither_repeat_nor_skip_an_address(client):
     for n, ip in enumerate(IPS[:9]):
         _failed(ip, minutes_ago=n + 1)
