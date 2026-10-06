@@ -16,6 +16,9 @@ const GS_CATEGORIES = [
 // Results a category's tab lists, and how many of them All shows
 const GS_LIMIT = 10;
 const GS_SUMMARY = 3;
+// The server is asked from this many characters; pages and settings answer from the first
+const GS_SERVER_FROM = 2;
+const GS_SHORT = 'Type one more character to search the messages, domains, mailboxes and addresses too.';
 
 const GS_ICONS = {
     pages: '<path d="M7 3h7l5 5v13H7zM14 3v5h5M10 13h6M10 17h6"/>',
@@ -199,6 +202,11 @@ function gsRun(raw) {
     gsResults.pages.count = gsResults.pages.items.length;
     gsResults.settings.count = gsResults.settings.items.length;
     const remote = GS_CATEGORIES.filter(c => GS_REMOTE[c.id] && !gsOff(c));
+    if (q.length < GS_SERVER_FROM) {
+        remote.forEach(c => { gsResults[c.id] = { short: true, count: 0, items: [] }; });
+        gsRender();
+        return;
+    }
     remote.forEach(c => { gsResults[c.id] = { loading: true, count: 0, items: [] }; });
     gsRender();
     // The server is asked once typing pauses; an older search is cancelled
@@ -226,7 +234,7 @@ function gsItem(category, item, q) {
 }
 
 function gsCountText(result) {
-    if (!result) return '';
+    if (!result || result.short) return '';
     if (result.loading) return '…';
     if (result.failed) return '!';
     return result.count.toLocaleString();
@@ -245,6 +253,7 @@ function gsRender() {
     const q = gsQuery.toLowerCase();
     const categories = GS_CATEGORIES.filter(c => !gsOff(c));
     const loading = categories.some(c => gsResults[c.id]?.loading);
+    const short = categories.some(c => gsResults[c.id]?.short);
     const total = categories.reduce((n, c) => n + (gsResults[c.id]?.count || 0), 0);
     if (gsTab !== 'all' && !categories.some(c => c.id === gsTab)) gsTab = 'all';
 
@@ -263,8 +272,9 @@ function gsRender() {
             body += `<div class="ui-gs-sec"><span>${escapeHtml(c.label)} · ${r.count.toLocaleString()}</span>${r.count > GS_SUMMARY ? `<button type="button" class="ui-link" data-gs-tab="${c.id}">See all</button>` : ''}</div>`
                 + r.items.slice(0, GS_SUMMARY).map(item => gsItem(c.id, item, q)).join('');
         });
-        if (!body) body = `<p class="ui-gs-empty">${loading ? 'Searching…' : `Nothing found for “${escapeHtml(gsQuery)}”`}</p>`;
+        if (!body) body = `<p class="ui-gs-empty">${loading ? 'Searching…' : short ? GS_SHORT : `Nothing found for “${escapeHtml(gsQuery)}”`}</p>`;
         else if (loading) body += '<p class="ui-gs-wait">Still searching…</p>';
+        else if (short) body += `<p class="ui-gs-wait">${GS_SHORT}</p>`;
     } else {
         const r = gsResults[gsTab] || { count: 0, items: [] };
         if (r.more && r.count) {
@@ -273,7 +283,8 @@ function gsRender() {
         }
         body += r.items.map(item => gsItem(gsTab, item, q)).join('');
         if (r.count > r.items.length && !r.more) body += `<p class="ui-gs-wait">The first ${r.items.length} of ${r.count.toLocaleString()}</p>`;
-        if (r.loading) body = '<p class="ui-gs-empty">Searching…</p>';
+        if (r.short) body = `<p class="ui-gs-empty">${GS_SHORT}</p>`;
+        else if (r.loading) body = '<p class="ui-gs-empty">Searching…</p>';
         else if (r.failed) body = '<p class="ui-gs-empty">This search failed. Try again in a moment.</p>';
         else if (!r.items.length) body = `<p class="ui-gs-empty">Nothing found for “${escapeHtml(gsQuery)}”</p>`;
     }

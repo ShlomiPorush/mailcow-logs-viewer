@@ -2177,7 +2177,8 @@ html .markdown-body .markdown-alert-caution .markdown-alert-title { color: var(-
     .ui-topbar .ui-nav-toggle, html.ui-nav-collapsed .ui-topbar .ui-nav-toggle { position: static; margin: 0; }
     .ui-topbar-title { flex-shrink: 0; max-width: 40%; min-width: 0; padding-inline-start: 18px; margin-inline-end: 24px; }
     .ui-topbar-title .ui-h1 { margin: 0; font-size: 20px; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .ui-topbar-actions { display: flex; align-items: center; gap: 8px; min-width: 0; padding-inline-start: 16px; }
+    .ui-topbar-actions { flex: none; display: flex; align-items: center; gap: 8px; padding-inline-start: 16px; }
+    .ui-topbar-actions > * { flex-wrap: nowrap; }
     .ui-topbar-actions:empty { padding: 0; }
     .ui-topbar-actions > * { margin: 0; }
     /* DMARC keeps room under its buttons for the sync note, which stays in the page here */
@@ -2231,14 +2232,18 @@ html .markdown-body .markdown-alert-caution .markdown-alert-title { color: var(-
 .ui-gs { display: none; }
 @media (min-width: 761px) {
     html.ui-has-topbar .ui-topbar .ui-gs { display: block; }
-    .ui-topbar .ui-gs { position: relative; flex: 0 1 300px; min-width: 200px; margin-inline-start: auto; transition: flex-basis .22s ease; }
+    .ui-topbar .ui-gs { position: relative; flex: 0 1 300px; min-width: 42px; margin-inline-start: auto; transition: flex-basis .22s ease;
+        container-type: inline-size; }
     .ui-topbar .ui-gs.is-open { flex-basis: 820px; }
+    /* The page's buttons keep their size; while the search is open they step aside for it */
+    .ui-topbar:has(.ui-gs.is-open) .ui-topbar-actions { display: none; }
+    @container (max-width: 150px) { .ui-gs-key { display: none; } }
 }
 .ui-gs-box { display: flex; align-items: center; gap: 8px; height: 40px; padding: 0 10px 0 12px; border: 1px solid var(--ui-line); border-radius: 10px;
     background: var(--ui-panel); color: var(--ui-muted); transition: border-color .15s, box-shadow .15s, background .15s; }
 .ui-gs.is-open .ui-gs-box { border-color: var(--ui-ink); background: var(--ui-bg);
     box-shadow: 0 0 0 3px color-mix(in srgb, var(--ui-ink) 10%, transparent); }
-.ui-gs-box input { flex: 1; min-width: 0; height: 100%; border: 0; outline: 0; background: none; font: inherit; font-size: 15px; color: var(--ui-ink); }
+.ui-gs-box input { flex: 1; min-width: 0; height: 100%; border: 0; outline: 0; background: none; font: inherit; font-size: 15px; color: var(--ui-ink); text-overflow: ellipsis; }
 .ui-gs-box input::placeholder { color: var(--ui-muted); }
 .ui-gs-box input::-webkit-search-cancel-button { display: none; }
 .ui-gs-key, .ui-gs-keys kbd { font: 600 11px var(--ui-mono); padding: 2px 6px; border: 1px solid var(--ui-line); border-radius: 6px; color: var(--ui-muted); background: none; }
