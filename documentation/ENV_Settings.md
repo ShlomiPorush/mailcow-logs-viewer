@@ -72,7 +72,7 @@ These settings **must** be configured in your `.env` file:
 | `DEBUG` | boolean | `false` | Enable debug mode (shows detailed errors, use only for development). ⚠️ **WARNING: Never enable in production!** |
 | `MAX_SEARCH_RESULTS` | integer | `1000` | Maximum records to return in search results |
 | `CSV_EXPORT_LIMIT` | integer | `10000` | CSV export row limit |
-| `SCHEDULER_WORKERS` | integer | `4` | Thread pool size for blocking scheduler jobs (e.g. DMARC IMAP sync). Valid range: 1-64. Higher values allow more blocking jobs to run in parallel |
+| `SCHEDULER_WORKERS` | integer | `4` | Thread pool size for blocking scheduler jobs (e.g. the DMARC & TLS IMAP import). Valid range: 1-64. Higher values allow more blocking jobs to run in parallel |
 | `DISABLED_FEATURES` | string | (empty) | Comma-separated list of features to disable (hides navigation, stops background jobs). Valid values: `netfilter`, `queue`, `quarantine`, `spam-filter`, `domains`, `dmarc`, `mailbox-stats`, `rate-limits`, `logs`, `blacklist`. Can also be managed from the Settings UI when `SETTINGS_EDIT_VIA_UI_ENABLED=true` |
 
 ---
@@ -206,10 +206,10 @@ Which sending IPs must pass each domain's SPF record on the Domains page. With a
 
 | Variable | Type | Default | Description |
 |----------|------|---------|-------------|
-| `DMARC_RETENTION_DAYS` | integer | `60` | DMARC reports retention in days |
-| `DMARC_MANUAL_UPLOAD_ENABLED` | boolean | `true` | Allow manual upload of DMARC reports via UI |
-| `DMARC_ALLOW_REPORT_DELETE` | boolean | `false` | Allow deleting DMARC/TLS reports from the UI |
-| `DMARC_ERROR_EMAIL` | string | (empty) | Email address for DMARC error notifications (defaults to `ADMIN_EMAIL` if not set) |
+| `DMARC_RETENTION_DAYS` | integer | `60` | How many days DMARC and TLS reports are kept |
+| `DMARC_MANUAL_UPLOAD_ENABLED` | boolean | `true` | Allow uploading DMARC and TLS reports by hand in the UI |
+| `DMARC_ALLOW_REPORT_DELETE` | boolean | `false` | Allow deleting DMARC and TLS reports from the UI |
+| `DMARC_ERROR_EMAIL` | string | (empty) | Email address for errors while importing DMARC and TLS reports (defaults to `ADMIN_EMAIL` if not set) |
 
 ### DMARC Insights (Policy Recommendations)
 
@@ -223,17 +223,19 @@ Turns collected DMARC report data into advice: when a domain's pass rate and vol
 
 > Read-only: this feature never changes DNS records - it only shows recommendations on the DMARC & TLS page.
 
-### DMARC IMAP Auto-Import Configuration
+### DMARC & TLS IMAP Auto-Import Configuration
+
+One mailbox receives both kinds of report: point the `rua=` of your DMARC and TLS-RPT records at it. The variable names keep the `DMARC_IMAP_` prefix.
 
 | Variable | Type | Default | Description |
 |----------|------|---------|-------------|
-| `DMARC_IMAP_ENABLED` | boolean | `false` | Enable automatic DMARC report import from IMAP |
+| `DMARC_IMAP_ENABLED` | boolean | `false` | Import DMARC and TLS reports automatically from IMAP |
 | `DMARC_IMAP_HOST` | string | (empty) | IMAP server hostname (e.g., `imap.gmail.com`) |
 | `DMARC_IMAP_PORT` | integer | `993` | IMAP server port (993 for SSL, 143 for non-SSL) |
 | `DMARC_IMAP_USE_SSL` | boolean | `true` | Use SSL/TLS for IMAP connection |
 | `DMARC_IMAP_USER` | string | (empty) | IMAP username (email address) |
 | `DMARC_IMAP_PASSWORD` | string | (empty) | IMAP password |
-| `DMARC_IMAP_FOLDER` | string | `INBOX` | IMAP folder to scan for DMARC reports |
+| `DMARC_IMAP_FOLDER` | string | `INBOX` | IMAP folder to scan for DMARC and TLS reports |
 | `DMARC_IMAP_DELETE_AFTER` | boolean | `true` | Delete emails after successful processing |
 | `DMARC_IMAP_INTERVAL` | integer | `3600` | Interval between IMAP syncs in seconds (default: 3600 = 1 hour) |
 | `DMARC_IMAP_RUN_ON_STARTUP` | boolean | `true` | Run IMAP sync once on application startup |

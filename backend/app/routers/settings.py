@@ -40,7 +40,7 @@ def _job_off_reason(key: str):
     """
     rw = mailcow_api.has_rw_key
     checks = {
-        'dmarc_imap_sync': [(not settings.dmarc_imap_enabled, 'IMAP import of DMARC reports is not set up', 'dmarc_imap')],
+        'dmarc_imap_sync': [(not settings.dmarc_imap_enabled, 'IMAP import of DMARC and TLS reports is not set up', 'dmarc_imap')],
         'update_geoip': [(not is_license_configured(), 'Needs a MaxMind Account ID and License Key', 'maxmind')],
         'send_weekly_summary': [(not settings.enable_weekly_summary, 'The weekly summary is turned off', 'notifications')],
         'fetch_raw_logs': [(not settings.raw_logs_enabled, 'Live Logs are turned off', 'logs')],
@@ -300,7 +300,7 @@ def get_settings_info(db: Session = Depends(get_db)):
                 },
                 "cleanup_dmarc_reports": {
                     "schedule": "Daily at 2:15 AM" if settings.is_feature_enabled('dmarc') else "Disabled (feature off)",
-                    "description": "Removes old DMARC and TLS reports based on DMARC retention period",
+                    "description": "Removes DMARC and TLS reports older than the retention period",
                     "retention": f"{settings.dmarc_retention_days} days",
                     "feature_disabled": not settings.is_feature_enabled('dmarc'),
                     "status": jobs_status.get('cleanup_dmarc_reports', {}).get('status', 'unknown') if settings.is_feature_enabled('dmarc') else 'disabled',
@@ -331,7 +331,7 @@ def get_settings_info(db: Session = Depends(get_db)):
                 },
                 "dmarc_imap_sync": {
                     "interval": f"{settings.dmarc_imap_interval} seconds ({settings.dmarc_imap_interval // 60} minutes)" if (settings.is_feature_enabled('dmarc') and settings.dmarc_imap_enabled) else ("Disabled (feature off)" if not settings.is_feature_enabled('dmarc') else "Disabled"),
-                    "description": "Imports DMARC reports from IMAP mailbox",
+                    "description": "Imports DMARC and TLS reports from an IMAP mailbox",
                     "enabled": settings.is_feature_enabled('dmarc') and settings.dmarc_imap_enabled,
                     "feature_disabled": not settings.is_feature_enabled('dmarc'),
                     "status": jobs_status.get('dmarc_imap_sync', {}).get('status', 'idle') if (settings.is_feature_enabled('dmarc') and settings.dmarc_imap_enabled) else 'disabled',

@@ -1386,7 +1386,7 @@ def trigger_manual_sync(background_tasks: BackgroundTasks, db: Session = Depends
     if not settings.dmarc_imap_enabled:
         raise HTTPException(
             status_code=400,
-            detail="DMARC IMAP sync is not enabled."
+            detail="The IMAP import of DMARC and TLS reports is not set up."
         )
     
     try:
@@ -1420,7 +1420,7 @@ def trigger_manual_sync(background_tasks: BackgroundTasks, db: Session = Depends
         
         return {
             'status': 'started',
-            'message': 'DMARC IMAP sync started'
+            'message': 'IMAP import of DMARC and TLS reports started'
         }
         
     except Exception as e:
