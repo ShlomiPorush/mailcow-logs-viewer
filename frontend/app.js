@@ -5305,3 +5305,20 @@ function initNavFlyouts() {
     window.addEventListener('resize', hideNavFlyout);
 }
 document.addEventListener('DOMContentLoaded', initNavFlyouts);
+
+// =============================================================================
+// The app frame never scrolls the window. A phone keyboard can pan the window to
+// show a field and leave it panned when it closes, which hid the top bar and left
+// an empty band at the bottom on every page. Once no field is being edited, the
+// window goes back to the top.
+// =============================================================================
+
+function resetWindowPan() {
+    const el = document.activeElement;
+    const editing = el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName));
+    if (editing) return;
+    if (window.scrollX || window.scrollY || document.scrollingElement.scrollTop) window.scrollTo(0, 0);
+}
+window.addEventListener('scroll', resetWindowPan, { passive: true });
+document.addEventListener('focusout', () => setTimeout(resetWindowPan, 300));
+if (window.visualViewport) window.visualViewport.addEventListener('resize', () => setTimeout(resetWindowPan, 100));

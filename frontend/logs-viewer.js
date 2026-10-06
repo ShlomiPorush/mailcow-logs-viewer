@@ -124,6 +124,7 @@ function renderLogServiceList(services) {
             </button>
         `;
     }).join('');
+    updateLogServiceToggle();
 }
 
 
@@ -137,6 +138,24 @@ function filterLogServices(query) {
     });
 }
 
+// Narrow screens: the service list folds into one row that names the current service
+function toggleLogServices(open) {
+    const side = document.getElementById('logs-side');
+    const toggle = document.getElementById('logs-side-toggle');
+    if (!side) return;
+    const show = typeof open === 'boolean' ? open : !side.classList.contains('is-open');
+    side.classList.toggle('is-open', show);
+    if (toggle) toggle.setAttribute('aria-expanded', show);
+}
+
+function updateLogServiceToggle() {
+    const active = document.querySelector('#logs-service-list .ui-log-svc[aria-current="true"]');
+    const name = document.getElementById('logs-side-current');
+    const count = document.getElementById('logs-side-count');
+    if (name) name.textContent = active ? (active.querySelector('.ui-log-svc-name') || active).textContent.trim() : '-';
+    if (count) count.textContent = active && active.querySelector('small') ? active.querySelector('small').textContent.trim() : '';
+}
+
 async function selectLogService(serviceId) {
     console.log('[LOGS] Selecting service:', serviceId);
     logsState.activeService = serviceId;
@@ -147,6 +166,8 @@ async function selectLogService(serviceId) {
         if (btn.dataset.service === serviceId) btn.setAttribute('aria-current', 'true');
         else btn.removeAttribute('aria-current');
     });
+    updateLogServiceToggle();
+    toggleLogServices(false);
     
     // Update status bar
     const activeServiceEl = document.getElementById('logs-active-service');

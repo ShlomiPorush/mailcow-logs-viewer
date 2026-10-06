@@ -3,7 +3,7 @@
 
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, interactive-widget=resizes-content">
     <title>mailcow Logs Viewer</title>
 
     <!-- App icons -->
@@ -1277,7 +1277,11 @@
                 </div>
                 <div class="ui-logs ui-scroll">
                     <!-- Service Sidebar -->
-                    <aside class="ui-panel ui-logs-side">
+                    <aside class="ui-panel ui-logs-side" id="logs-side">
+                        <button type="button" class="ui-logs-side-toggle" id="logs-side-toggle" aria-expanded="false" aria-controls="logs-service-list" onclick="toggleLogServices()">
+                            <span>Service</span><b id="logs-side-current">-</b><small id="logs-side-count"></small>
+                            <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
+                        </button>
                         <input type="text" id="logs-service-search" placeholder="Filter services..." aria-label="Filter services"
                             oninput="filterLogServices(this.value)" class="ui-input">
                         <div id="logs-service-list" class="ui-logs-services">
