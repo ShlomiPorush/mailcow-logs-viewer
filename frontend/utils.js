@@ -141,6 +141,12 @@ function uiTag(text, tone) {
     return `<span class="ui-tag${tone ? ` ui-tag-${tone}` : ''}">${escapeHtml(String(text))}</span>`;
 }
 
+// Inbound, outbound and internal keep their own colours, as before the redesign
+function uiDirectionTag(direction) {
+    const known = ['inbound', 'outbound', 'internal'].includes(direction);
+    return `<span class="ui-tag ui-tag-dir${known ? ` ui-dir-${direction}` : ''}">${escapeHtml(String(direction))}</span>`;
+}
+
 function uiStatusTag(status) {
     return uiTag(status, UI_STATUS_TONE[status]);
 }
@@ -184,10 +190,6 @@ function uiLocked(title, textHtml, action = 'settings') {
 
 // The Read-Write key sentence used by every locked area that needs it
 const UI_RW_KEY_TEXT = 'needs a <strong>Read-Write API key</strong> (<code>MAILCOW_API_KEY_RW</code>). Configure it in Settings → Mailcow → Connection.';
-
-function uiDirectionTag(direction) {
-    return `<span class="ui-tag ui-tag-line">${escapeHtml(String(direction))}</span>`;
-}
 
 function getCorrelationStatusDisplay(msg) {
     // If there's a final_status, show it with emoji

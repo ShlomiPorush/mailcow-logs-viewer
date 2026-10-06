@@ -160,6 +160,11 @@ function folderIconSvg(sizeClasses) {
 }
 
 // A labelled value in a facts grid
+// One Identifiers row: the label on the left, the value (and a note) on the right
+function mdIdRow(label, valueHtml, noteHtml = '') {
+    return `<div class="ui-md-idrow"><dt>${label}</dt><dd><span class="ui-md-idval">${valueHtml}</span>${noteHtml ? `<small>${noteHtml}</small>` : ''}</dd></div>`;
+}
+
 function mdFact(label, valueHtml, extra = '') {
     return `<div class="ui-md-fact${extra ? ` ${extra}` : ''}"><span>${label}</span><div>${valueHtml}</div></div>`;
 }
@@ -433,20 +438,29 @@ function renderMessageHeader(data) {
     const recipients = (data.recipients && data.recipients.length) ? data.recipients : (data.recipient ? [data.recipient] : []);
     const verdict = messageVerdict(data);
     const facts = [];
-    if (data.rspamd && typeof data.rspamd.score === 'number') facts.push(`Spam score ${data.rspamd.score.toFixed(1)}`);
     if (data.rspamd && data.rspamd.size) facts.push(formatSize(data.rspamd.size));
     if (data.direction) facts.push(data.direction);
+    // The spam summary sits here, in view, and opens the Spam Analysis tab
+    const r = data.rspamd;
+    const spamHtml = r && typeof r.score === 'number' ? `
+            <button type="button" class="ui-md-spam" onclick="switchModalTab('spam')" title="Open Spam Analysis">
+                <span><small>Spam score</small><b class="${r.score >= (r.required_score || 15) ? 'ui-text-fail' : 'ui-text-ok'}">${r.score.toFixed(2)}</b></span>
+                <span><small>Action</small><b>${escapeHtml(String(r.action || '-'))}</b></span>
+                <span><small>Class</small><b class="${r.is_spam ? 'ui-text-fail' : 'ui-text-ok'}">${r.is_spam ? 'SPAM' : 'CLEAN'}</b></span>
+                <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg>
+            </button>` : '';
     const hasSubject = data.subject && data.subject !== 'Postfix Log Details';
     header.innerHTML = `
         <h2 class="ui-md-subject" dir="auto" title="${escapeHtml(hasSubject ? data.subject : 'No subject')}">${escapeHtml(hasSubject ? data.subject : 'No subject')}</h2>
         <div class="ui-md-who">
             <span>From</span><div>${copyableText(data.sender || '-')}</div>
-            <span>To</span><div>${recipients.length > 1 ? `${recipients.length} recipients: ${recipients.map(r => copyableText(r)).join(', ')}` : copyableText(recipients[0] || '-')}</div>
+            <span>${recipients.length > 1 ? `To (${recipients.length})` : 'To'}</span><div class="ui-md-to">${recipients.length > 1 ? recipients.map(r => `<span>${copyableText(r)}</span>`).join('') : copyableText(recipients[0] || '-')}</div>
             <span>When</span><div>${formatTime(data.first_seen)}</div>
         </div>
         <div class="ui-md-verdict-bar${verdict.tone ? ` ui-md-verdict-${verdict.tone}` : ''}">
-            ${escapeHtml(verdict.text)}
-            ${facts.length ? `<small>${escapeHtml(facts.join(', '))}</small>` : ''}
+            <div>${escapeHtml(verdict.text)}
+            ${facts.length ? `<small>${escapeHtml(facts.join(', '))}</small>` : ''}</div>
+            ${spamHtml}
         </div>`;
 }
 
@@ -454,7 +468,7 @@ function renderMessageHeader(data) {
 // and what Dovecot did with it. Built from the same logs as the Logs tab.
 function buildDeliverySteps(data) {
     const steps = [];
-    const add = (time, tone, title, detail) => steps.push({ time: time || '', tone, title, detail });
+    const add = (time, tone, title, detail, html) => steps.push({ time: time || '', tone, title, detail, ...(html || {}) });
     for (const log of data.postfix || []) {
         const message = log.message || '';
         const program = log.program || 'postfix';
@@ -464,13 +478,17 @@ function buildDeliverySteps(data) {
         } else if (/client=/.test(message) && /smtpd/.test(program)) {
             const ip = (message.match(/client=.*?\[([^\]]+)\]/) || [])[1];
             const user = (message.match(/sasl_username=(\S+)/) || [])[1];
-            add(log.time, 'ok', ip ? `Received from ${ip}` : 'Received', `${when}, ${program}${user ? `, authenticated as ${user}` : ''}`);
+            add(log.time, 'ok', ip ? `Received from ${ip}` : 'Received', `${when}, ${program}${user ? `, authenticated as ${user}` : ''}`, {
+                titleHtml: ip ? `Received from ${copyableText(ip)}` : '',
+                detailHtml: `${escapeHtml(`${when}, ${program}`)}${user ? `, authenticated as ${copyableText(user)}` : ''}`
+            });
         } else if (/cleanup/.test(program) && /message-id=/.test(message)) {
-            add(log.time, 'ok', log.queue_id || data.queue_id ? `Queued as ${log.queue_id || data.queue_id}` : 'Queued', `${when}, ${program}`);
+            const qid = log.queue_id || data.queue_id;
+            add(log.time, 'ok', qid ? `Queued as ${qid}` : 'Queued', `${when}, ${program}`, { titleHtml: qid ? `Queued as ${copyableText(qid)}` : '' });
         } else if (log.status) {
             const target = relayHost(log.relay) || log.recipient || '';
             const detail = `${when}, status=${log.status}${log.dsn ? ` (${log.dsn})` : ''}`;
-            if (log.status === 'sent') add(log.time, 'ok', target ? `Delivered to ${target}` : 'Delivered', detail);
+            if (log.status === 'sent') add(log.time, 'ok', target ? `Delivered to ${target}` : 'Delivered', detail, { titleHtml: target ? `Delivered to ${copyableText(target)}` : '' });
             else if (log.status === 'deferred') add(log.time, 'warn', target ? `Deferred for ${target}` : 'Deferred', detail);
             else if (log.status === 'bounced') add(log.time, 'fail', target ? `Bounced for ${target}` : 'Bounced', detail);
             else add(log.time, 'fail', `${log.status.charAt(0).toUpperCase()}${log.status.slice(1)}`, detail);
@@ -486,12 +504,15 @@ function buildDeliverySteps(data) {
         const last = (dovecot.logs || []).slice(-1)[0];
         add(last ? last.time : '9', verdict.tone || 'warn', verdict.label, getDovecotVerdictText(dovecot));
     }
-    steps.sort((a, b) => (a.time < b.time ? -1 : a.time > b.time ? 1 : 0));
+    // Steps logged in the same second keep the order mail flows in
+    const stage = step => /^(Rejected|Received)/.test(step.title) ? 0 : /^Queued/.test(step.title) ? 1 : /^Rspamd/.test(step.title) ? 2
+        : /^(Delivered|Deferred|Bounced)/.test(step.title) ? 3 : 4;
+    steps.sort((a, b) => (a.time < b.time ? -1 : a.time > b.time ? 1 : stage(a) - stage(b)));
     // A retry logs the same step again; one line with the number of attempts
     const merged = [];
     for (const step of steps) {
         const prev = merged[merged.length - 1];
-        if (prev && prev.title === step.title) { prev.count = (prev.count || 1) + 1; prev.detail = step.detail; continue; }
+        if (prev && prev.title === step.title) { prev.count = (prev.count || 1) + 1; prev.detail = step.detail; prev.detailHtml = step.detailHtml; continue; }
         merged.push({ ...step });
     }
     return merged;
@@ -502,8 +523,8 @@ function renderDeliverySteps(data) {
     if (!steps.length) return '<p class="ui-muted">No delivery steps recorded yet.</p>';
     return `<ol class="ui-steps">${steps.map(step => `
         <li class="${step.tone ? `ui-step-${step.tone}` : ''}">
-            <b>${escapeHtml(step.title)}${step.count > 1 ? ` <span class="ui-tag">${step.count} attempts</span>` : ''}</b>
-            <span>${escapeHtml(step.detail)}</span>
+            <b>${step.titleHtml || escapeHtml(step.title)}${step.count > 1 ? ` <span class="ui-tag">${step.count} attempts</span>` : ''}</b>
+            <span>${step.detailHtml || escapeHtml(step.detail)}</span>
         </li>`).join('')}</ol>`;
 }
 
@@ -522,17 +543,19 @@ function renderOverviewTab(content, data) {
         : (data.recipients || []);
 
     const rspamd = data.rspamd || {};
+    // Where the client address is from: flag, country and city, network owner
+    const geoNote = rspamd.country_code ? [
+        getFlagUrl(rspamd.country_code, '16x12') ? `<img src="${getFlagUrl(rspamd.country_code, '16x12')}" alt="" width="16" height="12" onerror="this.style.display='none'">` : '',
+        escapeHtml([rspamd.country_name, rspamd.city].filter(Boolean).join(', ')),
+        rspamd.asn_org ? `<span class="ui-muted">· ${escapeHtml(rspamd.asn_org)}</span>` : ''
+    ].filter(Boolean).join(' ') : '';
     const identifiers = [
-        data.queue_id ? mdFact('Queue ID', `<span class="ui-mono">${copyableText(data.queue_id)}</span>`) : '',
-        rspamd.ip ? mdFact('Client IP', `<div class="ui-md-geo">${renderGeoIPInfo(rspamd, '16x12')}</div>`) : '',
-        // Who sent it and how they proved it, in one cell
-        rspamd.user || rspamd.has_auth ? mdFact('Authenticated user',
-            `${rspamd.user ? copyableText(rspamd.user) : '<span class="ui-muted">Unknown user</span>'}${rspamd.has_auth ? '<small class="ui-md-sub">Verified (MAILCOW_AUTH)</small>' : ''}`) : '',
-        rspamd.size ? mdFact('Message Size', formatSize(rspamd.size)) : '',
-        data.dovecot && data.dovecot.status === 'stored' && data.dovecot.mailbox ? mdFact('Folder', `<span class="ui-md-folder">${folderIconSvg('ui-md-folder-icon')}${escapeHtml(data.dovecot.mailbox)}</span>`) : '',
-        recipientsToDisplay.length > 1 ? mdFact(`Recipients (${recipientsToDisplay.length})`,
-            `<div class="ui-md-recipients">${recipientsToDisplay.map(r => `<div>${copyableText(r)}</div>`).join('')}</div>`, 'ui-md-fact-wide') : '',
-        data.message_id ? mdFact('Message ID', `<span class="ui-mono" title="${escapeHtml(data.message_id)}">${copyableText(data.message_id)}</span>`, 'ui-md-fact-wide') : '',
+        data.queue_id ? mdIdRow('Queue ID', `<span class="ui-mono">${copyableText(data.queue_id)}</span>`) : '',
+        data.message_id ? mdIdRow('Message ID', `<span class="ui-mono">${copyableText(data.message_id)}</span>`) : '',
+        rspamd.ip ? mdIdRow('Client IP', `<span class="ui-mono">${copyableText(rspamd.ip)}</span>`, geoNote) : '',
+        (rspamd.user && rspamd.user !== 'unknown') || rspamd.has_auth ? mdIdRow('Authenticated user',
+            rspamd.user && rspamd.user !== 'unknown' ? copyableText(rspamd.user) : '<span class="ui-muted">Unknown user</span>', rspamd.has_auth ? 'Verified (MAILCOW_AUTH)' : '') : '',
+
     ].join('');
 
     content.innerHTML = `
@@ -543,20 +566,8 @@ function renderOverviewTab(content, data) {
             </section>
             ${renderDovecotSummary(data.dovecot)}
             ${renderRelatedDeliveries(data)}
-            ${identifiers ? `<section><h4 class="ui-md-h">Identifiers</h4><div class="ui-md-facts ui-md-ids">${identifiers}</div></section>` : ''}
-            ${data.rspamd ? `
-                <section class="ui-md-card ui-md-clickable" onclick="switchModalTab('spam')">
-                    <div class="ui-md-card-head">
-                        <h4 class="ui-md-h">Quick Spam Summary</h4>
-                        <span class="ui-muted">See "Spam Analysis" tab for details</span>
-                    </div>
-                    <div class="ui-md-figures">
-                        <div><b class="${data.rspamd.score >= (data.rspamd.required_score || 15) ? 'ui-text-fail' : 'ui-text-ok'}">${data.rspamd.score.toFixed(2)}</b><span>Score</span></div>
-                        <div><b>${escapeHtml(String(data.rspamd.action))}</b><span>Action</span></div>
-                        <div><b class="${data.rspamd.is_spam ? 'ui-text-fail' : 'ui-text-ok'}">${data.rspamd.is_spam ? 'SPAM' : 'CLEAN'}</b><span>Class</span></div>
-                    </div>
-                </section>
-            ` : data.postfix && data.postfix.length > 0 ? `
+            ${identifiers ? `<section><h4 class="ui-md-h">Identifiers</h4><dl class="ui-md-idlist">${identifiers}</dl></section>` : ''}
+            ${data.rspamd ? '' : data.postfix && data.postfix.length > 0 ? `
                 <div class="ui-banner">
                     <div>Postfix Delivery Logs
                         <p>Click "Logs" tab to see complete delivery timeline (${data.postfix.length} entries)</p>
