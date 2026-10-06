@@ -186,7 +186,7 @@ function renderDomainAccordionRow(domain, open = false) {
                     ${escapeHtml(domain.domain_name)}
                     ${domain.active ? '' : uiTag('Inactive', '')}
                 </div>
-                <small>${domain.mboxes_in_domain} mailboxes, ${domain.aliases_in_domain} aliases${issues ? ', open for the fix' : ''}</small>
+                <small>${domain.mboxes_in_domain} mailboxes, ${domain.aliases_in_domain} aliases${issues ? ', needs a DNS change' : ''}</small>
             </div>
             ${DNS_CHECKS.map(([label, key]) => dnsStatusTag(label, dns[key] || { status: 'unknown' })).join('')}
             <span class="ui-td ui-td-end"><small class="ui-sec-unit">Storage </small>${formatBytes(domain.bytes_total)}</span>
