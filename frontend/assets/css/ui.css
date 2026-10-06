@@ -1459,12 +1459,13 @@ button.ui-st-card:hover { outline: 1px solid var(--ui-line); }
 .ui-feature.is-locked { cursor: not-allowed; }
 .ui-set-featurelist > .ui-set-env { padding: 12px var(--ui-pad-x) 0; }
 
-/* Floating save bar, shown only with unsaved changes */
-.ui-set-savebar { position: fixed; inset: auto 0 18px 0; z-index: 60; display: flex; align-items: center; gap: 12px; width: fit-content; margin: 0 auto;
+/* Floating save bar (uiSaveBar), shown only with unsaved changes, on every editable page */
+.ui-savebar { position: fixed; inset: auto 0 18px 0; z-index: 60; display: flex; align-items: center; gap: 12px; width: fit-content; margin: 0 auto;
     padding: 8px 8px 8px 18px; border-radius: 12px; background: var(--ui-ink); color: var(--ui-bg); box-shadow: 0 12px 30px rgb(0 0 0 / .25); }
-.ui-set-savebar.hidden { display: none; }
-.ui-set-savebar #settings-discard-btn { background: transparent; color: var(--ui-bg); border-color: color-mix(in srgb, var(--ui-bg) 35%, transparent); }
-.ui-set-savebar #settings-save-btn { background: var(--ui-bg); color: var(--ui-ink); border-color: var(--ui-bg); }
+.ui-savebar.hidden { display: none; }
+.ui-savebar .ui-savebar-discard { background: transparent; color: var(--ui-bg); border-color: color-mix(in srgb, var(--ui-bg) 35%, transparent); }
+.ui-savebar .ui-savebar-save { background: var(--ui-bg); color: var(--ui-ink); border-color: var(--ui-bg); }
+.ui-savebar button:disabled { opacity: .6; cursor: wait; }
 
 .ui-set-channels { padding: 12px var(--ui-pad-x) var(--ui-pad-x); }
 .ui-channels { display: grid; gap: 8px; }
@@ -1496,8 +1497,8 @@ button.ui-st-card:hover { outline: 1px solid var(--ui-line); }
     .ui-set-field > *, .ui-set-field > .ui-label, .ui-set-field > .ui-set-desc { grid-column: 1; grid-row: auto; }
     .ui-set-field > .ui-input, .ui-set-field > .ui-select, .ui-set-field > .ui-set-secret, .ui-set-field > .ui-set-checks { grid-row: auto; }
     .settings-mobile-nav { top: 0; }
-    .ui-set-savebar { inset: auto 10px calc(76px + env(safe-area-inset-bottom)) 10px; width: auto; }
-    .ui-set-savebar #settings-dirty-count { flex: 1; }
+    .ui-savebar { inset: auto 10px calc(76px + env(safe-area-inset-bottom)) 10px; width: auto; }
+    .ui-savebar .ui-savebar-count { flex: 1; }
 }
 .ui-form > label.ui-check-label { display: flex; }
 .ui-set-env svg { display: inline-block; }
@@ -1893,10 +1894,6 @@ html .markdown-body .markdown-alert-caution .markdown-alert-title { color: var(-
 .ui-prot-sentence { margin: 0; line-height: 2.2; }
 .ui-prot-num { display: inline-block; width: 72px; height: 30px; margin: 0 4px; text-align: center; }
 .ui-prot-note { margin: 0; font-size: 12.5px; }
-.ui-prot-save { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-radius: var(--ui-radius); background: var(--ui-panel);
-    border: 1px solid var(--ui-line); }
-.ui-prot-save > span { flex: 1; font-weight: 600; }
-.ui-prot-save.hidden { display: none; }
 .ui-prot-tried { display: block; margin-top: 2px; font-size: 12px; }
 .ui-prot-intro { margin: 0 0 12px; font-size: 13px; }
 .ui-prot-rule-head h3 .ui-tag { margin-inline-start: 6px; vertical-align: 2px; }
