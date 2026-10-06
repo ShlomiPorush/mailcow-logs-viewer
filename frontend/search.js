@@ -473,15 +473,18 @@ function initGlobalSearch() {
             gsClose(true);
         }
     });
-    // A click on a result or a tab keeps the focus in the field
+    // A click on a result or a tab keeps the focus in the field. On a phone a tab
+    // lets the keyboard go instead: the search is done, the results need the room
+    const sheet = () => root.classList.contains('is-sheet');
     panel.addEventListener('mousedown', event => {
-        if (event.target.closest('button')) event.preventDefault();
+        if (event.target.closest('button') && !sheet()) event.preventDefault();
     });
     panel.addEventListener('click', event => {
         const tab = event.target.closest('[data-gs-tab]');
         if (tab) {
             gsSetTab(tab.dataset.gsTab);
-            input.focus();
+            if (sheet()) input.blur();
+            else input.focus();
             return;
         }
         const item = event.target.closest('[data-gs-index]');
