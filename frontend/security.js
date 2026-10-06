@@ -296,72 +296,18 @@ function securityRow(a) {
 
 // On a phone an address opens in a sheet from the bottom, so the list stays where it was
 function renderSecuritySheet(addresses) {
-    let sheet = document.getElementById('security-sheet');
     const a = securityPhone() && securityOpenRow && securityTab === 'overview' && addresses.find(x => x.ip === securityOpenRow);
     if (!a) {
-        if (sheet) sheet.remove();
-        document.body.classList.remove('ui-sec-sheet-on');
+        uiSheetClose('security-sheet');
         return;
     }
-    if (!sheet) {
-        sheet = document.createElement('div');
-        sheet.id = 'security-sheet';
-        sheet.className = 'ui-sec-sheet';
-        document.body.appendChild(sheet);
-    }
     const d = securityDescribe(a);
-    const scroll = sheet.querySelector('.ui-sec-sheet-body');
-    const keep = scroll ? scroll.scrollTop : 0;
-    sheet.innerHTML = `
-        <div class="ui-sec-sheet-back" onclick="securityCloseSheet()"></div>
-        <section class="ui-sec-sheet-panel" role="dialog" aria-label="${escapeHtml(a.ip)}">
-            <span class="ui-sec-sheet-grip" aria-hidden="true"></span>
-            <div class="ui-sec-sheet-head">
-                <div class="ui-sec-top"><b class="ui-mono">${copyableText(a.ip)}</b>${d.tag}</div>
-                <button type="button" class="ui-icon-btn" onclick="securityCloseSheet()" aria-label="Close" title="Close">&times;</button>
-            </div>
-            <div class="ui-sec-sheet-body">
-                <p class="ui-sec-why">${d.why}</p>
-                ${d.acts ? `<div class="ui-sec-acts">${d.acts}</div>` : ''}
-                ${securityDetail(a)}
-            </div>
-        </section>`;
-    const body = sheet.querySelector('.ui-sec-sheet-body');
-    if (body) body.scrollTop = keep;
-    securitySheetSwipe(sheet.querySelector('.ui-sec-sheet-panel'), body);
-    document.body.classList.add('ui-sec-sheet-on');
-}
-
-// Pulling the sheet down closes it: from its head, or from its content once that is
-// scrolled to the top. A short pull springs back.
-function securitySheetSwipe(panel, body) {
-    if (!panel) return;
-    let startY = null, pulled = 0;
-    panel.addEventListener('touchstart', event => {
-        const fromHead = !!event.target.closest('.ui-sec-sheet-head, .ui-sec-sheet-grip');
-        if (!fromHead && body && body.scrollTop > 0) { startY = null; return; }
-        startY = event.touches[0].clientY;
-        pulled = 0;
-        panel.style.transition = 'none';
-    }, { passive: true });
-    panel.addEventListener('touchmove', event => {
-        if (startY === null) return;
-        pulled = Math.max(0, event.touches[0].clientY - startY);
-        panel.style.transform = pulled ? `translateY(${pulled}px)` : '';
-    }, { passive: true });
-    const end = () => {
-        if (startY === null) return;
-        startY = null;
-        panel.style.transition = 'transform .2s ease';
-        if (pulled > Math.min(120, panel.offsetHeight / 4)) {
-            panel.style.transform = 'translateY(100%)';
-            setTimeout(securityCloseSheet, 200);
-        } else {
-            panel.style.transform = '';
-        }
-    };
-    panel.addEventListener('touchend', end);
-    panel.addEventListener('touchcancel', end);
+    uiSheetShow('security-sheet', {
+        label: a.ip,
+        head: `<div class="ui-sec-top"><b class="ui-mono">${copyableText(a.ip)}</b>${d.tag}</div>`,
+        body: `<p class="ui-sec-why">${d.why}</p>${d.acts ? `<div class="ui-sec-acts">${d.acts}</div>` : ''}${securityDetail(a)}`,
+        onClose: securityCloseSheet
+    });
 }
 
 function securityCloseSheet() {
@@ -578,7 +524,7 @@ async function loadSecurityCountryChart(days = securityChartDays) {
     if (securityCountryPicker) renderSecurityOverview();
 }
 
-// A tap outside the country picker closes it; Escape closes it and the sheet
+// A tap outside the country picker closes it, and so does Escape
 document.addEventListener('click', event => {
     if (securityCountryPicker && !event.target.closest('.ui-sec-chost')) {
         securityCountryPicker = false;
@@ -588,7 +534,6 @@ document.addEventListener('click', event => {
 document.addEventListener('keydown', event => {
     if (event.key !== 'Escape') return;
     if (securityCountryPicker) { securityCountryPicker = false; renderSecurityOverview(); }
-    else if (document.getElementById('security-sheet')) securityCloseSheet();
 });
 
 function securityWatchedCountries() {
