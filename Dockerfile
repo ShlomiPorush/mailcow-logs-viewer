@@ -1,4 +1,4 @@
-FROM python:3.11-slim
+FROM python:3.11-slim AS base
 
 WORKDIR /app
 
@@ -44,3 +44,21 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
     CMD curl -f http://localhost:8080/api/health || exit 1
 
 ENTRYPOINT ["./entrypoint.sh"]
+
+# Public demo image (tag `demo`): the same application plus the demo package,
+# which cuts every outbound connection and serves fictional data. Only this
+# stage copies backend/demo, so the regular image never contains it.
+FROM base AS demo
+COPY --chown=appuser:appuser backend/demo/ /app/demo/
+# The asyncio loop matters: uvloop connects in C and would bypass the
+# Python-level network guard in demo/network_guard.py.
+ENV DEMO_MODE=true \
+    APP_MODULE=demo.main:app \
+    UVICORN_LOOP=asyncio \
+    MAILCOW_URL=https://mail.example.com \
+    MAILCOW_API_KEY=demo \
+    MAILCOW_API_KEY_RW=demo \
+    SETTINGS_EDIT_VIA_UI_ENABLED=true
+
+# The regular image. Kept last so a plain `docker build` produces it.
+FROM base AS app
