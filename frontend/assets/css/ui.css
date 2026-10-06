@@ -672,6 +672,9 @@
 .ui-prot-mark { display: inline-grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; font-size: 11px; font-weight: 800;
     color: var(--ui-muted); box-shadow: inset 0 0 0 1.5px currentColor; }
 .ui-prot-item.is-on .ui-prot-mark { color: #fff; background: var(--ui-ok); box-shadow: none; }
+/* Watching only: on, but it notes or alerts instead of banning */
+.ui-prot-item.is-watch { color: var(--ui-ink); }
+.ui-prot-item.is-watch .ui-prot-mark, .ui-dash-sec-prot.is-watch .ui-prot-mark { color: #fff; background: var(--ui-warn); box-shadow: none; }
 .ui-prot-item.is-unknown .ui-prot-mark { color: var(--ui-warn); }
 .ui-sec-two { display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: var(--ui-gap); align-items: start; }
 .ui-sec-side { display: grid; gap: var(--ui-gap); }

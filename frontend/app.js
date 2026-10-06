@@ -1913,15 +1913,17 @@ function renderDashboardSecurity(page = dashboardSecurityPage) {
     const counts = page ? page.all_counts : null;
     const n = key => counts ? counts[key].toLocaleString() : '-';
     const protections = securityProtectionItems();
-    const on = protections.filter(p => p.state === 'on');
+    const on = protections.filter(securityProtectionOn);
+    // The line's own mark: a tick when anything acts, an eye when everything on only watches
+    const lineState = on.some(p => p.state === 'on') ? 'on' : on.length ? 'watch' : 'off';
     box.innerHTML = `
         <div class="ui-stats ui-dash-sec-stats">
             <button type="button" class="ui-stat" onclick="openSecurityList('review')"><span>To review</span><b>${n('review')}</b><small>Not banned</small></button>
             <button type="button" class="ui-stat" onclick="openSecurityList('banned')"><span>Banned now</span><b${counts && counts.banned ? ' class="ui-text-fail"' : ''}>${n('banned')}</b><small>By Fail2ban and the rules</small></button>
         </div>
-        <button type="button" class="ui-dash-sec-prot${on.length ? ' is-on' : ''}" aria-expanded="${dashboardProtectionsOpen}" aria-controls="dashboard-protections"
+        <button type="button" class="ui-dash-sec-prot is-${lineState}" aria-expanded="${dashboardProtectionsOpen}" aria-controls="dashboard-protections"
             onclick="dashboardProtectionsOpen = !dashboardProtectionsOpen; renderDashboardSecurity()">
-            <span class="ui-prot-mark" aria-hidden="true">${on.length ? '✓' : '✕'}</span><b>Protection ${on.length} of ${protections.length} on</b><span class="ui-dash-sec-chev" aria-hidden="true"></span>
+            <span class="ui-prot-mark" aria-hidden="true">${securityProtectionMark(lineState)}</span><b>Protection ${on.length} of ${protections.length} on</b><span class="ui-dash-sec-chev" aria-hidden="true"></span>
             ${on.length && !dashboardProtectionsOpen ? `<span class="ui-dash-sec-on">${on.map(p => escapeHtml(p.name)).join(' · ')}</span>` : ''}
         </button>
         ${dashboardProtectionsOpen ? `<div id="dashboard-protections" class="ui-dash-sec-list">${protections.map(p => securityProtectionButton(p, 'openSecurityProtection')).join('')}</div>` : ''}`;
