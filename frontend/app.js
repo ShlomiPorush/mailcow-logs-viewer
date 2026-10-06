@@ -3277,8 +3277,24 @@ async function initQuarantineRules() {
     
     if (mailcowRwConfigured) {
         section.classList.remove('hidden');
+        const tabs = document.getElementById('quarantine-tabs');
+        if (tabs) tabs.classList.remove('hidden');
+        const navItem = document.getElementById('tab-quarantine');
+        if (navItem) navItem.classList.add('has-sub');
         loadQuarantineRules();
     }
+}
+
+// Quarantine tabs: the held messages, and the Auto-Rules that handle them
+let quarantineTab = 'messages';
+function quarantineShowTab(tab) {
+    quarantineTab = tab;
+    ['messages', 'rules'].forEach(name => {
+        const btn = document.getElementById(`quarantine-tab-btn-${name}`);
+        if (btn) { btn.classList.toggle('active', name === tab); btn.setAttribute('aria-selected', name === tab); }
+        const panel = document.getElementById(`quarantine-tab-${name}`);
+        if (panel) panel.classList.toggle('hidden', name !== tab);
+    });
 }
 
 async function loadQuarantineRules() {
@@ -3294,6 +3310,8 @@ async function loadQuarantineRules() {
         const countEl = document.getElementById('quarantine-rules-count');
         const activeCount = data.data.filter(r => r.enabled).length;
         if (countEl) countEl.textContent = activeCount > 0 ? `(${activeCount} active)` : '';
+        const tabCount = document.getElementById('quarantine-tab-n-rules');
+        if (tabCount) { tabCount.textContent = activeCount || ''; tabCount.classList.toggle('hidden', !activeCount); }
         
         if (!data.data || data.data.length === 0) {
             container.innerHTML = '<p class="ui-empty">No rules configured. Click "Add Rule" to create one.</p>';
@@ -5219,6 +5237,7 @@ function loadMailboxStatsPage(page) {
 // =============================================================================
 
 const NAV_SUBPAGE_TABS = {
+    quarantine: '#quarantine-tabs:not(.hidden)',
     netfilter: '.ui-se-tabs',
     'spam-filter': '#content-spam-filter .ui-page-tabs',
     status: '.ui-st-tabs',
@@ -5287,7 +5306,7 @@ function initNavFlyouts() {
     Object.keys(NAV_SUBPAGE_TABS).forEach(page => {
         const item = document.getElementById(`tab-${page}`);
         if (!item) return;
-        item.classList.add('has-sub');
+        item.classList.toggle('has-sub', navSubpageTabs(page).length > 1);
         item.setAttribute('aria-haspopup', 'menu');
         item.addEventListener('mouseenter', () => showNavFlyout(item, page));
         item.addEventListener('mouseleave', () => { navFlyoutTimer = setTimeout(hideNavFlyout, 150); });

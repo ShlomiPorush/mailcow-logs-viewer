@@ -91,8 +91,9 @@ function renderDomains(container, data) {
     }
 
     container.innerHTML = `
-        <div class="ui-list-head ui-domain-tools">
-            <label class="ui-search">
+        <section class="ui-panel ui-filters ui-domain-tools">
+            <div class="ui-filters-row">
+            <label class="ui-search ui-ms-search">
                 <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
                 <input type="text" id="domain-search-input" placeholder="Search domains..." aria-label="Search domains" oninput="filterDomains()">
             </label>
@@ -101,7 +102,8 @@ function renderDomains(container, data) {
                 <input type="checkbox" id="filter-issues-only" class="ui-check" onchange="filterDomains()">
                 Show only domains with issues
             </label>
-        </div>
+            </div>
+        </section>
         <div id="domains-list" class="ui-table ui-stack ui-domain-table">
             ${renderDomainRows(domains)}
         </div>

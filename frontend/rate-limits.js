@@ -353,7 +353,7 @@ function renderRateLimitSendersTable(senders) {
         return `
             <tr data-rl-sender="${escapeHtml((group.user || '').toLowerCase())}" class="ui-dtable-link"
                 onclick="selectRateLimitSender('${escapeJsArg(group.user)}')">
-                <td class="ui-mono ui-dtable-wrap">${escapeHtml(group.user)}</td>
+                <td class="ui-dtable-wrap">${escapeHtml(group.user)}</td>
                 <td>${uiTag(group.events, 'fail')}</td>
                 <td class="ui-nowrap" title="${escapeHtml(formatTime(group.last_seen))}">${formatAgo(group.last_seen)}</td>
                 <td class="hide-mobile">${renderRateLimitBadge(group.current_limit)}</td>
@@ -442,7 +442,7 @@ function renderRateLimitSenderDetail(group) {
         <div class="ui-rl-sender">
             <div>
                 <button type="button" onclick="backToRateLimitSenders()" class="ui-btn ui-btn-sm">← All senders</button>
-                <p class="ui-mono ui-dtable-wrap"><b>${escapeHtml(group.user)}</b></p>
+                <p class="ui-dtable-wrap"><b>${escapeHtml(group.user)}</b></p>
                 <p class="ui-muted">Last hit ${escapeHtml(formatTime(group.last_seen))}</p>
                 <div class="ui-chip-row">
                     ${renderRateLimitBadge(group.current_limit)}
@@ -557,7 +557,7 @@ function renderRateLimitEventRow(event) {
     return `
         <tr>
             <td class="ui-nowrap"><span class="ui-phone-only">${escapeHtml(rateLimitShortTime(event.time))}</span><span class="ui-phone-hide">${escapeHtml(formatTime(event.time))}</span></td>
-            <td class="ui-mono ui-dtable-wrap">${escapeHtml(event.rcpt)}</td>
+            <td class="ui-dtable-wrap">${escapeHtml(event.rcpt)}</td>
             <td>${shortened ? `<span dir="auto">${escapeHtml(shortened)}</span>` : '<span class="ui-muted">No subject</span>'}</td>
             <td class="ui-mono ui-muted ui-nowrap hide-mobile">${escapeHtml(event.qid)}</td>
         </tr>
@@ -961,7 +961,7 @@ function renderRateLimitConfigRow(kind, name, value, frame, canWrite) {
     const row = `
         <tr data-rl-name="${escapeHtml(name.toLowerCase())}" data-rl-kind="${kind}">
             <td class="hide-mobile">${uiTag(kind === 'domain' ? 'Domain' : 'Mailbox', '')}</td>
-            <td class="ui-mono ui-dtable-wrap">${escapeHtml(name)}</td>
+            <td class="ui-dtable-wrap">${escapeHtml(name)}</td>
             <td>${renderRateLimitBadge(value ? { value: value, frame: frame } : null)}</td>
             <td class="ui-td-end ui-nowrap">${action}</td>
         </tr>
