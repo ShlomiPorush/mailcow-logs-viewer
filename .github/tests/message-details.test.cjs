@@ -67,7 +67,7 @@ test('message entry point and all four tabs preserve content and actions', async
     h.context.closeMessageModal();
     assert.equal(h.element('message-modal').classList.contains('hidden'), true);
     assert.equal(h.document.body.style.overflow, '');
-    assert.equal(h.element('modal-tab-netfilter').innerHTML, '<span class="text-sm font-medium">Security</span>');
+    assert.equal(h.element('modal-tab-netfilter').innerHTML, '<span>Security</span>');
 });
 
 test('right-to-left mail content keeps its own direction', async () => {
