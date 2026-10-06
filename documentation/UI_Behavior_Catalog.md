@@ -414,11 +414,11 @@ Native `title` tooltips. Dynamic ones show the expression that builds the text.
 | Settings | "Close" | `frontend/notifications.js:152` (renderNotificationChannelModal) |
 | Settings | "Set by an environment variable, change it there" | `frontend/settings.js:599` (renderSettingsEditField) |
 | Settings | "Differs from the default" | `frontend/settings.js:644` (renderSettingsEditField) |
-| Settings | "Differs from the default" | `frontend/settings.js:659` (renderSettingsEditField) |
-| Settings | "Click to view changelog" | `frontend/settings.js:861` (renderSettings) |
-| Settings | dynamic: `${escapeHtml(domain)}` | `frontend/settings.js:891` (renderSettings) |
-| Settings | "Add a MaxMind Account ID and License Key first" | `frontend/settings.js:1909` (maxmindValidateButton) |
-| Settings | "Close" | `frontend/settings.js:2001` (showConnectionTestModal) |
+| Settings | "Differs from the default" | `frontend/settings.js:661` (renderSettingsEditField) |
+| Settings | "Click to view changelog" | `frontend/settings.js:863` (renderSettings) |
+| Settings | dynamic: `${escapeHtml(domain)}` | `frontend/settings.js:893` (renderSettings) |
+| Settings | "Add a MaxMind Account ID and License Key first" | `frontend/settings.js:1911` (maxmindValidateButton) |
+| Settings | "Close" | `frontend/settings.js:2003` (showConnectionTestModal) |
 | Shared | dynamic: `${escapeHtml(title)}` | `frontend/utils.js:164` (uiCorrelationTag) |
 | Shared | "Close" | `frontend/utils.js:575` (showToast) |
 | Shared | "The feature this job belongs to is turned off in Settings" | `frontend/utils.js:661` (renderJobCard) |
@@ -564,19 +564,19 @@ Transient notifications from `showToast(message, type)` (utils.js). Type default
 | Settings | "Could not delete destination" [error] | `frontend/notifications.js:256` (deleteNotificationChannel) |
 | Settings | "Destination deleted" [success] | `frontend/notifications.js:257` (deleteNotificationChannel) |
 | Settings | "Could not delete destination" [error] | `frontend/notifications.js:260` (deleteNotificationChannel) |
-| Settings | "Cannot enable Basic Auth without a password. Please set a password first." [error] | `frontend/settings.js:1459` (renderSettings) |
-| Settings | "Basic Auth enabled successfully! You will need to log in on your next visit." [success] | `frontend/settings.js:1504` (renderSettings) |
-| Settings | dynamic: ``Purging data for ${purgeableNewlyDisabled.length} disabled feature(s)...`` [info] | `frontend/settings.js:1521` (renderSettings) |
-| Settings | "Features updated - reloading..." [success] | `frontend/settings.js:1535` (renderSettings) |
-| Settings | dynamic: `'Failed to save: ' + (err.message \|\| err)` [error] | `frontend/settings.js:1543` (renderSettings) |
-| Settings | "MaxMind license is valid" [success] | `frontend/settings.js:1805` (validateMaxMindLicense) |
-| Settings | dynamic: `'MaxMind license validation failed: ' + result.error` [error] | `frontend/settings.js:1807` (validateMaxMindLicense) |
-| Settings | "Failed to validate MaxMind license" [error] | `frontend/settings.js:1816` (validateMaxMindLicense) |
-| Settings | "GeoIP database re-download started…" [info] | `frontend/settings.js:1841` (repairGeoIPDatabase) |
-| Settings | "GeoIP databases repaired successfully" [success] | `frontend/settings.js:1864` (repairGeoIPDatabase) |
-| Settings | "GeoIP databases re-downloaded but validation still failed" [error] | `frontend/settings.js:1866` (repairGeoIPDatabase) |
-| Settings | "GeoIP repair timed out - check Status page for progress" [warning] | `frontend/settings.js:1879` (repairGeoIPDatabase) |
-| Settings | dynamic: `'Failed to repair GeoIP databases: ' + error.message` [error] | `frontend/settings.js:1890` (repairGeoIPDatabase) |
+| Settings | "Cannot enable Basic Auth without a password. Please set a password first." [error] | `frontend/settings.js:1461` (renderSettings) |
+| Settings | "Basic Auth enabled successfully! You will need to log in on your next visit." [success] | `frontend/settings.js:1506` (renderSettings) |
+| Settings | dynamic: ``Purging data for ${purgeableNewlyDisabled.length} disabled feature(s)...`` [info] | `frontend/settings.js:1523` (renderSettings) |
+| Settings | "Features updated - reloading..." [success] | `frontend/settings.js:1537` (renderSettings) |
+| Settings | dynamic: `'Failed to save: ' + (err.message \|\| err)` [error] | `frontend/settings.js:1545` (renderSettings) |
+| Settings | "MaxMind license is valid" [success] | `frontend/settings.js:1807` (validateMaxMindLicense) |
+| Settings | dynamic: `'MaxMind license validation failed: ' + result.error` [error] | `frontend/settings.js:1809` (validateMaxMindLicense) |
+| Settings | "Failed to validate MaxMind license" [error] | `frontend/settings.js:1818` (validateMaxMindLicense) |
+| Settings | "GeoIP database re-download started…" [info] | `frontend/settings.js:1843` (repairGeoIPDatabase) |
+| Settings | "GeoIP databases repaired successfully" [success] | `frontend/settings.js:1866` (repairGeoIPDatabase) |
+| Settings | "GeoIP databases re-downloaded but validation still failed" [error] | `frontend/settings.js:1868` (repairGeoIPDatabase) |
+| Settings | "GeoIP repair timed out - check Status page for progress" [warning] | `frontend/settings.js:1881` (repairGeoIPDatabase) |
+| Settings | dynamic: `'Failed to repair GeoIP databases: ' + error.message` [error] | `frontend/settings.js:1892` (repairGeoIPDatabase) |
 | Shared | "Download started." [success] | `frontend/export.js:34` (exportCSV) |
 | Shared | dynamic: `error.message \|\| 'Could not export CSV. Please try again.'` [error] | `frontend/export.js:37` (exportCSV) |
 | Shared | dynamic: `'Copied: ' + text` [success] | `frontend/utils.js:525` (copyToClipboard) |
@@ -621,8 +621,8 @@ Every action that asks before it acts. Losing one turns a guarded action into a 
 | Mailbox stats | showConfirmModal: dynamic: `{ title: value === 0 ? 'Remove rate limits' : 'Apply rate limit', message: va...` | `frontend/rate-limits.js:876` (applyRateLimitBulk) |
 | Mailbox stats | showConfirmModal: dynamic: `{ title: 'Remove rate limit', message: `Remove the rate limit on ${name}? It ...` | `frontend/rate-limits.js:1049` (removeRateLimit) |
 | Settings | showConfirmModal: dynamic: `{ title: 'Delete destination', message: `Delete "${channel ? channel.name : '...` | `frontend/notifications.js:247` (deleteNotificationChannel) |
-| Settings | showFeatureDisableConfirmModal: dynamic: `purgeableNewlyDisabled` | `frontend/settings.js:1489` (renderSettings) |
-| Settings | showConfirmModal: dynamic: `{ title: 'Import from ENV', message: 'Import current configuration from ENV i...` | `frontend/settings.js:1549` (renderSettings) |
+| Settings | showFeatureDisableConfirmModal: dynamic: `purgeableNewlyDisabled` | `frontend/settings.js:1491` (renderSettings) |
+| Settings | showConfirmModal: dynamic: `{ title: 'Import from ENV', message: 'Import current configuration from ENV i...` | `frontend/settings.js:1551` (renderSettings) |
 | Shared | confirm: dynamic: `` | `frontend/utils.js:595` |
 | app.js (mixed) | showConfirmModal: dynamic: `{ title: 'Allow IP', message: `Add ${ipWithMask} to the Fail2Ban allowlist?\\...` | `frontend/app.js:1317` (allowIP) |
 
@@ -645,8 +645,8 @@ Places that render Markdown (help pages, changelogs) through `renderMarkdown` (m
 
 | Page | What | Code |
 |---|---|---|
-| Settings | renders `versionInfo.changelog` | `frontend/settings.js:819` (updateVersionInfoUI) |
-| Settings | renders `changelogText` | `frontend/settings.js:1171` (renderSettings) |
+| Settings | renders `versionInfo.changelog` | `frontend/settings.js:821` (updateVersionInfoUI) |
+| Settings | renders `changelogText` | `frontend/settings.js:1173` (renderSettings) |
 | Modal: changelog-modal | renders `markdownContent` | `frontend/app.js:666` (showMarkdownModal) |
 | Modal: changelog-modal | renders `changelog` | `frontend/app.js:4839` (showChangelogModal) |
 
@@ -670,17 +670,17 @@ Buttons, tabs and fields whose behavior is attached with `addEventListener` inst
 | Settings | click on `cancelBtn` | `frontend/settings.js:160` (showFeatureDisableConfirmModal) |
 | Settings | click on `confirmBtn` | `frontend/settings.js:161` (showFeatureDisableConfirmModal) |
 | Settings | click on `overlay` | `frontend/settings.js:168` (showFeatureDisableConfirmModal) |
-| Settings | click on `btn` | `frontend/settings.js:1307` (renderSettings) |
-| Settings | change on `tabSelect` | `frontend/settings.js:1323` (renderSettings) |
-| Settings | click on `btn` | `frontend/settings.js:1330` (renderSettings) |
-| Settings | change on `cb` | `frontend/settings.js:1356` (renderSettings) |
-| Settings | input on `form` | `frontend/settings.js:1387` (renderSettings) |
-| Settings | change on `form` | `frontend/settings.js:1388` (renderSettings) |
-| Settings | click on `btn` | `frontend/settings.js:1390` (renderSettings) |
-| Settings | click on `btn` | `frontend/settings.js:1396` (renderSettings) |
-| Settings | input on `search` | `frontend/settings.js:1398` (renderSettings) |
-| Settings | click on `closeBtn` | `frontend/settings.js:1632` (showGeoIPSetupModal) |
-| Settings | click on `modal` | `frontend/settings.js:2017` (showConnectionTestModal) |
+| Settings | click on `btn` | `frontend/settings.js:1309` (renderSettings) |
+| Settings | change on `tabSelect` | `frontend/settings.js:1325` (renderSettings) |
+| Settings | click on `btn` | `frontend/settings.js:1332` (renderSettings) |
+| Settings | change on `cb` | `frontend/settings.js:1358` (renderSettings) |
+| Settings | input on `form` | `frontend/settings.js:1389` (renderSettings) |
+| Settings | change on `form` | `frontend/settings.js:1390` (renderSettings) |
+| Settings | click on `btn` | `frontend/settings.js:1392` (renderSettings) |
+| Settings | click on `btn` | `frontend/settings.js:1398` (renderSettings) |
+| Settings | input on `search` | `frontend/settings.js:1400` (renderSettings) |
+| Settings | click on `closeBtn` | `frontend/settings.js:1634` (showGeoIPSetupModal) |
+| Settings | click on `modal` | `frontend/settings.js:2019` (showConnectionTestModal) |
 | Shared | click on `cancelBtn` | `frontend/utils.js:643` (showConfirmModal) |
 | Shared | click on `okBtn` | `frontend/utils.js:644` (showConfirmModal) |
 | Shared | click on `document` | `frontend/utils.js:844` |
@@ -782,9 +782,9 @@ Text shown when a list or panel has nothing to show.
 | Logs | "No log entries found" | `frontend/logs-viewer.js:476` (renderLogEntries) |
 | Settings | "No logs available" | `frontend/notifications.js:269` (testNotificationChannel) |
 | Settings | "No logs available" | `frontend/notifications.js:286` (testNotificationChannelDraft) |
-| Settings | "No changelog available" | `frontend/settings.js:1145` (renderSettings) |
-| Settings | "No logs available" | `frontend/settings.js:1954` (testSmtpConnection) |
-| Settings | "No logs available" | `frontend/settings.js:1980` (testImapConnection) |
+| Settings | "No changelog available" | `frontend/settings.js:1147` (renderSettings) |
+| Settings | "No logs available" | `frontend/settings.js:1956` (testSmtpConnection) |
+| Settings | "No logs available" | `frontend/settings.js:1982` (testImapConnection) |
 | Modal: changelog-modal | "No changelog available" | `frontend/app.js:4841` (showChangelogModal) |
 | Modal: container-logs-modal | "No logs available" | `frontend/app.js:5117` (fetchContainerLogs) |
 
@@ -804,10 +804,10 @@ Functions that render a spinner or "Loading..." while data is fetched.
 | Status | 2 loading indicator(s) | `frontend/app.js:4312` (checkBlacklists) |
 | Status | 1 loading indicator(s) | `frontend/app.js:4786` (triggerBackgroundJob) |
 | Logs | 1 loading indicator(s) | `frontend/logs-viewer.js:1091` (loadDateRangeLogs) |
-| Settings | 3 loading indicator(s) | `frontend/settings.js:1188` (renderSettings) |
-| Settings | 2 loading indicator(s) | `frontend/settings.js:1589` (showGeoIPSetupModal) |
-| Settings | 1 loading indicator(s) | `frontend/settings.js:1779` (validateMaxMindLicense) |
-| Settings | 1 loading indicator(s) | `frontend/settings.js:1825` (repairGeoIPDatabase) |
+| Settings | 3 loading indicator(s) | `frontend/settings.js:1190` (renderSettings) |
+| Settings | 2 loading indicator(s) | `frontend/settings.js:1591` (showGeoIPSetupModal) |
+| Settings | 1 loading indicator(s) | `frontend/settings.js:1781` (validateMaxMindLicense) |
+| Settings | 1 loading indicator(s) | `frontend/settings.js:1827` (repairGeoIPDatabase) |
 
 ### Persisted preferences
 
@@ -831,7 +831,7 @@ Background refreshes and polling.
 | Shell | every 5 * 60 * 1000 ms | `frontend/app.js:479` (loadAppInfo) |
 | Shell | every AUTO_REFRESH_INTERVAL ms | `frontend/app.js:767` (startAutoRefresh) |
 | Status | every 1000 ms | `frontend/app.js:4347` (checkBlacklists) |
-| Settings | every 2000 ms | `frontend/settings.js:1710` (showGeoIPSetupModal) |
+| Settings | every 2000 ms | `frontend/settings.js:1712` (showGeoIPSetupModal) |
 | Modal: container-logs-modal | every 2000 ms | `frontend/app.js:5153` (loadContainerLogs) |
 
 ### Address bar and deep links

@@ -1437,7 +1437,12 @@ button.ui-st-card:hover { outline: 1px solid var(--ui-line); }
 /* On and off settings: the explanation left, a switch right */
 .ui-set-bool { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 6px 10px; padding: 14px var(--ui-pad-x); border-top: 1px solid var(--ui-line); }
 .ui-set-bool-main { display: flex; flex-direction: row-reverse; align-items: flex-start; justify-content: space-between; gap: 16px; flex: 1 1 100%; min-width: 0; }
-.ui-set-bool-label { font-weight: 600; cursor: pointer; }
+.ui-set-bool-label { font-weight: 600; }
+/* The whole row is the label, like a Features row */
+.ui-set-bool-main { cursor: pointer; }
+.ui-set-bool.is-locked .ui-set-bool-main { cursor: not-allowed; }
+.ui-set-bool-text { display: grid; min-width: 0; }
+.ui-set-bool-text > .ui-set-desc { display: block; }
 .ui-set-bool .ui-set-clear { margin-inline-start: 0; }
 .ui-set-bool.is-locked .ui-check, .ui-feature.is-locked .ui-check { opacity: .6; }
 .ui-set-bool .ui-check, .ui-feature .ui-check { appearance: none; -webkit-appearance: none; position: relative; flex: none; width: 38px; height: 22px; margin: 0;
