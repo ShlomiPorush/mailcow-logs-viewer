@@ -41,6 +41,12 @@ def get_dashboard_stats(db: Session = Depends(get_db)):
         messages_30d = db.query(MessageCorrelation).filter(
             MessageCorrelation.first_seen >= month_ago
         ).count()
+
+        # The same figures as the Messages page counts them: a message to three
+        # recipients is one message (and three deliveries above)
+        from .messages import _count_messages, _filtered_messages_query
+        unique_24h = _count_messages(_filtered_messages_query(db, start_date=day_ago))
+        unique_7d = _count_messages(_filtered_messages_query(db, start_date=week_ago))
         
         # Blocked messages (bounced, rejected, spam) - from MessageCorrelation
         blocked_24h = db.query(MessageCorrelation).filter(
@@ -113,7 +119,9 @@ def get_dashboard_stats(db: Session = Depends(get_db)):
             "messages": {
                 "24h": messages_24h,
                 "7d": messages_7d,
-                "30d": messages_30d
+                "30d": messages_30d,
+                "unique_24h": unique_24h,
+                "unique_7d": unique_7d
             },
             "blocked": {
                 "24h": blocked_24h,
@@ -176,6 +184,11 @@ def get_timeline_stats(
         ).all()
 
         corr_hour = func.date_trunc('hour', MessageCorrelation.first_seen).label('hour')
+        message_key = func.coalesce(MessageCorrelation.message_id, MessageCorrelation.correlation_key)
+        # Messages as the Messages page counts them in that hour (one per message), beside the deliveries
+        unique = dict(db.query(corr_hour, func.count(func.distinct(message_key))).filter(
+            MessageCorrelation.first_seen >= cutoff, MessageCorrelation.correlation_key != "BLACKLISTED"
+        ).group_by('hour').all())
         messages = db.query(
             corr_hour,
             func.count(MessageCorrelation.id),
@@ -207,6 +220,7 @@ def get_timeline_stats(
                     "hour": format_datetime_utc(at),
                     **values,
                     "messages": values.get("messages", 0),
+                    "unique_messages": unique.get(at, 0),
                     "blocked": values.get("blocked", 0),
                     "deferred": values.get("deferred", 0),
                     "auth_failures": auth_failures.get(at, 0),

@@ -1837,32 +1837,61 @@ function renderMailFlowStats() {
     const set = (id, text) => { const el = document.getElementById(id); if (el) el.textContent = text; };
     const n = v => (v || 0).toLocaleString();
     if (slot) {
-        set('stat-messages-24h', n(slot.messages));
+        set('stat-messages-24h', n(slot.unique_messages));
         set('stat-blocked-24h', n(slot.blocked));
         set('stat-deferred-24h', n(slot.deferred));
         set('stat-auth-failures-24h', n(slot.auth_failures));
-        set('stat-messages-note', `24h: ${n(d.messages['24h'])}`);
+        set('stat-messages-note', `${n(slot.messages)} deliveries, 24h: ${n(d.messages.unique_24h)}`);
         set('stat-blocked-note', `24h: ${n(d.blocked['24h'])}`);
         set('stat-deferred-note', `24h: ${n(d.deferred['24h'])}`);
         set('stat-auth-failures-note', `24h: ${n(d.auth_failures['24h'])}`);
         set('dashboard-flow-title', `Mail flow, ${mailFlowHour(slot.t)} to ${mailFlowHour(slot.t + 3600000)}`);
     } else {
-        set('stat-messages-24h', n(d.messages['24h']));
+        set('stat-messages-24h', n(d.messages.unique_24h ?? d.messages['24h']));
         set('stat-blocked-24h', n(d.blocked['24h']));
         set('stat-deferred-24h', n(d.deferred['24h']));
         set('stat-auth-failures-24h', n(d.auth_failures['24h']));
-        set('stat-messages-note', `7d: ${n(d.messages['7d'])}`);
+        set('stat-messages-note', `${n(d.messages['24h'])} deliveries, 7d: ${n(d.messages.unique_7d ?? d.messages['7d'])}`);
         set('stat-blocked-note', `7d: ${n(d.blocked['7d'])} (${d.blocked.percentage_24h}%)`);
         set('stat-deferred-note', `7d: ${n(d.deferred['7d'])}`);
         set('stat-auth-failures-note', `7d: ${n(d.auth_failures['7d'])}`);
         set('dashboard-flow-title', 'Mail flow, last 24 hours');
     }
     document.getElementById('dashboard-flow-reset')?.classList.toggle('hidden', !slot);
+    document.getElementById('dashboard-flow-view')?.classList.toggle('hidden', !slot);
     const bars = document.querySelector('#dashboard-flow-chart .ui-flow-bars');
     if (bars) {
         bars.classList.toggle('has-pick', !!slot);
         bars.querySelectorAll('.ui-flow-bar').forEach(b => b.setAttribute('aria-pressed', String(!!slot && Number(b.dataset.t) === slot.t)));
     }
+}
+
+// The picked hour's messages on the Messages page: its time filter set to that hour, the other filters cleared.
+// Messages counts by the same first-seen time as the chart's Messages figure, so the two agree.
+function openMailFlowHourMessages() {
+    const slot = mailFlowSlots.find(s => s.t === mailFlowPicked);
+    if (!slot) return;
+    const start = new Date(slot.t).toISOString();
+    const end = new Date(slot.t + 3600000 - 1).toISOString();
+    ['search', 'sender', 'recipient', 'user', 'ip', 'direction', 'status'].forEach(key => {
+        const el = document.getElementById(`messages-filter-${key}`);
+        if (el) el.value = '';
+    });
+    document.getElementById('messages-date-range').value = 'custom';
+    document.getElementById('messages-start-date').value = start;
+    document.getElementById('messages-end-date').value = end;
+    // The custom range picker shows the day the hour is on
+    const day = new Intl.DateTimeFormat('en-CA', { year: 'numeric', month: '2-digit', day: '2-digit',
+        timeZone: appTimezone && appTimezone !== 'UTC' ? appTimezone : undefined }).format(new Date(slot.t));
+    document.getElementById('messages-date-range-start').value = day;
+    document.getElementById('messages-date-range-end').value = day;
+    const dayLabel = new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric',
+        timeZone: appTimezone && appTimezone !== 'UTC' ? appTimezone : undefined }).format(new Date(slot.t));
+    document.getElementById('messages-date-range-label').textContent = `${dayLabel}, ${mailFlowHour(slot.t)} to ${mailFlowHour(slot.t + 3600000)}`;
+    setMessagesDatePresetActive(null);
+    currentFilters.messages = { start_date: start, end_date: end };
+    currentPage.messages = 1;
+    navigateTo('messages');
 }
 
 // Hourly messages over the last 24 hours, clean and spam (Rspamd), as bars over a time axis
@@ -1883,7 +1912,7 @@ async function loadMailFlowChart() {
     for (let i = 23; i >= 0; i--) {
         const t = now - i * 3600 * 1000;
         const r = byHour.get(t) || {};
-        slots.push({ t, clean: r.clean || 0, spam: r.spam || 0, messages: r.messages || 0, blocked: r.blocked || 0,
+        slots.push({ t, clean: r.clean || 0, spam: r.spam || 0, messages: r.messages || 0, unique_messages: r.unique_messages || 0, blocked: r.blocked || 0,
             deferred: r.deferred || 0, auth_failures: r.auth_failures || 0 });
     }
     mailFlowSlots = slots;
