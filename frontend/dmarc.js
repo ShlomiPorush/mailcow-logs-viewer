@@ -18,8 +18,34 @@ let dmarcState = {
     chartInstance: null,
     // Breadcrumb tracking: { label: string, action: function or null }
     breadcrumb: [],
-    detailType: null // 'report', 'source', 'tls'
+    detailType: null, // 'report', 'source', 'tls'
+    tab: 'dmarc' // the page tab: 'dmarc' or 'tls'
 };
+
+const DMARC_PAGE_SUBTITLES = {
+    dmarc: "What receivers report about mail sent in your domains' name",
+    tls: 'Whether other mail servers reached your domains over an encrypted connection, as they report it'
+};
+
+// The DMARC and TLS tabs of the page: mark the tab, nothing else
+function dmarcShowPageTab(tab) {
+    dmarcState.tab = tab;
+    ['dmarc', 'tls'].forEach(name => {
+        const btn = document.getElementById(`dmarc-tab-btn-${name}`);
+        if (btn) {
+            btn.classList.toggle('active', name === tab);
+            btn.setAttribute('aria-selected', name === tab ? 'true' : 'false');
+        }
+    });
+    const subtitle = document.getElementById('dmarc-subtitle');
+    if (subtitle) subtitle.textContent = DMARC_PAGE_SUBTITLES[tab];
+}
+
+// A tab click: its own address, /dmarc or /dmarc/tls
+function dmarcOpenTab(tab) {
+    dmarcState.tab = tab;
+    navigateTo('dmarc', tab === 'tls' ? { tab: 'tls' } : {});
+}
 
 // Pass rates: green from 95%, amber from 80%, red below
 function dmarcTone(pct) {
@@ -50,7 +76,8 @@ function dmarcFlag(countryCode, countryName, size = '24x18') {
 }
 
 function dmarcShowView(view) {
-    ['dmarc-domains-view', 'dmarc-overview-view', 'dmarc-report-details-view', 'dmarc-source-details-view'].forEach(id => {
+    ['dmarc-domains-view', 'dmarc-overview-view', 'dmarc-report-details-view', 'dmarc-source-details-view',
+        'dmarc-tls-domains-view', 'dmarc-tls-domain-view'].forEach(id => {
         document.getElementById(id).classList.toggle('hidden', id !== view);
     });
 }
@@ -68,7 +95,9 @@ function updateDmarcBreadcrumb() {
 
     container.classList.remove('hidden');
     container.innerHTML = `
-        <button type="button" class="ui-crumb" onclick="navigateTo('dmarc')">DMARC &amp; TLS</button>
+        ${dmarcState.tab === 'tls'
+            ? `<button type="button" class="ui-crumb" onclick="dmarcOpenTab('tls')">TLS</button>`
+            : `<button type="button" class="ui-crumb" onclick="dmarcOpenTab('dmarc')">DMARC</button>`}
         ${dmarcState.breadcrumb.map((item, idx) => {
         const isLast = idx === dmarcState.breadcrumb.length - 1;
         const separator = '<span class="ui-crumb-sep" aria-hidden="true">/</span>';
@@ -105,10 +134,14 @@ function setDmarcBreadcrumb(type, data = {}) {
                 { label: data.ip, action: null }
             ];
             break;
+        case 'tlsDomain':
+            dmarcState.breadcrumb = [
+                { label: data.domain, action: null }
+            ];
+            break;
         case 'tlsDetails':
             dmarcState.breadcrumb = [
-                { label: data.domain, action: `loadDomainOverview('${escapeJsArg(data.domain)}')` },
-                { label: 'TLS Reports', action: `loadDomainOverview('${escapeJsArg(data.domain)}'); setTimeout(() => dmarcSwitchSubTab('tls'), 100)` },
+                { label: data.domain, action: `loadTlsDomain('${escapeJsArg(data.domain)}')` },
                 { label: data.date, action: null }
             ];
             break;
@@ -175,6 +208,22 @@ async function loadDmarc() {
  */
 async function handleDmarcRoute(params = {}) {
     console.log('handleDmarcRoute called with:', params);
+
+    // An address from before TLS had its own tab (/dmarc/example.com/tls) opens it there
+    if (params.domain && params.type === 'tls') {
+        params = { tab: 'tls', domain: params.domain, id: params.id };
+        const path = buildPath('dmarc', params);
+        history.replaceState({ route: 'dmarc', params }, '', path);
+    }
+
+    dmarcShowPageTab(params.tab === 'tls' ? 'tls' : 'dmarc');
+    if (params.tab === 'tls') {
+        if (!dmarcConfiguration) loadDmarcSettings().then(updateDmarcControls);
+        loadDmarcImapStatus().then(updateDmarcControls);
+        if (params.domain) await loadTlsDomain(params.domain, params.id || null, false);
+        else await loadTlsDomains();
+        return;
+    }
 
     // If no domain specified, load domains list
     if (!params.domain) {
@@ -288,7 +337,9 @@ async function loadDmarcDomains() {
         if (!response.ok) throw new Error('Failed to load domains');
 
         const data = await response.json();
-        const domains = data.domains || [];
+        const allDomains = data.domains || [];
+        // TLS reports have their own tab
+        const domains = allDomains.filter(d => d.has_dmarc !== false);
 
         // Insights load independently - never block the domains table on them
         loadDmarcInsights();
@@ -305,7 +356,7 @@ async function loadDmarcDomains() {
         const mainStatsContainer = document.getElementById('dmarc-main-stats-container');
         if (mainStatsContainer) {
             mainStatsContainer.innerHTML = dmarcKpis([
-                [data.total || 0, 'Total Domains'],
+                [domains.length, 'Total Domains'],
                 [totalMessages.toLocaleString(), 'Total Messages'],
                 [`${overallPassPct}%`, 'DMARC Pass', totalMessages ? dmarcTone(overallPassPct) : ''],
                 [totalUniqueIps.toLocaleString(), 'Unique IPs'],
@@ -313,38 +364,28 @@ async function loadDmarcDomains() {
         }
 
         const domainsList = document.getElementById('dmarc-domains-list');
+        dmarcUpdateManageButton(allDomains);
 
         if (domains.length === 0) {
-            domainsList.innerHTML = '<p class="ui-empty">No domains found in the reporting period.</p>';
+            domainsList.innerHTML = '<p class="ui-empty">No DMARC reports yet.</p>';
             return;
         }
 
         const day = ts => ts ? new Date(ts * 1000).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '-';
         domainsList.innerHTML = `
-            <div class="ui-tr ui-tr-head"><span>Domain</span><span>Activity Period</span><span class="ui-td-end">Reports</span><span class="ui-td-end">Messages (30d)</span><span class="ui-td-end">Unique IPs</span><span>DMARC Pass</span><span>TLS Success</span></div>
+            <div class="ui-tr ui-tr-head"><span>Domain</span><span>Activity Period</span><span class="ui-td-end">Reports</span><span class="ui-td-end">Messages (30d)</span><span class="ui-td-end">Unique IPs</span><span>DMARC Pass</span></div>
             ${domains.map(domain => {
             const stats = domain.stats_30d || {};
-            const hasTls = domain.has_tls;
-            const hasDmarc = domain.has_dmarc !== false; // default true for backwards compat
             return `
                 <div class="ui-tr" onclick="loadDomainOverview('${escapeJsArg(domain.domain)}')">
-                    <span class="ui-td"><b>${escapeHtml(domain.domain)}</b>${hasTls && !hasDmarc ? ` ${uiTag('TLS', 'ok')}` : ''}</span>
+                    <span class="ui-td"><b>${escapeHtml(domain.domain)}</b></span>
                     <span class="ui-td"><small class="ui-sec-unit">Period </small>${day(domain.first_report)} - ${day(domain.last_report)}</span>
-                    <span class="ui-td ui-td-end"><small class="ui-sec-unit">Reports </small>${domain.report_count || 0}${domain.tls_report_count > 0 ? ` <small class="ui-text-ok" title="TLS Reports">+${domain.tls_report_count} TLS</small>` : ''}</span>
+                    <span class="ui-td ui-td-end"><small class="ui-sec-unit">Reports </small>${domain.report_count || 0}</span>
                     <span class="ui-td ui-td-end"><small class="ui-sec-unit">Messages </small>${(stats.total_messages || 0).toLocaleString()}</span>
                     <span class="ui-td ui-td-end"><small class="ui-sec-unit">Unique IPs </small>${stats.unique_ips || 0}</span>
-                    <span class="ui-td"><small class="ui-sec-unit">DMARC </small>${hasDmarc ? dmarcRate(stats.dmarc_pass_pct || 0) : '<span class="ui-muted">-</span>'}</span>
-                    <span class="ui-td"><small class="ui-sec-unit">TLS </small>${hasTls ? dmarcRate(stats.tls_success_pct || 100) : '<span class="ui-muted">-</span>'}</span>
+                    <span class="ui-td"><small class="ui-sec-unit">DMARC </small>${dmarcRate(stats.dmarc_pass_pct || 0)}</span>
                 </div>`;
         }).join('')}`;
-
-        // Manage Reports sits with Upload Report in the page head
-        const manageBtn = document.getElementById('dmarc-manage-btn');
-        if (manageBtn) {
-            const totalReports = domains.reduce((sum, d) => sum + (d.report_count || 0) + (d.tls_report_count || 0), 0);
-            manageBtn.textContent = `Manage Reports (${totalReports})`;
-            manageBtn.classList.toggle('hidden', totalReports === 0);
-        }
 
     } catch (error) {
         console.error('Error loading DMARC domains:', error);
@@ -438,9 +479,6 @@ async function loadDomainOverview(domain, updateUrl = true) {
             `;
         })();
 
-        // The two DNS records next to each other: DMARC, and TLS-RPT for the TLS reports
-        const tlsRptRecordCardHtml = renderTlsRptRecordCard(data.tls_rpt_record || null);
-
         const statsContainer = document.getElementById('dmarc-overview-stats-container');
         if (statsContainer) {
             statsContainer.innerHTML = `
@@ -449,7 +487,7 @@ async function loadDomainOverview(domain, updateUrl = true) {
                     [totals.dmarc_pass_pct ? `${totals.dmarc_pass_pct}%` : '-', 'DMARC Pass', totals.dmarc_pass_pct ? dmarcTone(totals.dmarc_pass_pct) : '', 'SPF + DKIM Pass'],
                     [(totals.unique_ips || 0).toLocaleString(), 'Sources', '', `${totals.unique_reporters || 0} reporters`],
                 ])}
-                ${(dmarcRecordCardHtml || tlsRptRecordCardHtml) ? `<div class="ui-dmarc-records">${dmarcRecordCardHtml}${tlsRptRecordCardHtml}</div>` : ''}
+                ${dmarcRecordCardHtml}
             `;
         }
 
@@ -461,8 +499,6 @@ async function loadDomainOverview(domain, updateUrl = true) {
             await loadDomainReports(domain);
         } else if (dmarcState.currentSubTab === 'sources') {
             await loadDomainSources(domain);
-        } else if (dmarcState.currentSubTab === 'tls') {
-            await loadDomainTLSReports(domain);
         } else {
             // Default to reports
             await loadDomainReports(domain);
@@ -624,12 +660,10 @@ function dmarcSwitchSubTab(tab, replaceUrl = false) {
         loadDomainReports(dmarcState.currentDomain);
     } else if (tab === 'sources') {
         loadDomainSources(dmarcState.currentDomain);
-    } else if (tab === 'tls') {
-        loadDomainTLSReports(dmarcState.currentDomain);
     }
 }
 
-const DMARC_SUBTABS = ['reports', 'sources', 'tls'];
+const DMARC_SUBTABS = ['reports', 'sources'];
 
 // Mark the tab and show its panel, without loading anything
 function dmarcShowSubTabPanel(tab) {
@@ -641,6 +675,111 @@ function dmarcShowSubTabPanel(tab) {
         }
         document.getElementById(`dmarc-${name}-content`)?.classList.toggle('hidden', name !== tab);
     });
+}
+
+// Manage Reports sits with Upload Report in the page head and counts both kinds of report
+function dmarcUpdateManageButton(domains) {
+    const manageBtn = document.getElementById('dmarc-manage-btn');
+    if (!manageBtn) return;
+    const totalReports = domains.reduce((sum, d) => sum + (d.report_count || 0) + (d.tls_report_count || 0), 0);
+    manageBtn.textContent = `Manage Reports (${totalReports})`;
+    manageBtn.classList.toggle('hidden', totalReports === 0);
+}
+
+// The last DNS check of a domain's TLS-RPT record, for the TLS domains list
+function tlsRptStatusTag(status) {
+    const tags = {
+        success: ['Published', 'ok'],
+        warning: ['Not published', 'warn'],
+        error: ['Has a problem', 'fail'],
+        unknown: ['Could not check', ''],
+    };
+    if (!tags[status]) {
+        return `<span title="The daily DNS check covers the mailcow domains. Open the domain to check it now.">${uiTag('Not checked yet', '')}</span>`;
+    }
+    const [text, tone] = tags[status];
+    return uiTag(text, tone);
+}
+
+// TLS tab: every domain, whether it asks for TLS reports and what they say
+async function loadTlsDomains() {
+    dmarcState.currentView = 'tls_domains';
+    dmarcState.currentDomain = null;
+    dmarcState.detailType = null;
+    if (dmarcState.chartInstance) {
+        dmarcState.chartInstance.destroy();
+        dmarcState.chartInstance = null;
+    }
+    dmarcShowView('dmarc-tls-domains-view');
+    setDmarcBreadcrumb('domains');
+
+    const list = document.getElementById('dmarc-tls-domains-list');
+    if (list) list.innerHTML = '<div class="ui-loading"><div class="loading"></div><p>Loading TLS reports...</p></div>';
+    try {
+        const response = await authenticatedFetch('/api/dmarc/domains');
+        if (!response.ok) throw new Error('Failed to load domains');
+        const domains = (await response.json()).domains || [];
+        dmarcUpdateManageButton(domains);
+
+        const reports = domains.reduce((sum, d) => sum + (d.tls_report_count || 0), 0);
+        const published = domains.filter(d => d.tls_rpt_status === 'success').length;
+        // The daily DNS check covers the mailcow domains; a domain known only from reports has no result
+        const checked = domains.filter(d => d.tls_rpt_status).length;
+        const stats = document.getElementById('dmarc-tls-stats-container');
+        if (stats) {
+            stats.innerHTML = dmarcKpis([
+                [domains.length, 'Domains'],
+                [checked ? `${published} of ${checked}` : '-', 'TLS-RPT record published', checked && published < checked ? 'warn' : '', checked < domains.length ? `${domains.length - checked} not checked` : ''],
+                [reports.toLocaleString(), 'TLS reports', '', 'Last 30 days'],
+            ]);
+        }
+        if (!list) return;
+        if (!domains.length) {
+            list.innerHTML = '<p class="ui-empty">No domains yet. Domains appear here once DMARC or TLS reports arrive for them.</p>';
+            return;
+        }
+        // Domains that receive TLS reports first, then those that do not yet
+        const rows = [...domains].sort((a, b) => (b.tls_report_count || 0) - (a.tls_report_count || 0));
+        list.innerHTML = `
+            <div class="ui-tr ui-tr-head"><span>Domain</span><span>TLS-RPT record</span><span class="ui-td-end">Reports (30d)</span><span>TLS Success</span></div>
+            ${rows.map(d => `
+                <div class="ui-tr" onclick="loadTlsDomain('${escapeJsArg(d.domain)}')">
+                    <span class="ui-td"><b>${escapeHtml(d.domain)}</b></span>
+                    <span class="ui-td"><small class="ui-sec-unit">Record </small>${tlsRptStatusTag(d.tls_rpt_status)}</span>
+                    <span class="ui-td ui-td-end"><small class="ui-sec-unit">Reports </small>${d.tls_report_count || 0}</span>
+                    <span class="ui-td"><small class="ui-sec-unit">TLS </small>${d.tls_report_count ? dmarcRate((d.stats_30d || {}).tls_success_pct ?? 100) : '<span class="ui-muted">No reports</span>'}</span>
+                </div>`).join('')}`;
+    } catch (error) {
+        console.error('Error loading TLS domains:', error);
+        if (list) list.innerHTML = '<p class="ui-empty ui-text-fail">Failed to load TLS reports. Refresh the page to try again.</p>';
+    }
+}
+
+// TLS tab, one domain: its TLS-RPT record and the TLS reports by day
+async function loadTlsDomain(domain, reportDate = null, updateUrl = true) {
+    dmarcState.currentView = 'tls_domain';
+    dmarcState.currentDomain = domain;
+    dmarcState.detailType = null;
+    dmarcShowPageTab('tls');
+    if (updateUrl) {
+        const params = { tab: 'tls', domain };
+        const path = buildPath('dmarc', params);
+        if (window.location.pathname !== path) history.pushState({ route: 'dmarc', params }, '', path);
+    }
+    setDmarcBreadcrumb('tlsDomain', { domain });
+    dmarcShowView('dmarc-tls-domain-view');
+
+    const recordBox = document.getElementById('dmarc-tls-record-container');
+    if (recordBox) recordBox.innerHTML = '';
+    authenticatedFetch(`/api/dmarc/domains/${encodeURIComponent(domain)}/tls-rpt-record`)
+        .then(r => r.ok ? r.json() : null)
+        .then(data => {
+            if (recordBox && dmarcState.currentDomain === domain) recordBox.innerHTML = renderTlsRptRecordCard(data && data.tls_rpt_record);
+        })
+        .catch(() => {});
+
+    if (reportDate) await loadTLSReportDetails(domain, reportDate, false);
+    else await loadDomainTLSReports(domain);
 }
 
 async function loadDomainTLSReports(domain) {
@@ -695,11 +834,16 @@ async function loadDomainTLSReports(domain) {
     }
 }
 
-async function loadTLSReportDetails(domain, reportDate) {
+async function loadTLSReportDetails(domain, reportDate, updateUrl = true) {
     const tlsList = document.getElementById('dmarc-tls-list');
     if (!tlsList) return;
 
     dmarcState.detailType = 'tls';
+    if (updateUrl) {
+        const params = { tab: 'tls', domain, id: reportDate };
+        const path = buildPath('dmarc', params);
+        if (window.location.pathname !== path) history.pushState({ route: 'dmarc', params }, '', path);
+    }
     const dateFormatted = new Date(reportDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
     setDmarcBreadcrumb('tlsDetails', { domain, date: dateFormatted });
 
@@ -716,7 +860,7 @@ async function loadTLSReportDetails(domain, reportDate) {
 
         tlsList.innerHTML = `
             <div class="ui-list-head">
-                <button onclick="loadDomainTLSReports('${escapeJsArg(domain)}')" class="ui-btn ui-btn-sm">← Back to Daily Reports</button>
+                <button onclick="loadTlsDomain('${escapeJsArg(domain)}')" class="ui-btn ui-btn-sm">← Back to Daily Reports</button>
             </div>
             <div class="ui-dmarc-sub-head">
                 <h3 class="ui-h2">${dateLong}</h3>
@@ -747,7 +891,7 @@ async function loadTLSReportDetails(domain, reportDate) {
         tlsList.innerHTML = `
             <div class="ui-empty">
                 <p class="ui-text-fail">Failed to load TLS report details.</p>
-                <button onclick="loadDomainTLSReports('${escapeJsArg(domain)}')" class="ui-btn ui-btn-sm">Back to Daily Reports</button>
+                <button onclick="loadTlsDomain('${escapeJsArg(domain)}')" class="ui-btn ui-btn-sm">Back to Daily Reports</button>
             </div>`;
     }
 }

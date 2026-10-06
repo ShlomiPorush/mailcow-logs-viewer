@@ -1117,6 +1117,11 @@
                     </div>
                 </div>
 
+                <div id="dmarc-page-tabs" class="ui-tabs ui-page-tabs" role="tablist" aria-label="DMARC and TLS reports">
+                    <button type="button" class="modal-tab active" role="tab" aria-selected="true" id="dmarc-tab-btn-dmarc" onclick="dmarcOpenTab('dmarc')">DMARC</button>
+                    <button type="button" class="modal-tab" role="tab" aria-selected="false" id="dmarc-tab-btn-tls" onclick="dmarcOpenTab('tls')">TLS</button>
+                </div>
+
                 <!-- Breadcrumb -->
                 <nav id="dmarc-breadcrumb" class="ui-crumbs hidden" aria-label="Breadcrumb"></nav>
 
@@ -1127,7 +1132,7 @@
                     <!-- Insights (policy recommendations + new-source detection) -->
                     <div id="dmarc-insights-container" class="hidden"></div>
 
-                    <div id="dmarc-domains-list" class="ui-table ui-stack" style="--ui-cols: minmax(180px, 1.6fr) minmax(120px, 1fr) 90px 120px 90px minmax(120px, 1fr) minmax(120px, 1fr); --ui-table-min: 900px"></div>
+                    <div id="dmarc-domains-list" class="ui-table ui-stack" style="--ui-cols: minmax(180px, 1.6fr) minmax(120px, 1fr) 90px 120px 90px minmax(120px, 1fr); --ui-table-min: 780px"></div>
 
                 </div>
 
@@ -1140,12 +1145,11 @@
                         <div class="ui-chart-body ui-dmarc-chart"><canvas id="dmarc-chart"></canvas></div>
                     </section>
 
-                    <!-- Sub-tabs: Reports | Sources | TLS Reports -->
+                    <!-- Sub-tabs: Reports | Sources -->
                     <section class="ui-panel">
                         <div class="ui-tabs" role="tablist">
                             <button onclick="dmarcSwitchSubTab('reports')" id="dmarc-subtab-reports" class="modal-tab active" role="tab" aria-selected="true">Daily Reports</button>
                             <button onclick="dmarcSwitchSubTab('sources')" id="dmarc-subtab-sources" class="modal-tab" role="tab" aria-selected="false">Source IPs</button>
-                            <button onclick="dmarcSwitchSubTab('tls')" id="dmarc-subtab-tls" class="modal-tab" role="tab" aria-selected="false">TLS Reports</button>
                         </div>
                         <div id="dmarc-reports-content" class="ui-dmarc-tab">
                             <div id="dmarc-reports-list"><div class="ui-loading"><div class="loading"></div><p>Loading reports...</p></div></div>
@@ -1153,10 +1157,19 @@
                         <div id="dmarc-sources-content" class="ui-dmarc-tab hidden">
                             <div id="dmarc-sources-list"><div class="ui-loading"><div class="loading"></div><p>Loading sources...</p></div></div>
                         </div>
-                        <div id="dmarc-tls-content" class="ui-dmarc-tab hidden">
-                            <div id="dmarc-tls-list" class="ui-sec-block"><div class="ui-loading"><div class="loading"></div><p>Loading TLS reports...</p></div></div>
-                        </div>
                     </section>
+                </div>
+
+                <!-- TLS tab: every domain with its TLS-RPT record and TLS reports -->
+                <div id="dmarc-tls-domains-view" class="hidden ui-sec-block ui-scroll">
+                    <div id="dmarc-tls-stats-container"></div>
+                    <div id="dmarc-tls-domains-list" class="ui-table ui-stack" style="--ui-cols: minmax(180px, 1.6fr) minmax(150px, 1fr) 110px minmax(130px, 1fr); --ui-table-min: 640px"></div>
+                </div>
+
+                <!-- TLS tab: one domain, its TLS-RPT record and daily TLS reports -->
+                <div id="dmarc-tls-domain-view" class="hidden ui-sec-block ui-scroll">
+                    <div id="dmarc-tls-record-container"></div>
+                    <div id="dmarc-tls-list" class="ui-sec-block"><div class="ui-loading"><div class="loading"></div><p>Loading TLS reports...</p></div></div>
                 </div>
 
                 <!-- Report Details View (hidden by default) -->
