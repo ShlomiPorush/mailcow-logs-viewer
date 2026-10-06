@@ -65,6 +65,8 @@ RULE_NAMES = BAN_RULES + ("breach",)
 OPEN_STATUSES = ("watching", "pending", "banned", "alert")
 CLOSED_STATUSES = ("dismissed", "expired", "undone")
 LEAVE_ALONE = timedelta(days=7)
+# A watched address not seen for this long leaves To review for the history
+QUIET_AFTER = timedelta(days=7)
 
 DEFAULT_RULES: Dict[str, dict] = {
     "trap": {"enabled": False, "mode": "watch", "names": [], "ban_hours": 720, "notify": True},
@@ -388,10 +390,22 @@ def evaluate(db: Session, context: ProtectionContext, now: Optional[datetime] = 
     created: List[ProtectionHit] = []
     created += _evaluate_netfilter(db, context, rules, now)
     created += _evaluate_breach(db, context, rules, now)
+    quiet = _close_quiet(db, now)
     db.commit()
     if created:
         logger.info("Protection rules caught %d new address(es)", len(created))
+    if quiet:
+        logger.info("Protection rules: %d watched address(es) quiet for %d days moved to the history", quiet, QUIET_AFTER.days)
     return created
+
+
+def _close_quiet(db: Session, now: datetime) -> int:
+    """Close the watched catches with no new activity for QUIET_AFTER. Only
+    'watching' ones: a ban ends on its own clock, and an alert waits for the admin.
+    If the address comes back, the rule catches it again as a new catch."""
+    return db.query(ProtectionHit).filter(
+        ProtectionHit.status == "watching", ProtectionHit.last_seen < now - QUIET_AFTER,
+    ).update({"status": "expired", "ended_at": now}, synchronize_session=False)
 
 
 def _evaluate_netfilter(db: Session, context: ProtectionContext, rules: dict, now: datetime) -> List[ProtectionHit]:
@@ -618,6 +632,17 @@ def fail2ban_attrs(current: dict, blacklist: List[str], whitelist: List[str]) ->
     }
 
 
+def _blacklist_entry(target: str) -> str:
+    """How a ban is written to the blacklist: a single address as /32 (/128), as
+    the Ban button on the page writes it; a network keeps its own prefix."""
+    if "/" in target:
+        return target
+    try:
+        return f"{target}/{ipaddress.ip_address(target).max_prefixlen}"
+    except ValueError:
+        return target
+
+
 def _in_list(target: str, entries: List[str]) -> bool:
     """mailcow keeps a single address either bare or as /32 (/128)."""
     if target in entries:
@@ -704,7 +729,7 @@ async def enforce(mailcow_api, now: Optional[datetime] = None) -> Dict[str, list
                 hit.status, hit.ended_at, hit.error = "dismissed", now, "On the allowlist now, so it was not banned"
                 continue
             if not _in_list(hit.ip, new_black):
-                new_black.append(hit.ip)
+                new_black.append(_blacklist_entry(hit.ip))
                 added.add(hit.ip)
         for hit in ending:
             hit.status, hit.ended_at = "expired", now

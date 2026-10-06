@@ -66,7 +66,7 @@ def test_a_banning_rule_writes_the_address_and_keeps_every_other_setting(db):
     api = FakeMailcow(blacklist='203.0.113.99/32', whitelist='203.0.113.0/24')
     result = _enforce(api)
 
-    assert api.black() == ['203.0.113.99/32', TRAP_IP]
+    assert api.black() == ['203.0.113.99/32', f'{TRAP_IP}/32']
     edit = api.edits[0]
     assert edit['whitelist'] == '203.0.113.0/24' and edit['max_attempts'] == '7' and edit['retry_window'] == '900'
     hit = _fresh(db)[0]
@@ -100,7 +100,7 @@ def test_an_ended_ban_lifts_only_the_entry_the_app_added(db):
     _trap_hit(db, ban_hours=1)
     api = FakeMailcow(blacklist='203.0.113.99')
     _enforce(api)
-    assert api.black() == ['203.0.113.99', TRAP_IP]
+    assert api.black() == ['203.0.113.99', f'{TRAP_IP}/32']
 
     result = _enforce(api, now=datetime.utcnow() + timedelta(hours=2))
     assert api.black() == ['203.0.113.99']
@@ -152,7 +152,7 @@ def test_a_permanent_ban_has_no_end(db):
     _enforce(api, now=datetime.utcnow() + timedelta(days=3650))
     hit = _fresh(db)[0]
     assert hit.status == 'banned' and hit.expires_at is None
-    assert api.black() == [TRAP_IP]
+    assert api.black() == [f'{TRAP_IP}/32']
 
 
 def test_when_two_rules_ban_one_address_the_entry_stays_until_both_end(db):
@@ -164,10 +164,10 @@ def test_when_two_rules_ban_one_address_the_entry_stays_until_both_end(db):
     protection_rules.evaluate(db, _context())
     api = FakeMailcow()
     _enforce(api)
-    assert api.black() == [TRAP_IP]
+    assert api.black() == [f'{TRAP_IP}/32']
 
     _enforce(api, now=datetime.utcnow() + timedelta(hours=2))
-    assert api.black() == [TRAP_IP]
+    assert api.black() == [f'{TRAP_IP}/32']
     _enforce(api, now=datetime.utcnow() + timedelta(hours=49))
     assert api.black() == []
     assert sorted(h.status for h in _fresh(db)) == ['expired', 'expired']
@@ -329,7 +329,7 @@ def test_the_api_bans_a_watched_hit_now_and_undoes_it(db, monkeypatch):
     banned = client.post(f'/api/protection/hits/{hit_id}/ban')
     assert banned.status_code == 200, banned.text
     assert banned.json()['status'] == 'banned' and banned.json()['owned'] is True
-    assert api.black() == ['203.0.113.99', TRAP_IP]
+    assert api.black() == ['203.0.113.99', f'{TRAP_IP}/32']
     active = [h for h in client.get('/api/protection/hits?status=active').json()['hits'] if h['ip'] in ALL_IPS]
     assert [h['status'] for h in active] == ['banned']
 
@@ -402,3 +402,43 @@ def test_the_notification_names_the_bans_and_the_alerts(monkeypatch):
     subject, text, kw = sent[0]
     assert subject == 'Possible stolen password' and kw == {'alert_type': 'security'}
     assert TRAP_IP in text and SPRAY_IP in text and 'Banned 1 address:' in text
+
+
+# ---------- how a ban is written, and watched catches that go quiet ----------
+
+@pytest.mark.parametrize('target,entry', [
+    ('198.51.100.10', '198.51.100.10/32'),
+    ('2001:db8::1', '2001:db8::1/128'),
+    ('198.51.100.0/24', '198.51.100.0/24'),
+])
+def test_a_ban_is_written_like_the_ban_button_writes_it(target, entry):
+    from app.services import protection_rules
+    assert protection_rules._blacklist_entry(target) == entry
+
+
+def test_a_watched_catch_with_no_new_activity_for_a_week_moves_to_the_history(db):
+    from app.services import protection_rules
+    _rules(db, trap={'enabled': True, 'names': ['admin']})
+    _fail(db, TRAP_IP, 'admin')
+    protection_rules.evaluate(db, _context())
+    assert [h.status for h in _fresh(db)] == ['watching']
+
+    protection_rules.evaluate(db, _context(), now=datetime.utcnow() + timedelta(days=6))
+    assert [h.status for h in _fresh(db)] == ['watching']
+
+    later = datetime.utcnow() + timedelta(days=8)
+    protection_rules.evaluate(db, _context(), now=later)
+    hit = _fresh(db)[0]
+    assert hit.status == 'expired' and hit.mode == 'watch' and hit.ended_at == later
+
+    # It comes back: the rule catches it again, as a new catch
+    _fail(db, TRAP_IP, 'admin', minutes_ago=-8 * 24 * 60)
+    protection_rules.evaluate(db, _context(), now=later + timedelta(minutes=1))
+    assert [h.status for h in _fresh(db)] == ['expired', 'watching']
+
+
+def test_a_ban_waiting_to_be_written_does_not_go_quiet(db):
+    from app.services import protection_rules
+    _trap_hit(db)
+    protection_rules.evaluate(db, _context(), now=datetime.utcnow() + timedelta(days=8))
+    assert [h.status for h in _fresh(db)] == ['pending']
