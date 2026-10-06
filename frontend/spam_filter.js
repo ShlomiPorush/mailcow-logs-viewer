@@ -160,6 +160,15 @@ function renderRspamdMapsList(maps, rwKeyConfigured) {
     container.innerHTML = html;
 }
 
+// The way back to the maps list, as a breadcrumb like the DMARC & TLS page
+function rspamdMapCrumbs(name) {
+    return `<nav class="ui-crumbs" aria-label="Breadcrumb">
+        <button type="button" class="ui-crumb" onclick="loadRspamdMaps()">Rspamd Maps</button>
+        <span class="ui-crumb-sep" aria-hidden="true">/</span>
+        <span class="ui-crumb-current">${escapeHtml(name)}</span>
+    </nav>`;
+}
+
 async function openMapEditor(filename) {
     const container = document.getElementById('rspamd-maps-list');
 
@@ -175,9 +184,7 @@ async function openMapEditor(filename) {
         mapEditorSaved = data.content || '';
 
         container.innerHTML = `
-            <div class="ui-list-head">
-                <button onclick="loadRspamdMaps()" class="ui-btn ui-btn-sm">← Back to Maps List</button>
-            </div>
+            ${rspamdMapCrumbs(meta.name || filename)}
 
             <section class="ui-panel">
                 <div class="ui-panel-head ui-rl-head">
@@ -244,9 +251,7 @@ async function openMapEditor(filename) {
     } catch (error) {
         console.error('Failed to load map content:', error);
         container.innerHTML = `
-            <div class="ui-list-head">
-                <button onclick="loadRspamdMaps()" class="ui-btn ui-btn-sm">← Back to Maps List</button>
-            </div>
+            ${rspamdMapCrumbs(filename)}
             <p class="ui-empty ui-text-fail">Failed to load map: ${escapeHtml(error.message)}</p>
         `;
     }

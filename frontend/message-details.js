@@ -551,12 +551,13 @@ function renderOverviewTab(content, data) {
         escapeHtml([rspamd.country_name, rspamd.city].filter(Boolean).join(', ')),
         rspamd.asn_org ? `<span class="ui-muted">· ${escapeHtml(rspamd.asn_org)}</span>` : ''
     ].filter(Boolean).join(' ') : '';
+    // Who sent it first; the IDs, which are only copied, last
     const identifiers = [
-        data.queue_id ? mdIdRow('Queue ID', `<span class="ui-mono">${copyableText(data.queue_id)}</span>`) : '',
-        data.message_id ? mdIdRow('Message ID', `<span class="ui-mono">${copyableText(data.message_id)}</span>`) : '',
         rspamd.ip ? mdIdRow('Client IP', `<span class="ui-mono">${copyableText(rspamd.ip)}</span>`, geoNote) : '',
         (rspamd.user && rspamd.user !== 'unknown') || rspamd.has_auth ? mdIdRow('Authenticated user',
             rspamd.user && rspamd.user !== 'unknown' ? copyableText(rspamd.user) : '<span class="ui-muted">Unknown user</span>', rspamd.has_auth ? 'Verified (MAILCOW_AUTH)' : '') : '',
+        data.queue_id ? mdIdRow('Queue ID', `<span class="ui-mono">${copyableText(data.queue_id)}</span>`) : '',
+        data.message_id ? mdIdRow('Message ID', `<span class="ui-mono">${copyableText(data.message_id)}</span>`) : '',
 
     ].join('');
 
