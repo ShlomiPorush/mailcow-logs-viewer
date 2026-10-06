@@ -1553,3 +1553,57 @@ button.ui-st-card:hover { outline: 1px solid var(--ui-line); }
 }
 .ui-qr-table .ui-q-who > div { white-space: normal; }
 .ui-dialog .markdown-body { font-family: inherit; background: transparent; color: var(--ui-ink); }
+
+/* ---------- App frame: the browser never scrolls, each page scrolls inside ---------- */
+html, body { height: 100%; overflow: hidden; }
+.ui-shell { height: 100vh; height: 100dvh; min-height: 0; }
+.ui-sidenav { height: 100%; }
+.ui-main { display: flex; flex-direction: column; min-height: 0; height: 100vh; height: 100dvh; overflow: hidden; }
+.ui-content { flex: 1; min-height: 0; display: flex; flex-direction: column; padding-bottom: 0; }
+/* A page without a marked region scrolls as a whole, inside the frame */
+.ui-page:not(.hidden) { display: flex; flex-direction: column; flex: 1; min-height: 0; overflow-y: auto; padding-bottom: 28px; }
+.ui-page > * { flex: none; }
+/* A page with a marked region keeps its header, tabs and filters in place */
+.ui-page:not(.hidden):has(> .ui-scroll) { overflow: hidden; padding-bottom: 0; }
+.ui-page > .ui-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding-bottom: 28px; align-content: start; }
+.ui-page > .ui-scroll.hidden { display: none; }
+
+/* Messages: the three columns fill the frame and scroll on their own */
+.ui-msgs-page:not(.hidden) { display: flex; overflow: hidden; padding-bottom: 0; }
+.ui-msgs { flex: 1; height: auto; min-height: 0; }
+/* Status: a long attention list scrolls by itself instead of pushing the tabs away */
+#status-attention-panel { max-height: 34vh; overflow-y: auto; }
+/* Logs: the services list and the terminal fill the height */
+.ui-logs.ui-scroll { align-items: stretch; overflow: hidden; padding-bottom: 20px; }
+.ui-logs-side { min-height: 0; overflow-y: auto; align-content: start; }
+.ui-logs-main { min-height: 0; }
+.ui-logs-terminal { min-height: 0; max-height: none; }
+/* Settings: the section nav and the fields scroll separately */
+#settings-content.ui-scroll:has(.settings-edit-layout) { display: flex; flex-direction: column; overflow: hidden; padding-bottom: 0; }
+#settings-content .settings-edit-layout { flex: 1; min-height: 0; }
+#settings-content .settings-edit-nav { position: static; height: 100%; max-height: none; overflow-y: auto; }
+#settings-content .ui-set-search { position: sticky; top: 0; z-index: 2; }
+#settings-content .settings-edit-content { height: 100%; overflow-y: auto; overscroll-behavior: contain; align-content: start; padding-bottom: 96px; }
+
+@media (max-width: 999px) {
+    .ui-msgs-page:not(.hidden) { display: flex; flex-direction: column; overflow-y: auto; }
+    .ui-msgs { flex: none; }
+    .ui-msg-col { min-height: auto; }
+}
+/* Phones and very short screens: the page scrolls as one inside the frame, the tabs stay on top */
+@media (max-width: 760px), (max-height: 600px) {
+    .ui-page:not(.hidden):has(> .ui-scroll) { overflow-y: auto; padding-bottom: 28px; }
+    .ui-page > .ui-scroll { flex: none; min-height: auto; overflow: visible; padding-bottom: 0; }
+    .ui-page > .ui-tabs { position: sticky; top: 0; z-index: 6; background: var(--ui-bg); }
+    #status-attention-panel { max-height: none; }
+    .ui-logs.ui-scroll { overflow: visible; }
+    .ui-logs-terminal { min-height: 420px; max-height: 70vh; }
+    #settings-content.ui-scroll:has(.settings-edit-layout) { display: grid; overflow: visible; }
+    #settings-content .settings-edit-content { height: auto; overflow: visible; }
+}
+@media (max-width: 760px) {
+    .ui-shell { display: flex; flex-direction: column; }
+    .ui-mtop { position: relative; flex: none; }
+    .ui-main { flex: 1; height: auto; padding-bottom: calc(64px + env(safe-area-inset-bottom)); }
+    .ui-content { padding: 16px 12px 0; }
+}
