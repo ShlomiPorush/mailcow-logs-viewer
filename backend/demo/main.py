@@ -18,6 +18,7 @@ from app.config import settings
 from app.main import app  # noqa: F401  (served by uvicorn)
 
 from . import fake_internet, fake_mailcow, network_guard, seed
+from .rate_limit import WriteRateLimitMiddleware
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +46,9 @@ def _demo_start_scheduler():
     seed.start_live_traffic(fake_mailcow.server, _traffic)
     seed.schedule_nightly_reset()
 
+
+# Outermost, so a refused write costs nothing downstream
+app.add_middleware(WriteRateLimitMiddleware)
 
 app_main.init_db = _demo_init_db
 app_main.start_scheduler = _demo_start_scheduler
