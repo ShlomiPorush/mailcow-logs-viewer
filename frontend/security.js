@@ -104,6 +104,20 @@ async function loadSecurityHistory() {
 // ----------------------------------------------------------------- the addresses
 
 const securityBare = entry => String(entry || '').replace(/\/(32|128)$/, '');
+
+// The country's flag, before its name; nothing when the code is unknown
+function securityFlag(code) {
+    const url = code ? getFlagUrl(code, '16x12') : '';
+    return url ? `<img class="ui-sec-flag" src="${url}" alt="" width="16" height="12" onerror="this.remove()">` : '';
+}
+
+// The code of a country the chart or the list named
+function securityCountryCode(name) {
+    const row = securityCountries && securityCountries.data.find(r => r.country_name === name);
+    if (row) return row.country_code;
+    const source = securityOverview && securityOverview.sources.find(s => s.country_name === name);
+    return source ? source.country_code : '';
+}
 const securityOnList = (list, ip) => list.some(entry => securityBare(entry) === ip);
 
 // One entry per address, from the last day's attempts, the rules' hits and Fail2ban's bans
@@ -250,12 +264,12 @@ function securityDescribe(a) {
 function securityRow(a) {
     const d = securityDescribe(a);
     const open = securityOpenRow === a.ip;
-    const where = [a.country, a.last ? formatAgo(a.last) : ''].filter(Boolean).join(' · ');
+    const where = a.country || a.last ? `${a.country ? `${securityFlag(a.countryCode)}${escapeHtml(a.country)}` : ''}${a.country && a.last ? ' · ' : ''}${a.last ? formatAgo(a.last) : ''}` : '';
     return `
         <div class="ui-sec-row${open ? ' is-open' : ''}" onclick="securityRowClick(event, '${escapeJsArg(a.ip)}')" role="button" tabindex="0"
              onkeydown="if (event.key === 'Enter' && event.target === this) securityToggleRow('${escapeJsArg(a.ip)}')" aria-expanded="${open}">
             <div class="ui-sec-main">
-                <div class="ui-sec-top"><b class="ui-mono">${copyableText(a.ip)}</b>${d.tag}${where ? `<small class="ui-muted">${escapeHtml(where)}</small>` : ''}</div>
+                <div class="ui-sec-top"><b class="ui-mono">${copyableText(a.ip)}</b>${d.tag}${where ? `<small class="ui-muted ui-sec-where">${where}</small>` : ''}</div>
                 <p class="ui-sec-why">${d.why}</p>
             </div>
             <div class="ui-sec-acts">${d.acts}</div>
@@ -274,7 +288,7 @@ function securityDetail(a) {
     return `
         <div class="ui-sec-detail" onclick="event.stopPropagation()">
             <div class="ui-sec-facts">
-                <div><h4>From</h4>${escapeHtml([a.city, a.country].filter(Boolean).join(', ') || 'Unknown')}${a.org ? `<br><span class="ui-muted">${escapeHtml(a.org)}</span>` : ''}</div>
+                <div><h4>From</h4>${a.country ? securityFlag(a.countryCode) : ''}${escapeHtml([a.city, a.country].filter(Boolean).join(', ') || 'Unknown')}${a.org ? `<br><span class="ui-muted">${escapeHtml(a.org)}</span>` : ''}</div>
                 <div><h4>Failed logins today</h4>${a.tries ? a.tries.toLocaleString() : '<span class="ui-muted">None</span>'}${a.services.length ? `<br><span class="ui-muted">${escapeHtml(a.services.join(', '))}</span>` : ''}</div>
                 ${a.hits.length ? `<div><h4>Caught by</h4>${escapeHtml([...new Set(a.hits.map(h => securityRuleName(h.rule)))].join(', '))}</div>` : ''}
             </div>
@@ -345,7 +359,7 @@ function securityHistoryRows() {
         <div class="ui-sec-row is-static">
             <div class="ui-sec-main">
                 <div class="ui-sec-top"><b class="ui-mono">${copyableText(h.ip)}</b>${protectionStatus(h)}<span class="ui-sec-by">${escapeHtml(securityRuleName(h.rule))}</span>
-                    <small class="ui-muted">${escapeHtml([h.country_name, formatAgo(h.ended_at || h.last_seen)].filter(Boolean).join(' · '))}</small></div>
+                    <small class="ui-muted ui-sec-where">${h.country_name ? `${securityFlag(h.country_code)}${escapeHtml(h.country_name)} · ` : ''}${formatAgo(h.ended_at || h.last_seen)}</small></div>
                 <p class="ui-sec-why">${escapeHtml(h.reason || '')}</p>
             </div>
         </div>`).join('');
@@ -393,7 +407,7 @@ function renderSecurityOverview() {
     box.innerHTML = `
         <div class="ui-panel-head">
             <div class="ui-seg ui-sec-seg" role="group" aria-label="Show">${segs}</div>
-            ${securityCountry ? `<span class="ui-sec-filter">${escapeHtml(securityCountry)}<button type="button" onclick="pickSecurityCountry(null)" aria-label="Show every country" title="Show every country">&times;</button></span>` : ''}
+            ${securityCountry ? `<span class="ui-sec-filter">${securityFlag(securityCountryCode(securityCountry))}${escapeHtml(securityCountry)}<button type="button" onclick="pickSecurityCountry(null)" aria-label="Show every country" title="Show every country">&times;</button></span>` : ''}
         </div>
         ${rwNote}${f2bNote}
         <div class="ui-sec-list">${securityFilter === 'history' ? securityHistoryRows()
@@ -431,10 +445,10 @@ function renderSecurityCountries() {
     const max = rows && rows.length ? Math.max(...rows.map(r => r.total)) : 1;
     const bar = r => {
         const part = (n, cls, label) => n ? `<i class="${cls}" style="width:${(n / max) * 100}%" title="${n.toLocaleString()} ${label}"></i>` : '';
-        const flag = r.country_code ? getFlagUrl(r.country_code, '24x18') : '';
+
         return `<button type="button" class="ui-sec-bar${securityCountry === r.country_name ? ' is-on' : ''}" onclick="pickSecurityCountry('${escapeJsArg(r.country_name)}')"
                 title="${escapeHtml(`${r.country_name}: ${r.total.toLocaleString()} events`)}" aria-pressed="${securityCountry === r.country_name}">
-            <span class="ui-sec-bar-name">${flag ? `<img src="${flag}" alt="" width="16" height="12" onerror="this.style.display='none'">` : ''}${escapeHtml(r.country_name)}${watched.has(r.country_code) ? '<i class="ui-sec-watch" title="Watched by the Countries rule"></i>' : ''}</span>
+            <span class="ui-sec-bar-name">${securityFlag(r.country_code)}${escapeHtml(r.country_name)}${watched.has(r.country_code) ? '<i class="ui-sec-watch" title="Watched by the Countries rule"></i>' : ''}</span>
             <span class="ui-sec-bar-track">${part(r.ban, 'is-ban', 'bans')}${part(r.warning, 'is-warn', 'warnings')}${part(r.unban, 'is-unban', 'unbans')}</span>
             <em>${r.total.toLocaleString()}</em></button>`;
     };
@@ -589,9 +603,22 @@ function securityOpenCard(key) {
     securityCard = key;
     renderSecuritySettings();
     if (!key) return;
-    const card = document.getElementById(`security-card-${key}`);
-    const scroller = document.getElementById('security-tab-settings');
-    if (card && scroller) scroller.scrollTop = card.offsetTop - scroller.offsetTop - 8;
+    // After the layout settles (the card that closed changed it), the card's top goes to
+    // the top of whatever scrolls it (the tab on a wide screen, the page on a phone),
+    // and it takes the focus so the keyboard starts there
+    requestAnimationFrame(() => {
+        const card = document.getElementById(`security-card-${key}`);
+        if (!card) return;
+        let scroller = card.parentElement;
+        while (scroller && !(scroller.scrollHeight > scroller.clientHeight && /(auto|scroll)/.test(getComputedStyle(scroller).overflowY))) {
+            scroller = scroller.parentElement;
+        }
+        // On a phone the tabs stick to the top of the page and would cover the card's head
+        const tabs = document.querySelector('.ui-se-tabs');
+        const covered = tabs && scroller && scroller.contains(tabs) && getComputedStyle(tabs).position === 'sticky' ? tabs.offsetHeight : 0;
+        if (scroller) scroller.scrollTop += card.getBoundingClientRect().top - scroller.getBoundingClientRect().top - covered - 10;
+        card.focus({ preventScroll: true });
+    });
 }
 
 // ----------------------------------------------------------------- unsaved changes, one save bar
@@ -823,13 +850,13 @@ function securityCardBody(key) {
         const suggest = protectionCountrySuggestions.filter(s => !r.countries.includes(s.code));
         extra = `
             <h4>Countries</h4>
-            <div class="ui-chip-row">${r.countries.length ? r.countries.map(code => `<span class="ui-sec-chip">${escapeHtml(protectionCountryName(code))}<button type="button" onclick="removeProtectionCountry('${escapeJsArg(code)}')" aria-label="Remove ${escapeHtml(code)}" title="Remove">&times;</button></span>`).join('') : '<span class="ui-muted">No countries yet</span>'}</div>
+            <div class="ui-chip-row">${r.countries.length ? r.countries.map(code => `<span class="ui-sec-chip">${securityFlag(code)}${escapeHtml(protectionCountryName(code))}<button type="button" onclick="removeProtectionCountry('${escapeJsArg(code)}')" aria-label="Remove ${escapeHtml(code)}" title="Remove">&times;</button></span>`).join('') : '<span class="ui-muted">No countries yet</span>'}</div>
             <form class="ui-sec-ladd ui-flush" onsubmit="event.preventDefault(); addProtectionCountry(this.elements.code.value); this.reset();">
                 <input type="text" name="code" class="ui-input" placeholder="Two-letter code, for example CN" aria-label="Country code" maxlength="2">
                 <button type="submit" class="ui-btn">Add</button>
             </form>
             ${suggest.length ? `<h4>Failed logins in the last 7 days came from</h4>
-                <div class="ui-chip-row">${suggest.map(s => `<button type="button" class="ui-chip" onclick="addProtectionCountry('${escapeJsArg(s.code)}')" title="${s.tries} failed logins">+ ${escapeHtml(s.name)} <small>${s.tries}</small></button>`).join('')}</div>` : ''}
+                <div class="ui-chip-row">${suggest.map(s => `<button type="button" class="ui-chip" onclick="addProtectionCountry('${escapeJsArg(s.code)}')" title="${s.tries} failed logins">+ ${securityFlag(s.code)}${escapeHtml(s.name)} <small>${s.tries}</small></button>`).join('')}</div>` : ''}
             <p class="ui-sec-note ui-flush">Only failed logins are caught. A user who logs in from one of these countries is not affected.</p>`;
     } else if (key === 'unknown_accounts') {
         extra = '<p class="ui-sec-note ui-flush">An address with a successful login in the last day is never caught, so a user who mistyped the address is safe.</p>';
@@ -887,7 +914,7 @@ function securityToggle(key, on, disabled, action, why) {
 
 function securityCardShell(key, name, open, status, toggle, locked, sentence, body, on = true) {
     return `
-        <article class="ui-sec-card${open ? ' is-open' : ''}${on ? '' : ' is-off'}" id="security-card-${key}" ${open ? '' : `onclick="securityOpenCard('${key}')"`}>
+        <article class="ui-sec-card${open ? ' is-open' : ''}${on ? '' : ' is-off'}" id="security-card-${key}" tabindex="-1" aria-label="${escapeHtml(name)}" ${open ? '' : `onclick="securityOpenCard('${key}')"`}>
             <div class="ui-sec-card-head">${toggle}<h3>${escapeHtml(name)}</h3>${status}
                 <span class="ui-sec-card-act">${open
                     ? `<button type="button" class="ui-btn ui-btn-sm" onclick="event.stopPropagation(); securityOpenCard(null)">Done</button>`
