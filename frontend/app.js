@@ -461,8 +461,109 @@ async function loadAppInfo() {
 
         // Load mailcow connection status
         await loadMailcowConnectionStatus();
+
+        // Sidebar counters and server card
+        placeShellUtilities();
+        window.matchMedia('(max-width: 760px)').addEventListener('change', placeShellUtilities);
+        loadNavCounters();
+        setInterval(loadNavCounters, 5 * 60 * 1000);
     } catch (error) {
         console.error('Failed to load app info:', error);
+    }
+}
+
+// =============================================================================
+// SIDEBAR: SERVER CARD, COUNTERS AND TOOLS
+// =============================================================================
+
+// The Refresh and theme buttons live in the sidebar foot; on phones, where the
+// sidebar is hidden, the same elements move into the top bar.
+function placeShellUtilities() {
+    const tools = document.getElementById('ui-utilities');
+    const phoneSlot = document.getElementById('ui-mtop-actions');
+    const foot = document.getElementById('app-footer');
+    if (!tools || !phoneSlot || !foot) return;
+    if (window.matchMedia('(max-width: 760px)').matches) {
+        if (tools.parentNode !== phoneSlot) phoneSlot.appendChild(tools);
+    } else if (tools.parentNode !== foot) {
+        foot.insertBefore(tools, document.getElementById('container-logs-modal'));
+    }
+}
+
+function setNavCount(page, count, isFail, title) {
+    const el = document.getElementById(`nav-count-${page}`);
+    if (!el) return;
+    if (count > 0) {
+        el.textContent = count.toLocaleString();
+        el.classList.toggle('is-fail', !!isFail);
+        el.title = title || '';
+        el.classList.remove('hidden');
+    } else {
+        el.classList.add('hidden');
+    }
+}
+
+// Counters next to the pages that can need attention, and the problems shown
+// on the server card, the phone top bar and the Status tab.
+async function loadNavCounters() {
+    const off = feature => (window.disabledFeatures || []).includes(feature);
+    const get = async url => {
+        try {
+            const res = await authenticatedFetch(url);
+            return res.ok ? await res.json() : null;
+        } catch (e) {
+            return null;
+        }
+    };
+    const [dashboard, queue, quarantine, insights, summary, blacklist, info] = await Promise.all([
+        off('netfilter') ? null : get('/api/stats/dashboard'),
+        off('queue') ? null : get('/api/queue'),
+        off('quarantine') ? null : get('/api/quarantine'),
+        off('dmarc') ? null : get('/api/dmarc/insights'),
+        get('/api/status/summary'),
+        off('blacklist') ? null : get('/api/blacklist/summary'),
+        get('/api/settings/info'),
+    ]);
+
+    const failedLogins = dashboard && dashboard.auth_failures ? dashboard.auth_failures['24h'] || 0 : 0;
+    setNavCount('netfilter', failedLogins, false, `${failedLogins} failed logins in the last 24 hours`);
+    const queued = queue && Array.isArray(queue.data) ? queue.data.length : 0;
+    setNavCount('queue', queued, false, `${queued} messages in the queue`);
+    const held = quarantine ? (quarantine.total || (quarantine.data || []).length) : 0;
+    setNavCount('quarantine', held, false, `${held} quarantined messages`);
+    const dmarcActions = insights ? (insights.insights || []).filter(i =>
+        i.recommendations.some(r => r.type === 'tighten_policy' || r.type === 'low_pass_rate') ||
+        (i.new_sources && i.new_sources.length > 0)).length : 0;
+    setNavCount('dmarc', dmarcActions, false, `${dmarcActions} DMARC insights`);
+
+    const problems = [];
+    const indicator = document.getElementById('mailcow-connection-indicator');
+    if (indicator && indicator.title === 'Not connected to mailcow') problems.push('not connected to mailcow');
+    const stopped = summary && summary.containers ? summary.containers.stopped || 0 : 0;
+    if (stopped > 0) problems.push(`${stopped} container${stopped === 1 ? '' : 's'} stopped`);
+    if (blacklist && blacklist.status === 'listed') problems.push('listed on a blocklist');
+    setNavCount('status', problems.length, true, problems.join(', '));
+
+    const label = problems.length === 0 ? 'No problems' : `${problems.length} problem${problems.length === 1 ? '' : 's'}`;
+    const small = document.getElementById('ui-server-problems');
+    if (small) {
+        small.textContent = label;
+        small.title = problems.join(', ');
+        small.classList.toggle('has-problems', problems.length > 0);
+    }
+    const pill = document.getElementById('ui-problems-pill');
+    if (pill) {
+        pill.textContent = label;
+        pill.title = problems.join(', ');
+        pill.classList.toggle('hidden', problems.length === 0);
+    }
+    const pip = document.getElementById('tabbar-pip-status');
+    if (pip) pip.classList.toggle('hidden', problems.length === 0);
+
+    const host = document.getElementById('ui-server-host');
+    const url = info && info.configuration ? info.configuration.mailcow_url : '';
+    if (host && url) {
+        try { host.textContent = new URL(url).hostname; } catch (e) { host.textContent = url; }
     }
 }
 
@@ -667,7 +768,7 @@ function stopAutoRefresh() {
 async function smartRefreshCurrentTab() {
     // Don't refresh if modal is open
     const modal = document.getElementById('message-modal');
-    if (modal && !modal.classList.contains('hidden')) {
+    if (modal && !modal.classList.contains('hidden') && !modal.classList.contains('ui-docked')) {
         return;
     }
 
@@ -754,33 +855,25 @@ async function smartRefreshMessages() {
 }
 
 // Render messages without loading spinner
-// One row of the Messages list (also used by the smart refresh). Everything
-// the list showed before is kept: correlation status, direction, spam verdict,
-// time, queue ID, message ID, score (red from 15), folder, deliveries, user, IP.
+// One row of the Messages list (also used by the smart refresh), as in the
+// mockup: sender and time, subject, then the outcome tag and the direction.
+// Queue ID, message ID, score, user and IP are in the reading pane.
 function renderMessageRow(msg) {
     const tone = messageRowTone(msg);
     return `
         <div class="ui-msg-item${tone ? ` ui-msg-${tone}` : ''}" data-key="${escapeHtml(msg.correlation_key || '')}" onclick="viewMessageDetails('${escapeJsArg(msg.correlation_key)}')">
             <div class="ui-msg-l1">
-                <span class="ui-msg-who">
-                    <span>${escapeHtml(msg.sender || 'Unknown')}</span>
-                    <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg>
-                    <span class="ui-muted">${escapeHtml(msg.recipient || 'Unknown')}</span>
-                </span>
-                <time>${formatTime(msg.first_seen)}</time>
+                <b class="ui-msg-from">${escapeHtml(msg.sender || 'Unknown')}</b>
+                <time title="${escapeHtml(formatTime(msg.first_seen))}">${formatListTime(msg.first_seen)}</time>
             </div>
             <p class="ui-msg-sub" dir="auto" title="${escapeHtml(msg.subject || 'No subject')}">${escapeHtml(msg.subject || 'No subject')}</p>
             <div class="ui-msg-l3">
                 ${uiCorrelationTag(msg)}
-                ${msg.direction ? uiDirectionTag(msg.direction) : ''}
-                ${msg.is_spam !== null && msg.is_spam !== undefined ? `<span class="ui-tag ${msg.is_spam ? 'ui-tag-spam' : 'ui-tag-ok'}">${msg.is_spam ? 'SPAM' : 'CLEAN'}</span>` : ''}
-                ${msg.queue_id ? `<span class="ui-mono" title="Queue ID">Q: ${escapeHtml(msg.queue_id)}</span>` : ''}
-                ${msg.message_id ? `<span class="ui-mono ui-msg-mid" title="Message ID: ${escapeHtml(msg.message_id)}">MID: ${escapeHtml(msg.message_id.substring(0, 20))}${msg.message_id.length > 20 ? '...' : ''}</span>` : ''}
-                ${msg.spam_score !== null && msg.spam_score !== undefined ? `<span>Score: <b class="${msg.spam_score >= 15 ? 'ui-text-fail' : ''}">${msg.spam_score.toFixed(1)}</b></span>` : ''}
+                ${msg.direction ? `<span>${escapeHtml(msg.direction)}</span>` : ''}
+                ${msg.is_spam ? '<span class="ui-tag ui-tag-spam">SPAM</span>' : ''}
+                <span class="ui-msg-to" title="${escapeHtml(msg.recipient || '')}">to ${escapeHtml(msg.recipient || 'Unknown')}</span>
                 ${renderMailboxFolderHint(msg)}
                 ${renderDeliveriesChip(msg)}
-                ${msg.user ? `<span>User: ${escapeHtml(msg.user)}</span>` : ''}
-                ${msg.ip ? `<span>IP: ${escapeHtml(msg.ip)}</span>` : ''}
             </div>
         </div>`;
 }
@@ -805,6 +898,7 @@ function renderMessagesData(data) {
         <div class="ui-msg-list">${data.data.map(renderMessageRow).join('')}</div>
         ${renderPagination('messages', data.page, data.pages)}
     `;
+    if (typeof markSelectedMessageRow === 'function' && window.openMessageKey) markSelectedMessageRow(window.openMessageKey);
 }
 
 // Deduplicate netfilter logs based on message + time + priority
@@ -1298,6 +1392,7 @@ async function refreshAllData() {
         }
     }
     switchTab(currentTab);
+    loadNavCounters();
 }
 
 // =============================================================================
@@ -3586,6 +3681,74 @@ document.addEventListener('click', function(e) {
     }
 });
 
+// =============================================================================
+// MESSAGES FACETS (counts per outcome and direction, /api/messages/facets)
+// =============================================================================
+
+const MESSAGE_STATUS_FACETS = [['', 'All messages'], ['delivered', 'Delivered'], ['deferred', 'Deferred'], ['bounced', 'Bounced'],
+    ['rejected', 'Rejected'], ['spam', 'Spam'], ['discarded', 'Discarded (Sieve)']];
+const MESSAGE_DIRECTION_FACETS = [['', 'Any direction'], ['inbound', 'Inbound'], ['outbound', 'Outbound'], ['internal', 'Internal']];
+
+function messagesFilterParams(filters) {
+    const params = new URLSearchParams();
+    for (const key of ['search', 'sender', 'recipient', 'direction', 'user', 'status', 'ip', 'start_date', 'end_date']) {
+        if (filters[key]) params.append(key, filters[key]);
+    }
+    return params;
+}
+
+// Choosing a facet sets the outcome or direction filter and reloads the list
+function setMessagesFacet(kind, value) {
+    const select = document.getElementById(kind === 'status' ? 'messages-filter-status' : 'messages-filter-direction');
+    if (select) select.value = value;
+    applyMessagesFilters();
+}
+
+function renderFacetList(kind, entries, counts, current) {
+    return entries.map(([value, label]) => {
+        const count = counts ? counts[value || 'all'] : undefined;
+        const tone = kind === 'status' && value ? (UI_STATUS_TONE[value] || '') : '';
+        return `<button type="button" class="ui-fct" aria-pressed="${String(current === value)}" onclick="setMessagesFacet('${kind}', '${value}')">
+            ${kind === 'status' && value ? `<i class="ui-fct-dot${tone ? ` ui-fct-${tone}` : ''}"></i>` : ''}<span>${escapeHtml(label)}</span>
+            <small>${count === undefined ? '' : count.toLocaleString()}</small></button>`;
+    }).join('');
+}
+
+async function loadMessageFacets(filters) {
+    const statusList = document.getElementById('messages-facet-status');
+    const directionList = document.getElementById('messages-facet-direction');
+    const chips = document.getElementById('messages-chips');
+    let data = null;
+    try {
+        const response = await authenticatedFetch(`/api/messages/facets?${messagesFilterParams(filters)}`);
+        if (response.ok) data = await response.json();
+    } catch (e) {
+        console.warn('Failed to load message facets:', e);
+    }
+    const status = filters.status || '';
+    const direction = filters.direction || '';
+    if (statusList) statusList.innerHTML = renderFacetList('status', MESSAGE_STATUS_FACETS, data && data.status, status);
+    if (directionList) directionList.innerHTML = renderFacetList('direction', MESSAGE_DIRECTION_FACETS, data && data.direction, direction);
+    // Phones and tablets: the outcome facets as chips above the list
+    if (chips) {
+        chips.innerHTML = MESSAGE_STATUS_FACETS.map(([value, label]) => {
+            const count = data && data.status ? data.status[value || 'all'] : undefined;
+            return `<button type="button" class="ui-chip" aria-pressed="${String(status === value)}" onclick="setMessagesFacet('status', '${value}')">${escapeHtml(value ? label : 'All')}${count === undefined ? '' : ` <small>${count.toLocaleString()}</small>`}</button>`;
+        }).join('');
+    }
+}
+
+// After the list renders: keep the open message marked, and on wide screens
+// show the first message in the reading pane, as a mail client does.
+function afterMessagesRendered(data) {
+    if (typeof markSelectedMessageRow === 'function' && window.openMessageKey) markSelectedMessageRow(window.openMessageKey);
+    const modal = document.getElementById('message-modal');
+    const slot = typeof messageReaderSlot === 'function' ? messageReaderSlot() : null;
+    if (slot && modal && modal.classList.contains('hidden') && data.data && data.data.length) {
+        viewMessageDetails(data.data[0].correlation_key);
+    }
+}
+
 async function loadMessages(page = 1) {
     const container = document.getElementById('messages-logs');
 
@@ -3593,6 +3756,7 @@ async function loadMessages(page = 1) {
         container.innerHTML = '<div class="ui-loading"><div class="loading"></div><p>Loading...</p></div>';
 
         const filters = currentFilters.messages || {};
+        loadMessageFacets(filters);
         const params = new URLSearchParams({
             page: page,
             limit: 50
@@ -3621,7 +3785,7 @@ async function loadMessages(page = 1) {
         // Update count display
         const countEl = document.getElementById('messages-count');
         if (countEl) {
-            countEl.textContent = data.total ? `(${data.total.toLocaleString()} results)` : '';
+            countEl.textContent = `${(data.total || 0).toLocaleString()} messages`;
         }
 
         if (!data.data || data.data.length === 0) {
@@ -3633,6 +3797,7 @@ async function loadMessages(page = 1) {
             <div class="ui-msg-list">${data.data.map(renderMessageRow).join('')}</div>
             ${renderPagination('messages', data.page, data.pages)}
         `;
+        afterMessagesRendered(data);
 
         currentPage.messages = page;
     } catch (error) {
