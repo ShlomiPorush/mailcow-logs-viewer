@@ -1,8 +1,9 @@
-"""Protection rules, layer 1: the Trap and unknown-account rules in watch mode.
+"""Protection rules: the Trap and unknown-account rules in watch mode.
 
 A rule reads the failed logins netfilter records and notes which addresses it
 would ban and why. In watch mode nothing is written to Fail2ban; the hits are
-what the admin reviews before switching a rule to enforce.
+what the admin reviews before switching a rule to ban. The other rules and the
+writes to Fail2ban are covered in test_protection_enforce.py.
 """
 import uuid
 from datetime import datetime, timedelta
@@ -20,7 +21,9 @@ SPRAY_IP = '198.51.100.20'
 TYPO_IP = '198.51.100.30'
 ALLOWED_IP = '203.0.113.5'
 PRIVATE_IP = '10.1.2.3'
-ALL_IPS = [TRAP_IP, SPRAY_IP, TYPO_IP, ALLOWED_IP, PRIVATE_IP]
+SUBNET = '192.0.2.0/24'
+SUBNET_IPS = [f'192.0.2.{n}' for n in range(1, 7)]
+ALL_IPS = [TRAP_IP, SPRAY_IP, TYPO_IP, ALLOWED_IP, PRIVATE_IP, SUBNET] + SUBNET_IPS
 
 
 def _postgres_available() -> bool:
