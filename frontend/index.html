@@ -618,11 +618,18 @@
                     </div>
 
                     <div class="ui-col">
-                        <section class="ui-panel">
-                            <div class="ui-panel-head">Server</div>
-                            <div id="dashboard-blacklist-card"><div id="dashboard-blacklist-summary"><div class="ui-loading"><div class="loading"></div><p>Loading...</p></div></div></div>
-                            <div id="dashboard-containers-summary"></div>
-                            <div id="dashboard-storage-summary"></div>
+                        <!-- Server health: one card per area, each opens its Status tab -->
+                        <section class="ui-panel" id="dashboard-health-panel">
+                            <div class="ui-panel-head">Server health
+                                <button type="button" class="ui-more" onclick="openStatusTab('containers')">Status</button></div>
+                            <div class="ui-dash-health">
+                                <button type="button" class="ui-st-card" onclick="openStatusTab('containers')"><span class="ui-st-card-label">Containers</span><b id="dash-kpi-containers">-</b><small id="dash-kpi-containers-note"></small></button>
+                                <button type="button" class="ui-st-card" id="dashboard-blacklist-card" onclick="openStatusTab('blocklists')"><span class="ui-st-card-label">Blocklists</span><b id="dash-kpi-blocklists">-</b><small id="dash-kpi-blocklists-note"></small></button>
+                                <button type="button" class="ui-st-card" onclick="openStatusTab('jobs')"><span class="ui-st-card-label">Background jobs</span><b id="dash-kpi-jobs">-</b><small id="dash-kpi-jobs-note"></small></button>
+                                <button type="button" class="ui-st-card" onclick="openStatusTab('data')"><span class="ui-st-card-label">Mail storage</span><b id="dash-kpi-storage">-</b><small id="dash-kpi-storage-note"></small></button>
+                                <button type="button" class="ui-st-card" onclick="openStatusTab('data')"><span class="ui-st-card-label">Message linking</span><b id="dash-kpi-linking">-</b><small id="dash-kpi-linking-note"></small></button>
+                                <button type="button" class="ui-st-card" onclick="navigateTo('settings')"><span class="ui-st-card-label">This app</span><b id="dash-kpi-version">-</b><small id="dash-kpi-version-note"></small></button>
+                            </div>
                         </section>
                         <section class="ui-panel">
                             <div class="ui-panel-head">Hosted</div>
@@ -1027,26 +1034,13 @@
                 </section>
 
                 <div class="ui-tabs ui-page-tabs ui-st-tabs" role="tablist" aria-label="Status sections">
-                    <button type="button" class="modal-tab active" role="tab" aria-selected="true" id="status-tab-btn-overview" onclick="statusShowTab('overview')">Overview</button>
-                    <button type="button" class="modal-tab" role="tab" aria-selected="false" id="status-tab-btn-containers" onclick="statusShowTab('containers')">Containers <span id="status-tab-n-containers" class="ui-tab-n hidden"></span></button>
+                    <button type="button" class="modal-tab active" role="tab" aria-selected="true" id="status-tab-btn-containers" onclick="statusShowTab('containers')">Containers <span id="status-tab-n-containers" class="ui-tab-n hidden"></span></button>
                     <button type="button" class="modal-tab" role="tab" aria-selected="false" id="status-tab-btn-blocklists" onclick="statusShowTab('blocklists')">Blocklists <span id="status-tab-n-blocklists" class="ui-tab-n hidden"></span></button>
                     <button type="button" class="modal-tab" role="tab" aria-selected="false" id="status-tab-btn-jobs" onclick="statusShowTab('jobs')">Jobs <span id="status-tab-n-jobs" class="ui-tab-n hidden"></span></button>
                     <button type="button" class="modal-tab" role="tab" aria-selected="false" id="status-tab-btn-data" onclick="statusShowTab('data')">Data &amp; storage</button>
                 </div>
 
-                <!-- Overview: one card per area, each opens its tab -->
-                <div id="status-tab-overview" class="ui-scroll ui-st-panel" role="tabpanel">
-                    <div class="ui-st-cards" id="status-kpis">
-                        <button type="button" class="ui-st-card" onclick="statusShowTab('containers')"><span class="ui-st-card-label">Containers</span><b id="status-kpi-containers">-</b><small id="status-containers-note"></small></button>
-                        <button type="button" class="ui-st-card" id="status-kpi-blocklists-cell" onclick="statusShowTab('blocklists')"><span class="ui-st-card-label">Blocklists</span><b id="status-kpi-blocklists">-</b><small id="status-kpi-blocklists-note">Addresses on a blocklist</small></button>
-                        <button type="button" class="ui-st-card" onclick="statusShowTab('jobs')"><span class="ui-st-card-label">Background jobs</span><b id="status-kpi-jobs">-</b><small id="status-kpi-jobs-note"></small></button>
-                        <button type="button" class="ui-st-card" onclick="statusShowTab('data')"><span class="ui-st-card-label">Mail storage</span><b id="status-kpi-storage">-</b><small id="status-kpi-storage-note"></small></button>
-                        <button type="button" class="ui-st-card" onclick="statusShowTab('data')"><span class="ui-st-card-label">Message linking</span><b id="status-kpi-linking">-</b><small id="status-kpi-linking-note"></small></button>
-                        <div class="ui-st-card"><span class="ui-st-card-label">This app</span><b id="status-kpi-version">-</b><small id="status-kpi-version-note">Version</small></div>
-                    </div>
-                </div>
-
-                <div id="status-tab-containers" class="ui-scroll ui-st-panel hidden" role="tabpanel">
+                <div id="status-tab-containers" class="ui-scroll ui-st-panel" role="tabpanel">
                     <div class="ui-list-head"><h2 class="ui-h2">Containers</h2> <span id="status-containers-summary" class="ui-count"></span>
                         <div class="ui-seg ui-head-actions" role="group" aria-label="Show">
                             <button type="button" aria-pressed="true" data-ctr-filter="all" onclick="statusContainerFilter('all')">All</button>

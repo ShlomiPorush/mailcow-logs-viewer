@@ -1671,3 +1671,29 @@ html .markdown-body {
     --color-accent-fg: var(--ui-info); --color-accent-emphasis: var(--ui-info);
     color: var(--ui-ink); background: transparent;
 }
+
+/* Markdown callouts in the app colours */
+html .markdown-body .markdown-alert { margin: 0 0 16px; padding: 10px 14px; border: 0; border-inline-start: 3px solid var(--ui-info);
+    border-radius: 0 var(--ui-radius-sm) var(--ui-radius-sm) 0; background: color-mix(in srgb, var(--ui-info) 8%, transparent); color: inherit; }
+html .markdown-body .markdown-alert > :last-child { margin-bottom: 0; }
+html .markdown-body .markdown-alert-title { display: flex; align-items: center; gap: 6px; margin: 0 0 4px; font-weight: 700; color: var(--ui-info); }
+html .markdown-body .markdown-alert-tip { border-inline-start-color: var(--ui-ok); background: color-mix(in srgb, var(--ui-ok) 8%, transparent); }
+html .markdown-body .markdown-alert-tip .markdown-alert-title { color: var(--ui-ok); }
+html .markdown-body .markdown-alert-important { border-inline-start-color: var(--ui-spam); background: color-mix(in srgb, var(--ui-spam) 8%, transparent); }
+html .markdown-body .markdown-alert-important .markdown-alert-title { color: var(--ui-spam); }
+html .markdown-body .markdown-alert-warning { border-inline-start-color: var(--ui-warn); background: color-mix(in srgb, var(--ui-warn) 9%, transparent); }
+html .markdown-body .markdown-alert-warning .markdown-alert-title { color: var(--ui-warn); }
+html .markdown-body .markdown-alert-caution { border-inline-start-color: var(--ui-fail); background: color-mix(in srgb, var(--ui-fail) 8%, transparent); }
+html .markdown-body .markdown-alert-caution .markdown-alert-title { color: var(--ui-fail); }
+/* The changelog and help modals force every element to white in dark mode; the callout titles keep their colour */
+.dark #changelog-content .markdown-alert .markdown-alert-title, .dark .update-changelog-content .markdown-alert .markdown-alert-title { color: var(--ui-info) !important; }
+.dark #changelog-content .markdown-alert-tip .markdown-alert-title, .dark .update-changelog-content .markdown-alert-tip .markdown-alert-title { color: var(--ui-ok) !important; }
+.dark #changelog-content .markdown-alert-important .markdown-alert-title, .dark .update-changelog-content .markdown-alert-important .markdown-alert-title { color: var(--ui-spam) !important; }
+.dark #changelog-content .markdown-alert-warning .markdown-alert-title, .dark .update-changelog-content .markdown-alert-warning .markdown-alert-title { color: var(--ui-warn) !important; }
+.dark #changelog-content .markdown-alert-caution .markdown-alert-title, .dark .update-changelog-content .markdown-alert-caution .markdown-alert-title { color: var(--ui-fail) !important; }
+
+/* Dashboard server health: the Status cards, two per row in the side column */
+.ui-dash-health { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; padding: 4px 12px 12px; }
+.ui-dash-health .ui-st-card { padding: 11px 12px; background: var(--ui-bg); }
+.ui-dash-health .ui-st-card b { font-size: 17px; }
+.ui-dash-health .ui-st-card small { font-size: 12px; overflow-wrap: anywhere; }
