@@ -362,10 +362,17 @@ function gsChoose(index) {
     item.open();
 }
 
+// A kind's tab starts on its first result, after the box that opens them all
 function gsSetTab(id) {
     gsTab = id;
-    gsActive = 0;
+    const r = gsResults[id];
+    gsActive = r && r.more && r.count && r.items.length ? 1 : 0;
     gsRender();
+}
+
+function gsStepTab(step) {
+    const ids = ['all', ...GS_CATEGORIES.filter(c => !gsOff(c)).map(c => c.id)];
+    gsSetTab(ids[(ids.indexOf(gsTab) + step + ids.length) % ids.length]);
 }
 
 // Wait for something a page draws after loading
@@ -491,19 +498,30 @@ function initGlobalSearch() {
 
     input.addEventListener('focus', gsOpen);
     input.addEventListener('input', () => gsRun(input.value));
-    input.addEventListener('keydown', event => {
+    // The keys work from the field and from a tab or a result that has the focus:
+    // Up and Down move in the results, Left and Right on a tab switch the kind
+    root.addEventListener('keydown', event => {
+        const onTab = !!event.target.closest('[data-gs-tab]');
+        const inPanel = panel.contains(event.target);
+        if (event.target !== input && !inPanel) return;
         if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
             event.preventDefault();
             if (!gsShown.length) return;
             gsActive = (gsActive + (event.key === 'ArrowDown' ? 1 : -1) + gsShown.length) % gsShown.length;
             gsRender();
-        } else if (event.key === 'Enter') {
+            if (inPanel && !root.classList.contains('is-sheet')) input.focus({ preventScroll: true });
+        } else if ((event.key === 'ArrowLeft' || event.key === 'ArrowRight') && onTab) {
+            event.preventDefault();
+            const rtl = getComputedStyle(root).direction === 'rtl';
+            gsStepTab((event.key === 'ArrowRight') !== rtl ? 1 : -1);
+            panel.querySelector('.ui-gs-tab.is-on')?.focus();
+        } else if (event.key === 'Enter' && !inPanel) {
             event.preventDefault();
             gsChoose(gsActive);
         } else if (event.key === 'Tab' && gsQuery) {
             event.preventDefault();
-            const ids = ['all', ...GS_CATEGORIES.filter(c => !gsOff(c)).map(c => c.id)];
-            gsSetTab(ids[(ids.indexOf(gsTab) + (event.shiftKey ? -1 : 1) + ids.length) % ids.length]);
+            gsStepTab(event.shiftKey ? -1 : 1);
+            if (inPanel && !root.classList.contains('is-sheet')) input.focus({ preventScroll: true });
         } else if (event.key === 'Escape') {
             event.preventDefault();
             event.stopPropagation();

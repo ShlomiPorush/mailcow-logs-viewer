@@ -2266,7 +2266,11 @@ html .markdown-body .markdown-alert-caution .markdown-alert-title { color: var(-
 .ui-gs-sec .ui-link { padding: 0; border: 0; background: none; font: inherit; font-size: 12.5px; font-weight: 600; letter-spacing: 0; text-transform: none; color: var(--ui-ink); }
 .ui-gs-item { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; align-items: center; gap: 2px 10px; width: 100%; padding: 7px 10px;
     border: 0; border-radius: 8px; background: none; color: inherit; font: inherit; text-align: start; cursor: pointer; }
-.ui-gs-item:hover, .ui-gs-item.is-active, .ui-gs-more:hover, .ui-gs-more.is-active { background: var(--ui-panel); }
+.ui-gs-item:hover, .ui-gs-more:hover { background: var(--ui-panel); }
+/* The result Enter opens: a bar on its side, plain enough to follow with the arrows */
+.ui-gs-item.is-active, .ui-gs-more.is-active { background: var(--ui-panel); box-shadow: inset 3px 0 0 var(--ui-ink); }
+[dir="rtl"] .ui-gs-item.is-active, [dir="rtl"] .ui-gs-more.is-active { box-shadow: inset -3px 0 0 var(--ui-ink); }
+.ui-gs-tab:focus-visible, .ui-gs-item:focus-visible, .ui-gs-more:focus-visible { outline: 2px solid var(--ui-focus); outline-offset: -2px; }
 .ui-gs-ic { grid-row: 1 / span 2; display: grid; place-items: center; color: var(--ui-muted); }
 .ui-gs-item b { font-weight: 600; font-size: 13.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ui-gs-item small { grid-column: 2; color: var(--ui-muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -2307,3 +2311,9 @@ html .markdown-body .markdown-alert-caution .markdown-alert-title { color: var(-
     /* A message opened from the search comes over it */
     html:has(#message-modal:not(.hidden)) .ui-gs.is-sheet { z-index: 49; }
 }
+
+/* Message Details over the page: what is behind it stays put while it is open */
+html:has(#message-modal:not(.hidden):not(.ui-docked)),
+html:has(#message-modal:not(.hidden):not(.ui-docked)) body,
+html:has(#message-modal:not(.hidden):not(.ui-docked)) :is(.ui-page, .ui-scroll, .ui-gs-body, .ui-sidenav) { overflow: hidden !important; }
+#message-modal .ui-dialog-body, #message-modal-content { overscroll-behavior: contain; }
