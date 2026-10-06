@@ -775,7 +775,8 @@ async def edit_fail2ban_policy(request: Request):
             raise HTTPException(status_code=503, detail="Could not fetch current Fail2Ban settings")
         attrs = {**policy,
                  "blacklist": ",".join(_split_ip_list(current.get("blacklist", ""))),
-                 "whitelist": ",".join(_split_ip_list(current.get("whitelist", "")))}
+                 "whitelist": ",".join(_split_ip_list(current.get("whitelist", ""))),
+                 "manage_external": _manage_external(current)}
         result = await mailcow_api.edit_fail2ban(attrs)
         if isinstance(result, list) and result and result[0].get("type") != "success":
             return {"status": "error", "msg": result[0].get("msg", "Update failed")}
@@ -822,6 +823,11 @@ def _split_ip_list(value) -> List[str]:
     return [e.strip() for e in (value or '').replace('\n', ',').split(',') if e.strip()]
 
 
+def _manage_external(current: dict) -> str:
+    """mailcow's 'firewall managed outside mailcow' switch, as an edit must resend it."""
+    return "1" if current.get("manage_external") in (True, 1, "1") else "0"
+
+
 def _same_entry(a: str, b: str) -> bool:
     """1.2.3.4 and 1.2.3.4/32 (or /128) are the same list entry."""
     bare = lambda v: v[:-3] if v.endswith("/32") else v[:-4] if v.endswith("/128") else v
@@ -860,6 +866,8 @@ async def _add_to_fail2ban_list(ip: str, list_name: str, remove: bool = False) -
         "netban_ipv6": str(current.get("netban_ipv6", "64")),
         "retry_window": str(current.get("retry_window", "600")),
         "whitelist": ",".join(lists["whitelist"]),
+        # mailcow turns this off on any edit that leaves it out
+        "manage_external": _manage_external(current),
     }
 
     logger.info(f"{'Removing' if remove else 'Adding'} IP {ip} {'from' if remove else 'to'} the Fail2Ban {label}")

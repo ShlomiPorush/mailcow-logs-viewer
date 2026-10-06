@@ -820,6 +820,8 @@ async function smartRefreshCurrentTab() {
             case 'netfilter':
                 await smartRefreshNetfilter();
                 await loadSecurityOverview();
+                fail2banSettingsLoaded = false;
+                loadFail2BanSettings();
                 if (typeof refreshProtectionHits === 'function') refreshProtectionHits();
                 break;
             case 'queue':
@@ -1137,10 +1139,12 @@ async function unbanIP(ip, btnEl) {
         const result = await res.json();
         if (res.ok && result.status === 'success') {
             showToast('IP ' + ip + ' unbanned successfully', 'success');
-            // Refresh fail2ban data and netfilter logs
-            fail2banSettingsLoaded = false;
-            fail2banActiveBans = null;
-            loadFail2BanSettings();
+            // mailcow queues the unban and lifts it a few seconds later: the address
+            // leaves the lists now, and Fail2ban is asked again once it has acted
+            const bare = entry => String(entry || '').replace(/\/(32|128)$/, '');
+            if (fail2banActiveBans) fail2banActiveBans = fail2banActiveBans.filter(b => bare(b.ip || b.network) !== bare(ip));
+            renderSecurityOverview();
+            setTimeout(() => { fail2banSettingsLoaded = false; loadFail2BanSettings(); }, 5000);
             smartRefreshNetfilter();
         } else {
             showToast('Failed to unban: ' + (result.msg || result.detail || 'Unknown error'), 'error');
@@ -2059,8 +2063,10 @@ async function loadFail2BanSettings() {
         fail2banLoadError = true;
     }
     renderSecurityOverview();
-    renderSecurityLists();
-    renderSecuritySettings();
+    if (!securityEditing()) {
+        renderSecurityLists();
+        renderSecuritySettings();
+    }
     // The events' Ban and Unban buttons depend on the denylist
     if (lastDataCache.netfilter && mailcowRwConfigured) renderNetfilterData(lastDataCache.netfilter);
 }
