@@ -94,11 +94,9 @@ async function loadProtectionOverview() {
         if (securityFilter === 'history') loadSecurityHistory();
         refreshSecurityAddresses();
         renderSecurityOverview();
-        // The page's timer must not redraw a card or a list someone is working in
-        if (!securityEditing()) {
-            renderSecurityLists();      // which denylist entries a rule wrote
-            renderSecuritySettings();   // the rules' cards
-        }
+        // The page's timer must not redraw a card or an address someone is typing
+        if (!securityListsTyping()) renderSecurityLists();   // which denylist entries a rule wrote
+        if (!securityEditing()) renderSecuritySettings();    // the rules' cards
     } catch (error) {
         console.error('Failed to load the protection hits:', error);
     }
@@ -412,12 +410,18 @@ function securityOpenEvents(ip) {
     applyNetfilterFilters();
 }
 
-// Someone is working in the Settings cards or the Lists: an open card, unsaved
-// changes, or the focus in one of their fields
+// Someone is working in the Settings cards: an open card, unsaved changes, or the
+// focus in one of their fields
 function securityEditing() {
     const focus = document.activeElement;
     return securityCard !== null || securityChangeCount() > 0
-        || !!(focus && focus.closest && focus.closest('#security-cards, #security-lists'));
+        || !!(focus && focus.closest && focus.closest('#security-cards'));
+}
+
+// An address is being typed into a list's Add field. Only that holds the Lists back:
+// after a ban, an allow or a removal they are drawn again at once.
+function securityListsTyping() {
+    return [...document.querySelectorAll('#security-lists .ui-sec-ladd input')].some(field => field.value.trim());
 }
 
 function setSecurityFilter(key) {
@@ -702,8 +706,9 @@ async function securityAddToList(list, value, form) {
     const ip = String(value || '').trim();
     if (!ip) return;
     const button = form && form.querySelector('button');
-    if (list === 'whitelist') await allowIP(ip, button);
-    else await banIP(ip, button);
+    const done = list === 'whitelist' ? await allowIP(ip, button) : await banIP(ip, button);
+    // The field empties, so the list is drawn again with the new entry
+    if (done && form) form.reset();
 }
 
 async function securityRemoveFromList(list, entry, button) {
