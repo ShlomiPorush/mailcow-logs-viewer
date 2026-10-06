@@ -76,9 +76,50 @@ function renderProtection() {
     renderSecurityCountries();
 }
 
+// Every country GeoIP can name, by its ISO 3166-1 code, named in English by the
+// browser itself. Unions, test codes and retired codes the browser also knows are left out.
+const PROTECTION_NOT_COUNTRIES = new Set(('EU EZ UN QO XA XB ZZ AC CP CQ DG EA IC TA '
+    + 'AN BU CS DD DY FX NT SU TP YD YU ZR HV NH RH UK VD').split(' '));
+let protectionCountryList = null;
+
+function protectionCountries() {
+    if (protectionCountryList) return protectionCountryList;
+    protectionCountryList = [];
+    let names;
+    try {
+        names = new Intl.DisplayNames(['en'], { type: 'region', fallback: 'none' });
+    } catch (e) {
+        return protectionCountryList;
+    }
+    for (let a = 65; a <= 90; a++) {
+        for (let b = 65; b <= 90; b++) {
+            const code = String.fromCharCode(a, b);
+            const name = PROTECTION_NOT_COUNTRIES.has(code) ? null : names.of(code);
+            if (name && name !== code) protectionCountryList.push({ code, name });
+        }
+    }
+    protectionCountryList.sort((x, y) => x.name.localeCompare(y.name));
+    return protectionCountryList;
+}
+
 function protectionCountryName(code) {
-    const known = protectionCountrySuggestions.find(s => s.code === code);
+    const known = protectionCountrySuggestions.find(s => s.code === code) || protectionCountries().find(c => c.code === code);
     return known ? `${known.name} (${code})` : code;
+}
+
+// A country from the field: a pick from the list ("Indonesia (ID)"), a name, or a two-letter code
+function protectionCountryCode(value) {
+    const text = String(value || '').trim();
+    const picked = text.match(/\(([A-Za-z]{2})\)$/);
+    if (picked) return picked[1].toUpperCase();
+    if (/^[A-Za-z]{2}$/.test(text)) return text.toUpperCase();
+    const named = protectionCountries().find(c => c.name.toLowerCase() === text.toLowerCase());
+    return named ? named.code : '';
+}
+
+// A pick from the list is added at once, without pressing Add
+function protectionCountryPicked(field) {
+    if (/\([A-Za-z]{2}\)$/.test(field.value.trim()) && addProtectionCountry(field.value)) field.value = '';
 }
 
 // ----------------------------------------------------------------- hits
@@ -151,10 +192,18 @@ function removeTrapName(name) {
 }
 
 function addProtectionCountry(value) {
-    const code = String(value || '').trim().toUpperCase();
-    if (!code || !protectionRules) return;
+    if (!String(value || '').trim() || !protectionRules) return false;
+    const code = protectionCountryCode(value);
+    if (!code) {
+        showToast('No such country. Pick one from the list, or type its two-letter code.', 'error');
+        return false;
+    }
     if (!protectionRules.country.countries.includes(code)) protectionRules.country.countries.push(code);
     renderProtection();
+    // The field is drawn again: the next country can be typed right away
+    const field = document.querySelector('#security-card-country input[name="code"]');
+    if (field) field.focus();
+    return true;
 }
 
 function removeProtectionCountry(code) {
