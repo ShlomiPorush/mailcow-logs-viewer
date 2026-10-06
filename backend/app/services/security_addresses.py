@@ -226,9 +226,15 @@ def _parse_cursor(value: str) -> Optional[tuple]:
         return None
 
 
-def page(addresses: List[dict], list_name: str, country: Optional[str], after: Optional[str], limit: int) -> dict:
-    """One page of a list, its real total, and both lists' counts (for the country, when one is chosen)."""
-    in_country = [a for a in addresses if not country or a["country"] == country]
+def page(addresses: List[dict], list_name: str, country: Optional[str], after: Optional[str], limit: int,
+         query: Optional[str] = None) -> dict:
+    """One page of a list, its real total, and both lists' counts (for the country, when one is chosen).
+
+    `query` keeps the addresses that contain it, for the global search; the
+    counts then count only those.
+    """
+    in_country = [a for a in addresses if (not country or a["country"] == country)
+                  and (not query or query in a["ip"])]
     counts = {name: sum(1 for a in in_country if a["list"] == name) for name in LISTS}
     rows = [a for a in in_country if a["list"] == list_name]
     start = _parse_cursor(after) if after else None

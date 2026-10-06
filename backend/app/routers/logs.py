@@ -635,12 +635,14 @@ async def get_security_addresses(
     country: Optional[str] = Query(None, max_length=100),
     after: Optional[str] = Query(None, max_length=200),
     limit: int = Query(50, ge=1, le=200),
+    q: Optional[str] = Query(None, max_length=100),
     db: Session = Depends(get_db)
 ):
     """
     One page of the Security page's To review or Banned list, newest activity
     first, with the real count of both lists (for the country, when one is
-    given). `after` is the `next` cursor of the page before.
+    given). `after` is the `next` cursor of the page before. `q` keeps the
+    addresses that contain it.
     """
     try:
         found = security_addresses.cached()
@@ -650,7 +652,7 @@ async def get_security_addresses(
             security_addresses.remember(addresses, f2b is not None)
             found = (addresses, f2b is not None)
         addresses, fail2ban_known = found
-        result = security_addresses.page(addresses, list_name, country or None, after, limit)
+        result = security_addresses.page(addresses, list_name, country or None, after, limit, (q or '').strip() or None)
         result["items"] = [_security_item(a) for a in result["items"]]
         result["fail2ban_known"] = fail2ban_known
         return result
