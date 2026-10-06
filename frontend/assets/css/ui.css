@@ -298,6 +298,45 @@
 .ui-alert-title { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; }
 .ui-alert-text p { margin: 3px 0 0; font-size: var(--ui-fs-sm); overflow-wrap: anywhere; }
 
+/* Filter panels */
+.ui-filters { display: grid; gap: 10px; padding: 12px; overflow: visible; }
+.ui-filters-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; }
+.ui-filters-row .ui-filter-wide { grid-column: span 2; }
+.ui-filters-actions { display: flex; gap: 8px; }
+.ui-filters-actions .ui-btn { flex: 1; }
+.ui-filters-toggle { display: none; }
+
+/* A drop-down panel anchored to a button (date range pickers) */
+.ui-popover-host { position: relative; min-width: 0; }
+.ui-popover { position: absolute; inset-inline-start: 0; top: calc(100% + 6px); z-index: 50; width: 320px; max-width: calc(100vw - 32px);
+    padding: 12px; border-radius: var(--ui-radius); background: var(--ui-bg); border: 1px solid var(--ui-line);
+    box-shadow: 0 12px 32px rgb(0 0 0 / .14); }
+.ui-select-btn { display: flex; align-items: center; gap: 8px; text-align: start; cursor: pointer; }
+.ui-select-btn > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ui-select-btn svg { flex: none; color: var(--ui-muted); }
+.ui-select-arrow { transition: transform .15s ease; }
+.ui-chip-row { display: flex; flex-wrap: wrap; gap: 6px; }
+.ui-date-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+
+/* Message list rows: a coloured edge for the final status */
+.ui-msg-item { padding: var(--ui-pad-y) var(--ui-pad-x) var(--ui-pad-y) calc(var(--ui-pad-x) - 3px); border-top: 1px solid var(--ui-line);
+    border-inline-start: 3px solid transparent; cursor: pointer; }
+.ui-msg-item:hover { background: color-mix(in srgb, var(--ui-accent) 5%, transparent); }
+.ui-msg-ok { border-inline-start-color: color-mix(in srgb, var(--ui-ok) 55%, transparent); }
+.ui-msg-warn { border-inline-start-color: var(--ui-warn); }
+.ui-msg-fail { border-inline-start-color: var(--ui-fail); }
+.ui-msg-spam { border-inline-start-color: var(--ui-spam); }
+.ui-msg-l1 { display: flex; align-items: baseline; gap: 10px; }
+.ui-msg-l1 .ui-msg-who { flex: 1; min-width: 0; }
+.ui-msg-l1 time { flex: none; color: var(--ui-muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.ui-msg-l3 { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; margin-top: 6px; color: var(--ui-muted); font-size: 12px; }
+.ui-msg-l3 .ui-tag { margin-inline-end: -6px; }
+.ui-msg-l3 b { font-weight: 650; color: var(--ui-ink); }
+.ui-msg-l3 b.ui-text-fail { color: var(--ui-fail); }
+.ui-msg-mid { max-width: 22ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.ui-pagination { display: flex; align-items: center; justify-content: center; gap: 12px; padding: 14px var(--ui-pad-x); border-top: 1px solid var(--ui-line); }
+
 @media (max-width: 1000px) {
     .ui-dash-grid { grid-template-columns: minmax(0, 1fr); }
 }
@@ -311,6 +350,12 @@
     .ui-msg-row { grid-template-columns: minmax(0, 1fr); }
     .ui-msg-meta { flex-direction: row; align-items: center; justify-content: space-between; }
     .ui-alert { flex-wrap: wrap; }
+    .ui-filters-row .ui-filter-wide { grid-column: auto; }
+    /* Phones: search, Apply and Clear stay; the other filters open with "Filters" */
+    .ui-filters:not(.is-open) .ui-filter-extra { display: none; }
+    .ui-filters-toggle { display: inline-flex; }
+    .ui-filters.is-open .ui-filters-toggle { background: var(--ui-accent); border-color: var(--ui-accent); color: var(--ui-on-accent); }
+    .ui-msg-l1 { flex-wrap: wrap; }
     .ui-alert > .ui-btn { margin-inline-start: 18px; }
 }
 
