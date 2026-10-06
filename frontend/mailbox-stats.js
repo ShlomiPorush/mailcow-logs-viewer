@@ -271,7 +271,7 @@ async function loadMailboxStatsList(page = 1) {
 
         // Update count
         const countEl = document.getElementById('mailbox-stats-count');
-        if (countEl) countEl.textContent = `${data.total || 0} mailboxes`;
+        if (countEl) countEl.textContent = uiCountLabel(data.total || 0, 'mailbox', 'mailboxes');
 
         // Update pagination info
         const pageInfoEl = document.getElementById('mailbox-stats-page-info');

@@ -316,7 +316,8 @@ function renderRateLimitSendersCard() {
     const header = rateLimitCardHead('Blocked senders', 'Mail that mailcow refused because the sender ran out of allowance',
         senders.length === 0 || detailMode ? '' : `
             <input type="text" value="${escapeHtml(rateLimitSenderSearch)}" placeholder="Search..." aria-label="Search senders"
-                oninput="filterRateLimitSenders(this.value)" class="ui-input ui-rl-search">`);
+                oninput="filterRateLimitSenders(this.value)" class="ui-input ui-rl-search">
+            <span class="ui-count" data-rl-sender-count>${uiCountLabel(senders.length, 'sender', 'senders')}</span>`);
 
     let body;
     if (senders.length === 0) {
@@ -422,6 +423,8 @@ function filterRateLimitSenders(query) {
 
     const empty = card.querySelector('[data-rl-sender-noresults]');
     if (empty) empty.classList.toggle('hidden', shown !== 0);
+    const count = card.querySelector('[data-rl-sender-count]');
+    if (count) count.textContent = uiCountLabel(shown, 'sender', 'senders');
 }
 
 
@@ -669,6 +672,7 @@ function renderRateLimitConfigCard() {
                 <label class="ui-check-label"><input type="checkbox" class="ui-check" ${rateLimitHideUnlimited ? 'checked' : ''} onchange="setRateLimitHideUnlimited(this.checked)"> Hide no limit</label>
                 <input type="text" value="${escapeHtml(rateLimitConfigSearch)}" placeholder="Search..." aria-label="Search limits"
                     oninput="filterRateLimitConfigRows(this.value)" class="ui-input ui-rl-search">
+                <span class="ui-count" data-rl-config-count></span>
                 ${canWrite && rows ? `<button type="button" onclick="toggleRateLimitBulkPanel()" class="${RATE_LIMIT_ACTION_BUTTON}">Apply to filtered</button>` : ''}`)}
             ${renderRateLimitBulkPanel()}
             ${renderRateLimitReadOnlyNotice()}
@@ -723,6 +727,8 @@ function applyRateLimitConfigFilters() {
 
     const empty = card.querySelector('[data-rl-noresults]');
     if (empty) empty.classList.toggle('hidden', shown !== 0);
+    const count = card.querySelector('[data-rl-config-count]');
+    if (count) count.textContent = uiCountLabel(shown, 'entry', 'entries');
 
     refreshRateLimitBulkPanel();
 }

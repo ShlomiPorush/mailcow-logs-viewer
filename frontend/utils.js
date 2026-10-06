@@ -309,6 +309,12 @@ function escapeHtml(text) {
 }
 
 // Escape a value embedded as a JS single-quoted string inside an inline HTML
+// A list's count, as every list shows it above itself: "1,920 events", "1 device"
+function uiCountLabel(n, one, many) {
+    const count = Number(n) || 0;
+    return `${count.toLocaleString()} ${count === 1 ? one : many}`;
+}
+
 // event handler, e.g. onclick="fn('${escapeJsArg(value)}')". escapeHtml is NOT
 // safe there: the browser HTML-decodes the attribute (&#039; -> ') before the
 // JS parser runs, letting a quote break out of the string. \xNN escapes leave
