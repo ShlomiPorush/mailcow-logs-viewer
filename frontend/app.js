@@ -336,6 +336,17 @@ async function fetchRwStatus() {
         console.warn('Failed to fetch RW status:', e);
         mailcowRwConfigured = false;
     }
+    // The Quarantine tabs (and the sidebar sub-menu built from them) are known from the start
+    showQuarantineTabs();
+}
+
+// Auto-Rules needs the Read-Write key: with it, Quarantine gets its tabs
+function showQuarantineTabs() {
+    if (!mailcowRwConfigured) return false;
+    document.getElementById('quarantine-rules-section')?.classList.remove('hidden');
+    document.getElementById('quarantine-tabs')?.classList.remove('hidden');
+    document.getElementById('tab-quarantine')?.classList.add('has-sub');
+    return true;
 }
 
 // Auto-refresh configuration
@@ -3202,12 +3213,7 @@ async function initQuarantineRules() {
         await fetchRwStatus();
     }
     
-    if (mailcowRwConfigured) {
-        section.classList.remove('hidden');
-        const tabs = document.getElementById('quarantine-tabs');
-        if (tabs) tabs.classList.remove('hidden');
-        const navItem = document.getElementById('tab-quarantine');
-        if (navItem) navItem.classList.add('has-sub');
+    if (showQuarantineTabs()) {
         loadQuarantineRules();
     }
 }
