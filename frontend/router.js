@@ -257,14 +257,17 @@ function navigateTo(route, params = {}, updateHistory = true) {
 // leaving the page. The entry has the same address as the page.
 // =============================================================================
 
-// The docked message pane on the desktop Messages page is part of the page, not a dialog
-const OVERLAY_SELECTOR = '.ui-dialog-backdrop:not(.hidden):not(.ui-docked), #container-logs-modal:not(.hidden), #mobile-menu.active';
+// The docked message pane on the desktop Messages page is part of the page, not a dialog.
+// The search over a phone's screen (search.js) is one too
+const OVERLAY_SELECTOR = '.ui-dialog-backdrop:not(.hidden):not(.ui-docked), #container-logs-modal:not(.hidden), #mobile-menu.active, .ui-gs.is-sheet';
 let overlayHistoryEntry = false;
 let overlayIgnorePop = false;
 let overlaySyncQueued = false;
 
+// The phone search is under a message it opened, though it comes later in the page
 function openOverlays() {
-    return [...document.querySelectorAll(OVERLAY_SELECTOR)].filter(el => el.getClientRects().length > 0);
+    const open = [...document.querySelectorAll(OVERLAY_SELECTOR)].filter(el => el.getClientRects().length > 0);
+    return [...open.filter(el => el.matches('.ui-gs')), ...open.filter(el => !el.matches('.ui-gs'))];
 }
 
 // Close the dialog on top the way a user would: its Close or Cancel button
