@@ -2192,6 +2192,8 @@ html .markdown-body .markdown-alert-caution .markdown-alert-title { color: var(-
     .ui-page-crumbs .ui-crumb { text-decoration: none; }
     .ui-page-crumbs .ui-crumb:hover { text-decoration: underline; }
     .ui-page-crumbs .ui-crumb-current { font-weight: 600; color: var(--ui-ink); }
+    /* A page's own crumbs (a Rspamd map) are in the top crumbs instead */
+    html.ui-has-topbar .ui-crumbs-local { display: none; }
 }
 
 /* Protection rules (Security > Protection) */
