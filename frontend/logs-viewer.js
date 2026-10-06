@@ -220,11 +220,61 @@ async function loadSmartFilters(serviceId) {
         chipsContainer.innerHTML = logsState.smartFilters.map(f => `<button onclick="toggleSmartFilter('${f.id}')"
                 id="smart-filter-${f.id}" class="ui-chip ui-chip-${escapeHtml(f.color || 'blue')}" aria-pressed="false"
                 title="${escapeHtml(f.description || '')}" data-filter-id="${f.id}" data-color="${escapeHtml(f.color || 'blue')}">${escapeHtml(f.label)}</button>`).join('');
+        fitQuickFilters();
         
     } catch (error) {
         console.error('[LOGS] Failed to load smart filters:', error);
         container.classList.add('hidden');
     }
+}
+
+// Quick filters fold to a row and a half, so the cut second row shows there is more
+let quickFiltersOpen = false;
+function fitQuickFilters() {
+    const chips = document.getElementById('logs-smart-filter-chips');
+    const more = document.getElementById('logs-quick-more');
+    if (!chips || !more) return;
+    if (!quickFiltersObserver && typeof ResizeObserver === 'function') {
+        let lastWidth = 0;
+        quickFiltersObserver = new ResizeObserver(entries => {
+            const width = Math.round(entries[0].contentRect.width);
+            if (width && width !== lastWidth) { lastWidth = width; fitQuickFilters(); }
+        });
+        quickFiltersObserver.observe(chips);
+    }
+    chips.classList.remove('is-folded');
+    const first = chips.firstElementChild;
+    if (!first) { more.classList.add('hidden'); return; }
+    // Fold only when it saves at least a row; otherwise show them all, no link
+    const rowH = first.offsetHeight;
+    const foldH = Math.round(rowH * 1.6 + 6);
+    const overflows = chips.scrollHeight > foldH + rowH;
+    // An active filter never hides in the folded part
+    const activeHidden = [...chips.querySelectorAll('[aria-pressed="true"]')].some(c => c.offsetTop - chips.offsetTop > rowH);
+    if (activeHidden) quickFiltersOpen = true;
+    more.classList.toggle('hidden', !overflows);
+    chips.classList.toggle('is-folded', overflows && !quickFiltersOpen);
+    chips.style.setProperty('--ui-fold-h', `${foldH}px`);
+    more.textContent = quickFiltersOpen ? 'Show less' : `Show all ${chips.children.length}`;
+    more.setAttribute('aria-expanded', quickFiltersOpen);
+}
+
+function toggleQuickFilters() {
+    quickFiltersOpen = !quickFiltersOpen;
+    fitQuickFilters();
+}
+// Refit when the chips get their size: the page was hidden, or the width changed
+let quickFiltersObserver = null;
+
+// The custom date range opens from its chip; the presets fill it and load
+function toggleLogCustomRange(open) {
+    const box = document.getElementById('logs-custom-range');
+    const btn = document.getElementById('logs-custom-range-btn');
+    if (!box) return;
+    const show = typeof open === 'boolean' ? open : box.classList.contains('hidden');
+    box.classList.toggle('hidden', !show);
+    if (btn) { btn.setAttribute('aria-expanded', show); btn.setAttribute('aria-pressed', show); }
+    if (show) { const from = document.getElementById('logs-date-from'); if (from) from.focus(); }
 }
 
 async function toggleSmartFilter(filterId) {

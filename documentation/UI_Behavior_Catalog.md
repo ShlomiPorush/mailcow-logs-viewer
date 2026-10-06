@@ -382,10 +382,10 @@ Native `title` tooltips. Dynamic ones show the expression that builds the text.
 | Logs | "Clear display" | `frontend/index.html:1320` |
 | Logs | "Search" | `frontend/index.html:1327` |
 | Logs | "Clear search" | `frontend/index.html:1328` |
-| Logs | "From date" | `frontend/index.html:1342` |
-| Logs | "To date" | `frontend/index.html:1344` |
+| Logs | "From date" | `frontend/index.html:1344` |
+| Logs | "To date" | `frontend/index.html:1346` |
 | Logs | dynamic: `${escapeHtml(f.description \|\| '')}` | `frontend/logs-viewer.js:222` (loadSmartFilters) |
-| Logs | "Clear all filters" | `frontend/logs-viewer.js:1170` (updateFilterBadge) |
+| Logs | "Clear all filters" | `frontend/logs-viewer.js:1220` (updateFilterBadge) |
 | Settings | "Last delivery succeeded" | `frontend/notifications.js:67` (renderNotificationChannels) |
 | Settings | "Last delivery failed" | `frontend/notifications.js:69` (renderNotificationChannels) |
 | Settings | "Not used yet" | `frontend/notifications.js:70` (renderNotificationChannels) |
@@ -407,12 +407,12 @@ Native `title` tooltips. Dynamic ones show the expression that builds the text.
 | app.js (mixed) | dynamic: `Look up on ${escapeHtml(r.name)}` | `frontend/app.js:4028` (blocklistLookupLink) |
 | app.js (mixed) | set in JS: dynamic: `label` | `frontend/app.js:286` (setNavTabLabel) |
 | app.js (mixed) | set in JS: dynamic: `title \|\| ''` | `frontend/app.js:496` (setNavCount) |
-| Modal: changelog-modal | "Close" | `frontend/index.html:1428` |
-| Modal: container-logs-modal | "Refresh" | `frontend/index.html:1460` |
-| Modal: container-logs-modal | "Close" | `frontend/index.html:1468` |
-| Modal: dmarc-reports-management-modal | "Close" | `frontend/index.html:1516` |
-| Modal: dmarc-sync-history-modal | "Close" | `frontend/index.html:1503` |
-| Modal: message-modal | "Close" | `frontend/index.html:1401` |
+| Modal: changelog-modal | "Close" | `frontend/index.html:1432` |
+| Modal: container-logs-modal | "Refresh" | `frontend/index.html:1464` |
+| Modal: container-logs-modal | "Close" | `frontend/index.html:1472` |
+| Modal: dmarc-reports-management-modal | "Close" | `frontend/index.html:1520` |
+| Modal: dmarc-sync-history-modal | "Close" | `frontend/index.html:1507` |
+| Modal: message-modal | "Close" | `frontend/index.html:1405` |
 
 ### Toasts
 
@@ -745,7 +745,7 @@ Text shown when a list or panel has nothing to show.
 | DMARC | "No reports found" | `frontend/dmarc.js:1173` (renderReportsManagementTable) |
 | Mailbox stats | "No mailboxes found" | `frontend/mailbox-stats.js:306` (renderMailboxStatsAccordion) |
 | Logs | "No log services available" | `frontend/logs-viewer.js:90` (loadLogViewer) |
-| Logs | "No log entries found" | `frontend/logs-viewer.js:437` (renderLogEntries) |
+| Logs | "No log entries found" | `frontend/logs-viewer.js:487` (renderLogEntries) |
 | Settings | "No logs available" | `frontend/notifications.js:269` (testNotificationChannel) |
 | Settings | "No logs available" | `frontend/notifications.js:286` (testNotificationChannelDraft) |
 | Settings | "No changelog available" | `frontend/settings.js:1147` (renderSettings) |
@@ -769,7 +769,7 @@ Functions that render a spinner or "Loading..." while data is fetched.
 | Status | 1 loading indicator(s) | `frontend/app.js:4060` (renderStatusAttention) |
 | Status | 2 loading indicator(s) | `frontend/app.js:4352` (checkBlacklists) |
 | Status | 1 loading indicator(s) | `frontend/app.js:4825` (triggerBackgroundJob) |
-| Logs | 1 loading indicator(s) | `frontend/logs-viewer.js:1052` (loadDateRangeLogs) |
+| Logs | 1 loading indicator(s) | `frontend/logs-viewer.js:1102` (loadDateRangeLogs) |
 | Settings | 3 loading indicator(s) | `frontend/settings.js:1190` (renderSettings) |
 | Settings | 2 loading indicator(s) | `frontend/settings.js:1587` (showGeoIPSetupModal) |
 | Settings | 1 loading indicator(s) | `frontend/settings.js:1777` (validateMaxMindLicense) |
@@ -784,7 +784,7 @@ Settings the browser remembers between visits.
 | Shell | localStorage getItem "theme" | `frontend/app.js:5031` (initDarkMode) |
 | Shell | localStorage setItem "theme" | `frontend/app.js:5046` (toggleDarkMode) |
 | Logs | localStorage getItem "logsNewestFirst" | `frontend/logs-viewer.js:17` |
-| Logs | localStorage setItem "logsNewestFirst" | `frontend/logs-viewer.js:510` (toggleLogSortOrder) |
+| Logs | localStorage setItem "logsNewestFirst" | `frontend/logs-viewer.js:560` (toggleLogSortOrder) |
 
 ### Auto refresh and timers
 

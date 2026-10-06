@@ -1338,18 +1338,22 @@
                                     <button onclick="setLogTimePreset(360)" class="ui-chip">6h</button>
                                     <button onclick="setLogTimePreset(1440)" class="ui-chip">24h</button>
                                     <button onclick="setLogTimePreset(2880)" class="ui-chip">48h</button>
+                                    <button type="button" onclick="toggleLogCustomRange()" id="logs-custom-range-btn" class="ui-chip" aria-expanded="false" aria-controls="logs-custom-range">Custom</button>
                                 </div>
-                                <input type="datetime-local" id="logs-date-from" class="ui-input ui-logs-date" title="From date" aria-label="From date">
-                                <span class="ui-muted">→</span>
-                                <input type="datetime-local" id="logs-date-to" class="ui-input ui-logs-date" title="To date" aria-label="To date">
-                                <button onclick="loadDateRangeLogs()" class="ui-btn ui-btn-sm ui-btn-primary" id="logs-load-range-btn"><svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg> Load</button>
-                                <span id="logs-range-loading" class="hidden ui-text-info">Loading...</span>
+                                <div id="logs-custom-range" class="ui-logs-custom hidden">
+                                    <input type="datetime-local" id="logs-date-from" class="ui-input ui-logs-date" title="From date" aria-label="From date">
+                                    <span class="ui-muted">→</span>
+                                    <input type="datetime-local" id="logs-date-to" class="ui-input ui-logs-date" title="To date" aria-label="To date">
+                                    <button onclick="loadDateRangeLogs()" class="ui-btn ui-btn-sm ui-btn-primary" id="logs-load-range-btn"><svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg> Load</button>
+                                    <span id="logs-range-loading" class="hidden ui-text-info">Loading...</span>
+                                </div>
                             </div>
 
                             <!-- Smart Filters (Postfix only) -->
-                            <div id="logs-smart-filters" class="ui-logs-row hidden">
+                            <div id="logs-smart-filters" class="ui-logs-row ui-logs-quick hidden">
                                 <span class="ui-muted">Quick Filters:</span>
                                 <div id="logs-smart-filter-chips" class="ui-chip-row"></div>
+                                <button type="button" id="logs-quick-more" class="ui-link-row ui-logs-quick-more hidden" aria-expanded="false" aria-controls="logs-smart-filter-chips" onclick="toggleQuickFilters()">Show all</button>
                             </div>
                         </div>
 
