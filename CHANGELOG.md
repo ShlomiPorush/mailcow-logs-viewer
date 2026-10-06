@@ -9,9 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Devices page** - A new page under Server lists the phones, tablets and Outlook clients that sync over ActiveSync: the user, device type, last IP with its country, last request and when each device was first and last seen. A device whose password is refused is marked, and new devices are tagged for a week. The list is read from the SOGo log through the mailcow API, so nothing changes in mailcow. Devices that stop syncing are removed after 90 days (`EAS_DEVICES_RETENTION_DAYS`, `0` keeps them), and the page can be turned off under Features. Thanks to AonH and DocFraggle on the [mailcow community forum](https://community.mailcow.email/d/6177-kleines-eas-monitoringscript).
+
+### Fixed
+
+- **Pages that went empty with the Logs page off** - Sieve and delivery results in message details, the Rate Limits activity and the Security login alert read their mailcow logs from the Logs page's collection, so turning the Logs page off, or unticking `dovecot` or `ratelimited` there, quietly stopped them. The services these pages need are now collected whatever the Logs settings are, and Settings lists them under the Logs services.
+
+## [2.9.0] - 2026-10-04
+
+### Added
+
 - **DNSSEC and DANE checks** - The Domains page shows whether each domain is DNSSEC validated, and whether DANE actually works: TLSA records must be DNSSEC validated and match the certificate each mail server presents. A TLSA record that stops matching the certificate triggers a DNS change alert. [#287](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/287). Thanks to [@Neocridas](https://github.com/Neocridas).
 - **TLS-RPT record check** - The DMARC page is now called **DMARC & TLS**, and each domain shows a TLS-RPT Record card next to the DMARC Record card: whether the domain publishes a TLS-RPT record and where TLS reports are sent, so a missing or broken record explains why no reports arrive. A change to the record triggers a DNS change alert. [#328](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/328). Thanks to [@homonto](https://github.com/homonto).
-- **Devices page** - A new page under Server lists the phones, tablets and Outlook clients that sync over ActiveSync: the user, device type, last IP with its country, last request and when each device was first and last seen. A device whose password is refused is marked, and new devices are tagged for a week. The list is read from the SOGo log through the mailcow API, so nothing changes in mailcow. Devices that stop syncing are removed after 90 days (`EAS_DEVICES_RETENTION_DAYS`, `0` keeps them), and the page can be turned off under Features. Thanks to AonH and DocFraggle on the [mailcow community forum](https://community.mailcow.email/d/6177-kleines-eas-monitoringscript).
 
 ### Security
 
@@ -19,7 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **Pages that went empty with the Logs page off** - Sieve and delivery results in message details, the Rate Limits activity and the Security login alert read their mailcow logs from the Logs page's collection, so turning the Logs page off, or unticking `dovecot` or `ratelimited` there, quietly stopped them. The services these pages need are now collected whatever the Logs settings are, and Settings lists them under the Logs services.
+- **Hebrew and Arabic subjects** - Subjects written in Hebrew or Arabic were shown left to right, so brackets, punctuation and numbers landed on the wrong side. They are now shown in their own reading direction in the message lists, the message details, Quarantine and Rate Limits.
 - **DKIM records rewritten by DNS providers** - A published record with reordered tags, an added `h=sha256`, a missing `t=s` or a folded key is no longer reported as a mismatch. Only a different key, key type or hash that breaks signing is an error; other tag differences show as warnings. [#292](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/292). Thanks to [@phende](https://github.com/phende).
 - **DMARC reports with empty rows** - Some providers send aggregate reports whose rows have no source IP and a count of 0. Such a report failed on every sync with a database error; the empty rows are now skipped and the report is stored. [#324](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/324). Thanks to [@fadorator](https://github.com/fadorator).
 - **Fail2ban Unban** - Unban on the Security page failed with an error: the app called an endpoint mailcow does not have. It now uses mailcow's own unban request. Saving the Fail2ban settings, and Ban, also no longer switch off mailcow's "manage external" option.

@@ -136,19 +136,32 @@ jobs:
   # Issues with a merged fix stay open until the release that ships it.
   # Once the image is published, close every open issue labelled
   # `fix available` (the label is applied only after the fix is merged to
-  # main, so everything it marks is in this release).
+  # main, so everything it marks is in a release tagged on main). A release
+  # tagged on a maintenance branch (an urgent fix to an earlier version while
+  # main has moved on) does not carry main's fixes, so it closes nothing;
+  # close the issues it fixes by hand.
   close-shipped-issues:
     needs: build-and-push
     runs-on: ubuntu-latest
     permissions:
+      contents: read
       issues: write
     env:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
       TAG: ${{ github.ref_name }}
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
       - name: Close issues labelled "fix available"
         run: |
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::notice::${TAG} is not on main, so it does not ship main's fixes. No issue was closed; close the ones this release fixes by hand."
+            exit 0
+          fi
           issues=$(gh issue list --state open --label "fix available" --limit 100 --json number -q '.[].number')
           if [ -z "$issues" ]; then
             echo "No open issues labelled 'fix available'."
