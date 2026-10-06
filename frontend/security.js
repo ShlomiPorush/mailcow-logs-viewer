@@ -195,31 +195,41 @@ function refreshSecurityAddresses() {
 
 // ----------------------------------------------------------------- what protects the server
 
-function securityProtections() {
+// Every protection with whether it is on: Fail2ban, the rules, and outgoing spam.
+// The Overview's row and the dashboard's Security card are drawn from it.
+function securityProtectionItems() {
     const rules = (typeof protectionSaved !== 'undefined' && protectionSaved) || (typeof protectionRules !== 'undefined' && protectionRules);
     const caps = typeof protectionCaps !== 'undefined' ? protectionCaps : {};
-    const item = (state, name, note, open) => {
-        const mark = state === 'on' ? '✓' : state === 'unknown' ? '?' : '✕';
-        const label = state === 'on' ? 'On' : state === 'unknown' ? 'Unknown' : 'Off';
-        return `<button type="button" class="ui-prot-item is-${state}" onclick="${open}" title="${escapeHtml(`${name}: ${label}${note ? `, ${note}` : ''}`)}">
-            <span class="ui-prot-mark" aria-label="${label}">${mark}</span>${escapeHtml(name)}${note ? `<small>${escapeHtml(note)}</small>` : ''}</button>`;
-    };
-    const f2b = fail2banLoadError ? item('unknown', 'Fail2ban', 'mailcow did not answer', "securityOpenProtection('fail2ban')")
-        : fail2banPolicy ? item('on', 'Fail2ban', `${fail2banPolicy.max_attempts} tries, ${formatSeconds(fail2banPolicy.ban_time)}`, "securityOpenProtection('fail2ban')")
-        : item('unknown', 'Fail2ban', '', "securityOpenProtection('fail2ban')");
+    const item = (state, name, note, key) => ({ state, name, note, key });
+    const f2b = fail2banLoadError ? item('unknown', 'Fail2ban', 'mailcow did not answer', 'fail2ban')
+        : fail2banPolicy ? item('on', 'Fail2ban', `${fail2banPolicy.max_attempts} attempts, ${formatSeconds(fail2banPolicy.ban_time)}`, 'fail2ban')
+        : item('unknown', 'Fail2ban', '', 'fail2ban');
     const rule = key => {
         if (!rules || !rules[key]) return '';
         const r = rules[key];
         const needs = key === 'country' && !caps.geoip ? 'needs MaxMind GeoIP' : '';
-        if (needs) return item('off', SECURITY_RULE_NAMES[key], needs, `securityOpenProtection('${key}')`);
-        if (!r.enabled) return item('off', SECURITY_RULE_NAMES[key], '', `securityOpenProtection('${key}')`);
+        if (needs) return item('off', SECURITY_RULE_NAMES[key], needs, key);
+        if (!r.enabled) return item('off', SECURITY_RULE_NAMES[key], '', key);
         const doing = key === 'breach' ? 'alerts' : r.mode === 'enforce' && caps.can_ban ? 'bans' : 'watching';
-        return item('on', SECURITY_RULE_NAMES[key], doing, `securityOpenProtection('${key}')`);
+        return item('on', SECURITY_RULE_NAMES[key], doing, key);
     };
     const abuse = typeof smtpAbuseStatus !== 'undefined' && smtpAbuseStatus
-        ? item(smtpAbuseStatus.enabled ? 'on' : 'off', 'Outgoing spam', '', "securityOpenProtection('abuse')") : '';
-    const items = [f2b, ...SECURITY_RULE_ORDER.map(rule), abuse].filter(Boolean);
-    const on = items.filter(html => html.includes('is-on')).length;
+        ? item(smtpAbuseStatus.enabled ? 'on' : 'off', 'Outgoing spam', '', 'abuse') : '';
+    return [f2b, ...SECURITY_RULE_ORDER.map(rule), abuse].filter(Boolean);
+}
+
+// One protection, with its mark and what it does; a click opens its settings card
+function securityProtectionButton({ state, name, note, key }, opener = 'securityOpenProtection') {
+    const mark = state === 'on' ? '✓' : state === 'unknown' ? '?' : '✕';
+    const label = state === 'on' ? 'On' : state === 'unknown' ? 'Unknown' : 'Off';
+    return `<button type="button" class="ui-prot-item is-${state}" onclick="${opener}('${key}')" title="${escapeHtml(`${name}: ${label}${note ? `, ${note}` : ''}`)}">
+        <span class="ui-prot-mark" aria-label="${label}">${mark}</span>${escapeHtml(name)}${note ? `<small>${escapeHtml(note)}</small>` : ''}</button>`;
+}
+
+function securityProtections() {
+    const protections = securityProtectionItems();
+    const items = protections.map(p => securityProtectionButton(p));
+    const on = protections.filter(p => p.state === 'on').length;
     // On a phone the row folds into one chip that opens the list
     const summary = `<button type="button" class="ui-prot-sum" aria-expanded="${securityStripOpen}" onclick="securityStripOpen = !securityStripOpen; renderSecurityOverview()">
         Protection <b>${on} of ${items.length} on</b></button>`;
@@ -746,6 +756,25 @@ async function loadSecurityAppSettings() {
         securityAppSettings = null;
     }
     renderSecuritySettings();
+}
+
+// The dashboard's Security card opens one of the two lists, or the protection settings
+function openSecurityList(key) {
+    securityFilter = key;
+    securityOpenRow = null;
+    securityPage = null;
+    securityToTop = true;
+    navigateTo('netfilter', { sub: 'overview' });
+}
+
+function openSecuritySettings() {
+    navigateTo('netfilter', { sub: 'settings' });
+}
+
+// From the dashboard, straight to one protection's settings card
+function openSecurityProtection(key) {
+    navigateTo('netfilter', { sub: 'settings' });
+    securityOpenCard(key);
 }
 
 // A protection in the Overview's row opens its own card

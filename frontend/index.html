@@ -590,6 +590,12 @@
                     </div>
 
                     <div class="ui-col">
+                        <!-- Security: the Security page's two lists, and which protections are on -->
+                        <section class="ui-panel" id="dashboard-security-panel">
+                            <div class="ui-panel-head">Security
+                                <button type="button" class="ui-more" onclick="navigateTo('netfilter')">Open Security</button></div>
+                            <div id="dashboard-security"><div class="ui-loading"><div class="loading"></div><p>Loading...</p></div></div>
+                        </section>
                         <!-- Server health: one card per area, each opens its Status tab -->
                         <section class="ui-panel" id="dashboard-health-panel">
                             <div class="ui-panel-head">Server health

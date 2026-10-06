@@ -1350,6 +1350,7 @@ async function smartRefreshDashboard() {
         loadRecentActivity();
         loadMailFlowChart();
         loadDashboardStatusSummary();
+        loadDashboardSecurity();
     } catch (error) {
         console.error('Dashboard refresh error:', error);
     }
@@ -1587,6 +1588,7 @@ async function loadDashboard() {
         loadDashboardHealth();
         loadDashboardSecurityAlerts();
         loadDashboardAttention();
+        loadDashboardSecurity();
         loadMailFlowChart();
     } catch (error) {
         console.error('Failed to load dashboard:', error);
@@ -1858,6 +1860,66 @@ function setDashKpi(id, value, tone, note) {
     if (el) { el.textContent = value; el.className = tone ? `ui-${tone}` : ''; }
     const noteEl = document.getElementById(`${id}-note`);
     if (noteEl && note !== undefined) noteEl.textContent = note;
+}
+
+// The Security card: whether the protections are on, and the Security page's two
+// lists with the same real counts. Which protections are on is read once; the
+// Security page keeps it current when it is opened.
+async function loadDashboardSecurity() {
+    const panel = document.getElementById('dashboard-security-panel');
+    if (!panel) return;
+    if (isFeatureDisabled('netfilter')) {
+        panel.classList.add('hidden');
+        return;
+    }
+    panel.classList.remove('hidden');
+    const get = async url => {
+        try {
+            const res = await authenticatedFetch(url);
+            return res.ok ? await res.json() : null;
+        } catch (e) {
+            return null;
+        }
+    };
+    const [page, rules, abuse] = await Promise.all([
+        get('/api/security/addresses?list=review&limit=1'),
+        protectionSaved ? null : get('/api/protection/rules'),
+        smtpAbuseStatus ? null : get('/api/smtp-abuse/status?limit=1'),
+        fail2banSettingsLoaded ? null : loadFail2BanSettings(),
+    ]);
+    if (rules) {
+        protectionCaps = rules.capabilities || protectionCaps;
+        if (!protectionDirty) {
+            protectionRules = rules.rules;
+            protectionSaved = JSON.parse(JSON.stringify(rules.rules));
+        }
+    }
+    if (abuse) smtpAbuseStatus = abuse;
+    renderDashboardSecurity(page || dashboardSecurityPage);
+}
+
+let dashboardSecurityPage = null;
+let dashboardProtectionsOpen = false;   // the protection line folds out into every protection
+
+function renderDashboardSecurity(page = dashboardSecurityPage) {
+    dashboardSecurityPage = page;
+    const box = document.getElementById('dashboard-security');
+    if (!box) return;
+    const counts = page ? page.all_counts : null;
+    const n = key => counts ? counts[key].toLocaleString() : '-';
+    const protections = securityProtectionItems();
+    const on = protections.filter(p => p.state === 'on');
+    box.innerHTML = `
+        <div class="ui-stats ui-dash-sec-stats">
+            <button type="button" class="ui-stat" onclick="openSecurityList('review')"><span>To review</span><b>${n('review')}</b><small>Not banned</small></button>
+            <button type="button" class="ui-stat" onclick="openSecurityList('banned')"><span>Banned now</span><b${counts && counts.banned ? ' class="ui-text-fail"' : ''}>${n('banned')}</b><small>By Fail2ban and the rules</small></button>
+        </div>
+        <button type="button" class="ui-dash-sec-prot${on.length ? ' is-on' : ''}" aria-expanded="${dashboardProtectionsOpen}" aria-controls="dashboard-protections"
+            onclick="dashboardProtectionsOpen = !dashboardProtectionsOpen; renderDashboardSecurity()">
+            <span class="ui-prot-mark" aria-hidden="true">${on.length ? '✓' : '✕'}</span><b>Protection ${on.length} of ${protections.length} on</b><span class="ui-dash-sec-chev" aria-hidden="true"></span>
+            ${on.length && !dashboardProtectionsOpen ? `<span class="ui-dash-sec-on">${on.map(p => escapeHtml(p.name)).join(' · ')}</span>` : ''}
+        </button>
+        ${dashboardProtectionsOpen ? `<div id="dashboard-protections" class="ui-dash-sec-list">${protections.map(p => securityProtectionButton(p, 'openSecurityProtection')).join('')}</div>` : ''}`;
 }
 
 // Jobs, message linking and the app version for the dashboard health cards
