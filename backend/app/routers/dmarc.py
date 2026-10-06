@@ -498,10 +498,24 @@ def _build_domains_list():
             if dmarc or tls
         }
 
+        # Messages per day across every domain, for the page's chart
+        daily = {}
+        for begin, total, passed in db.query(
+            DMARCReport.begin_date, func.sum(DMARCRecord.count),
+            func.sum(case((or_(DMARCRecord.spf_result == 'pass', DMARCRecord.dkim_result == 'pass'), DMARCRecord.count), else_=0))
+        ).join(DMARCReport, DMARCRecord.dmarc_report_id == DMARCReport.id).filter(
+            DMARCReport.begin_date >= int((datetime.now() - timedelta(days=30)).timestamp())
+        ).group_by(DMARCReport.id, DMARCReport.begin_date).all():
+            day = datetime.fromtimestamp(begin).date().isoformat()
+            entry = daily.setdefault(day, {'date': day, 'total': 0, 'dmarc_pass': 0, 'dmarc_fail': 0})
+            entry['total'] += total or 0
+            entry['dmarc_pass'] += passed or 0
+            entry['dmarc_fail'] += (total or 0) - (passed or 0)
+
         # Sort by last_report, handling None values
         domains_list.sort(key=lambda x: x['last_report'] or 0, reverse=True)
 
-        return {'domains': domains_list, 'total': len(domains_list)}, stored
+        return {'domains': domains_list, 'total': len(domains_list), 'daily': sorted(daily.values(), key=lambda d: d['date'])}, stored
 
 
 

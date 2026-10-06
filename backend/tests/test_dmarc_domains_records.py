@@ -124,6 +124,16 @@ def test_senders_that_fail_dmarc_are_counted(seeded, monkeypatch):
     assert _row(client, STORED)['failing_sources'] == 1
 
 
+def test_the_list_carries_messages_per_day_across_domains(seeded, monkeypatch):
+    client, _ = _client(monkeypatch)
+    daily = client.get('/api/dmarc/domains').json()['daily']
+    today = datetime.fromtimestamp(time.time() - 3600).date().isoformat()
+    day = next(d for d in daily if d['date'] == today)
+    # Both seeded domains: 2 reports each, 5 failing + 20 or 10 passing per report
+    assert day['total'] >= 2 * (5 + 20 + 5 + 10)
+    assert day['dmarc_fail'] >= 2 * 10 and day['total'] == day['dmarc_pass'] + day['dmarc_fail']
+
+
 def test_each_address_says_who_reported_it(seeded, monkeypatch):
     client, _ = _client(monkeypatch)
     data = client.get(f'/api/dmarc/domains/{STORED}/sources').json()['data']
