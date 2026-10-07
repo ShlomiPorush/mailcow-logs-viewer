@@ -244,6 +244,8 @@ def test_a_network_with_the_panels_period_lists_every_address_that_tried_in_it(c
     assert _ips(_get(client, list='review', network='Test Network')) == [IPS[0]]
     page = _get(client, list='review', network='Test Network', days=7)
     assert _ips(page) == [IPS[0], IPS[2], IPS[1]] and page['counts'] == {'review': 3, 'banned': 0}
+    # The Overview tab still counts the last day
+    assert page['all_counts']['review'] == _get(client, list='review', network='Test Network')['all_counts']['review']
     # A country with the period does the same
     assert _ips(_get(client, list='review', days=7)) == [IPS[0], IPS[2], IPS[1]]
     # Without either, the list stays the last day

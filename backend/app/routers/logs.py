@@ -649,6 +649,16 @@ def _security_item(a: dict) -> dict:
     }
 
 
+async def _security_addresses(db: Session, hours: int):
+    found = security_addresses.cached(hours)
+    if found is None:
+        f2b = await mailcow_api.get_fail2ban()
+        addresses = await run_in_threadpool(security_addresses.collect, db, f2b, None, hours)
+        security_addresses.remember(addresses, f2b is not None, hours)
+        found = (addresses, f2b is not None)
+    return found
+
+
 @router.get("/security/addresses")
 async def get_security_addresses(
     list_name: str = Query("review", alias="list", pattern="^(review|banned)$"),
@@ -669,14 +679,11 @@ async def get_security_addresses(
     """
     try:
         hours = days * 24 if days and (country or network) else 24
-        found = security_addresses.cached(hours)
-        if found is None:
-            f2b = await mailcow_api.get_fail2ban()
-            addresses = await run_in_threadpool(security_addresses.collect, db, f2b, None, hours)
-            security_addresses.remember(addresses, f2b is not None, hours)
-            found = (addresses, f2b is not None)
-        addresses, fail2ban_known = found
+        addresses, fail2ban_known = await _security_addresses(db, hours)
         result = security_addresses.page(addresses, list_name, country or None, after, limit, (q or '').strip() or None, network or None)
+        if hours != 24:
+            # The Overview tab counts the last day, whatever a filter lists
+            result["all_counts"] = security_addresses.page((await _security_addresses(db, 24))[0], list_name, None, None, 1)["all_counts"]
         result["items"] = [_security_item(a) for a in result["items"]]
         result["fail2ban_known"] = fail2ban_known
         return result
