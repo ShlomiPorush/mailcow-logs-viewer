@@ -10,7 +10,7 @@ from http.cookiejar import CookieJar, DefaultCookiePolicy
 from urllib.parse import quote
 from typing import List, Dict, Any, Optional
 from datetime import datetime
-from tenacity import retry, retry_if_not_exception_type, stop_after_attempt, wait_exponential, RetryError
+from tenacity import retry, retry_if_not_exception_type, stop_after_attempt, wait_exponential
 
 from .config import settings
 
@@ -149,7 +149,8 @@ class MailcowAPI:
     
     @retry(
         stop=stop_after_attempt(3),
-        wait=wait_exponential(multiplier=1, min=2, max=10)
+        wait=wait_exponential(multiplier=1, min=2, max=10),
+        reraise=True,
     )
     async def _make_request(self, endpoint: str, method: str = "GET", **kwargs) -> Any:
         """
@@ -197,6 +198,7 @@ class MailcowAPI:
         wait=wait_exponential(multiplier=1, min=2, max=10),
         # A refused key stays refused, and every try is a failed login for Fail2ban
         retry=retry_if_not_exception_type(MailcowRwKeyError),
+        reraise=True,
     )
     async def _make_rw_request(self, endpoint: str, method: str = "POST", **kwargs) -> Any:
         """
@@ -352,7 +354,7 @@ class MailcowAPI:
             
         except MailcowAPIError as e:
             logger.error(f"Failed to fetch Postfix logs: {e}")
-            return []
+            raise
     
     async def get_rspamd_logs(self, count: int = 500) -> List[Dict[str, Any]]:
         """
@@ -377,7 +379,7 @@ class MailcowAPI:
             
         except MailcowAPIError as e:
             logger.error(f"Failed to fetch Rspamd logs: {e}")
-            return []
+            raise
     
     async def get_postfix_logs_page(self, page_size: int, offset: int) -> List[Dict[str, Any]]:
         """
@@ -414,7 +416,7 @@ class MailcowAPI:
             
         except MailcowAPIError as e:
             logger.error(f"Failed to fetch Postfix logs page (offset={offset}): {e}")
-            return []
+            raise
     
     async def get_rspamd_logs_page(self, page_size: int, offset: int) -> List[Dict[str, Any]]:
         """
@@ -451,7 +453,7 @@ class MailcowAPI:
             
         except MailcowAPIError as e:
             logger.error(f"Failed to fetch Rspamd logs page (offset={offset}): {e}")
-            return []
+            raise
     
     async def get_raw_logs_range(self, service: str, offset: int, page_size: int) -> List[Dict[str, Any]]:
         """
@@ -488,13 +490,7 @@ class MailcowAPI:
         end = offset + page_size - 1
         endpoint = f"/api/v1/get/logs/{service}/{start}-{end}"
         logger.debug(f"Fetching raw log range for {service}: {start}-{end}")
-        try:
-            data = await self._make_request(endpoint)
-        except RetryError as e:
-            # _make_request's retry decorator does not re-raise the original
-            # exception, so callers would otherwise have to know about tenacity.
-            last = e.last_attempt.exception() if e.last_attempt else None
-            raise MailcowAPIError(f"Range fetch failed for {service} {start}-{end}: {last}") from e
+        data = await self._make_request(endpoint)
 
         if isinstance(data, list):
             return data
@@ -547,7 +543,7 @@ class MailcowAPI:
             
         except MailcowAPIError as e:
             logger.error(f"Failed to fetch Netfilter logs: {e}")
-            return []
+            raise
     
     # Allowed services for the raw logs viewer
     ALLOWED_RAW_LOG_SERVICES = frozenset([
@@ -590,7 +586,7 @@ class MailcowAPI:
             
         except MailcowAPIError as e:
             logger.error(f"Failed to fetch raw logs for {service}: {e}")
-            return []
+            raise
     
     async def get_queue(self) -> List[Dict[str, Any]]:
         """
@@ -612,7 +608,7 @@ class MailcowAPI:
             
         except MailcowAPIError as e:
             logger.error(f"Failed to fetch queue: {e}")
-            return []
+            raise
 
     async def edit_queue(self, item_ids: List[str], action: str) -> Any:
         """
@@ -679,7 +675,7 @@ class MailcowAPI:
             
         except MailcowAPIError as e:
             logger.error(f"Failed to fetch quarantine: {e}")
-            return []
+            raise
 
     async def get_status_containers(self) -> List[Dict[str, Any]]:
         """
@@ -710,7 +706,7 @@ class MailcowAPI:
             
         except MailcowAPIError as e:
             logger.error(f"Failed to fetch container status: {e}")
-            return []
+            raise
 
     async def get_status_vmail(self) -> Dict[str, Any]:
         """
@@ -738,7 +734,7 @@ class MailcowAPI:
             
         except MailcowAPIError as e:
             logger.error(f"Failed to fetch vmail status: {e}")
-            return {}
+            raise
     
     async def get_status_version(self) -> str:
         """
@@ -769,7 +765,7 @@ class MailcowAPI:
             
         except MailcowAPIError as e:
             logger.error(f"Failed to fetch version: {e}")
-            return 'unknown'
+            raise
     
     async def get_domains(self) -> List[Dict[str, Any]]:
         """
@@ -791,7 +787,7 @@ class MailcowAPI:
             
         except MailcowAPIError as e:
             logger.error(f"Failed to fetch domains: {e}")
-            return []
+            raise
     
     async def get_active_domains(self) -> List[str]:
         """
@@ -851,7 +847,7 @@ class MailcowAPI:
 
         except MailcowAPIError as e:
             logger.error(f"Failed to fetch alias domains: {e}")
-            return []
+            raise
 
     async def get_alias_domain_map(self) -> Dict[str, str]:
         """
@@ -899,7 +895,7 @@ class MailcowAPI:
             
         except MailcowAPIError as e:
             logger.error(f"Failed to fetch mailboxes: {e}")
-            return []
+            raise
 
     async def edit_mailbox(self, mailbox: str, attributes: Dict[str, Any]) -> Any:
         """
@@ -953,13 +949,7 @@ class MailcowAPI:
         """
         endpoint = f"/api/v1/get/rl-mbox/{quote(mailbox, safe='@')}"
         logger.debug(f"Fetching rate limit for mailbox {mailbox}")
-        try:
-            data = await self._make_request(endpoint)
-        except RetryError as e:
-            # _make_request's retry decorator does not re-raise the original
-            # exception, so callers would otherwise have to know about tenacity.
-            last = e.last_attempt.exception() if e.last_attempt else None
-            raise MailcowAPIError(f"Rate limit fetch failed for mailbox {mailbox}: {last}") from e
+        data = await self._make_request(endpoint)
 
         if not isinstance(data, dict):
             logger.warning(f"Unexpected rl-mbox response format for {mailbox}: {type(data)}")
@@ -981,11 +971,7 @@ class MailcowAPI:
         """
         endpoint = f"/api/v1/get/rl-domain/{quote(domain, safe='')}"
         logger.debug(f"Fetching rate limit for domain {domain}")
-        try:
-            data = await self._make_request(endpoint)
-        except RetryError as e:
-            last = e.last_attempt.exception() if e.last_attempt else None
-            raise MailcowAPIError(f"Rate limit fetch failed for domain {domain}: {last}") from e
+        data = await self._make_request(endpoint)
 
         if not isinstance(data, dict):
             logger.warning(f"Unexpected rl-domain response format for {domain}: {type(data)}")
@@ -1017,15 +1003,11 @@ class MailcowAPI:
                 "rl_frame": frame
             }
         }
-        try:
-            data = await self._make_rw_request(
-                "/api/v1/edit/rl-mbox/",
-                method="POST",
-                json=payload
-            )
-        except RetryError as e:
-            last = e.last_attempt.exception() if e.last_attempt else None
-            raise MailcowAPIError(f"Rate limit update failed for mailbox {mailbox}: {last}") from e
+        data = await self._make_rw_request(
+            "/api/v1/edit/rl-mbox/",
+            method="POST",
+            json=payload
+        )
 
         logger.info(f"Mailbox rate limit response for {mailbox}: {data}")
         return data
@@ -1060,16 +1042,11 @@ class MailcowAPI:
                 "rl_frame": frame
             }
         }
-        try:
-            data = await self._make_rw_request(
-                "/api/v1/edit/rl-mbox/",
-                method="POST",
-                json=payload
-            )
-        except RetryError as e:
-            last = e.last_attempt.exception() if e.last_attempt else None
-            raise MailcowAPIError(
-                f"Rate limit update failed for {len(items)} mailboxes: {last}") from e
+        data = await self._make_rw_request(
+            "/api/v1/edit/rl-mbox/",
+            method="POST",
+            json=payload
+        )
 
         logger.info(f"Mailbox rate limit response for {len(items)} mailboxes: {data}")
         return data
@@ -1099,15 +1076,11 @@ class MailcowAPI:
                 "rl_frame": frame
             }
         }
-        try:
-            data = await self._make_rw_request(
-                "/api/v1/edit/rl-domain/",
-                method="POST",
-                json=payload
-            )
-        except RetryError as e:
-            last = e.last_attempt.exception() if e.last_attempt else None
-            raise MailcowAPIError(f"Rate limit update failed for domain {domain}: {last}") from e
+        data = await self._make_rw_request(
+            "/api/v1/edit/rl-domain/",
+            method="POST",
+            json=payload
+        )
 
         logger.info(f"Domain rate limit response for {domain}: {data}")
         return data
@@ -1140,16 +1113,11 @@ class MailcowAPI:
                 "rl_frame": frame
             }
         }
-        try:
-            data = await self._make_rw_request(
-                "/api/v1/edit/rl-domain/",
-                method="POST",
-                json=payload
-            )
-        except RetryError as e:
-            last = e.last_attempt.exception() if e.last_attempt else None
-            raise MailcowAPIError(
-                f"Rate limit update failed for {len(items)} domains: {last}") from e
+        data = await self._make_rw_request(
+            "/api/v1/edit/rl-domain/",
+            method="POST",
+            json=payload
+        )
 
         logger.info(f"Domain rate limit response for {len(items)} domains: {data}")
         return data
@@ -1171,15 +1139,11 @@ class MailcowAPI:
             MailcowAPIError: If the request fails or no RW key is configured
         """
         logger.info(f"Releasing rate limit counter {rl_hash}")
-        try:
-            data = await self._make_rw_request(
-                "/api/v1/delete/rlhash",
-                method="POST",
-                json=[rl_hash]
-            )
-        except RetryError as e:
-            last = e.last_attempt.exception() if e.last_attempt else None
-            raise MailcowAPIError(f"Rate limit release failed for {rl_hash}: {last}") from e
+        data = await self._make_rw_request(
+            "/api/v1/delete/rlhash",
+            method="POST",
+            json=[rl_hash]
+        )
 
         logger.info(f"Rate limit release response for {rl_hash}: {data}")
         return data
@@ -1204,7 +1168,7 @@ class MailcowAPI:
             
         except MailcowAPIError as e:
             logger.error(f"Failed to fetch aliases: {e}")
-            return []
+            raise
     
     async def test_connection(self) -> bool:
         """
@@ -1284,7 +1248,7 @@ class MailcowAPI:
                 
         except MailcowAPIError as e:
             logger.error(f"Failed to fetch DKIM configuration for {domain}: {e}")
-            return None
+            raise
     
     async def get_transports(self) -> List[Dict[str, Any]]:
         """
@@ -1321,7 +1285,7 @@ class MailcowAPI:
             
         except MailcowAPIError as e:
             logger.error(f"Failed to fetch transports: {e}")
-            return []
+            raise
     
     async def get_relayhosts(self) -> List[Dict[str, Any]]:
         """
@@ -1358,7 +1322,7 @@ class MailcowAPI:
             
         except MailcowAPIError as e:
             logger.error(f"Failed to fetch relayhosts: {e}")
-            return []
+            raise
 
 
     async def get_fail2ban(self) -> Optional[Dict[str, Any]]:
@@ -1383,9 +1347,8 @@ class MailcowAPI:
                 logger.warning(f"Unexpected Fail2Ban response format: {type(data)}")
                 return None
                 
-        except (MailcowAPIError, RetryError) as e:
-            # RetryError: _make_request's retry decorator does not re-raise the
-            # original exception, and the Security page must still load without it
+        except MailcowAPIError as e:
+            # The Security page must still load without Fail2ban
             logger.error(f"Failed to fetch Fail2Ban configuration: {e}")
             return None
 

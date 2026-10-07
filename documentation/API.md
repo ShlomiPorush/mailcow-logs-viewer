@@ -2137,7 +2137,7 @@ Perform an action on mail queue items. Requires a Read-Write API key (`MAILCOW_A
 
 **Error Responses:**
 - `400 Bad Request`: Missing `items` array or invalid action
-- `500 Internal Server Error`: RW API key not configured or mailcow API error
+- `502 Bad Gateway`: RW API key not configured, or mailcow did not answer
 
 **Notes:**
 - Proxies to mailcow `POST /api/v1/edit/mailq` with `{"items": [...], "attr": {"action": "..."}}`
@@ -2170,7 +2170,7 @@ Delete specific mail queue items. Requires a Read-Write API key (`MAILCOW_API_KE
 
 **Error Responses:**
 - `400 Bad Request`: Missing `items` array
-- `500 Internal Server Error`: RW API key not configured or mailcow API error
+- `502 Bad Gateway`: RW API key not configured, or mailcow did not answer
 
 **Notes:**
 - Proxies to mailcow `POST /api/v1/delete/mailq` with queue IDs array
@@ -2243,7 +2243,7 @@ Release (approve) quarantined messages on mailcow. Requires a Read-Write API key
 
 **Error Responses:**
 - `400 Bad Request`: Missing `items` array
-- `500 Internal Server Error`: RW API key not configured or mailcow API error
+- `502 Bad Gateway`: RW API key not configured, or mailcow did not answer
 
 **Notes:**
 - Proxies to mailcow `POST /api/v1/edit/qitem` with `{"items": [...], "attr": {"action": "release"}}`
@@ -2285,7 +2285,7 @@ Permanently delete quarantined messages on mailcow. Requires a Read-Write API ke
 
 **Error Responses:**
 - `400 Bad Request`: Missing `items` array
-- `500 Internal Server Error`: RW API key not configured or mailcow API error
+- `502 Bad Gateway`: RW API key not configured, or mailcow did not answer
 
 **Notes:**
 - Proxies to mailcow `POST /api/v1/delete/qitem` with `["id1", "id2"]`
@@ -2319,7 +2319,7 @@ Release quarantined messages and train Rspamd that they are **not spam** (ham). 
 
 **Error Responses:**
 - `400 Bad Request`: Missing `items` array
-- `500 Internal Server Error`: RW API key not configured or mailcow API error
+- `502 Bad Gateway`: RW API key not configured, or mailcow did not answer
 
 **Notes:**
 - Proxies to mailcow `POST /api/v1/edit/qitem` with `{"items": [...], "attr": {"action": "learnham"}}`
@@ -2353,7 +2353,7 @@ Delete quarantined messages and train Rspamd that they are **spam**. Requires a 
 
 **Error Responses:**
 - `400 Bad Request`: Missing `items` array
-- `500 Internal Server Error`: RW API key not configured or mailcow API error
+- `502 Bad Gateway`: RW API key not configured, or mailcow did not answer
 
 **Notes:**
 - Proxies to mailcow `POST /api/v1/edit/qitem` with `{"items": [...], "attr": {"action": "learnspam"}}`
@@ -4999,6 +4999,15 @@ All endpoints may return the following error responses:
   "detail": "Error description (only in debug mode)"
 }
 ```
+
+### 502 Bad Gateway
+```json
+{
+  "detail": "mailcow did not answer. Try again in a moment."
+}
+```
+
+**Note:** Returned by every endpoint that reads from or writes to mailcow when mailcow fails or refuses the request after three tries. In debug mode `detail` is the underlying error.
 
 ---
 

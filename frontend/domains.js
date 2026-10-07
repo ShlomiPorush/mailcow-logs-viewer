@@ -31,7 +31,7 @@ async function loadDomains() {
         const response = await authenticatedFetch('/api/domains/all');
 
         if (!response.ok) {
-            throw new Error(`HTTP ${response.status}`);
+            throw await responseError(response);
         }
 
         const data = await response.json();

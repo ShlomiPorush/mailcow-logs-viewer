@@ -163,7 +163,7 @@ async def get_containers_status():
         return await _get_containers_status_internal()
     except Exception as e:
         logger.error("Failed to fetch container status: %s", e)
-        raise HTTPException(status_code=500, detail="Failed to fetch container status. Check the application logs.")
+        raise internal_error(e)
 
 
 class ContainerIgnoreRequest(BaseModel):
@@ -205,7 +205,7 @@ async def get_storage_status():
         
     except Exception as e:
         logger.error(f"Error fetching storage status: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail="Failed to fetch storage status. Check the application logs.")
+        raise internal_error(e)
 
 @router.get("/status/version")
 async def get_version_status(force: bool = Query(False, description="Force a fresh version check")):

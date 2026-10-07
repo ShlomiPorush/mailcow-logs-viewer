@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 from ..database import get_db_context
 from ..models import QuarantineRule, QuarantineRuleLog
 from ..mailcow_api import mailcow_api
+from ..utils import internal_error
 
 logger = logging.getLogger(__name__)
 
@@ -239,7 +240,7 @@ async def test_rules():
         quarantine = await mailcow_api.get_quarantine()
     except Exception as e:
         logger.error("Failed to fetch quarantine for rule preview: %s", e)
-        raise HTTPException(status_code=500, detail="Failed to fetch quarantine. Check the application logs.")
+        raise internal_error(e)
     
     if not quarantine:
         return {"matches": [], "total_matches": 0, "total_quarantine": 0, "message": "Quarantine is empty"}
