@@ -14,7 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **Ban buttons say how long** - On the Security page a rule's catch is banned with a button that shows the rule's ban length, such as Ban 1w or Ban 30d; the app lifts that ban when it ends. An address no rule caught, and an event on the Events tab, has Ban for good: it goes on the denylist and stays until removed.
+- **Ban buttons say how long** - On the Security page a rule's catch is banned with a button that shows the rule's ban length, such as Ban 1w or Ban 30d; the app lifts that ban when it ends. An address no rule caught, and an event on the Events tab, has Ban permanently: it goes on the denylist and stays until removed.
 - **The Dashboard search moved to the top bar** - The search box and its status filter on the Dashboard are gone; the search in the top bar replaces them. To see messages with a given status, filter by status on the Messages page.
 
 ### Fixed
