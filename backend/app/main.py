@@ -152,15 +152,15 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"Failed to initialize database or load the stored settings: {e}")
         raise
-
+    
     # Log effective configuration (after DB overrides are loaded)
     logger.info(f"Configuration: {settings.fetch_interval}s interval, {settings.retention_days}d retention")
-
+    
     if settings.blacklist_emails_list:
         logger.info(f"Blacklist enabled with {len(settings.blacklist_emails_list)} email(s)")
-
+    
     log_authentication_state()
-
+    
     # GeoIP initialization
     try:
         if is_license_configured():
