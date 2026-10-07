@@ -6,6 +6,7 @@ import asyncio
 import httpx
 import logging
 import weakref
+from http.cookiejar import CookieJar, DefaultCookiePolicy
 from urllib.parse import quote
 from typing import List, Dict, Any, Optional
 from datetime import datetime
@@ -48,6 +49,10 @@ class MailcowAPI:
             client = httpx.AsyncClient(
                 timeout=self.timeout,
                 verify=self.verify_ssl,
+                # Every request carries the API key, so mailcow's session
+                # cookie is never kept: a session mailcow stopped honouring
+                # would otherwise ride along on every later call
+                cookies=CookieJar(policy=DefaultCookiePolicy(allowed_domains=[])),
                 # Keep idle connections long enough to bridge the polling
                 # jobs (raw logs every ~60s, log fetch every ~30s), so
                 # steady-state polling reuses one connection instead of
@@ -58,6 +63,15 @@ class MailcowAPI:
             )
             self._clients[loop] = client
         return client
+
+    def _discard_client(self, client: httpx.AsyncClient) -> None:
+        """Stop using a client mailcow refused (401, 403) or dropped, so the next
+        try opens new connections. It is closed a little later, once requests
+        still on it are done."""
+        loop = asyncio.get_running_loop()
+        if self._clients.get(loop) is client:
+            del self._clients[loop]
+            loop.call_later(30, lambda: loop.create_task(client.aclose()))
 
     def _drop_clients(self):
         """Close all cached clients (config changed). Safe from any thread."""
@@ -149,9 +163,12 @@ class MailcowAPI:
                 
         except httpx.HTTPStatusError as e:
             logger.error(f"HTTP error {e.response.status_code} for {url}: {e}")
+            if e.response.status_code in (401, 403):
+                self._discard_client(client)
             raise MailcowAPIError(f"API returned status {e.response.status_code}")
         except httpx.RequestError as e:
             logger.error(f"Request error for {url}: {e}")
+            self._discard_client(client)
             raise MailcowAPIError(f"Failed to connect to mailcow API: {e}")
         except Exception as e:
             logger.error(f"Unexpected error for {url}: {e}")
@@ -195,9 +212,11 @@ class MailcowAPI:
             )
                 
             if response.status_code == 401:
+                self._discard_client(client)
                 raise MailcowAPIError("Read-Write API key authentication failed (401)")
                 
             if response.status_code == 403:
+                self._discard_client(client)
                 raise MailcowAPIError("Read-Write API key does not have sufficient permissions (403)")
                 
             response.raise_for_status()
@@ -213,6 +232,7 @@ class MailcowAPI:
         except httpx.HTTPStatusError as e:
             raise MailcowAPIError(f"RW API request failed with status {e.response.status_code}: {e.response.text}")
         except httpx.RequestError as e:
+            self._discard_client(client)
             raise MailcowAPIError(f"RW API request failed: {str(e)}")
 
     async def get_postfix_logs(self, count: int = 500) -> List[Dict[str, Any]]:
@@ -1269,7 +1289,9 @@ class MailcowAPI:
                 logger.warning(f"Unexpected Fail2Ban response format: {type(data)}")
                 return None
                 
-        except MailcowAPIError as e:
+        except (MailcowAPIError, RetryError) as e:
+            # RetryError: _make_request's retry decorator does not re-raise the
+            # original exception, and the Security page must still load without it
             logger.error(f"Failed to fetch Fail2Ban configuration: {e}")
             return None
 
