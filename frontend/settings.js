@@ -991,10 +991,8 @@ function renderSettings(content, data) {
             });
             mobileNavHtml += '</select></div>';
 
-            // Desktop: grouped category sidebar, with a search over every field
-            let navHtml = '<nav class="settings-edit-nav" aria-label="Settings categories">'
-                + '<label class="ui-search ui-set-search"><svg width="15" height="15" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>'
-                + '<input type="search" id="settings-search" placeholder="Search settings" aria-label="Search settings"></label>';
+            // Desktop: grouped category sidebar (the search in the top bar finds a setting)
+            let navHtml = '<nav class="settings-edit-nav" aria-label="Settings categories">';
             grouped.forEach(function (group) {
                 if (!group.tabs.length) return;
                 navHtml += '<div class="ui-set-navgroup"><p>' + escapeHtml(group.label) + '</p><div>';
@@ -1100,7 +1098,6 @@ function renderSettings(content, data) {
                     <button type="button" id="settings-import-env-btn" class="ui-btn ui-btn-primary">Migrate Settings from ENV</button>
                     <p class="ui-set-migrate-note">Click once to copy your current configuration into the database. After that you can edit the fields below and save.</p>
                 </div>` : ''}
-                <p id="settings-search-empty" class="ui-empty hidden">No setting matches this search.</p>
                 <form id="settings-edit-form" class="ui-set-form">
                     <!-- Until the first migration nothing can be saved, so the fields stay
                          read-only instead of accepting edits that would be lost -->
@@ -1273,41 +1270,6 @@ function renderSettings(content, data) {
             content.querySelectorAll('.settings-clear-btn').forEach(btn => btn.addEventListener('click', () => setTimeout(updateDirty)));
         }
 
-        // Search: show every matching field from all sections at once
-        const search = content.querySelector('#settings-search');
-        let openTab = settingsTab;
-        content.querySelectorAll('.settings-edit-tab').forEach(btn => btn.addEventListener('click', () => { openTab = btn.getAttribute('data-tab'); if (search) search.value = ''; }));
-        if (search) {
-            search.addEventListener('input', () => {
-                const q = search.value.trim().toLowerCase();
-                const panels = [...content.querySelectorAll('.settings-edit-panel')];
-                const empty = content.querySelector('#settings-search-empty');
-                if (!q) {
-                    content.querySelectorAll('.ui-set-field, .ui-set-bool, .ui-set-group').forEach(el => { el.hidden = false; });
-                    switchSettingsTab(openTab, false);
-                    if (empty) empty.classList.add('hidden');
-                    return;
-                }
-                let any = false;
-                panels.forEach(panel => {
-                    let panelHas = false;
-                    panel.querySelectorAll('.ui-set-group').forEach(group => {
-                        let groupHas = false;
-                        group.querySelectorAll('.ui-set-field, .ui-set-bool').forEach(field => {
-                            const match = field.textContent.toLowerCase().includes(q) || (field.querySelector('[name]')?.name || '').replace(/_/g, ' ').includes(q);
-                            field.hidden = !match;
-                            if (match) groupHas = true;
-                        });
-                        group.hidden = !groupHas;
-                        if (groupHas) panelHas = true;
-                    });
-                    panel.classList.toggle('hidden', !panelHas);
-                    if (panelHas) any = true;
-                });
-                content.querySelectorAll('.settings-edit-tab').forEach(b => b.removeAttribute('aria-current'));
-                if (empty) empty.classList.toggle('hidden', any);
-            });
-        }
         if (form) {
             form.onsubmit = async (e) => {
                 e.preventDefault();

@@ -152,7 +152,7 @@ async function loadMailboxStats() {
         // Update last update time
         const lastUpdateEl = document.getElementById('mailbox-stats-last-update');
         if (lastUpdateEl && summary.last_update) {
-            lastUpdateEl.textContent = `Last updated: ${formatTime(summary.last_update)}`;
+            uiAgo(lastUpdateEl, summary.last_update, 'Last updated ');
         }
 
         // Show content, hide loading

@@ -3836,11 +3836,7 @@ async function loadStatus() {
             loadStatusAppVersion()
         ]);
         const lastChecked = document.getElementById('status-last-checked');
-        if (lastChecked) {
-            const now = new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit', hour12: false,
-                timeZone: appTimezone && appTimezone !== 'UTC' ? appTimezone : undefined }).format(new Date());
-            lastChecked.textContent = `Last checked: ${now}`;
-        }
+        uiAgo(lastChecked, new Date().toISOString(), 'Last checked ');
         renderStatusAttention();
     } catch (error) {
         console.error('Failed to load status:', error);
@@ -4414,7 +4410,7 @@ function renderStatusCorrelation(correlation, incompleteList) {
     container.innerHTML = `
         <div class="ui-srv-big${correlation.incomplete ? ' ui-text-warn' : ''}">${correlation.completion_rate || 0}%</div>
         <small>${(correlation.complete || 0).toLocaleString()} of ${(correlation.total || 0).toLocaleString()} complete, ${(correlation.incomplete || 0).toLocaleString()} incomplete, ${(correlation.expired || 0).toLocaleString()} expired</small>
-        ${correlation.last_update ? `<small>Updated ${formatTime(correlation.last_update)}</small>` : ''}
+        ${correlation.last_update ? `<small title="${escapeHtml(formatTime(correlation.last_update))}">Updated ${formatAgo(correlation.last_update)}</small>` : ''}
     `;
     const pending = document.getElementById('status-correlation-pending');
     if (pending) pending.innerHTML = incompleteList.length > 0 ? `

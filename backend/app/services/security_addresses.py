@@ -227,13 +227,15 @@ def _parse_cursor(value: str) -> Optional[tuple]:
 
 
 def page(addresses: List[dict], list_name: str, country: Optional[str], after: Optional[str], limit: int,
-         query: Optional[str] = None) -> dict:
+         query: Optional[str] = None, network: Optional[str] = None) -> dict:
     """One page of a list, its real total, and both lists' counts (for the country, when one is chosen).
 
-    `query` keeps the addresses that contain it, for the global search; the
-    counts then count only those.
+    `query` keeps the addresses that contain it, for the global search, and
+    `network` the ones from that network (its ASN organization); the counts then
+    count only those.
     """
     in_country = [a for a in addresses if (not country or a["country"] == country)
+                  and (not network or a["org"] == network)
                   and (not query or query in a["ip"])]
     counts = {name: sum(1 for a in in_country if a["list"] == name) for name in LISTS}
     rows = [a for a in in_country if a["list"] == list_name]
@@ -244,6 +246,7 @@ def page(addresses: List[dict], list_name: str, country: Optional[str], after: O
     return {
         "list": list_name,
         "country": country,
+        "network": network,
         "total": counts[list_name],
         "counts": counts,
         "all_counts": {name: sum(1 for a in addresses if a["list"] == name) for name in LISTS},

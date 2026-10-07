@@ -13,6 +13,7 @@ let securityHits = [];           // the rules' open hits: watching, pending, ban
 let securityHistory = null;      // closed hits, loaded when the History filter opens
 let securityFilter = 'review';
 let securityCountry = null;      // a country picked in the chart filters the list
+let securityNetwork = null;      // and so does a network picked in Networks that try most
 let securityOpenRow = null;      // the address whose details are open
 let securityRawLog = {};         // ip -> log lines, or 'loading' / 'error'
 let securityPage = null;         // the loaded part of the chosen list: items, next cursor, real counts
@@ -29,6 +30,7 @@ let securityNetworks = null;     // /stats/by-network
 let fail2banLoadError = false;   // mailcow could not be asked about Fail2ban
 let securityStripOpen = false;   // on a phone the Protection row folds into one chip
 let securityCountryPicker = false;  // on a phone the countries open from the filter row
+let securityNetworkPicker = false;  // and the networks too
 
 // A phone: the list gets its own layout (one line per address, details in a sheet)
 const securityPhone = () => window.matchMedia('(max-width: 760px)').matches;
@@ -151,6 +153,7 @@ async function loadSecurityAddresses(more = false, limit = SECURITY_PAGE_SIZE) {
     securityPageLoading = true;
     const params = new URLSearchParams({ list: securityFilter, limit: String(limit) });
     if (securityCountry) params.set('country', securityCountry);
+    if (securityNetwork) params.set('network', securityNetwork);
     if (more) params.set('after', securityPage.next);
     try {
         const res = await authenticatedFetch(`/api/security/addresses?${params}`);
@@ -314,6 +317,12 @@ function securityDescribe(a) {
     };
 }
 
+// How many attempts an address made: its logged attempts in the last 24 hours, or what the rules counted
+function securityAttempts(a) {
+    const n = a.attempts || (a.hits || []).reduce((sum, h) => sum + (h.attempts || 0), 0);
+    return n ? `<span class="ui-sec-attempts" title="Attempts in the last 24 hours">${uiCountLabel(n, 'attempt', 'attempts')}</span>` : '';
+}
+
 function securityRow(a) {
     const d = securityDescribe(a);
     const open = securityOpenRow === a.ip;
@@ -322,7 +331,7 @@ function securityRow(a) {
         <div class="ui-sec-row${open ? ' is-open' : ''}" onclick="securityRowClick(event, '${escapeJsArg(a.ip)}')" role="button" tabindex="0"
              onkeydown="if (event.key === 'Enter' && event.target === this) securityToggleRow('${escapeJsArg(a.ip)}')" aria-expanded="${open}">
             <div class="ui-sec-main">
-                <div class="ui-sec-top">${a.country ? `<span class="ui-sec-pflag" title="${escapeHtml(a.country)}">${securityFlag(a.countryCode)}</span>` : ''}<b class="ui-mono">${copyableText(a.ip)}</b>${d.tag}${where ? `<small class="ui-muted ui-sec-where">${where}</small>` : ''}</div>
+                <div class="ui-sec-top">${a.country ? `<span class="ui-sec-pflag" title="${escapeHtml(a.country)}">${securityFlag(a.countryCode)}</span>` : ''}<b class="ui-mono">${copyableText(a.ip)}</b>${securityAttempts(a)}${d.tag}${where ? `<small class="ui-muted ui-sec-where">${where}</small>` : ''}</div>
                 <p class="ui-sec-why">${d.why}</p>
             </div>
             <div class="ui-sec-acts">${d.acts}</div>
@@ -340,7 +349,7 @@ function renderSecuritySheet(addresses) {
     const d = securityDescribe(a);
     uiSheetShow('security-sheet', {
         label: a.ip,
-        head: `<div class="ui-sec-top"><b class="ui-mono">${copyableText(a.ip)}</b>${d.tag}</div>`,
+        head: `<div class="ui-sec-top"><b class="ui-mono">${copyableText(a.ip)}</b>${securityAttempts(a)}${d.tag}</div>`,
         body: `<p class="ui-sec-why">${d.why}</p>${d.acts ? `<div class="ui-sec-acts">${d.acts}</div>` : ''}${securityDetail(a)}`,
         onClose: securityCloseSheet
     });
@@ -466,6 +475,33 @@ function pickSecurityCountry(name) {
     renderSecurityCountries();
 }
 
+function pickSecurityNetwork(name) {
+    securityNetwork = securityNetwork === name ? null : name;
+    securityOpenRow = null;
+    securityPage = null;
+    securityNetworkPicker = false;
+    securityToTop = true;
+    loadSecurityAddresses();
+    renderSecurityOverview();
+    securityListToTop();
+    renderSecurityCountries();
+}
+
+// The phone's network picker: the networks that try most, and All
+function securityNetworkPanel() {
+    const rows = securityNetworks ? securityNetworks.data : null;
+    return `<span class="ui-sec-cpanel-head"><b>Networks that try most</b><span class="ui-muted">${securityChartDays} days</span></span>
+        ${rows === null ? '<span class="ui-muted">Loading...</span>' : !rows.length ? '<span class="ui-muted">No network data yet.</span>'
+            : `<span class="ui-sec-nets">${securityNetworkRows()}</span>`}
+        ${securityNetwork ? '<button type="button" class="ui-btn ui-btn-sm ui-sec-call" onclick="pickSecurityNetwork(null)">Every network</button>' : ''}`;
+}
+
+function securityNetworkRows() {
+    return (securityNetworks ? securityNetworks.data : []).map(n => `<button type="button" class="ui-sec-net${securityNetwork === n.asn_org ? ' is-on' : ''}" onclick="pickSecurityNetwork('${escapeJsArg(n.asn_org)}')"
+        aria-pressed="${securityNetwork === n.asn_org}" title="${escapeHtml(`${n.asn_org} (${n.asn}): ${n.attempts.toLocaleString()} attempts`)}"><span>${escapeHtml(n.asn_org)}</span>
+        <small class="ui-muted">${n.addresses.toLocaleString()} address${n.addresses === 1 ? '' : 'es'}</small><b>${n.attempts.toLocaleString()}</b></button>`).join('');
+}
+
 function securityHistoryRows() {
     if (securityHistory === null) return '<div class="ui-loading"><div class="loading"></div><p>Loading...</p></div>';
     const rows = securityHistory.filter(h => !securityCountry || h.country_name === securityCountry);
@@ -491,8 +527,9 @@ function renderSecurityOverview() {
     const box = document.getElementById('security-list');
     if (!box) return;
 
-    // The page holds the chosen list for the chosen country; until it does, the last counts stay
-    const page = securityPage && securityPage.list === securityFilter && (securityPage.country || null) === (securityCountry || null) ? securityPage : null;
+    // The page holds the chosen list for the chosen country and network; until it does, the last counts stay
+    const page = securityPage && securityPage.list === securityFilter && (securityPage.country || null) === (securityCountry || null)
+        && (securityPage.network || null) === (securityNetwork || null) ? securityPage : null;
     if (page) securityLastCounts = { counts: page.counts, review: page.all_counts.review };
     const counts = securityLastCounts ? securityLastCounts.counts : null;
     const reviewCount = securityLastCounts ? securityLastCounts.review : 0;
@@ -529,10 +566,16 @@ function renderSecurityOverview() {
             <div class="ui-seg ui-sec-seg" role="group" aria-label="Show">${segs}</div>
             <span class="ui-popover-host ui-sec-chost">
                 <button type="button" class="ui-msg-range${securityCountry ? ' is-set' : ''}" aria-expanded="${securityCountryPicker}" aria-controls="security-country-panel"
-                    onclick="securityCountryPicker = !securityCountryPicker; renderSecurityOverview()">${securityCountry ? `${securityFlag(securityCountryCode(securityCountry))}${escapeHtml(securityCountry)}` : 'Country: All'}</button>
+                    onclick="securityCountryPicker = !securityCountryPicker; securityNetworkPicker = false; renderSecurityOverview()">${securityCountry ? `${securityFlag(securityCountryCode(securityCountry))}${escapeHtml(securityCountry)}` : 'Country: All'}</button>
                 <span id="security-country-panel" class="ui-popover ui-sec-cpanel${securityCountryPicker ? '' : ' hidden'}" role="dialog" aria-label="Where attacks come from">${securityCountryPanel()}</span>
             </span>
+            <span class="ui-popover-host ui-sec-chost">
+                <button type="button" class="ui-msg-range${securityNetwork ? ' is-set' : ''}" aria-expanded="${securityNetworkPicker}" aria-controls="security-network-panel"
+                    onclick="securityNetworkPicker = !securityNetworkPicker; securityCountryPicker = false; renderSecurityOverview()">${securityNetwork ? escapeHtml(securityNetwork) : 'Network: All'}</button>
+                <span id="security-network-panel" class="ui-popover ui-sec-cpanel${securityNetworkPicker ? '' : ' hidden'}" role="dialog" aria-label="Networks that try most">${securityNetworkPanel()}</span>
+            </span>
             ${securityCountry ? `<span class="ui-sec-filter">${securityFlag(securityCountryCode(securityCountry))}${escapeHtml(securityCountry)}<button type="button" onclick="pickSecurityCountry(null)" aria-label="Show every country" title="Show every country">&times;</button></span>` : ''}
+            ${securityNetwork ? `<span class="ui-sec-filter">${escapeHtml(securityNetwork)}<button type="button" onclick="pickSecurityNetwork(null)" aria-label="Show every network" title="Show every network">&times;</button></span>` : ''}
         </div>
         ${rwNote}${f2bNote}
         <div class="ui-sec-list">${rows}</div>
@@ -576,19 +619,19 @@ async function loadSecurityCountryChart(days = securityChartDays) {
         securityNetworks = securityNetworks || { data: [] };
     }
     renderSecurityCountries();
-    if (securityCountryPicker) renderSecurityOverview();
+    if (securityCountryPicker || securityNetworkPicker) renderSecurityOverview();
 }
 
-// A tap outside the country picker closes it, and so does Escape
+// A tap outside the country or network picker closes it, and so does Escape
 document.addEventListener('click', event => {
-    if (securityCountryPicker && !event.target.closest('.ui-sec-chost')) {
-        securityCountryPicker = false;
+    if ((securityCountryPicker || securityNetworkPicker) && !event.target.closest('.ui-sec-chost')) {
+        securityCountryPicker = securityNetworkPicker = false;
         renderSecurityOverview();
     }
 });
 document.addEventListener('keydown', event => {
     if (event.key !== 'Escape') return;
-    if (securityCountryPicker) { securityCountryPicker = false; renderSecurityOverview(); }
+    if (securityCountryPicker || securityNetworkPicker) { securityCountryPicker = securityNetworkPicker = false; renderSecurityOverview(); }
 });
 
 function securityWatchedCountries() {
@@ -640,7 +683,7 @@ function renderSecurityCountries() {
         <section class="ui-panel ui-sec-networks">
             <div class="ui-panel-head">Networks that try most <span class="ui-count">${securityChartDays} days</span></div>
             ${networks === null ? '' : !networks.length ? '<p class="ui-empty">No network data yet.</p>'
-                : networks.map(n => `<div class="ui-sec-net"><span title="${escapeHtml(n.asn)}">${escapeHtml(n.asn_org)}</span><small class="ui-muted">${n.addresses.toLocaleString()} address${n.addresses === 1 ? '' : 'es'}</small><b>${n.attempts.toLocaleString()}</b></div>`).join('')}
+                : `<div class="ui-sec-nets">${securityNetworkRows()}</div><p class="ui-sec-note">Pick a network to see its addresses.</p>`}
         </section>`;
 }
 

@@ -430,6 +430,23 @@ function formatAgo(isoString) {
     return `${Math.round(hours / 24)} d ago`;
 }
 
+// A time written as "5 min ago" in an element, with the exact time on hover. The
+// labels are written again every 30 seconds, so the page does not go stale.
+const uiAgoLabels = new Map();
+let uiAgoTimer = null;
+function uiAgo(el, iso, prefix = '') {
+    if (!el || !iso) return;
+    uiAgoLabels.set(el, { iso, prefix });
+    el.textContent = `${prefix}${formatAgo(iso)}`;
+    el.title = formatTime(iso);
+    if (!uiAgoTimer && typeof setInterval === 'function') {
+        uiAgoTimer = setInterval(() => uiAgoLabels.forEach((v, node) => {
+            if (!node.isConnected) uiAgoLabels.delete(node);
+            else node.textContent = `${v.prefix}${formatAgo(v.iso)}`;
+        }), 30000);
+    }
+}
+
 function formatTime(isoString) {
     if (!isoString) return '-';
     const date = new Date(isoString);

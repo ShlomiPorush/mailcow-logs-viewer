@@ -211,3 +211,17 @@ def test_an_address_without_a_line_today_takes_its_country_from_older_lines(clie
     fail2ban['answer']['active_bans'] = [{'ip': ip, 'network': f'{ip}/32', 'banned_until': '2d'}]
     page = _get(client, list='banned')
     assert _ips(page) == [ip] and page['items'][0]['country'] == COUNTRY
+
+
+def test_a_network_keeps_its_addresses_and_counts_only_those(client, fail2ban):
+    from app.database import get_db_context
+    from app.models import NetfilterLog
+    for ip in IPS[:4]:
+        _failed(ip)
+    with get_db_context() as db:
+        db.query(NetfilterLog).filter(NetfilterLog.priority == MARKER, NetfilterLog.ip.in_(IPS[:3])).update({NetfilterLog.asn_org: 'Test Network'}, synchronize_session=False)
+        db.commit()
+    page = _get(client, list='review', network='Test Network')
+    assert sorted(_ips(page)) == sorted(IPS[:3])
+    assert page['counts'] == {'review': 3, 'banned': 0} and page['network'] == 'Test Network'
+    assert _get(client, list='review')['counts']['review'] == 4
