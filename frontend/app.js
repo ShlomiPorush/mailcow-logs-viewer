@@ -1239,7 +1239,7 @@ function renderNetfilterData(data) {
                     <span class="ui-ev-where" title="${escapeHtml(place + org)}">${flagUrl ? `<img src="${flagUrl}" alt="" width="16" height="12" onerror="this.style.display='none'">` : ''}${escapeHtml(place || '-')}</span>
                     <span class="ui-st-acts">
                         ${showUnban ? `<button onclick="unbanIP('${escapeJsArg(log.ip)}', this)" class="ui-btn ui-btn-sm" title="Unban ${escapeHtml(log.ip)}/32">Unban</button>` : ''}
-                        ${showBan ? `<button onclick="banIP('${escapeJsArg(log.ip)}', this)" class="ui-btn ui-btn-sm ui-btn-danger" title="Ban ${escapeHtml(log.ip)}/32">Ban</button>` : ''}
+                        ${showBan ? `<button onclick="banIP('${escapeJsArg(log.ip)}', this)" class="ui-btn ui-btn-sm ui-btn-danger" title="Put ${escapeHtml(log.ip)}/32 on the denylist; it stays until removed">Ban permanently</button>` : ''}
                         <button type="button" class="ui-icon-btn ui-icon-btn-sm ui-ev-toggle" aria-expanded="false" aria-controls="ev-detail-${index}" title="Show the log line" onclick="toggleEventDetail(this)"><svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg></button>
                     </span>
                     <div class="ui-ev-detail" id="ev-detail-${index}" hidden>
@@ -1639,7 +1639,6 @@ function switchTab(tab, params = {}) {
             loadNetfilterCountries();
             loadSmtpAbusePanel();
             loadSecurityAppSettings();
-            loadSecurityCountryChart(securityChartDays);
             break;
         case 'queue':
             loadQueue();
@@ -3838,11 +3837,7 @@ async function loadStatus() {
             loadStatusAppVersion()
         ]);
         const lastChecked = document.getElementById('status-last-checked');
-        if (lastChecked) {
-            const now = new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit', hour12: false,
-                timeZone: appTimezone && appTimezone !== 'UTC' ? appTimezone : undefined }).format(new Date());
-            lastChecked.textContent = `Last checked: ${now}`;
-        }
+        uiAgo(lastChecked, new Date().toISOString(), 'Updated ');
         renderStatusAttention();
     } catch (error) {
         console.error('Failed to load status:', error);
@@ -4416,7 +4411,7 @@ function renderStatusCorrelation(correlation, incompleteList) {
     container.innerHTML = `
         <div class="ui-srv-big${correlation.incomplete ? ' ui-text-warn' : ''}">${correlation.completion_rate || 0}%</div>
         <small>${(correlation.complete || 0).toLocaleString()} of ${(correlation.total || 0).toLocaleString()} complete, ${(correlation.incomplete || 0).toLocaleString()} incomplete, ${(correlation.expired || 0).toLocaleString()} expired</small>
-        ${correlation.last_update ? `<small>Updated ${formatTime(correlation.last_update)}</small>` : ''}
+        ${correlation.last_update ? `<small title="${escapeHtml(formatTime(correlation.last_update))}">Updated ${formatAgo(correlation.last_update)}</small>` : ''}
     `;
     const pending = document.getElementById('status-correlation-pending');
     if (pending) pending.innerHTML = incompleteList.length > 0 ? `

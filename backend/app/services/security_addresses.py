@@ -2,18 +2,21 @@
 The Security page's address lists, built here so the counts are real and a
 country filter covers every address, not only the ones a browser has loaded.
 
-An address is banned or it is not. Banned: a rule's ban, or one of Fail2ban's
-own (not a permanent one, and not one mailcow is about to lift). To review:
-every other address a rule caught, or that failed to log in in the last 24
-hours. An address on the allowlist or the denylist is shown on the Lists, not
-here. The newest activity comes first; pages follow a cursor, so an address
+Every address that tried in the chosen period, or that a rule caught, is on
+one of two lists. Banned: a rule's ban, one of Fail2ban's own (not one mailcow
+is about to lift), or the denylist. To review: every other one, whether a rule
+caught it or not, and the ones on the allowlist too, tagged so. The panels
+beside the list (countries and networks) are counted from the same addresses,
+so a number there is the rows a click on it shows. The newest activity comes first; pages follow a cursor, so an address
 that changes list while someone scrolls does not shift the rest.
 """
 import time
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple
 
-from sqlalchemy import desc, func
+import ipaddress
+
+from sqlalchemy import case, desc, distinct, func
 from sqlalchemy.orm import Session
 
 from ..models import NetfilterLog, ProtectionHit
@@ -99,6 +102,31 @@ def netfilter_sources(db: Session, hours: int, now: Optional[datetime] = None) -
     return sources, totals
 
 
+def attempt_sources(db: Session, hours: int, now: Optional[datetime] = None) -> List[dict]:
+    """Attempts over the last hours by source address, counted by the database.
+
+    The same attempts netfilter_sources counts (lines where netfilter matched a
+    rule), but grouped in SQL, so a long period is not cut at a number of lines.
+    """
+    cutoff = (now or datetime.utcnow()) - timedelta(hours=hours)
+    text = NetfilterLog.message
+    service = case(*[(text.like(f'%{needle}%'), name) for needle, name, _ in _NETFILTER_SERVICES], else_=None)
+    login = case(*[(text.like(f'%{needle}%'), 1 if is_login else 0) for needle, _, is_login in _NETFILTER_SERVICES], else_=0)
+    rows = db.query(
+        NetfilterLog.ip, func.count(NetfilterLog.id), func.sum(login), func.max(NetfilterLog.time),
+        func.array_agg(distinct(service)), func.array_agg(distinct(NetfilterLog.username)),
+        func.max(NetfilterLog.country_code), func.max(NetfilterLog.country_name),
+        func.max(NetfilterLog.city), func.max(NetfilterLog.asn_org)
+    ).filter(
+        NetfilterLog.time >= cutoff, NetfilterLog.ip.isnot(None), NetfilterLog.rule_id.isnot(None)
+    ).group_by(NetfilterLog.ip).all()
+    return [{
+        "ip": ip, "attempts": attempts, "failed_logins": int(logins or 0), "last_seen": last,
+        "services": sorted(s for s in services or [] if s), "usernames": sorted(u for u in users or [] if u)[:5],
+        "country_code": code, "country_name": name, "city": city, "asn_org": org,
+    } for ip, attempts, logins, last, services, users, code, name, city, org in rows]
+
+
 # ---------------------------------------------------------------- the lists
 
 def _bare(entry: str) -> str:
@@ -106,8 +134,23 @@ def _bare(entry: str) -> str:
     return entry[:-3] if entry.endswith("/32") else entry[:-4] if entry.endswith("/128") else entry
 
 
-def _on(entries: List[str], ip: str) -> bool:
-    return any(_bare(e) == ip for e in entries)
+def _entry_for(entries: List[str], ip: str) -> Optional[str]:
+    """The list entry that holds the address: the address itself, or a network around it."""
+    for entry in entries:
+        if _bare(entry) == ip:
+            return entry
+    try:
+        address = ipaddress.ip_address(ip)
+    except ValueError:
+        return None
+    for entry in entries:
+        try:
+            net = ipaddress.ip_network(entry.strip(), strict=False)
+        except ValueError:
+            continue
+        if address.version == net.version and address in net:
+            return entry
+    return None
 
 
 def _truthy(value) -> bool:
@@ -115,13 +158,18 @@ def _truthy(value) -> bool:
 
 
 def _state(a: dict, known: bool, whitelist: List[str], blacklist: List[str]) -> str:
-    """Where an address stands; the same order the page used to apply."""
+    """Where an address stands; the same order the page used to apply. listed_as
+    is the allowlist or denylist entry that holds it."""
     statuses = {h["status"] for h in a["hits"]}
-    if known and _on(whitelist, a["ip"]):
+    allowed = _entry_for(whitelist, a["ip"]) if known else None
+    if allowed:
+        a["listed_as"] = allowed
         return "allow"
     if "banned" in statuses or a["f2b"]:
         return "banned"
-    if known and _on(blacklist, a["ip"]):
+    denied = _entry_for(blacklist, a["ip"]) if known else None
+    if denied:
+        a["listed_as"] = denied
         return "deny"
     if statuses & {"watching", "pending", "alert"}:
         return "review"
@@ -129,18 +177,50 @@ def _state(a: dict, known: bool, whitelist: List[str], blacklist: List[str]) -> 
 
 
 def _list_of(a: dict) -> Optional[str]:
-    if a["state"] == "banned":
+    if a["state"] in ("banned", "deny"):
         return "banned"
-    if a["state"] == "review" or (a["state"] == "quiet" and a["tries"] > 0):
+    if a["state"] in ("review", "allow") or (a["state"] == "quiet" and a["attempts"] > 0):
         return "review"
     return None
 
 
-def collect(db: Session, f2b: Optional[dict], now: Optional[datetime] = None) -> List[dict]:
+def attempts_of(a: dict) -> int:
+    """An address's attempts as its row shows them: logged ones, or what the rules counted."""
+    return a["attempts"] or sum(h.get("attempts") or 0 for h in a["hits"])
+
+
+def panels(addresses: List[dict], countries: int = 10, networks: int = 8) -> Tuple[List[dict], List[dict]]:
+    """The countries and networks the listed addresses come from, most attempts first.
+
+    Counted from the lists themselves: addresses is how many rows a click shows
+    (To review and Banned together), and the attempts are the ones on those rows.
+    """
+    by_country: Dict[str, dict] = {}
+    by_network: Dict[str, dict] = {}
+    for a in addresses:
+        if a["list"] is None:
+            continue
+        n = attempts_of(a)
+        for key, groups, base in ((a["country"], by_country, {"country_name": a["country"], "country_code": a["country_code"]}),
+                                  (a["org"], by_network, {"asn_org": a["org"]})):
+            if not key:
+                continue
+            g = groups.setdefault(key, {**base, "addresses": 0, "attempts": 0, "review": 0, "banned": 0})
+            g["addresses"] += 1
+            g["attempts"] += n
+            g[a["list"]] += n
+
+    def top(groups, limit):
+        return sorted(groups.values(), key=lambda g: (g["attempts"], g["addresses"]), reverse=True)[:limit]
+    return top(by_country, countries), top(by_network, networks)
+
+
+def collect(db: Session, f2b: Optional[dict], now: Optional[datetime] = None, hours: int = 24) -> List[dict]:
     """Every address on one of the lists, newest activity first.
 
     f2b is mailcow's Fail2ban answer, or None when mailcow did not answer: then
     only the rules' bans count as banned, and the allow and deny lists are unknown.
+    hours is the period the attempts are counted over.
     """
     now = now or datetime.utcnow()
     addresses: Dict[str, dict] = {}
@@ -148,15 +228,15 @@ def collect(db: Session, f2b: Optional[dict], now: Optional[datetime] = None) ->
     def get(ip: str) -> dict:
         if ip not in addresses:
             addresses[ip] = {"ip": ip, "tries": 0, "attempts": 0, "users": [], "services": [], "hits": [],
-                             "country": "", "country_code": "", "city": "", "org": "", "last": None, "f2b": None}
+                             "country": "", "country_code": "", "city": "", "org": "", "last": None, "f2b": None,
+                             "listed_as": None}
         return addresses[ip]
 
     def seen(a: dict, when: Optional[datetime]) -> None:
         if when and (a["last"] is None or when > a["last"]):
             a["last"] = when
 
-    sources, _ = netfilter_sources(db, 24, now)
-    for s in sources.values():
+    for s in attempt_sources(db, hours, now):
         if not s["attempts"]:
             continue
         a = get(s["ip"])
@@ -227,13 +307,15 @@ def _parse_cursor(value: str) -> Optional[tuple]:
 
 
 def page(addresses: List[dict], list_name: str, country: Optional[str], after: Optional[str], limit: int,
-         query: Optional[str] = None) -> dict:
+         query: Optional[str] = None, network: Optional[str] = None) -> dict:
     """One page of a list, its real total, and both lists' counts (for the country, when one is chosen).
 
-    `query` keeps the addresses that contain it, for the global search; the
-    counts then count only those.
+    `query` keeps the addresses that contain it, for the global search, and
+    `network` the ones from that network (its ASN organization); the counts then
+    count only those.
     """
     in_country = [a for a in addresses if (not country or a["country"] == country)
+                  and (not network or a["org"] == network)
                   and (not query or query in a["ip"])]
     counts = {name: sum(1 for a in in_country if a["list"] == name) for name in LISTS}
     rows = [a for a in in_country if a["list"] == list_name]
@@ -244,6 +326,7 @@ def page(addresses: List[dict], list_name: str, country: Optional[str], after: O
     return {
         "list": list_name,
         "country": country,
+        "network": network,
         "total": counts[list_name],
         "counts": counts,
         "all_counts": {name: sum(1 for a in addresses if a["list"] == name) for name in LISTS},
@@ -254,21 +337,22 @@ def page(addresses: List[dict], list_name: str, country: Optional[str], after: O
 
 # ---------------------------------------------------------------- a short cache
 # Scrolling asks for one page after another; they come from one reading of the
-# logs and of mailcow, so a page never disagrees with the one before it. Any
-# change to Fail2ban or to a catch forgets it.
+# logs and of mailcow, so a page never disagrees with the one before it. Each
+# period has its own reading. Any change to Fail2ban or to a catch forgets them.
 
-_cache: Dict[str, object] = {"at": 0.0, "addresses": None, "fail2ban_known": False}
+_cache: Dict[int, Tuple[float, List[dict], bool]] = {}
 
 
-def cached() -> Optional[Tuple[List[dict], bool]]:
-    if _cache["addresses"] is not None and time.monotonic() - _cache["at"] < CACHE_SECONDS:
-        return _cache["addresses"], _cache["fail2ban_known"]
+def cached(hours: int = 24) -> Optional[Tuple[List[dict], bool]]:
+    found = _cache.get(hours)
+    if found and time.monotonic() - found[0] < CACHE_SECONDS:
+        return found[1], found[2]
     return None
 
 
-def remember(addresses: List[dict], fail2ban_known: bool) -> None:
-    _cache.update(at=time.monotonic(), addresses=addresses, fail2ban_known=fail2ban_known)
+def remember(addresses: List[dict], fail2ban_known: bool, hours: int = 24) -> None:
+    _cache[hours] = (time.monotonic(), addresses, fail2ban_known)
 
 
 def forget() -> None:
-    _cache.update(at=0.0, addresses=None, fail2ban_known=False)
+    _cache.clear()
