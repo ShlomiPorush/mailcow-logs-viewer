@@ -5624,6 +5624,7 @@ Create a new suppression entry.
 **Notes:**
 - Domain type entries are stored as regex patterns (e.g., `/.+@example\.com/i`)
 - Regex patterns (starting with `/`) bypass email format validation
+- When written to Rspamd, a regex pattern is anchored as a whole (`/^(?:pattern)$/i`). Entries created automatically (`source: auto`, from bounces and the deferred queue cleanup) are always written as the exact address, even when they look like a pattern
 - If `permanent=false` and no `expires_at` is provided, default expiry is `base_expiry_days` from config
 
 ---
