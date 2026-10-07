@@ -2,6 +2,8 @@
 Load/save app config overrides from DB (system_settings table, keys config.*).
 Used when SETTINGS_EDIT_VIA_UI_ENABLED is True.
 """
+import functools
+import hashlib
 import json
 import logging
 from typing import Dict, Any
@@ -167,10 +169,20 @@ def clear_maxmind_validation_status(db: Session) -> None:
 _CREDENTIAL_CHECK_PREFIX = "credential_check."
 
 
+@functools.lru_cache(maxsize=16)
 def credential_fingerprint(*parts: str) -> str:
-    """Short hash of the address and secret a check ran against; the secret itself is never stored here."""
-    import hashlib
-    return hashlib.sha256("\n".join(p or "" for p in parts).encode("utf-8")).hexdigest()[:16]
+    """Short hash of the address and secret a check ran against; the secret itself is never stored here.
+
+    PBKDF2, not a plain hash: the fingerprint is stored, and a fast hash of a
+    password lets anyone holding the database try guesses cheaply. It is read
+    on every settings load, so the result is kept in memory.
+    """
+    return hashlib.pbkdf2_hmac(
+        "sha256",
+        "\n".join(p or "" for p in parts).encode("utf-8"),
+        b"mailcow-logs-viewer credential check",
+        100_000,
+    ).hex()[:16]
 
 
 def get_credential_check_status(db: Session, name: str, fingerprint: str) -> dict:
