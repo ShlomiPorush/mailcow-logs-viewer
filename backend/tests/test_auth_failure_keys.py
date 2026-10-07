@@ -14,7 +14,8 @@ from test_auth_request_limits import client_at, credentials
 
 @pytest.fixture(autouse=True)
 def small_table(monkeypatch):
-    monkeypatch.setattr(settings._inner, "auth_max_failure_clients", 4)
+    # Patched on the wrapper, like test_auth_capacity.py, which leaves a value there
+    monkeypatch.setattr(settings, "auth_max_failure_clients", 4, raising=False)
     monkeypatch.setattr(settings._inner, "basic_auth_enabled", True)
     monkeypatch.setattr(settings._inner, "auth_enabled", False)
     monkeypatch.setattr(settings._inner, "oauth2_enabled", False)
