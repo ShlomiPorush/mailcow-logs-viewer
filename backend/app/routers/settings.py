@@ -19,6 +19,7 @@ from ..config import settings, EDITABLE_SETTING_KEYS, FEATURE_IDS, reload_settin
 from ..config import _get_field_annotations, get_env_locked_keys
 from ..scheduler import last_fetch_run_time, get_job_status, update_job_status, reschedule_interval_jobs, dovecot_correlation_available, cleanup_disabled_feature_data
 from ..services.settings_store import get_config_overrides_from_db, save_config_overrides_to_db, has_config_overrides_in_db, get_maxmind_validation_status, save_maxmind_validation_status, clear_maxmind_validation_status
+from ..services.settings_store import credential_fingerprint, get_credential_check_status, save_credential_check_status
 from ..services.connection_test import test_smtp_connection, test_imap_connection
 from ..services.geoip_downloader import is_license_configured, get_geoip_status
 from .domains import get_cached_server_ip
@@ -222,7 +223,9 @@ def get_settings_info(db: Session = Depends(get_db)):
                 "oauth2_enabled": settings.is_oauth2_enabled,
                 "auth_username": settings.auth_username if settings.is_basic_auth_enabled else None,
                 "oauth2_provider_name": settings.oauth2_provider_name if settings.is_oauth2_enabled else None,
-                "maxmind_status": get_maxmind_validation_status(db)  # Last validated result from DB, or None if never checked
+                "maxmind_status": get_maxmind_validation_status(db),  # Last validated result from DB, or None if never checked
+                "mailcow_rw_key_status": _credential_status(db, "mailcow_rw_key"),
+                "rspamd_password_status": _credential_status(db, "rspamd_password"),
             },
             "import_status": {
                 "postfix": {
@@ -700,6 +703,7 @@ def update_settings(body: Dict[str, Any], db: Session = Depends(get_db)):
     except Exception as e:
         raise HTTPException(status_code=400, detail="Invalid settings. Check the submitted values.") from e
     prev_sync_sources = (settings.blacklist_source_transports, settings.blacklist_source_relayhosts)
+    prev_credentials = {name: check["fingerprint"]() for name, check in _CREDENTIAL_CHECKS.items()}
     save_config_overrides_to_db(db, allowed)
     reload_settings(db)
     # A feature switched off here should drop its data now, not at the next restart
@@ -729,7 +733,11 @@ def update_settings(body: Dict[str, Any], db: Session = Depends(get_db)):
     if 'maxmind_license_key' in allowed or 'maxmind_account_id' in allowed:
         clear_maxmind_validation_status(db)
     
-    return {"settings_edit_via_ui_enabled": True, "settings_migrated": True, "configuration": _effective_config_for_editable(settings)}
+    # The page checks a new or changed Read-Write key or Rspamd password right after saving
+    changed = {f"{name}_changed": check["configured"]() and prev_credentials[name] != check["fingerprint"]()
+               for name, check in _CREDENTIAL_CHECKS.items()}
+    return {"settings_edit_via_ui_enabled": True, "settings_migrated": True, "configuration": _effective_config_for_editable(settings),
+            **changed}
 
 
 # Feature → tables mapping for data purge
@@ -996,6 +1004,65 @@ async def validate_maxmind_license_endpoint():
     result = await validate_maxmind_license()
     await asyncio.to_thread(_persist_maxmind_validation_worker, result)
     return result
+
+
+# Credentials checked against the server they belong to, changing nothing there.
+# The fingerprint covers the address and the secret, so a stored result is
+# dropped as soon as either changes, through the UI or the environment.
+_CREDENTIAL_CHECKS = {
+    "mailcow_rw_key": {
+        "configured": lambda: mailcow_api.has_rw_key,
+        "fingerprint": lambda: credential_fingerprint(settings.mailcow_url, settings.mailcow_api_key_rw),
+        "check": lambda: mailcow_api.check_rw_key(),
+    },
+    "rspamd_password": {
+        "configured": lambda: settings.is_rspamd_configured,
+        "fingerprint": lambda: credential_fingerprint(settings.mailcow_url, settings.rspamd_url, settings.rspamd_password),
+        "check": lambda: mailcow_api.check_rspamd_password(),
+    },
+}
+
+
+def _credential_status(db: Session, name: str) -> Optional[Dict[str, Any]]:
+    """Last check of a credential for its current address and secret; None if not checked yet."""
+    check = _CREDENTIAL_CHECKS[name]
+    if not check["configured"]():
+        return {"configured": False, "valid": False, "error": None}
+    return get_credential_check_status(db, name, check["fingerprint"]())
+
+
+def _persist_credential_status_worker(name: str, result: Dict[str, Any], fingerprint: str) -> None:
+    with get_db_context() as db:
+        save_credential_check_status(db, name, result, fingerprint)
+
+
+async def _validate_credential(name: str) -> Dict[str, Any]:
+    check = _CREDENTIAL_CHECKS[name]
+    fingerprint = check["fingerprint"]()
+    result = await check["check"]()
+    if result["configured"]:
+        await asyncio.to_thread(_persist_credential_status_worker, name, result, fingerprint)
+    return result
+
+
+@router.post("/settings/mailcow/rw-key/validate")
+async def validate_mailcow_rw_key_endpoint():
+    """
+    Check that mailcow accepts the Read-Write API key for writes, changing nothing.
+    Called after the key or URL is saved, and when the user clicks 'Validate'.
+    Persists the result to DB.
+    """
+    return await _validate_credential("mailcow_rw_key")
+
+
+@router.post("/settings/rspamd/password/validate")
+async def validate_rspamd_password_endpoint():
+    """
+    Check that Rspamd accepts the password, the way its web UI logs in.
+    Called after the password or the Rspamd or mailcow URL is saved, and when
+    the user clicks 'Validate'. Persists the result to DB.
+    """
+    return await _validate_credential("rspamd_password")
 
 
 @router.post("/settings/geoip/validate")

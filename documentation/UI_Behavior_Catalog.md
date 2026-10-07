@@ -149,6 +149,7 @@ The v3 redesign replaces these with one consistent locked-area component that sa
 | A Logs service another page reads (`raw_logs_required` in `/api/settings/info`) | Its row says "Always collected for <pages>"; switching it off only hides it on the Logs page | `renderSettingsEditField` |
 | A value differs from its default | Amber highlight with "Reset to default" or "Clear" | `renderSettingsEditField` |
 | A feature is disabled | Its Settings tab is hidden | `SETTINGS_TAB_FEATURE_MAP` |
+| mailcow Read-Write API key and Rspamd password | Each: "Not checked", "Not configured", "Accepted" or a red "Rejected", "Read-only key", "Redirected", "Connection error", "Unexpected answer" whose tooltip says what to fix, and when it was last checked; checked right after a new or changed key, password or URL is saved (the message is shown again after the page reloads), and from Validate | `renderCredentialStatus`, `validateCredential` |
 | MaxMind | "Not checked", "Not configured", "License Valid" or a red error; database "DB Healthy", "DB Corrupt" with Repair, or "Downloading..." | `renderMaxMindStatus`, `renderGeoIPDbStatus` |
 | Turning Basic Auth on without a password | A toast, then the "Verify Credentials" modal | `renderSettings` |
 | Disabling a feature that has data | The warning "Disabling a feature permanently deletes its stored data." and a confirmation modal before the purge | `showFeatureDisableConfirmModal` |
