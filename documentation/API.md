@@ -2843,6 +2843,18 @@ Returns comprehensive system configuration, import status, correlation status, a
       "valid": true,
       "error": null,
       "checked_at": "2026-05-15T14:30:00Z"
+    },
+    "mailcow_rw_key_status": {
+      "configured": true,
+      "valid": true,
+      "error": null,
+      "checked_at": "2026-10-07T09:12:00Z"
+    },
+    "rspamd_password_status": {
+      "configured": true,
+      "valid": true,
+      "error": null,
+      "checked_at": "2026-10-07T09:12:01Z"
     }
   },
   "import_status": {
@@ -3528,6 +3540,75 @@ Validate MaxMind license key on-demand. Result is persisted to database.
 - The `maxmind_status` field in `GET /api/settings/info` returns the last persisted result (or `null` if never checked)
 - Clearing MaxMind credentials via `PUT /api/settings` automatically clears the persisted validation result
 - The scheduled "Update MaxMind Databases" job also marks the license as valid after a successful database download
+
+---
+
+### POST /api/settings/mailcow/rw-key/validate
+
+Check that mailcow accepts the Read-Write API key (`MAILCOW_API_KEY_RW`) for writes, without changing anything. The Settings page calls it right after a new or changed key or mailcow URL is saved, and from the Validate button. Result is persisted to database.
+
+**Authentication:** Required
+
+**Response (accepted):**
+```json
+{
+  "configured": true,
+  "valid": true,
+  "error": null
+}
+```
+
+**Response (rejected):**
+```json
+{
+  "configured": true,
+  "valid": false,
+  "error": "rejected",
+  "http_status": 401
+}
+```
+
+**Response Fields:**
+- `configured`: Boolean - whether a Read-Write key is set
+- `valid`: Boolean - whether mailcow accepted the key for writes
+- `error`: String or null - `"rejected"` (401: wrong or inactive key, or this server's IP is not allowed for the key), `"read_only"` (403: a read-only key), `"connection"` (mailcow not reachable), `"unexpected"` (any other answer)
+- `http_status`: Integer - mailcow's status code, present when mailcow answered with an error
+
+**Notes:**
+- Sends one `POST /api/v1/edit/mlv-key-check` to mailcow. mailcow checks the key and its allowed IPs before routing, so an accepted key gets `404 route not found` and nothing is changed
+- No retry: every rejected key is also a failed login for mailcow's Fail2ban
+- The `mailcow_rw_key_status` field in `GET /api/settings/info` returns the last result for the current mailcow URL and key; `null` if not checked since either changed
+- `PUT /api/settings` returns `mailcow_rw_key_changed: true` when the saved mailcow URL or Read-Write key differs from before
+
+---
+
+### POST /api/settings/rspamd/password/validate
+
+Check that Rspamd accepts the Rspamd password (`RSPAMD_PASSWORD`), the way the Rspamd web UI logs in, without changing anything. The Settings page calls it right after a new or changed password, Rspamd URL or mailcow URL is saved, and from the Validate button. Result is persisted to database.
+
+**Authentication:** Required
+
+**Response (rejected):**
+```json
+{
+  "configured": true,
+  "valid": false,
+  "error": "rejected",
+  "http_status": 403
+}
+```
+
+**Response Fields:**
+- `configured`: Boolean - whether an Rspamd password is set
+- `valid`: Boolean - whether Rspamd accepted the password
+- `error`: String or null - `"rejected"` (401 or 403: wrong password), `"redirected"` (a proxy answered with a redirect before Rspamd saw the password; set `RSPAMD_URL`), `"connection"` (Rspamd not reachable), `"unexpected"` (any other answer)
+- `http_status`: Integer - the status code, present when the answer was an error
+
+**Notes:**
+- Sends one `GET /rspamd/auth` with the `Password` header, through the mailcow proxy or straight to `RSPAMD_URL` when it is set. An accepted password gets `200` with `"auth": "ok"`
+- No retry: a wrong password is also a failed login for mailcow's Fail2ban
+- The `rspamd_password_status` field in `GET /api/settings/info` returns the last result for the current address and password; `null` if not checked since either changed
+- `PUT /api/settings` returns `rspamd_password_changed: true` when the saved password, Rspamd URL or mailcow URL differs from before
 
 ---
 

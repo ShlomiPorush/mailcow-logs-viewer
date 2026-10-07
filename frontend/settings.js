@@ -797,6 +797,7 @@ async function loadSettings() {
 
         loading.classList.add('hidden');
         content.classList.remove('hidden');
+        showSettingsToastAfterReload();
 
         // Load app info and version status in parallel (non-blocking)
         (async () => {
@@ -923,6 +924,7 @@ function renderSettings(content, data) {
             <div class="ui-panel-head">Runtime</div>
             <div class="ui-md-ids ui-set-facts">
                 ${readOnlyFacts.map(([label, value]) => `<div class="ui-md-fact"><span>${label}</span><div>${value}</div></div>`).join('')}
+                ${Object.keys(CREDENTIAL_CHECKS).map(name => `<div class="ui-md-fact"><span>${CREDENTIAL_CHECKS[name].label}</span>${credentialCheckFact(name, config[name + '_status'], '')}</div>`).join('')}
                 <div class="ui-md-fact"><span>MaxMind Status</span>
                     <div class="ui-chip-row">
                         <span id="maxmind-license-status">${renderMaxMindStatus(data.configuration.maxmind_status)}</span>
@@ -1027,6 +1029,15 @@ function renderSettings(content, data) {
                         + '</div></section>';
                 };
                 const onOff = function (on, offTone) { return on ? uiTag('Enabled', 'ok') : uiTag('Disabled', offTone || ''); };
+
+                // The Mailcow tab says whether mailcow accepts the Read-Write key and Rspamd its password
+                if (tab.id === 'mailcow') {
+                    tabsHtml += '<section class="ui-panel ui-set-group"><h3 class="ui-set-group-title">Status</h3><div class="ui-md-ids ui-set-facts">'
+                        + Object.keys(CREDENTIAL_CHECKS).map(function (name) {
+                            return '<div class="ui-md-fact"><span>' + CREDENTIAL_CHECKS[name].label + '</span>' + credentialCheckFact(name, config[name + '_status'], '-tab') + '</div>';
+                        }).join('')
+                        + '</div></section>';
+                }
 
                 // Special handling for SMTP tab - add Global SMTP Configuration
                 if (tab.id === 'smtp' && data.smtp_configuration) {
@@ -1343,7 +1354,17 @@ function renderSettings(content, data) {
                         const err = await res.json().catch(() => ({}));
                         throw new Error(err.detail || res.statusText);
                     }
+                    const saved = await res.json().catch(() => ({}));
                     uiSaveBarBusy('settings-savebar', false);
+                    // A new or changed Read-Write key or Rspamd password is checked right away;
+                    // a failure is the answer to show, so it wins over a success
+                    let checkToast = null;
+                    for (const name of Object.keys(CREDENTIAL_CHECKS)) {
+                        if (!saved[name + '_changed']) continue;
+                        const toast = await validateCredential(name);
+                        if (toast && !(checkToast && checkToast[1] === 'error')) checkToast = toast;
+                    }
+                    if (checkToast) showToast(...checkToast);
                     if (isEnablingBasicAuth) {
                         showToast('Basic Auth enabled successfully! You will need to log in on your next visit.', 'success');
                     }
@@ -1376,6 +1397,10 @@ function renderSettings(content, data) {
                             }
                         }
 
+                        // The credential check's answer is shown again after the reload
+                        if (checkToast) {
+                            try { sessionStorage.setItem(SETTINGS_TOAST_AFTER_RELOAD, JSON.stringify(checkToast)); } catch (e) { /* private mode: the status tag still shows it */ }
+                        }
                         showToast('Features updated - reloading...', 'success');
                         setTimeout(() => location.reload(), 600);
                         return;
@@ -1736,6 +1761,104 @@ async function repairGeoIPDatabase() {
             statusEl.innerHTML = renderGeoIPDbStatus({ db_valid: false });
         }
     }
+}
+
+// Credentials checked against their server, changing nothing there. Each
+// failure says what it means and what to do about it.
+const CREDENTIAL_CHECKS = {
+    mailcow_rw_key: {
+        label: 'Read-Write API Key',
+        endpoint: '/api/settings/mailcow/rw-key/validate',
+        missing: 'Add a Read-Write API key first',
+        accepted: 'mailcow accepted the Read-Write API key',
+        errors: {
+            rejected: ['Rejected', 'mailcow rejected the Read-Write API key. Check in mailcow under System → API that the key is correct and active, and that the IP address of this server is allowed.'],
+            read_only: ['Read-only key', 'This is a read-only API key. Paste the Read-Write key from System → API in mailcow.'],
+            connection: ['Connection error', 'Could not reach mailcow to check the Read-Write API key. Check the mailcow URL and try again.'],
+            unexpected: ['Unexpected answer', 'mailcow gave an unexpected answer when checking the Read-Write API key. Check the mailcow URL and the application logs.']
+        }
+    },
+    rspamd_password: {
+        label: 'Rspamd Password',
+        endpoint: '/api/settings/rspamd/password/validate',
+        missing: 'Add the Rspamd password first',
+        accepted: 'Rspamd accepted the password',
+        errors: {
+            rejected: ['Rejected', 'Rspamd rejected the password. Use the Rspamd UI password set in mailcow under System → Configuration → Access → Rspamd UI.'],
+            redirected: ['Redirected', 'A proxy answered before Rspamd could check the password. Set the Rspamd URL to reach Rspamd directly, for example http://rspamd-mailcow:11334.'],
+            connection: ['Connection error', 'Could not reach Rspamd to check the password. Check the Rspamd URL, or the mailcow URL when it is empty, and try again.'],
+            unexpected: ['Unexpected answer', 'Rspamd gave an unexpected answer when checking the password. Check the Rspamd URL and the application logs.']
+        }
+    }
+};
+
+function credentialCheckError(name, status) {
+    const errors = CREDENTIAL_CHECKS[name].errors;
+    return errors[status && status.error] || errors.unexpected;
+}
+
+function renderCredentialStatus(name, status) {
+    if (status === null || status === undefined) return uiTag('Not checked', '');
+    if (!status.configured) return uiTag('Not configured', '');
+    if (status.valid) return uiTag('Accepted', 'ok');
+    const known = credentialCheckError(name, status);
+    return `<span title="${escapeHtml(known[1])}">${uiTag(known[0], 'fail')}</span>`;
+}
+
+function credentialCheckedAt(status) {
+    if (!status || status.configured === false) return '';
+    return status.checked_at ? 'Checked ' + escapeHtml(formatTime(status.checked_at)) : 'Not checked yet';
+}
+
+// Validate needs the credential; without it the button stays, disabled, and says so
+function credentialValidateButton(name, status) {
+    return status && status.configured === false
+        ? `<button type="button" class="ui-btn ui-btn-sm" disabled title="${escapeHtml(CREDENTIAL_CHECKS[name].missing)}">Validate</button>`
+        : `<button type="button" onclick="validateCredential('${name}', true)" class="ui-btn ui-btn-sm">Validate</button>`;
+}
+
+// One fact: the status tag, Validate, and when it was last checked. The ids
+// carry a suffix because the read-only facts and the Mailcow tab both show it.
+function credentialCheckFact(name, status, suffix) {
+    const id = 'credential-' + name + suffix;
+    return `<div class="ui-chip-row"><span id="${id}-status">${renderCredentialStatus(name, status)}</span>${credentialValidateButton(name, status)}</div>`
+        + `<span id="${id}-checked" class="ui-md-sub">${credentialCheckedAt(status)}</span>`;
+}
+
+// Run one check and show its result; returns the toast it calls for, and shows it when asked
+async function validateCredential(name, toastNow) {
+    const check = CREDENTIAL_CHECKS[name];
+    const show = (part, html) => ['', '-tab'].forEach(suffix => {
+        const el = document.getElementById('credential-' + name + suffix + '-' + part);
+        if (el) el.innerHTML = html;
+    });
+    show('status', uiTag('Checking…', 'info'));
+    let result;
+    try {
+        const response = await authenticatedFetch(check.endpoint, { method: 'POST' });
+        result = response.ok ? await response.json() : { configured: true, valid: false, error: 'unexpected' };
+    } catch (error) {
+        console.error('Failed to check the ' + check.label + ':', error); // nosemgrep: javascript.lang.security.audit.unsafe-formatstring.unsafe-formatstring
+        result = { configured: true, valid: false, error: 'connection' };
+    }
+    show('status', renderCredentialStatus(name, result));
+    show('checked', credentialCheckedAt(result.configured ? { ...result, checked_at: new Date().toISOString() } : result));
+    if (!result.configured) return null;
+    const toast = result.valid ? [check.accepted, 'success'] : [credentialCheckError(name, result)[1], 'error'];
+    if (toastNow) showToast(...toast);
+    return toast;
+}
+
+// A toast that has to outlive the reload after saving (a credential check)
+const SETTINGS_TOAST_AFTER_RELOAD = 'settingsToastAfterReload';
+
+function showSettingsToastAfterReload() {
+    let toast = null;
+    try {
+        toast = JSON.parse(sessionStorage.getItem(SETTINGS_TOAST_AFTER_RELOAD) || 'null');
+        sessionStorage.removeItem(SETTINGS_TOAST_AFTER_RELOAD);
+    } catch (e) { /* private mode or a bad value: nothing to show */ }
+    if (Array.isArray(toast)) showToast(String(toast[0]), toast[1] === 'success' ? 'success' : 'error');
 }
 
 function renderMaxMindStatus(status) {

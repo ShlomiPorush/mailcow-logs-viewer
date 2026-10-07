@@ -235,6 +235,80 @@ class MailcowAPI:
             self._discard_client(client)
             raise MailcowAPIError(f"RW API request failed: {str(e)}")
 
+    async def check_rw_key(self) -> Dict[str, Any]:
+        """Check that mailcow accepts the Read-Write key for writes, changing nothing.
+
+        POSTs to an edit route that does not exist. mailcow checks the key and
+        its allowed IPs before routing, so the answer tells the cases apart:
+        404 "route not found" = accepted for writes, 403 = a read-only key,
+        401 = wrong or inactive key, or this server's IP is not allowed.
+        No retry: a rejected key is a final answer, and every rejection is
+        also a failed login for mailcow's Fail2ban.
+        """
+        if not self.headers_rw:
+            return {"configured": False, "valid": False, "error": None}
+        client = self._get_client()
+        try:
+            response = await client.post(f"{self.base_url}/api/v1/edit/mlv-key-check",
+                                         headers=self.headers_rw, json={"items": [], "attr": {}})
+        except httpx.RequestError as e:
+            self._discard_client(client)
+            logger.warning(f"Read-Write API key check could not reach mailcow: {e}")
+            return {"configured": True, "valid": False, "error": "connection"}
+        status = response.status_code
+        if status == 404:
+            return {"configured": True, "valid": True, "error": None}
+        if status in (401, 403):
+            self._discard_client(client)
+        error = {401: "rejected", 403: "read_only"}.get(status, "unexpected")
+        logger.warning(f"Read-Write API key check failed: HTTP {status}")
+        return {"configured": True, "valid": False, "error": error, "http_status": status}
+
+    def _rspamd_url(self, endpoint: str) -> str:
+        """Where an Rspamd controller endpoint ('/rspamd/...') is reached: through
+        the mailcow proxy, or straight at RSPAMD_URL when that is set."""
+        rspamd_base = (settings.rspamd_url or '').strip().rstrip('/')
+        if not rspamd_base:
+            return f"{self.base_url}{endpoint}"
+        direct_endpoint = endpoint
+        if direct_endpoint.startswith('/rspamd'):
+            direct_endpoint = direct_endpoint[len('/rspamd'):] or '/'
+        return f"{rspamd_base}{direct_endpoint}"
+
+    async def check_rspamd_password(self) -> Dict[str, Any]:
+        """Check that Rspamd accepts the password, the way its web UI logs in.
+
+        GET /auth answers 200 with "auth": "ok" for a good password and 401 or
+        403 otherwise; it changes nothing. A redirect means a proxy answered
+        before Rspamd saw the password. No retry: a wrong password is a failed
+        login for mailcow's Fail2ban.
+        """
+        if not settings.rspamd_password:
+            return {"configured": False, "valid": False, "error": None}
+        client = self._get_client()
+        try:
+            response = await client.get(self._rspamd_url("/rspamd/auth"),
+                                        headers={"Password": settings.rspamd_password})
+        except httpx.RequestError as e:
+            logger.warning(f"Rspamd password check could not reach Rspamd: {e}")
+            return {"configured": True, "valid": False, "error": "connection"}
+        status = response.status_code
+        if status == 200:
+            try:
+                accepted = response.json().get("auth") == "ok"
+            except ValueError:
+                accepted = False
+            if accepted:
+                return {"configured": True, "valid": True, "error": None}
+        if status in (401, 403):
+            error = "rejected"
+        elif status in (301, 302, 303, 307, 308):
+            error = "redirected"
+        else:
+            error = "unexpected"
+        logger.warning(f"Rspamd password check failed: HTTP {status}")
+        return {"configured": True, "valid": False, "error": error, "http_status": status}
+
     async def get_postfix_logs(self, count: int = 500) -> List[Dict[str, Any]]:
         """
         Fetch Postfix logs from mailcow
@@ -1508,13 +1582,7 @@ class MailcowAPI:
         # get a 302 from that proxy before the Password header is ever checked.
         # RSPAMD_URL points straight at the Rspamd controller instead.
         rspamd_base = (settings.rspamd_url or '').strip().rstrip('/')
-        if rspamd_base:
-            direct_endpoint = endpoint
-            if direct_endpoint.startswith('/rspamd'):
-                direct_endpoint = direct_endpoint[len('/rspamd'):] or '/'
-            url = f"{rspamd_base}{direct_endpoint}"
-        else:
-            url = f"{self.base_url}{endpoint}"
+        url = self._rspamd_url(endpoint)
 
         headers = {"Password": rspamd_pw}
         if extra_headers:

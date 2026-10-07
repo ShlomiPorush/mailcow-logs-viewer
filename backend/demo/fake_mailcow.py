@@ -58,6 +58,8 @@ class FakeMailcow:
             ("GET", re.compile(r"^/api/v1/get/quarantine/all$"), self._get_quarantine),
             ("GET", re.compile(r"^/inc/ajax/qitem_details\.php$"), self._get_qitem_details),
             ("POST", re.compile(r"^/api/v1/edit/qitem$"), self._edit_qitem),
+            # The Read-Write key check: mailcow answers an unknown edit route with 404
+            ("POST", re.compile(r"^/api/v1/edit/mlv-key-check$"), self._route_not_found),
             ("POST", re.compile(r"^/api/v1/delete/qitem$"), self._delete_qitem),
             ("GET", re.compile(r"^/api/v1/get/status/containers$"), self._get_containers),
             ("GET", re.compile(r"^/api/v1/get/status/vmail$"), self._get_vmail),
@@ -81,6 +83,8 @@ class FakeMailcow:
             ("GET", re.compile(r"^/api/v1/get/fail2ban$"), self._get_fail2ban),
             ("POST", re.compile(r"^/api/v1/edit/fail2ban$"), self._edit_fail2ban),
             # Rspamd through the mailcow proxy, or direct when RSPAMD_URL is set
+            # The Rspamd password check logs in the way the Rspamd web UI does
+            ("GET", re.compile(r"^(?:/rspamd)?/auth$"), self._get_rspamd_auth),
             ("GET", re.compile(r"^(?:/rspamd)?/maps$"), self._get_rspamd_maps),
             ("GET", re.compile(r"^(?:/rspamd)?/getmap$"), self._get_rspamd_map),
             ("POST", re.compile(r"^/api/v1/edit/rspamd-map$"), self._edit_rspamd_map),
@@ -217,6 +221,9 @@ class FakeMailcow:
         return _success("Deleted")
 
     # ----------------------------------------------------------------- status
+
+    def _route_not_found(self, request):
+        return _json({"type": "error", "msg": "route not found"}, status=404)
 
     def _get_containers(self, request):
         return _json([self.containers])
@@ -387,6 +394,9 @@ class FakeMailcow:
         return _success(f"Unbanned {', '.join(sorted(networks))}")
 
     # ----------------------------------------------------------------- rspamd
+
+    def _get_rspamd_auth(self, request):
+        return _json({"auth": "ok", "read_only": False})
 
     def _get_rspamd_maps(self, request):
         return _json([
