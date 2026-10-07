@@ -20,6 +20,9 @@ import app.services.settings_store as ss
 from app.config import EDITABLE_SETTING_KEYS
 
 MASK = rs.MASK_PLACEHOLDER
+# Settings the page shows as a dropdown (SETTINGS_FIELD_OPTIONS in frontend/settings.js):
+# their value is posted as the option string, '' for Automatic
+SELECT_KEYS = {"smtp_verify_ssl", "dmarc_imap_verify_ssl"}
 
 SEED = {
     "smtp_enabled": True, "smtp_host": "smtp.example.com", "smtp_port": 587, "smtp_use_tls": True,
@@ -40,7 +43,9 @@ def store(monkeypatch):
         if key.startswith(("SMTP_", "RSPAMD_", "DMARC_IMAP_", "OAUTH2_")):
             monkeypatch.delenv(key)
     monkeypatch.setenv("SETTINGS_EDIT_VIA_UI_ENABLED", "true")
-    monkeypatch.setattr(ss, "get_config_overrides_from_db", lambda db, types_: dict(data))
+    # Values go through the same string round trip as the system_settings table
+    monkeypatch.setattr(ss, "get_config_overrides_from_db", lambda db, types_: {
+        k: ss._deserialize_value(ss._serialize_value(v), k, types_[k]) for k, v in data.items()})
     monkeypatch.setattr(rs, "save_config_overrides_to_db", lambda db, ov: data.update(ov))
     monkeypatch.setattr(rs, "has_config_overrides_in_db", lambda db: bool(data))
     monkeypatch.setattr(rs, "cleanup_disabled_feature_data", lambda db: None)
@@ -71,7 +76,7 @@ def _form_payload(configuration):
     for key, value in configuration.items():
         if key in rs._SENSITIVE_SETTING_KEYS and value == MASK:
             continue
-        if isinstance(value, bool) and key not in getattr(rs, "_TRI_STATE_KEYS", ()):
+        if isinstance(value, bool) and key not in SELECT_KEYS:
             payload[key] = value
         elif isinstance(value, bool):
             payload[key] = "true" if value else "false"
@@ -142,6 +147,18 @@ def test_unchanged_full_form_save_succeeds(store):
     result = _put(payload)
     assert result["configuration"]["smtp_password"] == MASK
     assert store["smtp_password"] == SEED["smtp_password"]
+
+
+@pytest.mark.parametrize("verify", [None, True, False])
+def test_full_form_save_keeps_the_verify_ssl_choice(store, verify):
+    store.update({"smtp_verify_ssl": verify, "dmarc_imap_verify_ssl": verify})
+    cfg.reload_settings(object())
+    payload = _form_payload(rs.get_editable_settings(db=object())["configuration"])
+    assert payload["smtp_verify_ssl"] == {None: "", True: "true", False: "false"}[verify]
+    _put(payload)
+    cfg.reload_settings(object())
+    assert cfg.settings.smtp_verify_ssl is verify
+    assert cfg.settings.dmarc_imap_verify_ssl is verify
 
 
 def test_form_save_changing_only_unrelated_fields_succeeds(store):

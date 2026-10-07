@@ -313,6 +313,13 @@ class Settings(BaseSettings):
         description='Use SSL/TLS for IMAP connection'
     )
 
+    dmarc_imap_verify_ssl: Optional[bool] = Field(
+        default=None,
+        env='DMARC_IMAP_VERIFY_SSL',
+        description='Verify the IMAP server TLS certificate. Unset: verify host names like imap.example.com, '
+                    'not localhost, IP addresses or container names. false: never verify (self-signed servers)'
+    )
+
     dmarc_imap_user: Optional[str] = Field(
         default=None,
         env='DMARC_IMAP_USER',
@@ -409,6 +416,13 @@ class Settings(BaseSettings):
         default=False,
         env='SMTP_USE_SSL',
         description='Use Implicit SSL/TLS for SMTP connection (usually port 465)'
+    )
+
+    smtp_verify_ssl: Optional[bool] = Field(
+        default=None,
+        env='SMTP_VERIFY_SSL',
+        description='Verify the SMTP server TLS certificate. Unset: verify host names like smtp.example.com, '
+                    'not localhost, IP addresses or container names. false: never verify (self-signed servers)'
     )
 
     smtp_user: Optional[str] = Field(
@@ -761,6 +775,14 @@ class Settings(BaseSettings):
     def empty_str_to_none(cls, v):
         """Convert empty string to None so default value is used"""
         if v == '':
+            return None
+        return v
+
+    @field_validator('smtp_verify_ssl', 'dmarc_imap_verify_ssl', mode='before')
+    @classmethod
+    def verify_auto_to_none(cls, v):
+        """Empty or 'auto' is the automatic mode (None); the Settings page posts '' for it"""
+        if isinstance(v, str) and v.strip().lower() in ('', 'auto'):
             return None
         return v
 

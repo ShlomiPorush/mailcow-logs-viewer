@@ -10,6 +10,7 @@ from datetime import datetime
 from typing import Optional
 
 from ..config import settings
+from .mail_tls import mail_tls_context, certificate_error_hint
 
 logger = logging.getLogger(__name__)
 
@@ -75,11 +76,13 @@ class SmtpService:
             # Determine connection mode
             # Priority 1: Implicit SSL (if configured or using port 465)
             if self.use_ssl or self.port == 465:
-                server = smtplib.SMTP_SSL(self.host, self.port)
+                context = mail_tls_context(self.host, settings.smtp_verify_ssl, "SMTP_VERIFY_SSL")
+                server = smtplib.SMTP_SSL(self.host, self.port, context=context)
             # Priority 2: STARTTLS (if configured)
             elif self.use_tls:
+                context = mail_tls_context(self.host, settings.smtp_verify_ssl, "SMTP_VERIFY_SSL")
                 server = smtplib.SMTP(self.host, self.port)
-                server.starttls()
+                server.starttls(context=context)
             # Priority 3: Plaintext
             else:
                 server = smtplib.SMTP(self.host, self.port)
@@ -95,7 +98,7 @@ class SmtpService:
             return True
             
         except Exception as e:
-            logger.error(f"Failed to send email: {e}")
+            logger.error(f"Failed to send email: {certificate_error_hint(e, 'SMTP_VERIFY_SSL') or e}")
             return False
 
 

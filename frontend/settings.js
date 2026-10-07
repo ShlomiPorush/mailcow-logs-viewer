@@ -272,6 +272,7 @@ var SETTINGS_FIELD_DESCRIPTIONS = {
     smtp_port: 'SMTP server port (587 for TLS, 465 for SSL, 25 for plain).',
     smtp_use_tls: 'Use STARTTLS for SMTP. Recommended.',
     smtp_use_ssl: 'Use implicit SSL for SMTP (usually port 465).',
+    smtp_verify_ssl: 'Check the SMTP server certificate before the password is sent. Automatic checks host names such as smtp.example.com and skips localhost, IP addresses and container names. Choose Never only for a server with a self-signed certificate.',
     smtp_user: 'SMTP username (usually email address).',
     smtp_password: 'SMTP password.',
     smtp_from: 'From address for emails (defaults to SMTP user if not set).',
@@ -286,6 +287,7 @@ var SETTINGS_FIELD_DESCRIPTIONS = {
     dmarc_imap_host: 'IMAP server hostname (e.g. imap.gmail.com).',
     dmarc_imap_port: 'IMAP server port (993 for SSL, 143 for non-SSL). Default: 993.',
     dmarc_imap_use_ssl: 'Use SSL/TLS for IMAP connection. Default: true.',
+    dmarc_imap_verify_ssl: 'Check the IMAP server certificate before the password is sent. Automatic checks host names such as imap.example.com and skips localhost, IP addresses and container names. Choose Never only for a server with a self-signed certificate.',
     dmarc_imap_user: 'IMAP username (email address).',
     dmarc_imap_password: 'IMAP password.',
     dmarc_imap_folder: 'IMAP folder to scan for DMARC and TLS reports. Default: INBOX.',
@@ -322,7 +324,14 @@ var SETTINGS_FIELD_DESCRIPTIONS = {
 };
 
 // Predefined options for settings fields (renders as dropdown instead of text input)
+const SETTINGS_VERIFY_SSL_OPTIONS = [
+    { value: '', label: 'Automatic - check host names, not localhost, IP addresses or container names' },
+    { value: 'true', label: 'Always check' },
+    { value: 'false', label: 'Never check (self-signed certificate)' }
+];
 const SETTINGS_FIELD_OPTIONS = {
+    smtp_verify_ssl: SETTINGS_VERIFY_SSL_OPTIONS,
+    dmarc_imap_verify_ssl: SETTINGS_VERIFY_SSL_OPTIONS,
     webhook_type: [
         { value: 'generic', label: 'Generic - JSON POST {title, message, ...}' },
         { value: 'slack', label: 'Slack - Incoming Webhook' },
@@ -403,7 +412,7 @@ var SETTINGS_EDIT_TABS = [
         id: 'smtp', label: 'SMTP', description: 'SMTP for sending notifications (alerts, weekly summary). Relay mode: for local relay servers that do not require authentication (only host and from address needed).', groups: [
             { label: 'Enable', keys: ['smtp_enabled'] },
             { label: 'Server', keys: ['smtp_host', 'smtp_port'] },
-            { label: 'Security', keys: ['smtp_use_tls', 'smtp_use_ssl'] },
+            { label: 'Security', keys: ['smtp_use_tls', 'smtp_use_ssl', 'smtp_verify_ssl'] },
             { label: 'Authentication', keys: ['smtp_user', 'smtp_password', 'smtp_relay_mode'] },
             { label: 'From Address', keys: ['smtp_from'] }
         ]
@@ -439,7 +448,7 @@ var SETTINGS_EDIT_TABS = [
     {
         id: 'dmarc_imap', label: 'DMARC & TLS IMAP', description: 'Import DMARC and TLS reports automatically from an IMAP mailbox: the address in the rua= of your DMARC and TLS-RPT records. Set host, port, user, password and folder (e.g. INBOX). Delete after: remove emails after processing. Interval in seconds; run on startup to sync once at start.', groups: [
             { label: 'Enable', keys: ['dmarc_imap_enabled'] },
-            { label: 'Connection', keys: ['dmarc_imap_host', 'dmarc_imap_port', 'dmarc_imap_use_ssl'] },
+            { label: 'Connection', keys: ['dmarc_imap_host', 'dmarc_imap_port', 'dmarc_imap_use_ssl', 'dmarc_imap_verify_ssl'] },
             { label: 'Authentication', keys: ['dmarc_imap_user', 'dmarc_imap_password'] },
             { label: 'Settings', keys: ['dmarc_imap_folder', 'dmarc_imap_delete_after', 'dmarc_imap_interval', 'dmarc_imap_run_on_startup', 'dmarc_imap_batch_size', 'dmarc_imap_scan_all_unseen'] }
         ]
@@ -710,7 +719,8 @@ function renderSettingsEditField(key, value, sensitiveKeys, description, envLock
             '<input type="hidden" id="edit-' + key + '" name="' + key + '" value="********"' + (envLocked ? ' disabled' : '') + '></div></div>';
     }
 
-    if (isBool) {
+    // A setting with a choice of values (Automatic / Always / Never) is a dropdown even when it holds a boolean
+    if (isBool && !SETTINGS_FIELD_OPTIONS[key]) {
         // The whole row toggles, like a Features row: the row is the label (so its text is phrasing content)
         const asSpan = html => html.replace(/^<p /, '<span ').replace(/<\/p>$/, '</span>');
         return '<div class="ui-set-bool' + (envLocked ? ' is-locked' : (isChanged ? ' is-changed' : '')) + '">' +
