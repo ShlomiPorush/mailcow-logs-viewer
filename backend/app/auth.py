@@ -250,17 +250,17 @@ class BasicAuthMiddleware(BaseHTTPMiddleware):
         # Health check endpoint must be accessible for Docker health monitoring
         # Info endpoint is used to check if authentication is enabled
         # Auth endpoints handle their own authentication
-        public_paths = [
+        # Exact paths only; /static/ is the one prefix (the frontend files).
+        public_paths = {
             "/login",
-            "/static/",
             "/api/health",
             "/api/info",
             "/api/auth/login",
             "/api/auth/callback",
             "/api/auth/provider-info",
-        ]
-        
-        if any(path == p or path.startswith(p) for p in public_paths):
+        }
+
+        if path in public_paths or path.startswith("/static/"):
             return await call_next(request)
         
         # A valid session cookie is accepted for both authentication methods:
