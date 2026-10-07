@@ -637,14 +637,16 @@ async def sync_suppressions_to_rspamd(db: Session) -> dict:
     """
     MAP_FILENAME = "global_rcpt_blacklist.map"
     
-    # 1. Read current map content
+    # 1. Read current map content. A failed read stops the sync: writing
+    # without it would drop the manual entries above the managed section.
     current_content = ""
     try:
         map_id = await mailcow_api.find_rspamd_map_id(MAP_FILENAME)
         if map_id is not None:
             current_content = await mailcow_api.get_rspamd_map_content(map_id)
     except MailcowAPIError as e:
-        logger.warning(f"Could not read current map (proceeding with empty): {e}")
+        logger.warning(f"Could not read the current map, not writing it: {e}")
+        raise
     
     # 2. Parse: extract manual entries (above any managed marker)
     # Recognizes both current and legacy marker formats to prevent
