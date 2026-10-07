@@ -25,7 +25,7 @@
     <!-- Utility classes still used by the markup, compiled once
          (.github/scripts/build-utilities-css.sh); the design system comes last -->
     <link rel="stylesheet" href="/static/assets/css/utilities.css?v=1">
-    <link rel="stylesheet" href="/static/assets/css/ui.css?v=44">
+    <link rel="stylesheet" href="/static/assets/css/ui.css?v=45">
     <style>
         .tab-active {
             border-bottom: 2px solid #3b82f6;
@@ -1603,7 +1603,8 @@
     <!-- JavaScript -->
     <script src="/static/utils.js?v=16"></script>
     <script src="/static/router.js?v=5"></script>
-    <script src="/static/app.js?v=54"></script>
+    <script src="/static/app.js?v=55"></script>
+    <script src="/static/alert-activity.js?v=1"></script>
     <script src="/static/export.js?v=1"></script>
     <script src="/static/message-details.js?v=6"></script>
     <script src="/static/dmarc.js?v=6"></script>
@@ -1635,6 +1636,17 @@
     </div>
 
     <!-- DMARC Reports Management Modal -->
+    <!-- A security alert's history: what was sent or tried before and around it (alert-activity.js) -->
+    <div id="alert-activity-modal" class="hidden ui-dialog-backdrop" role="dialog" aria-labelledby="alert-activity-title" onclick="if (event.target === this) closeAlertActivity()">
+        <div class="ui-dialog ui-dialog-fit ui-aa-dialog">
+            <div class="ui-dialog-head">
+                <h3 id="alert-activity-title">Activity</h3>
+                <button onclick="closeAlertActivity()" class="ui-icon-btn" title="Close" aria-label="Close"><svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg></button>
+            </div>
+            <div id="alert-activity-content" class="ui-dialog-body"></div>
+        </div>
+    </div>
+
     <div id="dmarc-reports-management-modal" class="hidden ui-dialog-backdrop" role="dialog" aria-label="Manage Reports">
         <div class="ui-dialog ui-dialog-fit">
             <div class="ui-dialog-head">
