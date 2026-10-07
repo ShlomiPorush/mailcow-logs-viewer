@@ -1237,7 +1237,7 @@ function renderNetfilterData(data) {
                     <span class="ui-ev-where" title="${escapeHtml(place + org)}">${flagUrl ? `<img src="${flagUrl}" alt="" width="16" height="12" onerror="this.style.display='none'">` : ''}${escapeHtml(place || '-')}</span>
                     <span class="ui-st-acts">
                         ${showUnban ? `<button onclick="unbanIP('${escapeJsArg(log.ip)}', this)" class="ui-btn ui-btn-sm" title="Unban ${escapeHtml(log.ip)}/32">Unban</button>` : ''}
-                        ${showBan ? `<button onclick="banIP('${escapeJsArg(log.ip)}', this)" class="ui-btn ui-btn-sm ui-btn-danger" title="Ban ${escapeHtml(log.ip)}/32">Ban</button>` : ''}
+                        ${showBan ? `<button onclick="banIP('${escapeJsArg(log.ip)}', this)" class="ui-btn ui-btn-sm ui-btn-danger" title="Put ${escapeHtml(log.ip)}/32 on the denylist; it stays until removed">Ban for good</button>` : ''}
                         <button type="button" class="ui-icon-btn ui-icon-btn-sm ui-ev-toggle" aria-expanded="false" aria-controls="ev-detail-${index}" title="Show the log line" onclick="toggleEventDetail(this)"><svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg></button>
                     </span>
                     <div class="ui-ev-detail" id="ev-detail-${index}" hidden>

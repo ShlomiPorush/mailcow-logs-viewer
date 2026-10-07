@@ -261,6 +261,16 @@ function securityRuleTags(hits) {
     return `<span class="ui-sec-tags">${[...new Set(hits.map(h => securityRuleName(h.rule)))].map(name => uiTag(escapeHtml(name), 'warn')).join('')}</span>`;
 }
 
+// How long a rule's ban lasts, as its button says it: 1w, 30d, 12h, or for good.
+// The rule's current setting decides when the ban is made; until the rules load, the catch's own.
+function securityBanLength(hit) {
+    const rule = typeof protectionSaved !== 'undefined' && protectionSaved ? protectionSaved[hit.rule] : null;
+    const hours = Number(rule && rule.ban_hours !== undefined ? rule.ban_hours : hit.ban_hours) || 0;
+    if (!hours) return { label: 'for good', title: 'Ban it for good: this rule\'s bans do not end' };
+    const label = hours % 168 === 0 ? `${hours / 168}w` : hours % 24 === 0 ? `${hours / 24}d` : `${hours}h`;
+    return { label, title: `Ban it for ${formatSeconds(hours * 3600)}; the ban is lifted then` };
+}
+
 // The tag, the sentence that says why, and what can be done
 function securityDescribe(a) {
     const rw = mailcowRwConfigured;
@@ -304,17 +314,18 @@ function securityDescribe(a) {
     }
     if (a.state === 'review') {
         const canBan = typeof protectionCaps !== 'undefined' && protectionCaps.can_ban;
+        const length = securityBanLength(hit);
         return {
             tag: securityRuleTags(a.hits.filter(h => h.status === 'watching')),
             why: `${escapeHtml(hit.reason || '')}, ${formatAgo(hit.last_seen)}. The rule is watching, so nothing was banned.`,
-            acts: (canBan ? `<button type="button" class="ui-btn ui-btn-sm ui-btn-danger" onclick="banProtectionHit(${id}, this)" title="Put it on the Fail2ban blacklist now">Ban now</button>` : '') + dismiss
+            acts: (canBan ? `<button type="button" class="ui-btn ui-btn-sm ui-btn-danger" onclick="banProtectionHit(${id}, this)" title="${escapeHtml(length.title)}">Ban ${escapeHtml(length.label)}</button>` : '') + dismiss
         };
     }
     const policy = fail2banPolicy ? ` Fail2ban bans at ${fail2banPolicy.max_attempts} within ${formatSeconds(fail2banPolicy.retry_window)}.` : '';
     return {
         tag: '',
         why: `${a.tries ? `${a.tries.toLocaleString()} failed login${a.tries === 1 ? '' : 's'}` : uiCountLabel(a.attempts, 'attempt', 'attempts')} ${securityWindowText()}${a.services.length ? ` (${escapeHtml(a.services.join(', '))})` : ''}.${policy}`,
-        acts: rw && known ? `<button type="button" class="ui-btn ui-btn-sm ui-btn-danger" onclick="banIP('${ipArg}', this)" title="Ban ${escapeHtml(a.ip)}/32">Ban</button>
+        acts: rw && known ? `<button type="button" class="ui-btn ui-btn-sm ui-btn-danger" onclick="banIP('${ipArg}', this)" title="Put ${escapeHtml(a.ip)}/32 on the denylist; it stays until removed">Ban for good</button>
             <button ${B} onclick="allowIP('${ipArg}', this)" title="Never ban ${escapeHtml(a.ip)}/32">Allow</button>` : ''
     };
 }
