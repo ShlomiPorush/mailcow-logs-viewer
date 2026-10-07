@@ -11,7 +11,7 @@ from typing import List, Optional
 
 from ..database import get_db
 from ..models import PostfixLog, RspamdLog, NetfilterLog, MessageCorrelation
-from ..mailcow_api import mailcow_api
+from ..mailcow_api import MailcowRwKeyError, mailcow_api
 from ..config import settings
 from ..services import geoip_service, security_addresses
 from ..services.security_addresses import netfilter_service  # noqa: F401  (tests import it from here)
@@ -824,6 +824,8 @@ async def unban_fail2ban(request: Request):
         raise
     except Exception as e:
         logger.error(f"Error unbanning IP from Fail2Ban: {e}")
+        if isinstance(e, MailcowRwKeyError):
+            raise internal_error(e)
         raise HTTPException(status_code=502, detail="mailcow did not accept the unban. Check the Read-Write API key and try again.")
 
 

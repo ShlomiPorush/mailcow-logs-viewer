@@ -3579,6 +3579,7 @@ Check that mailcow accepts the Read-Write API key (`MAILCOW_API_KEY_RW`) for wri
 - No retry: every rejected key is also a failed login for mailcow's Fail2ban
 - The `mailcow_rw_key_status` field in `GET /api/settings/info` returns the last result for the current mailcow URL and key; `null` if not checked since either changed
 - `PUT /api/settings` returns `mailcow_rw_key_changed: true` when the saved mailcow URL or Read-Write key differs from before
+- When mailcow refuses the Read-Write key during an action (quarantine, queue, Fail2Ban, rate limits and other writes), the endpoint answers `502` at once, without retries, and `detail` says whether the key was rejected or is read-only and what to fix
 
 ---
 
