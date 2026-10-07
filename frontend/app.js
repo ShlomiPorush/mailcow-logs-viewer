@@ -600,9 +600,11 @@ function updateTopbarCrumbs() {
     const sub = topbarSubLabel(route);
     const parts = [];
     if (groupLabel) parts.push(`<span class="ui-crumb-group">${escapeHtml(groupLabel.textContent.trim())}</span>`);
-    parts.push(sub ? `<button type="button" class="ui-crumb" onclick="topbarOpenPage('${escapeJsArg(route)}')">${escapeHtml(name)}</button>`
-        : `<span class="ui-crumb-current" aria-current="page">${escapeHtml(name)}</span>`);
     const inner = topbarPageCrumbs && topbarPageCrumbs.route === route && topbarPageCrumbs.sub === sub ? topbarPageCrumbs : null;
+    // A page without tabs (DMARC & TLS) leads back from a level inside it by its name
+    parts.push(sub ? `<button type="button" class="ui-crumb" onclick="topbarOpenPage('${escapeJsArg(route)}')">${escapeHtml(name)}</button>`
+        : inner ? `<button type="button" class="ui-crumb" onclick="${inner.back}">${escapeHtml(name)}</button>`
+        : `<span class="ui-crumb-current" aria-current="page">${escapeHtml(name)}</span>`);
     if (sub && sub !== name) {
         parts.push(inner ? `<button type="button" class="ui-crumb" onclick="${inner.back}">${escapeHtml(sub)}</button>`
             : `<span class="ui-crumb-current" aria-current="page">${escapeHtml(sub)}</span>`);
@@ -622,7 +624,7 @@ function updateTopbarCrumbs() {
 // The page's name in the crumbs opens the page at its first tab
 function topbarOpenPage(route) {
     if (typeof SUBPAGES !== 'undefined' && SUBPAGES[route]) navigateTo(route, { sub: subpageFirst(route) });
-    else if (route === 'dmarc' && typeof dmarcOpenTab === 'function') dmarcOpenTab('dmarc');
+    else if (route === 'dmarc' && typeof dmarcOpenTab === 'function') dmarcOpenTab();
     else navigateTo(route);
 }
 
@@ -4998,8 +5000,7 @@ const NAV_SUBPAGE_TABS = {
     netfilter: '.ui-se-tabs',
     'spam-filter': '#content-spam-filter .ui-page-tabs',
     status: '.ui-st-tabs',
-    'mailbox-stats': '#mailbox-stats-views',
-    dmarc: '#dmarc-page-tabs'
+    'mailbox-stats': '#mailbox-stats-views'
 };
 let navFlyout = null;
 let navFlyoutTimer = null;
