@@ -10,7 +10,7 @@ from http.cookiejar import CookieJar, DefaultCookiePolicy
 from urllib.parse import quote
 from typing import List, Dict, Any, Optional
 from datetime import datetime
-from tenacity import retry, stop_after_attempt, wait_exponential, RetryError
+from tenacity import retry, retry_if_not_exception_type, stop_after_attempt, wait_exponential, RetryError
 
 from .config import settings
 
@@ -26,6 +26,24 @@ def _forget_security_addresses() -> None:
 class MailcowAPIError(Exception):
     """Custom exception for mailcow API errors"""
     pass
+
+
+class MailcowRwKeyError(MailcowAPIError):
+    """mailcow refused the Read-Write key: 'rejected' (401) or 'read_only' (403).
+
+    Final, so never retried; the API answers it with a message that says what to fix.
+    """
+    MESSAGES = {
+        "rejected": "mailcow rejected the Read-Write API key. Check in mailcow under System → API "
+                    "that the key is correct and active, and that the IP address of this server is allowed. "
+                    "Settings → Mailcow can check the key.",
+        "read_only": "The Read-Write API key is a read-only key in mailcow. "
+                     "Put the Read-Write key from System → API in Settings → Mailcow.",
+    }
+
+    def __init__(self, code: str):
+        self.code = code
+        super().__init__(self.MESSAGES[code])
 
 
 class MailcowAPI:
@@ -176,7 +194,9 @@ class MailcowAPI:
     
     @retry(
         stop=stop_after_attempt(3),
-        wait=wait_exponential(multiplier=1, min=2, max=10)
+        wait=wait_exponential(multiplier=1, min=2, max=10),
+        # A refused key stays refused, and every try is a failed login for Fail2ban
+        retry=retry_if_not_exception_type(MailcowRwKeyError),
     )
     async def _make_rw_request(self, endpoint: str, method: str = "POST", **kwargs) -> Any:
         """
@@ -213,11 +233,11 @@ class MailcowAPI:
                 
             if response.status_code == 401:
                 self._discard_client(client)
-                raise MailcowAPIError("Read-Write API key authentication failed (401)")
+                raise MailcowRwKeyError("rejected")
                 
             if response.status_code == 403:
                 self._discard_client(client)
-                raise MailcowAPIError("Read-Write API key does not have sufficient permissions (403)")
+                raise MailcowRwKeyError("read_only")
                 
             response.raise_for_status()
                 
