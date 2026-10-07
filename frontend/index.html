@@ -25,7 +25,7 @@
     <!-- Utility classes still used by the markup, compiled once
          (.github/scripts/build-utilities-css.sh); the design system comes last -->
     <link rel="stylesheet" href="/static/assets/css/utilities.css?v=1">
-    <link rel="stylesheet" href="/static/assets/css/ui.css?v=45">
+    <link rel="stylesheet" href="/static/assets/css/ui.css?v=50">
     <style>
         .tab-active {
             border-bottom: 2px solid #3b82f6;
@@ -1100,14 +1100,14 @@
             <div id="content-dmarc" class="tab-content hidden ui-page">
                 <div class="ui-page-head">
                     <div>
-                        <h1 class="ui-h1"><span id="dmarc-page-title">DMARC &amp; TLS Reports</span> <button onclick="showHelpModal('DMARC')" class="ui-icon-btn ui-help-btn"
+                        <h1 class="ui-h1"><span id="dmarc-page-title">DMARC &amp; TLS</span> <button onclick="showHelpModal('DMARC')" class="ui-icon-btn ui-help-btn"
                                         title="Help - DMARC Information">
                                         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                                                 d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
                                         </svg>
                                     </button></h1>
-                        <p id="dmarc-subtitle" class="ui-muted">What receivers report about mail sent in your domains' name</p>
+                        <p id="dmarc-subtitle" class="ui-muted">Who sends mail in your domains' name, and whether mail to them is encrypted</p>
                     </div>
                     <div id="dmarc-header-actions" class="ui-head-tools">
                         <button type="button" id="dmarc-manage-btn" class="hidden ui-btn" onclick="showReportsManagementModal()">Manage Reports</button>
@@ -1127,107 +1127,11 @@
                     </div>
                 </div>
 
-                <div id="dmarc-page-tabs" class="ui-tabs ui-page-tabs" role="tablist" aria-label="DMARC and TLS reports">
-                    <button type="button" class="modal-tab active" role="tab" aria-selected="true" id="dmarc-tab-btn-dmarc" onclick="dmarcOpenTab('dmarc')">DMARC</button>
-                    <button type="button" class="modal-tab" role="tab" aria-selected="false" id="dmarc-tab-btn-tls" onclick="dmarcOpenTab('tls')">TLS</button>
-                </div>
-
-                <!-- Breadcrumb -->
+                <!-- Breadcrumb on a phone; with the top bar the crumbs are up there -->
                 <nav id="dmarc-breadcrumb" class="ui-crumbs ui-crumbs-local hidden" aria-label="Breadcrumb"></nav>
 
-                <!-- Domains List View -->
-                <div id="dmarc-domains-view" class="ui-sec-block ui-scroll">
-                    <div id="dmarc-main-stats-container"></div>
-
-                    <!-- Insights (policy recommendations + new-source detection) -->
-                    <div id="dmarc-insights-container" class="hidden"></div>
-
-                    <div id="dmarc-domains-list" class="ui-table ui-stack" style="--ui-cols: minmax(180px, 1.6fr) minmax(120px, 1fr) 90px 120px 90px minmax(120px, 1fr); --ui-table-min: 780px"></div>
-
-                </div>
-
-                <!-- Domain Overview View (hidden by default) -->
-                <div id="dmarc-overview-view" class="hidden ui-sec-block ui-scroll">
-                    <div id="dmarc-overview-stats-container" class="ui-sec-block"></div>
-
-                    <section class="ui-panel">
-                        <div class="ui-panel-head">Email Volume (Last 30 Days)</div>
-                        <div class="ui-chart-body ui-dmarc-chart"><canvas id="dmarc-chart"></canvas></div>
-                    </section>
-
-                    <!-- Sub-tabs: Reports | Sources -->
-                    <section class="ui-panel">
-                        <div class="ui-tabs" role="tablist">
-                            <button onclick="dmarcSwitchSubTab('reports')" id="dmarc-subtab-reports" class="modal-tab active" role="tab" aria-selected="true">Daily Reports</button>
-                            <button onclick="dmarcSwitchSubTab('sources')" id="dmarc-subtab-sources" class="modal-tab" role="tab" aria-selected="false">Source IPs</button>
-                        </div>
-                        <div id="dmarc-reports-content" class="ui-dmarc-tab">
-                            <div id="dmarc-reports-list"><div class="ui-loading"><div class="loading"></div><p>Loading reports...</p></div></div>
-                        </div>
-                        <div id="dmarc-sources-content" class="ui-dmarc-tab hidden">
-                            <div id="dmarc-sources-list"><div class="ui-loading"><div class="loading"></div><p>Loading sources...</p></div></div>
-                        </div>
-                    </section>
-                </div>
-
-                <!-- TLS tab: every domain with its TLS-RPT record and TLS reports -->
-                <div id="dmarc-tls-domains-view" class="hidden ui-sec-block ui-scroll">
-                    <div id="dmarc-tls-stats-container"></div>
-                    <div id="dmarc-tls-domains-list" class="ui-table ui-stack" style="--ui-cols: minmax(180px, 1.6fr) minmax(120px, 1fr) 90px 120px 120px minmax(120px, 1fr); --ui-table-min: 810px"></div>
-                </div>
-
-                <!-- TLS tab: one domain, built like the DMARC domain view -->
-                <div id="dmarc-tls-domain-view" class="hidden ui-sec-block ui-scroll">
-                    <div id="dmarc-tls-overview-stats-container" class="ui-sec-block"></div>
-
-                    <section class="ui-panel">
-                        <div class="ui-panel-head">Sessions (Last 30 Days)</div>
-                        <div class="ui-chart-body ui-dmarc-chart"><canvas id="dmarc-tls-chart"></canvas></div>
-                    </section>
-
-                    <!-- Sub-tabs: Reports | Providers -->
-                    <section class="ui-panel">
-                        <div class="ui-tabs" role="tablist">
-                            <button onclick="tlsSwitchSubTab('reports')" id="tls-subtab-reports" class="modal-tab active" role="tab" aria-selected="true">Daily Reports</button>
-                            <button onclick="tlsSwitchSubTab('providers')" id="tls-subtab-providers" class="modal-tab" role="tab" aria-selected="false">Providers</button>
-                        </div>
-                        <div id="tls-reports-content" class="ui-dmarc-tab">
-                            <div id="dmarc-tls-list"><div class="ui-loading"><div class="loading"></div><p>Loading reports...</p></div></div>
-                        </div>
-                        <div id="tls-providers-content" class="ui-dmarc-tab hidden">
-                            <div id="dmarc-tls-providers-list"><div class="ui-loading"><div class="loading"></div><p>Loading providers...</p></div></div>
-                        </div>
-                    </section>
-                </div>
-
-                <!-- TLS tab: one day, built like the DMARC report details -->
-                <div id="dmarc-tls-details-view" class="hidden ui-sec-block ui-scroll">
-                    <div id="tls-details-stats-container"></div>
-                    <div class="ui-list-head"><h2 class="ui-h2">Providers</h2></div>
-                    <div id="tls-detail-providers-list"><div class="ui-loading"><div class="loading"></div><p>Loading providers...</p></div></div>
-                </div>
-
-                <!-- Report Details View (hidden by default) -->
-                <div id="dmarc-report-details-view" class="hidden ui-sec-block ui-scroll">
-                    <div id="report-details-stats-container"></div>
-                    <div class="ui-list-head"><h2 class="ui-h2">Sources</h2></div>
-                    <div id="report-detail-sources-list"><div class="ui-loading"><div class="loading"></div><p>Loading sources...</p></div></div>
-                </div>
-
-                <!-- Source Details View (hidden by default) -->
-                <div id="dmarc-source-details-view" class="hidden ui-sec-block ui-scroll">
-                    <section class="ui-panel ui-dmarc-source">
-                        <img id="source-detail-flag" src="" alt="" class="ui-flag-lg">
-                        <div>
-                            <h3 id="source-detail-name" class="ui-h2">-</h3>
-                            <p id="source-detail-ip" class="ui-mono">-</p>
-                            <p class="ui-muted"><span id="source-detail-location">-</span>, <span id="source-detail-asn">-</span></p>
-                        </div>
-                    </section>
-                    <div id="source-details-stats-container"></div>
-                    <div class="ui-list-head"><h2 class="ui-h2">Email Details</h2></div>
-                    <div id="source-detail-envelope-list"><div class="ui-loading"><div class="loading"></div><p>Loading details...</p></div></div>
-                </div>
+                <!-- The open screen: all domains, a domain, a sender, a day of reports (dmarc.js) -->
+                <div id="dmarc-view" class="ui-scroll ui-dm"><div class="ui-loading"><div class="loading"></div><p>Loading...</p></div></div>
             </div>
 
             <!-- Mailbox Stats Tab -->
@@ -1478,7 +1382,7 @@
                             </span>
                             <span id="logs-entry-count">0 entries</span>
                             <span class="ui-toolbar-gap"></span>
-                            <span id="logs-last-update">Last update: never</span>
+                            <span id="logs-last-update">Not updated yet</span>
                             <b id="logs-active-service">postfix</b>
                         </div>
                     </section>
@@ -1601,24 +1505,24 @@
     </div>
 
     <!-- JavaScript -->
-    <script src="/static/utils.js?v=16"></script>
-    <script src="/static/router.js?v=5"></script>
-    <script src="/static/app.js?v=55"></script>
+    <script src="/static/utils.js?v=17"></script>
+    <script src="/static/router.js?v=6"></script>
+    <script src="/static/app.js?v=61"></script>
     <script src="/static/alert-activity.js?v=1"></script>
     <script src="/static/export.js?v=1"></script>
     <script src="/static/message-details.js?v=6"></script>
-    <script src="/static/dmarc.js?v=6"></script>
-    <script src="/static/logs-viewer.js?v=4"></script>
-    <script src="/static/settings.js?v=25"></script>
+    <script src="/static/dmarc.js?v=8"></script>
+    <script src="/static/logs-viewer.js?v=5"></script>
+    <script src="/static/settings.js?v=26"></script>
     <script src="/static/about.js?v=1"></script>
-    <script src="/static/domains.js?v=7"></script>
-    <script src="/static/mailbox-stats.js?v=5"></script>
+    <script src="/static/domains.js?v=8"></script>
+    <script src="/static/mailbox-stats.js?v=7"></script>
     <script src="/static/devices.js?v=6"></script>
     <script src="/static/rate-limits.js?v=24"></script>
     <script src="/static/smtp-abuse.js?v=3"></script>
     <script src="/static/protection.js?v=2"></script>
-    <script src="/static/security.js?v=1"></script>
-    <script src="/static/search.js?v=5"></script>
+    <script src="/static/security.js?v=7"></script>
+    <script src="/static/search.js?v=6"></script>
     <script src="/static/notifications.js?v=5"></script>
     <script src="/static/spam_filter.js?v=6"></script>
 
@@ -1656,6 +1560,16 @@
             <div class="ui-dialog-body">
                 <div id="dmarc-reports-management-content"><div class="ui-loading"><div class="loading"></div><p>Loading reports...</p></div></div>
             </div>
+        </div>
+    </div>
+    <!-- A DMARC or TLS-RPT record: what is in DNS, what it means, what to publish -->
+    <div id="dmarc-record-modal" class="hidden ui-dialog-backdrop" role="dialog" aria-labelledby="dmarc-record-title" onclick="if (event.target === this) closeDmarcRecordModal()">
+        <div class="ui-dialog ui-dialog-fit ui-dm-dialog">
+            <div class="ui-dialog-head">
+                <h3 id="dmarc-record-title">Record</h3>
+                <button onclick="closeDmarcRecordModal()" class="ui-icon-btn" title="Close" aria-label="Close"><svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg></button>
+            </div>
+            <div id="dmarc-record-content" class="ui-dialog-body"></div>
         </div>
     </div>
 </body>

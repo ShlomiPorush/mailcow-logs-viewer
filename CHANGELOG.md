@@ -15,10 +15,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **DMARC & TLS page redesigned** - One page for DMARC and TLS, without tabs. All domains shows the last 30 days, messages per day across the domains and a domains table with each domain's policy, TLS-RPT record and failing senders, beside a To do list of what needs attention first. A domain shows its messages per day, the mail flow from the domain through its senders to the receivers that reported them, its senders grouped by network, its daily reports and the encryption of mail to it, beside its To do list and records. A record opens a window with what is published, the three policies with whether the domain is ready for the next one, and a record to copy. Old addresses keep working.
+- **Ban buttons say how long** - On the Security page a rule's catch is banned with a button that shows the rule's ban length, such as Ban 1w or Ban 30d; the app lifts that ban when it ends. An address no rule caught, and an event on the Events tab, has Ban permanently: it goes on the denylist and stays until removed.
 - **The Dashboard search moved to the top bar** - The search box and its status filter on the Dashboard are gone; the search in the top bar replaces them. To see messages with a given status, filter by status on the Messages page.
 
 ### Fixed
 
+- **Security counts that did not add up** - The Security page's list and the countries and networks beside it now count the same addresses: every address that tried in the period picked above the list (1, 7, 30 or 90 days), whether a rule caught it or not. A number in the panels is the rows a click on it shows. Addresses on the allowlist stay in To review, tagged Allowlisted, and the ones on the denylist are under Banned, tagged Denylisted. Where attacks come from used to count each attempt twice, and a picked country or network listed only the last day.
 - **Pages that went empty with the Logs page off** - Sieve and delivery results in message details, the Rate Limits activity and the Security login alert read their mailcow logs from the Logs page's collection, so turning the Logs page off, or unticking `dovecot` or `ratelimited` there, quietly stopped them. The services these pages need are now collected whatever the Logs settings are, and Settings lists them under the Logs services.
 
 ## [2.9.0] - 2026-10-04

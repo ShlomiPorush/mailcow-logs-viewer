@@ -1,9 +1,10 @@
 // =============================================================================
 // SECURITY PAGE - Overview
-// Every address that tried to sign in or that a protection caught, once, with
-// what happened to it and why: to review (not banned, tagged with the rule that
-// caught it, if one did), banned (by Fail2ban or by a rule), and the rules' history. Above it, which protections are
-// on; beside it, where the attacks come from.
+// Every address that tried in the chosen period, or that a protection caught,
+// once, with what happened to it and why: to review (not banned: tagged with the
+// rule that caught it, if one did, or as allowlisted), banned (by Fail2ban, a rule
+// or the denylist), and the rules' history. Above it, which protections are on;
+// beside it, the countries and networks of the same addresses.
 // Classic script sharing the global scope; loaded after app.js, smtp-abuse.js
 // and protection.js, whose loaders call back into the functions here.
 // =============================================================================
@@ -13,6 +14,7 @@ let securityHits = [];           // the rules' open hits: watching, pending, ban
 let securityHistory = null;      // closed hits, loaded when the History filter opens
 let securityFilter = 'review';
 let securityCountry = null;      // a country picked in the chart filters the list
+let securityNetwork = null;      // and so does a network picked in Networks that try most
 let securityOpenRow = null;      // the address whose details are open
 let securityRawLog = {};         // ip -> log lines, or 'loading' / 'error'
 let securityPage = null;         // the loaded part of the chosen list: items, next cursor, real counts
@@ -23,17 +25,19 @@ let securityRefreshTimer = null;
 let securityLastCounts = null;   // the counts shown while another list or country loads
 let securityToTop = false;       // a new list or country goes to its first row once it is drawn
 let securityMoreObserver = null;
-let securityChartDays = 30;
-let securityCountries = null;    // /stats/by-country
-let securityNetworks = null;     // /stats/by-network
+let securityDays = 1;            // the period the list (and the panels beside it) covers
+let securityCountries = null;    // the listed addresses by country, from /api/security/addresses
+let securityNetworks = null;     // and by network
 let fail2banLoadError = false;   // mailcow could not be asked about Fail2ban
 let securityStripOpen = false;   // on a phone the Protection row folds into one chip
 let securityCountryPicker = false;  // on a phone the countries open from the filter row
+let securityNetworkPicker = false;  // and the networks too
 
 // A phone: the list gets its own layout (one line per address, details in a sheet)
 const securityPhone = () => window.matchMedia('(max-width: 760px)').matches;
 
 const SECURITY_PAGE_SIZE = 50;
+const SECURITY_DAYS = [1, 7, 30, 90];
 const SECURITY_FILTERS = [['review', 'To review'], ['banned', 'Banned'], ['history', 'History']];
 const SECURITY_RULE_ORDER = ['trap', 'unknown_accounts', 'repeat_offender', 'subnet', 'country', 'breach'];
 const SECURITY_RULE_NAMES = {
@@ -138,7 +142,8 @@ function securityCountryCode(name) {
 function securityFromServer(x) {
     return {
         ip: x.ip, state: x.state, tries: x.tries, attempts: x.attempts, users: x.users, services: x.services, hits: x.hits,
-        country: x.country || '', countryCode: x.country_code || '', city: x.city || '', org: x.org || '', last: x.last_seen || '', f2b: x.f2b
+        country: x.country || '', countryCode: x.country_code || '', city: x.city || '', org: x.org || '', last: x.last_seen || '', f2b: x.f2b,
+        listedAs: x.listed_as || ''
     };
 }
 
@@ -149,8 +154,9 @@ async function loadSecurityAddresses(more = false, limit = SECURITY_PAGE_SIZE) {
     if (more && (!securityPage || !securityPage.next || securityPageLoading)) return;
     const seq = ++securityPageSeq;
     securityPageLoading = true;
-    const params = new URLSearchParams({ list: securityFilter, limit: String(limit) });
+    const params = new URLSearchParams({ list: securityFilter, limit: String(limit), days: String(securityDays) });
     if (securityCountry) params.set('country', securityCountry);
+    if (securityNetwork) params.set('network', securityNetwork);
     if (more) params.set('after', securityPage.next);
     try {
         const res = await authenticatedFetch(`/api/security/addresses?${params}`);
@@ -166,6 +172,10 @@ async function loadSecurityAddresses(more = false, limit = SECURITY_PAGE_SIZE) {
         }
         securityPage = data;
         securityPageError = null;
+        // The panels count the same addresses, so they come with the list
+        securityCountries = { data: data.countries || [], since: data.since };
+        securityNetworks = { data: data.networks || [], since: data.since };
+        renderSecurityCountries();
     } catch (err) {
         if (seq !== securityPageSeq) return;
         console.error('Failed to load the security addresses:', err);
@@ -256,6 +266,16 @@ function securityRuleTags(hits) {
     return `<span class="ui-sec-tags">${[...new Set(hits.map(h => securityRuleName(h.rule)))].map(name => uiTag(escapeHtml(name), 'warn')).join('')}</span>`;
 }
 
+// How long a rule's ban lasts, as its button says it: 1w, 30d, 12h, or permanently.
+// The rule's current setting decides when the ban is made; until the rules load, the catch's own.
+function securityBanLength(hit) {
+    const rule = typeof protectionSaved !== 'undefined' && protectionSaved ? protectionSaved[hit.rule] : null;
+    const hours = Number(rule && rule.ban_hours !== undefined ? rule.ban_hours : hit.ban_hours) || 0;
+    if (!hours) return { label: 'permanently', title: 'Ban it permanently: this rule\'s bans do not end' };
+    const label = hours % 168 === 0 ? `${hours / 168}w` : hours % 24 === 0 ? `${hours / 24}d` : `${hours}h`;
+    return { label, title: `Ban it for ${formatSeconds(hours * 3600)}; the ban is lifted then` };
+}
+
 // The tag, the sentence that says why, and what can be done
 function securityDescribe(a) {
     const rw = mailcowRwConfigured;
@@ -267,6 +287,22 @@ function securityDescribe(a) {
     const B = 'type="button" class="ui-btn ui-btn-sm"';
     const undo = `<button ${B} onclick="undoProtectionHit(${id}, this)" title="Lift the ban; the rule leaves it alone for a week">Undo</button>`;
     const dismiss = `<button ${B} onclick="dismissProtectionHit(${id})" title="Not an attack: the rule leaves it alone for a week">Dismiss</button>`;
+    const attemptsText = `${a.tries ? `${a.tries.toLocaleString()} failed login${a.tries === 1 ? '' : 's'}` : uiCountLabel(a.attempts, 'attempt', 'attempts')} ${securityWindowText()}${a.services.length ? ` (${escapeHtml(a.services.join(', '))})` : ''}`;
+    const listedBy = a.listedAs && securityBare(a.listedAs) !== a.ip ? `<span class="ui-sec-by">as ${escapeHtml(a.listedAs)}</span>` : '';
+    if (a.state === 'allow') {
+        return {
+            tag: `${uiTag('Allowlisted', 'ok')}${listedBy}`,
+            why: `${attemptsText}. On the allowlist, so it is never banned.`,
+            acts: rw && a.listedAs ? `<button ${B} onclick="securityRemoveFromList('whitelist', '${escapeJsArg(a.listedAs)}', this)" title="Remove ${escapeHtml(a.listedAs)} from the allowlist">Remove from allowlist</button>` : ''
+        };
+    }
+    if (a.state === 'deny') {
+        return {
+            tag: `${uiTag('Denylisted', 'fail')}${listedBy}`,
+            why: `${attemptsText}. On the denylist: <b>banned until removed</b>.`,
+            acts: rw && a.listedAs ? `<button ${B} onclick="securityRemoveFromList('blacklist', '${escapeJsArg(a.listedAs)}', this)" title="Remove ${escapeHtml(a.listedAs)} from the denylist">Remove from denylist</button>` : ''
+        };
+    }
     if (a.state === 'banned' && hit && hit.status === 'banned') {
         return {
             tag: `${uiTag('Banned', 'fail')}<span class="ui-sec-by">by ${escapeHtml(securityRuleName(hit.rule))}</span>`,
@@ -275,12 +311,12 @@ function securityDescribe(a) {
         };
     }
     if (a.state === 'banned') {
-        const tries = a.tries ? `${a.tries.toLocaleString()} failed login${a.tries === 1 ? '' : 's'} in the last 24 hours. ` : '';
+        const tries = a.tries ? `${a.tries.toLocaleString()} failed login${a.tries === 1 ? '' : 's'} ${securityWindowText()}. ` : '';
         return {
             tag: `${uiTag('Banned', 'fail')}<span class="ui-sec-by">by Fail2ban</span>`,
             why: `${tries}<b>${a.f2b.banned_until ? `${escapeHtml(a.f2b.banned_until)} left` : 'Banned now'}</b>, then Fail2ban lets it try again.${a.f2b.queued_for_unban ? ' Unbanning...' : ''}`,
             acts: rw && !a.f2b.queued_for_unban ? `<button ${B} onclick="unbanIP('${ipArg}', this)" title="Unban ${escapeHtml(a.ip)}/32">Unban</button>
-                <button type="button" class="ui-btn ui-btn-sm ui-btn-danger" onclick="banIP('${ipArg}', this)" title="Put it on the denylist">Ban for good</button>` : ''
+                <button type="button" class="ui-btn ui-btn-sm ui-btn-danger" onclick="banIP('${ipArg}', this)" title="Put it on the denylist">Ban permanently</button>` : ''
         };
     }
     if (a.state === 'review' && hit.status === 'alert') {
@@ -299,19 +335,26 @@ function securityDescribe(a) {
     }
     if (a.state === 'review') {
         const canBan = typeof protectionCaps !== 'undefined' && protectionCaps.can_ban;
+        const length = securityBanLength(hit);
         return {
             tag: securityRuleTags(a.hits.filter(h => h.status === 'watching')),
             why: `${escapeHtml(hit.reason || '')}, ${formatAgo(hit.last_seen)}. The rule is watching, so nothing was banned.`,
-            acts: (canBan ? `<button type="button" class="ui-btn ui-btn-sm ui-btn-danger" onclick="banProtectionHit(${id}, this)" title="Put it on the Fail2ban blacklist now">Ban now</button>` : '') + dismiss
+            acts: (canBan ? `<button type="button" class="ui-btn ui-btn-sm ui-btn-danger" onclick="banProtectionHit(${id}, this)" title="${escapeHtml(length.title)}">Ban ${escapeHtml(length.label)}</button>` : '') + dismiss
         };
     }
     const policy = fail2banPolicy ? ` Fail2ban bans at ${fail2banPolicy.max_attempts} within ${formatSeconds(fail2banPolicy.retry_window)}.` : '';
     return {
         tag: '',
-        why: `${a.tries.toLocaleString()} failed login${a.tries === 1 ? '' : 's'} in the last 24 hours${a.services.length ? ` (${escapeHtml(a.services.join(', '))})` : ''}.${policy}`,
-        acts: rw && known ? `<button type="button" class="ui-btn ui-btn-sm ui-btn-danger" onclick="banIP('${ipArg}', this)" title="Ban ${escapeHtml(a.ip)}/32">Ban</button>
+        why: `${attemptsText}.${policy}`,
+        acts: rw && known ? `<button type="button" class="ui-btn ui-btn-sm ui-btn-danger" onclick="banIP('${ipArg}', this)" title="Put ${escapeHtml(a.ip)}/32 on the denylist; it stays until removed">Ban permanently</button>
             <button ${B} onclick="allowIP('${ipArg}', this)" title="Never ban ${escapeHtml(a.ip)}/32">Allow</button>` : ''
     };
+}
+
+// How many attempts an address made: its logged attempts in the list's period, or what the rules counted
+function securityAttempts(a) {
+    const n = a.attempts || (a.hits || []).reduce((sum, h) => sum + (h.attempts || 0), 0);
+    return n ? `<span class="ui-sec-attempts" title="Attempts ${securityWindowText()}">${uiCountLabel(n, 'attempt', 'attempts')}</span>` : '';
 }
 
 function securityRow(a) {
@@ -322,7 +365,7 @@ function securityRow(a) {
         <div class="ui-sec-row${open ? ' is-open' : ''}" onclick="securityRowClick(event, '${escapeJsArg(a.ip)}')" role="button" tabindex="0"
              onkeydown="if (event.key === 'Enter' && event.target === this) securityToggleRow('${escapeJsArg(a.ip)}')" aria-expanded="${open}">
             <div class="ui-sec-main">
-                <div class="ui-sec-top">${a.country ? `<span class="ui-sec-pflag" title="${escapeHtml(a.country)}">${securityFlag(a.countryCode)}</span>` : ''}<b class="ui-mono">${copyableText(a.ip)}</b>${d.tag}${where ? `<small class="ui-muted ui-sec-where">${where}</small>` : ''}</div>
+                <div class="ui-sec-top">${a.country ? `<span class="ui-sec-pflag" title="${escapeHtml(a.country)}">${securityFlag(a.countryCode)}</span>` : ''}<b class="ui-mono">${copyableText(a.ip)}</b>${securityAttempts(a)}${d.tag}${where ? `<small class="ui-muted ui-sec-where">${where}</small>` : ''}</div>
                 <p class="ui-sec-why">${d.why}</p>
             </div>
             <div class="ui-sec-acts">${d.acts}</div>
@@ -340,7 +383,7 @@ function renderSecuritySheet(addresses) {
     const d = securityDescribe(a);
     uiSheetShow('security-sheet', {
         label: a.ip,
-        head: `<div class="ui-sec-top"><b class="ui-mono">${copyableText(a.ip)}</b>${d.tag}</div>`,
+        head: `<div class="ui-sec-top"><b class="ui-mono">${copyableText(a.ip)}</b>${securityAttempts(a)}${d.tag}</div>`,
         body: `<p class="ui-sec-why">${d.why}</p>${d.acts ? `<div class="ui-sec-acts">${d.acts}</div>` : ''}${securityDetail(a)}`,
         onClose: securityCloseSheet
     });
@@ -454,6 +497,16 @@ function securityListToTop() {
     if (box) requestAnimationFrame(() => securityScrollTo(box, true));
 }
 
+function setSecurityDays(days) {
+    securityDays = days;
+    securityOpenRow = null;
+    securityPage = null;
+    securityToTop = true;
+    loadSecurityAddresses();
+    renderSecurityOverview();
+    securityListToTop();
+}
+
 function pickSecurityCountry(name) {
     securityCountry = securityCountry === name ? null : name;
     securityOpenRow = null;
@@ -464,6 +517,33 @@ function pickSecurityCountry(name) {
     renderSecurityOverview();
     securityListToTop();
     renderSecurityCountries();
+}
+
+function pickSecurityNetwork(name) {
+    securityNetwork = securityNetwork === name ? null : name;
+    securityOpenRow = null;
+    securityPage = null;
+    securityNetworkPicker = false;
+    securityToTop = true;
+    loadSecurityAddresses();
+    renderSecurityOverview();
+    securityListToTop();
+    renderSecurityCountries();
+}
+
+// The phone's network picker: the networks that try most, and All
+function securityNetworkPanel() {
+    const rows = securityNetworks ? securityNetworks.data : null;
+    return `<span class="ui-sec-cpanel-head"><b>Networks that try most</b><span class="ui-muted">${escapeHtml(securityPeriodLabel())}</span></span>
+        ${rows === null ? '<span class="ui-muted">Loading...</span>' : !rows.length ? '<span class="ui-muted">No network data yet.</span>'
+            : `<span class="ui-sec-nets">${securityNetworkRows()}</span>`}
+        ${securityNetwork ? '<button type="button" class="ui-btn ui-btn-sm ui-sec-call" onclick="pickSecurityNetwork(null)">Every network</button>' : ''}`;
+}
+
+function securityNetworkRows() {
+    return (securityNetworks ? securityNetworks.data : []).map(n => `<button type="button" class="ui-sec-net${securityNetwork === n.asn_org ? ' is-on' : ''}" onclick="pickSecurityNetwork('${escapeJsArg(n.asn_org)}')"
+        aria-pressed="${securityNetwork === n.asn_org}" title="${escapeHtml(`${n.asn_org}: ${n.attempts.toLocaleString()} attempts from ${n.addresses.toLocaleString()} address${n.addresses === 1 ? '' : 'es'}`)}"><span>${escapeHtml(n.asn_org)}</span>
+        <small class="ui-muted">${n.addresses.toLocaleString()} address${n.addresses === 1 ? '' : 'es'}</small><b>${n.attempts.toLocaleString()}</b></button>`).join('');
 }
 
 function securityHistoryRows() {
@@ -491,8 +571,9 @@ function renderSecurityOverview() {
     const box = document.getElementById('security-list');
     if (!box) return;
 
-    // The page holds the chosen list for the chosen country; until it does, the last counts stay
-    const page = securityPage && securityPage.list === securityFilter && (securityPage.country || null) === (securityCountry || null) ? securityPage : null;
+    // The page holds the chosen list for the chosen country and network; until it does, the last counts stay
+    const page = securityPage && securityPage.list === securityFilter && (securityPage.country || null) === (securityCountry || null)
+        && (securityPage.network || null) === (securityNetwork || null) ? securityPage : null;
     if (page) securityLastCounts = { counts: page.counts, review: page.all_counts.review };
     const counts = securityLastCounts ? securityLastCounts.counts : null;
     const reviewCount = securityLastCounts ? securityLastCounts.review : 0;
@@ -513,7 +594,7 @@ function renderSecurityOverview() {
     const f2bNote = f2bDown && securityFilter !== 'history'
         ? `<p class="ui-sec-note ui-text-fail">mailcow did not answer about Fail2ban, so its bans are not shown and nothing can be banned from here. The next refresh tries again.</p>` : '';
     const empty = {
-        review: 'Nothing to review. Addresses that fail to log in, and what the protection rules catch while they watch, show up here.',
+        review: 'Nothing to review. Every address that tries to sign in or probe the server, and what the protection rules catch, shows up here.',
         banned: f2bDown ? 'The bans are not known while mailcow does not answer.' : 'Nothing is banned right now.',
     }[securityFilter];
     const rows = securityFilter === 'history' ? securityHistoryRows()
@@ -527,12 +608,19 @@ function renderSecurityOverview() {
     box.innerHTML = `
         <div class="ui-panel-head ui-sec-head">
             <div class="ui-seg ui-sec-seg" role="group" aria-label="Show">${segs}</div>
+            ${securityFilter === 'history' ? '' : `<span class="ui-sec-days"><span class="ui-seg" role="group" aria-label="Period">${SECURITY_DAYS.map(d => `<button type="button" aria-pressed="${securityDays === d}" onclick="setSecurityDays(${d})">${d}D</button>`).join('')}</span>${securityPeriodSince() ? `<small class="ui-muted" title="The oldest log line kept">since ${escapeHtml(securityPeriodSince())}</small>` : ''}</span>`}
             <span class="ui-popover-host ui-sec-chost">
                 <button type="button" class="ui-msg-range${securityCountry ? ' is-set' : ''}" aria-expanded="${securityCountryPicker}" aria-controls="security-country-panel"
-                    onclick="securityCountryPicker = !securityCountryPicker; renderSecurityOverview()">${securityCountry ? `${securityFlag(securityCountryCode(securityCountry))}${escapeHtml(securityCountry)}` : 'Country: All'}</button>
+                    onclick="securityCountryPicker = !securityCountryPicker; securityNetworkPicker = false; renderSecurityOverview()">${securityCountry ? `${securityFlag(securityCountryCode(securityCountry))}${escapeHtml(securityCountry)}` : 'Country: All'}</button>
                 <span id="security-country-panel" class="ui-popover ui-sec-cpanel${securityCountryPicker ? '' : ' hidden'}" role="dialog" aria-label="Where attacks come from">${securityCountryPanel()}</span>
             </span>
+            <span class="ui-popover-host ui-sec-chost">
+                <button type="button" class="ui-msg-range${securityNetwork ? ' is-set' : ''}" aria-expanded="${securityNetworkPicker}" aria-controls="security-network-panel"
+                    onclick="securityNetworkPicker = !securityNetworkPicker; securityCountryPicker = false; renderSecurityOverview()">${securityNetwork ? escapeHtml(securityNetwork) : 'Network: All'}</button>
+                <span id="security-network-panel" class="ui-popover ui-sec-cpanel${securityNetworkPicker ? '' : ' hidden'}" role="dialog" aria-label="Networks that try most">${securityNetworkPanel()}</span>
+            </span>
             ${securityCountry ? `<span class="ui-sec-filter">${securityFlag(securityCountryCode(securityCountry))}${escapeHtml(securityCountry)}<button type="button" onclick="pickSecurityCountry(null)" aria-label="Show every country" title="Show every country">&times;</button></span>` : ''}
+            ${securityNetwork ? `<span class="ui-sec-filter">${escapeHtml(securityNetwork)}<button type="button" onclick="pickSecurityNetwork(null)" aria-label="Show every network" title="Show every network">&times;</button></span>` : ''}
         </div>
         ${rwNote}${f2bNote}
         <div class="ui-sec-list">${rows}</div>
@@ -542,6 +630,23 @@ function renderSecurityOverview() {
     if (tabs) box.style.setProperty('--ui-sec-stick', `${tabs.offsetHeight}px`);
     renderSecuritySheet(list);
     securityWatchMore(!!(page && page.next && !securityPageError));
+}
+
+// The period as it really is: the logs may start after the chosen one
+function securityPeriodSince() {
+    const since = securityPage && securityPage.days === securityDays ? securityPage.since : null;
+    return since ? new Date(since).toLocaleDateString('en-US', { day: 'numeric', month: 'short' }) : null;
+}
+
+function securityPeriodLabel() {
+    const since = securityPeriodSince();
+    return since ? `Since ${since}` : securityDays === 1 ? 'Last 24 hours' : `${securityDays} days`;
+}
+
+// The time a row's counts cover
+function securityWindowText() {
+    const since = securityPeriodSince();
+    return since ? `since ${since}` : securityDays === 1 ? 'in the last 24 hours' : `in the last ${securityDays} days`;
 }
 
 // When the end of the list comes near, the next page is asked for
@@ -560,35 +665,16 @@ function securityWatchMore(more) {
 
 // ----------------------------------------------------------------- where attacks come from
 
-async function loadSecurityCountryChart(days = securityChartDays) {
-    securityChartDays = days;
-    renderSecurityCountries();
-    try {
-        const [countries, networks] = await Promise.all([
-            authenticatedFetch(`/api/logs/netfilter/stats/by-country?days=${days}`),
-            authenticatedFetch(`/api/logs/netfilter/stats/by-network?days=${days}`)
-        ]);
-        securityCountries = countries.ok ? await countries.json() : { data: [] };
-        securityNetworks = networks.ok ? await networks.json() : { data: [] };
-    } catch (error) {
-        console.error('Failed to load where the attacks come from:', error);
-        securityCountries = securityCountries || { data: [] };
-        securityNetworks = securityNetworks || { data: [] };
-    }
-    renderSecurityCountries();
-    if (securityCountryPicker) renderSecurityOverview();
-}
-
-// A tap outside the country picker closes it, and so does Escape
+// A tap outside the country or network picker closes it, and so does Escape
 document.addEventListener('click', event => {
-    if (securityCountryPicker && !event.target.closest('.ui-sec-chost')) {
-        securityCountryPicker = false;
+    if ((securityCountryPicker || securityNetworkPicker) && !event.target.closest('.ui-sec-chost')) {
+        securityCountryPicker = securityNetworkPicker = false;
         renderSecurityOverview();
     }
 });
 document.addEventListener('keydown', event => {
     if (event.key !== 'Escape') return;
-    if (securityCountryPicker) { securityCountryPicker = false; renderSecurityOverview(); }
+    if (securityCountryPicker || securityNetworkPicker) { securityCountryPicker = securityNetworkPicker = false; renderSecurityOverview(); }
 });
 
 function securityWatchedCountries() {
@@ -598,25 +684,24 @@ function securityWatchedCountries() {
 function securityCountryBars() {
     const watched = securityWatchedCountries();
     const rows = securityCountries ? securityCountries.data : [];
-    const max = rows.length ? Math.max(...rows.map(r => r.total)) : 1;
+    const max = rows.length ? Math.max(...rows.map(r => r.attempts)) : 1;
     return rows.map(r => {
         const part = (n, cls, label) => n ? `<i class="${cls}" style="width:${(n / max) * 100}%" title="${n.toLocaleString()} ${label}"></i>` : '';
-
+        const addresses = `${r.addresses.toLocaleString()} address${r.addresses === 1 ? '' : 'es'}`;
         return `<button type="button" class="ui-sec-bar${securityCountry === r.country_name ? ' is-on' : ''}" onclick="pickSecurityCountry('${escapeJsArg(r.country_name)}')"
-                title="${escapeHtml(`${r.country_name}: ${r.total.toLocaleString()} events`)}" aria-pressed="${securityCountry === r.country_name}">
+                title="${escapeHtml(`${r.country_name}: ${r.attempts.toLocaleString()} attempts from ${addresses}`)}" aria-pressed="${securityCountry === r.country_name}">
             <span class="ui-sec-bar-name">${securityFlag(r.country_code)}${escapeHtml(r.country_name)}${watched.has(r.country_code) ? '<i class="ui-sec-watch" title="Watched by the Countries rule"></i>' : ''}</span>
-            <span class="ui-sec-bar-track">${part(r.ban, 'is-ban', 'bans')}${part(r.warning, 'is-warn', 'warnings')}${part(r.unban, 'is-unban', 'unbans')}</span>
-            <em>${r.total.toLocaleString()}</em></button>`;
+            <span class="ui-sec-bar-track">${part(r.review, 'is-warn', 'attempts to review')}${part(r.banned, 'is-ban', 'attempts from banned addresses')}</span>
+            <small class="ui-muted">${addresses}</small><em>${r.attempts.toLocaleString()}</em></button>`;
     }).join('');
 }
 
-// The phone's country picker: the period, the countries, and All
+// The phone's country picker: the countries, and All
 function securityCountryPanel() {
     const rows = securityCountries ? securityCountries.data : null;
-    const range = [7, 30, 90].map(d => `<button type="button" aria-pressed="${securityChartDays === d}" onclick="loadSecurityCountryChart(${d})">${d}D</button>`).join('');
-    return `<span class="ui-sec-cpanel-head"><b>Where attacks come from</b><span class="ui-seg" role="group" aria-label="Period">${range}</span></span>
+    return `<span class="ui-sec-cpanel-head"><b>Where attacks come from</b><span class="ui-muted">${escapeHtml(securityPeriodLabel())}</span></span>
         ${rows === null ? '<span class="ui-muted">Loading...</span>'
-            : !rows.length ? '<span class="ui-muted">No GeoIP data available. Configure MaxMind to enable country statistics.</span>'
+            : !rows.length ? '<span class="ui-muted">No country for these addresses. Configure MaxMind to see where they come from.</span>'
             : `<span class="ui-sec-bars">${securityCountryBars()}</span>`}
         ${securityCountry ? '<button type="button" class="ui-btn ui-btn-sm ui-sec-call" onclick="pickSecurityCountry(null)">Every country</button>' : ''}`;
 }
@@ -625,22 +710,22 @@ function renderSecurityCountries() {
     const box = document.getElementById('security-countries');
     if (!box) return;
     const watched = securityWatchedCountries();
-    const range = [7, 30, 90].map(d => `<button type="button" id="country-chart-${d}d" aria-pressed="${securityChartDays === d}" onclick="loadSecurityCountryChart(${d})">${d}D</button>`).join('');
     const rows = securityCountries ? securityCountries.data : null;
     const networks = securityNetworks ? securityNetworks.data : null;
+    const period = escapeHtml(securityPeriodLabel());
     box.innerHTML = `
         <section class="ui-panel">
-            <div class="ui-panel-head">Where attacks come from <div class="ui-seg ui-head-actions" role="group" aria-label="Period">${range}</div></div>
+            <div class="ui-panel-head">Where attacks come from <span class="ui-count">${period}</span></div>
             ${rows === null ? '<div class="ui-loading"><div class="loading"></div><p>Loading...</p></div>'
-                : !rows.length ? '<p id="country-chart-empty" class="ui-empty">No GeoIP data available. Configure MaxMind to enable country statistics.</p>'
+                : !rows.length ? '<p id="country-chart-empty" class="ui-empty">No country for these addresses. Configure MaxMind to see where they come from.</p>'
                 : `<div class="ui-sec-bars">${securityCountryBars()}</div>
-                   <p class="ui-sec-legend"><span><i class="is-ban"></i>Ban</span><span><i class="is-warn"></i>Warning</span><span><i class="is-unban"></i>Unban</span>${watched.size ? '<span><i class="ui-sec-watch"></i>Watched by the Countries rule</span>' : ''}</p>
-                   <p class="ui-sec-note">Pick a country to see its addresses.</p>`}
+                   <p class="ui-sec-legend"><span><i class="is-warn"></i>To review</span><span><i class="is-ban"></i>Banned</span>${watched.size ? '<span><i class="ui-sec-watch"></i>Watched by the Countries rule</span>' : ''}</p>
+                   <p class="ui-sec-note">The addresses in the list, by country. Pick one to see them.</p>`}
         </section>
         <section class="ui-panel ui-sec-networks">
-            <div class="ui-panel-head">Networks that try most <span class="ui-count">${securityChartDays} days</span></div>
-            ${networks === null ? '' : !networks.length ? '<p class="ui-empty">No network data yet.</p>'
-                : networks.map(n => `<div class="ui-sec-net"><span title="${escapeHtml(n.asn)}">${escapeHtml(n.asn_org)}</span><small class="ui-muted">${n.addresses.toLocaleString()} address${n.addresses === 1 ? '' : 'es'}</small><b>${n.attempts.toLocaleString()}</b></div>`).join('')}
+            <div class="ui-panel-head">Networks that try most <span class="ui-count">${period}</span></div>
+            ${networks === null ? '' : !networks.length ? '<p class="ui-empty">No network for these addresses.</p>'
+                : `<div class="ui-sec-nets">${securityNetworkRows()}</div><p class="ui-sec-note">Pick a network to see its addresses.</p>`}
         </section>`;
 }
 

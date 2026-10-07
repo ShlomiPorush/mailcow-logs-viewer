@@ -124,21 +124,28 @@ def test_an_address_is_banned_or_to_review(client, fail2ban):
     assert review['fail2ban_known'] is True
 
 
-def test_the_allowlist_and_the_denylist_are_not_in_either_list(client, fail2ban):
-    allowed, denied = IPS[:2]
+def test_the_allowlist_is_to_review_and_the_denylist_is_banned(client, fail2ban):
+    allowed, denied, in_network = IPS[:3]
     _failed(allowed)
     _hit(denied, 'watching')
-    fail2ban['answer'].update(whitelist=f'{allowed}/32', blacklist=denied)
-    page = _get(client, list='review')
-    assert page['counts'] == {'review': 0, 'banned': 0}
+    _failed(in_network)
+    fail2ban['answer'].update(whitelist=f'{allowed}/32,{in_network}/31', blacklist=denied)
+    review = _get(client, list='review')
+    assert sorted(_ips(review)) == sorted([allowed, in_network]) and review['counts'] == {'review': 2, 'banned': 1}
+    by_ip = {a['ip']: a for a in review['items']}
+    assert by_ip[allowed]['state'] == 'allow' and by_ip[allowed]['listed_as'] == f'{allowed}/32'
+    assert by_ip[in_network]['listed_as'] == f'{in_network}/31'
+    banned = _get(client, list='banned')['items']
+    assert [(a['ip'], a['state'], a['listed_as']) for a in banned] == [(denied, 'deny', denied)]
 
 
-def test_a_permanent_ban_is_a_list_entry_not_a_ban(client, fail2ban):
+def test_a_permanent_ban_is_banned_as_a_denylist_entry(client, fail2ban):
     ip = IPS[0]
     _failed(ip)
     fail2ban['answer'].update(active_bans=[{'ip': ip, 'network': f'{ip}/32', 'banned_until': ''}],
                               perm_bans=[{'network': f'{ip}/32'}], blacklist=f'{ip}/32')
-    assert _get(client, list='banned')['counts'] == {'review': 0, 'banned': 0}
+    page = _get(client, list='banned')
+    assert page['counts'] == {'review': 0, 'banned': 1} and page['items'][0]['state'] == 'deny'
 
 
 def test_the_counts_are_for_the_country_and_cover_every_address(client):
@@ -211,3 +218,74 @@ def test_an_address_without_a_line_today_takes_its_country_from_older_lines(clie
     fail2ban['answer']['active_bans'] = [{'ip': ip, 'network': f'{ip}/32', 'banned_until': '2d'}]
     page = _get(client, list='banned')
     assert _ips(page) == [ip] and page['items'][0]['country'] == COUNTRY
+
+
+def test_a_network_keeps_its_addresses_and_counts_only_those(client, fail2ban):
+    from app.database import get_db_context
+    from app.models import NetfilterLog
+    for ip in IPS[:4]:
+        _failed(ip)
+    with get_db_context() as db:
+        db.query(NetfilterLog).filter(NetfilterLog.priority == MARKER, NetfilterLog.ip.in_(IPS[:3])).update({NetfilterLog.asn_org: 'Test Network'}, synchronize_session=False)
+        db.commit()
+    page = _get(client, list='review', network='Test Network')
+    assert sorted(_ips(page)) == sorted(IPS[:3])
+    assert page['counts'] == {'review': 3, 'banned': 0} and page['network'] == 'Test Network'
+    assert _get(client, list='review')['counts']['review'] == 4
+
+
+def test_the_country_panel_counts_an_attempt_once(client):
+    from app.database import get_db_context
+    from app.models import NetfilterLog
+    ip = IPS[0]
+    _failed(ip, times=2)
+    with get_db_context() as db:
+        db.add(NetfilterLog(time=datetime.utcnow() - timedelta(minutes=5), priority=MARKER, ip=ip, action='warning',
+                            country_name=COUNTRY, country_code='TL',
+                            message=f'7 more attempts in the next 600 seconds until {ip}/32 is banned'))
+        db.commit()
+    response = client.get('/api/logs/netfilter/stats/by-country', params={'days': 7})
+    assert response.status_code == 200, response.text
+    country = next(c for c in response.json()['data'] if c['country_code'] == 'TL')
+    assert country['warning'] == 2 and country['total'] == 2 and country['addresses'] == 1
+
+
+def test_the_period_lists_every_address_that_tried_in_it(client, fail2ban):
+    from app.database import get_db_context
+    from app.models import NetfilterLog
+    _failed(IPS[0])
+    _failed(IPS[1], minutes_ago=3 * 24 * 60)
+    with get_db_context() as db:
+        # A probe is an attempt, though not a failed login
+        db.add(NetfilterLog(time=datetime.utcnow() - timedelta(hours=2), priority=MARKER, ip=IPS[2], rule_id=1,
+                            action='warning', country_name=COUNTRY, country_code='TL',
+                            message=f'{IPS[2]} matched rule id 1 (warning: non-SMTP command from unknown[{IPS[2]}])'))
+        db.commit()
+    day = _get(client, list='review')
+    assert _ips(day) == [IPS[0], IPS[2]] and day['days'] == 1
+    week = _get(client, list='review', days=7)
+    assert _ips(week) == [IPS[0], IPS[2], IPS[1]] and week['counts'] == {'review': 3, 'banned': 0}
+    assert week['all_counts']['review'] >= 3
+
+
+def test_the_panels_count_the_rows_a_click_shows(client, fail2ban):
+    from app.database import get_db_context
+    from app.models import NetfilterLog
+    _failed(IPS[0], times=3)
+    _failed(IPS[1])
+    _failed(IPS[2], country=OTHER)
+    _hit(IPS[3], 'watching')
+    fail2ban['answer'].update(whitelist=f'{IPS[1]}/32',
+                              active_bans=[{'ip': IPS[2], 'network': f'{IPS[2]}/32', 'banned_until': '1h'}])
+    with get_db_context() as db:
+        db.query(NetfilterLog).filter(NetfilterLog.priority == MARKER).update({NetfilterLog.asn_org: 'Test Network'}, synchronize_session=False)
+        db.commit()
+    page = _get(client, list='review')
+    country = next(c for c in page['countries'] if c['country_name'] == COUNTRY)
+    # The watched address has no log line; the rule's count is its attempts
+    assert (country['addresses'], country['attempts'], country['review'], country['banned']) == (3, 5, 5, 0)
+    assert page['counts']['review'] + page['counts']['banned'] == country['addresses']
+    network = next(n for n in page['networks'] if n['asn_org'] == 'Test Network')
+    assert (network['addresses'], network['attempts'], network['review'], network['banned']) == (3, 5, 4, 1)
+    picked = _get(client, list='review', network='Test Network', country='')
+    assert picked['counts']['review'] + picked['counts']['banned'] == network['addresses']
