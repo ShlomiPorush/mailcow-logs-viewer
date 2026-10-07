@@ -86,10 +86,13 @@ These settings **must** be configured in your `.env` file:
 | `SMTP_PORT` | integer | `587` | SMTP server port (587 for TLS, 465 for SSL, 25 for plain) |
 | `SMTP_USE_TLS` | boolean | `false` | Use STARTTLS for SMTP connection (recommended) |
 | `SMTP_USE_SSL` | boolean | `false` | Use Implicit SSL/TLS for SMTP connection (usually port 465) |
+| `SMTP_VERIFY_SSL` | boolean | (automatic) | Verify the SMTP server's TLS certificate before the password is sent. `true`: always verify. `false`: never verify, for a server with a self-signed certificate. Not set: verify host names such as `smtp.example.com`; do not verify `localhost`, IP addresses and single-label names such as Docker container names (a warning in the log names this setting). See the note below |
 | `SMTP_USER` | string | (empty) | SMTP username (usually email address) |
 | `SMTP_PASSWORD` | string | (empty) | SMTP password |
 | `SMTP_FROM` | string | (empty) | From address for emails (defaults to SMTP user if not set) |
 | `SMTP_RELAY_MODE` | boolean | `false` | Relay mode - send emails without authentication (for local relay servers). When enabled, username and password are not required |
+
+> **Upgrade note - certificate verification.** Versions up to 2.9.0 sent the SMTP and IMAP passwords over TLS without checking the server's certificate. Now a server reached by a host name such as `smtp.example.com` must present a certificate that is valid for that name. **If your SMTP or DMARC IMAP server is reached by a host name and uses a self-signed certificate, set `SMTP_VERIFY_SSL=false` or `DMARC_IMAP_VERIFY_SSL=false`** (or choose **Never check** under Settings), otherwise sending mail or importing reports fails with a certificate error that names the setting. Servers reached as `localhost`, by IP address or by a container name such as `postfix-mailcow` keep working unchanged.
 
 ---
 
@@ -233,6 +236,7 @@ One mailbox receives both kinds of report: point the `rua=` of your DMARC and TL
 | `DMARC_IMAP_HOST` | string | (empty) | IMAP server hostname (e.g., `imap.gmail.com`) |
 | `DMARC_IMAP_PORT` | integer | `993` | IMAP server port (993 for SSL, 143 for non-SSL) |
 | `DMARC_IMAP_USE_SSL` | boolean | `true` | Use SSL/TLS for IMAP connection |
+| `DMARC_IMAP_VERIFY_SSL` | boolean | (automatic) | Verify the IMAP server's TLS certificate before the password is sent. Same values as `SMTP_VERIFY_SSL`: `true` always, `false` never (self-signed certificate), not set verifies host names but not `localhost`, IP addresses or container names |
 | `DMARC_IMAP_USER` | string | (empty) | IMAP username (email address) |
 | `DMARC_IMAP_PASSWORD` | string | (empty) | IMAP password |
 | `DMARC_IMAP_FOLDER` | string | `INBOX` | IMAP folder to scan for DMARC and TLS reports |

@@ -44,6 +44,8 @@ All settings are editable from the UI **except** database connection settings (`
 
 Sensitive fields (passwords, API key, etc.) are shown as masked in the form. Leave the field empty to keep the current value; enter a new value only when you want to change it.
 
+A stored password is only sent to the server it was entered for. When you change the server it goes to (for example the SMTP host, port, encryption or user, the DMARC & TLS IMAP host, the Rspamd URL or the OAuth2 issuer and endpoints), enter the password again in the same save; otherwise the save is refused with a message saying which one. Notification destinations work the same way: changing the server URL of an ntfy, Gotify or custom webhook destination needs its token again.
+
 ## Scheduler / intervals
 
 Changes to **fetch interval**, **correlation check interval**, **DMARC & TLS IMAP interval**, and **scheduler workers** take effect immediately after you save. The application reschedules the relevant background jobs and updates the thread pool without requiring a restart.
