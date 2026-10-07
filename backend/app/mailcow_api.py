@@ -797,22 +797,17 @@ class MailcowAPI:
             List of active domain names (where active=1)
         """
         logger.info("Fetching active domains")
-        try:
-            domains = await self.get_domains()
-            
-            # Filter active domains and extract domain_name
-            active_domains = [
-                domain.get('domain_name', '')
-                for domain in domains
-                if domain.get('active') == 1 and domain.get('domain_name')
-            ]
-            
-            logger.info(f"Found {len(active_domains)} active domains: {', '.join(active_domains)}")
-            return active_domains
-            
-        except Exception as e:
-            logger.error(f"Failed to fetch active domains: {e}")
-            return []
+        domains = await self.get_domains()
+
+        # Filter active domains and extract domain_name
+        active_domains = [
+            domain.get('domain_name', '')
+            for domain in domains
+            if domain.get('active') == 1 and domain.get('domain_name')
+        ]
+
+        logger.info(f"Found {len(active_domains)} active domains: {', '.join(active_domains)}")
+        return active_domains
     
     async def get_alias_domains(self) -> List[str]:
         """
@@ -858,22 +853,15 @@ class MailcowAPI:
         which primary domain each alias points at.
         """
         logger.info("Fetching alias domain map")
-        try:
-            data = await self._make_request("/api/v1/get/alias-domain/all")
-            if not isinstance(data, list):
-                return {}
-            return {
-                item['alias_domain'].lower(): item['target_domain'].lower()
-                for item in data
-                if item.get('active', 0) == 1
-                and item.get('alias_domain') and item.get('target_domain')
-            }
-        except MailcowAPIError as e:
-            logger.error(f"Failed to fetch alias domains: {e}")
-            return []
-        except Exception as e:
-            logger.error(f"Failed to fetch alias domains: {e}")
-            return []
+        data = await self._make_request("/api/v1/get/alias-domain/all")
+        if not isinstance(data, list):
+            return {}
+        return {
+            item['alias_domain'].lower(): item['target_domain'].lower()
+            for item in data
+            if item.get('active', 0) == 1
+            and item.get('alias_domain') and item.get('target_domain')
+        }
     
     async def get_mailboxes(self) -> List[Dict[str, Any]]:
         """
