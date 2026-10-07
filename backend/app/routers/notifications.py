@@ -128,7 +128,12 @@ def update_channel(channel_id: int, request: ChannelRequest, db: Session = Depen
         if not channel:
             raise HTTPException(status_code=404, detail="Channel not found")
 
-        merged = nc.merge_config(request.channel_type, channel.config or {}, request.config)
+        # A different service never inherits the stored secrets of the old one
+        stored = (channel.config or {}) if request.channel_type == channel.channel_type else {}
+        try:
+            merged = nc.merge_config(request.channel_type, stored, request.config)
+        except nc.SecretEndpointChanged as e:
+            raise HTTPException(status_code=422, detail=str(e))
         ok, error = nc.validate_config(request.channel_type, merged)
         if not ok:
             raise HTTPException(status_code=422, detail=error)
