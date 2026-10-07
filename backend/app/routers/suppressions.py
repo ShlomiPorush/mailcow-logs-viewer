@@ -33,26 +33,59 @@ MANAGED_MARKER_START = "# === MANAGED BY MAILCOW LOGS VIEWER - DO NOT EDIT BELOW
 MANAGED_MARKER_END = "# === END MANAGED SECTION ==="
 
 
-def format_suppression_map_entry(email: str) -> str:
+# Sources whose rows hold addresses read from Postfix logs or the mail queue.
+# Everything else (manual, import, and rows from before the column was set)
+# was entered by an administrator.
+AUTOMATIC_SOURCES = frozenset({'auto'})
+
+
+def suppression_allows_regex(source: Optional[str]) -> bool:
+    """Only an administrator's entry may be a /regex/; automatic ones are literal."""
+    return source not in AUTOMATIC_SOURCES
+
+
+def auto_suppression_address(raw: Optional[str]) -> Optional[str]:
+    """
+    The recipient an automatic path may suppress, or None to skip it.
+
+    Recipients come from Postfix logs and the mail queue, so they are
+    whatever a sender typed. A '/' in the domain or any whitespace is never
+    a deliverable address and is refused here; the map line is written as an
+    escaped literal regardless (see format_suppression_map_entry).
+    """
+    email = (raw or '').strip().lower()
+    local, sep, domain = email.rpartition('@')
+    if not sep or not local or not domain:
+        return None
+    if '/' in domain or any(ch.isspace() for ch in email):
+        return None
+    return email
+
+
+def format_suppression_map_entry(email: str, allow_regex: bool = False) -> str:
     """
     One line of the Rspamd map, matching the address exactly.
 
     global_rcpt_blacklist.map is a regexp map: a bare address like e@example.com
     is compiled as an unanchored pattern and blocks every recipient that
     merely CONTAINS it (alice@example.com, joe@example.com, ...). Every
-    entry is therefore written as an anchored, escaped pattern. Stored domain
-    suppressions are already regex strings; ones created before anchoring
-    existed get their anchors added here.
+    entry is therefore written as an anchored, escaped pattern.
+
+    allow_regex is for entries an administrator added (domain suppressions
+    are stored as /.+@example\\.com/i). Their body is anchored as one group,
+    ^(?:body)$, so an alternation cannot escape the anchors. Automatic rows
+    must pass allow_regex=False: their value came from a log or the mail
+    queue, and a recipient shaped like /.*/i would otherwise block everyone.
     """
     email = (email or '').strip()
-    pattern = re.match(r'^/(.*)/(i?)$', email)
+    pattern = re.match(r'^/(.*)/(i?)$', email) if allow_regex else None
     if pattern:
         body, flags = pattern.group(1), pattern.group(2)
-        if not body.startswith('^'):
-            body = '^' + body
-        if not body.endswith('$'):
-            body = body + '$'
-        return f'/{body}/{flags}'
+        if body.startswith('^'):
+            body = body[1:]
+        if body.endswith('$') and not body.endswith('\\$'):
+            body = body[:-1]
+        return f'/^(?:{body})$/{flags}'
     return f'/^{re.escape(email)}$/i'
 
 
@@ -696,7 +729,10 @@ async def sync_suppressions_to_rspamd(db: Session) -> dict:
         if in_managed and line.strip() and not line.strip().startswith('#'):
             current_managed.append(line.strip())
 
-    desired_lines = [format_suppression_map_entry(s.email) for s in active_suppressions]
+    desired_lines = [
+        format_suppression_map_entry(s.email, allow_regex=suppression_allows_regex(s.source))
+        for s in active_suppressions
+    ]
     if (current_content and not manual_needs_migration
             and sorted(current_managed) == sorted(desired_lines)):
         synced_count = 0

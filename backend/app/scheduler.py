@@ -35,6 +35,7 @@ from .services.dovecot_parser import (
     resolve_session_verdicts,
 )
 from .routers.domains import check_domain_dns, store_dns_check_worker
+from .routers.suppressions import auto_suppression_address
 from .services.dmarc_imap_service import sync_dmarc_reports_from_imap
 from .services.dmarc_notifications import send_dmarc_error_notification
 from .services import geoip_service, correlation_jobs
@@ -3274,8 +3275,8 @@ async def cleanup_deferred_queue_job():
 
             # Collect recipients for suppression
             for rcpt in (item.get('recipients') or []):
-                rcpt_email = rcpt.split(' ')[0].strip('<>').lower()
-                if not rcpt_email or '@' not in rcpt_email:
+                rcpt_email = auto_suppression_address(rcpt.split(' ')[0].strip('<>'))
+                if not rcpt_email:
                     continue
                 domain = rcpt_email.split('@')[-1]
                 if domain in whitelist:
@@ -3902,7 +3903,9 @@ def _detect_suppressions_worker():
                 if not sender_val or sender_val.startswith('mailer-daemon'):
                     continue
 
-            recipient = log.recipient.lower().strip()
+            recipient = auto_suppression_address(log.recipient)
+            if not recipient:
+                continue
 
             # Skip whitelisted domains
             domain = recipient.split('@')[-1] if '@' in recipient else ''
