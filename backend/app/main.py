@@ -49,6 +49,7 @@ from .routers import (
 )
 from .migrations import run_migrations
 from .auth import BasicAuthMiddleware, safe_return_path
+from .origin_guard import SameOriginGuardMiddleware
 from .session import get_session_from_request
 from .services.auth_cleanup import auth_store_maintenance
 from .version import __version__
@@ -249,19 +250,36 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# Add Basic Auth Middleware FIRST (before CORS)
+# Add Basic Auth Middleware FIRST (innermost)
 # This ensures ALL requests are authenticated when enabled
 app.add_middleware(BasicAuthMiddleware)
 
-# CORS middleware - allow all origins because the app runs behind a reverse proxy in Docker.
-# The reverse proxy (nginx/traefik) handles origin restrictions.
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],  # nosemgrep: python.fastapi.security.wildcard-cors.wildcard-cors
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# Writes and the live log WebSocket must come from the app's own pages,
+# with or without authentication
+app.add_middleware(SameOriginGuardMiddleware)
+
+
+def configure_cors(application: FastAPI) -> None:
+    """Allow cross-origin API access only for the exact origins in CORS_ALLOWED_ORIGINS.
+
+    The web interface is served from the same origin as the API and needs no
+    CORS at all, so by default no CORS policy is installed. Credentials are
+    never combined with a wildcard or a reflected Origin.
+    """
+    origins = settings.cors_allowed_origins_list
+    if not origins:
+        return
+    application.add_middleware(
+        CORSMiddleware,
+        allow_origins=origins,
+        allow_credentials=True,
+        allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
+        allow_headers=["Content-Type", "Authorization"],
+    )
+    logger.info(f"Cross-origin API access allowed for: {', '.join(origins)}")
+
+
+configure_cors(app)
 
 # Security headers on every response.
 # CSP notes: the frontend relies on inline event handlers and inline <script>
@@ -342,7 +360,7 @@ class SlowRequestLogMiddleware:
 app.add_middleware(SecurityHeadersMiddleware, csp=_CSP)
 
 # Registered last so it is the outermost middleware: the measured time then
-# covers auth/CORS/security-headers as well, not just the route handler.
+# covers auth/origin guard/security-headers as well, not just the route handler.
 app.add_middleware(SlowRequestLogMiddleware)
 
 # Include routers

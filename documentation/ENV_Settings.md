@@ -425,6 +425,28 @@ proxy. Proxies must preserve cookies and the original request scheme.
 | `SESSION_SECRET_KEY` | string | (empty) | Secret key for signing session cookies. **REQUIRED if `OAUTH2_ENABLED=true`**. Also used for Basic Auth logins since 2.7.1: without it a new key is generated on every start, so restarting the container signs everyone out and they log in again. Generate a random secret: `openssl rand -hex 32`. ⚠️ **WARNING: Use a strong random secret in production!** |
 | `SESSION_EXPIRY_HOURS` | integer | `24` | Session expiration time in hours |
 
+### Cross-site requests
+
+The web interface is served from the same address as the API, so it needs no
+cross-origin access. Requests that change something (POST, PUT, PATCH, DELETE)
+and the Live Logs WebSocket are refused with HTTP 403 when the browser says they
+came from a page on another site, whether or not authentication is enabled. This
+stops a web page on another site from using a browser on your network to act on
+mailcow. Only the host name and port are compared, not `http`/`https`, so a TLS
+reverse proxy in front of the app needs no change. Requests without an `Origin`
+or `Referer` header, such as `curl` or scripts, are not affected.
+
+The check compares the browser's address with the `Host` header, or with
+`X-Forwarded-Host` when the proxy sends it. A proxy that replaces `Host` with its
+own upstream address (nginx does this when `proxy_set_header Host` is missing)
+must pass the original one; every recipe in [Reverse_Proxy.md](Reverse_Proxy.md)
+already does. Otherwise, list the address you open the dashboard at in
+`CORS_ALLOWED_ORIGINS`.
+
+| Variable | Type | Default | Description |
+|----------|------|---------|-------------|
+| `CORS_ALLOWED_ORIGINS` | string | (empty) | Comma-separated exact origins, such as `https://dashboard.example.com`, that may call the API from another site using the signed-in session. Empty means same-origin only, which is all the web interface needs. Wildcards are ignored. Origins listed here also pass the cross-site check above. ENV only; restart the app container after changing it. |
+
 ---
 
 ## Configuration Priority
@@ -449,6 +471,7 @@ The following settings **must** remain in the `.env` file and cannot be changed 
 - `POSTGRES_PASSWORD`
 - `POSTGRES_DB`
 - `SETTINGS_EDIT_VIA_UI_ENABLED`
+- `CORS_ALLOWED_ORIGINS`
 
 All other settings can be managed from the Settings tab in the web interface when `SETTINGS_EDIT_VIA_UI_ENABLED=true`.
 

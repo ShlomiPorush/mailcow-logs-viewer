@@ -4,6 +4,8 @@ Configuration management using Pydantic Settings
 import os
 import re
 import ipaddress
+from functools import lru_cache
+from urllib.parse import urlsplit
 from pydantic_settings import BaseSettings
 from pydantic import TypeAdapter, Field, validator, field_validator, model_validator
 from typing import List, Optional, Any, Dict
@@ -12,6 +14,50 @@ import logging
 logger = logging.getLogger(__name__)
 
 _cached_active_domains: Optional[List[str]] = None
+
+_DEFAULT_PORTS = {"http": 80, "https": 443}
+
+
+def normalize_origin(value: str) -> Optional[str]:
+    """A browser origin as scheme://host[:port] in canonical form, or None.
+
+    Lower-cases scheme and host and drops the default port, the way browsers
+    send the Origin header. Anything with a path, credentials or a scheme
+    other than http/https is not an origin.
+    """
+    value = (value or "").strip()
+    if value.endswith("/"):
+        value = value[:-1]
+    try:
+        parts = urlsplit(value)
+        port = parts.port
+    except ValueError:
+        return None
+    scheme = parts.scheme.lower()
+    if (scheme not in _DEFAULT_PORTS or not parts.hostname or parts.username or parts.password
+            or parts.path or parts.query or parts.fragment):
+        return None
+    host = parts.hostname.lower()
+    if ":" in host:
+        host = f"[{host}]"
+    if port and port != _DEFAULT_PORTS[scheme]:
+        host = f"{host}:{port}"
+    return f"{scheme}://{host}"
+
+
+@lru_cache(maxsize=8)
+def _parse_cors_origins(raw: str) -> tuple:
+    origins = []
+    for entry in (raw or "").split(","):
+        if not entry.strip():
+            continue
+        origin = normalize_origin(entry)
+        if origin is None:
+            logger.warning("Ignoring CORS_ALLOWED_ORIGINS entry %r: list exact origins such as "
+                           "https://dashboard.example.com", entry.strip()[:200])
+        elif origin not in origins:
+            origins.append(origin)
+    return tuple(origins)
 
 # Database-only keys: not editable from UI (must stay in ENV).
 _DB_ONLY_KEYS = frozenset({"postgres_host", "postgres_port", "postgres_user", "postgres_password", "postgres_db"})
@@ -255,6 +301,11 @@ class Settings(BaseSettings):
     oauth2_use_oidc_discovery: bool = Field(
         default=True,
         description="Enable OIDC discovery (uses .well-known/openid-configuration)"
+    )
+    cors_allowed_origins: str = Field(
+        default="",
+        description="Comma-separated exact origins (scheme://host[:port]) that may call the API "
+                    "from another site with the user's session. Empty: same-origin only."
     )
     session_secret_key: str = Field(
         default="",
@@ -824,6 +875,11 @@ class Settings(BaseSettings):
         return _lenient_manual_hosts_list(self.domain_spf_source_manual_hosts, 'domain_spf_source_manual_hosts')
 
     @property
+    def cors_allowed_origins_list(self) -> List[str]:
+        """Exact origins allowed cross-origin access; never a wildcard."""
+        return list(_parse_cors_origins(self.cors_allowed_origins))
+
+    @property
     def raw_logs_services_list(self) -> List[str]:
         """Parse raw_logs_services into a list of enabled service names.
         Supports 'all' as a shortcut for all services. Names that are not a
@@ -947,10 +1003,11 @@ class Settings(BaseSettings):
 def _get_editable_setting_keys() -> frozenset:
     """All Settings field names that are editable from UI (excludes DB keys, UI-edit flag, and deprecated/legacy fields)."""
     # auth_enabled deprecated, tz legacy, app_port is Docker-level.
+    # cors_allowed_origins is applied once at startup, so it lives in ENV only.
     # webhook_* are legacy single-webhook settings, superseded by the
     # notification channels UI (they are migrated into a channel on upgrade).
     excluded = _DB_ONLY_KEYS | {
-        _EDIT_VIA_UI_FLAG_KEY, "auth_enabled", "tz", "app_port",
+        _EDIT_VIA_UI_FLAG_KEY, "auth_enabled", "tz", "app_port", "cors_allowed_origins",
         "webhook_enabled", "webhook_type", "webhook_url", "webhook_telegram_chat_id",
     }
     keys = set(Settings.model_fields.keys()) - excluded
