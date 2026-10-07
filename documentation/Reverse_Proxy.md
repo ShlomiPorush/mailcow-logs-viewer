@@ -59,11 +59,11 @@ recreate the viewer with `docker compose up -d`:
 
 ```dotenv
 # Example address only: use the one you find with the commands below.
-FORWARDED_ALLOW_IPS=172.22.1.10
+FORWARDED_ALLOW_IPS=192.0.2.10
 ```
 
 List exact addresses, separated by commas. The bundled Uvicorn 0.27 does not
-accept ranges such as `172.22.1.0/24`. Never use `*`: it would let anyone who can
+accept ranges such as `192.0.2.0/24`. Never use `*`: it would let anyone who can
 reach the viewer directly pick the address they are counted as. See
 [ENV_Settings.md](ENV_Settings.md#login-attempt-limits-and-reverse-proxies) for
 the details.
