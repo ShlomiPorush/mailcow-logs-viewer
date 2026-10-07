@@ -1755,7 +1755,10 @@ async function loadDashboardSecurityAlerts() {
                         <p>${escapeHtml(a.detail || '')}</p>
                         <p class="ui-muted">${escapeHtml(formatTime(a.created_at))}</p>
                     </div>
-                    <button type="button" onclick="acknowledgeSecurityAlert(${a.id})" class="ui-btn ui-btn-sm" title="Dismiss">Dismiss</button>
+                    <div class="ui-alert-acts">
+                        <button type="button" onclick="openAlertActivity(${a.id})" class="ui-btn ui-btn-sm" title="What happened before and around this alert">Show activity</button>
+                        <button type="button" onclick="acknowledgeSecurityAlert(${a.id})" class="ui-btn ui-btn-sm" title="Dismiss">Dismiss</button>
+                    </div>
                 </div>`;
         }).join('');
         container.classList.remove('hidden');

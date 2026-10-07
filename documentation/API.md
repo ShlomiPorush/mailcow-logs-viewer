@@ -5875,6 +5875,17 @@ List security alerts, newest first.
 
 **Alert types:** `volume_spike`, `auth_failure_burst`, `smtp_abuse_block`
 
+### GET /api/security-alerts/{alert_id}/activity
+
+The history behind an alert, for its Show activity window. For a `volume_spike` it counts the mailbox's outbound messages; for an `auth_failure_burst` the username's failed logins.
+
+- `buckets`: `[{start, count}]` per `bucket_minutes` (15) from `baseline_days` before the alert to two hours after it
+- `window_minutes`, `baseline_days`: the detector's check window and baseline period
+- `around`: from the check window before the alert to an hour after it: `total`, and for a volume spike `recipient_domains`, `results` and `subjects`, for a burst `addresses`, `countries` and `networks`, each `[{name, count}]`, most first
+- `alert`: the alert itself
+
+Returns 404 for an unknown alert.
+
 ### POST /api/security-alerts/{alert_id}/acknowledge
 
 Mark a single alert as acknowledged (removes it from the dashboard banner).
