@@ -1004,6 +1004,10 @@ def get_env_locked_keys() -> frozenset:
     return frozenset(k for k in EDITABLE_SETTING_KEYS if _is_env_key_set(k))
 
 
+class SettingsLoadError(RuntimeError):
+    """The settings stored in the database could not be read."""
+
+
 def build_settings(db: Optional[Any] = None) -> Settings:
     """
     Build effective Settings: defaults -> DB -> ENV overrides.
@@ -1016,52 +1020,55 @@ def build_settings(db: Optional[Any] = None) -> Settings:
     This prevents lockout: if a user makes a mistake in the UI (e.g. wrong
     OIDC URL or bad auth password), they can fix it by setting the correct
     value in ENV / docker-compose.yml and restarting.
+
+    A failed read of the stored overrides raises SettingsLoadError. It must
+    never fall back to ENV-only settings: authentication enabled from the UI
+    lives only in the database, so that fallback would turn it off.
     """
     base = Settings()  # loads defaults + ENV
     if not base.edit_settings_via_ui_enabled or db is None:
         return base
+    from .services.settings_store import get_config_overrides_from_db
     try:
-        from .services.settings_store import get_config_overrides_from_db
         overrides = get_config_overrides_from_db(db, _get_field_annotations())
-        if not overrides:
-            return base
-        # Only apply DB overrides for editable keys where ENV is NOT explicitly set.
-        # When an ENV variable is set, it takes precedence over the DB value.
-        env_locked = get_env_locked_keys()
-        allowed = {k: v for k, v in overrides.items()
-                   if k in EDITABLE_SETTING_KEYS and k not in env_locked}
-        if not allowed:
-            return base
-        # model_copy bypasses validators: validate security capacity bounds first.
-        for key in ("session_max_entries", "auth_max_failure_clients"):
-            if key in allowed:
-                try:
-                    value = TypeAdapter(int).validate_python(allowed[key])
-                    if value < 1:
-                        raise ValueError("Capacity must be positive")
-                    allowed[key] = value
-                except (ValueError, TypeError):
-                    logger.warning("Ignoring invalid authentication capacity override for %s", key)
-                    allowed.pop(key)
-        merged = base.model_copy(update=allowed)
-        # model_copy skips validators. Apply them manually on affected fields.
-        # (We can't use Settings.model_validate() because BaseSettings re-reads ENV on init)
-        try:
-            if 'mailcow_url' in allowed:
-                object.__setattr__(merged, 'mailcow_url', merged.mailcow_url.rstrip('/'))
-            if 'log_level' in allowed:
-                v = merged.log_level.upper()
-                if v not in ('DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'):
-                    v = 'WARNING'
-                object.__setattr__(merged, 'log_level', v)
-            if 'scheduler_workers' in allowed:
-                object.__setattr__(merged, 'scheduler_workers', max(1, min(64, merged.scheduler_workers)))
-        except Exception as e:
-            logger.warning("Post-validation of DB overrides failed: %s", e)
-        return merged
     except Exception as e:
-        logger.warning("Could not load config overrides from DB: %s", e)
+        raise SettingsLoadError(f"Could not read the settings stored in the database: {e}") from e
+    if not overrides:
         return base
+    # Only apply DB overrides for editable keys where ENV is NOT explicitly set.
+    # When an ENV variable is set, it takes precedence over the DB value.
+    env_locked = get_env_locked_keys()
+    allowed = {k: v for k, v in overrides.items()
+               if k in EDITABLE_SETTING_KEYS and k not in env_locked}
+    if not allowed:
+        return base
+    # model_copy bypasses validators: validate security capacity bounds first.
+    for key in ("session_max_entries", "auth_max_failure_clients"):
+        if key in allowed:
+            try:
+                value = TypeAdapter(int).validate_python(allowed[key])
+                if value < 1:
+                    raise ValueError("Capacity must be positive")
+                allowed[key] = value
+            except (ValueError, TypeError):
+                logger.warning("Ignoring invalid authentication capacity override for %s", key)
+                allowed.pop(key)
+    merged = base.model_copy(update=allowed)
+    # model_copy skips validators. Apply them manually on affected fields.
+    # (We can't use Settings.model_validate() because BaseSettings re-reads ENV on init)
+    try:
+        if 'mailcow_url' in allowed:
+            object.__setattr__(merged, 'mailcow_url', merged.mailcow_url.rstrip('/'))
+        if 'log_level' in allowed:
+            v = merged.log_level.upper()
+            if v not in ('DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'):
+                v = 'WARNING'
+            object.__setattr__(merged, 'log_level', v)
+        if 'scheduler_workers' in allowed:
+            object.__setattr__(merged, 'scheduler_workers', max(1, min(64, merged.scheduler_workers)))
+    except Exception as e:
+        logger.warning("Post-validation of DB overrides failed: %s", e)
+    return merged
 
 
 class SettingsWrapper:
@@ -1078,9 +1085,19 @@ settings = _settings_wrapper
 
 
 def reload_settings(db: Optional[Any] = None) -> None:
-    """Reload effective settings (e.g. after saving from UI). Updates the global settings wrapper."""
+    """Reload effective settings (e.g. after saving from UI). Updates the global settings wrapper.
+
+    On failure the current settings stay in force and the error is raised, so
+    the caller (an API request, or startup) fails instead of serving with
+    defaults that may have authentication off.
+    """
     global _settings_wrapper
-    _settings_wrapper._inner = build_settings(db)
+    try:
+        new_inner = build_settings(db)
+    except Exception as e:
+        logger.error("Settings reload failed, keeping the current settings: %s", e)
+        raise
+    _settings_wrapper._inner = new_inner
     # Re-apply log level to root logger (setup_logging ran at import time with the old level)
     root = logging.getLogger()
     root.setLevel(getattr(logging, _settings_wrapper.log_level, logging.WARNING))

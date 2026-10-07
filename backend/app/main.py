@@ -133,31 +133,33 @@ async def lifespan(app: FastAPI):
         from .migrations import run_alembic_upgrade
         run_alembic_upgrade()
 
-        # Load settings overrides from DB (if UI editing is enabled and overrides exist)
+        # Load settings overrides from DB (if UI editing is enabled and overrides exist).
+        # A failed read aborts startup: authentication enabled from the UI is
+        # stored only there, and starting without it would serve with auth off.
         if settings.edit_settings_via_ui_enabled:
+            from .database import get_db_context
+            with get_db_context() as db:
+                reload_settings(db)
+            logger.info("Settings loaded from database overrides")
             try:
-                from .database import get_db_context
-                with get_db_context() as db:
-                    reload_settings(db)
-                    # Reload services that cache settings values
-                    mailcow_api.reload_config()
-                    from .services.oauth2_client import oauth2_client
-                    oauth2_client.reload_config()
-                    logger.info("Settings loaded from database overrides")
+                # Reload services that cache settings values
+                mailcow_api.reload_config()
+                from .services.oauth2_client import oauth2_client
+                oauth2_client.reload_config()
             except Exception as e:
-                logger.warning(f"Could not load settings from DB: {e}")
+                logger.warning(f"Could not apply the stored settings to the mailcow and OAuth2 clients: {e}")
     except Exception as e:
-        logger.error(f"Failed to initialize database: {e}")
+        logger.error(f"Failed to initialize database or load the stored settings: {e}")
         raise
-    
+
     # Log effective configuration (after DB overrides are loaded)
     logger.info(f"Configuration: {settings.fetch_interval}s interval, {settings.retention_days}d retention")
-    
+
     if settings.blacklist_emails_list:
         logger.info(f"Blacklist enabled with {len(settings.blacklist_emails_list)} email(s)")
-    
+
     log_authentication_state()
-    
+
     # GeoIP initialization
     try:
         if is_license_configured():
