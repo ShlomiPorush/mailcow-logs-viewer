@@ -3876,6 +3876,11 @@ Get list of all domains with DMARC statistics.
 - `tls_first_report`, `tls_last_report`: Unix timestamps of the domain's first and last TLS report, or `null` without TLS reports
 - `stats_30d.tls_sessions`: TLS sessions reported in the last 30 days
 - `tls_rpt_status`: Result of the last DNS check of the domain's TLS-RPT record (`success`, `warning`, `error`, `unknown`), or `null` when the domain has not been checked. The daily DNS check covers the mailcow domains only
+- `dmarc_record`: `{checked, found, status, policy}`. The domain's DMARC record from the stored DNS check, or looked up live when the domain has none (a domain that is not in mailcow). `checked` is false when it could not be read; `policy` is `none`, `quarantine` or `reject` when a record was found
+- `tls_rpt_record`: `{checked, found, status}`, the same for the TLS-RPT record
+- `failing_sources`: How many source IPs failed DMARC for most of their mail in the last 30 days
+
+**Top-level field:** `daily`, messages per day across every domain in the last 30 days: `[{date, total, dmarc_pass, dmarc_fail}]`. The list is cached for 5 minutes.
 
 ---
 
@@ -4007,6 +4012,8 @@ Get daily aggregated reports for a specific domain.
 ### GET /api/dmarc/domains/{domain}/sources
 
 Get source IP analysis with GeoIP enrichment.
+
+Each source also has `reporters`: `[{org_name, count, dmarc_pass}]`, the receivers that reported the address and how much of its mail, most first.
 
 **Path Parameters:**
 - `domain`: Domain name (URL encoded)
@@ -4461,7 +4468,7 @@ TLS-RPT (TLS Reporting) provides visibility into TLS connection failures when ot
 
 ### GET /api/dmarc/domains/{domain}/tls-rpt-record
 
-The domain's TLS-RPT record, for the TLS tab of the DMARC & TLS page. Comes from the cached DNS check, or a live lookup when the domain has not been checked.
+The domain's TLS-RPT record. Comes from the cached DNS check, or a live lookup when the domain has not been checked. The DMARC & TLS page reads it from the domain overview.
 
 **Response:**
 ```json

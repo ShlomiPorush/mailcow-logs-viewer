@@ -224,10 +224,6 @@ function navigateTo(route, params = {}, updateHistory = true) {
     if (SUBPAGES[route] && !params.sub) {
         params = { ...params, sub: SUBPAGES[route].current() };
     }
-    // DMARC & TLS too: the sidebar reopens the TLS tab when it was left there
-    if (route === 'dmarc' && !Object.keys(params).length && typeof dmarcState !== 'undefined' && dmarcState.tab === 'tls') {
-        params = { tab: 'tls' };
-    }
 
     // Build the new path
     const newPath = buildPath(route, params);

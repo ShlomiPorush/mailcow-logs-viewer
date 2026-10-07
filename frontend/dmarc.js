@@ -1,52 +1,25 @@
 // =============================================================================
-// DMARC & TLS-RPT - domains list, reports, sources, upload, IMAP sync, management
+// DMARC & TLS-RPT - domains, a domain, its senders, a day of reports, upload,
+// IMAP sync and report management
 // =============================================================================
-// Split out of app.js (phase 2). Classic script sharing the global scope;
-// loaded after utils.js and app.js in index.html.
+// Classic script sharing the global scope; loaded after utils.js and app.js in
+// index.html. Every screen renders into #dmarc-view: all domains, a domain (mail
+// per day, the mail flow, its senders and TLS beside the to-do list and its
+// records), a sender, a day of DMARC reports and a day of TLS reports.
 
-// =============================================================================
-// DMARC PAGE
-// =============================================================================
-
-// DMARC Navigation State
 let dmarcState = {
-    currentView: 'domains',
+    currentView: 'domains',      // domains | domain | report | source | tls
     currentDomain: null,
-    currentSubTab: 'reports',
-    currentReportDate: null,
-    currentSourceIp: null,
-    chartInstance: null,
-    // Breadcrumb tracking: { label: string, action: function or null }
-    breadcrumb: [],
-    detailType: null, // 'report', 'source', 'tls'
-    tab: 'dmarc', // the page tab: 'dmarc' or 'tls'
-    tlsSubTab: 'reports',
-    tlsChartInstance: null
+    breadcrumb: [],              // [{ label, action }] after the page's name
+    domains: null,               // /api/dmarc/domains
+    daily: [],                   // messages per day across the domains
+    insights: null,              // /api/dmarc/insights
+    domain: null                 // the open domain: { name, overview, groups, tls, insight }
 };
 
-const DMARC_PAGE_SUBTITLES = {
-    dmarc: "What receivers report about mail sent in your domains' name",
-    tls: 'Whether other mail servers reached your domains over an encrypted connection, as they report it'
-};
-
-// The DMARC and TLS tabs of the page: mark the tab, nothing else
-function dmarcShowPageTab(tab) {
-    dmarcState.tab = tab;
-    ['dmarc', 'tls'].forEach(name => {
-        const btn = document.getElementById(`dmarc-tab-btn-${name}`);
-        if (btn) {
-            btn.classList.toggle('active', name === tab);
-            btn.setAttribute('aria-selected', name === tab ? 'true' : 'false');
-        }
-    });
-    const subtitle = document.getElementById('dmarc-subtitle');
-    if (subtitle) subtitle.textContent = DMARC_PAGE_SUBTITLES[tab];
-}
-
-// A tab click: its own address, /dmarc or /dmarc/tls
-function dmarcOpenTab(tab) {
-    dmarcState.tab = tab;
-    navigateTo('dmarc', tab === 'tls' ? { tab: 'tls' } : {});
+// The page has no tabs any more; /dmarc/tls and the old tab links open the domains
+function dmarcOpenTab() {
+    navigateTo('dmarc');
 }
 
 // Pass rates: green from 95%, amber from 80%, red below
@@ -54,108 +27,102 @@ function dmarcTone(pct) {
     return pct >= 95 ? 'ok' : pct >= 80 ? 'warn' : 'fail';
 }
 
-function dmarcRate(pct) {
-    const value = Number(pct) || 0;
-    const tone = dmarcTone(value);
-    return `<span class="ui-rate"><b class="ui-text-${tone}">${value}%</b><span class="ui-meter ui-${tone}"><i style="width: ${Math.min(100, Math.max(0, value))}%"></i></span></span>`;
+function dmarcPct(value) {
+    return `${Math.round((Number(value) || 0) * 100) / 100}%`;
 }
 
-// Alignment columns: green at 95% and up, red at 0%, plain in between
-function dmarcPctCell(pct) {
-    const tone = pct >= 95 ? 'ok' : pct === 0 ? 'fail' : '';
-    return `<span class="ui-td ui-td-end${tone ? ` ui-text-${tone}` : ''}">${pct}%</span>`;
+function dmarcNum(value) {
+    return (Number(value) || 0).toLocaleString();
 }
 
-function dmarcKpis(items) {
-    return `<div class="ui-kpis">${items.map(([value, label, tone, note]) => `
-        <div class="ui-kpi"><b class="${tone ? `ui-${tone}` : ''}">${value}</b>${label}${note ? `<small class="ui-kpi-note">${note}</small>` : ''}</div>`).join('')}
-    </div>`;
+function dmarcDay(date, long = false) {
+    const d = new Date(`${date}T00:00:00`);
+    return d.toLocaleDateString('en-US', long ? { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' } : { month: 'short', day: 'numeric' });
 }
 
-function dmarcFlag(countryCode, countryName, size = '24x18') {
-    if (!countryCode || countryCode.length !== 2) return '';
-    return `<img class="ui-flag" src="/static/assets/flags/${size}/${countryCode.toLowerCase()}.png" alt="${escapeHtml(countryName || countryCode)}" onerror="this.remove()">`;
+function dmarcTag(tone, label, solid = false) {
+    return `<span class="ui-dm-pill ui-dm-${tone}${solid ? ' is-solid' : ''}">${escapeHtml(label)}</span>`;
 }
 
-function dmarcShowView(view) {
-    ['dmarc-domains-view', 'dmarc-overview-view', 'dmarc-report-details-view', 'dmarc-source-details-view',
-        'dmarc-tls-domains-view', 'dmarc-tls-domain-view', 'dmarc-tls-details-view'].forEach(id => {
-        document.getElementById(id).classList.toggle('hidden', id !== view);
-    });
+async function dmarcGet(url) {
+    const response = await authenticatedFetch(url);
+    if (!response.ok) throw new Error(`The server answered ${response.status}`);
+    return response.json();
 }
 
-// Update breadcrumb display
+function dmarcView() {
+    return document.getElementById('dmarc-view');
+}
+
+function dmarcLoading(text) {
+    const view = dmarcView();
+    if (view) view.innerHTML = `<div class="ui-loading"><div class="loading"></div><p>${escapeHtml(text)}</p></div>`;
+}
+
+function dmarcFailed(error) {
+    const view = dmarcView();
+    if (view) view.innerHTML = `<div class="ui-dm-card"><p class="ui-dm-empty">Could not load this: ${escapeHtml(error.message)}. Try again in a moment.</p></div>`;
+}
+
+// The address of what is open; a load from the address itself does not add a step
+function dmarcPush(params) {
+    if (typeof buildPath !== 'function') return;
+    const path = buildPath('dmarc', params);
+    if (window.location.pathname !== path) history.pushState({ route: 'dmarc', params }, '', path);
+}
+
+function dmarcReplace(params) {
+    if (typeof buildPath !== 'function') return;
+    history.replaceState({ route: 'dmarc', params }, '', buildPath('dmarc', params));
+}
+
+// =============================================================================
+// BREADCRUMBS
+// =============================================================================
+
 function updateDmarcBreadcrumb() {
+    // With the top bar the levels join its crumbs; on a phone this row shows them
+    if (typeof setPageCrumbs === 'function') setPageCrumbs('dmarc', '', 'dmarcOpenTab()', dmarcState.breadcrumb);
     const container = document.getElementById('dmarc-breadcrumb');
     if (!container) return;
-
-    // With the top bar these join its breadcrumbs, and this row is hidden (kept on a phone)
-    const tabLabel = dmarcState.tab === 'tls' ? 'TLS' : 'DMARC';
-    if (typeof setPageCrumbs === 'function') {
-        setPageCrumbs('dmarc', tabLabel, `dmarcOpenTab('${dmarcState.tab === 'tls' ? 'tls' : 'dmarc'}')`, dmarcState.breadcrumb);
-    }
-
-    if (dmarcState.breadcrumb.length === 0) {
+    if (!dmarcState.breadcrumb.length) {
         container.innerHTML = '';
         container.classList.add('hidden');
         return;
     }
-
     container.classList.remove('hidden');
-    container.innerHTML = `
-        ${dmarcState.tab === 'tls'
-            ? `<button type="button" class="ui-crumb" onclick="dmarcOpenTab('tls')">TLS</button>`
-            : `<button type="button" class="ui-crumb" onclick="dmarcOpenTab('dmarc')">DMARC</button>`}
-        ${dmarcState.breadcrumb.map((item, idx) => {
-        const isLast = idx === dmarcState.breadcrumb.length - 1;
-        const separator = '<span class="ui-crumb-sep" aria-hidden="true">/</span>';
-        return isLast
+    const separator = '<span class="ui-crumb-sep" aria-hidden="true">/</span>';
+    container.innerHTML = `<button type="button" class="ui-crumb" onclick="dmarcOpenTab()">DMARC &amp; TLS</button>${dmarcState.breadcrumb.map((item, idx) =>
+        idx === dmarcState.breadcrumb.length - 1 || !item.action
             ? `${separator}<span class="ui-crumb-current">${escapeHtml(item.label)}</span>`
-            : `${separator}<button type="button" class="ui-crumb" onclick="${item.action}">${escapeHtml(item.label)}</button>`;
-    }).join('')}`;
+            : `${separator}<button type="button" class="ui-crumb" onclick="${item.action}">${escapeHtml(item.label)}</button>`).join('')}`;
 }
 
-// Set breadcrumb for different views (without "DMARC & TLS Reports" since title is static)
+// The levels after the page's name, for each screen
 function setDmarcBreadcrumb(type, data = {}) {
+    const domain = data.domain ? { label: data.domain, action: `loadDomainOverview('${escapeJsArg(data.domain)}')` } : null;
     switch (type) {
-        case 'domains':
-            // On domains list, no breadcrumb needed (we're at root)
-            dmarcState.breadcrumb = [];
-            break;
         case 'domain':
-            // Just show domain name
-            dmarcState.breadcrumb = [
-                { label: data.domain, action: null }
-            ];
+            dmarcState.breadcrumb = [{ label: data.domain, action: null }];
             break;
         case 'reportDetails':
-            dmarcState.breadcrumb = [
-                { label: data.domain, action: `loadDomainOverview('${escapeJsArg(data.domain)}')` },
-                { label: 'Daily Reports', action: `loadDomainOverview('${escapeJsArg(data.domain)}'); setTimeout(() => dmarcSwitchSubTab('reports'), 100)` },
-                { label: data.date, action: null }
-            ];
+            dmarcState.breadcrumb = [domain, { label: dmarcDay(data.date), action: null }];
             break;
         case 'sourceDetails':
-            dmarcState.breadcrumb = [
-                { label: data.domain, action: `loadDomainOverview('${escapeJsArg(data.domain)}')` },
-                { label: 'Source IPs', action: `loadDomainOverview('${escapeJsArg(data.domain)}'); setTimeout(() => dmarcSwitchSubTab('sources'), 100)` },
-                { label: data.ip, action: null }
-            ];
-            break;
-        case 'tlsDomain':
-            dmarcState.breadcrumb = [
-                { label: data.domain, action: null }
-            ];
+            dmarcState.breadcrumb = [domain, { label: data.name || data.ip, action: null }];
             break;
         case 'tlsDetails':
-            dmarcState.breadcrumb = [
-                { label: data.domain, action: `loadTlsDomain('${escapeJsArg(data.domain)}')` },
-                { label: data.date, action: null }
-            ];
+            dmarcState.breadcrumb = [domain, { label: `TLS, ${dmarcDay(data.date)}`, action: null }];
             break;
+        default:
+            dmarcState.breadcrumb = [];
     }
     updateDmarcBreadcrumb();
 }
+
+// =============================================================================
+// LOADING AND ROUTES
+// =============================================================================
 
 async function loadDmarcSettings() {
     try {
@@ -164,538 +131,602 @@ async function loadDmarcSettings() {
             dmarcConfiguration = null;
             return;
         }
-
         const data = await response.json();
         dmarcConfiguration = data.dmarc_configuration || {};
-        console.log('DMARC settings loaded:', dmarcConfiguration);
-
     } catch (error) {
         console.error('Error loading DMARC settings:', error);
         dmarcConfiguration = null;
     }
 }
 
+// The upload and sync controls: settings once, the mailbox status each time
+function dmarcLoadControls() {
+    const loads = [loadDmarcImapStatus()];
+    if (!dmarcConfiguration) loads.push(loadDmarcSettings());
+    // Manage Reports counts the reports: opened straight on a domain, read the list for it
+    if (!dmarcState.domains) dmarcGet('/api/dmarc/domains').then(list => dmarcUpdateManageButton(list.domains || [])).catch(() => {});
+    return Promise.all(loads).then(updateDmarcControls);
+}
+
+// All domains
 async function loadDmarc() {
-    console.log('Loading DMARC tab...');
     dmarcState.currentView = 'domains';
     dmarcState.currentDomain = null;
-    dmarcState.detailType = null;
-    dmarcState.currentReportDate = null;
-    dmarcState.currentSourceIp = null;
-
-    dmarcDestroyCharts();
-
-    // Hide all sub-views and show main domains view
-    dmarcShowView('dmarc-domains-view');
-    document.getElementById('dmarc-page-title').textContent = 'DMARC & TLS Reports';
-
-    // Update breadcrumb
     setDmarcBreadcrumb('domains');
-
-    // Show a loading placeholder before the data requests start
-    const domainsList = document.getElementById('dmarc-domains-list');
-    if (domainsList) {
-        domainsList.innerHTML = '<div class="ui-loading"><div class="loading"></div><p>Loading DMARC reports...</p></div>';
-    }
-
-    // Run the three requests in parallel - they do not depend on each other
-    await Promise.all([loadDmarcSettings(), loadDmarcImapStatus(), loadDmarcDomains()]);
-
-    // Ordering is not guaranteed in parallel, so refresh the controls once everything settled
-    updateDmarcControls();
+    if (!dmarcState.domains) dmarcLoading('Loading DMARC reports...');
+    else renderDmarcHome();
+    dmarcLoadControls();
+    await loadDmarcDomains();
 }
 
 /**
- * Handle DMARC route based on URL params
- * Called from switchTab when navigating to DMARC
- * @param {Object} params - Route params { domain, type, id }
+ * Open what the address names. /dmarc/tls and /dmarc/tls/<domain> are from when
+ * TLS had its own tab: they open the domains and the domain.
+ * @param {Object} params - { domain, type, id } or { tab: 'tls', domain, id }
  */
 async function handleDmarcRoute(params = {}) {
-    console.log('handleDmarcRoute called with:', params);
-
-    // An address from before TLS had its own tab (/dmarc/example.com/tls) opens it there
-    if (params.domain && params.type === 'tls') {
-        params = { tab: 'tls', domain: params.domain, id: params.id };
-        const path = buildPath('dmarc', params);
-        history.replaceState({ route: 'dmarc', params }, '', path);
-    }
-
-    dmarcShowPageTab(params.tab === 'tls' ? 'tls' : 'dmarc');
+    // Opened from the address (a link, Back, Refresh): read the domain afresh
+    dmarcState.domain = null;
     if (params.tab === 'tls') {
-        if (!dmarcConfiguration) loadDmarcSettings().then(updateDmarcControls);
-        loadDmarcImapStatus().then(updateDmarcControls);
-        if (params.domain && params.id && params.id !== 'providers') await loadTLSReportDetails(params.domain, params.id, false);
-        else if (params.domain) await loadTlsDomain(params.domain, params.id === 'providers' ? 'providers' : 'reports', false);
-        else await loadTlsDomains();
-        return;
+        if (params.domain && params.id && params.id !== 'providers') return loadTLSReportDetails(params.domain, params.id, false);
+        dmarcReplace(params.domain ? { domain: params.domain } : {});
+        return params.domain ? loadDomainOverview(params.domain, false) : loadDmarc();
     }
-
-    // If no domain specified, load domains list
-    if (!params.domain) {
-        await loadDmarc();
-        return;
-    }
-
-    // Load settings (only if missing) and IMAP status in parallel
-    const initialLoads = [loadDmarcImapStatus()];
-    if (!dmarcConfiguration) {
-        initialLoads.push(loadDmarcSettings());
-    }
-    await Promise.all(initialLoads);
-
-    // Ordering is not guaranteed in parallel, so refresh the controls once everything settled
-    updateDmarcControls();
-
-    // If type is specified with an id, load that specific view
-    if (params.type && params.id) {
-        switch (params.type) {
-            case 'report':
-                // First load domain overview (don't update URL), then report details
-                await loadDomainOverview(params.domain, false);
-                await loadReportDetails(params.domain, params.id, false);
-                return;
-            case 'source':
-                // First load domain overview (don't update URL), then source details
-                await loadDomainOverview(params.domain, false);
-                await loadSourceDetails(params.domain, params.id, false);
-                return;
-        }
-    }
-
-    // The address names the tab (/dmarc/example.com/sources); the overview opens on it
-    dmarcState.currentSubTab = DMARC_SUBTABS.includes(params.type) ? params.type : 'reports';
-    await loadDomainOverview(params.domain, false);
+    if (!params.domain) return loadDmarc();
+    if (params.type === 'report' && params.id) return loadReportDetails(params.domain, params.id, false);
+    if (params.type === 'source' && params.id) return loadSourceDetails(params.domain, params.id, false);
+    // /dmarc/<domain>/sources, /reports and /tls were tabs of the domain
+    if (params.type) dmarcReplace({ domain: params.domain });
+    return loadDomainOverview(params.domain, false);
 }
 
 // =============================================================================
-// DOMAINS LIST
+// ALL DOMAINS
 // =============================================================================
-
-function getPolicyBadgeClass(policy) {
-    switch (policy) {
-        case 'reject':
-            return 'ui-tag ui-tag-fail';
-        case 'quarantine':
-            return 'ui-tag ui-tag-warn';
-        case 'none':
-        default:
-            return 'ui-tag';
-    }
-}
-
-async function loadDmarcInsights() {
-    const container = document.getElementById('dmarc-insights-container');
-    if (!container) return;
-    try {
-        const response = await authenticatedFetch('/api/dmarc/insights');
-        if (!response.ok) { container.classList.add('hidden'); return; }
-        const data = await response.json();
-        const insights = (data.insights || []).filter(i =>
-            i.recommendations.some(r => r.type === 'tighten_policy' || r.type === 'low_pass_rate') ||
-            (i.new_sources && i.new_sources.length > 0)
-        );
-        if (insights.length === 0) { container.classList.add('hidden'); container.innerHTML = ''; return; }
-
-        const rows = insights.map(i => {
-            const failing = i.new_sources && i.new_sources.length > 0;
-            const recs = i.recommendations.map(r => {
-                const tone = r.severity === 'success' ? 'ui-text-ok' : r.severity === 'warning' ? 'ui-text-warn' : '';
-                const action = r.type === 'tighten_policy'
-                    ? ` ${uiTag(`p=${r.current_policy} → p=${r.recommended_policy}`, 'ok')}`
-                    : '';
-                return `<li class="${tone}">${escapeHtml(r.message)}${action}</li>`;
-            }).join('');
-
-            const newSrc = failing
-                ? `<p class="ui-text-fail"><b>${i.new_sources.length} new failing source(s):</b> ${i.new_sources.slice(0, 5).map(s => escapeHtml(s.source_ip) + ' (' + s.failing_messages + ')').join(', ')}</p>`
-                : '';
-
-            return `
-                <div class="ui-alert ${failing ? 'ui-alert-fail' : 'ui-alert-warn'}">
-                    <span class="ui-alert-bar"></span>
-                    <div class="ui-alert-text">
-                        <div class="ui-alert-title"><b>${escapeHtml(i.domain)}</b>
-                            <span class="ui-muted">p=${escapeHtml(i.current_policy)}, ${i.pass_rate}% pass, ${i.total_messages.toLocaleString()} msgs</span></div>
-                        <ul class="ui-insight-list">${recs}</ul>
-                        ${newSrc}
-                    </div>
-                    <button type="button" class="ui-btn ui-btn-sm" onclick="loadDomainOverview('${escapeJsArg(i.domain)}')">Open</button>
-                </div>`;
-        }).join('');
-
-        container.innerHTML = `
-            <section class="ui-panel">
-                <div class="ui-panel-head">DMARC Insights <span class="ui-count">${insights.length}</span>
-                    <span class="ui-muted ui-head-actions">last ${data.window_days} days</span></div>
-                ${rows}
-            </section>`;
-        container.classList.remove('hidden');
-    } catch (e) {
-        console.warn('Failed to load DMARC insights:', e);
-        container.classList.add('hidden');
-    }
-}
 
 async function loadDmarcDomains() {
     try {
-        const response = await authenticatedFetch('/api/dmarc/domains');
-        if (!response.ok) throw new Error('Failed to load domains');
-
-        const data = await response.json();
-        const allDomains = data.domains || [];
-        // TLS reports have their own tab
-        const domains = allDomains.filter(d => d.has_dmarc !== false);
-
-        // Insights load independently - never block the domains table on them
-        loadDmarcInsights();
-
-        const totalMessages = domains.reduce((sum, d) => sum + (d.stats_30d?.total_messages || 0), 0);
-        const totalUniqueIps = domains.reduce((sum, d) => sum + (d.stats_30d?.unique_ips || 0), 0);
-        const totalPass = domains.reduce((sum, d) => {
-            const msgs = d.stats_30d?.total_messages || 0;
-            const pct = d.stats_30d?.dmarc_pass_pct || 0;
-            return sum + (msgs * pct / 100);
-        }, 0);
-        const overallPassPct = totalMessages > 0 ? Math.round((totalPass / totalMessages) * 100) : 0;
-
-        const mainStatsContainer = document.getElementById('dmarc-main-stats-container');
-        if (mainStatsContainer) {
-            mainStatsContainer.innerHTML = dmarcKpis([
-                [domains.length, 'Total Domains'],
-                [totalMessages.toLocaleString(), 'Total Messages'],
-                [`${overallPassPct}%`, 'DMARC Pass', totalMessages ? dmarcTone(overallPassPct) : ''],
-                [totalUniqueIps.toLocaleString(), 'Unique IPs'],
-            ]);
-        }
-
-        const domainsList = document.getElementById('dmarc-domains-list');
-        dmarcUpdateManageButton(allDomains);
-
-        if (domains.length === 0) {
-            domainsList.innerHTML = '<p class="ui-empty">No DMARC reports yet.</p>';
-            return;
-        }
-
-        const day = ts => ts ? new Date(ts * 1000).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '-';
-        domainsList.innerHTML = `
-            <div class="ui-tr ui-tr-head"><span>Domain</span><span>Activity Period</span><span class="ui-td-end">Reports</span><span class="ui-td-end">Messages (30d)</span><span class="ui-td-end">Unique IPs</span><span>DMARC Pass</span></div>
-            ${domains.map(domain => {
-            const stats = domain.stats_30d || {};
-            return `
-                <div class="ui-tr" onclick="loadDomainOverview('${escapeJsArg(domain.domain)}')">
-                    <span class="ui-td"><b>${escapeHtml(domain.domain)}</b></span>
-                    <span class="ui-td"><small class="ui-sec-unit">Period </small>${day(domain.first_report)} - ${day(domain.last_report)}</span>
-                    <span class="ui-td ui-td-end"><small class="ui-sec-unit">Reports </small>${domain.report_count || 0}</span>
-                    <span class="ui-td ui-td-end"><small class="ui-sec-unit">Messages </small>${(stats.total_messages || 0).toLocaleString()}</span>
-                    <span class="ui-td ui-td-end"><small class="ui-sec-unit">Unique IPs </small>${stats.unique_ips || 0}</span>
-                    <span class="ui-td"><small class="ui-sec-unit">DMARC </small>${dmarcRate(stats.dmarc_pass_pct || 0)}</span>
-                </div>`;
-        }).join('')}`;
-
+        const [list, insights] = await Promise.all([dmarcGet('/api/dmarc/domains'), dmarcGet('/api/dmarc/insights').catch(() => null)]);
+        dmarcState.domains = list.domains || [];
+        dmarcState.daily = list.daily || [];
+        dmarcState.insights = insights;
+        dmarcState.domain = null;
+        dmarcUpdateManageButton(dmarcState.domains);
+        if (dmarcState.currentView === 'domains') renderDmarcHome();
     } catch (error) {
         console.error('Error loading DMARC domains:', error);
-        const domainsList = document.getElementById('dmarc-domains-list');
-        if (domainsList) {
-            domainsList.innerHTML = '<p class="ui-empty ui-text-fail">Failed to load DMARC reports. Refresh the page to try again.</p>';
-        }
+        if (dmarcState.currentView === 'domains') dmarcFailed(error);
     }
 }
 
-// TLS-RPT record (_smtp._tls): where sending servers deliver their TLS reports.
-// Same card as the DMARC record; the edge colour follows the check result.
-function renderTlsRptRecordCard(record) {
-    if (!record) return '';
-    const tone = { success: 'ok', warning: 'warn', error: 'fail' }[record.status] || '';
+function dmarcInsightFor(domain) {
+    return ((dmarcState.insights || {}).insights || []).find(i => i.domain === domain) || null;
+}
+
+// What to do on every domain, the most important first
+function dmarcHomeTasks(domains) {
+    const tasks = [];
+    domains.forEach(d => {
+        const rec = d.dmarc_record || {}, tls = d.tls_rpt_record || {};
+        const volume = (d.stats_30d || {}).total_messages || 0;
+        const name = escapeJsArg(d.domain);
+        if (rec.checked && !rec.found) tasks.push({ w: 1000 + volume, tone: 'fail', domain: d.domain, title: 'Publish a DMARC record',
+            text: `${uiCountLabel(volume, 'message', 'messages')} in 30 days, and receivers have no policy to refuse fakes.`, label: 'Show the record', action: `openDmarcRecord('dmarc', '${name}')` });
+        if (d.failing_sources) tasks.push({ w: 600 + d.failing_sources, tone: 'fail', domain: d.domain, title: `${uiCountLabel(d.failing_sources, 'sender fails', 'senders fail')} DMARC`,
+            text: 'Mail in your name that failed SPF and DKIM. Open the domain to see who sent it.', label: 'Look at it', action: `loadDomainOverview('${name}')` });
+        if (rec.found && rec.policy === 'none') {
+            const advice = ((dmarcInsightFor(d.domain) || {}).recommendations || [])[0];
+            tasks.push({ w: volume >= 100 ? 500 : 50, tone: 'warn', domain: d.domain, title: 'The policy only monitors (p=none)',
+                text: advice ? advice.message : 'Mail that fails is still delivered.', label: 'See the policy', action: `openDmarcRecord('dmarc', '${name}')` });
+        }
+        if (tls.checked && !tls.found) tasks.push({ w: 100, tone: 'warn', domain: d.domain, title: 'Publish a TLS-RPT record',
+            text: 'Receivers then tell you when mail to you could not be encrypted.', label: 'Show the record', action: `openDmarcRecord('tls', '${name}')` });
+    });
+    return tasks.sort((a, b) => b.w - a.w);
+}
+
+function dmarcPolicyTag(d) {
+    const rec = d.dmarc_record || {};
+    if (!rec.checked) return dmarcTag('mut', 'Not checked');
+    if (!rec.found) return dmarcTag('fail', 'No record', true);
+    return rec.policy === 'reject' ? dmarcTag('ok', 'Reject') : rec.policy === 'quarantine' ? dmarcTag('warn', 'Quarantine') : dmarcTag('warn', rec.policy ? rec.policy[0].toUpperCase() + rec.policy.slice(1) : 'Unknown');
+}
+
+function renderDmarcHome() {
+    const view = dmarcView();
+    if (!view) return;
+    const domains = dmarcState.domains || [];
+    if (!domains.length) {
+        view.innerHTML = `<div class="ui-dm-card"><p class="ui-dm-empty">No reports yet. They arrive from the report mailbox, or upload one with Upload Report.</p></div>`;
+        return;
+    }
+    const total = domains.reduce((s, d) => s + ((d.stats_30d || {}).total_messages || 0), 0);
+    const pass = total ? domains.reduce((s, d) => s + ((d.stats_30d || {}).total_messages || 0) * ((d.stats_30d || {}).dmarc_pass_pct || 0), 0) / total : 0;
+    const enforced = domains.filter(d => ['reject', 'quarantine'].includes((d.dmarc_record || {}).policy)).length;
+    view.innerHTML = `
+        <div class="ui-dm-card"><header>Last 30 days</header><div class="ui-dm-strip">
+            <div><small>Domains with reports</small><b class="is-big">${domains.length}</b></div>
+            <div><small>Messages reported</small><b class="is-big">${dmarcNum(total)}</b></div>
+            <div><small>Passed DMARC</small><b class="is-big ui-text-${dmarcTone(pass)}">${total ? dmarcPct(pass.toFixed(1)) : '-'}</b></div>
+            <div><small>Enforced (quarantine or reject)</small><b class="is-big">${enforced} of ${domains.length}</b></div></div></div>
+        <div class="ui-dm-lay"><div>
+            <div class="ui-dm-card"><header>Messages per day<small>every domain</small></header><div class="ui-dm-body">${dmarcChart(dmarcState.daily, { h: 150, open: null })}</div></div>
+            <div class="ui-dm-card"><header>Domains <span class="ui-count">${domains.length}</span></header>
+            <table class="ui-dm-tbl"><thead><tr><th>Domain</th><th>DMARC policy</th><th class="r">Messages</th><th class="r">Passed DMARC</th><th class="ui-dm-hm">TLS-RPT</th><th class="r ui-dm-hm">Encrypted</th><th class="r ui-dm-hm">Failing senders</th></tr></thead><tbody>
+            ${domains.map(d => {
+                const s = d.stats_30d || {}, tls = d.tls_rpt_record || {};
+                return `<tr class="is-go" onclick="loadDomainOverview('${escapeJsArg(d.domain)}')"><td><button type="button" class="ui-dm-link">${escapeHtml(d.domain)}</button></td>
+                    <td>${dmarcPolicyTag(d)}</td><td class="r ui-num">${d.has_dmarc ? dmarcNum(s.total_messages) : '<span class="ui-muted">-</span>'}</td>
+                    <td class="r">${d.has_dmarc ? `<span class="ui-text-${dmarcTone(s.dmarc_pass_pct)}">${dmarcPct(s.dmarc_pass_pct)}</span>` : '<span class="ui-muted">-</span>'}</td>
+                    <td class="ui-dm-hm">${!tls.checked ? dmarcTag('mut', 'Not checked') : tls.found ? dmarcTag('ok', 'Published') : dmarcTag('warn', 'Missing')}</td>
+                    <td class="r ui-dm-hm">${d.has_tls ? `<span class="ui-text-${dmarcTone(s.tls_success_pct)}">${dmarcPct(s.tls_success_pct)}</span>` : '<span class="ui-muted">-</span>'}</td>
+                    <td class="r ui-dm-hm">${d.failing_sources ? `<span class="ui-text-fail">${d.failing_sources}</span>` : '<span class="ui-muted">0</span>'}</td></tr>`;
+            }).join('')}</tbody></table></div>
+        </div><aside>${dmarcTodoCard(dmarcHomeTasks(domains), true)}</aside></div>`;
+}
+
+// =============================================================================
+// PIECES: the chart, the to-do list, the mail flow
+// =============================================================================
+
+// Messages (or TLS sessions) per day, passed on failed; a day opens its reports
+function dmarcChart(daily, opts = {}) {
+    if (!daily.length) return '<p class="ui-dm-empty">No reports in the last 30 days.</p>';
+    const h = opts.h || 190;
+    const ok = x => opts.tls ? x.total_success : x.dmarc_pass;
+    const bad = x => opts.tls ? x.total_fail : x.dmarc_fail;
+    const max = Math.max(1, ...daily.map(x => ok(x) + bad(x)));
+    const step = Math.pow(10, Math.floor(Math.log10(max)));
+    const top = Math.ceil(max / step) * step;
+    const short = v => v >= 10000 ? `${(v / 1000).toFixed(1).replace(/\.0$/, '')}k` : dmarcNum(v);
+    const domain = dmarcState.currentDomain ? escapeJsArg(dmarcState.currentDomain) : '';
+    const words = opts.tls ? ['encrypted', 'failed'] : ['passed', 'failed'];
+    return `<div class="ui-dm-legend"><span><i class="is-ok"></i>${opts.tls ? 'Encrypted' : 'Passed DMARC'}</span><span><i class="is-fail"></i>Failed</span>${opts.open !== null && domain ? '<span>A day opens its reports</span>' : ''}</div>
+        <div class="ui-dm-chart"><div class="ui-dm-grid" style="height:${h}px">${[top, top * .75, top * .5, top * .25, 0].map(t => `<i><span>${short(Math.round(t))}</span></i>`).join('')}</div>
+        <div class="ui-dm-cols" style="height:${h}px">${daily.map(x => {
+            const tip = `${dmarcDay(x.date)}: ${dmarcNum(ok(x))} ${words[0]}, ${dmarcNum(bad(x))} ${words[1]}`;
+            const day = escapeJsArg(x.date);
+            const open = opts.open === null || !domain ? 'disabled'
+                : opts.tls ? `onclick="loadTLSReportDetails('${domain}', '${day}')"` : `onclick="loadReportDetails('${domain}', '${day}')"`;
+            return `<button type="button" class="ui-dm-col" data-tip="${escapeHtml(tip)}" aria-label="${escapeHtml(tip)}" ${open}><i style="height:${ok(x) / top * h}px"></i><i class="is-fail" style="height:${bad(x) / top * h}px"></i></button>`;
+        }).join('')}</div>
+        <div class="ui-dm-x"><span>${dmarcDay(daily[0].date)}</span><span>${dmarcDay(daily[daily.length - 1].date)}</span></div></div>`;
+}
+
+function dmarcTodoCard(tasks, withDomain = false) {
+    if (!tasks.length) return '<div class="ui-dm-card"><header>To do</header><p class="ui-dm-empty">Nothing to do. The records are in place and every sender passes.</p></div>';
+    return `<div class="ui-dm-card"><header>To do <span class="ui-count">${tasks.length}</span></header>${tasks.slice(0, 8).map(t => `
+        <div class="ui-dm-task ui-dm-${t.tone}"><div><b>${escapeHtml(t.title)}</b>${withDomain ? `<small class="ui-dm-task-domain">${escapeHtml(t.domain)}</small>` : ''}
+            <p>${escapeHtml(t.text)}</p><button type="button" class="ui-btn ui-btn-sm" onclick="${t.action}">${escapeHtml(t.label)}</button></div></div>`).join('')}
+        ${tasks.length > 8 ? `<p class="ui-dm-more">and ${tasks.length - 8} more</p>` : ''}</div>`;
+}
+
+// Your domain, the senders that sent as it, the receivers that reported it
+function dmarcFlow(x) {
+    const groups = x.groups.slice(0, 8);
+    const receivers = {};
+    groups.forEach(g => g.reporters.forEach(r => {
+        const e = receivers[r.org_name] || (receivers[r.org_name] = { name: r.org_name, count: 0, pass: 0, from: {} });
+        e.count += r.count; e.pass += r.dmarc_pass; e.from[g.key] = (e.from[g.key] || 0) + r.count;
+    }));
+    const recv = Object.values(receivers).sort((a, b) => b.count - a.count).slice(0, 8);
+    if (!groups.length) return '<p class="ui-dm-empty">No senders in the last 30 days.</p>';
+    const total = groups.reduce((s, g) => s + g.total, 0) || 1, rtotal = recv.reduce((s, r) => s + r.count, 0) || 1;
+    const links = [];
+    recv.forEach((r, ri) => Object.entries(r.from).forEach(([key, count]) => {
+        const gi = groups.findIndex(g => g.key === key);
+        if (gi >= 0) links.push([gi, ri, Math.max(2, count / rtotal * 24), dmarcTone(groups[gi].passPct)]);
+    }));
+    const node = (col, i, title, sub, pct, action) => `<${action ? 'button type="button"' : 'div'} class="ui-dm-node ui-dm-${dmarcTone(pct)}" data-col="${col}" data-i="${i}" ${action ? `onclick="${action}"` : ''}><b>${escapeHtml(title)}</b><small>${escapeHtml(sub)}</small></${action ? 'button' : 'div'}>`;
+    const domain = escapeJsArg(x.name);
+    return `<div class="ui-dm-flow" id="dmarc-flow" data-g='${escapeHtml(JSON.stringify(groups.map(g => [Math.max(3, g.total / total * 24), dmarcTone(g.passPct)])))}' data-l='${escapeHtml(JSON.stringify(links))}'>
+        <svg aria-hidden="true"></svg><span class="ui-dm-colh" data-col="0">Your domain</span><span class="ui-dm-colh" data-col="1">Sent by</span><span class="ui-dm-colh" data-col="2">Reported by</span>
+        ${node(0, 0, x.name, `${dmarcNum(x.totals.total_messages)} messages · ${dmarcPct(x.totals.dmarc_pass_pct)} pass`, x.totals.dmarc_pass_pct)}
+        ${groups.map((g, i) => node(1, i, g.name, `${dmarcNum(g.total)} · ${dmarcPct(g.passPct)} pass`, g.passPct, `loadSourceDetails('${domain}', '${escapeJsArg(g.ips[0].source_ip)}')`)).join('')}
+        ${recv.map((r, i) => node(2, i, r.name, `${dmarcNum(r.count)} · ${dmarcPct(r.count ? r.pass / r.count * 100 : 0)} pass`, r.count ? r.pass / r.count * 100 : 0)).join('')}
+    </div><div class="ui-dm-legend ui-dm-flow-legend"><span><i class="is-ok"></i>95% or more pass</span><span><i class="is-warn"></i>80% or more</span><span><i class="is-fail"></i>Less</span><span>Line width is the volume</span></div>`;
+}
+
+// Lay the flow out for its width: three columns side by side, or down the page on a phone
+function drawDmarcFlow() {
+    const el = document.getElementById('dmarc-flow');
+    if (!el || !el.offsetWidth) return;
+    watchDmarcFlowSize();
+    const svg = el.querySelector('svg');
+    const w = el.clientWidth;
+    const G = JSON.parse(el.dataset.g), L = JSON.parse(el.dataset.l);
+    const cols = [[], [], []];
+    el.querySelectorAll('.ui-dm-node').forEach(nd => { cols[+nd.dataset.col][+nd.dataset.i] = nd; });
+    const color = tone => `var(--ui-${tone})`;
+    const pos = [[], [], []];
+    const narrow = w < 600;
+    el.querySelectorAll('.ui-dm-colh').forEach(h => { h.style.display = narrow ? 'none' : ''; });
+    if (narrow) {
+        let y = 0;
+        cols.forEach((list, c) => {
+            const cw = (w - (list.length - 1) * 8) / Math.max(1, list.length);
+            let rowH = 0;
+            list.forEach((nd, i) => {
+                Object.assign(nd.style, { width: `${cw}px`, left: `${i * (cw + 8)}px`, top: `${y}px` });
+                rowH = Math.max(rowH, nd.offsetHeight);
+            });
+            list.forEach((nd, i) => { pos[c][i] = { x: i * (cw + 8) + cw / 2, top: y, bottom: y + rowH }; });
+            y += rowH + 44;
+        });
+        el.style.height = `${y - 44}px`;
+    } else {
+        const nw = Math.min(210, (w - 80) / 3), xs = [0, w / 2 - nw / 2, w - nw], gap = 10;
+        const heights = cols.map(list => list.reduce((s, nd) => { nd.style.width = `${nw}px`; return s + nd.offsetHeight + gap; }, -gap));
+        const H = Math.max(...heights) + 26;
+        cols.forEach((list, c) => {
+            let y = 26 + (H - 26 - heights[c]) / 2;
+            el.querySelectorAll(`.ui-dm-colh[data-col="${c}"]`).forEach(h => { h.style.left = `${xs[c]}px`; });
+            list.forEach((nd, i) => {
+                Object.assign(nd.style, { left: `${xs[c]}px`, top: `${y}px` });
+                pos[c][i] = { left: xs[c], right: xs[c] + nw, mid: y + nd.offsetHeight / 2 };
+                y += nd.offsetHeight + gap;
+            });
+        });
+        el.style.height = `${H}px`;
+    }
+    const curve = (a, b, width, tone) => {
+        const d = narrow ? `M${a.x},${a.bottom} C${a.x},${(a.bottom + b.top) / 2} ${b.x},${(a.bottom + b.top) / 2} ${b.x},${b.top}`
+            : `M${a.right},${a.mid} C${(a.right + b.left) / 2},${a.mid} ${(a.right + b.left) / 2},${b.mid} ${b.left},${b.mid}`;
+        return `<path d="${d}" stroke="${color(tone)}" stroke-width="${width}" fill="none" stroke-opacity=".45" stroke-linecap="round"/>`;
+    };
+    svg.innerHTML = G.map(([width, tone], i) => pos[1][i] ? curve(pos[0][0], pos[1][i], width, tone) : '').join('')
+        + L.map(([gi, ri, width, tone]) => pos[1][gi] && pos[2][ri] ? curve(pos[1][gi], pos[2][ri], width, tone) : '').join('');
+}
+
+// The flow is laid out again when the window changes size
+let dmarcFlowResize = null;
+let dmarcFlowWatching = false;
+function watchDmarcFlowSize() {
+    if (dmarcFlowWatching) return;
+    dmarcFlowWatching = true;
+    window.addEventListener('resize', () => {
+        clearTimeout(dmarcFlowResize);
+        dmarcFlowResize = setTimeout(drawDmarcFlow, 150);
+    });
+}
+
+// =============================================================================
+// A DOMAIN
+// =============================================================================
+
+// The senders of a domain, one per network (ASN); an address without one stands alone
+function dmarcGroups(sources) {
+    const groups = {};
+    sources.forEach(s => {
+        const key = s.asn_org || s.source_ip;
+        const g = groups[key] || (groups[key] = { key, name: s.asn_org || s.source_ip, ips: [], total: 0, pass: 0, spf: 0, dkim: 0, reporters: {} });
+        g.ips.push(s);
+        g.total += s.total_count || 0; g.pass += s.dmarc_pass || 0; g.spf += s.spf_pass || 0; g.dkim += s.dkim_pass || 0;
+        (s.reporters || []).forEach(r => {
+            const e = g.reporters[r.org_name] || (g.reporters[r.org_name] = { org_name: r.org_name, count: 0, dmarc_pass: 0 });
+            e.count += r.count; e.dmarc_pass += r.dmarc_pass;
+        });
+    });
+    return Object.values(groups).map(g => ({
+        ...g, reporters: Object.values(g.reporters),
+        passPct: g.total ? g.pass / g.total * 100 : 0, spfPct: g.total ? g.spf / g.total * 100 : 0, dkimPct: g.total ? g.dkim / g.total * 100 : 0,
+        place: [g.ips[0].asn, g.ips[0].country_name].filter(Boolean).join(' · ')
+    })).sort((a, b) => (a.passPct >= 50) - (b.passPct >= 50) || b.total - a.total);
+}
+
+// The open domain's data, read once and kept while it stays open
+async function dmarcLoadDomain(domain) {
+    if (dmarcState.domain && dmarcState.domain.name === domain) return dmarcState.domain;
+    const enc = encodeURIComponent(domain);
+    const [overview, sources, tls, insight, days] = await Promise.all([
+        dmarcGet(`/api/dmarc/domains/${enc}/overview?days=30`),
+        dmarcGet(`/api/dmarc/domains/${enc}/sources?days=30&limit=500`),
+        dmarcGet(`/api/dmarc/domains/${enc}/tls-reports/daily?days=30&limit=31`).catch(() => ({ data: [] })),
+        dmarcGet(`/api/dmarc/insights?domain=${enc}`).catch(() => null),
+        dmarcGet(`/api/dmarc/domains/${enc}/reports?days=30&limit=31`).catch(() => ({ data: [] }))
+    ]);
+    const groups = dmarcGroups(sources.data || []);
+    const sent = groups.reduce((s, g) => s + g.total, 0);
+    dmarcState.domain = {
+        name: domain, overview, groups, tls: tls || { data: [] }, insight, days: (days || {}).data || [],
+        totals: overview.totals || {}, record: overview.dmarc_record || {}, tlsRecord: overview.tls_rpt_record || {},
+        spfPct: sent ? groups.reduce((s, g) => s + g.spf, 0) / sent * 100 : 0,
+        dkimSeen: groups.some(g => g.dkim > 0)
+    };
+    return dmarcState.domain;
+}
+
+function dmarcDomainTasks(x) {
+    const tasks = [];
+    const name = escapeJsArg(x.name);
+    const policy = x.record.record ? String(x.record.policy || (x.record.settings || {}).policy || '').toLowerCase() : '';
+    const volume = x.totals.total_messages || 0;
+    if (!x.record.record) tasks.push({ w: 1000, tone: 'fail', title: 'Publish a DMARC record', label: 'Show the record', action: `openDmarcRecord('dmarc', '${name}')`,
+        text: `${uiCountLabel(volume, 'message', 'messages')} in 30 days, and receivers have no policy to refuse fakes.` });
+    x.groups.filter(g => g.passPct < 50).forEach(g => tasks.push({ w: 600 + g.total, tone: 'fail', title: `${g.name} fails DMARC`, label: 'Look at it',
+        action: `loadSourceDetails('${name}', '${escapeJsArg(g.ips[0].source_ip)}')`,
+        text: `${uiCountLabel(g.total, 'message', 'messages')}: SPF ${dmarcPct(g.spfPct)}, DKIM ${dmarcPct(g.dkimPct)}. If it is yours, set up SPF or DKIM for it; if not, ${policy === 'reject' ? 'your policy refuses it' : 'a stricter policy stops it'}.` }));
+    if (policy === 'none') {
+        const advice = ((x.insight || {}).recommendations || [])[0];
+        tasks.push({ w: volume >= 100 ? 500 : 50, tone: 'warn', title: 'The policy only monitors (p=none)', label: 'See the policy', action: `openDmarcRecord('dmarc', '${name}')`,
+            text: advice ? advice.message : 'Mail that fails is still delivered.' });
+    }
+    x.groups.filter(g => g.passPct >= 95 && g.spfPct < 50).forEach(g => tasks.push({ w: 200, tone: 'warn', title: `${g.name} passes on DKIM only`, label: 'Look at it',
+        action: `loadSourceDetails('${name}', '${escapeJsArg(g.ips[0].source_ip)}')`, text: 'SPF does not include it. Fine for a newsletter service; add it to SPF if it should be there.' }));
+    if (!x.tlsRecord.record) tasks.push({ w: 100, tone: 'warn', title: 'Publish a TLS-RPT record', label: 'Show the record', action: `openDmarcRecord('tls', '${name}')`,
+        text: 'Receivers then tell you when mail to you could not be encrypted.' });
+    return tasks.sort((a, b) => b.w - a.w);
+}
+
+function dmarcRecordsCard(x) {
+    const name = escapeJsArg(x.name);
+    const policy = x.record.record ? String(x.record.policy || (x.record.settings || {}).policy || '').toLowerCase() : '';
+    const rows = [
+        ['DMARC', x.record.record ? `p=${policy || '?'}` : 'No record at _dmarc', policy === 'reject' ? dmarcTag('ok', 'Enforced') : policy === 'quarantine' ? dmarcTag('warn', 'Partial') : policy ? dmarcTag('warn', 'Monitoring') : dmarcTag('fail', 'Missing', true), 'dmarc'],
+        ['SPF', `${Math.round(x.spfPct)}% of mail aligned`, x.spfPct >= 95 ? dmarcTag('ok', 'OK') : dmarcTag('warn', 'Gaps'), 'dmarc'],
+        ['DKIM', x.dkimSeen ? 'Your mail is signed' : 'No signed mail in the reports', x.dkimSeen ? dmarcTag('ok', 'OK') : dmarcTag('fail', 'Missing', true), 'dmarc'],
+        ['TLS-RPT', x.tlsRecord.record ? 'Receivers report encryption' : 'No record at _smtp._tls', x.tlsRecord.record ? dmarcTag('ok', 'OK') : dmarcTag('warn', 'Missing'), 'tls']];
+    return `<div class="ui-dm-card"><header>Records<small>a record opens its details</small></header>${rows.map(([label, sub, tag, kind]) =>
+        `<button type="button" class="ui-dm-rec" onclick="openDmarcRecord('${kind}', '${name}')"><span><b>${label}</b><small>${escapeHtml(sub)}</small></span>${tag}<span class="ui-muted" aria-hidden="true">›</span></button>`).join('')}</div>`;
+}
+
+function dmarcSendersCard(x) {
+    if (!x.groups.length) return '';
+    const name = escapeJsArg(x.name);
+    return `<div class="ui-dm-card"><header>Senders <span class="ui-count">${x.groups.length}</span><small>who sent mail as ${escapeHtml(x.name)}, failing first</small></header>
+        <table class="ui-dm-tbl"><thead><tr><th>Sender</th><th class="r">Messages</th><th class="r">Passed DMARC</th><th class="r ui-dm-hm">SPF aligned</th><th class="r ui-dm-hm">DKIM aligned</th><th class="r ui-dm-hm">Addresses</th></tr></thead><tbody>
+        ${x.groups.map(g => `<tr class="is-go" onclick="loadSourceDetails('${name}', '${escapeJsArg(g.ips[0].source_ip)}')"><td><button type="button" class="ui-dm-link">${escapeHtml(g.name)}</button>${g.place ? `<small class="ui-dm-sub">${escapeHtml(g.place)}</small>` : ''}</td>
+            <td class="r ui-num">${dmarcNum(g.total)}</td><td class="r ui-text-${dmarcTone(g.passPct)}">${dmarcPct(g.passPct)}</td>
+            <td class="r ui-dm-hm ui-text-${dmarcTone(g.spfPct)}">${dmarcPct(g.spfPct)}</td><td class="r ui-dm-hm ui-text-${dmarcTone(g.dkimPct)}">${dmarcPct(g.dkimPct)}</td><td class="r ui-dm-hm">${g.ips.length}</td></tr>`).join('')}</tbody></table></div>`;
+}
+
+// One row a day: how much mail, from how many senders, who reported it
+function dmarcDaysCard(x) {
+    if (!x.days.length) return '';
+    const name = escapeJsArg(x.name);
+    return `<div class="ui-dm-card"><header>Daily reports <span class="ui-count">${x.days.length}</span></header>
+        <table class="ui-dm-tbl"><thead><tr><th>Day</th><th class="r">Messages</th><th class="r ui-dm-hm">Senders</th><th class="ui-dm-hm">Reported by</th><th class="r">Passed DMARC</th></tr></thead><tbody>
+        ${x.days.map(r => `<tr class="is-go" onclick="loadReportDetails('${name}', '${escapeJsArg(r.date)}')"><td><button type="button" class="ui-dm-link">${dmarcDay(r.date)}</button></td>
+            <td class="r ui-num">${dmarcNum(r.total_messages)}</td><td class="r ui-dm-hm">${dmarcNum(r.unique_ips)}</td><td class="ui-dm-hm ui-muted">${escapeHtml((r.reporters || []).join(', '))}</td>
+            <td class="r ui-text-${dmarcTone(r.dmarc_pass_pct)}">${dmarcPct(r.dmarc_pass_pct)}</td></tr>`).join('')}</tbody></table></div>`;
+}
+
+// Whether mail to the domain arrived encrypted, from its TLS reports
+function dmarcTlsCard(x) {
+    const days = (x.tls.data || []).slice().reverse();
+    const name = escapeJsArg(x.name);
+    if (!days.length) return `<div class="ui-dm-card"><header>Encryption of mail to you (TLS)</header><p class="ui-dm-empty">No TLS reports for ${escapeHtml(x.name)} in the last 30 days.
+        <button type="button" class="ui-dm-link" onclick="openDmarcRecord('tls', '${name}')">See the TLS-RPT record</button></p></div>`;
+    const totals = x.tls.totals || {};
+    const reporters = {};
+    days.forEach(d => (d.reports || []).forEach(r => {
+        const e = reporters[r.organization_name] || (reporters[r.organization_name] = { name: r.organization_name, ok: 0, fail: 0 });
+        e.ok += r.successful_sessions || 0; e.fail += r.failed_sessions || 0;
+    }));
+    return `<div class="ui-dm-card"><header>Encryption of mail to you (TLS)</header>
+        <div class="ui-dm-strip ui-dm-strip-line"><div><small>Sessions</small><b>${dmarcNum((totals.total_successful_sessions || 0) + (totals.total_failed_sessions || 0))}</b></div>
+            <div><small>Encrypted</small><b class="ui-text-${dmarcTone(totals.overall_success_rate)}">${dmarcPct(totals.overall_success_rate)}</b></div>
+            <div><small>Failed</small><b class="${totals.total_failed_sessions ? 'ui-text-fail' : ''}">${dmarcNum(totals.total_failed_sessions)}</b></div>
+            <div><small>Reports</small><b>${dmarcNum(totals.total_reports)}</b></div></div>
+        <div class="ui-dm-body">${dmarcChart(days, { tls: true, h: 120 })}</div>
+        <table class="ui-dm-tbl"><thead><tr><th>Reported by</th><th class="r">Sessions</th><th class="r">Failed</th><th class="r">Encrypted</th></tr></thead><tbody>
+        ${Object.values(reporters).sort((a, b) => (b.ok + b.fail) - (a.ok + a.fail)).map(r => `<tr><td>${escapeHtml(r.name)}</td><td class="r ui-num">${dmarcNum(r.ok + r.fail)}</td>
+            <td class="r ${r.fail ? 'ui-text-fail' : ''}">${dmarcNum(r.fail)}</td><td class="r ui-text-${dmarcTone(r.ok + r.fail ? r.ok / (r.ok + r.fail) * 100 : 100)}">${dmarcPct(r.ok + r.fail ? r.ok / (r.ok + r.fail) * 100 : 100)}</td></tr>`).join('')}</tbody></table></div>`;
+}
+
+async function loadDomainOverview(domain, updateUrl = true) {
+    dmarcState.currentView = 'domain';
+    dmarcState.currentDomain = domain;
+    if (updateUrl) dmarcPush({ domain });
+    setDmarcBreadcrumb('domain', { domain });
+    if (!dmarcState.domain || dmarcState.domain.name !== domain) dmarcLoading('Loading the domain...');
+    dmarcLoadControls();
+    try {
+        const x = await dmarcLoadDomain(domain);
+        if (dmarcState.currentView !== 'domain' || dmarcState.currentDomain !== domain) return;
+        dmarcView().innerHTML = `
+            <div class="ui-dm-ttl"><div><small>Last 30 days</small><h2>${escapeHtml(domain)}</h2></div></div>
+            <div class="ui-dm-lay"><div>
+                <div class="ui-dm-card"><header>Messages per day</header><div class="ui-dm-body">${dmarcChart(x.overview.daily_stats || [])}</div></div>
+                ${x.groups.length ? `<div class="ui-dm-card"><header>Mail flow<small>your domain, who sent it, who reported it</small></header><div class="ui-dm-body">${dmarcFlow(x)}</div></div>` : ''}
+                ${dmarcSendersCard(x)}
+                ${dmarcDaysCard(x)}
+                ${dmarcTlsCard(x)}
+            </div><aside>${dmarcTodoCard(dmarcDomainTasks(x))}${dmarcRecordsCard(x)}</aside></div>`;
+        drawDmarcFlow();
+    } catch (error) {
+        console.error('Error loading the DMARC domain:', error);
+        dmarcFailed(error);
+    }
+}
+
+// =============================================================================
+// THE RECORD WINDOWS
+// =============================================================================
+
+async function openDmarcRecord(kind, domain) {
+    const modal = document.getElementById('dmarc-record-modal');
+    const content = document.getElementById('dmarc-record-content');
+    document.getElementById('dmarc-record-title').textContent = `${kind === 'tls' ? 'TLS-RPT' : 'DMARC'} record · ${domain}`;
+    content.innerHTML = '<div class="ui-loading"><div class="loading"></div><p>Loading...</p></div>';
+    modal.classList.remove('hidden');
+    try {
+        const x = await dmarcLoadDomain(domain);
+        content.innerHTML = kind === 'tls' ? dmarcTlsRecord(x) : dmarcDmarcRecord(x);
+    } catch (error) {
+        content.innerHTML = `<p class="ui-dm-empty">Could not read the record: ${escapeHtml(error.message)}.</p>`;
+    }
+}
+
+function closeDmarcRecordModal() {
+    document.getElementById('dmarc-record-modal').classList.add('hidden');
+}
+
+// Esc closes the record window, like the other dialogs
+document.addEventListener('keydown', event => {
+    if (event.key !== 'Escape') return;
+    const modal = document.getElementById('dmarc-record-modal');
+    if (modal && !modal.classList.contains('hidden')) closeDmarcRecordModal();
+});
+
+function dmarcCopyBlock(text) {
+    return `<div class="ui-dm-code"><span>${escapeHtml(text)}</span><button type="button" class="ui-btn ui-btn-sm" onclick="copyToClipboard('${escapeJsArg(text)}', event)">Copy</button></div>`;
+}
+
+function dmarcDmarcRecord(x) {
+    const settings = x.record.settings || {};
+    const current = x.record.record ? String(x.record.policy || settings.policy || '').toLowerCase() : '';
+    const next = current === 'reject' ? null : current === 'quarantine' ? 'reject' : 'quarantine';
+    const failing = x.groups.filter(g => g.passPct < 50).reduce((s, g) => s + g.total, 0);
+    const ready = x.groups.filter(g => g.passPct >= 50).every(g => g.passPct >= 95);
+    const rua = (settings.aggregate_report_uris || [])[0] || `mailto:dmarc@${x.name}`;
     // Report URIs come from DNS: only mailto: becomes a link, anything else stays text
-    const formatUri = (uri) => {
+    const formatUriAsEmail = (uri) => {
         const text = String(uri).trim();
         if (!/^mailto:/i.test(text)) return escapeHtml(text);
         return `<a href="${escapeHtml(text)}" class="ui-link">${escapeHtml(text.replace(/^mailto:/i, ''))}</a>`;
     };
-    const uris = Array.isArray(record.report_uris) ? record.report_uris : [];
-    const list = (items, cls) => (Array.isArray(items) && items.length)
-        ? `<ul class="${cls} ui-dmarc-record-warn">${items.map(n => `<li>${escapeHtml(n)}</li>`).join('')}</ul>` : '';
-    return `
-        <section class="ui-panel ui-dmarc-record${tone ? ` ui-dmarc-${tone}` : ''}">
-            <div class="ui-panel-head">TLS-RPT Record</div>
-            <p class="ui-dmarc-record-msg${tone ? ` ui-text-${tone}` : ''}">${escapeHtml(record.message || 'No information')}</p>
-            ${uris.length ? `<div class="ui-kv"><span>Report addresses (rua)</span><b class="ui-kv-small">${uris.map(formatUri).join(', ')}</b></div>` : ''}
-            ${record.record ? `<details class="ui-dns-more ui-dmarc-record-raw"><summary>View Record</summary><div class="ui-dns-code"><code>${escapeHtml(record.record)}</code></div></details>` : ''}
-            ${list(record.warnings, 'ui-dns-warnings')}
-            ${list(record.info, 'ui-dns-info')}
-        </section>
-    `;
+    const option = (id, title, text) => `<div class="${current === id ? 'is-on' : ''}"><h4>${title}${current === id ? ` ${dmarcTag('mut', 'Now')}` : ''}</h4><p>${text}</p></div>`;
+    return `${x.record.record ? `${dmarcCopyBlock(x.record.record)}
+            <dl class="ui-dm-kv"><dt>Policy</dt><dd>${escapeHtml(settings.policy || current || '-')}</dd>
+            <dt>Subdomains</dt><dd>${escapeHtml(settings.subdomain_policy || 'same as the domain')}</dd>
+            <dt>Applied to</dt><dd>${escapeHtml(settings.percentage ?? 100)}% of mail</dd>
+            <dt>Reports go to</dt><dd>${(settings.aggregate_report_uris || []).map(formatUriAsEmail).join(', ') || '-'}</dd>
+            ${settings.forensic_report_uris && settings.forensic_report_uris.length ? `<dt>Failure reports go to</dt><dd>${settings.forensic_report_uris.map(formatUriAsEmail).join(', ')}</dd>` : ''}
+            <dt>Alignment</dt><dd>SPF ${escapeHtml(settings.spf_alignment || 'relaxed')}, DKIM ${escapeHtml(settings.dkim_alignment || 'relaxed')}</dd></dl>
+            ${(x.record.warnings || []).map(w => `<p class="ui-text-warn ui-dm-note">${escapeHtml(w)}</p>`).join('')}`
+        : `<p class="ui-dm-lead"><b class="ui-text-fail">No DMARC record at _dmarc.${escapeHtml(x.name)}.</b> Receivers have no policy to refuse mail that pretends to be you.</p>`}
+        <dl class="ui-dm-kv"><dt>SPF</dt><dd>${Math.round(x.spfPct)}% of your mail is aligned with SPF</dd><dt>DKIM</dt><dd>${x.dkimSeen ? 'Your mail is signed' : 'No signed mail in the reports'}</dd></dl>
+        <h4 class="ui-dm-h4">Policy</h4>
+        <div class="ui-dm-pol">${option('none', 'None', 'Mail that fails is still delivered. Reports only.')}${option('quarantine', 'Quarantine', 'Mail that fails goes to spam.')}${option('reject', 'Reject', 'Mail that fails is refused.')}</div>
+        ${next ? `<p class="ui-dm-note">${ready ? '<b class="ui-text-ok">Ready.</b> Every sender that passes, passes on 95% or more.' : '<b class="ui-text-warn">Not yet.</b> A sender passes on under 95%: fix it first.'}
+            With p=${next}, receivers would have ${next === 'reject' ? 'refused' : 'sent to spam'} <b>${dmarcNum(failing)}</b> messages in the last 30 days, all from senders that fail.</p>
+            ${dmarcCopyBlock(`_dmarc.${x.name}  TXT  "v=DMARC1; p=${next}; rua=${rua}"`)}` : '<p class="ui-dm-note ui-text-ok">The strictest policy is in place.</p>'}`;
 }
 
-async function loadDomainOverview(domain, updateUrl = true) {
-    dmarcState.currentView = 'overview';
+function dmarcTlsRecord(x) {
+    const tls = x.tlsRecord || {};
+    const user = (dmarcImapStatus && (dmarcImapStatus.configuration || {}).user) || '';
+    if (tls.record) return `${dmarcCopyBlock(tls.record)}<dl class="ui-dm-kv"><dt>Reports go to</dt><dd>${escapeHtml((tls.report_uris || []).join(', ') || '-')}</dd></dl>
+        ${(tls.warnings || []).map(w => `<p class="ui-text-warn ui-dm-note">${escapeHtml(w)}</p>`).join('')}`;
+    return `<p class="ui-dm-lead"><b class="ui-text-warn">No TLS-RPT record.</b> Sending servers report failed encrypted deliveries only to domains that publish one. Publish:</p>
+        ${dmarcCopyBlock(`_smtp._tls.${x.name}  TXT  "v=TLSRPTv1; rua=mailto:${user || `tls-reports@${x.name}`}"`)}
+        ${user ? `<p class="ui-dm-note">The address is the mailbox this page reads, so the reports show up here.</p>` : '<p class="ui-dm-note">Send the reports to the mailbox this page reads, so they show up here.</p>'}`;
+}
+
+// =============================================================================
+// A SENDER, A DAY OF REPORTS, A DAY OF TLS
+// =============================================================================
+
+async function loadSourceDetails(domain, sourceIp, updateUrl = true) {
+    dmarcState.currentView = 'source';
     dmarcState.currentDomain = domain;
-    dmarcState.detailType = null;
-    if (updateUrl) dmarcState.currentSubTab = 'reports';
-
-    // Update URL if requested (skip when called from handleDmarcRoute to avoid duplicate history)
-    if (updateUrl && typeof buildPath === 'function') {
-        const newPath = buildPath('dmarc', { domain });
-        if (window.location.pathname !== newPath) {
-            history.pushState({ route: 'dmarc', params: { domain } }, '', newPath);
-        }
-    }
-
-    // Update breadcrumb
-    setDmarcBreadcrumb('domain', { domain });
-    dmarcShowView('dmarc-overview-view');
-
+    if (updateUrl) dmarcPush({ domain, type: 'source', id: sourceIp });
+    setDmarcBreadcrumb('sourceDetails', { domain, ip: sourceIp });
+    dmarcLoading('Loading the sender...');
+    dmarcLoadControls();
     try {
-        const response = await authenticatedFetch(`/api/dmarc/domains/${encodeURIComponent(domain)}/overview?days=30`);
-        const data = await response.json();
-        const totals = data.totals || {};
-        const dmarcRecord = data.dmarc_record || null;
-
-        // DMARC record from DNS: reject is the goal, quarantine is on the way, none protects nothing
-        const dmarcRecordCardHtml = (() => {
-            if (!dmarcRecord) return '';
-            const settings = dmarcRecord.settings || {};
-            const policyLevel = (dmarcRecord.policy || settings.policy || 'unknown').toLowerCase();
-            const POLICY_TONE = { reject: 'ok', quarantine: 'warn', none: 'fail' };
-            // No policy to judge (no record, or one that does not parse): the check result colours it, like the TLS-RPT card
-            const tone = POLICY_TONE[policyLevel] || { success: 'ok', warning: 'warn', error: 'fail' }[dmarcRecord.status] || '';
-            const labels = { policy: 'Policy', subdomain_policy: 'Subdomain policy', aggregate_report_uris: 'Aggregate report URIs (rua)', forensic_report_uris: 'Forensic report URIs (ruf)', dkim_alignment: 'DKIM alignment', spf_alignment: 'SPF alignment', percentage: 'Percentage', failure_reporting_options: 'Failure reporting options' };
-            const formatVal = (v) => Array.isArray(v) ? v.join(', ') : String(v);
-            // Report URIs come from DNS: only mailto: becomes a link, anything else stays text
-            const formatUriAsEmail = (uri) => {
-                const text = String(uri).trim();
-                if (!/^mailto:/i.test(text)) return escapeHtml(text);
-                return `<a href="${escapeHtml(text)}" class="ui-link">${escapeHtml(text.replace(/^mailto:/i, ''))}</a>`;
-            };
-            const formatCell = (k, v) => {
-                if ((k === 'aggregate_report_uris' || k === 'forensic_report_uris') && Array.isArray(v) && v.length) return v.map(formatUriAsEmail).join(', ');
-                if (k === 'policy' || k === 'subdomain_policy') return uiTag(formatVal(v), POLICY_TONE[String(v || '').toLowerCase()] || '');
-                return escapeHtml(formatVal(v));
-            };
-            const settingsRows = Object.keys(labels).filter(k => settings[k] !== undefined && settings[k] !== '')
-                .map(k => `<div class="ui-kv"><span>${escapeHtml(labels[k])}</span><b class="ui-kv-small">${formatCell(k, settings[k])}</b></div>`).join('');
-            return `
-                <section class="ui-panel ui-dmarc-record${tone ? ` ui-dmarc-${tone}` : ''}">
-                    <div class="ui-panel-head">DMARC Record</div>
-                    <p class="ui-dmarc-record-msg${tone ? ` ui-text-${tone}` : ''}">${escapeHtml(dmarcRecord.message || 'No information')}</p>
-                    ${settingsRows}
-                    ${dmarcRecord.record ? `<details class="ui-dns-more ui-dmarc-record-raw"><summary>View Record</summary><div class="ui-dns-code"><code>${escapeHtml(dmarcRecord.record)}</code></div></details>` : ''}
-                    ${(dmarcRecord.warnings && dmarcRecord.warnings.length) ? `<ul class="ui-dns-warnings ui-dmarc-record-warn">${dmarcRecord.warnings.map(w => `<li>${escapeHtml(w)}</li>`).join('')}</ul>` : ''}
-                </section>
-            `;
-        })();
-
-        const statsContainer = document.getElementById('dmarc-overview-stats-container');
-        if (statsContainer) {
-            statsContainer.innerHTML = `
-                ${dmarcKpis([
-                    [(totals.total_messages || 0).toLocaleString(), 'Total Messages', '', 'Last 30 days'],
-                    [totals.dmarc_pass_pct ? `${totals.dmarc_pass_pct}%` : '-', 'DMARC Pass', totals.dmarc_pass_pct ? dmarcTone(totals.dmarc_pass_pct) : '', 'SPF + DKIM Pass'],
-                    [(totals.unique_ips || 0).toLocaleString(), 'Sources', '', `${totals.unique_reporters || 0} reporters`],
-                ])}
-                ${dmarcRecordCardHtml}
-            `;
-        }
-
-        renderDmarcChart(data.daily_stats || []);
-
-        // Load initial sub-tab content based on current state
-        dmarcShowSubTabPanel(dmarcState.currentSubTab);
-        if (dmarcState.currentSubTab === 'reports') {
-            await loadDomainReports(domain);
-        } else if (dmarcState.currentSubTab === 'sources') {
-            await loadDomainSources(domain);
-        } else {
-            // Default to reports
-            await loadDomainReports(domain);
-        }
+        const x = await dmarcLoadDomain(domain);
+        const g = x.groups.find(gr => gr.ips.some(ip => ip.source_ip === sourceIp));
+        const ips = g ? g.ips : [{ source_ip: sourceIp }];
+        const details = await Promise.all(ips.map(ip => dmarcGet(`/api/dmarc/domains/${encodeURIComponent(domain)}/sources/${encodeURIComponent(ip.source_ip)}/details?days=30`).catch(() => null)));
+        if (dmarcState.currentView !== 'source' || dmarcState.currentDomain !== domain) return;
+        const first = details.find(Boolean) || {};
+        const name = g ? g.name : (first.asn_org || sourceIp);
+        setDmarcBreadcrumb('sourceDetails', { domain, ip: sourceIp, name });
+        const sum = g || { total: (first.totals || {}).total_messages || 0, passPct: (first.totals || {}).dmarc_pass_pct || 0, spfPct: (first.totals || {}).spf_pass_pct || 0, dkimPct: (first.totals || {}).dkim_pass_pct || 0, pass: (first.totals || {}).dmarc_pass || 0, ips };
+        const policy = x.record.record ? String(x.record.policy || (x.record.settings || {}).policy || '').toLowerCase() : '';
+        const rows = details.flatMap((d, i) => ((d || {}).envelope_from_groups || []).map(e => ({ ...e, ip: ips[i].source_ip })));
+        const place = [first.city, first.country_name].filter(Boolean).join(', ');
+        dmarcView().innerHTML = `
+            <div class="ui-dm-ttl"><div><small>Sender</small><h2>${escapeHtml(name)}</h2><p class="ui-muted">${escapeHtml([place, first.asn].filter(Boolean).join(' · ') || 'No location or network known')}</p></div>
+                <div>${sum.passPct < 50 ? dmarcTag('fail', 'Fails DMARC', true) : sum.spfPct < 50 ? dmarcTag('warn', 'Passes on DKIM only') : dmarcTag('ok', 'Passes')}</div></div>
+            ${sum.passPct < 50 ? `<div class="ui-dm-card ui-dm-alert"><div class="ui-dm-body"><b class="ui-text-fail">Not set up to send as ${escapeHtml(domain)}.</b>
+                <p>Receivers ${policy === 'reject' ? 'refused' : policy === 'quarantine' ? 'sent to spam' : 'still delivered'} these ${uiCountLabel(sum.total, 'message', 'messages')}${x.record.record ? '' : ', because there is no DMARC record'}.
+                If you know this sender (a CRM, a newsletter tool, a scanner), set up SPF or DKIM for it. If you do not, someone is sending as you: ${policy === 'reject' ? 'your policy already stops it.' : x.record.record ? 'a stricter policy stops it.' : 'a DMARC record lets receivers refuse it.'}</p></div></div>` : ''}
+            <div class="ui-dm-card"><header>Last 30 days</header><div class="ui-dm-strip">
+                <div><small>Messages</small><b class="is-big">${dmarcNum(sum.total)}</b></div>
+                <div><small>Passed DMARC</small><b class="is-big ui-text-${dmarcTone(sum.passPct)}">${dmarcPct(sum.passPct)}</b></div>
+                <div><small>SPF aligned</small><b class="is-big ui-text-${dmarcTone(sum.spfPct)}">${dmarcPct(sum.spfPct)}</b></div>
+                <div><small>DKIM aligned</small><b class="is-big ui-text-${dmarcTone(sum.dkimPct)}">${dmarcPct(sum.dkimPct)}</b></div>
+                <div><small>Addresses</small><b class="is-big">${ips.length}</b></div></div></div>
+            <div class="ui-dm-card"><header>What receivers saw <span class="ui-count">${rows.length}</span></header>
+            ${rows.length ? `<table class="ui-dm-tbl"><thead><tr><th>Address</th><th>From</th><th class="ui-dm-hm">Envelope from</th><th class="r">Messages</th><th>SPF</th><th>DKIM</th><th class="ui-dm-hm">Reported by</th></tr></thead><tbody>
+            ${rows.map(e => `<tr><td class="ui-mono">${escapeHtml(e.ip)}</td><td>${escapeHtml(e.header_from || '-')}</td><td class="ui-dm-hm">${escapeHtml(e.envelope_from || '-')}</td><td class="r ui-num">${dmarcNum(e.volume)}</td>
+                <td>${e.spf_aligned ? dmarcTag('ok', 'Aligned') : dmarcTag('fail', e.spf_result || 'Fail')}</td><td>${e.dkim_aligned ? dmarcTag('ok', 'Aligned') : dmarcTag('fail', e.dkim_result || 'Fail')}</td>
+                <td class="ui-dm-hm ui-muted">${escapeHtml(e.reporter || '-')}</td></tr>`).join('')}</tbody></table>` : '<p class="ui-dm-empty">No details for this sender.</p>'}</div>`;
     } catch (error) {
-        console.error('Error loading domain overview:', error);
+        console.error('Error loading the DMARC sender:', error);
+        dmarcFailed(error);
     }
 }
 
-// The chart follows the theme: ink for all mail, green for mail that passed
-function dmarcChartColor(name, fallback) {
-    const value = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-    return value || fallback;
-}
-
-function dmarcDestroyCharts() {
-    ['chartInstance', 'tlsChartInstance'].forEach(key => {
-        if (dmarcState[key]) {
-            dmarcState[key].destroy();
-            dmarcState[key] = null;
-        }
-    });
-}
-
-function renderDmarcChart(dailyStats) {
-    dmarcLineChart('dmarc-chart', 'chartInstance', dailyStats, [
-        ['Total Messages', d => d.total || 0, '--ui-ink', '#111814'],
-        ['DMARC Pass', d => d.dmarc_pass || 0, '--ui-ok', '#12803F'],
-    ]);
-}
-
-// The TLS tab's chart: the same lines, for TLS sessions
-function renderTlsChart(dailyStats) {
-    dmarcLineChart('dmarc-tls-chart', 'tlsChartInstance', dailyStats, [
-        ['Total Sessions', d => d.total_sessions || 0, '--ui-ink', '#111814'],
-        ['TLS Success', d => d.total_success || 0, '--ui-ok', '#12803F'],
-    ]);
-}
-
-// Two lines by day: all of it in ink, the part that passed in green
-function dmarcLineChart(canvasId, stateKey, dailyStats, series) {
-    const canvas = document.getElementById(canvasId);
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-
-    if (dmarcState[stateKey]) {
-        dmarcState[stateKey].destroy();
-    }
-
-    // d.date is an ISO date string, not a timestamp
-    const labels = dailyStats.map(d => {
-        const date = new Date(d.date);
-        return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-    });
-    const muted = dmarcChartColor('--ui-muted', '#6B736E');
-    const line = dmarcChartColor('--ui-line', '#E3E6E4');
-
-    dmarcState[stateKey] = new Chart(ctx, {
-        type: 'line',
-        data: {
-            labels: labels,
-            datasets: series.map(([label, value, color, fallback]) => ({
-                label,
-                data: dailyStats.map(value),
-                borderColor: dmarcChartColor(color, fallback),
-                backgroundColor: 'transparent',
-                borderWidth: 2,
-                pointRadius: 0,
-                tension: 0.3
-            }))
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            plugins: { legend: { labels: { color: muted, boxWidth: 10, boxHeight: 10 } } },
-            scales: {
-                x: { ticks: { color: muted }, grid: { display: false } },
-                y: { beginAtZero: true, ticks: { color: muted }, grid: { color: line } }
-            }
-        }
-    });
-}
-
-async function loadDomainReports(domain) {
+async function loadReportDetails(domain, reportDate, updateUrl = true) {
+    dmarcState.currentView = 'report';
+    dmarcState.currentDomain = domain;
+    if (updateUrl) dmarcPush({ domain, type: 'report', id: reportDate });
+    setDmarcBreadcrumb('reportDetails', { domain, date: reportDate });
+    dmarcLoading('Loading the reports...');
+    dmarcLoadControls();
     try {
-        const response = await authenticatedFetch(`/api/dmarc/domains/${encodeURIComponent(domain)}/reports?days=30`);
-        const data = await response.json();
-        const reports = data.data || [];
-        const reportsList = document.getElementById('dmarc-reports-list');
-
-        if (reports.length === 0) {
-            reportsList.innerHTML = '<p class="ui-empty">No daily reports available.</p>';
-            return;
-        }
-
-        reportsList.innerHTML = `
-            <div class="ui-table ui-stack" style="--ui-cols: minmax(130px, 1.2fr) 110px 100px 100px minmax(140px, 1fr); --ui-table-min: 600px">
-                <div class="ui-tr ui-tr-head"><span>Date</span><span class="ui-td-end">Messages</span><span class="ui-td-end">Unique IPs</span><span class="ui-td-end">Reporters</span><span>DMARC Pass</span></div>
-                ${reports.map(report => {
-            const dateStr = new Date(report.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-            return `
-                <div class="ui-tr" onclick="loadReportDetails('${escapeJsArg(domain)}', '${report.date}')">
-                    <b class="ui-td">${dateStr}</b>
-                    <span class="ui-td ui-td-end"><small class="ui-sec-unit">Messages </small>${(report.total_messages || 0).toLocaleString()}</span>
-                    <span class="ui-td ui-td-end"><small class="ui-sec-unit">Unique IPs </small>${report.unique_ips}</span>
-                    <span class="ui-td ui-td-end"><small class="ui-sec-unit">Reporters </small>${report.reports.length}</span>
-                    <span class="ui-td">${dmarcRate(report.dmarc_pass_pct || 0)}</span>
-                </div>`;
-        }).join('')}
-            </div>`;
+        const [r, x] = await Promise.all([dmarcGet(`/api/dmarc/domains/${encodeURIComponent(domain)}/reports/${encodeURIComponent(reportDate)}/details`), dmarcLoadDomain(domain)]);
+        if (dmarcState.currentView !== 'report' || dmarcState.currentDomain !== domain) return;
+        const t = r.totals || {};
+        const name = escapeJsArg(domain);
+        const sender = s => s.asn_org || s.source_ip;
+        dmarcView().innerHTML = `
+            <div class="ui-dm-ttl"><div><small>DMARC reports</small><h2>${dmarcDay(reportDate, true)}</h2><p class="ui-muted">${escapeHtml(domain)}</p></div></div>
+            <div class="ui-dm-card"><header>That day</header><div class="ui-dm-strip">
+                <div><small>Messages</small><b class="is-big">${dmarcNum(t.total_messages)}</b></div>
+                <div><small>Passed DMARC</small><b class="is-big ui-text-${dmarcTone(t.dmarc_pass_pct)}">${dmarcPct(t.dmarc_pass_pct)}</b></div>
+                <div><small>SPF aligned</small><b class="is-big ui-text-${dmarcTone(t.spf_pass_pct)}">${dmarcPct(t.spf_pass_pct)}</b></div>
+                <div><small>DKIM aligned</small><b class="is-big ui-text-${dmarcTone(t.dkim_pass_pct)}">${dmarcPct(t.dkim_pass_pct)}</b></div>
+                <div><small>Reported by</small><b>${escapeHtml((t.reporters || []).join(', ') || '-')}</b></div></div></div>
+            <div class="ui-dm-card"><header>Who sent that day <span class="ui-count">${(r.sources || []).length}</span></header>
+            <table class="ui-dm-tbl"><thead><tr><th>Sender</th><th class="ui-dm-hm">Address</th><th class="ui-dm-hm">Envelope from</th><th class="r">Messages</th><th class="r">Passed DMARC</th><th class="r ui-dm-hm">SPF</th><th class="r ui-dm-hm">DKIM</th><th class="ui-dm-hm">Reported by</th></tr></thead><tbody>
+            ${(r.sources || []).map(s => `<tr class="is-go" onclick="loadSourceDetails('${name}', '${escapeJsArg(s.source_ip)}')"><td><button type="button" class="ui-dm-link">${escapeHtml(sender(s))}</button></td>
+                <td class="ui-dm-hm ui-mono">${escapeHtml(s.source_ip)}</td><td class="ui-dm-hm">${escapeHtml(s.envelope_from || '-')}</td><td class="r ui-num">${dmarcNum(s.volume)}</td>
+                <td class="r ui-text-${dmarcTone(s.dmarc_pass_pct)}">${dmarcPct(s.dmarc_pass_pct)}</td><td class="r ui-dm-hm ui-text-${dmarcTone(s.spf_pass_pct)}">${dmarcPct(s.spf_pass_pct)}</td>
+                <td class="r ui-dm-hm ui-text-${dmarcTone(s.dkim_pass_pct)}">${dmarcPct(s.dkim_pass_pct)}</td><td class="ui-dm-hm ui-muted">${escapeHtml(s.reporter || '-')}</td></tr>`).join('')}</tbody></table></div>
+            <div class="ui-dm-card"><header>Other days</header><div class="ui-dm-body">${dmarcChart(x.overview.daily_stats || [], { h: 90 })}</div></div>`;
     } catch (error) {
-        console.error('Error loading reports:', error);
+        console.error('Error loading the DMARC day:', error);
+        dmarcFailed(error);
     }
 }
 
-async function loadDomainSources(domain) {
+async function loadTLSReportDetails(domain, reportDate, updateUrl = true) {
+    dmarcState.currentView = 'tls';
+    dmarcState.currentDomain = domain;
+    if (updateUrl) dmarcPush({ tab: 'tls', domain, id: reportDate });
+    setDmarcBreadcrumb('tlsDetails', { domain, date: reportDate });
+    dmarcLoading('Loading the TLS reports...');
+    dmarcLoadControls();
     try {
-        const response = await authenticatedFetch(`/api/dmarc/domains/${encodeURIComponent(domain)}/sources?days=30`);
-        if (!response.ok) throw new Error('Failed to load sources');
-
-        const data = await response.json();
-        const sources = data.data || [];
-        const sourcesList = document.getElementById('dmarc-sources-list');
-
-        if (sources.length === 0) {
-            sourcesList.innerHTML = '<p class="ui-empty">No sources found.</p>';
-            return;
-        }
-
-        sourcesList.innerHTML = `
-            <div class="ui-table ui-stack" style="--ui-cols: minmax(220px, 2fr) 100px 80px 80px minmax(140px, 1fr); --ui-table-min: 660px">
-                <div class="ui-tr ui-tr-head"><span>Source</span><span class="ui-td-end">Messages</span><span class="ui-td-end">SPF</span><span class="ui-td-end">DKIM</span><span>DMARC Pass</span></div>
-                ${sources.map(s => `
-                <div class="ui-tr" onclick="loadSourceDetails('${escapeJsArg(domain)}', '${escapeJsArg(s.source_ip)}')">
-                    <div class="ui-td ui-q-who">
-                        <div>${dmarcFlag(s.country_code, s.country_name)}${escapeHtml(s.asn_org || 'Unknown Provider')}</div>
-                        <small>${escapeHtml(s.source_ip)}${s.country_name ? `, ${escapeHtml(s.country_name)}` : ''}</small>
-                    </div>
-                    <span class="ui-td ui-td-end"><small class="ui-sec-unit">Messages </small>${(s.total_count || 0).toLocaleString()}</span>
-                    <span class="ui-td ui-td-end ${s.spf_pass_pct >= 95 ? 'ui-text-ok' : 'ui-text-fail'}"><small class="ui-sec-unit">SPF </small>${s.spf_pass_pct}%</span>
-                    <span class="ui-td ui-td-end ${s.dkim_pass_pct >= 95 ? 'ui-text-ok' : 'ui-text-fail'}"><small class="ui-sec-unit">DKIM </small>${s.dkim_pass_pct}%</span>
-                    <span class="ui-td">${dmarcRate(s.dmarc_pass_pct || 0)}</span>
-                </div>`).join('')}
-            </div>`;
+        const r = await dmarcGet(`/api/dmarc/domains/${encodeURIComponent(domain)}/tls-reports/${encodeURIComponent(reportDate)}/details`);
+        if (dmarcState.currentView !== 'tls' || dmarcState.currentDomain !== domain) return;
+        const s = r.stats || {};
+        dmarcView().innerHTML = `
+            <div class="ui-dm-ttl"><div><small>TLS reports</small><h2>${dmarcDay(reportDate, true)}</h2><p class="ui-muted">${escapeHtml(domain)}</p></div></div>
+            <div class="ui-dm-card"><header>That day</header><div class="ui-dm-strip">
+                <div><small>Sessions</small><b class="is-big">${dmarcNum(s.total_sessions)}</b></div>
+                <div><small>Encrypted</small><b class="is-big ui-text-${dmarcTone(s.success_rate)}">${dmarcPct(s.success_rate)}</b></div>
+                <div><small>Failed</small><b class="is-big ${s.total_fail ? 'ui-text-fail' : ''}">${dmarcNum(s.total_fail)}</b></div>
+                <div><small>Receivers reporting</small><b class="is-big">${dmarcNum(s.total_providers)}</b></div></div></div>
+            <div class="ui-dm-card"><header>Who reported <span class="ui-count">${(r.providers || []).length}</span></header>
+            <table class="ui-dm-tbl"><thead><tr><th>Reported by</th><th class="ui-dm-hm">Policy</th><th class="ui-dm-hm">MX</th><th class="r">Sessions</th><th class="r">Failed</th><th class="r">Encrypted</th></tr></thead><tbody>
+            ${(r.providers || []).map(p => `<tr><td><b>${escapeHtml(p.organization_name)}</b>${p.contact_info ? `<small class="ui-dm-sub">${escapeHtml(p.contact_info)}</small>` : ''}</td>
+                <td class="ui-dm-hm">${(p.policies || []).map(q => dmarcTag('mut', String(q.policy_type || '').toUpperCase())).join(' ')}</td>
+                <td class="ui-dm-hm ui-mono">${escapeHtml((p.policies || []).flatMap(q => q.mx_host || []).join(', '))}</td><td class="r ui-num">${dmarcNum(p.total_sessions)}</td>
+                <td class="r ${p.failed_sessions ? 'ui-text-fail' : ''}">${dmarcNum(p.failed_sessions)}</td><td class="r ui-text-${dmarcTone(p.success_rate)}">${dmarcPct(p.success_rate)}</td></tr>
+                ${(p.policies || []).flatMap(q => q.failure_details || []).map(f => `<tr><td colspan="6" class="ui-text-fail ui-dm-note">${escapeHtml(f.result_type || 'Failure')}: ${dmarcNum(f.failed_session_count)} sessions${f.receiving_mx_hostname ? ` to ${escapeHtml(f.receiving_mx_hostname)}` : ''}</td></tr>`).join('')}`).join('')}</tbody></table></div>`;
     } catch (error) {
-        console.error('Error loading sources:', error);
+        console.error('Error loading the TLS day:', error);
+        dmarcFailed(error);
     }
 }
 
-// =============================================================================
-// TLS REPORTS TAB
-// =============================================================================
-
-function dmarcSwitchSubTab(tab, replaceUrl = false) {
-    dmarcState.currentSubTab = tab;
-
-    // Each tab has its own address (/dmarc/example.com/sources); Daily Reports is the domain's own
-    if (typeof currentTab !== 'undefined' && currentTab === 'dmarc' && dmarcState.currentDomain && typeof buildPath === 'function') {
-        const params = tab === 'reports' ? { domain: dmarcState.currentDomain } : { domain: dmarcState.currentDomain, type: tab };
-        const path = buildPath('dmarc', params);
-        if (window.location.pathname !== path) {
-            if (replaceUrl) history.replaceState({ route: 'dmarc', params }, '', path);
-            else history.pushState({ route: 'dmarc', params }, '', path);
-        }
-    }
-
-    dmarcShowSubTabPanel(tab);
-
-    // Load the selected tab's content
-    if (tab === 'reports') {
-        loadDomainReports(dmarcState.currentDomain);
-    } else if (tab === 'sources') {
-        loadDomainSources(dmarcState.currentDomain);
-    }
-}
-
-const DMARC_SUBTABS = ['reports', 'sources'];
-
-// Mark the tab and show its panel, without loading anything
-function dmarcShowSubTabPanel(tab) {
-    DMARC_SUBTABS.forEach(name => {
-        const button = document.getElementById(`dmarc-subtab-${name}`);
-        if (button) {
-            button.classList.toggle('active', name === tab);
-            button.setAttribute('aria-selected', name === tab ? 'true' : 'false');
-        }
-        document.getElementById(`dmarc-${name}-content`)?.classList.toggle('hidden', name !== tab);
-    });
-}
-
-// Manage Reports sits with Upload Report in the page head and counts both kinds of report
+// Manage Reports shows how many there are, and hides with none
 function dmarcUpdateManageButton(domains) {
     const manageBtn = document.getElementById('dmarc-manage-btn');
     if (!manageBtn) return;
@@ -703,426 +734,6 @@ function dmarcUpdateManageButton(domains) {
     manageBtn.textContent = `Manage Reports (${totalReports})`;
     manageBtn.classList.toggle('hidden', totalReports === 0);
 }
-
-// The last DNS check of a domain's TLS-RPT record, for the TLS domains list
-function tlsRptStatusTag(status) {
-    const tags = {
-        success: ['Published', 'ok'],
-        warning: ['Not published', 'warn'],
-        error: ['Problem', 'fail'],
-        unknown: ['Unknown', ''],
-    };
-    if (!tags[status]) {
-        return `<span title="The daily DNS check covers the mailcow domains. Open the domain to check it now.">${uiTag('Not checked', '')}</span>`;
-    }
-    const [text, tone] = tags[status];
-    return uiTag(text, tone);
-}
-
-// TLS tab: the domains that receive TLS reports, laid out like the DMARC domains list
-async function loadTlsDomains() {
-    dmarcState.currentView = 'tls_domains';
-    dmarcState.currentDomain = null;
-    dmarcState.detailType = null;
-    dmarcDestroyCharts();
-    dmarcShowView('dmarc-tls-domains-view');
-    setDmarcBreadcrumb('domains');
-
-    const list = document.getElementById('dmarc-tls-domains-list');
-    if (list) list.innerHTML = '<div class="ui-loading"><div class="loading"></div><p>Loading TLS reports...</p></div>';
-    try {
-        const response = await authenticatedFetch('/api/dmarc/domains');
-        if (!response.ok) throw new Error('Failed to load domains');
-        const allDomains = (await response.json()).domains || [];
-        dmarcUpdateManageButton(allDomains);
-        const domains = allDomains.filter(d => d.has_tls)
-            .sort((a, b) => (b.tls_last_report || 0) - (a.tls_last_report || 0));
-
-        const sessions = domains.reduce((sum, d) => sum + ((d.stats_30d || {}).tls_sessions || 0), 0);
-        const successful = domains.reduce((sum, d) => sum + ((d.stats_30d || {}).tls_sessions || 0) * ((d.stats_30d || {}).tls_success_pct ?? 100) / 100, 0);
-        const overallPct = sessions > 0 ? Math.round(successful / sessions * 100) : 0;
-        const checked = domains.filter(d => d.tls_rpt_status).length;
-        const published = domains.filter(d => d.tls_rpt_status === 'success').length;
-        const stats = document.getElementById('dmarc-tls-stats-container');
-        if (stats) {
-            stats.innerHTML = dmarcKpis([
-                [domains.length, 'Total Domains'],
-                [sessions.toLocaleString(), 'Total Sessions'],
-                [`${overallPct}%`, 'TLS Success', sessions ? dmarcTone(overallPct) : ''],
-                [checked ? `${published} of ${checked}` : '-', 'TLS-RPT Published', checked && published < checked ? 'warn' : ''],
-            ]);
-        }
-
-        if (!list) return;
-        if (!domains.length) {
-            list.innerHTML = '<p class="ui-empty">No TLS reports yet.</p>';
-            return;
-        }
-        const day = ts => ts ? new Date(ts * 1000).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '-';
-        list.innerHTML = `
-            <div class="ui-tr ui-tr-head"><span>Domain</span><span>Activity Period</span><span class="ui-td-end">Reports</span><span class="ui-td-end">Sessions (30d)</span><span>TLS-RPT Record</span><span>TLS Success</span></div>
-            ${domains.map(d => {
-            const s = d.stats_30d || {};
-            return `
-                <div class="ui-tr" onclick="loadTlsDomain('${escapeJsArg(d.domain)}')">
-                    <span class="ui-td"><b>${escapeHtml(d.domain)}</b></span>
-                    <span class="ui-td"><small class="ui-sec-unit">Period </small>${day(d.tls_first_report)} - ${day(d.tls_last_report)}</span>
-                    <span class="ui-td ui-td-end"><small class="ui-sec-unit">Reports </small>${d.tls_report_count || 0}</span>
-                    <span class="ui-td ui-td-end"><small class="ui-sec-unit">Sessions </small>${(s.tls_sessions || 0).toLocaleString()}</span>
-                    <span class="ui-td"><small class="ui-sec-unit">Record </small>${tlsRptStatusTag(d.tls_rpt_status)}</span>
-                    <span class="ui-td"><small class="ui-sec-unit">TLS </small>${dmarcRate(s.tls_success_pct ?? 100)}</span>
-                </div>`;
-        }).join('')}`;
-    } catch (error) {
-        console.error('Error loading TLS domains:', error);
-        if (list) list.innerHTML = '<p class="ui-empty ui-text-fail">Failed to load TLS reports. Refresh the page to try again.</p>';
-    }
-}
-
-const TLS_SUBTABS = ['reports', 'providers'];
-
-// Mark the TLS sub-tab and show its panel, like dmarcShowSubTabPanel
-function tlsShowSubTabPanel(tab) {
-    TLS_SUBTABS.forEach(name => {
-        const button = document.getElementById(`tls-subtab-${name}`);
-        if (button) {
-            button.classList.toggle('active', name === tab);
-            button.setAttribute('aria-selected', name === tab ? 'true' : 'false');
-        }
-        document.getElementById(`tls-${name}-content`)?.classList.toggle('hidden', name !== tab);
-    });
-}
-
-// Daily Reports is the domain's own address; Providers is /dmarc/tls/<domain>/providers
-function tlsSwitchSubTab(tab, replaceUrl = false) {
-    dmarcState.tlsSubTab = tab;
-    if (dmarcState.currentDomain) {
-        const params = tab === 'providers' ? { tab: 'tls', domain: dmarcState.currentDomain, id: 'providers' } : { tab: 'tls', domain: dmarcState.currentDomain };
-        const path = buildPath('dmarc', params);
-        if (window.location.pathname !== path) {
-            if (replaceUrl) history.replaceState({ route: 'dmarc', params }, '', path);
-            else history.pushState({ route: 'dmarc', params }, '', path);
-        }
-    }
-    tlsShowSubTabPanel(tab);
-}
-
-// TLS tab, one domain: the same layout as a DMARC domain
-async function loadTlsDomain(domain, subTab = 'reports', updateUrl = true) {
-    dmarcState.currentView = 'tls_domain';
-    dmarcState.currentDomain = domain;
-    dmarcState.detailType = null;
-    dmarcState.tlsSubTab = subTab;
-    dmarcShowPageTab('tls');
-    if (updateUrl) {
-        const params = { tab: 'tls', domain };
-        const path = buildPath('dmarc', params);
-        if (window.location.pathname !== path) history.pushState({ route: 'dmarc', params }, '', path);
-    }
-    setDmarcBreadcrumb('tlsDomain', { domain });
-    dmarcShowView('dmarc-tls-domain-view');
-    tlsShowSubTabPanel(subTab);
-
-    const statsContainer = document.getElementById('dmarc-tls-overview-stats-container');
-    const reportsList = document.getElementById('dmarc-tls-list');
-    const providersList = document.getElementById('dmarc-tls-providers-list');
-    if (statsContainer) statsContainer.innerHTML = '';
-    if (reportsList) reportsList.innerHTML = '<div class="ui-loading"><div class="loading"></div><p>Loading reports...</p></div>';
-
-    try {
-        const [dailyRes, recordRes] = await Promise.all([
-            authenticatedFetch(`/api/dmarc/domains/${encodeURIComponent(domain)}/tls-reports/daily?days=30`),
-            authenticatedFetch(`/api/dmarc/domains/${encodeURIComponent(domain)}/tls-rpt-record`).catch(() => null),
-        ]);
-        if (!dailyRes.ok) throw new Error('Failed to load TLS reports');
-        const data = await dailyRes.json();
-        const record = recordRes && recordRes.ok ? (await recordRes.json()).tls_rpt_record : null;
-        if (dmarcState.currentDomain !== domain) return;
-        const days = data.data || [];
-        const totals = data.totals || {};
-        const sessions = (totals.total_successful_sessions || 0) + (totals.total_failed_sessions || 0);
-
-        // Every provider across the 30 days, from the reports of each day
-        const byProvider = {};
-        days.forEach(d => (d.reports || []).forEach(r => {
-            const name = r.organization_name || 'Unknown';
-            const p = byProvider[name] || (byProvider[name] = { name, reports: 0, success: 0, fail: 0 });
-            p.reports += 1;
-            p.success += r.successful_sessions || 0;
-            p.fail += r.failed_sessions || 0;
-        }));
-        const providers = Object.values(byProvider).sort((a, b) => (b.success + b.fail) - (a.success + a.fail));
-
-        if (statsContainer) {
-            statsContainer.innerHTML = `
-                ${dmarcKpis([
-                    [sessions.toLocaleString(), 'Total Sessions', '', 'Last 30 days'],
-                    [sessions ? `${totals.overall_success_rate}%` : '-', 'TLS Success', sessions ? dmarcTone(totals.overall_success_rate) : '', 'Encrypted sessions'],
-                    [providers.length.toLocaleString(), 'Providers', '', `${totals.total_reports || 0} reports`],
-                ])}
-                ${renderTlsRptRecordCard(record)}
-            `;
-        }
-
-        renderTlsChart([...days].reverse());
-
-        if (reportsList) {
-            reportsList.innerHTML = !days.length ? '<p class="ui-empty">No daily reports available.</p>' : `
-                <div class="ui-table ui-stack" style="--ui-cols: minmax(130px, 1.2fr) 110px 100px 100px minmax(140px, 1fr); --ui-table-min: 600px">
-                    <div class="ui-tr ui-tr-head"><span>Date</span><span class="ui-td-end">Sessions</span><span class="ui-td-end">Failed</span><span class="ui-td-end">Reporters</span><span>TLS Success</span></div>
-                    ${days.map(d => `
-                    <div class="ui-tr" onclick="loadTLSReportDetails('${escapeJsArg(domain)}', '${escapeJsArg(d.date)}')">
-                        <b class="ui-td">${new Date(d.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</b>
-                        <span class="ui-td ui-td-end"><small class="ui-sec-unit">Sessions </small>${(d.total_sessions || 0).toLocaleString()}</span>
-                        <span class="ui-td ui-td-end${d.total_fail ? ' ui-text-fail' : ''}"><small class="ui-sec-unit">Failed </small>${(d.total_fail || 0).toLocaleString()}</span>
-                        <span class="ui-td ui-td-end"><small class="ui-sec-unit">Reporters </small>${d.organization_count || 0}</span>
-                        <span class="ui-td">${dmarcRate(d.success_rate)}</span>
-                    </div>`).join('')}
-                </div>`;
-        }
-
-        if (providersList) {
-            providersList.innerHTML = !providers.length ? '<p class="ui-empty">No providers found.</p>' : `
-                <div class="ui-table ui-stack" style="--ui-cols: minmax(220px, 2fr) 100px 80px 80px minmax(140px, 1fr); --ui-table-min: 660px">
-                    <div class="ui-tr ui-tr-head"><span>Provider</span><span class="ui-td-end">Sessions</span><span class="ui-td-end">Success</span><span class="ui-td-end">Failed</span><span>TLS Success</span></div>
-                    ${providers.map(p => {
-                    const total = p.success + p.fail;
-                    const pct = total ? Math.round(p.success / total * 10000) / 100 : 100;
-                    return `
-                    <div class="ui-tr">
-                        <div class="ui-td ui-q-who"><div>${escapeHtml(p.name)}</div><small>${p.reports} report${p.reports === 1 ? '' : 's'}</small></div>
-                        <span class="ui-td ui-td-end"><small class="ui-sec-unit">Sessions </small>${total.toLocaleString()}</span>
-                        <span class="ui-td ui-td-end ui-text-ok"><small class="ui-sec-unit">Success </small>${p.success.toLocaleString()}</span>
-                        <span class="ui-td ui-td-end${p.fail ? ' ui-text-fail' : ''}"><small class="ui-sec-unit">Failed </small>${p.fail.toLocaleString()}</span>
-                        <span class="ui-td">${dmarcRate(pct)}</span>
-                    </div>`;
-                }).join('')}
-                </div>`;
-        }
-    } catch (error) {
-        console.error('Error loading TLS reports:', error);
-        if (reportsList) reportsList.innerHTML = '<p class="ui-empty ui-text-fail">Failed to load TLS reports.</p>';
-    }
-}
-
-// TLS tab, one day: its own view, like the DMARC report details
-async function loadTLSReportDetails(domain, reportDate, updateUrl = true) {
-    dmarcState.currentView = 'tls_details';
-    dmarcState.currentDomain = domain;
-    dmarcState.detailType = 'tls';
-    dmarcShowPageTab('tls');
-    if (updateUrl) {
-        const params = { tab: 'tls', domain, id: reportDate };
-        const path = buildPath('dmarc', params);
-        if (window.location.pathname !== path) history.pushState({ route: 'dmarc', params }, '', path);
-    }
-    dmarcShowView('dmarc-tls-details-view');
-    const shortDate = new Date(reportDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-    setDmarcBreadcrumb('tlsDetails', { domain, date: shortDate });
-
-    const statsContainer = document.getElementById('tls-details-stats-container');
-    const list = document.getElementById('tls-detail-providers-list');
-    if (list) list.innerHTML = '<div class="ui-loading"><div class="loading"></div><p>Loading providers...</p></div>';
-    try {
-        const response = await authenticatedFetch(`/api/dmarc/domains/${encodeURIComponent(domain)}/tls-reports/${encodeURIComponent(reportDate)}/details`);
-        if (!response.ok) throw new Error('Failed to load TLS report details');
-        const data = await response.json();
-        const stats = data.stats || {};
-        const providers = data.providers || [];
-
-        if (statsContainer) {
-            statsContainer.innerHTML = dmarcKpis([
-                [(stats.total_sessions || 0).toLocaleString(), 'Sessions'],
-                [(stats.total_success || 0).toLocaleString(), 'Successful', '', `${stats.success_rate ?? 100}%`],
-                [(stats.total_fail || 0).toLocaleString(), 'Failed', stats.total_fail ? 'fail' : ''],
-                [(stats.total_providers || providers.length).toLocaleString(), 'Providers'],
-            ]);
-        }
-        if (!list) return;
-        if (!providers.length) {
-            list.innerHTML = '<p class="ui-empty">No providers found.</p>';
-            return;
-        }
-        list.innerHTML = `
-            <div class="ui-table ui-stack" style="--ui-cols: minmax(200px, 2fr) 100px 100px 90px minmax(140px, 1fr); --ui-table-min: 640px">
-                <div class="ui-tr ui-tr-head"><span>Provider</span><span class="ui-td-end">Sessions</span><span class="ui-td-end">Success</span><span class="ui-td-end">Failed</span><span>TLS Success</span></div>
-                ${providers.map(p => `
-                <div class="ui-tr">
-                    <div class="ui-td ui-q-who"><div>${escapeHtml(p.organization_name || 'Unknown')}</div><small>${p.policies?.length || 0} policies</small></div>
-                    <span class="ui-td ui-td-end"><small class="ui-sec-unit">Sessions </small>${(p.total_sessions || 0).toLocaleString()}</span>
-                    <span class="ui-td ui-td-end ui-text-ok"><small class="ui-sec-unit">Success </small>${(p.successful_sessions || 0).toLocaleString()}</span>
-                    <span class="ui-td ui-td-end${p.failed_sessions ? ' ui-text-fail' : ''}"><small class="ui-sec-unit">Failed </small>${(p.failed_sessions || 0).toLocaleString()}</span>
-                    <span class="ui-td">${dmarcRate(p.success_rate)}</span>
-                </div>`).join('')}
-            </div>`;
-    } catch (error) {
-        console.error('Error loading TLS report details:', error);
-        if (list) list.innerHTML = '<p class="ui-empty ui-text-fail">Failed to load TLS report details.</p>';
-    }
-}
-
-// =============================================================================
-// REPORT DETAILS
-// =============================================================================
-
-async function loadReportDetails(domain, reportDate, updateUrl = true) {
-    dmarcState.currentView = 'report_details';
-    dmarcState.currentReportDate = reportDate;
-    dmarcState.detailType = 'report';
-
-    // Update URL if requested
-    if (updateUrl && typeof buildPath === 'function') {
-        const newPath = buildPath('dmarc', { domain, type: 'report', id: reportDate });
-        if (window.location.pathname !== newPath) {
-            history.pushState({ route: 'dmarc', params: { domain, type: 'report', id: reportDate } }, '', newPath);
-        }
-    }
-
-    dmarcShowView('dmarc-report-details-view');
-
-    const shortDate = new Date(reportDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-    // Title stays static as "DMARC & TLS Reports"
-
-    // Update breadcrumb
-    setDmarcBreadcrumb('reportDetails', { domain, date: shortDate });
-
-    try {
-        const response = await authenticatedFetch(`/api/dmarc/domains/${encodeURIComponent(domain)}/reports/${reportDate}/details`);
-        const data = await response.json();
-        const totals = data.totals || {};
-
-        const statsContainer = document.getElementById('report-details-stats-container');
-        if (statsContainer) {
-            statsContainer.innerHTML = generateDetailStatsGrid(totals);
-        }
-
-        const sources = data.sources || [];
-        const sourcesList = document.getElementById('report-detail-sources-list');
-
-        if (sources.length === 0) {
-            sourcesList.innerHTML = '<p class="ui-empty">No sources found.</p>';
-            return;
-        }
-
-        sourcesList.innerHTML = `
-            <div class="ui-table ui-stack" style="--ui-cols: minmax(200px, 1.8fr) minmax(120px, 1fr) minmax(120px, 1fr) 80px 80px 80px 80px minmax(110px, 1fr); --ui-table-min: 1000px">
-                <div class="ui-tr ui-tr-head"><span>Source</span><span>From: domain</span><span>Envelope from: domain</span><span class="ui-td-end">Volume</span><span class="ui-td-end">DMARC pass</span><span class="ui-td-end">SPF aligned</span><span class="ui-td-end">DKIM aligned</span><span>Reporter</span></div>
-                ${sources.map(s => `
-                <div class="ui-tr" onclick="loadSourceDetails('${escapeJsArg(domain)}', '${escapeJsArg(s.source_ip)}')">
-                    <div class="ui-td ui-q-who">
-                        <div>${dmarcFlag(s.country_code, s.country_name)}${escapeHtml(s.asn_org || s.source_name || 'Unknown')}</div>
-                        <small>${escapeHtml(s.source_ip)}</small>
-                    </div>
-                    <span class="ui-td">${escapeHtml(s.header_from || '-')}</span>
-                    <span class="ui-td">${escapeHtml(s.envelope_from || '-')}</span>
-                    <span class="ui-td ui-td-end">${(s.volume || 0).toLocaleString()}</span>
-                    ${dmarcPctCell(s.dmarc_pass_pct)}
-                    ${dmarcPctCell(s.spf_pass_pct)}
-                    ${dmarcPctCell(s.dkim_pass_pct)}
-                    <span class="ui-td">${escapeHtml(s.reporter || '-')}</span>
-                </div>`).join('')}
-            </div>
-        `;
-    } catch (error) {
-        console.error('Error loading report details:', error);
-    }
-}
-
-
-// =============================================================================
-// SOURCE DETAILS
-// =============================================================================
-
-async function loadSourceDetails(domain, sourceIp, updateUrl = true) {
-    dmarcState.currentView = 'source_details';
-    dmarcState.currentSourceIp = sourceIp;
-    dmarcState.detailType = 'source';
-
-    // Update URL if requested
-    if (updateUrl && typeof buildPath === 'function') {
-        const newPath = buildPath('dmarc', { domain, type: 'source', id: sourceIp });
-        if (window.location.pathname !== newPath) {
-            history.pushState({ route: 'dmarc', params: { domain, type: 'source', id: sourceIp } }, '', newPath);
-        }
-    }
-
-    dmarcShowView('dmarc-source-details-view');
-    // Title stays static as "DMARC & TLS Reports"
-
-    // Update breadcrumb
-    setDmarcBreadcrumb('sourceDetails', { domain, ip: sourceIp });
-
-    try {
-        const response = await authenticatedFetch(`/api/dmarc/domains/${encodeURIComponent(domain)}/sources/${encodeURIComponent(sourceIp)}/details?days=30`);
-        const data = await response.json();
-
-        /* Update Header Info */
-        const hasGeoData = data.country_code && data.country_code.length === 2;
-        const flagImg = document.getElementById('source-detail-flag');
-        if (hasGeoData) {
-            const flagUrl = `/static/assets/flags/48x36/${data.country_code.toLowerCase()}.png`;
-            flagImg.src = flagUrl;
-            flagImg.style.display = '';
-            flagImg.onerror = function () { this.style.display = 'none'; };
-        } else {
-            flagImg.style.display = 'none';
-        }
-        document.getElementById('source-detail-name').textContent = data.source_name || data.asn_org || 'Unknown Provider';
-        document.getElementById('source-detail-ip').textContent = sourceIp;
-
-        const location = [data.city, data.country_name].filter(Boolean).join(', ') || 'Unknown location';
-        document.getElementById('source-detail-location').textContent = location;
-        document.getElementById('source-detail-asn').textContent = data.asn ? `ASN ${data.asn}` : 'No ASN';
-
-        const totals = data.totals || {};
-        const statsContainer = document.getElementById('source-details-stats-container');
-        if (statsContainer) {
-            statsContainer.innerHTML = generateDetailStatsGrid(totals);
-        }
-
-        const envelopes = data.envelope_from_groups || [];
-        const envelopeList = document.getElementById('source-detail-envelope-list');
-
-        if (envelopes.length === 0) {
-            envelopeList.innerHTML = '<p class="ui-empty">No data found.</p>';
-            return;
-        }
-
-        envelopeList.innerHTML = `
-            <div class="ui-table ui-stack" style="--ui-cols: minmax(140px, 1.2fr) minmax(140px, 1.2fr) 80px 80px 80px 80px minmax(110px, 1fr); --ui-table-min: 820px">
-                <div class="ui-tr ui-tr-head"><span>From: domain</span><span>Envelope from: domain</span><span class="ui-td-end">Volume</span><span class="ui-td-end">DMARC pass</span><span class="ui-td-end">SPF aligned</span><span class="ui-td-end">DKIM aligned</span><span>Reporter</span></div>
-                ${envelopes.map(env => {
-            const pct = count => env.volume > 0 ? Math.round((count / env.volume) * 100) : 0;
-            return `
-                <div class="ui-tr">
-                    <span class="ui-td">${escapeHtml(env.header_from || '-')}</span>
-                    <span class="ui-td">${escapeHtml(env.envelope_from || '-')}</span>
-                    <span class="ui-td ui-td-end">${(env.volume || 0).toLocaleString()}</span>
-                    ${dmarcPctCell(pct(env.dmarc_pass))}
-                    ${dmarcPctCell(pct(env.spf_aligned))}
-                    ${dmarcPctCell(pct(env.dkim_aligned))}
-                    <span class="ui-td">${escapeHtml(env.reporter || '-')}</span>
-                </div>`;
-        }).join('')}
-            </div>
-        `;
-    } catch (error) {
-        console.error('Error loading source details:', error);
-    }
-}
-
-
-function generateDetailStatsGrid(totals) {
-    return dmarcKpis([
-        [(totals.total_messages || 0).toLocaleString(), 'Volume'],
-        [(totals.dmarc_pass || 0).toLocaleString(), 'DMARC Pass', '', `${totals.dmarc_pass_pct || 0}%`],
-        [(totals.spf_pass || 0).toLocaleString(), 'SPF Aligned', '', `${totals.spf_pass_pct || 0}%`],
-        [(totals.dkim_pass || 0).toLocaleString(), 'DKIM Aligned', '', `${totals.dkim_pass_pct || 0}%`],
-    ]);
-}
-
-
-
 
 // =============================================================================
 // UPLOAD
