@@ -109,6 +109,17 @@ async function authenticatedFetch(url, options = {}) {
     return response;
 }
 
+// The reason the server gave for a failed request (FastAPI's `detail`), or its status
+async function responseError(response) {
+    let detail = '';
+    try {
+        detail = (await response.json()).detail;
+    } catch (e) {
+        // not JSON
+    }
+    return new Error(typeof detail === 'string' && detail ? detail : `HTTP ${response.status}`);
+}
+
 // Handle logout - one path for both login methods, since both are backed by
 // the same server-side session.
 function handleLogout() {
@@ -2277,7 +2288,7 @@ async function loadQueue() {
 
         const response = await authenticatedFetch('/api/queue');
         if (!response.ok) {
-            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            throw await responseError(response);
         }
 
         const data = await response.json();
@@ -2606,7 +2617,7 @@ async function loadQuarantine() {
 
         const response = await authenticatedFetch('/api/quarantine');
         if (!response.ok) {
-            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            throw await responseError(response);
         }
 
         const data = await response.json();
@@ -3890,6 +3901,7 @@ async function setContainerIgnored(container, ignored) {
 async function loadStatusContainers() {
     try {
         const response = await authenticatedFetch('/api/status/containers');
+        if (!response.ok) throw await responseError(response);
         let data = await response.json();
 
         const container = document.getElementById('status-containers');
@@ -3960,7 +3972,7 @@ async function loadStatusContainers() {
     } catch (error) {
         console.error('Failed to load containers status:', error);
         setStatusKpi('status-kpi-containers', '-');
-        document.getElementById('status-containers').innerHTML = '<p class="ui-empty ui-panel ui-text-fail">Failed to load containers</p>';
+        document.getElementById('status-containers').innerHTML = `<p class="ui-empty ui-panel ui-text-fail">Failed to load containers: ${escapeHtml(error.message)}</p>`;
     }
 }
 
@@ -3977,7 +3989,7 @@ async function loadStatusSystem() {
         ]);
 
         if (!infoResponse.ok) {
-            throw new Error(`HTTP ${infoResponse.status}: ${infoResponse.statusText}`);
+            throw await responseError(infoResponse);
         }
 
         const data = await infoResponse.json();
@@ -4034,7 +4046,7 @@ async function loadStatusStorage() {
 
         const response = await authenticatedFetch('/api/status/storage');
         if (!response.ok) {
-            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            throw await responseError(response);
         }
 
         let rawData = await response.json();

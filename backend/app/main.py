@@ -23,7 +23,8 @@ from .config import settings, set_cached_active_domains, reload_settings
 from .database import init_db, check_db_connection
 from .scheduler import start_scheduler, stop_scheduler
 from .raw_logs_worker import start_raw_logs_scheduler, stop_raw_logs_scheduler
-from .mailcow_api import mailcow_api
+from .mailcow_api import mailcow_api, MailcowAPIError
+from .utils import internal_error
 from .routers import (
     logs,
     stats,
@@ -456,6 +457,14 @@ async def app_info(request: Request):
         })
 
     return info
+
+
+@app.exception_handler(MailcowAPIError)
+async def mailcow_exception_handler(request: Request, exc: MailcowAPIError):
+    """A mailcow failure no route turned into an answer: say it was mailcow"""
+    logger.error(f"mailcow request failed: {exc}")
+    error = internal_error(exc)
+    return JSONResponse(status_code=error.status_code, content={"detail": error.detail})
 
 
 @app.exception_handler(Exception)

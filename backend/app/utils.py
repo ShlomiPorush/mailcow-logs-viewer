@@ -50,16 +50,22 @@ def ensure_timezone_aware(dt: datetime) -> datetime:
     return dt
 
 
+MAILCOW_NO_ANSWER = "mailcow did not answer. Try again in a moment."
+
+
 def internal_error(e: Exception, status_code: int = 500):
     """
     Build an HTTPException that hides internal error details from clients
     unless DEBUG is enabled. Callers should log the full exception first.
+    A mailcow failure says so (502).
     """
     from fastapi import HTTPException
     from .config import settings
-    from .mailcow_api import MailcowRwKeyError
+    from .mailcow_api import MailcowAPIError, MailcowRwKeyError
     # mailcow refused the Read-Write key: say so, it is the admin's to fix
     if isinstance(e, MailcowRwKeyError):
         return HTTPException(status_code=502, detail=str(e))
+    if isinstance(e, MailcowAPIError):
+        return HTTPException(status_code=502, detail=str(e) if settings.debug else MAILCOW_NO_ANSWER)
     detail = str(e) if settings.debug else "Internal server error"
     return HTTPException(status_code=status_code, detail=detail)
