@@ -1329,6 +1329,7 @@ function renderSettings(content, data) {
                 // Detect if any features are being newly disabled
                 const PURGEABLE_FEATURES = ['netfilter', 'domains', 'dmarc', 'mailbox-stats', 'logs', 'blacklist', 'spam-filter', 'quarantine', 'devices'];
                 let newlyDisabledFeatures = [];
+                let featuresChanged = false;
                 if ('disabled_features' in payload) {
                     const oldDisabled = new Set(
                         (window.disabledFeatures || []).map(s => s.trim().toLowerCase())
@@ -1337,6 +1338,7 @@ function renderSettings(content, data) {
                         (payload.disabled_features || '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean)
                     );
                     newlyDisabledFeatures = [...newDisabled].filter(f => !oldDisabled.has(f));
+                    featuresChanged = newlyDisabledFeatures.length > 0 || [...oldDisabled].some(f => !newDisabled.has(f));
 
                     // Show confirmation modal if any purgeable features are being disabled
                     const purgeableNewlyDisabled = newlyDisabledFeatures.filter(f => PURGEABLE_FEATURES.includes(f));
@@ -1379,8 +1381,12 @@ function renderSettings(content, data) {
                         return;
                     }
                     
-                    // If disabled_features changed, purge data for newly disabled features and reload
-                    if ('disabled_features' in payload) {
+                    // The rest of the app reads features, title, logo, sign-in and the mailcow
+                    // address once, when the page loads: a change to one of them reloads it.
+                    // Any other save refreshes Settings in place.
+                    const shellChanged = SETTINGS_READ_AT_PAGE_LOAD.some(key =>
+                        key in payload && String(payload[key] ?? '') !== String(data.editable_config[key] ?? ''));
+                    if (featuresChanged || shellChanged) {
                         const purgeableNewlyDisabled = newlyDisabledFeatures.filter(f => PURGEABLE_FEATURES.includes(f));
                         if (purgeableNewlyDisabled.length > 0) {
                             showToast(`Purging data for ${purgeableNewlyDisabled.length} disabled feature(s)...`, 'info');
@@ -1401,11 +1407,12 @@ function renderSettings(content, data) {
                         if (checkToast) {
                             try { sessionStorage.setItem(SETTINGS_TOAST_AFTER_RELOAD, JSON.stringify(checkToast)); } catch (e) { /* private mode: the status tag still shows it */ }
                         }
-                        showToast('Features updated - reloading...', 'success');
+                        showToast(featuresChanged ? 'Features updated - reloading...' : 'Settings saved - reloading...', 'success');
                         setTimeout(() => location.reload(), 600);
                         return;
                     }
 
+                    if (!checkToast && !isEnablingBasicAuth) showToast('Settings saved', 'success');
                     await loadSettings();
                 } catch (err) {
                     uiSaveBarBusy('settings-savebar', false);
@@ -1848,6 +1855,10 @@ async function validateCredential(name, toastNow) {
     if (toastNow) showToast(...toast);
     return toast;
 }
+
+// Settings the rest of the app reads once, when the page loads (from /api/info);
+// saving a change to one reloads the page so it takes effect everywhere
+const SETTINGS_READ_AT_PAGE_LOAD = ['app_title', 'app_logo_url', 'basic_auth_enabled', 'oauth2_enabled', 'mailcow_url'];
 
 // A toast that has to outlive the reload after saving (a credential check)
 const SETTINGS_TOAST_AFTER_RELOAD = 'settingsToastAfterReload';
