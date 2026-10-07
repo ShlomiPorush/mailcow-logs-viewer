@@ -352,7 +352,7 @@ Settings for the automatic quarantine rule processing feature. When rules are de
 
 | Variable | Type | Default | Description |
 |----------|------|---------|-------------|
-| `AUTH_MAX_FAILURE_CLIENTS` | integer | `10000` | Maximum client addresses tracked for failed Basic Auth attempts per process. Must be positive. At capacity, Basic Auth from untracked addresses receives 429 before credential verification; existing sessions remain usable. Expired counters are reclaimed automatically. |
+| `AUTH_MAX_FAILURE_CLIENTS` | integer | `10000` | Maximum clients tracked for failed Basic Auth attempts per process (an IPv4 address or an IPv6 /64 network each). Must be positive. A full table never refuses a correct password: expired counters are reclaimed first, and otherwise the client whose last failed attempt is oldest is dropped to make room for a new one. Existing sessions remain usable. |
 | `SESSION_MAX_ENTRIES` | integer | `50` | Maximum live Basic Auth and OAuth2 sessions per process. Must be positive. New sessions are refused at capacity until a session expires or is logged out. Existing sessions are never evicted. |
 | `BASIC_AUTH_ENABLED` | boolean | `false` | Enable Basic HTTP authentication. When enabled, ALL pages and API endpoints require Basic Auth. If both `BASIC_AUTH_ENABLED` and `OAUTH2_ENABLED` are true, both methods are available |
 | `AUTH_USERNAME` | string | `admin` | Basic auth username |
@@ -360,8 +360,10 @@ Settings for the automatic quarantine rule processing feature. When rules are de
 
 ### Login attempt limits and reverse proxies
 
-Basic Auth allows 10 failed attempts per client address within 15 minutes. The
-same limit applies to password checks on `/api/info` and protected API endpoints.
+Basic Auth allows 10 failed attempts per client address within 15 minutes. IPv6
+clients are counted per /64 network, because a single host usually holds a whole
+/64. The same limit applies to password checks on `/api/info` and protected API
+endpoints.
 Further attempts return HTTP 429 with `Retry-After`. Public login information
 without credentials and already signed-in sessions remain available.
 

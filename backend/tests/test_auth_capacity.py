@@ -50,23 +50,26 @@ def test_full_sessions_reject_new_login_and_preserve_cookies():
 @pytest.mark.parametrize("peer,trusted", [
     ("192.0.2.50", "127.0.0.1"), ("192.0.2.10", "192.0.2.10"),
 ])
-def test_failure_capacity_rejects_unknown_clients_before_password_check(monkeypatch, peer, trusted):
+def test_failure_capacity_accepts_correct_password_and_counts_wrong_ones(peer, trusted):
+    # A full table used to answer 429 before checking the password, which let
+    # anyone who filled it lock the operator out of new logins.
     for ip in ["198.51.100.1", "198.51.100.2"]:
         for _ in range(auth._AUTH_MAX_FAILURES):
             auth._record_auth_failure(ip)
-    monkeypatch.setattr(auth, "verify_credentials", lambda *args: pytest.fail("Checked password at capacity"))
     client = client_at(peer, trusted)
-    for path in ["/api/info", "/api/auth/verify", "/api/auth/session"]:
-        method = "POST" if path.endswith("/session") else "GET"
-        response = client.request(method, path, headers={**credentials(), "X-Forwarded-For": "192.0.2.51"})
-        assert response.status_code == 429
+    headers = {**credentials(), "X-Forwarded-For": "192.0.2.51"}
+    assert "version" in client.get("/api/info", headers=headers).json()
+    assert client.get("/api/auth/verify", headers=headers).status_code == 200
+    assert client.post("/api/auth/session", headers=headers).status_code == 200
+    # Correct passwords are not recorded, so the tracked clients are untouched
     assert len(auth._auth_failures) == 2
     assert auth._is_rate_limited("198.51.100.1")
-    assert client.get("/api/info").status_code == 200
-    assert client.get("/api/auth/provider-info").status_code == 200
-    cookie = session.create_session({"username": "admin"})
-    client.cookies.set(session.SESSION_COOKIE_NAME, cookie)
-    assert client.get("/api/auth/status").json()["authenticated"] is True
+    # A wrong guess from a new client is counted; the least recent client makes room
+    wrong = {**credentials("wrong"), "X-Forwarded-For": "192.0.2.51"}
+    assert client_at(peer, trusted).get("/api/auth/verify", headers=wrong).status_code == 401
+    assert len(auth._auth_failures) == 2
+    assert "198.51.100.1" not in auth._auth_failures
+    assert auth._is_rate_limited("198.51.100.2")
 
 
 def test_expired_sessions_are_reclaimed_on_admission():
@@ -104,7 +107,7 @@ def test_live_capacity_changes_do_not_evict_sessions_or_counters(monkeypatch):
         auth._record_auth_failure(ip)
     monkeypatch.setattr(settings, "session_max_entries", 1)
     monkeypatch.setattr(settings, "auth_max_failure_clients", 1)
-    assert client_at("192.0.2.52").get("/api/auth/verify", headers=credentials()).status_code == 429
+    assert client_at("192.0.2.52").get("/api/auth/verify", headers=credentials()).status_code == 200
     with pytest.raises(session.SessionCapacityError):
         session.create_session({"username": "admin"})
     assert all(session.get_session(cookie) for cookie in cookies)
@@ -117,17 +120,16 @@ def test_live_capacity_changes_do_not_evict_sessions_or_counters(monkeypatch):
     assert client_at("192.0.2.52").get("/api/auth/verify", headers=credentials()).status_code == 200
 
 
-def test_failure_capacity_recovers_after_expiry(monkeypatch):
+def test_full_table_reclaims_expired_counters_before_evicting(monkeypatch):
     now = [1000.0]
     monkeypatch.setattr(auth.time, "time", lambda: now[0])
     monkeypatch.setattr(auth.time, "monotonic", lambda: now[0])
     for ip in ["198.51.100.1", "198.51.100.2"]:
         auth._record_auth_failure(ip)
-    client = client_at()
-    assert client.get("/api/auth/verify", headers=credentials()).status_code == 429
     now[0] += auth._AUTH_WINDOW_SECONDS + 1
-    assert client.get("/api/auth/verify", headers=credentials()).status_code == 200
-    assert not auth._auth_failures
+    auth._record_auth_failure("198.51.100.3")
+    assert client_at().get("/api/auth/verify", headers=credentials("wrong")).status_code == 401
+    assert list(auth._auth_failures) == ["198.51.100.3", "192.0.2.50"]
 
 
 def test_parallel_unknown_clients_do_not_overrun_failure_capacity():
@@ -139,8 +141,7 @@ def test_parallel_unknown_clients_do_not_overrun_failure_capacity():
 
     with ThreadPoolExecutor(max_workers=12) as pool:
         results = list(pool.map(attempt, range(12)))
-    assert results.count(401) == 2
-    assert results.count(429) == 10
+    assert results.count(401) == 12
     assert len(auth._auth_failures) == 2
 
 
@@ -152,7 +153,7 @@ def test_saturated_cleanup_scans_are_throttled(monkeypatch):
     monkeypatch.setattr(auth.time, "monotonic", lambda: 1000.0)
     monkeypatch.setattr(auth, "cleanup_expired_auth_failures", lambda: (calls.append(True), cleanup()))
     for index in range(10):
-        assert client_at(f"192.0.2.{index + 1}").get("/api/auth/verify", headers=credentials()).status_code == 429
+        assert client_at(f"192.0.2.{index + 1}").get("/api/auth/verify", headers=credentials("wrong")).status_code == 401
     assert len(calls) == 1
 
 
