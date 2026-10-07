@@ -21,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Local domains replaced when mailcow did not answer** - When reading the domains from mailcow failed but the alias domains were read, the local domain sync kept only the alias domains, so mail of the primary domains was no longer counted as local. A failed read now leaves the local domains as they were and records the sync as failed.
 - **Manual entries lost from the Rspamd recipient blacklist** - When the suppression sync could not read `global_rcpt_blacklist.map` from Rspamd, it wrote the map anyway with only its own section, dropping the entries added by hand. It now leaves the map alone, records the sync as failed and tries again on the next run.
 - **"Internal server error" when mailcow did not answer** - Queue, Quarantine, Domains, Status and the actions on them (release, delete, learn, Fail2ban changes) showed an internal server error when mailcow failed or refused a request. They now say that mailcow did not answer, and the background jobs record mailcow's own error instead of an unreadable one.
 - **mailcow refusing the app until a restart** - After mailcow dropped its connections, every later call from the running app could be refused (403) until the app was restarted. The app no longer keeps mailcow's session cookie, and opens new connections after a refused or dropped one. While mailcow does not answer about Fail2ban, the Security page now loads without its bans and says so, instead of failing.

@@ -27,6 +27,8 @@ READS = [
     ("get_status_vmail", (), {}),
     ("get_status_version", (), {}),
     ("get_domains", (), {}),
+    ("get_active_domains", (), {}),
+    ("get_alias_domain_map", (), {}),
     ("get_mailboxes", (), {}),
     ("get_aliases", (), {}),
     ("get_dkim", ("example.com",), {}),
@@ -143,3 +145,23 @@ def test_a_mailcow_error_no_route_caught_is_still_a_mailcow_answer(no_debug):
     response = asyncio.run(mailcow_exception_handler(None, MailcowAPIError("API returned status 500")))
     assert response.status_code == 502
     assert json.loads(response.body) == {"detail": "mailcow did not answer. Try again in a moment."}
+
+
+def test_local_domains_stay_as_they_were_when_mailcow_fails(monkeypatch):
+    """A failed domain read must not leave only the alias domains as local."""
+    from app import scheduler
+
+    async def aliases():
+        return {"alias.example": "example.com"}
+
+    monkeypatch.setattr(scheduler.mailcow_api, "get_domains", _no_mailcow_async)
+    monkeypatch.setattr(scheduler.mailcow_api, "get_alias_domain_map", aliases)
+    cached = []
+    monkeypatch.setattr(scheduler, "set_cached_active_domains", cached.append)
+    monkeypatch.setattr(scheduler, "update_job_status", lambda *a, **k: None)
+    assert asyncio.run(scheduler.sync_local_domains()) is not True
+    assert cached == []
+
+
+async def _no_mailcow_async(*args, **kwargs):
+    raise MailcowAPIError("API returned status 500")
