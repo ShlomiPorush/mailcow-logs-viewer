@@ -70,7 +70,10 @@ function renderDomains(container, data) {
         const lastCheck = data.last_dns_check ? formatTime(data.last_dns_check) : 'Never';
         // When the DNS was last checked sits on a line under the page title
         const lastChecked = document.getElementById('domains-last-checked');
-        if (lastChecked) lastChecked.innerHTML = `<span title="${data.last_dns_check ? escapeHtml(formatTime(data.last_dns_check)) : ''}">Last checked: ${data.last_dns_check ? formatAgo(data.last_dns_check) : escapeHtml(lastCheck)}</span>`;
+        if (lastChecked) {
+            if (data.last_dns_check) uiAgo(lastChecked, data.last_dns_check, 'Updated ');
+            else lastChecked.textContent = 'Not checked yet';
+        }
         dnsCheckInfo.innerHTML = `
             <button id="check-all-dns-btn" onclick="checkAllDomainsDNS()" class="ui-btn ui-btn-primary">
                 <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
@@ -163,7 +166,7 @@ function renderDomainDnsSection(domain) {
     return `
         <div class="ui-list-head">
             <h4 class="ui-md-h">DNS Security Records</h4>
-            <span class="ui-muted ui-head-actions" title="${dns.checked_at ? escapeHtml(formatTime(dns.checked_at)) : ''}">Last checked: ${dns.checked_at ? formatAgo(dns.checked_at) : 'Not checked'}</span>
+            <span class="ui-muted ui-head-actions" title="${dns.checked_at ? escapeHtml(formatTime(dns.checked_at)) : ''}">${dns.checked_at ? `Updated ${formatAgo(dns.checked_at)}` : 'Not checked yet'}</span>
             <button data-domain="${escapeHtml(domain.domain_name)}"
                 onclick="event.stopPropagation(); checkSingleDomainDNS(this.dataset.domain)"
                 class="ui-btn ui-btn-sm" title="Check DNS for this domain">Check</button>

@@ -3836,7 +3836,7 @@ async function loadStatus() {
             loadStatusAppVersion()
         ]);
         const lastChecked = document.getElementById('status-last-checked');
-        uiAgo(lastChecked, new Date().toISOString(), 'Last checked ');
+        uiAgo(lastChecked, new Date().toISOString(), 'Updated ');
         renderStatusAttention();
     } catch (error) {
         console.error('Failed to load status:', error);

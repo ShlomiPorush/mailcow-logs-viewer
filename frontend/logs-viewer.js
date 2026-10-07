@@ -911,12 +911,7 @@ function updateLogStatusBar() {
     }
     
     if (updateEl) {
-        if (logsState.lastUpdateTime) {
-            const seconds = Math.floor((new Date() - logsState.lastUpdateTime) / 1000);
-            updateEl.textContent = `Last update: ${seconds}s ago`;
-        } else {
-            updateEl.textContent = 'Last update: just now';
-        }
+        uiAgo(updateEl, (logsState.lastUpdateTime || new Date()).toISOString(), 'Updated ');
     }
 }
 
