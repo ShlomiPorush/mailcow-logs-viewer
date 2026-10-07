@@ -467,6 +467,12 @@ When `SETTINGS_EDIT_VIA_UI_ENABLED=true`, configuration is resolved in this orde
 
 So: ENV overrides DB, and DB overrides defaults. If an environment variable is explicitly set, it always takes precedence over the value stored in the database. This prevents lockout: if you make a configuration mistake in the UI (e.g., wrong OIDC URL or password typo), you can fix it by setting the correct value in your `.env` / `docker-compose.yml` and restarting.
 
+If the settings stored in the database cannot be read, the app keeps the
+settings it already has instead of falling back to the ENV values alone (which
+could turn off authentication that was enabled from the web UI). The request
+that needed them fails, and at startup the app stops with an error instead of
+starting; it starts normally once the database answers again.
+
 ---
 
 ## Settings That Cannot Be Changed via UI
