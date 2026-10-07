@@ -707,7 +707,7 @@
 .ui-sec-act.is-unban { color: var(--ui-ok); }
 .ui-sec-more { margin-top: 8px; }
 .ui-sec-bars { display: grid; gap: 4px; padding: 0 var(--ui-pad-x) 6px; }
-.ui-sec-bar { display: grid; grid-template-columns: 130px minmax(0, 1fr) 44px; gap: 8px; align-items: center; width: 100%; padding: 4px 6px; margin: 0 -6px;
+.ui-sec-bar { display: grid; grid-template-columns: 120px minmax(0, 1fr) auto 36px; gap: 8px; align-items: center; width: 100%; padding: 4px 6px; margin: 0 -6px;
     border: 0; border-radius: 6px; background: none; color: inherit; font: inherit; font-size: 12.5px; text-align: start; cursor: pointer; }
 .ui-sec-bar:hover { background: var(--ui-bg); }
 .ui-sec-bar.is-on { background: var(--ui-bg); box-shadow: inset 0 0 0 1.5px var(--ui-ink); }
@@ -716,6 +716,7 @@
 .ui-sec-legend .ui-sec-watch { width: 8px; height: 8px; }
 .ui-sec-bar-track { display: flex; height: 10px; border-radius: 3px; overflow: hidden; }
 .ui-sec-bar-track i, .ui-sec-legend i { display: block; height: 100%; }
+.ui-sec-bar small { font-size: 11.5px; white-space: nowrap; }
 .ui-sec-bar em { font-style: normal; text-align: end; color: var(--ui-muted); font-variant-numeric: tabular-nums; }
 :is(.ui-sec-bar-track, .ui-sec-legend) .is-ban { background: var(--ui-fail); }
 :is(.ui-sec-bar-track, .ui-sec-legend) .is-warn { background: var(--ui-warn); }
@@ -868,7 +869,7 @@ body.ui-sheet-on { overflow: hidden; }
     .ui-sec-row .ui-sec-why { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .ui-sec-row { grid-template-columns: minmax(0, 1fr); }
     .ui-sec-acts { justify-content: flex-start; }
-    .ui-sec-bar { grid-template-columns: 110px minmax(0, 1fr) 40px; }
+    .ui-sec-bar { grid-template-columns: 110px minmax(0, 1fr) auto 32px; }
     .ui-sec-lrow { grid-template-columns: minmax(0, 1fr) auto; }
     .ui-sec-lrow .ui-sec-why { grid-column: 1 / -1; grid-row: 2; }
     .ui-sec-field { grid-template-columns: minmax(0, 1fr); }

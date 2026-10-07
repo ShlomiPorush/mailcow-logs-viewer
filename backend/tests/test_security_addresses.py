@@ -268,3 +268,13 @@ def test_the_country_panel_counts_an_attempt_once(client):
     assert response.status_code == 200, response.text
     country = next(c for c in response.json()['data'] if c['country_code'] == 'TL')
     assert country['warning'] == 2 and country['total'] == 2 and country['addresses'] == 1
+
+
+def test_a_filter_counts_its_addresses_on_the_allowlist_or_denylist(client, fail2ban):
+    _failed(IPS[0])
+    _failed(IPS[1], minutes_ago=2 * 24 * 60)
+    fail2ban['answer']['blacklist'] = f'{IPS[1]}/32'
+    page = _get(client, list='review', days=7)
+    assert _ips(page) == [IPS[0]] and page['on_lists'] == 1
+    assert page['counts'] == {'review': 1, 'banned': 0}
+    assert _get(client, list='banned', days=7)['items'] == []

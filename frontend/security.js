@@ -280,7 +280,7 @@ function securityDescribe(a) {
         };
     }
     if (a.state === 'banned') {
-        const tries = a.tries ? `${a.tries.toLocaleString()} failed login${a.tries === 1 ? '' : 's'} in the last 24 hours. ` : '';
+        const tries = a.tries ? `${a.tries.toLocaleString()} failed login${a.tries === 1 ? '' : 's'} ${securityWindowText()}. ` : '';
         return {
             tag: `${uiTag('Banned', 'fail')}<span class="ui-sec-by">by Fail2ban</span>`,
             why: `${tries}<b>${a.f2b.banned_until ? `${escapeHtml(a.f2b.banned_until)} left` : 'Banned now'}</b>, then Fail2ban lets it try again.${a.f2b.queued_for_unban ? ' Unbanning...' : ''}`,
@@ -313,16 +313,16 @@ function securityDescribe(a) {
     const policy = fail2banPolicy ? ` Fail2ban bans at ${fail2banPolicy.max_attempts} within ${formatSeconds(fail2banPolicy.retry_window)}.` : '';
     return {
         tag: '',
-        why: `${a.tries.toLocaleString()} failed login${a.tries === 1 ? '' : 's'} in the last 24 hours${a.services.length ? ` (${escapeHtml(a.services.join(', '))})` : ''}.${policy}`,
+        why: `${a.tries ? `${a.tries.toLocaleString()} failed login${a.tries === 1 ? '' : 's'}` : uiCountLabel(a.attempts, 'attempt', 'attempts')} ${securityWindowText()}${a.services.length ? ` (${escapeHtml(a.services.join(', '))})` : ''}.${policy}`,
         acts: rw && known ? `<button type="button" class="ui-btn ui-btn-sm ui-btn-danger" onclick="banIP('${ipArg}', this)" title="Ban ${escapeHtml(a.ip)}/32">Ban</button>
             <button ${B} onclick="allowIP('${ipArg}', this)" title="Never ban ${escapeHtml(a.ip)}/32">Allow</button>` : ''
     };
 }
 
-// How many attempts an address made: its logged attempts in the last 24 hours, or what the rules counted
+// How many attempts an address made: its logged attempts in the list's period, or what the rules counted
 function securityAttempts(a) {
     const n = a.attempts || (a.hits || []).reduce((sum, h) => sum + (h.attempts || 0), 0);
-    return n ? `<span class="ui-sec-attempts" title="Attempts in the last 24 hours">${uiCountLabel(n, 'attempt', 'attempts')}</span>` : '';
+    return n ? `<span class="ui-sec-attempts" title="Attempts ${securityWindowText()}">${uiCountLabel(n, 'attempt', 'attempts')}</span>` : '';
 }
 
 function securityRow(a) {
@@ -593,18 +593,25 @@ function renderSecurityOverview() {
 function securityFilterNote() {
     if (securityFilter === 'history' || !(securityCountry || securityNetwork)) return '';
     const where = [securityCountry, securityNetwork].filter(Boolean).map(escapeHtml).join(', ');
-    return `<p class="ui-sec-note">Every address from ${where} that tried ${securityPeriodText()}.</p>`;
+    const onLists = securityPage && securityPage.on_lists;
+    const lists = onLists ? ` ${onLists.toLocaleString()} more ${onLists === 1 ? 'is' : 'are'} on the allowlist or denylist, under Lists.` : '';
+    return `<p class="ui-sec-note">Every address from ${where} that tried ${securityPeriodText()}.${lists}</p>`;
 }
 
 // The panels' period as it really is: the logs may start after the chosen one
 function securityPeriodSince() {
     const since = (securityCountries && securityCountries.since) || (securityNetworks && securityNetworks.since);
-    return since ? new Date(since).toLocaleDateString(undefined, { day: 'numeric', month: 'short' }) : null;
+    return since ? new Date(since).toLocaleDateString('en-US', { day: 'numeric', month: 'short' }) : null;
 }
 
 function securityPeriodLabel() {
     const since = securityPeriodSince();
     return since ? `Since ${since}` : `${securityChartDays} days`;
+}
+
+// The time a row's counts cover: the last day, or the panels' period while a country or network is picked
+function securityWindowText() {
+    return securityCountry || securityNetwork ? securityPeriodText().replace(', the oldest log kept', '') : 'in the last 24 hours';
 }
 
 function securityPeriodText() {
@@ -676,10 +683,10 @@ function securityCountryBars() {
         const part = (n, cls, label) => n ? `<i class="${cls}" style="width:${(n / max) * 100}%" title="${n.toLocaleString()} ${label}"></i>` : '';
 
         return `<button type="button" class="ui-sec-bar${securityCountry === r.country_name ? ' is-on' : ''}" onclick="pickSecurityCountry('${escapeJsArg(r.country_name)}')"
-                title="${escapeHtml(`${r.country_name}: ${r.warning.toLocaleString()} attempts from ${(r.addresses || 0).toLocaleString()} address${r.addresses === 1 ? '' : 'es'}`)}" aria-pressed="${securityCountry === r.country_name}">
+                title="${escapeHtml(`${r.country_name}: ${r.warning.toLocaleString()} attempts from ${(r.addresses || 0).toLocaleString()} address${r.addresses === 1 ? '' : 'es'}${r.ban ? `, ${r.ban.toLocaleString()} bans` : ''}${r.unban ? `, ${r.unban.toLocaleString()} unbans` : ''}`)}" aria-pressed="${securityCountry === r.country_name}">
             <span class="ui-sec-bar-name">${securityFlag(r.country_code)}${escapeHtml(r.country_name)}${watched.has(r.country_code) ? '<i class="ui-sec-watch" title="Watched by the Countries rule"></i>' : ''}</span>
             <span class="ui-sec-bar-track">${part(r.ban, 'is-ban', 'bans')}${part(r.warning, 'is-warn', 'attempts')}${part(r.unban, 'is-unban', 'unbans')}</span>
-            <em>${r.total.toLocaleString()}</em></button>`;
+            <small class="ui-muted">${(r.addresses || 0).toLocaleString()} address${r.addresses === 1 ? '' : 'es'}</small><em>${r.warning.toLocaleString()}</em></button>`;
     }).join('');
 }
 

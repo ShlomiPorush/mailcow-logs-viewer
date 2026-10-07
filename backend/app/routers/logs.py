@@ -455,7 +455,7 @@ def get_netfilter_stats_by_country(
             country["addresses"] = len(addresses.get(code, ()))
 
         # Sort by total descending, take top 10
-        sorted_countries = sorted(countries.values(), key=lambda x: x["total"], reverse=True)[:10]
+        sorted_countries = sorted(countries.values(), key=lambda x: (x["warning"], x["total"]), reverse=True)[:10]
         
         return {
             "days": days,

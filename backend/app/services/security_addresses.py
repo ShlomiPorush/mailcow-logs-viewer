@@ -208,7 +208,9 @@ def collect(db: Session, f2b: Optional[dict], now: Optional[datetime] = None, ho
     for a in addresses.values():
         a["state"] = _state(a, known, whitelist, blacklist)
         a["list"] = _list_of(a, hours > 24)
-        if a["list"]:
+        # An address on the allowlist or denylist is in neither list, but a
+        # filter says how many of its addresses are there
+        if a["list"] or (a["state"] in ("allow", "deny") and a["attempts"]):
             out.append(a)
     out.sort(key=_order, reverse=True)
     return out
@@ -254,6 +256,7 @@ def page(addresses: List[dict], list_name: str, country: Optional[str], after: O
         "total": counts[list_name],
         "counts": counts,
         "all_counts": {name: sum(1 for a in addresses if a["list"] == name) for name in LISTS},
+        "on_lists": sum(1 for a in in_country if a["list"] is None),
         "items": items,
         "next": cursor_of(items[-1]) if len(rows) > limit else None,
     }
