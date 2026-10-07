@@ -674,6 +674,9 @@
 .ui-sec-side { display: grid; gap: var(--ui-gap); }
 .ui-sec-seg button { padding: 6px 12px; font-size: 13.5px; }
 .ui-sec-seg button b { margin-inline-start: 4px; font-variant-numeric: tabular-nums; }
+.ui-sec-days { display: inline-flex; align-items: center; gap: 8px; margin-inline-start: auto; }
+.ui-sec-days .ui-seg button { padding: 5px 9px; font-size: 12.5px; }
+.ui-sec-days small { font-size: 12px; white-space: nowrap; }
 .ui-sec-filter { display: inline-flex; align-items: center; gap: 4px; padding: 2px 4px 2px 9px; border-radius: 999px; background: var(--ui-ink); color: var(--ui-bg); font-size: 12px; font-weight: 600; }
 .ui-sec-filter button { border: 0; background: none; color: inherit; font-size: 14px; line-height: 1; cursor: pointer; padding: 0 4px; }
 .ui-sec-note { margin: 0; padding: 4px var(--ui-pad-x) 10px; font-size: 12.5px; color: var(--ui-muted); }

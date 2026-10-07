@@ -19,7 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **Security counts that did not add up** - Where attacks come from counted each attempt twice, once for the attempt and once for Fail2ban's "N more attempts" line after it. Picking a country or a network listed only the addresses active in the last day, while the panels count the chosen period; it now lists every address the panel counted. When the logs are kept for less than the chosen period, the panels say since when they count.
+- **Security counts that did not add up** - The Security page's list and the countries and networks beside it now count the same addresses: every address that tried in the period picked above the list (1, 7, 30 or 90 days), whether a rule caught it or not. A number in the panels is the rows a click on it shows. Addresses on the allowlist stay in To review, tagged Allowlisted, and the ones on the denylist are under Banned, tagged Denylisted. Where attacks come from used to count each attempt twice, and a picked country or network listed only the last day.
 - **Pages that went empty with the Logs page off** - Sieve and delivery results in message details, the Rate Limits activity and the Security login alert read their mailcow logs from the Logs page's collection, so turning the Logs page off, or unticking `dovecot` or `ratelimited` there, quietly stopped them. The services these pages need are now collected whatever the Logs settings are, and Settings lists them under the Logs services.
 
 ## [2.9.0] - 2026-10-04

@@ -122,7 +122,7 @@ The v3 redesign replaces these with one consistent locked-area component that sa
 | Message details | `netfilter` disabled | The Security tab of the modal is hidden | `#modal-tab-netfilter` |
 | Security, Settings, Outgoing spam card | SMTP abuse protection off | The card's switch is off, and inside "Automatic protection is off." with a locked area that points to the switch When editing settings is off, the switch is disabled and a locked area "Editing settings is off" says how to turn it on | `securityCardHtml`, `renderSmtpAbusePanel` |
 | Security, Settings, Countries card | No GeoIP | The switch is disabled, the card shows "Needs MaxMind GeoIP" and a locked area "Needs GeoIP"; the Overview's Protection row shows a cross with "needs MaxMind GeoIP" | `securityCardHtml`, `securityProtections` |
-| Security | No GeoIP data | "No GeoIP data available. Configure MaxMind to enable country statistics." (also shown when MaxMind is configured but there is no data yet) | `#country-chart-empty` |
+| Security | No GeoIP data | "No country for these addresses. Configure MaxMind to see where they come from." (also shown when MaxMind is configured but the listed addresses have no country) | `#country-chart-empty` |
 | Spam Filter | `RSPAMD_PASSWORD` missing | Locked area "Rspamd Not Configured" with the message and a Go to Settings button | `loadRspamdMaps` |
 | DMARC | Manual upload disabled | The Upload Report button is hidden | `updateDmarcControls` |
 | DMARC | IMAP sync disabled | The Sync from IMAP block and the last sync line are hidden | `updateDmarcControls` |

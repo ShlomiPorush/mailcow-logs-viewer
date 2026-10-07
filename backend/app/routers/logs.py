@@ -645,7 +645,7 @@ def _security_item(a: dict) -> dict:
         "ip": a["ip"], "state": a["state"], "tries": a["tries"], "attempts": a["attempts"],
         "users": a["users"], "services": a["services"], "hits": a["hits"],
         "country": a["country"], "country_code": a["country_code"], "city": a["city"], "org": a["org"],
-        "last_seen": format_datetime_utc(a["last"]), "f2b": a["f2b"],
+        "last_seen": format_datetime_utc(a["last"]), "f2b": a["f2b"], "listed_as": a["listed_as"],
     }
 
 
@@ -667,23 +667,24 @@ async def get_security_addresses(
     limit: int = Query(50, ge=1, le=200),
     q: Optional[str] = Query(None, max_length=100),
     network: Optional[str] = Query(None, max_length=200),
-    days: Optional[int] = Query(None, ge=1, le=365, description="With a country or network: the panels' period"),
+    days: int = Query(1, ge=1, le=365, description="The period: addresses that tried in the last days"),
     db: Session = Depends(get_db)
 ):
     """
     One page of the Security page's To review or Banned list, newest activity
     first, with the real count of both lists (for the country or network, when
     one is given). `after` is the `next` cursor of the page before. `q` keeps the
-    addresses that contain it. With a country or network, `days` lists every
-    address that tried in that period, the ones the panels count.
+    addresses that contain it. `days` is the period. `countries` and `networks`
+    are counted from the same addresses (every one of the period, whatever is
+    picked), and `since` is the oldest log line kept when the logs are shorter.
     """
     try:
-        hours = days * 24 if days and (country or network) else 24
+        hours = days * 24
         addresses, fail2ban_known = await _security_addresses(db, hours)
         result = security_addresses.page(addresses, list_name, country or None, after, limit, (q or '').strip() or None, network or None)
-        if hours != 24:
-            # The Overview tab counts the last day, whatever a filter lists
-            result["all_counts"] = security_addresses.page((await _security_addresses(db, 24))[0], list_name, None, None, 1)["all_counts"]
+        result["days"] = days
+        result["countries"], result["networks"] = security_addresses.panels(addresses)
+        result["since"] = _netfilter_since(db, datetime.now(timezone.utc) - timedelta(hours=hours))
         result["items"] = [_security_item(a) for a in result["items"]]
         result["fail2ban_known"] = fail2ban_known
         return result

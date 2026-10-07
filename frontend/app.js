@@ -1637,7 +1637,6 @@ function switchTab(tab, params = {}) {
             loadNetfilterCountries();
             loadSmtpAbusePanel();
             loadSecurityAppSettings();
-            loadSecurityCountryChart(securityChartDays);
             break;
         case 'queue':
             loadQueue();
