@@ -225,3 +225,44 @@ def test_a_network_keeps_its_addresses_and_counts_only_those(client, fail2ban):
     assert sorted(_ips(page)) == sorted(IPS[:3])
     assert page['counts'] == {'review': 3, 'banned': 0} and page['network'] == 'Test Network'
     assert _get(client, list='review')['counts']['review'] == 4
+
+
+def test_a_network_with_the_panels_period_lists_every_address_that_tried_in_it(client, fail2ban):
+    from app.database import get_db_context
+    from app.services import security_addresses
+    from app.models import NetfilterLog
+    _failed(IPS[0])
+    _failed(IPS[1], minutes_ago=3 * 24 * 60)
+    with get_db_context() as db:
+        # A probe is an attempt the panels count, though not a failed login
+        db.add(NetfilterLog(time=datetime.utcnow() - timedelta(days=2), priority=MARKER, ip=IPS[2], rule_id=1,
+                            action='warning', country_name=COUNTRY, country_code='TL', asn_org='Test Network',
+                            message=f'{IPS[2]} matched rule id 1 (warning: non-SMTP command from unknown[{IPS[2]}])'))
+        db.commit()
+        db.query(NetfilterLog).filter(NetfilterLog.priority == MARKER).update({NetfilterLog.asn_org: 'Test Network'}, synchronize_session=False)
+        db.commit()
+    assert _ips(_get(client, list='review', network='Test Network')) == [IPS[0]]
+    page = _get(client, list='review', network='Test Network', days=7)
+    assert _ips(page) == [IPS[0], IPS[2], IPS[1]] and page['counts'] == {'review': 3, 'banned': 0}
+    # A country with the period does the same
+    assert _ips(_get(client, list='review', days=7)) == [IPS[0], IPS[2], IPS[1]]
+    # Without either, the list stays the last day
+    security_addresses.forget()
+    unfiltered = client.get('/api/security/addresses', params={'list': 'review', 'days': 7, 'limit': 200}).json()
+    assert IPS[0] in _ips(unfiltered) and not {IPS[1], IPS[2]} & set(_ips(unfiltered))
+
+
+def test_the_country_panel_counts_an_attempt_once(client):
+    from app.database import get_db_context
+    from app.models import NetfilterLog
+    ip = IPS[0]
+    _failed(ip, times=2)
+    with get_db_context() as db:
+        db.add(NetfilterLog(time=datetime.utcnow() - timedelta(minutes=5), priority=MARKER, ip=ip, action='warning',
+                            country_name=COUNTRY, country_code='TL',
+                            message=f'7 more attempts in the next 600 seconds until {ip}/32 is banned'))
+        db.commit()
+    response = client.get('/api/logs/netfilter/stats/by-country', params={'days': 7})
+    assert response.status_code == 200, response.text
+    country = next(c for c in response.json()['data'] if c['country_code'] == 'TL')
+    assert country['warning'] == 2 and country['total'] == 2 and country['addresses'] == 1

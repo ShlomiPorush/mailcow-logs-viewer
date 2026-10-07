@@ -5,8 +5,10 @@ country filter covers every address, not only the ones a browser has loaded.
 An address is banned or it is not. Banned: a rule's ban, or one of Fail2ban's
 own (not a permanent one, and not one mailcow is about to lift). To review:
 every other address a rule caught, or that failed to log in in the last 24
-hours. An address on the allowlist or the denylist is shown on the Lists, not
-here. The newest activity comes first; pages follow a cursor, so an address
+hours. A country or network picked in the page's panels covers the panels'
+period instead, and every address that tried in it, so the list holds the
+addresses the panel counted. An address on the allowlist or the denylist is
+shown on the Lists, not here. The newest activity comes first; pages follow a cursor, so an address
 that changes list while someone scrolls does not shift the rest.
 """
 import time
@@ -128,19 +130,21 @@ def _state(a: dict, known: bool, whitelist: List[str], blacklist: List[str]) -> 
     return "quiet"
 
 
-def _list_of(a: dict) -> Optional[str]:
+def _list_of(a: dict, wide: bool) -> Optional[str]:
     if a["state"] == "banned":
         return "banned"
-    if a["state"] == "review" or (a["state"] == "quiet" and a["tries"] > 0):
+    if a["state"] == "review" or (a["state"] == "quiet" and (a["attempts"] if wide else a["tries"]) > 0):
         return "review"
     return None
 
 
-def collect(db: Session, f2b: Optional[dict], now: Optional[datetime] = None) -> List[dict]:
+def collect(db: Session, f2b: Optional[dict], now: Optional[datetime] = None, hours: int = 24) -> List[dict]:
     """Every address on one of the lists, newest activity first.
 
     f2b is mailcow's Fail2ban answer, or None when mailcow did not answer: then
     only the rules' bans count as banned, and the allow and deny lists are unknown.
+    hours longer than a day is a panel's period: every address that tried in it
+    is listed, as the panels count them, not only the ones that failed to log in.
     """
     now = now or datetime.utcnow()
     addresses: Dict[str, dict] = {}
@@ -155,7 +159,7 @@ def collect(db: Session, f2b: Optional[dict], now: Optional[datetime] = None) ->
         if when and (a["last"] is None or when > a["last"]):
             a["last"] = when
 
-    sources, _ = netfilter_sources(db, 24, now)
+    sources, _ = netfilter_sources(db, hours, now)
     for s in sources.values():
         if not s["attempts"]:
             continue
@@ -203,7 +207,7 @@ def collect(db: Session, f2b: Optional[dict], now: Optional[datetime] = None) ->
     out = []
     for a in addresses.values():
         a["state"] = _state(a, known, whitelist, blacklist)
-        a["list"] = _list_of(a)
+        a["list"] = _list_of(a, hours > 24)
         if a["list"]:
             out.append(a)
     out.sort(key=_order, reverse=True)
@@ -257,21 +261,22 @@ def page(addresses: List[dict], list_name: str, country: Optional[str], after: O
 
 # ---------------------------------------------------------------- a short cache
 # Scrolling asks for one page after another; they come from one reading of the
-# logs and of mailcow, so a page never disagrees with the one before it. Any
-# change to Fail2ban or to a catch forgets it.
+# logs and of mailcow, so a page never disagrees with the one before it. Each
+# period has its own reading. Any change to Fail2ban or to a catch forgets them.
 
-_cache: Dict[str, object] = {"at": 0.0, "addresses": None, "fail2ban_known": False}
+_cache: Dict[int, Tuple[float, List[dict], bool]] = {}
 
 
-def cached() -> Optional[Tuple[List[dict], bool]]:
-    if _cache["addresses"] is not None and time.monotonic() - _cache["at"] < CACHE_SECONDS:
-        return _cache["addresses"], _cache["fail2ban_known"]
+def cached(hours: int = 24) -> Optional[Tuple[List[dict], bool]]:
+    found = _cache.get(hours)
+    if found and time.monotonic() - found[0] < CACHE_SECONDS:
+        return found[1], found[2]
     return None
 
 
-def remember(addresses: List[dict], fail2ban_known: bool) -> None:
-    _cache.update(at=time.monotonic(), addresses=addresses, fail2ban_known=fail2ban_known)
+def remember(addresses: List[dict], fail2ban_known: bool, hours: int = 24) -> None:
+    _cache[hours] = (time.monotonic(), addresses, fail2ban_known)
 
 
 def forget() -> None:
-    _cache.update(at=0.0, addresses=None, fail2ban_known=False)
+    _cache.clear()

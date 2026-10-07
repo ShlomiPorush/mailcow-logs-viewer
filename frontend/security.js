@@ -154,6 +154,8 @@ async function loadSecurityAddresses(more = false, limit = SECURITY_PAGE_SIZE) {
     const params = new URLSearchParams({ list: securityFilter, limit: String(limit) });
     if (securityCountry) params.set('country', securityCountry);
     if (securityNetwork) params.set('network', securityNetwork);
+    // A picked country or network covers the panels' period, so the list holds what they counted
+    if (securityCountry || securityNetwork) params.set('days', String(securityChartDays));
     if (more) params.set('after', securityPage.next);
     try {
         const res = await authenticatedFetch(`/api/security/addresses?${params}`);
@@ -490,7 +492,7 @@ function pickSecurityNetwork(name) {
 // The phone's network picker: the networks that try most, and All
 function securityNetworkPanel() {
     const rows = securityNetworks ? securityNetworks.data : null;
-    return `<span class="ui-sec-cpanel-head"><b>Networks that try most</b><span class="ui-muted">${securityChartDays} days</span></span>
+    return `<span class="ui-sec-cpanel-head"><b>Networks that try most</b><span class="ui-muted">${securityPeriodLabel()}</span></span>
         ${rows === null ? '<span class="ui-muted">Loading...</span>' : !rows.length ? '<span class="ui-muted">No network data yet.</span>'
             : `<span class="ui-sec-nets">${securityNetworkRows()}</span>`}
         ${securityNetwork ? '<button type="button" class="ui-btn ui-btn-sm ui-sec-call" onclick="pickSecurityNetwork(null)">Every network</button>' : ''}`;
@@ -577,7 +579,7 @@ function renderSecurityOverview() {
             ${securityCountry ? `<span class="ui-sec-filter">${securityFlag(securityCountryCode(securityCountry))}${escapeHtml(securityCountry)}<button type="button" onclick="pickSecurityCountry(null)" aria-label="Show every country" title="Show every country">&times;</button></span>` : ''}
             ${securityNetwork ? `<span class="ui-sec-filter">${escapeHtml(securityNetwork)}<button type="button" onclick="pickSecurityNetwork(null)" aria-label="Show every network" title="Show every network">&times;</button></span>` : ''}
         </div>
-        ${rwNote}${f2bNote}
+        ${rwNote}${f2bNote}${securityFilterNote()}
         <div class="ui-sec-list">${rows}</div>
         ${footer}`;
     // The filters stick right under the tabs, which stick to the top on a phone
@@ -585,6 +587,29 @@ function renderSecurityOverview() {
     if (tabs) box.style.setProperty('--ui-sec-stick', `${tabs.offsetHeight}px`);
     renderSecuritySheet(list);
     securityWatchMore(!!(page && page.next && !securityPageError));
+}
+
+// What a picked country or network lists: every address that tried in the panels' period
+function securityFilterNote() {
+    if (securityFilter === 'history' || !(securityCountry || securityNetwork)) return '';
+    const where = [securityCountry, securityNetwork].filter(Boolean).map(escapeHtml).join(', ');
+    return `<p class="ui-sec-note">Every address from ${where} that tried ${securityPeriodText()}.</p>`;
+}
+
+// The panels' period as it really is: the logs may start after the chosen one
+function securityPeriodSince() {
+    const since = (securityCountries && securityCountries.since) || (securityNetworks && securityNetworks.since);
+    return since ? new Date(since).toLocaleDateString(undefined, { day: 'numeric', month: 'short' }) : null;
+}
+
+function securityPeriodLabel() {
+    const since = securityPeriodSince();
+    return since ? `Since ${since}` : `${securityChartDays} days`;
+}
+
+function securityPeriodText() {
+    const since = securityPeriodSince();
+    return since ? `since ${since}, the oldest log kept` : `in the last ${securityChartDays} days`;
 }
 
 // When the end of the list comes near, the next page is asked for
@@ -619,6 +644,11 @@ async function loadSecurityCountryChart(days = securityChartDays) {
         securityNetworks = securityNetworks || { data: [] };
     }
     renderSecurityCountries();
+    // A picked country or network lists the panels' period, so a new period reads the list again
+    if (securityCountry || securityNetwork) {
+        securityPage = null;
+        loadSecurityAddresses();
+    }
     if (securityCountryPicker || securityNetworkPicker) renderSecurityOverview();
 }
 
@@ -646,9 +676,9 @@ function securityCountryBars() {
         const part = (n, cls, label) => n ? `<i class="${cls}" style="width:${(n / max) * 100}%" title="${n.toLocaleString()} ${label}"></i>` : '';
 
         return `<button type="button" class="ui-sec-bar${securityCountry === r.country_name ? ' is-on' : ''}" onclick="pickSecurityCountry('${escapeJsArg(r.country_name)}')"
-                title="${escapeHtml(`${r.country_name}: ${r.total.toLocaleString()} events`)}" aria-pressed="${securityCountry === r.country_name}">
+                title="${escapeHtml(`${r.country_name}: ${r.warning.toLocaleString()} attempts from ${(r.addresses || 0).toLocaleString()} address${r.addresses === 1 ? '' : 'es'}`)}" aria-pressed="${securityCountry === r.country_name}">
             <span class="ui-sec-bar-name">${securityFlag(r.country_code)}${escapeHtml(r.country_name)}${watched.has(r.country_code) ? '<i class="ui-sec-watch" title="Watched by the Countries rule"></i>' : ''}</span>
-            <span class="ui-sec-bar-track">${part(r.ban, 'is-ban', 'bans')}${part(r.warning, 'is-warn', 'warnings')}${part(r.unban, 'is-unban', 'unbans')}</span>
+            <span class="ui-sec-bar-track">${part(r.ban, 'is-ban', 'bans')}${part(r.warning, 'is-warn', 'attempts')}${part(r.unban, 'is-unban', 'unbans')}</span>
             <em>${r.total.toLocaleString()}</em></button>`;
     }).join('');
 }
@@ -677,11 +707,11 @@ function renderSecurityCountries() {
             ${rows === null ? '<div class="ui-loading"><div class="loading"></div><p>Loading...</p></div>'
                 : !rows.length ? '<p id="country-chart-empty" class="ui-empty">No GeoIP data available. Configure MaxMind to enable country statistics.</p>'
                 : `<div class="ui-sec-bars">${securityCountryBars()}</div>
-                   <p class="ui-sec-legend"><span><i class="is-ban"></i>Ban</span><span><i class="is-warn"></i>Warning</span><span><i class="is-unban"></i>Unban</span>${watched.size ? '<span><i class="ui-sec-watch"></i>Watched by the Countries rule</span>' : ''}</p>
-                   <p class="ui-sec-note">Pick a country to see its addresses.</p>`}
+                   <p class="ui-sec-legend"><span><i class="is-ban"></i>Ban</span><span><i class="is-warn"></i>Attempt</span><span><i class="is-unban"></i>Unban</span>${watched.size ? '<span><i class="ui-sec-watch"></i>Watched by the Countries rule</span>' : ''}</p>
+                   <p class="ui-sec-note">${securityPeriodSince() ? `The logs start ${escapeHtml(securityPeriodSince())}, so the period is shorter. ` : ''}Pick a country to see its addresses.</p>`}
         </section>
         <section class="ui-panel ui-sec-networks">
-            <div class="ui-panel-head">Networks that try most <span class="ui-count">${securityChartDays} days</span></div>
+            <div class="ui-panel-head">Networks that try most <span class="ui-count">${securityPeriodLabel()}</span></div>
             ${networks === null ? '' : !networks.length ? '<p class="ui-empty">No network data yet.</p>'
                 : `<div class="ui-sec-nets">${securityNetworkRows()}</div><p class="ui-sec-note">Pick a network to see its addresses.</p>`}
         </section>`;

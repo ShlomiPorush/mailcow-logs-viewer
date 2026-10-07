@@ -355,14 +355,26 @@ def get_netfilter_countries(db: Session = Depends(get_db)):
         return []
 
 
+def _netfilter_since(db: Session, cutoff: datetime) -> Optional[str]:
+    """The oldest netfilter line kept, when it is newer than the period's start."""
+    oldest = db.query(func.min(NetfilterLog.time)).scalar()
+    if oldest is None:
+        return None
+    if oldest.tzinfo is None:
+        oldest = oldest.replace(tzinfo=timezone.utc)
+    return format_datetime_utc(oldest) if oldest > cutoff else None
+
+
 @router.get("/logs/netfilter/stats/by-country")
 def get_netfilter_stats_by_country(
     days: int = Query(30, ge=1, le=365, description="Number of days to look back"),
     db: Session = Depends(get_db)
 ):
     """
-    Get netfilter event counts grouped by country and action type.
-    Returns data suitable for a stacked bar chart.
+    Netfilter counts by country: attempts (lines where netfilter matched a rule,
+    as on the Security page; the "N more attempts" line after each is not
+    counted again), bans and unbans, and the addresses that tried. `since` is
+    the oldest line kept, when the logs are shorter than the period.
     """
     try:
         import re
@@ -374,10 +386,12 @@ def get_netfilter_stats_by_country(
             NetfilterLog.country_name,
             NetfilterLog.action,
             NetfilterLog.message,
-            NetfilterLog.ip
+            NetfilterLog.ip,
+            NetfilterLog.rule_id
         ).filter(
             NetfilterLog.time >= cutoff
         ).all()
+        addresses = {}
 
         # Aggregate into per-country structure
         countries = {}
@@ -426,8 +440,10 @@ def get_netfilter_stats_by_country(
                 countries[code]["ban"] += 1
             elif action == 'unban':
                 countries[code]["unban"] += 1
-            elif action == 'warning':
+            elif action == 'warning' and row.rule_id is not None:
                 countries[code]["warning"] += 1
+                if row.ip:
+                    addresses.setdefault(code, set()).add(row.ip)
             # Skip 'info' and 'other' - not interesting for chart
             else:
                 continue
@@ -435,12 +451,15 @@ def get_netfilter_stats_by_country(
 
         # Remove countries with 0 total after filtering
         countries = {k: v for k, v in countries.items() if v["total"] > 0}
+        for code, country in countries.items():
+            country["addresses"] = len(addresses.get(code, ()))
 
         # Sort by total descending, take top 10
         sorted_countries = sorted(countries.values(), key=lambda x: x["total"], reverse=True)[:10]
         
         return {
             "days": days,
+            "since": _netfilter_since(db, cutoff),
             "data": sorted_countries
         }
     except Exception as e:
@@ -471,6 +490,7 @@ def get_netfilter_stats_by_network(
         ).group_by(NetfilterLog.asn).order_by(desc(func.count(NetfilterLog.id))).limit(8).all()
         return {
             "days": days,
+            "since": _netfilter_since(db, cutoff),
             "data": [
                 {"asn": asn, "asn_org": org or asn, "attempts": attempts, "addresses": addresses}
                 for asn, org, attempts, addresses in rows
@@ -637,20 +657,23 @@ async def get_security_addresses(
     limit: int = Query(50, ge=1, le=200),
     q: Optional[str] = Query(None, max_length=100),
     network: Optional[str] = Query(None, max_length=200),
+    days: Optional[int] = Query(None, ge=1, le=365, description="With a country or network: the panels' period"),
     db: Session = Depends(get_db)
 ):
     """
     One page of the Security page's To review or Banned list, newest activity
     first, with the real count of both lists (for the country or network, when
     one is given). `after` is the `next` cursor of the page before. `q` keeps the
-    addresses that contain it.
+    addresses that contain it. With a country or network, `days` lists every
+    address that tried in that period, the ones the panels count.
     """
     try:
-        found = security_addresses.cached()
+        hours = days * 24 if days and (country or network) else 24
+        found = security_addresses.cached(hours)
         if found is None:
             f2b = await mailcow_api.get_fail2ban()
-            addresses = await run_in_threadpool(security_addresses.collect, db, f2b)
-            security_addresses.remember(addresses, f2b is not None)
+            addresses = await run_in_threadpool(security_addresses.collect, db, f2b, None, hours)
+            security_addresses.remember(addresses, f2b is not None, hours)
             found = (addresses, f2b is not None)
         addresses, fail2ban_known = found
         result = security_addresses.page(addresses, list_name, country or None, after, limit, (q or '').strip() or None, network or None)
