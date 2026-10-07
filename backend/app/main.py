@@ -89,6 +89,28 @@ async def _loop_lag_watchdog():
             logger.debug(f"Loop lag watchdog iteration failed: {e}")
 
 
+def log_authentication_state() -> None:
+    """Log which authentication is in force; running without any is a warning."""
+    if settings.is_authentication_enabled:
+        auth_methods = []
+        if settings.is_basic_auth_enabled:
+            auth_methods.append("Basic Auth")
+            if not settings.auth_password:
+                logger.warning("WARNING: Basic Auth enabled but password not set!")
+        if settings.is_oauth2_enabled:
+            auth_methods.append(f"OAuth2 ({settings.oauth2_provider_name})")
+            if not settings.oauth2_client_id or not settings.oauth2_client_secret:
+                logger.warning("WARNING: OAuth2 enabled but client credentials not configured!")
+
+        logger.info(f"Authentication is ENABLED: {', '.join(auth_methods)}")
+    else:
+        logger.warning(
+            "Authentication is DISABLED: anyone who can reach this app can read the logs, "
+            "change settings and run mailcow actions. Set BASIC_AUTH_ENABLED=true with "
+            "AUTH_PASSWORD, or configure OAuth2, unless access is restricted another way."
+        )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifecycle management"""
@@ -134,20 +156,7 @@ async def lifespan(app: FastAPI):
     if settings.blacklist_emails_list:
         logger.info(f"Blacklist enabled with {len(settings.blacklist_emails_list)} email(s)")
     
-    if settings.is_authentication_enabled:
-        auth_methods = []
-        if settings.is_basic_auth_enabled:
-            auth_methods.append("Basic Auth")
-            if not settings.auth_password:
-                logger.warning("WARNING: Basic Auth enabled but password not set!")
-        if settings.is_oauth2_enabled:
-            auth_methods.append(f"OAuth2 ({settings.oauth2_provider_name})")
-            if not settings.oauth2_client_id or not settings.oauth2_client_secret:
-                logger.warning("WARNING: OAuth2 enabled but client credentials not configured!")
-        
-        logger.info(f"Authentication is ENABLED: {', '.join(auth_methods)}")
-    else:
-        logger.info("Authentication is DISABLED")
+    log_authentication_state()
     
     # GeoIP initialization
     try:
