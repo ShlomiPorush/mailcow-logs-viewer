@@ -966,18 +966,38 @@ def _store_rspamd_page(logs):
                     continue
 
             if blacklisted_message_ids:
-                correlations_to_delete = db.query(MessageCorrelation).filter(
+                # The Message-ID only finds candidates: senders choose it, so
+                # an unrelated message can share it. Remove a correlation (and
+                # its queue's Postfix lines) only when that message itself
+                # involves a listed address.
+                candidates = db.query(MessageCorrelation).filter(
                     MessageCorrelation.message_id.in_(blacklisted_message_ids)
                 ).all()
+                candidate_queues = {c.queue_id for c in candidates if c.queue_id}
+                listed_queues = set()
+                if candidate_queues:
+                    for queue_id, p_sender, p_recipient in db.query(
+                        PostfixLog.queue_id, PostfixLog.sender, PostfixLog.recipient
+                    ).filter(PostfixLog.queue_id.in_(candidate_queues)).all():
+                        if is_blacklisted(p_sender) or is_blacklisted(p_recipient):
+                            listed_queues.add(queue_id)
+
+                correlations_to_delete = [
+                    c for c in candidates
+                    if is_blacklisted(c.sender) or is_blacklisted(c.recipient)
+                    or (c.queue_id and c.queue_id in listed_queues)
+                ]
 
                 queue_ids_to_delete = set()
                 for corr in correlations_to_delete:
                     if corr.queue_id:
                         queue_ids_to_delete.add(corr.queue_id)
 
-                deleted_corr = db.query(MessageCorrelation).filter(
-                    MessageCorrelation.message_id.in_(blacklisted_message_ids)
-                ).delete(synchronize_session=False)
+                deleted_corr = 0
+                if correlations_to_delete:
+                    deleted_corr = db.query(MessageCorrelation).filter(
+                        MessageCorrelation.id.in_([c.id for c in correlations_to_delete])
+                    ).delete(synchronize_session=False)
 
                 if queue_ids_to_delete:
                     deleted_postfix = db.query(PostfixLog).filter(
