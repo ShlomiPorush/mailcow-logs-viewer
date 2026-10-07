@@ -6,6 +6,7 @@ import asyncio
 import threading
 import re
 import httpx
+from html import escape as html_escape
 import ipaddress
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
@@ -1794,6 +1795,30 @@ async def update_geoip_database():
         update_job_status('update_geoip', 'failed', str(e))
 
 
+def _blacklist_alert_host_html(display_name, extra_info, listed_count, listed_bls) -> str:
+    """
+    One host block of the blacklist alert email. Host names come from the
+    mailcow transports and relayhosts and the blacklist entries from the
+    check results, so every value is escaped before it becomes HTML.
+    """
+    items = "".join(
+        f'<li><strong>{html_escape(str(bl.get("name", "")))}</strong> - {html_escape(str(bl.get("zone", "")))} '
+        f'(<a href="{html_escape(str(bl.get("info_url") or "#"), quote=True)}">lookup</a>)</li>'
+        for bl in listed_bls
+    )
+    return f"""
+                        <div style="margin-bottom: 30px; border-bottom: 1px solid #eee; padding-bottom: 20px;">
+                            <h3 style="margin: 0 0 10px 0;">{html_escape(str(display_name))} <span style="font-weight: normal; font-size: 14px; color: #666;">{html_escape(str(extra_info))}</span></h3>
+                            <div style="background-color: #fef2f2; border: 1px solid #fee2e2; border-radius: 4px; padding: 10px; margin-bottom: 10px;">
+                                <strong style="color: #dc2626;">Listed on {html_escape(str(listed_count))} blacklist(s)</strong>
+                            </div>
+                            <ul style="margin-top: 5px;">
+                                {items}
+                            </ul>
+                        </div>
+                        """
+
+
 async def check_monitored_hosts_job(force: bool = False, send_notification: bool = True):
     """
     Background job: Check all monitored hosts against DNS blacklists
@@ -1989,19 +2014,7 @@ async def _run_check_monitored_hosts(force: bool, send_notification: bool):
                         text_content += f"Blacklists:\n{bl_text_list}\n\n"
                         
                         # HTML Row
-                        bl_html_list = "".join([f'<li><strong>{bl["name"]}</strong> - {bl["zone"]} (<a href="{bl.get("info_url", "#")}">lookup</a>)</li>' for bl in listed_bls])
-                        
-                        html_rows += f"""
-                        <div style="margin-bottom: 30px; border-bottom: 1px solid #eee; padding-bottom: 20px;">
-                            <h3 style="margin: 0 0 10px 0;">{display_name} <span style="font-weight: normal; font-size: 14px; color: #666;">{extra_info}</span></h3>
-                            <div style="background-color: #fef2f2; border: 1px solid #fee2e2; border-radius: 4px; padding: 10px; margin-bottom: 10px;">
-                                <strong style="color: #dc2626;">Listed on {listed_count} blacklist(s)</strong>
-                            </div>
-                            <ul style="margin-top: 5px;">
-                                {bl_html_list}
-                            </ul>
-                        </div>
-                        """
+                        html_rows += _blacklist_alert_host_html(display_name, extra_info, listed_count, listed_bls)
 
                     text_content += "Action Required:\nPlease investigate and request removal from these blacklists to ensure email deliverability.\n\n"
                     text_content += "This is an automated notification from mailcow Logs Viewer."
@@ -2062,7 +2075,7 @@ async def _run_check_monitored_hosts(force: bool, send_notification: bool):
     <body style="font-family: Arial, sans-serif; padding: 20px; line-height: 1.5;">
     <h2 style="color: #16a34a;">✅ Blacklist Cleared</h2>
     <p>All monitored hosts are no longer listed on any (actionable) blacklists.</p>
-    <p><strong>Monitored hosts:</strong> {host_list}</p>
+    <p><strong>Monitored hosts:</strong> {html_escape(host_list)}</p>
     <hr style="margin-top: 30px;">
     <p style="color: #999; font-size: 12px;">This is an automated notification from mailcow Logs Viewer.</p>
     </body>
@@ -2083,9 +2096,9 @@ async def _run_check_monitored_hosts(force: bool, send_notification: bool):
     <body style="font-family: Arial, sans-serif; padding: 20px; line-height: 1.5;">
     <h2 style="color: #2563eb;">📉 Blacklist Improved</h2>
     <p>Fewer hosts are now listed on (actionable) blacklists.</p>
-    <p><strong>Previously:</strong> {prev_listed} host(s) listed.</p>
-    <p><strong>Now:</strong> {actionable_count} host(s) listed.</p>
-    <p><strong>Still listed:</strong> {still_listed}</p>
+    <p><strong>Previously:</strong> {html_escape(str(prev_listed))} host(s) listed.</p>
+    <p><strong>Now:</strong> {html_escape(str(actionable_count))} host(s) listed.</p>
+    <p><strong>Still listed:</strong> {html_escape(still_listed)}</p>
     <hr style="margin-top: 30px;">
     <p style="color: #999; font-size: 12px;">This is an automated notification from mailcow Logs Viewer.</p>
     </body>

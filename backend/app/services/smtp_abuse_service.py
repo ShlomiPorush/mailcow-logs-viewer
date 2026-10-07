@@ -16,6 +16,7 @@ helper executed through ``asyncio.to_thread`` so the event loop never blocks.
 import asyncio
 import logging
 from datetime import datetime, timedelta
+from html import escape
 from typing import Dict, List, Optional
 
 from sqlalchemy import func
@@ -250,7 +251,9 @@ async def _notify_user_blocked(email: str, count: int) -> None:
         "Please change your password and revoke any app passwords you no "
         f"longer use, then contact {contact} to restore sending."
     )
-    html = text.replace("\n", "<br>")
+    # The address and the help contact are mailbox names and settings, not
+    # markup: escape them before turning line breaks into <br>.
+    html = escape(text).replace("\n", "<br>")
     await asyncio.to_thread(send_notification_email, email, subject, text, html)
 
 
