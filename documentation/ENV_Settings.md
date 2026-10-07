@@ -358,6 +358,11 @@ Settings for the automatic quarantine rule processing feature. When rules are de
 | `AUTH_USERNAME` | string | `admin` | Basic auth username |
 | `AUTH_PASSWORD` | string | (empty) | Basic auth password (required if `BASIC_AUTH_ENABLED=true` or `AUTH_ENABLED=true`). ⚠️ **WARNING: Use a strong password in production!** |
 
+Changing who can sign in from the Settings page (the Basic Auth username or
+password, turning Basic Auth or OAuth2 on or off, the OAuth2 provider addresses,
+client ID or secret, or `SESSION_SECRET_KEY`) signs out every existing session.
+The person who saved the change stays signed in.
+
 ### Login attempt limits and reverse proxies
 
 Basic Auth allows 10 failed attempts per client address within 15 minutes. IPv6
