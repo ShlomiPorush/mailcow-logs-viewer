@@ -27,11 +27,11 @@ def limited_stores(monkeypatch):
     monkeypatch.setattr(auth, "_next_capacity_cleanup", 0.0, raising=False)
     session._session_store.clear()
     auth._auth_failures.clear()
-    auth_router._state_store.clear()
+    auth_router._consumed_states.clear()
     yield
     session._session_store.clear()
     auth._auth_failures.clear()
-    auth_router._state_store.clear()
+    auth_router._consumed_states.clear()
 
 
 def test_full_sessions_reject_new_login_and_preserve_cookies():
@@ -192,13 +192,12 @@ def test_oauth_capacity_consumes_state_and_returns_specific_error(monkeypatch):
     monkeypatch.setattr(auth_router.oauth2_client, "get_user_info", AsyncMock(return_value={"email": "user@example.com"}))
     for _ in range(2):
         session.create_session({"username": "admin"})
-    state, nonce = "test-state", "a" * 43
-    auth_router._state_store[state] = (nonce, auth_router.time.monotonic() + 600)
+    state, browser_value = auth_router._new_oauth_flow("/")
     client = client_at()
-    client.cookies.set(auth_router.OAUTH_COOKIE_PREFIX + state, nonce, domain="testserver.local", path="/")
+    client.cookies.set(auth_router.OAUTH_COOKIE_PREFIX + state, browser_value, domain="testserver.local", path="/")
     response = client.get("/api/auth/callback", params={"state": state, "code": "test-code"}, follow_redirects=False)
     assert response.headers["location"] == "/login?error=session_capacity"
-    assert state not in auth_router._state_store
+    assert state in auth_router._consumed_states
     assert session.SESSION_COOKIE_NAME not in client.cookies
     assert auth_router.OAUTH_COOKIE_PREFIX + state not in client.cookies
     assert len(session._session_store) == 2

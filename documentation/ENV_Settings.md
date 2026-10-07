@@ -402,8 +402,9 @@ SameSite=Lax cookie. Complete the login within ten minutes in the same browser a
 on the same application hostname as `OAUTH2_REDIRECT_URI`. Concurrent tabs are
 supported. If the flow expires, cookies are blocked, or the application restarts,
 start again from the login page. Callbacks are single-use, including provider
-errors. Pending flows are capped at 1,024 per process; expired entries are removed
-on the next login or callback. Existing signed-in sessions are unaffected.
+errors. Starting a login keeps nothing on the server (the login state is signed
+with the session secret), so no number of started logins can block others from
+signing in. Existing signed-in sessions are unaffected.
 
 No new environment settings are required. The temporary cookie uses the same
 HTTP/HTTPS policy as the session cookie, including deployments behind a reverse
