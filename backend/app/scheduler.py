@@ -489,6 +489,40 @@ def is_blacklisted(email: Optional[str]) -> bool:
     return is_blocked
 
 
+def _column_length(model, name: str) -> Optional[int]:
+    column = model.__table__.columns.get(name)
+    return getattr(column.type, 'length', None) if column is not None else None
+
+
+def _fit_columns(model, values: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Cut every string value to the length of its column.
+
+    Addresses, Message-IDs and user names in mail logs are chosen by whoever
+    sends the mail or tries to log in. PostgreSQL rejects a value longer than
+    its VARCHAR column, and one such row used to roll back the whole page.
+    """
+    for name, value in values.items():
+        if isinstance(value, str):
+            length = _column_length(model, name)
+            if length and len(value) > length:
+                values[name] = value[:length]
+    return values
+
+
+def _fit_addresses(addresses):
+    """
+    Cut each address of an Rspamd recipient list to the address column
+    length. The list itself is JSON, but correlation copies its first entry
+    into MessageCorrelation.recipient, and an over-long one failed that
+    message's correlation on every run.
+    """
+    if not isinstance(addresses, list):
+        return addresses
+    length = _column_length(MessageCorrelation, 'recipient')
+    return [a[:length] if isinstance(a, str) and length else a for a in addresses]
+
+
 # Cache for log discovery results to avoid expensive binary search on every cycle
 _log_count_cache: Dict[str, tuple] = {}  # log_type -> (count, cached_at)
 _LOG_COUNT_CACHE_TTL = 300  # seconds (5 minutes)
@@ -635,6 +669,9 @@ def _store_postfix_page(logs):
         page_status_queue_ids = set()
         page_skipped = 0
         page_blacklisted = 0
+        # Entries join the duplicate cache only after the page is committed;
+        # a failed commit must leave the page to be retried next cycle.
+        page_seen: Set[str] = set()
 
         with get_db_context() as db:
             blacklisted_queue_ids: Set[str] = set()
@@ -692,7 +729,7 @@ def _store_postfix_page(logs):
                     message = log_entry.get('message', '')
                     unique_id = f"{time_str}:{message[:100]}"
 
-                    if unique_id in seen_postfix:
+                    if unique_id in seen_postfix or unique_id in page_seen:
                         page_skipped += 1
                         continue
 
@@ -701,7 +738,7 @@ def _store_postfix_page(logs):
 
                     if queue_id and queue_id in blacklisted_queue_ids:
                         page_blacklisted += 1
-                        seen_postfix.add(unique_id)
+                        page_seen.add(unique_id)
                         continue
 
                     # Parse timestamp with timezone
@@ -714,14 +751,14 @@ def _store_postfix_page(logs):
                     time_val = int(log_entry.get('time', 0))
                     db_key = f"{time_val}|{log_entry.get('program', '')}|{queue_id or ''}|{message}"
                     if db_key in existing_in_db:
-                        seen_postfix.add(unique_id)
+                        page_seen.add(unique_id)
                         page_skipped += 1
                         continue
 
                     sender = parsed.get('sender')
                     recipient = parsed.get('recipient')
 
-                    postfix_log = PostfixLog(
+                    postfix_log = PostfixLog(**_fit_columns(PostfixLog, dict(
                         time=timestamp,
                         program=log_entry.get('program'),
                         priority=log_entry.get('priority'),
@@ -735,10 +772,10 @@ def _store_postfix_page(logs):
                         delay=parsed.get('delay'),
                         dsn=parsed.get('dsn'),
                         raw_data=log_entry
-                    )
+                    )))
 
                     db.add(postfix_log)
-                    seen_postfix.add(unique_id)
+                    page_seen.add(unique_id)
                     page_new += 1
 
                     if queue_id and parsed.get('status') in PUSH_TRIGGER_STATUSES:
@@ -749,6 +786,7 @@ def _store_postfix_page(logs):
                     continue
 
             db.commit()
+            seen_postfix.update(page_seen)
 
             # The outcome of these queues just changed. Refresh only those
             # correlations, so a delivery that lands after the correlation age
@@ -870,6 +908,9 @@ def _store_rspamd_page(logs):
         page_new = 0
         page_skipped = 0
         page_blacklisted = 0
+        # Entries join the duplicate cache only after the page is committed
+        page_seen: Set[str] = set()
+        message_id_max = _column_length(RspamdLog, 'message_id')
 
         with get_db_context() as db:
             blacklisted_message_ids: Set[str] = set()
@@ -898,26 +939,30 @@ def _store_rspamd_page(logs):
                     message_id = log_entry.get('message-id', '')
                     if message_id == 'undef' or not message_id:
                         message_id = None
+                    elif isinstance(message_id, str):
+                        # Cut here, not only at the model: the duplicate key
+                        # and the blacklist cleanup must use the stored value
+                        message_id = message_id[:message_id_max]
                     sender = log_entry.get('sender_smtp')
                     recipients = log_entry.get('rcpt_smtp', [])
 
                     unique_id = f"{unix_time}:{message_id if message_id else 'no-id'}"
 
-                    if unique_id in seen_rspamd or unique_id in existing_in_db:
-                        seen_rspamd.add(unique_id)
+                    if unique_id in seen_rspamd or unique_id in existing_in_db or unique_id in page_seen:
+                        page_seen.add(unique_id)
                         page_skipped += 1
                         continue
 
                     if is_blacklisted(sender):
                         page_blacklisted += 1
-                        seen_rspamd.add(unique_id)
+                        page_seen.add(unique_id)
                         if message_id:
                             blacklisted_message_ids.add(message_id)
                         continue
 
                     if recipients and any(is_blacklisted(r) for r in recipients):
                         page_blacklisted += 1
-                        seen_rspamd.add(unique_id)
+                        page_seen.add(unique_id)
                         if message_id:
                             blacklisted_message_ids.add(message_id)
                         continue
@@ -925,13 +970,13 @@ def _store_rspamd_page(logs):
                     timestamp = datetime.fromtimestamp(unix_time, tz=timezone.utc)
                     direction = detect_direction(log_entry)
 
-                    rspamd_log = RspamdLog(
+                    rspamd_log = RspamdLog(**_fit_columns(RspamdLog, dict(
                         time=timestamp,
                         message_id=message_id,
                         sender_smtp=sender,
                         sender_mime=log_entry.get('sender_mime', sender),
-                        recipients_smtp=recipients,
-                        recipients_mime=log_entry.get('rcpt_mime', recipients),
+                        recipients_smtp=_fit_addresses(recipients),
+                        recipients_mime=_fit_addresses(log_entry.get('rcpt_mime', recipients)),
                         subject=log_entry.get('subject'),
                         score=log_entry.get('score', 0.0),
                         required_score=log_entry.get('required_score', 15.0),
@@ -947,7 +992,7 @@ def _store_rspamd_page(logs):
                         user=log_entry.get('user'),
                         size=log_entry.get('size'),
                         raw_data=log_entry
-                    )
+                    )))
 
                     if geoip_service.is_geoip_available() and rspamd_log.ip:
                         geo_info = geoip_service.lookup_ip(rspamd_log.ip)
@@ -958,7 +1003,7 @@ def _store_rspamd_page(logs):
                         rspamd_log.asn_org = geo_info.get('asn_org')
 
                     db.add(rspamd_log)
-                    seen_rspamd.add(unique_id)
+                    page_seen.add(unique_id)
                     page_new += 1
 
                 except Exception as e:
@@ -1011,6 +1056,7 @@ def _store_rspamd_page(logs):
                     logger.info(f"[BLACKLIST] Deleted {deleted_corr} correlations for blacklisted message IDs")
 
             db.commit()
+            seen_rspamd.update(page_seen)
         return page_new, page_skipped, page_blacklisted
 
 
@@ -1130,6 +1176,8 @@ def _store_netfilter_logs(logs):
         with get_db_context() as db:
             new_count = 0
             skipped_count = 0
+            # Entries join the duplicate cache only after the batch is committed
+            batch_seen: Set[str] = set()
             
             for log_entry in logs:
                 try:
@@ -1138,7 +1186,7 @@ def _store_netfilter_logs(logs):
                     priority = log_entry.get('priority', 'info')
                     unique_id = f"{time_val}:{priority}:{message}"
                     
-                    if unique_id in seen_netfilter:
+                    if unique_id in seen_netfilter or unique_id in batch_seen:
                         skipped_count += 1
                         continue
                     
@@ -1151,12 +1199,12 @@ def _store_netfilter_logs(logs):
                     
                     if existing:
                         skipped_count += 1
-                        seen_netfilter.add(unique_id)
+                        batch_seen.add(unique_id)
                         continue
                     
                     parsed = parse_netfilter_message(message, priority=priority)
                     
-                    netfilter_log = NetfilterLog(
+                    netfilter_log = NetfilterLog(**_fit_columns(NetfilterLog, dict(
                         time=timestamp,
                         priority=priority,
                         message=message,
@@ -1167,7 +1215,7 @@ def _store_netfilter_logs(logs):
                         rule_id=parsed.get('rule_id'),
                         attempts_left=parsed.get('attempts_left'),
                         raw_data=log_entry
-                    )
+                    )))
                     
                     # Enrich with GeoIP data at import time
                     if geoip_service.is_geoip_available() and netfilter_log.ip:
@@ -1179,7 +1227,7 @@ def _store_netfilter_logs(logs):
                         netfilter_log.asn_org = geo_info.get('asn_org')
                     
                     db.add(netfilter_log)
-                    seen_netfilter.add(unique_id)
+                    batch_seen.add(unique_id)
                     new_count += 1
                     
                 except Exception as e:
@@ -1187,6 +1235,7 @@ def _store_netfilter_logs(logs):
                     continue
             
             db.commit()
+            seen_netfilter.update(batch_seen)
             
             if new_count > 0:
                 logger.info(f"[OK] Imported {new_count} Netfilter logs (skipped {skipped_count} duplicates)")
