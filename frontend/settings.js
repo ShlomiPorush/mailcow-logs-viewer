@@ -325,9 +325,9 @@ var SETTINGS_FIELD_DESCRIPTIONS = {
 
 // Predefined options for settings fields (renders as dropdown instead of text input)
 const SETTINGS_VERIFY_SSL_OPTIONS = [
-    { value: '', label: 'Automatic - check host names, not localhost, IP addresses or container names' },
+    { value: '', label: 'Automatic' },
     { value: 'true', label: 'Always check' },
-    { value: 'false', label: 'Never check (self-signed certificate)' }
+    { value: 'false', label: 'Never check' }
 ];
 const SETTINGS_FIELD_OPTIONS = {
     smtp_verify_ssl: SETTINGS_VERIFY_SSL_OPTIONS,
