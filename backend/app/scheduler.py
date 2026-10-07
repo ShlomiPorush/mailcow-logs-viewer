@@ -26,6 +26,7 @@ from .correlation import (
     ensure_leg,
     find_legs,
     parse_postfix_message,
+    POSTFIX_DELIVERY_AGENTS,
 )
 from .services.dovecot_parser import (
     NON_DELIVERY_VERDICTS,
@@ -3865,11 +3866,18 @@ def _detect_suppressions_worker():
         if not settings.queue_cleanup_enabled:
             statuses_to_check.append('deferred')
 
+        # Only a delivery agent's result for a queued message is a bounce.
+        # smtpd lines (NOQUEUE rejects included) carry client-chosen from=<>
+        # and helo=<> values and must never suppress anyone - this also
+        # covers rows stored before the parser stopped reading status= and
+        # dsn= out of those fields.
         bounce_logs = db.query(PostfixLog).filter(
             PostfixLog.created_at >= cutoff,
             PostfixLog.status.in_(statuses_to_check),
             PostfixLog.recipient.isnot(None),
             PostfixLog.dsn.isnot(None),
+            PostfixLog.queue_id.isnot(None),
+            or_(*[PostfixLog.program.like(f'%/{agent}') for agent in POSTFIX_DELIVERY_AGENTS]),
         ).all()
 
         if not bounce_logs:
