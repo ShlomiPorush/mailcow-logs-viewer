@@ -235,7 +235,6 @@
 .ui-auth-banner > svg { width: 20px; height: 20px; flex: none; }
 .ui-auth-banner > div { flex: 1; min-width: 0; }
 .ui-auth-banner > .ui-btn, .ui-auth-banner > .ui-icon-btn { flex: none; }
-.ui-auth-banner .ui-auth-banner-note { font-size: 12.5px; opacity: .7; }
 @media (max-width: 760px) {
     .ui-auth-banner { flex-wrap: wrap; align-items: flex-start; }
     .ui-auth-banner > div { flex-basis: calc(100% - 78px); }
