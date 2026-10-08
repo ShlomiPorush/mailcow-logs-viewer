@@ -21,6 +21,7 @@ from typing import Dict, List, Optional
 from sqlalchemy import func
 
 from ..config import settings
+from ..correlation import submitted_with_auth
 from ..database import get_db_context
 from ..mailcow_api import mailcow_api
 from ..models import (
@@ -43,7 +44,9 @@ def fetch_outbound_counts(window_minutes: int, limit: Optional[int] = None) -> D
     """Outbound message count per sender within the rolling window.
 
     Grouped on lower(sender) so 'User@x' and 'user@x' are one mailbox - the
-    same normalisation used everywhere else for addresses.
+    same normalisation used everywhere else for addresses. Only authenticated
+    submissions count: the envelope sender of unauthenticated mail is chosen
+    by the remote client, so it must never get a mailbox blocked.
     """
     cutoff = datetime.utcnow() - timedelta(minutes=window_minutes)
     with get_db_context() as db:
@@ -52,6 +55,7 @@ def fetch_outbound_counts(window_minutes: int, limit: Optional[int] = None) -> D
             func.count(MessageCorrelation.id).label("count"),
         ).filter(
             func.lower(MessageCorrelation.direction) == "outbound",
+            submitted_with_auth(),
             MessageCorrelation.first_seen >= cutoff,
             MessageCorrelation.sender.isnot(None),
             MessageCorrelation.sender != "",

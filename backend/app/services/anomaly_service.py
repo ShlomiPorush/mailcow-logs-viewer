@@ -18,6 +18,7 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import func
 
 from ..config import settings
+from ..correlation import submitted_with_auth
 from ..database import get_db_context
 from ..models import (
     MessageCorrelation,
@@ -95,6 +96,7 @@ def _is_recurring_daily_pattern(db, sender: str, recent_count: int,
         slot_start = now - timedelta(days=day_back) - window - tolerance
         slot_count = db.query(func.count(MessageCorrelation.id)).filter(
             MessageCorrelation.direction == "outbound",
+            submitted_with_auth(),
             MessageCorrelation.first_seen >= slot_start,
             MessageCorrelation.first_seen <= slot_end,
             func.lower(MessageCorrelation.sender) == sender,
@@ -123,6 +125,7 @@ def detect_volume_spikes(db, pending) -> int:
         func.count(MessageCorrelation.id).label("cnt"),
     ).filter(
         MessageCorrelation.direction == "outbound",
+        submitted_with_auth(),
         MessageCorrelation.first_seen >= window_start,
         MessageCorrelation.first_seen <= now,
         func.lower(MessageCorrelation.sender).in_(locals_),
@@ -137,6 +140,7 @@ def detect_volume_spikes(db, pending) -> int:
         # Baseline: this sender's average per-window rate over the history period
         baseline_total = db.query(func.count(MessageCorrelation.id)).filter(
             MessageCorrelation.direction == "outbound",
+            submitted_with_auth(),
             MessageCorrelation.first_seen >= baseline_start,
             MessageCorrelation.first_seen < window_start,
             func.lower(MessageCorrelation.sender) == sender,

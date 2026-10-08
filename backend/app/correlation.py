@@ -16,7 +16,7 @@ import hashlib
 from datetime import datetime, timedelta
 from typing import Dict, Any, Optional, List
 from sqlalchemy.orm import Session
-from sqlalchemy import and_
+from sqlalchemy import and_, exists, or_
 
 from .models import MessageCorrelation, PostfixLog, RspamdLog
 from .config import settings
@@ -51,6 +51,26 @@ def origin_is_local(rspamd_log: Optional[RspamdLog]) -> bool:
     except ValueError:
         return False
     return addr.is_private or addr.is_loopback
+
+
+def submitted_with_auth():
+    """
+    Filter clause for message_correlations rows whose Rspamd scan shows an
+    authenticated submission (MAILCOW_AUTH, or a logged-in SMTP user).
+
+    Use this wherever a row is attributed to the mailbox in its sender field
+    for enforcement or alerting. The 'outbound' direction alone is not enough:
+    it also covers unauthenticated mail with a hosted envelope sender, and the
+    envelope sender of such mail is whatever the remote client claimed.
+    Rows without a linked Rspamd scan do not qualify.
+    """
+    return exists().where(
+        RspamdLog.id == MessageCorrelation.rspamd_log_id,
+        or_(
+            RspamdLog.has_auth.is_(True),
+            and_(RspamdLog.user.isnot(None), RspamdLog.user != '', RspamdLog.user != 'unknown'),
+        ),
+    )
 
 
 def extract_domain(email: str) -> Optional[str]:
