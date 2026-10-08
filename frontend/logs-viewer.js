@@ -111,7 +111,7 @@ function renderLogServiceList(services) {
     container.innerHTML = services.map(svc => {
         const iconPath = LOG_SERVICE_ICONS[svc.icon] || LOG_SERVICE_ICONS.file;
         const isActive = svc.id === logsState.activeService;
-        const countStr = svc.log_count >= 1000 ? (svc.log_count / 1000).toFixed(1) + 'K' : svc.log_count.toString();
+        const countStr = svc.log_count >= 1000 ? (svc.log_count / 1000).toFixed(1) + 'K' : String(Number(svc.log_count));
         
         return `
             <button onclick="selectLogService('${escapeJsArg(svc.id)}')" id="log-svc-${escapeHtml(svc.id)}"
@@ -206,9 +206,9 @@ async function loadSmartFilters(serviceId) {
         
         container.classList.remove('hidden');
         
-        chipsContainer.innerHTML = logsState.smartFilters.map(f => `<button onclick="toggleSmartFilter('${f.id}')"
-                id="smart-filter-${f.id}" class="ui-chip ui-chip-${escapeHtml(f.color || 'blue')}" aria-pressed="false"
-                title="${escapeHtml(f.description || '')}" data-filter-id="${f.id}" data-color="${escapeHtml(f.color || 'blue')}">${escapeHtml(f.label)}</button>`).join('');
+        chipsContainer.innerHTML = logsState.smartFilters.map(f => `<button onclick="toggleSmartFilter('${escapeJsArg(f.id)}')"
+                id="smart-filter-${escapeHtml(f.id)}" class="ui-chip ui-chip-${escapeHtml(f.color || 'blue')}" aria-pressed="false"
+                title="${escapeHtml(f.description || '')}" data-filter-id="${escapeHtml(f.id)}" data-color="${escapeHtml(f.color || 'blue')}">${escapeHtml(f.label)}</button>`).join('');
         fitQuickFilters();
         
     } catch (error) {
@@ -1196,7 +1196,7 @@ function updateFilterBadge(hasFilters, visible, total) {
     if (logsState.activeSmartFilters.length > 0) {
         const filterNames = logsState.activeSmartFilters.map(id => {
             const f = logsState.smartFilters.find(sf => sf.id === id);
-            return f ? f.label : id;
+            return escapeHtml(f ? f.label : id);
         });
         parts.push(filterNames.join(', '));
     }

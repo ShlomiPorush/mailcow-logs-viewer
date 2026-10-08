@@ -106,7 +106,8 @@ curl -b cookies.txt http://your-server:8080/api/info
 ```
 
 Sessions live in the application's memory, so restarting the container signs
-everyone out. `GET /api/auth/logout` ends the session and clears the cookie.
+everyone out. `POST /api/auth/logout` ends the session and clears the cookie
+(`curl -b cookies.txt -X POST http://your-server:8080/api/auth/logout`).
 API clients that prefer to send `Authorization: Basic` on every request can keep
 doing that; nothing about it changed.
 
@@ -122,7 +123,7 @@ When `OAUTH2_ENABLED=true`, users can authenticate via OAuth2/OIDC. The applicat
 1. User initiates login via `GET /api/auth/login`
 2. User is redirected to OAuth2 provider
 3. After authentication, provider redirects to `GET /api/auth/callback`
-4. Application exchanges authorization code for tokens
+4. Application exchanges authorization code for tokens, proving the login with PKCE (S256)
 5. Session is created and HTTP-only cookie is set
 6. User is redirected to main application
 
@@ -264,6 +265,7 @@ Initiate OAuth2 login flow. Redirects user to OAuth2 provider.
 
 **Notes:**
 - Generates CSRF state token for security
+- Sends a PKCE code challenge (RFC 7636, `code_challenge_method=S256`); the callback sends the matching `code_verifier` with the token request
 - Only works when `OAUTH2_ENABLED=true`
 - User will be redirected back to `/api/auth/callback` after authentication
 
@@ -298,7 +300,7 @@ Handle OAuth2 callback from provider. This endpoint processes the authorization 
 
 ---
 
-### GET /api/auth/logout
+### POST /api/auth/logout
 
 Logout and clear session.
 
@@ -310,6 +312,7 @@ Logout and clear session.
 - Deletes server-side session
 - Clears session cookie
 - Works for both OAuth2 and Basic Auth sessions
+- POST only, so another site cannot log you out with a link or an image. `GET /api/auth/logout` returns `405 Method Not Allowed`. A cross-site POST is rejected with 403 by the same-origin check
 
 ---
 

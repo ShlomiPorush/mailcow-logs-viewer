@@ -238,7 +238,7 @@ function gsCountText(result) {
     if (!result || result.short) return '';
     if (result.loading) return '…';
     if (result.failed) return '!';
-    return result.count.toLocaleString();
+    return Number(result.count).toLocaleString();
 }
 
 function gsRender() {
@@ -270,7 +270,7 @@ function gsRender() {
         categories.forEach(c => {
             const r = gsResults[c.id];
             if (!r || !r.count) return;
-            body += `<div class="ui-gs-sec"><span>${escapeHtml(c.label)} · ${r.count.toLocaleString()}</span>${r.count > GS_SUMMARY ? `<button type="button" class="ui-link" data-gs-tab="${c.id}">See all</button>` : ''}</div>`
+            body += `<div class="ui-gs-sec"><span>${escapeHtml(c.label)} · ${Number(r.count).toLocaleString()}</span>${r.count > GS_SUMMARY ? `<button type="button" class="ui-link" data-gs-tab="${c.id}">See all</button>` : ''}</div>`
                 + r.items.slice(0, GS_SUMMARY).map(item => gsItem(c.id, item, q)).join('');
         });
         if (!body) body = `<p class="ui-gs-empty">${loading ? 'Searching…' : short ? GS_SHORT : `Nothing found for “${escapeHtml(gsQuery)}”`}</p>`;
@@ -280,10 +280,10 @@ function gsRender() {
         const r = gsResults[gsTab] || { count: 0, items: [] };
         if (r.more && r.count) {
             const index = gsShown.push(r.more) - 1;
-            body += `<button type="button" class="ui-gs-more${index === gsActive ? ' is-active' : ''}" data-gs-index="${index}"><span><b>${r.count.toLocaleString()}</b> found</span><span class="ui-link">${escapeHtml(r.more.label)}</span></button>`;
+            body += `<button type="button" class="ui-gs-more${index === gsActive ? ' is-active' : ''}" data-gs-index="${index}"><span><b>${Number(r.count).toLocaleString()}</b> found</span><span class="ui-link">${escapeHtml(r.more.label)}</span></button>`;
         }
         body += r.items.map(item => gsItem(gsTab, item, q)).join('');
-        if (r.count > r.items.length && !r.more) body += `<p class="ui-gs-wait">The first ${r.items.length} of ${r.count.toLocaleString()}</p>`;
+        if (r.count > r.items.length && !r.more) body += `<p class="ui-gs-wait">The first ${r.items.length} of ${Number(r.count).toLocaleString()}</p>`;
         if (r.short) body = `<p class="ui-gs-empty">${GS_SHORT}</p>`;
         else if (r.loading) body = '<p class="ui-gs-empty">Searching…</p>';
         else if (r.failed) body = '<p class="ui-gs-empty">This search failed. Try again in a moment.</p>';

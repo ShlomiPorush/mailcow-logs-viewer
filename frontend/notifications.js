@@ -78,9 +78,9 @@ function renderNotificationChannels() {
                 ${ch.last_error ? `<small class="ui-text-fail" title="${escapeHtml(ch.last_error)}">${escapeHtml(ch.last_error)}</small>` : ''}
             </div>
             <div class="ui-row-actions">
-                <button type="button" onclick="testNotificationChannel(${ch.id})" class="ui-btn ui-btn-sm">Test</button>
-                <button type="button" onclick="editNotificationChannel(${ch.id})" class="ui-btn ui-btn-sm">Edit</button>
-                <button type="button" onclick="deleteNotificationChannel(${ch.id})" class="ui-btn ui-btn-sm ui-btn-danger">Delete</button>
+                <button type="button" onclick="testNotificationChannel(${Number(ch.id)})" class="ui-btn ui-btn-sm">Test</button>
+                <button type="button" onclick="editNotificationChannel(${Number(ch.id)})" class="ui-btn ui-btn-sm">Edit</button>
+                <button type="button" onclick="deleteNotificationChannel(${Number(ch.id)})" class="ui-btn ui-btn-sm ui-btn-danger">Delete</button>
             </div>
         </div>`;
     }).join('');

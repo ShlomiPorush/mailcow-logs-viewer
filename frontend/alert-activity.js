@@ -65,7 +65,7 @@ function alertActivityChart(data) {
     const fmt = d => d.toLocaleString(undefined, { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
     const what = spike ? 'sent' : 'failed logins';
     const markAt = cols.findIndex(c => at >= c.start && at < new Date(c.start.getTime() + minutes * 60000));
-    const ranges = [['24h', '24 hours'], ['48h', '2 days'], ['7d', `${data.baseline_days} days`]];
+    const ranges = [['24h', '24 hours'], ['48h', '2 days'], ['7d', `${escapeHtml(String(data.baseline_days))} days`]];
     return `<div class="ui-aa-head"><b>${spike ? 'What it sent' : 'Failed logins'}</b><span class="ui-muted">${spike ? 'this mailbox only' : 'this username only'}</span>
             <span class="ui-seg ui-head-actions" role="group" aria-label="Period">${ranges.map(([k, l]) => `<button type="button" aria-pressed="${alertActivityRange === k}" onclick="setAlertActivityRange('${k}')">${l}</button>`).join('')}</span></div>
         <div class="ui-aa-chart">
@@ -79,13 +79,13 @@ function alertActivityChart(data) {
             ${markAt >= 0 ? `<div class="ui-aa-mark" style="left:${(markAt + .5) / cols.length * 100}%"><span>Alert ${at.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}</span></div>` : ''}
         </div>
         <div class="ui-aa-x"><span>${escapeHtml(fmt(cols[0].start))}</span><span>${escapeHtml(fmt(cols[cols.length - 1].start))}</span></div>
-        <p class="ui-aa-legend"><span><i></i>${spike ? 'Sent' : 'Failed logins'}, per ${minutes === 60 ? 'hour' : `${minutes} minutes`}</span><span><i class="is-alert"></i>The alert's ${data.window_minutes} minutes</span>${usual !== null ? `<span><i class="is-usual"></i>Its usual rate over ${data.baseline_days} days</span>` : ''}</p>`;
+        <p class="ui-aa-legend"><span><i></i>${spike ? 'Sent' : 'Failed logins'}, per ${minutes === 60 ? 'hour' : `${escapeHtml(String(minutes))} minutes`}</span><span><i class="is-alert"></i>The alert's ${escapeHtml(String(data.window_minutes))} minutes</span>${usual !== null ? `<span><i class="is-usual"></i>Its usual rate over ${escapeHtml(String(data.baseline_days))} days</span>` : ''}</p>`;
 }
 
 function alertActivityList(title, rows, total, tone) {
     if (!rows.length) return '';
     return `<div class="ui-aa-box"><h4>${escapeHtml(title)}</h4>${rows.map(r => `<div class="ui-aa-row"><span title="${escapeHtml(r.name)}">${escapeHtml(r.name)}</span>
-        <span class="ui-aa-bar"><i style="width:${total ? r.count / total * 100 : 0}%;${tone ? `background:var(--ui-${tone(r.name)})` : ''}"></i></span><b>${r.count.toLocaleString()}</b></div>`).join('')}</div>`;
+        <span class="ui-aa-bar"><i style="width:${total ? r.count / total * 100 : 0}%;${tone ? `background:var(--ui-${tone(r.name)})` : ''}"></i></span><b>${Number(r.count).toLocaleString()}</b></div>`).join('')}</div>`;
 }
 
 function renderAlertActivity() {
@@ -116,7 +116,7 @@ function renderAlertActivity() {
         <p class="ui-muted ui-aa-sub">${escapeHtml(a.title)} · ${escapeHtml(formatTime(a.created_at))}</p>
         <div class="ui-aa-strip">${figures.map(([label, value, bad]) => `<div><small>${escapeHtml(label)}</small><b${bad ? ' class="ui-text-fail"' : ''}>${escapeHtml(value)}</b></div>`).join('')}</div>
         <section>${alertActivityChart(data)}</section>
-        <section><div class="ui-aa-head"><b>Around the alert</b><span class="ui-muted">${uiCountLabel(around.total, spike ? 'message' : 'failed login', spike ? 'messages' : 'failed logins')}, from ${data.window_minutes} minutes before it to an hour after</span></div>
+        <section><div class="ui-aa-head"><b>Around the alert</b><span class="ui-muted">${uiCountLabel(around.total, spike ? 'message' : 'failed login', spike ? 'messages' : 'failed logins')}, from ${escapeHtml(String(data.window_minutes))} minutes before it to an hour after</span></div>
             ${around.total ? `<div class="ui-aa-two">${spike
                 ? alertActivityList('Recipient domains', around.recipient_domains, around.total) + alertActivityList('What happened to them', around.results, around.total, n => results[n] || 'muted')
                     + `<div class="ui-aa-box ui-aa-wide"><h4>Subjects</h4>${around.subjects.map(s => `<div class="ui-aa-subj"><span title="${escapeHtml(s.name)}" dir="auto">${escapeHtml(s.name)}</span><small>${uiCountLabel(s.count, 'message', 'messages')}</small></div>`).join('')}</div>`
