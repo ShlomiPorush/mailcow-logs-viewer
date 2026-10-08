@@ -156,6 +156,18 @@ def delete_session(session_id: str) -> bool:
         return False
 
 
+def revoke_all_sessions() -> int:
+    """End every session, for example after the sign-in credentials changed.
+
+    Returns the number of sessions that were ended.
+    """
+    with _session_lock:
+        count = len(_session_store)
+        _session_store.clear()
+    logger.info(f"Revoked {count} session(s) after an authentication settings change")
+    return count
+
+
 def get_session_from_request(request: Request) -> Optional[Dict[str, Any]]:
     """
     Get session data from request cookie
