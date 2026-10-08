@@ -180,8 +180,6 @@ def _session_bound_values() -> tuple:
     return tuple(getattr(settings, key, None) for key in _SESSION_BOUND_SETTING_KEYS)
 
 
-
-
 def _effective_config_for_editable(settings_obj: Settings) -> Dict[str, Any]:
     """Build dict of editable keys -> value (secrets masked) for API response."""
     out = {}
