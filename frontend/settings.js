@@ -272,7 +272,7 @@ var SETTINGS_FIELD_DESCRIPTIONS = {
     smtp_port: 'SMTP server port (587 for TLS, 465 for SSL, 25 for plain).',
     smtp_use_tls: 'Use STARTTLS for SMTP. Recommended.',
     smtp_use_ssl: 'Use implicit SSL for SMTP (usually port 465).',
-    smtp_verify_ssl: 'Check the SMTP server certificate before the password is sent. Automatic checks host names such as smtp.example.com and skips localhost, IP addresses and container names. Choose Never only for a server with a self-signed certificate.',
+    smtp_verify_ssl: 'Check the SMTP server certificate before the password is sent, so nobody between this app and the server can read it. Off (default) does not check. Automatic checks host names such as smtp.example.com and skips localhost, IP addresses and container names. On always checks. Automatic or On is recommended; keep Off only for a server with a self-signed certificate.',
     smtp_user: 'SMTP username (usually email address).',
     smtp_password: 'SMTP password.',
     smtp_from: 'From address for emails (defaults to SMTP user if not set).',
@@ -287,7 +287,7 @@ var SETTINGS_FIELD_DESCRIPTIONS = {
     dmarc_imap_host: 'IMAP server hostname (e.g. imap.gmail.com).',
     dmarc_imap_port: 'IMAP server port (993 for SSL, 143 for non-SSL). Default: 993.',
     dmarc_imap_use_ssl: 'Use SSL/TLS for IMAP connection. Default: true.',
-    dmarc_imap_verify_ssl: 'Check the IMAP server certificate before the password is sent. Automatic checks host names such as imap.example.com and skips localhost, IP addresses and container names. Choose Never only for a server with a self-signed certificate.',
+    dmarc_imap_verify_ssl: 'Check the IMAP server certificate before the password is sent, so nobody between this app and the server can read it. Off (default) does not check. Automatic checks host names such as imap.example.com and skips localhost, IP addresses and container names. On always checks. Automatic or On is recommended; keep Off only for a server with a self-signed certificate.',
     dmarc_imap_user: 'IMAP username (email address).',
     dmarc_imap_password: 'IMAP password.',
     dmarc_imap_folder: 'IMAP folder to scan for DMARC and TLS reports. Default: INBOX.',
@@ -323,15 +323,24 @@ var SETTINGS_FIELD_DESCRIPTIONS = {
     queue_cleanup_threshold_minutes: 'How long (in minutes) a deferred email must be stuck in the queue before it is automatically deleted and the recipient suppressed. Default: 60 (1 hour).'
 };
 
+// Settings with a few short choices, shown as a segmented control (.ui-seg, as on the Security page).
+// A hidden input holds the value, so the form saves it like any other field
+const SETTINGS_SEGMENTED_OPTIONS = {
+    smtp_verify_ssl: [['false', 'Off'], ['auto', 'Automatic'], ['true', 'On']],
+    dmarc_imap_verify_ssl: [['false', 'Off'], ['auto', 'Automatic'], ['true', 'On']]
+};
+
+function settingsPickSegment(btn) {
+    const group = btn.closest('.ui-seg');
+    const field = group && group.parentElement.querySelector('input[type="hidden"]');
+    if (field === null || field === undefined || btn.disabled) return;
+    field.value = btn.getAttribute('data-value');
+    group.querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', String(b === btn)));
+    field.form && field.form.dispatchEvent(new Event('input', { bubbles: true }));
+}
+
 // Predefined options for settings fields (renders as dropdown instead of text input)
-const SETTINGS_VERIFY_SSL_OPTIONS = [
-    { value: '', label: 'Automatic' },
-    { value: 'true', label: 'Always check' },
-    { value: 'false', label: 'Never check' }
-];
 const SETTINGS_FIELD_OPTIONS = {
-    smtp_verify_ssl: SETTINGS_VERIFY_SSL_OPTIONS,
-    dmarc_imap_verify_ssl: SETTINGS_VERIFY_SSL_OPTIONS,
     webhook_type: [
         { value: 'generic', label: 'Generic - JSON POST {title, message, ...}' },
         { value: 'slack', label: 'Slack - Incoming Webhook' },
@@ -719,8 +728,19 @@ function renderSettingsEditField(key, value, sensitiveKeys, description, envLock
             '<input type="hidden" id="edit-' + key + '" name="' + key + '" value="********"' + (envLocked ? ' disabled' : '') + '></div></div>';
     }
 
-    // A setting with a choice of values (Automatic / Always / Never) is a dropdown even when it holds a boolean
-    if (isBool && !SETTINGS_FIELD_OPTIONS[key]) {
+    const segments = SETTINGS_SEGMENTED_OPTIONS[key];
+    if (segments) {
+        const current = segments.some(([v]) => v === String(displayVal)) ? String(displayVal) : segments[0][0];
+        const buttons = segments.map(([v, text]) =>
+            '<button type="button" data-value="' + escapeHtml(v) + '" aria-pressed="' + (v === current) + '" ' + disabledAttr +
+            ' onclick="settingsPickSegment(this)">' + escapeHtml(text) + '</button>').join('');
+        return '<div class="ui-set-field' + (envLocked ? ' is-locked' : '') + '"><span class="ui-label" id="label-' + key + '">' + escapeHtml(label) + labelLockIcon + '</span>' +
+            descHtml +
+            '<div class="ui-seg" role="group" aria-labelledby="label-' + key + '">' + buttons + '</div>' +
+            '<input type="hidden" id="edit-' + key + '" name="' + key + '" value="' + escapeHtml(current) + '"' + (envLocked ? ' disabled' : '') + '></div>';
+    }
+
+    if (isBool) {
         // The whole row toggles, like a Features row: the row is the label (so its text is phrasing content)
         const asSpan = html => html.replace(/^<p /, '<span ').replace(/<\/p>$/, '</span>');
         return '<div class="ui-set-bool' + (envLocked ? ' is-locked' : (isChanged ? ' is-changed' : '')) + '">' +
