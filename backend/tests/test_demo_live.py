@@ -3,6 +3,7 @@ The demo's live trickle: minute-sized windows get a minute's worth of
 traffic, never a line from the future, and the lines a scenario writes later
 (a retry, an unban) arrive once their time comes.
 """
+import threading
 import time
 
 from demo import fake_mailcow, seed
@@ -59,8 +60,16 @@ def test_queue_ids_stay_unique_across_history_and_live():
 
 def test_the_live_loop_feeds_the_fake_server():
     fake = fake_mailcow.FakeMailcow()
-    seed.start_live_traffic(fake, Traffic(seed=5), interval=0.05)
-    deadline = time.time() + 5
-    while time.time() < deadline and not any(fake.logs.values()):
-        time.sleep(0.05)
-    assert any(fake.logs.values())
+    stop = threading.Event()
+    thread = seed.start_live_traffic(fake, Traffic(seed=5), interval=0.05, stop=stop)
+    try:
+        deadline = time.time() + 5
+        while time.time() < deadline and not any(fake.logs.values()):
+            time.sleep(0.05)
+        assert any(fake.logs.values())
+    finally:
+        # A thread left running would keep generating traffic for the rest of
+        # the test session and react to other tests' clock changes.
+        stop.set()
+        thread.join(timeout=5)
+    assert not thread.is_alive()

@@ -144,9 +144,9 @@ def test_successful_info_auth_resets_failures():
         assert client.get("/api/auth/verify", headers=credentials("wrong")).status_code == 401
 
 
-def test_lockout_expires(monkeypatch):
+def test_lockout_expires(monkeypatch, module_clock):
     now = [1000.0]
-    monkeypatch.setattr(auth.time, "time", lambda: now[0])
+    module_clock(auth, time=lambda: now[0])
     client = client_at()
     for _ in range(auth._AUTH_MAX_FAILURES):
         client.get("/api/auth/verify", headers=credentials("wrong"))

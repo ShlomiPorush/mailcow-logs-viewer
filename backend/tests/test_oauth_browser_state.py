@@ -134,9 +134,9 @@ def test_forged_or_altered_state_is_rejected(monkeypatch, tamper):
     auth.oauth2_client.exchange_code_for_token.assert_not_awaited()
 
 
-def test_expired_state_is_rejected_and_used_states_are_pruned(monkeypatch):
+def test_expired_state_is_rejected_and_used_states_are_pruned(monkeypatch, module_clock):
     now = [1_000_000.0]
-    monkeypatch.setattr(auth.time, "time", lambda: now[0])
+    module_clock(auth, time=lambda: now[0])
     client = TestClient(app)
     expired = start(client)
     now[0] += auth.OAUTH_STATE_TTL
@@ -225,9 +225,9 @@ def test_unauthenticated_starts_cannot_block_a_new_login():
     assert owner.get("/api/auth/status").json()["authenticated"] is True
 
 
-def test_periodic_cleanup_forgets_expired_used_states(monkeypatch):
+def test_periodic_cleanup_forgets_expired_used_states(monkeypatch, module_clock):
     now = [1_000_000.0]
-    monkeypatch.setattr(auth.time, "time", lambda: now[0])
+    module_clock(auth, time=lambda: now[0])
     client = TestClient(app)
     state = start(client)
     assert finish(client, state).headers["location"] == "/"
