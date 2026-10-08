@@ -192,13 +192,16 @@ LIVE_MIN_WEIGHT = 2.0
 LIVE_NOISE_PER_MINUTE = 2.0
 
 
-def start_live_traffic(fake, traffic, interval=LIVE_INTERVAL_SECONDS):
+def start_live_traffic(fake, traffic, interval=LIVE_INTERVAL_SECONDS, stop=None):
     """Keep mail flowing: every minute the fake server gets that minute's
-    traffic, which the scheduler's regular jobs pick up like new logs."""
+    traffic, which the scheduler's regular jobs pick up like new logs.
+
+    Setting the optional ``stop`` event ends the loop (used by tests)."""
+    stop = stop or threading.Event()
+
     def loop():
         last = time.time()
-        while True:
-            time.sleep(interval)
+        while not stop.wait(interval):
             now = time.time()
             try:
                 batch = traffic.generate(last, now, min_weight=LIVE_MIN_WEIGHT,

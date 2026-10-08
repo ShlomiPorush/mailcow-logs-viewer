@@ -120,10 +120,10 @@ def test_live_capacity_changes_do_not_evict_sessions_or_counters(monkeypatch):
     assert client_at("192.0.2.52").get("/api/auth/verify", headers=credentials()).status_code == 200
 
 
-def test_full_table_reclaims_expired_counters_before_evicting(monkeypatch):
+def test_full_table_reclaims_expired_counters_before_evicting(monkeypatch, module_clock):
     now = [1000.0]
-    monkeypatch.setattr(auth.time, "time", lambda: now[0])
-    monkeypatch.setattr(auth.time, "monotonic", lambda: now[0])
+    module_clock(auth, time=lambda: now[0])
+    module_clock(auth, monotonic=lambda: now[0])
     for ip in ["198.51.100.1", "198.51.100.2"]:
         auth._record_auth_failure(ip)
     now[0] += auth._AUTH_WINDOW_SECONDS + 1
@@ -145,12 +145,12 @@ def test_parallel_unknown_clients_do_not_overrun_failure_capacity():
     assert len(auth._auth_failures) == 2
 
 
-def test_saturated_cleanup_scans_are_throttled(monkeypatch):
+def test_saturated_cleanup_scans_are_throttled(monkeypatch, module_clock):
     for ip in ["198.51.100.1", "198.51.100.2"]:
         auth._record_auth_failure(ip)
     calls = []
     cleanup = auth.cleanup_expired_auth_failures
-    monkeypatch.setattr(auth.time, "monotonic", lambda: 1000.0)
+    module_clock(auth, monotonic=lambda: 1000.0)
     monkeypatch.setattr(auth, "cleanup_expired_auth_failures", lambda: (calls.append(True), cleanup()))
     for index in range(10):
         assert client_at(f"192.0.2.{index + 1}").get("/api/auth/verify", headers=credentials("wrong")).status_code == 401
