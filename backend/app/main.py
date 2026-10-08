@@ -15,6 +15,7 @@ from fastapi.staticfiles import StaticFiles
 from .frontend_assets import stamp_asset_versions
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.convertors import Convertor, register_url_convertor
 from starlette.datastructures import MutableHeaders
 from contextlib import asynccontextmanager, suppress
 from typing import Optional
@@ -509,13 +510,34 @@ async def global_exception_handler(request: Request, exc: Exception):
     )
 
 
+class SpaPathConvertor(Convertor):
+    """Any path except those under /api and /ws.
+
+    Those prefixes belong to the API and the WebSocket. If the page route
+    matched them, an unknown API path such as /api/does-not-exist would get
+    index.html with 200 (and any other method a misleading 405), hiding typos
+    from scripts. Left unmatched, it gets FastAPI's JSON 404 for every method.
+    """
+
+    regex = r"(?!(?:api|ws)(?:/|$)).*"
+
+    def convert(self, value: str) -> str:
+        return value
+
+    def to_string(self, value: str) -> str:
+        return value
+
+
+register_url_convertor("spa_path", SpaPathConvertor())
+
+
 # SPA catch-all route - must be AFTER all other routes and exception handlers
 # Returns index.html for all frontend routes (e.g., /dashboard, /messages, /dmarc)
-@app.get("/{full_path:path}", response_class=HTMLResponse)
+@app.get("/{full_path:spa_path}", response_class=HTMLResponse)
 def spa_catch_all(full_path: str):
     """Serve the SPA for all frontend routes - enables clean URLs"""
     # API and static routes are handled by their respective routers/mounts
-    # This catch-all only receives unmatched routes
+    # This catch-all only receives unmatched routes outside /api and /ws
     try:
         with open("/app/frontend/index.html", "r") as f:
             html = f.read()
