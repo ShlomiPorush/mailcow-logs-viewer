@@ -228,6 +228,19 @@
 .ui-banner-ok { color: var(--ui-ok); background: color-mix(in srgb, var(--ui-ok) 13%, transparent); }
 .ui-banner-warn { color: var(--ui-warn); background: color-mix(in srgb, var(--ui-warn) 14%, transparent); }
 .ui-banner-fail { color: var(--ui-fail); background: color-mix(in srgb, var(--ui-fail) 13%, transparent); }
+/* No sign-in configured: a warn banner at the top of the Dashboard. The action
+   sits on the right, as in .ui-locked, with the dismiss button last; on phones
+   the action moves under the text and the dismiss button stays top right. */
+.ui-auth-banner { align-items: center; margin-bottom: 14px; }
+.ui-auth-banner > svg { width: 20px; height: 20px; flex: none; }
+.ui-auth-banner > div { flex: 1; min-width: 0; }
+.ui-auth-banner > .ui-btn, .ui-auth-banner > .ui-icon-btn { flex: none; }
+@media (max-width: 760px) {
+    .ui-auth-banner { flex-wrap: wrap; align-items: flex-start; }
+    .ui-auth-banner > div { flex-basis: calc(100% - 78px); }
+    .ui-auth-banner > .ui-icon-btn { order: 1; margin: -6px -8px 0 0; }
+    .ui-auth-banner > .ui-btn { order: 2; margin-inline-start: 32px; }
+}
 
 /*
  * Locked area: shown instead of controls that need something the installation

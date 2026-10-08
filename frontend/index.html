@@ -25,7 +25,7 @@
     <!-- Utility classes still used by the markup, compiled once
          (.github/scripts/build-utilities-css.sh); the design system comes last -->
     <link rel="stylesheet" href="/static/assets/css/utilities.css?v=1">
-    <link rel="stylesheet" href="/static/assets/css/ui.css?v=53">
+    <link rel="stylesheet" href="/static/assets/css/ui.css?v=56">
     <style>
         .tab-active {
             border-bottom: 2px solid #3b82f6;
@@ -557,6 +557,17 @@
 
             <!-- Dashboard Tab -->
             <div id="content-dashboard" class="tab-content ui-page">
+                <!-- Shown on the Dashboard while no sign-in is configured (app.js loadAppInfo).
+                     Dismiss hides it for good in this browser, for setups where a reverse proxy signs users in. -->
+                <div id="auth-off-banner" class="ui-banner ui-banner-warn ui-auth-banner hidden" role="status">
+                    <svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>
+                    <div><b>Authentication is off</b>
+                        <p>Anyone who can open this page can see all mail logs and change settings.</p></div>
+                    <button type="button" class="ui-btn ui-btn-sm" onclick="navigateTo('settings', { sub: 'auth' })">Set up sign-in</button>
+                    <button type="button" class="ui-icon-btn" onclick="dismissAuthOffBanner()" title="Dismiss" aria-label="Dismiss">
+                        <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                    </button>
+                </div>
                 <div class="ui-page-head">
                     <div>
                         <h1 class="ui-h1">Dashboard</h1>
@@ -1507,7 +1518,7 @@
     <!-- JavaScript -->
     <script src="/static/utils.js?v=18"></script>
     <script src="/static/router.js?v=6"></script>
-    <script src="/static/app.js?v=63"></script>
+    <script src="/static/app.js?v=64"></script>
     <script src="/static/alert-activity.js?v=2"></script>
     <script src="/static/export.js?v=1"></script>
     <script src="/static/message-details.js?v=7"></script>
