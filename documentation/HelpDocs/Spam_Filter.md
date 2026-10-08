@@ -39,6 +39,8 @@ Manage a list of email addresses that should be blocked from receiving outbound 
 #### Domain Suppressions
 When a domain-based suppression is created (e.g., blocking all emails to `@example.com`), the system stores it as a regex pattern for Rspamd compatibility. In the UI, these entries display the **clean domain name** instead of the raw regex, with a "Domain" badge. Hover over the badge to see the actual regex pattern.
 
+Only entries you add or import can be patterns. Addresses the app suppresses on its own, from bounces and the mail queue, are always written to Rspamd as the exact address, so an odd-looking address can never block other recipients.
+
 #### Sync Status
 - ✓ **Synced**: Entry is active in Rspamd's denylist
 - ⟳ **Pending**: Entry needs to be synced to Rspamd

@@ -152,82 +152,108 @@ def is_blacklisted(email: str) -> bool:
     return email_lower in blacklist
 
 
+# Postfix programs that log a delivery result (the last part of the syslog
+# program name, e.g. postfix/smtp, postfix/lmtp).
+POSTFIX_DELIVERY_AGENTS = ('smtp', 'lmtp', 'local', 'virtual', 'error', 'retry', 'discard', 'pipe')
+
+# An address as Postfix logs it between <>: a quoted local part may contain
+# '>' and ', ', anything outside quotes ends at the first '>'. The two
+# alternatives start with different characters, so matching stays linear.
+_PF_ADDR = r'(?:"(?:[^"\\]|\\.)*"|[^>"])*'
+
+# Delivery-agent result (smtp, lmtp, local, virtual, error, pipe, ...):
+#   QID: to=<rcpt>, [orig_to=<o>, ]relay=R, [conn_use=N, ]delay=D,
+#        delays=a/b/c/d, dsn=X.Y.Z, status=word (reply text)
+# Only these fixed fields carry the outcome. The addresses are chosen by
+# senders and the reply text by remote servers, so neither may supply a
+# status, a DSN or a Message-ID.
+_PF_DELIVERY_RE = re.compile(
+    r'^[0-9A-F]+: to=<(?P<to>' + _PF_ADDR + r')>, '
+    r'(?:orig_to=<(?P<orig_to>' + _PF_ADDR + r')>, )?'
+    r'(?P<fields>(?:[a-z_]+=[^,\s<>]*, )*?)'
+    r'dsn=(?P<dsn>\d\.\d{1,3}\.\d{1,3}), status=(?P<status>\w+)(?P<reply>.*)$'
+)
+_PF_FIELD_RE = re.compile(r'([a-z_]+)=([^,\s<>]*), ')
+# qmgr: QID: from=<sender>, status=expired, returned to sender
+_PF_EXPIRED_RE = re.compile(r'^[0-9A-F]+: from=<' + _PF_ADDR + r'>, status=(?P<status>expired)\b')
+# cleanup: QID: message-id=<id>
+_PF_MESSAGE_ID_RE = re.compile(r'^[0-9A-F]+: message-id=<([^>]+)>', re.IGNORECASE)
+
+
 def parse_postfix_message(message: str) -> Dict[str, Any]:
     """
     Parse Postfix log message to extract structured data
-    
+
+    status, dsn, relay and delay are read only from a delivery-agent result
+    line (or the qmgr "status=expired" line) of a queued message, and the
+    Message-ID only from the cleanup "message-id=" line. Text inside from=<>,
+    to=<>, helo=<> or a server reply never sets them, so an smtpd NOQUEUE
+    reject line can never look like a bounce.
+
     Args:
         message: Postfix log message string
-    
+
     Returns:
         Dictionary with parsed fields
     """
     result = {}
-    
+
     # Extract queue ID (at the start of message)
     queue_match = re.match(r'^([A-F0-9]+):', message)
     if queue_match:
         result['queue_id'] = queue_match.group(1)
-    
-    # Extract message-id - Method 1: Standalone line
-    mid_match = re.search(r'message-id=<([^>]+)>', message, re.IGNORECASE)
+
+    # Message-ID: only the cleanup line names it. Reply text inside
+    # status=(...) is not a Message-ID: Dovecot LMTP quotes the recipient
+    # there ("250 2.0.0 <rcpt> <session> Saved") and a remote MX may quote
+    # anything.
+    mid_match = _PF_MESSAGE_ID_RE.match(message)
     if mid_match:
         result['message_id'] = mid_match.group(1)
-    
-    # Extract message-id - Method 2: Inside status message (alternative location)
-    # Example: status=sent (250 2.6.0 <message-id@domain.com> ...)
-    if not result.get('message_id'):
-        status_mid_match = re.search(r'status=\w+\s*\([^<]*<([^>@]+@[^>]+)>', message)
-        if status_mid_match:
-            # Verify it looks like a message-id (has @ symbol)
-            potential_mid = status_mid_match.group(1)
-            # Additional check: message-ids often have special chars, not just email format
-            if '@' in potential_mid:
-                result['message_id'] = potential_mid
-    
-    # Extract from= (sender)
-    from_match = re.search(r'from=<([^>]*)>', message)
-    if from_match:
-        result['sender'] = from_match.group(1) if from_match.group(1) else None
-    
-    # Extract to= (recipient)
-    to_match = re.search(r'to=<([^>]*)>', message)
-    if to_match:
-        result['recipient'] = to_match.group(1) if to_match.group(1) else None
-    
-    # Extract relay
-    relay_match = re.search(r'relay=([^,\s]+)', message)
-    if relay_match:
-        result['relay'] = relay_match.group(1)
-    
-    # Extract delay
-    delay_match = re.search(r'delay=([\d.]+)', message)
-    if delay_match:
-        result['delay'] = float(delay_match.group(1))
-    
-    # Extract DSN
-    dsn_match = re.search(r'dsn=([\d.]+)', message)
-    if dsn_match:
-        result['dsn'] = dsn_match.group(1)
-    
-    # Extract orig_to (original recipient)
-    orig_to_match = re.search(r'orig_to=<([^>]*)>', message)
-    if orig_to_match:
-        result['orig_to'] = orig_to_match.group(1) if orig_to_match.group(1) else None
-    
-    # Extract status
-    status_match = re.search(r'status=(\w+)', message)
-    if status_match:
-        result['status'] = status_match.group(1)
-        
-        # Check for rspamd-pipe-spam delivery
-        # Example: status=sent (delivered to command: /usr/local/bin/rspamd-pipe-spam)
-        if result['status'] == 'sent' and 'rspamd-pipe-spam' in message:
+
+    delivery = _PF_DELIVERY_RE.match(message)
+    if delivery:
+        result['recipient'] = delivery.group('to') or None
+        if delivery.group('orig_to') is not None:
+            result['orig_to'] = delivery.group('orig_to') or None
+        fields = dict(_PF_FIELD_RE.findall(delivery.group('fields')))
+        if fields.get('relay'):
+            result['relay'] = fields['relay']
+        try:
+            if fields.get('delay'):
+                result['delay'] = float(fields['delay'])
+        except ValueError:
+            pass
+        result['dsn'] = delivery.group('dsn')
+        result['status'] = delivery.group('status')
+
+        # Check for rspamd-pipe-spam delivery. Only the relay or Postfix's
+        # own pipe/local result text count, never a remote server's reply.
+        # Example: relay=rspamd-pipe-spam, ... status=sent (delivered via rspamd-pipe-spam service)
+        reply = delivery.group('reply').strip()
+        if result['status'] == 'sent' and (
+                'rspamd-pipe-spam' in (result.get('relay') or '')
+                or (reply.startswith('(delivered ') and 'rspamd-pipe-spam' in reply)):
             result['status'] = 'spam'
             # If we have orig_to, use it as the recipient because the actual to= is the spam alias
             if result.get('orig_to'):
                 result['recipient'] = result['orig_to']
-    
+        return result
+
+    # Extract from= (sender)
+    from_match = re.search(r'from=<([^>]*)>', message)
+    if from_match:
+        result['sender'] = from_match.group(1) if from_match.group(1) else None
+
+    # Extract to= (recipient)
+    to_match = re.search(r'to=<([^>]*)>', message)
+    if to_match:
+        result['recipient'] = to_match.group(1) if to_match.group(1) else None
+
+    expired = _PF_EXPIRED_RE.match(message)
+    if expired:
+        result['status'] = expired.group('status')
+
     return result
 
 

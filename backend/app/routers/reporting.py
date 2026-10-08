@@ -2,6 +2,7 @@
 API endpoints for system reports and summary
 """
 import asyncio
+import html
 import logging
 from fastapi import APIRouter, HTTPException, BackgroundTasks
 from datetime import datetime, timezone
@@ -161,6 +162,12 @@ def send_summary_report_email(
     background_tasks.add_task(generate_and_send_email)
     return {"status": "queued", "message": "Weekly summary email generation started"}
 
+def _h(value) -> str:
+    """HTML-escape one value for the summary email. Host names, domains and
+    mailbox names come from mailcow and DNS, not from this app."""
+    return html.escape(str(value), quote=True)
+
+
 async def generate_and_send_email():
     """
     Generate and send the weekly summary email
@@ -200,14 +207,14 @@ async def generate_and_send_email():
                 
                 blacklist_rows += f"""
                                             <tr>
-                                                <td>{h.get('hostname')}</td>
+                                                <td>{_h(h.get('hostname'))}</td>
                                                 <td>
                                                     <span style="color: {status_color}; font-weight: bold;">
-                                                        {status.upper()}
+                                                        {_h(status.upper())}
                                                     </span>
                                                 </td>
                                                 <td style="font-size: 11px; color: #6b7280;">
-                                                    {details}
+                                                    {_h(details)}
                                                 </td>
                                             </tr>
                 """
@@ -218,7 +225,7 @@ async def generate_and_send_email():
         dns_rows = ""
         if dns_issues:
              for item in dns_issues:
-                 dns_rows += f"<tr><td>{item['domain']}</td><td style='color: #b45309;'>{', '.join(item['issues'])}</td></tr>"
+                 dns_rows += f"<tr><td>{_h(item['domain'])}</td><td style='color: #b45309;'>{_h(', '.join(item['issues']))}</td></tr>"
 
         # 3. Top Failures Rows
         failures_rows = ""
@@ -229,11 +236,11 @@ async def generate_and_send_email():
                 fail_rate = m.get('combined_failure_rate', 0)
                 failures_rows += f"""
                                             <tr>
-                                                <td>{m.get('username')}</td>
-                                                <td align="center">{m.get('combined_received', 0)}</td>
-                                                <td align="center">{m.get('combined_sent', 0)}</td>
-                                                <td align="center" style="color: #dc2626; font-weight: bold;">{failed_count}</td>
-                                                <td align="center" style="color: #dc2626; font-weight: bold;">{fail_rate}%</td>
+                                                <td>{_h(m.get('username'))}</td>
+                                                <td align="center">{_h(m.get('combined_received', 0))}</td>
+                                                <td align="center">{_h(m.get('combined_sent', 0))}</td>
+                                                <td align="center" style="color: #dc2626; font-weight: bold;">{_h(failed_count)}</td>
+                                                <td align="center" style="color: #dc2626; font-weight: bold;">{_h(fail_rate)}%</td>
                                             </tr>
                 """
 
@@ -271,7 +278,7 @@ async def generate_and_send_email():
                             <tr>
                                 <td bgcolor="#2563eb" style="padding: 20px; text-align: center; color: #ffffff;">
                                     <h1 style="margin: 0; font-size: 24px;">Weekly Server Summary</h1>
-                                    <p style="margin: 5px 0 0 0; font-size: 14px; opacity: 0.9;">{current_date}</p>
+                                    <p style="margin: 5px 0 0 0; font-size: 14px; opacity: 0.9;">{_h(current_date)}</p>
                                 </td>
                             </tr>
                             
@@ -282,34 +289,34 @@ async def generate_and_send_email():
                                     <table border="0" cellpadding="0" cellspacing="0" width="100%">
                                         <tr>
                                             <td width="32%" class="stat-box">
-                                                <div class="stat-value">{system['mailboxes']['active']}</div>
+                                                <div class="stat-value">{_h(system['mailboxes']['active'])}</div>
                                                 <div class="stat-label">Mailboxes</div>
                                             </td>
                                             <td width="2%">&nbsp;</td>
                                             <td width="32%" class="stat-box">
-                                                <div class="stat-value">{system['aliases']['active']}</div>
+                                                <div class="stat-value">{_h(system['aliases']['active'])}</div>
                                                 <div class="stat-label">Aliases</div>
                                             </td>
                                             <td width="2%">&nbsp;</td>
                                             <td width="32%" class="stat-box">
-                                                <div class="stat-value">{system['domains']['active']}</div>
+                                                <div class="stat-value">{_h(system['domains']['active'])}</div>
                                                 <div class="stat-label">Domains</div>
                                             </td>
                                         </tr>
                                         <tr><td colspan="5" height="10"></td></tr>
                                         <tr>
                                             <td width="32%" class="stat-box">
-                                                <div class="stat-value">{storage_display}</div>
+                                                <div class="stat-value">{_h(storage_display)}</div>
                                                 <div class="stat-label">Storage Used</div>
                                             </td>
                                             <td width="2%">&nbsp;</td>
                                             <td width="32%" class="stat-box">
-                                                <div class="stat-value">{queue['count']}</div>
+                                                <div class="stat-value">{_h(queue['count'])}</div>
                                                 <div class="stat-label">Queue</div>
                                             </td>
                                             <td width="2%">&nbsp;</td>
                                             <td width="32%" class="stat-box">
-                                                <div class="stat-value">{quarantine['count']}</div>
+                                                <div class="stat-value">{_h(quarantine['count'])}</div>
                                                 <div class="stat-label">Quarantine</div>
                                             </td>
                                         </tr>
@@ -324,22 +331,22 @@ async def generate_and_send_email():
                                     <table border="0" cellpadding="0" cellspacing="0" width="100%">
                                         <tr>
                                             <td width="23%" class="stat-box">
-                                                <div class="stat-value">{traffic['total_sent']}</div>
+                                                <div class="stat-value">{_h(traffic['total_sent'])}</div>
                                                 <div class="stat-label">Sent</div>
                                             </td>
                                             <td width="2%">&nbsp;</td>
                                             <td width="23%" class="stat-box">
-                                                <div class="stat-value">{traffic['total_received']}</div>
+                                                <div class="stat-value">{_h(traffic['total_received'])}</div>
                                                 <div class="stat-label">Received</div>
                                             </td>
                                             <td width="2%">&nbsp;</td>
                                             <td width="23%" class="stat-box">
-                                                <div class="stat-value" style="color: #dc2626;">{traffic['sent_failed']}</div>
+                                                <div class="stat-value" style="color: #dc2626;">{_h(traffic['sent_failed'])}</div>
                                                 <div class="stat-label">Failed</div>
                                             </td>
                                             <td width="2%">&nbsp;</td>
                                             <td width="23%" class="stat-box" style="background-color: {'#fee2e2' if traffic['failure_rate'] > 5 else '#dcfce7'}; border-color: {'#fecaca' if traffic['failure_rate'] > 5 else '#bbf7d0'};">
-                                                <div class="stat-value" style="color: {'#dc2626' if traffic['failure_rate'] > 5 else '#16a34a'};">{traffic['failure_rate']}%</div>
+                                                <div class="stat-value" style="color: {'#dc2626' if traffic['failure_rate'] > 5 else '#16a34a'};">{_h(traffic['failure_rate'])}%</div>
                                                 <div class="stat-label" style="color: {'#991b1b' if traffic['failure_rate'] > 5 else '#166534'};">Rating</div>
                                             </td>
                                         </tr>
