@@ -46,8 +46,10 @@ done
 # Start the application; extra arguments are passed to docker run (-e ...).
 # mailcow is a placeholder: nothing in this smoke test needs a reachable
 # mailcow, and every job must cope with an unreachable one without crashing.
+# The container runs read-only like the shipped docker-compose.yml: only /tmp
+# and /app/data (a tmpfs here, standing in for the data volume) are writable.
 start_app() {
-    docker run -d --name "${APP}" --network "${NET}" -p "${PORT}:8080" \
+    docker run -d --name "${APP}" --network "${NET}" -p "${PORT}:8080"         --read-only --tmpfs /tmp:size=64m --tmpfs /app/data \
         -e MAILCOW_URL=https://mail.example.com \
         -e MAILCOW_API_KEY=ci-placeholder \
         -e POSTGRES_HOST="${DB}" -e POSTGRES_PORT=5432 \
@@ -134,6 +136,11 @@ curl -fsS "${BASE}/api/health" | grep -q '"status": *"healthy"' || fail "health 
 # raises TypeError/AttributeError/NameError is a programming error (#81).
 if docker logs "${APP}" 2>&1 | grep -E "(TypeError|AttributeError|NameError|ImportError):" ; then
     fail "a job raised a programming error (see log lines above)"
+fi
+
+step "Nothing writes outside /app/data and /tmp"
+if docker logs "${APP}" 2>&1 | grep -E "Read-only file system|EROFS|PermissionError" ; then
+    fail "the application tried to write outside /app/data and /tmp (see log lines above)"
 fi
 
 if [ "${UI_SMOKE:-0}" = "1" ]; then
