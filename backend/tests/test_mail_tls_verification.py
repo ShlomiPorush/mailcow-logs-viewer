@@ -6,9 +6,10 @@ the SMTP or IMAP password. The servers here run on loopback with a self-signed
 certificate for an unrelated name, the way an interceptor would; nothing leaves
 the machine (a dotted name is pointed at loopback by patching getaddrinfo).
 
-SMTP_VERIFY_SSL / DMARC_IMAP_VERIFY_SSL: true always verifies, false never
-(self-signed servers), unset verifies dotted host names and skips localhost,
-IP addresses and single-label names such as Docker container names.
+SMTP_VERIFY_SSL / DMARC_IMAP_VERIFY_SSL: false (also unset, the default, so an
+upgrade changes nothing) does not check, auto checks dotted host names and skips
+localhost, IP addresses and single-label names such as Docker container names,
+true always checks.
 """
 import base64
 import datetime
@@ -30,6 +31,7 @@ from app.services.smtp_service import SmtpService
 
 PASSWORD = "Dummy-Secret-PW-42"
 DOTTED = "mail.example.com"
+UNSET = object()  # keep the setting's default
 
 
 def _server_context(tmp_path_factory):
@@ -161,7 +163,7 @@ def mail(rogue, monkeypatch):
 
     monkeypatch.setattr(socket, "getaddrinfo", getaddrinfo)
 
-    def configure(host, verify, smtp_mode="starttls"):
+    def configure(host, verify=UNSET, smtp_mode="starttls"):
         values = {
             "smtp_enabled": True, "smtp_host": host, "smtp_user": "notify@example.com",
             "smtp_password": PASSWORD, "smtp_from": "notify@example.com", "smtp_relay_mode": False,
@@ -170,8 +172,9 @@ def mail(rogue, monkeypatch):
             "smtp_use_tls": smtp_mode == "starttls",
             "dmarc_imap_host": host, "dmarc_imap_port": rogue.ports["imaps"], "dmarc_imap_use_ssl": True,
             "dmarc_imap_user": "dmarc@example.com", "dmarc_imap_password": PASSWORD,
-            "smtp_verify_ssl": verify, "dmarc_imap_verify_ssl": verify,
         }
+        if verify is not UNSET:
+            values.update({"smtp_verify_ssl": verify, "dmarc_imap_verify_ssl": verify})
         monkeypatch.setattr(cfg.settings, "_inner", cfg.settings._inner.model_copy(update=values))
 
     return configure
@@ -179,7 +182,7 @@ def mail(rogue, monkeypatch):
 
 # What a verifying client must do: refuse the certificate before any password is sent
 
-@pytest.mark.parametrize("host,verify", [("localhost", True), (DOTTED, True), (DOTTED, None)])
+@pytest.mark.parametrize("host,verify", [("localhost", "true"), (DOTTED, "true"), (DOTTED, "auto")])
 @pytest.mark.parametrize("smtp_mode", ["smtps", "starttls"])
 def test_send_email_refuses_an_untrusted_certificate(rogue, mail, host, verify, smtp_mode):
     mail(host, verify, smtp_mode)
@@ -187,7 +190,7 @@ def test_send_email_refuses_an_untrusted_certificate(rogue, mail, host, verify, 
     assert not rogue.got_password()
 
 
-@pytest.mark.parametrize("host,verify", [("localhost", True), (DOTTED, None)])
+@pytest.mark.parametrize("host,verify", [("localhost", "true"), (DOTTED, "auto")])
 def test_smtp_connection_test_refuses_and_names_the_setting(rogue, mail, host, verify):
     mail(host, verify, "starttls")
     result = connection_test.test_smtp_connection()
@@ -196,7 +199,7 @@ def test_smtp_connection_test_refuses_and_names_the_setting(rogue, mail, host, v
     assert any("SMTP_VERIFY_SSL" in line for line in result["logs"])
 
 
-@pytest.mark.parametrize("host,verify", [("localhost", True), (DOTTED, None)])
+@pytest.mark.parametrize("host,verify", [("localhost", "true"), (DOTTED, "auto")])
 def test_imap_connection_test_refuses_and_names_the_setting(rogue, mail, host, verify):
     mail(host, verify)
     result = connection_test.test_imap_connection()
@@ -205,7 +208,7 @@ def test_imap_connection_test_refuses_and_names_the_setting(rogue, mail, host, v
     assert any("DMARC_IMAP_VERIFY_SSL" in line for line in result["logs"])
 
 
-@pytest.mark.parametrize("host,verify", [("localhost", True), (DOTTED, None)])
+@pytest.mark.parametrize("host,verify", [("localhost", "true"), (DOTTED, "auto")])
 def test_dmarc_imap_sync_refuses_and_names_the_setting(rogue, mail, host, verify):
     mail(host, verify)
     with pytest.raises(Exception) as exc:
@@ -214,10 +217,12 @@ def test_dmarc_imap_sync_refuses_and_names_the_setting(rogue, mail, host, verify
     assert not rogue.got_password()
 
 
-# The opt-out for self-signed servers, and the unchanged behaviour for local names
+# Off (the default) and auto with a local name do not check: the password still goes out
 
-@pytest.mark.parametrize("host,verify", [(DOTTED, False), ("localhost", None), ("127.0.0.1", None)])
-def test_unverified_when_opted_out_or_local(rogue, mail, host, verify):
+@pytest.mark.parametrize("host,verify", [
+    (DOTTED, UNSET), ("localhost", UNSET), (DOTTED, "false"), ("localhost", "auto"), ("127.0.0.1", "auto"),
+])
+def test_unverified_by_default_when_off_or_auto_with_a_local_name(rogue, mail, host, verify):
     mail(host, verify, "smtps")
     SmtpService().send_email("admin@example.com", "subject", "text")
     with pytest.raises(Exception):
@@ -228,36 +233,44 @@ def test_unverified_when_opted_out_or_local(rogue, mail, host, verify):
 def test_auto_mode_warns_and_names_the_setting(rogue, mail, caplog):
     from app.services import mail_tls
     mail_tls._warned.clear()  # the warning is given once per host
-    mail("localhost", None, "smtps")
+    mail("localhost", "auto", "smtps")
     with caplog.at_level(logging.WARNING):
         SmtpService().send_email("admin@example.com", "subject", "text")
     assert any("SMTP_VERIFY_SSL" in r.getMessage() for r in caplog.records)
 
 
-@pytest.mark.parametrize("host,verify,verified", [
-    ("smtp.example.com", None, True),
-    ("smtp.example.com.", None, True),
-    ("localhost", None, False),
-    ("LOCALHOST", None, False),
-    ("127.0.0.1", None, False),
-    ("::1", None, False),
-    ("[2001:db8::1]", None, False),
-    ("postfix-mailcow", None, False),
-    ("localhost", True, True),
-    ("smtp.example.com", False, False),
+@pytest.mark.parametrize("host,mode,verified", [
+    ("smtp.example.com", "auto", True),
+    ("smtp.example.com.", "auto", True),
+    ("localhost", "auto", False),
+    ("LOCALHOST", "auto", False),
+    ("127.0.0.1", "auto", False),
+    ("::1", "auto", False),
+    ("[2001:db8::1]", "auto", False),
+    ("postfix-mailcow", "auto", False),
+    ("localhost", "true", True),
+    ("smtp.example.com", "true", True),
+    ("smtp.example.com", "false", False),
+    ("smtp.example.com", "", False),
+    ("smtp.example.com", None, False),
 ])
-def test_mail_tls_context_modes(host, verify, verified):
+def test_mail_tls_context_modes(host, mode, verified):
     from app.services.mail_tls import mail_tls_context
-    ctx = mail_tls_context(host, verify, "SMTP_VERIFY_SSL")
+    ctx = mail_tls_context(host, mode, "SMTP_VERIFY_SSL")
     assert (ctx.verify_mode == ssl.CERT_REQUIRED) is verified
     assert ctx.check_hostname is verified
 
 
 @pytest.mark.parametrize("key", ["smtp_verify_ssl", "dmarc_imap_verify_ssl"])
-def test_verify_settings_default_to_auto_and_are_editable(key, monkeypatch):
+def test_verify_settings_default_to_off_and_are_editable(key, monkeypatch):
+    from pydantic import ValidationError
     assert key in cfg.EDITABLE_SETTING_KEYS
     monkeypatch.delenv(key.upper(), raising=False)
-    assert getattr(cfg.Settings(), key) is None
-    for raw, expected in [("true", True), ("false", False), ("", None)]:
+    assert getattr(cfg.Settings(), key) == "false"
+    for raw, expected in [("true", "true"), ("TRUE", "true"), ("Auto", "auto"), ("false", "false"),
+                          ("off", "false"), ("", "false")]:
         monkeypatch.setenv(key.upper(), raw)
-        assert getattr(cfg.Settings(), key) is expected
+        assert getattr(cfg.Settings(), key) == expected
+    monkeypatch.setenv(key.upper(), "maybe")
+    with pytest.raises(ValidationError):
+        cfg.Settings()

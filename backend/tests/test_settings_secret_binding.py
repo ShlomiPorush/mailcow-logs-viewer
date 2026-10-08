@@ -20,9 +20,6 @@ import app.services.settings_store as ss
 from app.config import EDITABLE_SETTING_KEYS
 
 MASK = rs.MASK_PLACEHOLDER
-# Settings the page shows as a dropdown (SETTINGS_FIELD_OPTIONS in frontend/settings.js):
-# their value is posted as the option string, '' for Automatic
-SELECT_KEYS = {"smtp_verify_ssl", "dmarc_imap_verify_ssl"}
 
 SEED = {
     "smtp_enabled": True, "smtp_host": "smtp.example.com", "smtp_port": 587, "smtp_use_tls": True,
@@ -69,17 +66,15 @@ def _form_payload(configuration):
     """What the Settings page sends on Save (frontend/settings.js, form.onsubmit).
 
     Every editable key is posted. A masked secret is left out, a checkbox is a
-    boolean, a number field a number, a select or text field its string value
-    ('' when unset). Settings that are null render as a text field or select.
+    boolean, a number field a number, a select, text or hidden field (the Verify
+    SSL buttons) its string value ('' when unset).
     """
     payload = {}
     for key, value in configuration.items():
         if key in rs._SENSITIVE_SETTING_KEYS and value == MASK:
             continue
-        if isinstance(value, bool) and key not in SELECT_KEYS:
+        if isinstance(value, bool):
             payload[key] = value
-        elif isinstance(value, bool):
-            payload[key] = "true" if value else "false"
         elif isinstance(value, (int, float)):
             payload[key] = value
         else:
@@ -149,16 +144,23 @@ def test_unchanged_full_form_save_succeeds(store):
     assert store["smtp_password"] == SEED["smtp_password"]
 
 
-@pytest.mark.parametrize("verify", [None, True, False])
+@pytest.mark.parametrize("verify", ["false", "auto", "true"])
 def test_full_form_save_keeps_the_verify_ssl_choice(store, verify):
     store.update({"smtp_verify_ssl": verify, "dmarc_imap_verify_ssl": verify})
     cfg.reload_settings(object())
     payload = _form_payload(rs.get_editable_settings(db=object())["configuration"])
-    assert payload["smtp_verify_ssl"] == {None: "", True: "true", False: "false"}[verify]
+    assert payload["smtp_verify_ssl"] == verify
     _put(payload)
     cfg.reload_settings(object())
-    assert cfg.settings.smtp_verify_ssl is verify
-    assert cfg.settings.dmarc_imap_verify_ssl is verify
+    assert cfg.settings.smtp_verify_ssl == verify
+    assert cfg.settings.dmarc_imap_verify_ssl == verify
+
+
+def test_verify_ssl_rejects_an_unknown_value(store):
+    with pytest.raises(HTTPException) as exc:
+        _put({"smtp_verify_ssl": "maybe"})
+    assert exc.value.status_code == 400
+    assert "smtp_verify_ssl" in exc.value.detail
 
 
 def test_form_save_changing_only_unrelated_fields_succeeds(store):

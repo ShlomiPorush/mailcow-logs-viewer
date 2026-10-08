@@ -9,12 +9,12 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from typing import Dict, List
 from ..config import settings
-from .mail_tls import mail_tls_context, certificate_error_hint
+from .mail_tls import mail_tls_context, certificate_error_hint, verify_mode
 
 
 def _verify_label(verify) -> str:
     """How a *_VERIFY_SSL setting reads in the test log."""
-    return "automatic" if verify is None else str(verify)
+    return {"false": "Off", "auto": "Automatic", "true": "On"}.get(verify_mode(verify), str(verify))
 
 
 def test_smtp_connection() -> Dict:
