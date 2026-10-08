@@ -11,15 +11,19 @@ using the certificate it already renews for you. That is the first recipe below.
 
 ## Before you start: what the proxy has to do
 
-Whichever proxy you use, four things must be right. Every example below already
-includes them.
+Whichever proxy you use, these things must be right. The proxy configuration in
+every example below already includes the first five; the last one is a setting
+on the viewer itself, described in
+[Let the viewer see each visitor's address](#let-the-viewer-see-each-visitors-address).
 
 | Requirement | Why |
 |---|---|
 | Forward the WebSocket upgrade on `/ws/raw-logs` | The Live Logs page streams over a WebSocket. Without this the page loads but never shows a line |
 | A long read timeout on that WebSocket | A quiet mail server sends nothing for minutes. nginx's 60 second default closes the stream and the page reconnects in a loop |
 | Send `X-Forwarded-Proto` | The login session cookie is marked `Secure` only when the app knows the request arrived over HTTPS. Without this header the cookie is sent over plain HTTP too |
-| Send `X-Forwarded-For` | Used for the failed-login rate limit. Without it every request looks like it came from the proxy, so one attacker locks out everyone |
+| Pass the browser's `Host` header | Saving, banning and the other actions are refused (HTTP 403) when the app cannot tell they came from its own page. It compares the page's address with `Host`, or with `X-Forwarded-Host` when the proxy sends it |
+| Send `X-Forwarded-For` | The failed-login limit counts each visitor separately only when the app knows their address. The header alone is not enough: see the next row |
+| Set `FORWARDED_ALLOW_IPS` on the viewer to the proxy's address | The app reads `X-Forwarded-For` only from a proxy it trusts. Without this, every visitor is counted as the proxy, so ten wrong passwords from anyone block new Basic Auth logins for everyone for 15 minutes |
 
 ### Give the viewer a hostname of its own
 
@@ -45,6 +49,37 @@ In the viewer's `docker-compose.yml`, bind the port to localhost:
 
 Or, when the proxy reaches the container over a Docker network (the mailcow
 recipe below), remove the `ports:` block entirely.
+
+### Let the viewer see each visitor's address
+
+The viewer trusts `X-Forwarded-For` only from the addresses listed in
+`FORWARDED_ALLOW_IPS` (by default only `127.0.0.1`, which is never the proxy in a
+Docker setup). Add the address the proxy connects from to the viewer's `.env` and
+recreate the viewer with `docker compose up -d`:
+
+```dotenv
+# Example address only: use the one you find with the commands below.
+FORWARDED_ALLOW_IPS=192.0.2.10
+```
+
+List exact addresses, separated by commas. The bundled Uvicorn 0.27 does not
+accept ranges such as `192.0.2.0/24`. Never use `*`: it would let anyone who can
+reach the viewer directly pick the address they are counted as. See
+[ENV_Settings.md](ENV_Settings.md#login-attempt-limits-and-reverse-proxies) for
+the details.
+
+Which address to use depends on the recipe:
+
+| Recipe | The proxy connects from | Find it with |
+|---|---|---|
+| 1. mailcow's nginx | The `nginx-mailcow` container's address on the mailcow network | In the mailcow directory: `docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}} {{end}}' $(docker compose ps -q nginx-mailcow)` |
+| 2. nginx on the host, 3. Caddy on the host | The gateway of the viewer's Docker network, because the published `127.0.0.1:8080` reaches the container through it | `docker network inspect -f '{{range .IPAM.Config}}{{.Gateway}}{{end}}' <network>`, where `<network>` is the viewer's network from `docker network ls`, for example `mailcow-logs-viewer_mailcow-logs-network` |
+| 3. Caddy in a container, 4. Traefik | The proxy container's address on the network it shares with the viewer | `docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}} {{end}}' <proxy container>` |
+
+A container's address can change when it is recreated, for example after a
+mailcow or proxy update. If `FORWARDED_ALLOW_IPS` no longer matches, logins keep
+working; failed attempts are just counted for everyone together again, so check
+the address after such updates.
 
 ---
 
@@ -185,6 +220,13 @@ docker compose restart nginx-mailcow
 Open `https://logs.example.com`. If nginx refuses to start, check the file with
 `docker compose logs nginx-mailcow`.
 
+### 6. Trust mailcow's nginx in the viewer
+
+Set `FORWARDED_ALLOW_IPS` in the viewer's `.env` to the `nginx-mailcow`
+container's address, as described in
+[Let the viewer see each visitor's address](#let-the-viewer-see-each-visitors-address),
+and recreate the viewer with `docker compose up -d`.
+
 ---
 
 ## Recipe 2: a standalone nginx on the host
@@ -233,6 +275,10 @@ server {
 }
 ```
 
+Then set `FORWARDED_ALLOW_IPS` in the viewer's `.env` to the gateway of the
+viewer's Docker network; see
+[Let the viewer see each visitor's address](#let-the-viewer-see-each-visitors-address).
+
 ---
 
 ## Recipe 3: Caddy
@@ -254,6 +300,11 @@ logs.example.com {
     reverse_proxy mailcow-logs-app:8080
 }
 ```
+
+Then set `FORWARDED_ALLOW_IPS` in the viewer's `.env`: to the gateway of the
+viewer's Docker network for the first form, or to the Caddy container's address
+for the second; see
+[Let the viewer see each visitor's address](#let-the-viewer-see-each-visitors-address).
 
 ---
 
@@ -283,7 +334,10 @@ networks:
 ```
 
 Traefik forwards WebSockets and sets the `X-Forwarded-*` headers itself. Its
-default read timeout is unlimited, so the log stream stays open.
+default read timeout is unlimited, so the log stream stays open. Set
+`FORWARDED_ALLOW_IPS` in the viewer's `.env` to the Traefik container's address
+on the `traefik` network; see
+[Let the viewer see each visitor's address](#let-the-viewer-see-each-visitors-address).
 
 ---
 
@@ -311,8 +365,18 @@ The session cookie is not coming back. This is almost always a missing
 to the `location /` block.
 
 **The failed-login lockout triggers for everyone at once.**
-`X-Forwarded-For` is missing, so every login attempt is attributed to the proxy's
-own address. Add the header.
+The viewer counts every login attempt against the proxy's address. Either
+`FORWARDED_ALLOW_IPS` is not set to the address the proxy connects from, or that
+address changed when a container was recreated, or the proxy does not send
+`X-Forwarded-For`. See
+[Let the viewer see each visitor's address](#let-the-viewer-see-each-visitors-address).
+
+**Saving settings or running an action fails with 403, "came from another site".**
+The proxy does not pass the browser's `Host` header, so the app cannot match the
+page's address to its own. With nginx, add `proxy_set_header Host $http_host;`
+to every `location` block, as in the recipes above. If the proxy cannot do that,
+list the address you open the viewer at in `CORS_ALLOWED_ORIGINS` (for example
+`https://logs.example.com`); see [ENV_Settings.md](ENV_Settings.md#cross-site-requests).
 
 **Everything 404s, or the page loads without styling.**
 You are serving the viewer under a sub-path. It has to sit at the root of its own
