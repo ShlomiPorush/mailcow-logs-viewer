@@ -139,3 +139,15 @@ def test_pages_are_open_without_authentication(auth_mode, client):
 ])
 def test_only_local_pages_are_return_paths(value, expected):
     assert safe_return_path(value) == expected
+
+
+@pytest.mark.parametrize("path", ["/loginx", "/login-help", "/api/infox", "/api/health-x", "/api/auth/login2"])
+def test_public_paths_match_exactly(auth_mode, client, path):
+    """Only the listed public paths skip authentication, not everything that starts with them."""
+    auth_mode(basic=True, oauth2=False)
+    response = client.get(path)
+    if path.startswith("/api/"):
+        assert response.status_code == 401
+    else:
+        assert response.status_code == 302
+        assert response.headers["location"].startswith("/login")

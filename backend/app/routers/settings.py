@@ -7,7 +7,7 @@ import logging
 import os
 import httpx
 from pydantic import ValidationError
-from fastapi import APIRouter, Depends, BackgroundTasks, HTTPException
+from fastapi import APIRouter, Depends, BackgroundTasks, HTTPException, Request, Response
 from sqlalchemy.orm import Session
 from sqlalchemy import func, desc, text, or_
 from datetime import datetime, timezone, timedelta
@@ -25,6 +25,7 @@ from ..services.geoip_downloader import is_license_configured, get_geoip_status
 from .domains import get_cached_server_ip
 from ..mailcow_api import mailcow_api
 from ..services.oauth2_client import oauth2_client
+from ..session import get_session_from_request, create_session, set_session_cookie, revoke_all_sessions
 
 from ..utils import format_datetime_for_api as format_datetime_utc
 
@@ -92,6 +93,18 @@ _SENSITIVE_SETTING_KEYS = frozenset({
     "webhook_url",  # may embed bot tokens (Telegram/Gotify/Slack)
 })
 MASK_PLACEHOLDER = "********"
+
+# Settings that decide who can sign in. A change to any of them ends every
+# session issued before it, so rotating a password evicts a stolen cookie.
+_SESSION_BOUND_SETTING_KEYS = (
+    "basic_auth_enabled", "auth_username", "auth_password",
+    "oauth2_enabled", "oauth2_issuer_url", "oauth2_authorization_url", "oauth2_token_url",
+    "oauth2_userinfo_url", "oauth2_client_id", "oauth2_client_secret", "session_secret_key",
+)
+
+
+def _session_bound_values() -> tuple:
+    return tuple(getattr(settings, key, None) for key in _SESSION_BOUND_SETTING_KEYS)
 
 
 
@@ -586,7 +599,8 @@ def get_editable_settings(db: Session = Depends(get_db)):
 
 
 @router.put("/settings")
-def update_settings(body: Dict[str, Any], db: Session = Depends(get_db)):
+def update_settings(body: Dict[str, Any], request: Request = None, response: Response = None,
+                    db: Session = Depends(get_db)):
     """
     Update app settings from UI. Only allowed when SETTINGS_EDIT_VIA_UI_ENABLED is true.
     Accepts only keys in EDITABLE_SETTING_KEYS. Secrets: send empty string to leave unchanged.
@@ -704,8 +718,15 @@ def update_settings(body: Dict[str, Any], db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail="Invalid settings. Check the submitted values.") from e
     prev_sync_sources = (settings.blacklist_source_transports, settings.blacklist_source_relayhosts)
     prev_credentials = {name: check["fingerprint"]() for name, check in _CREDENTIAL_CHECKS.items()}
+    prev_sign_in = _session_bound_values()
+    operator_session = get_session_from_request(request) if request is not None else None
     save_config_overrides_to_db(db, allowed)
     reload_settings(db)
+    if _session_bound_values() != prev_sign_in:
+        revoke_all_sessions()
+        # Keep the operator who saved signed in, with a session issued under the new settings
+        if operator_session and settings.is_authentication_enabled and response is not None:
+            set_session_cookie(response, create_session(operator_session["user_info"]), request)
     # A feature switched off here should drop its data now, not at the next restart
     cleanup_disabled_feature_data(db)
     mailcow_api.reload_config()
