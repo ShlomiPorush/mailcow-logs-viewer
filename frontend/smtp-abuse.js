@@ -53,7 +53,7 @@ function renderSmtpAbusePanel() {
     const mailboxRow = item => `
         <tr>
             <td class="ui-mono ui-dtable-wrap">${escapeHtml(item.email)}</td>
-            <td>${item.message_count}</td>
+            <td>${escapeHtml(String(item.message_count))}</td>
             <td>${
                 item.blocked_by_protection
                     ? uiTag('SMTP disabled', 'fail')
@@ -72,7 +72,7 @@ function renderSmtpAbusePanel() {
 
     const tableHead = `
         <thead><tr>
-            <th>Mailbox</th><th>Sent (${status.window_minutes}m)</th>
+            <th>Mailbox</th><th>Sent (${escapeHtml(String(status.window_minutes))}m)</th>
             <th>Status</th><th></th>
         </tr></thead>`;
 
@@ -93,7 +93,7 @@ function renderSmtpAbusePanel() {
                 <div class="ui-dtable-scroll ui-sa-table is-blocked">
                     <table class="ui-dtable">${tableHead}<tbody>${blockedRows.map(mailboxRow).join('')}</tbody></table>
                 </div>
-                ${status.unblock_grace_minutes > 0 ? `<p class="ui-set-desc">After re-enabling, automatic blocking is paused for ${status.unblock_grace_minutes} minutes so the mailbox is not immediately re-blocked.</p>` : ''}
+                ${status.unblock_grace_minutes > 0 ? `<p class="ui-set-desc">After re-enabling, automatic blocking is paused for ${escapeHtml(String(status.unblock_grace_minutes))} minutes so the mailbox is not immediately re-blocked.</p>` : ''}
             </div>` : ''}
 
             <div class="ui-sa-block">
@@ -101,7 +101,7 @@ function renderSmtpAbusePanel() {
                 <div class="ui-dtable-scroll ui-sa-table">
                     <table class="ui-dtable">${tableHead}<tbody>${
                         pageRows.map(mailboxRow).join('') ||
-                        `<tr><td colspan="4" class="ui-empty">No outbound activity in the last ${status.window_minutes} minutes</td></tr>`
+                        `<tr><td colspan="4" class="ui-empty">No outbound activity in the last ${escapeHtml(String(status.window_minutes))} minutes</td></tr>`
                     }</tbody></table>
                 </div>
                 ${pageCount > 1 ? `
