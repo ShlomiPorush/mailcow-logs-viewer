@@ -532,8 +532,7 @@ class DMARCImapService:
                     contact_info=parsed_data.get('contact_info', ''),
                     policy_domain=parsed_data['policy_domain'],
                     start_datetime=parsed_data['start_datetime'],
-                    end_datetime=parsed_data['end_datetime'],
-                    raw_json=parsed_data.get('raw_json', '')
+                    end_datetime=parsed_data['end_datetime']
                 )
                 db.add(tls_report)
                 db.flush()
