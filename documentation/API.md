@@ -122,7 +122,7 @@ When `OAUTH2_ENABLED=true`, users can authenticate via OAuth2/OIDC. The applicat
 1. User initiates login via `GET /api/auth/login`
 2. User is redirected to OAuth2 provider
 3. After authentication, provider redirects to `GET /api/auth/callback`
-4. Application exchanges authorization code for tokens
+4. Application exchanges authorization code for tokens, proving the login with PKCE (S256)
 5. Session is created and HTTP-only cookie is set
 6. User is redirected to main application
 
@@ -264,6 +264,7 @@ Initiate OAuth2 login flow. Redirects user to OAuth2 provider.
 
 **Notes:**
 - Generates CSRF state token for security
+- Sends a PKCE code challenge (RFC 7636, `code_challenge_method=S256`); the callback sends the matching `code_verifier` with the token request
 - Only works when `OAUTH2_ENABLED=true`
 - User will be redirected back to `/api/auth/callback` after authentication
 

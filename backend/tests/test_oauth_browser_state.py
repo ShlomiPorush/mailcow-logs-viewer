@@ -18,7 +18,7 @@ def oauth(monkeypatch):
     monkeypatch.setattr(auth.oauth2_client, "is_configured", lambda: True)
     monkeypatch.setattr(auth.oauth2_client, "initialize", AsyncMock())
     monkeypatch.setattr(auth.oauth2_client, "get_authorization_url",
-                        lambda state: "https://id.example.com/authorize?" + urlencode({"state": state}))
+                        lambda state, code_challenge=None: "https://id.example.com/authorize?" + urlencode({"state": state}))
     monkeypatch.setattr(auth.oauth2_client, "exchange_code_for_token",
                         AsyncMock(return_value={"access_token": "test-token"}))
     monkeypatch.setattr(auth.oauth2_client, "get_user_info",
@@ -190,7 +190,7 @@ def test_failed_exchange_cleans_cookie_and_cannot_be_replayed(monkeypatch, failu
 
 
 def test_start_failure_does_not_leave_pending_state(monkeypatch):
-    def fail(state):
+    def fail(state, code_challenge=None):
         raise auth.OAuth2ClientError("test")
     monkeypatch.setattr(auth.oauth2_client, "get_authorization_url", fail)
     client = TestClient(app)
