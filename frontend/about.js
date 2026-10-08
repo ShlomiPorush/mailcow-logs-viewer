@@ -152,7 +152,7 @@ function wireVersionPanel(content, appVersion, versionInfo) {
         currentVersionText.onclick = async () => {
             try {
                 const versionForApi = appVersion.startsWith('v') ? appVersion.substring(1) : appVersion;
-                const response = await authenticatedFetch(`/api/status/app-version/changelog/${versionForApi}`);
+                const response = await authenticatedFetch(`/api/status/app-version/changelog/${encodeURIComponent(versionForApi)}`);
                 if (response.ok) {
                     const data = await response.json();
                     showChangelogModal(data.changelog || 'No changelog available');
