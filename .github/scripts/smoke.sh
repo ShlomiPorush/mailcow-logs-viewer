@@ -49,7 +49,8 @@ done
 # The container runs read-only like the shipped docker-compose.yml: only /tmp
 # and /app/data (a tmpfs here, standing in for the data volume) are writable.
 start_app() {
-    docker run -d --name "${APP}" --network "${NET}" -p "${PORT}:8080"         --read-only --tmpfs /tmp:size=64m --tmpfs /app/data \
+    docker run -d --name "${APP}" --network "${NET}" -p "${PORT}:8080" \
+        --read-only --tmpfs /tmp:size=64m --tmpfs /app/data \
         -e MAILCOW_URL=https://mail.example.com \
         -e MAILCOW_API_KEY=ci-placeholder \
         -e POSTGRES_HOST="${DB}" -e POSTGRES_PORT=5432 \
