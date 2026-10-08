@@ -272,6 +272,7 @@ var SETTINGS_FIELD_DESCRIPTIONS = {
     smtp_port: 'SMTP server port (587 for TLS, 465 for SSL, 25 for plain).',
     smtp_use_tls: 'Use STARTTLS for SMTP. Recommended.',
     smtp_use_ssl: 'Use implicit SSL for SMTP (usually port 465).',
+    smtp_verify_ssl: 'Check the SMTP server certificate before the password is sent, so nobody between this app and the server can read it. Off (default) does not check. Automatic checks host names such as smtp.example.com and skips localhost, IP addresses and container names. On always checks. Automatic or On is recommended; keep Off only for a server with a self-signed certificate.',
     smtp_user: 'SMTP username (usually email address).',
     smtp_password: 'SMTP password.',
     smtp_from: 'From address for emails (defaults to SMTP user if not set).',
@@ -286,6 +287,7 @@ var SETTINGS_FIELD_DESCRIPTIONS = {
     dmarc_imap_host: 'IMAP server hostname (e.g. imap.gmail.com).',
     dmarc_imap_port: 'IMAP server port (993 for SSL, 143 for non-SSL). Default: 993.',
     dmarc_imap_use_ssl: 'Use SSL/TLS for IMAP connection. Default: true.',
+    dmarc_imap_verify_ssl: 'Check the IMAP server certificate before the password is sent, so nobody between this app and the server can read it. Off (default) does not check. Automatic checks host names such as imap.example.com and skips localhost, IP addresses and container names. On always checks. Automatic or On is recommended; keep Off only for a server with a self-signed certificate.',
     dmarc_imap_user: 'IMAP username (email address).',
     dmarc_imap_password: 'IMAP password.',
     dmarc_imap_folder: 'IMAP folder to scan for DMARC and TLS reports. Default: INBOX.',
@@ -320,6 +322,22 @@ var SETTINGS_FIELD_DESCRIPTIONS = {
     queue_cleanup_enabled: 'Automatically monitor the mail queue for deferred emails. If an email has been stuck longer than the threshold, it is deleted from the queue and the recipient is suppressed.',
     queue_cleanup_threshold_minutes: 'How long (in minutes) a deferred email must be stuck in the queue before it is automatically deleted and the recipient suppressed. Default: 60 (1 hour).'
 };
+
+// Settings with a few short choices, shown as a segmented control (.ui-seg, as on the Security page).
+// A hidden input holds the value, so the form saves it like any other field
+const SETTINGS_SEGMENTED_OPTIONS = {
+    smtp_verify_ssl: [['false', 'Off'], ['auto', 'Automatic'], ['true', 'On']],
+    dmarc_imap_verify_ssl: [['false', 'Off'], ['auto', 'Automatic'], ['true', 'On']]
+};
+
+function settingsPickSegment(btn) {
+    const group = btn.closest('.ui-seg');
+    const field = group && group.parentElement.querySelector('input[type="hidden"]');
+    if (field === null || field === undefined || btn.disabled) return;
+    field.value = btn.getAttribute('data-value');
+    group.querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', String(b === btn)));
+    field.form && field.form.dispatchEvent(new Event('input', { bubbles: true }));
+}
 
 // Predefined options for settings fields (renders as dropdown instead of text input)
 const SETTINGS_FIELD_OPTIONS = {
@@ -403,7 +421,7 @@ var SETTINGS_EDIT_TABS = [
         id: 'smtp', label: 'SMTP', description: 'SMTP for sending notifications (alerts, weekly summary). Relay mode: for local relay servers that do not require authentication (only host and from address needed).', groups: [
             { label: 'Enable', keys: ['smtp_enabled'] },
             { label: 'Server', keys: ['smtp_host', 'smtp_port'] },
-            { label: 'Security', keys: ['smtp_use_tls', 'smtp_use_ssl'] },
+            { label: 'Security', keys: ['smtp_use_tls', 'smtp_use_ssl', 'smtp_verify_ssl'] },
             { label: 'Authentication', keys: ['smtp_user', 'smtp_password', 'smtp_relay_mode'] },
             { label: 'From Address', keys: ['smtp_from'] }
         ]
@@ -439,7 +457,7 @@ var SETTINGS_EDIT_TABS = [
     {
         id: 'dmarc_imap', label: 'DMARC & TLS IMAP', description: 'Import DMARC and TLS reports automatically from an IMAP mailbox: the address in the rua= of your DMARC and TLS-RPT records. Set host, port, user, password and folder (e.g. INBOX). Delete after: remove emails after processing. Interval in seconds; run on startup to sync once at start.', groups: [
             { label: 'Enable', keys: ['dmarc_imap_enabled'] },
-            { label: 'Connection', keys: ['dmarc_imap_host', 'dmarc_imap_port', 'dmarc_imap_use_ssl'] },
+            { label: 'Connection', keys: ['dmarc_imap_host', 'dmarc_imap_port', 'dmarc_imap_use_ssl', 'dmarc_imap_verify_ssl'] },
             { label: 'Authentication', keys: ['dmarc_imap_user', 'dmarc_imap_password'] },
             { label: 'Settings', keys: ['dmarc_imap_folder', 'dmarc_imap_delete_after', 'dmarc_imap_interval', 'dmarc_imap_run_on_startup', 'dmarc_imap_batch_size', 'dmarc_imap_scan_all_unseen'] }
         ]
@@ -708,6 +726,24 @@ function renderSettingsEditField(key, value, sensitiveKeys, description, envLock
             (envLocked ? '' : '<button type="button" class="ui-btn ui-btn-sm" onclick="settingsReplaceSecret(this)">Replace</button>' +
                 '<button type="button" class="ui-btn ui-btn-sm" onclick="settingsRemoveSecret(this)">Remove</button>') +
             '<input type="hidden" id="edit-' + key + '" name="' + key + '" value="********"' + (envLocked ? ' disabled' : '') + '></div></div>';
+    }
+
+    const segments = SETTINGS_SEGMENTED_OPTIONS[key];
+    if (segments) {
+        const current = segments.some(([v]) => v === String(displayVal)) ? String(displayVal) : segments[0][0];
+        const buttons = segments.map(([v, text]) =>
+            '<button type="button" data-value="' + escapeHtml(v) + '" aria-pressed="' + (v === current) + '" ' + disabledAttr +
+            ' onclick="settingsPickSegment(this)">' + escapeHtml(text) + '</button>').join('');
+        // Changed marker and Reset as for every other field; Reset names the default option (Off)
+        const defaultOption = segments.find(([v]) => v === String(defaultValue));
+        const segClearHtml = clearBtnHtml && defaultOption
+            ? clearBtnHtml.replace(/\(([^()]*)\)<\/button>$/, '(' + escapeHtml(defaultOption[1]) + ')</button>')
+            : clearBtnHtml;
+        return '<div class="ui-set-field ui-set-seg' + (envLocked ? ' is-locked' : '') + changed + '"><span class="ui-label" id="label-' + key + '">' + escapeHtml(label) + labelLockIcon + changedPill + '</span>' +
+            descHtml +
+            '<div class="ui-seg" role="group" aria-labelledby="label-' + key + '">' + buttons + '</div>' +
+            '<input type="hidden" id="edit-' + key + '" name="' + key + '" value="' + escapeHtml(current) + '"' + (envLocked ? ' disabled' : '') + '>' +
+            segClearHtml + '</div>';
     }
 
     if (isBool) {
@@ -1230,6 +1266,9 @@ function renderSettings(content, data) {
                     el.type = 'text'; // Show cleared field
                 } else {
                     el.value = defaultVal || '';
+                    // A segmented control shows the value with its pressed button
+                    const seg = el.parentElement && el.parentElement.querySelector('.ui-seg');
+                    if (seg) seg.querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', String(b.getAttribute('data-value') === el.value)));
                 }
                 // The field is back at its default, so it is no longer marked as changed
                 const parent = el.closest('.ui-set-bool, .ui-set-field');

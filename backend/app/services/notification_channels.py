@@ -302,11 +302,39 @@ def mask_config(channel_type: str, config: Dict) -> Dict:
     }
 
 
+class SecretEndpointChanged(ValueError):
+    """A masked secret came back with a different server: it must be entered again."""
+
+
+def _endpoint(channel_type: str, key: str, config: Dict) -> str:
+    """The server a secret goes to, spelled the same way for stored and posted configs."""
+    value = str(config.get(key) or "").strip()
+    if not value and channel_type == "ntfy" and key == "server_url":
+        value = "https://ntfy.sh"  # build_request's default
+    return value.rstrip("/")
+
+
 def merge_config(channel_type: str, existing: Dict, incoming: Dict) -> Dict:
-    """Keep the stored secret when the UI sends back the mask placeholder."""
+    """Keep the stored secret when the UI sends back the mask placeholder.
+
+    Only while the destination stays the same: with a changed server_url / url
+    the stored secret would be sent to the new server, so SecretEndpointChanged
+    asks for it again.
+    """
     secrets = SECRET_FIELDS.get(channel_type, set())
     merged = dict(incoming or {})
+    existing = existing or {}
+    moved = [f for f in CHANNEL_TYPES.get(channel_type, {}).get("fields", [])
+             if f["key"] in ("server_url", "url")
+             and _endpoint(channel_type, f["key"], merged) != _endpoint(channel_type, f["key"], existing)]
     for key in secrets:
-        if merged.get(key) == MASK:
-            merged[key] = (existing or {}).get(key, "")
+        if merged.get(key) != MASK:
+            continue
+        stored = existing.get(key, "")
+        if moved and str(stored or "").strip():
+            label = next(f["label"] for f in CHANNEL_TYPES[channel_type]["fields"] if f["key"] == key)
+            raise SecretEndpointChanged(
+                f"You changed the {moved[0]['label']}. Enter the {label} again: "
+                f"a stored secret is only sent to the server it was entered for.")
+        merged[key] = stored
     return merged

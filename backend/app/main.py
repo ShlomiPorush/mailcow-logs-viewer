@@ -49,6 +49,7 @@ from .routers import (
 )
 from .migrations import run_migrations
 from .auth import BasicAuthMiddleware, safe_return_path
+from .origin_guard import SameOriginGuardMiddleware
 from .session import get_session_from_request
 from .services.auth_cleanup import auth_store_maintenance
 from .version import __version__
@@ -89,6 +90,28 @@ async def _loop_lag_watchdog():
             logger.debug(f"Loop lag watchdog iteration failed: {e}")
 
 
+def log_authentication_state() -> None:
+    """Log which authentication is in force; running without any is a warning."""
+    if settings.is_authentication_enabled:
+        auth_methods = []
+        if settings.is_basic_auth_enabled:
+            auth_methods.append("Basic Auth")
+            if not settings.auth_password:
+                logger.warning("WARNING: Basic Auth enabled but password not set!")
+        if settings.is_oauth2_enabled:
+            auth_methods.append(f"OAuth2 ({settings.oauth2_provider_name})")
+            if not settings.oauth2_client_id or not settings.oauth2_client_secret:
+                logger.warning("WARNING: OAuth2 enabled but client credentials not configured!")
+
+        logger.info(f"Authentication is ENABLED: {', '.join(auth_methods)}")
+    else:
+        logger.warning(
+            "Authentication is DISABLED: anyone who can reach this app can read the logs, "
+            "change settings and run mailcow actions. Set BASIC_AUTH_ENABLED=true with "
+            "AUTH_PASSWORD, or configure OAuth2, unless access is restricted another way."
+        )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifecycle management"""
@@ -111,21 +134,23 @@ async def lifespan(app: FastAPI):
         from .migrations import run_alembic_upgrade
         run_alembic_upgrade()
 
-        # Load settings overrides from DB (if UI editing is enabled and overrides exist)
+        # Load settings overrides from DB (if UI editing is enabled and overrides exist).
+        # A failed read aborts startup: authentication enabled from the UI is
+        # stored only there, and starting without it would serve with auth off.
         if settings.edit_settings_via_ui_enabled:
+            from .database import get_db_context
+            with get_db_context() as db:
+                reload_settings(db)
+            logger.info("Settings loaded from database overrides")
             try:
-                from .database import get_db_context
-                with get_db_context() as db:
-                    reload_settings(db)
-                    # Reload services that cache settings values
-                    mailcow_api.reload_config()
-                    from .services.oauth2_client import oauth2_client
-                    oauth2_client.reload_config()
-                    logger.info("Settings loaded from database overrides")
+                # Reload services that cache settings values
+                mailcow_api.reload_config()
+                from .services.oauth2_client import oauth2_client
+                oauth2_client.reload_config()
             except Exception as e:
-                logger.warning(f"Could not load settings from DB: {e}")
+                logger.warning(f"Could not apply the stored settings to the mailcow and OAuth2 clients: {e}")
     except Exception as e:
-        logger.error(f"Failed to initialize database: {e}")
+        logger.error(f"Failed to initialize database or load the stored settings: {e}")
         raise
     
     # Log effective configuration (after DB overrides are loaded)
@@ -134,20 +159,7 @@ async def lifespan(app: FastAPI):
     if settings.blacklist_emails_list:
         logger.info(f"Blacklist enabled with {len(settings.blacklist_emails_list)} email(s)")
     
-    if settings.is_authentication_enabled:
-        auth_methods = []
-        if settings.is_basic_auth_enabled:
-            auth_methods.append("Basic Auth")
-            if not settings.auth_password:
-                logger.warning("WARNING: Basic Auth enabled but password not set!")
-        if settings.is_oauth2_enabled:
-            auth_methods.append(f"OAuth2 ({settings.oauth2_provider_name})")
-            if not settings.oauth2_client_id or not settings.oauth2_client_secret:
-                logger.warning("WARNING: OAuth2 enabled but client credentials not configured!")
-        
-        logger.info(f"Authentication is ENABLED: {', '.join(auth_methods)}")
-    else:
-        logger.info("Authentication is DISABLED")
+    log_authentication_state()
     
     # GeoIP initialization
     try:
@@ -238,19 +250,36 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# Add Basic Auth Middleware FIRST (before CORS)
+# Add Basic Auth Middleware FIRST (innermost)
 # This ensures ALL requests are authenticated when enabled
 app.add_middleware(BasicAuthMiddleware)
 
-# CORS middleware - allow all origins because the app runs behind a reverse proxy in Docker.
-# The reverse proxy (nginx/traefik) handles origin restrictions.
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],  # nosemgrep: python.fastapi.security.wildcard-cors.wildcard-cors
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# Writes and the live log WebSocket must come from the app's own pages,
+# with or without authentication
+app.add_middleware(SameOriginGuardMiddleware)
+
+
+def configure_cors(application: FastAPI) -> None:
+    """Allow cross-origin API access only for the exact origins in CORS_ALLOWED_ORIGINS.
+
+    The web interface is served from the same origin as the API and needs no
+    CORS at all, so by default no CORS policy is installed. Credentials are
+    never combined with a wildcard or a reflected Origin.
+    """
+    origins = settings.cors_allowed_origins_list
+    if not origins:
+        return
+    application.add_middleware(
+        CORSMiddleware,
+        allow_origins=origins,
+        allow_credentials=True,
+        allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
+        allow_headers=["Content-Type", "Authorization"],
+    )
+    logger.info(f"Cross-origin API access allowed for: {', '.join(origins)}")
+
+
+configure_cors(app)
 
 # Security headers on every response.
 # CSP notes: the frontend relies on inline event handlers and inline <script>
@@ -331,7 +360,7 @@ class SlowRequestLogMiddleware:
 app.add_middleware(SecurityHeadersMiddleware, csp=_CSP)
 
 # Registered last so it is the outermost middleware: the measured time then
-# covers auth/CORS/security-headers as well, not just the route handler.
+# covers auth/origin guard/security-headers as well, not just the route handler.
 app.add_middleware(SlowRequestLogMiddleware)
 
 # Include routers

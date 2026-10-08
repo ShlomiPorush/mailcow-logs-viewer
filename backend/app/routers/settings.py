@@ -7,7 +7,7 @@ import logging
 import os
 import httpx
 from pydantic import ValidationError
-from fastapi import APIRouter, Depends, BackgroundTasks, HTTPException
+from fastapi import APIRouter, Depends, BackgroundTasks, HTTPException, Request, Response
 from sqlalchemy.orm import Session
 from sqlalchemy import func, desc, text, or_
 from datetime import datetime, timezone, timedelta
@@ -25,6 +25,7 @@ from ..services.geoip_downloader import is_license_configured, get_geoip_status
 from .domains import get_cached_server_ip
 from ..mailcow_api import mailcow_api
 from ..services.oauth2_client import oauth2_client
+from ..session import get_session_from_request, create_session, set_session_cookie, revoke_all_sessions
 
 from ..utils import format_datetime_for_api as format_datetime_utc
 
@@ -93,7 +94,90 @@ _SENSITIVE_SETTING_KEYS = frozenset({
 })
 MASK_PLACEHOLDER = "********"
 
+# A stored secret is only sent to the server it was entered for. Changing one of
+# these settings while keeping the masked secret would hand it to the new server,
+# so such a save has to carry the secret again.
+_SECRET_BINDINGS = {
+    "smtp_password": ("smtp_host", "smtp_port", "smtp_use_tls", "smtp_use_ssl", "smtp_user"),
+    "rspamd_password": ("rspamd_url", "mailcow_url"),  # empty rspamd_url: reached through mailcow
+    "dmarc_imap_password": ("dmarc_imap_host", "dmarc_imap_port", "dmarc_imap_use_ssl", "dmarc_imap_user"),
+    "oauth2_client_secret": ("oauth2_issuer_url", "oauth2_authorization_url", "oauth2_token_url",
+                             "oauth2_userinfo_url", "oauth2_use_oidc_discovery"),
+    "mailcow_api_key": ("mailcow_url",),
+    "mailcow_api_key_rw": ("mailcow_url",),
+}
+_SECRET_LABELS = {
+    "smtp_password": "SMTP password",
+    "rspamd_password": "Rspamd password",
+    "dmarc_imap_password": "IMAP password",
+    "oauth2_client_secret": "OAuth2 client secret",
+    "mailcow_api_key": "mailcow API key",
+    "mailcow_api_key_rw": "mailcow Read-Write API key",
+}
 
+
+def _comparable_setting(key: str, value: Any) -> Any:
+    """A setting value as the form and the effective settings both spell it.
+
+    The Settings page posts '' for an unset field and numbers may arrive as
+    strings, so None == '', 587 == '587', and a trailing slash or surrounding
+    blanks do not count as a change. Booleans compare as booleans.
+    """
+    from ..services.settings_store import _get_effective_type
+    if _get_effective_type(_get_field_annotations().get(key, str)) is bool:
+        if isinstance(value, str):
+            return value.strip().lower() in ("true", "1", "yes", "on")
+        return bool(value)
+    if value is None:
+        return ""
+    return str(value).strip().rstrip("/")
+
+
+def _reject_moved_secrets(allowed: Dict[str, Any]) -> None:
+    """Refuse to keep a stored secret when the server it is sent to changes.
+
+    Runs before the mask placeholder is stripped: a secret that is absent or
+    still masked is the stored one. ENV-set settings are skipped, because the
+    database value posted for them is ignored anyway.
+    """
+    env_locked = get_env_locked_keys()
+    reenter, from_env = [], []
+    for secret, endpoints in _SECRET_BINDINGS.items():
+        if not str(getattr(settings, secret, None) or "").strip():
+            continue  # nothing stored, nothing to hand over
+        posted = allowed.get(secret, MASK_PLACEHOLDER)
+        if posted != MASK_PLACEHOLDER and secret not in env_locked:
+            continue  # the secret is entered (or cleared) together with the change
+        moved = [k for k in endpoints
+                 if k in allowed and k not in env_locked
+                 and _comparable_setting(k, allowed[k]) != _comparable_setting(k, getattr(settings, k, None))]
+        if moved:
+            (from_env if secret in env_locked else reenter).append((secret, moved))
+    if from_env:
+        secret, moved = from_env[0]
+        raise HTTPException(status_code=400, detail=(
+            f"The {_SECRET_LABELS[secret]} is set by the {secret.upper()} environment variable, so it can only "
+            f"be sent to a different server from there. Change {', '.join(k.upper() for k in moved)} in the "
+            f"environment as well, or undo the change here."))
+    if reenter:
+        labels = [_SECRET_LABELS[secret] for secret, _ in reenter]
+        names = labels[0] if len(labels) == 1 else ", ".join(labels[:-1]) + " and " + labels[-1]
+        raise HTTPException(status_code=400, detail=(
+            f"You changed the server the {names} {'is' if len(labels) == 1 else 'are'} sent to. "
+            f"Enter the {names} again: a stored secret is only sent to the server it was entered for."))
+
+
+# Settings that decide who can sign in. A change to any of them ends every
+# session issued before it, so rotating a password evicts a stolen cookie.
+_SESSION_BOUND_SETTING_KEYS = (
+    "basic_auth_enabled", "auth_username", "auth_password",
+    "oauth2_enabled", "oauth2_issuer_url", "oauth2_authorization_url", "oauth2_token_url",
+    "oauth2_userinfo_url", "oauth2_client_id", "oauth2_client_secret", "session_secret_key",
+)
+
+
+def _session_bound_values() -> tuple:
+    return tuple(getattr(settings, key, None) for key in _SESSION_BOUND_SETTING_KEYS)
 
 
 def _effective_config_for_editable(settings_obj: Settings) -> Dict[str, Any]:
@@ -586,7 +670,8 @@ def get_editable_settings(db: Session = Depends(get_db)):
 
 
 @router.put("/settings")
-def update_settings(body: Dict[str, Any], db: Session = Depends(get_db)):
+def update_settings(body: Dict[str, Any], request: Request = None, response: Response = None,
+                    db: Session = Depends(get_db)):
     """
     Update app settings from UI. Only allowed when SETTINGS_EDIT_VIA_UI_ENABLED is true.
     Accepts only keys in EDITABLE_SETTING_KEYS. Secrets: send empty string to leave unchanged.
@@ -602,6 +687,7 @@ def update_settings(body: Dict[str, Any], db: Session = Depends(get_db)):
         if any(f not in FEATURE_IDS for f in features):
             raise HTTPException(status_code=400, detail="disabled_features accepts only known feature names.")
         allowed["disabled_features"] = ",".join(features)
+    _reject_moved_secrets(allowed)
     # For sensitive keys, mask placeholder means "do not change" - omit from payload
     # Empty string means "clear this value" and should be kept
     for sk in _SENSITIVE_SETTING_KEYS:
@@ -704,8 +790,15 @@ def update_settings(body: Dict[str, Any], db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail="Invalid settings. Check the submitted values.") from e
     prev_sync_sources = (settings.blacklist_source_transports, settings.blacklist_source_relayhosts)
     prev_credentials = {name: check["fingerprint"]() for name, check in _CREDENTIAL_CHECKS.items()}
+    prev_sign_in = _session_bound_values()
+    operator_session = get_session_from_request(request) if request is not None else None
     save_config_overrides_to_db(db, allowed)
     reload_settings(db)
+    if _session_bound_values() != prev_sign_in:
+        revoke_all_sessions()
+        # Keep the operator who saved signed in, with a session issued under the new settings
+        if operator_session and settings.is_authentication_enabled and response is not None:
+            set_session_cookie(response, create_session(operator_session["user_info"]), request)
     # A feature switched off here should drop its data now, not at the next restart
     cleanup_disabled_feature_data(db)
     mailcow_api.reload_config()

@@ -86,10 +86,13 @@ These settings **must** be configured in your `.env` file:
 | `SMTP_PORT` | integer | `587` | SMTP server port (587 for TLS, 465 for SSL, 25 for plain) |
 | `SMTP_USE_TLS` | boolean | `false` | Use STARTTLS for SMTP connection (recommended) |
 | `SMTP_USE_SSL` | boolean | `false` | Use Implicit SSL/TLS for SMTP connection (usually port 465) |
+| `SMTP_VERIFY_SSL` | string | `false` | Check the SMTP server's TLS certificate before the password is sent: `false` (also empty or unset) does not check, `auto` checks host names such as `smtp.example.com` but not `localhost`, IP addresses or single-label names such as Docker container names (a warning in the log names this setting), `true` always checks. Case-insensitive. See the note below |
 | `SMTP_USER` | string | (empty) | SMTP username (usually email address) |
 | `SMTP_PASSWORD` | string | (empty) | SMTP password |
 | `SMTP_FROM` | string | (empty) | From address for emails (defaults to SMTP user if not set) |
 | `SMTP_RELAY_MODE` | boolean | `false` | Relay mode - send emails without authentication (for local relay servers). When enabled, username and password are not required |
+
+> **Certificate check (recommended).** By default (`false`) the SMTP and IMAP passwords are sent over TLS without checking the server's certificate, as in earlier versions, so anyone able to intercept the connection could read them. Set `SMTP_VERIFY_SSL=auto` and `DMARC_IMAP_VERIFY_SSL=auto` (or Automatic under Settings) to check servers reached by a host name, or `true` (On) to check every server. Keep `false` only for a server with a self-signed certificate.
 
 ---
 
@@ -233,6 +236,7 @@ One mailbox receives both kinds of report: point the `rua=` of your DMARC and TL
 | `DMARC_IMAP_HOST` | string | (empty) | IMAP server hostname (e.g., `imap.gmail.com`) |
 | `DMARC_IMAP_PORT` | integer | `993` | IMAP server port (993 for SSL, 143 for non-SSL) |
 | `DMARC_IMAP_USE_SSL` | boolean | `true` | Use SSL/TLS for IMAP connection |
+| `DMARC_IMAP_VERIFY_SSL` | string | `false` | Check the IMAP server's TLS certificate before the password is sent. Same values as `SMTP_VERIFY_SSL`: `false` (default) does not check, `auto` checks host names but not `localhost`, IP addresses or container names, `true` always checks |
 | `DMARC_IMAP_USER` | string | (empty) | IMAP username (email address) |
 | `DMARC_IMAP_PASSWORD` | string | (empty) | IMAP password |
 | `DMARC_IMAP_FOLDER` | string | `INBOX` | IMAP folder to scan for DMARC and TLS reports |
@@ -352,16 +356,23 @@ Settings for the automatic quarantine rule processing feature. When rules are de
 
 | Variable | Type | Default | Description |
 |----------|------|---------|-------------|
-| `AUTH_MAX_FAILURE_CLIENTS` | integer | `10000` | Maximum client addresses tracked for failed Basic Auth attempts per process. Must be positive. At capacity, Basic Auth from untracked addresses receives 429 before credential verification; existing sessions remain usable. Expired counters are reclaimed automatically. |
+| `AUTH_MAX_FAILURE_CLIENTS` | integer | `10000` | Maximum clients tracked for failed Basic Auth attempts per process (an IPv4 address or an IPv6 /64 network each). Must be positive. A full table never refuses a correct password: expired counters are reclaimed first, and otherwise the client whose last failed attempt is oldest is dropped to make room for a new one. Existing sessions remain usable. |
 | `SESSION_MAX_ENTRIES` | integer | `50` | Maximum live Basic Auth and OAuth2 sessions per process. Must be positive. New sessions are refused at capacity until a session expires or is logged out. Existing sessions are never evicted. |
 | `BASIC_AUTH_ENABLED` | boolean | `false` | Enable Basic HTTP authentication. When enabled, ALL pages and API endpoints require Basic Auth. If both `BASIC_AUTH_ENABLED` and `OAUTH2_ENABLED` are true, both methods are available |
 | `AUTH_USERNAME` | string | `admin` | Basic auth username |
 | `AUTH_PASSWORD` | string | (empty) | Basic auth password (required if `BASIC_AUTH_ENABLED=true` or `AUTH_ENABLED=true`). ⚠️ **WARNING: Use a strong password in production!** |
 
+Changing who can sign in from the Settings page (the Basic Auth username or
+password, turning Basic Auth or OAuth2 on or off, the OAuth2 provider addresses,
+client ID or secret, or `SESSION_SECRET_KEY`) signs out every existing session.
+The person who saved the change stays signed in.
+
 ### Login attempt limits and reverse proxies
 
-Basic Auth allows 10 failed attempts per client address within 15 minutes. The
-same limit applies to password checks on `/api/info` and protected API endpoints.
+Basic Auth allows 10 failed attempts per client address within 15 minutes. IPv6
+clients are counted per /64 network, because a single host usually holds a whole
+/64. The same limit applies to password checks on `/api/info` and protected API
+endpoints.
 Further attempts return HTTP 429 with `Retry-After`. Public login information
 without credentials and already signed-in sessions remain available.
 
@@ -402,8 +413,9 @@ SameSite=Lax cookie. Complete the login within ten minutes in the same browser a
 on the same application hostname as `OAUTH2_REDIRECT_URI`. Concurrent tabs are
 supported. If the flow expires, cookies are blocked, or the application restarts,
 start again from the login page. Callbacks are single-use, including provider
-errors. Pending flows are capped at 1,024 per process; expired entries are removed
-on the next login or callback. Existing signed-in sessions are unaffected.
+errors. Starting a login keeps nothing on the server (the login state is signed
+with the session secret), so no number of started logins can block others from
+signing in. Existing signed-in sessions are unaffected.
 
 No new environment settings are required. The temporary cookie uses the same
 HTTP/HTTPS policy as the session cookie, including deployments behind a reverse
@@ -429,6 +441,28 @@ application in the provider. See [OAuth2_Configuration.md](OAuth2_Configuration.
 | `SESSION_SECRET_KEY` | string | (empty) | Secret key for signing session cookies. **REQUIRED if `OAUTH2_ENABLED=true`**. Also used for Basic Auth logins since 2.7.1: without it a new key is generated on every start, so restarting the container signs everyone out and they log in again. Generate a random secret: `openssl rand -hex 32`. ⚠️ **WARNING: Use a strong random secret in production!** |
 | `SESSION_EXPIRY_HOURS` | integer | `24` | Session expiration time in hours |
 
+### Cross-site requests
+
+The web interface is served from the same address as the API, so it needs no
+cross-origin access. Requests that change something (POST, PUT, PATCH, DELETE)
+and the Live Logs WebSocket are refused with HTTP 403 when the browser says they
+came from a page on another site, whether or not authentication is enabled. This
+stops a web page on another site from using a browser on your network to act on
+mailcow. Only the host name and port are compared, not `http`/`https`, so a TLS
+reverse proxy in front of the app needs no change. Requests without an `Origin`
+or `Referer` header, such as `curl` or scripts, are not affected.
+
+The check compares the browser's address with the `Host` header, or with
+`X-Forwarded-Host` when the proxy sends it. A proxy that replaces `Host` with its
+own upstream address (nginx does this when `proxy_set_header Host` is missing)
+must pass the original one; every recipe in [Reverse_Proxy.md](Reverse_Proxy.md)
+already does. Otherwise, list the address you open the dashboard at in
+`CORS_ALLOWED_ORIGINS`.
+
+| Variable | Type | Default | Description |
+|----------|------|---------|-------------|
+| `CORS_ALLOWED_ORIGINS` | string | (empty) | Comma-separated exact origins, such as `https://dashboard.example.com`, that may call the API from another site using the signed-in session. Empty means same-origin only, which is all the web interface needs. Wildcards are ignored. Origins listed here also pass the cross-site check above. ENV only; restart the app container after changing it. |
+
 ---
 
 ## Configuration Priority
@@ -440,6 +474,12 @@ When `SETTINGS_EDIT_VIA_UI_ENABLED=true`, configuration is resolved in this orde
 3. **ENV** (environment variables — **always win** when set)
 
 So: ENV overrides DB, and DB overrides defaults. If an environment variable is explicitly set, it always takes precedence over the value stored in the database. This prevents lockout: if you make a configuration mistake in the UI (e.g., wrong OIDC URL or password typo), you can fix it by setting the correct value in your `.env` / `docker-compose.yml` and restarting.
+
+If the settings stored in the database cannot be read, the app keeps the
+settings it already has instead of falling back to the ENV values alone (which
+could turn off authentication that was enabled from the web UI). The request
+that needed them fails, and at startup the app stops with an error instead of
+starting; it starts normally once the database answers again.
 
 ---
 
@@ -453,6 +493,7 @@ The following settings **must** remain in the `.env` file and cannot be changed 
 - `POSTGRES_PASSWORD`
 - `POSTGRES_DB`
 - `SETTINGS_EDIT_VIA_UI_ENABLED`
+- `CORS_ALLOWED_ORIGINS`
 
 All other settings can be managed from the Settings tab in the web interface when `SETTINGS_EDIT_VIA_UI_ENABLED=true`.
 
