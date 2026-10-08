@@ -1217,7 +1217,7 @@ class MailcowAPI:
         """
         logger.info(f"Fetching DKIM configuration for {domain}")
         try:
-            data = await self._make_request(f"/api/v1/get/dkim/{domain}")
+            data = await self._make_request(f"/api/v1/get/dkim/{quote(domain, safe='')}")
             
             # Handle different response formats
             if isinstance(data, dict):
@@ -1502,12 +1502,13 @@ class MailcowAPI:
         Returns:
             Parsed JSON response with detailed quarantine info
         """
-        url = f"{self.base_url}/inc/ajax/qitem_details.php?id={item_id}"
+        url = f"{self.base_url}/inc/ajax/qitem_details.php"
         
         client = self._get_client()
         try:
             response = await client.get(
                 url,
+                params={"id": item_id},
                 headers=self.headers
             )
             response.raise_for_status()
