@@ -120,7 +120,7 @@ def seed_dmarc(db):
                 country_code='NL', country_name='Netherlands'))
     tls = m.TLSReport(
         report_id='smoke-tls-0', organization_name='reporter.example.net', contact_info='smtp-tls@reporter.example.net',
-        policy_domain='example.com', start_datetime=ago(days=1), end_datetime=NOW, raw_json='{}')
+        policy_domain='example.com', start_datetime=ago(days=1), end_datetime=NOW)
     db.add(tls)
     db.flush()
     db.add(m.TLSReportPolicy(

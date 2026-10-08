@@ -37,7 +37,7 @@ VALID_REPORT = """<?xml version="1.0"?>
 
 
 def test_parse_valid_xml():
-    parsed = parse_dmarc_xml(VALID_REPORT, VALID_REPORT)
+    parsed = parse_dmarc_xml(VALID_REPORT)
     assert parsed["org_name"] == "google.com"
     assert parsed["domain"] == "example.com"
     assert parsed["report_id"] == "1234567890"
@@ -56,7 +56,7 @@ def test_entity_expansion_blocked():
         '<!ENTITY lol2 "&lol;&lol;&lol;">]><feedback>&lol2;</feedback>'
     )
     with pytest.raises(Exception):
-        parse_dmarc_xml(evil, evil)
+        parse_dmarc_xml(evil)
 
 
 def test_parse_gz_file_end_to_end():
@@ -90,4 +90,4 @@ def test_unsupported_extension_returns_none():
 
 def test_missing_metadata_raises():
     with pytest.raises(Exception):
-        parse_dmarc_xml("<feedback></feedback>", "<feedback></feedback>")
+        parse_dmarc_xml("<feedback></feedback>")

@@ -245,6 +245,7 @@ class DMARCReport(Base):
     
     domain_id = Column(String(255), index=True)
     
+    # No longer written (always NULL); kept so an older version can still run
     raw_xml = Column(Text)
     
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
@@ -433,7 +434,7 @@ class TLSReport(Base):
     start_datetime = Column(DateTime, nullable=False)
     end_datetime = Column(DateTime, nullable=False)
     
-    # Raw JSON for reference
+    # No longer written (always NULL); kept so an older version can still run
     raw_json = Column(Text)
     
     created_at = Column(DateTime, default=datetime.utcnow, index=True)

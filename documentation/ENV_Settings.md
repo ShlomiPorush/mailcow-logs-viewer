@@ -162,7 +162,7 @@ Automatically disables **sending** for a mailbox that exceeds a hard outbound li
 | Variable | Type | Default | Description |
 |----------|------|---------|-------------|
 | `SMTP_ABUSE_ENABLED` | boolean | `false` | Enable automatic SMTP blocking |
-| `SMTP_ABUSE_THRESHOLD` | integer | `100` | Outbound messages a mailbox may send within the rolling window before SMTP is disabled |
+| `SMTP_ABUSE_THRESHOLD` | integer | `100` | Outbound messages a mailbox may send within the rolling window before SMTP is disabled. Only mail sent after logging in (authenticated SMTP) counts |
 | `SMTP_ABUSE_WINDOW_MINUTES` | integer | `60` | Length of the rolling window in minutes |
 | `SMTP_ABUSE_REVOKE_APP_PASSWORDS` | boolean | `true` | Also revoke the mailbox's app passwords when blocking (a compromised mailbox usually sends via an app password) |
 | `SMTP_ABUSE_UNBLOCK_GRACE_MINUTES` | integer | `60` | After an operator re-enables SMTP, do not auto-block that mailbox again for this many minutes. Prevents the mailbox from being re-blocked immediately while old messages are still inside the rolling window |
@@ -420,6 +420,10 @@ signing in. Existing signed-in sessions are unaffected.
 No new environment settings are required. The temporary cookie uses the same
 HTTP/HTTPS policy as the session cookie, including deployments behind a reverse
 proxy. Proxies must preserve cookies and the original request scheme.
+
+Every account your provider lets sign in gets full access to the dashboard. The
+app has no list of allowed users of its own, so restrict who may use this
+application in the provider. See [OAuth2_Configuration.md](OAuth2_Configuration.md#overview).
 
 | Variable | Type | Default | Description |
 |----------|------|---------|-------------|
