@@ -364,8 +364,8 @@ function markdownCallouts(html) {
 }
 
 function renderMarkdown(markdownText) {
-    const html = marked.parse(markdownText || '');
-    if (typeof DOMPurify !== 'undefined') {
+    const html = typeof marked !== 'undefined' ? marked.parse(markdownText || '') : '';
+    if (html && typeof DOMPurify !== 'undefined') {
         return markdownCallouts(DOMPurify.sanitize(html));
     }
     // Library failed to load - fail safe by escaping rather than injecting
@@ -719,7 +719,7 @@ function renderJobCard(name, jobKey, job) {
         <div class="ui-jobrow${isDisabled ? ' is-off' : ''}${failed ? ' is-failed' : ''}">
             <i class="ui-mdot${dot}"></i>
             <span class="ui-jobrow-name"><b>${escapeHtml(name)}</b>${job.description ? `<small title="${escapeHtml(job.description)}">${escapeHtml(job.description)}</small>` : ''}${isDisabled && !isFeatureOff && job.disabled_reason ? `<small class="ui-text-warn">${escapeHtml(job.disabled_reason)}</small>` : ''}</span>
-            <span class="ui-jobrow-runs">${escapeHtml(runs.join(', ') || '-')}${job.pending_items !== undefined ? ` <small class="ui-text-warn">Pending: ${job.pending_items}</small>` : ''}</span>
+            <span class="ui-jobrow-runs">${escapeHtml(runs.join(', ') || '-')}${job.pending_items !== undefined ? ` <small class="ui-text-warn">Pending: ${escapeHtml(String(job.pending_items))}</small>` : ''}</span>
             <span class="ui-jobrow-last" title="${job.last_run ? escapeHtml(formatTime(job.last_run)) : ''}">${job.last_run ? formatAgo(job.last_run) : 'Not run yet'}</span>
             <span class="ui-jobrow-tag">${job.status === 'success' && !isDisabled ? '' : statusBadge}</span>
             <span class="ui-jobrow-act">${!isDisabled ? `
@@ -750,7 +750,7 @@ function renderMailboxFolderHint(msg) {
 function renderDeliveriesChip(msg) {
     const deliveries = msg.deliveries || 1;
     if (deliveries < 2) return '';
-    return `<span>Deliveries: ${deliveries}</span>`;
+    return `<span>Deliveries: ${escapeHtml(String(deliveries))}</span>`;
 }
 
 // =============================================================================
