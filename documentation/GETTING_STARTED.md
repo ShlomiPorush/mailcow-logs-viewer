@@ -274,6 +274,8 @@ SMTP_FROM=noreply@yourdomain.com
 
 **If not configured:** No email notifications will be sent (default: `SMTP_ENABLED=false`).
 
+**Certificate check (recommended):** by default the SMTP password is sent without checking the server's certificate. Add `SMTP_VERIFY_SSL=auto` (and `DMARC_IMAP_VERIFY_SSL=auto` for the IMAP import below) to check it for servers reached by a host name, or `true` to check every server. Leave it off only for a server with a self-signed certificate. See [ENV_Settings.md](ENV_Settings.md#smtp-configuration).
+
 ---
 
 ## DMARC Configuration

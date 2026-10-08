@@ -15,6 +15,7 @@ from email.message import EmailMessage
 from email.header import decode_header as decode_rfc2047
 
 from ..config import settings
+from .mail_tls import mail_tls_context, certificate_error_hint
 from ..database import SessionLocal
 from ..models import DMARCSync, DMARCReport, DMARCRecord, TLSReport, TLSReportPolicy
 from ..services.dmarc_parser import parse_dmarc_file
@@ -70,7 +71,8 @@ class DMARCImapService:
                 raise ValueError(f"IMAP server configuration incomplete: host={self.host}, port={self.port}")
             
             if self.use_ssl:
-                self.connection = imaplib.IMAP4_SSL(self.host, self.port, timeout=30)
+                context = mail_tls_context(self.host, settings.dmarc_imap_verify_ssl, "DMARC_IMAP_VERIFY_SSL")
+                self.connection = imaplib.IMAP4_SSL(self.host, self.port, ssl_context=context, timeout=30)
             else:
                 self.connection = imaplib.IMAP4(self.host, self.port, timeout=30)
             
@@ -83,8 +85,12 @@ class DMARCImapService:
             logger.error(error_msg)
             raise ConnectionError(error_msg) from e
         except Exception as e:
-            error_msg = f"Failed to connect to IMAP server {self.host}:{self.port}: {e}"
+            hint = certificate_error_hint(e, "DMARC_IMAP_VERIFY_SSL")
+            error_msg = f"Failed to connect to IMAP server {self.host}:{self.port}: {hint or e}"
             logger.error(error_msg)
+            if hint:
+                # The sync stores this message, so it has to name the setting to change
+                raise ConnectionError(error_msg) from e
             raise
     
     def disconnect(self):

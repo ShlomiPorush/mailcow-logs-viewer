@@ -364,6 +364,14 @@ class Settings(BaseSettings):
         description='Use SSL/TLS for IMAP connection'
     )
 
+    dmarc_imap_verify_ssl: str = Field(
+        default='false',
+        env='DMARC_IMAP_VERIFY_SSL',
+        description='Verify the IMAP server TLS certificate before the password is sent: false (default, '
+                    'no check), auto (check host names like imap.example.com, not localhost, IP addresses '
+                    'or container names) or true (always check)'
+    )
+
     dmarc_imap_user: Optional[str] = Field(
         default=None,
         env='DMARC_IMAP_USER',
@@ -460,6 +468,14 @@ class Settings(BaseSettings):
         default=False,
         env='SMTP_USE_SSL',
         description='Use Implicit SSL/TLS for SMTP connection (usually port 465)'
+    )
+
+    smtp_verify_ssl: str = Field(
+        default='false',
+        env='SMTP_VERIFY_SSL',
+        description='Verify the SMTP server TLS certificate before the password is sent: false (default, '
+                    'no check), auto (check host names like smtp.example.com, not localhost, IP addresses '
+                    'or container names) or true (always check)'
     )
 
     smtp_user: Optional[str] = Field(
@@ -814,6 +830,16 @@ class Settings(BaseSettings):
         if v == '':
             return None
         return v
+
+    @field_validator('smtp_verify_ssl', 'dmarc_imap_verify_ssl', mode='before')
+    @classmethod
+    def normalize_verify_mode(cls, v):
+        """false (also empty or unset), auto or true, whatever the case"""
+        from .services.mail_tls import verify_mode
+        mode = verify_mode(v)
+        if mode is None:
+            raise ValueError("must be false, auto or true")
+        return mode
 
     @validator('mailcow_url')
     def validate_mailcow_url(cls, v):
