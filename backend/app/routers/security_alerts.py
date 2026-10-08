@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 from ..database import get_db
 from ..models import SecurityAlert, MessageCorrelation, NetfilterLog
 from ..config import settings
+from ..correlation import submitted_with_auth
 from ..utils import internal_error, format_datetime_for_api as format_datetime_utc
 
 logger = logging.getLogger(__name__)
@@ -109,6 +110,8 @@ def _events(db: Session, alert: SecurityAlert, start, end):
         return db.query(MessageCorrelation.first_seen, MessageCorrelation.recipient,
                         MessageCorrelation.final_status, MessageCorrelation.subject).filter(
             MessageCorrelation.direction == 'outbound',
+            # The same messages the volume-spike alert counted
+            submitted_with_auth(),
             func.lower(MessageCorrelation.sender) == subject,
             MessageCorrelation.first_seen >= start, MessageCorrelation.first_seen < end,
         ).all()

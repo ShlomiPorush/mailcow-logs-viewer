@@ -31,7 +31,7 @@ def env(monkeypatch):
     if not _postgres_available():
         pytest.skip('PostgreSQL not available')
     from app.database import init_db, get_db_context
-    from app.models import MessageCorrelation, NetfilterLog, SecurityAlert
+    from app.models import MessageCorrelation, NetfilterLog, RspamdLog, SecurityAlert
     init_db()
     monkeypatch.setattr(settings._inner, 'anomaly_check_interval', 15)
     monkeypatch.setattr(settings._inner, 'anomaly_baseline_days', 7)
@@ -40,21 +40,35 @@ def env(monkeypatch):
     def cleanup():
         with get_db_context() as db:
             db.query(MessageCorrelation).filter(MessageCorrelation.sender == SENDER).delete(synchronize_session=False)
+            db.query(RspamdLog).filter(RspamdLog.sender_smtp == SENDER).delete(synchronize_session=False)
             db.query(NetfilterLog).filter(NetfilterLog.priority == MARKER).delete(synchronize_session=False)
             db.query(SecurityAlert).filter(SecurityAlert.subject.in_([SENDER, USER])).delete(synchronize_session=False)
             db.commit()
     cleanup()
     with get_db_context() as db:
+        # Sent after logging in (counted), and mail from outside that only
+        # claims the mailbox as its sender (not counted, as in the alert)
+        own = RspamdLog(time=now, sender_smtp=SENDER, has_auth=True, user=SENDER, direction='outbound')
+        forged = RspamdLog(time=now, sender_smtp=SENDER, has_auth=False, user='unknown', ip='203.0.113.9',
+                           direction='outbound')
+        db.add_all([own, forged])
+        db.flush()
         # Two messages three days before, then 30 in the alert's 15 minutes to two domains
         for i in range(2):
             when = now - timedelta(days=3, minutes=i)
             db.add(MessageCorrelation(correlation_key=uuid.uuid4().hex, sender=SENDER, recipient='friend@known.example', direction='outbound',
-                                      subject='Hello', final_status='delivered', first_seen=when, last_seen=when, created_at=when))
+                                      subject='Hello', final_status='delivered', first_seen=when, last_seen=when, created_at=when,
+                                      rspamd_log_id=own.id))
         for i in range(30):
             when = now - timedelta(minutes=10, seconds=i)
             db.add(MessageCorrelation(correlation_key=uuid.uuid4().hex, sender=SENDER, recipient=f'x{i}@{"a.example" if i < 20 else "b.example"}',
                                       direction='outbound', subject='Win a prize', final_status='bounced' if i % 3 == 0 else 'delivered',
-                                      first_seen=when, last_seen=when, created_at=when))
+                                      first_seen=when, last_seen=when, created_at=when, rspamd_log_id=own.id))
+        for i in range(5):
+            when = now - timedelta(minutes=8, seconds=i)
+            db.add(MessageCorrelation(correlation_key=uuid.uuid4().hex, sender=SENDER, recipient='dest@forged.invalid',
+                                      direction='outbound', subject='Forged', final_status='delivered',
+                                      first_seen=when, last_seen=when, created_at=when, rspamd_log_id=forged.id))
         for i in range(12):
             db.add(NetfilterLog(time=now - timedelta(minutes=5, seconds=i), priority=MARKER, ip=f'192.0.2.{i % 3 + 1}', username=USER,
                                 rule_id=3, country_name='Testland', asn_org='Test Net', message='failed'))
