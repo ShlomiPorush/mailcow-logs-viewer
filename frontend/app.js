@@ -476,6 +476,11 @@ async function loadAppInfo() {
             }
         }
 
+        // Without any sign-in, everyone who reaches the app has full access: say so
+        // on every page. Only an explicit false shows it, never a missing field.
+        const authOffBanner = document.getElementById('auth-off-banner');
+        if (authOffBanner) authOffBanner.classList.toggle('hidden', data.auth_enabled !== false);
+
         // Store timezone for date formatting
         if (data.timezone) {
             appTimezone = data.timezone;
