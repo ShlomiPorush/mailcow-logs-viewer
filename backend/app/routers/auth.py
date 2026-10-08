@@ -60,6 +60,22 @@ def _state_signature(nonce: str, expires: str, return_to: str) -> str:
     return _b64(hmac.new(get_session_secret_key().encode("utf-8"), message, hashlib.sha256).digest())
 
 
+def _pkce_verifier(nonce: str) -> str:
+    """The PKCE code_verifier (RFC 7636) for the login started with this cookie nonce.
+
+    Derived from the session secret, so the callback can recompute it without
+    server-side storage, and it never appears in the state, the cookie or the
+    authorization URL. 43 base64url characters, the minimum RFC 7636 allows.
+    """
+    message = "\n".join(("oauth-pkce", nonce)).encode("utf-8")
+    return _b64(hmac.new(get_session_secret_key().encode("utf-8"), message, hashlib.sha256).digest())
+
+
+def _pkce_challenge(verifier: str) -> str:
+    """The S256 code_challenge for a code_verifier."""
+    return _b64(hashlib.sha256(verifier.encode("ascii")).digest())
+
+
 def _new_browser_value(return_to: str) -> str:
     """The browser cookie value: a fresh random nonce plus the page to return to.
 
@@ -214,7 +230,10 @@ async def oauth2_login(request: Request, next: Optional[str] = None):
 
         browser_value = _new_browser_value(safe_return_path(next))
         state = _signed_state(browser_value)
-        auth_url = oauth2_client.get_authorization_url(state)
+        nonce = browser_value.partition(".")[0]
+        auth_url = oauth2_client.get_authorization_url(
+            state, code_challenge=_pkce_challenge(_pkce_verifier(nonce)),
+        )
         response = RedirectResponse(url=auth_url)
         # A separate cookie per flow permits concurrent logins in different tabs.
         # Lax allows the provider's top-level GET callback; no Domain scopes it
@@ -277,7 +296,9 @@ async def oauth2_callback(
     
     try:
         # Exchange code for token
-        token_data = await oauth2_client.exchange_code_for_token(code)
+        # The cookie's nonce was verified with the state above
+        code_verifier = _pkce_verifier(browser_value.partition(".")[0])
+        token_data = await oauth2_client.exchange_code_for_token(code, code_verifier=code_verifier)
         access_token = token_data.get('access_token')
         
         if not access_token:
@@ -309,10 +330,13 @@ async def oauth2_callback(
         return _oauth_redirect("/login?error=server_error", state, request)
 
 
-@router.get("/auth/logout")
+@router.post("/auth/logout")
 def oauth2_logout(request: Request):
     """
-    Logout and clear session
+    Logout and clear session.
+    POST only: a GET that ends the session lets any other site log the
+    operator out with a link or an image. The same-origin guard rejects
+    cross-site POSTs. GET answers 405.
     """
     session_id = request.cookies.get(SESSION_COOKIE_NAME)
     
@@ -328,6 +352,16 @@ def oauth2_logout(request: Request):
     
     logger.info("User logged out")
     return response
+
+
+@router.get("/auth/logout", include_in_schema=False)
+def oauth2_logout_get():
+    """Explicit 405: without this route the SPA catch-all would answer GET with the page."""
+    raise HTTPException(
+        status_code=status.HTTP_405_METHOD_NOT_ALLOWED,
+        detail="Log out with POST",
+        headers={"Allow": "POST"},
+    )
 
 
 @router.get("/auth/status")

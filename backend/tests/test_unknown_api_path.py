@@ -96,8 +96,8 @@ def test_health_and_root_unchanged(client):
 
 
 def test_known_api_path_with_wrong_method_stays_405(client):
-    # /api/auth/logout exists as GET only; a POST is still Method Not Allowed
-    response = client.post("/api/auth/logout")
+    # /api/health exists as GET only; a POST is still Method Not Allowed
+    response = client.post("/api/health")
     assert response.status_code == 405
     assert response.json() == {"detail": "Method Not Allowed"}
 
