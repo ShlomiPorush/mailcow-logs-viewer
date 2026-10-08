@@ -431,6 +431,20 @@ document.addEventListener('DOMContentLoaded', async () => {
 // APP INFO & VERSION
 // =============================================================================
 
+// The authentication-off banner can be dismissed for good in this browser: a
+// reverse proxy in front of the app may already sign users in.
+const AUTH_OFF_BANNER_DISMISSED_KEY = 'authOffBannerDismissed';
+
+function authOffBannerDismissed() {
+    try { return localStorage.getItem(AUTH_OFF_BANNER_DISMISSED_KEY) === '1'; } catch (e) { return false; }
+}
+
+function dismissAuthOffBanner() {
+    try { localStorage.setItem(AUTH_OFF_BANNER_DISMISSED_KEY, '1'); } catch (e) { /* private mode: it just is not remembered */ }
+    const banner = document.getElementById('auth-off-banner');
+    if (banner) banner.classList.add('hidden');
+}
+
 async function loadAppInfo() {
     try {
         // Use regular fetch since this is called after authentication check
@@ -477,9 +491,9 @@ async function loadAppInfo() {
         }
 
         // Without any sign-in, everyone who reaches the app has full access: say so
-        // on every page. Only an explicit false shows it, never a missing field.
+        // on the Dashboard. Only an explicit false shows it, never a missing field.
         const authOffBanner = document.getElementById('auth-off-banner');
-        if (authOffBanner) authOffBanner.classList.toggle('hidden', data.auth_enabled !== false);
+        if (authOffBanner) authOffBanner.classList.toggle('hidden', data.auth_enabled !== false || authOffBannerDismissed());
 
         // Store timezone for date formatting
         if (data.timezone) {
