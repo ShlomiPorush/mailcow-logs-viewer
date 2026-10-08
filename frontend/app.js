@@ -824,7 +824,7 @@ function showAppUpdateModal() {
 
 // Helper to show markdown content in the changelog modal
 function showMarkdownModal(title, markdownContent) {
-    let htmlContent = markdownContent;
+    let htmlContent = escapeHtml(markdownContent); // shown as text if marked is missing or fails
     try {
         if (typeof marked !== 'undefined') {
             marked.setOptions({
@@ -1248,7 +1248,7 @@ function renderNetfilterData(data) {
                 const place = [log.country_name, log.city].filter(Boolean).join(', ');
                 const org = log.asn_org ? ` (${log.asn_org})` : '';
                 const account = log.username && log.username !== '-' ? copyableText(log.username)
-                    : (log.attempts_left !== null && log.attempts_left !== undefined ? `<span class="ui-muted">${log.attempts_left} attempts left</span>` : '<span class="ui-muted">-</span>');
+                    : (log.attempts_left !== null && log.attempts_left !== undefined ? `<span class="ui-muted">${escapeHtml(String(log.attempts_left))} attempts left</span>` : '<span class="ui-muted">-</span>');
                 return `
                 <div class="ui-ev-row ui-msg-${uiActionTone(log.action)}">
                     <time class="ui-muted" title="${escapeHtml(formatTime(log.time))}">${formatListTime(log.time)}</time>
@@ -1775,8 +1775,8 @@ async function loadDashboardSecurityAlerts() {
                         <p class="ui-muted">${escapeHtml(formatTime(a.created_at))}</p>
                     </div>
                     <div class="ui-alert-acts">
-                        <button type="button" onclick="openAlertActivity(${a.id})" class="ui-btn ui-btn-sm" title="What happened before and around this alert">Show activity</button>
-                        <button type="button" onclick="acknowledgeSecurityAlert(${a.id})" class="ui-btn ui-btn-sm" title="Dismiss">Dismiss</button>
+                        <button type="button" onclick="openAlertActivity(${Number(a.id)})" class="ui-btn ui-btn-sm" title="What happened before and around this alert">Show activity</button>
+                        <button type="button" onclick="acknowledgeSecurityAlert(${Number(a.id)})" class="ui-btn ui-btn-sm" title="Dismiss">Dismiss</button>
                     </div>
                 </div>`;
         }).join('');
@@ -1977,8 +1977,8 @@ async function loadMailFlowChart() {
         : i % 3 === 0 ? `<span class="is-minor">${mailFlowHour(s.t)}</span>` : '<span></span>';
     chart.innerHTML = `
         <div class="ui-flow-bars" role="group" aria-label="Messages per hour">${slots.map(s => `
-            <button type="button" class="ui-flow-bar" data-t="${s.t}" aria-pressed="false" onclick="pickMailFlowHour(${s.t})"
-                title="${mailFlowHour(s.t)} to ${mailFlowHour(s.t + 3600000)}: ${s.clean.toLocaleString()} clean, ${s.spam.toLocaleString()} spam. Click for this hour's numbers">
+            <button type="button" class="ui-flow-bar" data-t="${Number(s.t)}" aria-pressed="false" onclick="pickMailFlowHour(${Number(s.t)})"
+                title="${mailFlowHour(s.t)} to ${mailFlowHour(s.t + 3600000)}: ${Number(s.clean).toLocaleString()} clean, ${Number(s.spam).toLocaleString()} spam. Click for this hour's numbers">
                 <i class="ui-flow-spam" style="height: ${(s.spam / max) * 100}%"></i>
                 <i class="ui-flow-clean" style="height: ${(s.clean / max) * 100}%"></i>
             </button>`).join('')}</div>
@@ -2058,7 +2058,7 @@ function renderDashboardSecurity(page = dashboardSecurityPage) {
     const box = document.getElementById('dashboard-security');
     if (!box) return;
     const counts = page ? page.all_counts : null;
-    const n = key => counts ? counts[key].toLocaleString() : '-';
+    const n = key => counts ? Number(counts[key]).toLocaleString() : '-';
     const protections = securityProtectionItems();
     const on = protections.filter(securityProtectionOn);
     // The line's own mark: a tick when anything acts, an eye when everything on only watches
@@ -2124,9 +2124,9 @@ async function loadDashboardStatusSummary() {
         const systemDiv = document.getElementById('dashboard-system-summary');
         const system = data.system || {};
         systemDiv.innerHTML = `
-            <div class="ui-kv"><span>Domains</span><b>${(system.domains || 0).toLocaleString()}</b></div>
-            <div class="ui-kv"><span>Mailboxes</span><b>${(system.mailboxes || 0).toLocaleString()}</b></div>
-            <div class="ui-kv"><span>Aliases</span><b>${(system.aliases || 0).toLocaleString()}</b></div>
+            <div class="ui-kv"><span>Domains</span><b>${Number(system.domains || 0).toLocaleString()}</b></div>
+            <div class="ui-kv"><span>Mailboxes</span><b>${Number(system.mailboxes || 0).toLocaleString()}</b></div>
+            <div class="ui-kv"><span>Aliases</span><b>${Number(system.aliases || 0).toLocaleString()}</b></div>
         `;
     } catch (error) {
         console.error('Failed to load status summary:', error);
@@ -2879,7 +2879,7 @@ async function showQuarantineDetails(itemId) {
     document.body.style.overflow = 'hidden';
 
     try {
-        const res = await authenticatedFetch(`/api/quarantine/${itemId}/details`);
+        const res = await authenticatedFetch(`/api/quarantine/${encodeURIComponent(itemId)}/details`);
         if (!res.ok) throw new Error('Failed to fetch details');
         const data = await res.json();
         renderQuarantineDetailContent(data, itemId);
@@ -2972,11 +2972,11 @@ function renderQuarantineDetailContent(data, itemId) {
     if (footer && canAct) {
         footer.className = 'ui-dialog-foot';
         footer.innerHTML = `
-            <button onclick="closeQuarantineDetails(); quarantineLearnSpam('${itemId}')" class="ui-btn" title="Delete & train as Spam">Spam</button>
-            <button onclick="closeQuarantineDetails(); quarantineLearnHam('${itemId}')" class="ui-btn" title="Release & train as Not Spam">Not Spam</button>
+            <button onclick="closeQuarantineDetails(); quarantineLearnSpam('${escapeJsArg(itemId)}')" class="ui-btn" title="Delete & train as Spam">Spam</button>
+            <button onclick="closeQuarantineDetails(); quarantineLearnHam('${escapeJsArg(itemId)}')" class="ui-btn" title="Release & train as Not Spam">Not Spam</button>
             <span class="ui-toolbar-gap"></span>
-            <button onclick="closeQuarantineDetails(); quarantineDelete('${itemId}')" class="ui-btn ui-btn-danger">Delete</button>
-            <button onclick="closeQuarantineDetails(); quarantineRelease('${itemId}')" class="ui-btn ui-btn-primary">Release</button>
+            <button onclick="closeQuarantineDetails(); quarantineDelete('${escapeJsArg(itemId)}')" class="ui-btn ui-btn-danger">Delete</button>
+            <button onclick="closeQuarantineDetails(); quarantineRelease('${escapeJsArg(itemId)}')" class="ui-btn ui-btn-primary">Release</button>
         `;
     } else if (footer) {
         // The list's locked note sits behind the dialog: say it here too
@@ -3048,14 +3048,14 @@ async function loadQuarantineRules() {
                 <div class="ui-td ui-q-who">
                     <div><b dir="auto">${escapeHtml(rule.name)}</b> ${uiTag(actionLabel, rule.action === 'delete' ? 'fail' : 'ok')}
                         ${rule.is_regex ? uiTag('Regex', 'info') : ''} ${!rule.enabled ? uiTag('Disabled', '') : ''}</div>
-                    <small>${matchLabels[rule.match_type] || rule.match_type}: <code class="ui-mono" dir="auto">${escapeHtml(rule.match_value)}</code></small>
-                    <small>Hits: ${rule.hit_count}${rule.last_hit_at ? ' · Last: ' + formatTime(rule.last_hit_at) : ''}${rule.notes ? ' · ' + escapeHtml(rule.notes) : ''}</small>
+                    <small>${escapeHtml(matchLabels[rule.match_type] || rule.match_type)}: <code class="ui-mono" dir="auto">${escapeHtml(rule.match_value)}</code></small>
+                    <small>Hits: ${escapeHtml(String(rule.hit_count))}${rule.last_hit_at ? ' · Last: ' + formatTime(rule.last_hit_at) : ''}${rule.notes ? ' · ' + escapeHtml(rule.notes) : ''}</small>
                 </div>
                 <span class="ui-td ui-td-end ui-row-actions">
-                    <button onclick="toggleQuarantineRule(${rule.id})" title="${rule.enabled ? 'Click to disable this rule' : 'Click to enable this rule'}"
+                    <button onclick="toggleQuarantineRule(${Number(rule.id)})" title="${rule.enabled ? 'Click to disable this rule' : 'Click to enable this rule'}"
                         class="ui-btn ui-btn-sm${rule.enabled ? ' ui-btn-on' : ''}">${rule.enabled ? 'Enabled' : 'Disabled'}</button>
-                    <button onclick="showEditQuarantineRuleModal(${rule.id})" title="Edit" class="ui-btn ui-btn-sm">Edit</button>
-                    <button onclick="deleteQuarantineRule(${rule.id}, '${escapeJsArg(rule.name)}')" title="Delete" class="ui-btn ui-btn-sm ui-btn-danger">Delete</button>
+                    <button onclick="showEditQuarantineRuleModal(${Number(rule.id)})" title="Edit" class="ui-btn ui-btn-sm">Edit</button>
+                    <button onclick="deleteQuarantineRule(${Number(rule.id)}, '${escapeJsArg(rule.name)}')" title="Delete" class="ui-btn ui-btn-sm ui-btn-danger">Delete</button>
                 </span>
             </div>`;
         }).join('')}</div>`;
@@ -3157,7 +3157,7 @@ function _showQuarantineRuleModal(rule, prefill) {
             </div>
             <div class="ui-dialog-foot">
                 <button onclick="closeQuarantineRuleModal()" class="ui-btn">Cancel</button>
-                <button onclick="saveQuarantineRule(${isEdit ? rule.id : 'null'})" class="ui-btn ui-btn-primary">${isEdit ? 'Save Changes' : 'Create Rule'}</button>
+                <button onclick="saveQuarantineRule(${isEdit ? Number(rule.id) : 'null'})" class="ui-btn ui-btn-primary">${isEdit ? 'Save Changes' : 'Create Rule'}</button>
             </div>
         </div>
     </div>`;
@@ -3329,8 +3329,8 @@ async function testQuarantineRules() {
                 </div>
                 <div class="ui-dialog-body ui-form">
                     <div class="ui-kpis">
-                        <div class="ui-kpi"><b>${data.total_matches}</b>matched</div>
-                        <div class="ui-kpi"><b class="ui-muted">${data.total_quarantine}</b>total</div>
+                        <div class="ui-kpi"><b>${escapeHtml(String(data.total_matches))}</b>matched</div>
+                        <div class="ui-kpi"><b class="ui-muted">${escapeHtml(String(data.total_quarantine))}</b>total</div>
                     </div>
                     ${disabledCount > 0 ? `<p class="ui-text-warn">⚠ ${disabledCount} from disabled rules</p>` : ''}
                     ${noMatches ? '<p class="ui-empty">No quarantine items matched any rules.</p>' : groupsHtml}
@@ -3630,7 +3630,7 @@ function renderFacetList(kind, entries, counts, current) {
         const tone = kind === 'status' && value ? (UI_STATUS_TONE[value] || '') : '';
         return `<button type="button" class="ui-fct" aria-pressed="${String(current === value)}" onclick="setMessagesFacet('${kind}', '${value}')">
             ${kind === 'status' && value ? `<i class="ui-fct-dot${tone ? ` ui-fct-${tone}` : ''}"></i>` : ''}${kind === 'direction' && value ? `<i class="ui-fct-dot ui-dir-${value}"></i>` : ''}<span>${escapeHtml(label)}</span>
-            <small>${count === undefined ? '' : String(count)}</small></button>`;
+            <small>${count === undefined ? '' : escapeHtml(String(count))}</small></button>`;
     }).join('');
 }
 
@@ -4018,7 +4018,7 @@ async function loadStatusSystem() {
             versionHtml = `v${escapeHtml(versionData.current_version)}${updateBadge}`;
         }
 
-        const row = (label, part) => `<dt>${label}</dt><dd>${(part.total || 0).toLocaleString()} <small>${(part.active || 0).toLocaleString()} active</small></dd>`;
+        const row = (label, part) => `<dt>${label}</dt><dd>${Number(part.total || 0).toLocaleString()} <small>${Number(part.active || 0).toLocaleString()} active</small></dd>`;
         container.innerHTML = `
             <div class="ui-srv-big">${versionHtml || 'mailcow'}</div>
             <dl class="ui-srv-dl">
@@ -4412,7 +4412,7 @@ function renderStatusImport(imports) {
             ${d ? `
             <span class="ui-td" title="${d.last_fetch_run ? escapeHtml(formatTime(d.last_fetch_run)) : ''}"><small class="ui-sec-unit">Last Fetch Run </small>${d.last_fetch_run ? formatAgo(d.last_fetch_run) : 'Never'}</span>
             <span class="ui-td" title="${d.last_import ? escapeHtml(formatTime(d.last_import)) : ''}"><small class="ui-sec-unit">Last Import </small>${d.last_import ? formatAgo(d.last_import) : 'Never'}</span>
-            <span class="ui-td ui-td-end"><small class="ui-sec-unit">Total Entries </small>${(d.total_entries || 0).toLocaleString()}</span>
+            <span class="ui-td ui-td-end"><small class="ui-sec-unit">Total Entries </small>${Number(d.total_entries || 0).toLocaleString()}</span>
             <span class="ui-td"><small class="ui-sec-unit">Oldest Entry </small>${d.oldest_entry ? formatTime(d.oldest_entry) : '-'}</span>
             ` : '<span class="ui-td ui-muted">No data</span><span></span><span></span><span></span>'}
         </div>`;
@@ -4432,8 +4432,8 @@ function renderStatusCorrelation(correlation, incompleteList) {
     const linkingNote = document.getElementById('status-kpi-linking-note');
     if (linkingNote) linkingNote.textContent = `${(correlation.complete || 0).toLocaleString()} of ${(correlation.total || 0).toLocaleString()} complete, ${(correlation.incomplete || 0).toLocaleString()} waiting`;
     container.innerHTML = `
-        <div class="ui-srv-big${correlation.incomplete ? ' ui-text-warn' : ''}">${correlation.completion_rate || 0}%</div>
-        <small>${(correlation.complete || 0).toLocaleString()} of ${(correlation.total || 0).toLocaleString()} complete, ${(correlation.incomplete || 0).toLocaleString()} incomplete, ${(correlation.expired || 0).toLocaleString()} expired</small>
+        <div class="ui-srv-big${correlation.incomplete ? ' ui-text-warn' : ''}">${escapeHtml(String(correlation.completion_rate || 0))}%</div>
+        <small>${Number(correlation.complete || 0).toLocaleString()} of ${Number(correlation.total || 0).toLocaleString()} complete, ${Number(correlation.incomplete || 0).toLocaleString()} incomplete, ${Number(correlation.expired || 0).toLocaleString()} expired</small>
         ${correlation.last_update ? `<small title="${escapeHtml(formatTime(correlation.last_update))}">Updated ${formatAgo(correlation.last_update)}</small>` : ''}
     `;
     const pending = document.getElementById('status-correlation-pending');
@@ -4446,7 +4446,7 @@ function renderStatusCorrelation(correlation, incompleteList) {
                     <div class="ui-tr">
                         <span class="ui-td ui-mono">${copyableText(item.message_id || 'N/A')}</span>
                         <span class="ui-td">${copyableText(item.sender || 'N/A')} → ${copyableText(item.recipient || 'N/A')}</span>
-                        <span class="ui-td ui-td-end ui-text-warn">${item.age_minutes}m ago</span>
+                        <span class="ui-td ui-td-end ui-text-warn">${escapeHtml(String(item.age_minutes))}m ago</span>
                     </div>`).join('')}
             </div>
             <p class="ui-kv-note ui-list-foot">These will be automatically completed or expired within 1-2 minutes</p>
@@ -4696,7 +4696,7 @@ function closeChangelogModal() {
 // =============================================================================
 
 function getFlagUrl(countryCode, size = '24x18') {
-    if (!countryCode || countryCode.length !== 2) {
+    if (typeof countryCode !== 'string' || !/^[a-z]{2}$/i.test(countryCode)) {
         return null;
     }
     return `/static/assets/flags/${size}/${countryCode.toLowerCase()}.png`;
@@ -4795,11 +4795,11 @@ function renderPagination(type, currentPage, totalPages) {
 
     return `
         <div class="ui-pagination">
-            <button onclick="loadLogs('${type}', ${currentPage - 1})" ${currentPage === 1 ? 'disabled' : ''} class="ui-btn">
+            <button onclick="loadLogs('${type}', ${Number(currentPage) - 1})" ${currentPage === 1 ? 'disabled' : ''} class="ui-btn">
                 Previous
             </button>
-            <span class="ui-muted">Page ${currentPage} of ${totalPages}</span>
-            <button onclick="loadLogs('${type}', ${currentPage + 1})" ${currentPage === totalPages ? 'disabled' : ''} class="ui-btn">
+            <span class="ui-muted">Page ${Number(currentPage)} of ${Number(totalPages)}</span>
+            <button onclick="loadLogs('${type}', ${Number(currentPage) + 1})" ${currentPage === totalPages ? 'disabled' : ''} class="ui-btn">
                 Next
             </button>
         </div>

@@ -592,6 +592,7 @@ function settingsSearchIndex() {
 }
 
 function renderSettingsEditField(key, value, sensitiveKeys, description, envLocked, defaultValue) {
+    const keyAttr = escapeHtml(key); // setting names go into ids, names and data attributes
     const LOCK = '<svg width="12" height="12" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true"><path fill-rule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clip-rule="evenodd"></path></svg>';
     // Special renderer for disabled_features - checkboxes for feature toggles
     if (key === 'disabled_features') {
@@ -707,10 +708,10 @@ function renderSettingsEditField(key, value, sensitiveKeys, description, envLock
     if (!envLocked) {
         if (hasDefault && !isUserSpecific && (isChanged || isSensitiveChanged)) {
             const defaultLabel = sensitive || String(defaultValue) === '' ? 'empty' : escapeHtml(String(defaultValue));
-            clearBtnHtml = '<button type="button" class="settings-clear-btn ui-set-clear is-reset" data-key="' + key + '" data-default="' + escapeHtml(String(defaultValue)) + '" data-sensitive="' + sensitive + '" data-isbool="' + isBool + '">' +
+            clearBtnHtml = '<button type="button" class="settings-clear-btn ui-set-clear is-reset" data-key="' + keyAttr + '" data-default="' + escapeHtml(String(defaultValue)) + '" data-sensitive="' + sensitive + '" data-isbool="' + isBool + '">' +
                 '↺ Reset to default' + (isBool ? ': ' + defaultLabel : ' (' + defaultLabel + ')') + '</button>';
         } else if (!isBool && String(displayVal).trim() !== '' && !(sensitive && displayVal === '') && !(hasDefault && !isUserSpecific && String(displayVal) === String(defaultValue))) {
-            clearBtnHtml = '<button type="button" class="settings-clear-btn ui-set-clear" data-key="' + key + '" data-default="' + (hasDefault ? escapeHtml(String(defaultValue)) : '') + '" data-sensitive="' + sensitive + '" data-isbool="false">' +
+            clearBtnHtml = '<button type="button" class="settings-clear-btn ui-set-clear" data-key="' + keyAttr + '" data-default="' + (hasDefault ? escapeHtml(String(defaultValue)) : '') + '" data-sensitive="' + sensitive + '" data-isbool="false">' +
                 '× Clear</button>';
         }
     }
@@ -725,7 +726,7 @@ function renderSettingsEditField(key, value, sensitiveKeys, description, envLock
             '<div class="ui-set-secret"><span class="ui-set-secret-state">' + (envLocked ? 'Stored in the environment' : 'Stored') + '</span>' +
             (envLocked ? '' : '<button type="button" class="ui-btn ui-btn-sm" onclick="settingsReplaceSecret(this)">Replace</button>' +
                 '<button type="button" class="ui-btn ui-btn-sm" onclick="settingsRemoveSecret(this)">Remove</button>') +
-            '<input type="hidden" id="edit-' + key + '" name="' + key + '" value="********"' + (envLocked ? ' disabled' : '') + '></div></div>';
+            '<input type="hidden" id="edit-' + keyAttr + '" name="' + keyAttr + '" value="********"' + (envLocked ? ' disabled' : '') + '></div></div>';
     }
 
     const segments = SETTINGS_SEGMENTED_OPTIONS[key];
@@ -739,10 +740,10 @@ function renderSettingsEditField(key, value, sensitiveKeys, description, envLock
         const segClearHtml = clearBtnHtml && defaultOption
             ? clearBtnHtml.replace(/\(([^()]*)\)<\/button>$/, '(' + escapeHtml(defaultOption[1]) + ')</button>')
             : clearBtnHtml;
-        return '<div class="ui-set-field ui-set-seg' + (envLocked ? ' is-locked' : '') + changed + '"><span class="ui-label" id="label-' + key + '">' + escapeHtml(label) + labelLockIcon + changedPill + '</span>' +
+        return '<div class="ui-set-field ui-set-seg' + (envLocked ? ' is-locked' : '') + changed + '"><span class="ui-label" id="label-' + keyAttr + '">' + escapeHtml(label) + labelLockIcon + changedPill + '</span>' +
             descHtml +
-            '<div class="ui-seg" role="group" aria-labelledby="label-' + key + '">' + buttons + '</div>' +
-            '<input type="hidden" id="edit-' + key + '" name="' + key + '" value="' + escapeHtml(current) + '"' + (envLocked ? ' disabled' : '') + '>' +
+            '<div class="ui-seg" role="group" aria-labelledby="label-' + keyAttr + '">' + buttons + '</div>' +
+            '<input type="hidden" id="edit-' + keyAttr + '" name="' + keyAttr + '" value="' + escapeHtml(current) + '"' + (envLocked ? ' disabled' : '') + '>' +
             segClearHtml + '</div>';
     }
 
@@ -750,8 +751,8 @@ function renderSettingsEditField(key, value, sensitiveKeys, description, envLock
         // The whole row toggles, like a Features row: the row is the label (so its text is phrasing content)
         const asSpan = html => html.replace(/^<p /, '<span ').replace(/<\/p>$/, '</span>');
         return '<div class="ui-set-bool' + (envLocked ? ' is-locked' : (isChanged ? ' is-changed' : '')) + '">' +
-            '<label for="edit-' + key + '" class="ui-set-bool-main">' +
-            '<input type="checkbox" id="edit-' + key + '" name="' + key + '" ' + (displayVal ? 'checked' : '') + ' ' + disabledAttr + ' class="ui-check">' +
+            '<label for="edit-' + keyAttr + '" class="ui-set-bool-main">' +
+            '<input type="checkbox" id="edit-' + keyAttr + '" name="' + keyAttr + '" ' + (displayVal ? 'checked' : '') + ' ' + disabledAttr + ' class="ui-check">' +
             '<span class="ui-set-bool-text"><span class="ui-set-bool-label">' + escapeHtml(label) + labelLockIcon + (envLocked ? '' : (isChanged ? ' <span class="ui-set-pill is-changed" title="Differs from the default">Changed</span>' : '')) + '</span>' + asSpan(descHtml) + asSpan(envLockedHtml) + '</span></label>' +
             clearBtnHtml + '</div>';
     }
@@ -764,9 +765,9 @@ function renderSettingsEditField(key, value, sensitiveKeys, description, envLock
             const selected = String(displayVal) === opt.value ? 'selected' : '';
             optionsHtml += '<option value="' + escapeHtml(opt.value) + '" ' + selected + '>' + escapeHtml(opt.label) + '</option>';
         });
-        return '<div class="ui-set-field' + (envLocked ? ' is-locked' : '') + '"><label for="edit-' + key + '" class="ui-label">' + escapeHtml(label) + labelLockIcon + changedPill + '</label>' +
+        return '<div class="ui-set-field' + (envLocked ? ' is-locked' : '') + '"><label for="edit-' + keyAttr + '" class="ui-label">' + escapeHtml(label) + labelLockIcon + changedPill + '</label>' +
             descHtml +
-            '<select id="edit-' + key + '" name="' + key + '" ' + disabledAttr + ' class="ui-select' + changed + '">' +
+            '<select id="edit-' + keyAttr + '" name="' + keyAttr + '" ' + disabledAttr + ' class="ui-select' + changed + '">' +
             optionsHtml + '</select>' +
             clearBtnHtml +
             envLockedHtml + '</div>';
@@ -775,9 +776,9 @@ function renderSettingsEditField(key, value, sensitiveKeys, description, envLock
     const inputType = sensitive ? 'password' : (isNum ? 'number' : 'text');
     const placeholder = envLocked ? 'Set by ENV' : (sensitive ? 'Not set' : '');
     const valAttr = (isBool ? '' : displayVal);
-    return '<div class="ui-set-field' + (envLocked ? ' is-locked' : '') + '"><label for="edit-' + key + '" class="ui-label">' + escapeHtml(label) + labelLockIcon + changedPill + '</label>' +
+    return '<div class="ui-set-field' + (envLocked ? ' is-locked' : '') + '"><label for="edit-' + keyAttr + '" class="ui-label">' + escapeHtml(label) + labelLockIcon + changedPill + '</label>' +
         descHtml +
-        '<input type="' + inputType + '" id="edit-' + key + '" name="' + key + '" value="' + escapeHtml(valAttr) + '" placeholder="' + escapeHtml(placeholder) + '" ' + disabledAttr + ' class="ui-input' + changed + '">' +
+        '<input type="' + inputType + '" id="edit-' + keyAttr + '" name="' + keyAttr + '" value="' + escapeHtml(valAttr) + '" placeholder="' + escapeHtml(placeholder) + '" ' + disabledAttr + ' class="ui-input' + changed + '">' +
         clearBtnHtml +
         envLockedHtml + '</div>';
 }
@@ -936,18 +937,18 @@ function renderSettings(content, data) {
 
     const kv = (label, value, cls = '') => `<div class="ui-kv"><span>${label}</span><b class="${cls}">${value}</b></div>`;
     const readOnlyFacts = [
-        ['Fetch Interval', `${config.fetch_interval || 0} seconds`],
-        ['Fetch Count (Postfix)', `${config.fetch_count_postfix || config.fetch_count || 0} per request`],
-        ['Fetch Count (Rspamd)', `${config.fetch_count_rspamd || config.fetch_count || 0} per request`],
-        ['Fetch Count (Netfilter)', `${config.fetch_count_netfilter || config.fetch_count || 0} per request`],
-        ['Max Pages per Cycle', `${config.fetch_max_pages || 50}`],
-        ['Retention', `${config.retention_days || 0} days`],
-        ['Max Correlation Age', `${config.max_correlation_age_minutes || 10} minutes`],
-        ['Correlation Check', `${config.correlation_check_interval || 120} seconds`],
+        ['Fetch Interval', `${escapeHtml(String(config.fetch_interval || 0))} seconds`],
+        ['Fetch Count (Postfix)', `${escapeHtml(String(config.fetch_count_postfix || config.fetch_count || 0))} per request`],
+        ['Fetch Count (Rspamd)', `${escapeHtml(String(config.fetch_count_rspamd || config.fetch_count || 0))} per request`],
+        ['Fetch Count (Netfilter)', `${escapeHtml(String(config.fetch_count_netfilter || config.fetch_count || 0))} per request`],
+        ['Max Pages per Cycle', `${escapeHtml(String(config.fetch_max_pages || 50))}`],
+        ['Retention', `${escapeHtml(String(config.retention_days || 0))} days`],
+        ['Max Correlation Age', `${escapeHtml(String(config.max_correlation_age_minutes || 10))} minutes`],
+        ['Correlation Check', `${escapeHtml(String(config.correlation_check_interval || 120))} seconds`],
         ['Timezone', escapeHtml(config.timezone || 'N/A')],
         ['Log Level', escapeHtml(config.log_level || 'INFO')],
-        ['Blacklist', config.blacklist_enabled ? `Enabled (${config.blacklist_count} emails)` : 'Disabled'],
-        ['Scheduler Workers', `${config.scheduler_workers || 4}`],
+        ['Blacklist', config.blacklist_enabled ? `Enabled (${escapeHtml(String(config.blacklist_count))} emails)` : 'Disabled'],
+        ['Scheduler Workers', `${escapeHtml(String(config.scheduler_workers || 4))}`],
     ];
 
     const editing = !!(data.settings_edit_via_ui_enabled && data.editable_config);
@@ -1110,7 +1111,7 @@ function renderSettings(content, data) {
                     const asnDb = dbs.ASN || {};
                     const dbLine = function (name, db) {
                         return db.available
-                            ? '<span>' + name + ': ' + db.size_mb + 'MB <small class="ui-muted">(' + db.age_days + 'd old)</small></span>'
+                            ? '<span>' + name + ': ' + escapeHtml(String(db.size_mb)) + 'MB <small class="ui-muted">(' + escapeHtml(String(db.age_days)) + 'd old)</small></span>'
                             : '<span class="ui-muted">' + name + ': Not installed</span>';
                     };
                     tabsHtml += statusBlock([
@@ -1257,7 +1258,7 @@ function renderSettings(content, data) {
                 const defaultVal = btn.getAttribute('data-default');
                 const isSensitive = btn.getAttribute('data-sensitive') === 'true';
                 const isBool = btn.getAttribute('data-isbool') === 'true';
-                const el = content.querySelector('[name="' + key + '"]');
+                const el = content.querySelector('[name="' + CSS.escape(key) + '"]');
                 if (!el) return;
                 if (isBool) {
                     el.checked = defaultVal === 'true';
@@ -1326,7 +1327,7 @@ function renderSettings(content, data) {
                 const payload = {};
                 const sensitiveKeys = SETTINGS_SENSITIVE_KEYS;
                 for (const key of Object.keys(data.editable_config)) {
-                    const el = form.querySelector('[name="' + key + '"]');
+                    const el = form.querySelector('[name="' + CSS.escape(key) + '"]');
                     if (!el) continue;
                     if (el.type === 'checkbox') {
                         payload[key] = el.checked;

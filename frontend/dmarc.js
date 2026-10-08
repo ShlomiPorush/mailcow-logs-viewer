@@ -260,7 +260,7 @@ function renderDmarcHome() {
                     <td class="r">${d.has_dmarc ? `<span class="ui-text-${dmarcTone(s.dmarc_pass_pct)}">${dmarcPct(s.dmarc_pass_pct)}</span>` : '<span class="ui-muted">-</span>'}</td>
                     <td class="ui-dm-hm">${!tls.checked ? dmarcTag('mut', 'Not checked') : tls.found ? dmarcTag('ok', 'Published') : dmarcTag('warn', 'Missing')}</td>
                     <td class="r ui-dm-hm">${d.has_tls ? `<span class="ui-text-${dmarcTone(s.tls_success_pct)}">${dmarcPct(s.tls_success_pct)}</span>` : '<span class="ui-muted">-</span>'}</td>
-                    <td class="r ui-dm-hm">${d.failing_sources ? `<span class="ui-text-fail">${d.failing_sources}</span>` : '<span class="ui-muted">0</span>'}</td></tr>`;
+                    <td class="r ui-dm-hm">${d.failing_sources ? `<span class="ui-text-fail">${escapeHtml(String(d.failing_sources))}</span>` : '<span class="ui-muted">0</span>'}</td></tr>`;
             }).join('')}</tbody></table></div>
         </div><aside>${dmarcTodoCard(dmarcHomeTasks(domains), true)}</aside></div>`;
 }
@@ -304,9 +304,9 @@ function dmarcTodoCard(tasks, withDomain = false) {
 // Your domain, the senders that sent as it, the receivers that reported it
 function dmarcFlow(x) {
     const groups = x.groups.slice(0, 8);
-    const receivers = {};
+    const receivers = Object.create(null); // keyed by reporter names from the reports
     groups.forEach(g => g.reporters.forEach(r => {
-        const e = receivers[r.org_name] || (receivers[r.org_name] = { name: r.org_name, count: 0, pass: 0, from: {} });
+        const e = receivers[r.org_name] || (receivers[r.org_name] = { name: r.org_name, count: 0, pass: 0, from: Object.create(null) });
         e.count += r.count; e.pass += r.dmarc_pass; e.from[g.key] = (e.from[g.key] || 0) + r.count;
     }));
     const recv = Object.values(receivers).sort((a, b) => b.count - a.count).slice(0, 8);
@@ -396,10 +396,10 @@ function watchDmarcFlowSize() {
 
 // The senders of a domain, one per network (ASN); an address without one stands alone
 function dmarcGroups(sources) {
-    const groups = {};
+    const groups = Object.create(null); // keyed by names from the reports
     sources.forEach(s => {
         const key = s.asn_org || s.source_ip;
-        const g = groups[key] || (groups[key] = { key, name: s.asn_org || s.source_ip, ips: [], total: 0, pass: 0, spf: 0, dkim: 0, reporters: {} });
+        const g = groups[key] || (groups[key] = { key, name: s.asn_org || s.source_ip, ips: [], total: 0, pass: 0, spf: 0, dkim: 0, reporters: Object.create(null) });
         g.ips.push(s);
         g.total += s.total_count || 0; g.pass += s.dmarc_pass || 0; g.spf += s.spf_pass || 0; g.dkim += s.dkim_pass || 0;
         (s.reporters || []).forEach(r => {
@@ -498,7 +498,7 @@ function dmarcTlsCard(x) {
     if (!days.length) return `<div class="ui-dm-card"><header>Encryption of mail to you (TLS)</header><p class="ui-dm-empty">No TLS reports for ${escapeHtml(x.name)} in the last 30 days.
         <button type="button" class="ui-dm-link" onclick="openDmarcRecord('tls', '${name}')">See the TLS-RPT record</button></p></div>`;
     const totals = x.tls.totals || {};
-    const reporters = {};
+    const reporters = Object.create(null); // keyed by reporter names from the reports
     days.forEach(d => (d.reports || []).forEach(r => {
         const e = reporters[r.organization_name] || (reporters[r.organization_name] = { name: r.organization_name, ok: 0, fail: 0 });
         e.ok += r.successful_sessions || 0; e.fail += r.failed_sessions || 0;
@@ -928,10 +928,10 @@ async function showDmarcSyncHistory() {
                     <span class="ui-td">${formatDate(sync.started_at)}</span>
                     <span class="ui-td">${uiTag(sync.sync_type, sync.sync_type === 'manual' ? 'info' : '')}</span>
                     <span class="ui-td">${uiTag(sync.status, STATUS_TONE[sync.status] || '')}</span>
-                    <span class="ui-td ui-td-end"><small class="ui-sec-unit">Emails </small>${sync.emails_found || 0}</span>
-                    <span class="ui-td ui-td-end ui-text-ok"><small class="ui-sec-unit">Created </small>${sync.reports_created || 0}</span>
-                    <span class="ui-td ui-td-end ui-muted"><small class="ui-sec-unit">Duplicate </small>${sync.reports_duplicate || 0}</span>
-                    <span class="ui-td ui-td-end${sync.reports_failed > 0 ? ' ui-text-fail' : ''}"><small class="ui-sec-unit">Failed </small>${sync.reports_failed || 0}</span>
+                    <span class="ui-td ui-td-end"><small class="ui-sec-unit">Emails </small>${escapeHtml(String(sync.emails_found || 0))}</span>
+                    <span class="ui-td ui-td-end ui-text-ok"><small class="ui-sec-unit">Created </small>${escapeHtml(String(sync.reports_created || 0))}</span>
+                    <span class="ui-td ui-td-end ui-muted"><small class="ui-sec-unit">Duplicate </small>${escapeHtml(String(sync.reports_duplicate || 0))}</span>
+                    <span class="ui-td ui-td-end${sync.reports_failed > 0 ? ' ui-text-fail' : ''}"><small class="ui-sec-unit">Failed </small>${escapeHtml(String(sync.reports_failed || 0))}</span>
                     <span class="ui-td">${sync.duration_seconds ? `${Math.round(sync.duration_seconds)}s` : '-'}</span>
                 </div>`).join('')}
             </div>
@@ -1001,11 +1001,11 @@ function renderReportsManagementTable(reports, allowDelete, { total, page, total
         return;
     }
 
-    const pageButton = (label, target, disabled) => `<button onclick="loadReportsManagementPage(${target})" ${disabled ? 'disabled' : ''} class="ui-btn ui-btn-sm">${label}</button>`;
+    const pageButton = (label, target, disabled) => `<button onclick="loadReportsManagementPage(${Number(target)})" ${disabled ? 'disabled' : ''} class="ui-btn ui-btn-sm">${label}</button>`;
     const pagination = totalPages > 1 ? `<nav aria-label="Report pages" class="ui-pager">
         ${pageButton('First', 1, page === 1)}
         ${pageButton('Previous', page - 1, page === 1)}
-        <span class="ui-muted">Page ${page} of ${totalPages}</span>
+        <span class="ui-muted">Page ${Number(page)} of ${Number(totalPages)}</span>
         ${pageButton('Next', page + 1, page === totalPages)}
         ${pageButton('Last', totalPages, page === totalPages)}
     </nav>` : '';
@@ -1017,7 +1017,7 @@ function renderReportsManagementTable(reports, allowDelete, { total, page, total
 
     content.innerHTML = `
         <p class="ui-muted ui-mgmt-total">
-            Total: <span class="ui-strong">${total}</span> reports
+            Total: <span class="ui-strong">${escapeHtml(String(total))}</span> reports
         </p>
         ${allowDelete ? '' : `<div class="ui-list-note">${uiLocked('Deleting reports is off', 'Turn on report deletion in Settings, DMARC.',
             `<button type="button" class="ui-btn ui-btn-sm" onclick="closeReportsManagementModal(); navigateTo('settings', { sub: 'dmarc' })">Open Settings</button>`)}</div>`}
@@ -1026,12 +1026,12 @@ function renderReportsManagementTable(reports, allowDelete, { total, page, total
             ${reports.map(report => `
             <div class="ui-tr">
                 <span class="ui-td">${dateTime(report.created_at)}</span>
-                <span class="ui-td"><span class="ui-tag${report.type === 'dmarc' ? ' ui-tag-info' : ' ui-tag-ok'}">${report.type.toUpperCase()}</span></span>
+                <span class="ui-td"><span class="ui-tag${report.type === 'dmarc' ? ' ui-tag-info' : ' ui-tag-ok'}">${escapeHtml(String(report.type).toUpperCase())}</span></span>
                 <b class="ui-td">${escapeHtml(report.domain)}</b>
                 <span class="ui-td">${escapeHtml(report.org_name || '-')}</span>
-                <span class="ui-td ui-td-end"><small class="ui-sec-unit">Records </small>${report.record_count}</span>
+                <span class="ui-td ui-td-end"><small class="ui-sec-unit">Records </small>${escapeHtml(String(report.record_count))}</span>
                 <span class="ui-td">${day(report.begin_date)} - ${day(report.end_date)}</span>
-                ${allowDelete ? `<span class="ui-td ui-td-end ui-row-actions"><button onclick="deleteReport('${report.type}', ${report.id}, '${escapeJsArg(report.domain)}')" class="ui-btn ui-btn-sm ui-btn-danger" title="Delete report">Delete</button></span>` : ''}
+                ${allowDelete ? `<span class="ui-td ui-td-end ui-row-actions"><button onclick="deleteReport('${escapeJsArg(report.type)}', ${Number(report.id)}, '${escapeJsArg(report.domain)}')" class="ui-btn ui-btn-sm ui-btn-danger" title="Delete report">Delete</button></span>` : ''}
             </div>`).join('')}
         </div>
         ${pagination}
