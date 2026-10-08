@@ -734,10 +734,16 @@ function renderSettingsEditField(key, value, sensitiveKeys, description, envLock
         const buttons = segments.map(([v, text]) =>
             '<button type="button" data-value="' + escapeHtml(v) + '" aria-pressed="' + (v === current) + '" ' + disabledAttr +
             ' onclick="settingsPickSegment(this)">' + escapeHtml(text) + '</button>').join('');
-        return '<div class="ui-set-field' + (envLocked ? ' is-locked' : '') + '"><span class="ui-label" id="label-' + key + '">' + escapeHtml(label) + labelLockIcon + '</span>' +
+        // Changed marker and Reset as for every other field; Reset names the default option (Off)
+        const defaultOption = segments.find(([v]) => v === String(defaultValue));
+        const segClearHtml = clearBtnHtml && defaultOption
+            ? clearBtnHtml.replace(/\(([^()]*)\)<\/button>$/, '(' + escapeHtml(defaultOption[1]) + ')</button>')
+            : clearBtnHtml;
+        return '<div class="ui-set-field ui-set-seg' + (envLocked ? ' is-locked' : '') + changed + '"><span class="ui-label" id="label-' + key + '">' + escapeHtml(label) + labelLockIcon + changedPill + '</span>' +
             descHtml +
             '<div class="ui-seg" role="group" aria-labelledby="label-' + key + '">' + buttons + '</div>' +
-            '<input type="hidden" id="edit-' + key + '" name="' + key + '" value="' + escapeHtml(current) + '"' + (envLocked ? ' disabled' : '') + '></div>';
+            '<input type="hidden" id="edit-' + key + '" name="' + key + '" value="' + escapeHtml(current) + '"' + (envLocked ? ' disabled' : '') + '>' +
+            segClearHtml + '</div>';
     }
 
     if (isBool) {
@@ -1260,6 +1266,9 @@ function renderSettings(content, data) {
                     el.type = 'text'; // Show cleared field
                 } else {
                     el.value = defaultVal || '';
+                    // A segmented control shows the value with its pressed button
+                    const seg = el.parentElement && el.parentElement.querySelector('.ui-seg');
+                    if (seg) seg.querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', String(b.getAttribute('data-value') === el.value)));
                 }
                 // The field is back at its default, so it is no longer marked as changed
                 const parent = el.closest('.ui-set-bool, .ui-set-field');

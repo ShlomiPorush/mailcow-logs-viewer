@@ -1691,7 +1691,9 @@ button.ui-st-card:hover { outline: 1px solid var(--ui-line); }
 .ui-set-field > .ui-label { grid-row: 1; margin: 0; color: var(--ui-ink); font-size: 14px; }
 .ui-set-field > .ui-set-desc { grid-row: 2; }
 .ui-set-field > .ui-input, .ui-set-field > .ui-select, .ui-set-field > .ui-set-secret, .ui-set-field > .ui-set-checks, .ui-set-field > .ui-seg { grid-row: 1 / span 2; }
-.ui-set-field > .ui-seg { justify-self: start; }
+/* Three-way choice: at the end edge of the row with Reset under the description, like the on/off toggles */
+.ui-set-field > .ui-seg { justify-self: end; }
+.ui-set-seg > .ui-set-clear { grid-column: 1; }
 .ui-set-field.ui-set-wide { grid-template-columns: minmax(0, 1fr); }
 .ui-set-field.ui-set-wide > * { grid-column: 1; grid-row: auto; }
 .ui-set-desc { margin: 0; color: var(--ui-muted); font-size: 12.5px; line-height: 1.5; }
