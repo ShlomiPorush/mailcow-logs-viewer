@@ -59,7 +59,7 @@ function domainHasIssues(domain) {
 }
 
 function domainRowId(domainName) {
-    return `domain-${escapeHtml(domainName).replace(/\./g, '-')}`;
+    return `domain-${String(domainName).replace(/[^A-Za-z0-9_-]/g, '-')}`;
 }
 
 function renderDomains(container, data) {
@@ -185,17 +185,17 @@ function renderDomainAccordionRow(domain, open = false) {
     const dns = domain.dns_checks || {};
     const domainId = domainRowId(domain.domain_name);
     const issues = domainHasIssues(domain);
-    const fact = (label, value, note) => `<div class="ui-md-fact"><span>${label}</span><div>${value}</div>${note ? `<small class="ui-muted">${note}</small>` : ''}</div>`;
+    const fact = (label, value, note) => `<div class="ui-md-fact"><span>${label}</span><div>${escapeHtml(value)}</div>${note ? `<small class="ui-muted">${escapeHtml(note)}</small>` : ''}</div>`;
 
     return `
-        <div class="ui-tr ui-domain-row" data-domain-row="${escapeHtml(domain.domain_name)}" onclick="toggleDomainDetails('${domainId}')">
+        <div class="ui-tr ui-domain-row" data-domain-row="${escapeHtml(domain.domain_name)}" onclick="toggleDomainDetails('${escapeJsArg(domainId)}')">
             <div class="ui-td ui-q-who">
                 <div>
                     <svg id="${domainId}-icon-desktop" class="ui-domain-chevron" width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"${open ? ' style="transform: rotate(90deg)"' : ''}><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg>
                     ${copyableText(domain.domain_name)}
                     ${domain.active ? '' : uiTag('Inactive', '')}
                 </div>
-                <small>${domain.mboxes_in_domain} mailboxes, ${domain.aliases_in_domain} aliases${issues ? ', needs a DNS change' : ''}</small>
+                <small>${escapeHtml(String(domain.mboxes_in_domain))} mailboxes, ${escapeHtml(String(domain.aliases_in_domain))} aliases${issues ? ', needs a DNS change' : ''}</small>
             </div>
             ${DNS_CHECKS.map(([label, key]) => dnsStatusTag(label, dns[key] || { status: 'unknown' })).join('')}
             <span class="ui-td ui-td-end"><small class="ui-sec-unit">Storage </small>${formatBytes(domain.bytes_total)}</span>
@@ -204,7 +204,7 @@ function renderDomainAccordionRow(domain, open = false) {
                     ${fact('Mailboxes', `${domain.mboxes_in_domain} / ${domain.max_num_mboxes_for_domain}`, `${domain.mboxes_left} available`)}
                     ${fact('Aliases', `${domain.aliases_in_domain} / ${domain.max_num_aliases_for_domain}`, `${domain.aliases_left} available`)}
                     ${fact('Storage Used', formatBytes(domain.bytes_total), domain.max_quota_for_domain > 0 ? `${formatBytes(domain.max_quota_for_domain)} max` : 'Unlimited')}
-                    ${fact('Total Messages', (domain.msgs_total || 0).toLocaleString())}
+                    ${fact('Total Messages', Number(domain.msgs_total || 0).toLocaleString())}
                     ${fact('Created Date', domain.created ? formatDate(domain.created) : 'N/A')}
                     ${fact('Backup MX', domain.backupmx == 1 ? 'Yes' : 'No')}
                     ${fact('Relay All Recipients', domain.relay_all_recipients == 1 ? 'Yes' : 'No')}
