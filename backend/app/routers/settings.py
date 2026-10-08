@@ -8,6 +8,7 @@ import os
 import httpx
 from pydantic import ValidationError
 from fastapi import APIRouter, Depends, BackgroundTasks, HTTPException, Request, Response
+from fastapi.concurrency import run_in_threadpool
 from sqlalchemy.orm import Session
 from sqlalchemy import func, desc, text, or_
 from datetime import datetime, timezone, timedelta
@@ -1033,16 +1034,6 @@ def _persist_maxmind_validation_worker(result: Dict[str, Any]) -> None:
 
 
 
-def _run_async_in_background(coro_func):
-    """Helper to run an async function from BackgroundTasks (which expects sync callables)."""
-    import asyncio
-    loop = asyncio.new_event_loop()
-    try:
-        loop.run_until_complete(coro_func())
-    finally:
-        loop.close()
-
-
 @router.get("/settings/geoip/status")
 def get_geoip_detailed_status():
     """
@@ -1083,7 +1074,8 @@ def trigger_geoip_download(background_tasks: BackgroundTasks):
     
     logger.info("Manual GeoIP download triggered from setup modal")
     from ..scheduler import update_geoip_database
-    background_tasks.add_task(_run_async_in_background, update_geoip_database)
+    # Async background tasks run on the application loop, like the scheduled job
+    background_tasks.add_task(update_geoip_database)
     return {"status": "started", "message": "GeoIP download started in background"}
 
 
@@ -1300,20 +1292,15 @@ def trigger_job(job_name: str, background_tasks: BackgroundTasks):
     if not self_managing:
         update_job_status(status_key, 'running')
     
-    # Run job in background
-    def run_job_wrapper():
+    # Run job in background. An async wrapper runs on the application loop,
+    # the same loop APScheduler uses, so the job shares its asyncio locks and
+    # HTTP clients with the scheduled runs (a private loop broke the locks).
+    async def run_job_wrapper():
         try:
-            import asyncio
-            # Handle both sync and async functions
             if asyncio.iscoroutinefunction(job_func):
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                try:
-                    loop.run_until_complete(job_func())
-                finally:
-                    loop.close()
+                await job_func()
             else:
-                job_func()
+                await run_in_threadpool(job_func)
             # Self-managing jobs update their own status internally
             if not self_managing:
                 update_job_status(status_key, 'success')
