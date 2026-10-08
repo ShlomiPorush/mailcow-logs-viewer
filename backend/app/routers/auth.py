@@ -60,13 +60,26 @@ def _state_signature(nonce: str, expires: str, return_to: str) -> str:
     return _b64(hmac.new(get_session_secret_key().encode("utf-8"), message, hashlib.sha256).digest())
 
 
+def _new_browser_value(return_to: str) -> str:
+    """The browser cookie value: a fresh random nonce plus the page to return to.
+
+    It carries no secret; only the state sent to the provider is signed.
+    """
+    return f"{secrets.token_urlsafe(32)}.{_b64(return_to.encode('utf-8'))}"
+
+
+def _signed_state(browser_value: str) -> str:
+    """The state sent to the provider, signed over the cookie's nonce and return page."""
+    nonce, _, encoded = browser_value.partition(".")
+    return_to = base64.urlsafe_b64decode(encoded + "=" * (-len(encoded) % 4)).decode("utf-8")
+    expires = str(int(time.time()) + OAUTH_STATE_TTL)
+    return f"{expires}.{_state_signature(nonce, expires, return_to)}"
+
+
 def _new_oauth_flow(return_to: str) -> tuple[str, str]:
     """A signed state for the provider and the matching value for the browser cookie."""
-    # Independent random nonce, never an OAuth client secret or user password.
-    nonce = secrets.token_urlsafe(32)
-    expires = str(int(time.time()) + OAUTH_STATE_TTL)
-    state = f"{expires}.{_state_signature(nonce, expires, return_to)}"
-    return state, f"{nonce}.{_b64(return_to.encode('utf-8'))}"
+    browser_value = _new_browser_value(return_to)
+    return _signed_state(browser_value), browser_value
 
 
 def _verify_oauth_flow(state: Optional[str], cookie_value: str) -> Optional[str]:
@@ -199,7 +212,8 @@ async def oauth2_login(request: Request, next: Optional[str] = None):
         # Initialize client (perform discovery if needed)
         await oauth2_client.initialize()
 
-        state, browser_value = _new_oauth_flow(safe_return_path(next))
+        browser_value = _new_browser_value(safe_return_path(next))
+        state = _signed_state(browser_value)
         auth_url = oauth2_client.get_authorization_url(state)
         response = RedirectResponse(url=auth_url)
         # A separate cookie per flow permits concurrent logins in different tabs.
