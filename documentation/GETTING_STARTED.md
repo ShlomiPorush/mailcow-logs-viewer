@@ -96,6 +96,17 @@ Then rename the environment file:
 mv env.example .env
 ```
 
+> [!NOTE]
+> The shipped `docker-compose.yml` runs the application container with a read-only filesystem: it writes only to the `/app/data` volume and to `/tmp`. If you use your own compose file, you can add the same two settings to the `app` service:
+>
+> ```yaml
+>     read_only: true
+>     tmpfs:
+>       - /tmp:size=64m
+> ```
+>
+> Keep a volume mapped to `/app/data` when you do; the application cannot start read-only without it.
+
 ### Step 3: Configure Environment
 
 Edit the `.env` file and configure the settings for your environment:

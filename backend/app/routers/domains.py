@@ -20,6 +20,7 @@ from app.services.alias_domains import get_alias_domain_map, aliases_of_domain
 from app.utils import format_datetime_for_api
 from app.config import settings
 from app.mailcow_api import mailcow_api
+from app.services.dmarc_parser import is_valid_domain_name
 from ..utils import internal_error
 
 logger = logging.getLogger(__name__)
@@ -1870,6 +1871,13 @@ async def get_all_domains_with_dns():
         raise internal_error(e)
 
 
+def _require_domain_name(domain: str) -> None:
+    """Refuse a path value that is not a plain domain name before it reaches
+    DNS lookups, the mailcow API or the database."""
+    if not is_valid_domain_name(domain):
+        raise HTTPException(status_code=400, detail="Invalid domain name")
+
+
 @router.get("/domains/{domain}/dns-check")
 async def check_single_domain_dns(domain: str):
     """
@@ -1881,6 +1889,7 @@ async def check_single_domain_dns(domain: str):
     Returns:
         DNS check results for the domain
     """
+    _require_domain_name(domain)
     try:
         dns_data = await check_domain_dns(domain)
         return dns_data
@@ -2157,6 +2166,7 @@ async def check_all_domains_dns_manual():
 @router.post("/domains/{domain}/check-dns")
 async def check_single_domain_dns_manual(domain: str):
     """Manually trigger DNS check for a single domain"""
+    _require_domain_name(domain)
     try:
         dns_data = await check_domain_dns(domain)
         await asyncio.to_thread(store_dns_check_worker, domain, dns_data, False)

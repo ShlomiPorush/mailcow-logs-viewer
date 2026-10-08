@@ -227,9 +227,14 @@ def send_to_config(channel_type: str, config: Dict, subject: str, message: str) 
         return False, error
     try:
         url, kwargs = build_request(channel_type, config, subject, message)
-        response = requests.post(url, timeout=_TIMEOUT_SECONDS, **kwargs)
+        # A redirect would carry the alert, and any token in the URL or the
+        # Authorization header, to wherever the server points: never follow it
+        response = requests.post(url, timeout=_TIMEOUT_SECONDS, allow_redirects=False, **kwargs)
         if 200 <= response.status_code < 300:
             return True, ""
+        if 300 <= response.status_code < 400:
+            return False, (f"HTTP {response.status_code}: the server redirected the request, "
+                           f"and redirects are not followed. Enter the final URL of the service.")
         return False, _sanitize_error(channel_type, config,
                                       f"HTTP {response.status_code}: {response.text[:200]}")
     except Exception as e:

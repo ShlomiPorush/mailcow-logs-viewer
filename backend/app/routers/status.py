@@ -4,6 +4,7 @@ API endpoints for system status and health monitoring
 import asyncio
 import logging
 import httpx
+from urllib.parse import quote
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 from datetime import datetime, timedelta, timezone
@@ -412,7 +413,7 @@ async def get_app_version_changelog(version: str):
         async with httpx.AsyncClient(timeout=10) as client:
             # Try to get the specific release by tag
             response = await client.get(
-                f"https://api.github.com/repos/ShlomiPorush/mailcow-logs-viewer/releases/tags/{version_tag}"
+                f"https://api.github.com/repos/ShlomiPorush/mailcow-logs-viewer/releases/tags/{quote(version_tag, safe='')}"
             )
             
             if response.status_code == 200:

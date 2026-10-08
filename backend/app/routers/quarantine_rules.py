@@ -54,12 +54,91 @@ def _require_rw_key():
         )
 
 
+try:  # Python 3.11+
+    from re import _parser as _sre_parse
+except ImportError:  # pragma: no cover - older Python
+    import sre_parse as _sre_parse
+
+# Sender, recipient and subject come from whoever sent the mail. A regex rule
+# only looks at this many leading characters, which bounds the work per item.
+REGEX_TARGET_MAX_CHARS = 1000
+
+_REPEATS = (_sre_parse.MAX_REPEAT, _sre_parse.MIN_REPEAT)
+_ZERO_WIDTH = (_sre_parse.AT,)
+_warned_patterns = set()
+
+
+def _only_variable_items(items) -> tuple:
+    r"""(every item has a variable length, at least one repeats without limit).
+
+    A body like `a+`, `\w+\s?` or `(a*)*` can split the same text in many
+    ways; a fixed item such as the `\.` in `([a-z]+\.)+` cannot.
+    """
+    unbounded = False
+    seen = False
+    for op, av in items:
+        if op in _ZERO_WIDTH:
+            continue
+        seen = True
+        if op in _REPEATS:
+            low, high, _sub = av
+            if low == high:
+                return False, unbounded
+            unbounded = unbounded or high == _sre_parse.MAXREPEAT
+        elif op == _sre_parse.SUBPATTERN:
+            variable, inner_unbounded = _only_variable_items(av[-1])
+            if not variable:
+                return False, unbounded
+            unbounded = unbounded or inner_unbounded
+        else:
+            return False, unbounded
+    return seen, unbounded
+
+
+def _has_nested_repetition(items) -> bool:
+    r"""True when a repeated group itself repeats without limit, such as
+    (a+)+ or (\w+\s?)*. Such a pattern can take exponential time on text
+    that almost matches."""
+    for op, av in items:
+        if op in _REPEATS:
+            _low, high, sub = av
+            if high > 1:
+                variable, unbounded = _only_variable_items(sub)
+                if variable and unbounded:
+                    return True
+            if _has_nested_repetition(sub):
+                return True
+        elif op == _sre_parse.SUBPATTERN:
+            if _has_nested_repetition(av[-1]):
+                return True
+        elif op == _sre_parse.BRANCH:
+            if any(_has_nested_repetition(branch) for branch in av[1]):
+                return True
+        elif op in (_sre_parse.ASSERT, _sre_parse.ASSERT_NOT):
+            if _has_nested_repetition(av[1]):
+                return True
+    return False
+
+
+def _is_nested_repetition(pattern: str) -> bool:
+    try:
+        return _has_nested_repetition(_sre_parse.parse(pattern))
+    except Exception:
+        return False
+
+
 def _validate_regex(pattern: str):
     """Validate a regex pattern."""
     try:
         re.compile(pattern)
     except re.error as e:
         raise HTTPException(status_code=400, detail=f"Invalid regex pattern: {e}")
+    if _is_nested_repetition(pattern):
+        raise HTTPException(
+            status_code=400,
+            detail="This pattern repeats a group that itself repeats (nested repetition, "
+                   "like (a+)+). It can freeze the app on some messages - rewrite it "
+                   "without the nested repetition.")
 
 
 def _rule_to_dict(rule: QuarantineRule) -> dict:
@@ -102,8 +181,16 @@ def _find_matching_rule(rules, sender: str, sender_domain: str, rcpt: str, subje
             continue
         
         if rule.is_regex:
+            if _is_nested_repetition(value):
+                # Saved before such patterns were refused: skip it, leaving the
+                # item in quarantine, instead of risking a stalled process
+                if value not in _warned_patterns:
+                    _warned_patterns.add(value)
+                    logger.warning(f"[QUARANTINE RULES] Skipping rule '{rule.name}': its pattern "
+                                   f"has nested repetition. Edit the rule to rewrite it.")
+                continue
             try:
-                if re.search(value, target, re.IGNORECASE):
+                if re.search(value, (target or '')[:REGEX_TARGET_MAX_CHARS], re.IGNORECASE):
                     return rule
             except re.error:
                 continue
