@@ -19,6 +19,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Ban buttons say how long** - On the Security page a rule's catch is banned with a button that shows the rule's ban length, such as Ban 1w or Ban 30d; the app lifts that ban when it ends. An address no rule caught, and an event on the Events tab, has Ban permanently: it goes on the denylist and stays until removed.
 - **The Dashboard search moved to the top bar** - The search box and its status filter on the Dashboard are gone; the search in the top bar replaces them. To see messages with a given status, filter by status on the Messages page.
 
+### Security
+
+- **Smaller limit for DMARC and TLS reports, and no stored copy of the original** - A small compressed report sent to the DMARC mailbox could expand to 50 MB and make the app use a lot of memory, and the full original text of every report was stored next to the parsed data, although nothing ever showed or used it. Reports may now expand to at most 10 MB (real reports are far below 1 MB), and only the parsed data is stored. On upgrade, the stored original copies of existing reports are cleared; the parsed reports, records and charts are kept as they are.
+- **SMTP abuse protection counts only authenticated sending** - SMTP abuse protection and the outbound volume spike alert counted every message shown as outbound, including mail from outside with a forged sender address of your own domain. Someone outside could make it look as if a mailbox was sending too much and get its SMTP access disabled. Both now count only mail the mailbox sent after logging in. How messages are shown and labeled elsewhere does not change.
+- **Note on OAuth2 sign-in** - Every account your OAuth2/OIDC provider lets sign in gets full access to the dashboard. The OAuth2 guide now explains how to limit which users may sign in at the provider (Google, Microsoft, Authentik, Keycloak and mailcow).
+
 ### Fixed
 
 - **Local domains replaced when mailcow did not answer** - When reading the domains from mailcow failed but the alias domains were read, the local domain sync kept only the alias domains, so mail of the primary domains was no longer counted as local. A failed read now leaves the local domains as they were and records the sync as failed.
