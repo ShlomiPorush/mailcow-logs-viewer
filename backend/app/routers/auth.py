@@ -330,10 +330,13 @@ async def oauth2_callback(
         return _oauth_redirect("/login?error=server_error", state, request)
 
 
-@router.get("/auth/logout")
+@router.post("/auth/logout")
 def oauth2_logout(request: Request):
     """
-    Logout and clear session
+    Logout and clear session.
+    POST only: a GET that ends the session lets any other site log the
+    operator out with a link or an image. The same-origin guard rejects
+    cross-site POSTs. GET answers 405.
     """
     session_id = request.cookies.get(SESSION_COOKIE_NAME)
     
@@ -349,6 +352,16 @@ def oauth2_logout(request: Request):
     
     logger.info("User logged out")
     return response
+
+
+@router.get("/auth/logout", include_in_schema=False)
+def oauth2_logout_get():
+    """Explicit 405: without this route the SPA catch-all would answer GET with the page."""
+    raise HTTPException(
+        status_code=status.HTTP_405_METHOD_NOT_ALLOWED,
+        detail="Log out with POST",
+        headers={"Allow": "POST"},
+    )
 
 
 @router.get("/auth/status")

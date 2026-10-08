@@ -106,7 +106,8 @@ curl -b cookies.txt http://your-server:8080/api/info
 ```
 
 Sessions live in the application's memory, so restarting the container signs
-everyone out. `GET /api/auth/logout` ends the session and clears the cookie.
+everyone out. `POST /api/auth/logout` ends the session and clears the cookie
+(`curl -b cookies.txt -X POST http://your-server:8080/api/auth/logout`).
 API clients that prefer to send `Authorization: Basic` on every request can keep
 doing that; nothing about it changed.
 
@@ -299,7 +300,7 @@ Handle OAuth2 callback from provider. This endpoint processes the authorization 
 
 ---
 
-### GET /api/auth/logout
+### POST /api/auth/logout
 
 Logout and clear session.
 
@@ -311,6 +312,7 @@ Logout and clear session.
 - Deletes server-side session
 - Clears session cookie
 - Works for both OAuth2 and Basic Auth sessions
+- POST only, so another site cannot log you out with a link or an image. `GET /api/auth/logout` returns `405 Method Not Allowed`. A cross-site POST is rejected with 403 by the same-origin check
 
 ---
 

@@ -121,9 +121,17 @@ async function responseError(response) {
 }
 
 // Handle logout - one path for both login methods, since both are backed by
-// the same server-side session.
-function handleLogout() {
-    window.location.href = '/api/auth/logout';
+// the same server-side session. POST only: a GET that logs out could be
+// triggered by any other site.
+async function handleLogout() {
+    try {
+        await authenticatedFetch('/api/auth/logout', { method: 'POST' });
+    } catch (e) {
+        // A 401 means the session is already gone; authenticatedFetch has
+        // sent the browser to the login page.
+        return;
+    }
+    window.location.href = '/login';
 }
 
 // Check authentication on page load.
