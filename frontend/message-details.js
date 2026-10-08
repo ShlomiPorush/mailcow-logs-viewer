@@ -99,7 +99,7 @@ async function viewMessageDetails(correlationKey) {
     content.innerHTML = '<div class="ui-loading"><div class="loading"></div><p>Loading...</p></div>';
 
     try {
-        const response = await authenticatedFetch(`/api/message/${correlationKey}/details`);
+        const response = await authenticatedFetch(`/api/message/${encodeURIComponent(correlationKey)}/details`);
         if (!response.ok) {
             throw new Error(`HTTP ${response.status}: ${response.statusText}`);
         }
@@ -350,7 +350,7 @@ function renderRelatedDeliveries(data) {
             <div class="ui-md-legs hidden" id="delivery-journey-legs">
                 ${legs.map((leg, i) => `
                     <div class="ui-md-leg${leg.current ? ' is-current' : ''}"
-                        ${leg.current ? '' : `onclick="viewMessageDetails('${escapeHtml(leg.correlation_key)}')"`}>
+                        ${leg.current ? '' : `onclick="viewMessageDetails('${escapeJsArg(leg.correlation_key)}')"`}>
                         <span class="ui-muted">${i + 1}.</span>
                         <span class="ui-md-leg-who">${escapeHtml(leg.sender || '-')} =&gt; ${escapeHtml(leg.recipient || '-')}</span>
                         ${leg.current ? '<span class="ui-tag ui-tag-info">viewing</span>' : ''}
@@ -758,7 +758,7 @@ function renderSpamTab(content, data) {
     content.innerHTML = `
         <div class="ui-md-stack">
             <div class="ui-md-figures ui-md-card">
-                <div><b class="${data.rspamd.score >= (data.rspamd.required_score || 15) ? 'ui-text-fail' : 'ui-text-ok'}">${data.rspamd.score.toFixed(2)}</b><span>Score</span><small>Limit: ${data.rspamd.required_score || 15}</small></div>
+                <div><b class="${data.rspamd.score >= (data.rspamd.required_score || 15) ? 'ui-text-fail' : 'ui-text-ok'}">${Number(data.rspamd.score).toFixed(2)}</b><span>Score</span><small>Limit: ${escapeHtml(String(data.rspamd.required_score || 15))}</small></div>
                 <div><b>${escapeHtml(String(data.rspamd.action))}</b><span>Action</span></div>
                 <div><b class="${data.rspamd.is_spam ? 'ui-text-fail' : 'ui-text-ok'}">${data.rspamd.is_spam ? 'SPAM' : 'CLEAN'}</b><span>Class</span></div>
             </div>
@@ -842,7 +842,7 @@ function renderNetfilterTab(content, data) {
                         </div>
                         ${log.username ? `<p>User: ${copyableText(log.username)}</p>` : ''}
                         ${log.auth_method ? `<p class="ui-muted">Method: ${escapeHtml(log.auth_method)}</p>` : ''}
-                        ${log.attempts_left !== null ? `<p class="ui-muted">Attempts remaining: ${log.attempts_left}</p>` : ''}
+                        ${log.attempts_left !== null ? `<p class="ui-muted">Attempts remaining: ${escapeHtml(String(log.attempts_left))}</p>` : ''}
                         <p class="ui-md-log-msg">${escapeHtml(log.message)}</p>
                     </div>
                 `).join('')}

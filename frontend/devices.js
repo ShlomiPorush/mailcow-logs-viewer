@@ -83,9 +83,9 @@ function renderDevicesList(container, data) {
     document.getElementById('devices-foot').classList.toggle('hidden', data.total_pages <= 1);
     pager.innerHTML = data.total_pages > 1 ? `
         <nav class="ui-pager" aria-label="Device pages">
-            ${data.page > 1 ? `<button onclick="loadDevices(${data.page - 1})" class="ui-btn ui-btn-sm">← Prev</button>` : ''}
-            <span class="ui-muted">Page ${data.page}/${data.total_pages}</span>
-            ${data.page < data.total_pages ? `<button onclick="loadDevices(${data.page + 1})" class="ui-btn ui-btn-sm">Next →</button>` : ''}
+            ${data.page > 1 ? `<button onclick="loadDevices(${Number(data.page) - 1})" class="ui-btn ui-btn-sm">← Prev</button>` : ''}
+            <span class="ui-muted">Page ${Number(data.page)}/${Number(data.total_pages)}</span>
+            ${data.page < data.total_pages ? `<button onclick="loadDevices(${Number(data.page) + 1})" class="ui-btn ui-btn-sm">Next →</button>` : ''}
         </nav>` : '';
 
     if (!data.items.length) {
@@ -115,7 +115,7 @@ function renderDevicesList(container, data) {
 
 function deviceStatusTag(status) {
     if (!status || status < 400) return '';
-    const label = status === 401 ? 'Sign-in failed' : status === 403 ? 'Refused' : `Error ${status}`;
+    const label = status === 401 ? 'Sign-in failed' : status === 403 ? 'Refused' : `Error ${Number(status)}`;
     return `<span class="ui-tag ui-tag-fail" title="SOGo answered HTTP ${Number(status)}">${label}</span>`;
 }
 

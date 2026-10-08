@@ -263,7 +263,7 @@ function securityRuleName(rule) {
 
 // One tag per rule that caught the address
 function securityRuleTags(hits) {
-    return `<span class="ui-sec-tags">${[...new Set(hits.map(h => securityRuleName(h.rule)))].map(name => uiTag(escapeHtml(name), 'warn')).join('')}</span>`;
+    return `<span class="ui-sec-tags">${[...new Set(hits.map(h => securityRuleName(h.rule)))].map(name => uiTag(name, 'warn')).join('')}</span>`;
 }
 
 // How long a rule's ban lasts, as its button says it: 1w, 30d, 12h, or permanently.
@@ -287,7 +287,7 @@ function securityDescribe(a) {
     const B = 'type="button" class="ui-btn ui-btn-sm"';
     const undo = `<button ${B} onclick="undoProtectionHit(${id}, this)" title="Lift the ban; the rule leaves it alone for a week">Undo</button>`;
     const dismiss = `<button ${B} onclick="dismissProtectionHit(${id})" title="Not an attack: the rule leaves it alone for a week">Dismiss</button>`;
-    const attemptsText = `${a.tries ? `${a.tries.toLocaleString()} failed login${a.tries === 1 ? '' : 's'}` : uiCountLabel(a.attempts, 'attempt', 'attempts')} ${securityWindowText()}${a.services.length ? ` (${escapeHtml(a.services.join(', '))})` : ''}`;
+    const attemptsText = `${a.tries ? `${Number(a.tries).toLocaleString()} failed login${a.tries === 1 ? '' : 's'}` : uiCountLabel(a.attempts, 'attempt', 'attempts')} ${securityWindowText()}${a.services.length ? ` (${escapeHtml(a.services.join(', '))})` : ''}`;
     const listedBy = a.listedAs && securityBare(a.listedAs) !== a.ip ? `<span class="ui-sec-by">as ${escapeHtml(a.listedAs)}</span>` : '';
     if (a.state === 'allow') {
         return {
@@ -311,7 +311,7 @@ function securityDescribe(a) {
         };
     }
     if (a.state === 'banned') {
-        const tries = a.tries ? `${a.tries.toLocaleString()} failed login${a.tries === 1 ? '' : 's'} ${securityWindowText()}. ` : '';
+        const tries = a.tries ? `${Number(a.tries).toLocaleString()} failed login${a.tries === 1 ? '' : 's'} ${securityWindowText()}. ` : '';
         return {
             tag: `${uiTag('Banned', 'fail')}<span class="ui-sec-by">by Fail2ban</span>`,
             why: `${tries}<b>${a.f2b.banned_until ? `${escapeHtml(a.f2b.banned_until)} left` : 'Banned now'}</b>, then Fail2ban lets it try again.${a.f2b.queued_for_unban ? ' Unbanning...' : ''}`,
@@ -342,7 +342,7 @@ function securityDescribe(a) {
             acts: (canBan ? `<button type="button" class="ui-btn ui-btn-sm ui-btn-danger" onclick="banProtectionHit(${id}, this)" title="${escapeHtml(length.title)}">Ban ${escapeHtml(length.label)}</button>` : '') + dismiss
         };
     }
-    const policy = fail2banPolicy ? ` Fail2ban bans at ${fail2banPolicy.max_attempts} within ${formatSeconds(fail2banPolicy.retry_window)}.` : '';
+    const policy = fail2banPolicy ? ` Fail2ban bans at ${escapeHtml(String(fail2banPolicy.max_attempts))} within ${escapeHtml(formatSeconds(fail2banPolicy.retry_window))}.` : '';
     return {
         tag: '',
         why: `${attemptsText}.${policy}`,
@@ -433,7 +433,7 @@ function securityRowClick(event, ip) {
 // addresses only; for any other one they are counted in its own log lines.
 function securityFailedText(a, lines) {
     const services = a.services.length ? ` <span class="ui-muted">(${escapeHtml(a.services.join(', '))})</span>` : '';
-    if (a.tries) return `${a.tries.toLocaleString()} in the last 24 hours${services}`;
+    if (a.tries) return `${Number(a.tries).toLocaleString()} in the last 24 hours${services}`;
     if (!Array.isArray(lines)) return '<span class="ui-muted">Counting...</span>';
     const tries = lines.filter(e => e.rule_id !== null && e.rule_id !== undefined);
     const recent = tries.filter(e => Date.now() - new Date(e.time).getTime() < 24 * 3600 * 1000);
@@ -543,7 +543,7 @@ function securityNetworkPanel() {
 function securityNetworkRows() {
     return (securityNetworks ? securityNetworks.data : []).map(n => `<button type="button" class="ui-sec-net${securityNetwork === n.asn_org ? ' is-on' : ''}" onclick="pickSecurityNetwork('${escapeJsArg(n.asn_org)}')"
         aria-pressed="${securityNetwork === n.asn_org}" title="${escapeHtml(`${n.asn_org}: ${n.attempts.toLocaleString()} attempts from ${n.addresses.toLocaleString()} address${n.addresses === 1 ? '' : 'es'}`)}"><span>${escapeHtml(n.asn_org)}</span>
-        <small class="ui-muted">${n.addresses.toLocaleString()} address${n.addresses === 1 ? '' : 'es'}</small><b>${n.attempts.toLocaleString()}</b></button>`).join('');
+        <small class="ui-muted">${Number(n.addresses).toLocaleString()} address${n.addresses === 1 ? '' : 'es'}</small><b>${Number(n.attempts).toLocaleString()}</b></button>`).join('');
 }
 
 function securityHistoryRows() {
@@ -585,7 +585,7 @@ function renderSecurityOverview() {
 
     const segs = SECURITY_FILTERS.map(([key, label]) => {
         const n = key === 'history' || !counts ? null : counts[key];
-        return `<button type="button" aria-pressed="${securityFilter === key}" onclick="setSecurityFilter('${key}')">${label}${n === null || n === undefined ? '' : ` <b>${n.toLocaleString()}</b>`}</button>`;
+        return `<button type="button" aria-pressed="${securityFilter === key}" onclick="setSecurityFilter('${key}')">${label}${n === null || n === undefined ? '' : ` <b>${Number(n).toLocaleString()}</b>`}</button>`;
     }).join('');
     const list = page ? page.items : [];
     const rwNote = !mailcowRwConfigured && securityFilter !== 'history'
@@ -603,7 +603,7 @@ function renderSecurityOverview() {
         : list.map(securityRow).join('') || `<p class="ui-empty">${escapeHtml(empty)}</p>`;
     const footer = securityFilter === 'history' || !page ? ''
         : page.next ? `<p id="security-more" class="ui-msg-more" aria-live="polite">${securityPageError ? `Could not load more: ${escapeHtml(securityPageError)}` : 'Loading more...'}</p>`
-        : page.total > SECURITY_PAGE_SIZE ? `<p class="ui-msg-more">All ${page.total.toLocaleString()} shown</p>` : '';
+        : page.total > SECURITY_PAGE_SIZE ? `<p class="ui-msg-more">All ${Number(page.total).toLocaleString()} shown</p>` : '';
 
     box.innerHTML = `
         <div class="ui-panel-head ui-sec-head">
@@ -686,13 +686,13 @@ function securityCountryBars() {
     const rows = securityCountries ? securityCountries.data : [];
     const max = rows.length ? Math.max(...rows.map(r => r.attempts)) : 1;
     return rows.map(r => {
-        const part = (n, cls, label) => n ? `<i class="${cls}" style="width:${(n / max) * 100}%" title="${n.toLocaleString()} ${label}"></i>` : '';
-        const addresses = `${r.addresses.toLocaleString()} address${r.addresses === 1 ? '' : 'es'}`;
+        const part = (n, cls, label) => n ? `<i class="${cls}" style="width:${(n / max) * 100}%" title="${Number(n).toLocaleString()} ${label}"></i>` : '';
+        const addresses = `${Number(r.addresses).toLocaleString()} address${r.addresses === 1 ? '' : 'es'}`;
         return `<button type="button" class="ui-sec-bar${securityCountry === r.country_name ? ' is-on' : ''}" onclick="pickSecurityCountry('${escapeJsArg(r.country_name)}')"
                 title="${escapeHtml(`${r.country_name}: ${r.attempts.toLocaleString()} attempts from ${addresses}`)}" aria-pressed="${securityCountry === r.country_name}">
             <span class="ui-sec-bar-name">${securityFlag(r.country_code)}${escapeHtml(r.country_name)}${watched.has(r.country_code) ? '<i class="ui-sec-watch" title="Watched by the Countries rule"></i>' : ''}</span>
             <span class="ui-sec-bar-track">${part(r.review, 'is-warn', 'attempts to review')}${part(r.banned, 'is-ban', 'attempts from banned addresses')}</span>
-            <small class="ui-muted">${addresses}</small><em>${r.attempts.toLocaleString()}</em></button>`;
+            <small class="ui-muted">${addresses}</small><em>${Number(r.attempts).toLocaleString()}</em></button>`;
     }).join('');
 }
 
@@ -767,7 +767,7 @@ function renderSecurityLists() {
         <div class="ui-sec-lrow"><b class="ui-mono">${copyableText(entry)}</b><span class="ui-sec-why">${note}</span><span class="ui-sec-acts">${action}</span></div>`;
     const allowRows = fail2banWhitelist.map(entry => {
         const n = tried(entry);
-        return row(entry, n ? `Failed ${n.toLocaleString()} login${n === 1 ? '' : 's'} today, never banned` : '',
+        return row(entry, n ? `Failed ${Number(n).toLocaleString()} login${n === 1 ? '' : 's'} today, never banned` : '',
             rw ? `<button type="button" class="ui-btn ui-btn-sm" onclick="securityRemoveFromList('whitelist', '${escapeJsArg(entry)}', this)">Remove</button>` : '');
     }).join('');
     const denyRows = fail2banBlacklist.map(entry => {
@@ -777,7 +777,7 @@ function renderSecurityLists() {
                 `<button type="button" class="ui-btn ui-btn-sm" onclick="undoProtectionHit(${Number(hit.id)}, this)" title="Lift the ban; the rule leaves it alone for a week">Remove</button>`);
         }
         const n = tried(entry);
-        return row(entry, `Added by hand${n ? `, still tried ${n.toLocaleString()} time${n === 1 ? '' : 's'} today` : ''}`,
+        return row(entry, `Added by hand${n ? `, still tried ${Number(n).toLocaleString()} time${n === 1 ? '' : 's'} today` : ''}`,
             rw ? `<button type="button" class="ui-btn ui-btn-sm" onclick="securityRemoveFromList('blacklist', '${escapeJsArg(entry)}', this)">Remove</button>` : '');
     }).join('');
     box.innerHTML = `
@@ -1072,10 +1072,10 @@ function securityF2bSentence(edit) {
     const v = securityF2bValues();
     const off = !mailcowRwConfigured;
     if (!edit) {
-        return `An address that fails <b>${v.max_attempts} logins</b> within <b>${formatSeconds(v.retry_window)}</b> is banned for <b>${formatSeconds(v.ban_time)}</b>${v.ban_time_increment ? `, longer each time it comes back, up to <b>${formatSeconds(v.max_ban_time)}</b>` : ''}.`;
+        return `An address that fails <b>${escapeHtml(String(v.max_attempts))} logins</b> within <b>${escapeHtml(formatSeconds(v.retry_window))}</b> is banned for <b>${escapeHtml(formatSeconds(v.ban_time))}</b>${v.ban_time_increment ? `, longer each time it comes back, up to <b>${escapeHtml(formatSeconds(v.max_ban_time))}</b>` : ''}.`;
     }
     const n = (key, min, max, label, width) => securityNum(v[key], `setSecurityF2b('${key}', this.value)`, min, max, label, width, off);
-    const hint = key => `<span class="ui-sec-hint">${formatSeconds(v[key])}</span>`;
+    const hint = key => `<span class="ui-sec-hint">${escapeHtml(formatSeconds(v[key]))}</span>`;
     return `An address that fails ${n('max_attempts', 1, 0, 'Failed logins before a ban', 3)} logins within ${n('retry_window', 1, 0, 'Retry window in seconds', 6)} seconds ${hint('retry_window')}
         is banned for ${n('ban_time', 60, 0, 'Ban time in seconds', 6)} seconds ${hint('ban_time')},
         <label class="ui-sec-inline"><input type="checkbox" class="ui-check" ${v.ban_time_increment ? 'checked' : ''} ${off ? 'disabled' : ''} onchange="setSecurityF2b('ban_time_increment', this.checked)"> longer each time it comes back</label>,
@@ -1088,7 +1088,7 @@ function securityAbuseSentence(edit) {
     const editable = securityAppSettingsEditable();
     const locked = key => !editable || (securityAppSettings.env_locked_keys || []).includes(key);
     if (!edit) {
-        return `Stops a mailbox from sending when it sends more than <b>${val('smtp_abuse_threshold')} messages</b> within <b>${val('smtp_abuse_window_minutes')} minutes</b>. Receiving is never affected.`;
+        return `Stops a mailbox from sending when it sends more than <b>${escapeHtml(String(val('smtp_abuse_threshold')))} messages</b> within <b>${escapeHtml(String(val('smtp_abuse_window_minutes')))} minutes</b>. Receiving is never affected.`;
     }
     const n = (key, min, label, width) => securityNum(val(key), `setSecurityAbuse('${key}', Number(this.value))`, min, 0, label, width, locked(key));
     return `Stop a mailbox from sending when it sends more than ${n('smtp_abuse_threshold', 1, 'Messages', 5)} messages within ${n('smtp_abuse_window_minutes', 1, 'Minutes the messages are counted in', 4)} minutes.
@@ -1148,7 +1148,7 @@ function securityCardBody(key) {
                 <button type="submit" class="ui-btn">Add</button>
             </form>
             ${suggest.length ? `<h4>Tried in the last 7 days, and no such mailbox here</h4>
-                <div class="ui-chip-row">${suggest.map(s => `<button type="button" class="ui-chip" onclick="addTrapName('${escapeJsArg(s.name)}')" title="${s.tries} tries from ${s.addresses} address${s.addresses === 1 ? '' : 'es'}">+ ${escapeHtml(s.name)} <small>${s.tries}</small></button>`).join('')}</div>` : ''}
+                <div class="ui-chip-row">${suggest.map(s => `<button type="button" class="ui-chip" onclick="addTrapName('${escapeJsArg(s.name)}')" title="${escapeHtml(String(s.tries))} tries from ${escapeHtml(String(s.addresses))} address${s.addresses === 1 ? '' : 'es'}">+ ${escapeHtml(s.name)} <small>${escapeHtml(String(s.tries))}</small></button>`).join('')}</div>` : ''}
             <p class="ui-sec-note ui-flush">A real mailbox or alias can never be a trap name.</p>`;
     } else if (key === 'country') {
         const suggest = protectionCountrySuggestions.filter(s => !r.countries.includes(s.code));
@@ -1163,7 +1163,7 @@ function securityCardBody(key) {
                 <button type="submit" class="ui-btn">Add</button>
             </form>
             ${suggest.length ? `<h4>Failed logins in the last 7 days came from</h4>
-                <div class="ui-chip-row">${suggest.map(s => `<button type="button" class="ui-chip" onclick="addProtectionCountry('${escapeJsArg(s.code)}')" title="${s.tries} failed logins">+ ${securityFlag(s.code)}${escapeHtml(s.name)} <small>${s.tries}</small></button>`).join('')}</div>` : ''}
+                <div class="ui-chip-row">${suggest.map(s => `<button type="button" class="ui-chip" onclick="addProtectionCountry('${escapeJsArg(s.code)}')" title="${escapeHtml(String(s.tries))} failed logins">+ ${securityFlag(s.code)}${escapeHtml(s.name)} <small>${escapeHtml(String(s.tries))}</small></button>`).join('')}</div>` : ''}
             <p class="ui-sec-note ui-flush">Only failed logins are caught. A user who logs in from one of these countries is not affected.</p>`;
     } else if (key === 'unknown_accounts') {
         extra = '<p class="ui-sec-note ui-flush">An address with a successful login in the last day is never caught, so a user who mistyped the address is safe.</p>';

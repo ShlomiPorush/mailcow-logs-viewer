@@ -178,7 +178,7 @@ async function openMapEditor(filename) {
     container.innerHTML = '<div class="ui-loading"><div class="loading"></div><p>Loading map content...</p></div>';
 
     try {
-        const response = await authenticatedFetch(`/api/rspamd/maps/${filename}`);
+        const response = await authenticatedFetch(`/api/rspamd/maps/${encodeURIComponent(filename)}`);
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
         const data = await response.json();
@@ -291,7 +291,7 @@ async function validateMapContent(filename) {
 
         const line = (entry, tone) => `
             <div class="ui-map-error ui-text-${tone}">
-                <span class="ui-mono ui-muted">Line ${entry.line}:</span>
+                <span class="ui-mono ui-muted">Line ${escapeHtml(String(entry.line))}:</span>
                 <span>${escapeHtml(entry.error)} - <code>${escapeHtml(entry.content)}</code></span>
             </div>
         `;
@@ -340,7 +340,7 @@ async function saveMapContent(filename) {
     uiSaveBarBusy('map-savebar', true);
     
     try {
-        const response = await authenticatedFetch(`/api/rspamd/maps/${filename}`, {
+        const response = await authenticatedFetch(`/api/rspamd/maps/${encodeURIComponent(filename)}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ content })
@@ -484,7 +484,7 @@ function renderSuppressionItem(s) {
     // For domain regex entries like /.+@example\.com/i, show clean domain
     const displayEmail = _cleanRegexDomain(s.email);
     const isRegexDomain = displayEmail !== s.email;
-    const expiry = s.expires_in ? `Expires in ${s.expires_in.human}`
+    const expiry = s.expires_in ? `Expires in ${escapeHtml(s.expires_in.human)}`
         : (!s.expires_at && s.active ? '<span class="ui-text-spam">∞ Permanent</span>' : '-');
 
     return `
@@ -497,14 +497,14 @@ function renderSuppressionItem(s) {
                 ${s.notes ? `<small title="${escapeHtml(s.notes)}">${escapeHtml(s.notes)}</small>` : ''}
             </div>
             <span class="ui-td ui-td-wrap">${uiTag(s.reason.replace('_', ' '), REASON_TONE[s.reason] || '')} ${uiTag(s.source || 'manual', SOURCE_TONE[s.source] || '')}</span>
-            <span class="ui-td"><small class="ui-sec-unit">Bounces </small>${s.bounce_count > 0 ? `${s.bounce_count} <small class="ui-muted">(H:${s.hard_bounce_count} S:${s.soft_bounce_count})</small>` : '<span class="ui-muted">-</span>'}</span>
+            <span class="ui-td"><small class="ui-sec-unit">Bounces </small>${s.bounce_count > 0 ? `${escapeHtml(String(s.bounce_count))} <small class="ui-muted">(H:${escapeHtml(String(s.hard_bounce_count))} S:${escapeHtml(String(s.soft_bounce_count))})</small>` : '<span class="ui-muted">-</span>'}</span>
             <span class="ui-td">${expiry}</span>
             <span class="ui-td">${syncBadge}</span>
             <span class="ui-td" title="${escapeHtml(formatTime(s.created_at))}"><small class="ui-sec-unit">Added </small>${formatAgo(s.created_at)}</span>
             <span class="ui-td ui-td-end ui-row-actions">
                 <button onclick="showEditSuppressionModalById(${Number(s.id)})" class="ui-btn ui-btn-sm" title="Edit suppression">Edit</button>
-                <button onclick="toggleSuppression(${s.id}, ${!s.active})" class="ui-btn ui-btn-sm" title="${s.active ? 'Deactivate' : 'Reactivate'}">${s.active ? 'Disable' : 'Enable'}</button>
-                <button onclick="deleteSuppression(${s.id}, '${escapeJsArg(s.email)}')" class="ui-btn ui-btn-sm ui-btn-danger" title="Delete permanently">Delete</button>
+                <button onclick="toggleSuppression(${Number(s.id)}, ${!s.active})" class="ui-btn ui-btn-sm" title="${s.active ? 'Deactivate' : 'Reactivate'}">${s.active ? 'Disable' : 'Enable'}</button>
+                <button onclick="deleteSuppression(${Number(s.id)}, '${escapeJsArg(s.email)}')" class="ui-btn ui-btn-sm ui-btn-danger" title="Delete permanently">Delete</button>
             </span>
         </div>
     `;
@@ -513,10 +513,10 @@ function renderSuppressionItem(s) {
 function renderSuppressionPagination(page, totalPages, total) {
     return `
         <nav class="ui-pager" aria-label="Suppression pages">
-            <span class="ui-muted">${total} total</span>
-            ${page > 1 ? `<button onclick="loadSuppressions(${page - 1})" class="ui-btn ui-btn-sm">← Prev</button>` : ''}
-            <span class="ui-muted">Page ${page}/${totalPages}</span>
-            ${page < totalPages ? `<button onclick="loadSuppressions(${page + 1})" class="ui-btn ui-btn-sm">Next →</button>` : ''}
+            <span class="ui-muted">${escapeHtml(String(total))} total</span>
+            ${page > 1 ? `<button onclick="loadSuppressions(${Number(page) - 1})" class="ui-btn ui-btn-sm">← Prev</button>` : ''}
+            <span class="ui-muted">Page ${Number(page)}/${Number(totalPages)}</span>
+            ${page < totalPages ? `<button onclick="loadSuppressions(${Number(page) + 1})" class="ui-btn ui-btn-sm">Next →</button>` : ''}
         </nav>
     `;
 }
@@ -532,10 +532,10 @@ async function loadSuppressionStats() {
         const stats = await response.json();
 
         container.innerHTML = `
-            <div class="ui-kpi"><b>${stats.active}</b>Active</div>
-            <div class="ui-kpi"><b class="${stats.hard_bounce ? 'ui-fail' : ''}">${stats.hard_bounce}</b>Hard Bounces</div>
-            <div class="ui-kpi"><b class="${stats.soft_bounce ? 'ui-warn' : ''}">${stats.soft_bounce}</b>Soft Bounces</div>
-            <div class="ui-kpi"><b>${stats.pending_sync}</b>Pending Sync</div>
+            <div class="ui-kpi"><b>${escapeHtml(String(stats.active))}</b>Active</div>
+            <div class="ui-kpi"><b class="${stats.hard_bounce ? 'ui-fail' : ''}">${escapeHtml(String(stats.hard_bounce))}</b>Hard Bounces</div>
+            <div class="ui-kpi"><b class="${stats.soft_bounce ? 'ui-warn' : ''}">${escapeHtml(String(stats.soft_bounce))}</b>Soft Bounces</div>
+            <div class="ui-kpi"><b>${escapeHtml(String(stats.pending_sync))}</b>Pending Sync</div>
         `;
     } catch (error) {
         console.error('Failed to load suppression stats:', error);
@@ -725,7 +725,7 @@ function showEditSuppressionModal(s) {
         <div class="ui-md-ids ui-form-facts">
             <div class="ui-md-fact"><span>Reason</span><div>${escapeHtml(s.reason.replace('_', ' '))}</div></div>
             <div class="ui-md-fact"><span>Source</span><div>${escapeHtml(s.source || 'manual')}</div></div>
-            ${s.bounce_count > 0 ? `<div class="ui-md-fact"><span>Bounces</span><div>${s.bounce_count}</div></div>` : ''}
+            ${s.bounce_count > 0 ? `<div class="ui-md-fact"><span>Bounces</span><div>${escapeHtml(String(s.bounce_count))}</div></div>` : ''}
             <div class="ui-md-fact"><span>Created</span><div>${formatTime(s.created_at)}</div></div>
         </div>
         <label><span class="ui-label">Notes</span>
@@ -750,7 +750,7 @@ function showEditSuppressionModal(s) {
         </div>
     `, `
         <button onclick="document.getElementById('edit-suppression-modal').remove()" class="ui-btn">Cancel</button>
-        <button onclick="saveEditSuppression(${s.id})" class="ui-btn ui-btn-primary">Save Changes</button>
+        <button onclick="saveEditSuppression(${Number(s.id)})" class="ui-btn ui-btn-primary">Save Changes</button>
     `);
 }
 
