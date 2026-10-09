@@ -951,9 +951,10 @@ function closeDmarcSyncHistoryModal() {
 // REPORTS MANAGEMENT
 // =============================================================================
 // This part runs in the pagination test with only document, authenticatedFetch,
-// escapeHtml, escapeJsArg, console, showToast, showConfirmModal and dmarcState.
+// escapeHtml, escapeJsArg, console, showToast, showConfirmModal, uiLocked,
+// dmarcState, dmarcGet, dmarcUpdateManageButton and loadDmarcDomains.
 
-const reportsManagementState = { page: 1, limit: 50, request: 0 };
+const reportsManagementState = { page: 1, limit: 50, request: 0, domains: [], allowDelete: false, domainsRequest: 0 };
 
 async function showReportsManagementModal() {
     const modal = document.getElementById('dmarc-reports-management-modal');
@@ -961,7 +962,132 @@ async function showReportsManagementModal() {
     modal.onclick = (event) => {
         if (event.target === modal) closeReportsManagementModal();
     };
+    loadReportsDomains();
     await loadReportsManagementPage(1);
+}
+
+// Reports by domain: how many of each type a domain has, with Delete all
+async function loadReportsDomains() {
+    const request = ++reportsManagementState.domainsRequest;
+    const content = document.getElementById('dmarc-reports-domains');
+    if (!reportsManagementState.domains.length) {
+        content.innerHTML = '<div class="ui-loading"><div class="loading"></div><p>Loading domains...</p></div>';
+    }
+    try {
+        const response = await authenticatedFetch('/api/dmarc/reports/domains');
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const data = await response.json();
+        if (request !== reportsManagementState.domainsRequest) return;
+        reportsManagementState.domains = data.domains || [];
+        reportsManagementState.allowDelete = !!data.allow_delete;
+        renderReportsDomains();
+    } catch (error) {
+        if (request !== reportsManagementState.domainsRequest) return;
+        console.error('Error loading reports by domain:', error);
+        content.innerHTML = `<div class="ui-empty"><p class="ui-text-fail">Failed to load the domains. Please try again.</p>
+            <button onclick="loadReportsDomains()" class="ui-btn ui-btn-sm">Retry</button></div>`;
+    }
+}
+
+function renderReportsDomains() {
+    const content = document.getElementById('dmarc-reports-domains');
+    const { domains, allowDelete } = reportsManagementState;
+    if (!domains.length) {
+        content.innerHTML = '';
+        return;
+    }
+    const previous = document.getElementById('dmarc-reports-domains-search');
+    const term = previous ? previous.value : '';
+    content.innerHTML = `
+        <h4 class="ui-md-h">Reports by domain</h4>
+        ${allowDelete ? '' : `<div class="ui-list-note ui-flush">${uiLocked('Deleting reports is off', 'Turn on report deletion in Settings, DMARC.',
+            `<button type="button" class="ui-btn ui-btn-sm" onclick="closeReportsManagementModal(); navigateTo('settings', { sub: 'dmarc' })">Open Settings</button>`)}</div>`}
+        <div class="ui-panel ui-table-card">
+        <section class="ui-panel ui-filters ui-domain-tools">
+            <div class="ui-filters-row">
+            <label class="ui-search ui-ms-search">
+                <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
+                <input type="text" id="dmarc-reports-domains-search" placeholder="Search domains..." aria-label="Search domains" value="${escapeHtml(term)}" oninput="filterReportsDomains()">
+            </label>
+            <span id="dmarc-reports-domains-count" class="ui-count"></span>
+            </div>
+        </section>
+        <div id="dmarc-reports-domains-table" class="ui-table ui-stack" style="--ui-cols: minmax(180px, 2fr) 110px 110px minmax(110px, 1fr)${allowDelete ? ' 100px' : ''}; --ui-table-min: ${allowDelete ? 640 : 540}px"></div>
+        </div>
+    `;
+    filterReportsDomains();
+}
+
+// Filter the domains by the search, as the Domains page does (filterDomains)
+function filterReportsDomains() {
+    const input = document.getElementById('dmarc-reports-domains-search');
+    const table = document.getElementById('dmarc-reports-domains-table');
+    const count = document.getElementById('dmarc-reports-domains-count');
+    if (!input || !table) return;
+    const term = input.value.toLowerCase().trim();
+    const { allowDelete } = reportsManagementState;
+    const rows = reportsManagementState.domains.filter(d => d.domain.toLowerCase().includes(term));
+    if (count) count.textContent = `${rows.length} domain${rows.length !== 1 ? 's' : ''}`;
+    if (!rows.length) {
+        table.innerHTML = `<p class="ui-empty">No domains found matching "${escapeHtml(term)}"</p>`;
+        return;
+    }
+    const day = ts => ts ? new Date(ts * 1000).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '-';
+    table.innerHTML = `
+        <div class="ui-tr ui-tr-head"><span>Domain</span><span class="ui-td-end">DMARC reports</span><span class="ui-td-end">TLS reports</span><span>Last report</span>${allowDelete ? '<span class="ui-td-end">Actions</span>' : ''}</div>
+        ${rows.map(d => `
+        <div class="ui-tr">
+            <b class="ui-td">${escapeHtml(d.domain)}</b>
+            <span class="ui-td ui-td-end" data-sort="${Number(d.dmarc_reports)}"><small class="ui-sec-unit">DMARC </small>${escapeHtml(String(d.dmarc_reports))}</span>
+            <span class="ui-td ui-td-end" data-sort="${Number(d.tls_reports)}"><small class="ui-sec-unit">TLS </small>${escapeHtml(String(d.tls_reports))}</span>
+            <span class="ui-td" data-sort="${Number(d.last_report) || ''}"><small class="ui-sec-unit">Last report </small>${day(d.last_report)}</span>
+            ${allowDelete ? `<span class="ui-td ui-td-end ui-row-actions"><button onclick="deleteDomainReports('${escapeJsArg(d.domain)}')" class="ui-btn ui-btn-sm ui-btn-danger" title="Delete all reports of this domain">Delete all</button></span>` : ''}
+        </div>`).join('')}
+    `;
+}
+
+const reportsCount = (n, type) => `${Number(n)} ${type} report${Number(n) === 1 ? '' : 's'}`;
+
+async function deleteDomainReports(domain) {
+    const row = reportsManagementState.domains.find(d => d.domain === domain);
+    if (!row) return;
+    if (!await showConfirmModal({
+        title: 'Delete All Reports',
+        message: `Delete all reports for ${domain}?\n\nThis deletes ${reportsCount(row.dmarc_reports, 'DMARC')} and ${reportsCount(row.tls_reports, 'TLS')}. This action cannot be undone.`,
+        confirmText: 'Delete all', isDangerous: true
+    })) {
+        return;
+    }
+
+    try {
+        const response = await authenticatedFetch(`/api/dmarc/reports/domains/${encodeURIComponent(domain)}`, { method: 'DELETE' });
+        if (response.status === 403) {
+            showToast('Report deletion is disabled', 'error');
+            return;
+        }
+        if (!response.ok && response.status !== 404) throw new Error(`HTTP ${response.status}`);
+        if (response.ok) {
+            const result = await response.json();
+            showToast(`Deleted ${reportsCount(result.dmarc_reports, 'DMARC')} and ${reportsCount(result.tls_reports, 'TLS')} for ${domain}`, 'success');
+        } else {
+            showToast(`${domain} has no reports left`, 'info');
+        }
+        await refreshAfterReportDelete();
+    } catch (error) {
+        console.error('Error deleting the reports of a domain:', error);
+        showToast('Failed to delete the reports', 'error');
+    }
+}
+
+// After a deletion: the domains, the current page (the server clamps it), the Manage Reports count and the domains list
+async function refreshAfterReportDelete() {
+    const loads = [];
+    if (!document.getElementById('dmarc-reports-management-modal').classList.contains('hidden')) {
+        loads.push(loadReportsDomains(), loadReportsManagementPage(reportsManagementState.page));
+    }
+    if (dmarcState.currentView === 'domains') loads.push(loadDmarcDomains());
+    else loads.push(dmarcGet('/api/dmarc/domains').then(list => dmarcUpdateManageButton(list.domains || [])).catch(() => {}));
+    await Promise.all(loads);
 }
 
 async function loadReportsManagementPage(page) {
@@ -990,6 +1116,7 @@ async function loadReportsManagementPage(page) {
 
 function closeReportsManagementModal() {
     reportsManagementState.request++;
+    reportsManagementState.domainsRequest++;
     document.getElementById('dmarc-reports-management-modal').classList.add('hidden');
 }
 
@@ -1019,8 +1146,6 @@ function renderReportsManagementTable(reports, allowDelete, { total, page, total
         <p class="ui-muted ui-mgmt-total">
             Total: <span class="ui-strong">${escapeHtml(String(total))}</span> reports
         </p>
-        ${allowDelete ? '' : `<div class="ui-list-note">${uiLocked('Deleting reports is off', 'Turn on report deletion in Settings, DMARC.',
-            `<button type="button" class="ui-btn ui-btn-sm" onclick="closeReportsManagementModal(); navigateTo('settings', { sub: 'dmarc' })">Open Settings</button>`)}</div>`}
         <div data-nosort class="ui-table ui-stack" style="${cols}; --ui-table-min: 780px">
             <div class="ui-tr ui-tr-head"><span>Import Date</span><span>Type</span><span>Domain</span><span>Reporter</span><span class="ui-td-end">Records</span><span>Period</span>${allowDelete ? '<span class="ui-td-end">Actions</span>' : ''}</div>
             ${reports.map(report => `
@@ -1058,16 +1183,7 @@ async function deleteReport(reportType, reportId, domain) {
         }
 
         showToast(`${reportType.toUpperCase()} report deleted`, 'success');
-
-        // Refresh the modal
-        if (!document.getElementById('dmarc-reports-management-modal').classList.contains('hidden')) {
-            await loadReportsManagementPage(reportsManagementState.page);
-        }
-
-        // Refresh domains list if visible
-        if (dmarcState.currentView === 'domains') {
-            await loadDmarcDomains();
-        }
+        await refreshAfterReportDelete();
 
     } catch (error) {
         console.error('Error deleting report:', error);

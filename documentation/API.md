@@ -3895,6 +3895,35 @@ Paged responses contain `reports`, `total`, `allow_delete`, `page`, `limit`, and
 
 Each report contains `id`, `type` (`dmarc` or `tls`), `domain`, `org_name`, `begin_date`, `end_date`, `record_count`, `created_at`, and `report_id`. Unpaginated responses retain only the original top-level fields: `reports`, `total`, and `allow_delete`.
 
+`GET /api/dmarc/reports/domains` returns how many reports each domain has, sorted by domain name. Domain names are compared trimmed and in lower case, so `Example.com` and `example.com` count as one domain.
+
+```json
+{
+  "domains": [
+    {"domain": "example.com", "dmarc_reports": 42, "tls_reports": 7, "last_report": 1767312000}
+  ],
+  "allow_delete": false
+}
+```
+
+- `dmarc_reports`, `tls_reports`: Number of stored DMARC and TLS reports for the domain
+- `last_report`: Unix timestamp of the end of the domain's latest report period (DMARC or TLS), or `null`
+
+`DELETE /api/dmarc/reports/domains/{domain}` deletes every DMARC and TLS report of one domain, with their records and policies, in one transaction. The domain is matched the same way (trimmed, lower case). It is refused with `403` unless report deletion is turned on (`DMARC_ALLOW_REPORT_DELETE=true`, off by default), answers `400` for an empty domain and `404` when the domain has no reports. Each deletion is written to the application log with the domain and the counts.
+
+```json
+{
+  "status": "success",
+  "domain": "example.com",
+  "dmarc_reports": 42,
+  "dmarc_records": 310,
+  "tls_reports": 7,
+  "tls_policies": 7
+}
+```
+
+Reports that arrive later for the domain (from IMAP or an upload) are imported as usual.
+
 ### Overview
 
 The DMARC module provides comprehensive email authentication monitoring through DMARC (Domain-based Message Authentication, Reporting & Conformance) aggregate reports. It includes automatic report parsing, GeoIP enrichment for source IPs, and detailed analytics.

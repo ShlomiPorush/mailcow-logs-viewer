@@ -203,6 +203,114 @@ def get_all_reports(
         raise internal_error(e)
 
 
+def _report_domain_key(column):
+    """A report's domain as the reports-by-domain endpoints compare it: trimmed and lower case."""
+    return func.lower(func.trim(column))
+
+
+def _normalize_report_domain(domain: str) -> str:
+    name = (domain or "").strip().lower()
+    if not name or len(name) > 255:
+        raise HTTPException(status_code=400, detail="A domain name is required")
+    return name
+
+
+@router.get("/dmarc/reports/domains")
+def get_reports_by_domain(db: Session = Depends(get_db)):
+    """
+    How many DMARC and TLS reports each domain has, and the end of its latest report period.
+    """
+    try:
+        dmarc_key = _report_domain_key(DMARCReport.domain).label("domain")
+        dmarc_rows = db.query(
+            dmarc_key, func.count(DMARCReport.id), func.max(DMARCReport.end_date),
+        ).group_by(dmarc_key).all()
+        tls_key = _report_domain_key(TLSReport.policy_domain).label("domain")
+        tls_rows = db.query(
+            tls_key, func.count(TLSReport.id), func.max(TLSReport.end_datetime),
+        ).group_by(tls_key).all()
+
+        domains = {}
+        def entry(name):
+            return domains.setdefault(name, {"domain": name, "dmarc_reports": 0, "tls_reports": 0, "last_report": None})
+        for name, count, last in dmarc_rows:
+            row = entry(name)
+            row["dmarc_reports"] = count
+            row["last_report"] = last
+        for name, count, last in tls_rows:
+            row = entry(name)
+            row["tls_reports"] = count
+            last = int(last.timestamp()) if last else None
+            if last is not None and (row["last_report"] is None or last > row["last_report"]):
+                row["last_report"] = last
+
+        return {
+            "domains": sorted(domains.values(), key=lambda row: row["domain"]),
+            "allow_delete": settings.dmarc_allow_report_delete,
+        }
+    except Exception as e:
+        logger.error(f"Error fetching reports by domain: {e}")
+        raise internal_error(e)
+
+
+# Registered before /dmarc/reports/{report_type}/{report_id}, which would otherwise take this path
+@router.delete("/dmarc/reports/domains/{domain}")
+def delete_domain_reports(domain: str, db: Session = Depends(get_db)):
+    """
+    Delete every DMARC and TLS report of one domain, with their records and policies
+    """
+    if not settings.dmarc_allow_report_delete:
+        raise HTTPException(
+            status_code=403,
+            detail="Report deletion is disabled. Set DMARC_ALLOW_REPORT_DELETE=true to enable."
+        )
+    name = _normalize_report_domain(domain)
+
+    try:
+        dmarc_ids = db.query(DMARCReport.id).filter(_report_domain_key(DMARCReport.domain) == name)
+        tls_ids = db.query(TLSReport.id).filter(_report_domain_key(TLSReport.policy_domain) == name)
+
+        dmarc_records = db.query(DMARCRecord).filter(
+            DMARCRecord.dmarc_report_id.in_(dmarc_ids.scalar_subquery())
+        ).delete(synchronize_session=False)
+        dmarc_reports = db.query(DMARCReport).filter(
+            _report_domain_key(DMARCReport.domain) == name
+        ).delete(synchronize_session=False)
+        tls_policies = db.query(TLSReportPolicy).filter(
+            TLSReportPolicy.tls_report_id.in_(tls_ids.scalar_subquery())
+        ).delete(synchronize_session=False)
+        tls_reports = db.query(TLSReport).filter(
+            _report_domain_key(TLSReport.policy_domain) == name
+        ).delete(synchronize_session=False)
+
+        if dmarc_reports == 0 and tls_reports == 0:
+            db.rollback()
+            raise HTTPException(status_code=404, detail="No reports found for this domain")
+
+        db.commit()
+        clear_dmarc_cache(db)
+
+        logger.info(
+            f"Deleted all reports of {name}: {dmarc_reports} DMARC reports ({dmarc_records} records), "
+            f"{tls_reports} TLS reports ({tls_policies} policies)"
+        )
+        return {
+            "status": "success",
+            "domain": name,
+            "dmarc_reports": dmarc_reports,
+            "dmarc_records": dmarc_records,
+            "tls_reports": tls_reports,
+            "tls_policies": tls_policies,
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error deleting the reports of a domain: {e}")
+        raise internal_error(e)
+
+
 @router.delete("/dmarc/reports/{report_type}/{report_id}")
 def delete_report(
     report_type: str,

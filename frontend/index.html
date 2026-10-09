@@ -1522,7 +1522,7 @@
     <script src="/static/alert-activity.js?v=2"></script>
     <script src="/static/export.js?v=1"></script>
     <script src="/static/message-details.js?v=7"></script>
-    <script src="/static/dmarc.js?v=9"></script>
+    <script src="/static/dmarc.js?v=10"></script>
     <script src="/static/logs-viewer.js?v=6"></script>
     <script src="/static/settings.js?v=31"></script>
     <script src="/static/about.js?v=2"></script>
@@ -1569,7 +1569,11 @@
                 <button onclick="closeReportsManagementModal()" class="ui-icon-btn" title="Close" aria-label="Close"><svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg></button>
             </div>
             <div class="ui-dialog-body">
-                <div id="dmarc-reports-management-content"><div class="ui-loading"><div class="loading"></div><p>Loading reports...</p></div></div>
+                <div id="dmarc-reports-domains"></div>
+                <div class="ui-subsection">
+                    <h4 class="ui-md-h">All reports</h4>
+                    <div id="dmarc-reports-management-content"><div class="ui-loading"><div class="loading"></div><p>Loading reports...</p></div></div>
+                </div>
             </div>
         </div>
     </div>

@@ -240,6 +240,13 @@ When using email services (marketing, support desk, etc.):
 - Older DMARC and TLS reports are automatically deleted daily (cleanup job runs at 2:15 AM) to save space
 - Export reports before they're deleted if long-term analysis is needed
 
+### Deleting reports
+**Manage Reports** on the DMARC & TLS page opens a window with two lists:
+- **Reports by domain**: each domain with its number of DMARC and TLS reports and the date of its latest report. Search filters the domains, and a click on a column header sorts by it. **Delete all** removes every DMARC and TLS report of that domain, for example a domain you no longer host. The confirmation shows how many reports will be deleted; this cannot be undone.
+- **All reports**: every report, newest first, with **Delete** for a single report.
+
+Deleting is off by default. Turn it on under **Settings → DMARC** (`DMARC_ALLOW_REPORT_DELETE=true`). A domain whose reports were deleted comes back if new reports for it arrive.
+
 ---
 
 ## Security Considerations
