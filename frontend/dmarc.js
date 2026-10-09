@@ -41,7 +41,7 @@ function dmarcRate(pct, count) {
 // Nothing while the server's domains are not known (on_mailcow null).
 function dmarcNotOnServer(d) {
     if (!d || d.on_mailcow !== false) return '';
-    return '<sup class="ui-dm-sup" title="This domain is not an active domain on this mailcow server. Its reports are kept for history.">Not on server</sup>';
+    return '<sup class="ui-dm-sup" title="This domain is not on this mailcow server.">Not on server</sup>';
 }
 
 function dmarcNum(value) {
