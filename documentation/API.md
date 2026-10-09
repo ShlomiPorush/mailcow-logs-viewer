@@ -3964,6 +3964,8 @@ Get list of all domains with DMARC statistics.
 - `dmarc_record`: `{checked, found, status, policy}`. The domain's DMARC record from the stored DNS check, or looked up live when the domain has none (a domain that is not in mailcow). `checked` is false when it could not be read; `policy` is `none`, `quarantine` or `reject` when a record was found
 - `tls_rpt_record`: `{checked, found, status}`, the same for the TLS-RPT record
 - `failing_sources`: How many source IPs failed DMARC for most of their mail in the last 30 days
+- `on_mailcow`: `true` when the domain is an active domain or alias domain on this mailcow server, `false` when it is not (for example a domain removed from mailcow, whose reports are kept for history), `null` while the server's domains are not known yet. Read on every request, not cached with the list
+- `stats_30d.dmarc_pass_pct` is `0` and `stats_30d.tls_success_pct` is `100` when there were no messages or TLS sessions in the last 30 days; check `stats_30d.total_messages` and `stats_30d.tls_sessions` before reading them as a rate
 
 **Top-level field:** `daily`, messages per day across every domain in the last 30 days: `[{date, total, dmarc_pass, dmarc_fail}]`. The list is cached for 5 minutes.
 
@@ -4024,6 +4026,7 @@ Get detailed overview for a specific domain with daily breakdown.
 - `daily_stats`: Array of daily statistics
 - `dmarc_record`: DNS check of the domain's DMARC record (`status`, `message`, `record`, `policy`, `settings`, `warnings`)
 - `tls_rpt_record`: DNS check of the domain's TLS-RPT record at `_smtp._tls` (`status`, `message`, `record`, `report_uris`, `warnings`). Both come from the cached DNS check, or a live lookup when none is cached
+- `on_mailcow`: whether the domain is on this mailcow server, as in the domains list
 
 **Policy Object:**
 - `p`: Domain policy (none, quarantine, reject)

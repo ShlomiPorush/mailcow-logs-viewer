@@ -31,6 +31,19 @@ function dmarcPct(value) {
     return `${Math.round((Number(value) || 0) * 100) / 100}%`;
 }
 
+// A rate in its tone, or a muted "-" when there was nothing to measure: no messages
+// or no TLS sessions in the period is no data, not a failure (issue #412)
+function dmarcRate(pct, count) {
+    return count ? `<span class="ui-text-${dmarcTone(pct)}">${dmarcPct(pct)}</span>` : '<span class="ui-muted">-</span>';
+}
+
+// A domain with reports that is not an active domain on this mailcow server (issue #412).
+// Nothing while the server's domains are not known (on_mailcow null).
+function dmarcNotOnServer(d, tag = 'small', cls = 'ui-dm-sub') {
+    if (!d || d.on_mailcow !== false) return '';
+    return `<${tag} class="${cls}" title="This domain is not an active domain on this mailcow server. Its reports are kept for history.">Not on this mailcow server</${tag}>`;
+}
+
 function dmarcNum(value) {
     return (Number(value) || 0).toLocaleString();
 }
@@ -247,7 +260,7 @@ function renderDmarcHome() {
         <div class="ui-dm-card"><header>Last 30 days</header><div class="ui-dm-strip">
             <div><small>Domains with reports</small><b class="is-big">${domains.length}</b></div>
             <div><small>Messages reported</small><b class="is-big">${dmarcNum(total)}</b></div>
-            <div><small>Passed DMARC</small><b class="is-big ui-text-${dmarcTone(pass)}">${total ? dmarcPct(pass.toFixed(1)) : '-'}</b></div>
+            <div><small>Passed DMARC</small><b class="is-big">${dmarcRate(pass.toFixed(1), total)}</b></div>
             <div><small>Enforced (quarantine or reject)</small><b class="is-big">${enforced} of ${domains.length}</b></div></div></div>
         <div class="ui-dm-lay"><div>
             <div class="ui-dm-card"><header>Messages per day<small>every domain</small></header><div class="ui-dm-body">${dmarcChart(dmarcState.daily, { h: 150, open: null })}</div></div>
@@ -255,11 +268,11 @@ function renderDmarcHome() {
             <table class="ui-dm-tbl"><thead><tr><th>Domain</th><th>DMARC policy</th><th class="r">Messages</th><th class="r">Passed DMARC</th><th class="ui-dm-hm">TLS-RPT</th><th class="r ui-dm-hm">Encrypted</th><th class="r ui-dm-hm">Failing senders</th></tr></thead><tbody>
             ${domains.map(d => {
                 const s = d.stats_30d || {}, tls = d.tls_rpt_record || {};
-                return `<tr class="is-go" onclick="loadDomainOverview('${escapeJsArg(d.domain)}')"><td><button type="button" class="ui-dm-link">${escapeHtml(d.domain)}</button></td>
+                return `<tr class="is-go" onclick="loadDomainOverview('${escapeJsArg(d.domain)}')"><td data-sort="${escapeHtml(d.domain)}"><button type="button" class="ui-dm-link">${escapeHtml(d.domain)}</button>${dmarcNotOnServer(d)}</td>
                     <td>${dmarcPolicyTag(d)}</td><td class="r ui-num">${d.has_dmarc ? dmarcNum(s.total_messages) : '<span class="ui-muted">-</span>'}</td>
-                    <td class="r">${d.has_dmarc ? `<span class="ui-text-${dmarcTone(s.dmarc_pass_pct)}">${dmarcPct(s.dmarc_pass_pct)}</span>` : '<span class="ui-muted">-</span>'}</td>
+                    <td class="r">${dmarcRate(s.dmarc_pass_pct, d.has_dmarc && s.total_messages)}</td>
                     <td class="ui-dm-hm">${!tls.checked ? dmarcTag('mut', 'Not checked') : tls.found ? dmarcTag('ok', 'Published') : dmarcTag('warn', 'Missing')}</td>
-                    <td class="r ui-dm-hm">${d.has_tls ? `<span class="ui-text-${dmarcTone(s.tls_success_pct)}">${dmarcPct(s.tls_success_pct)}</span>` : '<span class="ui-muted">-</span>'}</td>
+                    <td class="r ui-dm-hm">${dmarcRate(s.tls_success_pct, d.has_tls && s.tls_sessions)}</td>
                     <td class="r ui-dm-hm">${d.failing_sources ? `<span class="ui-text-fail">${escapeHtml(String(d.failing_sources))}</span>` : '<span class="ui-muted">0</span>'}</td></tr>`;
             }).join('')}</tbody></table></div>
         </div><aside>${dmarcTodoCard(dmarcHomeTasks(domains), true)}</aside></div>`;
@@ -461,10 +474,13 @@ function dmarcDomainTasks(x) {
 function dmarcRecordsCard(x) {
     const name = escapeJsArg(x.name);
     const policy = x.record.record ? String(x.record.policy || (x.record.settings || {}).policy || '').toLowerCase() : '';
+    // Without mail in the period the reports say nothing about SPF or DKIM
+    const sent = x.groups.reduce((s, g) => s + g.total, 0);
+    const noMail = ['No mail in the last 30 days', dmarcTag('mut', 'No data')];
     const rows = [
         ['DMARC', x.record.record ? `p=${policy || '?'}` : 'No record at _dmarc', policy === 'reject' ? dmarcTag('ok', 'Enforced') : policy === 'quarantine' ? dmarcTag('warn', 'Partial') : policy ? dmarcTag('warn', 'Monitoring') : dmarcTag('fail', 'Missing', true), 'dmarc'],
-        ['SPF', `${Math.round(x.spfPct)}% of mail aligned`, x.spfPct >= 95 ? dmarcTag('ok', 'OK') : dmarcTag('warn', 'Gaps'), 'dmarc'],
-        ['DKIM', x.dkimSeen ? 'Your mail is signed' : 'No signed mail in the reports', x.dkimSeen ? dmarcTag('ok', 'OK') : dmarcTag('fail', 'Missing', true), 'dmarc'],
+        sent ? ['SPF', `${Math.round(x.spfPct)}% of mail aligned`, x.spfPct >= 95 ? dmarcTag('ok', 'OK') : dmarcTag('warn', 'Gaps'), 'dmarc'] : ['SPF', ...noMail, 'dmarc'],
+        sent ? ['DKIM', x.dkimSeen ? 'Your mail is signed' : 'No signed mail in the reports', x.dkimSeen ? dmarcTag('ok', 'OK') : dmarcTag('fail', 'Missing', true), 'dmarc'] : ['DKIM', ...noMail, 'dmarc'],
         ['TLS-RPT', x.tlsRecord.record ? 'Receivers report encryption' : 'No record at _smtp._tls', x.tlsRecord.record ? dmarcTag('ok', 'OK') : dmarcTag('warn', 'Missing'), 'tls']];
     return `<div class="ui-dm-card"><header>Records<small>a record opens its details</small></header>${rows.map(([label, sub, tag, kind]) =>
         `<button type="button" class="ui-dm-rec" onclick="openDmarcRecord('${kind}', '${name}')"><span><b>${label}</b><small>${escapeHtml(sub)}</small></span>${tag}<span class="ui-muted" aria-hidden="true">›</span></button>`).join('')}</div>`;
@@ -476,8 +492,8 @@ function dmarcSendersCard(x) {
     return `<div class="ui-dm-card"><header>Senders <span class="ui-count">${x.groups.length}</span><small>who sent mail as ${escapeHtml(x.name)}, failing first</small></header>
         <table class="ui-dm-tbl"><thead><tr><th>Sender</th><th class="r">Messages</th><th class="r">Passed DMARC</th><th class="r ui-dm-hm">SPF aligned</th><th class="r ui-dm-hm">DKIM aligned</th><th class="r ui-dm-hm">Addresses</th></tr></thead><tbody>
         ${x.groups.map(g => `<tr class="is-go" onclick="loadSourceDetails('${name}', '${escapeJsArg(g.ips[0].source_ip)}')"><td><button type="button" class="ui-dm-link">${escapeHtml(g.name)}</button>${g.place ? `<small class="ui-dm-sub">${escapeHtml(g.place)}</small>` : ''}</td>
-            <td class="r ui-num">${dmarcNum(g.total)}</td><td class="r ui-text-${dmarcTone(g.passPct)}">${dmarcPct(g.passPct)}</td>
-            <td class="r ui-dm-hm ui-text-${dmarcTone(g.spfPct)}">${dmarcPct(g.spfPct)}</td><td class="r ui-dm-hm ui-text-${dmarcTone(g.dkimPct)}">${dmarcPct(g.dkimPct)}</td><td class="r ui-dm-hm">${g.ips.length}</td></tr>`).join('')}</tbody></table></div>`;
+            <td class="r ui-num">${dmarcNum(g.total)}</td><td class="r">${dmarcRate(g.passPct, g.total)}</td>
+            <td class="r ui-dm-hm">${dmarcRate(g.spfPct, g.total)}</td><td class="r ui-dm-hm">${dmarcRate(g.dkimPct, g.total)}</td><td class="r ui-dm-hm">${g.ips.length}</td></tr>`).join('')}</tbody></table></div>`;
 }
 
 // One row a day: how much mail, from how many senders, who reported it
@@ -488,7 +504,7 @@ function dmarcDaysCard(x) {
         <table class="ui-dm-tbl"><thead><tr><th>Day</th><th class="r">Messages</th><th class="r ui-dm-hm">Senders</th><th class="ui-dm-hm">Reported by</th><th class="r">Passed DMARC</th></tr></thead><tbody>
         ${x.days.map(r => `<tr class="is-go" onclick="loadReportDetails('${name}', '${escapeJsArg(r.date)}')"><td><button type="button" class="ui-dm-link">${dmarcDay(r.date)}</button></td>
             <td class="r ui-num">${dmarcNum(r.total_messages)}</td><td class="r ui-dm-hm">${dmarcNum(r.unique_ips)}</td><td class="ui-dm-hm ui-muted">${escapeHtml((r.reporters || []).join(', '))}</td>
-            <td class="r ui-text-${dmarcTone(r.dmarc_pass_pct)}">${dmarcPct(r.dmarc_pass_pct)}</td></tr>`).join('')}</tbody></table></div>`;
+            <td class="r">${dmarcRate(r.dmarc_pass_pct, r.total_messages)}</td></tr>`).join('')}</tbody></table></div>`;
 }
 
 // Whether mail to the domain arrived encrypted, from its TLS reports
@@ -505,13 +521,13 @@ function dmarcTlsCard(x) {
     }));
     return `<div class="ui-dm-card"><header>Encryption of mail to you (TLS)</header>
         <div class="ui-dm-strip ui-dm-strip-line"><div><small>Sessions</small><b>${dmarcNum((totals.total_successful_sessions || 0) + (totals.total_failed_sessions || 0))}</b></div>
-            <div><small>Encrypted</small><b class="ui-text-${dmarcTone(totals.overall_success_rate)}">${dmarcPct(totals.overall_success_rate)}</b></div>
+            <div><small>Encrypted</small><b>${dmarcRate(totals.overall_success_rate, (totals.total_successful_sessions || 0) + (totals.total_failed_sessions || 0))}</b></div>
             <div><small>Failed</small><b class="${totals.total_failed_sessions ? 'ui-text-fail' : ''}">${dmarcNum(totals.total_failed_sessions)}</b></div>
             <div><small>Reports</small><b>${dmarcNum(totals.total_reports)}</b></div></div>
         <div class="ui-dm-body">${dmarcChart(days, { tls: true, h: 120 })}</div>
         <table class="ui-dm-tbl"><thead><tr><th>Reported by</th><th class="r">Sessions</th><th class="r">Failed</th><th class="r">Encrypted</th></tr></thead><tbody>
         ${Object.values(reporters).sort((a, b) => (b.ok + b.fail) - (a.ok + a.fail)).map(r => `<tr><td>${escapeHtml(r.name)}</td><td class="r ui-num">${dmarcNum(r.ok + r.fail)}</td>
-            <td class="r ${r.fail ? 'ui-text-fail' : ''}">${dmarcNum(r.fail)}</td><td class="r ui-text-${dmarcTone(r.ok + r.fail ? r.ok / (r.ok + r.fail) * 100 : 100)}">${dmarcPct(r.ok + r.fail ? r.ok / (r.ok + r.fail) * 100 : 100)}</td></tr>`).join('')}</tbody></table></div>`;
+            <td class="r ${r.fail ? 'ui-text-fail' : ''}">${dmarcNum(r.fail)}</td><td class="r">${dmarcRate(r.ok + r.fail ? r.ok / (r.ok + r.fail) * 100 : 0, r.ok + r.fail)}</td></tr>`).join('')}</tbody></table></div>`;
 }
 
 async function loadDomainOverview(domain, updateUrl = true) {
@@ -525,7 +541,7 @@ async function loadDomainOverview(domain, updateUrl = true) {
         const x = await dmarcLoadDomain(domain);
         if (dmarcState.currentView !== 'domain' || dmarcState.currentDomain !== domain) return;
         dmarcView().innerHTML = `
-            <div class="ui-dm-ttl"><div><small>Last 30 days</small><h2>${escapeHtml(domain)}</h2></div></div>
+            <div class="ui-dm-ttl"><div><small>Last 30 days</small><h2>${escapeHtml(domain)}</h2>${dmarcNotOnServer(x.overview, 'p', 'ui-muted')}</div></div>
             <div class="ui-dm-lay"><div>
                 <div class="ui-dm-card"><header>Messages per day</header><div class="ui-dm-body">${dmarcChart(x.overview.daily_stats || [])}</div></div>
                 ${x.groups.length ? `<div class="ui-dm-card"><header>Mail flow<small>your domain, who sent it, who reported it</small></header><div class="ui-dm-body">${dmarcFlow(x)}</div></div>` : ''}
@@ -646,9 +662,9 @@ async function loadSourceDetails(domain, sourceIp, updateUrl = true) {
                 If you know this sender (a CRM, a newsletter tool, a scanner), set up SPF or DKIM for it. If you do not, someone is sending as you: ${policy === 'reject' ? 'your policy already stops it.' : x.record.record ? 'a stricter policy stops it.' : 'a DMARC record lets receivers refuse it.'}</p></div></div>` : ''}
             <div class="ui-dm-card"><header>Last 30 days</header><div class="ui-dm-strip">
                 <div><small>Messages</small><b class="is-big">${dmarcNum(sum.total)}</b></div>
-                <div><small>Passed DMARC</small><b class="is-big ui-text-${dmarcTone(sum.passPct)}">${dmarcPct(sum.passPct)}</b></div>
-                <div><small>SPF aligned</small><b class="is-big ui-text-${dmarcTone(sum.spfPct)}">${dmarcPct(sum.spfPct)}</b></div>
-                <div><small>DKIM aligned</small><b class="is-big ui-text-${dmarcTone(sum.dkimPct)}">${dmarcPct(sum.dkimPct)}</b></div>
+                <div><small>Passed DMARC</small><b class="is-big">${dmarcRate(sum.passPct, sum.total)}</b></div>
+                <div><small>SPF aligned</small><b class="is-big">${dmarcRate(sum.spfPct, sum.total)}</b></div>
+                <div><small>DKIM aligned</small><b class="is-big">${dmarcRate(sum.dkimPct, sum.total)}</b></div>
                 <div><small>Addresses</small><b class="is-big">${ips.length}</b></div></div></div>
             <div class="ui-dm-card"><header>What receivers saw <span class="ui-count">${rows.length}</span></header>
             ${rows.length ? `<table class="ui-dm-tbl"><thead><tr><th>Address</th><th>From</th><th class="ui-dm-hm">Envelope from</th><th class="r">Messages</th><th>SPF</th><th>DKIM</th><th class="ui-dm-hm">Reported by</th></tr></thead><tbody>
@@ -678,16 +694,16 @@ async function loadReportDetails(domain, reportDate, updateUrl = true) {
             <div class="ui-dm-ttl"><div><small>DMARC reports</small><h2>${dmarcDay(reportDate, true)}</h2><p class="ui-muted">${escapeHtml(domain)}</p></div></div>
             <div class="ui-dm-card"><header>That day</header><div class="ui-dm-strip">
                 <div><small>Messages</small><b class="is-big">${dmarcNum(t.total_messages)}</b></div>
-                <div><small>Passed DMARC</small><b class="is-big ui-text-${dmarcTone(t.dmarc_pass_pct)}">${dmarcPct(t.dmarc_pass_pct)}</b></div>
-                <div><small>SPF aligned</small><b class="is-big ui-text-${dmarcTone(t.spf_pass_pct)}">${dmarcPct(t.spf_pass_pct)}</b></div>
-                <div><small>DKIM aligned</small><b class="is-big ui-text-${dmarcTone(t.dkim_pass_pct)}">${dmarcPct(t.dkim_pass_pct)}</b></div>
+                <div><small>Passed DMARC</small><b class="is-big">${dmarcRate(t.dmarc_pass_pct, t.total_messages)}</b></div>
+                <div><small>SPF aligned</small><b class="is-big">${dmarcRate(t.spf_pass_pct, t.total_messages)}</b></div>
+                <div><small>DKIM aligned</small><b class="is-big">${dmarcRate(t.dkim_pass_pct, t.total_messages)}</b></div>
                 <div><small>Reported by</small><b>${escapeHtml((t.reporters || []).join(', ') || '-')}</b></div></div></div>
             <div class="ui-dm-card"><header>Who sent that day <span class="ui-count">${(r.sources || []).length}</span></header>
             <table class="ui-dm-tbl"><thead><tr><th>Sender</th><th class="ui-dm-hm">Address</th><th class="ui-dm-hm">Envelope from</th><th class="r">Messages</th><th class="r">Passed DMARC</th><th class="r ui-dm-hm">SPF</th><th class="r ui-dm-hm">DKIM</th><th class="ui-dm-hm">Reported by</th></tr></thead><tbody>
             ${(r.sources || []).map(s => `<tr class="is-go" onclick="loadSourceDetails('${name}', '${escapeJsArg(s.source_ip)}')"><td><button type="button" class="ui-dm-link">${escapeHtml(sender(s))}</button></td>
                 <td class="ui-dm-hm ui-mono">${escapeHtml(s.source_ip)}</td><td class="ui-dm-hm">${escapeHtml(s.envelope_from || '-')}</td><td class="r ui-num">${dmarcNum(s.volume)}</td>
-                <td class="r ui-text-${dmarcTone(s.dmarc_pass_pct)}">${dmarcPct(s.dmarc_pass_pct)}</td><td class="r ui-dm-hm ui-text-${dmarcTone(s.spf_pass_pct)}">${dmarcPct(s.spf_pass_pct)}</td>
-                <td class="r ui-dm-hm ui-text-${dmarcTone(s.dkim_pass_pct)}">${dmarcPct(s.dkim_pass_pct)}</td><td class="ui-dm-hm ui-muted">${escapeHtml(s.reporter || '-')}</td></tr>`).join('')}</tbody></table></div>
+                <td class="r">${dmarcRate(s.dmarc_pass_pct, s.volume)}</td><td class="r ui-dm-hm">${dmarcRate(s.spf_pass_pct, s.volume)}</td>
+                <td class="r ui-dm-hm">${dmarcRate(s.dkim_pass_pct, s.volume)}</td><td class="ui-dm-hm ui-muted">${escapeHtml(s.reporter || '-')}</td></tr>`).join('')}</tbody></table></div>
             <div class="ui-dm-card"><header>Other days</header><div class="ui-dm-body">${dmarcChart(x.overview.daily_stats || [], { h: 90 })}</div></div>`;
     } catch (error) {
         console.error('Error loading the DMARC day:', error);
@@ -710,7 +726,7 @@ async function loadTLSReportDetails(domain, reportDate, updateUrl = true) {
             <div class="ui-dm-ttl"><div><small>TLS reports</small><h2>${dmarcDay(reportDate, true)}</h2><p class="ui-muted">${escapeHtml(domain)}</p></div></div>
             <div class="ui-dm-card"><header>That day</header><div class="ui-dm-strip">
                 <div><small>Sessions</small><b class="is-big">${dmarcNum(s.total_sessions)}</b></div>
-                <div><small>Encrypted</small><b class="is-big ui-text-${dmarcTone(s.success_rate)}">${dmarcPct(s.success_rate)}</b></div>
+                <div><small>Encrypted</small><b class="is-big">${dmarcRate(s.success_rate, s.total_sessions)}</b></div>
                 <div><small>Failed</small><b class="is-big ${s.total_fail ? 'ui-text-fail' : ''}">${dmarcNum(s.total_fail)}</b></div>
                 <div><small>Receivers reporting</small><b class="is-big">${dmarcNum(s.total_providers)}</b></div></div></div>
             <div class="ui-dm-card"><header>Who reported <span class="ui-count">${(r.providers || []).length}</span></header>
@@ -718,7 +734,7 @@ async function loadTLSReportDetails(domain, reportDate, updateUrl = true) {
             ${(r.providers || []).map(p => `<tr><td><b>${escapeHtml(p.organization_name)}</b>${p.contact_info ? `<small class="ui-dm-sub">${escapeHtml(p.contact_info)}</small>` : ''}</td>
                 <td class="ui-dm-hm">${(p.policies || []).map(q => dmarcTag('mut', String(q.policy_type || '').toUpperCase())).join(' ')}</td>
                 <td class="ui-dm-hm ui-mono">${escapeHtml((p.policies || []).flatMap(q => q.mx_host || []).join(', '))}</td><td class="r ui-num">${dmarcNum(p.total_sessions)}</td>
-                <td class="r ${p.failed_sessions ? 'ui-text-fail' : ''}">${dmarcNum(p.failed_sessions)}</td><td class="r ui-text-${dmarcTone(p.success_rate)}">${dmarcPct(p.success_rate)}</td></tr>
+                <td class="r ${p.failed_sessions ? 'ui-text-fail' : ''}">${dmarcNum(p.failed_sessions)}</td><td class="r">${dmarcRate(p.success_rate, p.total_sessions)}</td></tr>
                 ${(p.policies || []).flatMap(q => q.failure_details || []).map(f => `<tr><td colspan="6" class="ui-text-fail ui-dm-note">${escapeHtml(f.result_type || 'Failure')}: ${dmarcNum(f.failed_session_count)} sessions${f.receiving_mx_hostname ? ` to ${escapeHtml(f.receiving_mx_hostname)}` : ''}</td></tr>`).join('')}`).join('')}</tbody></table></div>`;
     } catch (error) {
         console.error('Error loading the TLS day:', error);
