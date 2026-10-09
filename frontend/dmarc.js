@@ -951,10 +951,11 @@ function closeDmarcSyncHistoryModal() {
 // REPORTS MANAGEMENT
 // =============================================================================
 // This part runs in the pagination test with only document, authenticatedFetch,
-// escapeHtml, escapeJsArg, console, showToast, showConfirmModal, uiLocked,
-// dmarcState, dmarcGet, dmarcUpdateManageButton and loadDmarcDomains.
+// escapeHtml, escapeJsArg, encodeURIComponent, setTimeout, clearTimeout, console,
+// showToast, showConfirmModal, uiLocked, dmarcState, dmarcGet,
+// dmarcUpdateManageButton and loadDmarcDomains.
 
-const reportsManagementState = { page: 1, limit: 50, request: 0, domains: [], allowDelete: false, domainsRequest: 0 };
+const reportsManagementState = { page: 1, limit: 50, request: 0, search: '', searchTimer: null, domains: [], allowDelete: false, domainsRequest: 0 };
 
 async function showReportsManagementModal() {
     const modal = document.getElementById('dmarc-reports-management-modal');
@@ -962,8 +963,22 @@ async function showReportsManagementModal() {
     modal.onclick = (event) => {
         if (event.target === modal) closeReportsManagementModal();
     };
+    clearTimeout(reportsManagementState.searchTimer);
+    reportsManagementState.search = '';
+    document.getElementById('dmarc-reports-search').value = '';
     loadReportsDomains();
     await loadReportsManagementPage(1);
+}
+
+// The search filters All reports on the server by domain or reporter, from page 1
+function searchReportsManagement() {
+    clearTimeout(reportsManagementState.searchTimer);
+    reportsManagementState.searchTimer = setTimeout(() => {
+        const search = document.getElementById('dmarc-reports-search').value.trim();
+        if (search === reportsManagementState.search) return;
+        reportsManagementState.search = search;
+        loadReportsManagementPage(1);
+    }, 300);
 }
 
 // Reports by domain: how many of each type a domain has, with Delete all
@@ -996,53 +1011,22 @@ function renderReportsDomains() {
         content.innerHTML = '';
         return;
     }
-    const previous = document.getElementById('dmarc-reports-domains-search');
-    const term = previous ? previous.value : '';
+    const day = ts => ts ? new Date(ts * 1000).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '-';
     content.innerHTML = `
         <h4 class="ui-md-h">Reports by domain</h4>
         ${allowDelete ? '' : `<div class="ui-list-note ui-flush">${uiLocked('Deleting reports is off', 'Turn on report deletion in Settings, DMARC.',
             `<button type="button" class="ui-btn ui-btn-sm" onclick="closeReportsManagementModal(); navigateTo('settings', { sub: 'dmarc' })">Open Settings</button>`)}</div>`}
-        <div class="ui-panel ui-table-card">
-        <section class="ui-panel ui-filters ui-domain-tools">
-            <div class="ui-filters-row">
-            <label class="ui-search ui-ms-search">
-                <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
-                <input type="text" id="dmarc-reports-domains-search" placeholder="Search domains..." aria-label="Search domains" value="${escapeHtml(term)}" oninput="filterReportsDomains()">
-            </label>
-            <span id="dmarc-reports-domains-count" class="ui-count"></span>
-            </div>
-        </section>
-        <div id="dmarc-reports-domains-table" class="ui-table ui-stack" style="--ui-cols: minmax(180px, 2fr) 110px 110px minmax(110px, 1fr)${allowDelete ? ' 100px' : ''}; --ui-table-min: ${allowDelete ? 640 : 540}px"></div>
+        <div id="dmarc-reports-domains-table" class="ui-table ui-stack" style="--ui-cols: minmax(180px, 2fr) 110px 110px minmax(110px, 1fr)${allowDelete ? ' 100px' : ''}; --ui-table-min: ${allowDelete ? 640 : 540}px">
+            <div class="ui-tr ui-tr-head"><span>Domain</span><span class="ui-td-end">DMARC reports</span><span class="ui-td-end">TLS reports</span><span>Last report</span>${allowDelete ? '<span class="ui-td-end">Actions</span>' : ''}</div>
+            ${domains.map(d => `
+            <div class="ui-tr">
+                <b class="ui-td">${escapeHtml(d.domain)}</b>
+                <span class="ui-td ui-td-end" data-sort="${Number(d.dmarc_reports)}"><small class="ui-sec-unit">DMARC </small>${escapeHtml(String(d.dmarc_reports))}</span>
+                <span class="ui-td ui-td-end" data-sort="${Number(d.tls_reports)}"><small class="ui-sec-unit">TLS </small>${escapeHtml(String(d.tls_reports))}</span>
+                <span class="ui-td" data-sort="${Number(d.last_report) || ''}"><small class="ui-sec-unit">Last report </small>${day(d.last_report)}</span>
+                ${allowDelete ? `<span class="ui-td ui-td-end ui-row-actions"><button onclick="deleteDomainReports('${escapeJsArg(d.domain)}')" class="ui-btn ui-btn-sm ui-btn-danger" title="Delete all reports of this domain">Delete all</button></span>` : ''}
+            </div>`).join('')}
         </div>
-    `;
-    filterReportsDomains();
-}
-
-// Filter the domains by the search, as the Domains page does (filterDomains)
-function filterReportsDomains() {
-    const input = document.getElementById('dmarc-reports-domains-search');
-    const table = document.getElementById('dmarc-reports-domains-table');
-    const count = document.getElementById('dmarc-reports-domains-count');
-    if (!input || !table) return;
-    const term = input.value.toLowerCase().trim();
-    const { allowDelete } = reportsManagementState;
-    const rows = reportsManagementState.domains.filter(d => d.domain.toLowerCase().includes(term));
-    if (count) count.textContent = `${rows.length} domain${rows.length !== 1 ? 's' : ''}`;
-    if (!rows.length) {
-        table.innerHTML = `<p class="ui-empty">No domains found matching "${escapeHtml(term)}"</p>`;
-        return;
-    }
-    const day = ts => ts ? new Date(ts * 1000).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '-';
-    table.innerHTML = `
-        <div class="ui-tr ui-tr-head"><span>Domain</span><span class="ui-td-end">DMARC reports</span><span class="ui-td-end">TLS reports</span><span>Last report</span>${allowDelete ? '<span class="ui-td-end">Actions</span>' : ''}</div>
-        ${rows.map(d => `
-        <div class="ui-tr">
-            <b class="ui-td">${escapeHtml(d.domain)}</b>
-            <span class="ui-td ui-td-end" data-sort="${Number(d.dmarc_reports)}"><small class="ui-sec-unit">DMARC </small>${escapeHtml(String(d.dmarc_reports))}</span>
-            <span class="ui-td ui-td-end" data-sort="${Number(d.tls_reports)}"><small class="ui-sec-unit">TLS </small>${escapeHtml(String(d.tls_reports))}</span>
-            <span class="ui-td" data-sort="${Number(d.last_report) || ''}"><small class="ui-sec-unit">Last report </small>${day(d.last_report)}</span>
-            ${allowDelete ? `<span class="ui-td ui-td-end ui-row-actions"><button onclick="deleteDomainReports('${escapeJsArg(d.domain)}')" class="ui-btn ui-btn-sm ui-btn-danger" title="Delete all reports of this domain">Delete all</button></span>` : ''}
-        </div>`).join('')}
     `;
 }
 
@@ -1099,7 +1083,8 @@ async function loadReportsManagementPage(page) {
     content.innerHTML = '<div class="ui-loading"><div class="loading"></div><p>Loading reports...</p></div>';
 
     try {
-        const response = await authenticatedFetch(`/api/dmarc/reports/all?page=${page}&limit=${reportsManagementState.limit}`);
+        const { limit, search } = reportsManagementState;
+        const response = await authenticatedFetch(`/api/dmarc/reports/all?page=${page}&limit=${limit}${search ? `&search=${encodeURIComponent(search)}` : ''}`);
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const data = await response.json();
         if (request !== reportsManagementState.request) return;
@@ -1115,6 +1100,7 @@ async function loadReportsManagementPage(page) {
 }
 
 function closeReportsManagementModal() {
+    clearTimeout(reportsManagementState.searchTimer);
     reportsManagementState.request++;
     reportsManagementState.domainsRequest++;
     document.getElementById('dmarc-reports-management-modal').classList.add('hidden');
@@ -1122,9 +1108,15 @@ function closeReportsManagementModal() {
 
 function renderReportsManagementTable(reports, allowDelete, { total, page, total_pages: totalPages }) {
     const content = document.getElementById('dmarc-reports-management-content');
+    const { search } = reportsManagementState;
+    document.getElementById('dmarc-reports-total').innerHTML = search
+        ? `<span class="ui-strong">${escapeHtml(String(total))}</span> matching report${Number(total) === 1 ? '' : 's'}`
+        : `Total: <span class="ui-strong">${escapeHtml(String(total))}</span> reports`;
 
     if (reports.length === 0) {
-        content.innerHTML = '<p class="ui-empty">No reports found</p>';
+        content.innerHTML = search
+            ? `<p class="ui-empty">No reports match "${escapeHtml(search)}"</p>`
+            : '<p class="ui-empty">No reports found</p>';
         return;
     }
 
@@ -1143,9 +1135,6 @@ function renderReportsManagementTable(reports, allowDelete, { total, page, total
         : '--ui-cols: minmax(150px, 1.2fr) 70px minmax(140px, 1.2fr) minmax(120px, 1fr) 70px minmax(110px, .9fr)';
 
     content.innerHTML = `
-        <p class="ui-muted ui-mgmt-total">
-            Total: <span class="ui-strong">${escapeHtml(String(total))}</span> reports
-        </p>
         <div data-nosort class="ui-table ui-stack" style="${cols}; --ui-table-min: 780px">
             <div class="ui-tr ui-tr-head"><span>Import Date</span><span>Type</span><span>Domain</span><span>Reporter</span><span class="ui-td-end">Records</span><span>Period</span>${allowDelete ? '<span class="ui-td-end">Actions</span>' : ''}</div>
             ${reports.map(report => `

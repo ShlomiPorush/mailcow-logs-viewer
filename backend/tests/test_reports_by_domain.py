@@ -190,3 +190,81 @@ def test_cross_site_delete_is_rejected(deletion, no_auth):
         "/api/dmarc/reports/domains/example.com", headers={"Origin": "https://evil.invalid"})
     assert response.status_code == 403
     assert "another site" in response.json()["detail"]
+
+
+# Search on the All reports list: the domain or the reporter, literally and in any case
+
+def seed_search(isolated):
+    with Session(isolated) as db:
+        stamp = datetime(2026, 1, 1)
+        rows = [
+            DMARCReport(report_id="s-1", domain="example.com", org_name="Google", begin_date=1, end_date=2,
+                        created_at=stamp.replace(hour=1)),
+            DMARCReport(report_id="s-2", domain="example.net", org_name="Odd 50%_Off\Mail", begin_date=1,
+                        end_date=2, created_at=stamp.replace(hour=2)),
+            TLSReport(report_id="s-3", policy_domain="example.com", organization_name="Microsoft",
+                      start_datetime=stamp, end_datetime=stamp, created_at=stamp.replace(hour=3)),
+            TLSReport(report_id="s-4", policy_domain="example.org", organization_name="Google",
+                      start_datetime=stamp, end_datetime=stamp, created_at=stamp.replace(hour=4)),
+        ]
+        db.add_all(rows)
+        db.commit()
+
+
+def found(client, search, **params):
+    response = client.get("/dmarc/reports/all", params={"page": 1, "search": search, **params})
+    assert response.status_code == 200
+    payload = response.json()
+    return payload, sorted((row["type"], row["domain"], row["org_name"]) for row in payload["reports"])
+
+
+def test_search_matches_the_domain_in_any_case_across_both_types(db_client):
+    client, isolated = db_client
+    seed_search(isolated)
+    payload, rows = found(client, "  EXAMPLE.com ")
+    assert rows == [("dmarc", "example.com", "Google"), ("tls", "example.com", "Microsoft")]
+    assert payload["total"] == 2
+
+
+def test_search_matches_the_reporter(db_client):
+    client, isolated = db_client
+    seed_search(isolated)
+    _, rows = found(client, "google")
+    assert rows == [("dmarc", "example.com", "Google"), ("tls", "example.org", "Google")]
+
+
+@pytest.mark.parametrize("term", ["%", "_", "\\", "50%_off"])
+def test_like_wildcards_are_literal(db_client, term):
+    client, isolated = db_client
+    seed_search(isolated)
+    payload, rows = found(client, term)
+    assert rows == [("dmarc", "example.net", "Odd 50%_Off\Mail")]
+    assert payload["total"] == 1
+
+
+def test_total_and_pages_follow_the_search(db_client):
+    client, isolated = db_client
+    seed_search(isolated)
+    payload, _ = found(client, "google", limit=1)
+    assert (payload["total"], payload["total_pages"]) == (2, 2)
+    last = client.get("/dmarc/reports/all", params={"page": 99, "limit": 1, "search": "google"}).json()
+    assert (last["page"], len(last["reports"])) == (2, 1)
+    payload, rows = found(client, "nothing-matches.invalid")
+    assert (payload["total"], payload["total_pages"], rows) == (0, 1, [])
+
+
+def test_an_empty_or_absent_search_lists_everything(db_client):
+    client, isolated = db_client
+    seed_search(isolated)
+    assert found(client, "   ")[0]["total"] == 4
+    assert client.get("/dmarc/reports/all?page=1").json()["total"] == 4
+    # The legacy unpaginated response is unchanged without a search and filtered with one
+    assert client.get("/dmarc/reports/all").json()["total"] == 4
+    assert client.get("/dmarc/reports/all", params={"search": "microsoft"}).json()["total"] == 1
+
+
+def test_a_very_long_search_is_capped_not_refused(db_client):
+    client, isolated = db_client
+    seed_search(isolated)
+    payload, rows = found(client, "x" * 5000)
+    assert (payload["total"], rows) == (0, [])

@@ -83,25 +83,43 @@ def get_reports_management_config():
     }
 
 
+REPORT_SEARCH_MAX_LENGTH = 255
+
+
+def _report_search_filters(search: Optional[str]):
+    """Filters for the DMARC and the TLS reports whose domain or reporter contains the search, literally and in any case."""
+    term = (search or "").strip()[:REPORT_SEARCH_MAX_LENGTH]
+    if not term:
+        return (), ()
+    pattern = "%" + term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+    def match(*columns):
+        return (or_(*(column.ilike(pattern, escape="\\") for column in columns)),)
+    return (match(DMARCReport.domain, DMARCReport.org_name),
+            match(TLSReport.policy_domain, TLSReport.organization_name))
+
+
 @router.get("/dmarc/reports/all")
 def get_all_reports(
     db: Session = Depends(get_db),
     page: Annotated[Optional[int], Query(ge=1)] = None,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    search: Optional[str] = None,
 ):
     """
     Get report summaries. Omit page to preserve the legacy unpaginated response.
+    search keeps the reports whose domain or reporter contains it (any case).
     """
     try:
         reports = []
         selected = None
+        dmarc_match, tls_match = _report_search_filters(search)
         if page is not None:
             combined = db.query(
                 DMARCReport.id.label("id"), literal("dmarc").label("type"),
                 DMARCReport.created_at.label("created_at"),
-            ).union_all(db.query(
+            ).filter(*dmarc_match).union_all(db.query(
                 TLSReport.id, literal("tls"), TLSReport.created_at,
-            )).subquery()
+            ).filter(*tls_match)).subquery()
             total = db.query(func.count()).select_from(combined).scalar()
             total_pages = max(1, (total + limit - 1) // limit)
             page = min(page, total_pages)
@@ -130,6 +148,8 @@ def get_all_reports(
         )
         if selected is not None:
             dmarc_reports = dmarc_reports.filter(DMARCReport.id.in_(dmarc_ids))
+        else:
+            dmarc_reports = dmarc_reports.filter(*dmarc_match)
         dmarc_reports = dmarc_reports.order_by(DMARCReport.created_at.desc()).all() if selected is None or dmarc_ids else []
 
         for report, record_count in dmarc_reports:
@@ -164,6 +184,8 @@ def get_all_reports(
         )
         if selected is not None:
             tls_reports = tls_reports.filter(TLSReport.id.in_(tls_ids))
+        else:
+            tls_reports = tls_reports.filter(*tls_match)
         tls_reports = tls_reports.order_by(TLSReport.created_at.desc()).all() if selected is None or tls_ids else []
 
         for report, policy_count in tls_reports:

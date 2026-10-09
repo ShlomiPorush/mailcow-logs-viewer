@@ -3890,6 +3890,7 @@ Export Messages (correlations) to CSV file.
 |-----------|---------|-------------|
 | `page` | omitted | Positive page number. Omit it to retain the legacy unpaginated response. |
 | `limit` | 50 | Reports per page, from 1 to 200. Used when `page` is supplied. |
+| `search` | omitted | Keeps the reports whose domain or reporter (`org_name`) contains this text, in any case. `%`, `_` and `` match literally. Leading and trailing spaces are ignored, only the first 255 characters are used, and an empty value lists every report. With `page`, `total` and `total_pages` count the matching reports. |
 
 Paged responses contain `reports`, `total`, `allow_delete`, `page`, `limit`, and `total_pages`. `total` counts all reports of both types. Empty results return page 1 of 1. A page beyond the end is clamped to the last available page, including after deletions. Concurrent imports or deletions may shift reports between requests; reload from page 1 to refresh the history.
 
