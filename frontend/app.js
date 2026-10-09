@@ -2949,7 +2949,10 @@ function renderQuarantineDetailContent(data, itemId) {
         <th>Symbol</th><th>Group</th><th class="ui-td-end">Score</th><th>Details</th>
     </tr></thead><tbody>${rows}</tbody></table></div>`;
 
-    const textContent = data.text_plain || data.text_html || '';
+    // mailcow sends a literal '-' as text_plain when the message has no plain-text part;
+    // text_html is already converted to plain text by mailcow, so fall back to it.
+    const plainText = (data.text_plain || '').trim();
+    const textContent = (plainText && plainText !== '-') ? data.text_plain : (data.text_html || '');
     const canAct = mailcowRwConfigured;
 
     content.innerHTML = `
