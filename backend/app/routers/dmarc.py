@@ -22,7 +22,7 @@ from ..services.dmarc_cache import (
     set_dmarc_cache, 
     clear_dmarc_cache
 )
-from ..config import settings
+from ..config import settings, get_cached_active_domains
 from ..scheduler import update_job_status
 from .domains import get_cached_dns_check, check_dmarc_record, check_tls_rpt_record, parse_dmarc_record_tags, _public_cached_dns_result
 from ..utils import internal_error
@@ -268,11 +268,13 @@ async def get_domains_list():
     each with the state of its DMARC and TLS-RPT records and how many senders fail
     DMARC. The records come from the stored DNS checks; a domain that has none (one
     that is not a mailcow domain) is looked up live, once per cache period.
+    Each domain says whether it is a domain on this mailcow server (on_mailcow).
     """
     try:
         cache_key = get_dmarc_cache_key("domains_list")
         cached_result = await asyncio.to_thread(_cached_domains_list, cache_key)
         if cached_result is not None:
+            _mark_on_mailcow(cached_result['domains'])
             return cached_result
 
         response, stored = await asyncio.to_thread(_build_domains_list)
@@ -285,10 +287,30 @@ async def get_domains_list():
             entry['tls_rpt_record'] = _record_state(tls_check)
 
         set_dmarc_cache(cache_key, response)
+        _mark_on_mailcow(response['domains'])
         return response
     except Exception as e:
         logger.error(f"Error fetching domains list: {e}")
         raise internal_error(e)
+
+
+def _on_mailcow_check():
+    """A check of whether a domain is an active domain or alias domain on this mailcow
+    server: True or False, or None for every domain while the server's domains are not
+    known (before the first domain sync, or when mailcow could not be read), so that no
+    domain is marked as missing by mistake (issue #412)."""
+    def norm(name):
+        return (name or '').strip().rstrip('.').lower()
+    active = {norm(name) for name in (get_cached_active_domains() or [])} - {''}
+    return lambda domain: (norm(domain) in active) if active else None
+
+
+def _mark_on_mailcow(entries):
+    """Set on_mailcow on each domain of the list. Read on every request rather than
+    cached with the list, so a domain sync shows at once."""
+    on_mailcow = _on_mailcow_check()
+    for entry in entries:
+        entry['on_mailcow'] = on_mailcow(entry['domain'])
 
 
 def _cached_domains_list(cache_key: str):
@@ -532,7 +554,9 @@ async def get_domain_overview(domain: str, days: int = 30):
             dmarc_record = await check_dmarc_record(domain)
         if tls_rpt_record is None:
             tls_rpt_record = await check_tls_rpt_record(domain)
-        return await asyncio.to_thread(_load_domain_overview, domain, days, dmarc_record, tls_rpt_record)
+        overview = await asyncio.to_thread(_load_domain_overview, domain, days, dmarc_record, tls_rpt_record)
+        overview['on_mailcow'] = _on_mailcow_check()(domain)
+        return overview
     except Exception as e:
         logger.error(f"Error fetching domain overview: {e}")
         raise internal_error(e)
