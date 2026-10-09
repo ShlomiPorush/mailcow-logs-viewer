@@ -58,6 +58,8 @@ def test_raw_database_lifetime_is_owned_by_worker(monkeypatch, job, stage):
     monkeypatch.setattr(type(settings._inner), "is_feature_enabled", lambda self, name: True)
     monkeypatch.setattr(settings._inner, "raw_logs_enabled", True)
     monkeypatch.setattr(settings._inner, "raw_logs_services", "dovecot")
+    # Only the selected service; what other pages need is tested in test_raw_log_collection
+    monkeypatch.setattr(type(settings._inner), "raw_logs_required", property(lambda self: {}))
     monkeypatch.setattr(raw, "_catchup_state", {})
     monkeypatch.setattr(raw, "_unavailable_services", set())
     api = SimpleNamespace(get_raw_logs=AsyncMock(return_value=[{

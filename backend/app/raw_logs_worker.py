@@ -10,6 +10,11 @@ Architecture:
 - SHA-256 dedup: prevents duplicate entries via unique constraint
 - Daily cleanup: removes entries older than RAW_LOGS_RETENTION_DAYS
 - WebSocket broadcast: pushes new entries to connected clients
+
+What is collected is settings.raw_logs_collected_list: the Logs page's
+services while that page is on, plus the services other pages read from this
+table (Dovecot for message details and the breach alert, Ratelimited for Rate
+Limits, SOGo for Devices). Those keep coming in with the Logs page off.
 """
 import logging
 import hashlib
@@ -401,13 +406,10 @@ async def fetch_raw_service_logs():
     raw_logs_job_status['fetch_raw_logs']['status'] = 'running'
     raw_logs_job_status['fetch_raw_logs']['last_run'] = datetime.now(timezone.utc)
 
-    # Runtime feature check - skip if logs feature was disabled after startup
-    if not settings.is_feature_enabled('logs') or not settings.raw_logs_enabled:
-        raw_logs_job_status['fetch_raw_logs']['status'] = 'success'
-        return
-
     try:
-        enabled_services = settings.raw_logs_services_list
+        enabled_services = settings.raw_logs_collected_list
+        # Only the Logs page streams; the other readers poll the table
+        page_services = set(settings.raw_logs_services_list) if settings.raw_logs_page_on else set()
         if not enabled_services:
             logger.debug("[RAW LOGS] No services enabled, skipping fetch")
             raw_logs_job_status['fetch_raw_logs']['status'] = 'success'
@@ -445,7 +447,7 @@ async def fetch_raw_service_logs():
                 # Broadcast only what is genuinely new at the head. Caught-up
                 # history is older than what the page already shows and would
                 # appear at the newest end if streamed.
-                if head_entries and _ws_broadcast_fn:
+                if head_entries and _ws_broadcast_fn and service in page_services:
                     try:
                         await _ws_broadcast_fn(service, head_entries)
                     except Exception as e:
@@ -512,11 +514,6 @@ def _cleanup_raw_service_logs_worker():
     raw_logs_job_status['cleanup_raw_logs']['status'] = 'running'
     raw_logs_job_status['cleanup_raw_logs']['last_run'] = datetime.now(timezone.utc)
     
-    # Runtime feature check
-    if not settings.is_feature_enabled('logs') or not settings.raw_logs_enabled:
-        raw_logs_job_status['cleanup_raw_logs']['status'] = 'success'
-        return
-    
     try:
         retention_days = settings.raw_logs_retention_days
         cutoff_date = datetime.now(timezone.utc) - timedelta(days=retention_days)
@@ -525,11 +522,14 @@ def _cleanup_raw_service_logs_worker():
             deleted = db.query(RawServiceLog).filter(
                 RawServiceLog.time < cutoff_date
             ).delete()
+            uncollected = delete_uncollected_raw_logs(db)
             
             db.commit()
             
             if deleted > 0:
                 logger.info(f"[RAW LOGS CLEANUP] Deleted {deleted} entries older than {retention_days} days")
+            if uncollected > 0:
+                logger.info(f"[RAW LOGS CLEANUP] Deleted {uncollected} entries of services no longer collected")
         
         raw_logs_job_status['cleanup_raw_logs']['status'] = 'success'
         raw_logs_job_status['cleanup_raw_logs']['error'] = None
@@ -540,12 +540,23 @@ def _cleanup_raw_service_logs_worker():
         raw_logs_job_status['cleanup_raw_logs']['error'] = str(e)
 
 
+def delete_uncollected_raw_logs(db) -> int:
+    """Drop the rows of services nothing collects any more (the Logs page was
+    turned off, or a service unticked). Rows another page reads stay. The
+    caller commits."""
+    collected = settings.raw_logs_collected_list
+    return db.query(RawServiceLog).filter(
+        ~RawServiceLog.service.in_(collected)
+    ).delete(synchronize_session=False)
+
+
 def start_raw_logs_scheduler():
     """Start the raw logs background scheduler (called from main.py startup)"""
-    if not settings.raw_logs_enabled or not settings.is_feature_enabled('logs'):
-        reason = "RAW_LOGS_ENABLED=false" if not settings.raw_logs_enabled else "Logs feature disabled"
-        logger.info(f"[RAW LOGS] Raw logs collection is disabled ({reason})")
+    if not settings.raw_logs_collected_list:
+        logger.info("[RAW LOGS] No service to collect")
         return
+    if not settings.raw_logs_page_on:
+        logger.info("[RAW LOGS] Logs page is off; collecting only what other pages read")
     
     load_catchup_state()
 
@@ -571,7 +582,7 @@ def start_raw_logs_scheduler():
         
         raw_logs_scheduler.start()
         
-        services = settings.raw_logs_services_list
+        services = settings.raw_logs_collected_list
         logger.info(f"[RAW LOGS] Scheduler started")
         logger.info(f"   [FETCH] Every {settings.raw_logs_fetch_interval}s, {settings.raw_logs_fetch_count} logs/service")
         logger.info(f"   [SERVICES] {', '.join(services)} ({len(services)} enabled)")
@@ -599,13 +610,13 @@ def reschedule_raw_logs_jobs():
     Called from reschedule_interval_jobs() in scheduler.py.
     """
     if not raw_logs_scheduler.running:
-        if settings.raw_logs_enabled:
+        if settings.raw_logs_collected_list:
             # Scheduler wasn't running but now it should be
             start_raw_logs_scheduler()
         return
     
-    if not settings.raw_logs_enabled:
-        # Disable: stop the scheduler
+    if not settings.raw_logs_collected_list:
+        # Nothing to collect: stop the scheduler
         stop_raw_logs_scheduler()
         return
     
@@ -624,7 +635,7 @@ def reschedule_raw_logs_jobs():
         _unavailable_services.clear()
         
         logger.info(f"[RAW LOGS] Rescheduled: fetch every {settings.raw_logs_fetch_interval}s, "
-                     f"services: {', '.join(settings.raw_logs_services_list)}")
+                     f"services: {', '.join(settings.raw_logs_collected_list)}")
     except Exception as e:
         logger.warning(f"[RAW LOGS] Failed to reschedule: {e}")
 

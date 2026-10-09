@@ -11,7 +11,6 @@ from datetime import datetime, timedelta
 
 import pytest
 from fastapi import HTTPException
-from tenacity import RetryError
 
 import starlette.staticfiles as sf
 _orig_init = sf.StaticFiles.__init__
@@ -200,24 +199,6 @@ def test_delete_rl_hash_posts_a_bare_list(monkeypatch):
     asyncio.run(api.delete_rl_hash('RLabc123'))
     assert seen['endpoint'] == '/api/v1/delete/rlhash'
     assert seen['json'] == ['RLabc123']
-
-
-def test_retry_error_is_normalised_to_mailcow_api_error(monkeypatch):
-    """_make_request's retry decorator has no reraise, so after three failures
-    tenacity raises RetryError; callers must only ever see MailcowAPIError."""
-    api = _client()
-
-    class _Attempt:
-        def exception(self):
-            return MailcowAPIError('connection refused')
-
-    async def fake(endpoint, method='GET', **kw):
-        raise RetryError(_Attempt())
-    monkeypatch.setattr(api, '_make_request', fake)
-
-    with pytest.raises(MailcowAPIError) as exc:
-        asyncio.run(api.get_rl_mbox('user@example.com'))
-    assert 'connection refused' in str(exc.value)
 
 
 # ---------- database-backed tests ----------

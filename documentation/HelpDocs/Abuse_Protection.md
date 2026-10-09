@@ -48,7 +48,7 @@ Mailboxes this system has blocked. Click **Re-enable SMTP** once you have secure
 > Only mailboxes blocked *by this feature* are listed here. A mailbox that simply has SMTP switched off in mailcow - for example an incoming-only address such as a DMARC report mailbox - is not treated as an abuse case.
 
 ### 📈 Outbound Activity
-Every mailbox that sent mail during the current window, with its message count and status:
+Every mailbox that sent mail during the current window, with its message count and status. Only mail the mailbox sent after logging in counts, here, for the limit and for anomaly detection; mail from outside that only claims one of your addresses as its sender does not.
 
 - **Normal** - under the limit
 - **Over limit** - above the limit; it will be blocked on the next run unless whitelisted

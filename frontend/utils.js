@@ -129,6 +129,98 @@ function getDirectionClass(direction) {
     return APP_COLORS.default.badge;
 }
 
+// v3 status and direction tags (assets/css/ui.css). The colour follows the
+// meaning: delivered and sent are good, deferred waits, bounced and rejected
+// failed, spam is spam, anything else is neutral.
+const UI_STATUS_TONE = {
+    delivered: 'ok', sent: 'ok', deferred: 'warn', bounced: 'fail', rejected: 'fail', spam: 'spam',
+};
+
+// A v3 tag with the given text and tone (ok, warn, fail, spam, info or none)
+function uiTag(text, tone) {
+    return `<span class="ui-tag${tone ? ` ui-tag-${tone}` : ''}">${escapeHtml(String(text))}</span>`;
+}
+
+// Inbound, outbound and internal keep their own colours, as before the redesign
+function uiDirectionTag(direction) {
+    const known = ['inbound', 'outbound', 'internal'].includes(direction);
+    return `<span class="ui-tag ui-tag-dir${known ? ` ui-dir-${direction}` : ''}">${escapeHtml(String(direction))}</span>`;
+}
+
+function uiStatusTag(status) {
+    return uiTag(status, UI_STATUS_TONE[status]);
+}
+
+// The correlation status of a message (getCorrelationStatusDisplay) as a v3
+// tag: same text and tooltip, tone from the final status; Linked is good and
+// Pending waits.
+function uiCorrelationTag(msg) {
+    const status = getCorrelationStatusDisplay(msg);
+    if (!status) return '';
+    const tone = UI_STATUS_TONE[msg.final_status] || (msg.is_complete ? 'ok' : 'warn');
+    const title = msg.final_status || (msg.is_complete ? 'Correlation complete' : 'Waiting for Postfix logs');
+    // The word only; the symbol (checkmark, cross) of the old badge is left out, the tone carries it
+    const text = status.display.replace(/^[^A-Za-z0-9]+\s*/, '');
+    return `<span class="ui-tag ui-tag-${tone}" title="${escapeHtml(title)}">${escapeHtml(text)}</span>`;
+}
+
+// Tone of a netfilter action tag; the text comes from getActionLabel
+function uiActionTone(action) {
+    if (action === 'ban' || action === 'banned') return 'fail';
+    if (action === 'unban') return 'ok';
+    if (action === 'info') return 'info';
+    return 'warn';
+}
+
+function uiActionTag(action) {
+    return uiTag(getActionLabel(action), uiActionTone(action));
+}
+
+// The locked area (assets/css/ui.css .ui-locked): shown instead of silently
+// hiding controls. Says what is missing and where to set it. textHtml is
+// trusted markup written in this codebase, never data.
+const UI_LOCK_ICON = '<svg class="ui-locked-icon" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="11" width="16" height="10" rx="2"></rect><path d="M8 11V7a4 4 0 0 1 8 0v4"></path></svg>';
+
+function uiLocked(title, textHtml, action = 'settings') {
+    const button = action === 'settings'
+        ? `<button type="button" class="ui-btn ui-btn-sm" onclick="navigateTo('settings')">Open Settings</button>`
+        : (action || '');
+    return `<div class="ui-locked">${UI_LOCK_ICON}<div><b>${escapeHtml(title)}</b><p>${textHtml}</p></div>${button}</div>`;
+}
+
+// The Read-Write key sentence used by every locked area that needs it
+const UI_RW_KEY_TEXT = 'needs a <strong>Read-Write API key</strong> (<code>MAILCOW_API_KEY_RW</code>). Configure it in Settings → Mailcow → Connection.';
+
+// The floating save bar every editable page uses, shown only with unsaved changes.
+// Place it inside the page or tab it saves: a hidden page hides its bar too.
+// save and discard are onclick code; with form, Save submits that form instead.
+function uiSaveBar(id, { save = '', discard = '', form = '' } = {}) {
+    const saveAttrs = form ? `type="submit" form="${form}"` : `type="button" onclick="${save}"`;
+    return `<div class="ui-savebar hidden" id="${id}" role="region" aria-label="Unsaved changes">
+            <span class="ui-savebar-count" aria-live="polite"></span>
+            <button type="button" class="ui-btn ui-savebar-discard" onclick="${discard}">Discard</button>
+            <button ${saveAttrs} class="ui-btn ui-savebar-save">Save changes</button>
+        </div>`;
+}
+
+// Show the bar with the number of unsaved changes, or hide it at zero
+function uiSaveBarUpdate(id, count) {
+    const bar = document.getElementById(id);
+    if (!bar) return;
+    bar.classList.toggle('hidden', !count);
+    const label = bar.querySelector('.ui-savebar-count');
+    if (label) label.textContent = `${count} unsaved change${count === 1 ? '' : 's'}`;
+}
+
+// While saving: both buttons off and Save says so
+function uiSaveBarBusy(id, busy) {
+    const bar = document.getElementById(id);
+    if (!bar) return;
+    bar.querySelectorAll('button').forEach(b => { b.disabled = busy; });
+    const save = bar.querySelector('.ui-savebar-save');
+    if (save) save.textContent = busy ? 'Saving...' : 'Save changes';
+}
+
 function getCorrelationStatusDisplay(msg) {
     // If there's a final_status, show it with emoji
     if (msg.final_status) {
@@ -217,6 +309,12 @@ function escapeHtml(text) {
 }
 
 // Escape a value embedded as a JS single-quoted string inside an inline HTML
+// A list's count, as every list shows it above itself: "1,920 events", "1 device"
+function uiCountLabel(n, one, many) {
+    const count = Number(n) || 0;
+    return `${count.toLocaleString()} ${count === 1 ? one : many}`;
+}
+
 // event handler, e.g. onclick="fn('${escapeJsArg(value)}')". escapeHtml is NOT
 // safe there: the browser HTML-decodes the attribute (&#039; -> ') before the
 // JS parser runs, letting a quote break out of the string. \xNN escapes leave
@@ -240,13 +338,113 @@ function escapeRegex(string) {
 
 // Render markdown to sanitized HTML. marked passes raw HTML through
 // unchanged, so DOMPurify strips any script vectors before innerHTML.
+// GitHub callouts ("> [!NOTE]", TIP, IMPORTANT, WARNING, CAUTION): marked
+// leaves them as quotes, so give them their box and title. Works on the
+// already sanitized HTML and only moves nodes and adds a text title.
+function markdownCallouts(html) {
+    if (typeof document === 'undefined' || !/\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\]/i.test(html)) return html;
+    const tpl = document.createElement('template');
+    tpl.innerHTML = html;
+    tpl.content.querySelectorAll('blockquote').forEach(quote => {
+        const first = quote.querySelector('p');
+        const match = first && first.innerHTML.match(/^\s*\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\]\s*(<br>)?\s*/i);
+        if (!match) return;
+        const type = match[1].toLowerCase();
+        first.innerHTML = first.innerHTML.slice(match[0].length);
+        const box = document.createElement('div');
+        box.className = `markdown-alert markdown-alert-${type}`;
+        const title = document.createElement('p');
+        title.className = 'markdown-alert-title';
+        title.textContent = type.charAt(0).toUpperCase() + type.slice(1);
+        box.append(title, ...quote.childNodes);
+        if (!first.textContent.trim()) first.remove();
+        quote.replaceWith(box);
+    });
+    return tpl.innerHTML;
+}
+
 function renderMarkdown(markdownText) {
-    const html = marked.parse(markdownText || '');
-    if (typeof DOMPurify !== 'undefined') {
-        return DOMPurify.sanitize(html);
+    const html = typeof marked !== 'undefined' ? marked.parse(markdownText || '') : '';
+    if (html && typeof DOMPurify !== 'undefined') {
+        return markdownCallouts(DOMPurify.sanitize(html));
     }
     // Library failed to load - fail safe by escaping rather than injecting
     return escapeHtml(markdownText || '');
+}
+
+// Time for a list row: the time of day for today, the day and month before
+// that, in the app timezone. The full timestamp goes in the row tooltip.
+function formatListTime(isoString) {
+    if (!isoString) return '-';
+    const date = new Date(isoString);
+    const tz = appTimezone && appTimezone !== 'UTC' ? appTimezone : undefined;
+    try {
+        const day = d => new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
+        if (day(date) === day(new Date())) {
+            return new Intl.DateTimeFormat(undefined, { timeZone: tz, hour: '2-digit', minute: '2-digit', hour12: false }).format(date);
+        }
+        return new Intl.DateTimeFormat(undefined, { timeZone: tz, day: 'numeric', month: 'short' }).format(date);
+    } catch (e) {
+        return formatTime(isoString);
+    }
+}
+
+// A "More" menu for a table row. It opens as a popover, so the table's own
+// scrolling cannot clip it; the toggle listener below puts it under its button.
+let uiMenuSeq = 0;
+function uiMenu(label, itemsHtml) {
+    const id = `ui-menu-${++uiMenuSeq}`;
+    return `<button type="button" class="ui-btn ui-btn-sm" popovertarget="${id}" aria-haspopup="menu">${escapeHtml(label)}</button>
+        <div id="${id}" popover class="ui-menu" role="menu" onclick="if (event.target.closest('button')) this.hidePopover()">${itemsHtml}</div>`;
+}
+
+// Called once at startup: places an opening menu and closes it on scroll
+function uiInitMenus() {
+    document.addEventListener('toggle', event => {
+        const menu = event.target;
+        if (!(menu instanceof HTMLElement) || !menu.classList.contains('ui-menu') || event.newState !== 'open') return;
+        const button = document.querySelector(`[popovertarget="${menu.id}"]`);
+        if (!button) return;
+        const r = button.getBoundingClientRect();
+        const rtl = getComputedStyle(button).direction === 'rtl';
+        const left = rtl ? r.left : r.right - menu.offsetWidth;
+        menu.style.left = `${Math.max(8, Math.min(left, window.innerWidth - menu.offsetWidth - 8))}px`;
+        const below = r.bottom + 4;
+        menu.style.top = `${below + menu.offsetHeight > window.innerHeight - 8 ? Math.max(8, r.top - menu.offsetHeight - 4) : below}px`;
+    }, true);
+
+    // An open menu would drift away from its button on scroll, so close it
+    window.addEventListener('scroll', () => {
+        document.querySelectorAll('.ui-menu:popover-open').forEach(menu => menu.hidePopover());
+    }, true);
+}
+
+// "6 min ago", "3 h ago", "2 d ago"; the full time is for a tooltip
+function formatAgo(isoString) {
+    if (!isoString) return '-';
+    const minutes = Math.max(0, Math.round((Date.now() - new Date(isoString).getTime()) / 60000));
+    if (minutes < 1) return 'just now';
+    if (minutes < 60) return `${minutes} min ago`;
+    const hours = Math.round(minutes / 60);
+    if (hours < 48) return `${hours} h ago`;
+    return `${Math.round(hours / 24)} d ago`;
+}
+
+// A time written as "5 min ago" in an element, with the exact time on hover. The
+// labels are written again every 30 seconds, so the page does not go stale.
+const uiAgoLabels = new Map();
+let uiAgoTimer = null;
+function uiAgo(el, iso, prefix = '') {
+    if (!el || !iso) return;
+    uiAgoLabels.set(el, { iso, prefix });
+    el.textContent = `${prefix}${formatAgo(iso)}`;
+    el.title = formatTime(iso);
+    if (!uiAgoTimer && typeof setInterval === 'function') {
+        uiAgoTimer = setInterval(() => uiAgoLabels.forEach((v, node) => {
+            if (!node.isConnected) uiAgoLabels.delete(node);
+            else node.textContent = `${v.prefix}${formatAgo(v.iso)}`;
+        }), 30000);
+    }
 }
 
 function formatTime(isoString) {
@@ -382,29 +580,22 @@ function showToast(message, type = 'info') {
         existingToast.remove();
     }
 
-    const colors = {
-        'success': 'bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-200 border-green-500',
-        'error': 'bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-200 border-red-500',
-        'warning': 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-800 dark:text-yellow-200 border-yellow-500',
-        'info': 'bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-200 border-blue-500'
-    };
-
     const icons = {
         'success': '✓',
         'error': '✗',
         'warning': '⚠',
         'info': 'ℹ'
     };
+    const kind = icons[type] ? type : 'info';
 
     const toast = document.createElement('div');
     toast.id = 'toast-notification';
-    toast.className = `fixed bottom-4 right-4 z-50 ${colors[type]} border-l-4 p-4 rounded shadow-lg max-w-md animate-slide-in`;
+    toast.className = `ui-toast ui-toast-${kind}`;
+    toast.setAttribute('role', kind === 'error' ? 'alert' : 'status');
     toast.innerHTML = `
-        <div class="flex items-start gap-3">
-            <span class="text-xl font-bold flex-shrink-0">${icons[type]}</span>
-            <p class="text-sm flex-1">${escapeHtml(message)}</p>
-            <button onclick="this.parentElement.parentElement.remove()" class="text-lg font-bold hover:opacity-70 flex-shrink-0">×</button>
-        </div>
+        <span class="ui-toast-icon" aria-hidden="true">${icons[kind]}</span>
+        <p>${escapeHtml(message)}</p>
+        <button type="button" onclick="this.parentElement.remove()" class="ui-icon-btn" title="Close" aria-label="Close">×</button>
     `;
 
     document.body.appendChild(toast);
@@ -432,48 +623,24 @@ function showConfirmModal({ title = 'Confirm', message = 'Are you sure?', confir
         const existing = document.getElementById('app-confirm-modal');
         if (existing) existing.remove();
 
-        const gradientColor = confirmColor || (isDangerous
-            ? 'linear-gradient(135deg,#ef4444,#dc2626)'
-            : 'linear-gradient(135deg,#3b82f6,#2563eb)');
-
-        const iconBg = isDangerous
-            ? 'linear-gradient(135deg,#ef4444,#dc2626)'
-            : 'linear-gradient(135deg,#3b82f6,#2563eb)';
-
-        const iconSvg = isDangerous
-            ? '<path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z"></path>'
-            : '<path stroke-linecap="round" stroke-linejoin="round" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>';
-
         const overlay = document.createElement('div');
         overlay.id = 'app-confirm-modal';
-        overlay.style.cssText = 'position:fixed;inset:0;z-index:99999;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.6);backdrop-filter:blur(4px);';
+        overlay.className = 'ui-dialog-backdrop ui-confirm';
+        overlay.setAttribute('role', 'alertdialog');
+        overlay.setAttribute('aria-label', title);
 
         // Callers pass plain text (channel names, emails, domains, ...) - escape
         // it before it goes into innerHTML, then turn newlines into breaks.
         const escapedMessage = escapeHtml(message).replace(/\n/g, '<br>');
 
         overlay.innerHTML = `
-            <div style="background:var(--color-bg-primary, #1f2937);border:1px solid var(--color-border, #374151);border-radius:12px;padding:28px;max-width:420px;width:90%;box-shadow:0 25px 50px rgba(0,0,0,0.4);">
-                <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px;">
-                    <div style="width:40px;height:40px;border-radius:10px;background:${iconBg};display:flex;align-items:center;justify-content:center;flex-shrink:0;">
-                        <svg width="20" height="20" fill="none" stroke="white" stroke-width="2" viewBox="0 0 24 24">${iconSvg}</svg>
-                    </div>
-                    <div>
-                        <h3 style="margin:0;font-size:16px;font-weight:600;color:#f3f4f6;">${title}</h3>
-                    </div>
-                </div>
-                <p style="margin:0 0 24px;font-size:14px;color:#d1d5db;line-height:1.5;">${escapedMessage}</p>
-                <div style="display:flex;justify-content:flex-end;gap:10px;">
-                    <button type="button" id="app-confirm-cancel"
-                        style="padding:9px 18px;border-radius:6px;border:1px solid #4b5563;background:transparent;color:#d1d5db;font-size:13px;font-weight:500;cursor:pointer;transition:all 0.15s;"
-                        onmouseover="this.style.background='#374151'" onmouseout="this.style.background='transparent'">
-                        ${cancelText}
-                    </button>
-                    <button type="button" id="app-confirm-ok"
-                        style="padding:9px 18px;border-radius:6px;border:none;background:${gradientColor};color:white;font-size:13px;font-weight:600;cursor:pointer;transition:all 0.15s;"
-                        onmouseover="this.style.opacity='0.9'" onmouseout="this.style.opacity='1'">
-                        ${confirmText}
-                    </button>
+            <div class="ui-dialog ui-dialog-fit ui-dialog-sm">
+                <div class="ui-dialog-head"><h3>${escapeHtml(title)}</h3></div>
+                <div class="ui-dialog-body"><p class="ui-confirm-text">${escapedMessage}</p></div>
+                <div class="ui-dialog-foot">
+                    <button type="button" id="app-confirm-cancel" class="ui-btn">${escapeHtml(cancelText)}</button>
+                    <button type="button" id="app-confirm-ok" class="ui-btn ${isDangerous ? 'ui-btn-danger-solid' : 'ui-btn-primary'}"
+                        ${confirmColor ? `style="background: ${escapeHtml(confirmColor)}"` : ''}>${escapeHtml(confirmText)}</button>
                 </div>
             </div>
         `;
@@ -486,9 +653,15 @@ function showConfirmModal({ title = 'Confirm', message = 'Are you sure?', confir
 
         function cleanup(result) {
             overlay.remove();
+            document.removeEventListener('keydown', onKey);
             document.body.style.overflow = '';
             resolve(result);
         }
+        // Escape cancels, like the other dialogs
+        function onKey(event) {
+            if (event.key === 'Escape') cleanup(false);
+        }
+        document.addEventListener('keydown', onKey);
 
         cancelBtn.addEventListener('click', () => cleanup(false));
         okBtn.addEventListener('click', () => cleanup(true));
@@ -508,113 +681,54 @@ function renderJobCard(name, jobKey, job) {
     let statusBadge = '';
 
     if (isFeatureOff) {
-        statusBadge = '<span class="px-2 py-1 text-xs font-medium rounded bg-orange-500/80 text-white">feature off</span>';
+        statusBadge = '<span class="ui-tag ui-tag-warn" title="The feature this job belongs to is turned off in Settings">feature off</span>';
+    } else if (isDisabled) {
+        // The reason comes from the server (no IMAP, no MaxMind key, no Read-Write key, a setting that is off)
+        statusBadge = `<span class="ui-tag" title="${escapeHtml(job.disabled_reason || 'This job is turned off in its settings, so it cannot be run')}">off</span>`;
     } else {
         switch (job.status) {
             case 'running':
-                statusBadge = '<span class="px-2 py-1 text-xs font-medium rounded bg-blue-500 text-white">running</span>';
+                statusBadge = '<span class="ui-tag ui-tag-info">running</span>';
                 break;
             case 'success':
-                statusBadge = '<span class="px-2 py-1 text-xs font-medium rounded bg-green-600 dark:bg-green-500 text-white">success</span>';
+                statusBadge = '<span class="ui-tag ui-tag-ok">success</span>';
                 break;
             case 'failed':
-                statusBadge = '<span class="px-2 py-1 text-xs font-medium rounded bg-red-600 dark:bg-red-500 text-white">failed</span>';
+                statusBadge = '<span class="ui-tag ui-tag-fail">failed</span>';
                 break;
             case 'scheduled':
-                statusBadge = '<span class="px-2 py-1 text-xs font-medium rounded bg-purple-600 dark:bg-purple-500 text-white">scheduled</span>';
+                statusBadge = '<span class="ui-tag ui-tag-spam">scheduled</span>';
                 break;
             default:
-                statusBadge = '<span class="px-2 py-1 text-xs font-medium rounded bg-gray-500 text-white">idle</span>';
+                statusBadge = '<span class="ui-tag">idle</span>';
         }
     }
 
+    const runs = [
+        job.interval,
+        job.schedule,
+        job.retention ? `keeps ${job.retention}` : '',
+        job.max_age ? `Max: ${job.max_age}` : '',
+        job.expire_after ? `Expire: ${job.expire_after}` : '',
+    ].filter(Boolean);
+
+    // A healthy job shows a green dot and no tag; everything else says what it is
+    const failed = !isDisabled && job.status === 'failed';
+    const dot = isDisabled ? '' : failed ? ' ui-mdot-fail' : job.status === 'running' ? ' ui-mdot-info' : job.status === 'success' ? ' ui-mdot-ok' : '';
     return `
-        <div class="p-3 bg-gray-50 dark:bg-gray-700/30 rounded-lg ${isFeatureOff ? 'opacity-50' : ''}">
-            <div class="flex items-start justify-between gap-3 mb-2">
-                <div class="flex-1 min-w-0">
-                    <h4 class="font-semibold text-gray-900 dark:text-white text-sm">${escapeHtml(name)}</h4>
-                    <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">${escapeHtml(job.description || '')}</p>
-                </div>
-                <div class="flex flex-col items-end gap-1.5">
-                    ${statusBadge}
-                    ${!isDisabled ? `
-                        <button 
-                            onclick="triggerBackgroundJob('${escapeJsArg(jobKey)}', this, '${escapeJsArg(name)}')" 
-                            class="px-2 py-1 text-xs font-medium rounded transition-colors flex items-center gap-1 ${isRunning
-                ? 'bg-gray-200 dark:bg-gray-600 text-gray-400 dark:text-gray-500 cursor-not-allowed'
-                : 'bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 hover:bg-blue-200 dark:hover:bg-blue-900/50'}"
-                            ${isRunning ? 'disabled' : ''}
-                            title="${isRunning ? 'Job is running' : 'Run this job now'}">
-                            ${isRunning ? '<span class="inline-block animate-spin w-3 h-3 border-2 border-current border-t-transparent rounded-full"></span>' : '<span class="text-[10px]">▶</span>'}
-                            Run
-                        </button>
-                    ` : ''}
-                </div>
-            </div>
-            
-            <div class="flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-600 dark:text-gray-400">
-                ${job.interval ? `<span>⏱ ${job.interval}</span>` : ''}
-                ${job.schedule ? `<span>📅 ${job.schedule}</span>` : ''}
-                ${job.retention ? `<span>🗂 ${job.retention}</span>` : ''}
-                ${job.max_age ? `<span>⏳ Max: ${job.max_age}</span>` : ''}
-                ${job.expire_after ? `<span>⏱ Expire: ${job.expire_after}</span>` : ''}
-                ${job.pending_items !== undefined ? `<span class="font-medium text-yellow-600 dark:text-yellow-400">📋 Pending: ${job.pending_items}</span>` : ''}
-            </div>
-            
-            ${job.last_run ? `
-                <div class="mt-2 pt-2 border-t border-gray-200 dark:border-gray-600">
-                    <p class="text-xs text-gray-500 dark:text-gray-400">
-                        Last run: <span class="text-gray-900 dark:text-white font-medium">${formatTime(job.last_run)}</span>
-                    </p>
-                </div>
-            ` : ''}
-            
-            ${job.error ? `
-                <div class="mt-2 p-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded">
-                    <p class="text-xs text-red-700 dark:text-red-300 font-mono break-all">${escapeHtml(job.error)}</p>
-                </div>
-            ` : ''}
-        </div>
-    `;
-}
-
-function renderImportCard(title, data, color) {
-    if (!data) {
-        return `<div class="p-4 bg-gray-50 dark:bg-gray-700/30 rounded-lg">
-            <p class="font-semibold text-gray-900 dark:text-white">${title}</p>
-            <p class="text-sm text-gray-500 dark:text-gray-400 mt-2">No data</p>
-        </div>`;
-    }
-
-    const colorClasses = {
-        blue: 'border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-900/20',
-        purple: 'border-purple-200 dark:border-purple-800 bg-purple-50 dark:bg-purple-900/20',
-        red: 'border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20'
-    };
-
-    return `
-        <div class="p-4 border ${colorClasses[color]} rounded-lg">
-            <p class="font-semibold text-gray-900 dark:text-white mb-3">${title}</p>
-            <div class="space-y-2 text-sm">
-                <div>
-                    <p class="text-xs text-gray-500 dark:text-gray-400">Last Fetch Run</p>
-                    <p class="text-gray-900 dark:text-white font-medium">${data.last_fetch_run ? formatTime(data.last_fetch_run) : 'Never'}</p>
-                </div>
-                <div>
-                    <p class="text-xs text-gray-500 dark:text-gray-400">Last Import</p>
-                    <p class="text-gray-900 dark:text-white">${data.last_import ? formatTime(data.last_import) : 'Never'}</p>
-                </div>
-                <div>
-                    <p class="text-xs text-gray-500 dark:text-gray-400">Total Entries</p>
-                    <p class="text-gray-900 dark:text-white font-semibold">${(data.total_entries || 0).toLocaleString()}</p>
-                </div>
-                ${data.oldest_entry ? `
-                    <div>
-                        <p class="text-xs text-gray-500 dark:text-gray-400">Oldest Entry</p>
-                        <p class="text-gray-900 dark:text-white">${formatTime(data.oldest_entry)}</p>
-                    </div>
-                ` : ''}
-            </div>
+        <div class="ui-jobrow${isDisabled ? ' is-off' : ''}${failed ? ' is-failed' : ''}">
+            <i class="ui-mdot${dot}"></i>
+            <span class="ui-jobrow-name"><b>${escapeHtml(name)}</b>${job.description ? `<small title="${escapeHtml(job.description)}">${escapeHtml(job.description)}</small>` : ''}${isDisabled && !isFeatureOff && job.disabled_reason ? `<small class="ui-text-warn">${escapeHtml(job.disabled_reason)}</small>` : ''}</span>
+            <span class="ui-jobrow-runs">${escapeHtml(runs.join(', ') || '-')}${job.pending_items !== undefined ? ` <small class="ui-text-warn">Pending: ${escapeHtml(String(job.pending_items))}</small>` : ''}</span>
+            <span class="ui-jobrow-last" title="${job.last_run ? escapeHtml(formatTime(job.last_run)) : ''}">${job.last_run ? formatAgo(job.last_run) : 'Not run yet'}</span>
+            <span class="ui-jobrow-tag">${job.status === 'success' && !isDisabled ? '' : statusBadge}</span>
+            <span class="ui-jobrow-act">${!isDisabled ? `
+                <button onclick="triggerBackgroundJob('${escapeJsArg(jobKey)}', this, '${escapeJsArg(name)}')"
+                    class="ui-btn ui-btn-sm" ${isRunning ? 'disabled' : ''} title="${isRunning ? 'Job is running' : 'Run this job now'}">Run</button>`
+                : !isFeatureOff && job.settings_section ? `
+                <button onclick="navigateTo('settings', { sub: '${escapeJsArg(job.settings_section)}' })" class="ui-btn ui-btn-sm"
+                    title="${escapeHtml(job.disabled_reason || '')}">Settings</button>` : ''}</span>
+            ${job.error ? `<p class="ui-job-error ui-mono">${escapeHtml(job.error)}</p>` : ''}
         </div>
     `;
 }
@@ -636,5 +750,260 @@ function renderMailboxFolderHint(msg) {
 function renderDeliveriesChip(msg) {
     const deliveries = msg.deliveries || 1;
     if (deliveries < 2) return '';
-    return `<span>Deliveries: ${deliveries}</span>`;
+    return `<span>Deliveries: ${escapeHtml(String(deliveries))}</span>`;
 }
+
+// =============================================================================
+// Sortable table headers. A click on a column header sorts the rows: numbers
+// high to low first, text A to Z first, and a second click turns it around.
+// The order survives the page's own refreshes. A table paged on the server
+// names a handler instead (data-sort-handler) and its sortable headers carry
+// the server's field (data-sort-key), so the order covers every page. A table
+// or a header with data-nosort, and headers with no text, do not sort.
+// =============================================================================
+
+const uiTableSorts = new Map();
+
+function uiSortHeads(table) {
+    const head = table.tagName === 'TABLE' ? table.querySelector('thead tr') : table.querySelector(':scope > .ui-tr-head');
+    return head ? [...head.children] : [];
+}
+
+function uiTableKey(table) {
+    const owner = table.id ? table : table.closest('[id]');
+    return `${owner ? owner.id : ''}|${uiSortHeads(table).map(h => h.textContent.trim()).join('|')}`;
+}
+
+function uiSortable(table, cell) {
+    if (!cell || table.hasAttribute('data-nosort') || cell.hasAttribute('data-nosort')) return false;
+    if (table.hasAttribute('data-sort-handler')) return cell.hasAttribute('data-sort-key');
+    return cell.textContent.trim() !== '' && !/^actions?$/i.test(cell.textContent.trim());
+}
+
+// The value a cell sorts by: its data-sort, else its text read as a number,
+// a size, a time ago or a date when it is one
+function uiSortValue(cell) {
+    if (!cell) return { n: null, t: '' };
+    if (cell.hasAttribute && cell.hasAttribute('data-sort')) {
+        const v = cell.getAttribute('data-sort');
+        return isNaN(Number(v)) ? { n: null, t: v.toLowerCase() } : { n: Number(v), t: v };
+    }
+    const copy = cell.cloneNode(true);
+    copy.querySelectorAll('.ui-sec-unit, .ui-phone-only').forEach(el => el.remove());
+    const text = copy.textContent.replace(/\s+/g, ' ').trim();
+    const t = text.toLowerCase();
+    if (!text || text === '-') return { n: null, t: '' };
+    const size = text.match(/^(-?\d+(?:[.,]\d+)?)\s*(b|kb|mb|gb|tb)$/i);
+    if (size) return { n: parseFloat(size[1].replace(',', '.')) * 1024 ** ['b', 'kb', 'mb', 'gb', 'tb'].indexOf(size[2].toLowerCase()), t };
+    // A time ago (recent first when high to low) or a plain duration (longest first)
+    const span = t.match(/^(?:up\s+)?(\d+(?:\.\d+)?)\s*(sec|s|min|mo|m|h|d|w|y)[a-z]*(\s+ago)?$/);
+    if (span || t === 'just now') {
+        const unit = { s: 1, sec: 1, m: 60, min: 60, h: 3600, d: 86400, w: 604800, mo: 2592000, y: 31536000 };
+        if (!span) return { n: 0, t };
+        const secs = Number(span[1]) * unit[span[2]];
+        return { n: span[3] ? -secs : secs, t };
+    }
+    const num = text.replace(/,/g, '').match(/^(-?\d+(?:\.\d+)?)\s*(%|k|m)?(\s|$)/i);
+    if (num) return { n: parseFloat(num[1]) * ({ k: 1e3, m: 1e6 }[(num[2] || '').toLowerCase()] || 1), t };
+    if (/\d{1,4}[./-]\d{1,2}[./-]\d{1,4}/.test(text)) {
+        const [a, b, c, rest] = text.split(/[^\d]+/).filter(Boolean);
+        // The app writes dates as MM/DD/YYYY or DD.MM.YYYY; either reads in order once the year leads
+        const dotted = /\d\.\d/.test(text);
+        const y = String(c).length === 4 ? c : a;
+        const mo = dotted ? b : a, da = dotted ? a : b;
+        const time = Date.parse(`${y}-${String(mo).padStart(2, '0')}-${String(da).padStart(2, '0')}T${(text.match(/\d{1,2}:\d{2}(:\d{2})?/) || ['00:00'])[0].padStart(5, '0')}`);
+        if (!isNaN(time)) return { n: time, t };
+    }
+    return { n: null, t };
+}
+
+// Rows travel with what follows them up to the next row (an opened detail)
+function uiSortUnits(table) {
+    if (table.tagName === 'TABLE') {
+        const body = table.tBodies[0];
+        return body ? [{ parent: body, units: [...body.rows].filter(r => !r.hasAttribute('data-sort-fixed') && r.cells.length > 1).map(r => [r]),
+            fixed: [...body.rows].filter(r => r.hasAttribute('data-sort-fixed') || r.cells.length <= 1) }] : [];
+    }
+    const kids = [...table.children];
+    const start = kids.findIndex(k => k.classList.contains('ui-tr-head')) + 1;
+    const segments = [];
+    let seg = { parent: table, units: [], fixed: [] };
+    for (const el of kids.slice(start)) {
+        if (el.classList.contains('ui-tr-group')) { segments.push(seg); seg = { parent: table, units: [], fixed: [], after: el }; continue; }
+        if (el.classList.contains('ui-tr')) seg.units.push([el]);
+        else if (seg.units.length) seg.units[seg.units.length - 1].push(el);
+        else seg.fixed.push(el);
+    }
+    segments.push(seg);
+    return segments;
+}
+
+function uiApplyTableSort(table, index, dir) {
+    const heads = uiSortHeads(table);
+    heads.forEach((h, i) => { if (uiSortable(table, h)) h.setAttribute('aria-sort', i === index ? (dir > 0 ? 'ascending' : 'descending') : 'none'); });
+    for (const seg of uiSortUnits(table)) {
+        const keyed = seg.units.map((unit, pos) => ({ unit, pos, v: uiSortValue(unit[0].children[index]) }));
+        keyed.sort((a, b) => {
+            // Empty values go last either way
+            const ae = a.v.n === null && !a.v.t, be = b.v.n === null && !b.v.t;
+            if (ae !== be) return ae ? 1 : -1;
+            let c;
+            if (a.v.n !== null && b.v.n !== null) c = a.v.n - b.v.n;
+            else c = a.v.t.localeCompare(b.v.t, undefined, { sensitivity: 'base' });
+            return c ? c * dir : a.pos - b.pos;
+        });
+        // Put them back in order, ahead of anything fixed at the end (a "No matches" row)
+        let anchor = seg.after ? seg.after.nextSibling : (seg.parent.tagName === 'TBODY' ? seg.parent.firstChild : uiSortHeads(table)[0].parentNode.nextSibling);
+        for (const { unit } of keyed) for (const el of unit) { seg.parent.insertBefore(el, anchor); anchor = el.nextSibling; }
+        for (const el of seg.fixed) if (seg.parent.tagName === 'TBODY') seg.parent.appendChild(el);
+    }
+    table.dataset.sortedBy = `${index}:${dir}`;
+}
+
+function uiClearTableSort(owner) {
+    for (const key of [...uiTableSorts.keys()]) if (key.startsWith(`${owner}|`)) uiTableSorts.delete(key);
+}
+
+document.addEventListener('click', event => {
+    const cell = event.target.closest('.ui-tr-head > *, thead th');
+    if (!cell) return;
+    const table = cell.closest('.ui-table, table');
+    if (!table || !uiSortable(table, cell)) return;
+    const index = uiSortHeads(table).indexOf(cell);
+    const current = cell.getAttribute('aria-sort');
+    const numeric = uiSortUnits(table).some(seg => seg.units.some(u => uiSortValue(u[0].children[index]).n !== null));
+    const dir = current === 'descending' ? 1 : current === 'ascending' ? -1 : (numeric ? -1 : 1);
+    const handler = table.getAttribute('data-sort-handler');
+    if (handler) {
+        if (typeof window[handler] === 'function') window[handler](cell.getAttribute('data-sort-key'), dir > 0 ? 'asc' : 'desc');
+        return;
+    }
+    uiTableSorts.set(uiTableKey(table), { index, dir });
+    uiApplyTableSort(table, index, dir);
+});
+
+// Mark the sortable headers, and put a remembered order back after a refresh
+let uiTableSortQueued = false;
+function uiRefreshTableSorts() {
+    uiTableSortQueued = false;
+    document.querySelectorAll('.ui-table, table').forEach(table => {
+        uiSortHeads(table).forEach(h => { if (uiSortable(table, h) && !h.hasAttribute('aria-sort')) h.setAttribute('aria-sort', 'none'); });
+        if (table.hasAttribute('data-sort-handler')) return;
+        const state = uiTableSorts.get(uiTableKey(table));
+        if (state && table.dataset.sortedBy !== `${state.index}:${state.dir}`) uiApplyTableSort(table, state.index, state.dir);
+    });
+}
+document.addEventListener('DOMContentLoaded', () => {
+    new MutationObserver(() => {
+        if (uiTableSortQueued) return;
+        uiTableSortQueued = true;
+        requestAnimationFrame(uiRefreshTableSorts);
+    }).observe(document.body, { subtree: true, childList: true });
+    uiRefreshTableSorts();
+});
+
+// =============================================================================
+// SHEET - a panel from the bottom of the screen on phones. Its handle and head
+// stay on top while its body scrolls. Pulling it down (by the head, or by the
+// body scrolled to the top) closes it, and a short pull springs back. With
+// expand it opens at three quarters and rises with the reader's scroll to the full screen.
+// =============================================================================
+
+const uiSheetClosers = {};  // sheet id -> what closing it does
+const uiIsPhone = () => window.matchMedia('(max-width: 760px)').matches;
+
+// Show the sheet, or redraw it in place: the body keeps its scroll and a grown
+// sheet stays full screen
+function uiSheetShow(id, { label = '', head = '', body = '', expand = false, onClose = null } = {}) {
+    let sheet = document.getElementById(id);
+    const fresh = !sheet;
+    if (fresh) {
+        sheet = document.createElement('div');
+        sheet.id = id;
+        sheet.className = 'ui-sheet';
+        document.body.appendChild(sheet);
+    }
+    uiSheetClosers[id] = onClose;
+    const old = sheet.querySelector('.ui-sheet-body');
+    const keep = old ? old.scrollTop : 0;
+    sheet.classList.toggle('is-expand', expand);
+    sheet.innerHTML = `
+        <div class="ui-sheet-back" onclick="uiSheetDismiss('${id}')"></div>
+        <section class="ui-sheet-panel" role="dialog" aria-modal="true" aria-label="${escapeHtml(label)}">
+            <span class="ui-sheet-grip" aria-hidden="true"></span>
+            <div class="ui-sheet-head">${head}<button type="button" class="ui-icon-btn ui-sheet-x" onclick="uiSheetDismiss('${id}')" aria-label="Close" title="Close">&times;</button></div>
+            <div class="ui-sheet-body">${body}</div>
+        </section>`;
+    const bodyEl = sheet.querySelector('.ui-sheet-body');
+    bodyEl.scrollTop = keep;
+    if (expand) {
+        // The sheet rises with the reader's scroll: what the body scrolls goes into the
+        // sheet's height first, until it fills the screen; then the body scrolls
+        const panel = sheet.querySelector('.ui-sheet-panel');
+        if (sheet.dataset.height) panel.style.height = `${sheet.dataset.height}px`;
+        bodyEl.addEventListener('scroll', () => {
+            const height = panel.getBoundingClientRect().height;
+            const room = window.innerHeight - height;
+            const grow = Math.min(bodyEl.scrollTop, room);
+            if (grow <= 0) return;
+            panel.style.height = `${height + grow}px`;
+            sheet.dataset.height = height + grow;
+            bodyEl.scrollTop -= grow;
+            sheet.classList.toggle('is-full', room - grow < 1);
+        }, { passive: true });
+    }
+    uiSheetSwipe(sheet, bodyEl, id);
+    document.body.classList.add('ui-sheet-on');
+    return sheet;
+}
+
+// Close as its owner wants (an owner may keep state of what is open)
+function uiSheetDismiss(id) {
+    const closer = uiSheetClosers[id];
+    if (typeof closer === 'function') closer();
+    else uiSheetClose(id);
+}
+
+function uiSheetClose(id) {
+    const sheet = document.getElementById(id);
+    if (sheet) sheet.remove();
+    delete uiSheetClosers[id];
+    if (!document.querySelector('.ui-sheet')) document.body.classList.remove('ui-sheet-on');
+}
+
+function uiSheetSwipe(sheet, body, id) {
+    const panel = sheet.querySelector('.ui-sheet-panel');
+    let startY = null, pulled = 0;
+    panel.addEventListener('touchstart', event => {
+        const byHead = !!event.target.closest('.ui-sheet-head, .ui-sheet-grip');
+        if (!byHead && body.scrollTop > 0) { startY = null; return; }
+        startY = event.touches[0].clientY;
+        pulled = 0;
+        panel.style.transition = 'none';
+    }, { passive: true });
+    panel.addEventListener('touchmove', event => {
+        if (startY === null) return;
+        pulled = Math.max(0, event.touches[0].clientY - startY);
+        panel.style.transform = pulled ? `translateY(${pulled}px)` : '';
+    }, { passive: true });
+    const end = () => {
+        if (startY === null) return;
+        startY = null;
+        panel.style.transition = 'transform .2s ease';
+        if (pulled > Math.min(120, panel.offsetHeight / 4)) {
+            panel.style.transform = 'translateY(100%)';
+            setTimeout(() => uiSheetDismiss(id), 200);
+        } else {
+            panel.style.transform = '';
+        }
+    };
+    panel.addEventListener('touchend', end);
+    panel.addEventListener('touchcancel', end);
+}
+
+// Escape closes the sheet on top
+document.addEventListener('keydown', event => {
+    if (event.key !== 'Escape') return;
+    const sheets = document.querySelectorAll('.ui-sheet');
+    if (sheets.length) uiSheetDismiss(sheets[sheets.length - 1].id);
+});

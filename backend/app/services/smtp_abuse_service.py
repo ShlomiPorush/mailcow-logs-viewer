@@ -16,11 +16,13 @@ helper executed through ``asyncio.to_thread`` so the event loop never blocks.
 import asyncio
 import logging
 from datetime import datetime, timedelta
+from html import escape
 from typing import Dict, List, Optional
 
 from sqlalchemy import func
 
 from ..config import settings
+from ..correlation import submitted_with_auth
 from ..database import get_db_context
 from ..mailcow_api import mailcow_api
 from ..models import (
@@ -43,7 +45,9 @@ def fetch_outbound_counts(window_minutes: int, limit: Optional[int] = None) -> D
     """Outbound message count per sender within the rolling window.
 
     Grouped on lower(sender) so 'User@x' and 'user@x' are one mailbox - the
-    same normalisation used everywhere else for addresses.
+    same normalisation used everywhere else for addresses. Only authenticated
+    submissions count: the envelope sender of unauthenticated mail is chosen
+    by the remote client, so it must never get a mailbox blocked.
     """
     cutoff = datetime.utcnow() - timedelta(minutes=window_minutes)
     with get_db_context() as db:
@@ -52,6 +56,7 @@ def fetch_outbound_counts(window_minutes: int, limit: Optional[int] = None) -> D
             func.count(MessageCorrelation.id).label("count"),
         ).filter(
             func.lower(MessageCorrelation.direction) == "outbound",
+            submitted_with_auth(),
             MessageCorrelation.first_seen >= cutoff,
             MessageCorrelation.sender.isnot(None),
             MessageCorrelation.sender != "",
@@ -250,7 +255,9 @@ async def _notify_user_blocked(email: str, count: int) -> None:
         "Please change your password and revoke any app passwords you no "
         f"longer use, then contact {contact} to restore sending."
     )
-    html = text.replace("\n", "<br>")
+    # The address and the help contact are mailbox names and settings, not
+    # markup: escape them before turning line breaks into <br>.
+    html = escape(text).replace("\n", "<br>")
     await asyncio.to_thread(send_notification_email, email, subject, text, html)
 
 

@@ -86,6 +86,12 @@ A modern, self-hosted dashboard for monitoring, analyzing, and managing your mai
 - Quota usage, login times, rate limits
 - Sorting and filtering by date range, domain, activity
 
+### 📱 Devices (ActiveSync)
+- Phones, tablets and Outlook clients that sync over ActiveSync, read from the SOGo log
+- Per device: user, type or model, mail app, device ID, last IP with its location, last request, first and last seen
+- Marks new devices and devices whose password is refused
+- Filter by device type and last seen; configurable retention
+
 ### 📧 DMARC Reports
 - DMARC/SMTP-TLS report viewer with compliance analysis
 - GeoIP enrichment with MaxMind (City + ASN)
@@ -170,8 +176,8 @@ All settings via environment variables or the **web UI** (when `SETTINGS_EDIT_VI
 | `RETENTION_DAYS` | `7` | Days to keep logs |
 | `RSPAMD_PASSWORD` | (empty) | Rspamd password — enables Spam Filter maps editor |
 | `SUPPRESSION_ENABLED` | `true` | Enable automatic email suppression |
-| `BASIC_AUTH_ENABLED` | `true` | Enable HTTP Basic Authentication |
-| `SETTINGS_EDIT_VIA_UI_ENABLED` | `true` | Allow managing settings from the web UI |
+| `BASIC_AUTH_ENABLED` | `false` | Enable HTTP Basic Authentication. Off by default: without it (or OAuth2), anyone who can reach port 8080 has full access |
+| `SETTINGS_EDIT_VIA_UI_ENABLED` | `false` | Allow managing settings from the web UI (`env.example` sets it to `true`) |
 | `TZ` | `UTC` | Timezone |
 
 📖 **Full reference:** [ENV Settings](documentation/ENV_Settings.md)

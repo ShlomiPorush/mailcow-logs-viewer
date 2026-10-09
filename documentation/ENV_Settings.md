@@ -72,8 +72,8 @@ These settings **must** be configured in your `.env` file:
 | `DEBUG` | boolean | `false` | Enable debug mode (shows detailed errors, use only for development). ⚠️ **WARNING: Never enable in production!** |
 | `MAX_SEARCH_RESULTS` | integer | `1000` | Maximum records to return in search results |
 | `CSV_EXPORT_LIMIT` | integer | `10000` | CSV export row limit |
-| `SCHEDULER_WORKERS` | integer | `4` | Thread pool size for blocking scheduler jobs (e.g. DMARC IMAP sync). Valid range: 1-64. Higher values allow more blocking jobs to run in parallel |
-| `DISABLED_FEATURES` | string | (empty) | Comma-separated list of features to disable (hides navigation, stops background jobs). Valid values: `netfilter`, `queue`, `quarantine`, `spam-filter`, `domains`, `dmarc`, `mailbox-stats`, `rate-limits`, `logs`, `blacklist`. Can also be managed from the Settings UI when `SETTINGS_EDIT_VIA_UI_ENABLED=true` |
+| `SCHEDULER_WORKERS` | integer | `4` | Thread pool size for blocking scheduler jobs (e.g. the DMARC & TLS IMAP import). Valid range: 1-64. Higher values allow more blocking jobs to run in parallel |
+| `DISABLED_FEATURES` | string | (empty) | Comma-separated list of features to disable (hides navigation, stops background jobs). Valid values: `netfilter`, `queue`, `quarantine`, `spam-filter`, `domains`, `dmarc`, `mailbox-stats`, `rate-limits`, `logs`, `blacklist`, `devices`. Can also be managed from the Settings UI when `SETTINGS_EDIT_VIA_UI_ENABLED=true` |
 
 ---
 
@@ -86,10 +86,13 @@ These settings **must** be configured in your `.env` file:
 | `SMTP_PORT` | integer | `587` | SMTP server port (587 for TLS, 465 for SSL, 25 for plain) |
 | `SMTP_USE_TLS` | boolean | `false` | Use STARTTLS for SMTP connection (recommended) |
 | `SMTP_USE_SSL` | boolean | `false` | Use Implicit SSL/TLS for SMTP connection (usually port 465) |
+| `SMTP_VERIFY_SSL` | string | `false` | Check the SMTP server's TLS certificate before the password is sent: `false` (also empty or unset) does not check, `auto` checks host names such as `smtp.example.com` but not `localhost`, IP addresses or single-label names such as Docker container names (a warning in the log names this setting), `true` always checks. Case-insensitive. See the note below |
 | `SMTP_USER` | string | (empty) | SMTP username (usually email address) |
 | `SMTP_PASSWORD` | string | (empty) | SMTP password |
 | `SMTP_FROM` | string | (empty) | From address for emails (defaults to SMTP user if not set) |
 | `SMTP_RELAY_MODE` | boolean | `false` | Relay mode - send emails without authentication (for local relay servers). When enabled, username and password are not required |
+
+> **Certificate check (recommended).** By default (`false`) the SMTP and IMAP passwords are sent over TLS without checking the server's certificate, as in earlier versions, so anyone able to intercept the connection could read them. Set `SMTP_VERIFY_SSL=auto` and `DMARC_IMAP_VERIFY_SSL=auto` (or Automatic under Settings) to check servers reached by a host name, or `true` (On) to check every server. Keep `false` only for a server with a self-signed certificate.
 
 ---
 
@@ -159,7 +162,7 @@ Automatically disables **sending** for a mailbox that exceeds a hard outbound li
 | Variable | Type | Default | Description |
 |----------|------|---------|-------------|
 | `SMTP_ABUSE_ENABLED` | boolean | `false` | Enable automatic SMTP blocking |
-| `SMTP_ABUSE_THRESHOLD` | integer | `100` | Outbound messages a mailbox may send within the rolling window before SMTP is disabled |
+| `SMTP_ABUSE_THRESHOLD` | integer | `100` | Outbound messages a mailbox may send within the rolling window before SMTP is disabled. Only mail sent after logging in (authenticated SMTP) counts |
 | `SMTP_ABUSE_WINDOW_MINUTES` | integer | `60` | Length of the rolling window in minutes |
 | `SMTP_ABUSE_REVOKE_APP_PASSWORDS` | boolean | `true` | Also revoke the mailbox's app passwords when blocking (a compromised mailbox usually sends via an app password) |
 | `SMTP_ABUSE_UNBLOCK_GRACE_MINUTES` | integer | `60` | After an operator re-enables SMTP, do not auto-block that mailbox again for this many minutes. Prevents the mailbox from being re-blocked immediately while old messages are still inside the rolling window |
@@ -206,10 +209,10 @@ Which sending IPs must pass each domain's SPF record on the Domains page. With a
 
 | Variable | Type | Default | Description |
 |----------|------|---------|-------------|
-| `DMARC_RETENTION_DAYS` | integer | `60` | DMARC reports retention in days |
-| `DMARC_MANUAL_UPLOAD_ENABLED` | boolean | `true` | Allow manual upload of DMARC reports via UI |
-| `DMARC_ALLOW_REPORT_DELETE` | boolean | `false` | Allow deleting DMARC/TLS reports from the UI |
-| `DMARC_ERROR_EMAIL` | string | (empty) | Email address for DMARC error notifications (defaults to `ADMIN_EMAIL` if not set) |
+| `DMARC_RETENTION_DAYS` | integer | `60` | How many days DMARC and TLS reports are kept |
+| `DMARC_MANUAL_UPLOAD_ENABLED` | boolean | `true` | Allow uploading DMARC and TLS reports by hand in the UI |
+| `DMARC_ALLOW_REPORT_DELETE` | boolean | `false` | Allow deleting DMARC and TLS reports from the UI |
+| `DMARC_ERROR_EMAIL` | string | (empty) | Email address for errors while importing DMARC and TLS reports (defaults to `ADMIN_EMAIL` if not set) |
 
 ### DMARC Insights (Policy Recommendations)
 
@@ -223,17 +226,20 @@ Turns collected DMARC report data into advice: when a domain's pass rate and vol
 
 > Read-only: this feature never changes DNS records - it only shows recommendations on the DMARC & TLS page.
 
-### DMARC IMAP Auto-Import Configuration
+### DMARC & TLS IMAP Auto-Import Configuration
+
+One mailbox receives both kinds of report: point the `rua=` of your DMARC and TLS-RPT records at it. The variable names keep the `DMARC_IMAP_` prefix.
 
 | Variable | Type | Default | Description |
 |----------|------|---------|-------------|
-| `DMARC_IMAP_ENABLED` | boolean | `false` | Enable automatic DMARC report import from IMAP |
+| `DMARC_IMAP_ENABLED` | boolean | `false` | Import DMARC and TLS reports automatically from IMAP |
 | `DMARC_IMAP_HOST` | string | (empty) | IMAP server hostname (e.g., `imap.gmail.com`) |
 | `DMARC_IMAP_PORT` | integer | `993` | IMAP server port (993 for SSL, 143 for non-SSL) |
 | `DMARC_IMAP_USE_SSL` | boolean | `true` | Use SSL/TLS for IMAP connection |
+| `DMARC_IMAP_VERIFY_SSL` | string | `false` | Check the IMAP server's TLS certificate before the password is sent. Same values as `SMTP_VERIFY_SSL`: `false` (default) does not check, `auto` checks host names but not `localhost`, IP addresses or container names, `true` always checks |
 | `DMARC_IMAP_USER` | string | (empty) | IMAP username (email address) |
 | `DMARC_IMAP_PASSWORD` | string | (empty) | IMAP password |
-| `DMARC_IMAP_FOLDER` | string | `INBOX` | IMAP folder to scan for DMARC reports |
+| `DMARC_IMAP_FOLDER` | string | `INBOX` | IMAP folder to scan for DMARC and TLS reports |
 | `DMARC_IMAP_DELETE_AFTER` | boolean | `true` | Delete emails after successful processing |
 | `DMARC_IMAP_INTERVAL` | integer | `3600` | Interval between IMAP syncs in seconds (default: 3600 = 1 hour) |
 | `DMARC_IMAP_RUN_ON_STARTUP` | boolean | `true` | Run IMAP sync once on application startup |
@@ -263,13 +269,25 @@ Turns collected DMARC report data into advice: when a domain's pass rate and vol
 
 Settings for the background raw log collector that powers the Logs page. Logs are fetched from mailcow services and stored in a dedicated database table, then streamed to the UI via WebSocket.
 
+Other pages read some services from the same table, so those are collected whatever these settings are, even with the Logs page turned off: `dovecot` (Sieve and delivery results in message details, and the Security login alert), `ratelimited` (Rate Limits) and `sogo` (Devices). Each is collected only while its page is on. The Logs page shows only the services in `RAW_LOGS_SERVICES`.
+
 | Variable | Type | Default | Description |
 |----------|------|---------|-------------|
-| `RAW_LOGS_ENABLED` | boolean | `true` | Enable background raw log collection for the Logs page. When disabled, no logs are fetched and the Logs page shows historical data only |
+| `RAW_LOGS_ENABLED` | boolean | `true` | Collect `RAW_LOGS_SERVICES` for the Logs page. When disabled, the Logs page shows historical data only; the services other pages read are still collected |
 | `RAW_LOGS_FETCH_INTERVAL` | integer | `20` | Seconds between raw log fetch cycles. Lower = more real-time, higher = less API load |
 | `RAW_LOGS_FETCH_COUNT` | integer | `1000` | Number of log entries to fetch per service per cycle. Higher values catch more logs but increase API load |
 | `RAW_LOGS_RETENTION_DAYS` | integer | `2` | Days to keep raw logs in the database. Older logs are automatically deleted daily at 3:00 AM |
 | `RAW_LOGS_SERVICES` | string | `all` | Which mailcow services to collect logs from. Use `all` for all 10 services, or comma-separated list: `postfix,dovecot,sogo,api`. Available: `acme`, `api`, `autodiscover`, `dovecot`, `netfilter`, `postfix`, `ratelimited`, `rspamd-history`, `sogo`, `watchdog` |
+
+---
+
+## Devices (ActiveSync)
+
+The Devices page lists the phones and tablets that sync over ActiveSync. It reads the SOGo log through the mailcow API every minute, independent of the raw log settings above.
+
+| Variable | Type | Default | Description |
+|----------|------|---------|-------------|
+| `EAS_DEVICES_RETENTION_DAYS` | integer | `90` | Days to keep a device that stopped syncing. `0` keeps every device. Removed daily at 3:30 AM |
 
 ---
 
@@ -338,16 +356,23 @@ Settings for the automatic quarantine rule processing feature. When rules are de
 
 | Variable | Type | Default | Description |
 |----------|------|---------|-------------|
-| `AUTH_MAX_FAILURE_CLIENTS` | integer | `10000` | Maximum client addresses tracked for failed Basic Auth attempts per process. Must be positive. At capacity, Basic Auth from untracked addresses receives 429 before credential verification; existing sessions remain usable. Expired counters are reclaimed automatically. |
+| `AUTH_MAX_FAILURE_CLIENTS` | integer | `10000` | Maximum clients tracked for failed Basic Auth attempts per process (an IPv4 address or an IPv6 /64 network each). Must be positive. A full table never refuses a correct password: expired counters are reclaimed first, and otherwise the client whose last failed attempt is oldest is dropped to make room for a new one. Existing sessions remain usable. |
 | `SESSION_MAX_ENTRIES` | integer | `50` | Maximum live Basic Auth and OAuth2 sessions per process. Must be positive. New sessions are refused at capacity until a session expires or is logged out. Existing sessions are never evicted. |
 | `BASIC_AUTH_ENABLED` | boolean | `false` | Enable Basic HTTP authentication. When enabled, ALL pages and API endpoints require Basic Auth. If both `BASIC_AUTH_ENABLED` and `OAUTH2_ENABLED` are true, both methods are available |
 | `AUTH_USERNAME` | string | `admin` | Basic auth username |
 | `AUTH_PASSWORD` | string | (empty) | Basic auth password (required if `BASIC_AUTH_ENABLED=true` or `AUTH_ENABLED=true`). ⚠️ **WARNING: Use a strong password in production!** |
 
+Changing who can sign in from the Settings page (the Basic Auth username or
+password, turning Basic Auth or OAuth2 on or off, the OAuth2 provider addresses,
+client ID or secret, or `SESSION_SECRET_KEY`) signs out every existing session.
+The person who saved the change stays signed in.
+
 ### Login attempt limits and reverse proxies
 
-Basic Auth allows 10 failed attempts per client address within 15 minutes. The
-same limit applies to password checks on `/api/info` and protected API endpoints.
+Basic Auth allows 10 failed attempts per client address within 15 minutes. IPv6
+clients are counted per /64 network, because a single host usually holds a whole
+/64. The same limit applies to password checks on `/api/info` and protected API
+endpoints.
 Further attempts return HTTP 429 with `Retry-After`. Public login information
 without credentials and already signed-in sessions remain available.
 
@@ -388,12 +413,17 @@ SameSite=Lax cookie. Complete the login within ten minutes in the same browser a
 on the same application hostname as `OAUTH2_REDIRECT_URI`. Concurrent tabs are
 supported. If the flow expires, cookies are blocked, or the application restarts,
 start again from the login page. Callbacks are single-use, including provider
-errors. Pending flows are capped at 1,024 per process; expired entries are removed
-on the next login or callback. Existing signed-in sessions are unaffected.
+errors. Starting a login keeps nothing on the server (the login state is signed
+with the session secret), so no number of started logins can block others from
+signing in. Existing signed-in sessions are unaffected.
 
 No new environment settings are required. The temporary cookie uses the same
 HTTP/HTTPS policy as the session cookie, including deployments behind a reverse
 proxy. Proxies must preserve cookies and the original request scheme.
+
+Every account your provider lets sign in gets full access to the dashboard. The
+app has no list of allowed users of its own, so restrict who may use this
+application in the provider. See [OAuth2_Configuration.md](OAuth2_Configuration.md#overview).
 
 | Variable | Type | Default | Description |
 |----------|------|---------|-------------|
@@ -411,6 +441,28 @@ proxy. Proxies must preserve cookies and the original request scheme.
 | `SESSION_SECRET_KEY` | string | (empty) | Secret key for signing session cookies. **REQUIRED if `OAUTH2_ENABLED=true`**. Also used for Basic Auth logins since 2.7.1: without it a new key is generated on every start, so restarting the container signs everyone out and they log in again. Generate a random secret: `openssl rand -hex 32`. ⚠️ **WARNING: Use a strong random secret in production!** |
 | `SESSION_EXPIRY_HOURS` | integer | `24` | Session expiration time in hours |
 
+### Cross-site requests
+
+The web interface is served from the same address as the API, so it needs no
+cross-origin access. Requests that change something (POST, PUT, PATCH, DELETE)
+and the Live Logs WebSocket are refused with HTTP 403 when the browser says they
+came from a page on another site, whether or not authentication is enabled. This
+stops a web page on another site from using a browser on your network to act on
+mailcow. Only the host name and port are compared, not `http`/`https`, so a TLS
+reverse proxy in front of the app needs no change. Requests without an `Origin`
+or `Referer` header, such as `curl` or scripts, are not affected.
+
+The check compares the browser's address with the `Host` header, or with
+`X-Forwarded-Host` when the proxy sends it. A proxy that replaces `Host` with its
+own upstream address (nginx does this when `proxy_set_header Host` is missing)
+must pass the original one; every recipe in [Reverse_Proxy.md](Reverse_Proxy.md)
+already does. Otherwise, list the address you open the dashboard at in
+`CORS_ALLOWED_ORIGINS`.
+
+| Variable | Type | Default | Description |
+|----------|------|---------|-------------|
+| `CORS_ALLOWED_ORIGINS` | string | (empty) | Comma-separated exact origins, such as `https://dashboard.example.com`, that may call the API from another site using the signed-in session. Empty means same-origin only, which is all the web interface needs. Wildcards are ignored. Origins listed here also pass the cross-site check above. ENV only; restart the app container after changing it. |
+
 ---
 
 ## Configuration Priority
@@ -422,6 +474,12 @@ When `SETTINGS_EDIT_VIA_UI_ENABLED=true`, configuration is resolved in this orde
 3. **ENV** (environment variables — **always win** when set)
 
 So: ENV overrides DB, and DB overrides defaults. If an environment variable is explicitly set, it always takes precedence over the value stored in the database. This prevents lockout: if you make a configuration mistake in the UI (e.g., wrong OIDC URL or password typo), you can fix it by setting the correct value in your `.env` / `docker-compose.yml` and restarting.
+
+If the settings stored in the database cannot be read, the app keeps the
+settings it already has instead of falling back to the ENV values alone (which
+could turn off authentication that was enabled from the web UI). The request
+that needed them fails, and at startup the app stops with an error instead of
+starting; it starts normally once the database answers again.
 
 ---
 
@@ -435,6 +493,7 @@ The following settings **must** remain in the `.env` file and cannot be changed 
 - `POSTGRES_PASSWORD`
 - `POSTGRES_DB`
 - `SETTINGS_EDIT_VIA_UI_ENABLED`
+- `CORS_ALLOWED_ORIGINS`
 
 All other settings can be managed from the Settings tab in the web interface when `SETTINGS_EDIT_VIA_UI_ENABLED=true`.
 

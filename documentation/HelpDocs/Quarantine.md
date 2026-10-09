@@ -69,6 +69,8 @@ Click the **Rule** button next to any quarantine email. The modal opens pre-fill
 | **Contains** | Value is found anywhere in the field (case-insensitive) | `invoice` matches "Your invoice is ready" |
 | **Regex** | Full regular expression pattern (advanced) | `.*\.(ru|cn)$` matches Russian/Chinese domains |
 
+Contains and Regex rules look at the first 1000 characters of the field. A regex that repeats a group which itself repeats (nested repetition, such as `(a+)+`) is refused when you save it, because it can take a very long time on some messages; rewrite it without the nested repetition.
+
 ### Match Types
 
 | Type | Description | Example |

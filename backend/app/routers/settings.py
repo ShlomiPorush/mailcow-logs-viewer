@@ -7,7 +7,8 @@ import logging
 import os
 import httpx
 from pydantic import ValidationError
-from fastapi import APIRouter, Depends, BackgroundTasks, HTTPException
+from fastapi import APIRouter, Depends, BackgroundTasks, HTTPException, Request, Response
+from fastapi.concurrency import run_in_threadpool
 from sqlalchemy.orm import Session
 from sqlalchemy import func, desc, text, or_
 from datetime import datetime, timezone, timedelta
@@ -19,17 +20,50 @@ from ..config import settings, EDITABLE_SETTING_KEYS, FEATURE_IDS, reload_settin
 from ..config import _get_field_annotations, get_env_locked_keys
 from ..scheduler import last_fetch_run_time, get_job_status, update_job_status, reschedule_interval_jobs, dovecot_correlation_available, cleanup_disabled_feature_data
 from ..services.settings_store import get_config_overrides_from_db, save_config_overrides_to_db, has_config_overrides_in_db, get_maxmind_validation_status, save_maxmind_validation_status, clear_maxmind_validation_status
+from ..services.settings_store import credential_fingerprint, get_credential_check_status, save_credential_check_status
 from ..services.connection_test import test_smtp_connection, test_imap_connection
 from ..services.geoip_downloader import is_license_configured, get_geoip_status
 from .domains import get_cached_server_ip
 from ..mailcow_api import mailcow_api
 from ..services.oauth2_client import oauth2_client
+from ..session import get_session_from_request, create_session, set_session_cookie, revoke_all_sessions
 
 from ..utils import format_datetime_for_api as format_datetime_utc
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+def _job_off_reason(key: str):
+    """Why a background job does not run, and the Settings section that changes it.
+
+    A job of a feature switched off is not covered: the feature itself says so.
+    Returns (reason, settings section) or None while the job can run.
+    """
+    rw = mailcow_api.has_rw_key
+    checks = {
+        'dmarc_imap_sync': [(not settings.dmarc_imap_enabled, 'IMAP import of DMARC and TLS reports is not set up', 'dmarc_imap')],
+        'update_geoip': [(not is_license_configured(), 'Needs a MaxMind Account ID and License Key', 'maxmind')],
+        'send_weekly_summary': [(not settings.enable_weekly_summary, 'The weekly summary is turned off', 'notifications')],
+        'detect_suppressions': [(not settings.suppression_enabled, 'Suppressions are turned off', 'spam_filter'),
+                                (not settings.suppression_auto_detect, 'Automatic bounce detection is turned off', 'spam_filter')],
+        'sync_suppressions': [(not settings.suppression_enabled, 'Suppressions are turned off', 'spam_filter'),
+                              (not settings.suppression_rspamd_sync, 'Syncing suppressions to Rspamd is turned off', 'spam_filter'),
+                              (not settings.is_rspamd_configured, 'Needs the Rspamd password', 'mailcow')],
+        'expire_suppressions': [(not settings.suppression_enabled, 'Suppressions are turned off', 'spam_filter')],
+        'process_quarantine_rules': [(not rw, 'Needs the Read-Write API key (MAILCOW_API_KEY_RW)', 'mailcow')],
+        'cleanup_deferred_queue': [(not settings.suppression_enabled, 'Suppressions are turned off', 'spam_filter'),
+                                   (not settings.queue_cleanup_enabled, 'Deferred queue cleanup is turned off', 'spam_filter'),
+                                   (not rw, 'Needs the Read-Write API key (MAILCOW_API_KEY_RW)', 'mailcow')],
+        'anomaly_detection': [(not settings.anomaly_detection_enabled, 'Anomaly detection is turned off', 'anomaly')],
+        'smtp_abuse': [(not settings.smtp_abuse_enabled, 'SMTP abuse protection is turned off', 'smtp_abuse'),
+                       (not rw, 'Needs the Read-Write API key (MAILCOW_API_KEY_RW)', 'mailcow')],
+    }
+    for off, reason, section in checks.get(key, []):
+        if off:
+            return reason, section
+    return None
 
 
 def _get_raw_logs_job_status(job_key: str, field: str, enabled: bool):
@@ -61,7 +95,90 @@ _SENSITIVE_SETTING_KEYS = frozenset({
 })
 MASK_PLACEHOLDER = "********"
 
+# A stored secret is only sent to the server it was entered for. Changing one of
+# these settings while keeping the masked secret would hand it to the new server,
+# so such a save has to carry the secret again.
+_SECRET_BINDINGS = {
+    "smtp_password": ("smtp_host", "smtp_port", "smtp_use_tls", "smtp_use_ssl", "smtp_user"),
+    "rspamd_password": ("rspamd_url", "mailcow_url"),  # empty rspamd_url: reached through mailcow
+    "dmarc_imap_password": ("dmarc_imap_host", "dmarc_imap_port", "dmarc_imap_use_ssl", "dmarc_imap_user"),
+    "oauth2_client_secret": ("oauth2_issuer_url", "oauth2_authorization_url", "oauth2_token_url",
+                             "oauth2_userinfo_url", "oauth2_use_oidc_discovery"),
+    "mailcow_api_key": ("mailcow_url",),
+    "mailcow_api_key_rw": ("mailcow_url",),
+}
+_SECRET_LABELS = {
+    "smtp_password": "SMTP password",
+    "rspamd_password": "Rspamd password",
+    "dmarc_imap_password": "IMAP password",
+    "oauth2_client_secret": "OAuth2 client secret",
+    "mailcow_api_key": "mailcow API key",
+    "mailcow_api_key_rw": "mailcow Read-Write API key",
+}
 
+
+def _comparable_setting(key: str, value: Any) -> Any:
+    """A setting value as the form and the effective settings both spell it.
+
+    The Settings page posts '' for an unset field and numbers may arrive as
+    strings, so None == '', 587 == '587', and a trailing slash or surrounding
+    blanks do not count as a change. Booleans compare as booleans.
+    """
+    from ..services.settings_store import _get_effective_type
+    if _get_effective_type(_get_field_annotations().get(key, str)) is bool:
+        if isinstance(value, str):
+            return value.strip().lower() in ("true", "1", "yes", "on")
+        return bool(value)
+    if value is None:
+        return ""
+    return str(value).strip().rstrip("/")
+
+
+def _reject_moved_secrets(allowed: Dict[str, Any]) -> None:
+    """Refuse to keep a stored secret when the server it is sent to changes.
+
+    Runs before the mask placeholder is stripped: a secret that is absent or
+    still masked is the stored one. ENV-set settings are skipped, because the
+    database value posted for them is ignored anyway.
+    """
+    env_locked = get_env_locked_keys()
+    reenter, from_env = [], []
+    for secret, endpoints in _SECRET_BINDINGS.items():
+        if not str(getattr(settings, secret, None) or "").strip():
+            continue  # nothing stored, nothing to hand over
+        posted = allowed.get(secret, MASK_PLACEHOLDER)
+        if posted != MASK_PLACEHOLDER and secret not in env_locked:
+            continue  # the secret is entered (or cleared) together with the change
+        moved = [k for k in endpoints
+                 if k in allowed and k not in env_locked
+                 and _comparable_setting(k, allowed[k]) != _comparable_setting(k, getattr(settings, k, None))]
+        if moved:
+            (from_env if secret in env_locked else reenter).append((secret, moved))
+    if from_env:
+        secret, moved = from_env[0]
+        raise HTTPException(status_code=400, detail=(
+            f"The {_SECRET_LABELS[secret]} is set by the {secret.upper()} environment variable, so it can only "
+            f"be sent to a different server from there. Change {', '.join(k.upper() for k in moved)} in the "
+            f"environment as well, or undo the change here."))
+    if reenter:
+        labels = [_SECRET_LABELS[secret] for secret, _ in reenter]
+        names = labels[0] if len(labels) == 1 else ", ".join(labels[:-1]) + " and " + labels[-1]
+        raise HTTPException(status_code=400, detail=(
+            f"You changed the server the {names} {'is' if len(labels) == 1 else 'are'} sent to. "
+            f"Enter the {names} again: a stored secret is only sent to the server it was entered for."))
+
+
+# Settings that decide who can sign in. A change to any of them ends every
+# session issued before it, so rotating a password evicts a stolen cookie.
+_SESSION_BOUND_SETTING_KEYS = (
+    "basic_auth_enabled", "auth_username", "auth_password",
+    "oauth2_enabled", "oauth2_issuer_url", "oauth2_authorization_url", "oauth2_token_url",
+    "oauth2_userinfo_url", "oauth2_client_id", "oauth2_client_secret", "session_secret_key",
+)
+
+
+def _session_bound_values() -> tuple:
+    return tuple(getattr(settings, key, None) for key in _SESSION_BOUND_SETTING_KEYS)
 
 
 def _effective_config_for_editable(settings_obj: Settings) -> Dict[str, Any]:
@@ -158,6 +275,10 @@ def get_settings_info(db: Session = Depends(get_db)):
         
         jobs_status = get_job_status()
 
+        # "16.4 (Debian 16.4-1.pgdg120+1)" -> "16.4"
+        server_version = db.execute(text("SHOW server_version")).scalar() or ''
+        database_version = server_version.split()[0] if server_version else None
+
         result = {
             "settings_edit_via_ui_enabled": settings.edit_settings_via_ui_enabled,
             "configuration": {
@@ -180,12 +301,16 @@ def get_settings_info(db: Session = Depends(get_db)):
                 "max_search_results": settings.max_search_results,
                 "csv_export_limit": settings.csv_export_limit,
                 "scheduler_workers": settings.scheduler_workers,
+                "rspamd_configured": settings.is_rspamd_configured,
+                "database_version": database_version,
                 "auth_enabled": settings.is_authentication_enabled,
                 "basic_auth_enabled": settings.is_basic_auth_enabled,
                 "oauth2_enabled": settings.is_oauth2_enabled,
                 "auth_username": settings.auth_username if settings.is_basic_auth_enabled else None,
                 "oauth2_provider_name": settings.oauth2_provider_name if settings.is_oauth2_enabled else None,
-                "maxmind_status": get_maxmind_validation_status(db)  # Last validated result from DB, or None if never checked
+                "maxmind_status": get_maxmind_validation_status(db),  # Last validated result from DB, or None if never checked
+                "mailcow_rw_key_status": _credential_status(db, "mailcow_rw_key"),
+                "rspamd_password_status": _credential_status(db, "rspamd_password"),
             },
             "import_status": {
                 "postfix": {
@@ -267,7 +392,7 @@ def get_settings_info(db: Session = Depends(get_db)):
                 },
                 "cleanup_dmarc_reports": {
                     "schedule": "Daily at 2:15 AM" if settings.is_feature_enabled('dmarc') else "Disabled (feature off)",
-                    "description": "Removes old DMARC and TLS reports based on DMARC retention period",
+                    "description": "Removes DMARC and TLS reports older than the retention period",
                     "retention": f"{settings.dmarc_retention_days} days",
                     "feature_disabled": not settings.is_feature_enabled('dmarc'),
                     "status": jobs_status.get('cleanup_dmarc_reports', {}).get('status', 'unknown') if settings.is_feature_enabled('dmarc') else 'disabled',
@@ -298,7 +423,7 @@ def get_settings_info(db: Session = Depends(get_db)):
                 },
                 "dmarc_imap_sync": {
                     "interval": f"{settings.dmarc_imap_interval} seconds ({settings.dmarc_imap_interval // 60} minutes)" if (settings.is_feature_enabled('dmarc') and settings.dmarc_imap_enabled) else ("Disabled (feature off)" if not settings.is_feature_enabled('dmarc') else "Disabled"),
-                    "description": "Imports DMARC reports from IMAP mailbox",
+                    "description": "Imports DMARC and TLS reports from an IMAP mailbox",
                     "enabled": settings.is_feature_enabled('dmarc') and settings.dmarc_imap_enabled,
                     "feature_disabled": not settings.is_feature_enabled('dmarc'),
                     "status": jobs_status.get('dmarc_imap_sync', {}).get('status', 'idle') if (settings.is_feature_enabled('dmarc') and settings.dmarc_imap_enabled) else 'disabled',
@@ -329,6 +454,23 @@ def get_settings_info(db: Session = Depends(get_db)):
                     "last_run": format_datetime_utc(jobs_status.get('alias_stats', {}).get('last_run')) if settings.is_feature_enabled('mailbox-stats') else None,
                     "error": jobs_status.get('alias_stats', {}).get('error') if settings.is_feature_enabled('mailbox-stats') else None
                 },
+                "eas_devices": {
+                    "interval": "1 minute" if settings.is_feature_enabled('devices') else "Disabled (feature off)",
+                    "description": "Records ActiveSync devices from the SOGo log",
+                    "feature_disabled": not settings.is_feature_enabled('devices'),
+                    "status": jobs_status.get('eas_devices', {}).get('status', 'unknown') if settings.is_feature_enabled('devices') else 'disabled',
+                    "last_run": format_datetime_utc(jobs_status.get('eas_devices', {}).get('last_run')) if settings.is_feature_enabled('devices') else None,
+                    "error": jobs_status.get('eas_devices', {}).get('error') if settings.is_feature_enabled('devices') else None
+                },
+                "cleanup_eas_devices": {
+                    "schedule": "Daily at 3:30 AM" if settings.is_feature_enabled('devices') else "Disabled (feature off)",
+                    "description": "Removes ActiveSync devices not seen within the retention period",
+                    "retention": (f"{settings.eas_devices_retention_days} days" if settings.eas_devices_retention_days > 0 else "Forever") if settings.is_feature_enabled('devices') else None,
+                    "feature_disabled": not settings.is_feature_enabled('devices'),
+                    "status": jobs_status.get('cleanup_eas_devices', {}).get('status', 'unknown') if settings.is_feature_enabled('devices') else 'disabled',
+                    "last_run": format_datetime_utc(jobs_status.get('cleanup_eas_devices', {}).get('last_run')) if settings.is_feature_enabled('devices') else None,
+                    "error": jobs_status.get('cleanup_eas_devices', {}).get('error') if settings.is_feature_enabled('devices') else None
+                },
                 "blacklist_check": {
                     "schedule": "Daily at 5 AM" if settings.is_feature_enabled('blacklist') else "Disabled (feature off)",
                     "description": "Checks monitored hosts against DNS blacklists",
@@ -354,23 +496,22 @@ def get_settings_info(db: Session = Depends(get_db)):
                     "error": jobs_status.get('send_weekly_summary', {}).get('error') if settings.enable_weekly_summary else None
                 },
                 "fetch_raw_logs": {
-                    "interval": f"{settings.raw_logs_fetch_interval} seconds" if (settings.is_feature_enabled('logs') and settings.raw_logs_enabled) else ("Disabled (feature off)" if not settings.is_feature_enabled('logs') else "Disabled"),
-                    "description": "Fetches raw logs from mailcow services for the Logs page",
-                    "enabled": settings.is_feature_enabled('logs') and settings.raw_logs_enabled,
-                    "feature_disabled": not settings.is_feature_enabled('logs'),
-                    "status": _get_raw_logs_job_status('fetch_raw_logs', 'status', settings.is_feature_enabled('logs') and settings.raw_logs_enabled),
-                    "last_run": _get_raw_logs_job_status('fetch_raw_logs', 'last_run', settings.is_feature_enabled('logs') and settings.raw_logs_enabled),
-                    "error": _get_raw_logs_job_status('fetch_raw_logs', 'error', settings.is_feature_enabled('logs') and settings.raw_logs_enabled)
+                    "interval": f"{settings.raw_logs_fetch_interval} seconds",
+                    "description": "Fetches raw logs from mailcow services for the Logs page and the pages that read them",
+                    "services": ", ".join(settings.raw_logs_collected_list),
+                    "enabled": True,
+                    "status": _get_raw_logs_job_status('fetch_raw_logs', 'status', True),
+                    "last_run": _get_raw_logs_job_status('fetch_raw_logs', 'last_run', True),
+                    "error": _get_raw_logs_job_status('fetch_raw_logs', 'error', True)
                 },
                 "cleanup_raw_logs": {
-                    "schedule": "Daily at 3:00 AM" if (settings.is_feature_enabled('logs') and settings.raw_logs_enabled) else ("Disabled (feature off)" if not settings.is_feature_enabled('logs') else "Disabled"),
+                    "schedule": "Daily at 3:00 AM",
                     "description": "Removes raw logs older than retention period",
-                    "retention": f"{settings.raw_logs_retention_days} days" if (settings.is_feature_enabled('logs') and settings.raw_logs_enabled) else None,
-                    "enabled": settings.is_feature_enabled('logs') and settings.raw_logs_enabled,
-                    "feature_disabled": not settings.is_feature_enabled('logs'),
-                    "status": _get_raw_logs_job_status('cleanup_raw_logs', 'status', settings.is_feature_enabled('logs') and settings.raw_logs_enabled),
-                    "last_run": _get_raw_logs_job_status('cleanup_raw_logs', 'last_run', settings.is_feature_enabled('logs') and settings.raw_logs_enabled),
-                    "error": _get_raw_logs_job_status('cleanup_raw_logs', 'error', settings.is_feature_enabled('logs') and settings.raw_logs_enabled)
+                    "retention": f"{settings.raw_logs_retention_days} days",
+                    "enabled": True,
+                    "status": _get_raw_logs_job_status('cleanup_raw_logs', 'status', True),
+                    "last_run": _get_raw_logs_job_status('cleanup_raw_logs', 'last_run', True),
+                    "error": _get_raw_logs_job_status('cleanup_raw_logs', 'error', True)
                 },
                 "detect_suppressions": {
                     "interval": "5 minutes" if (settings.is_feature_enabled('spam-filter') and settings.suppression_enabled) else ("Disabled (feature off)" if not settings.is_feature_enabled('spam-filter') else "Disabled (suppression off)"),
@@ -432,6 +573,14 @@ def get_settings_info(db: Session = Depends(get_db)):
                     "status": jobs_status.get('smtp_abuse', {}).get('status', 'idle') if (settings.smtp_abuse_enabled and mailcow_api.has_rw_key) else 'disabled',
                     "last_run": format_datetime_utc(jobs_status.get('smtp_abuse', {}).get('last_run')) if (settings.smtp_abuse_enabled and mailcow_api.has_rw_key) else None,
                     "error": jobs_status.get('smtp_abuse', {}).get('error') if (settings.smtp_abuse_enabled and mailcow_api.has_rw_key) else None
+                },
+                "protection_rules": {
+                    "interval": "After each log fetch" if settings.is_feature_enabled('netfilter') else "Disabled (Security feature off)",
+                    "description": "Notes the addresses the protection rules would ban (watch mode)",
+                    "enabled": settings.is_feature_enabled('netfilter'),
+                    "status": jobs_status.get('protection_rules', {}).get('status', 'idle') if settings.is_feature_enabled('netfilter') else 'disabled',
+                    "last_run": format_datetime_utc(jobs_status.get('protection_rules', {}).get('last_run')) if settings.is_feature_enabled('netfilter') else None,
+                    "error": jobs_status.get('protection_rules', {}).get('error') if settings.is_feature_enabled('netfilter') else None
                 }
             },
             "smtp_configuration": {
@@ -474,6 +623,13 @@ def get_settings_info(db: Session = Depends(get_db)):
                 for corr in recent_incomplete
             ]
         }
+        # A job that cannot run says why, and where to change it
+        for key, job in result.get("background_jobs", {}).items():
+            off = None if job.get("feature_disabled") else _job_off_reason(key)
+            if off:
+                job["disabled_reason"], job["settings_section"] = off
+        # Raw log services other pages read, collected whatever the Logs page settings are
+        result["raw_logs_required"] = settings.raw_logs_required
         # When UI editing is enabled, include full editable config and migration status
         if settings.edit_settings_via_ui_enabled:
             result["editable_config"] = _effective_config_for_editable(settings)
@@ -515,7 +671,8 @@ def get_editable_settings(db: Session = Depends(get_db)):
 
 
 @router.put("/settings")
-def update_settings(body: Dict[str, Any], db: Session = Depends(get_db)):
+def update_settings(body: Dict[str, Any], request: Request = None, response: Response = None,
+                    db: Session = Depends(get_db)):
     """
     Update app settings from UI. Only allowed when SETTINGS_EDIT_VIA_UI_ENABLED is true.
     Accepts only keys in EDITABLE_SETTING_KEYS. Secrets: send empty string to leave unchanged.
@@ -531,6 +688,7 @@ def update_settings(body: Dict[str, Any], db: Session = Depends(get_db)):
         if any(f not in FEATURE_IDS for f in features):
             raise HTTPException(status_code=400, detail="disabled_features accepts only known feature names.")
         allowed["disabled_features"] = ",".join(features)
+    _reject_moved_secrets(allowed)
     # For sensitive keys, mask placeholder means "do not change" - omit from payload
     # Empty string means "clear this value" and should be kept
     for sk in _SENSITIVE_SETTING_KEYS:
@@ -632,8 +790,16 @@ def update_settings(body: Dict[str, Any], db: Session = Depends(get_db)):
     except Exception as e:
         raise HTTPException(status_code=400, detail="Invalid settings. Check the submitted values.") from e
     prev_sync_sources = (settings.blacklist_source_transports, settings.blacklist_source_relayhosts)
+    prev_credentials = {name: check["fingerprint"]() for name, check in _CREDENTIAL_CHECKS.items()}
+    prev_sign_in = _session_bound_values()
+    operator_session = get_session_from_request(request) if request is not None else None
     save_config_overrides_to_db(db, allowed)
     reload_settings(db)
+    if _session_bound_values() != prev_sign_in:
+        revoke_all_sessions()
+        # Keep the operator who saved signed in, with a session issued under the new settings
+        if operator_session and settings.is_authentication_enabled and response is not None:
+            set_session_cookie(response, create_session(operator_session["user_info"]), request)
     # A feature switched off here should drop its data now, not at the next restart
     cleanup_disabled_feature_data(db)
     mailcow_api.reload_config()
@@ -661,7 +827,11 @@ def update_settings(body: Dict[str, Any], db: Session = Depends(get_db)):
     if 'maxmind_license_key' in allowed or 'maxmind_account_id' in allowed:
         clear_maxmind_validation_status(db)
     
-    return {"settings_edit_via_ui_enabled": True, "settings_migrated": True, "configuration": _effective_config_for_editable(settings)}
+    # The page checks a new or changed Read-Write key or Rspamd password right after saving
+    changed = {f"{name}_changed": check["configured"]() and prev_credentials[name] != check["fingerprint"]()
+               for name, check in _CREDENTIAL_CHECKS.items()}
+    return {"settings_edit_via_ui_enabled": True, "settings_migrated": True, "configuration": _effective_config_for_editable(settings),
+            **changed}
 
 
 # Feature → tables mapping for data purge
@@ -674,6 +844,7 @@ _FEATURE_TABLES = {
     'blacklist': ['blacklist_checks', 'monitored_hosts'],
     'spam-filter': ['spam_suppressions'],
     'quarantine': ['quarantine_rule_logs', 'quarantine_rules'],
+    'devices': ['eas_devices'],
 }
 
 
@@ -703,6 +874,12 @@ def purge_feature_data(body: Dict[str, Any], db: Session = Depends(get_db)):
         for table_name in tables:
             if not _TABLE_NAME_RE.match(table_name):
                 raise ValueError(f"Invalid table name: {table_name}")
+            if table_name == 'raw_service_logs':
+                # Other pages read some services from this table; only the rows
+                # nothing collects any more go
+                from ..raw_logs_worker import delete_uncollected_raw_logs
+                deleted_counts[table_name] = delete_uncollected_raw_logs(db)
+                continue
             # nosemgrep: python.sqlalchemy.security.audit.avoid-sqlalchemy-text.avoid-sqlalchemy-text
             count = db.execute(text(f"SELECT COUNT(*) FROM {table_name}")).scalar() or 0
             if count > 0:
@@ -857,16 +1034,6 @@ def _persist_maxmind_validation_worker(result: Dict[str, Any]) -> None:
 
 
 
-def _run_async_in_background(coro_func):
-    """Helper to run an async function from BackgroundTasks (which expects sync callables)."""
-    import asyncio
-    loop = asyncio.new_event_loop()
-    try:
-        loop.run_until_complete(coro_func())
-    finally:
-        loop.close()
-
-
 @router.get("/settings/geoip/status")
 def get_geoip_detailed_status():
     """
@@ -907,7 +1074,8 @@ def trigger_geoip_download(background_tasks: BackgroundTasks):
     
     logger.info("Manual GeoIP download triggered from setup modal")
     from ..scheduler import update_geoip_database
-    background_tasks.add_task(_run_async_in_background, update_geoip_database)
+    # Async background tasks run on the application loop, like the scheduled job
+    background_tasks.add_task(update_geoip_database)
     return {"status": "started", "message": "GeoIP download started in background"}
 
 
@@ -921,6 +1089,65 @@ async def validate_maxmind_license_endpoint():
     result = await validate_maxmind_license()
     await asyncio.to_thread(_persist_maxmind_validation_worker, result)
     return result
+
+
+# Credentials checked against the server they belong to, changing nothing there.
+# The fingerprint covers the address and the secret, so a stored result is
+# dropped as soon as either changes, through the UI or the environment.
+_CREDENTIAL_CHECKS = {
+    "mailcow_rw_key": {
+        "configured": lambda: mailcow_api.has_rw_key,
+        "fingerprint": lambda: credential_fingerprint(settings.mailcow_url, settings.mailcow_api_key_rw),
+        "check": lambda: mailcow_api.check_rw_key(),
+    },
+    "rspamd_password": {
+        "configured": lambda: settings.is_rspamd_configured,
+        "fingerprint": lambda: credential_fingerprint(settings.mailcow_url, settings.rspamd_url, settings.rspamd_password),
+        "check": lambda: mailcow_api.check_rspamd_password(),
+    },
+}
+
+
+def _credential_status(db: Session, name: str) -> Optional[Dict[str, Any]]:
+    """Last check of a credential for its current address and secret; None if not checked yet."""
+    check = _CREDENTIAL_CHECKS[name]
+    if not check["configured"]():
+        return {"configured": False, "valid": False, "error": None}
+    return get_credential_check_status(db, name, check["fingerprint"]())
+
+
+def _persist_credential_status_worker(name: str, result: Dict[str, Any], fingerprint: str) -> None:
+    with get_db_context() as db:
+        save_credential_check_status(db, name, result, fingerprint)
+
+
+async def _validate_credential(name: str) -> Dict[str, Any]:
+    check = _CREDENTIAL_CHECKS[name]
+    fingerprint = check["fingerprint"]()
+    result = await check["check"]()
+    if result["configured"]:
+        await asyncio.to_thread(_persist_credential_status_worker, name, result, fingerprint)
+    return result
+
+
+@router.post("/settings/mailcow/rw-key/validate")
+async def validate_mailcow_rw_key_endpoint():
+    """
+    Check that mailcow accepts the Read-Write API key for writes, changing nothing.
+    Called after the key or URL is saved, and when the user clicks 'Validate'.
+    Persists the result to DB.
+    """
+    return await _validate_credential("mailcow_rw_key")
+
+
+@router.post("/settings/rspamd/password/validate")
+async def validate_rspamd_password_endpoint():
+    """
+    Check that Rspamd accepts the password, the way its web UI logs in.
+    Called after the password or the Rspamd or mailcow URL is saved, and when
+    the user clicks 'Validate'. Persists the result to DB.
+    """
+    return await _validate_credential("rspamd_password")
 
 
 @router.post("/settings/geoip/validate")
@@ -1005,7 +1232,10 @@ def trigger_job(job_name: str, background_tasks: BackgroundTasks):
         process_quarantine_rules_job,
         cleanup_deferred_queue_job,
         anomaly_detection_job,
-        smtp_abuse_job
+        smtp_abuse_job,
+        run_protection_rules,
+        update_eas_devices,
+        cleanup_eas_devices
     )
     from ..raw_logs_worker import fetch_raw_service_logs, cleanup_raw_service_logs
     
@@ -1037,6 +1267,9 @@ def trigger_job(job_name: str, background_tasks: BackgroundTasks):
         'cleanup_deferred_queue': ('cleanup_deferred_queue', cleanup_deferred_queue_job, False),
         'anomaly_detection': ('anomaly_detection', anomaly_detection_job, False),
         'smtp_abuse': ('smtp_abuse', smtp_abuse_job, False),
+        'protection_rules': ('protection_rules', run_protection_rules, False),
+        'eas_devices': ('eas_devices', update_eas_devices, False),
+        'cleanup_eas_devices': ('cleanup_eas_devices', cleanup_eas_devices, False),
         'fetch_raw_logs': ('fetch_raw_logs', fetch_raw_service_logs, True),
         'cleanup_raw_logs': ('cleanup_raw_logs', cleanup_raw_service_logs, True),
     }
@@ -1059,20 +1292,15 @@ def trigger_job(job_name: str, background_tasks: BackgroundTasks):
     if not self_managing:
         update_job_status(status_key, 'running')
     
-    # Run job in background
-    def run_job_wrapper():
+    # Run job in background. An async wrapper runs on the application loop,
+    # the same loop APScheduler uses, so the job shares its asyncio locks and
+    # HTTP clients with the scheduled runs (a private loop broke the locks).
+    async def run_job_wrapper():
         try:
-            import asyncio
-            # Handle both sync and async functions
             if asyncio.iscoroutinefunction(job_func):
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                try:
-                    loop.run_until_complete(job_func())
-                finally:
-                    loop.close()
+                await job_func()
             else:
-                job_func()
+                await run_in_threadpool(job_func)
             # Self-managing jobs update their own status internally
             if not self_managing:
                 update_job_status(status_key, 'success')

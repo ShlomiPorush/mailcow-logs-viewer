@@ -3,6 +3,7 @@ DMARC Notification Module
 Uses the global SMTP service to send DMARC-specific notifications
 """
 import logging
+from html import escape
 from typing import List, Dict
 from datetime import datetime
 
@@ -35,7 +36,7 @@ def send_dmarc_error_notification(failed_emails: List[Dict], sync_id: int) -> bo
         logger.warning("No notification channel configured (DMARC_ERROR_EMAIL/ADMIN_EMAIL or webhook)")
         return False
 
-    subject = f"DMARC Processing Errors - Sync #{sync_id}"
+    subject = f"DMARC & TLS Report Import Errors - Sync #{sync_id}"
     text_content = _create_text_content(failed_emails, sync_id)
     html_content = _create_html_content(failed_emails, sync_id)
 
@@ -127,7 +128,7 @@ def _create_html_content(failed_emails: List[Dict], sync_id: int) -> str:
 <body>
     <div class="header">
         <h2>⚠️ DMARC Processing Errors</h2>
-        <p>Sync #{sync_id} - {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')}</p>
+        <p>Sync #{escape(str(sync_id))} - {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')}</p>
     </div>
     
     <div class="content">
@@ -137,13 +138,19 @@ def _create_html_content(failed_emails: List[Dict], sync_id: int) -> str:
 """
     
     for i, email_data in enumerate(failed_emails, 1):
+        # Every value comes from inbound mail (or describes it) - anyone who
+        # can mail the rua address chooses the Subject and Message-ID.
+        email_id = escape(str(email_data.get('email_id', 'unknown')))
+        message_id = escape(str(email_data.get('message_id', 'unknown')))
+        subject = escape(str(email_data.get('subject', 'unknown')))
+        error = escape(str(email_data.get('error', 'unknown')))
         html += f"""
             <div class="error-item">
                 <div><span class="label">#{i}</span></div>
-                <div><span class="label">Email ID:</span><span class="value">{email_data.get('email_id', 'unknown')}</span></div>
-                <div><span class="label">Message-ID:</span><span class="value">{email_data.get('message_id', 'unknown')}</span></div>
-                <div><span class="label">Subject:</span><span class="value">{email_data.get('subject', 'unknown')}</span></div>
-                <div class="error"><span class="label">Error:</span> {email_data.get('error', 'unknown')}</div>
+                <div><span class="label">Email ID:</span><span class="value">{email_id}</span></div>
+                <div><span class="label">Message-ID:</span><span class="value">{message_id}</span></div>
+                <div><span class="label">Subject:</span><span class="value">{subject}</span></div>
+                <div class="error"><span class="label">Error:</span> {error}</div>
             </div>
 """
     

@@ -230,7 +230,14 @@ async def _resolve_with_fallback(query: str, rdtype: str, timeout: int, udp_serv
             # Check for NXDOMAIN in DoH response
             if response.rcode() == dns.rcode.NXDOMAIN:
                 raise dns.resolver.NXDOMAIN()
-            
+
+            # SERVFAIL, REFUSED and the like mean the lookup failed, not that
+            # the record is missing (issue #360): try the next endpoint
+            if response.rcode() != dns.rcode.NOERROR:
+                last_error = f"{doh_url} answered {dns.rcode.to_text(response.rcode())}"
+                logger.debug(f"DoH failed ({doh_url}) for {query}: {last_error}")
+                continue
+
             # Check for no answer
             answer_section = response.answer
             if not answer_section:

@@ -3,7 +3,7 @@
 # on pushes to main: main only changes through merged PRs and releases,
 # and both of those are already covered.
 #
-# Three jobs, each catching a different class of failure:
+# Four jobs, each catching a different class of failure:
 #   backend-tests   unit + database tests against a real PostgreSQL. A test
 #                   that skips for lack of a database is treated as a failure,
 #                   so the suite cannot quietly go green by skipping.
@@ -12,6 +12,8 @@
 #                   health, SPA, static assets, Alembic head, and the manual
 #                   job runner accepting every job the Status page lists
 #                   (.github/scripts/smoke.sh).
+#   demo-smoke      builds the public demo image and boots it with nothing but
+#                   database settings (.github/scripts/demo_smoke.sh).
 name: CI
 
 on:
@@ -60,10 +62,12 @@ jobs:
         with:
           python-version: "3.11"
           cache: pip
-          cache-dependency-path: backend/requirements.txt
+          cache-dependency-path: |
+            backend/requirements.txt
+            backend/requirements-dev.txt
 
       - name: Install dependencies
-        run: pip install -r backend/requirements.txt
+        run: pip install -r backend/requirements-dev.txt
 
       - name: Run tests
         working-directory: backend
@@ -97,6 +101,19 @@ jobs:
           done
           node --test .github/tests/*.test.cjs
 
+      # The Tailwind utilities are compiled once into a committed file instead of
+      # in the browser; a class added to the markup without a rebuild would have
+      # no style, so the build must reproduce the committed file exactly.
+      - name: Utility CSS matches the markup
+        run: |
+          npm install --silent --no-save --prefix /tmp/tw tailwindcss@3.4.17
+          printf '@tailwind base;\n@tailwind components;\n@tailwind utilities;\n' > /tmp/in.css
+          /tmp/tw/node_modules/.bin/tailwindcss -c .github/tailwind/tailwind.config.cjs -i /tmp/in.css -o /tmp/utilities.css --minify
+          if ! cmp -s /tmp/utilities.css frontend/assets/css/utilities.css; then
+            echo "::error::frontend/assets/css/utilities.css is out of date; run: bash .github/scripts/build-utilities-css.sh"
+            exit 1
+          fi
+
   image-smoke:
     name: Image build and smoke test
     runs-on: ubuntu-latest
@@ -104,16 +121,44 @@ jobs:
       - uses: actions/checkout@v5
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
 
       - name: Build image (amd64, not pushed)
-        uses: docker/build-push-action@v7
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
         with:
           context: .
           load: true
+          target: app
           tags: mailcow-logs-viewer:ci
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      - name: The regular image does not contain the demo package
+        run: docker run --rm --entrypoint sh mailcow-logs-viewer:ci -c 'test ! -e /app/demo'
+
       - name: Boot the image against PostgreSQL and exercise it
         run: bash .github/scripts/smoke.sh mailcow-logs-viewer:ci
+
+  demo-smoke:
+    name: Demo image build and smoke test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
+
+      - name: Build demo image (amd64, not pushed)
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
+        with:
+          context: .
+          load: true
+          target: demo
+          tags: mailcow-logs-viewer:ci-demo
+          cache-from: |
+            type=gha
+            type=gha,scope=demo
+          cache-to: type=gha,mode=max,scope=demo
+
+      - name: Boot the demo image and check it is cut off from the network
+        run: bash .github/scripts/demo_smoke.sh mailcow-logs-viewer:ci-demo

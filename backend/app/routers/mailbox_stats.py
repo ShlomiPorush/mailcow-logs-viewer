@@ -77,7 +77,8 @@ def format_bytes(bytes_value) -> str:
     
     for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
         if abs(bytes_value) < 1024.0:
-            return f"{bytes_value:.1f} {unit}"
+            # Whole bytes have no fraction ("0 B", like the Domains page)
+            return f"{bytes_value:.0f} {unit}" if unit == 'B' else f"{bytes_value:.1f} {unit}"
         bytes_value /= 1024.0
     return f"{bytes_value:.1f} PB"
 

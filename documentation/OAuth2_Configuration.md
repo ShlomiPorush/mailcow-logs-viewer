@@ -25,6 +25,15 @@ mailcow-logs-viewer supports OAuth2/OIDC authentication with any standard OAuth2
 - **OIDC Discovery** (recommended) - Automatically discovers endpoints from the provider
 - **Manual Configuration** - Manually specify all endpoints (for providers without discovery support)
 
+The login always uses PKCE (RFC 7636, `S256`): the app sends a code challenge with the authorization request and the matching verifier when it exchanges the code, so an intercepted authorization code is useless on its own. There is nothing to configure. Google, Microsoft, Authentik and Keycloak check it; the mailcow OAuth2 server does not support PKCE and ignores the extra parameters, as the OAuth2 standard requires. The app keeps the client secret as well, so it stays a confidential client.
+
+> **Who can sign in is decided by your provider.** Every account your provider lets sign in to this application gets full access to the dashboard, including settings and the actions that change mailcow. mailcow-logs-viewer does not keep its own list of allowed users, so restrict access in the provider:
+>
+> - **mailcow** - mailcow's OAuth2 server signs in mailbox users. Unless you have confirmed that only administrators can authorize this app on your server, assume every mailbox user can, and use a provider that can limit access instead.
+> - **Google** - set the OAuth consent screen to **Internal** so only accounts in your Google Workspace can sign in.
+> - **Microsoft Azure AD** - register the app as **single tenant** and turn on **Assignment required** for its enterprise application, then assign only the users who need access.
+> - **Authentik / Keycloak** - bind the application to a policy, group or role that only the intended users have.
+
 ### Basic Configuration
 
 Enable OAuth2 authentication in your `.env` file:
@@ -470,6 +479,8 @@ These providers require manual endpoint configuration:
 4. **Regular Rotation:** Rotate client secrets and session keys periodically
 5. **Minimal Scopes:** Request only the scopes you actually need
 6. **Provider Security:** Follow your provider's security recommendations
+7. **PKCE:** Every login uses PKCE (S256). If your provider can require PKCE for a client (in Keycloak: the client's PKCE Method set to S256), you can turn that on
+8. **Limit Who Can Sign In:** Every account the provider lets sign in gets full access to the dashboard. Restrict the application to the intended users in the provider (see the [Overview](#overview))
 
 ---
 

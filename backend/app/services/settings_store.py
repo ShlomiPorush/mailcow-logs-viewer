@@ -2,6 +2,8 @@
 Load/save app config overrides from DB (system_settings table, keys config.*).
 Used when SETTINGS_EDIT_VIA_UI_ENABLED is True.
 """
+import functools
+import hashlib
 import json
 import logging
 from typing import Dict, Any
@@ -159,4 +161,53 @@ def save_maxmind_validation_status(db: Session, result: dict) -> None:
 def clear_maxmind_validation_status(db: Session) -> None:
     """Delete all maxmind.* keys from system_settings (e.g. after credentials change)."""
     db.query(SystemSetting).filter(SystemSetting.key.startswith(_MAXMIND_PREFIX)).delete(synchronize_session=False)
+    db.commit()
+
+
+# ── Credential check status persistence (mailcow Read-Write key, Rspamd password) ──
+
+_CREDENTIAL_CHECK_PREFIX = "credential_check."
+
+
+@functools.lru_cache(maxsize=16)
+def credential_fingerprint(*parts: str) -> str:
+    """Short hash of the address and secret a check ran against; the secret itself is never stored here.
+
+    PBKDF2, not a plain hash: the fingerprint is stored, and a fast hash of a
+    password lets anyone holding the database try guesses cheaply. It is read
+    on every settings load, so the result is kept in memory.
+    """
+    return hashlib.pbkdf2_hmac(
+        "sha256",
+        "\n".join(p or "" for p in parts).encode("utf-8"),
+        b"mailcow-logs-viewer credential check",
+        100_000,
+    ).hex()[:16]
+
+
+def get_credential_check_status(db: Session, name: str, fingerprint: str) -> dict:
+    """The last check of a credential, or None if never checked or its address or secret changed since."""
+    row = db.query(SystemSetting).filter(SystemSetting.key == _CREDENTIAL_CHECK_PREFIX + name).first()
+    if not row or not row.value:
+        return None
+    try:
+        data = json.loads(row.value)
+    except ValueError:
+        return None
+    if data.get("fingerprint") != fingerprint:
+        return None
+    data.pop("fingerprint", None)
+    return data
+
+
+def save_credential_check_status(db: Session, name: str, result: dict, fingerprint: str) -> None:
+    """Persist a credential check result with the address and secret it ran against."""
+    from datetime import datetime, timezone
+    data = {**result, "fingerprint": fingerprint, "checked_at": datetime.now(timezone.utc).isoformat()}
+    key = _CREDENTIAL_CHECK_PREFIX + name
+    row = db.query(SystemSetting).filter(SystemSetting.key == key).first()
+    if row:
+        row.value = json.dumps(data)
+    else:
+        db.add(SystemSetting(key=key, value=json.dumps(data)))
     db.commit()

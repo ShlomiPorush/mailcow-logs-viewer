@@ -73,7 +73,7 @@ def test_anything_else_is_not_an_ip(value):
 
 
 def test_a_row_without_a_source_ip_is_skipped_and_the_report_is_kept():
-    parsed = parse_dmarc_xml(EMPTY_ROW_REPORT, EMPTY_ROW_REPORT)
+    parsed = parse_dmarc_xml(EMPTY_ROW_REPORT)
     assert parsed["report_id"] == REPORT_ID
     assert parsed["domain"] == "empty-rows.example"
     assert parsed["records"] == []
@@ -82,14 +82,14 @@ def test_a_row_without_a_source_ip_is_skipped_and_the_report_is_kept():
 def test_a_row_with_an_invalid_source_ip_is_skipped():
     report = VALID_REPORT.replace("<source_ip>203.0.113.5</source_ip>", "<source_ip>not-an-ip</source_ip>")
     assert report != VALID_REPORT
-    assert parse_dmarc_xml(report, report)["records"] == []
+    assert parse_dmarc_xml(report)["records"] == []
 
 
 @pytest.mark.parametrize("tag", ["report_id", "org_name"])
 def test_a_report_without_a_required_metadata_field_is_not_parsed(tag):
     report = EMPTY_ROW_REPORT.replace(f"<{tag}>", f"<{tag}_gone>").replace(f"</{tag}>", f"</{tag}_gone>")
     with pytest.raises(ValueError):
-        parse_dmarc_xml(report, report)
+        parse_dmarc_xml(report)
 
 
 def _postgres_available() -> bool:

@@ -20,29 +20,30 @@ When authentication is enabled, all API endpoints (except public endpoints liste
 4. [Job Status Tracking](#job-status-tracking)
 5. [Domains](#domains)
 6. [Mailbox Statistics](#mailbox-statistics)
-7. [Rate Limits](#rate-limits)
-8. [Messages (Unified View)](#messages-unified-view)
-9. [Logs](#logs)
+7. [Devices](#devices)
+8. [Rate Limits](#rate-limits)
+9. [Messages (Unified View)](#messages-unified-view)
+10. [Logs](#logs)
    - [Postfix Logs](#postfix-logs)
    - [Rspamd Logs](#rspamd-logs)
    - [Netfilter Logs](#netfilter-logs)
    - [Fail2Ban Configuration](#fail2ban-configuration)
-10. [Queue & Quarantine](#queue--quarantine)
-11. [Statistics](#statistics)
-12. [Status](#status)
-13. [Settings](#settings)
+11. [Queue & Quarantine](#queue--quarantine)
+12. [Statistics](#statistics)
+13. [Status](#status)
+14. [Settings](#settings)
     - [GeoIP Management](#geoip-management)
     - [SMTP & IMAP Test](#smtp--imap-test)
-14. [Export](#export)
-15. [DMARC](#dmarc)
+15. [Export](#export)
+16. [DMARC](#dmarc)
     - [DMARC IMAP Auto-Import](#dmarc-imap-auto-import)
-16. [Blacklist Monitoring](#blacklist-monitoring)
-17. [Reporting](#reporting)
-18. [Raw Logs (Live Log Viewer)](#raw-logs-live-log-viewer)
-19. [Spam Filter](#spam-filter)
+17. [Blacklist Monitoring](#blacklist-monitoring)
+18. [Reporting](#reporting)
+19. [Raw Logs (Live Log Viewer)](#raw-logs-live-log-viewer)
+20. [Spam Filter](#spam-filter)
     - [Rspamd Maps](#rspamd-maps)
     - [Suppressions](#suppressions)
-20. [Quarantine Auto-Rules](#quarantine-auto-rules)
+21. [Quarantine Auto-Rules](#quarantine-auto-rules)
 
 ---
 
@@ -105,7 +106,8 @@ curl -b cookies.txt http://your-server:8080/api/info
 ```
 
 Sessions live in the application's memory, so restarting the container signs
-everyone out. `GET /api/auth/logout` ends the session and clears the cookie.
+everyone out. `POST /api/auth/logout` ends the session and clears the cookie
+(`curl -b cookies.txt -X POST http://your-server:8080/api/auth/logout`).
 API clients that prefer to send `Authorization: Basic` on every request can keep
 doing that; nothing about it changed.
 
@@ -121,7 +123,7 @@ When `OAUTH2_ENABLED=true`, users can authenticate via OAuth2/OIDC. The applicat
 1. User initiates login via `GET /api/auth/login`
 2. User is redirected to OAuth2 provider
 3. After authentication, provider redirects to `GET /api/auth/callback`
-4. Application exchanges authorization code for tokens
+4. Application exchanges authorization code for tokens, proving the login with PKCE (S256)
 5. Session is created and HTTP-only cookie is set
 6. User is redirected to main application
 
@@ -200,7 +202,7 @@ Application information and configuration.
 - `auth_enabled`: Boolean - Whether any authentication is enabled
 - `basic_auth_enabled`: Boolean - Whether Basic Authentication is enabled
 - `oauth2_enabled`: Boolean - Whether OAuth2/OIDC authentication is enabled
-- `disabled_features`: Array of strings - List of currently disabled feature IDs. Valid values: `netfilter`, `queue`, `quarantine`, `spam-filter`, `domains`, `dmarc`, `mailbox-stats`, `rate-limits`, `logs`, `blacklist`. Empty array if all features are enabled
+- `disabled_features`: Array of strings - List of currently disabled feature IDs. Valid values: `netfilter`, `queue`, `quarantine`, `spam-filter`, `domains`, `dmarc`, `mailbox-stats`, `rate-limits`, `logs`, `blacklist`, `devices`. Empty array if all features are enabled
 
 ---
 
@@ -263,6 +265,7 @@ Initiate OAuth2 login flow. Redirects user to OAuth2 provider.
 
 **Notes:**
 - Generates CSRF state token for security
+- Sends a PKCE code challenge (RFC 7636, `code_challenge_method=S256`); the callback sends the matching `code_verifier` with the token request
 - Only works when `OAUTH2_ENABLED=true`
 - User will be redirected back to `/api/auth/callback` after authentication
 
@@ -297,7 +300,7 @@ Handle OAuth2 callback from provider. This endpoint processes the authorization 
 
 ---
 
-### GET /api/auth/logout
+### POST /api/auth/logout
 
 Logout and clear session.
 
@@ -309,6 +312,7 @@ Logout and clear session.
 - Deletes server-side session
 - Clears session cookie
 - Works for both OAuth2 and Basic Auth sessions
+- POST only, so another site cannot log you out with a link or an image. `GET /api/auth/logout` returns `405 Method Not Allowed`. A cross-site POST is rejected with 403 by the same-origin check
 
 ---
 
@@ -1245,6 +1249,73 @@ clear_stats_cache()
 
 ---
 
+## Devices
+
+ActiveSync devices recorded from SOGo's access log. The `eas_devices` job reads the newest SOGo lines through the mailcow API every minute and keeps one row per user and device ID: the newest request, and when the device was first and last seen. Devices not seen for `EAS_DEVICES_RETENTION_DAYS` (default 90, `0` = forever) are removed daily.
+
+### GET /api/devices
+
+List the recorded devices, filtered, sorted and paged.
+
+**Query Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `search` | string | - | Matches user, device ID, device type or IP (case-insensitive substring) |
+| `device_type` | string | - | Exact device type, as listed in `device_types` |
+| `seen` | string | `all` | `all`, `recent` (seen in 24 hours), `new` (first seen in 7 days) or `stale` (not seen for 30 days) |
+| `sort_by` | string | `last_seen` | `username`, `device_type`, `last_ip`, `last_command`, `first_seen` or `last_seen` |
+| `sort_dir` | string | `desc` | `asc` or `desc` |
+| `page` | integer | `1` | Page number |
+| `per_page` | integer | `50` | Rows per page (1-200) |
+
+**Response:**
+```json
+{
+  "items": [
+    {
+      "id": 12,
+      "username": "jane@example.com",
+      "device_id": "ApplF2C8A1D94B7E",
+      "device_type": "iPhone",
+      "last_ip": "203.0.113.7",
+      "country_code": "DE",
+      "country_name": "Germany",
+      "city": "Berlin",
+      "asn": "AS64500",
+      "asn_org": "Example Mobile",
+      "client": "Apple Mail",
+      "model": null,
+      "last_command": "Ping",
+      "last_status": 200,
+      "first_seen": "2026-09-02T08:14:03Z",
+      "last_seen": "2026-10-05T14:02:51Z"
+    }
+  ],
+  "total": 1,
+  "page": 1,
+  "per_page": 50,
+  "total_pages": 1,
+  "summary": {"devices": 16, "users": 11, "recent": 14, "new": 2, "stale": 1},
+  "device_types": ["iPad", "iPhone", "Outlook"],
+  "thresholds": {"recent_hours": 24, "new_days": 7, "stale_days": 30},
+  "retention_days": 90,
+  "geoip": true,
+  "last_run": "2026-10-05T14:03:00Z",
+  "last_status": "success"
+}
+```
+
+**Notes:**
+- `summary` counts every device, not only the filtered page
+- `last_ip` is `null` when SOGo logged something other than an IP address
+- The location fields come from the MaxMind GeoIP databases, looked up when the list is read; they are `null` when `geoip` is `false` or the address is not in the database
+- `client` is the mail app recognised from the device ID and type (`Apple Mail`, `Samsung Email`, `Outlook`, `Windows Mail`, `Gmail`), `null` when not recognised; `model` is a Samsung model code such as `SM-S918B`, else `null`
+- `last_status` is the HTTP status SOGo answered; `401` means the device's password was refused
+- A connected phone's `last_seen` can be up to an hour old: SOGo logs a `Ping` when it ends, and mailcow allows a Ping of up to 59 minutes
+
+---
+
 ## Rate Limits
 
 mailcow rate-limits senders through rspamd, which counts every send against a Redis key and writes a line to the `ratelimited` log when a sender runs out. These endpoints show who is hitting a limit, reset a stuck counter, and change the limits themselves. The write endpoints require a Read-Write API key (`MAILCOW_API_KEY_RW`).
@@ -1849,6 +1920,53 @@ Get Netfilter authentication failure logs.
 }
 ```
 
+#### GET /logs/netfilter/overview
+
+Attempts against the server over the last hours, grouped by source address. Used by the Security page.
+
+Only lines where netfilter matched a rule count as an attempt; the "N more attempts ... until banned" line that follows each one is not counted again. The service comes from the log text (SMTP auth, SMTP probe, IMAP, POP3, Sieve, SOGo, mailcow UI, Rspamd UI); failed logins are the attempts that are not SMTP probes.
+
+**Query Parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `hours` | int | Window in hours (default: 24, max: 168) |
+
+**Response:**
+```json
+{
+  "hours": 24,
+  "attempts": 61,
+  "failed_logins": 53,
+  "source_count": 4,
+  "sources": [
+    {
+      "ip": "198.51.100.23",
+      "attempts": 38,
+      "failed_logins": 38,
+      "last_seen": "2025-12-25T10:30:00Z",
+      "services": ["SMTP auth"],
+      "usernames": ["admin@example.com"],
+      "country_code": "NL",
+      "country_name": "Netherlands",
+      "last_action": null
+    }
+  ],
+  "latest": [
+    {
+      "time": "2025-12-25T10:30:00Z",
+      "ip": "198.51.100.23",
+      "username": "admin@example.com",
+      "service": "SMTP auth",
+      "country_code": "NL",
+      "country_name": "Netherlands"
+    }
+  ]
+}
+```
+
+`sources` holds the 50 addresses with the most attempts; `last_action` is the last Fail2ban `ban` or `unban` seen for the address in the window, or `null`. `latest` holds the 20 most recent failed logins.
+
 ---
 
 ### Fail2Ban Configuration
@@ -1934,6 +2052,24 @@ Update Fail2Ban configuration on mailcow. Requires the Read-Write API key (`MAIL
 - `403 Forbidden`: Read-Write API key is not configured
 - `503 Service Unavailable`: Could not reach the mailcow API
 
+#### POST /fail2ban/ban, POST /fail2ban/allow
+
+Add an address to the Fail2Ban blacklist (`ban`) or whitelist (`allow`, so its failed attempts never lead to a ban). Every other Fail2Ban setting is kept. Requires the Read-Write API key.
+
+**Request Body:**
+```json
+{ "ip": "198.51.100.23/32" }
+```
+
+**Response:**
+```json
+{ "status": "success", "msg": "IP 198.51.100.23/32 added to allowlist" }
+```
+
+#### POST /fail2ban/unban
+
+Lift an active ban for an address. Requires the Read-Write API key. Same request body and response shape as above.
+
 #### RW Status Check
 
 See [GET /rw-status](#get-rw-status) - unified endpoint for checking Read-Write API key availability.
@@ -2004,7 +2140,7 @@ Perform an action on mail queue items. Requires a Read-Write API key (`MAILCOW_A
 
 **Error Responses:**
 - `400 Bad Request`: Missing `items` array or invalid action
-- `500 Internal Server Error`: RW API key not configured or mailcow API error
+- `502 Bad Gateway`: RW API key not configured, or mailcow did not answer
 
 **Notes:**
 - Proxies to mailcow `POST /api/v1/edit/mailq` with `{"items": [...], "attr": {"action": "..."}}`
@@ -2037,7 +2173,7 @@ Delete specific mail queue items. Requires a Read-Write API key (`MAILCOW_API_KE
 
 **Error Responses:**
 - `400 Bad Request`: Missing `items` array
-- `500 Internal Server Error`: RW API key not configured or mailcow API error
+- `502 Bad Gateway`: RW API key not configured, or mailcow did not answer
 
 **Notes:**
 - Proxies to mailcow `POST /api/v1/delete/mailq` with queue IDs array
@@ -2110,7 +2246,7 @@ Release (approve) quarantined messages on mailcow. Requires a Read-Write API key
 
 **Error Responses:**
 - `400 Bad Request`: Missing `items` array
-- `500 Internal Server Error`: RW API key not configured or mailcow API error
+- `502 Bad Gateway`: RW API key not configured, or mailcow did not answer
 
 **Notes:**
 - Proxies to mailcow `POST /api/v1/edit/qitem` with `{"items": [...], "attr": {"action": "release"}}`
@@ -2152,7 +2288,7 @@ Permanently delete quarantined messages on mailcow. Requires a Read-Write API ke
 
 **Error Responses:**
 - `400 Bad Request`: Missing `items` array
-- `500 Internal Server Error`: RW API key not configured or mailcow API error
+- `502 Bad Gateway`: RW API key not configured, or mailcow did not answer
 
 **Notes:**
 - Proxies to mailcow `POST /api/v1/delete/qitem` with `["id1", "id2"]`
@@ -2186,7 +2322,7 @@ Release quarantined messages and train Rspamd that they are **not spam** (ham). 
 
 **Error Responses:**
 - `400 Bad Request`: Missing `items` array
-- `500 Internal Server Error`: RW API key not configured or mailcow API error
+- `502 Bad Gateway`: RW API key not configured, or mailcow did not answer
 
 **Notes:**
 - Proxies to mailcow `POST /api/v1/edit/qitem` with `{"items": [...], "attr": {"action": "learnham"}}`
@@ -2220,7 +2356,7 @@ Delete quarantined messages and train Rspamd that they are **spam**. Requires a 
 
 **Error Responses:**
 - `400 Bad Request`: Missing `items` array
-- `500 Internal Server Error`: RW API key not configured or mailcow API error
+- `502 Bad Gateway`: RW API key not configured, or mailcow did not answer
 
 **Notes:**
 - Proxies to mailcow `POST /api/v1/edit/qitem` with `{"items": [...], "attr": {"action": "learnspam"}}`
@@ -2461,21 +2597,44 @@ Get status of all mailcow containers.
     "postfix-mailcow": {
       "name": "postfix",
       "state": "running",
-      "started_at": "2025-12-20T08:00:00Z"
+      "started_at": "2025-12-20T08:00:00Z",
+      "ignored": false
     },
-    "dovecot-mailcow": {
-      "name": "dovecot",
-      "state": "running",
-      "started_at": "2025-12-20T08:00:00Z"
+    "ipv6nat-mailcow": {
+      "name": "ipv6nat",
+      "state": "exited",
+      "started_at": null,
+      "ignored": true
     }
   },
   "summary": {
     "running": 18,
     "stopped": 0,
-    "total": 18
+    "total": 18,
+    "ignored": 1
   }
 }
 ```
+
+An ignored container is still listed but never counted: `running`, `stopped` and `total` leave it out, and `ignored` counts them. The dashboard alert and the problem counters follow the summary.
+
+---
+
+### PUT /status/containers/{container}/ignore
+
+Ignore or stop ignoring one container, for example `ipv6nat-mailcow` on a server without IPv6. The choice is stored on the server for every user.
+
+**Request:**
+```json
+{ "ignored": true }
+```
+
+**Response:**
+```json
+{ "container": "ipv6nat-mailcow", "ignored": true }
+```
+
+Returns `404` for a container name the app has never seen.
 
 ---
 
@@ -2687,6 +2846,18 @@ Returns comprehensive system configuration, import status, correlation status, a
       "valid": true,
       "error": null,
       "checked_at": "2026-05-15T14:30:00Z"
+    },
+    "mailcow_rw_key_status": {
+      "configured": true,
+      "valid": true,
+      "error": null,
+      "checked_at": "2026-10-07T09:12:00Z"
+    },
+    "rspamd_password_status": {
+      "configured": true,
+      "valid": true,
+      "error": null,
+      "checked_at": "2026-10-07T09:12:01Z"
     }
   },
   "import_status": {
@@ -3119,7 +3290,7 @@ When a feature is disabled, this endpoint permanently deletes all stored data fr
 ```
 
 **Request Fields:**
-- `feature`: Feature ID to purge. Valid values: `netfilter`, `domains`, `dmarc`, `mailbox-stats`, `logs`, `blacklist`, `spam-filter`, `quarantine`
+- `feature`: Feature ID to purge. Valid values: `netfilter`, `domains`, `dmarc`, `mailbox-stats`, `logs`, `blacklist`, `spam-filter`, `quarantine`, `devices`
 
 **Feature → Tables Mapping:**
 
@@ -3129,10 +3300,11 @@ When a feature is disabled, this endpoint permanently deletes all stored data fr
 | `domains` | `domain_dns_checks` |
 | `dmarc` | `dmarc_reports`, `dmarc_records`, `dmarc_syncs`, `tls_reports`, `tls_report_policies` |
 | `mailbox-stats` | `mailbox_statistics`, `alias_statistics` |
-| `logs` | `raw_service_logs` |
+| `logs` | `raw_service_logs` (only the services no other page reads; `dovecot`, `ratelimited` and `sogo` stay while their pages are on) |
 | `blacklist` | `blacklist_checks`, `monitored_hosts` |
 | `spam-filter` | `spam_suppressions` |
 | `quarantine` | `quarantine_rules`, `quarantine_rule_logs` |
+| `devices` | `eas_devices` |
 
 **Response:**
 ```json
@@ -3235,6 +3407,8 @@ Manually trigger a background job.
 - `expire_suppressions`: Expire old suppressions
 - `process_quarantine_rules`: Process quarantine auto-rules
 - `cleanup_deferred_queue`: Clean up stuck deferred queue items
+- `eas_devices`: Record ActiveSync devices from the SOGo log
+- `cleanup_eas_devices`: Remove ActiveSync devices not seen within the retention period
 
 **Response:**
 ```json
@@ -3369,6 +3543,76 @@ Validate MaxMind license key on-demand. Result is persisted to database.
 - The `maxmind_status` field in `GET /api/settings/info` returns the last persisted result (or `null` if never checked)
 - Clearing MaxMind credentials via `PUT /api/settings` automatically clears the persisted validation result
 - The scheduled "Update MaxMind Databases" job also marks the license as valid after a successful database download
+
+---
+
+### POST /api/settings/mailcow/rw-key/validate
+
+Check that mailcow accepts the Read-Write API key (`MAILCOW_API_KEY_RW`) for writes, without changing anything. The Settings page calls it right after a new or changed key or mailcow URL is saved, and from the Validate button. Result is persisted to database.
+
+**Authentication:** Required
+
+**Response (accepted):**
+```json
+{
+  "configured": true,
+  "valid": true,
+  "error": null
+}
+```
+
+**Response (rejected):**
+```json
+{
+  "configured": true,
+  "valid": false,
+  "error": "rejected",
+  "http_status": 401
+}
+```
+
+**Response Fields:**
+- `configured`: Boolean - whether a Read-Write key is set
+- `valid`: Boolean - whether mailcow accepted the key for writes
+- `error`: String or null - `"rejected"` (401: wrong or inactive key, or this server's IP is not allowed for the key), `"read_only"` (403: a read-only key), `"connection"` (mailcow not reachable), `"unexpected"` (any other answer)
+- `http_status`: Integer - mailcow's status code, present when mailcow answered with an error
+
+**Notes:**
+- Sends one `POST /api/v1/edit/mlv-key-check` to mailcow. mailcow checks the key and its allowed IPs before routing, so an accepted key gets `404 route not found` and nothing is changed
+- No retry: every rejected key is also a failed login for mailcow's Fail2ban
+- The `mailcow_rw_key_status` field in `GET /api/settings/info` returns the last result for the current mailcow URL and key; `null` if not checked since either changed
+- `PUT /api/settings` returns `mailcow_rw_key_changed: true` when the saved mailcow URL or Read-Write key differs from before
+- When mailcow refuses the Read-Write key during an action (quarantine, queue, Fail2Ban, rate limits and other writes), the endpoint answers `502` at once, without retries, and `detail` says whether the key was rejected or is read-only and what to fix
+
+---
+
+### POST /api/settings/rspamd/password/validate
+
+Check that Rspamd accepts the Rspamd password (`RSPAMD_PASSWORD`), the way the Rspamd web UI logs in, without changing anything. The Settings page calls it right after a new or changed password, Rspamd URL or mailcow URL is saved, and from the Validate button. Result is persisted to database.
+
+**Authentication:** Required
+
+**Response (rejected):**
+```json
+{
+  "configured": true,
+  "valid": false,
+  "error": "rejected",
+  "http_status": 403
+}
+```
+
+**Response Fields:**
+- `configured`: Boolean - whether an Rspamd password is set
+- `valid`: Boolean - whether Rspamd accepted the password
+- `error`: String or null - `"rejected"` (401 or 403: wrong password), `"redirected"` (a proxy answered with a redirect before Rspamd saw the password; set `RSPAMD_URL`), `"connection"` (Rspamd not reachable), `"unexpected"` (any other answer)
+- `http_status`: Integer - the status code, present when the answer was an error
+
+**Notes:**
+- Sends one `GET /rspamd/auth` with the `Password` header, through the mailcow proxy or straight to `RSPAMD_URL` when it is set. An accepted password gets `200` with `"auth": "ok"`
+- No retry: a wrong password is also a failed login for mailcow's Fail2ban
+- The `rspamd_password_status` field in `GET /api/settings/info` returns the last result for the current address and password; `null` if not checked since either changed
+- `PUT /api/settings` returns `rspamd_password_changed: true` when the saved password, Rspamd URL or mailcow URL differs from before
 
 ---
 
@@ -3646,10 +3890,42 @@ Export Messages (correlations) to CSV file.
 |-----------|---------|-------------|
 | `page` | omitted | Positive page number. Omit it to retain the legacy unpaginated response. |
 | `limit` | 50 | Reports per page, from 1 to 200. Used when `page` is supplied. |
+| `search` | omitted | Keeps the reports whose domain or reporter (`org_name`) contains this text, in any case. `%`, `_` and `\` match literally. Leading and trailing spaces are ignored, only the first 255 characters are used, and an empty value lists every report. With `page`, `total` and `total_pages` count the matching reports. |
+| `sort_by` | `created_at` | Orders a paged request by `created_at` (import date), `type`, `domain`, `reporter`, `records` (record or policy count) or `period` (start of the report period). Domain and reporter compare in lower case. Any other value is refused with `422`. |
+| `sort_dir` | `desc` | `asc` or `desc`; any other value is refused with `422`. |
 
-Paged responses contain `reports`, `total`, `allow_delete`, `page`, `limit`, and `total_pages`. `total` counts all reports of both types. Empty results return page 1 of 1. A page beyond the end is clamped to the last available page, including after deletions. Concurrent imports or deletions may shift reports between requests; reload from page 1 to refresh the history.
+Paged responses contain `reports`, `total`, `allow_delete`, `page`, `limit`, `total_pages`, `sort_by`, and `sort_dir`. The order covers DMARC and TLS reports together and is applied before paging, so the next page continues it; empty values sort last, and ties fall back to the newest import, then type, then the highest ID. Without `page`, the legacy response keeps its newest-first order and ignores `sort_by` and `sort_dir`. `total` counts all reports of both types. Empty results return page 1 of 1. A page beyond the end is clamped to the last available page, including after deletions. Concurrent imports or deletions may shift reports between requests; reload from page 1 to refresh the history.
 
 Each report contains `id`, `type` (`dmarc` or `tls`), `domain`, `org_name`, `begin_date`, `end_date`, `record_count`, `created_at`, and `report_id`. Unpaginated responses retain only the original top-level fields: `reports`, `total`, and `allow_delete`.
+
+`GET /api/dmarc/reports/domains` returns how many reports each domain has, sorted by domain name. Domain names are compared trimmed and in lower case, so `Example.com` and `example.com` count as one domain.
+
+```json
+{
+  "domains": [
+    {"domain": "example.com", "dmarc_reports": 42, "tls_reports": 7, "last_report": 1767312000}
+  ],
+  "allow_delete": false
+}
+```
+
+- `dmarc_reports`, `tls_reports`: Number of stored DMARC and TLS reports for the domain
+- `last_report`: Unix timestamp of the end of the domain's latest report period (DMARC or TLS), or `null`
+
+`DELETE /api/dmarc/reports/domains/{domain}` deletes every DMARC and TLS report of one domain, with their records and policies, in one transaction. The domain is matched the same way (trimmed, lower case). It is refused with `403` unless report deletion is turned on (`DMARC_ALLOW_REPORT_DELETE=true`, off by default), answers `400` for an empty domain and `404` when the domain has no reports. Each deletion is written to the application log with the domain and the counts.
+
+```json
+{
+  "status": "success",
+  "domain": "example.com",
+  "dmarc_reports": 42,
+  "dmarc_records": 310,
+  "tls_reports": 7,
+  "tls_policies": 7
+}
+```
+
+Reports that arrive later for the domain (from IMAP or an upload) are imported as usual.
 
 ### Overview
 
@@ -3714,6 +3990,16 @@ Get list of all domains with DMARC statistics.
 - `policy_p`: Published DMARC policy (none, quarantine, reject)
 - `policy_sp`: Subdomain policy (if different from main policy)
 - `last_report_date`: Unix timestamp of most recent report
+- `tls_first_report`, `tls_last_report`: Unix timestamps of the domain's first and last TLS report, or `null` without TLS reports
+- `stats_30d.tls_sessions`: TLS sessions reported in the last 30 days
+- `tls_rpt_status`: Result of the last DNS check of the domain's TLS-RPT record (`success`, `warning`, `error`, `unknown`), or `null` when the domain has not been checked. The daily DNS check covers the mailcow domains only
+- `dmarc_record`: `{checked, found, status, policy}`. The domain's DMARC record from the stored DNS check, or looked up live when the domain has none (a domain that is not in mailcow). `checked` is false when it could not be read; `policy` is `none`, `quarantine` or `reject` when a record was found
+- `tls_rpt_record`: `{checked, found, status}`, the same for the TLS-RPT record
+- `failing_sources`: How many source IPs failed DMARC for most of their mail in the last 30 days
+- `on_mailcow`: `true` when the domain is an active domain or alias domain on this mailcow server, `false` when it is not, `null` while the server's domains are not known yet. Read on every request, not cached with the list
+- `stats_30d.dmarc_pass_pct` is `0` and `stats_30d.tls_success_pct` is `100` when there were no messages or TLS sessions in the last 30 days; check `stats_30d.total_messages` and `stats_30d.tls_sessions` before reading them as a rate
+
+**Top-level field:** `daily`, messages per day across every domain in the last 30 days: `[{date, total, dmarc_pass, dmarc_fail}]`. The list is cached for 5 minutes.
 
 ---
 
@@ -3772,6 +4058,7 @@ Get detailed overview for a specific domain with daily breakdown.
 - `daily_stats`: Array of daily statistics
 - `dmarc_record`: DNS check of the domain's DMARC record (`status`, `message`, `record`, `policy`, `settings`, `warnings`)
 - `tls_rpt_record`: DNS check of the domain's TLS-RPT record at `_smtp._tls` (`status`, `message`, `record`, `report_uris`, `warnings`). Both come from the cached DNS check, or a live lookup when none is cached
+- `on_mailcow`: whether the domain is on this mailcow server, as in the domains list
 
 **Policy Object:**
 - `p`: Domain policy (none, quarantine, reject)
@@ -3845,6 +4132,8 @@ Get daily aggregated reports for a specific domain.
 ### GET /api/dmarc/domains/{domain}/sources
 
 Get source IP analysis with GeoIP enrichment.
+
+Each source also has `reporters`: `[{org_name, count, dmarc_pass}]`, the receivers that reported the address and how much of its mail, most first.
 
 **Path Parameters:**
 - `domain`: Domain name (URL encoded)
@@ -4297,6 +4586,26 @@ TLS-RPT (TLS Reporting) provides visibility into TLS connection failures when ot
 
 ---
 
+### GET /api/dmarc/domains/{domain}/tls-rpt-record
+
+The domain's TLS-RPT record. Comes from the cached DNS check, or a live lookup when the domain has not been checked. The DMARC & TLS page reads it from the domain overview.
+
+**Response:**
+```json
+{
+  "domain": "example.com",
+  "tls_rpt_record": {
+    "status": "success",
+    "message": "TLS-RPT configured",
+    "record": "v=TLSRPTv1; rua=mailto:tls-reports@example.com",
+    "report_uris": ["mailto:tls-reports@example.com"],
+    "warnings": []
+  }
+}
+```
+
+---
+
 ### GET /api/dmarc/domains/{domain}/tls-reports
 
 Get TLS reports for a specific domain (individual reports).
@@ -4493,6 +4802,32 @@ Get a high-level blacklist summary for the dashboard, aggregated across ALL acti
 - `hosts`: One entry per active monitored host. A host's `status` is `unknown` and its `listed_count` is `0` when its latest check is older than 24 hours
 - `hosts_total`: Number of active monitored hosts
 - `hosts_listed`: Number of hosts currently listed (fresh data only)
+
+---
+
+### Ignored blocklists
+
+A blocklist can be ignored for every monitored address (for example UCEPROTECT Level 3, which lists whole ranges). It is still checked and shown, but a listing on it is not counted and sends no alert. Every response that carries per-list `results` marks each entry with `"ignored": true|false`, and `listed_count` and `status` leave ignored listings out. `ignored_listed_count` says how many listings were left out. The stored check is never changed, so un-ignoring takes effect at once.
+
+### GET /api/blacklist/ignored
+
+```json
+{ "lists": [{ "name": "UCEPROTECT Level 3", "zone": "dnsbl-3.uceprotect.net" }] }
+```
+
+### PUT /api/blacklist/lists/{zone}/ignore
+
+**Request:**
+```json
+{ "ignored": true }
+```
+
+**Response:**
+```json
+{ "zone": "dnsbl-3.uceprotect.net", "name": "UCEPROTECT Level 3", "ignored": true }
+```
+
+Returns `404` for a zone that is not one of the checked blocklists.
 
 ---
 
@@ -4702,6 +5037,15 @@ All endpoints may return the following error responses:
   "detail": "Error description (only in debug mode)"
 }
 ```
+
+### 502 Bad Gateway
+```json
+{
+  "detail": "mailcow did not answer. Try again in a moment."
+}
+```
+
+**Note:** Returned by every endpoint that reads from or writes to mailcow when mailcow fails or refuses the request after three tries. In debug mode `detail` is the underlying error.
 
 ---
 
@@ -5318,6 +5662,7 @@ Create a new suppression entry.
 **Notes:**
 - Domain type entries are stored as regex patterns (e.g., `/.+@example\.com/i`)
 - Regex patterns (starting with `/`) bypass email format validation
+- When written to Rspamd, a regex pattern is anchored as a whole (`/^(?:pattern)$/i`). Entries created automatically (`source: auto`, from bounces and the deferred queue cleanup) are always written as the exact address, even when they look like a pattern
 - If `permanent=false` and no `expires_at` is provided, default expiry is `base_expiry_days` from config
 
 ---
@@ -5659,6 +6004,17 @@ List security alerts, newest first.
 ```
 
 **Alert types:** `volume_spike`, `auth_failure_burst`, `smtp_abuse_block`
+
+### GET /api/security-alerts/{alert_id}/activity
+
+The history behind an alert, for its Show activity window. For a `volume_spike` it counts the mailbox's outbound messages; for an `auth_failure_burst` the username's failed logins.
+
+- `buckets`: `[{start, count}]` per `bucket_minutes` (15) from `baseline_days` before the alert to two hours after it
+- `window_minutes`, `baseline_days`: the detector's check window and baseline period
+- `around`: from the check window before the alert to an hour after it: `total`, and for a volume spike `recipient_domains`, `results` and `subjects`, for a burst `addresses`, `countries` and `networks`, each `[{name, count}]`, most first
+- `alert`: the alert itself
+
+Returns 404 for an unknown alert.
 
 ### POST /api/security-alerts/{alert_id}/acknowledge
 

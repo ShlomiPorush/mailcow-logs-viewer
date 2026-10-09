@@ -78,9 +78,11 @@ function navigateToMessagesWithFilter(options) {
 let dmarcImapStatus = null;
 let dmarcConfiguration = null;
 
-// Send the browser to the login page, dropping any client-side state.
+// Send the browser to the login page, dropping any client-side state; signing
+// in again returns to the page that was open
 function redirectToLogin() {
-    window.location.replace('/login');
+    const here = window.location.pathname + window.location.search;
+    window.location.replace(here === '/' ? '/login' : `/login?next=${encodeURIComponent(here)}`);
 }
 
 // Enhanced fetch with authentication.
@@ -107,10 +109,29 @@ async function authenticatedFetch(url, options = {}) {
     return response;
 }
 
+// The reason the server gave for a failed request (FastAPI's `detail`), or its status
+async function responseError(response) {
+    let detail = '';
+    try {
+        detail = (await response.json()).detail;
+    } catch (e) {
+        // not JSON
+    }
+    return new Error(typeof detail === 'string' && detail ? detail : `HTTP ${response.status}`);
+}
+
 // Handle logout - one path for both login methods, since both are backed by
-// the same server-side session.
-function handleLogout() {
-    window.location.href = '/api/auth/logout';
+// the same server-side session. POST only: a GET that logs out could be
+// triggered by any other site.
+async function handleLogout() {
+    try {
+        await authenticatedFetch('/api/auth/logout', { method: 'POST' });
+    } catch (e) {
+        // A 401 means the session is already gone; authenticatedFetch has
+        // sent the browser to the login page.
+        return;
+    }
+    window.location.href = '/login';
 }
 
 // Check authentication on page load.
@@ -183,6 +204,7 @@ const TOGGLEABLE_FEATURES = [
     { id: 'dmarc', label: 'DMARC & TLS', description: 'DMARC/TLS reports and IMAP sync' },
     { id: 'mailbox-stats', label: 'Mailbox Stats', description: 'Mailbox and alias statistics' },
     { id: 'rate-limits', label: 'Rate Limits', description: 'Sender rate limit hits and the configured limits' },
+    { id: 'devices', label: 'Devices', description: 'ActiveSync phones and tablets, read from the SOGo log' },
     { id: 'logs', label: 'Logs', description: 'Raw service log viewer' },
     { id: 'blacklist', label: 'IP Blacklist Monitor', description: 'DNS blacklist monitoring for your IPs' },
 ];
@@ -192,36 +214,40 @@ function isFeatureDisabled(featureId) {
 }
 
 function applyFeatureToggles() {
-    // Hide desktop and mobile tabs for disabled features
+    // Hide the sidebar, sheet and phone tab bar entries of disabled features
+    const navIds = feature => [`tab-${feature}`, `mobile-tab-${feature}`, `tabbar-${feature}`];
     for (const feature of window.disabledFeatures) {
-        // Desktop tab
-        const tab = document.getElementById(`tab-${feature}`);
-        if (tab) tab.style.display = 'none';
-        // Mobile tab
-        const mobileTab = document.getElementById(`mobile-tab-${feature}`);
-        if (mobileTab) mobileTab.style.display = 'none';
+        for (const id of navIds(feature)) {
+            const el = document.getElementById(id);
+            if (el) el.style.display = 'none';
+        }
     }
     // Ensure enabled features are visible (in case of settings change)
     for (const feature of TOGGLEABLE_FEATURES) {
         if (!window.disabledFeatures.includes(feature.id)) {
-            const tab = document.getElementById(`tab-${feature.id}`);
-            if (tab) tab.style.display = '';
-            const mobileTab = document.getElementById(`mobile-tab-${feature.id}`);
-            if (mobileTab) mobileTab.style.display = '';
+            for (const id of navIds(feature.id)) {
+                const el = document.getElementById(id);
+                if (el) el.style.display = '';
+            }
         }
     }
+    // A navigation group whose pages are all off loses its heading too
+    document.querySelectorAll('[data-nav-group]').forEach(group => {
+        const visible = [...group.querySelectorAll('button')].some(btn => btn.style.display !== 'none');
+        group.style.display = visible ? '' : 'none';
+    });
     
     // Special handling for blacklist feature - it doesn't have its own tab,
     // it's a section inside the Domains page
     const blacklistSection = document.getElementById('blacklist-section');
     const dashboardBlacklistCard = document.getElementById('dashboard-blacklist-card');
-    if (window.disabledFeatures.includes('blacklist')) {
-        if (blacklistSection) blacklistSection.style.display = 'none';
-        if (dashboardBlacklistCard) dashboardBlacklistCard.style.display = 'none';
-    } else {
-        if (blacklistSection) blacklistSection.style.display = '';
-        if (dashboardBlacklistCard) dashboardBlacklistCard.style.display = '';
-    }
+    const statusBlacklistKpi = document.getElementById('status-kpi-blocklists-cell');
+    const statusBlacklistTab = document.getElementById('status-tab-btn-blocklists');
+    const blacklistOff = window.disabledFeatures.includes('blacklist');
+    if (blacklistOff && typeof statusTab !== 'undefined' && statusTab === 'blocklists') statusShowTab('server');
+    [blacklistSection, dashboardBlacklistCard, statusBlacklistKpi, statusBlacklistTab].forEach(el => {
+        if (el) el.style.display = blacklistOff ? 'none' : '';
+    });
 
     // Same for rate-limits - it is a view inside the Mailbox Stats page,
     // so the feature toggle hides its switcher button instead of a tab
@@ -273,9 +299,15 @@ function applyFeatureToggles() {
     }
 }
 
-// A nav tab is an <svg> icon followed by its label in a bare text node, so the
-// label is swapped on that node and the icon and markup are left alone.
+// A nav tab is an <svg> icon followed by its label, in a .ui-nav-label span
+// (or, in older markup, a bare text node), so only the label text changes.
 function setNavTabLabel(tab, label) {
+    const span = tab.querySelector('.ui-nav-label');
+    if (span) {
+        if (span.textContent !== label) span.textContent = label;
+        tab.title = label;
+        return;
+    }
     for (let i = tab.childNodes.length - 1; i >= 0; i--) {
         const node = tab.childNodes[i];
         if (node.nodeType !== Node.TEXT_NODE) continue;
@@ -306,16 +338,11 @@ function updateDisabledFeaturesCheckbox(featureId, isChecked, el) {
 
     hiddenInput.value = Array.from(currentDisabled).sort().join(',');
 
-    // Update visual styling of the label
+    // Mark the toggle on or off
     const label = el ? el.closest('label') : null;
     if (label) {
-        if (isChecked) {
-            label.classList.remove('border-gray-200', 'dark:border-gray-700', 'bg-gray-50/50', 'dark:bg-gray-800/50', 'opacity-60');
-            label.classList.add('border-green-200', 'dark:border-green-700/50', 'bg-green-50/50', 'dark:bg-green-900/10');
-        } else {
-            label.classList.remove('border-green-200', 'dark:border-green-700/50', 'bg-green-50/50', 'dark:bg-green-900/10');
-            label.classList.add('border-gray-200', 'dark:border-gray-700', 'bg-gray-50/50', 'dark:bg-gray-800/50', 'opacity-60');
-        }
+        label.classList.toggle('is-on', isChecked);
+        label.classList.toggle('is-off', !isChecked);
     }
 }
 
@@ -331,6 +358,26 @@ async function fetchRwStatus() {
         console.warn('Failed to fetch RW status:', e);
         mailcowRwConfigured = false;
     }
+    showQuarantineRulesAccess();
+    // The key decides which actions the Security page offers; the flag may land after it drew
+    if (currentTab === 'netfilter') {
+        renderSecurityOverview();
+        renderSecurityLists();
+        renderSecuritySettings();
+    }
+}
+
+// Auto-Rules release and delete held mail in mailcow, so they need the Read-Write key.
+// The tab is always there; without the key it says what is missing. Returns whether rules can run.
+function showQuarantineRulesAccess() {
+    document.getElementById('quarantine-rules-section')?.classList.toggle('hidden', !mailcowRwConfigured);
+    const locked = document.getElementById('quarantine-rules-locked');
+    if (locked) {
+        locked.classList.toggle('hidden', mailcowRwConfigured);
+        locked.innerHTML = mailcowRwConfigured ? ''
+            : uiLocked('Auto-Rules are locked', `Rules release or delete held messages in mailcow by themselves, so they ${UI_RW_KEY_TEXT}`);
+    }
+    return mailcowRwConfigured;
 }
 
 // Auto-refresh configuration
@@ -339,6 +386,7 @@ let autoRefreshTimer = null;
 
 // Initialize on page load
 document.addEventListener('DOMContentLoaded', async () => {
+    uiInitMenus();
     console.log('=== mailcow Logs Viewer Initializing ===');
 
     // Check authentication first
@@ -391,6 +439,20 @@ document.addEventListener('DOMContentLoaded', async () => {
 // APP INFO & VERSION
 // =============================================================================
 
+// The authentication-off banner can be dismissed for good in this browser: a
+// reverse proxy in front of the app may already sign users in.
+const AUTH_OFF_BANNER_DISMISSED_KEY = 'authOffBannerDismissed';
+
+function authOffBannerDismissed() {
+    try { return localStorage.getItem(AUTH_OFF_BANNER_DISMISSED_KEY) === '1'; } catch (e) { return false; }
+}
+
+function dismissAuthOffBanner() {
+    try { localStorage.setItem(AUTH_OFF_BANNER_DISMISSED_KEY, '1'); } catch (e) { /* private mode: it just is not remembered */ }
+    const banner = document.getElementById('auth-off-banner');
+    if (banner) banner.classList.add('hidden');
+}
+
 async function loadAppInfo() {
     try {
         // Use regular fetch since this is called after authentication check
@@ -400,6 +462,9 @@ async function loadAppInfo() {
         if (data.app_title) {
             document.getElementById('app-title').textContent = data.app_title;
             document.title = data.app_title;
+            // The phone top bar names the app above the page
+            const phoneTitle = document.getElementById('mtop-app-title');
+            if (phoneTitle) phoneTitle.textContent = data.app_title;
 
             // Update footer app name
             const footerName = document.getElementById('app-name-footer');
@@ -413,6 +478,8 @@ async function loadAppInfo() {
             logoImg.src = data.app_logo_url;
             logoImg.classList.remove('hidden');
             document.getElementById('default-logo').classList.add('hidden');
+            const phoneLogo = document.getElementById('mtop-logo');
+            if (phoneLogo) phoneLogo.src = data.app_logo_url;
         }
 
         // Update footer version
@@ -430,6 +497,11 @@ async function loadAppInfo() {
                 logoutBtn.classList.add('hidden');
             }
         }
+
+        // Without any sign-in, everyone who reaches the app has full access: say so
+        // on the Dashboard. Only an explicit false shows it, never a missing field.
+        const authOffBanner = document.getElementById('auth-off-banner');
+        if (authOffBanner) authOffBanner.classList.toggle('hidden', data.auth_enabled !== false || authOffBannerDismissed());
 
         // Store timezone for date formatting
         if (data.timezone) {
@@ -451,8 +523,237 @@ async function loadAppInfo() {
 
         // Load mailcow connection status
         await loadMailcowConnectionStatus();
+
+        // Sidebar counters and server card
+        placeShellUtilities();
+        window.matchMedia('(max-width: 760px)').addEventListener('change', placeShellUtilities);
+        window.matchMedia('(max-width: 760px)').addEventListener('change', () => placeTopbar());
+        watchTopbarCrumbs();
+        loadNavCounters();
+        setInterval(loadNavCounters, 5 * 60 * 1000);
     } catch (error) {
         console.error('Failed to load app info:', error);
+    }
+}
+
+// =============================================================================
+// SIDEBAR: SERVER CARD, COUNTERS AND TOOLS
+// =============================================================================
+
+// The Refresh and theme buttons live in the sidebar foot; on phones, where the
+// sidebar is hidden, the same elements move into the top bar.
+function placeShellUtilities() {
+    const tools = document.getElementById('ui-utilities');
+    const phoneSlot = document.getElementById('ui-mtop-actions');
+    const foot = document.getElementById('app-footer');
+    if (!tools || !phoneSlot || !foot) return;
+    if (window.matchMedia('(max-width: 760px)').matches) {
+        if (tools.parentNode !== phoneSlot) phoneSlot.appendChild(tools);
+    } else if (tools.parentNode !== foot) {
+        foot.appendChild(tools);
+    }
+}
+
+// =============================================================================
+// WIDE SCREENS: THE TOP BAR
+// =============================================================================
+// One bar runs across the top: the app's name with the menu toggle, the page's
+// title and the page's actions. They are the page's own elements, moved up while
+// the page is open and put back when it is left, so every id, button and listener
+// stays as it was. Under the bar the page starts with breadcrumbs, then its
+// description. Messages keeps its own layout and has no bar; phones keep theirs.
+const TOPBAR_SKIP = new Set(['messages']);
+let topbarMoves = [];     // [element, placeholder] pairs, to put back in reverse
+let topbarRoute = null;
+
+function topbarMove(el, target) {
+    if (!el || !target) return;
+    const mark = document.createComment('topbar');
+    el.replaceWith(mark);
+    target.appendChild(el);
+    topbarMoves.push([el, mark]);
+}
+
+function topbarRestore() {
+    for (const [el, mark] of topbarMoves.reverse()) mark.replaceWith(el);
+    topbarMoves = [];
+    document.querySelectorAll('.ui-page-crumbs').forEach(nav => nav.remove());
+}
+
+function placeTopbar(route = topbarRoute) {
+    topbarRoute = route;
+    const bar = document.getElementById('ui-topbar');
+    if (!bar) return;
+    topbarRestore();
+    const page = route ? document.getElementById(`content-${route}`) : null;
+    const head = page ? page.querySelector('.ui-page-head') : null;
+    const intro = head ? head.firstElementChild : null;
+    const title = intro ? intro.querySelector('.ui-h1') : null;
+    const on = !!title && !TOPBAR_SKIP.has(route) && !window.matchMedia('(max-width: 760px)').matches;
+    document.documentElement.classList.toggle('ui-has-topbar', on);
+    if (!on) return;
+
+    const brandSlot = document.getElementById('ui-topbar-brand');
+    topbarMove(document.querySelector('.ui-sidenav .ui-brand'), brandSlot);
+    topbarMove(document.getElementById('ui-nav-toggle'), brandSlot);
+    const crumbs = document.createElement('nav');
+    crumbs.className = 'ui-crumbs ui-page-crumbs';
+    crumbs.setAttribute('aria-label', 'You are here');
+    title.before(crumbs);
+    topbarMove(title, document.getElementById('ui-topbar-title'));
+    [...head.children].filter(el => el !== intro).forEach(el => topbarMove(el, document.getElementById('ui-topbar-actions')));
+    // The DMARC sync note is too tall for the bar: it stays with the description
+    if (route === 'dmarc') topbarMove(document.getElementById('dmarc-last-sync-info'), intro);
+    updateTopbarCrumbs();
+}
+
+// The tab open on the page: Security's Overview, a Status tab, a Settings section
+function topbarSubLabel(route) {
+    const page = document.getElementById(`content-${route}`);
+    const tab = page && page.querySelector('[role="tab"][aria-selected="true"], [role="tab"].active, .settings-edit-nav [aria-current="true"]');
+    if (!tab) return '';
+    const label = tab.cloneNode(true);
+    label.querySelectorAll('.ui-tab-n, .ui-count, .ui-nav-count, .hidden').forEach(n => n.remove());
+    return label.textContent.replace(/\s+/g, ' ').trim();
+}
+
+// Something opened inside a tab (a Rspamd map, a DMARC domain or report) joins the
+// crumbs, and the tab's crumb leads back to its list. A level in between that has an
+// action ({ label, action }) leads back to it. It holds only while that tab is open.
+let topbarPageCrumbs = null;   // { route, sub, back, labels: [label or { label, action }] }
+
+function setPageCrumbs(route, sub, back, labels) {
+    topbarPageCrumbs = labels && labels.length ? { route, sub, back, labels } : null;
+    updateTopbarCrumbs();
+}
+
+function updateTopbarCrumbs() {
+    const nav = document.querySelector('.ui-page-crumbs');
+    if (!nav || !topbarRoute) return;
+    const route = topbarRoute;
+    const item = document.getElementById(`tab-${route}`);
+    const group = item && item.closest('.ui-nav-group');
+    const groupLabel = group && group.querySelector('.ui-nav-group-label');
+    const name = TAB_LABELS[route] || route;
+    const sub = topbarSubLabel(route);
+    const parts = [];
+    if (groupLabel) parts.push(`<span class="ui-crumb-group">${escapeHtml(groupLabel.textContent.trim())}</span>`);
+    const inner = topbarPageCrumbs && topbarPageCrumbs.route === route && topbarPageCrumbs.sub === sub ? topbarPageCrumbs : null;
+    // A page without tabs (DMARC & TLS) leads back from a level inside it by its name
+    parts.push(sub ? `<button type="button" class="ui-crumb" onclick="topbarOpenPage('${escapeJsArg(route)}')">${escapeHtml(name)}</button>`
+        : inner ? `<button type="button" class="ui-crumb" onclick="${inner.back}">${escapeHtml(name)}</button>`
+        : `<span class="ui-crumb-current" aria-current="page">${escapeHtml(name)}</span>`);
+    if (sub && sub !== name) {
+        parts.push(inner ? `<button type="button" class="ui-crumb" onclick="${inner.back}">${escapeHtml(sub)}</button>`
+            : `<span class="ui-crumb-current" aria-current="page">${escapeHtml(sub)}</span>`);
+    }
+    if (inner) {
+        inner.labels.forEach((item, i) => {
+            const label = typeof item === 'string' ? item : item.label;
+            const action = typeof item === 'string' ? null : item.action;
+            parts.push(i === inner.labels.length - 1 ? `<span class="ui-crumb-current" aria-current="page">${escapeHtml(label)}</span>`
+                : action ? `<button type="button" class="ui-crumb" onclick="${escapeHtml(action)}">${escapeHtml(label)}</button>`
+                : `<span class="ui-crumb-group">${escapeHtml(label)}</span>`);
+        });
+    }
+    nav.innerHTML = parts.join('<span class="ui-crumb-sep" aria-hidden="true">›</span>');
+}
+
+// The page's name in the crumbs opens the page at its first tab
+function topbarOpenPage(route) {
+    if (typeof SUBPAGES !== 'undefined' && SUBPAGES[route]) navigateTo(route, { sub: subpageFirst(route) });
+    else if (route === 'dmarc' && typeof dmarcOpenTab === 'function') dmarcOpenTab();
+    else navigateTo(route);
+}
+
+// A tab opened on the page, by a click or by Back, changes the last crumb
+function watchTopbarCrumbs() {
+    const content = document.querySelector('.ui-content');
+    if (!content || typeof MutationObserver === 'undefined') return;
+    let queued = false;
+    new MutationObserver(records => {
+        if (queued || !records.some(r => r.target.matches && r.target.matches('[role="tab"], .settings-edit-tab'))) return;
+        queued = true;
+        requestAnimationFrame(() => { queued = false; updateTopbarCrumbs(); });
+    }).observe(content, { subtree: true, attributes: true, attributeFilter: ['aria-selected', 'aria-current', 'class'] });
+}
+
+// The sidebar and the phone More sheet show the same counters
+function setNavCount(page, count, isFail, title) {
+    for (const el of [document.getElementById(`nav-count-${page}`), document.getElementById(`mobile-nav-count-${page}`)]) {
+        if (!el) continue;
+        if (count > 0) {
+            el.textContent = count.toLocaleString();
+            el.classList.toggle('is-fail', !!isFail);
+            el.title = title || '';
+            el.classList.remove('hidden');
+        } else {
+            el.classList.add('hidden');
+        }
+    }
+}
+
+// Counters next to the pages that can need attention, and the problems shown
+// on the server card, the phone top bar and the Status tab.
+async function loadNavCounters() {
+    const off = feature => (window.disabledFeatures || []).includes(feature);
+    const get = async url => {
+        try {
+            const res = await authenticatedFetch(url);
+            return res.ok ? await res.json() : null;
+        } catch (e) {
+            return null;
+        }
+    };
+    const [dashboard, queue, quarantine, insights, summary, blacklist, info] = await Promise.all([
+        off('netfilter') ? null : get('/api/logs/netfilter/overview'),
+        off('queue') ? null : get('/api/queue'),
+        off('quarantine') ? null : get('/api/quarantine'),
+        off('dmarc') ? null : get('/api/dmarc/insights'),
+        get('/api/status/summary'),
+        off('blacklist') ? null : get('/api/blacklist/summary'),
+        get('/api/settings/info'),
+    ]);
+
+    const failedLogins = dashboard ? dashboard.failed_logins || 0 : 0;
+    setNavCount('netfilter', failedLogins, false, `${failedLogins} failed logins in the last 24 hours`);
+    const queued = queue && Array.isArray(queue.data) ? queue.data.length : 0;
+    setNavCount('queue', queued, false, `${queued} messages in the queue`);
+    const held = quarantine ? (quarantine.total || (quarantine.data || []).length) : 0;
+    setNavCount('quarantine', held, false, `${held} quarantined messages`);
+    const dmarcActions = insights ? (insights.insights || []).filter(i =>
+        i.recommendations.some(r => r.type === 'tighten_policy' || r.type === 'low_pass_rate') ||
+        (i.new_sources && i.new_sources.length > 0)).length : 0;
+    setNavCount('dmarc', dmarcActions, false, `${dmarcActions} DMARC insights`);
+
+    const problems = [];
+    const indicator = document.getElementById('mailcow-connection-indicator');
+    if (indicator && indicator.title === 'Not connected to mailcow') problems.push('not connected to mailcow');
+    const stopped = summary && summary.containers ? summary.containers.stopped || 0 : 0;
+    if (stopped > 0) problems.push(`${stopped} container${stopped === 1 ? '' : 's'} stopped`);
+    if (blacklist && blacklist.status === 'listed') problems.push('listed on a blocklist');
+    setNavCount('status', problems.length, true, problems.join(', '));
+
+    const label = problems.length === 0 ? 'No problems' : `${problems.length} problem${problems.length === 1 ? '' : 's'}`;
+    const small = document.getElementById('ui-server-problems');
+    if (small) {
+        small.textContent = label;
+        small.title = problems.join(', ');
+        small.classList.toggle('has-problems', problems.length > 0);
+    }
+    const pill = document.getElementById('ui-problems-pill');
+    if (pill) {
+        pill.textContent = label;
+        pill.title = problems.join(', ');
+        pill.classList.toggle('hidden', problems.length === 0);
+    }
+    const pip = document.getElementById('tabbar-pip-status');
+    if (pip) pip.classList.toggle('hidden', problems.length === 0);
+
+    const host = document.getElementById('ui-server-host');
+    const url = info && info.configuration ? info.configuration.mailcow_url : '';
+    if (host && url) {
+        try { host.textContent = new URL(url).hostname; } catch (e) { host.textContent = url; }
     }
 }
 
@@ -514,12 +815,15 @@ async function loadAppVersionStatus() {
         if (updateBadge && data.update_available) {
             updateBadge.classList.remove('hidden');
             updateBadge.title = `Update available: v${data.latest_version}`;
+            // Say which product the update is for (the mailcow line has its own)
+            updateBadge.textContent = `v${data.latest_version} available`;
 
             // Allow clicking badge to view changelog
+            appUpdateInfo = data;
             updateBadge.onclick = (e) => {
                 e.preventDefault();
                 e.stopPropagation();
-                showMarkdownModal(`Update: v${data.latest_version}`, data.changelog || 'No changelog available');
+                showAppUpdateModal();
             };
         } else if (updateBadge) {
             updateBadge.classList.add('hidden');
@@ -529,9 +833,17 @@ async function loadAppVersionStatus() {
     }
 }
 
+// The available app update; the header badge and the dashboard alert open its changelog
+let appUpdateInfo = null;
+
+function showAppUpdateModal() {
+    if (!appUpdateInfo) return;
+    showMarkdownModal(`Update: v${appUpdateInfo.latest_version}`, appUpdateInfo.changelog || 'No changelog available');
+}
+
 // Helper to show markdown content in the changelog modal
 function showMarkdownModal(title, markdownContent) {
-    let htmlContent = markdownContent;
+    let htmlContent = escapeHtml(markdownContent); // shown as text if marked is missing or fails
     try {
         if (typeof marked !== 'undefined') {
             marked.setOptions({
@@ -544,6 +856,17 @@ function showMarkdownModal(title, markdownContent) {
         console.error('Failed to parse markdown:', e);
     }
 
+    // On a phone it opens in a sheet that grows to the full screen as it is read
+    if (uiIsPhone()) {
+        uiSheetShow('markdown-sheet', {
+            label: title,
+            head: `<h3 class="ui-sheet-title">${escapeHtml(title)}</h3>`,
+            body: `<div class="markdown-body">${htmlContent}</div>`,
+            expand: true
+        });
+        return;
+    }
+
     const modal = document.getElementById('changelog-modal');
     const modalTitle = modal?.querySelector('h3');
     const content = document.getElementById('changelog-content');
@@ -554,9 +877,8 @@ function showMarkdownModal(title, markdownContent) {
         }
 
         // Add some basic styling for markdown content
-        content.innerHTML = `<div class="markdown-body prose dark:prose-invert max-w-none">${htmlContent}</div>`;
-        modal.classList.remove('hidden');
-        document.body.style.overflow = 'hidden';
+        content.innerHTML = `<div class="markdown-body">${htmlContent}</div>`;
+        revealChangelogModal(modal);
     }
 }
 
@@ -581,6 +903,7 @@ async function loadMailcowVersionStatus() {
             window.mailcowUpdateVersion = data.latest_version;
             window.mailcowUpdateName = data.name || '';
             window.mailcowUpdateChangelog = data.changelog || 'No changelog available';
+            if (footerUpdateBadge) footerUpdateBadge.textContent = `mailcow ${data.latest_version} available`;
 
             // Function to handle clicks using the shared logic
             const handleClick = (e) => {
@@ -657,7 +980,7 @@ function stopAutoRefresh() {
 async function smartRefreshCurrentTab() {
     // Don't refresh if modal is open
     const modal = document.getElementById('message-modal');
-    if (modal && !modal.classList.contains('hidden')) {
+    if (modal && !modal.classList.contains('hidden') && !modal.classList.contains('ui-docked')) {
         return;
     }
 
@@ -671,6 +994,10 @@ async function smartRefreshCurrentTab() {
                 break;
             case 'netfilter':
                 await smartRefreshNetfilter();
+                await loadSecurityOverview();
+                fail2banSettingsLoaded = false;
+                loadFail2BanSettings();
+                if (typeof refreshProtectionHits === 'function') refreshProtectionHits();
                 break;
             case 'queue':
                 await smartRefreshQueue();
@@ -744,57 +1071,121 @@ async function smartRefreshMessages() {
 }
 
 // Render messages without loading spinner
+// One row of the Messages list (also used by the smart refresh), as in the
+// mockup: sender and time, subject, then the outcome tag and the direction.
+// Queue ID, message ID, score, user and IP are in the reading pane.
+function renderMessageRow(msg) {
+    const tone = messageRowTone(msg);
+    return `
+        <div class="ui-msg-item${tone ? ` ui-msg-${tone}` : ''}" data-key="${escapeHtml(msg.correlation_key || '')}" onclick="viewMessageDetails('${escapeJsArg(msg.correlation_key)}')">
+            <div class="ui-msg-l1">
+                <b class="ui-msg-from">${escapeHtml(msg.sender || 'Unknown')}</b>
+                <time title="${escapeHtml(formatTime(msg.first_seen))}">${formatListTime(msg.first_seen)}</time>
+            </div>
+            <p class="ui-msg-sub" dir="auto" title="${escapeHtml(msg.subject || 'No subject')}">${escapeHtml(msg.subject || 'No subject')}</p>
+            <div class="ui-msg-l3">
+                ${uiCorrelationTag(msg)}
+                ${msg.direction ? uiDirectionTag(msg.direction) : ''}
+                ${msg.is_spam ? '<span class="ui-tag ui-tag-spam">SPAM</span>' : ''}
+                <span class="ui-msg-to" title="${escapeHtml(msg.recipient || '')}">to ${escapeHtml(msg.recipient || 'Unknown')}</span>
+                ${renderMailboxFolderHint(msg)}
+                ${renderDeliveriesChip(msg)}
+            </div>
+        </div>`;
+}
+
+// The coloured edge of a row follows its final status.
+function messageRowTone(msg) {
+    const tone = UI_STATUS_TONE[msg.final_status];
+    if (tone) return tone;
+    return msg.is_complete === false ? 'warn' : '';
+}
+
 function renderMessagesData(data) {
     const container = document.getElementById('messages-logs');
     if (!container) return;
 
     if (!data.data || data.data.length === 0) {
-        container.innerHTML = '<p class="text-gray-500 dark:text-gray-400 text-center py-8">No messages found</p>';
+        container.innerHTML = '<p class="ui-empty">No messages found</p>';
         return;
     }
 
+    renderMessagesList(container, data);
+    if (typeof markSelectedMessageRow === 'function' && window.openMessageKey) markSelectedMessageRow(window.openMessageKey);
+}
+
+// ---------- Messages list: the next page loads as the end scrolls into view ----------
+const messagesPaging = { page: 1, pages: 1, total: 0, loading: false, observer: null };
+
+function messagesQueryParams(page) {
+    const filters = currentFilters.messages || {};
+    const params = new URLSearchParams({ page: page, limit: 50 });
+    for (const key of ['search', 'sender', 'recipient', 'direction', 'user', 'status', 'ip', 'start_date', 'end_date']) {
+        if (filters[key]) params.append(key, filters[key]);
+    }
+    return params;
+}
+
+function messagesMoreText() {
+    if (messagesPaging.page < messagesPaging.pages) return 'Loading more...';
+    return messagesPaging.total ? `All ${messagesPaging.total} messages shown` : '';
+}
+
+function renderMessagesList(container, data) {
+    messagesPaging.page = data.page || 1;
+    messagesPaging.pages = data.pages || 1;
+    messagesPaging.total = data.total || data.data.length;
     container.innerHTML = `
-        <div class="space-y-3">
-            ${data.data.map(msg => `
-                <div class="border border-gray-200 dark:border-gray-700 rounded-lg p-4 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition cursor-pointer" onclick="viewMessageDetails('${msg.correlation_key}')">
-                    <div class="grid grid-cols-1 sm:grid-cols-[1fr_auto] gap-2 mb-2 items-start">
-                        <div class="min-w-0 overflow-hidden">
-                            <div class="flex flex-wrap items-center gap-2 mb-1">
-                                <span class="text-sm font-medium text-gray-900 dark:text-white">${escapeHtml(msg.sender || 'Unknown')}</span>
-                                <svg class="w-4 h-4 text-gray-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
-                                </svg>
-                                <span class="text-sm text-gray-600 dark:text-gray-300">${escapeHtml(msg.recipient || 'Unknown')}</span>
-                            </div>
-                            <p class="text-xs text-gray-500 dark:text-gray-400 truncate" dir="auto" title="${escapeHtml(msg.subject || 'No subject')}">${escapeHtml(msg.subject || 'No subject')}</p>
-                        </div>
-                        <div class="flex flex-wrap items-center gap-2 flex-shrink-0 sm:justify-end">
-                            ${(() => {
-            const correlationStatus = getCorrelationStatusDisplay(msg);
-            if (correlationStatus) {
-                return `<span class="inline-block px-2 py-0.5 text-xs font-medium rounded ${correlationStatus.class}" title="${msg.final_status || (msg.is_complete ? 'Correlation complete' : 'Waiting for Postfix logs')}">${correlationStatus.display}</span>`;
-            }
-            return '';
-        })()}
-                            ${msg.direction ? `<span class="inline-block px-2 py-0.5 text-xs font-medium rounded ${getDirectionClass(msg.direction)}">${msg.direction}</span>` : ''}
-                            ${msg.is_spam !== null ? `<span class="inline-block px-2 py-0.5 text-xs font-medium rounded ${msg.is_spam ? 'bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-300' : 'bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300'}">${msg.is_spam ? 'SPAM' : 'CLEAN'}</span>` : ''}
-                        </div>
-                    </div>
-                    <div class="flex flex-wrap items-center gap-4 text-xs text-gray-500 dark:text-gray-400">
-                        <span>${formatTime(msg.first_seen)}</span>
-                        ${msg.queue_id ? `<span class="font-mono" title="Queue ID">Q: ${msg.queue_id}</span>` : ''}
-                        ${msg.message_id ? `<span class="font-mono truncate max-w-xs" title="Message ID: ${escapeHtml(msg.message_id)}">MID: ${escapeHtml(msg.message_id.substring(0, 20))}${msg.message_id.length > 20 ? '...' : ''}</span>` : ''}
-                        ${msg.spam_score !== null ? `<span>Score: <span class="${msg.spam_score >= 15 ? 'text-red-600 dark:text-red-400 font-semibold' : 'text-gray-600 dark:text-gray-300'}">${msg.spam_score.toFixed(1)}</span></span>` : ''}
-                        ${renderMailboxFolderHint(msg)}
-                        ${renderDeliveriesChip(msg)}
-                        ${msg.user ? `<span>User: ${escapeHtml(msg.user)}</span>` : ''}
-                        ${msg.ip ? `<span>IP: ${msg.ip}</span>` : ''}
-                    </div>
-                </div>
-            `).join('')}
-        </div>
-        ${renderPagination('messages', data.page, data.pages)}
+        <div class="ui-msg-list">${data.data.map(renderMessageRow).join('')}</div>
+        <p id="messages-more" class="ui-msg-more" aria-live="polite">${messagesMoreText()}</p>
     `;
+    watchMessagesEnd(container);
+}
+
+function watchMessagesEnd(container) {
+    if (messagesPaging.observer) messagesPaging.observer.disconnect();
+    const sentinel = document.getElementById('messages-more');
+    if (!sentinel || typeof IntersectionObserver === 'undefined') return;
+    // The list scrolls inside its own column; on narrow screens the page scrolls
+    const root = container.scrollHeight > container.clientHeight + 1 || getComputedStyle(container).overflowY !== 'visible' ? container : null;
+    messagesPaging.observer = new IntersectionObserver(entries => {
+        if (entries.some(e => e.isIntersecting)) loadMoreMessages();
+    }, { root, rootMargin: '0px 0px 600px 0px' });
+    messagesPaging.observer.observe(sentinel);
+}
+
+async function loadMoreMessages() {
+    if (messagesPaging.loading || messagesPaging.page >= messagesPaging.pages) return;
+    const list = document.querySelector('#messages-logs .ui-msg-list');
+    const more = document.getElementById('messages-more');
+    if (!list) return;
+    messagesPaging.loading = true;
+    const next = messagesPaging.page + 1;
+    try {
+        const response = await authenticatedFetch(`/api/messages?${messagesQueryParams(next)}`);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const data = await response.json();
+        // New mail can shift a page; never show the same message twice
+        const seen = new Set([...list.querySelectorAll('.ui-msg-item[data-key]')].map(row => row.dataset.key));
+        list.insertAdjacentHTML('beforeend', (data.data || []).filter(msg => !seen.has(msg.correlation_key || '')).map(renderMessageRow).join(''));
+        messagesPaging.page = next;
+        messagesPaging.pages = data.pages || messagesPaging.pages;
+        currentPage.messages = next;
+        if (more) more.textContent = messagesMoreText();
+        if (typeof markSelectedMessageRow === 'function' && window.openMessageKey) markSelectedMessageRow(window.openMessageKey);
+    } catch (error) {
+        if (more) more.innerHTML = `Could not load more messages. <button type="button" class="ui-link-row ui-link" onclick="loadMoreMessages()">Try again</button>`;
+    } finally {
+        messagesPaging.loading = false;
+    }
+    // A short page may leave the end still in view
+    const sentinel = document.getElementById('messages-more');
+    const container = document.getElementById('messages-logs');
+    if (sentinel && container && messagesPaging.page < messagesPaging.pages) {
+        const r = sentinel.getBoundingClientRect();
+        const box = container.getBoundingClientRect();
+        if (r.top < Math.max(box.bottom, window.innerHeight) + 600) loadMoreMessages();
+    }
 }
 
 // Deduplicate netfilter logs based on message + time + priority
@@ -823,7 +1214,7 @@ function renderNetfilterData(data) {
     if (!container) return;
 
     if (!data.data || data.data.length === 0) {
-        container.innerHTML = '<p class="text-gray-500 dark:text-gray-400 text-center py-8">No logs found</p>';
+        container.innerHTML = '<p class="ui-empty">No logs found</p>';
         return;
     }
 
@@ -833,7 +1224,7 @@ function renderNetfilterData(data) {
     // Update count display with total count from API (like Messages page)
     const countEl = document.getElementById('security-count');
     if (countEl) {
-        countEl.textContent = data.total ? `(${data.total.toLocaleString()} results)` : '';
+        countEl.textContent = uiCountLabel(data.total || 0, 'event', 'events');
     }
 
     // Build a set of currently banned IPs for quick lookup
@@ -850,9 +1241,20 @@ function renderNetfilterData(data) {
         });
     }
 
+    // Without a Read-Write key the Ban and Unban buttons are not offered; say so
+    const lockedNote = mailcowRwConfigured ? '' : `<div class="ui-list-note">${uiLocked('Ban and Unban are locked', `Banning or unbanning an IP from this list ${UI_RW_KEY_TEXT}`)}</div>`;
+
+    const tabCount = document.getElementById('security-tab-n-events');
+    if (tabCount) {
+        tabCount.textContent = data.total ? data.total.toLocaleString() : '';
+        tabCount.classList.toggle('hidden', !data.total);
+    }
+
     container.innerHTML = `
-        <div class="space-y-3">
-            ${uniqueLogs.map(log => {
+        ${lockedNote}
+        <div class="ui-ev-list">
+            <div class="ui-ev-row ui-ev-head"><span>When</span><span>Address</span><span>Account</span><span>Action</span><span>Where</span><span></span></div>
+            ${uniqueLogs.map((log, index) => {
                 const isBan = log.action === 'ban' || log.action === 'banned';
                 const isWarningOrUnban = log.action === 'warning' || log.action === 'unban';
                 // Check if IP is in the blacklist (with or without /32)
@@ -861,44 +1263,39 @@ function renderNetfilterData(data) {
                 const showUnban = mailcowRwConfigured && log.ip && (isBan || ipInBlacklist);
                 // Show ban if: warning/unban AND NOT already in blacklist
                 const showBan = mailcowRwConfigured && log.ip && isWarningOrUnban && !ipInBlacklist;
-                // GeoIP rendering
-                let geoHtml = '';
-                if (log.country_code) {
-                    const flagUrl = getFlagUrl(log.country_code, '16x12');
-                    let geoParts = [];
-                    if (log.country_name && flagUrl) {
-                        geoParts.push('<img src="' + flagUrl + '" alt="' + escapeHtml(log.country_name) + '" style="width:16px;height:12px;display:inline-block;vertical-align:middle" onerror="this.style.display=\'none\'"> ' + escapeHtml(log.country_name));
-                    }
-                    if (log.city) geoParts.push(escapeHtml(log.city));
-                    if (log.asn_org) geoParts.push('(' + escapeHtml(log.asn_org) + ')');
-                    if (geoParts.length > 0) {
-                        geoHtml = '<div class="text-xs text-gray-500 dark:text-gray-400 mt-1 flex items-center gap-1 flex-wrap">' +
-                            '<svg class="w-3 h-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>' +
-                            geoParts.join(' ') + '</div>';
-                    }
-                }
+                const flagUrl = log.country_code ? getFlagUrl(log.country_code, '16x12') : '';
+                const place = [log.country_name, log.city].filter(Boolean).join(', ');
+                const org = log.asn_org ? ` (${log.asn_org})` : '';
+                const account = log.username && log.username !== '-' ? copyableText(log.username)
+                    : (log.attempts_left !== null && log.attempts_left !== undefined ? `<span class="ui-muted">${escapeHtml(String(log.attempts_left))} attempts left</span>` : '<span class="ui-muted">-</span>');
                 return `
-                <div class="border border-gray-200 dark:border-gray-700 rounded-lg p-4 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition">
-                    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-2">
-                        <div class="flex flex-wrap items-center gap-2">
-                            <span class="font-mono text-sm font-semibold text-gray-900 dark:text-white">${log.ip ? copyableText(log.ip) : '-'}</span>
-                            ${log.username && log.username !== '-' ? `<span class="text-sm text-blue-600 dark:text-blue-400">${copyableText(log.username)}</span>` : ''}
-                            <span class="inline-block px-2 py-0.5 text-xs font-medium rounded ${getActionClass(log.action)}">${getActionLabel(log.action)}</span>
-                            ${log.attempts_left !== null && log.attempts_left !== undefined ? `<span class="text-xs text-gray-500 dark:text-gray-400">${log.attempts_left} attempts left</span>` : ''}
-                        </div>
-                        <div class="flex items-center gap-2">
-                            <span class="text-xs text-gray-500 dark:text-gray-400">${formatTime(log.time)}</span>
-                            ${showUnban ? `<button onclick="unbanIP('${escapeJsArg(log.ip)}', this)" class="inline-flex items-center gap-1.5 px-3 py-1 text-xs font-semibold rounded-md bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-400 hover:bg-green-200 dark:hover:bg-green-800/60 border border-green-300 dark:border-green-700 transition-colors cursor-pointer" title="Unban ${escapeHtml(log.ip)}/32"><svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 11V7a4 4 0 118 0m-4 8v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2z"></path></svg>Unban</button>` : ''}
-                            ${showBan ? `<button onclick="banIP('${escapeJsArg(log.ip)}', this)" class="inline-flex items-center gap-1.5 px-3 py-1 text-xs font-semibold rounded-md bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-400 hover:bg-red-200 dark:hover:bg-red-800/60 border border-red-300 dark:border-red-700 transition-colors cursor-pointer" title="Ban ${escapeHtml(log.ip)}/32"><svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path></svg>Ban</button>` : ''}
-                        </div>
+                <div class="ui-ev-row ui-msg-${uiActionTone(log.action)}">
+                    <time class="ui-muted" title="${escapeHtml(formatTime(log.time))}">${formatListTime(log.time)}</time>
+                    <b class="ui-mono">${log.ip ? copyableText(log.ip) : '-'}</b>
+                    <span class="ui-ev-account">${account}</span>
+                    <span>${uiActionTag(log.action)}</span>
+                    <span class="ui-ev-where" title="${escapeHtml(place + org)}">${flagUrl ? `<img src="${flagUrl}" alt="" width="16" height="12" onerror="this.style.display='none'">` : ''}${escapeHtml(place || '-')}</span>
+                    <span class="ui-st-acts">
+                        ${showUnban ? `<button onclick="unbanIP('${escapeJsArg(log.ip)}', this)" class="ui-btn ui-btn-sm" title="Unban ${escapeHtml(log.ip)}/32">Unban</button>` : ''}
+                        ${showBan ? `<button onclick="banIP('${escapeJsArg(log.ip)}', this)" class="ui-btn ui-btn-sm ui-btn-danger" title="Put ${escapeHtml(log.ip)}/32 on the denylist; it stays until removed">Ban permanently</button>` : ''}
+                        <button type="button" class="ui-icon-btn ui-icon-btn-sm ui-ev-toggle" aria-expanded="false" aria-controls="ev-detail-${index}" title="Show the log line" onclick="toggleEventDetail(this)"><svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg></button>
+                    </span>
+                    <div class="ui-ev-detail" id="ev-detail-${index}" hidden>
+                        <p class="ui-mono">${escapeHtml(log.message || '-')}</p>
+                        ${place || org ? `<p class="ui-muted">${escapeHtml([log.country_name, log.city].filter(Boolean).join(' '))}${escapeHtml(org)}</p>` : ''}
                     </div>
-                    <p class="text-sm text-gray-700 dark:text-gray-300 break-words">${escapeHtml(log.message || '-')}</p>
-                    ${geoHtml}
                 </div>`;
             }).join('')}
         </div>
         ${renderPagination('netfilter', data.page, data.pages)}
     `;
+}
+
+function toggleEventDetail(btn) {
+    const detail = document.getElementById(btn.getAttribute('aria-controls'));
+    if (!detail) return;
+    detail.hidden = !detail.hidden;
+    btn.setAttribute('aria-expanded', !detail.hidden);
 }
 
 async function unbanIP(ip, btnEl) {
@@ -917,10 +1314,13 @@ async function unbanIP(ip, btnEl) {
         const result = await res.json();
         if (res.ok && result.status === 'success') {
             showToast('IP ' + ip + ' unbanned successfully', 'success');
-            // Refresh fail2ban data and netfilter logs
-            fail2banSettingsLoaded = false;
-            fail2banActiveBans = null;
-            loadFail2BanSettings();
+            // mailcow queues the unban and lifts it a few seconds later: the address
+            // leaves the lists now, and Fail2ban is asked again once it has acted
+            const bare = entry => String(entry || '').replace(/\/(32|128)$/, '');
+            if (fail2banActiveBans) fail2banActiveBans = fail2banActiveBans.filter(b => bare(b.ip || b.network) !== bare(ip));
+            renderSecurityOverview();
+            refreshSecurityAddresses();
+            setTimeout(() => { fail2banSettingsLoaded = false; loadFail2BanSettings(); }, 5000);
             smartRefreshNetfilter();
         } else {
             showToast('Failed to unban: ' + (result.msg || result.detail || 'Unknown error'), 'error');
@@ -963,6 +1363,7 @@ async function banIP(ip, btnEl) {
             fail2banActiveBans = null;
             loadFail2BanSettings();
             smartRefreshNetfilter();
+            return true;
         } else {
             showToast('Failed to ban: ' + (result.msg || result.detail || 'Unknown error'), 'error');
             if (btnEl) {
@@ -976,6 +1377,37 @@ async function banIP(ip, btnEl) {
             btnEl.disabled = false;
             btnEl.textContent = 'Ban';
         }
+    }
+}
+
+async function allowIP(ip, btnEl) {
+    const ipWithMask = ip.includes('/') ? ip : ip + '/32';
+    if (!await showConfirmModal({ title: 'Allow IP', message: `Add ${ipWithMask} to the Fail2Ban allowlist?\n\nFailed attempts from this address will never lead to a ban.`, confirmText: 'Allow' })) return;
+    if (btnEl) {
+        btnEl.disabled = true;
+        btnEl.textContent = 'Allowing...';
+    }
+    try {
+        const res = await authenticatedFetch('/api/fail2ban/allow', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ip: ipWithMask })
+        });
+        const result = await res.json();
+        if (res.ok && result.status === 'success') {
+            showToast(`IP ${ip} added to the allowlist`, 'success');
+            fail2banSettingsLoaded = false;
+            fail2banActiveBans = null;
+            loadFail2BanSettings();
+            return true;
+        }
+        showToast('Failed to allow: ' + (result.msg || result.detail || 'Unknown error'), 'error');
+    } catch (err) {
+        showToast('Failed to allow IP: ' + err.message, 'error');
+    }
+    if (btnEl) {
+        btnEl.disabled = false;
+        btnEl.textContent = 'Allow';
     }
 }
 
@@ -1043,6 +1475,7 @@ async function smartRefreshQueue() {
         console.log('[REFRESH] Queue data changed, updating UI');
         lastDataCache.queue = data;
         allQueueData = data.data || [];
+        updateQueueSummary();
         applyQueueFilters();
     }
 }
@@ -1074,20 +1507,15 @@ async function smartRefreshDashboard() {
             lastDataCache.dashboard = data;
 
             // Update stats without full reload
-            document.getElementById('stat-messages-24h').textContent = data.messages['24h'].toLocaleString();
-            document.getElementById('stat-messages-7d').textContent = data.messages['7d'].toLocaleString();
-            document.getElementById('stat-blocked-24h').textContent = data.blocked['24h'].toLocaleString();
-            document.getElementById('stat-blocked-7d').textContent = data.blocked['7d'].toLocaleString();
-            document.getElementById('stat-blocked-percentage').textContent = data.blocked.percentage_24h;
-            document.getElementById('stat-deferred-24h').textContent = data.deferred['24h'].toLocaleString();
-            document.getElementById('stat-deferred-7d').textContent = data.deferred['7d'].toLocaleString();
-            document.getElementById('stat-auth-failures-24h').textContent = data.auth_failures['24h'].toLocaleString();
-            document.getElementById('stat-auth-failures-7d').textContent = data.auth_failures['7d'].toLocaleString();
+            dashboardStats = data;
+            renderMailFlowStats();
         }
 
         // Also refresh recent activity and status summary
         loadRecentActivity();
+        loadMailFlowChart();
         loadDashboardStatusSummary();
+        loadDashboardSecurity();
     } catch (error) {
         console.error('Dashboard refresh error:', error);
     }
@@ -1163,21 +1591,9 @@ function switchTab(tab, params = {}) {
         if (tabContent) {
             tabContent.classList.remove('hidden');
             tabContent.innerHTML = `
-                <div class="flex items-center justify-center min-h-[60vh]">
-                    <div class="text-center max-w-md">
-                        <div class="w-16 h-16 mx-auto mb-6 rounded-full bg-gray-100 dark:bg-gray-700 flex items-center justify-center">
-                            <svg class="w-8 h-8 text-gray-400 dark:text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
-                                    d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
-                            </svg>
-                        </div>
-                        <h2 class="text-xl font-semibold text-gray-700 dark:text-gray-300 mb-2">${escapeHtml(featureLabel)} is disabled</h2>
-                        <p class="text-gray-500 dark:text-gray-400 mb-6">This feature has been turned off by the administrator in Settings → Application → Features.</p>
-                        <button onclick="navigateTo('dashboard')"
-                            class="px-5 py-2.5 bg-blue-500 hover:bg-blue-600 text-white rounded-lg text-sm font-medium transition-colors">
-                            Go to Dashboard
-                        </button>
-                    </div>
+                <div class="ui-disabled-page">
+                    ${uiLocked(`${featureLabel} is disabled`, 'This feature has been turned off by the administrator in Settings → Application → Features.',
+                        `<button onclick="navigateTo('dashboard')" class="ui-btn ui-btn-primary">Go to Dashboard</button>`)}
                 </div>`;
         }
 
@@ -1189,18 +1605,26 @@ function switchTab(tab, params = {}) {
         return;
     }
 
+    // The page is already open and only its tab changed (Back, Forward, the
+    // sidebar flyout): switch the tab without loading the page again
+    const tabPage = typeof SUBPAGES !== 'undefined' ? SUBPAGES[tab] : null;
+    const pageEl = document.getElementById(`content-${tab}`);
+    if (tabPage && params.sub && currentTab === tab && pageEl && !pageEl.classList.contains('hidden')) {
+        tabPage.show(params.sub);
+        return;
+    }
+
     currentTab = tab;
 
-    // Update active tab button (desktop)
-    document.querySelectorAll('[id^="tab-"]').forEach(btn => {
-        btn.classList.remove('tab-active');
-        btn.classList.add('text-gray-500', 'dark:text-gray-400');
-    });
-    const activeBtn = document.getElementById(`tab-${tab}`);
-    if (activeBtn) {
-        activeBtn.classList.add('tab-active');
-        activeBtn.classList.remove('text-gray-500', 'dark:text-gray-400');
+    // Mark the current page in the sidebar and in the phone tab bar; "More"
+    // is marked when the page is only reachable through the sheet
+    document.querySelectorAll('[id^="tab-"], [id^="tabbar-"]').forEach(btn => btn.removeAttribute('aria-current'));
+    for (const id of [`tab-${tab}`, `tabbar-${tab}`]) {
+        const btn = document.getElementById(id);
+        if (btn) btn.setAttribute('aria-current', 'page');
     }
+    const moreBtn = document.getElementById('hamburger-btn');
+    if (moreBtn) moreBtn.classList.toggle('ui-more-current', !document.getElementById(`tabbar-${tab}`));
 
     // Update mobile menu state and label
     if (typeof updateMobileMenuActiveState === 'function') {
@@ -1209,6 +1633,7 @@ function switchTab(tab, params = {}) {
     if (typeof updateCurrentTabLabel === 'function') {
         updateCurrentTabLabel(tab);
     }
+    placeTopbar(tab);
 
     // Hide all tab contents
     document.querySelectorAll('.tab-content').forEach(content => {
@@ -1221,6 +1646,13 @@ function switchTab(tab, params = {}) {
         tabContent.classList.remove('hidden');
     } else {
         console.error(`Tab content not found: content-${tab}`);
+    }
+
+    // Open the tab the address names, and correct an address that named none
+    if (tabPage) {
+        const sub = params.sub || tabPage.current();
+        routerSyncSubpage(tab, sub, true);
+        tabPage.select(sub);
     }
 
     // Load tab data
@@ -1238,11 +1670,13 @@ function switchTab(tab, params = {}) {
             loadMessages(1);
             break;
         case 'netfilter':
+            loadSecurityOverview();
             loadNetfilterLogs(1);
             loadFail2BanSettings();
+            if (typeof loadProtection === 'function') loadProtection();
             loadNetfilterCountries();
             loadSmtpAbusePanel();
-            loadSecurityCountryChart(30);
+            loadSecurityAppSettings();
             break;
         case 'queue':
             loadQueue();
@@ -1258,16 +1692,23 @@ function switchTab(tab, params = {}) {
             loadDomains();
             break;
         case 'dmarc':
-            handleDmarcRoute(params);
+            // Refresh passes no params: reload what the address shows (the TLS tab stays open)
+            handleDmarcRoute(Object.keys(params).length ? params : parseRoute().params);
             break;
         case 'mailbox-stats':
             initMailboxStatsPage();
+            break;
+        case 'devices':
+            loadDevices();
             break;
         case 'logs':
             loadLogViewer();
             break;
         case 'settings':
             loadSettings();
+            break;
+        case 'about':
+            loadAbout();
             break;
         case 'spam-filter':
             loadSpamFilter();
@@ -1287,6 +1728,7 @@ async function refreshAllData() {
         }
     }
     switchTab(currentTab);
+    loadNavCounters();
 }
 
 // =============================================================================
@@ -1305,20 +1747,17 @@ async function loadDashboard() {
         const data = await response.json();
         console.log('Dashboard data:', data);
 
-        document.getElementById('stat-messages-24h').textContent = data.messages['24h'].toLocaleString();
-        document.getElementById('stat-messages-7d').textContent = data.messages['7d'].toLocaleString();
-        document.getElementById('stat-blocked-24h').textContent = data.blocked['24h'].toLocaleString();
-        document.getElementById('stat-blocked-7d').textContent = data.blocked['7d'].toLocaleString();
-        document.getElementById('stat-blocked-percentage').textContent = data.blocked.percentage_24h;
-        document.getElementById('stat-deferred-24h').textContent = data.deferred['24h'].toLocaleString();
-        document.getElementById('stat-deferred-7d').textContent = data.deferred['7d'].toLocaleString();
-        document.getElementById('stat-auth-failures-24h').textContent = data.auth_failures['24h'].toLocaleString();
-        document.getElementById('stat-auth-failures-7d').textContent = data.auth_failures['7d'].toLocaleString();
+        dashboardStats = data;
+        renderMailFlowStats();
 
         loadRecentActivity();
         loadDashboardStatusSummary();
         loadDashboardBlacklistSummary();
+        loadDashboardHealth();
         loadDashboardSecurityAlerts();
+        loadDashboardAttention();
+        loadDashboardSecurity();
+        loadMailFlowChart();
     } catch (error) {
         console.error('Failed to load dashboard:', error);
     }
@@ -1327,51 +1766,244 @@ async function loadDashboard() {
 async function loadDashboardSecurityAlerts() {
     const container = document.getElementById('dashboard-security-alerts');
     if (!container) return;
+    const dismissAll = document.getElementById('dashboard-dismiss-all');
     try {
         const response = await authenticatedFetch('/api/security-alerts?acknowledged=false&limit=20');
-        if (!response.ok) { container.classList.add('hidden'); return; }
+        if (!response.ok) { container.classList.add('hidden'); updateAttentionState(); return; }
         const data = await response.json();
         const alerts = data.alerts || [];
         if (alerts.length === 0) {
             container.classList.add('hidden');
             container.innerHTML = '';
+            if (dismissAll) dismissAll.classList.add('hidden');
+            updateAttentionState();
             return;
         }
 
-        const rows = alerts.map(a => {
-            const sev = a.severity === 'critical'
-                ? 'bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300'
-                : 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/40 dark:text-yellow-300';
+        container.innerHTML = alerts.map(a => {
+            const critical = a.severity === 'critical';
             return `
-                <div class="flex items-start justify-between gap-3 py-2 border-t border-red-200 dark:border-red-800/50 first:border-t-0">
-                    <div class="min-w-0">
-                        <div class="flex items-center gap-2 flex-wrap">
-                            <span class="inline-block px-2 py-0.5 text-xs font-semibold rounded ${sev}">${escapeHtml((a.severity || 'warning').toUpperCase())}</span>
-                            <span class="text-sm font-semibold text-gray-900 dark:text-white">${escapeHtml(a.title)}</span>
+                <div class="ui-alert ${critical ? 'ui-alert-fail' : 'ui-alert-warn'}">
+                    <span class="ui-alert-bar"></span>
+                    <div class="ui-alert-text">
+                        <div class="ui-alert-title">
+                            <span class="ui-tag ${critical ? 'ui-tag-fail' : 'ui-tag-warn'}">${escapeHtml((a.severity || 'warning').toUpperCase())}</span>
+                            <b>${escapeHtml(a.title)}</b>
                         </div>
-                        <p class="text-xs text-gray-600 dark:text-gray-400 mt-1">${escapeHtml(a.detail || '')}</p>
-                        <p class="text-xs text-gray-400 mt-1">${escapeHtml(formatTime(a.created_at))}</p>
+                        <p>${escapeHtml(a.detail || '')}</p>
+                        <p class="ui-muted">${escapeHtml(formatTime(a.created_at))}</p>
                     </div>
-                    <button type="button" onclick="acknowledgeSecurityAlert(${a.id})" class="flex-shrink-0 px-2 py-1 text-xs rounded bg-white/70 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700" title="Dismiss">Dismiss</button>
+                    <div class="ui-alert-acts">
+                        <button type="button" onclick="openAlertActivity(${Number(a.id)})" class="ui-btn ui-btn-sm" title="What happened before and around this alert">Show activity</button>
+                        <button type="button" onclick="acknowledgeSecurityAlert(${Number(a.id)})" class="ui-btn ui-btn-sm" title="Dismiss">Dismiss</button>
+                    </div>
                 </div>`;
         }).join('');
-
-        container.innerHTML = `
-            <div class="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-4">
-                <div class="flex items-center justify-between mb-2">
-                    <div class="flex items-center gap-2">
-                        <svg class="w-5 h-5 text-red-600 dark:text-red-400" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd"></path></svg>
-                        <h3 class="text-sm font-semibold text-red-800 dark:text-red-300">Security Alerts (${alerts.length})</h3>
-                    </div>
-                    <button type="button" onclick="acknowledgeAllSecurityAlerts()" class="px-2 py-1 text-xs rounded bg-white/70 dark:bg-gray-800 border border-red-300 dark:border-red-700 text-red-700 dark:text-red-300 hover:bg-red-100 dark:hover:bg-red-900/40">Dismiss all</button>
-                </div>
-                ${rows}
-            </div>`;
         container.classList.remove('hidden');
+        if (dismissAll) dismissAll.classList.remove('hidden');
     } catch (e) {
         console.warn('Failed to load security alerts:', e);
         container.classList.add('hidden');
     }
+    updateAttentionState();
+}
+
+// The count and the "all clear" line of Needs attention follow what is in it
+function updateAttentionState() {
+    const panel = document.getElementById('dashboard-attention-panel');
+    if (!panel) return;
+    const rows = panel.querySelectorAll('.ui-alert').length;
+    const count = document.getElementById('dashboard-attention-count');
+    if (count) count.textContent = rows ? String(rows) : '';
+    const clear = document.getElementById('dashboard-attention-clear');
+    if (clear) clear.classList.toggle('hidden', rows > 0);
+}
+
+// Server checks that need a look, each with the place to handle it
+async function loadDashboardAttention() {
+    const container = document.getElementById('dashboard-attention');
+    if (!container) return;
+    const off = feature => (window.disabledFeatures || []).includes(feature);
+    const get = async url => {
+        try {
+            const res = await authenticatedFetch(url);
+            return res.ok ? await res.json() : null;
+        } catch (e) {
+            return null;
+        }
+    };
+    const [blacklist, summary, insights, appVersion, mailcowVersion, connection] = await Promise.all([
+        off('blacklist') ? null : get('/api/blacklist/summary'),
+        get('/api/status/summary'),
+        off('dmarc') ? null : get('/api/dmarc/insights'),
+        get('/api/status/app-version'),
+        get('/api/status/version'),
+        get('/api/status/mailcow-connection'),
+    ]);
+    const items = [];
+    if (connection && connection.connected === false) {
+        items.push({ tone: 'fail', title: 'mailcow is not reachable', detail: 'The mailcow API did not answer, so logs and server data may be out of date.', action: 'Open settings', onclick: "navigateTo('settings')" });
+    }
+    if (blacklist && blacklist.status === 'listed') {
+        // Name the host that is actually listed, with its own list count
+        const listedHosts = (blacklist.hosts || []).filter(h => h.status === 'listed');
+        const first = listedHosts[0];
+        const title = listedHosts.length > 1
+            ? `${listedHosts.length} of your addresses are on a blocklist`
+            : `${first ? first.hostname : (blacklist.server_ip || 'Your server')} is on a blocklist`;
+        const detail = listedHosts.length > 1
+            ? `${listedHosts.map(h => h.hostname).join(', ')}. Outbound mail to some providers may bounce.`
+            : `Listed on ${first ? first.listed_count : blacklist.listed_count} of ${first && first.total_blacklists ? first.total_blacklists : blacklist.total_blacklists} lists. Outbound mail to some providers may bounce.`;
+        items.push({ tone: 'fail', title, detail, action: 'Check listing', onclick: "navigateTo('status')" });
+    }
+    const containers = summary && summary.containers ? summary.containers : null;
+    if (containers && containers.stopped > 0) {
+        items.push({ tone: 'fail', title: containers.stopped === 1 ? 'A mailcow container is stopped' : `${containers.stopped} mailcow containers are stopped`,
+            detail: `${containers.running || 0} of ${containers.total || 0} containers are running.`, action: 'Open status', onclick: "navigateTo('status')" });
+    }
+    const dmarc = insights ? (insights.insights || []).filter(i =>
+        i.recommendations.some(r => r.type === 'tighten_policy' || r.type === 'low_pass_rate') || (i.new_sources && i.new_sources.length > 0)) : [];
+    if (dmarc.length) {
+        const first = dmarc[0].recommendations[0];
+        items.push({ tone: 'warn', title: dmarc.length === 1 ? `DMARC needs attention for ${dmarc[0].domain}` : `DMARC needs attention for ${dmarc.length} domains`,
+            detail: first ? first.message : 'New sources are failing DMARC.', action: 'Open DMARC', onclick: "navigateTo('dmarc')" });
+    }
+    if (appVersion && appVersion.update_available) {
+        appUpdateInfo = appVersion;
+        items.push({ tone: 'info', title: `Version ${appVersion.latest_version} is available`,
+            detail: `You are running ${appVersion.current_version}. See what changed before updating.`, action: 'Read changes', onclick: 'showAppUpdateModal()' });
+    }
+    if (mailcowVersion && mailcowVersion.update_available) {
+        items.push({ tone: 'info', title: `mailcow ${mailcowVersion.latest_version} is available`,
+            detail: `You are running ${mailcowVersion.current_version}.`, action: 'Read changes', onclick: 'showMailcowUpdateModal()' });
+    }
+    container.innerHTML = items.map(item => `
+        <div class="ui-alert ui-alert-${item.tone}">
+            <span class="ui-alert-bar"></span>
+            <div class="ui-alert-text"><div class="ui-alert-title"><b>${escapeHtml(item.title)}</b></div><p>${escapeHtml(item.detail)}</p></div>
+            <button type="button" class="ui-btn ui-btn-sm" onclick="${item.onclick}">${escapeHtml(item.action)}</button>
+        </div>`).join('');
+    updateAttentionState();
+}
+
+// The dashboard's mail flow: the 24-hour figures, or those of one hour picked on the chart
+let dashboardStats = null;
+let mailFlowSlots = [];
+let mailFlowPicked = null; // start of the picked hour (ms), or null for all 24 hours
+
+function mailFlowHour(t) {
+    return new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit', hour12: false,
+        timeZone: appTimezone && appTimezone !== 'UTC' ? appTimezone : undefined }).format(new Date(t));
+}
+
+// A click on a bar shows that hour's numbers; the same bar again, or All 24 hours, goes back
+function pickMailFlowHour(t) {
+    mailFlowPicked = t === null || mailFlowPicked === t ? null : t;
+    renderMailFlowStats();
+}
+
+function renderMailFlowStats() {
+    const d = dashboardStats;
+    if (!d) return;
+    const slot = mailFlowPicked === null ? null : mailFlowSlots.find(s => s.t === mailFlowPicked);
+    if (!slot) mailFlowPicked = null;
+    const set = (id, text) => { const el = document.getElementById(id); if (el) el.textContent = text; };
+    const n = v => (v || 0).toLocaleString();
+    if (slot) {
+        set('stat-messages-24h', n(slot.unique_messages));
+        set('stat-blocked-24h', n(slot.blocked));
+        set('stat-deferred-24h', n(slot.deferred));
+        set('stat-auth-failures-24h', n(slot.auth_failures));
+        set('stat-messages-note', `${n(slot.messages)} deliveries, 24h: ${n(d.messages.unique_24h)}`);
+        set('stat-blocked-note', `24h: ${n(d.blocked['24h'])}`);
+        set('stat-deferred-note', `24h: ${n(d.deferred['24h'])}`);
+        set('stat-auth-failures-note', `24h: ${n(d.auth_failures['24h'])}`);
+        set('dashboard-flow-title', `Mail flow, ${mailFlowHour(slot.t)} to ${mailFlowHour(slot.t + 3600000)}`);
+    } else {
+        set('stat-messages-24h', n(d.messages.unique_24h ?? d.messages['24h']));
+        set('stat-blocked-24h', n(d.blocked['24h']));
+        set('stat-deferred-24h', n(d.deferred['24h']));
+        set('stat-auth-failures-24h', n(d.auth_failures['24h']));
+        set('stat-messages-note', `${n(d.messages['24h'])} deliveries, 7d: ${n(d.messages.unique_7d ?? d.messages['7d'])}`);
+        set('stat-blocked-note', `7d: ${n(d.blocked['7d'])} (${d.blocked.percentage_24h}%)`);
+        set('stat-deferred-note', `7d: ${n(d.deferred['7d'])}`);
+        set('stat-auth-failures-note', `7d: ${n(d.auth_failures['7d'])}`);
+        set('dashboard-flow-title', 'Mail flow, last 24 hours');
+    }
+    document.getElementById('dashboard-flow-reset')?.classList.toggle('hidden', !slot);
+    document.getElementById('dashboard-flow-view')?.classList.toggle('hidden', !slot);
+    const bars = document.querySelector('#dashboard-flow-chart .ui-flow-bars');
+    if (bars) {
+        bars.classList.toggle('has-pick', !!slot);
+        bars.querySelectorAll('.ui-flow-bar').forEach(b => b.setAttribute('aria-pressed', String(!!slot && Number(b.dataset.t) === slot.t)));
+    }
+}
+
+// The picked hour's messages on the Messages page: its time filter set to that hour, the other filters cleared.
+// Messages counts by the same first-seen time as the chart's Messages figure, so the two agree.
+function openMailFlowHourMessages() {
+    const slot = mailFlowSlots.find(s => s.t === mailFlowPicked);
+    if (!slot) return;
+    const start = new Date(slot.t).toISOString();
+    const end = new Date(slot.t + 3600000 - 1).toISOString();
+    ['search', 'sender', 'recipient', 'user', 'ip', 'direction', 'status'].forEach(key => {
+        const el = document.getElementById(`messages-filter-${key}`);
+        if (el) el.value = '';
+    });
+    document.getElementById('messages-date-range').value = 'custom';
+    document.getElementById('messages-start-date').value = start;
+    document.getElementById('messages-end-date').value = end;
+    // The custom range picker shows the day the hour is on
+    const day = new Intl.DateTimeFormat('en-CA', { year: 'numeric', month: '2-digit', day: '2-digit',
+        timeZone: appTimezone && appTimezone !== 'UTC' ? appTimezone : undefined }).format(new Date(slot.t));
+    document.getElementById('messages-date-range-start').value = day;
+    document.getElementById('messages-date-range-end').value = day;
+    const dayLabel = new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric',
+        timeZone: appTimezone && appTimezone !== 'UTC' ? appTimezone : undefined }).format(new Date(slot.t));
+    document.getElementById('messages-date-range-label').textContent = `${dayLabel}, ${mailFlowHour(slot.t)} to ${mailFlowHour(slot.t + 3600000)}`;
+    setMessagesDatePresetActive(null);
+    currentFilters.messages = { start_date: start, end_date: end };
+    currentPage.messages = 1;
+    navigateTo('messages');
+}
+
+// Hourly messages over the last 24 hours, clean and spam (Rspamd), as bars over a time axis
+async function loadMailFlowChart() {
+    const chart = document.getElementById('dashboard-flow-chart');
+    if (!chart) return;
+    let rows = [];
+    try {
+        const res = await authenticatedFetch('/api/stats/timeline?hours=24');
+        if (res.ok) rows = (await res.json()).timeline || [];
+    } catch (e) {
+        rows = [];
+    }
+    const byHour = new Map(rows.map(r => [new Date(r.hour).getTime(), r]));
+    // Hours are counted from the epoch, so any time zone lines up with the UTC buckets
+    const now = Math.floor(Date.now() / 3600000) * 3600000;
+    const slots = [];
+    for (let i = 23; i >= 0; i--) {
+        const t = now - i * 3600 * 1000;
+        const r = byHour.get(t) || {};
+        slots.push({ t, clean: r.clean || 0, spam: r.spam || 0, messages: r.messages || 0, unique_messages: r.unique_messages || 0, blocked: r.blocked || 0,
+            deferred: r.deferred || 0, auth_failures: r.auth_failures || 0 });
+    }
+    mailFlowSlots = slots;
+    const max = Math.max(1, ...slots.map(s => s.clean + s.spam));
+    // The axis names every third hour (every sixth on phones) and ends at now
+    const label = (s, i) => i === slots.length - 1 ? '<span class="is-major">Now</span>'
+        : i % 6 === 0 ? `<span class="is-major">${mailFlowHour(s.t)}</span>`
+        : i % 3 === 0 ? `<span class="is-minor">${mailFlowHour(s.t)}</span>` : '<span></span>';
+    chart.innerHTML = `
+        <div class="ui-flow-bars" role="group" aria-label="Messages per hour">${slots.map(s => `
+            <button type="button" class="ui-flow-bar" data-t="${Number(s.t)}" aria-pressed="false" onclick="pickMailFlowHour(${Number(s.t)})"
+                title="${mailFlowHour(s.t)} to ${mailFlowHour(s.t + 3600000)}: ${Number(s.clean).toLocaleString()} clean, ${Number(s.spam).toLocaleString()} spam. Click for this hour's numbers">
+                <i class="ui-flow-spam" style="height: ${(s.spam / max) * 100}%"></i>
+                <i class="ui-flow-clean" style="height: ${(s.clean / max) * 100}%"></i>
+            </button>`).join('')}</div>
+        <div class="ui-flow-axis" aria-hidden="true">${slots.map(label).join('')}</div>
+        <div class="ui-flow-legend"><span><i class="ui-flow-clean"></i>Clean</span><span><i class="ui-flow-spam"></i>Spam</span></div>`;
+    renderMailFlowStats();
 }
 
 async function acknowledgeSecurityAlert(alertId) {
@@ -1393,6 +2025,98 @@ async function acknowledgeAllSecurityAlerts() {
     }
 }
 
+// One dashboard health card: the big value, its tone and the line under it
+function setDashKpi(id, value, tone, note) {
+    const el = document.getElementById(id);
+    if (el) { el.textContent = value; el.className = tone ? `ui-${tone}` : ''; }
+    const noteEl = document.getElementById(`${id}-note`);
+    if (noteEl && note !== undefined) noteEl.textContent = note;
+}
+
+// The Security card: whether the protections are on, and the Security page's two
+// lists with the same real counts. Which protections are on is read once; the
+// Security page keeps it current when it is opened.
+async function loadDashboardSecurity() {
+    const panel = document.getElementById('dashboard-security-panel');
+    if (!panel) return;
+    if (isFeatureDisabled('netfilter')) {
+        panel.classList.add('hidden');
+        return;
+    }
+    panel.classList.remove('hidden');
+    const get = async url => {
+        try {
+            const res = await authenticatedFetch(url);
+            return res.ok ? await res.json() : null;
+        } catch (e) {
+            return null;
+        }
+    };
+    const [page, rules, abuse] = await Promise.all([
+        get('/api/security/addresses?list=review&limit=1'),
+        protectionSaved ? null : get('/api/protection/rules'),
+        smtpAbuseStatus ? null : get('/api/smtp-abuse/status?limit=1'),
+        fail2banSettingsLoaded ? null : loadFail2BanSettings(),
+    ]);
+    if (rules) {
+        protectionCaps = rules.capabilities || protectionCaps;
+        if (!protectionDirty) {
+            protectionRules = rules.rules;
+            protectionSaved = JSON.parse(JSON.stringify(rules.rules));
+        }
+    }
+    if (abuse) smtpAbuseStatus = abuse;
+    renderDashboardSecurity(page || dashboardSecurityPage);
+}
+
+let dashboardSecurityPage = null;
+let dashboardProtectionsOpen = false;   // the protection line folds out into every protection
+
+function renderDashboardSecurity(page = dashboardSecurityPage) {
+    dashboardSecurityPage = page;
+    const box = document.getElementById('dashboard-security');
+    if (!box) return;
+    const counts = page ? page.all_counts : null;
+    const n = key => counts ? Number(counts[key]).toLocaleString() : '-';
+    const protections = securityProtectionItems();
+    const on = protections.filter(securityProtectionOn);
+    // The line's own mark: a tick when anything acts, an eye when everything on only watches
+    const lineState = on.some(p => p.state === 'on') ? 'on' : on.length ? 'watch' : 'off';
+    box.innerHTML = `
+        <div class="ui-stats ui-dash-sec-stats">
+            <button type="button" class="ui-stat" onclick="openSecurityList('review')"><span>To review</span><b>${n('review')}</b><small>Not banned</small></button>
+            <button type="button" class="ui-stat" onclick="openSecurityList('banned')"><span>Banned now</span><b${counts && counts.banned ? ' class="ui-text-fail"' : ''}>${n('banned')}</b><small>By Fail2ban and the rules</small></button>
+        </div>
+        <button type="button" class="ui-dash-sec-prot is-${lineState}" aria-expanded="${dashboardProtectionsOpen}" aria-controls="dashboard-protections"
+            onclick="dashboardProtectionsOpen = !dashboardProtectionsOpen; renderDashboardSecurity()">
+            <span class="ui-prot-mark" aria-hidden="true">${securityProtectionMark(lineState)}</span><b>Protection ${on.length} of ${protections.length} on</b><span class="ui-dash-sec-chev" aria-hidden="true"></span>
+            ${on.length && !dashboardProtectionsOpen ? `<span class="ui-dash-sec-on">${on.map(p => escapeHtml(p.name)).join(' · ')}</span>` : ''}
+        </button>
+        ${dashboardProtectionsOpen ? `<div id="dashboard-protections" class="ui-dash-sec-list">${protections.map(p => securityProtectionButton(p, 'openSecurityProtection')).join('')}</div>` : ''}`;
+}
+
+// Jobs, message linking and the app version for the dashboard health cards
+async function loadDashboardHealth() {
+    try {
+        const [infoRes, versionRes] = await Promise.all([authenticatedFetch('/api/settings/info'), authenticatedFetch('/api/status/app-version')]);
+        if (infoRes.ok) {
+            const info = await infoRes.json();
+            const jobs = summarizeJobs(info.background_jobs || {});
+            setDashKpi('dash-kpi-jobs', `${jobs.healthy} of ${jobs.running} healthy`, jobs.failed.length ? 'fail' : '',
+                jobs.failed.length ? `${jobs.failed.map(([name]) => name).join(', ')} failed` : (jobs.off ? `${jobs.off} off with their feature` : 'None failed'));
+            const c = info.correlation_status || {};
+            setDashKpi('dash-kpi-linking', `${c.completion_rate || 0}%`, c.incomplete ? 'warn' : '',
+                `${(c.complete || 0).toLocaleString()} of ${(c.total || 0).toLocaleString()} complete`);
+        }
+        if (versionRes.ok) {
+            const v = await versionRes.json();
+            setDashKpi('dash-kpi-version', v.current_version || '-', '', v.update_available ? `${v.latest_version} available` : 'Up to date');
+        }
+    } catch (error) {
+        console.error('Failed to load dashboard health:', error);
+    }
+}
+
 async function loadDashboardStatusSummary() {
     try {
         console.log('Loading Dashboard Status Summary...');
@@ -1405,60 +2129,23 @@ async function loadDashboardStatusSummary() {
         const data = await response.json();
         console.log('Status summary data:', data);
 
-        const containersDiv = document.getElementById('dashboard-containers-summary');
+        // Containers: red when one is stopped; ignored ones are only mentioned
         const containers = data.containers || {};
-        containersDiv.innerHTML = `
-            <div class="flex justify-between items-center">
-                <span class="text-sm text-gray-600 dark:text-gray-400">Running</span>
-                <span class="text-lg font-semibold text-green-600 dark:text-green-400">${containers.running || 0}</span>
-            </div>
-            <div class="flex justify-between items-center">
-                <span class="text-sm text-gray-600 dark:text-gray-400">Stopped</span>
-                <span class="text-lg font-semibold ${containers.stopped > 0 ? 'text-red-600 dark:text-red-400' : 'text-gray-600 dark:text-gray-400'}">${containers.stopped || 0}</span>
-            </div>
-            <div class="flex justify-between items-center pt-2 border-t border-gray-200 dark:border-gray-700">
-                <span class="text-sm font-medium text-gray-700 dark:text-gray-300">Total</span>
-                <span class="text-lg font-semibold text-gray-900 dark:text-white">${containers.total || 0}</span>
-            </div>
-        `;
+        setDashKpi('dash-kpi-containers', `${containers.running || 0} of ${containers.total || 0} running`, containers.stopped > 0 ? 'fail' : '',
+            [containers.stopped ? `${containers.stopped} stopped` : 'All running', containers.ignored ? `${containers.ignored} ignored` : ''].filter(Boolean).join(', '));
 
-        const storageDiv = document.getElementById('dashboard-storage-summary');
+        // Storage: amber above 75%, red above 90%
         const storage = data.storage || {};
         const usedPercent = parseInt(storage.used_percent) || 0;
-        const storageColor = usedPercent > 90 ? 'text-red-600 dark:text-red-400' :
-            usedPercent > 75 ? 'text-yellow-600 dark:text-yellow-400' :
-                'text-green-600 dark:text-green-400';
-        storageDiv.innerHTML = `
-            <div class="flex justify-between items-center">
-                <span class="text-sm text-gray-600 dark:text-gray-400">Used</span>
-                <span class="text-lg font-semibold ${storageColor}">${storage.used_percent || '0%'}</span>
-            </div>
-            <div class="flex justify-between items-center">
-                <span class="text-sm text-gray-600 dark:text-gray-400">Available</span>
-                <span class="text-sm text-gray-900 dark:text-white">${storage.used || '0'} / ${storage.total || '0'}</span>
-            </div>
-            <div class="mt-2">
-                <div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
-                    <div class="h-2 rounded-full ${usedPercent > 90 ? 'bg-red-600' : usedPercent > 75 ? 'bg-yellow-600' : 'bg-green-600'}" style="width: ${usedPercent}%"></div>
-                </div>
-            </div>
-        `;
+        const storageLevel = usedPercent > 90 ? 'fail' : usedPercent > 75 ? 'warn' : '';
+        setDashKpi('dash-kpi-storage', `${storage.used_percent || '0%'} used`, storageLevel, `${storage.used || '0'} of ${storage.total || '0'}`);
 
         const systemDiv = document.getElementById('dashboard-system-summary');
         const system = data.system || {};
         systemDiv.innerHTML = `
-            <div class="flex justify-between items-center">
-                <span class="text-sm text-gray-600 dark:text-gray-400">Domains</span>
-                <span class="text-lg font-semibold text-gray-900 dark:text-white">${system.domains || 0}</span>
-            </div>
-            <div class="flex justify-between items-center">
-                <span class="text-sm text-gray-600 dark:text-gray-400">Mailboxes</span>
-                <span class="text-lg font-semibold text-gray-900 dark:text-white">${system.mailboxes || 0}</span>
-            </div>
-            <div class="flex justify-between items-center">
-                <span class="text-sm text-gray-600 dark:text-gray-400">Aliases</span>
-                <span class="text-lg font-semibold text-gray-900 dark:text-white">${system.aliases || 0}</span>
-            </div>
+            <div class="ui-kv"><span>Domains</span><b>${Number(system.domains || 0).toLocaleString()}</b></div>
+            <div class="ui-kv"><span>Mailboxes</span><b>${Number(system.mailboxes || 0).toLocaleString()}</b></div>
+            <div class="ui-kv"><span>Aliases</span><b>${Number(system.aliases || 0).toLocaleString()}</b></div>
         `;
     } catch (error) {
         console.error('Failed to load status summary:', error);
@@ -1480,58 +2167,26 @@ async function loadRecentActivity() {
         console.log('Recent Activity data:', data);
 
         if (data.activity.length === 0) {
-            container.innerHTML = '<p class="text-gray-500 dark:text-gray-400 text-center py-8">No recent activity</p>';
+            container.innerHTML = '<p class="ui-empty">No recent activity</p>';
             return;
         }
 
-        container.innerHTML = data.activity.map(msg => `
-            <div class="grid grid-cols-1 sm:grid-cols-[1fr_auto] gap-2 p-3 sm:p-4 bg-gray-50 dark:bg-gray-700/50 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition cursor-pointer items-start" onclick="viewMessageDetails('${msg.correlation_key}')">
-                <div class="min-w-0 overflow-hidden">
-                    <div class="flex flex-wrap items-center gap-2 mb-1">
-                        <span class="text-sm font-medium text-gray-900 dark:text-white">${escapeHtml(msg.sender || 'Unknown')}</span>
-                        <svg class="w-4 h-4 text-gray-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
-                        </svg>
-                        <span class="text-sm text-gray-600 dark:text-gray-300">${escapeHtml(msg.recipient || 'Unknown')}</span>
-                    </div>
-                    <p class="text-xs text-gray-500 dark:text-gray-400 truncate" dir="auto" title="${escapeHtml(msg.subject || 'No subject')}">${escapeHtml(msg.subject || 'No subject')}</p>
-                </div>
-                <div class="flex flex-col items-end gap-1 flex-shrink-0">
-                    <div class="flex items-center gap-2">
-                        <span class="inline-block px-2 py-1 text-xs font-medium rounded ${getStatusClass(msg.status)}">${msg.status || 'unknown'}</span>
-                        ${msg.direction ? `<span class="inline-block px-2 py-0.5 text-xs font-medium rounded ${getDirectionClass(msg.direction)}">${msg.direction}</span>` : ''}
-                    </div>
-                    <p class="text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap">${formatTime(msg.time)}</p>
-                </div>
-            </div>
-        `).join('');
+        // One compact row per message: time, outcome dot, who, subject
+        container.innerHTML = data.activity.map(msg => {
+            const tone = UI_STATUS_TONE[msg.status] || '';
+            const state = `${msg.status || 'unknown'}${msg.direction ? `, ${msg.direction}` : ''}`;
+            return `
+            <div class="ui-mrow" onclick="viewMessageDetails('${escapeJsArg(msg.correlation_key)}')">
+                <time title="${escapeHtml(formatTime(msg.time))}">${formatListTime(msg.time)}</time>
+                <i class="ui-mdot${tone ? ` ui-mdot-${tone}` : ''}" title="${escapeHtml(state)}"></i>
+                <span class="ui-mrow-who">${escapeHtml(msg.sender || 'Unknown')} → ${escapeHtml(msg.recipient || 'Unknown')}</span>
+                <span class="ui-mrow-sub" dir="auto" title="${escapeHtml(msg.subject || 'No subject')}">${escapeHtml(msg.subject || 'No subject')}</span>
+            </div>`;
+        }).join('');
     } catch (error) {
         console.error('Failed to load recent activity:', error);
-        document.getElementById('recent-activity').innerHTML = `<p class="text-red-500 text-center py-8">Failed to load activity: ${escapeHtml(error.message)}</p>`;
+        document.getElementById('recent-activity').innerHTML = `<p class="ui-empty ui-text-fail">Failed to load activity: ${escapeHtml(error.message)}</p>`;
     }
-}
-
-function performDashboardSearch() {
-    const query = document.getElementById('dashboard-search-query').value;
-    const status = document.getElementById('dashboard-search-status').value;
-
-    // Set filters on Messages page
-    document.getElementById('messages-filter-search').value = query;
-    document.getElementById('messages-filter-sender').value = '';
-    document.getElementById('messages-filter-recipient').value = '';
-    document.getElementById('messages-filter-direction').value = '';
-    document.getElementById('messages-filter-status').value = status;
-    document.getElementById('messages-filter-user').value = '';
-
-    // Apply filters
-    currentFilters.messages = {
-        search: query,
-        status: status
-    };
-    currentPage.messages = 1;
-
-    // Switch to Messages tab and load
-    switchTab('messages');
 }
 
 // =============================================================================
@@ -1559,226 +2214,11 @@ function clearNetfilterFilters() {
     loadNetfilterLogs();
 }
 
-let securityCountryChart = null;
-
-async function loadSecurityCountryChart(days = 30) {
-    // Update period button styles
-    document.querySelectorAll('.country-chart-period-btn').forEach(btn => {
-        btn.className = 'country-chart-period-btn px-3 py-1.5 text-xs font-medium rounded-md border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors';
-    });
-    const activeBtn = document.getElementById(`country-chart-${days}d`);
-    if (activeBtn) {
-        activeBtn.className = 'country-chart-period-btn px-3 py-1.5 text-xs font-medium rounded-md border border-blue-500 bg-blue-500 text-white transition-colors';
-    }
-
-    try {
-        const response = await authenticatedFetch(`/api/logs/netfilter/stats/by-country?days=${days}`);
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        const result = await response.json();
-        const data = result.data || [];
-
-        const container = document.getElementById('country-chart-container');
-        const emptyMsg = document.getElementById('country-chart-empty');
-
-        // Filter out countries with 0 total (ban+warning+unban)
-        const filteredData = data.filter(d => (d.ban + d.warning + d.unban) > 0);
-
-        if (filteredData.length === 0) {
-            container.classList.add('hidden');
-            emptyMsg.classList.remove('hidden');
-            return;
-        }
-        container.classList.remove('hidden');
-        emptyMsg.classList.add('hidden');
-
-
-        // Preload flag images for chart labels
-        const flagImages = {};
-        const flagPromises = filteredData.map(d => {
-            const url = getFlagUrl(d.country_code, '24x18');
-            if (!url) return Promise.resolve();
-            return new Promise(resolve => {
-                const img = new Image();
-                img.onload = () => { flagImages[d.country_code] = img; resolve(); };
-                img.onerror = () => resolve();
-                img.src = url;
-            });
-        });
-        await Promise.all(flagPromises);
-
-
-        // Destroy old chart if exists
-        if (securityCountryChart) {
-            securityCountryChart.destroy();
-            securityCountryChart = null;
-        }
-
-        const isDark = document.documentElement.classList.contains('dark');
-        const gridColor = isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)';
-        const textColor = isDark ? '#d1d5db' : '#374151';
-
-        // Dataset visibility state: track which action types are shown
-        const datasetKeys = ['ban', 'warning', 'unban'];
-        const visibleSets = { ban: true, warning: true, unban: true };
-
-        const datasetColors = {
-            ban:     isDark ? 'rgba(239,68,68,0.8)' : 'rgba(220,38,38,0.8)',
-            warning: isDark ? 'rgba(251,191,36,0.8)' : 'rgba(217,119,6,0.8)',
-            unban:   isDark ? 'rgba(34,197,94,0.8)' : 'rgba(22,163,74,0.8)'
-        };
-        const datasetLabels = { ban: 'Ban', warning: 'Warning', unban: 'Unban' };
-
-        // Build chart data filtered by visible datasets
-        function buildChartData() {
-            // Filter: only keep countries that have > 0 events in any VISIBLE dataset
-            const visible = filteredData.filter(d => {
-                let sum = 0;
-                for (const key of datasetKeys) {
-                    if (visibleSets[key]) sum += d[key];
-                }
-                return sum > 0;
-            });
-
-            // Sort by visible total descending
-            visible.sort((a, b) => {
-                let sumA = 0, sumB = 0;
-                for (const key of datasetKeys) {
-                    if (visibleSets[key]) { sumA += a[key]; sumB += b[key]; }
-                }
-                return sumB - sumA;
-            });
-
-            return visible;
-        }
-
-        function updateChart() {
-            const visible = buildChartData();
-
-            if (visible.length === 0) {
-                container.classList.add('hidden');
-                emptyMsg.classList.remove('hidden');
-                return;
-            }
-            container.classList.remove('hidden');
-            emptyMsg.classList.add('hidden');
-
-            // Dynamic height
-            const chartHeight = Math.min(350, Math.max(120, visible.length * 32));
-            container.style.height = chartHeight + 'px';
-
-            // Update chart data in place
-            securityCountryChart.data.labels = visible.map(d => d.country_name);
-            datasetKeys.forEach((key, i) => {
-                securityCountryChart.data.datasets[i].data = visible.map(d => d[key]);
-            });
-
-            // Store visible data reference for flag plugin and tooltip
-            securityCountryChart._visibleData = visible;
-
-            securityCountryChart.update();
-        }
-
-        const initialVisible = buildChartData();
-
-        // Dynamic height
-        const chartHeight = Math.min(350, Math.max(120, initialVisible.length * 32));
-        container.style.height = chartHeight + 'px';
-
-        const ctx = document.getElementById('security-country-chart').getContext('2d');
-        securityCountryChart = new Chart(ctx, {
-            type: 'bar',
-            data: {
-                labels: initialVisible.map(d => d.country_name),
-                datasets: datasetKeys.map(key => ({
-                    label: datasetLabels[key],
-                    data: initialVisible.map(d => d[key]),
-                    backgroundColor: datasetColors[key],
-                    borderRadius: 3
-                }))
-            },
-            options: {
-                indexAxis: 'y',
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: {
-                    legend: {
-                        position: 'top',
-                        labels: { color: textColor, padding: 15, usePointStyle: true, pointStyle: 'rectRounded' },
-                        onClick: (e, legendItem, legend) => {
-                            const key = datasetKeys[legendItem.datasetIndex];
-                            visibleSets[key] = !visibleSets[key];
-
-                            // Toggle the dataset hidden state
-                            const meta = legend.chart.getDatasetMeta(legendItem.datasetIndex);
-                            meta.hidden = !visibleSets[key];
-
-                            // Rebuild data with only countries that have visible events
-                            updateChart();
-                        }
-                    },
-                    tooltip: {
-                        callbacks: {
-                            title: (items) => items[0].label,
-                            afterTitle: (items) => {
-                                const d = securityCountryChart._visibleData?.[items[0].dataIndex];
-                                if (!d) return '';
-                                let sum = 0;
-                                for (const key of datasetKeys) {
-                                    if (visibleSets[key]) sum += d[key];
-                                }
-                                return `Total: ${sum} events`;
-                            }
-                        }
-                    }
-                },
-                scales: {
-                    x: {
-                        stacked: true,
-                        grid: { color: gridColor },
-                        ticks: { color: textColor }
-                    },
-                    y: {
-                        stacked: true,
-                        grid: { display: false },
-                        ticks: { color: textColor, padding: 30 }
-                    }
-                },
-                layout: {
-                    padding: { left: 8 }
-                }
-            },
-            plugins: [{
-                id: 'flagIcons',
-                afterDraw: (chart) => {
-                    const yScale = chart.scales.y;
-                    if (!yScale) return;
-                    const visible = chart._visibleData || initialVisible;
-                    const ctx = chart.ctx;
-                    yScale.ticks.forEach((tick, i) => {
-                        const d = visible[i];
-                        if (!d) return;
-                        const flagImg = flagImages[d.country_code];
-                        if (!flagImg) return;
-                        const y = yScale.getPixelForTick(i);
-                        const xPos = yScale.right - 28;
-                        ctx.drawImage(flagImg, xPos, y - 6, 24, 18);
-                    });
-                }
-            }]
-        });
-
-        // Store initial visible data reference
-        securityCountryChart._visibleData = initialVisible;
-    } catch (e) {
-        console.error('Failed to load security country chart:', e);
-    }
-}
-
 async function loadNetfilterLogs(page = 1) {
     const container = document.getElementById('netfilter-logs');
 
     try {
-        container.innerHTML = '<div class="text-center py-8"><div class="loading mx-auto mb-4"></div><p class="text-gray-500 dark:text-gray-400">Loading...</p></div>';
+        container.innerHTML = '<div class="ui-loading"><div class="loading"></div><p>Loading...</p></div>';
 
         const filters = currentFilters.netfilter || {};
         const params = new URLSearchParams({
@@ -1806,7 +2246,7 @@ async function loadNetfilterLogs(page = 1) {
         currentPage.netfilter = page;
     } catch (error) {
         console.error('Failed to load Netfilter logs:', error);
-        document.getElementById('netfilter-logs').innerHTML = `<p class="text-red-500 text-center py-8">Failed to load logs: ${escapeHtml(error.message)}</p>`;
+        document.getElementById('netfilter-logs').innerHTML = `<p class="ui-empty ui-text-fail">Failed to load logs: ${escapeHtml(error.message)}</p>`;
         const countEl = document.getElementById('security-count');
         if (countEl) countEl.textContent = '';
     }
@@ -1817,370 +2257,42 @@ async function loadNetfilterLogs(page = 1) {
 // =============================================================================
 
 let fail2banSettingsLoaded = false;
-let fail2banActiveBans = null;
+let fail2banActiveBans = null;   // null until mailcow has answered
 let fail2banBlacklist = [];
+let fail2banWhitelist = [];
+let fail2banPermBans = [];
+let fail2banPolicy = null;       // how Fail2ban bans: times, attempts, window, network size
 
+// Fail2ban's bans, lists and policy from mailcow. The Security page shows them in
+// the Overview, the Lists and the Fail2ban card; an action resets the flag to reload.
 async function loadFail2BanSettings() {
-    // Only load once per session (settings don't change often)
     if (fail2banSettingsLoaded) return;
-
-    const settingsContainer = document.getElementById('fail2ban-settings');
-    const ipListsContainer = document.getElementById('fail2ban-ip-lists');
-    if (!settingsContainer) return;
-
     try {
         const response = await authenticatedFetch('/api/fail2ban');
-
-        if (!response.ok) {
-            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-        }
-
+        if (!response.ok) throw new Error(`HTTP ${response.status}: ${response.statusText}`);
         const data = await response.json();
-        const canEdit = mailcowRwConfigured;
+        const list = value => (value || '').replace(/\n/g, ',').split(',').map(e => e.trim()).filter(e => e);
         fail2banSettingsLoaded = true;
+        fail2banLoadError = false;
         fail2banActiveBans = data.active_bans || [];
-
-        // Store blacklist entries globally for button logic
-        const rawBlacklist = data.blacklist || '';
-        fail2banBlacklist = rawBlacklist.replace(/\n/g, ',').split(',').map(e => e.trim()).filter(e => e);
-
-        // Re-render netfilter logs if they were already loaded (race condition fix)
-        // Now after blacklist is loaded, so buttons correctly reflect blacklist state
-        if (lastDataCache.netfilter && mailcowRwConfigured) {
-            renderNetfilterData(lastDataCache.netfilter);
-        }
-
-        // Parse for UI display
-        const whitelistEntries = (data.whitelist || '').split('\n').filter(e => e.trim());
-        const blacklistEntries = fail2banBlacklist;
-        const permBans = data.perm_bans || [];
-
-        // Render settings as editable form or read-only
-        const rwBanner = canEdit ? '' : `
-            <div class="mb-4 px-4 py-3 rounded-lg bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 text-yellow-800 dark:text-yellow-300 text-sm flex items-center gap-2">
-                <span class="text-lg">🔒</span>
-                <span>Editing requires a <strong>Read-Write API key</strong> (<code>MAILCOW_API_KEY_RW</code>). Configure it in Settings → Mailcow → Connection.</span>
-            </div>
-        `;
-
-        settingsContainer.innerHTML = `
-            ${rwBanner}
-            <form id="fail2ban-edit-form">
-                ${canEdit ? `
-                    <div class="mb-3 flex justify-end" id="fail2ban-edit-btn-row">
-                        <button type="button" id="fail2ban-enable-edit-btn"
-                            class="px-3 py-1.5 bg-gray-200 dark:bg-gray-600 hover:bg-gray-300 dark:hover:bg-gray-500 text-gray-700 dark:text-gray-200 text-sm font-medium rounded-lg transition-colors flex items-center gap-1.5">
-                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg>
-                            Edit Settings
-                        </button>
-                    </div>
-                ` : ''}
-                <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
-                    <div class="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3">
-                        <label class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1 block">Ban Time (seconds)</label>
-                        <input type="number" name="ban_time" value="${data.ban_time}" min="60"
-                            class="w-full px-2 py-1.5 text-sm font-semibold rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                            disabled />
-                        <div class="text-xs text-gray-400 dark:text-gray-500 mt-0.5">${formatSeconds(data.ban_time)}</div>
-                    </div>
-
-                    <div class="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3">
-                        <label class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1 block">Max. Ban Time (seconds)</label>
-                        <input type="number" name="max_ban_time" value="${data.max_ban_time}" min="60"
-                            class="w-full px-2 py-1.5 text-sm font-semibold rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                            disabled />
-                        <div class="text-xs text-gray-400 dark:text-gray-500 mt-0.5">${formatSeconds(data.max_ban_time)}</div>
-                    </div>
-
-                    <div class="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3">
-                        <label class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1 block">Ban Time Increment</label>
-                        <div class="mt-1">
-                            <label class="relative inline-flex items-center cursor-pointer opacity-60" id="fail2ban-increment-label">
-                                <input type="checkbox" name="ban_time_increment" ${data.ban_time_increment ? 'checked' : ''} disabled
-                                    class="sr-only peer" />
-                                <div class="w-9 h-5 bg-gray-300 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 rounded-full peer dark:bg-gray-600 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all dark:border-gray-600 peer-checked:bg-blue-600"></div>
-                                <span class="ml-2 text-sm text-gray-700 dark:text-gray-300">${data.ban_time_increment ? 'Enabled' : 'Disabled'}</span>
-                            </label>
-                        </div>
-                    </div>
-
-                    <div class="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3">
-                        <label class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1 block">Max. Attempts</label>
-                        <input type="number" name="max_attempts" value="${data.max_attempts}" min="1"
-                            class="w-full px-2 py-1.5 text-sm font-semibold rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                            disabled />
-                    </div>
-
-                    <div class="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3">
-                        <label class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1 block">Retry Window (seconds)</label>
-                        <input type="number" name="retry_window" value="${data.retry_window}" min="1"
-                            class="w-full px-2 py-1.5 text-sm font-semibold rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                            disabled />
-                        <div class="text-xs text-gray-400 dark:text-gray-500 mt-0.5">${formatSeconds(data.retry_window)}</div>
-                    </div>
-
-                    <div class="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3">
-                        <label class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1 block">Subnet Ban IPv4</label>
-                        <div class="flex items-center gap-1">
-                            <span class="text-sm text-gray-500 dark:text-gray-400">/</span>
-                            <input type="number" name="netban_ipv4" value="${data.netban_ipv4}" min="8" max="32"
-                                class="w-full px-2 py-1.5 text-sm font-semibold font-mono rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                                disabled />
-                        </div>
-                    </div>
-
-                    <div class="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3">
-                        <label class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1 block">Subnet Ban IPv6</label>
-                        <div class="flex items-center gap-1">
-                            <span class="text-sm text-gray-500 dark:text-gray-400">/</span>
-                            <input type="number" name="netban_ipv6" value="${data.netban_ipv6}" min="8" max="128"
-                                class="w-full px-2 py-1.5 text-sm font-semibold font-mono rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                                disabled />
-                        </div>
-                    </div>
-                </div>
-
-                <div class="mt-4 flex justify-end" id="fail2ban-save-row" style="display:none">
-                    <button type="submit" id="fail2ban-save-btn"
-                        class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg shadow transition-colors focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:focus:ring-offset-gray-800 flex items-center gap-2">
-                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
-                        Save Settings
-                    </button>
-                </div>
-            </form>
-        `;
-
-        // Build unified active bans list (permanent + temporary)
-        const activeBans = data.active_bans || [];
-        const permBanNetworks = new Set(permBans.map(b => b.network || b.ip));
-        // Temporary bans = active_bans entries NOT in perm_bans
-        const tempBans = activeBans.filter(b => !permBanNetworks.has(b.network));
-        // Sort both lists by IP address
-        const ipSort = (a, b) => (a.ip || a.network || '').localeCompare(b.ip || b.network || '', undefined, { numeric: true });
-        permBans.sort(ipSort);
-        tempBans.sort(ipSort);
-        const totalBans = permBans.length + tempBans.length;
-
-        // Render IP lists in separate accordion (editable textareas)
-        if (ipListsContainer) {
-            ipListsContainer.innerHTML = `
-                <form id="fail2ban-ip-form">
-                    ${canEdit ? `
-                        <div class="mb-3 flex justify-end" id="fail2ban-ip-edit-btn-row">
-                            <button type="button" id="fail2ban-ip-enable-edit-btn"
-                                class="px-3 py-1.5 bg-gray-200 dark:bg-gray-600 hover:bg-gray-300 dark:hover:bg-gray-500 text-gray-700 dark:text-gray-200 text-sm font-medium rounded-lg transition-colors flex items-center gap-1.5">
-                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg>
-                                Edit IP Lists
-                            </button>
-                        </div>
-                    ` : ''}
-                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div class="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3">
-                            <label class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2 block">Allowlisted <span class="text-gray-400 dark:text-gray-500">(${whitelistEntries.length})</span></label>
-                            <textarea name="whitelist" rows="4" placeholder="One IP/network per line"
-                                class="w-full px-2 py-1.5 text-sm font-mono rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-green-700 dark:text-green-400 focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-y"
-                                disabled>${escapeHtml((data.whitelist || '').replace(/,/g, '\n'))}</textarea>
-                        </div>
-
-                        <div class="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3">
-                            <label class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2 block">Denylisted <span class="text-gray-400 dark:text-gray-500">(${blacklistEntries.length})</span></label>
-                            <textarea name="blacklist" rows="4" placeholder="One IP/network per line"
-                                class="w-full px-2 py-1.5 text-sm font-mono rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-red-700 dark:text-red-400 focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-y"
-                                disabled>${escapeHtml((data.blacklist || '').replace(/,/g, '\n'))}</textarea>
-                        </div>
-                    </div>
-
-                    <div class="mt-3 px-1 text-xs text-gray-500 dark:text-gray-400 italic">
-                        A denylisted host or network will always outweigh an allowlisted entity. List updates will take a few seconds to be applied.
-                    </div>
-
-                    <div class="mt-3 flex justify-end" id="fail2ban-ip-save-row" style="display:none">
-                        <button type="submit" id="fail2ban-ip-save-btn"
-                            class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg shadow transition-colors focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:focus:ring-offset-gray-800 flex items-center gap-2">
-                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
-                            Save IP Lists
-                        </button>
-                    </div>
-                </form>
-
-                <!-- Active Bans List -->
-                <div class="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700">
-                    <div class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-3">
-                        Active Bans <span class="text-gray-400 dark:text-gray-500">(${totalBans})</span>
-                    </div>
-                    ${totalBans > 0 ? `
-                        <div class="space-y-2">
-                            ${permBans.map(ban => `
-                                <div class="flex items-center justify-between bg-gray-50 dark:bg-gray-700/50 rounded-lg px-3 py-2">
-                                    <div class="flex items-center gap-3">
-                                        <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400">Permanent</span>
-                                        <span class="text-sm font-mono text-gray-900 dark:text-white">${escapeHtml(ban.network || ban.ip)}</span>
-                                    </div>
-                                </div>
-                            `).join('')}
-                            ${tempBans.map(ban => `
-                                <div class="flex items-center justify-between bg-gray-50 dark:bg-gray-700/50 rounded-lg px-3 py-2">
-                                    <div class="flex items-center gap-3">
-                                        <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400">Temporary</span>
-                                        <span class="text-sm font-mono text-gray-900 dark:text-white">${escapeHtml(ban.network || ban.ip)}</span>
-                                        ${ban.banned_until ? `<span class="text-xs text-gray-500 dark:text-gray-400">${escapeHtml(ban.banned_until)} left</span>` : ''}
-                                        ${ban.queued_for_unban ? `<span class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400">Unbanning...</span>` : ''}
-                                    </div>
-                                    ${canEdit && !ban.queued_for_unban ? `
-                                        <button type="button" onclick="unbanIP('${escapeJsArg(ban.ip || ban.network)}', this)"
-                                            class="px-2.5 py-1 text-xs font-medium rounded-md border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-400 hover:bg-red-50 hover:border-red-300 hover:text-red-700 dark:hover:bg-red-900/20 dark:hover:border-red-700 dark:hover:text-red-400 transition-colors">
-                                            Unban
-                                        </button>
-                                    ` : ''}
-                                </div>
-                            `).join('')}
-                        </div>
-                    ` : '<div class="text-sm text-gray-400 dark:text-gray-500">No active bans</div>'}
-                </div>
-            `;
-        }
-
-        // Attach save handlers if edit is enabled
-        if (canEdit) {
-            // Edit Settings button handler
-            const editSettingsBtn = document.getElementById('fail2ban-enable-edit-btn');
-            if (editSettingsBtn) {
-                editSettingsBtn.addEventListener('click', () => {
-                    // Enable all inputs in settings form
-                    const form = document.getElementById('fail2ban-edit-form');
-                    form.querySelectorAll('input').forEach(el => { el.disabled = false; });
-                    // Fix toggle opacity
-                    const incrementLabel = document.getElementById('fail2ban-increment-label');
-                    if (incrementLabel) incrementLabel.classList.remove('opacity-60');
-                    // Hide edit button, show save button
-                    document.getElementById('fail2ban-edit-btn-row').style.display = 'none';
-                    document.getElementById('fail2ban-save-row').style.display = 'flex';
-                });
-            }
-
-            // Edit IP Lists button handler
-            const editIpBtn = document.getElementById('fail2ban-ip-enable-edit-btn');
-            if (editIpBtn) {
-                editIpBtn.addEventListener('click', () => {
-                    const form = document.getElementById('fail2ban-ip-form');
-                    form.querySelectorAll('textarea').forEach(el => { el.disabled = false; });
-                    document.getElementById('fail2ban-ip-edit-btn-row').style.display = 'none';
-                    document.getElementById('fail2ban-ip-save-row').style.display = 'flex';
-                });
-            }
-
-            // Save settings form
-            const settingsForm = document.getElementById('fail2ban-edit-form');
-            if (settingsForm) {
-                settingsForm.addEventListener('submit', async (e) => {
-                    e.preventDefault();
-                    const btn = document.getElementById('fail2ban-save-btn');
-                    const origText = btn.innerHTML;
-                    btn.disabled = true;
-                    btn.innerHTML = '<div class="loading-sm mr-2"></div> Saving...';
-
-                    try {
-                        // Collect ALL settings values (must send everything)
-                        const ipForm = document.getElementById('fail2ban-ip-form');
-                        const whitelist = ipForm ? ipForm.querySelector('[name="whitelist"]').value.split('\n').filter(l => l.trim()).join(',') : data.whitelist || '';
-                        const blacklist = ipForm ? ipForm.querySelector('[name="blacklist"]').value.split('\n').filter(l => l.trim()).join(',') : data.blacklist || '';
-
-                        const payload = {
-                            attr: {
-                                ban_time: settingsForm.querySelector('[name="ban_time"]').value,
-                                max_ban_time: settingsForm.querySelector('[name="max_ban_time"]').value,
-                                ban_time_increment: settingsForm.querySelector('[name="ban_time_increment"]').checked ? '1' : '0',
-                                max_attempts: settingsForm.querySelector('[name="max_attempts"]').value,
-                                retry_window: settingsForm.querySelector('[name="retry_window"]').value,
-                                netban_ipv4: settingsForm.querySelector('[name="netban_ipv4"]').value,
-                                netban_ipv6: settingsForm.querySelector('[name="netban_ipv6"]').value,
-                                whitelist: whitelist,
-                                blacklist: blacklist
-                            }
-                        };
-
-                        const res = await authenticatedFetch('/api/fail2ban', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify(payload)
-                        });
-
-                        const result = await res.json();
-                        if (res.ok && result.status === 'success') {
-                            showToast('Fail2Ban settings saved successfully', 'success');
-                            // Reset loaded flag so next open fetches fresh data
-                            fail2banSettingsLoaded = false;
-                        } else {
-                            showToast('Failed to save Fail2Ban settings: ' + (result.msg || result.detail || 'Unknown error'), 'error');
-                        }
-                    } catch (err) {
-                        showToast('Failed to save Fail2Ban settings: ' + err.message, 'error');
-                    } finally {
-                        btn.disabled = false;
-                        btn.innerHTML = origText;
-                    }
-                });
-            }
-
-            // Save IP lists form
-            const ipForm = document.getElementById('fail2ban-ip-form');
-            if (ipForm) {
-                ipForm.addEventListener('submit', async (e) => {
-                    e.preventDefault();
-                    const btn = document.getElementById('fail2ban-ip-save-btn');
-                    const origText = btn.innerHTML;
-                    btn.disabled = true;
-                    btn.innerHTML = '<div class="loading-sm mr-2"></div> Saving...';
-
-                    try {
-                        // Collect ALL values from both forms (must send everything)
-                        const sForm = document.getElementById('fail2ban-edit-form');
-                        const whitelist = ipForm.querySelector('[name="whitelist"]').value.split('\n').filter(l => l.trim()).join(',');
-                        const blacklist = ipForm.querySelector('[name="blacklist"]').value.split('\n').filter(l => l.trim()).join(',');
-
-                        const payload = {
-                            attr: {
-                                ban_time: sForm.querySelector('[name="ban_time"]').value,
-                                max_ban_time: sForm.querySelector('[name="max_ban_time"]').value,
-                                ban_time_increment: sForm.querySelector('[name="ban_time_increment"]').checked ? '1' : '0',
-                                max_attempts: sForm.querySelector('[name="max_attempts"]').value,
-                                retry_window: sForm.querySelector('[name="retry_window"]').value,
-                                netban_ipv4: sForm.querySelector('[name="netban_ipv4"]').value,
-                                netban_ipv6: sForm.querySelector('[name="netban_ipv6"]').value,
-                                whitelist: whitelist,
-                                blacklist: blacklist
-                            }
-                        };
-
-                        const res = await authenticatedFetch('/api/fail2ban', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify(payload)
-                        });
-
-                        const result = await res.json();
-                        if (res.ok && result.status === 'success') {
-                            showToast('Fail2Ban IP lists saved successfully', 'success');
-                            fail2banSettingsLoaded = false;
-                        } else {
-                            showToast('Failed to save Fail2Ban IP lists: ' + (result.msg || result.detail || 'Unknown error'), 'error');
-                        }
-                    } catch (err) {
-                        showToast('Failed to save Fail2Ban IP lists: ' + err.message, 'error');
-                    } finally {
-                        btn.disabled = false;
-                        btn.innerHTML = origText;
-                    }
-                });
-            }
-        }
+        fail2banPermBans = data.perm_bans || [];
+        fail2banBlacklist = list(data.blacklist);
+        fail2banWhitelist = list(data.whitelist);
+        fail2banPolicy = {
+            ban_time: data.ban_time, max_ban_time: data.max_ban_time, ban_time_increment: !!Number(data.ban_time_increment),
+            max_attempts: data.max_attempts, retry_window: data.retry_window,
+            netban_ipv4: data.netban_ipv4, netban_ipv6: data.netban_ipv6
+        };
     } catch (error) {
         console.error('Failed to load Fail2Ban settings:', error);
-        settingsContainer.innerHTML = `<p class="text-red-500 text-center py-4">Failed to load Fail2Ban settings: ${escapeHtml(error.message)}</p>`;
-        if (ipListsContainer) {
-            ipListsContainer.innerHTML = `<p class="text-red-500 text-center py-4">Failed to load IP lists</p>`;
-        }
+        fail2banLoadError = true;
     }
+    renderSecurityOverview();
+    refreshSecurityAddresses();   // a ban, an unban or a list entry moves an address between the lists
+    if (!securityListsTyping()) renderSecurityLists();
+    if (!securityEditing()) renderSecuritySettings();
+    // The events' Ban and Unban buttons depend on the denylist
+    if (lastDataCache.netfilter && mailcowRwConfigured) renderNetfilterData(lastDataCache.netfilter);
 }
 
 // =============================================================================
@@ -2197,26 +2309,44 @@ async function loadQueue() {
     const container = document.getElementById('queue-logs');
 
     try {
-        container.innerHTML = '<div class="text-center py-8"><div class="loading mx-auto mb-4"></div><p class="text-gray-500 dark:text-gray-400">Loading...</p></div>';
+        container.innerHTML = '<div class="ui-loading"><div class="loading"></div><p>Loading...</p></div>';
 
         console.log('Loading Queue...');
 
         const response = await authenticatedFetch('/api/queue');
         if (!response.ok) {
-            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            throw await responseError(response);
         }
 
         const data = await response.json();
         console.log('Queue data:', data);
 
         allQueueData = data.data || [];
+        updateQueueSummary();
         applyQueueFilters();
     } catch (error) {
         console.error('Failed to load queue:', error);
-        document.getElementById('queue-logs').innerHTML = `<p class="text-red-500 text-center py-8">Failed to load queue: ${escapeHtml(error.message)}</p>`;
+        document.getElementById('queue-logs').innerHTML = `<p class="ui-empty ui-text-fail">Failed to load queue: ${escapeHtml(error.message)}</p>`;
         const countEl = document.getElementById('queue-count');
         if (countEl) countEl.textContent = '';
     }
+}
+
+function updateQueueSummary() {
+    const el = document.getElementById('queue-summary');
+    if (!el) return;
+    if (!allQueueData.length) {
+        el.textContent = 'The queue is empty.';
+        return;
+    }
+    const count = name => allQueueData.filter(i => (i.queue_name || '').toLowerCase() === name).length;
+    const parts = [];
+    if (count('deferred')) parts.push(`${count('deferred')} waiting to retry`);
+    if (count('hold')) parts.push(`${count('hold')} on hold`);
+    if (count('active')) parts.push(`${count('active')} being delivered`);
+    const other = allQueueData.length - count('deferred') - count('hold') - count('active');
+    if (other) parts.push(`${other} other`);
+    el.textContent = `${allQueueData.length} ${allQueueData.length === 1 ? 'message' : 'messages'}: ${parts.join(', ')}. Postfix retries deferred mail on its own.`;
 }
 
 function applyQueueFilters() {
@@ -2243,135 +2373,78 @@ function applyQueueFilters() {
     // Update count display
     const countEl = document.getElementById('queue-count');
     if (countEl) {
-        countEl.textContent = `(${filteredData.length.toLocaleString()} items)`;
+        countEl.textContent = uiCountLabel(filteredData.length, 'message', 'messages');
     }
 
     if (filteredData.length === 0) {
-        container.innerHTML = '<p class="text-gray-500 dark:text-gray-400 text-center py-8">No matching queue entries</p>';
+        container.innerHTML = '<p class="ui-empty">No matching queue entries</p>';
         return;
     }
 
     const canAct = mailcowRwConfigured;
 
+    const lockedNote = canAct ? '' : `<div class="ui-list-note">${uiLocked('Queue actions are locked', `Retry, hold, release, delete and flush ${UI_RW_KEY_TEXT}`)}</div>`;
+    const cols = canAct
+        ? '--ui-cols: 20px minmax(200px, 1.6fr) 84px minmax(240px, 2.8fr) 70px 318px; --ui-table-min: 1000px'
+        : '--ui-cols: minmax(200px, 1.6fr) 84px minmax(240px, 2.8fr) 70px; --ui-table-min: 640px';
+
     container.innerHTML = `
+        ${lockedNote}
+        <div class="ui-table ui-stack" style="${cols}">
         ${canAct ? `
-            <div class="mb-4 flex flex-wrap items-center gap-2">
-                <button onclick="queueSelectAll()" id="queue-select-all-btn"
-                    class="px-3 py-1.5 text-xs font-medium rounded-md border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
-                    Select All
-                </button>
-                <button onclick="queueBulkRetry()" id="queue-bulk-retry-btn"
-                    class="hidden px-3 py-1.5 text-xs font-medium rounded-md border border-blue-500 bg-blue-500 text-white hover:bg-blue-600 transition-colors flex items-center gap-1">
-                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
-                    Retry Selected
-                </button>
-                <button onclick="queueBulkDelete()" id="queue-bulk-delete-btn"
-                    class="hidden px-3 py-1.5 text-xs font-medium rounded-md border border-red-500 bg-red-500 text-white hover:bg-red-600 transition-colors flex items-center gap-1">
-                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
-                    Delete Selected
-                </button>
-                <span id="queue-selection-count" class="hidden text-xs text-gray-500 dark:text-gray-400"></span>
-
-                <div class="flex-1"></div>
-
-                <button onclick="queueFlushAll()" id="queue-flush-all-btn"
-                    class="px-3 py-1.5 text-xs font-medium rounded-md border border-blue-500 bg-blue-500 text-white hover:bg-blue-600 transition-colors flex items-center gap-1">
-                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+            <div class="ui-toolbar ui-table-tools">
+                <button onclick="queueSelectAll()" id="queue-select-all-btn" class="ui-btn ui-btn-sm">Select All</button>
+                <button onclick="queueBulkRetry()" id="queue-bulk-retry-btn" class="hidden ui-btn ui-btn-sm ui-btn-primary">Retry Selected</button>
+                <button onclick="queueBulkDelete()" id="queue-bulk-delete-btn" class="hidden ui-btn ui-btn-sm ui-btn-danger-solid">Delete Selected</button>
+                <span id="queue-selection-count" class="hidden ui-muted"></span>
+                <span class="ui-toolbar-gap"></span>
+                <button onclick="queueFlushAll()" id="queue-flush-all-btn" class="ui-btn ui-btn-sm ui-btn-primary" title="Retry delivery of every message in the queue">
+                    <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
                     Flush All
                 </button>
-                <button onclick="queueDeleteAll()" id="queue-delete-all-btn"
-                    class="px-3 py-1.5 text-xs font-medium rounded-md border border-red-500 bg-red-500 text-white hover:bg-red-600 transition-colors flex items-center gap-1">
-                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
-                    Delete All
-                </button>
+                <button onclick="queueDeleteAll()" id="queue-delete-all-btn" class="ui-btn ui-btn-sm ui-btn-danger-solid">Delete All</button>
             </div>
         ` : ''}
-        <div class="space-y-4">
+            <div class="ui-tr ui-tr-head">${canAct ? '<span></span>' : ''}<span>Recipient</span><span>State</span><span>Last response</span><span class="ui-td-end">Size</span>${canAct ? '<span class="ui-td-end">Actions</span>' : ''}</div>
             ${filteredData.map(item => {
                 const qid = item.queue_id || '';
                 const queueName = (item.queue_name || '').toLowerCase();
                 const isHold = queueName === 'hold';
-                // Status badge colors
-                const statusColors = {
-                    hold: 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-800 dark:text-yellow-300',
-                    deferred: 'bg-orange-100 dark:bg-orange-900/30 text-orange-800 dark:text-orange-300',
-                    active: 'bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300',
-                    incoming: 'bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-300',
-                    bounce: 'bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-300',
-                    corrupt: 'bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-300',
-                };
-                const badgeColor = statusColors[queueName] || 'bg-gray-100 dark:bg-gray-600 text-gray-800 dark:text-gray-200';
+                const queueTone = { hold: '', deferred: 'warn', active: 'ok', incoming: 'info', bounce: 'fail', corrupt: 'fail' }[queueName] || '';
+                const stateText = isHold ? 'On hold' : (item.queue_name || 'unknown').replace(/^./, c => c.toUpperCase());
+                // "user@example.com (connect to ...: Connection timed out)" -> address and response
+                const recipients = item.recipients.map(r => {
+                    const email = r.split(' ')[0].replace(/[<>]/g, '').trim();
+                    const rest = r.includes(' ') ? r.substring(r.indexOf(' ')).trim().replace(/^\((.*)\)$/, '$1') : '';
+                    return { email, response: rest };
+                });
+                const responses = recipients.filter(r => r.response);
+                const queued = new Date(item.arrival_time * 1000).toISOString();
+                const suppress = recipients.length === 1
+                    ? `<button onclick="showAddSuppressionModal('${escapeJsArg(recipients[0].email)}')" title="Suppress ${escapeHtml(recipients[0].email)}" class="ui-btn ui-btn-sm">Suppress</button>`
+                    : uiMenu('Suppress', recipients.map(r => `<button type="button" role="menuitem" onclick="showAddSuppressionModal('${escapeJsArg(r.email)}')">${escapeHtml(r.email)}</button>`).join(''));
                 return `
-                <div class="border border-gray-200 dark:border-gray-700 rounded-lg p-4 bg-gray-50 dark:bg-gray-700/50" data-queue-id="${qid}">
-                    <div class="flex flex-col sm:flex-row sm:justify-between sm:items-start mb-2 gap-2">
-                        <div class="flex-1 flex items-start gap-3">
-                            ${canAct ? `
-                                <input type="checkbox" class="queue-checkbox mt-1 flex-shrink-0 w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 dark:focus:ring-blue-600 dark:ring-offset-gray-800 dark:bg-gray-700 dark:border-gray-600 cursor-pointer"
-                                    value="${qid}" onchange="queueUpdateSelection()" />
-                            ` : ''}
-                            <div>
-                                <p class="text-sm font-medium text-gray-900 dark:text-white">From: ${copyableText(item.sender)}</p>
-                                <p class="text-sm text-gray-600 dark:text-gray-300">Queue ID: ${copyableText(qid)}</p>
-                            </div>
-                        </div>
-                        <div class="flex items-center gap-2">
-                            <span class="inline-block px-2 py-0.5 text-xs font-semibold rounded ${badgeColor} uppercase">${escapeHtml(item.queue_name || 'unknown')}</span>
-                            <span class="text-xs text-gray-500 dark:text-gray-400">${formatTime(new Date(item.arrival_time * 1000).toISOString())}</span>
-                        </div>
+                <div class="ui-tr ui-q-row" data-queue-id="${escapeHtml(qid)}">
+                    ${canAct ? `<input type="checkbox" class="queue-checkbox ui-check" value="${escapeHtml(qid)}" onchange="queueUpdateSelection()" aria-label="Select ${escapeHtml(qid)}" />` : ''}
+                    <div class="ui-td ui-q-who">
+                        <div>${recipients.map(r => copyableText(r.email)).join(', ')}</div>
+                        <small>From ${copyableText(item.sender)}, queued <span title="${escapeHtml(formatTime(queued))}">${formatAgo(queued)}</span>, ID ${copyableText(qid)}</small>
                     </div>
-                    <div class="mb-2">
-                        <p class="text-sm font-medium text-gray-700 dark:text-gray-300">Recipients:</p>
-                        ${item.recipients.map(r => {
-                            const emailOnly = r.split(' ')[0].replace(/[<>]/g, '').trim();
-                            const errorPart = r.substring(r.indexOf(' ')).trim();
-                            const hasError = errorPart && errorPart !== emailOnly && r.includes(' ');
-                            return `<div class="ml-1 py-0.5">
-                                <span class="text-sm font-medium text-gray-800 dark:text-gray-200">${copyableText(emailOnly)}</span>
-                                ${hasError ? `<p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5 break-words">${escapeHtml(errorPart)}</p>` : ''}
-                            </div>`;
-                        }).join('')}
-                    </div>
-                    <div class="flex flex-wrap items-center justify-between gap-2">
-                        <span class="text-xs text-gray-500 dark:text-gray-400">Size: ${formatSize(item.message_size)}</span>
-                        <div class="flex items-center gap-2 flex-shrink-0">
-                            ${canAct ? `
-                                <button onclick="queueRetry('${qid}')" title="Retry delivery"
-                                    class="queue-action-btn px-2.5 py-1 text-xs font-medium rounded-md border border-blue-300 dark:border-blue-700 text-blue-700 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-900/30 transition-colors flex items-center gap-1">
-                                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
-                                    Retry
-                                </button>
-                                ${isHold ? `
-                                    <button onclick="queueUnhold('${qid}')" title="Release from hold"
-                                        class="queue-action-btn px-2.5 py-1 text-xs font-medium rounded-md border border-green-300 dark:border-green-700 text-green-700 dark:text-green-400 hover:bg-green-100 dark:hover:bg-green-900/30 transition-colors flex items-center gap-1">
-                                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
-                                        Unhold
-                                    </button>
-                                ` : `
-                                    <button onclick="queueHold('${qid}')" title="Hold message"
-                                        class="queue-action-btn px-2.5 py-1 text-xs font-medium rounded-md border border-yellow-300 dark:border-yellow-700 text-yellow-700 dark:text-yellow-400 hover:bg-yellow-100 dark:hover:bg-yellow-900/30 transition-colors flex items-center gap-1">
-                                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
-                                        Hold
-                                    </button>
-                                `}
-                                <button onclick="queueDeleteItem('${qid}')" title="Delete from queue"
-                                    class="queue-action-btn px-2.5 py-1 text-xs font-medium rounded-md border border-red-300 dark:border-red-700 text-red-700 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-900/30 transition-colors flex items-center gap-1">
-                                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
-                                    Delete
-                                </button>
-                            ` : ''}
-                            ${item.recipients.map(r => {
-                                const emailOnly = r.split(' ')[0].replace(/[<>]/g, '');
-                                return `
-                                <button onclick="showAddSuppressionModal('${escapeJsArg(emailOnly)}')" title="Suppress ${escapeHtml(emailOnly)}"
-                                    class="px-2.5 py-1 text-xs font-medium rounded-md border border-purple-300 dark:border-purple-700 text-purple-700 dark:text-purple-400 hover:bg-purple-100 dark:hover:bg-purple-900/30 transition-colors flex items-center gap-1">
-                                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"></path></svg>
-                                    Suppress
-                                </button>`;
-                            }).join('')}
-                        </div>
-                    </div>
-                </div>
-            `;
+                    <span class="ui-td">${uiTag(stateText, queueTone)}</span>
+                    <div class="ui-td ui-td-wrap ui-mono ui-q-resp">${responses.length
+                        ? responses.map(r => `<div>${recipients.length > 1 ? `<span class="ui-muted">${escapeHtml(r.email)}:</span> ` : ''}${escapeHtml(r.response)}</div>`).join('')
+                        : `<span class="ui-muted">${isHold ? 'Put on hold' : '-'}</span>`}</div>
+                    <span class="ui-td ui-td-end">${formatSize(item.message_size)}</span>
+                    ${canAct ? `
+                    <span class="ui-td ui-td-end ui-row-actions">
+                        <button onclick="queueRetry('${escapeJsArg(qid)}')" title="Retry delivery" class="queue-action-btn ui-btn ui-btn-sm">Retry</button>
+                        ${isHold
+                            ? `<button onclick="queueUnhold('${escapeJsArg(qid)}')" title="Release from hold" class="queue-action-btn ui-btn ui-btn-sm">Unhold</button>`
+                            : `<button onclick="queueHold('${escapeJsArg(qid)}')" title="Hold message" class="queue-action-btn ui-btn ui-btn-sm">Hold</button>`}
+                        <button onclick="queueDeleteItem('${escapeJsArg(qid)}')" title="Delete from queue" class="queue-action-btn ui-btn ui-btn-sm ui-btn-danger">Delete</button>
+                        ${suppress}
+                    </span>` : ''}
+                </div>`;
             }).join('')}
         </div>
     `;
@@ -2387,6 +2460,9 @@ function clearQueueFilters() {
 
 function queueUpdateSelection() {
     const checked = document.querySelectorAll('.queue-checkbox:checked');
+    // With rows selected the actions are about them; Delete All steps aside
+    const deleteAll = document.getElementById('queue-delete-all-btn');
+    if (deleteAll) deleteAll.classList.toggle('hidden', checked.length > 0);
     const bulkRetry = document.getElementById('queue-bulk-retry-btn');
     const bulkDelete = document.getElementById('queue-bulk-delete-btn');
     const countLabel = document.getElementById('queue-selection-count');
@@ -2524,6 +2600,11 @@ let quarantineLastData = null;
 
 // Return a sorted copy of quarantine items based on quarantineSortOrder.
 // Items without a numeric score are placed last in both score directions.
+// Reject is the strong verdict; add header and the softer ones read as a warning
+function quarantineActionTone(action) {
+    return ['reject', 'discard'].includes(String(action || '').toLowerCase()) ? 'fail' : 'warn';
+}
+
 function sortQuarantineItems(items) {
     const sorted = [...items];
     if (quarantineSortOrder !== 'score_desc' && quarantineSortOrder !== 'score_asc') {
@@ -2543,6 +2624,7 @@ function sortQuarantineItems(items) {
 
 // Handler for the #quarantine-sort dropdown - re-sorts the already-fetched list
 function applyQuarantineSort() {
+    if (typeof uiClearTableSort === 'function') uiClearTableSort('quarantine-logs');
     const select = document.getElementById('quarantine-sort');
     if (select) quarantineSortOrder = select.value;
     if (quarantineLastData) {
@@ -2556,36 +2638,22 @@ async function loadQuarantine() {
     const container = document.getElementById('quarantine-logs');
 
     try {
-        container.innerHTML = '<div class="text-center py-8"><div class="loading mx-auto mb-4"></div><p class="text-gray-500 dark:text-gray-400">Loading...</p></div>';
+        container.innerHTML = '<div class="ui-loading"><div class="loading"></div><p>Loading...</p></div>';
 
         console.log('Loading Quarantine...');
 
         const response = await authenticatedFetch('/api/quarantine');
         if (!response.ok) {
-            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            throw await responseError(response);
         }
 
         const data = await response.json();
         console.log('Quarantine data:', data);
 
-        // Update counter display
-        const countEl = document.getElementById('quarantine-count');
-        if (countEl) {
-            countEl.textContent = data.total ? `(${data.total.toLocaleString()} results)` : '';
-        }
-
-        if (!data.data || data.data.length === 0) {
-            quarantineLastData = data;
-            container.innerHTML = '<p class="text-gray-500 dark:text-gray-400 text-center py-8">No quarantined messages</p>';
-            return;
-        }
-
         renderQuarantineData(data);
     } catch (error) {
         console.error('Failed to load quarantine:', error);
-        document.getElementById('quarantine-logs').innerHTML = `<p class="text-red-500 text-center py-8">Failed to load quarantine: ${escapeHtml(error.message)}</p>`;
-        const countEl = document.getElementById('quarantine-count');
-        if (countEl) countEl.textContent = '';
+        document.getElementById('quarantine-logs').innerHTML = `<p class="ui-empty ui-text-fail">Failed to load quarantine: ${escapeHtml(error.message)}</p>`;
     }
 }
 
@@ -2596,134 +2664,71 @@ function renderQuarantineData(data) {
 
     // Keep the latest payload so sort changes can re-render without a re-fetch
     quarantineLastData = data;
-
-    // Update counter display
+    const summary = document.getElementById('quarantine-summary');
     const countEl = document.getElementById('quarantine-count');
-    if (countEl) {
-        countEl.textContent = data.total ? `(${data.total.toLocaleString()} results)` : '';
+    if (countEl) countEl.textContent = uiCountLabel(data.total || (data.data || []).length, 'message', 'messages');
+    if (summary) {
+        const total = data.total || (data.data || []).length;
+        summary.textContent = total
+            ? `${total.toLocaleString()} ${total === 1 ? 'message' : 'messages'} held as likely spam. Releasing one delivers it to the recipient.`
+            : 'Nothing is held right now.';
     }
 
     if (!data.data || data.data.length === 0) {
-        container.innerHTML = '<p class="text-gray-500 dark:text-gray-400 text-center py-8">No quarantined messages</p>';
+        container.innerHTML = '<p class="ui-empty">No quarantined messages</p>';
         return;
     }
 
     const canAct = mailcowRwConfigured;
     const items = sortQuarantineItems(data.data);
 
+    const lockedNote = canAct ? '' : `<div class="ui-list-note">${uiLocked('Quarantine actions are locked', `Release, delete, spam learning and the auto-rules ${UI_RW_KEY_TEXT}`)}</div>`;
+    const cols = canAct
+        ? '--ui-cols: 20px minmax(200px, 2fr) minmax(150px, 1.3fr) minmax(120px, 1fr) 56px 64px 336px; --ui-table-min: 1080px'
+        : '--ui-cols: minmax(200px, 2fr) minmax(150px, 1.3fr) minmax(120px, 1fr) 56px 64px 76px; --ui-table-min: 760px';
+
     container.innerHTML = `
+        ${lockedNote}
+        <div class="ui-table ui-stack" style="${cols}">
         ${!canAct ? '' : `
-            <div class="mb-4 flex flex-wrap items-center gap-2">
-                <button onclick="quarantineSelectAll()" id="quarantine-select-all-btn"
-                    class="px-3 py-1.5 text-xs font-medium rounded-md border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
-                    Select All
-                </button>
-                <button onclick="quarantineBulkRelease()" id="quarantine-bulk-release-btn"
-                    class="hidden px-3 py-1.5 text-xs font-medium rounded-md border border-green-500 bg-green-500 text-white hover:bg-green-600 transition-colors flex items-center gap-1">
-                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
-                    Release Selected
-                </button>
-                <button onclick="quarantineBulkDelete()" id="quarantine-bulk-delete-btn"
-                    class="hidden px-3 py-1.5 text-xs font-medium rounded-md border border-red-500 bg-red-500 text-white hover:bg-red-600 transition-colors flex items-center gap-1">
-                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
-                    Delete Selected
-                </button>
-                <button onclick="quarantineBulkLearnHam()" id="quarantine-bulk-learnham-btn"
-                    class="hidden px-3 py-1.5 text-xs font-medium rounded-md border border-emerald-500 bg-emerald-500 text-white hover:bg-emerald-600 transition-colors flex items-center gap-1">
-                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"></path></svg>
-                    Not Spam
-                </button>
-                <button onclick="quarantineBulkLearnSpam()" id="quarantine-bulk-learnspam-btn"
-                    class="hidden px-3 py-1.5 text-xs font-medium rounded-md border border-orange-500 bg-orange-500 text-white hover:bg-orange-600 transition-colors flex items-center gap-1">
-                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"></path></svg>
-                    Learn Spam
-                </button>
-                <span id="quarantine-selection-count" class="hidden text-xs text-gray-500 dark:text-gray-400"></span>
-
-                <div class="flex-1"></div>
-
-                <button onclick="quarantineReleaseAll()" id="quarantine-release-all-btn"
-                    class="px-3 py-1.5 text-xs font-medium rounded-md border border-green-500 bg-green-500 text-white hover:bg-green-600 transition-colors flex items-center gap-1">
-                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
-                    Release All
-                </button>
-                <button onclick="quarantineDeleteAll()" id="quarantine-delete-all-btn"
-                    class="px-3 py-1.5 text-xs font-medium rounded-md border border-red-500 bg-red-500 text-white hover:bg-red-600 transition-colors flex items-center gap-1">
-                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
-                    Delete All
-                </button>
+            <div class="ui-toolbar ui-table-tools">
+                <button onclick="quarantineSelectAll()" id="quarantine-select-all-btn" class="ui-btn ui-btn-sm">Select All</button>
+                <button onclick="quarantineBulkRelease()" id="quarantine-bulk-release-btn" class="hidden ui-btn ui-btn-sm ui-btn-primary">Release Selected</button>
+                <button onclick="quarantineBulkDelete()" id="quarantine-bulk-delete-btn" class="hidden ui-btn ui-btn-sm ui-btn-danger-solid">Delete Selected</button>
+                <button onclick="quarantineBulkLearnHam()" id="quarantine-bulk-learnham-btn" class="hidden ui-btn ui-btn-sm ui-btn-primary">Not Spam</button>
+                <button onclick="quarantineBulkLearnSpam()" id="quarantine-bulk-learnspam-btn" class="hidden ui-btn ui-btn-sm ui-btn-primary">Learn Spam</button>
+                <span id="quarantine-selection-count" class="hidden ui-muted"></span>
+                <span class="ui-toolbar-gap"></span>
+                <button onclick="quarantineReleaseAll()" id="quarantine-release-all-btn" class="ui-btn ui-btn-sm ui-btn-primary">Release All</button>
+                <button onclick="quarantineDeleteAll()" id="quarantine-delete-all-btn" class="ui-btn ui-btn-sm ui-btn-danger-solid">Delete All</button>
             </div>
         `}
-        <div class="space-y-3">
+            <div class="ui-tr ui-tr-head">${canAct ? '<span></span>' : ''}<span>Message</span><span>For</span><span>Why</span><span class="ui-td-end">Score</span><span>Held</span><span class="ui-td-end">Actions</span></div>
             ${items.map(item => {
                 const itemId = item.id !== undefined ? item.id : '';
+                const idArg = escapeJsArg(String(itemId));
+                const hasScore = item.score !== undefined && item.score !== null;
                 return `
-                <div class="border border-red-200 dark:border-red-900/50 rounded-lg p-4 bg-red-50 dark:bg-red-900/20 hover:bg-red-100 dark:hover:bg-red-900/30 transition" data-quarantine-id="${itemId}">
-                    <div class="grid grid-cols-1 sm:grid-cols-[1fr_auto] gap-2 mb-2 items-start">
-                        <div class="min-w-0 overflow-hidden flex items-start gap-3">
-                            ${canAct ? `
-                                <input type="checkbox" class="quarantine-checkbox mt-1 flex-shrink-0 w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 dark:focus:ring-blue-600 dark:ring-offset-gray-800 dark:bg-gray-700 dark:border-gray-600 cursor-pointer"
-                                    value="${itemId}" onchange="quarantineUpdateSelection()" />
-                            ` : ''}
-                            <div class="min-w-0 overflow-hidden">
-                                <div class="flex flex-wrap items-center gap-2 mb-1">
-                                    <span class="text-sm font-medium text-gray-900 dark:text-white">${copyableText(item.sender || 'Unknown')}</span>
-                                    <svg class="w-4 h-4 text-gray-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
-                                    </svg>
-                                    <span class="text-sm text-gray-600 dark:text-gray-300">${copyableText(item.rcpt || 'Unknown')}</span>
-                                </div>
-                                <p class="text-xs text-gray-500 dark:text-gray-400 truncate cursor-pointer hover:text-blue-500 dark:hover:text-blue-400 transition-colors" dir="auto" title="Click to view details" onclick="showQuarantineDetails('${itemId}')">${escapeHtml(item.subject || 'No subject')}</p>
-                            </div>
-                        </div>
-                        <div class="flex flex-wrap items-center gap-2 flex-shrink-0 sm:justify-end">
-                            <span class="inline-block px-2 py-0.5 text-xs font-medium rounded bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-300">${item.action || 'Quarantined'}</span>
-                            ${item.virus_flag ? '<span class="inline-block px-2 py-0.5 text-xs font-medium rounded bg-purple-100 dark:bg-purple-900/30 text-purple-800 dark:text-purple-300">🦠 VIRUS</span>' : ''}
-                        </div>
+                <div class="ui-tr ui-q-row" data-quarantine-id="${escapeHtml(String(itemId))}" onclick="quarantineRowClick(event, '${idArg}')">
+                    ${canAct ? `<input type="checkbox" class="quarantine-checkbox ui-check" value="${escapeHtml(String(itemId))}" onchange="quarantineUpdateSelection()" aria-label="Select message" />` : ''}
+                    <div class="ui-td ui-q-who">
+                        <button type="button" class="ui-link-row" dir="auto" title="View details" onclick="showQuarantineDetails('${idArg}')">${escapeHtml(item.subject || 'No subject')}</button>
+                        <small>${escapeHtml(item.sender || 'Unknown')}${item.qid ? `, ID ${escapeHtml(item.qid)}` : ''}</small>
                     </div>
-                    <div class="flex flex-col gap-2">
-                        <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-gray-600 dark:text-gray-400">
-                            <span>${formatTime(item.created)}</span>
-                            ${item.qid ? `<span class="font-mono" title="Queue ID">Q: ${copyableText(item.qid)}</span>` : ''}
-                            ${item.score !== undefined && item.score !== null ? `<span>Score: <span class="${item.score >= 15 ? 'text-red-600 dark:text-red-400 font-semibold' : 'text-gray-600 dark:text-gray-300'}">${item.score.toFixed(1)}</span></span>` : ''}
-                        </div>
-                        <div class="flex flex-wrap gap-1">
-                            <button onclick="showQuarantineDetails('${itemId}')" title="View details"
-                                class="quarantine-action-btn px-2 py-1 text-xs font-medium rounded-md border border-blue-300 dark:border-blue-700 text-blue-700 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-900/30 transition-colors flex items-center justify-center gap-1">
-                                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>
-                                Details
-                            </button>
-                            ${canAct ? `
-                                <button onclick="quarantineRelease('${itemId}')" title="Release message"
-                                    class="quarantine-action-btn px-2 py-1 text-xs font-medium rounded-md border border-green-300 dark:border-green-700 text-green-700 dark:text-green-400 hover:bg-green-100 dark:hover:bg-green-900/30 transition-colors flex items-center justify-center gap-1">
-                                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
-                                    Release
-                                </button>
-                                <button onclick="quarantineDelete('${itemId}')" title="Delete message"
-                                    class="quarantine-action-btn px-2 py-1 text-xs font-medium rounded-md border border-red-300 dark:border-red-700 text-red-700 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-900/30 transition-colors flex items-center justify-center gap-1">
-                                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
-                                    Delete
-                                </button>
-                                <button onclick="quarantineLearnHam('${itemId}')" title="Release & train as Not Spam"
-                                    class="quarantine-action-btn px-2 py-1 text-xs font-medium rounded-md border border-emerald-300 dark:border-emerald-700 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-100 dark:hover:bg-emerald-900/30 transition-colors flex items-center justify-center gap-1">
-                                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"></path></svg>
-                                    Not Spam
-                                </button>
-                                <button onclick="quarantineLearnSpam('${itemId}')" title="Delete & train as Spam"
-                                    class="quarantine-action-btn px-2 py-1 text-xs font-medium rounded-md border border-orange-300 dark:border-orange-700 text-orange-700 dark:text-orange-400 hover:bg-orange-100 dark:hover:bg-orange-900/30 transition-colors flex items-center justify-center gap-1">
-                                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"></path></svg>
-                                    Spam
-                                </button>
-                                <button onclick="showAddRuleFromQuarantine('${escapeJsArg(item.sender || '')}', '${escapeJsArg(item.rcpt || '')}', '${escapeJsArg(item.subject || '')}')" title="Create auto-rule from this email"
-                                    class="quarantine-action-btn px-2 py-1 text-xs font-medium rounded-md border border-amber-300 dark:border-amber-700 text-amber-700 dark:text-amber-400 hover:bg-amber-100 dark:hover:bg-amber-900/30 transition-colors flex items-center justify-center gap-1">
-                                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path></svg>
-                                    Rule
-                                </button>
-                            ` : ''}
-                        </div>
-                    </div>
-                </div>
-            `;
+                    <span class="ui-td">${escapeHtml(item.rcpt || 'Unknown')}</span>
+                    <span class="ui-td ui-td-wrap">${uiTag(item.action || 'Quarantined', quarantineActionTone(item.action))}${item.virus_flag ? ` ${uiTag('Virus', 'spam')}` : ''}</span>
+                    <span class="ui-td ui-td-end${hasScore && item.score >= 15 ? ' ui-text-fail' : ''}"><small class="ui-sec-unit">Score </small>${hasScore ? item.score.toFixed(1) : '-'}</span>
+                    <time class="ui-td" title="${escapeHtml(formatTime(item.created))}"><small class="ui-sec-unit">Held </small>${formatAgo(item.created).replace(' ago', '')}</time>
+                    <span class="ui-td ui-td-end ui-row-actions">
+                        ${canAct ? `
+                            <button onclick="quarantineRelease('${idArg}')" title="Release message" class="quarantine-action-btn ui-btn ui-btn-sm">Release</button>
+                            <button onclick="quarantineLearnHam('${idArg}')" title="Release and train as not spam" class="quarantine-action-btn ui-btn ui-btn-sm">Not spam</button>
+                            <button onclick="quarantineLearnSpam('${idArg}')" title="Delete and train as spam" class="quarantine-action-btn ui-btn ui-btn-sm">Spam</button>
+                            <button onclick="showAddRuleFromQuarantine('${escapeJsArg(item.sender || '')}', '${escapeJsArg(item.rcpt || '')}', '${escapeJsArg(item.subject || '')}')" title="Create an auto-rule from this message" class="quarantine-action-btn ui-btn ui-btn-sm">Rule</button>
+                            <button onclick="quarantineDelete('${idArg}')" title="Delete message" class="quarantine-action-btn ui-btn ui-btn-sm ui-btn-danger">Delete</button>
+                        ` : `<button onclick="showQuarantineDetails('${idArg}')" title="View details" class="quarantine-action-btn ui-btn ui-btn-sm">Details</button>`}
+                    </span>
+                </div>`;
             }).join('')}
         </div>
     `;
@@ -2731,11 +2736,21 @@ function renderQuarantineData(data) {
 
 // --- Quarantine action helpers ---
 
+// A click on the row opens the message, like the Messages list; its buttons,
+// checkbox and copyable values keep their own click
+function quarantineRowClick(event, itemId) {
+    if (event.target.closest('button, a, input, select, label, .copyable, [role="menu"]')) return;
+    if (window.getSelection && String(window.getSelection())) return;
+    showQuarantineDetails(itemId);
+}
+
 function quarantineUpdateSelection() {
     const checked = document.querySelectorAll('.quarantine-checkbox:checked');
     const bulkBtns = ['quarantine-bulk-release-btn', 'quarantine-bulk-delete-btn', 'quarantine-bulk-learnham-btn', 'quarantine-bulk-learnspam-btn'];
     const countLabel = document.getElementById('quarantine-selection-count');
 
+    // With rows selected the actions are about them; Release All and Delete All step aside
+    ['quarantine-release-all-btn', 'quarantine-delete-all-btn'].forEach(id => { const el = document.getElementById(id); if (el) el.classList.toggle('hidden', checked.length > 0); });
     if (checked.length > 0) {
         bulkBtns.forEach(id => { const el = document.getElementById(id); if (el) { el.classList.remove('hidden'); el.classList.add('inline-flex'); } });
         if (countLabel) { countLabel.classList.remove('hidden'); countLabel.textContent = `${checked.length} selected`; }
@@ -2856,27 +2871,25 @@ async function quarantineAction(action, itemIds) {
 // --- Quarantine Detail View ---
 
 async function showQuarantineDetails(itemId) {
-    // Create modal backdrop
     const existing = document.getElementById('quarantine-detail-modal');
     if (existing) existing.remove();
 
     const modal = document.createElement('div');
     modal.id = 'quarantine-detail-modal';
-    modal.className = 'fixed inset-0 z-[9999] flex items-center justify-center p-4';
+    modal.className = 'ui-dialog-backdrop';
+    modal.setAttribute('role', 'dialog');
+    modal.setAttribute('aria-label', 'Quarantine Item Details');
+    modal.onclick = event => { if (event.target === modal) closeQuarantineDetails(); };
     modal.innerHTML = `
-        <div class="absolute inset-0 bg-black/60 backdrop-blur-sm" onclick="closeQuarantineDetails()"></div>
-        <div class="relative bg-white dark:bg-gray-800 rounded-xl shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
-            <div class="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700">
-                <h3 class="text-lg font-semibold text-gray-900 dark:text-white">Quarantine Item Details</h3>
-                <button onclick="closeQuarantineDetails()" class="p-1 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
-                    <svg class="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+        <div class="ui-dialog ui-dialog-fit">
+            <div class="ui-dialog-head">
+                <h3>Quarantine Item Details</h3>
+                <button onclick="closeQuarantineDetails()" class="ui-icon-btn" title="Close" aria-label="Close">
+                    <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
                 </button>
             </div>
-            <div class="flex-1 overflow-y-auto p-4" id="quarantine-detail-content">
-                <div class="flex items-center justify-center py-12">
-                    <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
-                    <span class="ml-3 text-gray-500 dark:text-gray-400">Loading details...</span>
-                </div>
+            <div class="ui-dialog-body" id="quarantine-detail-content">
+                <div class="ui-loading"><div class="loading"></div><p>Loading details...</p></div>
             </div>
             <div id="quarantine-detail-footer" class="hidden"></div>
         </div>
@@ -2885,15 +2898,15 @@ async function showQuarantineDetails(itemId) {
     document.body.style.overflow = 'hidden';
 
     try {
-        const res = await authenticatedFetch(`/api/quarantine/${itemId}/details`);
+        const res = await authenticatedFetch(`/api/quarantine/${encodeURIComponent(itemId)}/details`);
         if (!res.ok) throw new Error('Failed to fetch details');
         const data = await res.json();
         renderQuarantineDetailContent(data, itemId);
     } catch (err) {
         document.getElementById('quarantine-detail-content').innerHTML = `
-            <div class="text-center py-12 text-red-500">
-                <p class="font-medium">Failed to load details</p>
-                <p class="text-sm mt-1">${escapeHtml(err.message)}</p>
+            <div class="ui-empty">
+                <p class="ui-text-fail">Failed to load details</p>
+                <p>${escapeHtml(err.message)}</p>
             </div>`;
     }
 }
@@ -2914,130 +2927,83 @@ function renderQuarantineDetailContent(data, itemId) {
     const zeroSymbols = allSymbols.filter(s => (s.score || 0) === 0).sort((a, b) => (a.name || '').localeCompare(b.name || ''));
 
     const recipientsHtml = (data.recipients || []).map(r =>
-        `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300">
-            <span class="font-medium uppercase text-[10px] ${r.type === 'smtp' ? 'text-blue-500' : 'text-gray-400'}">${escapeHtml(r.type)}</span>
-            ${copyableText(r.address)}
-        </span>`
+        `<span class="ui-qd-rcpt"><small class="${r.type === 'smtp' ? 'ui-text-info' : 'ui-muted'}">${escapeHtml(r.type)}</small> ${copyableText(r.address)}</span>`
     ).join(' ');
 
-    const scoreColor = (data.score || 0) >= 15 ? 'text-red-600 dark:text-red-400' :
-                       (data.score || 0) >= 6 ? 'text-orange-500 dark:text-orange-400' :
-                       'text-green-600 dark:text-green-400';
+    const score = data.score || 0;
+    const scoreTone = score >= 15 ? 'fail' : score >= 6 ? 'warn' : 'ok';
 
     const buildSymbolRows = (syms) => syms.map(s => {
         const sc = s.score || 0;
-        const cls = sc > 0 ? 'text-red-600 dark:text-red-400 font-semibold' :
-                    sc < 0 ? 'text-green-600 dark:text-green-400 font-semibold' :
-                    'text-gray-400 dark:text-gray-500';
+        const tone = sc > 0 ? 'ui-text-fail' : sc < 0 ? 'ui-text-ok' : 'ui-muted';
         const opts = (s.options || []).join(', ');
-        return `<tr class="border-b border-gray-100 dark:border-gray-700/50 hover:bg-gray-50 dark:hover:bg-gray-700/30">
-            <td class="py-1.5 px-2 font-mono text-gray-800 dark:text-gray-200">${escapeHtml(s.name || '')}</td>
-            <td class="py-1.5 px-2 text-gray-500 dark:text-gray-400">${escapeHtml(s.group || '')}</td>
-            <td class="py-1.5 px-2 text-right ${cls}">${sc !== 0 ? (sc > 0 ? '+' : '') + sc.toFixed(2) : '0'}</td>
-            <td class="py-1.5 px-2 text-gray-400 dark:text-gray-500 max-w-xs truncate" title="${escapeHtml(opts)}">${escapeHtml(opts)}</td>
+        return `<tr>
+            <td class="ui-mono">${escapeHtml(s.name || '')}</td>
+            <td class="ui-muted">${escapeHtml(s.group || '')}</td>
+            <td class="ui-td-end ${tone}"><b>${sc !== 0 ? (sc > 0 ? '+' : '') + sc.toFixed(2) : '0'}</b></td>
+            <td class="ui-muted ui-qd-opts" title="${escapeHtml(opts)}">${escapeHtml(opts)}</td>
         </tr>`;
     }).join('');
 
-    const symbolTableHead = `<table class="w-full text-xs"><thead><tr class="border-b border-gray-200 dark:border-gray-700 text-left">
-        <th class="py-2 px-2 font-medium text-gray-500 dark:text-gray-400">Symbol</th>
-        <th class="py-2 px-2 font-medium text-gray-500 dark:text-gray-400">Group</th>
-        <th class="py-2 px-2 font-medium text-gray-500 dark:text-gray-400 text-right">Score</th>
-        <th class="py-2 px-2 font-medium text-gray-500 dark:text-gray-400">Details</th>
-    </tr></thead>`;
+    const symbolTable = rows => `<div class="ui-dtable-scroll"><table class="ui-dtable"><thead><tr>
+        <th>Symbol</th><th>Group</th><th class="ui-td-end">Score</th><th>Details</th>
+    </tr></thead><tbody>${rows}</tbody></table></div>`;
 
-    const textContent = data.text_plain || data.text_html || '';
+    // mailcow sends a literal '-' as text_plain when the message has no plain-text part;
+    // text_html is already converted to plain text by mailcow, so fall back to it.
+    const plainText = (data.text_plain || '').trim();
+    const textContent = (plainText && plainText !== '-') ? data.text_plain : (data.text_html || '');
     const canAct = mailcowRwConfigured;
 
     content.innerHTML = `
-        <div class="space-y-5">
-            <div class="space-y-3">
-                <div>
-                    <label class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Subject</label>
-                    <p class="text-sm font-medium text-gray-900 dark:text-white mt-0.5">${copyableText(data.subject || '-')}</p>
-                </div>
-                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <div>
-                        <label class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">From (Header)</label>
-                        <p class="text-sm text-gray-800 dark:text-gray-200 mt-0.5">${copyableText(data.header_from || '-')}</p>
-                    </div>
-                    <div>
-                        <label class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Envelope From</label>
-                        <p class="text-sm text-gray-800 dark:text-gray-200 mt-0.5 font-mono">${copyableText(data.env_from || '-')}</p>
-                    </div>
-                </div>
-                <div>
-                    <label class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Recipients</label>
-                    <div class="flex flex-wrap gap-1 mt-1">${recipientsHtml || '<span class="text-sm text-gray-500">-</span>'}</div>
-                </div>
-                <div class="flex items-center gap-4">
-                    <div>
-                        <label class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Score</label>
-                        <p class="text-lg font-bold ${scoreColor} mt-0.5">${(data.score || 0).toFixed(2)}</p>
-                    </div>
-                    <div>
-                        <label class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Action</label>
-                        <p class="mt-0.5"><span class="inline-block px-2 py-0.5 text-xs font-medium rounded bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-300">${escapeHtml(data.action || '-')}</span></p>
-                    </div>
-                </div>
+        <div class="ui-qd">
+            <div class="ui-md-ids ui-qd-facts">
+                <div class="ui-md-fact ui-qd-wide"><span>Subject</span><div dir="auto">${copyableText(data.subject || '-')}</div></div>
+                <div class="ui-md-fact"><span>From (Header)</span><div>${copyableText(data.header_from || '-')}</div></div>
+                <div class="ui-md-fact"><span>Envelope From</span><div class="ui-mono">${copyableText(data.env_from || '-')}</div></div>
+                <div class="ui-md-fact ui-qd-wide"><span>Recipients</span><div class="ui-chip-row">${recipientsHtml || '<span class="ui-muted">-</span>'}</div></div>
+                <div class="ui-md-fact"><span>Score</span><div class="ui-text-${scoreTone}"><b>${score.toFixed(2)}</b></div></div>
+                <div class="ui-md-fact"><span>Action</span><div>${uiTag(data.action || '-', quarantineActionTone(data.action))}</div></div>
             </div>
 
             <div>
-                <h4 class="text-sm font-semibold text-gray-900 dark:text-white mb-2 flex items-center gap-2">
-                    <svg class="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"></path></svg>
-                    Rspamd Symbols
-                </h4>
-                ${activeSymbols.length > 0 ? `<div class="overflow-x-auto">${symbolTableHead}<tbody>${buildSymbolRows(activeSymbols)}</tbody></table></div>` : '<p class="text-gray-500 text-sm">No active symbols</p>'}
+                <h4 class="ui-md-h">Rspamd Symbols</h4>
+                ${activeSymbols.length > 0 ? symbolTable(buildSymbolRows(activeSymbols)) : '<p class="ui-muted">No active symbols</p>'}
                 ${zeroSymbols.length > 0 ? `
-                <details class="mt-2">
-                    <summary class="text-xs text-gray-500 dark:text-gray-400 cursor-pointer hover:text-gray-700 dark:hover:text-gray-300 select-none py-1">
-                        Informational symbols (score 0) - ${zeroSymbols.length} items
-                    </summary>
-                    <div class="overflow-x-auto mt-1">${symbolTableHead}<tbody>${buildSymbolRows(zeroSymbols)}</tbody></table></div>
+                <details class="ui-dns-more">
+                    <summary>Informational symbols (score 0) - ${zeroSymbols.length} items</summary>
+                    ${symbolTable(buildSymbolRows(zeroSymbols))}
                 </details>` : ''}
             </div>
 
             ${textContent ? `
             <div>
-                <h4 class="text-sm font-semibold text-gray-900 dark:text-white mb-2 flex items-center gap-2">
-                    <svg class="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path></svg>
-                    Email Content
-                </h4>
-                <pre class="text-xs bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg p-3 overflow-x-auto whitespace-pre-wrap max-h-64 overflow-y-auto text-gray-800 dark:text-gray-200">${escapeHtml(textContent)}</pre>
+                <h4 class="ui-md-h">Email Content</h4>
+                <pre class="ui-qd-text" dir="auto">${escapeHtml(textContent)}</pre>
             </div>` : ''}
 
             ${data.fuzzy_hashes && data.fuzzy_hashes.length > 0 ? `
             <div>
-                <h4 class="text-sm font-semibold text-gray-900 dark:text-white mb-2">Fuzzy Hashes</h4>
-                <div class="text-xs font-mono bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg p-3">${data.fuzzy_hashes.map(h => escapeHtml(JSON.stringify(h))).join('<br>')}</div>
+                <h4 class="ui-md-h">Fuzzy Hashes</h4>
+                <div class="ui-qd-text">${data.fuzzy_hashes.map(h => escapeHtml(JSON.stringify(h))).join('<br>')}</div>
             </div>` : ''}
         </div>
     `;
 
-    // Render sticky footer with action buttons
+    // Footer with the actions
     if (footer && canAct) {
-        footer.className = 'grid grid-cols-4 gap-1.5 p-3 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/50';
+        footer.className = 'ui-dialog-foot';
         footer.innerHTML = `
-            <button onclick="closeQuarantineDetails(); quarantineRelease('${itemId}')"
-                class="py-2 text-xs font-medium rounded-md bg-green-500 text-white hover:bg-green-600 transition-colors flex items-center justify-center gap-1">
-                <svg class="w-3.5 h-3.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
-                Release
-            </button>
-            <button onclick="closeQuarantineDetails(); quarantineDelete('${itemId}')"
-                class="py-2 text-xs font-medium rounded-md bg-red-500 text-white hover:bg-red-600 transition-colors flex items-center justify-center gap-1">
-                <svg class="w-3.5 h-3.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
-                Delete
-            </button>
-            <button onclick="closeQuarantineDetails(); quarantineLearnHam('${itemId}')"
-                class="py-2 text-xs font-medium rounded-md bg-emerald-500 text-white hover:bg-emerald-600 transition-colors flex items-center justify-center gap-1">
-                <svg class="w-3.5 h-3.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"></path></svg>
-                Not Spam
-            </button>
-            <button onclick="closeQuarantineDetails(); quarantineLearnSpam('${itemId}')"
-                class="py-2 text-xs font-medium rounded-md bg-orange-500 text-white hover:bg-orange-600 transition-colors flex items-center justify-center gap-1">
-                <svg class="w-3.5 h-3.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"></path></svg>
-                Spam
-            </button>
+            <button onclick="closeQuarantineDetails(); quarantineLearnSpam('${escapeJsArg(itemId)}')" class="ui-btn" title="Delete & train as Spam">Spam</button>
+            <button onclick="closeQuarantineDetails(); quarantineLearnHam('${escapeJsArg(itemId)}')" class="ui-btn" title="Release & train as Not Spam">Not Spam</button>
+            <span class="ui-toolbar-gap"></span>
+            <button onclick="closeQuarantineDetails(); quarantineDelete('${escapeJsArg(itemId)}')" class="ui-btn ui-btn-danger">Delete</button>
+            <button onclick="closeQuarantineDetails(); quarantineRelease('${escapeJsArg(itemId)}')" class="ui-btn ui-btn-primary">Release</button>
         `;
+    } else if (footer) {
+        // The list's locked note sits behind the dialog: say it here too
+        footer.className = 'ui-dialog-foot ui-dialog-foot-note';
+        footer.innerHTML = uiLocked('Quarantine actions are locked', `Release, delete and spam learning ${UI_RW_KEY_TEXT}`);
     }
 }
 
@@ -3056,10 +3022,22 @@ async function initQuarantineRules() {
         await fetchRwStatus();
     }
     
-    if (mailcowRwConfigured) {
-        section.classList.remove('hidden');
+    if (showQuarantineRulesAccess()) {
         loadQuarantineRules();
     }
+}
+
+// Quarantine tabs: the held messages, and the Auto-Rules that handle them
+let quarantineTab = 'messages';
+function quarantineShowTab(tab) {
+    quarantineTab = tab;
+    routerSyncSubpage('quarantine', tab);
+    ['messages', 'rules'].forEach(name => {
+        const btn = document.getElementById(`quarantine-tab-btn-${name}`);
+        if (btn) { btn.classList.toggle('active', name === tab); btn.setAttribute('aria-selected', name === tab); }
+        const panel = document.getElementById(`quarantine-tab-${name}`);
+        if (panel) panel.classList.toggle('hidden', name !== tab);
+    });
 }
 
 async function loadQuarantineRules() {
@@ -3074,59 +3052,38 @@ async function loadQuarantineRules() {
         
         const countEl = document.getElementById('quarantine-rules-count');
         const activeCount = data.data.filter(r => r.enabled).length;
-        if (countEl) countEl.textContent = activeCount > 0 ? `(${activeCount} active)` : '';
+        if (countEl) countEl.textContent = uiCountLabel(data.data.length, 'rule', 'rules');
+        const tabCount = document.getElementById('quarantine-tab-n-rules');
+        if (tabCount) { tabCount.textContent = activeCount || ''; tabCount.classList.toggle('hidden', !activeCount); }
         
         if (!data.data || data.data.length === 0) {
-            container.innerHTML = '<p class="text-gray-500 dark:text-gray-400 text-center py-4 text-sm">No rules configured. Click "Add Rule" to create one.</p>';
+            container.innerHTML = '<p class="ui-empty">No rules configured. Click "Add Rule" to create one.</p>';
             return;
         }
         
-        container.innerHTML = data.data.map(rule => {
+        container.innerHTML = `<div class="ui-table ui-stack ui-qr-table">${data.data.map(rule => {
             const matchLabels = { sender: 'Sender', sender_domain: 'Sender Domain', recipient: 'Recipient', subject: 'Subject' };
-            const actionColor = rule.action === 'delete' ? 'red' : 'green';
             const actionLabel = rule.action === 'delete' ? 'Delete' : 'Release';
-            
+
             return `
-            <div class="border ${rule.enabled ? 'border-gray-200 dark:border-gray-700' : 'border-gray-100 dark:border-gray-800 opacity-60'} rounded-lg p-3 bg-white dark:bg-gray-800 hover:border-gray-300 dark:hover:border-gray-600 transition">
-                <div class="flex items-center justify-between gap-3">
-                    <div class="flex-1 min-w-0">
-                        <div class="flex items-center gap-2 mb-1 flex-wrap">
-                            <span class="font-medium text-sm text-gray-900 dark:text-white" dir="auto">${escapeHtml(rule.name)}</span>
-                            <span class="px-2 py-0.5 text-xs rounded-full bg-${actionColor}-100 dark:bg-${actionColor}-900/30 text-${actionColor}-700 dark:text-${actionColor}-300">${actionLabel}</span>
-                            ${rule.is_regex ? '<span class="px-2 py-0.5 text-xs rounded-full bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300">Regex</span>' : ''}
-                            ${!rule.enabled ? '<span class="px-2 py-0.5 text-xs rounded-full bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400">Disabled</span>' : ''}
-                        </div>
-                        <p class="text-xs text-gray-500 dark:text-gray-400">
-                            <span class="font-medium">${matchLabels[rule.match_type] || rule.match_type}:</span> 
-                            <code class="bg-gray-100 dark:bg-gray-700 px-1 rounded" dir="auto">${escapeHtml(rule.match_value)}</code>
-                        </p>
-                        <p class="text-xs text-gray-400 dark:text-gray-500 mt-1">
-                            Hits: ${rule.hit_count}${rule.last_hit_at ? ' · Last: ' + formatTime(rule.last_hit_at) : ''}
-                            ${rule.notes ? ' · ' + escapeHtml(rule.notes) : ''}
-                        </p>
-                    </div>
-                    <div class="flex items-center gap-1 flex-shrink-0">
-                        <button onclick="toggleQuarantineRule(${rule.id})" title="${rule.enabled ? 'Click to disable this rule' : 'Click to enable this rule'}"
-                            class="px-2 py-1 text-xs rounded-md font-medium transition ${rule.enabled 
-                                ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 hover:bg-green-200 dark:hover:bg-green-900/50' 
-                                : 'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-600'}">
-                            ${rule.enabled ? 'Enabled' : 'Disabled'}
-                        </button>
-                        <button onclick="showEditQuarantineRuleModal(${rule.id})" title="Edit"
-                            class="p-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-700 transition text-gray-400 hover:text-blue-500">
-                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg>
-                        </button>
-                        <button onclick="deleteQuarantineRule(${rule.id}, '${escapeJsArg(rule.name)}')" title="Delete"
-                            class="p-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-700 transition text-gray-400 hover:text-red-500">
-                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
-                        </button>
-                    </div>
+            <div class="ui-tr${rule.enabled ? '' : ' ui-row-off'}">
+                <div class="ui-td ui-q-who">
+                    <div><b dir="auto">${escapeHtml(rule.name)}</b> ${uiTag(actionLabel, rule.action === 'delete' ? 'fail' : 'ok')}
+                        ${rule.is_regex ? uiTag('Regex', 'info') : ''} ${!rule.enabled ? uiTag('Disabled', '') : ''}</div>
+                    <small>${escapeHtml(matchLabels[rule.match_type] || rule.match_type)}: <code class="ui-mono" dir="auto">${escapeHtml(rule.match_value)}</code></small>
+                    <small>Hits: ${escapeHtml(String(rule.hit_count))}${rule.last_hit_at ? ' · Last: ' + formatTime(rule.last_hit_at) : ''}${rule.notes ? ' · ' + escapeHtml(rule.notes) : ''}</small>
                 </div>
+                <span class="ui-td ui-td-end ui-row-actions">
+                    <button onclick="toggleQuarantineRule(${Number(rule.id)})" title="${rule.enabled ? 'Click to disable this rule' : 'Click to enable this rule'}"
+                        class="ui-btn ui-btn-sm${rule.enabled ? ' ui-btn-on' : ''}">${rule.enabled ? 'Enabled' : 'Disabled'}</button>
+                    <button onclick="showEditQuarantineRuleModal(${Number(rule.id)})" title="Edit" class="ui-btn ui-btn-sm">Edit</button>
+                    <button onclick="deleteQuarantineRule(${Number(rule.id)}, '${escapeJsArg(rule.name)}')" title="Delete" class="ui-btn ui-btn-sm ui-btn-danger">Delete</button>
+                </span>
             </div>`;
-        }).join('');
+        }).join('')}</div>`;
     } catch (err) {
         console.error('Failed to load quarantine rules:', err);
-        container.innerHTML = `<p class="text-red-500 text-center py-4 text-sm">Failed to load rules: ${escapeHtml(err.message)}</p>`;
+        container.innerHTML = `<p class="ui-empty ui-text-fail">Failed to load rules: ${escapeHtml(err.message)}</p>`;
     }
 }
 
@@ -3161,86 +3118,72 @@ function _showQuarantineRuleModal(rule, prefill) {
     
     // For pre-fill mode, provide quick-fill buttons for sender/domain/recipient
     const prefillButtons = prefill ? `
-        <div class="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-3 mb-4">
-            <p class="text-xs font-medium text-blue-700 dark:text-blue-300 mb-2">Quick fill from email:</p>
-            <div class="flex flex-wrap gap-1.5">
-                <button type="button" onclick="qrulePrefill('sender', '${escapeJsArg(prefill.sender)}')"
-                    class="px-2 py-1 text-xs rounded bg-blue-100 dark:bg-blue-800 text-blue-700 dark:text-blue-300 hover:bg-blue-200 dark:hover:bg-blue-700 transition">Sender: ${escapeHtml(prefill.sender)}</button>
-                ${prefill.senderDomain ? `<button type="button" onclick="qrulePrefill('sender_domain', '${escapeJsArg(prefill.senderDomain)}')"
-                    class="px-2 py-1 text-xs rounded bg-blue-100 dark:bg-blue-800 text-blue-700 dark:text-blue-300 hover:bg-blue-200 dark:hover:bg-blue-700 transition">Domain: ${escapeHtml(prefill.senderDomain)}</button>` : ''}
-                <button type="button" onclick="qrulePrefill('recipient', '${escapeJsArg(prefill.recipient)}')"
-                    class="px-2 py-1 text-xs rounded bg-blue-100 dark:bg-blue-800 text-blue-700 dark:text-blue-300 hover:bg-blue-200 dark:hover:bg-blue-700 transition">Recipient: ${escapeHtml(prefill.recipient)}</button>
+        <div class="ui-qr-prefill">
+            <span class="ui-label">Quick fill from email:</span>
+            <div class="ui-chip-row">
+                <button type="button" onclick="qrulePrefill('sender', '${escapeJsArg(prefill.sender)}')" class="ui-chip">Sender: ${escapeHtml(prefill.sender)}</button>
+                ${prefill.senderDomain ? `<button type="button" onclick="qrulePrefill('sender_domain', '${escapeJsArg(prefill.senderDomain)}')" class="ui-chip">Domain: ${escapeHtml(prefill.senderDomain)}</button>` : ''}
+                <button type="button" onclick="qrulePrefill('recipient', '${escapeJsArg(prefill.recipient)}')" class="ui-chip">Recipient: ${escapeHtml(prefill.recipient)}</button>
             </div>
         </div>
     ` : '';
-    
+
     const html = `
-    <div class="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4" id="quarantine-rule-modal-overlay">
-        <div class="bg-white dark:bg-gray-800 rounded-xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
-            <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
-                <h3 class="text-lg font-semibold text-gray-900 dark:text-white">${title}</h3>
-                <button onclick="closeQuarantineRuleModal()" class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">
-                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+    <div class="ui-dialog-backdrop" id="quarantine-rule-modal-overlay" role="dialog" aria-label="${title}">
+        <div class="ui-dialog ui-dialog-fit ui-dialog-sm">
+            <div class="ui-dialog-head">
+                <h3>${title}</h3>
+                <button onclick="closeQuarantineRuleModal()" class="ui-icon-btn" title="Close" aria-label="Close">
+                    <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
                 </button>
             </div>
-            <div class="p-6 space-y-4">
+            <div class="ui-dialog-body ui-form">
                 ${prefillButtons}
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Rule Name</label>
-                    <input type="text" id="qrule-name" value="${defaultName}" 
-                        class="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-lg" placeholder="e.g., Allow notifications from service X">
-                </div>
-                <div class="grid grid-cols-2 gap-4">
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Match Type</label>
-                        <select id="qrule-match-type" class="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-lg">
+                <label><span class="ui-label">Rule Name</span>
+                    <input type="text" id="qrule-name" value="${defaultName}" class="ui-input" placeholder="e.g., Allow notifications from service X">
+                </label>
+                <div class="ui-qr-pair">
+                    <label><span class="ui-label">Match Type</span>
+                        <select id="qrule-match-type" class="ui-select">
                             <option value="sender" ${defaultMatchType === 'sender' ? 'selected' : ''}>Sender</option>
                             <option value="sender_domain" ${defaultMatchType === 'sender_domain' ? 'selected' : ''}>Sender Domain</option>
                             <option value="recipient" ${defaultMatchType === 'recipient' ? 'selected' : ''}>Recipient</option>
                             <option value="subject" ${defaultMatchType === 'subject' ? 'selected' : ''}>Subject</option>
                         </select>
-                    </div>
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Action</label>
-                        <select id="qrule-action" class="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-lg">
+                    </label>
+                    <label><span class="ui-label">Action</span>
+                        <select id="qrule-action" class="ui-select">
                             <option value="release" ${defaultAction === 'release' ? 'selected' : ''}>✅ Release</option>
                             <option value="delete" ${defaultAction === 'delete' ? 'selected' : ''}>🗑️ Delete</option>
                         </select>
-                    </div>
+                    </label>
                 </div>
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Match Value</label>
-                    <input type="text" id="qrule-match-value" value="${defaultMatchValue}"
-                        class="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-lg font-mono" placeholder="e.g., noreply@example.com">
-                    <div class="mt-2">
-                        <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Match Mode</label>
-                        <select id="qrule-match-mode" onchange="updateQRuleMatchHelp()" class="w-full px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-lg">
-                            <option value="exact" ${!defaultIsRegex ? 'selected' : ''}>Exact Match - matches the full value exactly</option>
-                            <option value="contains" ${defaultIsRegex && !(isEdit && rule.match_value.startsWith('^')) ? 'selected' : ''}>Contains - matches if value appears anywhere</option>
-                            <option value="regex" ${defaultIsRegex && isEdit && rule.match_value.startsWith('^') ? 'selected' : ''}>Regex (advanced) - custom regular expression</option>
-                        </select>
-                        <p id="qrule-match-help" class="text-xs text-gray-400 dark:text-gray-500 mt-1"></p>
-                    </div>
-                </div>
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Notes (optional)</label>
-                    <textarea id="qrule-notes" rows="2" class="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-lg" placeholder="Why this rule exists...">${defaultNotes}</textarea>
-                </div>
-                <div class="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg p-3">
-                    <p class="text-xs text-amber-700 dark:text-amber-300">
-                        <strong>Priority:</strong> Delete rules always take priority over Release rules. If both match, the email will be deleted.
-                    </p>
+                <label><span class="ui-label">Match Value</span>
+                    <input type="text" id="qrule-match-value" value="${defaultMatchValue}" class="ui-input ui-mono" placeholder="e.g., noreply@example.com">
+                </label>
+                <label><span class="ui-label">Match Mode</span>
+                    <select id="qrule-match-mode" onchange="updateQRuleMatchHelp()" class="ui-select">
+                        <option value="exact" ${!defaultIsRegex ? 'selected' : ''}>Exact Match - matches the full value exactly</option>
+                        <option value="contains" ${defaultIsRegex && !(isEdit && rule.match_value.startsWith('^')) ? 'selected' : ''}>Contains - matches if value appears anywhere</option>
+                        <option value="regex" ${defaultIsRegex && isEdit && rule.match_value.startsWith('^') ? 'selected' : ''}>Regex (advanced) - custom regular expression</option>
+                    </select>
+                    <small id="qrule-match-help" class="ui-muted"></small>
+                </label>
+                <label><span class="ui-label">Notes (optional)</span>
+                    <textarea id="qrule-notes" rows="2" class="ui-textarea" placeholder="Why this rule exists...">${defaultNotes}</textarea>
+                </label>
+                <div class="ui-alert ui-alert-warn ui-qr-note">
+                    <span class="ui-alert-bar"></span>
+                    <div class="ui-alert-text"><p><b>Priority:</b> Delete rules always take priority over Release rules. If both match, the email will be deleted.</p></div>
                 </div>
             </div>
-            <div class="px-6 py-4 border-t border-gray-200 dark:border-gray-700 flex justify-end gap-2">
-                <button onclick="closeQuarantineRuleModal()" class="px-4 py-2 text-sm font-medium rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition">Cancel</button>
-                <button onclick="saveQuarantineRule(${isEdit ? rule.id : 'null'})" class="px-4 py-2 text-sm font-medium rounded-lg bg-amber-500 hover:bg-amber-600 text-white transition">
-                    ${isEdit ? 'Save Changes' : 'Create Rule'}
-                </button>
+            <div class="ui-dialog-foot">
+                <button onclick="closeQuarantineRuleModal()" class="ui-btn">Cancel</button>
+                <button onclick="saveQuarantineRule(${isEdit ? Number(rule.id) : 'null'})" class="ui-btn ui-btn-primary">${isEdit ? 'Save Changes' : 'Create Rule'}</button>
             </div>
         </div>
     </div>`;
-    
+
     document.body.insertAdjacentHTML('beforeend', html); // nosemgrep: typescript.react.security.audit.react-unsanitized-method.react-unsanitized-method
     updateQRuleMatchHelp();
 }
@@ -3374,54 +3317,46 @@ async function testQuarantineRules() {
         }
         
         const groupsHtml = Object.values(byRule).map(group => {
-            const actionColor = group.action === 'delete' ? 'red' : 'green';
+            const tone = group.action === 'delete' ? 'fail' : 'ok';
             const itemsHtml = group.items.map(m => `
-                <div class="py-1.5 pl-3 border-l-2 ${group.rule_enabled ? 'border-' + actionColor + '-300 dark:border-' + actionColor + '-700' : 'border-gray-300 dark:border-gray-600'}">
-                    <div class="text-xs text-gray-700 dark:text-gray-300">${escapeHtml(m.sender || '?')} → ${escapeHtml(m.recipient || '?')}</div>
-                    <div class="text-xs text-gray-400 dark:text-gray-500 truncate" dir="auto" title="${escapeHtml(m.subject || '')}">${escapeHtml((m.subject || 'No subject').substring(0, 80))}</div>
+                <div class="ui-qt-item${group.rule_enabled ? ` ui-qt-${tone}` : ''}">
+                    <div>${escapeHtml(m.sender || '?')} → ${escapeHtml(m.recipient || '?')}</div>
+                    <small class="ui-muted" dir="auto" title="${escapeHtml(m.subject || '')}">${escapeHtml((m.subject || 'No subject').substring(0, 80))}</small>
                 </div>
             `).join('');
-            
+
             return `
-            <div class="mb-4 ${!group.rule_enabled ? 'opacity-50' : ''}">
-                <div class="flex items-center gap-2 mb-1.5 flex-wrap">
-                    <span class="font-medium text-sm text-gray-900 dark:text-white" dir="auto">${escapeHtml(group.rule_name)}</span>
-                    <span class="px-1.5 py-0.5 text-xs rounded bg-${actionColor}-100 dark:bg-${actionColor}-900/30 text-${actionColor}-700 dark:text-${actionColor}-300">${group.action}</span>
-                    ${!group.rule_enabled ? '<span class="px-1.5 py-0.5 text-xs rounded bg-gray-200 dark:bg-gray-700 text-gray-500 dark:text-gray-400">Disabled - will not execute</span>' : ''}
-                    <span class="text-xs text-gray-400 ml-auto">${group.items.length} match${group.items.length !== 1 ? 'es' : ''}</span>
+            <div class="ui-qt-group${!group.rule_enabled ? ' ui-row-off' : ''}">
+                <div class="ui-list-head">
+                    <b dir="auto">${escapeHtml(group.rule_name)}</b> ${uiTag(group.action, tone)}
+                    ${!group.rule_enabled ? uiTag('Disabled - will not execute', '') : ''}
+                    <span class="ui-muted ui-head-actions">${group.items.length} match${group.items.length !== 1 ? 'es' : ''}</span>
                 </div>
-                <div class="space-y-1">${itemsHtml}</div>
+                <div class="ui-qt-items">${itemsHtml}</div>
             </div>`;
         }).join('');
-        
+
         const disabledCount = data.matches.filter(m => !m.rule_enabled).length;
         const activeCount = data.matches.length - disabledCount;
         const noMatches = data.total_matches === 0;
-        
+
         const html = `
-        <div class="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4" id="qrule-test-modal">
-            <div class="bg-white dark:bg-gray-800 rounded-xl shadow-2xl w-full max-w-lg max-h-[80vh] overflow-y-auto">
-                <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
-                    <h3 class="text-lg font-semibold text-gray-900 dark:text-white">Test Results</h3>
-                    <button onclick="document.getElementById('qrule-test-modal').remove()" class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">
-                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+        <div class="ui-dialog-backdrop" id="qrule-test-modal" role="dialog" aria-label="Test Results">
+            <div class="ui-dialog ui-dialog-fit ui-dialog-sm">
+                <div class="ui-dialog-head">
+                    <h3>Test Results</h3>
+                    <button onclick="document.getElementById('qrule-test-modal').remove()" class="ui-icon-btn" title="Close" aria-label="Close">
+                        <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
                     </button>
                 </div>
-                <div class="p-6">
-                    <div class="flex items-center gap-3 mb-4 pb-3 border-b border-gray-100 dark:border-gray-700">
-                        <div class="text-center">
-                            <div class="text-2xl font-bold text-gray-900 dark:text-white">${data.total_matches}</div>
-                            <div class="text-xs text-gray-500">matched</div>
-                        </div>
-                        <div class="text-center text-gray-300 dark:text-gray-600">/</div>
-                        <div class="text-center">
-                            <div class="text-2xl font-bold text-gray-400">${data.total_quarantine}</div>
-                            <div class="text-xs text-gray-500">total</div>
-                        </div>
-                        ${disabledCount > 0 ? `<div class="ml-auto text-xs text-amber-600 dark:text-amber-400">⚠ ${disabledCount} from disabled rules</div>` : ''}
+                <div class="ui-dialog-body ui-form">
+                    <div class="ui-kpis">
+                        <div class="ui-kpi"><b>${escapeHtml(String(data.total_matches))}</b>matched</div>
+                        <div class="ui-kpi"><b class="ui-muted">${escapeHtml(String(data.total_quarantine))}</b>total</div>
                     </div>
-                    ${noMatches ? '<p class="text-sm text-gray-500 text-center py-4">No quarantine items matched any rules.</p>' : groupsHtml}
-                    <p class="text-xs text-gray-400 dark:text-gray-500 mt-4 pt-3 border-t border-gray-100 dark:border-gray-700 text-center">This is a dry-run preview. No actions were taken.</p>
+                    ${disabledCount > 0 ? `<p class="ui-text-warn">⚠ ${disabledCount} from disabled rules</p>` : ''}
+                    ${noMatches ? '<p class="ui-empty">No quarantine items matched any rules.</p>' : groupsHtml}
+                    <p class="ui-kv-note ui-list-foot">This is a dry-run preview. No actions were taken.</p>
                 </div>
             </div>
         </div>`;
@@ -3447,29 +3382,27 @@ async function loadQuarantineRuleHistory() {
     const container = document.getElementById('quarantine-rules-history-list');
     if (!container) return;
     
-    container.innerHTML = '<p class="text-gray-400 text-xs text-center py-2">Loading...</p>';
-    
+    container.innerHTML = '<p class="ui-empty">Loading...</p>';
+
     try {
         const res = await authenticatedFetch('/api/quarantine/rules/logs?limit=20');
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
-        
+
         if (!data.data || data.data.length === 0) {
-            container.innerHTML = '<p class="text-gray-400 text-xs text-center py-2">No actions recorded yet</p>';
+            container.innerHTML = '<p class="ui-empty">No actions recorded yet</p>';
             return;
         }
-        
-        container.innerHTML = data.data.map(log => `
-            <div class="flex items-center gap-2 py-1.5 border-b border-gray-100 dark:border-gray-700/50 text-xs">
-                <span class="px-1.5 py-0.5 rounded ${log.action === 'delete' ? 'bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400' : 'bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400'}">${log.action}</span>
-                <span class="text-gray-500 dark:text-gray-400 flex-1 truncate" title="${escapeHtml(log.sender || '')} → ${escapeHtml(log.recipient || '')}">
-                    ${escapeHtml(log.sender || '?')} → ${escapeHtml(log.recipient || '?')}
-                </span>
-                <span class="text-gray-400 dark:text-gray-500 flex-shrink-0" title="Rule: ${escapeHtml(log.rule_name || '')}">${formatTime(log.created_at)}</span>
+
+        container.innerHTML = `<div class="ui-qt-history">${data.data.map(log => `
+            <div class="ui-qt-hrow">
+                ${uiTag(log.action, log.action === 'delete' ? 'fail' : 'ok')}
+                <span class="ui-q-who" title="${escapeHtml(log.sender || '')} → ${escapeHtml(log.recipient || '')}">${escapeHtml(log.sender || '?')} → ${escapeHtml(log.recipient || '?')}</span>
+                <span class="ui-muted" title="Rule: ${escapeHtml(log.rule_name || '')}">${formatTime(log.created_at)}</span>
             </div>
-        `).join('');
+        `).join('')}</div>`;
     } catch (err) {
-        container.innerHTML = `<p class="text-red-500 text-xs text-center py-2">Failed: ${escapeHtml(err.message)}</p>`;
+        container.innerHTML = `<p class="ui-empty ui-text-fail">Failed: ${escapeHtml(err.message)}</p>`;
     }
 }
 
@@ -3494,6 +3427,28 @@ function applyMessagesFilters() {
     loadMessages();
 }
 
+// The filters panel next to the search (sender, recipient, user, IP)
+function toggleMessagesFilters(open) {
+    const panel = document.getElementById('messages-more-filters');
+    const btn = document.getElementById('messages-filters-btn');
+    if (!panel) return;
+    const show = typeof open === 'boolean' ? open : panel.classList.contains('hidden');
+    panel.classList.toggle('hidden', !show);
+    if (btn) btn.setAttribute('aria-expanded', show);
+    if (show) { const first = panel.querySelector('input'); if (first) first.focus(); }
+}
+
+// How many filters are on, for the button badge and the Clear filters link
+function updateMessagesFilterState() {
+    const f = currentFilters.messages || {};
+    const advanced = ['sender', 'recipient', 'user', 'ip'].filter(k => f[k]).length;
+    const any = advanced || f.search || f.status || f.direction || f.start_date || f.end_date || f.date_range;
+    const badge = document.getElementById('messages-filters-n');
+    if (badge) { badge.textContent = advanced || ''; badge.classList.toggle('hidden', !advanced); }
+    const clear = document.getElementById('messages-clear-filters');
+    if (clear) clear.classList.toggle('hidden', !any);
+}
+
 function clearMessagesFilters() {
     document.getElementById('messages-filter-search').value = '';
     document.getElementById('messages-filter-sender').value = '';
@@ -3509,14 +3464,7 @@ function clearMessagesFilters() {
     document.getElementById('messages-date-range-start').value = '';
     document.getElementById('messages-date-range-end').value = '';
     document.getElementById('messages-date-range-label').textContent = 'All Time';
-    // Reset preset button styles
-    document.querySelectorAll('.messages-date-preset-btn').forEach(btn => {
-        if (btn.getAttribute('data-preset') === '') {
-            btn.className = 'messages-date-preset-btn px-3 py-1.5 text-xs font-medium rounded-md border border-blue-500 bg-blue-500 text-white transition-colors';
-        } else {
-            btn.className = 'messages-date-preset-btn px-3 py-1.5 text-xs font-medium rounded-md border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors';
-        }
-    });
+    setMessagesDatePresetActive('');
     currentFilters.messages = {};
     currentPage.messages = 1;
     loadMessages();
@@ -3526,12 +3474,58 @@ function clearMessagesFilters() {
 // MESSAGES DATE RANGE PICKER
 // =============================================================================
 
+// Marks the chosen preset chip; null marks none (a custom range).
+function setMessagesDatePresetActive(preset) {
+    document.querySelectorAll('.messages-date-preset-btn').forEach(btn => {
+        btn.setAttribute('aria-pressed', String(preset !== null && btn.getAttribute('data-preset') === preset));
+    });
+}
+
+// Where the facets are hidden: outcome, direction and time open their choices in a panel, one at a time
+const MESSAGES_PICKERS = ['status', 'direction', 'time'];
+
+function toggleMessagesPicker(kind, open) {
+    MESSAGES_PICKERS.forEach(k => {
+        const panel = document.getElementById(`messages-${k}-panel`);
+        const button = document.getElementById(k === 'time' ? 'messages-date-range-label' : `messages-${k}-pick`);
+        if (!panel || !button) return;
+        const show = k === kind && (open === undefined ? panel.classList.contains('hidden') : open);
+        panel.classList.toggle('hidden', !show);
+        button.setAttribute('aria-expanded', String(show));
+        if (show && k === 'time') {
+            // The custom range starts from the one in use
+            document.getElementById('messages-time-start').value = document.getElementById('messages-date-range-start').value;
+            document.getElementById('messages-time-end').value = document.getElementById('messages-date-range-end').value;
+        }
+    });
+}
+
+function toggleMessagesTimePanel(open) {
+    toggleMessagesPicker('time', open);
+}
+
+function applyMessagesTimePanelRange() {
+    document.getElementById('messages-date-range-start').value = document.getElementById('messages-time-start').value;
+    document.getElementById('messages-date-range-end').value = document.getElementById('messages-time-end').value;
+    applyMessagesCustomDateRange();
+}
+
 function toggleMessagesDateRangePicker() {
     const dropdown = document.getElementById('messages-date-range-dropdown');
     const arrow = document.getElementById('messages-date-range-arrow');
     const isHidden = dropdown.classList.contains('hidden');
     dropdown.classList.toggle('hidden');
     arrow.style.transform = isHidden ? 'rotate(180deg)' : '';
+}
+
+// Where a Messages time preset starts ('' for all time)
+function messagesPresetStart(preset, now = new Date()) {
+    const d = new Date(now);
+    if (preset === 'today') { d.setHours(0, 0, 0, 0); return d.toISOString(); }
+    const days = { '7days': 7, '30days': 30, '90days': 90 }[preset];
+    if (!days) return '';
+    d.setDate(d.getDate() - days);
+    return d.toISOString();
 }
 
 function selectMessagesDatePreset(preset) {
@@ -3569,18 +3563,12 @@ function selectMessagesDatePreset(preset) {
     document.getElementById('messages-start-date').value = startDate;
     document.getElementById('messages-end-date').value = endDate;
 
-    // Update preset button styles
-    document.querySelectorAll('.messages-date-preset-btn').forEach(btn => {
-        if (btn.getAttribute('data-preset') === preset) {
-            btn.className = 'messages-date-preset-btn px-3 py-1.5 text-xs font-medium rounded-md border border-blue-500 bg-blue-500 text-white transition-colors';
-        } else {
-            btn.className = 'messages-date-preset-btn px-3 py-1.5 text-xs font-medium rounded-md border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors';
-        }
-    });
+    setMessagesDatePresetActive(preset);
 
     // Close dropdown and apply
     document.getElementById('messages-date-range-dropdown').classList.add('hidden');
     document.getElementById('messages-date-range-arrow').style.transform = '';
+    toggleMessagesTimePanel(false);
     applyMessagesFilters();
 }
 
@@ -3610,19 +3598,19 @@ function applyMessagesCustomDateRange() {
     const fmt = (d) => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
     document.getElementById('messages-date-range-label').textContent = `${fmt(startDate)} - ${fmt(endDate)}`;
 
-    // Reset preset button styles
-    document.querySelectorAll('.messages-date-preset-btn').forEach(btn => {
-        btn.className = 'messages-date-preset-btn px-3 py-1.5 text-xs font-medium rounded-md border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors';
-    });
+    setMessagesDatePresetActive(null);
 
     // Close dropdown and apply
     document.getElementById('messages-date-range-dropdown').classList.add('hidden');
     document.getElementById('messages-date-range-arrow').style.transform = '';
+    toggleMessagesTimePanel(false);
     applyMessagesFilters();
 }
 
 // Close messages date range picker on outside click
 document.addEventListener('click', function(e) {
+    const pickers = document.getElementById('messages-pickers');
+    if (pickers && !pickers.contains(e.target)) toggleMessagesPicker(null, false);
     const container = document.getElementById('messages-date-range-picker-container');
     if (container && !container.contains(e.target)) {
         const dropdown = document.getElementById('messages-date-range-dropdown');
@@ -3634,27 +3622,104 @@ document.addEventListener('click', function(e) {
     }
 });
 
+// =============================================================================
+// MESSAGES FACETS (counts per outcome and direction, /api/messages/facets)
+// =============================================================================
+
+const MESSAGE_STATUS_FACETS = [['', 'All messages'], ['delivered', 'Delivered'], ['deferred', 'Deferred'], ['bounced', 'Bounced'],
+    ['rejected', 'Rejected'], ['spam', 'Spam'], ['discarded', 'Discarded (Sieve)']];
+const MESSAGE_DIRECTION_FACETS = [['', 'Any direction'], ['inbound', 'Inbound'], ['outbound', 'Outbound'], ['internal', 'Internal']];
+
+function messagesFilterParams(filters) {
+    const params = new URLSearchParams();
+    for (const key of ['search', 'sender', 'recipient', 'direction', 'user', 'status', 'ip', 'start_date', 'end_date']) {
+        if (filters[key]) params.append(key, filters[key]);
+    }
+    return params;
+}
+
+// Choosing a facet sets the outcome or direction filter and reloads the list
+function setMessagesFacet(kind, value) {
+    const select = document.getElementById(kind === 'status' ? 'messages-filter-status' : 'messages-filter-direction');
+    if (select) select.value = value;
+    toggleMessagesPicker(null, false);
+    applyMessagesFilters();
+}
+
+function renderFacetList(kind, entries, counts, current) {
+    return entries.map(([value, label]) => {
+        const count = counts ? counts[value || 'all'] : undefined;
+        const tone = kind === 'status' && value ? (UI_STATUS_TONE[value] || '') : '';
+        return `<button type="button" class="ui-fct" aria-pressed="${String(current === value)}" onclick="setMessagesFacet('${kind}', '${value}')">
+            ${kind === 'status' && value ? `<i class="ui-fct-dot${tone ? ` ui-fct-${tone}` : ''}"></i>` : ''}${kind === 'direction' && value ? `<i class="ui-fct-dot ui-dir-${value}"></i>` : ''}<span>${escapeHtml(label)}</span>
+            <small>${count === undefined ? '' : escapeHtml(String(count))}</small></button>`;
+    }).join('');
+}
+
+async function loadMessageFacets(filters) {
+    const statusList = document.getElementById('messages-facet-status');
+    const directionList = document.getElementById('messages-facet-direction');
+    let data = null;
+    try {
+        const params = messagesFilterParams(filters);
+        for (const preset of ['today', '7days', '30days', '90days']) params.append('since', `${preset}:${messagesPresetStart(preset)}`);
+        const response = await authenticatedFetch(`/api/messages/facets?${params}`);
+        if (response.ok) data = await response.json();
+    } catch (e) {
+        console.warn('Failed to load message facets:', e);
+    }
+    const status = filters.status || '';
+    const direction = filters.direction || '';
+    if (statusList) statusList.innerHTML = renderFacetList('status', MESSAGE_STATUS_FACETS, data && data.status, status);
+    if (directionList) directionList.innerHTML = renderFacetList('direction', MESSAGE_DIRECTION_FACETS, data && data.direction, direction);
+    // The time presets get their counts like the other facets
+    document.querySelectorAll('.messages-date-preset-btn').forEach(btn => {
+        const count = data && data.time ? data.time[btn.dataset.preset || 'all'] : undefined;
+        let small = btn.querySelector('small');
+        if (!small) { small = document.createElement('small'); btn.appendChild(small); }
+        small.textContent = count === undefined ? '' : String(count);
+    });
+    // Phones and tablets: the same facets behind the Outcome and Direction buttons, which name the choice in use
+    const pick = (kind, entries, counts, current, anyLabel) => {
+        const options = document.getElementById(`messages-${kind}-options`);
+        if (options) options.innerHTML = renderFacetList(kind, entries, counts, current);
+        const button = document.getElementById(`messages-${kind}-pick`);
+        const chosen = entries.find(([value]) => value === current);
+        if (button) {
+            button.textContent = current && chosen ? chosen[1] : anyLabel;
+            button.classList.toggle('is-set', !!current);
+        }
+    };
+    pick('status', MESSAGE_STATUS_FACETS, data && data.status, status, 'All outcomes');
+    pick('direction', MESSAGE_DIRECTION_FACETS, data && data.direction, direction, 'Any direction');
+    const timeButton = document.getElementById('messages-date-range-label');
+    if (timeButton) timeButton.classList.toggle('is-set', !!(filters.start_date || filters.end_date));
+}
+
+// After the list renders: keep the open message marked, and on wide screens
+// show the first message in the reading pane, as a mail client does.
+function afterMessagesRendered(data) {
+    if (typeof markSelectedMessageRow === 'function' && window.openMessageKey) markSelectedMessageRow(window.openMessageKey);
+    const modal = document.getElementById('message-modal');
+    const slot = typeof messageReaderSlot === 'function' ? messageReaderSlot() : null;
+    if (slot && modal && modal.classList.contains('hidden') && data.data && data.data.length) {
+        viewMessageDetails(data.data[0].correlation_key);
+    }
+}
+
 async function loadMessages(page = 1) {
     const container = document.getElementById('messages-logs');
 
     try {
-        container.innerHTML = '<div class="text-center py-8"><div class="loading mx-auto mb-4"></div><p class="text-gray-500 dark:text-gray-400">Loading...</p></div>';
+        container.innerHTML = '<div class="ui-loading"><div class="loading"></div><p>Loading...</p></div>';
 
         const filters = currentFilters.messages || {};
-        const params = new URLSearchParams({
-            page: page,
-            limit: 50
-        });
-
-        if (filters.search) params.append('search', filters.search);
-        if (filters.sender) params.append('sender', filters.sender);
-        if (filters.recipient) params.append('recipient', filters.recipient);
-        if (filters.direction) params.append('direction', filters.direction);
-        if (filters.user) params.append('user', filters.user);
-        if (filters.status) params.append('status', filters.status);
-        if (filters.ip) params.append('ip', filters.ip);
-        if (filters.start_date) params.append('start_date', filters.start_date);
-        if (filters.end_date) params.append('end_date', filters.end_date);
+        loadMessageFacets(filters);
+        updateMessagesFilterState();
+        // The list grows as it scrolls, so a new load always starts at the top
+        page = 1;
+        const params = messagesQueryParams(page);
+        container.scrollTop = 0;
 
         console.log('Loading Messages:', `/api/messages?${params}`);
 
@@ -3669,61 +3734,21 @@ async function loadMessages(page = 1) {
         // Update count display
         const countEl = document.getElementById('messages-count');
         if (countEl) {
-            countEl.textContent = data.total ? `(${data.total.toLocaleString()} results)` : '';
+            countEl.textContent = uiCountLabel(data.total || 0, 'message', 'messages');
         }
 
         if (!data.data || data.data.length === 0) {
-            container.innerHTML = '<p class="text-gray-500 dark:text-gray-400 text-center py-8">No messages found</p>';
+            container.innerHTML = '<p class="ui-empty">No messages found</p>';
             return;
         }
 
-        container.innerHTML = `
-            <div class="space-y-3">
-                ${data.data.map(msg => `
-                    <div class="border border-gray-200 dark:border-gray-700 rounded-lg p-4 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition cursor-pointer" onclick="viewMessageDetails('${msg.correlation_key}')">
-                        <div class="grid grid-cols-1 sm:grid-cols-[1fr_auto] gap-2 mb-2 items-start">
-                            <div class="min-w-0 overflow-hidden">
-                                <div class="flex flex-wrap items-center gap-2 mb-1">
-                                    <span class="text-sm font-medium text-gray-900 dark:text-white">${escapeHtml(msg.sender || 'Unknown')}</span>
-                                    <svg class="w-4 h-4 text-gray-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
-                                    </svg>
-                                    <span class="text-sm text-gray-600 dark:text-gray-300">${escapeHtml(msg.recipient || 'Unknown')}</span>
-                                </div>
-                                <p class="text-xs text-gray-500 dark:text-gray-400 truncate" dir="auto" title="${escapeHtml(msg.subject || 'No subject')}">${escapeHtml(msg.subject || 'No subject')}</p>
-                            </div>
-                            <div class="flex flex-wrap items-center gap-2 flex-shrink-0 sm:justify-end">
-                                ${(() => {
-                const correlationStatus = getCorrelationStatusDisplay(msg);
-                if (correlationStatus) {
-                    return `<span class="inline-block px-2 py-0.5 text-xs font-medium rounded ${correlationStatus.class}" title="${msg.final_status || (msg.is_complete ? 'Correlation complete' : 'Waiting for Postfix logs')}">${correlationStatus.display}</span>`;
-                }
-                return '';
-            })()}
-                                ${msg.direction ? `<span class="inline-block px-2 py-0.5 text-xs font-medium rounded ${getDirectionClass(msg.direction)}">${msg.direction}</span>` : ''}
-                                ${msg.is_spam !== null ? `<span class="inline-block px-2 py-0.5 text-xs font-medium rounded ${msg.is_spam ? 'bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-300' : 'bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300'}">${msg.is_spam ? 'SPAM' : 'CLEAN'}</span>` : ''}
-                            </div>
-                        </div>
-                        <div class="flex flex-wrap items-center gap-4 text-xs text-gray-500 dark:text-gray-400">
-                            <span>${formatTime(msg.first_seen)}</span>
-                            ${msg.queue_id ? `<span class="font-mono" title="Queue ID">Q: ${msg.queue_id}</span>` : ''}
-                            ${msg.message_id ? `<span class="font-mono truncate max-w-xs" title="Message ID: ${escapeHtml(msg.message_id)}">MID: ${escapeHtml(msg.message_id.substring(0, 20))}${msg.message_id.length > 20 ? '...' : ''}</span>` : ''}
-                            ${msg.spam_score !== null ? `<span>Score: <span class="${msg.spam_score >= 15 ? 'text-red-600 dark:text-red-400 font-semibold' : 'text-gray-600 dark:text-gray-300'}">${msg.spam_score.toFixed(1)}</span></span>` : ''}
-                            ${renderMailboxFolderHint(msg)}
-                            ${renderDeliveriesChip(msg)}
-                            ${msg.user ? `<span>User: ${escapeHtml(msg.user)}</span>` : ''}
-                            ${msg.ip ? `<span>IP: ${msg.ip}</span>` : ''}
-                        </div>
-                    </div>
-                `).join('')}
-            </div>
-            ${renderPagination('messages', data.page, data.pages)}
-        `;
+        renderMessagesList(container, data);
+        afterMessagesRendered(data);
 
         currentPage.messages = page;
     } catch (error) {
         console.error('Failed to load messages:', error);
-        document.getElementById('messages-logs').innerHTML = `<p class="text-red-500 text-center py-8">Failed to load messages: ${escapeHtml(error.message)}</p>`;
+        document.getElementById('messages-logs').innerHTML = `<p class="ui-empty ui-text-fail">Failed to load messages: ${escapeHtml(error.message)}</p>`;
         const countEl = document.getElementById('messages-count');
         if (countEl) countEl.textContent = '';
     }
@@ -3733,22 +3758,180 @@ async function loadMessages(page = 1) {
 // STATUS TAB
 // =============================================================================
 
+// ---------- Status page ----------
+// What each loader found, so the attention list and the tab counters can be
+// built from one place once any of them finishes
+const statusState = { containers: null, blocklists: null, jobs: null };
+let statusTab = 'server';
+
+// A dashboard card opens its tab on the Status page
+function openStatusTab(tab) {
+    statusShowTab(tab);
+    navigateTo('status');
+}
+
+// One summary of the background jobs for Status and the dashboard
+function summarizeJobs(jobs) {
+    const all = statusJobCategories(jobs || {}).flatMap(cat => cat.jobs.filter(j => j[2]));
+    const isOff = job => job.feature_disabled === true || job.status === 'disabled' || job.enabled === false;
+    const failed = all.filter(([, , job]) => !isOff(job) && job.status === 'failed');
+    const off = all.filter(([, , job]) => isOff(job)).length;
+    return { all, isOff, failed, off, healthy: all.length - failed.length - off, running: all.length - off };
+}
+let statusCtrFilter = 'all';
+let statusJobFilterValue = 'all';
+
+function statusShowTab(tab) {
+    statusTab = tab;
+    routerSyncSubpage('status', tab);
+    document.querySelectorAll('.ui-st-tabs .modal-tab').forEach(btn => {
+        const on = btn.id === `status-tab-btn-${tab}`;
+        btn.classList.toggle('active', on);
+        btn.setAttribute('aria-selected', on);
+    });
+    document.querySelectorAll('.ui-st-panel').forEach(panel => panel.classList.toggle('hidden', panel.id !== `status-tab-${tab}`));
+}
+
+function setStatusTabCount(tab, count, isFail) {
+    const el = document.getElementById(`status-tab-n-${tab}`);
+    if (!el) return;
+    el.textContent = count;
+    el.classList.toggle('hidden', !count);
+    el.classList.toggle('is-fail', !!isFail);
+}
+
+function statusContainerFilter(filter) {
+    statusCtrFilter = filter;
+    document.querySelectorAll('[data-ctr-filter]').forEach(b => b.setAttribute('aria-pressed', b.dataset.ctrFilter === filter));
+    document.querySelectorAll('#status-containers .ui-ctr').forEach(row => {
+        row.hidden = filter === 'problems' && !row.classList.contains('is-down');
+    });
+}
+
+function statusJobFilter(filter) {
+    statusJobFilterValue = filter;
+    document.querySelectorAll('[data-job-filter]').forEach(b => b.setAttribute('aria-pressed', b.dataset.jobFilter === filter));
+    document.querySelectorAll('#status-jobs .ui-jg').forEach(group => {
+        let shown = 0;
+        group.querySelectorAll('.ui-jobrow').forEach(row => {
+            const show = filter === 'all' || (filter === 'problems' && row.classList.contains('is-failed'))
+                || (filter === 'off' && row.classList.contains('is-off'));
+            row.hidden = !show;
+            if (show) shown++;
+        });
+        group.hidden = shown === 0;
+        // Filtered: open what matches. All: back to failures plus what the user opened
+        group.open = filter === 'all' ? (group.hasAttribute('data-failed') || statusJobsOpen.has(group.dataset.group)) : shown > 0;
+    });
+}
+
+// A clickable link to a provider's own lookup page
+function blocklistLookupLink(r, label) {
+    if (!/^https:\/\//.test(r.info_url || '')) return '';
+    return `<a href="${escapeHtml(r.info_url)}" target="_blank" rel="noopener noreferrer" class="ui-btn ui-btn-sm" title="Look up on ${escapeHtml(r.name)}">${label}</a>`;
+}
+
+// Needs attention: stopped containers, blocklist listings and failed jobs,
+// each with the action that resolves it
+function renderStatusAttention() {
+    const box = document.getElementById('status-attention');
+    const count = document.getElementById('status-attention-count');
+    if (!box) return;
+    const items = [];
+    for (const c of statusState.containers || []) {
+        if (c.ignored || c.running) continue;
+        items.push({ tone: 'fail', title: `${c.name} is stopped`, detail: `State: ${c.state}. It is not running, so what it does is off until it starts again.`,
+            actions: `<button type="button" class="ui-btn ui-btn-sm" onclick="setContainerIgnored('${escapeJsArg(c.container)}', true)" title="Stop counting and alerting on ${escapeHtml(c.name)}">Ignore</button>` });
+    }
+    const blOff = (window.disabledFeatures || []).includes('blacklist');
+    for (const host of blOff ? [] : (statusState.blocklists || [])) {
+        for (const r of (host.results || []).filter(x => x.listed && !x.ignored)) {
+            items.push({ tone: 'fail', title: `${host.hostname} is on ${r.name}`,
+                detail: `${host.source || 'system'}, listed on ${host.listed_count || 1} of ${host.total_blacklists || '?'} lists. Mail to some providers may bounce.`,
+                actions: `${blocklistLookupLink(r, 'Look up')}<button type="button" class="ui-btn ui-btn-sm" onclick="setBlocklistIgnored('${escapeJsArg(r.zone)}', true)" title="Keep checking ${escapeHtml(r.name)} but never count or alert on it">Ignore this list</button>` });
+        }
+    }
+    for (const job of statusState.jobs || []) {
+        if (!job.failed) continue;
+        items.push({ tone: 'warn', title: `${job.name} failed`, detail: job.error || 'The last run did not finish.',
+            actions: `<button type="button" class="ui-btn ui-btn-sm" onclick="triggerBackgroundJob('${escapeJsArg(job.key)}', this, '${escapeJsArg(job.name)}')">Run now</button>` });
+    }
+    const loaded = statusState.containers && statusState.jobs;
+    if (count) count.textContent = items.length ? String(items.length) : '';
+    if (!items.length) {
+        box.innerHTML = loaded ? '<p class="ui-st-allgood">Everything is running. Nothing needs you right now.</p>'
+            : '<div class="ui-loading"><div class="loading"></div><p>Loading...</p></div>';
+        return;
+    }
+    box.innerHTML = items.map(item => `
+        <div class="ui-alert ui-alert-${item.tone}">
+            <span class="ui-alert-bar"></span>
+            <div class="ui-alert-text"><div class="ui-alert-title"><b>${escapeHtml(item.title)}</b></div><p>${escapeHtml(item.detail)}</p></div>
+            <div class="ui-st-acts">${item.actions}</div>
+        </div>`).join('');
+}
+
 async function loadStatus() {
     try {
         await Promise.all([
             loadStatusContainers(),
             loadStatusSystem(),
             loadStatusStorage(),
-            loadStatusExtended()
+            loadStatusExtended(),
+            loadStatusAppVersion()
         ]);
+        const lastChecked = document.getElementById('status-last-checked');
+        uiAgo(lastChecked, new Date().toISOString(), 'Updated ');
+        renderStatusAttention();
     } catch (error) {
         console.error('Failed to load status:', error);
+    }
+}
+
+function setStatusKpi(id, value, tone) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.textContent = value;
+    el.className = tone ? `ui-${tone}` : '';
+}
+
+// The version of this app, and whether an update is out
+async function loadStatusAppVersion() {
+    const note = document.getElementById('status-kpi-version-note');
+    try {
+        const res = await authenticatedFetch('/api/status/app-version');
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        setStatusKpi('status-kpi-version', data.current_version || '-');
+        if (note) {
+            note.innerHTML = data.update_available
+                ? `<button type="button" class="ui-link-row ui-text-info" onclick="switchTab('settings')">Update ${escapeHtml(data.latest_version)} available</button>`
+                : 'Up to date';
+        }
+    } catch (error) {
+        setStatusKpi('status-kpi-version', '-');
+        if (note) note.textContent = 'Version';
+    }
+}
+
+async function setContainerIgnored(container, ignored) {
+    try {
+        const res = await authenticatedFetch(`/api/status/containers/${encodeURIComponent(container)}/ignore`, {
+            method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ignored })
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        showToast(ignored ? `${container.replace('-mailcow', '')} is ignored. It no longer counts or alerts.` : `${container.replace('-mailcow', '')} counts again.`, 'success');
+        loadStatusContainers();
+        loadNavCounters();
+    } catch (e) {
+        showToast(`Could not change the container: ${e.message}`, 'error');
     }
 }
 
 async function loadStatusContainers() {
     try {
         const response = await authenticatedFetch('/api/status/containers');
+        if (!response.ok) throw await responseError(response);
         let data = await response.json();
 
         const container = document.getElementById('status-containers');
@@ -3767,61 +3950,59 @@ async function loadStatusContainers() {
                 name: (value.name || key).replace('-mailcow', ''),
                 container: key,
                 state: value.state || 'unknown',
-                started_at: value.started_at || null
+                started_at: value.started_at || null,
+                ignored: !!value.ignored
             }));
         }
 
+        const note = document.getElementById('status-containers-note');
         if (containersList.length > 0) {
-            // Normalize states and count: only 'running' is running, everything else is stopped
-            // This includes: paused, exited, stopped, created, restarting, removing, dead, unknown, etc.
-            const running = containersList.filter(c => {
-                const state = (c.state || 'unknown').toString().toLowerCase().trim();
-                return state === 'running';
-            }).length;
-            const stopped = containersList.length - running;
-            const total = containersList.length;
+            // Only 'running' is running; paused, exited, restarting, dead and the rest count as stopped
+            // Ignored containers (stopped on purpose) are shown but never counted
+            const isRunning = c => (c.state || 'unknown').toString().toLowerCase().trim() === 'running';
+            const counted = containersList.filter(c => !c.ignored);
+            const running = counted.filter(isRunning).length;
+            const stopped = counted.length - running;
+            const ignoredCount = containersList.length - counted.length;
+            setStatusKpi('status-kpi-containers', `${running} of ${counted.length} running`, stopped > 0 ? 'fail' : '');
+            const summaryText = [stopped ? `${stopped} stopped` : 'All running', ignoredCount ? `${ignoredCount} ignored` : ''].filter(Boolean).join(', ');
+            if (note) note.textContent = summaryText;
+            const summary = document.getElementById('status-containers-summary');
+            if (summary) summary.textContent = summaryText;
+            setStatusTabCount('server', stopped, true);
+            statusState.containers = containersList.map(c => ({ ...c, running: isRunning(c) }));
 
-            container.innerHTML = `
-                <!-- Summary FIRST -->
-                <div class="mb-4 pb-4 border-b border-gray-200 dark:border-gray-700">
-                    <div class="grid grid-cols-3 gap-4 text-center">
-                        <div>
-                            <p class="text-xs text-gray-500 dark:text-gray-400">Total</p>
-                            <p class="text-xl font-bold text-gray-900 dark:text-white">${total}</p>
-                        </div>
-                        <div>
-                            <p class="text-xs text-gray-500 dark:text-gray-400">Running</p>
-                            <p class="text-xl font-bold text-green-600 dark:text-green-400">${running}</p>
-                        </div>
-                        <div>
-                            <p class="text-xs text-gray-500 dark:text-gray-400">Stopped</p>
-                            <p class="text-xl font-bold text-red-600 dark:text-red-400">${stopped}</p>
-                        </div>
-                    </div>
-                </div>
-                
-                <!-- Containers list -->
-                <div class="space-y-2 max-h-96 overflow-y-auto" style="scrollbar-width: thin;">
-                    ${containersList.map(c => `
-                        <div class="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
-                            <div class="flex items-center gap-3 flex-1">
-                                <div class="w-2 h-2 rounded-full flex-shrink-0 ${c.state === 'running' ? 'bg-green-500' : 'bg-red-500'}"></div>
-                                <div class="min-w-0 flex-1">
-                                    <p class="text-sm font-medium text-gray-900 dark:text-white truncate">${escapeHtml(c.name)}</p>
-                                    <p class="text-xs text-gray-500 dark:text-gray-400">${c.started_at ? new Date(c.started_at).toLocaleString('he-IL', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'Unknown'}</p>
-                                </div>
-                            </div>
-                            <span class="text-xs px-2 py-1 rounded flex-shrink-0 ${c.state === 'running' ? 'bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300' : 'bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-300'}">${c.state}</span>
-                        </div>
-                    `).join('')}
-                </div>
-            `;
+            // Stopped containers first, so they are seen; ignored ones last
+            const rank = c => c.ignored ? 2 : (isRunning(c) ? 1 : 0);
+            const ordered = [...containersList].sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name));
+            // One tile per container: state dot, name, uptime, and Ignore where it applies
+            container.innerHTML = `<div class="ui-ctrs">${ordered.map(c => {
+                const up = isRunning(c);
+                const since = c.started_at ? formatAgo(c.started_at).replace(' ago', '') : '';
+                const arg = escapeJsArg(c.container);
+                // A stopped container can be ignored; an ignored one can be counted again
+                const action = c.ignored
+                    ? `<button type="button" class="ui-btn ui-btn-sm" onclick="setContainerIgnored('${arg}', false)">Stop ignoring</button>`
+                    : (up ? '' : `<button type="button" class="ui-btn ui-btn-sm" onclick="setContainerIgnored('${arg}', true)" title="Stop counting and alerting on ${escapeHtml(c.name)}">Ignore</button>`);
+                const state = c.ignored ? 'ignored' : (up ? (since ? `up ${since}` : 'running') : String(c.state || 'unknown'));
+                return `
+                <div class="ui-ctr${c.ignored ? ' is-ignored' : (up ? '' : ' is-down')}" title="${escapeHtml(c.ignored ? 'Ignored: shown here but never counted or alerted' : (c.started_at ? `Started ${formatTime(c.started_at)}` : 'Start time unknown'))}">
+                    <i class="ui-mdot${c.ignored ? '' : (up ? ' ui-mdot-ok' : ' ui-mdot-fail')}"></i>
+                    <b>${escapeHtml(c.name)}</b>
+                    <small>${escapeHtml(state)}</small>${action ? `<span class="ui-ctr-act">${action}</span>` : ''}
+                </div>`;
+            }).join('')}</div>`;
+            statusContainerFilter(statusCtrFilter);
+            renderStatusAttention();
         } else {
-            container.innerHTML = '<p class="text-gray-500 dark:text-gray-400 text-center py-8">No container information available</p>';
+            setStatusKpi('status-kpi-containers', '-');
+            if (note) note.textContent = '';
+            container.innerHTML = '<p class="ui-empty ui-panel">No container information available</p>';
         }
     } catch (error) {
         console.error('Failed to load containers status:', error);
-        document.getElementById('status-containers').innerHTML = '<p class="text-red-500 text-center py-8">Failed to load containers</p>';
+        setStatusKpi('status-kpi-containers', '-');
+        document.getElementById('status-containers').innerHTML = `<p class="ui-empty ui-panel ui-text-fail">Failed to load containers: ${escapeHtml(error.message)}</p>`;
     }
 }
 
@@ -3838,7 +4019,7 @@ async function loadStatusSystem() {
         ]);
 
         if (!infoResponse.ok) {
-            throw new Error(`HTTP ${infoResponse.status}: ${infoResponse.statusText}`);
+            throw await responseError(infoResponse);
         }
 
         const data = await infoResponse.json();
@@ -3853,50 +4034,24 @@ async function loadStatusSystem() {
             window.mailcowUpdateName = versionData.name || ''; // Store release title
             window.mailcowUpdateChangelog = versionData.changelog || 'No changelog available';
 
-            const updateBadge = versionData.update_available ?
-                `<button onclick="showMailcowUpdateModal()" 
-                    class="ml-2 px-2 py-0.5 bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-300 rounded text-xs font-medium hover:bg-blue-200 dark:hover:bg-blue-900/50 cursor-pointer transition-colors">
-                    Update Available
-                </button>` : '';
-
-            versionHtml = `
-                <div class="mt-4 pt-4 border-t border-gray-100 dark:border-gray-700 mx-1">
-                    <div class="flex items-center justify-between">
-                        <span class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">mailcow Version</span>
-                        <div class="flex items-center">
-                            <span class="text-sm font-bold text-gray-900 dark:text-white">v${versionData.current_version}</span>
-                            ${updateBadge}
-                        </div>
-                    </div>
-                </div>
-            `;
+            const updateBadge = versionData.update_available
+                ? ` <button onclick="showMailcowUpdateModal()" class="ui-tag ui-tag-info ui-tag-btn">Update Available</button>`
+                : '';
+            versionHtml = `v${escapeHtml(versionData.current_version)}${updateBadge}`;
         }
 
+        const row = (label, part) => `<dt>${label}</dt><dd>${Number(part.total || 0).toLocaleString()} <small>${Number(part.active || 0).toLocaleString()} active</small></dd>`;
         container.innerHTML = `
-            <div class="space-y-4">
-                <div class="grid grid-cols-2 gap-4">
-                    <div class="text-center p-4 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
-                        <p class="text-xs text-gray-500 dark:text-gray-400 uppercase mb-1">Domains</p>
-                        <p class="text-2xl font-bold text-gray-900 dark:text-white">${data.domains.total}</p>
-                        <p class="text-xs text-green-600 dark:text-green-400 mt-1">${data.domains.active} active</p>
-                    </div>
-                    <div class="text-center p-4 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
-                        <p class="text-xs text-gray-500 dark:text-gray-400 uppercase mb-1">Mailboxes</p>
-                        <p class="text-2xl font-bold text-gray-900 dark:text-white">${data.mailboxes.total}</p>
-                        <p class="text-xs text-green-600 dark:text-green-400 mt-1">${data.mailboxes.active} active</p>
-                    </div>
-                </div>
-                <div class="text-center p-4 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
-                    <p class="text-xs text-gray-500 dark:text-gray-400 uppercase mb-1">Aliases</p>
-                    <p class="text-2xl font-bold text-gray-900 dark:text-white">${data.aliases.total}</p>
-                    <p class="text-xs text-green-600 dark:text-green-400 mt-1">${data.aliases.active} active</p>
-                </div>
-                ${versionHtml}
-            </div>
+            <div class="ui-srv-big">${versionHtml || 'mailcow'}</div>
+            <dl class="ui-srv-dl">
+                ${row('Domains', data.domains || {})}
+                ${row('Mailboxes', data.mailboxes || {})}
+                ${row('Aliases', data.aliases || {})}
+            </dl>
         `;
     } catch (error) {
         console.error('Failed to load system info:', error);
-        document.getElementById('status-system').innerHTML = `<p class="text-red-500 text-center py-8">Failed to load system info: ${escapeHtml(error.message)}</p>`;
+        document.getElementById('status-system').innerHTML = `<p class="ui-empty ui-text-fail">Failed to load system info: ${escapeHtml(error.message)}</p>`;
     }
 }
 
@@ -3921,7 +4076,7 @@ async function loadStatusStorage() {
 
         const response = await authenticatedFetch('/api/status/storage');
         if (!response.ok) {
-            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            throw await responseError(response);
         }
 
         let rawData = await response.json();
@@ -3933,48 +4088,22 @@ async function loadStatusStorage() {
             data = rawData[0]; // Take first element
         }
         const usedPercent = parseInt(data.used_percent) || 0;
-        const storageColor = usedPercent > 90 ? 'bg-red-600' :
-            usedPercent > 75 ? 'bg-yellow-600' :
-                'bg-green-600';
-        const textColor = usedPercent > 90 ? 'text-red-600 dark:text-red-400' :
-            usedPercent > 75 ? 'text-yellow-600 dark:text-yellow-400' :
-                'text-green-600 dark:text-green-400';
+        // Amber above 75%, red above 90%
+        const level = usedPercent > 90 ? 'fail' : usedPercent > 75 ? 'warn' : 'ok';
+        setStatusKpi('status-kpi-storage', `${data.used_percent || `${usedPercent}%`} used`, level === 'ok' ? '' : level);
+        const storageNote = document.getElementById('status-kpi-storage-note');
+        if (storageNote) storageNote.textContent = [data.used && data.total ? `${data.used} of ${data.total}` : '', data.disk || ''].filter(Boolean).join(', ');
 
+        const size = [data.used && data.total ? `${data.used} of ${data.total}` : '', data.disk ? `on ${data.disk}` : ''].filter(Boolean).join(' ');
         container.innerHTML = `
-            <div class="space-y-6">
-                <div class="text-center">
-                    <p class="text-5xl font-bold ${textColor} mb-2">${data.used_percent}</p>
-                    <p class="text-sm text-gray-600 dark:text-gray-400">Storage Used</p>
-                </div>
-                
-                <div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-4">
-                    <div class="${storageColor} h-4 rounded-full transition-all duration-300" style="width: ${usedPercent}%"></div>
-                </div>
-                
-                <div class="grid grid-cols-2 gap-4 text-center">
-                    <div>
-                        <p class="text-xs text-gray-500 dark:text-gray-400 mb-1">Used</p>
-                        <p class="text-lg font-semibold text-gray-900 dark:text-white">${data.used}</p>
-                    </div>
-                    <div>
-                        <p class="text-xs text-gray-500 dark:text-gray-400 mb-1">Total</p>
-                        <p class="text-lg font-semibold text-gray-900 dark:text-white">${data.total}</p>
-                    </div>
-                </div>
-                
-                <div class="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3">
-                    <p class="text-xs text-gray-600 dark:text-gray-400">
-                        <svg class="inline w-4 h-4 mr-1" fill="currentColor" viewBox="0 0 20 20">
-                            <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"></path>
-                        </svg>
-                        Disk: ${data.disk}
-                    </p>
-                </div>
-            </div>
+            <div class="ui-srv-big${level === 'ok' ? '' : ` ui-text-${level}`}">${escapeHtml(String(data.used_percent || '0%'))} used</div>
+            <div class="ui-meter ui-${level}"><i style="width: ${usedPercent}%"></i></div>
+            ${size ? `<small>${escapeHtml(size)}</small>` : ''}
         `;
     } catch (error) {
         console.error('Failed to load storage info:', error);
-        document.getElementById('status-storage').innerHTML = `<p class="text-red-500 text-center py-8">Failed to load storage info: ${escapeHtml(error.message)}</p>`;
+        setStatusKpi('status-kpi-storage', '-');
+        document.getElementById('status-storage').innerHTML = `<p class="ui-empty ui-text-fail">Failed to load storage info: ${escapeHtml(error.message)}</p>`;
     }
 }
 
@@ -4002,9 +4131,9 @@ async function loadStatusExtended() {
 
     } catch (error) {
         console.error('Failed to load extended status:', error);
-        document.getElementById('status-import').innerHTML = `<p class="text-red-500 text-center py-8">Failed to load: ${escapeHtml(error.message)}</p>`;
-        document.getElementById('status-correlation').innerHTML = `<p class="text-red-500 text-center py-8">Failed to load: ${escapeHtml(error.message)}</p>`;
-        document.getElementById('status-jobs').innerHTML = `<p class="text-red-500 text-center py-8">Failed to load: ${escapeHtml(error.message)}</p>`;
+        document.getElementById('status-import').innerHTML = `<p class="ui-empty ui-text-fail">Failed to load: ${escapeHtml(error.message)}</p>`;
+        document.getElementById('status-correlation').innerHTML = `<p class="ui-empty ui-text-fail">Failed to load: ${escapeHtml(error.message)}</p>`;
+        document.getElementById('status-jobs').innerHTML = `<p class="ui-empty ui-text-fail">Failed to load: ${escapeHtml(error.message)}</p>`;
     }
 }
 
@@ -4036,20 +4165,18 @@ async function checkBlacklists(force = false, host = null) {
         if (existing) existing.remove();
 
         const progressHtml = `
-            <div id="blacklist-temp-progress" class="mb-4 p-4 bg-white dark:bg-gray-800 rounded-lg border border-blue-200 dark:border-blue-900 shadow-sm">
-                <div class="flex justify-between items-center mb-2">
-                    <span class="text-sm font-medium text-blue-700 dark:text-blue-400 flex items-center gap-2">
+            <div id="blacklist-temp-progress" class="ui-panel ui-bl-progress">
+                <div class="ui-bl-progress-head">
+                    <span class="ui-text-info">
                         <svg class="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                             <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
                             <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                         </svg>
                         Running Scan...
                     </span>
-                    <span id="blacklist-progress-text" class="text-xs text-gray-500 dark:text-gray-400">Initializing...</span>
+                    <span id="blacklist-progress-text" class="ui-muted">Initializing...</span>
                 </div>
-                <div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
-                    <div id="blacklist-progress-bar" class="bg-blue-600 h-2 rounded-full transition-all duration-300" style="width: 0%"></div>
-                </div>
+                <div class="ui-meter ui-meter-info"><i id="blacklist-progress-bar" style="width: 0%"></i></div>
             </div>
         `;
         container.insertAdjacentHTML('afterbegin', progressHtml);
@@ -4147,76 +4274,38 @@ async function loadBlacklistStatus() {
         renderBlacklistStatus(data);
     } catch (error) {
         console.error('Failed to load blacklist status:', error);
-        container.innerHTML = `<p class="text-red-500 text-center py-8">Failed to load: ${escapeHtml(error.message)}</p>`;
+        container.innerHTML = `<p class="ui-empty ui-text-fail">Failed to load: ${escapeHtml(error.message)}</p>`;
     }
 }
 
 
 async function loadDashboardBlacklistSummary() {
-    const container = document.getElementById('dashboard-blacklist-summary');
-    if (!container) return;
-
+    if (!document.getElementById('dash-kpi-blocklists')) return;
     try {
         const response = await authenticatedFetch('/api/blacklist/summary');
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const data = await response.json();
-        console.log('Status summary data:', data);
-
         if (!data.has_data) {
-            container.innerHTML = `
-                <div class="text-center py-4">
-                    <p class="text-sm text-gray-500 dark:text-gray-400">No blacklist data yet</p>
-                    <p class="text-xs text-gray-400 dark:text-gray-500 mt-1">The first check runs automatically</p>
-                </div>`;
+            setDashKpi('dash-kpi-blocklists', '-', '', 'No check yet; the first one runs by itself');
             return;
         }
-
-        const statusBadge = {
-            listed: '<span class="text-red-600 dark:text-red-400 font-semibold">&#10007; Listed</span>',
-            error: '<span class="text-yellow-600 dark:text-yellow-400 font-semibold">! Check Error</span>',
-            clean: '<span class="text-green-600 dark:text-green-400 font-semibold">&#10003; Clean</span>',
-            unknown: '<span class="text-gray-500 dark:text-gray-400 font-semibold">Unknown</span>'
-        }[data.status] || `<span class="text-gray-500 dark:text-gray-400">${escapeHtml(String(data.status))}</span>`;
-
-        const rows = [`
-            <div class="flex justify-between items-center">
-                <span class="text-sm text-gray-600 dark:text-gray-300">Status</span>
-                ${statusBadge}
-            </div>`];
-
-        if ((data.hosts_total || 0) > 1) {
-            rows.push(`
-                <div class="flex justify-between items-center">
-                    <span class="text-sm text-gray-600 dark:text-gray-300">Hosts Listed</span>
-                    <span class="text-sm font-medium text-gray-900 dark:text-white">${data.hosts_listed}/${data.hosts_total}</span>
-                </div>`);
+        // Count addresses, like the Status page, and name the listed ones
+        const hosts = data.hosts || [];
+        const listedHosts = hosts.filter(h => h.status === 'listed');
+        const checked = data.checked_at ? `checked ${formatAgo(data.checked_at)}` : '';
+        if (data.status === 'listed') {
+            setDashKpi('dash-kpi-blocklists', `${listedHosts.length || data.hosts_listed || 1} of ${hosts.length || 1} listed`, 'fail',
+                listedHosts.map(h => `${h.hostname} on ${h.listed_count} of ${h.total_blacklists || '?'}`).join(', '));
+        } else if (data.status === 'error') {
+            setDashKpi('dash-kpi-blocklists', 'Check error', 'warn', checked);
+        } else if (data.status === 'clean') {
+            setDashKpi('dash-kpi-blocklists', `${hosts.length || 1} clean`, '', [`${hosts.length} address${hosts.length === 1 ? '' : 'es'}`, checked].filter(Boolean).join(', '));
         } else {
-            const ip = (data.hosts && data.hosts[0] && data.hosts[0].hostname) || data.server_ip;
-            if (ip) {
-                rows.push(`
-                    <div class="flex justify-between items-center">
-                        <span class="text-sm text-gray-600 dark:text-gray-300">IP</span>
-                        <span class="text-sm font-mono text-gray-900 dark:text-white">${escapeHtml(ip)}</span>
-                    </div>`);
-            }
+            setDashKpi('dash-kpi-blocklists', 'Unknown', '', checked);
         }
-        rows.push(`
-            <div class="flex justify-between items-center">
-                <span class="text-sm text-gray-600 dark:text-gray-300">Listed On</span>
-                <span class="text-sm font-medium text-gray-900 dark:text-white">${data.listed_count}/${data.total_blacklists}</span>
-            </div>`);
-        if (data.checked_at) {
-            rows.push(`
-                <div class="flex justify-between items-center">
-                    <span class="text-sm text-gray-600 dark:text-gray-300">Last Check</span>
-                    <span class="text-xs text-gray-500 dark:text-gray-400">${escapeHtml(new Date(data.checked_at).toLocaleString())}</span>
-                </div>`);
-        }
-
-        container.innerHTML = `<div class="space-y-3">${rows.join('')}</div>`;
     } catch (error) {
         console.error('Failed to load blacklist summary:', error);
-        container.innerHTML = `<p class="text-gray-500 dark:text-gray-400 text-center text-sm">Error loading</p>`;
+        setDashKpi('dash-kpi-blocklists', '-', '', 'Could not load');
     }
 }
 
@@ -4226,201 +4315,174 @@ function renderBlacklistStatus(data) {
     if (!container) return;
 
     if (!data.hosts || data.hosts.length === 0) {
+        setStatusKpi('status-kpi-blocklists', '-');
         container.innerHTML = `
-            <div class="text-center py-8">
-                <svg class="w-12 h-12 mx-auto text-gray-400 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
-                </svg>
-                <h3 class="text-lg font-medium text-gray-900 dark:text-white">No Monitored Hosts</h3>
-                <p class="text-gray-500 dark:text-gray-400 mt-2">Syncing monitoring targets...</p>
+            <div class="ui-empty ui-panel">
+                <b>No Monitored Hosts</b>
+                <p>Syncing monitoring targets...</p>
             </div>
         `;
         return;
     }
 
-    // Preserve open states
+    // Addresses on at least one list, out of the checked addresses (same as the dashboard)
+    const withData = data.hosts.filter(host => host.has_data);
+    const listed = withData.filter(host => (host.listed_count || 0) > 0).length;
+    setStatusKpi('status-kpi-blocklists', withData.length ? `${listed} of ${withData.length} listed` : '-', listed > 0 ? 'fail' : '');
+    setStatusTabCount('blocklists', listed, true);
+    statusState.blocklists = data.hosts;
+
+    // Every list the admin ignores, once, with the way back
+    const ignoredLists = new Map();
+    data.hosts.forEach(host => (host.results || []).forEach(r => { if (r.ignored && r.zone) ignoredLists.set(r.zone, r.name); }));
+    const blNote = document.getElementById('status-kpi-blocklists-note');
+    if (blNote) blNote.textContent = ignoredLists.size ? `${ignoredLists.size} list${ignoredLists.size === 1 ? '' : 's'} ignored for every address` : 'Addresses on a blocklist';
+    const blSummary = document.getElementById('status-blacklist-summary');
+    if (blSummary) blSummary.textContent = `${data.hosts.length} address${data.hosts.length === 1 ? '' : 'es'}${listed ? `, ${listed} listed` : ''}`;
+
+    // Preserve which hosts show all their lists
     const openStates = {};
     container.querySelectorAll('details').forEach(el => {
         if (el.open && el.id) openStates[el.id] = true;
     });
 
-    let html = '<div class="space-y-4">';
+    const RESULT_TONE = { clean: 'ok', listed: 'fail', error: 'warn', timeout: 'warn' };
+    const detail = r => r.response ? `${r.name}: ${r.response}` : r.name;
+    const lookupIcon = r => /^https:\/\//.test(r.info_url || '')
+        ? `<a href="${escapeHtml(r.info_url)}" target="_blank" rel="noopener noreferrer" class="ui-bl-link" title="Look up on ${escapeHtml(r.name)}" aria-label="Look up on ${escapeHtml(r.name)}"><svg width="12" height="12" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path></svg></a>`
+        : '';
+    const ignoreToggle = r => r.zone && r.zone !== 'unknown'
+        ? `<button type="button" class="ui-bl-ign" onclick="setBlocklistIgnored('${escapeJsArg(r.zone)}', ${!r.ignored})" title="${r.ignored ? 'Count and alert on this list again' : 'Keep checking this list but never count or alert on it'}">${r.ignored ? 'Stop ignoring' : 'Ignore'}</button>`
+        : '';
 
-    data.hosts.forEach((host, index) => {
-        const hostId = `host-${index}`;
-        const isOpen = openStates[hostId] || false;
-
-        let statusColor = 'gray';
-        let statusText = 'Unknown';
-        let statusIcon = '?';
-
-        if (host.status === 'clean') {
-            statusColor = 'green';
-            statusText = 'Clean';
-            statusIcon = '✓';
-        } else if (host.status === 'listed') {
-            statusColor = 'red';
-            statusText = 'Listed';
-            statusIcon = '✗';
-        } else if (host.status === 'error') {
-            statusColor = 'yellow';
-            statusText = 'Error';
-            statusIcon = '!';
-        }
-
-        const listedCount = host.listed_count || 0;
-        const totalCount = host.total_blacklists || 0;
-        const lastCheck = host.checked_at ? formatTime(host.checked_at) : 'Never';
-        const hostname = escapeHtml(host.hostname);
-        const source = escapeHtml(host.source || 'system');
-
-        // Host card
-        html += `
-            <details id="${hostId}" class="group bg-gray-50 dark:bg-gray-700/50 rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden" ${isOpen ? 'open' : ''}>
-                <summary class="list-none px-4 py-3 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 transition flex items-center justify-between select-none">
-                    <div class="flex items-center gap-3">
-                        <div class="p-2 rounded-full bg-${statusColor}-100 dark:bg-${statusColor}-900/30 text-${statusColor}-600 dark:text-${statusColor}-400">
-                             <span class="font-bold text-lg w-5 h-5 flex items-center justify-center">${statusIcon}</span>
-                        </div>
-                        <div>
-                            <h3 class="font-semibold text-gray-900 dark:text-white flex items-center gap-2">
-                                ${hostname}
-                                <span class="text-xs px-2 py-0.5 rounded-full bg-gray-200 dark:bg-gray-600 text-gray-600 dark:text-gray-300">${source}</span>
-                            </h3>
-                            <p class="text-xs text-gray-500 dark:text-gray-400">
-                                ${statusText} • Listed on ${listedCount}/${totalCount} • Last check: ${lastCheck}
-                            </p>
-                        </div>
-                    </div>
-                    <svg class="w-5 h-5 text-gray-400 transition-transform duration-200 group-open:rotate-180" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
-                    </svg>
-                </summary>
-                
-                <div class="px-4 pb-4 pt-1 border-t border-gray-200 dark:border-gray-700">
-        `;
-
-        if (host.has_data && host.results) {
-            html += '<div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-2 mb-4 max-h-96 overflow-y-auto custom-scrollbar p-1">';
-            host.results.forEach(result => {
-                let color = 'gray';
-                let icon = '?';
-
-                if (result.status === 'clean') {
-                    color = 'green';
-                    icon = '✓';
-                } else if (result.listed) {
-                    color = 'red';
-                    icon = '✗';
-                } else if (result.status === 'error') {
-                    color = 'yellow';
-                    icon = '!';
-                } else if (result.status === 'timeout') {
-                    color = 'orange';
-                    icon = '⏱';
-                }
-
-                // The raw DNS answer distinguishes a real listing (127.0.0.x)
-                // from resolver interference - surface it on hover
-                const detail = result.response
-                    ? `${result.name}: ${result.response}`
-                    : result.name;
-                html += `
-                    <div class="px-2 py-1.5 rounded bg-${color}-50 dark:bg-${color}-900/10 border border-${color}-100 dark:border-${color}-900/30 text-xs flex items-center justify-between group/item relative hover:bg-${color}-100 dark:hover:bg-${color}-900/20 transition cursor-default">
-                        <span class="font-medium text-${color}-700 dark:text-${color}-300 truncate mr-1" title="${escapeHtml(detail)}">${escapeHtml(result.name)}</span>
-                        <div class="flex items-center">
-                            <span class="text-${color}-600 dark:text-${color}-400 font-bold" title="${escapeHtml(detail)}">${icon}</span>
-                            ${result.info_url ? `<a href="${result.info_url}" target="_blank" class="ml-1 text-${color}-400 hover:text-${color}-600" title="View info"><svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path></svg></a>` : ''}
-                        </div>
-                    </div>
-                `;
-            });
-            html += '</div>';
-        }
-
-        html += `
-                    <div class="mt-2 text-center">
-                         <button onclick="checkHost('${hostname}')" class="text-sm text-blue-600 dark:text-blue-400 hover:underline">Run Check for this Host</button>
-                    </div>
+    container.innerHTML = `
+        <div class="ui-st-hosts">
+        ${data.hosts.map((host, index) => {
+            const hostId = `host-${index}`;
+            const results = host.results || [];
+            const listedOn = results.filter(r => r.listed && !r.ignored);
+            const others = results.filter(r => !(r.listed && !r.ignored));
+            const total = host.total_blacklists || 0;
+            const result = !host.has_data ? uiTag('Not checked yet', '')
+                : host.status === 'listed' ? uiTag(`Listed on ${host.listed_count || 0} of ${total}`, 'fail')
+                : host.status === 'error' ? uiTag('Check error', 'warn')
+                : host.status === 'clean' ? uiTag(`Clean on ${total}`, 'ok')
+                : uiTag('Unknown', '');
+            return `
+            <section class="ui-panel ui-bl-row">
+                <div class="ui-st-host-head">
+                    <b class="ui-mono">${escapeHtml(host.hostname)}</b>
+                    <span class="ui-tag ui-tag-line">${escapeHtml(host.source || 'system')}</span>
+                    ${result}
+                    <span class="ui-st-host-tools">
+                        <span class="ui-muted" title="${host.checked_at ? escapeHtml(formatTime(host.checked_at)) : ''}">${host.checked_at ? `checked ${formatAgo(host.checked_at)}` : 'never checked'}</span>
+                        <button onclick="checkHost('${escapeJsArg(host.hostname)}')" class="ui-btn ui-btn-sm" title="Run Check for this Host">Check now</button>
+                    </span>
                 </div>
-            </details>
-        `;
-    });
+                ${listedOn.map(r => `
+                <div class="ui-st-listing">
+                    <div><b>${escapeHtml(r.name)}</b><small>${escapeHtml(r.response ? `Answer ${r.response}` : 'Listed')}</small></div>
+                    <span class="ui-st-acts">${blocklistLookupLink(r, 'Look up')}<button type="button" class="ui-btn ui-btn-sm" onclick="setBlocklistIgnored('${escapeJsArg(r.zone)}', true)">Ignore list</button></span>
+                </div>`).join('')}
+                ${host.has_data && others.length ? `
+                <details id="${hostId}" class="ui-bl-all"${openStates[hostId] ? ' open' : ''}>
+                    <summary>${listedOn.length ? `${others.length} other lists` : `All ${others.length} lists`}</summary>
+                    <div class="ui-bl-grid">
+                        ${others.map(r => {
+                            const tone = r.ignored ? '' : (RESULT_TONE[r.status] || '');
+                            const state = r.listed ? 'listed, ignored' : (r.ignored ? 'ignored' : (r.status || 'unknown'));
+                            return `<span class="ui-bl-item${tone ? ` ui-bl-${tone}` : ''}${r.ignored ? ' is-ignored' : ''}" title="${escapeHtml(detail(r))}"><i class="ui-mdot${tone ? ` ui-mdot-${tone}` : ''}"></i>${escapeHtml(r.name)}${lookupIcon(r)}<small>${escapeHtml(state)}</small>${ignoreToggle(r)}</span>`;
+                        }).join('')}
+                    </div>
+                </details>` : ''}
+            </section>`;
+        }).join('')}
+        ${ignoredLists.size ? `
+            <section class="ui-panel">
+                <div class="ui-panel-head">Ignored lists <span class="ui-count">${ignoredLists.size}</span></div>
+                ${[...ignoredLists].map(([zone, name]) => `
+                <div class="ui-st-listing">
+                    <div><b>${escapeHtml(name)}</b><small>Checked and shown, never counted or alerted, for every address</small></div>
+                    <span class="ui-st-acts"><button type="button" class="ui-btn ui-btn-sm" onclick="setBlocklistIgnored('${escapeJsArg(zone)}', false)">Stop ignoring</button></span>
+                </div>`).join('')}
+            </section>` : ''}
+        </div>
+    `;
+    renderStatusAttention();
+}
 
-    html += '</div>';
-    container.innerHTML = html;
+async function setBlocklistIgnored(zone, ignored) {
+    try {
+        const res = await authenticatedFetch(`/api/blacklist/lists/${encodeURIComponent(zone)}/ignore`, {
+            method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ignored })
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        showToast(ignored ? `${data.name} is ignored for every address.` : `${data.name} counts again.`, 'success');
+        loadBlacklistStatus();
+        loadNavCounters();
+    } catch (e) {
+        showToast(`Could not change the blocklist: ${e.message}`, 'error');
+    }
 }
 
 function renderStatusImport(imports) {
     const container = document.getElementById('status-import');
+    const row = (title, d) => `
+        <div class="ui-tr">
+            <b class="ui-td">${title}</b>
+            ${d ? `
+            <span class="ui-td" title="${d.last_fetch_run ? escapeHtml(formatTime(d.last_fetch_run)) : ''}"><small class="ui-sec-unit">Last Fetch Run </small>${d.last_fetch_run ? formatAgo(d.last_fetch_run) : 'Never'}</span>
+            <span class="ui-td" title="${d.last_import ? escapeHtml(formatTime(d.last_import)) : ''}"><small class="ui-sec-unit">Last Import </small>${d.last_import ? formatAgo(d.last_import) : 'Never'}</span>
+            <span class="ui-td ui-td-end"><small class="ui-sec-unit">Total Entries </small>${Number(d.total_entries || 0).toLocaleString()}</span>
+            <span class="ui-td"><small class="ui-sec-unit">Oldest Entry </small>${d.oldest_entry ? formatTime(d.oldest_entry) : '-'}</span>
+            ` : '<span class="ui-td ui-muted">No data</span><span></span><span></span><span></span>'}
+        </div>`;
     container.innerHTML = `
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-            ${renderImportCard('Postfix Logs', imports.postfix, 'blue')}
-            ${renderImportCard('Rspamd Logs', imports.rspamd, 'purple')}
-            ${renderImportCard('Netfilter Logs', imports.netfilter, 'red')}
+        <div class="ui-table ui-stack" style="--ui-cols: minmax(130px, 1fr) minmax(110px, 1fr) minmax(110px, 1fr) 110px minmax(150px, 1.2fr); --ui-table-min: 660px">
+            <div class="ui-tr ui-tr-head"><span>Source</span><span>Last Fetch Run</span><span>Last Import</span><span class="ui-td-end">Total Entries</span><span>Oldest Entry</span></div>
+            ${row('Postfix Logs', imports.postfix)}
+            ${row('Rspamd Logs', imports.rspamd)}
+            ${row('Netfilter Logs', imports.netfilter)}
         </div>
     `;
 }
 
 function renderStatusCorrelation(correlation, incompleteList) {
     const container = document.getElementById('status-correlation');
+    setStatusKpi('status-kpi-linking', `${correlation.completion_rate || 0}%`, correlation.incomplete ? 'warn' : '');
+    const linkingNote = document.getElementById('status-kpi-linking-note');
+    if (linkingNote) linkingNote.textContent = `${(correlation.complete || 0).toLocaleString()} of ${(correlation.total || 0).toLocaleString()} complete, ${(correlation.incomplete || 0).toLocaleString()} waiting`;
     container.innerHTML = `
-        <div class="grid grid-cols-2 md:grid-cols-5 gap-4 mb-4">
-            <div class="p-4 bg-gradient-to-br from-blue-50 to-blue-100 dark:from-blue-900/20 dark:to-blue-800/20 rounded-lg text-center">
-                <p class="text-2xl font-bold text-blue-600 dark:text-blue-400">${correlation.total || 0}</p>
-                <p class="text-xs text-gray-600 dark:text-gray-400 mt-1">Total</p>
-            </div>
-            <div class="p-4 bg-gradient-to-br from-green-50 to-green-100 dark:from-green-900/20 dark:to-green-800/20 rounded-lg text-center">
-                <p class="text-2xl font-bold text-green-600 dark:text-green-400">${correlation.complete || 0}</p>
-                <p class="text-xs text-gray-600 dark:text-gray-400 mt-1">Complete</p>
-            </div>
-            <div class="p-4 bg-gradient-to-br from-yellow-50 to-yellow-100 dark:from-yellow-900/20 dark:to-yellow-800/20 rounded-lg text-center">
-                <p class="text-2xl font-bold text-yellow-600 dark:text-yellow-400">${correlation.incomplete || 0}</p>
-                <p class="text-xs text-gray-600 dark:text-gray-400 mt-1">Incomplete</p>
-            </div>
-            <div class="p-4 bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-700/20 dark:to-gray-600/20 rounded-lg text-center">
-                <p class="text-2xl font-bold text-gray-500 dark:text-gray-400">${correlation.expired || 0}</p>
-                <p class="text-xs text-gray-600 dark:text-gray-400 mt-1">Expired</p>
-            </div>
-            <div class="p-4 bg-gradient-to-br from-purple-50 to-purple-100 dark:from-purple-900/20 dark:to-purple-800/20 rounded-lg text-center">
-                <p class="text-2xl font-bold text-purple-600 dark:text-purple-400">${correlation.completion_rate || 0}%</p>
-                <p class="text-xs text-gray-600 dark:text-gray-400 mt-1">Success Rate</p>
-            </div>
-        </div>
-        ${correlation.last_update ? `
-            <p class="text-sm text-gray-600 dark:text-gray-400 text-center">
-                Last updated: ${formatTime(correlation.last_update)}
-            </p>
-        ` : ''}
-        
-        ${incompleteList.length > 0 ? `
-            <div class="mt-4 p-4 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg">
-                <h4 class="text-sm font-semibold text-yellow-800 dark:text-yellow-300 mb-2">Recent Incomplete Correlations</h4>
-                <div class="space-y-2">
-                    ${incompleteList.map(item => `
-                        <div class="p-2 bg-white dark:bg-gray-800 rounded text-xs">
-                            <div class="flex justify-between items-start mb-1">
-                                <span class="font-mono text-gray-600 dark:text-gray-400">${copyableText(item.message_id || 'N/A')}</span>
-                                <span class="text-yellow-600 dark:text-yellow-400">${item.age_minutes}m ago</span>
-                            </div>
-                            <div class="text-gray-500 dark:text-gray-400">
-                                ${copyableText(item.sender || 'N/A')} => ${copyableText(item.recipient || 'N/A')}
-                            </div>
-                        </div>
-                    `).join('')}
-                </div>
-                <p class="text-xs text-yellow-700 dark:text-yellow-400 mt-2">
-                    These will be automatically completed or expired within 1-2 minutes
-                </p>
-            </div>
-        ` : ''}
+        <div class="ui-srv-big${correlation.incomplete ? ' ui-text-warn' : ''}">${escapeHtml(String(correlation.completion_rate || 0))}%</div>
+        <small>${Number(correlation.complete || 0).toLocaleString()} of ${Number(correlation.total || 0).toLocaleString()} complete, ${Number(correlation.incomplete || 0).toLocaleString()} incomplete, ${Number(correlation.expired || 0).toLocaleString()} expired</small>
+        ${correlation.last_update ? `<small title="${escapeHtml(formatTime(correlation.last_update))}">Updated ${formatAgo(correlation.last_update)}</small>` : ''}
     `;
+    const pending = document.getElementById('status-correlation-pending');
+    if (pending) pending.innerHTML = incompleteList.length > 0 ? `
+        <section class="ui-sec-block">
+            <div class="ui-list-head"><h2 class="ui-h2">Waiting to be linked</h2> <span class="ui-count">${incompleteList.length}</span></div>
+            <div class="ui-table ui-stack" style="--ui-cols: minmax(180px, 1.4fr) minmax(220px, 2fr) 90px; --ui-table-min: 560px">
+                <div class="ui-tr ui-tr-head"><span>Message ID</span><span>From and to</span><span class="ui-td-end">Age</span></div>
+                ${incompleteList.map(item => `
+                    <div class="ui-tr">
+                        <span class="ui-td ui-mono">${copyableText(item.message_id || 'N/A')}</span>
+                        <span class="ui-td">${copyableText(item.sender || 'N/A')} → ${copyableText(item.recipient || 'N/A')}</span>
+                        <span class="ui-td ui-td-end ui-text-warn">${escapeHtml(String(item.age_minutes))}m ago</span>
+                    </div>`).join('')}
+            </div>
+            <p class="ui-kv-note ui-list-foot">These will be automatically completed or expired within 1-2 minutes</p>
+        </section>` : '';
 }
 
 function renderStatusJobs(jobs) {
     const container = document.getElementById('status-jobs');
-    
-    const categories = [
+    const categories = statusJobCategories(jobs);
+    renderStatusJobsTable(container, categories, jobs);
+}
+
+function statusJobCategories(jobs) {
+    return [
         {
             title: 'Log Processing',
             icon: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4"></path>',
@@ -4450,11 +4512,11 @@ function renderStatusJobs(jobs) {
             ]
         },
         {
-            title: 'DMARC & Reports',
+            title: 'DMARC & TLS',
             icon: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"></path>',
             jobs: [
-                ['DMARC IMAP Import', 'dmarc_imap_sync', jobs.dmarc_imap_sync],
-                ['Cleanup DMARC Reports', 'cleanup_dmarc_reports', jobs.cleanup_dmarc_reports],
+                ['DMARC & TLS IMAP Import', 'dmarc_imap_sync', jobs.dmarc_imap_sync],
+                ['Cleanup DMARC & TLS Reports', 'cleanup_dmarc_reports', jobs.cleanup_dmarc_reports],
                 ['Weekly Summary Report', 'send_weekly_summary', jobs.send_weekly_summary]
             ]
         },
@@ -4463,7 +4525,8 @@ function renderStatusJobs(jobs) {
             icon: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path>',
             jobs: [
                 ['DNS Check (All Domains)', 'dns_check', jobs.dns_check],
-                ['IP Blacklist Check (All Hosts)', 'blacklist_check', jobs.blacklist_check]
+                ['IP Blacklist Check (All Hosts)', 'blacklist_check', jobs.blacklist_check],
+                ['Protection Rules', 'protection_rules', jobs.protection_rules]
             ]
         },
         {
@@ -4480,6 +4543,14 @@ function renderStatusJobs(jobs) {
             jobs: [
                 ['Fetch Raw Logs', 'fetch_raw_logs', jobs.fetch_raw_logs],
                 ['Cleanup Raw Logs', 'cleanup_raw_logs', jobs.cleanup_raw_logs]
+            ]
+        },
+        {
+            title: 'Devices',
+            icon: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z"></path>',
+            jobs: [
+                ['ActiveSync Devices', 'eas_devices', jobs.eas_devices],
+                ['Cleanup ActiveSync Devices', 'cleanup_eas_devices', jobs.cleanup_eas_devices]
             ]
         },
         {
@@ -4500,25 +4571,53 @@ function renderStatusJobs(jobs) {
             ]
         }
     ];
-    
+}
+
+function renderStatusJobsTable(container, categories, jobs) {
+    // Failed and switched-off jobs feed the attention list, the card and the filter
+    const summary = summarizeJobs(jobs);
+    const all = summary.all;
+    const isOff = summary.isOff;
+    statusState.jobs = all.map(([name, key, job]) => ({ name, key, failed: !isOff(job) && job.status === 'failed', error: job.error || '' }));
+    const failed = summary.failed.length;
+    const off = summary.off;
+    setStatusKpi('status-kpi-jobs', `${all.length - failed - off} of ${all.length - off} healthy`, failed ? 'fail' : '');
+    const jobsNote = [failed ? `${failed} failed` : 'None failed', off ? `${off} off because a feature or setting is off` : ''].filter(Boolean).join(', ');
+    const kpiNote = document.getElementById('status-kpi-jobs-note');
+    if (kpiNote) kpiNote.textContent = jobsNote;
+    const jobsSummary = document.getElementById('status-jobs-summary');
+    if (jobsSummary) jobsSummary.textContent = `${all.length} jobs, ${jobsNote.charAt(0).toLowerCase()}${jobsNote.slice(1)}`;
+    setStatusTabCount('jobs', failed, true);
+
+    const isFailed = job => !isOff(job) && job.status === 'failed';
+    const chevron = '<svg class="ui-collapse-chevron" width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>';
     let html = '';
     for (const cat of categories) {
         // Skip categories where no jobs exist
         const validJobs = cat.jobs.filter(j => j[2]);
         if (validJobs.length === 0) continue;
-        
+        const catFailed = validJobs.filter(j => isFailed(j[2])).length;
+        const catOff = validJobs.filter(j => isOff(j[2])).length;
+        const note = [catFailed ? `<span class="ui-text-fail">${catFailed} failed</span>` : 'all OK', catOff ? `${catOff} off` : ''].filter(Boolean).join(' · ');
+        // A group with a failure opens by itself; the others keep what the user chose
+        const open = catFailed > 0 || statusJobsOpen.has(cat.title);
         html += `
-            <div class="mb-6">
-                <div class="flex items-center gap-2 mb-3">
-                    <svg class="w-4 h-4 text-gray-400 dark:text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">${cat.icon}</svg>
-                    <h4 class="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">${cat.title}</h4>
-                </div>
-                <div class="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-3">
-                    ${cat.jobs.map(j => renderJobCard(j[0], j[1], j[2])).join('')}
-                </div>
-            </div>`;
+            <details class="ui-panel ui-collapse ui-jg" data-group="${escapeHtml(cat.title)}"${catFailed ? ' data-failed' : ''}${open ? ' open' : ''} ontoggle="statusJobGroupToggled(this)">
+                <summary class="ui-panel-head">${escapeHtml(cat.title)} <span class="ui-count">${validJobs.length} ${validJobs.length === 1 ? 'job' : 'jobs'} · ${note}</span>${chevron}</summary>
+                <div class="ui-jg-body">${validJobs.map(j => renderJobCard(j[0], j[1], j[2])).join('')}</div>
+            </details>`;
     }
-    container.innerHTML = html;
+    container.innerHTML = `<div class="ui-jgs">${html}</div>`;
+    statusJobFilter(statusJobFilterValue);
+    renderStatusAttention();
+}
+
+// Which job groups the user opened, so a refresh keeps them open
+const statusJobsOpen = new Set();
+function statusJobGroupToggled(el) {
+    // Only an unfiltered view records the choice; a filter opens groups by itself
+    if (statusJobFilterValue !== 'all') return;
+    if (el.open) statusJobsOpen.add(el.dataset.group); else statusJobsOpen.delete(el.dataset.group);
 }
 
 async function triggerBackgroundJob(jobKey, buttonEl, jobName = null) {
@@ -4588,9 +4687,18 @@ function showChangelogModal(changelog) {
         } else {
             content.textContent = changelog || 'No changelog available';
         }
-        modal.classList.remove('hidden');
-        document.body.style.overflow = 'hidden';
+        revealChangelogModal(modal);
     }
+}
+
+// The changelog, help and update texts share one dialog: each opens at the top of
+// what it holds, not where the one before was scrolled to
+function revealChangelogModal(modal) {
+    modal.classList.remove('hidden');
+    document.body.style.overflow = 'hidden';
+    // Only once it is shown: a hidden element cannot be scrolled
+    const body = modal.querySelector('.ui-dialog-body');
+    if (body) body.scrollTop = 0;
 }
 
 function closeChangelogModal() {
@@ -4610,7 +4718,7 @@ function closeChangelogModal() {
 // =============================================================================
 
 function getFlagUrl(countryCode, size = '24x18') {
-    if (!countryCode || countryCode.length !== 2) {
+    if (typeof countryCode !== 'string' || !/^[a-z]{2}$/i.test(countryCode)) {
         return null;
     }
     return `/static/assets/flags/${size}/${countryCode.toLowerCase()}.png`;
@@ -4708,12 +4816,12 @@ function renderPagination(type, currentPage, totalPages) {
     if (totalPages <= 1) return '';
 
     return `
-        <div class="flex flex-col sm:flex-row justify-center items-center gap-2 sm:gap-3 mt-6">
-            <button onclick="loadLogs('${type}', ${currentPage - 1})" ${currentPage === 1 ? 'disabled' : ''} class="w-full sm:w-auto px-4 py-2 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed transition">
+        <div class="ui-pagination">
+            <button onclick="loadLogs('${type}', ${Number(currentPage) - 1})" ${currentPage === 1 ? 'disabled' : ''} class="ui-btn">
                 Previous
             </button>
-            <span class="text-sm text-gray-600 dark:text-gray-400">Page ${currentPage} of ${totalPages}</span>
-            <button onclick="loadLogs('${type}', ${currentPage + 1})" ${currentPage === totalPages ? 'disabled' : ''} class="w-full sm:w-auto px-4 py-2 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed transition">
+            <span class="ui-muted">Page ${Number(currentPage)} of ${Number(totalPages)}</span>
+            <button onclick="loadLogs('${type}', ${Number(currentPage) + 1})" ${currentPage === totalPages ? 'disabled' : ''} class="ui-btn">
                 Next
             </button>
         </div>
@@ -4811,6 +4919,11 @@ async function showHelpModal(docName) {
 
     } catch (error) {
         console.error('Failed to load help documentation:', error);
+        if (uiIsPhone()) {
+            uiSheetShow('markdown-sheet', { label: 'Help', head: '<h3 class="ui-sheet-title">Help</h3>',
+                body: '<p class="ui-text-fail">Failed to load help documentation. Please try again later.</p>' });
+            return;
+        }
 
         const modal = document.getElementById('changelog-modal');
         const modalTitle = modal?.querySelector('h3');
@@ -4821,8 +4934,7 @@ async function showHelpModal(docName) {
                 modalTitle.textContent = 'Help';
             }
             content.innerHTML = '<p class="text-red-500">Failed to load help documentation. Please try again later.</p>';
-            modal.classList.remove('hidden');
-            document.body.style.overflow = 'hidden';
+            revealChangelogModal(modal);
         }
     }
 }
@@ -4917,6 +5029,137 @@ function closeContainerLogsModal() {
     }
 }
 
-function loadMailboxStatsPage(page) {
-    loadMailboxStatsList(page);
+// =============================================================================
+// Sidebar sub-pages: hovering or focusing a page with tabs shows its tabs next
+// to it. The items come from the page's own tab buttons, so a tab hidden by a
+// switched-off feature is not offered.
+// =============================================================================
+
+const NAV_SUBPAGE_TABS = {
+    quarantine: '#quarantine-tabs:not(.hidden)',
+    netfilter: '.ui-se-tabs',
+    'spam-filter': '#content-spam-filter .ui-page-tabs',
+    status: '.ui-st-tabs',
+    'mailbox-stats': '#mailbox-stats-views'
+};
+let navFlyout = null;
+let navFlyoutTimer = null;
+
+function navSubpageTabs(page) {
+    const list = document.querySelector(NAV_SUBPAGE_TABS[page]);
+    if (!list) return [];
+    return [...list.querySelectorAll('[role="tab"]')].filter(btn => !btn.hidden && !btn.classList.contains('hidden') && btn.style.display !== 'none');
 }
+
+function hideNavFlyout() {
+    clearTimeout(navFlyoutTimer);
+    if (navFlyout) navFlyout.classList.remove('is-open');
+}
+
+function showNavFlyout(item, page) {
+    clearTimeout(navFlyoutTimer);
+    const tabs = navSubpageTabs(page);
+    if (tabs.length < 2) return hideNavFlyout();
+    if (!navFlyout) {
+        navFlyout = document.createElement('div');
+        navFlyout.className = 'ui-fly';
+        navFlyout.setAttribute('role', 'menu');
+        navFlyout.addEventListener('mouseenter', () => clearTimeout(navFlyoutTimer));
+        navFlyout.addEventListener('mouseleave', () => { navFlyoutTimer = setTimeout(hideNavFlyout, 150); });
+        navFlyout.addEventListener('keydown', e => {
+            const items = [...navFlyout.querySelectorAll('.ui-fly-item')];
+            const i = items.indexOf(document.activeElement);
+            if (e.key === 'ArrowDown') { e.preventDefault(); items[(i + 1) % items.length].focus(); }
+            if (e.key === 'ArrowUp') { e.preventDefault(); items[(i - 1 + items.length) % items.length].focus(); }
+            if (e.key === 'Escape' || e.key === 'ArrowLeft') { e.preventDefault(); hideNavFlyout(); navFlyout.owner && navFlyout.owner.focus(); }
+        });
+        navFlyout.addEventListener('focusout', e => { if (!navFlyout.contains(e.relatedTarget)) hideNavFlyout(); });
+        document.body.appendChild(navFlyout);
+    }
+    const onPage = item.getAttribute('aria-current') === 'page';
+    const label = item.querySelector('.ui-nav-label');
+    navFlyout.owner = item;
+    navFlyout.innerHTML = `<div class="ui-fly-title">${escapeHtml(label ? label.textContent : page)}</div>` + tabs.map((btn, i) => {
+        const copy = btn.cloneNode(true);
+        const count = copy.querySelector('.ui-tab-n');
+        const countText = count && !count.classList.contains('hidden') ? count.textContent.trim() : '';
+        if (count) count.remove();
+        const on = onPage && (btn.classList.contains('active') || btn.getAttribute('aria-selected') === 'true');
+        return `<button type="button" role="menuitem" class="ui-fly-item${on ? ' is-on' : ''}" data-i="${i}">
+            <span>${copy.innerHTML.trim()}</span>${countText ? `<small class="ui-nav-count${count.classList.contains('is-fail') ? ' is-fail' : ''}">${escapeHtml(countText)}</small>` : ''}</button>`;
+    }).join('');
+    navFlyout.querySelectorAll('.ui-fly-item').forEach(el => el.addEventListener('click', () => {
+        // The tab first, so the page opens on it; a tab that navigates by itself needs nothing more
+        tabs[Number(el.dataset.i)].click();
+        hideNavFlyout();
+        if (currentTab !== page) navigateTo(page);
+    }));
+    const rect = item.getBoundingClientRect();
+    navFlyout.style.top = `${Math.max(8, Math.min(rect.top - 6, window.innerHeight - navFlyout.offsetHeight - 8))}px`;
+    navFlyout.style.left = `${rect.right + 8}px`;
+    navFlyout.classList.add('is-open');
+    navFlyout.style.top = `${Math.max(8, Math.min(rect.top - 6, window.innerHeight - navFlyout.offsetHeight - 8))}px`;
+}
+
+function initNavFlyouts() {
+    Object.keys(NAV_SUBPAGE_TABS).forEach(page => {
+        const item = document.getElementById(`tab-${page}`);
+        if (!item) return;
+        item.classList.toggle('has-sub', navSubpageTabs(page).length > 1);
+        item.setAttribute('aria-haspopup', 'menu');
+        item.addEventListener('mouseenter', () => showNavFlyout(item, page));
+        item.addEventListener('mouseleave', () => { navFlyoutTimer = setTimeout(hideNavFlyout, 150); });
+        item.addEventListener('focus', () => showNavFlyout(item, page));
+        item.addEventListener('blur', e => { if (!navFlyout || !navFlyout.contains(e.relatedTarget)) navFlyoutTimer = setTimeout(hideNavFlyout, 150); });
+        item.addEventListener('click', hideNavFlyout);
+        item.addEventListener('keydown', e => {
+            if (e.key !== 'ArrowRight') return;
+            e.preventDefault();
+            showNavFlyout(item, page);
+            const first = navFlyout && navFlyout.querySelector('.ui-fly-item');
+            if (first) first.focus();
+        });
+    });
+    window.addEventListener('resize', hideNavFlyout);
+}
+document.addEventListener('DOMContentLoaded', initNavFlyouts);
+
+// =============================================================================
+// The app frame never scrolls the window. A phone keyboard can pan the window to
+// show a field and leave it panned when it closes, which hid the top bar and left
+// an empty band at the bottom on every page. Once no field is being edited, the
+// window goes back to the top.
+// =============================================================================
+
+function resetWindowPan() {
+    const el = document.activeElement;
+    const editing = el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName));
+    if (editing) return;
+    if (window.scrollX || window.scrollY || document.scrollingElement.scrollTop) window.scrollTo(0, 0);
+}
+window.addEventListener('scroll', resetWindowPan, { passive: true });
+document.addEventListener('focusout', () => setTimeout(resetWindowPan, 300));
+if (window.visualViewport) window.visualViewport.addEventListener('resize', () => setTimeout(resetWindowPan, 100));
+
+// =============================================================================
+// The desktop sidebar folds into the icon rail and stays that way next time.
+// The class is set in the page head before it draws; this only toggles it.
+// =============================================================================
+
+function syncNavToggle() {
+    const collapsed = document.documentElement.classList.contains('ui-nav-collapsed');
+    const btn = document.getElementById('ui-nav-toggle');
+    if (!btn) return;
+    const label = collapsed ? 'Expand menu' : 'Collapse menu';
+    btn.setAttribute('aria-label', label);
+    btn.title = label;
+    btn.setAttribute('aria-expanded', String(!collapsed));
+}
+
+function toggleNavCollapsed() {
+    const collapsed = document.documentElement.classList.toggle('ui-nav-collapsed');
+    try { localStorage.setItem('navCollapsed', collapsed ? '1' : '0'); } catch (e) { /* private mode: it just is not remembered */ }
+    if (typeof hideNavFlyout === 'function') hideNavFlyout();
+    syncNavToggle();
+}
+document.addEventListener('DOMContentLoaded', syncNavToggle);

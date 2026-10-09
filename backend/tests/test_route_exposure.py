@@ -27,8 +27,9 @@ ALLOWED_ROOT_PATHS = {
     "/robots.txt",
     "/manifest.json",
     "/ws/raw-logs",
-    # SPA catch-all: serves index.html for clean URLs such as /dashboard.
-    "/{full_path:path}",
+    # SPA catch-all: serves index.html for clean URLs such as /dashboard
+    # (never for paths under /api or /ws).
+    "/{full_path:spa_path}",
 }
 
 
