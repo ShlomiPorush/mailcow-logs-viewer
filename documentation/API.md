@@ -3890,10 +3890,42 @@ Export Messages (correlations) to CSV file.
 |-----------|---------|-------------|
 | `page` | omitted | Positive page number. Omit it to retain the legacy unpaginated response. |
 | `limit` | 50 | Reports per page, from 1 to 200. Used when `page` is supplied. |
+| `search` | omitted | Keeps the reports whose domain or reporter (`org_name`) contains this text, in any case. `%`, `_` and `\` match literally. Leading and trailing spaces are ignored, only the first 255 characters are used, and an empty value lists every report. With `page`, `total` and `total_pages` count the matching reports. |
+| `sort_by` | `created_at` | Orders a paged request by `created_at` (import date), `type`, `domain`, `reporter`, `records` (record or policy count) or `period` (start of the report period). Domain and reporter compare in lower case. Any other value is refused with `422`. |
+| `sort_dir` | `desc` | `asc` or `desc`; any other value is refused with `422`. |
 
-Paged responses contain `reports`, `total`, `allow_delete`, `page`, `limit`, and `total_pages`. `total` counts all reports of both types. Empty results return page 1 of 1. A page beyond the end is clamped to the last available page, including after deletions. Concurrent imports or deletions may shift reports between requests; reload from page 1 to refresh the history.
+Paged responses contain `reports`, `total`, `allow_delete`, `page`, `limit`, `total_pages`, `sort_by`, and `sort_dir`. The order covers DMARC and TLS reports together and is applied before paging, so the next page continues it; empty values sort last, and ties fall back to the newest import, then type, then the highest ID. Without `page`, the legacy response keeps its newest-first order and ignores `sort_by` and `sort_dir`. `total` counts all reports of both types. Empty results return page 1 of 1. A page beyond the end is clamped to the last available page, including after deletions. Concurrent imports or deletions may shift reports between requests; reload from page 1 to refresh the history.
 
 Each report contains `id`, `type` (`dmarc` or `tls`), `domain`, `org_name`, `begin_date`, `end_date`, `record_count`, `created_at`, and `report_id`. Unpaginated responses retain only the original top-level fields: `reports`, `total`, and `allow_delete`.
+
+`GET /api/dmarc/reports/domains` returns how many reports each domain has, sorted by domain name. Domain names are compared trimmed and in lower case, so `Example.com` and `example.com` count as one domain.
+
+```json
+{
+  "domains": [
+    {"domain": "example.com", "dmarc_reports": 42, "tls_reports": 7, "last_report": 1767312000}
+  ],
+  "allow_delete": false
+}
+```
+
+- `dmarc_reports`, `tls_reports`: Number of stored DMARC and TLS reports for the domain
+- `last_report`: Unix timestamp of the end of the domain's latest report period (DMARC or TLS), or `null`
+
+`DELETE /api/dmarc/reports/domains/{domain}` deletes every DMARC and TLS report of one domain, with their records and policies, in one transaction. The domain is matched the same way (trimmed, lower case). It is refused with `403` unless report deletion is turned on (`DMARC_ALLOW_REPORT_DELETE=true`, off by default), answers `400` for an empty domain and `404` when the domain has no reports. Each deletion is written to the application log with the domain and the counts.
+
+```json
+{
+  "status": "success",
+  "domain": "example.com",
+  "dmarc_reports": 42,
+  "dmarc_records": 310,
+  "tls_reports": 7,
+  "tls_policies": 7
+}
+```
+
+Reports that arrive later for the domain (from IMAP or an upload) are imported as usual.
 
 ### Overview
 

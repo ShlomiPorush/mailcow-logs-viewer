@@ -1522,7 +1522,7 @@
     <script src="/static/alert-activity.js?v=2"></script>
     <script src="/static/export.js?v=1"></script>
     <script src="/static/message-details.js?v=7"></script>
-    <script src="/static/dmarc.js?v=18"></script>
+    <script src="/static/dmarc.js?v=19"></script>
     <script src="/static/logs-viewer.js?v=6"></script>
     <script src="/static/settings.js?v=31"></script>
     <script src="/static/about.js?v=2"></script>
@@ -1569,7 +1569,20 @@
                 <button onclick="closeReportsManagementModal()" class="ui-icon-btn" title="Close" aria-label="Close"><svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg></button>
             </div>
             <div class="ui-dialog-body">
-                <div id="dmarc-reports-management-content"><div class="ui-loading"><div class="loading"></div><p>Loading reports...</p></div></div>
+                <div id="dmarc-reports-domains"></div>
+                <div class="ui-subsection">
+                    <h4 class="ui-md-h">All reports</h4>
+                    <section class="ui-panel ui-filters ui-count-row ui-mgmt-total">
+                        <div class="ui-filters-row">
+                            <label class="ui-search">
+                                <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
+                                <input type="text" id="dmarc-reports-search" placeholder="Search by domain or reporter..." aria-label="Search reports by domain or reporter" oninput="searchReportsManagement()">
+                            </label>
+                            <span id="dmarc-reports-total" class="ui-count"></span>
+                        </div>
+                    </section>
+                    <div id="dmarc-reports-management-content"><div class="ui-loading"><div class="loading"></div><p>Loading reports...</p></div></div>
+                </div>
             </div>
         </div>
     </div>
