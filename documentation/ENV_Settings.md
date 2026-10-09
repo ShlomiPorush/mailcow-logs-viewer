@@ -13,7 +13,7 @@ These settings **must** be configured in your `.env` file:
 | Variable | Type | Description | Example |
 |----------|------|-------------|---------|
 | `MAILCOW_URL` | string | Your mailcow instance URL (without trailing slash) | `https://mail.example.com` |
-| `MAILCOW_API_KEY` | string | mailcow API key — **Read-Only** (generate from System → API in mailcow admin). Required permissions: Read access to logs | `abc123-def456-ghi789` |
+| `MAILCOW_API_KEY` | string | mailcow API key — **Read-Only** (generate from System → API in mailcow admin). Required permissions: Read access to logs. The key must be active, and its allowed IPs must include the address this app connects from (see [Allowed IPs of the API keys](#allowed-ips-of-the-api-keys)) | `abc123-def456-ghi789` |
 | `POSTGRES_USER` | string | PostgreSQL username | `mailcowlogs` |
 | `POSTGRES_PASSWORD` | string | PostgreSQL password. ⚠️ Avoid special chars (`@:/?#`) - breaks connection strings. 💡 Use UUID: `uuidgen` or https://it-tools.tech/uuid-generator | `a7f3c8e2-4b1d-4f9a-8c3e-7d2f1a9b5e4c` |
 | `POSTGRES_DB` | string | PostgreSQL database name | `mailcowlogs` |
@@ -34,9 +34,32 @@ These settings **must** be configured in your `.env` file:
 
 | Variable | Type | Default | Description |
 |----------|------|---------|-------------|
-| `MAILCOW_API_KEY_RW` | string | (empty) | mailcow API key — **Read-Write** (optional). Generate a separate key from System → API with write permissions. Used only for edit operations (e.g. Fail2Ban settings). When not set, edit features are disabled |
+| `MAILCOW_API_KEY_RW` | string | (empty) | mailcow API key — **Read-Write** (optional). Generate a separate key from System → API with write permissions. Used for actions such as quarantine, queue, Fail2Ban, rate limits and Rspamd maps. Its allowed IPs must include the address this app connects from (see [Allowed IPs of the API keys](#allowed-ips-of-the-api-keys)). When not set, edit features are disabled |
 | `MAILCOW_API_VERIFY_SSL` | boolean | `true` | Verify SSL certificates when connecting to mailcow API. Set to `false` for development environments with self-signed certificates |
 | `MAILCOW_API_TIMEOUT` | integer | `30` | API request timeout in seconds |
+
+### Allowed IPs of the API keys
+
+mailcow accepts an API key only from the addresses allowed for it. In mailcow
+under **System → API**, the Read-Only key and the Read-Write key each have their
+own list of allowed IPs and their own switch to activate the key. Add the address
+mailcow sees when this app connects to the list of each key you use.
+
+That address depends on how `MAILCOW_URL` reaches mailcow, and it can change with
+your setup, for example when the app joins mailcow's Docker network in the
+[reverse proxy recipe](Reverse_Proxy.md#recipe-1-mailcows-own-nginx-recommended).
+It is often the gateway of a Docker network, and it can be an IPv6 address.
+
+To find it, run Validate for the key in Settings → Mailcow, then look in mailcow's
+log. From the mailcow directory:
+
+```bash
+docker compose logs php-fpm-mailcow | grep "Invalid password"
+```
+
+In a line such as `mailcow UI: Invalid password for  by fd4d:6169:6c63:6f77::1`,
+the address after `by` is the one to allow. Until it is allowed, actions that need
+the Read-Write key say that mailcow rejected the key.
 
 ---
 

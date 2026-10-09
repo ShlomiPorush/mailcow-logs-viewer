@@ -227,6 +227,16 @@ container's address, as described in
 [Let the viewer see each visitor's address](#let-the-viewer-see-each-visitors-address),
 and recreate the viewer with `docker compose up -d`.
 
+### 7. Check the allowed IPs of the mailcow API keys
+
+Joining mailcow's network can change the address mailcow sees when the viewer
+calls its API, and mailcow accepts a key only from its allowed IPs. In the
+viewer, run Validate for the Read-Write key in Settings → Mailcow. If mailcow
+rejects it, add the viewer's address to the key's allowed IPs under
+**System → API** in mailcow, and to the Read-Only key's as well. To find the
+address, see
+[Allowed IPs of the API keys](ENV_Settings.md#allowed-ips-of-the-api-keys).
+
 ---
 
 ## Recipe 2: a standalone nginx on the host
@@ -377,6 +387,11 @@ page's address to its own. With nginx, add `proxy_set_header Host $http_host;`
 to every `location` block, as in the recipes above. If the proxy cannot do that,
 list the address you open the viewer at in `CORS_ALLOWED_ORIGINS` (for example
 `https://logs.example.com`); see [ENV_Settings.md](ENV_Settings.md#cross-site-requests).
+
+**Quarantine, queue or Fail2Ban actions fail with "mailcow rejected the Read-Write API key".**
+mailcow refused the key, most often because the address the viewer now connects
+from is not in the key's allowed IPs. See
+[Allowed IPs of the API keys](ENV_Settings.md#allowed-ips-of-the-api-keys).
 
 **Everything 404s, or the page loads without styling.**
 You are serving the viewer under a sub-path. It has to sit at the root of its own
