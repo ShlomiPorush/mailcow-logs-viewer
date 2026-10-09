@@ -4,7 +4,7 @@ A domain removed from mailcow keeps its stored DMARC and TLS reports, so it stay
 on the DMARC & TLS page (#412). Deleting them one report at a time is not practical.
 """
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import pytest
 from fastapi import FastAPI
@@ -268,3 +268,98 @@ def test_a_very_long_search_is_capped_not_refused(db_client):
     seed_search(isolated)
     payload, rows = found(client, "x" * 5000)
     assert (payload["total"], rows) == (0, [])
+
+
+# Sorting All reports on the server: across both report types, before paging
+
+def seed_sort(isolated):
+    """Mixed DMARC and TLS rows with ties on every key, and a TLS report without a reporter."""
+    t1, t2, t3 = datetime(2026, 1, 1, 1), datetime(2026, 1, 1, 2), datetime(2026, 1, 1, 3)
+    dmarc = [  # domain, reporter, period start, imported, records
+        ("b.example.com", "Zeta", 300, t1, 2),
+        ("A.example.net", "alpha", 100, t2, 0),
+        ("c.example.org", "Mid", 200, t1, 5),
+    ]
+    tls = [  # domain, reporter, period start, imported, policies
+        ("a.example.com", "beta", 150, t3, 1),
+        ("b.example.com", "Zeta", 300, t1, 2),
+        ("d.example.com", None, 50, t2, 0),
+    ]
+    expected = []
+    with Session(isolated) as db:
+        for i, (domain, org, begin, created, n) in enumerate(dmarc):
+            report = DMARCReport(report_id=f"sort-d{i}", domain=domain, org_name=org or "", begin_date=begin,
+                                 end_date=begin + 10, created_at=created)
+            db.add(report)
+            db.flush()
+            db.add_all([DMARCRecord(dmarc_report_id=report.id, source_ip="192.0.2.1", count=1) for _ in range(n)])
+            expected.append({"type": "dmarc", "id": report.id, "domain": domain.lower(), "reporter": org.lower(),
+                             "records": n, "period": begin, "created_at": created})
+        for i, (domain, org, begin, created, n) in enumerate(tls):
+            start = datetime(1970, 1, 1) + timedelta(seconds=begin)
+            report = TLSReport(report_id=f"sort-t{i}", policy_domain=domain, organization_name=org,
+                               start_datetime=start, end_datetime=start, created_at=created)
+            db.add(report)
+            db.flush()
+            db.add_all([TLSReportPolicy(tls_report_id=report.id, policy_domain=domain) for _ in range(n)])
+            expected.append({"type": "tls", "id": report.id, "domain": domain.lower(),
+                             "reporter": org.lower() if org else None, "records": n, "period": begin,
+                             "created_at": created})
+        db.commit()
+    return expected
+
+
+def python_order(rows, sort_by, sort_dir):
+    """The documented order: the key (empty values last), then newest import, type, highest id."""
+    rows = sorted(rows, key=lambda r: -r["id"])
+    rows = sorted(rows, key=lambda r: r["type"])
+    rows = sorted(rows, key=lambda r: r["created_at"], reverse=True)
+    if sort_by == "created_at" and sort_dir == "desc":
+        return rows
+    present = [r for r in rows if r[sort_by] is not None]
+    empty = [r for r in rows if r[sort_by] is None]
+    return sorted(present, key=lambda r: r[sort_by], reverse=sort_dir == "desc") + empty
+
+
+def all_pages(client, limit=2, **params):
+    first = client.get("/dmarc/reports/all", params={"page": 1, "limit": limit, **params}).json()
+    rows = []
+    for page in range(1, first["total_pages"] + 1):
+        payload = client.get("/dmarc/reports/all", params={"page": page, "limit": limit, **params}).json()
+        assert payload["page"] == page
+        rows += [(row["type"], row["id"]) for row in payload["reports"]]
+    return first, rows
+
+
+@pytest.mark.parametrize("sort_dir", ["asc", "desc"])
+@pytest.mark.parametrize("sort_by", ["created_at", "type", "domain", "reporter", "records", "period"])
+def test_every_column_sorts_across_pages_and_types(db_client, sort_by, sort_dir):
+    client, isolated = db_client
+    expected = seed_sort(isolated)
+    first, rows = all_pages(client, sort_by=sort_by, sort_dir=sort_dir)
+    assert (first["sort_by"], first["sort_dir"], first["total"]) == (sort_by, sort_dir, 6)
+    assert rows == [(r["type"], r["id"]) for r in python_order(expected, sort_by, sort_dir)]
+    # The same order on every request, at any page size
+    assert all_pages(client, limit=4, sort_by=sort_by, sort_dir=sort_dir)[1] == rows
+    assert all_pages(client, limit=6, sort_by=sort_by, sort_dir=sort_dir)[1] == rows
+
+
+def test_default_order_is_the_newest_import_first(db_client):
+    client, isolated = db_client
+    expected = seed_sort(isolated)
+    assert all_pages(client)[1] == [(r["type"], r["id"]) for r in python_order(expected, "created_at", "desc")]
+
+
+def test_sort_works_with_the_search(db_client):
+    client, isolated = db_client
+    expected = seed_sort(isolated)
+    first, rows = all_pages(client, search="example.com", sort_by="records", sort_dir="asc")
+    matching = [r for r in expected if r["domain"].endswith("example.com")]
+    assert first["total"] == 4
+    assert rows == [(r["type"], r["id"]) for r in python_order(matching, "records", "asc")]
+
+
+@pytest.mark.parametrize("query", ["sort_by=raw_xml", "sort_by=id;drop", "sort_by=", "sort_dir=up", "sort_dir=DESC"])
+def test_unknown_sort_values_are_refused(db_client, query):
+    client, _ = db_client
+    assert client.get(f"/dmarc/reports/all?page=1&{query}").status_code == 422

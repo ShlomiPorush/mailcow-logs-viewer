@@ -243,7 +243,7 @@ When using email services (marketing, support desk, etc.):
 ### Deleting reports
 **Manage Reports** on the DMARC & TLS page opens a window with two lists:
 - **Reports by domain**: each domain with its number of DMARC and TLS reports and the date of its latest report. A click on a column header sorts by it. **Delete all** removes every DMARC and TLS report of that domain, for example a domain you no longer host. The confirmation shows how many reports will be deleted; this cannot be undone.
-- **All reports**: every report, newest first, with **Delete** for a single report. The search above it finds reports by domain or by reporter (the organization that sent the report), and the total shows how many match.
+- **All reports**: every report, newest first, with **Delete** for a single report. A click on a column header sorts the whole list by it (a second click turns it around), across all pages. The search above it finds reports by domain or by reporter (the organization that sent the report), and the total shows how many match.
 
 Deleting is off by default. Turn it on under **Settings → DMARC** (`DMARC_ALLOW_REPORT_DELETE=true`). A domain whose reports were deleted comes back if new reports for it arrive.
 

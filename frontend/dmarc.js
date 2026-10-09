@@ -955,7 +955,19 @@ function closeDmarcSyncHistoryModal() {
 // showToast, showConfirmModal, uiLocked, dmarcState, dmarcGet,
 // dmarcUpdateManageButton and loadDmarcDomains.
 
-const reportsManagementState = { page: 1, limit: 50, request: 0, search: '', searchTimer: null, domains: [], allowDelete: false, domainsRequest: 0 };
+const REPORTS_DEFAULT_SORT = { by: 'created_at', dir: 'desc' };
+const reportsManagementState = { page: 1, limit: 50, request: 0, search: '', searchTimer: null, sort: { ...REPORTS_DEFAULT_SORT }, domains: [], allowDelete: false, domainsRequest: 0 };
+
+// All reports is paged on the server, so its headers sort there (as on the Devices page)
+function reportsSortAttr(key) {
+    const { sort } = reportsManagementState;
+    return ` data-sort-key="${key}" aria-sort="${sort.by === key ? (sort.dir === 'asc' ? 'ascending' : 'descending') : 'none'}"`;
+}
+
+function sortReportsManagement(key, dir) {
+    reportsManagementState.sort = { by: key, dir };
+    loadReportsManagementPage(1);
+}
 
 async function showReportsManagementModal() {
     const modal = document.getElementById('dmarc-reports-management-modal');
@@ -965,6 +977,7 @@ async function showReportsManagementModal() {
     };
     clearTimeout(reportsManagementState.searchTimer);
     reportsManagementState.search = '';
+    reportsManagementState.sort = { ...REPORTS_DEFAULT_SORT };
     document.getElementById('dmarc-reports-search').value = '';
     loadReportsDomains();
     await loadReportsManagementPage(1);
@@ -1083,8 +1096,10 @@ async function loadReportsManagementPage(page) {
     content.innerHTML = '<div class="ui-loading"><div class="loading"></div><p>Loading reports...</p></div>';
 
     try {
-        const { limit, search } = reportsManagementState;
-        const response = await authenticatedFetch(`/api/dmarc/reports/all?page=${page}&limit=${limit}${search ? `&search=${encodeURIComponent(search)}` : ''}`);
+        const { limit, search, sort } = reportsManagementState;
+        const sorted = sort.by === REPORTS_DEFAULT_SORT.by && sort.dir === REPORTS_DEFAULT_SORT.dir
+            ? '' : `&sort_by=${encodeURIComponent(sort.by)}&sort_dir=${encodeURIComponent(sort.dir)}`;
+        const response = await authenticatedFetch(`/api/dmarc/reports/all?page=${page}&limit=${limit}${search ? `&search=${encodeURIComponent(search)}` : ''}${sorted}`);
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const data = await response.json();
         if (request !== reportsManagementState.request) return;
@@ -1135,8 +1150,8 @@ function renderReportsManagementTable(reports, allowDelete, { total, page, total
         : '--ui-cols: minmax(150px, 1.2fr) 70px minmax(140px, 1.2fr) minmax(120px, 1fr) 70px minmax(110px, .9fr)';
 
     content.innerHTML = `
-        <div data-nosort class="ui-table ui-stack" style="${cols}; --ui-table-min: 780px">
-            <div class="ui-tr ui-tr-head"><span>Import Date</span><span>Type</span><span>Domain</span><span>Reporter</span><span class="ui-td-end">Records</span><span>Period</span>${allowDelete ? '<span class="ui-td-end">Actions</span>' : ''}</div>
+        <div class="ui-table ui-stack" data-sort-handler="sortReportsManagement" style="${cols}; --ui-table-min: 780px">
+            <div class="ui-tr ui-tr-head"><span${reportsSortAttr('created_at')}>Import Date</span><span${reportsSortAttr('type')}>Type</span><span${reportsSortAttr('domain')}>Domain</span><span${reportsSortAttr('reporter')}>Reporter</span><span class="ui-td-end"${reportsSortAttr('records')}>Records</span><span${reportsSortAttr('period')}>Period</span>${allowDelete ? '<span class="ui-td-end">Actions</span>' : ''}</div>
             ${reports.map(report => `
             <div class="ui-tr">
                 <span class="ui-td">${dateTime(report.created_at)}</span>

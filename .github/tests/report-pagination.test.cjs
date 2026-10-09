@@ -5,7 +5,7 @@ const vm = require('node:vm');
 const { test } = require('node:test');
 
 const source = fs.readFileSync(path.join(__dirname, '../../frontend/dmarc.js'), 'utf8');
-const start = source.indexOf('const reportsManagementState =');
+const start = source.indexOf('const REPORTS_DEFAULT_SORT =');
 const end = source.length;
 assert.ok(start > 0 && end > start);
 
@@ -267,5 +267,105 @@ test('reopening the dialog clears the search', async () => {
     assert.equal(h.element('dmarc-reports-search').value, '');
     assert.equal(h.requests[2].url, '/api/dmarc/reports/all?page=1&limit=50');
     h.resolve(2);
+    await reopening;
+});
+
+// The header click goes through the real sorter in utils.js (server-paged mode:
+// data-sort-handler and data-sort-key, as on the Devices page)
+const utils = fs.readFileSync(path.join(__dirname, '../../frontend/utils.js'), 'utf8');
+const sorterSource = utils.slice(utils.indexOf('const uiTableSorts'), utils.indexOf('// Mark the sortable headers'));
+
+// A stand-in for the rendered All reports table, read from its markup
+function fakeTable(html) {
+    const attrs = text => Object.fromEntries([...text.matchAll(/([\w-]+)="([^"]*)"/g)].map(m => [m[1], m[2]]));
+    const element = (attributes, text) => ({
+        attributes, textContent: text, children: [], classList: { contains: () => false },
+        hasAttribute: name => name in attributes, getAttribute: name => attributes[name] ?? null,
+        cloneNode() { return { querySelectorAll: () => [], textContent: text }; },
+    });
+    const table = element(attrs(html.match(/<div ([^>]*class="ui-table[^>]*)>/)[1]), '');
+    table.tagName = 'DIV';
+    const headHtml = html.match(/<div class="ui-tr ui-tr-head">(.*?)<\/div>/s)[1];
+    const heads = [...headHtml.matchAll(/<span([^>]*)>([^<]*)<\/span>/g)].map(m => element(attrs(m[1]), m[2]));
+    const head = { children: heads };
+    heads.forEach(cell => { cell.closest = selector => selector.includes('.ui-table') ? table : cell; });
+    table.querySelector = () => head;
+    table.children = [{ classList: { contains: name => name === 'ui-tr-head' } }];
+    return { table, header: label => heads.find(cell => cell.textContent === label) };
+}
+
+function sorterFor(h) {
+    let onClick;
+    const context = vm.createContext({
+        Map, document: { addEventListener: (type, handler) => { if (type === 'click') onClick = handler; } },
+        window: { sortReportsManagement: (key, dir) => h.run(`sortReportsManagement(${JSON.stringify(key)}, ${JSON.stringify(dir)})`) },
+    });
+    vm.runInContext(sorterSource, context);
+    return label => {
+        const { header } = fakeTable(h.content.innerHTML);
+        onClick({ target: header(label) });
+    };
+}
+
+test('a header click sorts All reports on the server, from page 1, keeping the search', async () => {
+    const h = harness();
+    await opened(h);
+    const click = sorterFor(h);
+    assert.match(h.content.innerHTML, /data-sort-handler="sortReportsManagement"/);
+    assert.doesNotMatch(h.content.innerHTML, /data-nosort/);
+    assert.match(h.content.innerHTML, /data-sort-key="created_at" aria-sort="descending">Import Date/);
+    h.element('dmarc-reports-search').value = 'example';
+    h.run('searchReportsManagement()');
+    await debounce();
+    h.resolve(1, 1, 200, 120);
+    await tick();
+    h.run('reportsManagementState.page = 3');
+
+    click('Domain');
+    assert.equal(h.requests[2].url, '/api/dmarc/reports/all?page=1&limit=50&search=example&sort_by=domain&sort_dir=asc');
+    h.resolve(2, 1, 200, 120);
+    await tick();
+    assert.match(h.content.innerHTML, /data-sort-key="domain" aria-sort="ascending">Domain/);
+    assert.match(h.content.innerHTML, /data-sort-key="created_at" aria-sort="none">Import Date/);
+
+    // A second click turns it around
+    click('Domain');
+    assert.equal(h.requests[3].url, '/api/dmarc/reports/all?page=1&limit=50&search=example&sort_by=domain&sort_dir=desc');
+    h.resolve(3, 1, 200, 120);
+    await tick();
+    assert.match(h.content.innerHTML, /data-sort-key="domain" aria-sort="descending">Domain/);
+
+    // Paging and a single delete keep the order
+    const paging = h.run('loadReportsManagementPage(2)');
+    assert.equal(h.requests[4].url, '/api/dmarc/reports/all?page=2&limit=50&search=example&sort_by=domain&sort_dir=desc');
+    h.resolve(4, 2, 200, 120);
+    await paging;
+    const deleting = h.run("deleteReport('dmarc', 2, 'example.com')");
+    await tick();
+    h.resolve(5);
+    await tick();
+    assert.equal(h.requests[6].url, '/api/dmarc/reports/all?page=2&limit=50&search=example&sort_by=domain&sort_dir=desc');
+    h.resolve(6, 2, 200, 119);
+    await deleting;
+});
+
+test('every listed column sorts except Actions, and reopening restores the default order', async () => {
+    const h = harness();
+    await opened(h);
+    const click = sorterFor(h);
+    for (const [label, key] of [['Import Date', 'created_at'], ['Type', 'type'], ['Reporter', 'reporter'], ['Records', 'records'], ['Period', 'period']]) {
+        assert.match(h.content.innerHTML, new RegExp(`data-sort-key="${key}" aria-sort="[a-z]+">${label}<`));
+    }
+    const before = h.requests.length;
+    click('Actions');
+    assert.equal(h.requests.length, before, 'Actions does not sort');
+    click('Reporter');
+    assert.match(h.requests[before].url, /sort_by=reporter&sort_dir=asc$/);
+    h.resolve(before);
+    await tick();
+    h.run('closeReportsManagementModal()');
+    const reopening = h.run('showReportsManagementModal()');
+    assert.equal(h.requests[before + 1].url, '/api/dmarc/reports/all?page=1&limit=50');
+    h.resolve(before + 1);
     await reopening;
 });

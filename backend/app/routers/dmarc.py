@@ -9,7 +9,7 @@ from typing import Annotated, List, Optional
 from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, BackgroundTasks, Query
 from sqlalchemy.orm import Session, load_only
-from sqlalchemy import func, and_, or_, case, literal
+from sqlalchemy import func, and_, or_, case, literal, cast, Float
 
 from ..database import SessionLocal, get_db
 from ..models import DMARCReport, DMARCRecord, DMARCSync, DomainDNSCheck, TLSReport, TLSReportPolicy
@@ -98,34 +98,80 @@ def _report_search_filters(search: Optional[str]):
             match(TLSReport.policy_domain, TLSReport.organization_name))
 
 
+REPORT_SORT_KEYS = ("created_at", "type", "domain", "reporter", "records", "period")
+
+
+def _report_sort_value(sort_by: str, report_type: str):
+    """What one branch of the report union sorts by, or None for the import date (always in the union)."""
+    if sort_by == "type":
+        return literal(report_type)
+    if report_type == "dmarc":
+        if sort_by == "domain":
+            return func.lower(DMARCReport.domain)
+        if sort_by == "reporter":
+            return func.lower(DMARCReport.org_name)
+        if sort_by == "period":
+            return cast(DMARCReport.begin_date, Float)
+    else:
+        if sort_by == "domain":
+            return func.lower(TLSReport.policy_domain)
+        if sort_by == "reporter":
+            return func.lower(TLSReport.organization_name)
+        if sort_by == "period":
+            return cast(func.extract("epoch", TLSReport.start_datetime), Float)
+    return None
+
+
+def _report_union(db: Session, dmarc_match, tls_match, sort_by: str = "created_at"):
+    """DMARC and TLS reports as one (id, type, created_at[, sort_value]) union for counting and paging."""
+    def branch(model, report_type, match, children):
+        columns = [model.id.label("id"), literal(report_type).label("type"), model.created_at.label("created_at")]
+        query = db.query(*columns).filter(*match)
+        if sort_by == "records":
+            # The record (DMARC) or policy (TLS) count, grouped once per branch
+            parent = children.dmarc_report_id if report_type == "dmarc" else children.tls_report_id
+            counts = db.query(parent.label("report_id"), func.count(children.id).label("n")).group_by(parent).subquery()
+            query = db.query(*columns, func.coalesce(counts.c.n, 0).label("sort_value")).outerjoin(
+                counts, counts.c.report_id == model.id).filter(*match)
+        elif sort_by != "created_at":
+            query = db.query(*columns, _report_sort_value(sort_by, report_type).label("sort_value")).filter(*match)
+        return query
+    return branch(DMARCReport, "dmarc", dmarc_match, DMARCRecord).union_all(
+        branch(TLSReport, "tls", tls_match, TLSReportPolicy)).subquery()
+
+
 @router.get("/dmarc/reports/all")
 def get_all_reports(
     db: Session = Depends(get_db),
     page: Annotated[Optional[int], Query(ge=1)] = None,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     search: Optional[str] = None,
+    sort_by: Annotated[str, Query(pattern="^(" + "|".join(REPORT_SORT_KEYS) + ")$")] = "created_at",
+    sort_dir: Annotated[str, Query(pattern="^(asc|desc)$")] = "desc",
 ):
     """
     Get report summaries. Omit page to preserve the legacy unpaginated response.
     search keeps the reports whose domain or reporter contains it (any case).
+    sort_by and sort_dir order the paged list across both report types before paging.
     """
     try:
         reports = []
         selected = None
         dmarc_match, tls_match = _report_search_filters(search)
         if page is not None:
-            combined = db.query(
-                DMARCReport.id.label("id"), literal("dmarc").label("type"),
-                DMARCReport.created_at.label("created_at"),
-            ).filter(*dmarc_match).union_all(db.query(
-                TLSReport.id, literal("tls"), TLSReport.created_at,
-            ).filter(*tls_match)).subquery()
-            total = db.query(func.count()).select_from(combined).scalar()
+            total = db.query(func.count()).select_from(_report_union(db, dmarc_match, tls_match)).scalar()
             total_pages = max(1, (total + limit - 1) // limit)
             page = min(page, total_pages)
+            combined = _report_union(db, dmarc_match, tls_match, sort_by)
+            # The import date, newest first, then type and id break ties so pages never repeat or skip a row
+            tiebreak = [combined.c.created_at.desc().nulls_last(), combined.c.type, combined.c.id.desc()]
+            if sort_by == "created_at":
+                primary = [combined.c.created_at.asc().nulls_last()] if sort_dir == "asc" else []
+            else:
+                value = combined.c.sort_value
+                primary = [value.asc().nulls_last() if sort_dir == "asc" else value.desc().nulls_last()]
             selected = db.query(combined.c.id, combined.c.type).order_by(
-                combined.c.created_at.desc().nulls_last(),
-                combined.c.type, combined.c.id.desc(),
+                *primary, *tiebreak,
             ).offset((page - 1) * limit).limit(limit).all()
             dmarc_ids = [row.id for row in selected if row.type == "dmarc"]
             tls_ids = [row.id for row in selected if row.type == "tls"]
@@ -208,6 +254,7 @@ def get_all_reports(
             return {
                 "reports": reports, "total": total, "page": page,
                 "limit": limit, "total_pages": total_pages,
+                "sort_by": sort_by, "sort_dir": sort_dir,
                 "allow_delete": settings.dmarc_allow_report_delete,
             }
 
