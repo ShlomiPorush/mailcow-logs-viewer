@@ -956,7 +956,7 @@ function closeDmarcSyncHistoryModal() {
 // dmarcUpdateManageButton and loadDmarcDomains.
 
 const REPORTS_DEFAULT_SORT = { by: 'created_at', dir: 'desc' };
-const reportsManagementState = { page: 1, limit: 50, request: 0, search: '', searchTimer: null, sort: { ...REPORTS_DEFAULT_SORT }, domains: [], allowDelete: false, domainsRequest: 0 };
+const reportsManagementState = { page: 1, limit: 50, request: 0, search: '', searchTimer: null, busyTimer: null, sort: { ...REPORTS_DEFAULT_SORT }, domains: [], allowDelete: false, domainsRequest: 0 };
 
 // All reports is paged on the server, so its headers sort there (as on the Devices page)
 function reportsSortAttr(key) {
@@ -979,6 +979,9 @@ async function showReportsManagementModal() {
     reportsManagementState.search = '';
     reportsManagementState.sort = { ...REPORTS_DEFAULT_SORT };
     document.getElementById('dmarc-reports-search').value = '';
+    // Opening is the one time the list shows a loading state
+    document.getElementById('dmarc-reports-management-content').innerHTML = '<div class="ui-loading"><div class="loading"></div><p>Loading reports...</p></div>';
+    document.getElementById('dmarc-reports-total').innerHTML = '';
     loadReportsDomains();
     await loadReportsManagementPage(1);
 }
@@ -1092,8 +1095,17 @@ async function loadReportsManagementPage(page) {
     const request = ++reportsManagementState.request;
     const content = document.getElementById('dmarc-reports-management-content');
 
-    // Show loading
-    content.innerHTML = '<div class="ui-loading"><div class="loading"></div><p>Loading reports...</p></div>';
+    // The rows on screen stay until the answer replaces them (as loadDevices does), so
+    // a search, a sort or a page change never collapses the dialog. A slow answer
+    // only dims them a little, which changes no layout.
+    content.setAttribute('aria-busy', 'true');
+    clearTimeout(reportsManagementState.busyTimer);
+    reportsManagementState.busyTimer = setTimeout(() => { content.style.opacity = '.6'; }, 200);
+    const settled = () => {
+        clearTimeout(reportsManagementState.busyTimer);
+        content.removeAttribute('aria-busy');
+        content.style.opacity = '';
+    };
 
     try {
         const { limit, search, sort } = reportsManagementState;
@@ -1103,11 +1115,13 @@ async function loadReportsManagementPage(page) {
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const data = await response.json();
         if (request !== reportsManagementState.request) return;
+        settled();
         reportsManagementState.page = data.page;
         renderReportsManagementTable(data.reports || [], data.allow_delete, data);
 
     } catch (error) {
         if (request !== reportsManagementState.request) return;
+        settled();
         console.error('Error loading reports:', error);
         content.innerHTML = `<div class="ui-empty"><p class="ui-text-fail">Failed to load reports. Please try again.</p>
             <button onclick="loadReportsManagementPage(${page})" class="ui-btn ui-btn-sm">Retry</button></div>`;
@@ -1116,6 +1130,10 @@ async function loadReportsManagementPage(page) {
 
 function closeReportsManagementModal() {
     clearTimeout(reportsManagementState.searchTimer);
+    clearTimeout(reportsManagementState.busyTimer);
+    const content = document.getElementById('dmarc-reports-management-content');
+    content.removeAttribute('aria-busy');
+    content.style.opacity = '';
     reportsManagementState.request++;
     reportsManagementState.domainsRequest++;
     document.getElementById('dmarc-reports-management-modal').classList.add('hidden');

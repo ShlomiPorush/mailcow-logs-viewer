@@ -17,7 +17,11 @@ const DOMAINS = [
 
 function harness({ allowDelete = true, confirm = true } = {}) {
     const elements = {};
-    const element = id => elements[id] || (elements[id] = { innerHTML: '', value: '' });
+    const element = id => elements[id] || (elements[id] = {
+        innerHTML: '', value: '', style: {}, attributes: {},
+        setAttribute(name, value) { this.attributes[name] = String(value); },
+        removeAttribute(name) { delete this.attributes[name]; },
+    });
     const content = element('dmarc-reports-management-content');
     const classes = new Set(['hidden']);
     const modal = { classList: {
@@ -368,4 +372,104 @@ test('every listed column sorts except Actions, and reopening restores the defau
     assert.equal(h.requests[before + 1].url, '/api/dmarc/reports/all?page=1&limit=50');
     h.resolve(before + 1);
     await reopening;
+});
+
+// No flashing: search, sort and paging keep the rows on screen until the answer arrives
+
+const LOADING = /Loading reports/;
+
+test('opening the dialog shows the loading state once', async () => {
+    const h = harness();
+    h.content.innerHTML = '<old rows from the last time>';
+    const opening = h.run('showReportsManagementModal()');
+    assert.match(h.content.innerHTML, LOADING);
+    h.resolve(0);
+    await opening;
+    assert.doesNotMatch(h.content.innerHTML, LOADING);
+});
+
+test('rows stay while a search, a sort or a page is on its way, then swap in place', async () => {
+    const h = harness();
+    await opened(h);
+    let next = 1;
+    for (const start of [
+        () => { h.element('dmarc-reports-search').value = 'exa'; h.run('searchReportsManagement()'); return debounce(); },
+        () => h.run("sortReportsManagement('domain', 'asc')"),
+        () => { h.run('loadReportsManagementPage(2)'); },
+    ]) {
+        const rows = h.content.innerHTML;
+        await start();
+        assert.equal(h.content.innerHTML, rows, 'the old rows are still there');
+        assert.doesNotMatch(h.content.innerHTML, LOADING);
+        assert.equal(h.content.attributes['aria-busy'], 'true');
+        assert.notEqual(h.content.style.opacity, '.6', 'no dimming for a fast answer');
+        await new Promise(resolve => setTimeout(resolve, 250));
+        assert.equal(h.content.style.opacity, '.6', 'a slow answer dims the rows a little');
+        h.resolve(next++, 2);
+        await tick();
+        assert.equal(h.content.attributes['aria-busy'], undefined);
+        assert.equal(h.content.style.opacity, '');
+        assert.match(h.content.innerHTML, /Page 2 of 3/);
+    }
+});
+
+test('typing is never undone and the search box is never rendered by the list', async () => {
+    const h = harness();
+    await opened(h);
+    const input = h.element('dmarc-reports-search');
+    input.value = 'exam';
+    h.run('searchReportsManagement()');
+    await debounce();
+    input.value = 'example.co';  // still typing while the answer is on its way
+    h.resolve(1, 1, 200, 3);
+    await tick();
+    assert.equal(h.element('dmarc-reports-search'), input);
+    assert.equal(input.value, 'example.co');
+    for (const id of ['dmarc-reports-management-content', 'dmarc-reports-total', 'dmarc-reports-domains']) {
+        assert.doesNotMatch(h.element(id).innerHTML, /dmarc-reports-search/);
+    }
+});
+
+test('search, sort and paging leave the reports by domain alone', async () => {
+    const h = harness();
+    await opened(h);
+    const summary = h.element('dmarc-reports-domains').innerHTML;
+    assert.equal(h.calls.summaries, 1);
+    h.element('dmarc-reports-search').value = 'example';
+    h.run('searchReportsManagement()');
+    await debounce();
+    h.resolve(1);
+    h.run("sortReportsManagement('reporter', 'asc')");
+    h.resolve(2);
+    h.run('loadReportsManagementPage(2)');
+    h.resolve(3, 2);
+    await tick();
+    assert.equal(h.calls.summaries, 1, 'the summary was not requested again');
+    assert.equal(h.element('dmarc-reports-domains').innerHTML, summary);
+});
+
+test('a delete refreshes without a loading state', async () => {
+    const h = harness();
+    await opened(h);
+    const rows = h.content.innerHTML;
+    const summary = h.element('dmarc-reports-domains').innerHTML;
+    const deleting = h.run("deleteDomainReports('example.com')");
+    await tick();
+    h.requests[1].resolve({ ok: true, status: 200, json: async () => ({ dmarc_reports: 3, tls_reports: 1 }) });
+    await tick();
+    assert.equal(h.content.innerHTML, rows, 'the list stays until its new page arrives');
+    assert.doesNotMatch(h.element('dmarc-reports-domains').innerHTML, /Loading/);
+    assert.notEqual(h.element('dmarc-reports-domains').innerHTML, summary, 'the summary is swapped, not blanked');
+    h.resolve(2);
+    await deleting;
+});
+
+test('closing while a request is on its way clears the busy state', async () => {
+    const h = harness();
+    await opened(h);
+    h.run('loadReportsManagementPage(2)');
+    await new Promise(resolve => setTimeout(resolve, 250));
+    h.run('closeReportsManagementModal()');
+    assert.equal(h.content.attributes['aria-busy'], undefined);
+    assert.equal(h.content.style.opacity, '');
 });
