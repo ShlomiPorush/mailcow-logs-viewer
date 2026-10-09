@@ -54,6 +54,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Quarantined mail with only an HTML part showed a dash** - mailcow sends a dash as the plain text of a message that has no plain-text part, and the quarantine details showed that dash instead of the message. The details now show the HTML part as text. [#413](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues/413). Thanks to [@kskarlatos](https://github.com/kskarlatos).
 - **Local domains replaced when mailcow did not answer** - When reading the domains from mailcow failed but the alias domains were read, the local domain sync kept only the alias domains, so mail of the primary domains was no longer counted as local. A failed read now leaves the local domains as they were and records the sync as failed.
 - **Manual entries lost from the Rspamd recipient blacklist** - When the suppression sync could not read `global_rcpt_blacklist.map` from Rspamd, it wrote the map anyway with only its own section, dropping the entries added by hand. It now leaves the map alone, records the sync as failed and tries again on the next run.
 - **"Internal server error" when mailcow did not answer** - Queue, Quarantine, Domains, Status and the actions on them (release, delete, learn, Fail2ban changes) showed an internal server error when mailcow failed or refused a request. They now say that mailcow did not answer, and the background jobs record mailcow's own error instead of an unreadable one.
