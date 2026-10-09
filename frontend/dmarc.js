@@ -39,9 +39,9 @@ function dmarcRate(pct, count) {
 
 // A domain with reports that is not an active domain on this mailcow server (issue #412).
 // Nothing while the server's domains are not known (on_mailcow null).
-function dmarcNotOnServer(d, tag = 'small', cls = 'ui-dm-sub') {
+function dmarcNotOnServer(d) {
     if (!d || d.on_mailcow !== false) return '';
-    return `<${tag} class="${cls}" title="This domain is not an active domain on this mailcow server. Its reports are kept for history.">Not on this mailcow server</${tag}>`;
+    return '<sup class="ui-dm-sup" title="This domain is not an active domain on this mailcow server. Its reports are kept for history.">Not on server</sup>';
 }
 
 function dmarcNum(value) {
@@ -541,7 +541,7 @@ async function loadDomainOverview(domain, updateUrl = true) {
         const x = await dmarcLoadDomain(domain);
         if (dmarcState.currentView !== 'domain' || dmarcState.currentDomain !== domain) return;
         dmarcView().innerHTML = `
-            <div class="ui-dm-ttl"><div><small>Last 30 days</small><h2>${escapeHtml(domain)}</h2>${dmarcNotOnServer(x.overview, 'p', 'ui-muted')}</div></div>
+            <div class="ui-dm-ttl"><div><small>Last 30 days</small><h2>${escapeHtml(domain)}${dmarcNotOnServer(x.overview)}</h2></div></div>
             <div class="ui-dm-lay"><div>
                 <div class="ui-dm-card"><header>Messages per day</header><div class="ui-dm-body">${dmarcChart(x.overview.daily_stats || [])}</div></div>
                 ${x.groups.length ? `<div class="ui-dm-card"><header>Mail flow<small>your domain, who sent it, who reported it</small></header><div class="ui-dm-body">${dmarcFlow(x)}</div></div>` : ''}

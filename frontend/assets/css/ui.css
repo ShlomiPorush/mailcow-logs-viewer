@@ -2380,6 +2380,8 @@ html:has(#message-modal:not(.hidden):not(.ui-docked)) :is(.ui-page, .ui-scroll, 
 .ui-dm-sub { display: block; color: var(--ui-muted); font-size: 12px; }
 .ui-dm-link { padding: 0; border: 0; background: none; color: var(--ui-focus); font: inherit; font-weight: 550; cursor: pointer; text-align: start; }
 .ui-dm-link:hover { text-decoration: underline; }
+.ui-dm-sup { margin-inline-start: 4px; color: var(--ui-muted); font-size: 11px; font-weight: 500; letter-spacing: 0; line-height: 0; white-space: nowrap; cursor: help; }
+.ui-dm-ttl h2 .ui-dm-sup { font-size: 13px; }
 .ui-dm-pill { display: inline-block; padding: 1px 8px; border-radius: 6px; font-size: 12px; font-weight: 650; white-space: nowrap;
     background: color-mix(in srgb, var(--dm-t) 15%, transparent); color: var(--dm-t); }
 .ui-dm-pill.is-solid { background: var(--dm-t); color: #fff; }
