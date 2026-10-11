@@ -291,6 +291,7 @@ def render(*, title, topic, tone: str = 'muted', intro=None, blocks: Sequence = 
 {pre_html}
 <table role="presentation" class="m-bg" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:{BG};">
 <tr><td align="center" class="m-wrap" style="padding:32px 24px;">
+<!--[if mso]><table role="presentation" width="600" align="center" cellpadding="0" cellspacing="0" border="0"><tr><td><![endif]-->
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:600px;font-family:{FONT};">
 <tr><td style="padding:0 0 28px;">
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
@@ -309,6 +310,7 @@ def render(*, title, topic, tone: str = 'muted', intro=None, blocks: Sequence = 
   {footer_text}
 </td></tr>
 </table>
+<!--[if mso]></td></tr></table><![endif]-->
 </td></tr>
 </table>
 </body>

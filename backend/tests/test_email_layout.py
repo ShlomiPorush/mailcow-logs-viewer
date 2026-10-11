@@ -152,6 +152,50 @@ def test_smtp_abuse_operator_email(monkeypatch):
     assert sent['alert_type'] == 'security'
 
 
+def _run_blacklist_job(monkeypatch, listed_count, prev_listed):
+    """Run the blacklist check with one host and a cached result; return what was sent."""
+    from app import scheduler
+    from app.services import blacklist_service, notification_service
+    monkeypatch.setattr(scheduler, '_load_blacklist_hosts_worker',
+                        lambda: [{'hostname': '203.0.113.25', 'source': 'transport:mx1.example.com'}])
+    results = [{'name': 'Spamhaus ZEN', 'zone': 'zen.spamhaus.org', 'listed': True,
+                'info_url': 'https://check.spamhaus.org/'}] if listed_count else []
+    monkeypatch.setattr(blacklist_service, 'get_cached_blacklist_check',
+                        lambda ip: {'listed_count': listed_count, 'total_blacklists': 50, 'results': results})
+    for name in ('start_batch_scan', 'end_batch_scan', 'update_batch_status', 'mark_host_as_processed_batch'):
+        monkeypatch.setattr(blacklist_service, name, lambda *a, **kw: None)
+    monkeypatch.setattr(scheduler.settings._inner, 'admin_email', 'admin@example.com')
+    monkeypatch.setattr(scheduler, '_blacklist_last_listed_actionable_count', prev_listed)
+    sent = []
+    monkeypatch.setattr(notification_service, 'notify',
+                        lambda subject, text, html, recipient, alert_type: sent.append((subject, text, html, alert_type))
+                        or {'email': True, 'channels_sent': 0})
+    asyncio.run(scheduler._run_check_monitored_hosts(False, True))
+    assert scheduler.job_status['blacklist_check']['status'] == 'success', scheduler.job_status['blacklist_check']
+    return sent
+
+
+def test_blacklist_job_sends_the_alert(monkeypatch):
+    sent = _run_blacklist_job(monkeypatch, listed_count=1, prev_listed=0)
+    assert len(sent) == 1
+    subject, text, html, alert_type = sent[0]
+    assert subject == 'Blacklist: 1 host is on a blacklist' and alert_type == 'blacklist'
+    assert LAYOUT_MARK in html and 'mx1.example.com' in html and 'Spamhaus ZEN' in html
+    assert 'Spamhaus ZEN (zen.spamhaus.org)' in text
+
+
+def test_blacklist_job_sends_cleared(monkeypatch):
+    sent = _run_blacklist_job(monkeypatch, listed_count=0, prev_listed=1)
+    assert [s[0] for s in sent] == ['Blacklist: all hosts are clear']
+    assert LAYOUT_MARK in sent[0][2] and 'All hosts are off the blacklists' in sent[0][2]
+
+
+def test_blacklist_job_sends_improved(monkeypatch):
+    sent = _run_blacklist_job(monkeypatch, listed_count=1, prev_listed=3)
+    assert [s[0] for s in sent] == ['Blacklist: 1 host is on a blacklist', 'Blacklist: 1 host still listed (was 3)']
+    assert LAYOUT_MARK in sent[1][2] and '1 host is still listed, down from 3.' in sent[1][2]
+
+
 def test_no_emoji_in_blacklist_subjects():
     import inspect
     from app import scheduler
