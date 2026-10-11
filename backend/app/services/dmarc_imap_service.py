@@ -264,7 +264,24 @@ class DMARCImapService:
         except Exception as e:
             logger.error(f"Error validating TLS-RPT email: {e}")
             return False
-    
+
+    def is_bounce(self, msg: EmailMessage) -> bool:
+        """
+        Detect a delivery status notification (RFC 3464).
+
+        The report mailbox is often also the address that mailcow sends its
+        own DMARC reports from, so bounces of those reports land here. A bounce
+        may carry the original outgoing report, which must not be imported.
+        TLS-RPT mail is also multipart/report, but with report-type=tlsrpt.
+        """
+        if msg.get_content_type() == 'multipart/report':
+            if str(msg.get_param('report-type', '')).lower() == 'delivery-status':
+                return True
+        return any(
+            part.get_content_type() in ('message/delivery-status', 'message/global-delivery-status')
+            for part in msg.walk()
+        )
+
     def detect_email_type(self, msg: EmailMessage) -> str:
         """
         Detect if email is DMARC or TLS-RPT by inspecting attachments
@@ -393,6 +410,7 @@ class DMARCImapService:
         - reports_duplicate: int
         - error: str or None
         - report_type: 'dmarc' or 'tls-rpt'
+        - skipped: why the email is not a report (bounce or no report attached), or None
         """
         result = {
             'success': False,
@@ -401,7 +419,8 @@ class DMARCImapService:
             'error': None,
             'message_id': None,
             'subject': None,
-            'report_type': None
+            'report_type': None,
+            'skipped': None
         }
         
         try:
@@ -416,7 +435,11 @@ class DMARCImapService:
             msg = email.message_from_bytes(msg_data[0][1])
             result['message_id'] = msg.get('message-id', 'unknown')
             result['subject'] = msg.get('subject', 'unknown')
-            
+
+            if self.is_bounce(msg):
+                result['skipped'] = 'bounce'
+                return result
+
             # Detect email type
             email_type = self.detect_email_type(msg)
             result['report_type'] = email_type
@@ -426,7 +449,7 @@ class DMARCImapService:
             elif email_type == 'dmarc':
                 return self._process_dmarc_email(msg, db, result)
             else:
-                result['error'] = "Not a valid DMARC or TLS-RPT report email"
+                result['skipped'] = 'no report attached'
                 return result
             
         except Exception as e:
@@ -676,8 +699,12 @@ class DMARCImapService:
                     email_id = email_id.decode() if isinstance(email_id, bytes) else email_id
                     result = self.process_email(email_id, db)
                     sync_record.emails_processed += 1
-                    
-                    if result['success']:
+
+                    if result['skipped']:
+                        # Not a report (e.g. a bounce): not a failure, and never deleted
+                        logger.info(f"Skipped email {email_id} ({result['skipped']}): {_decode_subject(result['subject'])}")
+                        self.mark_as_processed(email_id)
+                    elif result['success']:
                         sync_record.reports_created += result['reports_created']
                         sync_record.reports_duplicate += result['reports_duplicate']
                         
