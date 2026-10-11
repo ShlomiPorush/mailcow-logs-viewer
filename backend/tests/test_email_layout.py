@@ -13,6 +13,12 @@ ESCAPED = '&lt;a href=&quot;https://phish.invalid/login&quot;&gt;'
 LAYOUT_MARK = 'class="m-bg"'
 
 
+def _texts(html):
+    """The text between tags, one entry per text node."""
+    import re
+    return [t.strip() for t in re.findall(r'>([^<]+)<', html) if t.strip()]
+
+
 def _inert(html):
     assert '<a href="https://phish.invalid' not in html
     assert ESCAPED in html
@@ -69,6 +75,24 @@ def test_addresses_keep_the_text_colour():
     banner = e.banner('fail', 'anna@example.com logged in')
     assert 'class="m-fail" style="color:#C42B1C;text-decoration:none;">anna@example.com</a>' in banner
     assert 'href="https://example.com/?q=a@example.com"' in e.link('Look up', 'https://example.com/?q=a@example.com')
+
+
+def test_address_links_take_whole_addresses_only():
+    html = e.paragraph('Write to anna@example.com. Message-ID <abc@mailer.invalid>, not x@y or @example.com')
+    assert _texts(html) == ['Write to', 'anna@example.com', '. Message-ID &lt;', 'abc@mailer.invalid',
+                            '&gt;, not x@y or @example.com']
+
+
+def test_address_scan_stays_fast_on_hostile_text():
+    """The text includes subjects of inbound mail. The address pattern used to
+    backtrack polynomially on a long run without a valid address (CodeQL
+    py/polynomial-redos); the scan is linear now."""
+    import time
+    hostile = ('a.' * 40000) + '@' + ('b-' * 40000) + '!'
+    started = time.perf_counter()
+    e.paragraph(hostile)
+    e.paragraph('a' * 80000 + '@')
+    assert time.perf_counter() - started < 1
 
 
 def test_long_values_are_shortened_in_the_middle():
@@ -205,8 +229,9 @@ def test_blacklist_job_sends_the_alert(monkeypatch):
     assert len(sent) == 1
     subject, text, html, alert_type = sent[0]
     assert subject == 'Blacklist: 1 host is on a blacklist' and alert_type == 'blacklist'
-    assert LAYOUT_MARK in html and 'mx1.example.com' in html and 'Spamhaus ZEN' in html
-    assert 'Spamhaus ZEN (zen.spamhaus.org)' in text
+    shown = _texts(html)
+    assert LAYOUT_MARK in html and 'mx1.example.com' in shown and 'Spamhaus ZEN' in shown
+    assert '  - Spamhaus ZEN (zen.spamhaus.org)' in text.splitlines()
 
 
 def test_blacklist_job_sends_cleared(monkeypatch):
