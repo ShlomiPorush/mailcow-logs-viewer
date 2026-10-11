@@ -6,6 +6,11 @@ tables with inline styles. The colours are the light theme of
 frontend/assets/css/ui.css; a <style> block switches to the dark theme in the
 clients that honour prefers-color-scheme (Apple Mail, iOS, Outlook for Mac).
 
+Outlook for Windows draws email with Word, which ignores padding and margins
+outside table cells, rounded corners, max-width and font fallbacks. So every
+gap is cell padding or a spacer row, divider lines are 1px rows, and a block
+never relies on margins.
+
 Every value passed to a block is escaped. Only the output of another block
 (a Safe string) is inserted as markup, so callers never escape by hand:
 
@@ -37,14 +42,12 @@ _ADDRESS = re.compile(r'[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+')
 
 
 def _e(value) -> str:
-    """Escape visible text. Gmail and Outlook turn every address into a blue
-    link of their own; an address that already is a link keeps the colour of
-    the text around it."""
+    """Escape visible text. Gmail turns every address into a blue link of its
+    own, and a link of ours is blue in Outlook; an address split around the
+    @ is not recognised, keeps the colour of the text and copies as one."""
     if isinstance(value, Safe):
         return value
-    return _ADDRESS.sub(
-        lambda m: f'<a href="mailto:{m.group(0)}" style="color:inherit;text-decoration:none;">{m.group(0)}</a>',
-        _attr(value))
+    return _ADDRESS.sub(lambda m: m.group(0).replace('@', '<span>@</span>', 1), _attr(value))
 
 
 def local_now() -> datetime:
@@ -97,6 +100,7 @@ _DARK_CSS = """
   .m-ink { color: #F2F5F3 !important; }
   .m-muted { color: #97A29C !important; }
   .m-line { border-color: #262C29 !important; }
+  .m-rule { background-color: #262C29 !important; }
   .m-mark { background-color: #F2F5F3 !important; }
   .m-mark i { background-color: #0E1110 !important; }
   .m-ok { color: #3FCF7F !important; } .m-ok-bg { background-color: #1A3325 !important; }
@@ -114,31 +118,53 @@ _DARK_CSS = """
 }
 """
 
+# Word knows only bold and normal, and takes the first font of a list even
+# when it is not installed (then it shows Times New Roman).
+_MSO_CSS = """<!--[if mso]><style>
+body, table, td, th, p, a, span, h1, div { font-family: 'Segoe UI', Arial, sans-serif !important; }
+.m-mono { font-family: Consolas, 'Courier New', monospace !important; }
+.m-b { font-weight: bold !important; }
+</style><![endif]-->"""
+
+_TABLE = 'role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"'
+
 
 def _tone(tone: Optional[str]) -> Tuple[str, str]:
     return TONES.get(tone or 'muted', TONES['muted'])
 
 
+def _rule(colspan: int = 1) -> str:
+    """A 1px divider row; Word draws cell borders unevenly."""
+    return (f'<tr><td class="m-rule" colspan="{colspan}" height="1" style="height:1px;font-size:1px;line-height:1px;'
+            f'mso-line-height-rule:exactly;background-color:{LINE};">&nbsp;</td></tr>')
+
+
 def tag(text, tone: str = 'muted') -> Safe:
-    """A small status label, as .ui-tag."""
+    """A small status label, as .ui-tag. A table cell, so Word keeps its padding."""
     color, tint = _tone(tone)
     return Safe(
-        f'<span class="m-{tone} m-{tone}-bg" style="display:inline-block;padding:2px 8px;border-radius:6px;'
-        f'background-color:{tint};color:{color};font-size:12px;font-weight:700;line-height:1.4;'
-        f'white-space:nowrap;">{_e(text)}</span>'
+        f'<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="display:inline-table;vertical-align:middle;">'
+        f'<tr><td class="m-{tone} m-{tone}-bg m-b" bgcolor="{tint}" style="padding:2px 8px;border-radius:6px;'
+        f'background-color:{tint};color:{color};font-size:12px;font-weight:700;line-height:1.4;white-space:nowrap;">'
+        f'{_e(text)}</td></tr></table>'
     )
 
 
 def strong(text, tone: Optional[str] = None) -> Safe:
     color = _tone(tone)[0] if tone else INK
     cls = f'm-{tone}' if tone else 'm-ink'
-    return Safe(f'<b class="{cls}" style="color:{color};font-weight:650;">{_e(text)}</b>')
+    return Safe(f'<b class="{cls} m-b" style="color:{color};font-weight:650;">{_e(text)}</b>')
 
 
-def mono(text) -> Safe:
+def mono(text, max_length: Optional[int] = None) -> Safe:
     """Technical values (addresses, record text, keys). Long keys have no
-    spaces, so they may break anywhere instead of widening the email."""
-    return Safe(f'<span style="font-family:{MONO};font-size:13px;word-break:break-all;">{_e(text)}</span>')
+    spaces, so they may break anywhere instead of widening the email. Word
+    cannot break them at all, so max_length shortens them in the middle."""
+    text = '' if text is None else str(text)
+    if max_length and len(text) > max_length:
+        keep = max_length - 1
+        text = f'{text[:keep * 2 // 3]}…{text[-(keep - keep * 2 // 3):]}'
+    return Safe(f'<span class="m-mono" style="font-family:{MONO};font-size:13px;word-break:break-all;">{_e(text)}</span>')
 
 
 def link(text, url) -> Safe:
@@ -155,19 +181,20 @@ def join(parts: Iterable, sep: str = ', ') -> Safe:
 
 def paragraph(text, muted: bool = False) -> Safe:
     color, cls = (MUTED, 'm-muted') if muted else (INK, 'm-ink')
-    return Safe(f'<p class="{cls}" style="margin:0 0 14px;color:{color};font-size:15px;line-height:1.55;">{_lines(text)}</p>')
+    return Safe(f'<p class="{cls}" style="margin:0;color:{color};font-size:15px;line-height:1.55;">{_lines(text)}</p>')
 
 
 def banner(tone: str, title, text=None) -> Safe:
     """A tinted message across the full width, as .ui-banner."""
     color, tint = _tone(tone)
-    body = (f'<div class="m-ink" style="margin-top:3px;color:{INK};font-size:14px;font-weight:400;line-height:1.5;">'
-            f'{_lines(text)}</div>') if text else ''
+    body = (f'<tr><td class="m-ink" style="padding:3px 16px 0;color:{INK};font-size:14px;line-height:1.5;">'
+            f'{_lines(text)}</td></tr>') if text else ''
     return Safe(
-        f'<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 14px;">'
-        f'<tr><td class="m-{tone}-bg" style="padding:13px 16px;border-radius:12px;background-color:{tint};">'
-        f'<div class="m-{tone}" style="color:{color};font-size:14px;font-weight:700;line-height:1.4;">{_lines(title)}</div>'
-        f'{body}</td></tr></table>'
+        f'<table {_TABLE} class="m-{tone}-bg" bgcolor="{tint}" style="background-color:{tint};border-radius:12px;">'
+        f'<tr><td height="13" style="height:13px;font-size:1px;line-height:1px;">&nbsp;</td></tr>'
+        f'<tr><td class="m-{tone} m-b" style="padding:0 16px;color:{color};font-size:14px;font-weight:700;line-height:1.4;">'
+        f'{_lines(title)}</td></tr>{body}'
+        f'<tr><td height="13" style="height:13px;font-size:1px;line-height:1px;">&nbsp;</td></tr></table>'
     )
 
 
@@ -175,56 +202,54 @@ Stat = Tuple  # (label, value) or (label, value, tone) or (label, value, tone, n
 
 
 def stats(items: Sequence[Stat], per_row: int = 3) -> Safe:
-    """Key figures in bordered cells, as .ui-kpis. Stacks on phones."""
+    """Key figures in bordered cells, as .ui-kpis. One table per row, so a
+    short last row keeps the width of the others."""
+    width = int(100 / per_row)
     rows = []
     for start in range(0, len(items), per_row):
-        cells = []
         chunk = list(items[start:start + per_row])
-        width = int(100 / per_row)
-        for i, item in enumerate(chunk):
+        cells = []
+        for i in range(per_row):
+            if i:
+                cells.append('<td width="8" style="width:8px;font-size:1px;line-height:1px;">&nbsp;</td>')
+            if i >= len(chunk):
+                cells.append(f'<td width="{width}%">&nbsp;</td>')
+                continue
+            item = chunk[i]
             label, value = item[0], item[1]
             tone = item[2] if len(item) > 2 else None
             note = item[3] if len(item) > 3 else None
             color = _tone(tone)[0] if tone else INK
             vcls = f'm-{tone}' if tone else 'm-ink'
-            note_html = (f'<div class="m-muted" style="margin-top:2px;color:{MUTED};font-size:12px;">{_e(note)}</div>'
+            note_html = (f'<br><span class="m-muted" style="color:{MUTED};font-size:12px;line-height:1.4;">{_e(note)}</span>'
                          if note else '')
-            if i:
-                cells.append('<td class="m-stat-gap" width="8" style="width:8px;font-size:0;">&nbsp;</td>')
             cells.append(
                 f'<td class="m-stat m-line" width="{width}%" valign="top" style="padding:11px 14px;border:1px solid {LINE};'
                 f'border-radius:12px;">'
-                f'<div class="m-muted" style="color:{MUTED};font-size:12.5px;line-height:1.4;">{_e(label)}</div>'
-                f'<div class="{vcls} m-stat-v" style="color:{color};font-size:24px;line-height:1.2;font-weight:750;'
-                f'letter-spacing:-0.02em;">{_e(value)}</div>{note_html}</td>'
+                f'<span class="m-muted" style="color:{MUTED};font-size:12.5px;line-height:1.4;">{_e(label)}</span><br>'
+                f'<b class="{vcls} m-stat-v" style="color:{color};font-size:24px;line-height:1.3;font-weight:700;'
+                f'letter-spacing:-0.02em;">{_e(value)}</b>{note_html}</td>'
             )
-        for _ in range(per_row - len(chunk)):
-            cells.append('<td class="m-stat-gap" width="8" style="width:8px;font-size:0;">&nbsp;</td>'
-                         f'<td class="m-stat-gap" width="{width}%">&nbsp;</td>')
-        rows.append(f'<tr>{"".join(cells)}</tr>')
-    gap = '<tr><td style="height:8px;font-size:0;line-height:0;">&nbsp;</td></tr>'
-    return Safe(
-        '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" '
-        'style="margin:0 0 14px;border-collapse:separate;">' + gap.join(rows) + '</table>'
-    )
+        rows.append(f'<table {_TABLE}><tr>{"".join(cells)}</tr></table>')
+    return Safe('<div style="font-size:1px;line-height:8px;">&nbsp;</div>'.join(rows))
 
 
 def kv(rows: Sequence[Tuple]) -> Safe:
     """Label on the left, value on the right, a line between rows (.ui-kv).
     Each row is (label, value) or (label, value, tone)."""
     out = []
-    for i, row in enumerate(rows):
+    for row in rows:
         label, value = row[0], row[1]
         tone = row[2] if len(row) > 2 else None
         color = _tone(tone)[0] if tone else INK
         vcls = f'm-{tone}' if tone else 'm-ink'
-        border = f'border-top:1px solid {LINE};' if i else ''
+        out.append(_rule(2))
         out.append(
-            f'<tr><td class="m-muted m-line" valign="top" style="padding:9px 16px;{border}color:{MUTED};font-size:14px;">{_e(label)}</td>'
-            f'<td class="{vcls} m-line" valign="top" align="right" style="padding:9px 16px;{border}color:{color};font-size:14px;'
-            f'font-weight:650;text-align:right;overflow-wrap:break-word;">{_lines(value)}</td></tr>'
+            f'<tr><td class="m-muted m-cell" valign="top" style="padding:9px 16px;color:{MUTED};font-size:14px;">{_e(label)}</td>'
+            f'<td class="{vcls} m-cell" valign="top" align="right" style="padding:9px 16px;color:{color};font-size:14px;'
+            f'text-align:right;overflow-wrap:break-word;"><b style="font-weight:650;">{_lines(value)}</b></td></tr>'
         )
-    return Safe('<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">' + ''.join(out) + '</table>')
+    return Safe(f'<table {_TABLE}>' + ''.join(out) + '</table>')
 
 
 def table(columns: Sequence[Union[str, Tuple[str, str]]], rows: Sequence[Sequence], empty: str = 'Nothing to show',
@@ -232,52 +257,61 @@ def table(columns: Sequence[Union[str, Tuple[str, str]]], rows: Sequence[Sequenc
     """A data table inside a panel. Columns are names or (name, 'right');
     head=False leaves out the header row."""
     cols = [(c, 'left') if isinstance(c, str) else c for c in columns]
-    head_html = ''.join(
-        f'<th class="m-muted m-line m-cell" align="{a}" style="padding:9px 16px 8px;border-top:1px solid {LINE};color:{MUTED};font-size:12.5px;font-weight:600;'
-        f'text-align:{a};">{_e(c)}</th>'
-        for c, a in cols
-    )
-    body = []
+    span = len(cols)
+    out = []
+    if head:
+        out.append(_rule(span))
+        out.append('<tr>' + ''.join(
+            f'<th class="m-muted m-cell" align="{a}" style="padding:9px 16px 8px;color:{MUTED};font-size:12.5px;'
+            f'font-weight:600;text-align:{a};">{_e(c)}</th>'
+            for c, a in cols
+        ) + '</tr>')
     for row in rows:
-        body.append('<tr>' + ''.join(
-            f'<td class="m-ink m-line m-cell" align="{a}" valign="top" style="padding:9px 16px;border-top:1px solid {LINE};'
+        out.append(_rule(span))
+        out.append('<tr>' + ''.join(
+            f'<td class="m-ink m-cell" align="{a}" valign="top" style="padding:9px 16px;'
             f'color:{INK};font-size:14px;line-height:1.45;text-align:{a};'
             f'{"white-space:nowrap;" if a == "right" else "overflow-wrap:break-word;"}">{_lines(cell)}</td>'
             for cell, (_, a) in zip(row, cols)
         ) + '</tr>')
-    if not body:
-        body.append(f'<tr><td colspan="{len(cols)}" class="m-muted m-line" style="padding:12px 16px;border-top:1px solid {LINE};'
-                    f'color:{MUTED};font-size:14px;">{_e(empty)}</td></tr>')
-    return Safe('<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">'
-                f'{f"<tr>{head_html}</tr>" if head else ""}{"".join(body)}</table>')
+    if not rows:
+        out.append(_rule(span))
+        out.append(f'<tr><td colspan="{span}" class="m-muted m-cell" style="padding:12px 16px;'
+                   f'color:{MUTED};font-size:14px;">{_e(empty)}</td></tr>')
+    return Safe(f'<table {_TABLE}>' + ''.join(out) + '</table>')
 
 
 def panel(title, *blocks, count=None, note=None) -> Safe:
     """A grey panel with a heading, as .ui-panel."""
     count_html = (f' <span class="m-muted" style="color:{MUTED};font-weight:500;">{_e(count)}</span>'
                   if count is not None else '')
-    note_html = (f'<div class="m-muted" style="margin-top:2px;color:{MUTED};font-size:12.5px;font-weight:400;">{_e(note)}</div>'
+    note_html = (f'<br><span class="m-muted" style="color:{MUTED};font-size:12.5px;font-weight:400;">{_e(note)}</span>'
                  if note else '')
+    body = ''.join(f'<tr><td>{_e(b)}</td></tr>' for b in blocks)
     return Safe(
-        '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 14px;">'
-        f'<tr><td class="m-panel" style="background-color:{PANEL};border-radius:12px;padding:0 0 4px;">'
-        f'<div class="m-ink" style="padding:13px 16px 9px;color:{INK};font-size:15px;font-weight:650;">{_e(title)}{count_html}{note_html}</div>'
-        f'{"".join(_e(b) for b in blocks)}</td></tr></table>'
+        f'<table {_TABLE} class="m-panel" bgcolor="{PANEL}" style="background-color:{PANEL};border-radius:12px;">'
+        f'<tr><td class="m-ink m-cell" style="padding:13px 16px 9px;color:{INK};font-size:15px;">'
+        f'<span class="m-b" style="font-weight:650;">{_e(title)}</span>{count_html}{note_html}</td></tr>'
+        f'{body}<tr><td height="4" style="height:4px;font-size:1px;line-height:1px;">&nbsp;</td></tr></table>'
     )
 
 
 def panel_text(text) -> Safe:
     """Free text inside a panel, with the panel padding."""
-    return Safe(f'<div class="m-ink m-line" style="padding:10px 16px 12px;border-top:1px solid {LINE};color:{INK};'
-                f'font-size:14px;line-height:1.55;">{_lines(text)}</div>')
+    return Safe(f'<table {_TABLE}>{_rule()}<tr><td class="m-ink m-cell" style="padding:10px 16px 12px;color:{INK};'
+                f'font-size:14px;line-height:1.55;">{_lines(text)}</td></tr></table>')
 
 
 def _mark() -> str:
-    """The app icon reduced to its log lines: a dark tile with three bars."""
+    """The app icon reduced to its log lines: a dark tile with three bars.
+    Word draws neither the bars nor the rounded corners, so it gets a plain
+    square instead."""
     bar = 'display:block;height:3px;border-radius:2px;background-color:#FFFFFF;margin:0 0 3px;'
-    return (f'<td class="m-mark" width="14" height="26" valign="middle" style="width:14px;height:26px;background-color:{INK};'
-            f'border-radius:7px;padding:0 6px;">'
-            f'<i style="{bar}width:14px;"></i><i style="{bar}width:11px;opacity:.75;"></i><i style="{bar}width:8px;opacity:.5;margin:0;"></i></td>')
+    return (f'<!--[if mso]><td width="26" height="26" bgcolor="{INK}" style="width:26px;height:26px;">&nbsp;</td><![endif]-->'
+            f'<!--[if !mso]><!--><td class="m-mark" width="14" height="26" valign="middle" style="width:14px;height:26px;'
+            f'background-color:{INK};border-radius:7px;padding:0 6px;">'
+            f'<i style="{bar}width:14px;"></i><i style="{bar}width:11px;opacity:.75;"></i>'
+            f'<i style="{bar}width:8px;opacity:.5;margin:0;"></i></td><!--<![endif]-->')
 
 
 def render(*, title, topic, tone: str = 'muted', intro=None, blocks: Sequence = (),
@@ -303,9 +337,10 @@ def render(*, title, topic, tone: str = 'muted', intro=None, blocks: Sequence = 
     preheader = preheader if preheader is not None else intro
     pre_html = (f'<div style="display:none;max-height:0;overflow:hidden;opacity:0;mso-hide:all;">{_attr(preheader)}'
                 f'{"&nbsp;&zwnj;" * 40}</div>') if preheader else ''
-    intro_html = (f'<p class="m-muted" style="margin:10px 0 0;color:{MUTED};font-size:16px;line-height:1.5;">{_lines(intro)}</p>'
-                  if intro else '')
+    intro_html = (f'<tr><td class="m-muted" style="padding:10px 0 0;color:{MUTED};font-size:16px;line-height:1.5;">'
+                  f'{_lines(intro)}</td></tr>' if intro else '')
     footer_text = f'Sent by {_e(app_title)}.' + (f' {_lines(footer)}' if footer else '')
+    blocks_html = ''.join(f'<tr><td style="padding:0 0 14px;">{_e(b)}</td></tr>' for b in blocks)
 
     return f"""<!DOCTYPE html>
 <html lang="en" xmlns="http://www.w3.org/1999/xhtml">
@@ -316,6 +351,7 @@ def render(*, title, topic, tone: str = 'muted', intro=None, blocks: Sequence = 
 <meta name="supported-color-schemes" content="light dark">
 <title>{_attr(title)}</title>
 <style>{_DARK_CSS}</style>
+{_MSO_CSS}
 </head>
 <body class="m-bg" style="margin:0;padding:0;background-color:{BG};-webkit-text-size-adjust:100%;">
 {pre_html}
@@ -324,19 +360,22 @@ def render(*, title, topic, tone: str = 'muted', intro=None, blocks: Sequence = 
 <!--[if mso]><table role="presentation" width="600" align="center" cellpadding="0" cellspacing="0" border="0"><tr><td><![endif]-->
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:600px;font-family:{FONT};">
 <tr><td style="padding:0 0 28px;">
-  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
+  <table {_TABLE}><tr>
     {_mark()}
-    <td class="m-ink" style="padding-left:10px;color:{INK};font-size:15px;font-weight:700;letter-spacing:-0.01em;">{_e(app_title)}</td>
+    <td class="m-ink m-b" style="padding-left:10px;color:{INK};font-size:15px;font-weight:700;letter-spacing:-0.01em;">{_e(app_title)}</td>
     <td class="m-muted" align="right" style="color:{MUTED};font-size:13px;white-space:nowrap;">{_e(date)}</td>
   </tr></table>
 </td></tr>
 <tr><td style="padding:0 0 24px;">
-  {tag(topic, tone)}
-  <h1 class="m-ink m-h1" style="margin:12px 0 0;color:{INK};font-size:30px;line-height:1.15;font-weight:800;letter-spacing:-0.03em;">{_e(title)}</h1>
+  <table {_TABLE}>
+  <tr><td>{tag(topic, tone)}</td></tr>
+  <tr><td class="m-ink m-h1 m-b" style="padding:12px 0 0;color:{INK};font-size:30px;line-height:1.15;font-weight:800;letter-spacing:-0.03em;">
+    <h1 class="m-ink m-h1" style="margin:0;font-size:30px;line-height:1.15;font-weight:800;color:{INK};">{_e(title)}</h1></td></tr>
   {intro_html}
+  </table>
 </td></tr>
-<tr><td>{"".join(_e(b) for b in blocks)}</td></tr>
-<tr><td class="m-muted m-line" style="padding:18px 0 0;margin-top:10px;border-top:1px solid {LINE};color:{MUTED};font-size:12.5px;line-height:1.5;">
+{blocks_html}
+<tr><td class="m-muted m-line" style="padding:18px 0 0;border-top:1px solid {LINE};color:{MUTED};font-size:12.5px;line-height:1.5;">
   {footer_text}
 </td></tr>
 </table>

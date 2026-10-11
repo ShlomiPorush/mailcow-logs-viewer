@@ -62,9 +62,17 @@ def test_the_date_is_in_the_app_timezone(monkeypatch):
 def test_addresses_keep_the_text_colour():
     """Gmail made the address in a title a blue underlined link of its own."""
     html = e.render(title='Sending is off for anna@example.com', topic='Security')
-    assert '<a href="mailto:anna@example.com" style="color:inherit;text-decoration:none;">anna@example.com</a>' in html
+    assert 'Sending is off for anna<span>@</span>example.com</h1>' in html
+    assert 'mailto:' not in html
     assert '<title>Sending is off for anna@example.com</title>' in html
-    assert e.link('Look up', 'https://example.com/?q=a@example.com').count('<a') == 1
+    assert 'href="https://example.com/?q=a@example.com"' in e.link('Look up', 'https://example.com/?q=a@example.com')
+
+
+def test_long_values_are_shortened_in_the_middle():
+    value = 'v=DKIM1;k=rsa;p=' + 'A' * 300 + 'END'
+    shown = e.mono(value, max_length=56)
+    assert 'v=DKIM1;k=rsa;p=' in shown and 'END' in shown and '…' in shown
+    assert len(shown.split('>', 1)[1].rsplit('<', 1)[0]) == 56
 
 
 def _summary_data():
