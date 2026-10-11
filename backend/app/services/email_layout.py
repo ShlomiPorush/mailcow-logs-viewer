@@ -40,7 +40,20 @@ def _attr(value) -> str:
     return escape('' if value is None else str(value), quote=True)
 
 
-_ADDRESS = re.compile(r'[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+')
+# Runs of the characters an address is made of. The text comes from inbound
+# mail (DMARC subjects) among others, so the scan must stay linear: one
+# character class, no nested or overlapping quantifiers; whether a run is an
+# address is decided by plain string checks.
+_ADDRESS_RUN = re.compile(r'[A-Za-z0-9._%+@-]+')
+_DOMAIN_CHARS = frozenset('abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-')
+
+
+def _is_address(text: str) -> bool:
+    local, at, domain = text.partition('@')
+    if not at or not local or '@' in domain:
+        return False
+    labels = domain.split('.')
+    return len(labels) >= 2 and all(label and set(label) <= _DOMAIN_CHARS for label in labels)
 
 
 def _e(value, cls: str = 'm-ink') -> str:
@@ -50,9 +63,16 @@ def _e(value, cls: str = 'm-ink') -> str:
     if isinstance(value, Safe):
         return value
     color = _CLASS_COLORS.get(cls, INK)
-    return _ADDRESS.sub(
-        lambda m: f'<a href="mailto:{m.group(0)}" class="{cls}" style="color:{color};text-decoration:none;">{m.group(0)}</a>',
-        _attr(value))
+
+    def link(match):
+        run = match.group(0)
+        address = run.rstrip('.')  # the full stop of a sentence is not part of it
+        if not _is_address(address):
+            return run
+        return (f'<a href="mailto:{address}" class="{cls}" style="color:{color};text-decoration:none;">'
+                f'{address}</a>{run[len(address):]}')
+
+    return _ADDRESS_RUN.sub(link, _attr(value))
 
 
 def local_now() -> datetime:
