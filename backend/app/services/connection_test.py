@@ -74,7 +74,7 @@ def test_smtp_connection() -> Dict:
         msg['Subject'] = 'SMTP Test - mailcow Logs Viewer'
 
         body = "This is a test email from mailcow Logs Viewer.\n\nIf you received this, SMTP is working correctly."
-        msg.attach(MIMEText(body, 'plain'))
+        msg.attach(MIMEText(body, 'plain', 'utf-8'))
         from . import email_layout as e
         msg.attach(MIMEText(e.render(
             title='SMTP works', topic='Test', tone='ok',
@@ -84,7 +84,7 @@ def test_smtp_connection() -> Dict:
                 ('From', msg['From']),
                 ('To', msg['To']),
             ]))],
-            footer='The Test SMTP button sent this email.'), 'html'))
+            footer='The Test SMTP button sent this email.'), 'html', 'utf-8'))
         
         server.send_message(msg)
         logs.append("Test email sent successfully")

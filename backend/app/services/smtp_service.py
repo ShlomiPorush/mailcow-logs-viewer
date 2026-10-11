@@ -66,11 +66,14 @@ class SmtpService:
             msg['To'] = recipient
             msg['Date'] = datetime.utcnow().strftime('%a, %d %b %Y %H:%M:%S +0000')
             
-            part1 = MIMEText(text_content, 'plain')
+            # UTF-8 parts are base64 encoded: SMTP allows at most 998
+            # characters per line, and a server breaks a longer 7bit line
+            # wherever it likes, even in the middle of an HTML tag.
+            part1 = MIMEText(text_content, 'plain', 'utf-8')
             msg.attach(part1)
-            
+
             if html_content:
-                part2 = MIMEText(html_content, 'html')
+                part2 = MIMEText(html_content, 'html', 'utf-8')
                 msg.attach(part2)
             
             # Determine connection mode

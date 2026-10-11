@@ -174,7 +174,7 @@ def build_summary_email(data: Dict[str, Any], now: datetime = None) -> Tuple[str
     """Subject, plain text and HTML of the weekly summary."""
     from ..services import email_layout as e
 
-    now = now or datetime.now()
+    now = now or e.local_now()
     system = data['system']
     traffic = data['traffic']
     storage = data['storage']
@@ -185,7 +185,7 @@ def build_summary_email(data: Dict[str, Any], now: datetime = None) -> Tuple[str
     quarantine = data['quarantine']['count']
 
     start = now - timedelta(days=6)
-    period = f"{start.day} {start.strftime('%b')} to {now.day} {now.strftime('%b %Y')}"
+    period = f"{e.format_date(start)} to {e.format_date(now)}"
     listed = [h for h in hosts if h.get('status') == 'listed']
     rate = traffic.get('failure_rate', 0) or 0
     rate_high = rate > 5

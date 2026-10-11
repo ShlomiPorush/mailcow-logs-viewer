@@ -48,9 +48,23 @@ def test_line_breaks_survive_escaping():
 
 
 def test_dark_mode_and_header():
-    html = e.render(title='T', topic='Weekly', app_title='My Logs', when=datetime(2026, 10, 11))
+    html = e.render(title='T', topic='Weekly', app_title='My Logs', when=datetime(2026, 10, 11, 9, 5))
     assert 'prefers-color-scheme: dark' in html
-    assert 'My Logs' in html and '11 Oct 2026' in html
+    assert 'My Logs' in html and '11/10/2026 09:05' in html
+
+
+def test_the_date_is_in_the_app_timezone(monkeypatch):
+    from app.config import settings
+    monkeypatch.setattr(settings._inner, 'tz', 'Asia/Jerusalem')
+    assert e.local_now().utcoffset().total_seconds() in (2 * 3600, 3 * 3600)
+
+
+def test_addresses_keep_the_text_colour():
+    """Gmail made the address in a title a blue underlined link of its own."""
+    html = e.render(title='Sending is off for anna@example.com', topic='Security')
+    assert '<a href="mailto:anna@example.com" style="color:inherit;text-decoration:none;">anna@example.com</a>' in html
+    assert '<title>Sending is off for anna@example.com</title>' in html
+    assert e.link('Look up', 'https://example.com/?q=a@example.com').count('<a') == 1
 
 
 def _summary_data():
@@ -71,7 +85,7 @@ def _summary_data():
 def test_weekly_summary_uses_the_layout_and_names_what_needs_a_look():
     from app.routers.reporting import build_summary_email
     subject, text, html = build_summary_email(_summary_data(), now=datetime(2026, 10, 11))
-    assert subject == 'Weekly summary: 5 Oct to 11 Oct 2026'
+    assert subject == 'Weekly summary: 05/10/2026 to 11/10/2026'
     assert LAYOUT_MARK in html
     assert 'Failure rate' in html and 'Rating' not in html
     assert '12,480' in html
@@ -194,6 +208,45 @@ def test_blacklist_job_sends_improved(monkeypatch):
     sent = _run_blacklist_job(monkeypatch, listed_count=1, prev_listed=3)
     assert [s[0] for s in sent] == ['Blacklist: 1 host is on a blacklist', 'Blacklist: 1 host still listed (was 3)']
     assert LAYOUT_MARK in sent[1][2] and '1 host is still listed, down from 3.' in sent[1][2]
+
+
+def test_sent_mail_keeps_lines_short(monkeypatch):
+    """SMTP allows at most 998 characters per line. The layout writes long
+    lines, and a 7bit part sent as it is was broken by the mail server in the
+    middle of a tag, so Gmail showed '< /table>' as text. The parts must be
+    encoded so that no line is too long and the HTML arrives unchanged."""
+    import email
+    from app.services import smtp_service
+
+    sent = {}
+
+    class FakeSMTP:
+        def __init__(self, *a, **kw):
+            pass
+
+        def sendmail(self, sender, recipients, message):
+            sent['message'] = message
+
+        def quit(self):
+            pass
+
+    monkeypatch.setattr(smtp_service.smtplib, 'SMTP', FakeSMTP)
+    monkeypatch.setattr(type(smtp_service.settings._inner), 'notification_smtp_configured', property(lambda self: True))
+    for key, value in {'smtp_relay_mode': True, 'smtp_use_ssl': False, 'smtp_use_tls': False, 'smtp_port': 25,
+                       'smtp_host': 'smtp.example.com', 'smtp_from': 'logs@example.com'}.items():
+        monkeypatch.setattr(smtp_service.settings._inner, key, value)
+
+    from app.routers.reporting import build_summary_email
+    subject, text, html = build_summary_email(_summary_data(), now=datetime(2026, 10, 11))
+    assert max(len(line) for line in html.splitlines()) > 998, 'the test needs a long line'
+    assert smtp_service.send_notification_email('admin@example.com', subject, text, html)
+
+    raw = sent['message']
+    assert max(len(line) for line in raw.splitlines()) <= 998
+    parts = {p.get_content_type(): p.get_payload(decode=True).decode('utf-8')
+             for p in email.message_from_string(raw).walk() if not p.is_multipart()}
+    assert parts['text/html'] == html
+    assert parts['text/plain'] == text
 
 
 def test_no_emoji_in_blacklist_subjects():

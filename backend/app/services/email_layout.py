@@ -16,6 +16,7 @@ Every value passed to a block is escaped. Only the output of another block
         blocks=[panel('Hosts', table(...))],
     )
 """
+import re
 from datetime import datetime
 from html import escape
 from typing import Iterable, Optional, Sequence, Tuple, Union
@@ -25,10 +26,40 @@ class Safe(str):
     """Markup produced by this module; inserted without escaping."""
 
 
-def _e(value) -> str:
+def _attr(value) -> str:
+    """Escape for an attribute or a place that takes no markup."""
     if isinstance(value, Safe):
         return value
     return escape('' if value is None else str(value), quote=True)
+
+
+_ADDRESS = re.compile(r'[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+')
+
+
+def _e(value) -> str:
+    """Escape visible text. Gmail and Outlook turn every address into a blue
+    link of their own; an address that already is a link keeps the colour of
+    the text around it."""
+    if isinstance(value, Safe):
+        return value
+    return _ADDRESS.sub(
+        lambda m: f'<a href="mailto:{m.group(0)}" style="color:inherit;text-decoration:none;">{m.group(0)}</a>',
+        _attr(value))
+
+
+def local_now() -> datetime:
+    """Now, in the timezone set in TZ, like the dates in the app."""
+    from zoneinfo import ZoneInfo
+    try:
+        from ..config import settings
+        return datetime.now(ZoneInfo(settings.tz or 'UTC'))
+    except Exception:
+        return datetime.now(ZoneInfo('UTC'))
+
+
+def format_date(when: datetime, time: bool = False) -> str:
+    """Day/month/year, as the old emails and the numeric dates in the app."""
+    return when.strftime('%d/%m/%Y %H:%M' if time else '%d/%m/%Y')
 
 
 def _lines(value) -> str:
@@ -115,7 +146,7 @@ def link(text, url) -> Safe:
     url = '' if url is None else str(url)
     if not url.lower().startswith(('http://', 'https://')):
         return Safe(_e(text))
-    return Safe(f'<a href="{_e(url)}" class="m-ink" style="color:{INK};text-decoration:underline;">{_e(text)}</a>')
+    return Safe(f'<a href="{_attr(url)}" class="m-ink" style="color:{INK};text-decoration:underline;">{_e(text)}</a>')
 
 
 def join(parts: Iterable, sep: str = ', ') -> Safe:
@@ -268,10 +299,9 @@ def render(*, title, topic, tone: str = 'muted', intro=None, blocks: Sequence = 
             app_title = settings.app_title or 'mailcow Logs Viewer'
         except Exception:
             app_title = 'mailcow Logs Viewer'
-    when = when or datetime.now()
-    date = f'{when.day} {when.strftime("%b %Y")}'
+    date = format_date(when or local_now(), time=True)
     preheader = preheader if preheader is not None else intro
-    pre_html = (f'<div style="display:none;max-height:0;overflow:hidden;opacity:0;mso-hide:all;">{_e(preheader)}'
+    pre_html = (f'<div style="display:none;max-height:0;overflow:hidden;opacity:0;mso-hide:all;">{_attr(preheader)}'
                 f'{"&nbsp;&zwnj;" * 40}</div>') if preheader else ''
     intro_html = (f'<p class="m-muted" style="margin:10px 0 0;color:{MUTED};font-size:16px;line-height:1.5;">{_lines(intro)}</p>'
                   if intro else '')
@@ -284,7 +314,7 @@ def render(*, title, topic, tone: str = 'muted', intro=None, blocks: Sequence = 
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light dark">
 <meta name="supported-color-schemes" content="light dark">
-<title>{_e(title)}</title>
+<title>{_attr(title)}</title>
 <style>{_DARK_CSS}</style>
 </head>
 <body class="m-bg" style="margin:0;padding:0;background-color:{BG};-webkit-text-size-adjust:100%;">

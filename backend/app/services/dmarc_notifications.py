@@ -4,7 +4,6 @@ Uses the global SMTP service to send DMARC-specific notifications
 """
 import logging
 from typing import List, Dict
-from datetime import datetime
 
 from ..config import settings
 from . import email_layout as e
@@ -62,7 +61,7 @@ def _create_text_content(failed_emails: List[Dict], sync_id: int) -> str:
     lines = [
         _title(failed_emails),
         _intro(sync_id),
-        f"Date: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')}",
+        f"Date: {e.format_date(e.local_now(), time=True)}",
         "",
     ]
 
