@@ -258,8 +258,11 @@ def stats(items: Sequence[Stat], per_row: int = 3) -> Safe:
                 f'letter-spacing:-0.02em;">{_e(value, vcls)}</b>{note_html}</td>'
             )
         rows.append(f'<table {_TABLE}><tr>{"".join(cells)}</tr></table>')
+    # Outlook drops the bottom border of cards in the last row of a table, so
+    # an empty 1px row closes the table
     return Safe(f'<table {_TABLE}>' + ''.join(
-        f'<tr><td style="padding:{"8px" if i else "0"} 0 0;">{row}</td></tr>' for i, row in enumerate(rows)) + '</table>')
+        f'<tr><td style="padding:{"8px" if i else "0"} 0 0;">{row}</td></tr>' for i, row in enumerate(rows))
+        + '<tr><td height="1" style="height:1px;font-size:1px;line-height:1px;">&nbsp;</td></tr></table>')
 
 
 def kv(rows: Sequence[Tuple]) -> Safe:
