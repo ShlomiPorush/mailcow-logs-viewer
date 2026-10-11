@@ -229,9 +229,11 @@ def test_blacklist_job_sends_the_alert(monkeypatch):
     assert len(sent) == 1
     subject, text, html, alert_type = sent[0]
     assert subject == 'Blacklist: 1 host is on a blacklist' and alert_type == 'blacklist'
+    # Exact comparisons: CodeQL reads "host in ..." as URL sanitizing
     shown = _texts(html)
-    assert LAYOUT_MARK in html and 'mx1.example.com' in shown and 'Spamhaus ZEN' in shown
-    assert '  - Spamhaus ZEN (zen.spamhaus.org)' in text.splitlines()
+    assert LAYOUT_MARK in html
+    assert any(t == 'mx1.example.com' for t in shown) and any(t == 'Spamhaus ZEN' for t in shown)
+    assert any(line == '  - Spamhaus ZEN (zen.spamhaus.org)' for line in text.splitlines())
 
 
 def test_blacklist_job_sends_cleared(monkeypatch):
