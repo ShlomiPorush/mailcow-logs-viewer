@@ -4482,9 +4482,11 @@ Manually trigger IMAP sync operation.
   "email_id": "21",
   "message_id": "",
   "subject": "Report Domain: example.com",
-  "error": "Not a valid DMARC report email"
+  "error": "No DMARC attachments found"
 }
 ```
+
+Bounces and other emails without a report are marked as read and skipped; they are not counted as failed.
 
 **Notes:**
 - Returns immediately with sync results (synchronous operation)
