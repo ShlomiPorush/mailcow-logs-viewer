@@ -100,8 +100,8 @@ These settings **must** be configured in your `.env` file:
 
 | Variable | Type | Default | Description |
 |----------|------|---------|-------------|
-| `ADMIN_EMAIL` | string | (empty) | Administrator email for system notifications |
-| `BLACKLIST_ALERT_EMAIL` | string | (empty) | Email address for blacklist alerts (defaults to `ADMIN_EMAIL` if not set) |
+| `ADMIN_EMAIL` | string | (empty) | Administrator email for system notifications. Several addresses can be separated by commas |
+| `BLACKLIST_ALERT_EMAIL` | string | (empty) | Email address for blacklist alerts (defaults to `ADMIN_EMAIL` if not set). Several addresses can be separated by commas |
 | `ENABLE_WEEKLY_SUMMARY` | boolean | `true` | Enable weekly summary email report (sent to `ADMIN_EMAIL`) |
 
 ---
@@ -212,7 +212,7 @@ Which sending IPs must pass each domain's SPF record on the Domains page. With a
 | `DMARC_RETENTION_DAYS` | integer | `60` | How many days DMARC and TLS reports are kept |
 | `DMARC_MANUAL_UPLOAD_ENABLED` | boolean | `true` | Allow uploading DMARC and TLS reports by hand in the UI |
 | `DMARC_ALLOW_REPORT_DELETE` | boolean | `false` | Allow deleting DMARC and TLS reports from the UI |
-| `DMARC_ERROR_EMAIL` | string | (empty) | Email address for errors while importing DMARC and TLS reports (defaults to `ADMIN_EMAIL` if not set) |
+| `DMARC_ERROR_EMAIL` | string | (empty) | Email address for errors while importing DMARC and TLS reports (defaults to `ADMIN_EMAIL` if not set). Several addresses can be separated by commas |
 
 ### DMARC Insights (Policy Recommendations)
 

@@ -423,7 +423,7 @@ class Settings(BaseSettings):
     dmarc_error_email: Optional[str] = Field(
         default=None,
         env='DMARC_ERROR_EMAIL',
-        description='Email address for DMARC error notifications (defaults to ADMIN_EMAIL if not set)'
+        description='Email address(es) for DMARC error notifications, separated by commas (defaults to ADMIN_EMAIL if not set)'
     )
 
     # MaxMind Configuration
@@ -684,14 +684,14 @@ class Settings(BaseSettings):
     admin_email: Optional[str] = Field(
         default=None,
         env='ADMIN_EMAIL',
-        description='Administrator email for system notifications'
+        description='Administrator email(s) for system notifications, separated by commas'
     )
 
     # Blacklist Alert Email
     blacklist_alert_email: Optional[str] = Field(
         default=None,
         env='BLACKLIST_ALERT_EMAIL',
-        description='Email address for blacklist alerts (defaults to ADMIN_EMAIL if not set)'
+        description='Email address(es) for blacklist alerts, separated by commas (defaults to ADMIN_EMAIL if not set)'
     )
 
     # Weekly Summary Report

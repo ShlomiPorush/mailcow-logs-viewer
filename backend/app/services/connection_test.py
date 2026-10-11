@@ -65,11 +65,20 @@ def test_smtp_connection() -> Dict:
         else:
             logs.append("Relay mode - skipping authentication")
         
-        logs.append("Sending test email...")
         from . import email_layout as e
-        from .smtp_service import build_message
+        from .smtp_service import build_message, invalid_addresses, parse_recipients
         sender = settings.smtp_from or settings.smtp_user
-        recipient = settings.admin_email or settings.smtp_user
+        address_setting = settings.admin_email or settings.smtp_user
+        skipped = invalid_addresses(address_setting)
+        if skipped:
+            logs.append(f"Skipping invalid address(es): {', '.join(skipped)}")
+        recipients = parse_recipients(address_setting)
+        if not recipients:
+            logs.append("ERROR: No valid recipient address. Set the Admin Email in Settings, Notifications.")
+            server.quit()
+            return {"success": False, "logs": logs}
+        recipient = ", ".join(recipients)
+        logs.append(f"Sending test email to {recipient}...")
         body = "This is a test email from mailcow Logs Viewer.\n\nIf you received this, SMTP is working correctly."
         msg = build_message(sender, recipient, 'SMTP Test - mailcow Logs Viewer', body, e.render(
             title='SMTP works', topic='Test', tone='ok',

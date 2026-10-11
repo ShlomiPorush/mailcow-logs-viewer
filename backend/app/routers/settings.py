@@ -168,6 +168,29 @@ def _reject_moved_secrets(allowed: Dict[str, Any]) -> None:
             f"Enter the {names} again: a stored secret is only sent to the server it was entered for."))
 
 
+# Settings that take one or more email addresses
+_ADDRESS_LIST_LABELS = {
+    "admin_email": "Admin Email",
+    "blacklist_alert_email": "Blacklist Alert Email",
+    "dmarc_error_email": "Report Import Error Email",
+}
+
+
+def _normalize_address_lists(allowed: Dict[str, Any]) -> None:
+    """Refuse an entry that is not an email address, and store the addresses
+    separated by ', ' however they were typed."""
+    from ..services.smtp_service import invalid_addresses, split_addresses
+    for key, label in _ADDRESS_LIST_LABELS.items():
+        if key not in allowed or not str(allowed[key] or "").strip():
+            continue
+        bad = invalid_addresses(str(allowed[key]))
+        if bad:
+            raise HTTPException(status_code=400, detail=(
+                f"{label}: \"{bad[0]}\" is not an email address. "
+                f"Separate several addresses with commas."))
+        allowed[key] = ", ".join(split_addresses(str(allowed[key])))
+
+
 # Settings that decide who can sign in. A change to any of them ends every
 # session issued before it, so rotating a password evicts a stolen cookie.
 _SESSION_BOUND_SETTING_KEYS = (
@@ -689,6 +712,7 @@ def update_settings(body: Dict[str, Any], request: Request = None, response: Res
             raise HTTPException(status_code=400, detail="disabled_features accepts only known feature names.")
         allowed["disabled_features"] = ",".join(features)
     _reject_moved_secrets(allowed)
+    _normalize_address_lists(allowed)
     # For sensitive keys, mask placeholder means "do not change" - omit from payload
     # Empty string means "clear this value" and should be kept
     for sk in _SENSITIVE_SETTING_KEYS:
