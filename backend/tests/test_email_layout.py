@@ -60,11 +60,14 @@ def test_the_date_is_in_the_app_timezone(monkeypatch):
 
 
 def test_addresses_keep_the_text_colour():
-    """Gmail made the address in a title a blue underlined link of its own."""
+    """Gmail and Outlook made the address in a title a blue underlined link of
+    their own; Outlook ignores color:inherit, so the link has the text colour."""
     html = e.render(title='Sending is off for anna@example.com', topic='Security')
-    assert 'Sending is off for anna<span>@</span>example.com</h1>' in html
-    assert 'mailto:' not in html
+    assert ('Sending is off for <a href="mailto:anna@example.com" class="m-ink" '
+            'style="color:#111814;text-decoration:none;">anna@example.com</a></h1>') in html
     assert '<title>Sending is off for anna@example.com</title>' in html
+    banner = e.banner('fail', 'anna@example.com logged in')
+    assert 'class="m-fail" style="color:#C42B1C;text-decoration:none;">anna@example.com</a>' in banner
     assert 'href="https://example.com/?q=a@example.com"' in e.link('Look up', 'https://example.com/?q=a@example.com')
 
 
@@ -251,10 +254,39 @@ def test_sent_mail_keeps_lines_short(monkeypatch):
 
     raw = sent['message']
     assert max(len(line) for line in raw.splitlines()) <= 998
-    parts = {p.get_content_type(): p.get_payload(decode=True).decode('utf-8')
+    parts = {p.get_content_type(): p.get_payload(decode=True)
              for p in email.message_from_string(raw).walk() if not p.is_multipart()}
-    assert parts['text/html'] == html
-    assert parts['text/plain'] == text
+    assert parts['text/html'].decode('utf-8') == html
+    assert parts['text/plain'].decode('utf-8') == text
+
+
+def test_the_app_icon_travels_with_the_email():
+    """The header shows the app icon; it is sent inside the email so Outlook
+    and Gmail show it without loading anything from the internet."""
+    import email
+    from app.services.smtp_service import build_message
+
+    assert e.app_icon(), 'the icon file is found in the repository'
+    html = e.render(title='T', topic='Test')
+    assert 'src="cid:app-icon"' in html
+    message = email.message_from_string(build_message('a@example.com', 'b@example.com', 'S', 'text', html).as_string())
+    images = [p for p in message.walk() if p.get_content_type() == 'image/png']
+    assert len(images) == 1 and images[0]['Content-ID'] == '<app-icon>'
+    assert images[0].get_payload(decode=True) == e.app_icon()
+    plain = email.message_from_string(build_message('a@example.com', 'b@example.com', 'S', 'text', '<p>x</p>').as_string())
+    assert not [p for p in plain.walk() if p.get_content_type() == 'image/png']
+
+
+def test_outlook_gets_rounded_shapes():
+    html = e.render(title='T', topic='Topic', blocks=[
+        e.panel('P', e.kv([('Severity', e.tag('Critical', 'fail'))])),
+        e.banner('warn', 'What to do', 'Text'),
+        e.stats([('Sent', '1')]),
+    ])
+    assert 'xmlns:v="urn:schemas-microsoft-com:vml"' in html
+    # topic tag, panel, banner and card; the tag inside the panel stays a cell
+    assert html.count('<v:roundrect') == 4
+    assert html.count('<!--[if mso]>') >= html.count('<v:roundrect')
 
 
 def test_no_emoji_in_blacklist_subjects():

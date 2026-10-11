@@ -21,9 +21,11 @@ Every value passed to a block is escaped. Only the output of another block
         blocks=[panel('Hosts', table(...))],
     )
 """
+import functools
 import re
 from datetime import datetime
 from html import escape
+from pathlib import Path
 from typing import Iterable, Optional, Sequence, Tuple, Union
 
 
@@ -41,13 +43,16 @@ def _attr(value) -> str:
 _ADDRESS = re.compile(r'[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+')
 
 
-def _e(value) -> str:
-    """Escape visible text. Gmail turns every address into a blue link of its
-    own, and a link of ours is blue in Outlook; an address split around the
-    @ is not recognised, keeps the colour of the text and copies as one."""
+def _e(value, cls: str = 'm-ink') -> str:
+    """Escape visible text whose colour class is cls. Gmail and Outlook turn
+    every address into a blue link of their own, and Outlook ignores
+    color:inherit, so an address becomes a link of ours in the text colour."""
     if isinstance(value, Safe):
         return value
-    return _ADDRESS.sub(lambda m: m.group(0).replace('@', '<span>@</span>', 1), _attr(value))
+    color = _CLASS_COLORS.get(cls, INK)
+    return _ADDRESS.sub(
+        lambda m: f'<a href="mailto:{m.group(0)}" class="{cls}" style="color:{color};text-decoration:none;">{m.group(0)}</a>',
+        _attr(value))
 
 
 def local_now() -> datetime:
@@ -65,11 +70,11 @@ def format_date(when: datetime, time: bool = False) -> str:
     return when.strftime('%d/%m/%Y %H:%M' if time else '%d/%m/%Y')
 
 
-def _lines(value) -> str:
+def _lines(value, cls: str = 'm-ink') -> str:
     """Escape, then keep line breaks."""
     if isinstance(value, Safe):
         return value
-    return _e(value).replace('\n', '<br>')
+    return _e(value, cls).replace('\n', '<br>')
 
 
 FONT = "Onest, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif"
@@ -91,6 +96,8 @@ TONES = {
     'info': ('#1F5FBF', '#E0E9F6'),
     'muted': ('#5E6863', '#ECEEED'),
 }
+
+_CLASS_COLORS = {'m-ink': INK, 'm-muted': MUTED, **{f'm-{t}': c for t, (c, _) in TONES.items()}}
 
 _DARK_CSS = """
 :root { color-scheme: light dark; supported-color-schemes: light dark; }
@@ -121,10 +128,42 @@ _DARK_CSS = """
 # Word knows only bold and normal, and takes the first font of a list even
 # when it is not installed (then it shows Times New Roman).
 _MSO_CSS = """<!--[if mso]><style>
+v\\:* { behavior: url(#default#VML); display: inline-block; }
 body, table, td, th, p, a, span, h1, div { font-family: 'Segoe UI', Arial, sans-serif !important; }
 .m-mono { font-family: Consolas, 'Courier New', monospace !important; }
 .m-b { font-weight: bold !important; }
+.m-vml { background-color: transparent !important; border: none !important; padding: 0 !important; }
 </style><![endif]-->"""
+
+# Word draws no rounded corners, so Outlook for Windows gets a VML rounded
+# rectangle behind each panel, banner, card and tag. Its corner is a share
+# of the shorter side, so the height is estimated to keep about 12px.
+_ROW_HEIGHT = 37
+
+
+def _rounded(inner: str, width: int, height: int, fill: str, stroke: Optional[str] = None,
+             radius: int = 12, padding: Optional[str] = None, only_mso: bool = False) -> str:
+    """inner in a VML rounded rectangle for Outlook; other clients get inner
+    as it is (the block's own background has class m-vml, so Outlook leaves
+    it transparent). padding is the inner padding Outlook takes from the
+    shape. only_mso: the caller already sits in an mso-only comment."""
+    # arcsize is the corner radius as a share of the shorter side
+    arc = max(1, min(50, round(radius * 100 / min(width, height))))
+    edge = f'strokecolor="{stroke}" strokeweight="0.75pt"' if stroke else 'stroked="f"'
+    pad_open = f'<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td style="padding:{padding};">' if padding else ''
+    pad_close = '</td></tr></table>' if padding else ''
+    shape_open = (f'<v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" arcsize="{arc}%" fillcolor="{fill}" {edge} '
+                  f'style="width:{width * 3 / 4:g}pt;mso-fit-shape-to-text:true;"><v:textbox inset="0,0,0,0" '
+                  f'style="mso-fit-shape-to-text:true;">{pad_open}')
+    shape_close = f'{pad_close}</v:textbox></v:roundrect>'
+    if only_mso:
+        return f'{shape_open}{inner}{shape_close}'
+    return f'<!--[if mso]>{shape_open}<![endif]-->{inner}<!--[if mso]>{shape_close}<![endif]-->'
+
+
+def _estimate_height(html: str) -> int:
+    rows = html.count('<tr') - html.count('class="m-rule"')
+    return max(40, rows * _ROW_HEIGHT + html.count('<br>') * 20)
 
 _TABLE = 'role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"'
 
@@ -141,19 +180,32 @@ def _rule(colspan: int = 1) -> str:
 
 def tag(text, tone: str = 'muted') -> Safe:
     """A small status label, as .ui-tag. A table cell, so Word keeps its padding."""
+    return Safe(_tag(text, tone, rounded_in_outlook=False))
+
+
+def _tag(text, tone: str, rounded_in_outlook: bool) -> str:
+    """rounded_in_outlook draws a VML shape for Outlook. Only for a tag that
+    is not inside another rounded block: VML inside VML, followed by more
+    VML, makes Word report the table as corrupt and show nothing."""
     color, tint = _tone(tone)
-    return Safe(
-        f'<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="display:inline-table;vertical-align:middle;">'
-        f'<tr><td class="m-{tone} m-{tone}-bg m-b" bgcolor="{tint}" style="padding:2px 8px;border-radius:6px;'
-        f'background-color:{tint};color:{color};font-size:12px;font-weight:700;line-height:1.4;white-space:nowrap;">'
-        f'{_e(text)}</td></tr></table>'
-    )
+    cell = (f'<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="display:inline-table;vertical-align:middle;">'
+            f'<tr><td class="m-{tone} m-{tone}-bg m-b" bgcolor="{tint}" style="padding:2px 8px;border-radius:6px;'
+            f'background-color:{tint};color:{color};font-size:12px;font-weight:700;line-height:1.4;white-space:nowrap;">'
+            f'{_e(text, "m-" + tone)}</td></tr></table>')
+    if not rounded_in_outlook:
+        return cell
+    width = len(str(text)) * 7 + 18
+    return (f'<!--[if mso]><v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" arcsize="30%" fillcolor="{tint}" stroked="f" '
+            f'style="width:{width * 3 / 4:g}pt;height:15pt;v-text-anchor:middle;"><v:textbox inset="0,0,0,0">'
+            f'<center style="color:{color};font-family:\'Segoe UI\',Arial,sans-serif;font-size:12px;font-weight:bold;">'
+            f'{_attr(text)}</center></v:textbox></v:roundrect><![endif]-->'
+            f'<!--[if !mso]><!-->{cell}<!--<![endif]-->')
 
 
 def strong(text, tone: Optional[str] = None) -> Safe:
     color = _tone(tone)[0] if tone else INK
     cls = f'm-{tone}' if tone else 'm-ink'
-    return Safe(f'<b class="{cls} m-b" style="color:{color};font-weight:650;">{_e(text)}</b>')
+    return Safe(f'<b class="{cls} m-b" style="color:{color};font-weight:650;">{_e(text, cls)}</b>')
 
 
 def mono(text, max_length: Optional[int] = None) -> Safe:
@@ -181,7 +233,7 @@ def join(parts: Iterable, sep: str = ', ') -> Safe:
 
 def paragraph(text, muted: bool = False) -> Safe:
     color, cls = (MUTED, 'm-muted') if muted else (INK, 'm-ink')
-    return Safe(f'<p class="{cls}" style="margin:0;color:{color};font-size:15px;line-height:1.55;">{_lines(text)}</p>')
+    return Safe(f'<p class="{cls}" style="margin:0;color:{color};font-size:15px;line-height:1.55;">{_lines(text, cls)}</p>')
 
 
 def banner(tone: str, title, text=None) -> Safe:
@@ -189,13 +241,15 @@ def banner(tone: str, title, text=None) -> Safe:
     color, tint = _tone(tone)
     body = (f'<tr><td class="m-ink" style="padding:3px 16px 0;color:{INK};font-size:14px;line-height:1.5;">'
             f'{_lines(text)}</td></tr>') if text else ''
-    return Safe(
-        f'<table {_TABLE} class="m-{tone}-bg" bgcolor="{tint}" style="background-color:{tint};border-radius:12px;">'
+    inner = (
+        f'<table {_TABLE} class="m-{tone}-bg m-vml" style="background-color:{tint};border-radius:12px;">'
         f'<tr><td height="13" style="height:13px;font-size:1px;line-height:1px;">&nbsp;</td></tr>'
         f'<tr><td class="m-{tone} m-b" style="padding:0 16px;color:{color};font-size:14px;font-weight:700;line-height:1.4;">'
-        f'{_lines(title)}</td></tr>{body}'
+        f'{_lines(title, "m-" + tone)}</td></tr>{body}'
         f'<tr><td height="13" style="height:13px;font-size:1px;line-height:1px;">&nbsp;</td></tr></table>'
     )
+    lines = 1 + (len(str(text or '')) // 80 + 1 + str(text or '').count('\n') if text else 0)
+    return Safe(_rounded(inner, 600, 26 + lines * 21, tint))
 
 
 Stat = Tuple  # (label, value) or (label, value, tone) or (label, value, tone, note)
@@ -205,6 +259,7 @@ def stats(items: Sequence[Stat], per_row: int = 3) -> Safe:
     """Key figures in bordered cells, as .ui-kpis. One table per row, so a
     short last row keeps the width of the others."""
     width = int(100 / per_row)
+    card = (600 - 8 * (per_row - 1)) // per_row
     rows = []
     for start in range(0, len(items), per_row):
         chunk = list(items[start:start + per_row])
@@ -221,17 +276,24 @@ def stats(items: Sequence[Stat], per_row: int = 3) -> Safe:
             note = item[3] if len(item) > 3 else None
             color = _tone(tone)[0] if tone else INK
             vcls = f'm-{tone}' if tone else 'm-ink'
-            note_html = (f'<br><span class="m-muted" style="color:{MUTED};font-size:12px;line-height:1.4;">{_e(note)}</span>'
+            note_html = (f'<br><span class="m-muted" style="color:{MUTED};font-size:12px;line-height:1.4;">{_e(note, "m-muted")}</span>'
                          if note else '')
-            cells.append(
-                f'<td class="m-stat m-line" width="{width}%" valign="top" style="padding:11px 14px;border:1px solid {LINE};'
-                f'border-radius:12px;">'
-                f'<span class="m-muted" style="color:{MUTED};font-size:12.5px;line-height:1.4;">{_e(label)}</span><br>'
+            content = (
+                f'<span class="m-muted" style="color:{MUTED};font-size:12.5px;line-height:1.4;">{_e(label, "m-muted")}</span><br>'
                 f'<b class="{vcls} m-stat-v" style="color:{color};font-size:24px;line-height:1.3;font-weight:700;'
-                f'letter-spacing:-0.02em;">{_e(value)}</b>{note_html}</td>'
+                f'letter-spacing:-0.02em;">{_e(value, vcls)}</b>{note_html}'
+            )
+            # Outlook gets only the VML card, the others only the bordered cell
+            cells.append(
+                f'<td width="{width}%" valign="top">'
+                f'<!--[if mso]>{_rounded(content, card, 100, BG, stroke=LINE, padding="11px 14px", only_mso=True)}<![endif]-->'
+                f'<!--[if !mso]><!--><table {_TABLE}><tr><td class="m-stat m-line" valign="top" '
+                f'style="padding:11px 14px;border:1px solid {LINE};border-radius:12px;">{content}</td></tr></table><!--<![endif]-->'
+                f'</td>'
             )
         rows.append(f'<table {_TABLE}><tr>{"".join(cells)}</tr></table>')
-    return Safe('<div style="font-size:1px;line-height:8px;">&nbsp;</div>'.join(rows))
+    return Safe(f'<table {_TABLE}>' + ''.join(
+        f'<tr><td style="padding:{"8px" if i else "0"} 0 0;">{row}</td></tr>' for i, row in enumerate(rows)) + '</table>')
 
 
 def kv(rows: Sequence[Tuple]) -> Safe:
@@ -243,11 +305,13 @@ def kv(rows: Sequence[Tuple]) -> Safe:
         tone = row[2] if len(row) > 2 else None
         color = _tone(tone)[0] if tone else INK
         vcls = f'm-{tone}' if tone else 'm-ink'
+        # Markup such as a tag must not sit inside <b>: Word then reports the table as corrupt
+        shown = value if isinstance(value, Safe) else f'<b style="font-weight:650;">{_lines(value, vcls)}</b>'
         out.append(_rule(2))
         out.append(
-            f'<tr><td class="m-muted m-cell" valign="top" style="padding:9px 16px;color:{MUTED};font-size:14px;">{_e(label)}</td>'
+            f'<tr><td class="m-muted m-cell" valign="top" style="padding:9px 16px;color:{MUTED};font-size:14px;">{_e(label, "m-muted")}</td>'
             f'<td class="{vcls} m-cell" valign="top" align="right" style="padding:9px 16px;color:{color};font-size:14px;'
-            f'text-align:right;overflow-wrap:break-word;"><b style="font-weight:650;">{_lines(value)}</b></td></tr>'
+            f'text-align:right;overflow-wrap:break-word;">{shown}</td></tr>'
         )
     return Safe(f'<table {_TABLE}>' + ''.join(out) + '</table>')
 
@@ -263,7 +327,7 @@ def table(columns: Sequence[Union[str, Tuple[str, str]]], rows: Sequence[Sequenc
         out.append(_rule(span))
         out.append('<tr>' + ''.join(
             f'<th class="m-muted m-cell" align="{a}" style="padding:9px 16px 8px;color:{MUTED};font-size:12.5px;'
-            f'font-weight:600;text-align:{a};">{_e(c)}</th>'
+            f'font-weight:600;text-align:{a};">{_e(c, "m-muted")}</th>'
             for c, a in cols
         ) + '</tr>')
     for row in rows:
@@ -277,23 +341,24 @@ def table(columns: Sequence[Union[str, Tuple[str, str]]], rows: Sequence[Sequenc
     if not rows:
         out.append(_rule(span))
         out.append(f'<tr><td colspan="{span}" class="m-muted m-cell" style="padding:12px 16px;'
-                   f'color:{MUTED};font-size:14px;">{_e(empty)}</td></tr>')
+                   f'color:{MUTED};font-size:14px;">{_e(empty, "m-muted")}</td></tr>')
     return Safe(f'<table {_TABLE}>' + ''.join(out) + '</table>')
 
 
 def panel(title, *blocks, count=None, note=None) -> Safe:
     """A grey panel with a heading, as .ui-panel."""
-    count_html = (f' <span class="m-muted" style="color:{MUTED};font-weight:500;">{_e(count)}</span>'
+    count_html = (f' <span class="m-muted" style="color:{MUTED};font-weight:500;">{_e(count, "m-muted")}</span>'
                   if count is not None else '')
-    note_html = (f'<br><span class="m-muted" style="color:{MUTED};font-size:12.5px;font-weight:400;">{_e(note)}</span>'
+    note_html = (f'<br><span class="m-muted" style="color:{MUTED};font-size:12.5px;font-weight:400;">{_e(note, "m-muted")}</span>'
                  if note else '')
     body = ''.join(f'<tr><td>{_e(b)}</td></tr>' for b in blocks)
-    return Safe(
-        f'<table {_TABLE} class="m-panel" bgcolor="{PANEL}" style="background-color:{PANEL};border-radius:12px;">'
+    inner = (
+        f'<table {_TABLE} class="m-panel m-vml" style="background-color:{PANEL};border-radius:12px;">'
         f'<tr><td class="m-ink m-cell" style="padding:13px 16px 9px;color:{INK};font-size:15px;">'
         f'<span class="m-b" style="font-weight:650;">{_e(title)}</span>{count_html}{note_html}</td></tr>'
         f'{body}<tr><td height="4" style="height:4px;font-size:1px;line-height:1px;">&nbsp;</td></tr></table>'
     )
+    return Safe(_rounded(inner, 600, _estimate_height(inner), PANEL))
 
 
 def panel_text(text) -> Safe:
@@ -302,11 +367,32 @@ def panel_text(text) -> Safe:
                 f'font-size:14px;line-height:1.55;">{_lines(text)}</td></tr></table>')
 
 
+APP_ICON_CID = 'app-icon'
+_APP_ICON = 'assets/icons/android-chrome-192x192.png'
+
+
+@functools.lru_cache(maxsize=1)
+def app_icon() -> Optional[bytes]:
+    """The app icon as PNG, sent inside the email (cid:app-icon) so every
+    client shows it without loading anything. None when the frontend files
+    are not there (tests outside the image)."""
+    here = Path(__file__).resolve()
+    for root in (here.parents[2], here.parents[3]):  # /app in the image, the repository otherwise
+        path = root / 'frontend' / _APP_ICON
+        if path.is_file():
+            return path.read_bytes()
+    return None
+
+
 def _mark() -> str:
-    """The app icon reduced to its log lines: a dark tile with three bars.
-    Word draws neither the bars nor the rounded corners, so it gets a plain
-    square instead."""
-    bar = 'display:block;height:3px;border-radius:2px;background-color:#FFFFFF;margin:0 0 3px;'
+    """The app icon. Without the file: the icon reduced to its log lines, a
+    dark tile with three bars; Word draws neither the bars nor the rounded
+    corners, so it gets a plain square instead."""
+    if app_icon():
+        return (f'<td width="26" height="26" valign="middle" style="width:26px;height:26px;">'
+                f'<img src="cid:{APP_ICON_CID}" width="26" height="26" alt="" '
+                f'style="display:block;width:26px;height:26px;border:0;"></td>')
+    bar ='display:block;height:3px;border-radius:2px;background-color:#FFFFFF;margin:0 0 3px;'
     return (f'<!--[if mso]><td width="26" height="26" bgcolor="{INK}" style="width:26px;height:26px;">&nbsp;</td><![endif]-->'
             f'<!--[if !mso]><!--><td class="m-mark" width="14" height="26" valign="middle" style="width:14px;height:26px;'
             f'background-color:{INK};border-radius:7px;padding:0 6px;">'
@@ -338,12 +424,12 @@ def render(*, title, topic, tone: str = 'muted', intro=None, blocks: Sequence = 
     pre_html = (f'<div style="display:none;max-height:0;overflow:hidden;opacity:0;mso-hide:all;">{_attr(preheader)}'
                 f'{"&nbsp;&zwnj;" * 40}</div>') if preheader else ''
     intro_html = (f'<tr><td class="m-muted" style="padding:10px 0 0;color:{MUTED};font-size:16px;line-height:1.5;">'
-                  f'{_lines(intro)}</td></tr>' if intro else '')
-    footer_text = f'Sent by {_e(app_title)}.' + (f' {_lines(footer)}' if footer else '')
+                  f'{_lines(intro, "m-muted")}</td></tr>' if intro else '')
+    footer_text = f'Sent by {_e(app_title, "m-muted")}.' + (f' {_lines(footer, "m-muted")}' if footer else '')
     blocks_html = ''.join(f'<tr><td style="padding:0 0 14px;">{_e(b)}</td></tr>' for b in blocks)
 
     return f"""<!DOCTYPE html>
-<html lang="en" xmlns="http://www.w3.org/1999/xhtml">
+<html lang="en" xmlns="http://www.w3.org/1999/xhtml" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -363,12 +449,12 @@ def render(*, title, topic, tone: str = 'muted', intro=None, blocks: Sequence = 
   <table {_TABLE}><tr>
     {_mark()}
     <td class="m-ink m-b" style="padding-left:10px;color:{INK};font-size:15px;font-weight:700;letter-spacing:-0.01em;">{_e(app_title)}</td>
-    <td class="m-muted" align="right" style="color:{MUTED};font-size:13px;white-space:nowrap;">{_e(date)}</td>
+    <td class="m-muted" align="right" style="color:{MUTED};font-size:13px;white-space:nowrap;">{_e(date, "m-muted")}</td>
   </tr></table>
 </td></tr>
 <tr><td style="padding:0 0 24px;">
   <table {_TABLE}>
-  <tr><td>{tag(topic, tone)}</td></tr>
+  <tr><td>{_tag(topic, tone, rounded_in_outlook=True)}</td></tr>
   <tr><td class="m-ink m-h1 m-b" style="padding:12px 0 0;color:{INK};font-size:30px;line-height:1.15;font-weight:800;letter-spacing:-0.03em;">
     <h1 class="m-ink m-h1" style="margin:0;font-size:30px;line-height:1.15;font-weight:800;color:{INK};">{_e(title)}</h1></td></tr>
   {intro_html}
