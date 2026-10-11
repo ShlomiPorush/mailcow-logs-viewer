@@ -132,38 +132,12 @@ v\\:* { behavior: url(#default#VML); display: inline-block; }
 body, table, td, th, p, a, span, h1, div { font-family: 'Segoe UI', Arial, sans-serif !important; }
 .m-mono { font-family: Consolas, 'Courier New', monospace !important; }
 .m-b { font-weight: bold !important; }
-.m-vml { background-color: transparent !important; border: none !important; padding: 0 !important; }
 </style><![endif]-->"""
 
-# Word draws no rounded corners, so Outlook for Windows gets a VML rounded
-# rectangle behind each panel, banner, card and tag. Its corner is a share
-# of the shorter side, so the height is estimated to keep about 12px.
-_ROW_HEIGHT = 37
-
-
-def _rounded(inner: str, width: int, height: int, fill: str, stroke: Optional[str] = None,
-             radius: int = 12, padding: Optional[str] = None, only_mso: bool = False) -> str:
-    """inner in a VML rounded rectangle for Outlook; other clients get inner
-    as it is (the block's own background has class m-vml, so Outlook leaves
-    it transparent). padding is the inner padding Outlook takes from the
-    shape. only_mso: the caller already sits in an mso-only comment."""
-    # arcsize is the corner radius as a share of the shorter side
-    arc = max(1, min(50, round(radius * 100 / min(width, height))))
-    edge = f'strokecolor="{stroke}" strokeweight="0.75pt"' if stroke else 'stroked="f"'
-    pad_open = f'<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td style="padding:{padding};">' if padding else ''
-    pad_close = '</td></tr></table>' if padding else ''
-    shape_open = (f'<v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" arcsize="{arc}%" fillcolor="{fill}" {edge} '
-                  f'style="width:{width * 3 / 4:g}pt;mso-fit-shape-to-text:true;"><v:textbox inset="0,0,0,0" '
-                  f'style="mso-fit-shape-to-text:true;">{pad_open}')
-    shape_close = f'{pad_close}</v:textbox></v:roundrect>'
-    if only_mso:
-        return f'{shape_open}{inner}{shape_close}'
-    return f'<!--[if mso]>{shape_open}<![endif]-->{inner}<!--[if mso]>{shape_close}<![endif]-->'
-
-
-def _estimate_height(html: str) -> int:
-    rows = html.count('<tr') - html.count('class="m-rule"')
-    return max(40, rows * _ROW_HEIGHT + html.count('<br>') * 20)
+# Outlook for Windows draws no rounded corners. Panels, banners and cards
+# stay square there: a VML shape that grows with its content does not push
+# the next block down in Outlook, so blocks overlap. Only the topic tag,
+# which has a fixed size, gets a rounded VML shape.
 
 _TABLE = 'role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"'
 
@@ -184,9 +158,9 @@ def tag(text, tone: str = 'muted') -> Safe:
 
 
 def _tag(text, tone: str, rounded_in_outlook: bool) -> str:
-    """rounded_in_outlook draws a VML shape for Outlook. Only for a tag that
-    is not inside another rounded block: VML inside VML, followed by more
-    VML, makes Word report the table as corrupt and show nothing."""
+    """rounded_in_outlook draws a fixed-size VML shape for Outlook. Only for
+    the topic tag: VML inside a table, followed by more VML, can make Word
+    report the table as corrupt and show nothing."""
     color, tint = _tone(tone)
     cell = (f'<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="display:inline-table;vertical-align:middle;">'
             f'<tr><td class="m-{tone} m-{tone}-bg m-b" bgcolor="{tint}" style="padding:2px 8px;border-radius:6px;'
@@ -242,14 +216,13 @@ def banner(tone: str, title, text=None) -> Safe:
     body = (f'<tr><td class="m-ink" style="padding:3px 16px 0;color:{INK};font-size:14px;line-height:1.5;">'
             f'{_lines(text)}</td></tr>') if text else ''
     inner = (
-        f'<table {_TABLE} class="m-{tone}-bg m-vml" style="background-color:{tint};border-radius:12px;">'
+        f'<table {_TABLE} class="m-{tone}-bg" bgcolor="{tint}" style="background-color:{tint};border-radius:12px;">'
         f'<tr><td height="13" style="height:13px;font-size:1px;line-height:1px;">&nbsp;</td></tr>'
         f'<tr><td class="m-{tone} m-b" style="padding:0 16px;color:{color};font-size:14px;font-weight:700;line-height:1.4;">'
         f'{_lines(title, "m-" + tone)}</td></tr>{body}'
         f'<tr><td height="13" style="height:13px;font-size:1px;line-height:1px;">&nbsp;</td></tr></table>'
     )
-    lines = 1 + (len(str(text or '')) // 80 + 1 + str(text or '').count('\n') if text else 0)
-    return Safe(_rounded(inner, 600, 26 + lines * 21, tint))
+    return Safe(inner)
 
 
 Stat = Tuple  # (label, value) or (label, value, tone) or (label, value, tone, note)
@@ -259,7 +232,6 @@ def stats(items: Sequence[Stat], per_row: int = 3) -> Safe:
     """Key figures in bordered cells, as .ui-kpis. One table per row, so a
     short last row keeps the width of the others."""
     width = int(100 / per_row)
-    card = (600 - 8 * (per_row - 1)) // per_row
     rows = []
     for start in range(0, len(items), per_row):
         chunk = list(items[start:start + per_row])
@@ -278,18 +250,12 @@ def stats(items: Sequence[Stat], per_row: int = 3) -> Safe:
             vcls = f'm-{tone}' if tone else 'm-ink'
             note_html = (f'<br><span class="m-muted" style="color:{MUTED};font-size:12px;line-height:1.4;">{_e(note, "m-muted")}</span>'
                          if note else '')
-            content = (
+            cells.append(
+                f'<td class="m-stat m-line" width="{width}%" valign="top" style="padding:11px 14px;border:1px solid {LINE};'
+                f'border-radius:12px;">'
                 f'<span class="m-muted" style="color:{MUTED};font-size:12.5px;line-height:1.4;">{_e(label, "m-muted")}</span><br>'
                 f'<b class="{vcls} m-stat-v" style="color:{color};font-size:24px;line-height:1.3;font-weight:700;'
-                f'letter-spacing:-0.02em;">{_e(value, vcls)}</b>{note_html}'
-            )
-            # Outlook gets only the VML card, the others only the bordered cell
-            cells.append(
-                f'<td width="{width}%" valign="top">'
-                f'<!--[if mso]>{_rounded(content, card, 100, BG, stroke=LINE, padding="11px 14px", only_mso=True)}<![endif]-->'
-                f'<!--[if !mso]><!--><table {_TABLE}><tr><td class="m-stat m-line" valign="top" '
-                f'style="padding:11px 14px;border:1px solid {LINE};border-radius:12px;">{content}</td></tr></table><!--<![endif]-->'
-                f'</td>'
+                f'letter-spacing:-0.02em;">{_e(value, vcls)}</b>{note_html}</td>'
             )
         rows.append(f'<table {_TABLE}><tr>{"".join(cells)}</tr></table>')
     return Safe(f'<table {_TABLE}>' + ''.join(
@@ -353,12 +319,12 @@ def panel(title, *blocks, count=None, note=None) -> Safe:
                  if note else '')
     body = ''.join(f'<tr><td>{_e(b)}</td></tr>' for b in blocks)
     inner = (
-        f'<table {_TABLE} class="m-panel m-vml" style="background-color:{PANEL};border-radius:12px;">'
+        f'<table {_TABLE} class="m-panel" bgcolor="{PANEL}" style="background-color:{PANEL};border-radius:12px;">'
         f'<tr><td class="m-ink m-cell" style="padding:13px 16px 9px;color:{INK};font-size:15px;">'
         f'<span class="m-b" style="font-weight:650;">{_e(title)}</span>{count_html}{note_html}</td></tr>'
         f'{body}<tr><td height="4" style="height:4px;font-size:1px;line-height:1px;">&nbsp;</td></tr></table>'
     )
-    return Safe(_rounded(inner, 600, _estimate_height(inner), PANEL))
+    return Safe(inner)
 
 
 def panel_text(text) -> Safe:

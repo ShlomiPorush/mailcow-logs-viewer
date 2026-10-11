@@ -277,16 +277,18 @@ def test_the_app_icon_travels_with_the_email():
     assert not [p for p in plain.walk() if p.get_content_type() == 'image/png']
 
 
-def test_outlook_gets_rounded_shapes():
+def test_outlook_gets_only_the_fixed_size_rounded_tag():
+    """A VML shape that grows with its content does not push the next block
+    down in Outlook, so panels, cards and banners overlapped there. Only the
+    topic tag, which has a fixed size, is a VML shape."""
     html = e.render(title='T', topic='Topic', blocks=[
         e.panel('P', e.kv([('Severity', e.tag('Critical', 'fail'))])),
         e.banner('warn', 'What to do', 'Text'),
         e.stats([('Sent', '1')]),
     ])
-    assert 'xmlns:v="urn:schemas-microsoft-com:vml"' in html
-    # topic tag, panel, banner and card; the tag inside the panel stays a cell
-    assert html.count('<v:roundrect') == 4
-    assert html.count('<!--[if mso]>') >= html.count('<v:roundrect')
+    assert html.count('<v:roundrect') == 1
+    assert 'mso-fit-shape-to-text' not in html
+    assert 'height:15pt' in html
 
 
 def test_no_emoji_in_blacklist_subjects():
