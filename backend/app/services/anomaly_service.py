@@ -74,7 +74,7 @@ def _record_and_notify(db, pending, alert_type, severity, subject, title, detail
     # Notification delivery is slow (HTTP + SMTP with timeouts); queue it and
     # dispatch after the DB session is closed so a pooled connection is never
     # pinned while we wait on external services.
-    pending.append((title, detail))
+    pending.append((title, detail, severity, alert_type, subject))
 
 
 def _is_recurring_daily_pattern(db, sender: str, recent_count: int,
@@ -230,6 +230,32 @@ def detect_auth_failure_bursts(db, pending) -> int:
     return alerts
 
 
+_ALERT_HEADINGS = {
+    "volume_spike": ("Unusual sending from {}", "Mailbox"),
+    "auth_failure_burst": ("Many failed sign-ins for {}", "Username"),
+}
+
+
+def _alert_email_html(title, detail, severity, alert_type, subject) -> str:
+    """The alert email: the first paragraph of the detail says what happened,
+    the rest what to do."""
+    from . import email_layout as e
+    heading, label = _ALERT_HEADINGS.get(alert_type, ("{}", "Subject"))
+    what, _, advice = detail.partition("\n\n")
+    blocks = [e.panel('Details', e.kv([
+        (label, subject),
+        ('Severity', e.tag(severity.capitalize(), 'fail' if severity == 'critical' else 'warn')),
+    ]))]
+    if advice:
+        blocks.append(e.banner('warn', 'What to do', advice))
+    blocks.append(e.paragraph('The alert is also on the Dashboard.', muted=True))
+    return e.render(
+        title=heading.format(subject) if alert_type in _ALERT_HEADINGS else title,
+        topic='Security', tone='fail' if severity == 'critical' else 'warn',
+        intro=what, blocks=blocks,
+        footer='Anomaly detection is on in Settings, Anomaly Detection.')
+
+
 def run_anomaly_detection() -> dict:
     """Run all detectors. Returns a summary dict."""
     if not settings.anomaly_detection_enabled:
@@ -247,10 +273,12 @@ def run_anomaly_detection() -> dict:
         # committed one by one, so a detector crash must not swallow the
         # notifications of alerts recorded before it - the cooldown would then
         # suppress any retry.
-        for title, detail in pending:
+        for title, detail, severity, alert_type, subject in pending:
             try:
                 from .notification_service import notify
-                notify(subject=f"[Security] {title}", text_content=detail, alert_type="security")
+                notify(subject=f"[Security] {title}", text_content=detail,
+                       html_content=_alert_email_html(title, detail, severity, alert_type, subject),
+                       alert_type="security")
             except Exception as e:
                 logger.error(f"Failed to dispatch security alert notification: {e}")
 

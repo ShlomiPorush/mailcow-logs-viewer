@@ -1978,9 +1978,16 @@ def notify_dns_changes(domain_name: str, changes: List[Dict[str, str]]) -> None:
         return
     try:
         from ..services.notification_service import notify
+        from ..services import email_layout as layout
 
         types = ', '.join(c['type'] for c in changes)
         subject = f"DNS records changed for {domain_name}: {types}"
+        advice = (
+            "If you did not expect this, check the domain at your DNS provider. "
+            "If mailcow generated new values (for example a new DKIM key), update "
+            "the records at your registrar so mail keeps authenticating."
+        )
+        footer = "DNS change alerts are on in Settings, Notifications."
         lines = [
             f"The following DNS records changed for {domain_name}:",
             "",
@@ -1990,12 +1997,17 @@ def notify_dns_changes(domain_name: str, changes: List[Dict[str, str]]) -> None:
             lines.append(f"  before: {change['old']}")
             lines.append(f"  now:    {change['new']}")
             lines.append("")
-        lines.append(
-            "If you did not expect this, check the domain at your DNS provider. "
-            "If mailcow generated new values (for example a new DKIM key), update "
-            "the records at your registrar so mail keeps authenticating."
-        )
-        notify(subject, "\n".join(lines), alert_type="dns_changes")
+        lines.append(advice)
+        lines += ["", footer]
+        html = layout.render(
+            title=f"DNS records changed for {domain_name}", topic='DNS', tone='warn',
+            intro=f"{len(changes)} record{'s' if len(changes) != 1 else ''} changed: {types}.",
+            blocks=[layout.panel(change['type'], layout.table(
+                ['', 'Value'],
+                [['Before', layout.mono(change['old'])], ['Now', layout.mono(change['new'])]], head=False))
+                for change in changes] + [layout.banner('warn', 'What to do', advice)],
+            footer=footer)
+        notify(subject, "\n".join(lines), html_content=html, alert_type="dns_changes")
         logger.info(f"DNS change alert sent for {domain_name}: {types}")
     except Exception as e:
         logger.error(f"Could not send DNS change alert for {domain_name}: {e}")

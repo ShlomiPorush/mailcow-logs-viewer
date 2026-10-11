@@ -3,32 +3,34 @@ DMARC Notification Module
 Uses the global SMTP service to send DMARC-specific notifications
 """
 import logging
-from html import escape
 from typing import List, Dict
 from datetime import datetime
 
 from ..config import settings
+from . import email_layout as e
 from .smtp_service import get_notification_email
 from .notification_service import notify, any_channel_configured
 
 logger = logging.getLogger(__name__)
+
+_FOOTER = "Import errors go to the address set in Settings, Notifications."
 
 
 def send_dmarc_error_notification(failed_emails: List[Dict], sync_id: int) -> bool:
     """
     Send notification about failed DMARC report processing
     Uses global SMTP service
-    
+
     Args:
         failed_emails: List of failed email dicts with message_id, subject, error
         sync_id: ID of the sync operation
-    
+
     Returns:
         True if email was sent successfully, False otherwise
     """
     if not failed_emails:
         return True
-    
+
     # Recipient: DMARC_ERROR_EMAIL or fallback to ADMIN_EMAIL (webhook, if
     # configured, is notified regardless of email configuration)
     recipient = get_notification_email(settings.dmarc_error_email)
@@ -36,7 +38,7 @@ def send_dmarc_error_notification(failed_emails: List[Dict], sync_id: int) -> bo
         logger.warning("No notification channel configured (DMARC_ERROR_EMAIL/ADMIN_EMAIL or webhook)")
         return False
 
-    subject = f"DMARC & TLS Report Import Errors - Sync #{sync_id}"
+    subject = f"DMARC & TLS: {_title(failed_emails)}"
     text_content = _create_text_content(failed_emails, sync_id)
     html_content = _create_html_content(failed_emails, sync_id)
 
@@ -45,125 +47,56 @@ def send_dmarc_error_notification(failed_emails: List[Dict], sync_id: int) -> bo
     return results['email'] or results['channels_sent'] > 0
 
 
+def _title(failed_emails: List[Dict]) -> str:
+    n = len(failed_emails)
+    return f"{n} report email{'s' if n != 1 else ''} could not be imported"
+
+
+def _intro(sync_id: int) -> str:
+    return (f"The import from the DMARC mailbox (sync #{sync_id}) skipped these emails. "
+            "The reports in them are not in the app.")
+
+
 def _create_text_content(failed_emails: List[Dict], sync_id: int) -> str:
     """Create plain text email content"""
     lines = [
-        f"DMARC Report Processing Errors - Sync #{sync_id}",
+        _title(failed_emails),
+        _intro(sync_id),
         f"Date: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')}",
         "",
-        f"Failed to process {len(failed_emails)} DMARC report email(s):",
-        ""
     ]
-    
+
     for i, email_data in enumerate(failed_emails, 1):
         lines.append(f"{i}. Email ID: {email_data.get('email_id', 'unknown')}")
         lines.append(f"   Message-ID: {email_data.get('message_id', 'unknown')}")
         lines.append(f"   Subject: {email_data.get('subject', 'unknown')}")
         lines.append(f"   Error: {email_data.get('error', 'unknown')}")
         lines.append("")
-    
-    lines.append("---")
-    lines.append("This is an automated notification from mailcow Logs Viewer")
-    lines.append(f"DMARC IMAP Sync Service")
-    
+
+    lines.append(_FOOTER)
+
     return "\n".join(lines)
 
 
 def _create_html_content(failed_emails: List[Dict], sync_id: int) -> str:
-    """Create HTML email content"""
-    html = f"""
-<!DOCTYPE html>
-<html>
-<head>
-    <style>
-        body {{
-            font-family: Arial, sans-serif;
-            line-height: 1.6;
-            color: #333;
-        }}
-        .header {{
-            background-color: #dc3545;
-            color: white;
-            padding: 20px;
-            border-radius: 5px;
-        }}
-        .content {{
-            padding: 20px;
-        }}
-        .error-list {{
-            background-color: #f8f9fa;
-            border-left: 4px solid #dc3545;
-            padding: 15px;
-            margin: 20px 0;
-        }}
-        .error-item {{
-            margin-bottom: 20px;
-            padding-bottom: 20px;
-            border-bottom: 1px solid #dee2e6;
-        }}
-        .error-item:last-child {{
-            border-bottom: none;
-        }}
-        .label {{
-            font-weight: bold;
-            color: #495057;
-        }}
-        .value {{
-            margin-left: 10px;
-            color: #212529;
-        }}
-        .error {{
-            color: #dc3545;
-            margin-top: 5px;
-        }}
-        .footer {{
-            margin-top: 30px;
-            padding-top: 20px;
-            border-top: 1px solid #dee2e6;
-            font-size: 12px;
-            color: #6c757d;
-        }}
-    </style>
-</head>
-<body>
-    <div class="header">
-        <h2>⚠️ DMARC Processing Errors</h2>
-        <p>Sync #{escape(str(sync_id))} - {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')}</p>
-    </div>
-    
-    <div class="content">
-        <p>Failed to process <strong>{len(failed_emails)}</strong> DMARC report email(s):</p>
-        
-        <div class="error-list">
-"""
-    
-    for i, email_data in enumerate(failed_emails, 1):
-        # Every value comes from inbound mail (or describes it) - anyone who
-        # can mail the rua address chooses the Subject and Message-ID.
-        email_id = escape(str(email_data.get('email_id', 'unknown')))
-        message_id = escape(str(email_data.get('message_id', 'unknown')))
-        subject = escape(str(email_data.get('subject', 'unknown')))
-        error = escape(str(email_data.get('error', 'unknown')))
-        html += f"""
-            <div class="error-item">
-                <div><span class="label">#{i}</span></div>
-                <div><span class="label">Email ID:</span><span class="value">{email_id}</span></div>
-                <div><span class="label">Message-ID:</span><span class="value">{message_id}</span></div>
-                <div><span class="label">Subject:</span><span class="value">{subject}</span></div>
-                <div class="error"><span class="label">Error:</span> {error}</div>
-            </div>
-"""
-    
-    html += """
-        </div>
-        
-        <div class="footer">
-            <p>This is an automated notification from <strong>mailcow Logs Viewer</strong></p>
-            <p>DMARC IMAP Sync Service</p>
-        </div>
-    </div>
-</body>
-</html>
-"""
-    
-    return html
+    """Create HTML email content. Every value comes from inbound mail (or
+    describes it) - anyone who can mail the rua address chooses the Subject
+    and Message-ID - and email_layout escapes all of them."""
+    blocks = [
+        e.panel(
+            email_data.get('subject') or '(no subject)',
+            e.kv([
+                ('Error', email_data.get('error', 'unknown'), 'fail'),
+                ('Message-ID', e.mono(email_data.get('message_id', 'unknown'))),
+                ('Email ID', email_data.get('email_id', 'unknown')),
+            ]),
+        )
+        for email_data in failed_emails
+    ]
+    advice = "Open the emails in the DMARC mailbox to check them."
+    if settings.dmarc_manual_upload_enabled:
+        advice += " If one is a valid report, you can upload it by hand on the DMARC & TLS page."
+    blocks.append(e.paragraph(advice, muted=True))
+    return e.render(
+        title=_title(failed_emails), topic='DMARC & TLS', tone='fail',
+        intro=_intro(sync_id), blocks=blocks, footer=_FOOTER)

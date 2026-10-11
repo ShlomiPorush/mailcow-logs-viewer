@@ -400,8 +400,9 @@ def test_the_notification_names_the_bans_and_the_alerts(monkeypatch):
         banned=[(TRAP_IP, 'trap', 'Tried the trap account admin', True)], failed=[],
         alerts=[(SPRAY_IP, 'breach', f'info@{DOMAIN} logged in after 3 failed tries from the same address')])
     subject, text, kw = sent[0]
-    assert subject == 'Possible stolen password' and kw == {'alert_type': 'security'}
+    assert subject == 'Possible stolen password' and kw['alert_type'] == 'security'
     assert TRAP_IP in text and SPRAY_IP in text and 'Banned 1 address:' in text
+    assert TRAP_IP in kw['html_content'] and SPRAY_IP in kw['html_content']
 
 
 # ---------- how a ban is written, and watched catches that go quiet ----------

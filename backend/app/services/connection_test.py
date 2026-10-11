@@ -68,13 +68,23 @@ def test_smtp_connection() -> Dict:
             logs.append("Relay mode - skipping authentication")
         
         logs.append("Sending test email...")
-        msg = MIMEMultipart()
+        msg = MIMEMultipart('alternative')
         msg['From'] = settings.smtp_from or settings.smtp_user
         msg['To'] = settings.admin_email or settings.smtp_user
         msg['Subject'] = 'SMTP Test - mailcow Logs Viewer'
-        
+
         body = "This is a test email from mailcow Logs Viewer.\n\nIf you received this, SMTP is working correctly."
         msg.attach(MIMEText(body, 'plain'))
+        from . import email_layout as e
+        msg.attach(MIMEText(e.render(
+            title='SMTP works', topic='Test', tone='ok',
+            intro='This is a test email. Alerts and the weekly summary can reach you.',
+            blocks=[e.panel('Sent through', e.kv([
+                ('Server', f"{settings.smtp_host}:{settings.smtp_port}"),
+                ('From', msg['From']),
+                ('To', msg['To']),
+            ]))],
+            footer='The Test SMTP button sent this email.'), 'html'))
         
         server.send_message(msg)
         logs.append("Test email sent successfully")
