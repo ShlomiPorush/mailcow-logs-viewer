@@ -3,17 +3,42 @@ Global SMTP Service
 Generic email notification service for all system modules
 """
 import logging
+import re
 import smtplib
 from email.mime.image import MIMEImage
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from datetime import datetime
-from typing import Optional
+from typing import List, Optional
 
 from ..config import settings
 from .mail_tls import mail_tls_context, certificate_error_hint
 
 logger = logging.getLogger(__name__)
+
+# The address settings (ADMIN_EMAIL, BLACKLIST_ALERT_EMAIL, DMARC_ERROR_EMAIL)
+# take one or more addresses, separated by commas, semicolons or spaces.
+_ADDRESS = re.compile(r'^[^@\s,;<>"]+@[^@\s,;<>"]+\.[^@\s,;<>".]+$')
+
+
+def split_addresses(value: Optional[str]) -> List[str]:
+    """Every entry in an address setting, valid or not."""
+    return [part for part in re.split(r'[,;\s]+', value or '') if part]
+
+
+def invalid_addresses(value: Optional[str]) -> List[str]:
+    """Entries of an address setting that are not an email address."""
+    return [part for part in split_addresses(value) if not _ADDRESS.match(part)]
+
+
+def parse_recipients(value: Optional[str]) -> List[str]:
+    """The valid addresses of an address setting, each once."""
+    seen, recipients = set(), []
+    for part in split_addresses(value):
+        if _ADDRESS.match(part) and part.lower() not in seen:
+            seen.add(part.lower())
+            recipients.append(part)
+    return recipients
 
 
 def build_message(sender: str, recipient: str, subject: str, text_content: str,
@@ -87,12 +112,17 @@ class SmtpService:
             logger.warning("SMTP not configured, skipping email")
             return False
         
-        if not recipient:
+        recipients = parse_recipients(recipient)
+        skipped = invalid_addresses(recipient)
+        if skipped:
+            logger.warning("Skipping invalid recipient address(es): %s", ", ".join(skipped))
+        if not recipients:
             logger.warning("No recipient email provided, skipping email")
             return False
-        
+
         try:
-            msg = build_message(self.from_address, recipient, subject, text_content, html_content)
+            # One message to every address; each one sees the others in To
+            msg = build_message(self.from_address, ", ".join(recipients), subject, text_content, html_content)
             msg['Date'] = datetime.utcnow().strftime('%a, %d %b %Y %H:%M:%S +0000')
 
             # Determine connection mode
@@ -113,10 +143,10 @@ class SmtpService:
             if not self.relay_mode:
                 server.login(self.user, self.password)
             
-            server.sendmail(self.from_address, [recipient], msg.as_string())
+            server.sendmail(self.from_address, recipients, msg.as_string())
             server.quit()
-            
-            logger.info(f"Email sent successfully to {recipient}: {subject}")
+
+            logger.info(f"Email sent successfully to {', '.join(recipients)}: {subject}")
             return True
             
         except Exception as e:
@@ -132,7 +162,8 @@ def get_notification_email(module_specific: Optional[str] = None) -> str:
         module_specific: Optional module-specific email override
     
     Returns:
-        Email address to use (module email or admin email)
+        The address setting to use (module email or admin email); it may
+        hold several addresses, see parse_recipients
     """
     if module_specific:
         return module_specific
