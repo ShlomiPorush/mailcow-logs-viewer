@@ -16,7 +16,6 @@ helper executed through ``asyncio.to_thread`` so the event loop never blocks.
 import asyncio
 import logging
 from datetime import datetime, timedelta
-from html import escape
 from typing import Dict, List, Optional
 
 from sqlalchemy import func
@@ -256,8 +255,21 @@ async def _notify_user_blocked(email: str, count: int) -> None:
         f"longer use, then contact {contact} to restore sending."
     )
     # The address and the help contact are mailbox names and settings, not
-    # markup: escape them before turning line breaks into <br>.
-    html = escape(text).replace("\n", "<br>")
+    # markup; email_layout escapes them.
+    from . import email_layout as e
+    html = e.render(
+        title="Sending is paused for your account", topic='Security', tone='fail',
+        intro=f"Your account {email} sent {count} messages in {settings.smtp_abuse_window_minutes} minutes, "
+              f"above the limit of {settings.smtp_abuse_threshold}. This usually means someone else "
+              "is using the account.",
+        blocks=[
+            e.banner('ok', 'You can still receive and read mail', 'Only sending is paused.'),
+            e.panel('What to do', e.panel_text(
+                "1. Change your password.\n"
+                "2. Remove any app passwords you no longer use.\n"
+                f"3. Contact {contact} to turn sending back on.")),
+        ],
+        footer="This message was sent to you automatically by your mail server.")
     await asyncio.to_thread(send_notification_email, email, subject, text, html)
 
 
@@ -285,7 +297,23 @@ async def _notify_operator_blocked(email: str, count: int, revoked: int) -> None
         "IMAP access is unchanged. Re-enable from Security → Abuse Protection "
         "after securing the account."
     )
-    await asyncio.to_thread(notify, subject, text, None, None, "security")
+    from . import email_layout as e
+    html = e.render(
+        title=f"Sending is off for {email}", topic='Security', tone='fail',
+        intro=f"The mailbox sent {count} messages in {settings.smtp_abuse_window_minutes} minutes, "
+              f"above the limit of {settings.smtp_abuse_threshold}. Abuse protection turned SMTP off.",
+        blocks=[
+            e.stats([
+                ('Sent', count, 'fail', f"in {settings.smtp_abuse_window_minutes} minutes"),
+                ('Limit', settings.smtp_abuse_threshold),
+                ('App passwords revoked', revoked),
+            ]),
+            e.banner('warn', 'What to do',
+                     "Secure the account, then turn sending back on from Security, Abuse Protection. "
+                     "Receiving mail (IMAP) still works."),
+        ],
+        footer="SMTP abuse protection is on in Settings, SMTP Abuse.")
+    await asyncio.to_thread(notify, subject, text, html, None, "security")
 
 
 async def block_mailbox(email: str, count: int, automatic: bool = False,

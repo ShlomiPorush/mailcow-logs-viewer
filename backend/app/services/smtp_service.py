@@ -4,6 +4,7 @@ Generic email notification service for all system modules
 """
 import logging
 import smtplib
+from email.mime.image import MIMEImage
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from datetime import datetime
@@ -13,6 +14,37 @@ from ..config import settings
 from .mail_tls import mail_tls_context, certificate_error_hint
 
 logger = logging.getLogger(__name__)
+
+
+def build_message(sender: str, recipient: str, subject: str, text_content: str,
+                  html_content: Optional[str] = None) -> MIMEMultipart:
+    """The plain text and, when given, the HTML as alternatives. HTML that
+    shows the app icon (cid:app-icon) carries the icon with it."""
+    from .email_layout import APP_ICON_CID, app_icon
+
+    msg = MIMEMultipart('alternative')
+    msg['Subject'] = subject
+    msg['From'] = sender
+    msg['To'] = recipient
+
+    # UTF-8 parts are base64 encoded: SMTP allows at most 998 characters per
+    # line, and a server breaks a longer 7bit line wherever it likes, even
+    # in the middle of an HTML tag.
+    msg.attach(MIMEText(text_content, 'plain', 'utf-8'))
+    if html_content:
+        html_part = MIMEText(html_content, 'html', 'utf-8')
+        icon = app_icon() if f'cid:{APP_ICON_CID}' in html_content else None
+        if icon:
+            related = MIMEMultipart('related')
+            related.attach(html_part)
+            image = MIMEImage(icon, 'png')
+            image.add_header('Content-ID', f'<{APP_ICON_CID}>')
+            image.add_header('Content-Disposition', 'inline', filename='app-icon.png')
+            related.attach(image)
+            msg.attach(related)
+        else:
+            msg.attach(html_part)
+    return msg
 
 
 class SmtpService:
@@ -60,19 +92,9 @@ class SmtpService:
             return False
         
         try:
-            msg = MIMEMultipart('alternative')
-            msg['Subject'] = subject
-            msg['From'] = self.from_address
-            msg['To'] = recipient
+            msg = build_message(self.from_address, recipient, subject, text_content, html_content)
             msg['Date'] = datetime.utcnow().strftime('%a, %d %b %Y %H:%M:%S +0000')
-            
-            part1 = MIMEText(text_content, 'plain')
-            msg.attach(part1)
-            
-            if html_content:
-                part2 = MIMEText(html_content, 'html')
-                msg.attach(part2)
-            
+
             # Determine connection mode
             # Priority 1: Implicit SSL (if configured or using port 465)
             if self.use_ssl or self.port == 465:

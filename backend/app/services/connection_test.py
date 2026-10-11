@@ -5,8 +5,6 @@ Provides detailed logging for debugging
 import imaplib
 import smtplib
 import ssl
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
 from typing import Dict, List
 from ..config import settings
 from .mail_tls import mail_tls_context, certificate_error_hint, verify_mode
@@ -68,13 +66,20 @@ def test_smtp_connection() -> Dict:
             logs.append("Relay mode - skipping authentication")
         
         logs.append("Sending test email...")
-        msg = MIMEMultipart()
-        msg['From'] = settings.smtp_from or settings.smtp_user
-        msg['To'] = settings.admin_email or settings.smtp_user
-        msg['Subject'] = 'SMTP Test - mailcow Logs Viewer'
-        
+        from . import email_layout as e
+        from .smtp_service import build_message
+        sender = settings.smtp_from or settings.smtp_user
+        recipient = settings.admin_email or settings.smtp_user
         body = "This is a test email from mailcow Logs Viewer.\n\nIf you received this, SMTP is working correctly."
-        msg.attach(MIMEText(body, 'plain'))
+        msg = build_message(sender, recipient, 'SMTP Test - mailcow Logs Viewer', body, e.render(
+            title='SMTP works', topic='Test', tone='ok',
+            intro='This is a test email. Alerts and the weekly summary can reach you.',
+            blocks=[e.panel('Sent through', e.kv([
+                ('Server', f"{settings.smtp_host}:{settings.smtp_port}"),
+                ('From', sender),
+                ('To', recipient),
+            ]))],
+            footer='The Test SMTP button sent this email.'))
         
         server.send_message(msg)
         logs.append("Test email sent successfully")

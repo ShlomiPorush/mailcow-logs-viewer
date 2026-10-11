@@ -6,7 +6,6 @@ import asyncio
 import threading
 import re
 import httpx
-from html import escape as html_escape
 import ipaddress
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
@@ -1342,22 +1341,50 @@ def _run_protection_rules_sync(context):
 def _notify_protection(banned, failed, alerts):
     """One message per run about what the protection rules did."""
     from .services.notification_service import notify
+    from .services import email_layout as e
+
+    def addresses(n):
+        return f'{n} address{"es" if n != 1 else ""}'
+
     lines = []
     if alerts:
         lines.append('Possible stolen password:')
         lines += [f'  {reason} ({ip})' for ip, rule, reason in alerts]
     if banned:
-        lines.append(f'Banned {len(banned)} address{"es" if len(banned) != 1 else ""}:')
+        lines.append(f'Banned {addresses(len(banned))}:')
         lines += [f'  {ip}: {reason}' for ip, rule, reason, _ in banned]
     if failed:
-        lines.append(f'Could not ban {len(failed)} address{"es" if len(failed) != 1 else ""}; the next run tries again:')
+        lines.append(f'Could not ban {addresses(len(failed))}; the next run tries again:')
         lines += [f'  {ip}: {reason}' for ip, rule, reason, _ in failed]
     if not lines:
         return
     subject = 'Possible stolen password' if alerts else 'Protection rules banned addresses' if banned else 'Protection rules could not ban'
+    review = 'Review them on the Security page, Protection tab.'
     lines.append('')
-    lines.append('Review them on the Security page, Protection tab.')
-    notify(subject, '\n'.join(lines), alert_type='security')
+    lines.append(review)
+
+    done = []
+    if banned:
+        done.append(f'banned {addresses(len(banned))}')
+    if failed:
+        done.append(f'could not ban {addresses(len(failed))}')
+    intro = ' '.join(filter(None, [
+        'A mailbox may be used by someone else.' if alerts else '',
+        f'The protection rules {" and ".join(done)}.' if done else '',
+    ]))
+    blocks = [e.banner('fail', reason, f'Address: {ip}') for ip, rule, reason in alerts]
+    if banned:
+        blocks.append(e.panel('Banned', e.table(
+            ['Address', 'Reason'], [[e.mono(ip), reason] for ip, rule, reason, _ in banned]), count=len(banned)))
+    if failed:
+        blocks.append(e.panel('Could not ban', e.table(
+            ['Address', 'Reason'], [[e.mono(ip), reason] for ip, rule, reason, _ in failed]),
+            count=len(failed), note='The next run tries again.'))
+    blocks.append(e.paragraph(review, muted=True))
+    html = e.render(title=subject, topic='Security', tone='fail' if alerts or failed else 'warn',
+                    intro=intro or None, blocks=blocks,
+                    footer='The protection rules are set on the Security page, Protection tab.')
+    notify(subject, '\n'.join(lines), html_content=html, alert_type='security')
 
 
 _protection_lock = asyncio.Lock()
@@ -1864,28 +1891,27 @@ async def update_geoip_database():
         update_job_status('update_geoip', 'failed', str(e))
 
 
+_BLACKLIST_TODO = ("Find out why the host was listed and fix the cause, then ask each blacklist to remove it. "
+                   "You get another email when fewer hosts are listed.")
+_BLACKLIST_FOOTER = "Blacklist alerts go to the address set in Settings, Notifications."
+
+
 def _blacklist_alert_host_html(display_name, extra_info, listed_count, listed_bls) -> str:
     """
-    One host block of the blacklist alert email. Host names come from the
+    One host panel of the blacklist alert email. Host names come from the
     mailcow transports and relayhosts and the blacklist entries from the
-    check results, so every value is escaped before it becomes HTML.
+    check results; email_layout escapes every value.
     """
-    items = "".join(
-        f'<li><strong>{html_escape(str(bl.get("name", "")))}</strong> - {html_escape(str(bl.get("zone", "")))} '
-        f'(<a href="{html_escape(str(bl.get("info_url") or "#"), quote=True)}">lookup</a>)</li>'
-        for bl in listed_bls
+    from .services import email_layout as e
+    return e.panel(
+        display_name,
+        e.kv([('Listed on', f"{listed_count} blacklist{'s' if listed_count != 1 else ''}", 'fail')]),
+        e.table(['Blacklist', 'Zone', ''], [
+            [bl.get('name', ''), e.mono(bl.get('zone', '')), e.link('Look up', bl.get('info_url'))]
+            for bl in listed_bls
+        ]),
+        note=str(extra_info).strip().strip('()') or None,
     )
-    return f"""
-                        <div style="margin-bottom: 30px; border-bottom: 1px solid #eee; padding-bottom: 20px;">
-                            <h3 style="margin: 0 0 10px 0;">{html_escape(str(display_name))} <span style="font-weight: normal; font-size: 14px; color: #666;">{html_escape(str(extra_info))}</span></h3>
-                            <div style="background-color: #fef2f2; border: 1px solid #fee2e2; border-radius: 4px; padding: 10px; margin-bottom: 10px;">
-                                <strong style="color: #dc2626;">Listed on {html_escape(str(listed_count))} blacklist(s)</strong>
-                            </div>
-                            <ul style="margin-top: 5px;">
-                                {items}
-                            </ul>
-                        </div>
-                        """
 
 
 async def check_monitored_hosts_job(force: bool = False, send_notification: bool = True):
@@ -2043,9 +2069,12 @@ async def _run_check_monitored_hosts(force: bool, send_notification: bool):
                 # Notification destinations must fire even with no email configured
                 if notification_email or any_channel_configured():
                     # Build aggregated email content
-                    subject = f"⚠️ ALERT: {len(listed_hosts)} Host(s) Listed on Blacklists"
-                    
-                    text_content = f"The following hosts have been detected on one or more blacklists:\n\n"
+                    many = len(listed_hosts) != 1
+                    title = f"{len(listed_hosts)} host{'s are' if many else ' is'} on a blacklist"
+                    subject = f"Blacklist: {title}"
+                    intro = f"Servers that use these blacklists may reject or junk mail from {'these hosts' if many else 'this host'}."
+
+                    text_content = f"{title}. {intro}\n\n"
                     
                     html_rows = ""
                     
@@ -2085,23 +2114,13 @@ async def _run_check_monitored_hosts(force: bool, send_notification: bool):
                         # HTML Row
                         html_rows += _blacklist_alert_host_html(display_name, extra_info, listed_count, listed_bls)
 
-                    text_content += "Action Required:\nPlease investigate and request removal from these blacklists to ensure email deliverability.\n\n"
-                    text_content += "This is an automated notification from mailcow Logs Viewer."
-                    
-                    html_content = f"""
-    <html>
-    <body style="font-family: Arial, sans-serif; padding: 20px; line-height: 1.5;">
-    <h2 style="color: #dc2626;">⚠️ Blacklist Alert</h2>
-    <p>The following hosts have been detected on blacklists:</p>
+                    text_content += f"What to do:\n{_BLACKLIST_TODO}\n\n{_BLACKLIST_FOOTER}"
 
-    {html_rows}
-
-    <p style="color: #666; margin-top: 20px;">Please investigate and request removal from these blacklists to ensure email deliverability.</p>
-    <hr style="margin-top: 30px;">
-    <p style="color: #999; font-size: 12px;">This is an automated notification from mailcow Logs Viewer.</p>
-    </body>
-    </html>
-    """
+                    from .services import email_layout as e
+                    html_content = e.render(
+                        title=title, topic='Blacklist', tone='fail', intro=intro,
+                        blocks=[e.Safe(html_rows), e.banner('warn', 'What to do', _BLACKLIST_TODO)],
+                        footer=_BLACKLIST_FOOTER)
                     
                     # Send notification (in executor - smtplib/requests block the event loop)
                     logger.info("Sending blacklist alert (email + webhook)...")
@@ -2131,48 +2150,33 @@ async def _run_check_monitored_hosts(force: bool, send_notification: bool):
                 notification_email = get_notification_email(blacklist_alert_email)
                 from .services.notification_service import any_channel_configured
                 if notification_email or any_channel_configured():
+                    from .services import email_layout as e
                     if actionable_count == 0:
-                        subject = "✅ Blacklist Cleared - All Monitored Hosts Are Off Blacklists"
+                        subject = "Blacklist: all hosts are clear"
                         host_list = ", ".join(h["hostname"] for h in monitored_hosts)
-                        text_content = (
-                            "All monitored hosts are no longer listed on any (actionable) blacklists.\n\n"
-                            f"Monitored hosts: {host_list}\n\n"
-                            "This is an automated notification from mailcow Logs Viewer."
-                        )
-                        html_content = f"""
-    <html>
-    <body style="font-family: Arial, sans-serif; padding: 20px; line-height: 1.5;">
-    <h2 style="color: #16a34a;">✅ Blacklist Cleared</h2>
-    <p>All monitored hosts are no longer listed on any (actionable) blacklists.</p>
-    <p><strong>Monitored hosts:</strong> {html_escape(host_list)}</p>
-    <hr style="margin-top: 30px;">
-    <p style="color: #999; font-size: 12px;">This is an automated notification from mailcow Logs Viewer.</p>
-    </body>
-    </html>
-    """
+                        intro = "No monitored host is on a blacklist any more."
+                        text_content = f"{intro}\n\nMonitored hosts: {host_list}\n\n{_BLACKLIST_FOOTER}"
+                        html_content = e.render(
+                            title="All hosts are off the blacklists", topic='Blacklist', tone='ok', intro=intro,
+                            blocks=[e.panel('Monitored hosts', e.table(
+                                ['Host', 'Status'], [[h["hostname"], e.tag('Clean', 'ok')] for h in monitored_hosts]),
+                                count=len(monitored_hosts))],
+                            footer=_BLACKLIST_FOOTER)
                     else:
-                        subject = f"📉 Blacklist Improved - {prev_listed} → {actionable_count} Host(s) Listed"
+                        many = actionable_count != 1
+                        subject = f"Blacklist: {actionable_count} host{'s' if many else ''} still listed (was {prev_listed})"
                         still_listed = ", ".join(h["hostname"] for h in actionable_listed_hosts)
-                        text_content = (
-                            f"Fewer hosts are now listed on (actionable) blacklists.\n\n"
-                            f"Previously: {prev_listed} host(s) listed.\n"
-                            f"Now: {actionable_count} host(s) listed.\n\n"
-                            f"Still listed: {still_listed}\n\n"
-                            "This is an automated notification from mailcow Logs Viewer."
-                        )
-                        html_content = f"""
-    <html>
-    <body style="font-family: Arial, sans-serif; padding: 20px; line-height: 1.5;">
-    <h2 style="color: #2563eb;">📉 Blacklist Improved</h2>
-    <p>Fewer hosts are now listed on (actionable) blacklists.</p>
-    <p><strong>Previously:</strong> {html_escape(str(prev_listed))} host(s) listed.</p>
-    <p><strong>Now:</strong> {html_escape(str(actionable_count))} host(s) listed.</p>
-    <p><strong>Still listed:</strong> {html_escape(still_listed)}</p>
-    <hr style="margin-top: 30px;">
-    <p style="color: #999; font-size: 12px;">This is an automated notification from mailcow Logs Viewer.</p>
-    </body>
-    </html>
-    """
+                        intro = f"{actionable_count} host{'s are' if many else ' is'} still listed, down from {prev_listed}."
+                        text_content = f"{intro}\n\nStill listed: {still_listed}\n\n{_BLACKLIST_FOOTER}"
+                        html_content = e.render(
+                            title="Fewer hosts are on a blacklist", topic='Blacklist', tone='info', intro=intro,
+                            blocks=[
+                                e.stats([('Before', prev_listed), ('Now', actionable_count, 'fail')], per_row=2),
+                                e.panel('Still listed', e.table(
+                                    ['Host', 'Status'], [[h["hostname"], e.tag('Listed', 'fail')] for h in actionable_listed_hosts]),
+                                    count=actionable_count),
+                            ],
+                            footer=_BLACKLIST_FOOTER)
                     from .services.notification_service import notify
                     results = await asyncio.get_running_loop().run_in_executor(
                         _thread_pool_executor,
