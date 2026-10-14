@@ -811,8 +811,6 @@
     "devices-seen-filter=recent",
     "devices-seen-filter=stale",
     "devices-type-filter=",
-    "filter-issues-only=",
-    "filter-issues-only=issues",
     "logs-fontsize=10",
     "logs-fontsize=11",
     "logs-fontsize=12",

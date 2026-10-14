@@ -2616,3 +2616,16 @@ button.ui-dm-node:hover { border-color: var(--ui-ink); }
 }
 /* A picker standing in for a select at the end of a list head keeps its place there */
 .ui-picker-slot:has(+ select.ui-head-actions) { margin-inline-start: auto; }
+/* A picker panel stays within the screen and scrolls when its list is long */
+.ui-picker-panel { max-width: calc(100vw - 16px); }
+.ui-picker-panel[role="listbox"] { max-height: min(420px, 60vh); overflow-y: auto; }
+.ui-picker-panel [role="option"][hidden] { display: none; }
+.ui-picker-panel.has-search { width: min(320px, calc(100vw - 16px)); }
+.ui-picker-search { width: 100%; }
+.ui-picker-list { display: grid; gap: 1px; max-height: min(320px, 45vh); overflow-y: auto; }
+.ui-picker-none { padding: 4px 8px; font-size: 12.5px; }
+.ui-picker-none.hidden { display: none; }
+.ui-ms-dropdown { width: min(320px, calc(100vw - 16px)); }
+.ui-ms-range label, .ui-ms-range input { min-width: 0; }
+/* A card does not cut the picker open inside it */
+.ui-table-card:has(.ui-picker-panel:not(.hidden)) { overflow: visible; }

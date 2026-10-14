@@ -793,7 +793,7 @@
                             <option value="warning">Warning</option>
                             <option value="info">Info</option>
                         </select>
-                        <select id="netfilter-filter-country" class="ui-select" aria-label="Country" data-picker-label="Country" onchange="applyNetfilterFilters()">
+                        <select id="netfilter-filter-country" class="ui-select" aria-label="Country" data-picker-label="Country" data-picker-search="Search countries" onchange="applyNetfilterFilters()">
                             <option value="" data-short="All">All Countries</option>
                         </select>
                         <button type="button" class="ui-btn ui-filters-toggle" aria-expanded="false" aria-controls="netfilter-more" onclick="uiToggleFilters(this)">Filters<span class="ui-tab-n hidden"></span></button>
@@ -882,13 +882,14 @@
                 </div>
                 <div class="ui-scroll" id="quarantine-tab-messages" role="tabpanel">
                 <section class="ui-sec-block">
-                    <div class="ui-list-head ui-q-head"><h2 class="ui-h2">Quarantined Messages</h2> <span id="quarantine-count" class="ui-count"></span>
+                    <div class="ui-list-head ui-q-head"><h2 class="ui-h2">Quarantined Messages</h2>
                         <select id="quarantine-sort" onchange="applyQuarantineSort()" class="ui-select ui-head-actions ui-select-auto" aria-label="Sort" data-picker-label="Sort">
                             <option value="newest" data-short="Newest">Newest first</option>
-                            <option value="score_desc">Score: high to low</option>
-                            <option value="score_asc">Score: low to high</option>
+                            <option value="score_desc" data-short="Highest score">Score: high to low</option>
+                            <option value="score_asc" data-short="Lowest score">Score: low to high</option>
                         </select>
                     </div>
+                    <p class="ui-list-summary ui-q-summary"><span id="quarantine-count" class="ui-count"></span></p>
                     <div id="quarantine-logs"><div class="ui-loading"><div class="loading"></div><p>Loading...</p></div></div>
                 </section>
                 </div>

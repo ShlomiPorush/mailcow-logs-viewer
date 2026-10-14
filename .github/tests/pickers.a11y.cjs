@@ -196,3 +196,39 @@ test('a select shown as a picker picks through the select and passes the same ch
     assert.equal(w.document.activeElement, after, 'the focus is back on the picker');
     await noViolations(w, 'a select picker in use');
 });
+
+test('a long list searches as one types, and the keyboard goes from the search to the matches', async () => {
+    const countries = ['Algeria', 'Argentina', 'Armenia', 'Australia', 'Belarus', 'Brazil', 'Canada', 'China', 'France', 'Germany', 'Israel', 'Sweden'];
+    const w = page(`<main><h1>Long</h1><section class="ui-filters ui-fbar"><div class="ui-fbar-pickers">
+        <select id="country" aria-label="Country" data-picker-label="Country" data-picker-search="Search countries" onchange="changes.push(this.value)">
+            <option value="" data-short="All">All Countries</option>${countries.map(c => `<option value="${c}">${c}</option>`).join('')}
+        </select></div></section></main>`);
+    w.changes = [];
+    w.uiFilterBarSync();
+    const button = w.document.querySelector('.ui-picker-btn');
+    button.click();
+    const search = w.document.querySelector('.ui-picker-search');
+    assert.equal(w.document.activeElement, search, 'the search takes the focus on open');
+    assert.ok(search.getAttribute('aria-label'));
+    await noViolations(w, 'an open searchable picker');
+    search.value = 'ar';
+    search.dispatchEvent(new w.Event('input', { bubbles: true }));
+    const shown = () => [...w.document.querySelectorAll('[role="option"]')].filter(o => !o.hidden).map(o => o.textContent.trim());
+    assert.deepEqual(shown(), ['Argentina', 'Armenia', 'Belarus']);
+    key(w, search, 'ArrowDown');
+    assert.equal(w.document.activeElement.textContent.trim(), 'Argentina', 'Arrow Down moves into the matches');
+    key(w, w.document.activeElement, 'ArrowUp');
+    assert.equal(w.document.activeElement, search, 'Arrow Up from the first match returns to the search');
+    search.value = 'zzz';
+    search.dispatchEvent(new w.Event('input', { bubbles: true }));
+    assert.deepEqual(shown(), []);
+    assert.ok(!w.document.querySelector('.ui-picker-none').classList.contains('hidden'), 'says there are no matches');
+    search.value = 'swe';
+    search.dispatchEvent(new w.Event('input', { bubbles: true }));
+    key(w, search, 'Enter');
+    await frame(w);
+    assert.deepEqual([...w.changes], ['Sweden'], 'Enter picks the first match');
+    assert.match(w.document.querySelector('.ui-picker-btn').textContent.replace(/\s+/g, ' ').trim(), /^Country: Sweden$/);
+    w.document.querySelector('.ui-picker-btn').click();
+    assert.equal(shown().length, countries.length + 1, 'opening again shows every country');
+});

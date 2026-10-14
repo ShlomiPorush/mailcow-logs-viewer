@@ -105,12 +105,10 @@ function renderDomains(container, data) {
                 <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
                 <input type="text" id="domain-search-input" placeholder="Search domains..." aria-label="Search domains" oninput="filterDomains()">
             </label>
-            </div>
-            <div class="ui-fbar-pickers">
-                <select id="filter-issues-only" class="ui-select" aria-label="Show" data-picker-label="Show" onchange="filterDomains()">
-                    <option value="">All domains</option>
-                    <option value="issues" data-short="With issues">Only domains with issues</option>
-                </select>
+            <label class="ui-check-label">
+                <input type="checkbox" id="filter-issues-only" class="ui-check" onchange="filterDomains()">
+                Show only domains with issues
+            </label>
             </div>
         </section>
         <p class="ui-list-summary"><span id="domain-count-badge" class="ui-count">${uiCountLabel(domains.length, 'domain', 'domains')}</span><button type="button" class="ui-clear-filters hidden" onclick="clearDomainFilters()">Clear filters</button></p>
@@ -129,7 +127,7 @@ function clearDomainFilters() {
     const search = document.getElementById('domain-search-input');
     const issues = document.getElementById('filter-issues-only');
     if (search) search.value = '';
-    if (issues) issues.value = '';
+    if (issues) issues.checked = false;
     filterDomains();
 }
 
@@ -149,7 +147,7 @@ function filterDomains() {
     if (!searchInput || !domainsList || !window.domainsData) return;
 
     const searchTerm = searchInput.value.toLowerCase().trim();
-    const showIssuesOnly = issuesFilter ? issuesFilter.value === 'issues' : false;
+    const showIssuesOnly = issuesFilter ? issuesFilter.checked : false;
 
     const filteredDomains = window.domainsData.filter(domain =>
         domain.domain_name.toLowerCase().includes(searchTerm) && (!showIssuesOnly || domainHasIssues(domain)));

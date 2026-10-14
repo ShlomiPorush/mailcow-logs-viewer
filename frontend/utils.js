@@ -1113,6 +1113,8 @@ function uiFilterBarSync() {
         slot.innerHTML = uiPicker({
             id: `${select.id}-picker`, label: select.dataset.pickerLabel,
             value: escapeHtml(short(chosen)), set: uiFilterChanged(select),
+            // A long list gets a search field
+            search: select.dataset.pickerSearch || (options.length > 10 ? `Search ${select.dataset.pickerLabel.toLowerCase()}` : ''),
             options: options.map((o, i) => ({ label: o.textContent.trim(), selected: o === chosen, onclick: `uiSelectPick('${escapeJsArg(select.id)}', ${i})` })),
         });
     });
@@ -1241,10 +1243,13 @@ if (typeof MutationObserver !== 'undefined' && document.body) new MutationObserv
 // =============================================================================
 // One accessible drop-down for the whole app, after the WAI-ARIA listbox and
 // dialog patterns. A short list of choices is a listbox: arrows, Home and End
-// move between them, Enter or Space picks one. Richer content (a custom range,
-// country bars) is a dialog. In both, the choices take the focus on open,
+// move between them, Enter or Space picks one. A long list gets a search field
+// above it that narrows the choices as one types; Arrow Down moves into the
+// list and Enter picks the first match. Richer content (a custom range,
+// country bars) is a dialog. In all of them the focus moves inside on open,
 // Escape closes and returns it to the button, and a click or focus outside
 // closes. The button names the filter and its value ("Period: Last 7 days").
+// An open panel is moved back onto the screen when it would run past an edge.
 //
 // Markup (uiPicker builds it; static markup may follow the same shape):
 //   <span class="ui-popover-host ui-picker" data-picker="ID">
@@ -1253,23 +1258,36 @@ if (typeof MutationObserver !== 'undefined' && document.body) new MutationObserv
 // A page that redraws an open picker keeps it open: uiPickerIsOpen(id).
 
 // open: the picker shown; held: the picker whose button has the focus, so a
-// redraw of the page (new data) can give it back
-const uiPickers = { open: null, held: null };
+// redraw of the page (new data) can give it back; query: what was typed in a search
+const uiPickers = { open: null, held: null, query: {} };
 
 function uiPickerIsOpen(id) {
     return uiPickers.open === id;
 }
 
-// options: [{ label, hint, selected, onclick }] for a listbox; panel: HTML for a dialog
-function uiPicker({ id, label, value, set = false, options = null, panel = '', panelLabel = '', panelClass = '', hostClass = '', onOpen = '' }) {
+function uiPickerMatches(label, query) {
+    return !query || label.toLowerCase().includes(query.trim().toLowerCase());
+}
+
+// options: [{ label, hint, selected, onclick }] for a list; panel: HTML for a dialog;
+// search: the search field's label, for a long list
+function uiPicker({ id, label, value, set = false, options = null, panel = '', panelLabel = '', panelClass = '', hostClass = '', onOpen = '', search = '' }) {
     const open = uiPickerIsOpen(id);
     const list = Array.isArray(options);
-    const body = list
-        ? options.map(o => `<button type="button" role="option" class="ui-fct" tabindex="-1" aria-selected="${o.selected ? 'true' : 'false'}" onclick="${o.onclick}"><span>${escapeHtml(o.label)}</span>${o.hint !== undefined ? `<small>${escapeHtml(String(o.hint))}</small>` : ''}</button>`).join('')
-        : panel;
+    const query = search ? (uiPickers.query[id] || '') : '';
+    const items = list ? options.map(o => `<button type="button" role="option" class="ui-fct" tabindex="-1" aria-selected="${o.selected ? 'true' : 'false'}"${uiPickerMatches(o.label, query) ? '' : ' hidden'} onclick="${o.onclick}"><span>${escapeHtml(o.label)}</span>${o.hint !== undefined ? `<small>${escapeHtml(String(o.hint))}</small>` : ''}</button>`).join('') : '';
+    const anyShown = list && options.some(o => uiPickerMatches(o.label, query));
+    let role = list ? 'listbox' : 'dialog';
+    let body = list ? `<span class="ui-label" aria-hidden="true">${escapeHtml(label)}</span>${items}` : panel;
+    if (list && search) {
+        role = 'dialog';
+        body = `<input type="search" class="ui-input ui-picker-search" placeholder="${escapeHtml(search)}" aria-label="${escapeHtml(search)}" aria-controls="${escapeHtml(id)}-list" aria-autocomplete="list" autocomplete="off" spellcheck="false" value="${escapeHtml(query)}">
+            <span id="${escapeHtml(id)}-list" class="ui-fct-list ui-picker-list" role="listbox" aria-label="${escapeHtml(label)}">${items}</span>
+            <span class="ui-picker-none ui-muted${anyShown ? ' hidden' : ''}" role="status">No matches</span>`;
+    }
     return `<span class="ui-popover-host ui-picker${hostClass ? ` ${hostClass}` : ''}" data-picker="${escapeHtml(id)}"${onOpen ? ` data-on-open="${escapeHtml(onOpen)}"` : ''}>
-        <button type="button" class="ui-msg-range ui-picker-btn${set ? ' is-set' : ''}" aria-haspopup="${list ? 'listbox' : 'dialog'}" aria-expanded="${open}" aria-controls="${escapeHtml(id)}-panel"><span class="ui-picker-name">${escapeHtml(label)}:</span> ${value}</button>
-        <span id="${escapeHtml(id)}-panel" class="ui-popover ui-msg-time-panel ui-picker-panel${panelClass ? ` ${panelClass}` : ''}${open ? '' : ' hidden'}" role="${list ? 'listbox' : 'dialog'}" aria-label="${escapeHtml(panelLabel || label)}">${list ? `<span class="ui-label" aria-hidden="true">${escapeHtml(label)}</span>` : ''}${body}</span>
+        <button type="button" class="ui-msg-range ui-picker-btn${set ? ' is-set' : ''}" aria-haspopup="${role}" aria-expanded="${open}" aria-controls="${escapeHtml(id)}-panel"><span class="ui-picker-name">${escapeHtml(label)}:</span> ${value}</button>
+        <span id="${escapeHtml(id)}-panel" class="ui-popover ui-msg-time-panel ui-picker-panel${search ? ' has-search' : ''}${panelClass ? ` ${panelClass}` : ''}${open ? '' : ' hidden'}" role="${role}" aria-label="${escapeHtml(panelLabel || label)}">${body}</span>
     </span>`;
 }
 
@@ -1281,13 +1299,29 @@ function uiPickerParts(id) {
     return { host, button, panel };
 }
 
+function uiPickerList(panel) {
+    return panel.matches('[role="listbox"]') ? panel : panel.querySelector('[role="listbox"]');
+}
+
 function uiPickerItems(panel) {
-    return [...panel.querySelectorAll('[role="option"]')];
+    const list = uiPickerList(panel);
+    return list ? [...list.querySelectorAll('[role="option"]')].filter(o => !o.hidden) : [];
 }
 
 function uiPickerFocusables(panel) {
     return [...panel.querySelectorAll('button, input, select, textarea, a[href], [tabindex]:not([tabindex="-1"])')]
-        .filter(el => !el.disabled && !el.closest('.hidden'));
+        .filter(el => !el.disabled && !el.hidden && !el.closest('.hidden'));
+}
+
+// An open panel stays on the screen: it moves back from an edge it would run past
+function uiPickerPlace(panel) {
+    panel.style.transform = '';
+    const rect = panel.getBoundingClientRect();
+    const width = document.documentElement.clientWidth;
+    let shift = 0;
+    if (rect.right > width - 8) shift = width - 8 - rect.right;
+    if (rect.left + shift < 8) shift = 8 - rect.left;
+    if (shift) panel.style.transform = `translateX(${Math.round(shift)}px)`;
 }
 
 function uiPickerOpen(id) {
@@ -1299,11 +1333,14 @@ function uiPickerOpen(id) {
     if (hook && typeof window[hook] === 'function') window[hook]();
     panel.classList.remove('hidden');
     button.setAttribute('aria-expanded', 'true');
+    uiPickerPlace(panel);
     uiPickerFocusInside(panel);
 }
 
-// The chosen option, or the first one; in a dialog its first control
+// The search field, else the chosen option or the first one; in a dialog its first control
 function uiPickerFocusInside(panel) {
+    const search = panel.querySelector('.ui-picker-search');
+    if (search) { search.focus(); return; }
     if (panel.getAttribute('role') === 'listbox') {
         const items = uiPickerItems(panel);
         const target = items.find(o => o.getAttribute('aria-selected') === 'true') || items[0];
@@ -1315,10 +1352,31 @@ function uiPickerFocusInside(panel) {
     else { panel.setAttribute('tabindex', '-1'); panel.focus(); }
 }
 
+// Narrow a long list to the options that hold the typed text
+function uiPickerFilter(panel, query) {
+    const list = uiPickerList(panel);
+    if (!list) return;
+    let shown = 0;
+    list.querySelectorAll('[role="option"]').forEach(option => {
+        const match = uiPickerMatches(option.textContent, query);
+        option.hidden = !match;
+        if (match) shown++;
+    });
+    const none = panel.querySelector('.ui-picker-none');
+    if (none) none.classList.toggle('hidden', shown > 0);
+}
+
 function uiPickerClose(id, { returnFocus = false } = {}) {
     if (uiPickers.open === id) uiPickers.open = null;
     const { button, panel } = uiPickerParts(id);
-    if (panel) panel.classList.add('hidden');
+    if (panel) {
+        panel.classList.add('hidden');
+        panel.style.transform = '';
+        // The next opening shows every choice again
+        const search = panel.querySelector('.ui-picker-search');
+        if (search && search.value) { search.value = ''; uiPickerFilter(panel, ''); }
+    }
+    delete uiPickers.query[id];
     if (button) {
         button.setAttribute('aria-expanded', 'false');
         if (returnFocus) uiPickerFocusButton(id);
@@ -1338,7 +1396,10 @@ function uiPickerRefocus() {
     const lost = !document.activeElement || document.activeElement === document.body;
     if (uiPickers.open) {
         const { panel } = uiPickerParts(uiPickers.open);
-        if (panel && !panel.contains(document.activeElement)) uiPickerFocusInside(panel);
+        if (panel && !panel.contains(document.activeElement)) {
+            uiPickerPlace(panel);
+            uiPickerFocusInside(panel);
+        }
     } else if (uiPickers.held && lost) {
         uiPickerFocusButton(uiPickers.held);
     }
@@ -1368,6 +1429,14 @@ if (typeof document !== 'undefined' && document.addEventListener) {
         }
     });
 
+    document.addEventListener('input', event => {
+        const search = event.target instanceof Element && event.target.closest('.ui-picker-search');
+        if (!search) return;
+        const id = search.closest('.ui-picker').dataset.picker;
+        uiPickers.query[id] = search.value;
+        uiPickerFilter(search.closest('.ui-picker-panel'), search.value);
+    });
+
     // Capture, so Escape closes the picker before it reaches a dialog or sheet under it
     document.addEventListener('keydown', event => {
         if (!(event.target instanceof Element)) return;
@@ -1387,10 +1456,22 @@ if (typeof document !== 'undefined' && document.addEventListener) {
             uiPickerClose(id, { returnFocus: true });
             return;
         }
-        if (panel.getAttribute('role') !== 'listbox' || !panel.contains(event.target)) return;
+        if (!panel.contains(event.target)) return;
         const items = uiPickerItems(panel);
+        const search = panel.querySelector('.ui-picker-search');
+        if (search && event.target === search) {
+            if (event.key === 'ArrowDown' && items.length) { event.preventDefault(); items[0].focus(); }
+            else if (event.key === 'Enter' && items.length) { event.preventDefault(); items[0].click(); }
+            return;
+        }
+        const list = uiPickerList(panel);
+        if (!list || !list.contains(event.target)) return;
         const at = items.indexOf(document.activeElement);
-        const go = index => { event.preventDefault(); items[Math.max(0, Math.min(items.length - 1, index))].focus(); };
+        const go = index => {
+            event.preventDefault();
+            if (index < 0 && search) { search.focus(); return; }
+            items[Math.max(0, Math.min(items.length - 1, index))].focus();
+        };
         if (event.key === 'ArrowDown') go(at + 1);
         else if (event.key === 'ArrowUp') go(at - 1);
         else if (event.key === 'Home') go(0);
@@ -1410,5 +1491,12 @@ if (typeof document !== 'undefined' && document.addEventListener) {
         if (!host || !host.contains(event.target)) return;
         const next = event.relatedTarget;
         if (next && !host.contains(next)) uiPickerClose(id);
+    });
+
+    // A panel open while the window changes size stays on the screen
+    if (typeof window.addEventListener === 'function') window.addEventListener('resize', () => {
+        if (!uiPickers.open) return;
+        const { panel } = uiPickerParts(uiPickers.open);
+        if (panel) uiPickerPlace(panel);
     });
 }
