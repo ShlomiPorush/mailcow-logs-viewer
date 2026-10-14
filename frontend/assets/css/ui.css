@@ -1633,6 +1633,34 @@ button.ui-st-card:hover { outline: 1px solid var(--ui-line); }
 .ui-kpi-btn:hover { background: color-mix(in srgb, var(--ui-ink) 5%, var(--ui-bg)); }
 .ui-kpi b.ui-spam { color: var(--ui-spam); }
 .ui-ms-aliases { --ui-cols: minmax(220px, 2fr) repeat(7, 76px) 70px; --ui-table-min: 860px; background: var(--ui-bg); }
+/* Wide screens: the counts are one row of tiles and every alias count has its column */
+.ui-ms-group { display: contents; }
+.ui-ms-group-h, .ui-ms-sub, .ui-ms-alias-chev, .ui-ms-alias-more { display: none; }
+@media (max-width: 760px) {
+    /* A mailbox: address and activity, storage and aliases, services, then its four figures */
+    .ui-ms-row { position: relative; }
+    .ui-ms-row > .ui-q-who { flex: 1 1 100%; min-width: 0; }
+    .ui-ms-row > .ui-q-who > div:first-child, .ui-ms-row .ui-ms-sub { padding-inline-end: 124px; }
+    .ui-ms-row > .ui-ms-spark-cell { position: absolute; top: 8px; inset-inline-end: 16px; }
+    .ui-ms-row > .ui-ms-spark-cell > .ui-sec-unit, .ui-ms-row > .ui-ms-wide, .ui-ms-row .ui-ms-name { display: none; }
+    .ui-ms-row .ui-ms-sub { display: block; }
+    /* The counts: traffic beside what became of the sent mail, a name and its number a line */
+    .ui-ms-counts { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 14px; padding: 10px 12px; }
+    .ui-ms-counts .ui-ms-group { display: block; min-width: 0; }
+    .ui-ms-counts .ui-ms-group-h { display: block; margin: 0 0 6px; color: var(--ui-muted); font-size: 12px; font-weight: 600; }
+    .ui-ms-counts .ui-kpi { display: flex; flex-direction: row-reverse; justify-content: space-between; align-items: baseline; gap: 8px; width: 100%; padding: 5px 0; outline: 0; border-top: 1px solid var(--ui-line); background: none; font-size: 13px; }
+    .ui-ms-counts .ui-kpi b { display: inline; font-size: 14px; font-weight: 700; letter-spacing: 0; }
+    /* An alias: its address and failure rate, the counts it has; a tap opens all of them */
+    .ui-ms-alias { cursor: pointer; }
+    .ui-ms-alias > .ui-ms-alias-name { flex: 1 1 calc(100% - 110px); min-width: 0; }
+    .ui-ms-alias > .ui-ms-alias-fail { flex: none; }
+    .ui-ms-alias > .ui-ms-count { order: 1; }
+    .ui-ms-alias > .ui-ms-count.is-zero, .ui-ms-alias.is-open > .ui-ms-count { display: none; }
+    .ui-ms-alias > .ui-ms-alias-more { order: 2; flex: 1 1 100%; margin-top: 4px; cursor: default; }
+    .ui-ms-alias.is-open > .ui-ms-alias-more { display: block; }
+    .ui-ms-alias-chev { display: inline-flex; padding: 0; margin-inline-end: 2px; border: 0; background: none; color: inherit; cursor: pointer; vertical-align: -1px; }
+    .ui-ms-alias.is-open .ui-ms-alias-chev .ui-domain-chevron { transform: rotate(90deg); }
+}
 .ui-link-cell { border: 0; background: none; color: inherit; font: inherit; cursor: pointer; }
 .ui-link-cell:hover { text-decoration: underline; }
 .ui-domain-details .ui-md-fact > span .ui-mdot { display: inline-block; margin-inline-end: 4px; }

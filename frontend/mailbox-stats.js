@@ -14,7 +14,8 @@ let mailboxStatsCache = {
     mailboxes: null,
     domains: null,
     lastLoad: null,
-    expandedMailboxes: new Set() // Track expanded accordion states
+    expandedMailboxes: new Set(), // Track expanded accordion states
+    openAliases: new Set() // Aliases opened on a phone to show all their counts
 };
 
 // =============================================================================
@@ -323,6 +324,31 @@ function mailboxStatLink(email, filter, value, label, tone) {
         <b class="${!value ? 'ui-zero' : tone ? `ui-${tone}` : ''}">${(value || 0).toLocaleString()}</b>${label}</button>`;
 }
 
+// The counts of a mailbox or an alias: its traffic, and what became of the mail it sent.
+// Each count opens its messages. Wide screens show them as one row of tiles.
+function mailboxCountGroups(email, c) {
+    return `<div class="ui-kpis ui-ms-counts">
+        <div class="ui-ms-group"><h5 class="ui-ms-group-h">Traffic</h5>
+            ${mailboxStatLink(email, "direction: 'outbound'", c.sent, 'Sent', 'dir-out')}
+            ${mailboxStatLink(email, "direction: 'inbound'", c.received, 'Received', 'dir-in')}
+            ${mailboxStatLink(email, "direction: 'internal'", c.internal, 'Internal', 'dir-int')}</div>
+        <div class="ui-ms-group"><h5 class="ui-ms-group-h">Sent mail</h5>
+            ${mailboxStatLink(email, "status: 'delivered'", c.delivered, 'Delivered', 'ok')}
+            ${mailboxStatLink(email, "status: 'deferred'", c.deferred, 'Deferred', 'warn')}
+            ${mailboxStatLink(email, "status: 'bounced'", c.bounced, 'Bounced', 'fail')}
+            ${mailboxStatLink(email, "status: 'rejected'", c.rejected, 'Rejected', 'fail')}</div>
+    </div>`;
+}
+
+// On a phone an alias shows the counts it has; a tap opens all of them
+function toggleMailboxAlias(row, address) {
+    const open = !row.classList.contains('is-open');
+    row.classList.toggle('is-open', open);
+    row.querySelector('.ui-ms-alias-chev')?.setAttribute('aria-expanded', String(open));
+    if (open) mailboxStatsCache.openAliases.add(address);
+    else mailboxStatsCache.openAliases.delete(address);
+}
+
 // What the mailbox may use, as a line of tags under its address
 function mailboxServices(mb) {
     const at = mb.attributes || {};
@@ -438,7 +464,8 @@ function renderMailboxStatsAccordion(mailboxes, page = 1, totalPages = 1, total 
             <div class="ui-tr ui-ms-row" onclick="toggleMailboxAccordion('${escapeJsArg(mb.username)}')">
                 <div class="ui-td ui-q-who">
                     <div><svg id="accordion-icon-${index}" class="ui-domain-chevron" width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"${isExpanded ? ' style="transform: rotate(90deg)"' : ''}><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg>${copyableText(mb.username)} ${mb.active ? '' : uiTag('Inactive', 'fail')}</div>
-                    ${mb.name ? `<small>${escapeHtml(mb.name)}</small>` : ''}
+                    ${mb.name ? `<small class="ui-ms-name">${escapeHtml(mb.name)}</small>` : ''}
+                    <small class="ui-ms-sub">${escapeHtml(mb.quota_used_formatted)} · ${uiCountLabel(mb.alias_count || 0, 'alias', 'aliases')}</small>
                     ${mailboxServices(mb)}
                 </div>
                 <span class="ui-td ui-ms-spark-cell"><small class="ui-sec-unit">Activity </small>${mailboxSparkline(mb)}</span>
@@ -446,8 +473,8 @@ function renderMailboxStatsAccordion(mailboxes, page = 1, totalPages = 1, total 
                 <span class="ui-td ui-td-end"><small class="ui-sec-unit">Received </small>${mb.combined_received.toLocaleString()}</span>
                 <span class="ui-td ui-td-end"><small class="ui-sec-unit">Delivered </small>${(mb.combined_delivered || 0).toLocaleString()}</span>
                 <span class="ui-td ui-td-end${failTone ? ` ui-text-${failTone}` : ''}"><small class="ui-sec-unit">Failed </small>${mb.combined_failure_rate}%</span>
-                <span class="ui-td ui-td-end"><small class="ui-sec-unit">Aliases </small>${mb.alias_count || 0}</span>
-                <span class="ui-td ui-td-end"><small class="ui-sec-unit">Storage </small>${mb.quota_used_formatted}</span>
+                <span class="ui-td ui-td-end ui-ms-wide"><small class="ui-sec-unit">Aliases </small>${mb.alias_count || 0}</span>
+                <span class="ui-td ui-td-end ui-ms-wide"><small class="ui-sec-unit">Storage </small>${mb.quota_used_formatted}</span>
 
                 <div id="accordion-content-${index}" class="ui-domain-details${isExpanded ? '' : ' hidden'}" onclick="event.stopPropagation()">
                     <div class="ui-md-ids">
@@ -461,25 +488,26 @@ function renderMailboxStatsAccordion(mailboxes, page = 1, totalPages = 1, total 
                     </div>
 
                     <h4 class="ui-md-h">Message Statistics</h4>
-                    <div class="ui-kpis ui-ms-counts">
-                        ${mailboxStatLink(email, "direction: 'outbound'", mb.combined_sent, 'Sent', 'dir-out')}
-                        ${mailboxStatLink(email, "direction: 'inbound'", mb.combined_received, 'Received', 'dir-in')}
-                        ${mailboxStatLink(email, "direction: 'internal'", mb.combined_internal, 'Internal', 'dir-int')}
-                        ${mailboxStatLink(email, "status: 'delivered'", mb.combined_delivered, 'Delivered', 'ok')}
-                        ${mailboxStatLink(email, "status: 'deferred'", (mb.mailbox_counts?.sent_deferred || 0) + sum(mb, 'sent_deferred'), 'Deferred', 'warn')}
-                        ${mailboxStatLink(email, "status: 'bounced'", (mb.mailbox_counts?.sent_bounced || 0) + sum(mb, 'sent_bounced'), 'Bounced', 'fail')}
-                        ${mailboxStatLink(email, "status: 'rejected'", (mb.mailbox_counts?.sent_rejected || 0) + sum(mb, 'sent_rejected'), 'Rejected', 'fail')}
-                    </div>
+                    ${mailboxCountGroups(email, {
+                        sent: mb.combined_sent,
+                        received: mb.combined_received,
+                        internal: mb.combined_internal,
+                        delivered: mb.combined_delivered,
+                        deferred: (mb.mailbox_counts?.sent_deferred || 0) + sum(mb, 'sent_deferred'),
+                        bounced: (mb.mailbox_counts?.sent_bounced || 0) + sum(mb, 'sent_bounced'),
+                        rejected: (mb.mailbox_counts?.sent_rejected || 0) + sum(mb, 'sent_rejected'),
+                    })}
 
                     ${mb.aliases && mb.aliases.length > 0 ? `
                         <h4 class="ui-md-h">Aliases (${mb.aliases.length})</h4>
                         <div class="ui-table ui-stack ui-ms-aliases">
                             <div class="ui-tr ui-tr-head"><span>Alias</span><span class="ui-td-end">Sent</span><span class="ui-td-end">Received</span><span class="ui-td-end">Internal</span><span class="ui-td-end">Delivered</span><span class="ui-td-end">Deferred</span><span class="ui-td-end">Bounced</span><span class="ui-td-end">Rejected</span><span class="ui-td-end">Fail %</span></div>
                             ${aliases.map(alias => {
-            const go = (filter, value, label, tone) => `<button type="button" class="ui-td ui-td-end ui-link-cell${!value ? ' ui-zero' : tone ? ` ui-text-${tone}` : ''}" onclick="event.stopPropagation(); navigateToMessagesWithFilter({ email: '${escapeJsArg(alias.alias_address)}', filterType: 'search', ${filter} })"><small class="ui-sec-unit">${label} </small>${value || 0}</button>`;
+            const go = (filter, value, label, tone) => `<button type="button" class="ui-td ui-td-end ui-link-cell ui-ms-count${!value ? ' is-zero ui-zero' : tone ? ` ui-text-${tone}` : ''}" onclick="event.stopPropagation(); navigateToMessagesWithFilter({ email: '${escapeJsArg(alias.alias_address)}', filterType: 'search', ${filter} })"><small class="ui-sec-unit">${label} </small>${value || 0}</button>`;
+            const open = mailboxStatsCache.openAliases.has(alias.alias_address);
             return `
-                            <div class="ui-tr">
-                                <span class="ui-td">${copyableText(alias.alias_address)}
+                            <div class="ui-tr ui-ms-alias${open ? ' is-open' : ''}" onclick="toggleMailboxAlias(this, '${escapeJsArg(alias.alias_address)}')">
+                                <span class="ui-td ui-ms-alias-name"><button type="button" class="ui-ms-alias-chev" aria-expanded="${open}" aria-label="All counts of ${escapeHtml(alias.alias_address)}"><svg class="ui-domain-chevron" width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg></button>${copyableText(alias.alias_address)}
                                     ${alias.is_catch_all ? uiTag('catch-all', 'warn') : ''}
                                     ${alias.is_domain_alias ? '<span class="ui-tag ui-tag-info" title="Address on a mailcow alias domain that points at this mailbox">domain alias</span>' : ''}
                                     ${!alias.active ? uiTag('inactive', '') : ''}</span>
@@ -490,7 +518,11 @@ function renderMailboxStatsAccordion(mailboxes, page = 1, totalPages = 1, total 
                                 ${go("status: 'deferred'", alias.sent_deferred, 'Deferred', 'warn')}
                                 ${go("status: 'bounced'", alias.sent_bounced, 'Bounced', 'fail')}
                                 ${go("status: 'rejected'", alias.sent_rejected, 'Rejected', 'fail')}
-                                <span class="ui-td ui-td-end${alias.failure_rate >= 5 ? ' ui-text-fail' : ' ui-muted'}"><small class="ui-sec-unit">Fail </small>${alias.failure_rate || 0}%</span>
+                                <span class="ui-td ui-td-end ui-ms-alias-fail${alias.failure_rate >= 5 ? ' ui-text-fail' : ' ui-muted'}"><small class="ui-sec-unit">Fail </small>${alias.failure_rate || 0}%</span>
+                                <div class="ui-ms-alias-more" onclick="event.stopPropagation()">${mailboxCountGroups(alias.alias_address, {
+                                    sent: alias.sent_total, received: alias.received_total, internal: alias.direction_internal,
+                                    delivered: alias.sent_delivered, deferred: alias.sent_deferred, bounced: alias.sent_bounced, rejected: alias.sent_rejected,
+                                })}</div>
                             </div>`;
         }).join('')}
                         </div>
