@@ -1519,6 +1519,11 @@ button.ui-st-card:hover { outline: 1px solid var(--ui-line); }
     .ui-count-row .ui-filters-row > .ui-count + * { margin-inline-start: 0; }
     .ui-domain-table .ui-tr:not(.ui-tr-head) > .ui-td:not(.ui-q-who) { flex: 0 0 auto; }
     .ui-domain-details { flex: 1 1 100%; }
+    /* Two even lines of three checks, each name over its result; the storage is in the details */
+    .ui-domain-table .ui-domain-row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px 12px; }
+    .ui-domain-row > .ui-q-who, .ui-domain-row > .ui-domain-details { grid-column: 1 / -1; }
+    .ui-domain-row > .ui-dns-cell { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; }
+    .ui-domain-row > .ui-domain-storage { display: none; }
 }
 
 /* ---------- DMARC (v3 language) ---------- */

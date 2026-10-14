@@ -163,7 +163,7 @@ function filterDomains() {
 
 function dnsStatusTag(label, check) {
     const [text, tone] = DNS_TAG[check.status] || ['-', ''];
-    return `<span class="ui-td" title="${escapeHtml(`${label}: ${check.message || 'Not checked'}`)}"><small class="ui-sec-unit">${label} </small>${tone ? uiTag(text, tone) : '<span class="ui-muted">-</span>'}</span>`;
+    return `<span class="ui-td ui-dns-cell" title="${escapeHtml(`${label}: ${check.message || 'Not checked'}`)}"><small class="ui-sec-unit">${label} </small>${tone ? uiTag(text, tone) : '<span class="ui-muted">-</span>'}</span>`;
 }
 
 function renderDomainDnsSection(domain) {
@@ -204,7 +204,7 @@ function renderDomainAccordionRow(domain, open = false) {
                 <small>${escapeHtml(String(domain.mboxes_in_domain))} mailboxes, ${escapeHtml(String(domain.aliases_in_domain))} aliases${issues ? ', needs a DNS change' : ''}</small>
             </div>
             ${DNS_CHECKS.map(([label, key]) => dnsStatusTag(label, dns[key] || { status: 'unknown' })).join('')}
-            <span class="ui-td ui-td-end"><small class="ui-sec-unit">Storage </small>${formatBytes(domain.bytes_total)}</span>
+            <span class="ui-td ui-td-end ui-domain-storage"><small class="ui-sec-unit">Storage </small>${formatBytes(domain.bytes_total)}</span>
             <div id="${domainId}-details" class="ui-domain-details${open ? '' : ' hidden'}" data-tab="${domainTabs[domainId] || 'dns'}" onclick="event.stopPropagation()">
                 <div class="ui-tabs ui-domain-tabs" role="tablist" aria-label="Domain">
                     ${[['dns', 'DNS checks'], ['info', 'Details']].map(([tab, label]) => `<button type="button" class="modal-tab${(domainTabs[domainId] || 'dns') === tab ? ' active' : ''}" role="tab" aria-selected="${(domainTabs[domainId] || 'dns') === tab}" onclick="domainShowTab('${escapeJsArg(domainId)}', '${tab}')">${label}</button>`).join('')}
