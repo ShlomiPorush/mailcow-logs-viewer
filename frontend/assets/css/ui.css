@@ -2593,3 +2593,11 @@ button.ui-dm-node:hover { border-color: var(--ui-ink); }
     .ui-dialog-backdrop.is-full:not(.ui-docked) > .ui-dialog { border-radius: 0; padding-top: env(safe-area-inset-top); }
     .ui-dialog-backdrop:not(.ui-docked) .ui-dialog-body { overscroll-behavior: contain; padding-bottom: calc(var(--ui-pad-x) + env(safe-area-inset-bottom)); }
 }
+
+/* An information sheet's or dialog's top (grip and head) is its reading gauge:
+   it fills from the start as the text is read (utils.js, uiReadProgress) */
+.ui-sheet-panel:has(> .ui-read-bar), .ui-dialog:has(> .ui-read-bar) { position: relative; isolation: isolate; }
+.ui-read-bar { position: absolute; inset-inline: 0; top: 0; z-index: -1; overflow: hidden; pointer-events: none;
+    border-start-start-radius: inherit; border-start-end-radius: inherit; }
+.ui-read-bar.hidden { display: none; }
+.ui-read-bar i { display: block; width: 0; height: 100%; background: color-mix(in srgb, var(--ui-accent) 16%, transparent); transition: width .08s linear; }

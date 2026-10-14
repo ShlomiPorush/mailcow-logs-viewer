@@ -914,7 +914,7 @@ const uiIsPhone = () => window.matchMedia('(max-width: 760px)').matches;
 
 // Show the sheet, or redraw it in place: the body keeps its scroll and a grown
 // sheet stays full screen
-function uiSheetShow(id, { label = '', head = '', body = '', expand = false, onClose = null } = {}) {
+function uiSheetShow(id, { label = '', head = '', body = '', expand = false, progress = false, onClose = null } = {}) {
     let sheet = document.getElementById(id);
     const fresh = !sheet;
     if (fresh) {
@@ -952,9 +952,38 @@ function uiSheetShow(id, { label = '', head = '', body = '', expand = false, onC
             sheet.classList.toggle('is-full', room - grow < 1);
         }, { passive: true });
     }
+    if (progress) uiReadProgress(sheet.querySelector('.ui-sheet-head'), bodyEl);
     uiSheetSwipe(sheet, bodyEl, id);
     document.body.classList.add('ui-sheet-on');
     return sheet;
+}
+
+// An information sheet's or dialog's top as its reading gauge: everything above
+// the text (the grip and the head) fills as the text is read, and stays plain
+// when there is nothing to scroll
+function uiReadProgress(head, scroller) {
+    if (!head || !scroller) return;
+    const box = head.parentElement;
+    let bar = box.querySelector(':scope > .ui-read-bar');
+    if (!bar) {
+        bar = document.createElement('span');
+        bar.className = 'ui-read-bar';
+        bar.setAttribute('aria-hidden', 'true');
+        bar.innerHTML = '<i></i>';
+        box.appendChild(bar);
+    }
+    const update = () => {
+        const room = scroller.scrollHeight - scroller.clientHeight;
+        bar.classList.toggle('hidden', room <= 1);
+        bar.style.height = `${head.offsetTop + head.offsetHeight}px`;
+        bar.firstElementChild.style.width = `${room > 1 ? Math.min(100, scroller.scrollTop / room * 100) : 0}%`;
+    };
+    if (!scroller.dataset.readBar) {
+        scroller.dataset.readBar = '1';
+        scroller.addEventListener('scroll', update, { passive: true });
+    }
+    update();
+    requestAnimationFrame(update);
 }
 
 // Close as its owner wants (an owner may keep state of what is open)
