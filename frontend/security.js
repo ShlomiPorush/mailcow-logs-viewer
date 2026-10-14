@@ -32,6 +32,7 @@ let fail2banLoadError = false;   // mailcow could not be asked about Fail2ban
 let securityStripOpen = false;   // on a phone the Protection row folds into one chip
 let securityCountryPicker = false;  // on a phone the countries open from the filter row
 let securityNetworkPicker = false;  // and the networks too
+let securityDaysPicker = false;     // the period opens from its button
 
 // A phone: the list gets its own layout (one line per address, details in a sheet)
 const securityPhone = () => window.matchMedia('(max-width: 760px)').matches;
@@ -499,6 +500,7 @@ function securityListToTop() {
 
 function setSecurityDays(days) {
     securityDays = days;
+    securityDaysPicker = false;
     securityOpenRow = null;
     securityPage = null;
     securityToTop = true;
@@ -608,15 +610,21 @@ function renderSecurityOverview() {
     box.innerHTML = `
         <div class="ui-panel-head ui-sec-head">
             <div class="ui-seg ui-sec-seg" role="group" aria-label="Show">${segs}</div>
-            ${securityFilter === 'history' ? '' : `<span class="ui-sec-days"><span class="ui-seg" role="group" aria-label="Period">${SECURITY_DAYS.map(d => `<button type="button" aria-pressed="${securityDays === d}" onclick="setSecurityDays(${d})">${d}D</button>`).join('')}</span>${securityPeriodSince() ? `<small class="ui-muted" title="The oldest log line kept">since ${escapeHtml(securityPeriodSince())}</small>` : ''}</span>`}
+            ${securityFilter === 'history' ? '' : `<span class="ui-sec-days"><span class="ui-popover-host ui-sec-dhost">
+                <button type="button" class="ui-msg-range" aria-expanded="${securityDaysPicker}" aria-controls="security-days-panel"
+                    onclick="securityDaysPicker = !securityDaysPicker; securityCountryPicker = securityNetworkPicker = false; renderSecurityOverview()">${escapeHtml(securityDaysLabel(securityDays))}</button>
+                <span id="security-days-panel" class="ui-popover ui-msg-time-panel${securityDaysPicker ? '' : ' hidden'}" role="dialog" aria-label="Period">
+                    <span class="ui-label">Period</span>
+                    <span class="ui-fct-list">${SECURITY_DAYS.map(d => `<button type="button" class="ui-fct" aria-pressed="${securityDays === d}" onclick="setSecurityDays(${d})"><span>${escapeHtml(securityDaysLabel(d))}</span></button>`).join('')}</span>
+                </span></span>${securityPeriodSince() ? `<small class="ui-muted" title="The oldest log line kept">since ${escapeHtml(securityPeriodSince())}</small>` : ''}</span>`}
             <span class="ui-popover-host ui-sec-chost">
                 <button type="button" class="ui-msg-range${securityCountry ? ' is-set' : ''}" aria-expanded="${securityCountryPicker}" aria-controls="security-country-panel"
-                    onclick="securityCountryPicker = !securityCountryPicker; securityNetworkPicker = false; renderSecurityOverview()">${securityCountry ? `${securityFlag(securityCountryCode(securityCountry))}${escapeHtml(securityCountry)}` : 'Country: All'}</button>
+                    onclick="securityCountryPicker = !securityCountryPicker; securityNetworkPicker = securityDaysPicker = false; renderSecurityOverview()">${securityCountry ? `${securityFlag(securityCountryCode(securityCountry))}${escapeHtml(securityCountry)}` : 'Country: All'}</button>
                 <span id="security-country-panel" class="ui-popover ui-sec-cpanel${securityCountryPicker ? '' : ' hidden'}" role="dialog" aria-label="Where attacks come from">${securityCountryPanel()}</span>
             </span>
             <span class="ui-popover-host ui-sec-chost">
                 <button type="button" class="ui-msg-range${securityNetwork ? ' is-set' : ''}" aria-expanded="${securityNetworkPicker}" aria-controls="security-network-panel"
-                    onclick="securityNetworkPicker = !securityNetworkPicker; securityCountryPicker = false; renderSecurityOverview()">${securityNetwork ? escapeHtml(securityNetwork) : 'Network: All'}</button>
+                    onclick="securityNetworkPicker = !securityNetworkPicker; securityCountryPicker = securityDaysPicker = false; renderSecurityOverview()">${securityNetwork ? escapeHtml(securityNetwork) : 'Network: All'}</button>
                 <span id="security-network-panel" class="ui-popover ui-sec-cpanel${securityNetworkPicker ? '' : ' hidden'}" role="dialog" aria-label="Networks that try most">${securityNetworkPanel()}</span>
             </span>
             ${securityCountry ? `<span class="ui-sec-filter">${securityFlag(securityCountryCode(securityCountry))}${escapeHtml(securityCountry)}<button type="button" onclick="pickSecurityCountry(null)" aria-label="Show every country" title="Show every country">&times;</button></span>` : ''}
@@ -636,6 +644,11 @@ function renderSecurityOverview() {
 function securityPeriodSince() {
     const since = securityPage && securityPage.days === securityDays ? securityPage.since : null;
     return since ? new Date(since).toLocaleDateString('en-US', { day: 'numeric', month: 'short' }) : null;
+}
+
+// A period as the picker names it
+function securityDaysLabel(days) {
+    return days === 1 ? 'Last 24 hours' : `Last ${days} days`;
 }
 
 function securityPeriodLabel() {
@@ -665,16 +678,16 @@ function securityWatchMore(more) {
 
 // ----------------------------------------------------------------- where attacks come from
 
-// A tap outside the country or network picker closes it, and so does Escape
+// A tap outside the period, country or network picker closes it, and so does Escape
 document.addEventListener('click', event => {
-    if ((securityCountryPicker || securityNetworkPicker) && !event.target.closest('.ui-sec-chost')) {
-        securityCountryPicker = securityNetworkPicker = false;
+    if ((securityCountryPicker || securityNetworkPicker || securityDaysPicker) && !event.target.closest('.ui-sec-chost, .ui-sec-dhost')) {
+        securityCountryPicker = securityNetworkPicker = securityDaysPicker = false;
         renderSecurityOverview();
     }
 });
 document.addEventListener('keydown', event => {
     if (event.key !== 'Escape') return;
-    if (securityCountryPicker || securityNetworkPicker) { securityCountryPicker = securityNetworkPicker = false; renderSecurityOverview(); }
+    if (securityCountryPicker || securityNetworkPicker || securityDaysPicker) { securityCountryPicker = securityNetworkPicker = securityDaysPicker = false; renderSecurityOverview(); }
 });
 
 function securityWatchedCountries() {

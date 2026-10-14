@@ -533,6 +533,13 @@
 /* Below 1280px, where the facets hide, outcome, direction and time are buttons that open their choices */
 .ui-msg-pickers { display: none; }
 .ui-msg-range-host { display: inline-block; }
+/* A filter button that opens its choices (Messages below 1280px, the Security period) */
+.ui-msg-range { display: inline-flex; align-items: center; gap: 6px; padding: 5px 12px; border: 1px solid var(--ui-line); border-radius: 999px;
+    background: var(--ui-bg); color: var(--ui-ink); font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; white-space: nowrap; }
+/* A filter in use stands out */
+.ui-msg-range.is-set { border-color: var(--ui-ink); background: var(--ui-ink); color: var(--ui-bg); }
+.ui-msg-range::after { content: ""; width: 6px; height: 6px; margin-top: -3px; border: solid currentColor; border-width: 0 1.5px 1.5px 0; transform: rotate(45deg); }
+.ui-msg-range[aria-expanded="true"]::after { margin-top: 3px; transform: rotate(-135deg); }
 .ui-msg-time-panel { display: grid; gap: 8px; inset-inline-start: 0; top: calc(100% + 6px); width: min(300px, calc(100vw - 32px)); }
 .ui-msg-time-panel.hidden { display: none; }
 .ui-msg-time-panel .ui-date-pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
@@ -628,12 +635,6 @@
     .ui-msgs { grid-template-columns: minmax(300px, 360px) minmax(0, 1fr); }
     .ui-facets { display: none; }
     .ui-msg-pickers { position: relative; display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
-    .ui-msg-range { display: inline-flex; align-items: center; gap: 6px; padding: 5px 12px; border: 1px solid var(--ui-line); border-radius: 999px;
-        background: var(--ui-bg); color: var(--ui-ink); font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; }
-    /* A filter in use stands out */
-    .ui-msg-range.is-set { border-color: var(--ui-ink); background: var(--ui-ink); color: var(--ui-bg); }
-    .ui-msg-range::after { content: ""; width: 6px; height: 6px; margin-top: -3px; border: solid currentColor; border-width: 0 1.5px 1.5px 0; transform: rotate(45deg); }
-    .ui-msg-range[aria-expanded="true"]::after { margin-top: 3px; transform: rotate(-135deg); }
     /* A panel opens from the start of the row, so it stays on the screen */
     .ui-msg-range-host { position: static; }
 }
@@ -688,7 +689,8 @@
 .ui-sec-seg button { padding: 6px 12px; font-size: 13.5px; }
 .ui-sec-seg button b { margin-inline-start: 4px; font-variant-numeric: tabular-nums; }
 .ui-sec-days { display: inline-flex; align-items: center; gap: 8px; margin-inline-start: auto; }
-.ui-sec-days .ui-seg button { padding: 5px 9px; font-size: 12.5px; }
+/* The period sits at the end of the row, so its choices open toward the start */
+.ui-sec-dhost .ui-popover { inset-inline-start: auto; inset-inline-end: 0; width: 220px; }
 .ui-sec-days small { font-size: 12px; white-space: nowrap; }
 .ui-sec-filter { display: inline-flex; align-items: center; gap: 4px; padding: 2px 4px 2px 9px; border-radius: 999px; background: var(--ui-ink); color: var(--ui-bg); font-size: 12px; font-weight: 600; }
 .ui-sec-filter button { border: 0; background: none; color: inherit; font-size: 14px; line-height: 1; cursor: pointer; padding: 0 4px; }
@@ -886,7 +888,9 @@ body.ui-sheet-on { overflow: hidden; }
     .ui-sec-row { grid-template-columns: minmax(0, 1fr); }
     .ui-sec-acts { justify-content: flex-start; }
     /* The period on its own line; the countries without their bars, so a name fits */
-    .ui-sec-days { flex-basis: 100%; margin-inline-start: 0; }
+    .ui-sec-days { margin-inline-start: 0; }
+    .ui-sec-dhost { position: static; }
+    .ui-sec-dhost .ui-popover { inset-inline: var(--ui-pad-x); width: auto; }
     .ui-sec-bar { grid-template-columns: minmax(0, 1fr) auto 32px; }
     .ui-sec-bar .ui-sec-bar-track { display: none; }
     .ui-sec-lrow { grid-template-columns: minmax(0, 1fr) auto; }
@@ -1560,7 +1564,12 @@ button.ui-st-card:hover { outline: 1px solid var(--ui-line); }
 /* The toggles and Reset wrap together, never Reset alone */
 .ui-ms-opts { display: flex; align-items: center; gap: 8px 12px; margin-inline-start: auto; }
 @media (max-width: 760px) {
-    .ui-ms-filters .ui-filters-row > :is(.ui-ms-search, .ui-ms-picker, select) { flex: 1 1 100%; width: 100%; max-width: none; }
+    /* The search and Filters share a line; the other filters open under them, two to a line */
+    .ui-ms-filters .ui-filters-row > .ui-ms-search { flex: 1 1 0; min-width: 0; max-width: none; }
+    .ui-ms-filters .ui-filters-row > :is(.ui-ms-picker, select) { flex: 1 1 calc(50% - 5px); min-width: 0; width: auto; max-width: none; }
+    /* The count and the page's own buttons come after the filters */
+    .ui-ms-filters .ui-filters-row > .ui-count,
+    .ui-ms-filters .ui-filters-row > .ui-count ~ :not(.ui-filter-extra) { order: 2; }
     .ui-ms-picker > .ui-btn { width: 100%; justify-content: space-between; }
     .ui-ms-opts { flex: 1 1 100%; flex-wrap: wrap; margin-inline-start: 0; }
     .ui-ms-opts .ui-btn { margin-inline-start: auto; }

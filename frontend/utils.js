@@ -1007,3 +1007,29 @@ document.addEventListener('keydown', event => {
     const sheets = document.querySelectorAll('.ui-sheet');
     if (sheets.length) uiSheetDismiss(sheets[sheets.length - 1].id);
 });
+
+// Filter bars on phones: the search stays, the other filters open with
+// "Filters", whose badge counts the ones changed from their default
+function uiToggleFilters(button) {
+    const bar = button.closest('.ui-filters');
+    const open = bar.classList.toggle('is-open');
+    button.setAttribute('aria-expanded', String(open));
+}
+
+function uiFilterBadges() {
+    document.querySelectorAll('.ui-filters-toggle').forEach(button => {
+        const bar = button.closest('.ui-filters');
+        let changed = 0;
+        bar.querySelectorAll('select.ui-filter-extra, .ui-filter-extra select').forEach(select => {
+            const initial = [...select.options].find(o => o.defaultSelected) || select.options[0];
+            if (initial && select.value !== initial.value) changed++;
+        });
+        bar.querySelectorAll('.ui-filter-extra input[type="checkbox"], input.ui-filter-extra[type="checkbox"]').forEach(box => { if (box.checked !== box.defaultChecked) changed++; });
+        bar.querySelectorAll('.ui-filter-extra [data-filter-default]').forEach(input => { if (input.value !== input.dataset.filterDefault) changed++; });
+        const badge = button.querySelector('.ui-tab-n');
+        if (badge) {
+            badge.textContent = changed ? String(changed) : '';
+            badge.classList.toggle('hidden', !changed);
+        }
+    });
+}
