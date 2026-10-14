@@ -906,7 +906,7 @@ document.addEventListener('DOMContentLoaded', () => {
 // SHEET - a panel from the bottom of the screen on phones. Its handle and head
 // stay on top while its body scrolls. Pulling it down (by the head, or by the
 // body scrolled to the top) closes it, and a short pull springs back. With
-// expand it opens at three quarters and rises with the reader's scroll to the full screen.
+// expand it opens at four fifths and rises with the reader's scroll to the full screen.
 // =============================================================================
 
 const uiSheetClosers = {};  // sheet id -> what closing it does
@@ -971,22 +971,35 @@ function uiSheetClose(id) {
     if (!document.querySelector('.ui-sheet')) document.body.classList.remove('ui-sheet-on');
 }
 
+// A drag on the grip or the head moves the sheet: up grows it to the full
+// screen, down pulls it closed; from the content only a pull down at its top
 function uiSheetSwipe(sheet, body, id) {
     const panel = sheet.querySelector('.ui-sheet-panel');
-    let startY = null, pulled = 0;
+    let startY = null, startHeight = 0, byHead = false, pulled = 0;
     panel.addEventListener('touchstart', event => {
-        const byHead = !!event.target.closest('.ui-sheet-head, .ui-sheet-grip');
+        byHead = !!event.target.closest('.ui-sheet-head, .ui-sheet-grip');
         if (!byHead && body.scrollTop > 0) { startY = null; return; }
         startY = event.touches[0].clientY;
+        startHeight = panel.getBoundingClientRect().height;
         pulled = 0;
         panel.style.transition = 'none';
+        panel.classList.toggle('is-held', byHead);
     }, { passive: true });
     panel.addEventListener('touchmove', event => {
         if (startY === null) return;
-        pulled = Math.max(0, event.touches[0].clientY - startY);
+        const moved = event.touches[0].clientY - startY;
+        if (moved < 0 && byHead) {
+            const height = Math.min(window.innerHeight, startHeight - moved);
+            sheet.classList.add('is-expand');
+            panel.style.height = `${height}px`;
+            sheet.dataset.height = height;
+            sheet.classList.toggle('is-full', window.innerHeight - height < 1);
+        }
+        pulled = Math.max(0, moved);
         panel.style.transform = pulled ? `translateY(${pulled}px)` : '';
     }, { passive: true });
     const end = () => {
+        panel.classList.remove('is-held');
         if (startY === null) return;
         startY = null;
         panel.style.transition = 'transform .2s ease';
@@ -1033,3 +1046,100 @@ function uiFilterBadges() {
         }
     });
 }
+
+// Phones: every dialog opens like the help sheet, at four fifths of the
+// screen; it rises with the reader's scroll to the full screen, and a pull down
+// on its head, or on its content scrolled to the top, closes it
+function uiDialogSheet(backdrop) {
+    const dialog = backdrop.querySelector(':scope > .ui-dialog');
+    if (!dialog) return;
+    // Each opening starts at four fifths again, at the top
+    dialog.style.height = '';
+    if (uiIsPhone()) dialog.querySelectorAll('.ui-dialog-body').forEach(body => { body.scrollTop = 0; });
+    dialog.style.transform = '';
+    backdrop.classList.remove('is-grown', 'is-full');
+    if (backdrop.dataset.sheet) return;
+    backdrop.dataset.sheet = '1';
+    const active = () => uiIsPhone() && !backdrop.classList.contains('ui-docked');
+
+    backdrop.addEventListener('scroll', event => {
+        const body = event.target;
+        if (!active() || !(body instanceof Element) || !dialog.contains(body) || body.scrollTop <= 0) return;
+        const height = dialog.getBoundingClientRect().height;
+        const room = window.innerHeight - height;
+        const grow = Math.min(body.scrollTop, room);
+        if (grow < 1) return;
+        backdrop.classList.add('is-grown');
+        dialog.style.height = `${height + grow}px`;
+        body.scrollTop -= grow;
+        backdrop.classList.toggle('is-full', room - grow < 1);
+    }, { capture: true, passive: true });
+
+    // A drag on its fixed top part (head, header, tabs) moves the sheet itself: up
+    // grows it to the full screen, as scrolling does; down pulls it closed
+    let startY = null, startHeight = 0, fixedPart = false, pulled = 0;
+    const closeButton = () => dialog.querySelector('.ui-dialog-head [aria-label="Close"], .ui-dialog-head .ui-icon-btn');
+    dialog.addEventListener('touchstart', event => {
+        startY = null;
+        if (!active()) return;
+        fixedPart = !event.target.closest('.ui-dialog-body');
+        if (!fixedPart) {
+            for (let el = event.target; el && el !== dialog; el = el.parentElement) {
+                if (el.scrollTop > 0) return;
+            }
+        }
+        startY = event.touches[0].clientY;
+        startHeight = dialog.getBoundingClientRect().height;
+        pulled = 0;
+        dialog.style.transition = 'none';
+        dialog.classList.toggle('is-held', fixedPart);
+    }, { passive: true });
+    dialog.addEventListener('touchmove', event => {
+        if (startY === null) return;
+        const moved = event.touches[0].clientY - startY;
+        if (moved < 0 && fixedPart) {
+            const height = Math.min(window.innerHeight, startHeight - moved);
+            backdrop.classList.add('is-grown');
+            dialog.style.height = `${height}px`;
+            backdrop.classList.toggle('is-full', window.innerHeight - height < 1);
+        }
+        pulled = closeButton() ? Math.max(0, moved) : 0;
+        dialog.style.transform = pulled ? `translateY(${pulled}px)` : '';
+    }, { passive: true });
+    const end = () => {
+        dialog.classList.remove('is-held');
+        if (startY === null) return;
+        startY = null;
+        dialog.style.transition = 'transform .2s ease';
+        if (pulled > Math.min(120, dialog.offsetHeight / 4)) {
+            dialog.style.transform = 'translateY(100%)';
+            setTimeout(() => {
+                const button = closeButton();
+                if (button) button.click();
+                dialog.style.transition = '';
+                dialog.style.transform = '';
+            }, 200);
+        } else {
+            dialog.style.transform = '';
+        }
+    };
+    dialog.addEventListener('touchend', end);
+    dialog.addEventListener('touchcancel', end);
+}
+
+// A dialog is prepared each time it is shown or added to the page
+new MutationObserver(records => {
+    for (const record of records) {
+        if (record.type === 'attributes') {
+            const el = record.target;
+            const wasHidden = /(^|\s)hidden(\s|$)/.test(record.oldValue || '');
+            if (wasHidden && el.classList.contains('ui-dialog-backdrop') && !el.classList.contains('hidden')) uiDialogSheet(el);
+            continue;
+        }
+        record.addedNodes.forEach(node => {
+            if (!(node instanceof Element)) return;
+            const found = node.matches('.ui-dialog-backdrop') ? [node] : [...node.querySelectorAll('.ui-dialog-backdrop')];
+            found.filter(el => !el.classList.contains('hidden')).forEach(uiDialogSheet);
+        });
+    }
+}).observe(document.body, { subtree: true, childList: true, attributes: true, attributeOldValue: true, attributeFilter: ['class'] });
