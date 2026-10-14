@@ -709,24 +709,24 @@
                             </div>
                             <!-- Where the facets are hidden (below 1280px): outcome, direction and time as buttons that open their choices -->
                             <div id="messages-pickers" class="ui-msg-pickers">
-                                <span class="ui-popover-host ui-msg-range-host" id="messages-status-host">
-                                    <button type="button" id="messages-status-pick" class="ui-msg-range" aria-expanded="false" aria-controls="messages-status-panel" onclick="toggleMessagesPicker('status')">All outcomes</button>
-                                    <span id="messages-status-panel" class="ui-popover ui-msg-time-panel hidden" role="dialog" aria-label="Outcome">
-                                        <span class="ui-label">Outcome</span>
+                                <span class="ui-popover-host ui-msg-range-host ui-picker" id="messages-status-host" data-picker="messages-status">
+                                    <button type="button" id="messages-status-pick" class="ui-msg-range ui-picker-btn" aria-haspopup="listbox" aria-expanded="false" aria-controls="messages-status-panel"><span class="ui-picker-name">Outcome:</span> <span id="messages-status-value">All</span></button>
+                                    <span id="messages-status-panel" class="ui-popover ui-msg-time-panel ui-picker-panel hidden" role="listbox" aria-label="Outcome">
+                                        <span class="ui-label" aria-hidden="true">Outcome</span>
                                         <span id="messages-status-options" class="ui-fct-list"></span>
                                     </span>
                                 </span>
-                                <span class="ui-popover-host ui-msg-range-host" id="messages-direction-host">
-                                    <button type="button" id="messages-direction-pick" class="ui-msg-range" aria-expanded="false" aria-controls="messages-direction-panel" onclick="toggleMessagesPicker('direction')">Any direction</button>
-                                    <span id="messages-direction-panel" class="ui-popover ui-msg-time-panel hidden" role="dialog" aria-label="Direction">
-                                        <span class="ui-label">Direction</span>
+                                <span class="ui-popover-host ui-msg-range-host ui-picker" id="messages-direction-host" data-picker="messages-direction">
+                                    <button type="button" id="messages-direction-pick" class="ui-msg-range ui-picker-btn" aria-haspopup="listbox" aria-expanded="false" aria-controls="messages-direction-panel"><span class="ui-picker-name">Direction:</span> <span id="messages-direction-value">Any</span></button>
+                                    <span id="messages-direction-panel" class="ui-popover ui-msg-time-panel ui-picker-panel hidden" role="listbox" aria-label="Direction">
+                                        <span class="ui-label" aria-hidden="true">Direction</span>
                                         <span id="messages-direction-options" class="ui-fct-list"></span>
                                     </span>
                                 </span>
                                 <!-- Time: the same presets as the facets, and a custom range -->
-                                <span class="ui-popover-host ui-msg-range-host" id="messages-time-host">
-                                    <button type="button" id="messages-date-range-label" class="ui-msg-range" aria-expanded="false" aria-controls="messages-time-panel" onclick="toggleMessagesPicker('time')">All Time</button>
-                                    <span id="messages-time-panel" class="ui-popover ui-msg-time-panel hidden" role="dialog" aria-label="Time">
+                                <span class="ui-popover-host ui-msg-range-host ui-picker" id="messages-time-host" data-picker="messages-time" data-on-open="messagesTimePanelOpened">
+                                    <button type="button" id="messages-time-pick" class="ui-msg-range ui-picker-btn" aria-haspopup="dialog" aria-expanded="false" aria-controls="messages-time-panel"><span class="ui-picker-name">Time:</span> <span id="messages-date-range-label">All Time</span></button>
+                                    <span id="messages-time-panel" class="ui-popover ui-msg-time-panel ui-picker-panel hidden" role="dialog" aria-label="Time">
                                         <span class="ui-label">Time</span>
                                         <span class="ui-fct-list">
                                         <button type="button" onclick="selectMessagesDatePreset('')" data-preset="" class="messages-date-preset-btn ui-fct" aria-pressed="true"><span>All Time</span></button>

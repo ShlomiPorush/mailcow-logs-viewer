@@ -2601,3 +2601,7 @@ button.ui-dm-node:hover { border-color: var(--ui-ink); }
     border-start-start-radius: inherit; border-start-end-radius: inherit; }
 .ui-read-bar.hidden { display: none; }
 .ui-read-bar i { display: block; width: 0; height: 100%; background: color-mix(in srgb, var(--ui-accent) 16%, transparent); transition: width .08s linear; }
+
+/* Pickers (utils.js, uiPicker): the button names the filter, then its value */
+.ui-picker-name { font-weight: 500; opacity: .75; }
+.ui-picker-panel [role="option"]:focus-visible, .ui-picker-panel .ui-fct:focus-visible { outline: 2px solid var(--ui-focus, var(--ui-accent)); outline-offset: -2px; }

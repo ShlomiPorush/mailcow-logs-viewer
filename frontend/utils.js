@@ -1173,3 +1173,180 @@ if (typeof MutationObserver !== 'undefined' && document.body) new MutationObserv
         });
     }
 }).observe(document.body, { subtree: true, childList: true, attributes: true, attributeOldValue: true, attributeFilter: ['class'] });
+
+// =============================================================================
+// Pickers: a filter button that opens its choices (Security, Messages, lists)
+// =============================================================================
+// One accessible drop-down for the whole app, after the WAI-ARIA listbox and
+// dialog patterns. A short list of choices is a listbox: arrows, Home and End
+// move between them, Enter or Space picks one. Richer content (a custom range,
+// country bars) is a dialog. In both, the choices take the focus on open,
+// Escape closes and returns it to the button, and a click or focus outside
+// closes. The button names the filter and its value ("Period: Last 7 days").
+//
+// Markup (uiPicker builds it; static markup may follow the same shape):
+//   <span class="ui-popover-host ui-picker" data-picker="ID">
+//     <button class="ui-msg-range ui-picker-btn" aria-haspopup aria-expanded aria-controls="ID-panel">
+//     <span id="ID-panel" class="ui-popover ui-picker-panel" role="listbox|dialog"> ...
+// A page that redraws an open picker keeps it open: uiPickerIsOpen(id).
+
+// open: the picker shown; held: the picker whose button has the focus, so a
+// redraw of the page (new data) can give it back
+const uiPickers = { open: null, held: null };
+
+function uiPickerIsOpen(id) {
+    return uiPickers.open === id;
+}
+
+// options: [{ label, hint, selected, onclick }] for a listbox; panel: HTML for a dialog
+function uiPicker({ id, label, value, set = false, options = null, panel = '', panelLabel = '', panelClass = '', hostClass = '', onOpen = '' }) {
+    const open = uiPickerIsOpen(id);
+    const list = Array.isArray(options);
+    const body = list
+        ? options.map(o => `<button type="button" role="option" class="ui-fct" tabindex="-1" aria-selected="${o.selected ? 'true' : 'false'}" onclick="${o.onclick}"><span>${escapeHtml(o.label)}</span>${o.hint !== undefined ? `<small>${escapeHtml(String(o.hint))}</small>` : ''}</button>`).join('')
+        : panel;
+    return `<span class="ui-popover-host ui-picker${hostClass ? ` ${hostClass}` : ''}" data-picker="${escapeHtml(id)}"${onOpen ? ` data-on-open="${escapeHtml(onOpen)}"` : ''}>
+        <button type="button" class="ui-msg-range ui-picker-btn${set ? ' is-set' : ''}" aria-haspopup="${list ? 'listbox' : 'dialog'}" aria-expanded="${open}" aria-controls="${escapeHtml(id)}-panel"><span class="ui-picker-name">${escapeHtml(label)}:</span> ${value}</button>
+        <span id="${escapeHtml(id)}-panel" class="ui-popover ui-msg-time-panel ui-picker-panel${panelClass ? ` ${panelClass}` : ''}${open ? '' : ' hidden'}" role="${list ? 'listbox' : 'dialog'}" aria-label="${escapeHtml(panelLabel || label)}">${list ? `<span class="ui-label" aria-hidden="true">${escapeHtml(label)}</span>` : ''}${body}</span>
+    </span>`;
+}
+
+function uiPickerParts(id) {
+    const host = [...document.querySelectorAll('.ui-picker')].find(el => el.dataset.picker === id);
+    if (!host) return {};
+    const button = host.querySelector('.ui-picker-btn');
+    const panel = button && document.getElementById(button.getAttribute('aria-controls'));
+    return { host, button, panel };
+}
+
+function uiPickerItems(panel) {
+    return [...panel.querySelectorAll('[role="option"]')];
+}
+
+function uiPickerFocusables(panel) {
+    return [...panel.querySelectorAll('button, input, select, textarea, a[href], [tabindex]:not([tabindex="-1"])')]
+        .filter(el => !el.disabled && !el.closest('.hidden'));
+}
+
+function uiPickerOpen(id) {
+    if (uiPickers.open && uiPickers.open !== id) uiPickerClose(uiPickers.open);
+    const { host, button, panel } = uiPickerParts(id);
+    if (!panel) return;
+    uiPickers.open = id;
+    const hook = host.dataset.onOpen;
+    if (hook && typeof window[hook] === 'function') window[hook]();
+    panel.classList.remove('hidden');
+    button.setAttribute('aria-expanded', 'true');
+    uiPickerFocusInside(panel);
+}
+
+// The chosen option, or the first one; in a dialog its first control
+function uiPickerFocusInside(panel) {
+    if (panel.getAttribute('role') === 'listbox') {
+        const items = uiPickerItems(panel);
+        const target = items.find(o => o.getAttribute('aria-selected') === 'true') || items[0];
+        if (target) target.focus();
+        return;
+    }
+    const first = uiPickerFocusables(panel)[0];
+    if (first) first.focus();
+    else { panel.setAttribute('tabindex', '-1'); panel.focus(); }
+}
+
+function uiPickerClose(id, { returnFocus = false } = {}) {
+    if (uiPickers.open === id) uiPickers.open = null;
+    const { button, panel } = uiPickerParts(id);
+    if (panel) panel.classList.add('hidden');
+    if (button) {
+        button.setAttribute('aria-expanded', 'false');
+        if (returnFocus) uiPickerFocusButton(id);
+    }
+}
+
+function uiPickerFocusButton(id) {
+    const { button } = uiPickerParts(id);
+    if (!button) return;
+    uiPickers.held = id;
+    button.focus();
+}
+
+// After a page redraws a picker, the focus goes back where it was: inside the
+// open picker, or on the button of the one just closed
+function uiPickerRefocus() {
+    const lost = !document.activeElement || document.activeElement === document.body;
+    if (uiPickers.open) {
+        const { panel } = uiPickerParts(uiPickers.open);
+        if (panel && !panel.contains(document.activeElement)) uiPickerFocusInside(panel);
+    } else if (uiPickers.held && lost) {
+        uiPickerFocusButton(uiPickers.held);
+    }
+}
+
+if (typeof document !== 'undefined' && document.addEventListener) {
+    document.addEventListener('click', event => {
+        if (!(event.target instanceof Element)) return;
+        const button = event.target.closest('.ui-picker-btn');
+        if (button) {
+            const id = button.closest('.ui-picker').dataset.picker;
+            if (uiPickerIsOpen(id)) uiPickerClose(id);
+            else uiPickerOpen(id);
+            return;
+        }
+        const option = event.target.closest('.ui-picker [role="option"]');
+        if (option) {
+            // The option's own handler ran first and may have redrawn the picker
+            const id = option.closest('.ui-picker').dataset.picker;
+            uiPickerClose(id);
+            requestAnimationFrame(() => uiPickerFocusButton(id));
+            return;
+        }
+        if (uiPickers.open) {
+            const { host } = uiPickerParts(uiPickers.open);
+            if (!host || !host.contains(event.target)) uiPickerClose(uiPickers.open);
+        }
+    });
+
+    // Capture, so Escape closes the picker before it reaches a dialog or sheet under it
+    document.addEventListener('keydown', event => {
+        if (!(event.target instanceof Element)) return;
+        const onButton = event.target.closest('.ui-picker-btn');
+        if (onButton && (event.key === 'ArrowDown' || event.key === 'ArrowUp')) {
+            event.preventDefault();
+            uiPickerOpen(onButton.closest('.ui-picker').dataset.picker);
+            return;
+        }
+        const id = uiPickers.open;
+        if (!id) return;
+        const { panel } = uiPickerParts(id);
+        if (!panel) return;
+        if (event.key === 'Escape') {
+            event.preventDefault();
+            event.stopPropagation();
+            uiPickerClose(id, { returnFocus: true });
+            return;
+        }
+        if (panel.getAttribute('role') !== 'listbox' || !panel.contains(event.target)) return;
+        const items = uiPickerItems(panel);
+        const at = items.indexOf(document.activeElement);
+        const go = index => { event.preventDefault(); items[Math.max(0, Math.min(items.length - 1, index))].focus(); };
+        if (event.key === 'ArrowDown') go(at + 1);
+        else if (event.key === 'ArrowUp') go(at - 1);
+        else if (event.key === 'Home') go(0);
+        else if (event.key === 'End') go(items.length - 1);
+    }, true);
+
+    // The focus moving on elsewhere ends the claim of a closed picker's button
+    document.addEventListener('focusin', event => {
+        if (uiPickers.held && event.target instanceof Element && !event.target.closest(`.ui-picker[data-picker="${uiPickers.held}"]`)) uiPickers.held = null;
+    });
+
+    // Tabbing out of an open picker closes it
+    document.addEventListener('focusout', event => {
+        const id = uiPickers.open;
+        if (!id || !(event.target instanceof Element)) return;
+        const { host } = uiPickerParts(id);
+        if (!host || !host.contains(event.target)) return;
+        const next = event.relatedTarget;
+        if (next && !host.contains(next)) uiPickerClose(id);
+    });
+}

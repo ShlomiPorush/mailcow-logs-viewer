@@ -7,7 +7,9 @@
 #   backend-tests   unit + database tests against a real PostgreSQL. A test
 #                   that skips for lack of a database is treated as a failure,
 #                   so the suite cannot quietly go green by skipping.
-#   frontend-syntax node --check over every frontend script (no build step).
+#   frontend-syntax node --check over every frontend script (no build step),
+#                   the frontend tests, and the pickers checked for keyboard,
+#                   focus and ARIA in a real DOM with axe-core.
 #   image-smoke     builds the Docker image and boots it against PostgreSQL:
 #                   health, SPA, static assets, Alembic head, and the manual
 #                   job runner accepting every job the Status page lists
@@ -113,6 +115,13 @@ jobs:
             echo "::error::frontend/assets/css/utilities.css is out of date; run: bash .github/scripts/build-utilities-css.sh"
             exit 1
           fi
+
+      # The shared drop-down (utils.js, uiPicker) in a real DOM: keyboard, focus and
+      # ARIA after the WAI-ARIA listbox and dialog patterns, and axe-core
+      - name: Accessibility of the pickers
+        run: |
+          npm install --silent --no-save --prefix /tmp/a11y jsdom@30.1.2 axe-core@4.14.0
+          A11Y_MODULES=/tmp/a11y/node_modules node --test .github/tests/pickers.a11y.cjs
 
   image-smoke:
     name: Image build and smoke test
