@@ -220,7 +220,7 @@ function populateMailboxStatsDomainFilter(domains) {
     if (!select) return;
 
     // Clear existing options except "All Domains"
-    select.innerHTML = '<option value="">All Domains</option>';
+    select.innerHTML = '<option value="" data-short="All">All Domains</option>';
 
     // Add domain options
     domains.forEach(d => {
@@ -231,6 +231,7 @@ function populateMailboxStatsDomainFilter(domains) {
             : `${d.domain} (${d.mailbox_count})`;
         select.appendChild(option);
     });
+    uiFilterBarSync();
 }
 
 // Current page for pagination
@@ -242,7 +243,7 @@ let mailboxStatsMoreObserver = null;
 
 // The first 50 mailboxes, or (page > 1) the next 50 as the list scrolls
 async function loadMailboxStatsList(page = 1) {
-    uiFilterBadges();
+    uiFilterBarSync();
     if (page > 1 && (mailboxStatsLoading || page > mailboxStatsTotalPages)) return;
     const seq = ++mailboxStatsSeq;
     mailboxStatsLoading = true;
@@ -532,61 +533,20 @@ function toggleMailboxAccordion(username) {
 // DATE RANGE PICKER
 // =============================================================================
 
-// Date range picker state
-let dateRangePickerOpen = false;
-
-function toggleDateRangePicker() {
-    const dropdown = document.getElementById('date-range-dropdown');
-    const arrow = document.getElementById('date-range-arrow');
-
-    if (!dropdown) return;
-
-    dateRangePickerOpen = !dateRangePickerOpen;
-
-    if (dateRangePickerOpen) {
-        dropdown.classList.remove('hidden');
-        if (arrow) arrow.style.transform = 'rotate(180deg)';
-
-        // Set default dates for custom range inputs
-        const today = new Date();
-        const thirtyDaysAgo = new Date(today);
-        thirtyDaysAgo.setDate(today.getDate() - 30);
-
-        const startInput = document.getElementById('date-range-start');
-        const endInput = document.getElementById('date-range-end');
-
-        if (startInput && !startInput.value) {
-            startInput.value = thirtyDaysAgo.toISOString().split('T')[0];
-        }
-        if (endInput && !endInput.value) {
-            endInput.value = today.toISOString().split('T')[0];
-        }
-
-        // Add click outside listener
-        setTimeout(() => {
-            document.addEventListener('click', closeDateRangePickerOnClickOutside);
-        }, 0);
-    } else {
-        closeDateRangePicker();
-    }
+// The period is a picker (utils.js, uiPicker); opening it fills the custom range
+// with the last 30 days when it is empty
+function mailboxStatsPeriodOpened() {
+    const today = new Date();
+    const thirtyDaysAgo = new Date(today);
+    thirtyDaysAgo.setDate(today.getDate() - 30);
+    const startInput = document.getElementById('date-range-start');
+    const endInput = document.getElementById('date-range-end');
+    if (startInput && !startInput.value) startInput.value = thirtyDaysAgo.toISOString().split('T')[0];
+    if (endInput && !endInput.value) endInput.value = today.toISOString().split('T')[0];
 }
 
 function closeDateRangePicker() {
-    const dropdown = document.getElementById('date-range-dropdown');
-    const arrow = document.getElementById('date-range-arrow');
-
-    if (dropdown) dropdown.classList.add('hidden');
-    if (arrow) arrow.style.transform = '';
-    dateRangePickerOpen = false;
-
-    document.removeEventListener('click', closeDateRangePickerOnClickOutside);
-}
-
-function closeDateRangePickerOnClickOutside(e) {
-    const container = document.getElementById('date-range-picker-container');
-    if (container && !container.contains(e.target)) {
-        closeDateRangePicker();
-    }
+    if (uiPickerIsOpen('mailbox-stats-period')) uiPickerClose('mailbox-stats-period', { returnFocus: true });
 }
 
 function selectDatePreset(preset) {

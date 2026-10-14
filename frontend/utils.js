@@ -1050,30 +1050,92 @@ document.addEventListener('keydown', event => {
     if (sheets.length) uiSheetDismiss(sheets[sheets.length - 1].id);
 });
 
-// Filter bars on phones: the search stays, the other filters open with
-// "Filters", whose badge counts the ones changed from their default
+// Filter bars: a search, the common filters as pickers, the rarer ones behind
+// "Filters", and under the bar one line with the count and "Clear filters".
+//   <section class="ui-filters ui-fbar">
+//     <div class="ui-fbar-row"> search, Filters button, the page's own buttons
+//     <div class="ui-fbar-pickers"> <select data-picker-label="Reason"> ... (shown as pickers)
+//     <div class="ui-fbar-more"> the rarer filters
+//   </section>
+//   <p class="ui-list-summary"><span id="...-count"></span><button class="ui-clear-filters">
+// A select with data-picker-label keeps its value, its options and its onchange,
+// so the page's own code reads it as before; the picker only shows it. A select
+// with data-no-filter (sort order) is not counted as a filter.
 function uiToggleFilters(button) {
     const bar = button.closest('.ui-filters');
     const open = bar.classList.toggle('is-open');
     button.setAttribute('aria-expanded', String(open));
+    if (open) {
+        const first = bar.querySelector('.ui-fbar-more input, .ui-fbar-more select, .ui-fbar-more button');
+        if (first) first.focus();
+    }
 }
 
-function uiFilterBadges() {
-    document.querySelectorAll('.ui-filters-toggle').forEach(button => {
-        const bar = button.closest('.ui-filters');
-        let changed = 0;
-        bar.querySelectorAll('select.ui-filter-extra, .ui-filter-extra select').forEach(select => {
-            const initial = [...select.options].find(o => o.defaultSelected) || select.options[0];
-            if (initial && select.value !== initial.value) changed++;
+function uiSelectPick(selectId, index) {
+    const select = document.getElementById(selectId);
+    if (!select) return;
+    select.selectedIndex = index;
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+    uiFilterBarSync();
+}
+
+function uiSelectDefault(select) {
+    return [...select.options].find(o => o.defaultSelected) || select.options[0];
+}
+
+// A filter differs from where it starts (an empty search, a select's first or
+// default option, a checkbox as written in the page, a value with data-filter-default)
+function uiFilterChanged(el) {
+    if (el.matches('[data-no-filter]')) return false;
+    if (el.matches('[data-filter-default]')) return el.value !== el.dataset.filterDefault;
+    if (el.tagName === 'SELECT') {
+        const initial = uiSelectDefault(el);
+        return !!initial && el.value !== initial.value;
+    }
+    if (el.type === 'checkbox') return el.checked !== el.defaultChecked;
+    if (el.type === 'hidden' || el.type === 'date' || el.type === 'datetime-local') return false;
+    return el.value.trim() !== '';
+}
+
+function uiFilterBarSync() {
+    // A select shows as a picker wherever it is: in a filter bar, or alone (a sort order)
+    document.querySelectorAll('select[data-picker-label]').forEach(select => {
+        let slot = select.previousElementSibling;
+        if (!slot || !slot.classList.contains('ui-picker-slot')) {
+            slot = document.createElement('span');
+            slot.className = 'ui-picker-slot';
+            select.before(slot);
+            select.classList.add('hidden');
+        }
+        const options = [...select.options];
+        const chosen = select.selectedOptions[0] || options[0];
+        const short = o => (o && (o.dataset.short || o.textContent.trim())) || '';
+        slot.innerHTML = uiPicker({
+            id: `${select.id}-picker`, label: select.dataset.pickerLabel,
+            value: escapeHtml(short(chosen)), set: uiFilterChanged(select),
+            options: options.map((o, i) => ({ label: o.textContent.trim(), selected: o === chosen, onclick: `uiSelectPick('${escapeJsArg(select.id)}', ${i})` })),
         });
-        bar.querySelectorAll('.ui-filter-extra input[type="checkbox"], input.ui-filter-extra[type="checkbox"]').forEach(box => { if (box.checked !== box.defaultChecked) changed++; });
-        bar.querySelectorAll('.ui-filter-extra [data-filter-default]').forEach(input => { if (input.value !== input.dataset.filterDefault) changed++; });
-        const badge = button.querySelector('.ui-tab-n');
-        if (badge) {
+    });
+    document.querySelectorAll('.ui-fbar').forEach(bar => {
+        // A picker whose value lives in an input (a period) shows when it is in use
+        bar.querySelectorAll('.ui-picker[data-state]').forEach(host => {
+            const input = document.getElementById(host.dataset.state);
+            const button = host.querySelector('.ui-picker-btn');
+            if (input && button) button.classList.toggle('is-set', uiFilterChanged(input));
+        });
+        const fields = [...bar.querySelectorAll('input, select')].filter(el => !el.closest('.ui-picker-panel') || el.matches('[data-filter-default]'));
+        const more = bar.querySelector('.ui-fbar-more');
+        const badge = bar.querySelector('.ui-filters-toggle .ui-tab-n');
+        if (more && badge) {
+            const changed = [...more.querySelectorAll('input, select')].filter(uiFilterChanged).length;
             badge.textContent = changed ? String(changed) : '';
             badge.classList.toggle('hidden', !changed);
         }
+        const summary = bar.nextElementSibling;
+        const clear = summary && summary.classList.contains('ui-list-summary') && summary.querySelector('.ui-clear-filters');
+        if (clear) clear.classList.toggle('hidden', !fields.some(uiFilterChanged));
     });
+    uiPickerRefocus();
 }
 
 // Phones: every dialog opens like the help sheet, at four fifths of the

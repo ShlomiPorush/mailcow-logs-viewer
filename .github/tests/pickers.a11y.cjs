@@ -167,3 +167,32 @@ test('the Messages pickers in index.html pass the same checks', async () => {
         assert.equal(w.document.activeElement, button, `${id} gives the focus back`);
     }
 });
+
+test('a select shown as a picker picks through the select and passes the same checks', async () => {
+    const w = page(`<main><h1>Bar</h1>
+        <section class="ui-filters ui-fbar"><div class="ui-fbar-pickers">
+            <select id="reason" aria-label="Reason" data-picker-label="Reason" onchange="changes.push(this.value)">
+                <option value="" data-short="All">All reasons</option><option value="hard">Hard bounce</option>
+            </select></div></section>
+        <p class="ui-list-summary"><span class="ui-count">3 items</span><button type="button" class="ui-clear-filters hidden">Clear filters</button></p></main>`);
+    w.changes = [];
+    w.uiFilterBarSync();
+    const select = w.document.getElementById('reason');
+    const button = w.document.querySelector('.ui-picker-btn');
+    assert.ok(select.classList.contains('hidden'), 'the select itself is hidden');
+    assert.match(button.textContent.replace(/\s+/g, ' ').trim(), /^Reason: All$/);
+    await noViolations(w, 'a select picker');
+    button.click();
+    const options = [...w.document.querySelectorAll('[role="option"]')];
+    assert.deepEqual(options.map(o => o.textContent.trim()), ['All reasons', 'Hard bounce']);
+    options[1].click();
+    await frame(w);
+    assert.equal(select.value, 'hard');
+    assert.deepEqual([...w.changes], ['hard'], 'the select fires its own change');
+    const after = w.document.querySelector('.ui-picker-btn');
+    assert.match(after.textContent.replace(/\s+/g, ' ').trim(), /^Reason: Hard bounce$/);
+    assert.ok(after.classList.contains('is-set'));
+    assert.ok(!w.document.querySelector('.ui-clear-filters').classList.contains('hidden'), 'Clear filters shows');
+    assert.equal(w.document.activeElement, after, 'the focus is back on the picker');
+    await noViolations(w, 'a select picker in use');
+});

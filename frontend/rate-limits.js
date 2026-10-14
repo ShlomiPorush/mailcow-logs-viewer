@@ -179,7 +179,7 @@ function renderRateLimitActivityCard() {
     container.innerHTML = `
         <section class="ui-panel">
             ${rateLimitCardHead('Rate limit activity', subtitle, `
-                <select id="rate-limit-window" onchange="changeRateLimitWindow(this.value)" class="ui-select ui-select-auto" aria-label="Window">
+                <select id="rate-limit-window" onchange="changeRateLimitWindow(this.value)" class="ui-select ui-select-auto" aria-label="Window" data-picker-label="Window">
                     ${options}
                 </select>`)}
             ${hasHits
@@ -194,6 +194,7 @@ function renderRateLimitActivityCard() {
     `;
 
     if (hasHits) renderRateLimitChart(buckets, data.bucket === 'hour' ? 'hour' : 'day');
+    uiFilterBarSync();
 }
 
 

@@ -410,7 +410,7 @@ function suppressionSortBy(key, dir) {
 }
 
 async function loadSuppressions(page) {
-    uiFilterBadges();
+    uiFilterBarSync();
     suppressionPage = page || suppressionPage || 1;
     const container = document.getElementById('suppression-list');
     // The key status may not be loaded yet on the first page load
