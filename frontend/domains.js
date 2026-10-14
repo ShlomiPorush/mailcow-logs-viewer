@@ -9,6 +9,8 @@
 // =============================================================================
 
 const DNS_CHECKS = [['SPF', 'spf'], ['DKIM', 'dkim'], ['DMARC', 'dmarc'], ['DNSSEC', 'dnssec'], ['DANE', 'tlsa'], ['MTA-STS', 'mta_sts']];
+// On a phone an open domain shows its DNS checks or its details, one tab at a time
+const domainTabs = {};
 const DNS_TAG = {
     success: ['OK', 'ok'],
     warning: ['Warning', 'warn'],
@@ -199,7 +201,10 @@ function renderDomainAccordionRow(domain, open = false) {
             </div>
             ${DNS_CHECKS.map(([label, key]) => dnsStatusTag(label, dns[key] || { status: 'unknown' })).join('')}
             <span class="ui-td ui-td-end"><small class="ui-sec-unit">Storage </small>${formatBytes(domain.bytes_total)}</span>
-            <div id="${domainId}-details" class="ui-domain-details${open ? '' : ' hidden'}" onclick="event.stopPropagation()">
+            <div id="${domainId}-details" class="ui-domain-details${open ? '' : ' hidden'}" data-tab="${domainTabs[domainId] || 'dns'}" onclick="event.stopPropagation()">
+                <div class="ui-tabs ui-domain-tabs" role="tablist" aria-label="Domain">
+                    ${[['dns', 'DNS checks'], ['info', 'Details']].map(([tab, label]) => `<button type="button" class="modal-tab${(domainTabs[domainId] || 'dns') === tab ? ' active' : ''}" role="tab" aria-selected="${(domainTabs[domainId] || 'dns') === tab}" onclick="domainShowTab('${escapeJsArg(domainId)}', '${tab}')">${label}</button>`).join('')}
+                </div>
                 <div class="ui-md-ids">
                     ${fact('Mailboxes', `${domain.mboxes_in_domain} / ${domain.max_num_mboxes_for_domain}`, `${domain.mboxes_left} available`)}
                     ${fact('Aliases', `${domain.aliases_in_domain} / ${domain.max_num_aliases_for_domain}`, `${domain.aliases_left} available`)}
@@ -214,6 +219,18 @@ function renderDomainAccordionRow(domain, open = false) {
             </div>
         </div>
     `;
+}
+
+function domainShowTab(domainId, tab) {
+    domainTabs[domainId] = tab;
+    const details = document.getElementById(`${domainId}-details`);
+    if (!details) return;
+    details.dataset.tab = tab;
+    details.querySelectorAll('.ui-domain-tabs .modal-tab').forEach((button, i) => {
+        const on = (i === 0 ? 'dns' : 'info') === tab;
+        button.classList.toggle('active', on);
+        button.setAttribute('aria-selected', String(on));
+    });
 }
 
 // Toggle domain details accordion

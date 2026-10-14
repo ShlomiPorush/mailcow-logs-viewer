@@ -265,15 +265,15 @@ function renderDmarcHome() {
         <div class="ui-dm-lay"><div>
             <div class="ui-dm-card"><header>Messages per day<small>every domain</small></header><div class="ui-dm-body">${dmarcChart(dmarcState.daily, { h: 150, open: null })}</div></div>
             <div class="ui-dm-card"><header>Domains <span class="ui-count">${domains.length}</span></header>
-            <table class="ui-dm-tbl"><thead><tr><th>Domain</th><th>DMARC policy</th><th class="r">Messages</th><th class="r">Passed DMARC</th><th class="ui-dm-hm">TLS-RPT</th><th class="r ui-dm-hm">Encrypted</th><th class="r ui-dm-hm">Failing senders</th></tr></thead><tbody>
+            <table class="ui-dm-tbl ui-dm-cards"><thead><tr><th>Domain</th><th>DMARC policy</th><th class="r">Messages</th><th class="r">Passed DMARC</th><th class="ui-dm-hm">TLS-RPT</th><th class="r ui-dm-hm">Encrypted</th><th class="r ui-dm-hm">Failing senders</th></tr></thead><tbody>
             ${domains.map(d => {
                 const s = d.stats_30d || {}, tls = d.tls_rpt_record || {};
                 return `<tr class="is-go" onclick="loadDomainOverview('${escapeJsArg(d.domain)}')"><td data-sort="${escapeHtml(d.domain)}"><button type="button" class="ui-dm-link">${escapeHtml(d.domain)}</button>${dmarcNotOnServer(d)}</td>
-                    <td>${dmarcPolicyTag(d)}</td><td class="r ui-num">${d.has_dmarc ? dmarcNum(s.total_messages) : '<span class="ui-muted">-</span>'}</td>
-                    <td class="r">${dmarcRate(s.dmarc_pass_pct, d.has_dmarc && s.total_messages)}</td>
-                    <td class="ui-dm-hm">${!tls.checked ? dmarcTag('mut', 'Not checked') : tls.found ? dmarcTag('ok', 'Published') : dmarcTag('warn', 'Missing')}</td>
-                    <td class="r ui-dm-hm">${dmarcRate(s.tls_success_pct, d.has_tls && s.tls_sessions)}</td>
-                    <td class="r ui-dm-hm">${d.failing_sources ? `<span class="ui-text-fail">${escapeHtml(String(d.failing_sources))}</span>` : '<span class="ui-muted">0</span>'}</td></tr>`;
+                    <td data-label="DMARC policy">${dmarcPolicyTag(d)}</td><td class="r ui-num" data-label="Messages">${d.has_dmarc ? dmarcNum(s.total_messages) : '<span class="ui-muted">-</span>'}</td>
+                    <td class="r" data-label="Passed DMARC">${dmarcRate(s.dmarc_pass_pct, d.has_dmarc && s.total_messages)}</td>
+                    <td class="ui-dm-hm" data-label="TLS-RPT">${!tls.checked ? dmarcTag('mut', 'Not checked') : tls.found ? dmarcTag('ok', 'Published') : dmarcTag('warn', 'Missing')}</td>
+                    <td class="r ui-dm-hm" data-label="Encrypted">${dmarcRate(s.tls_success_pct, d.has_tls && s.tls_sessions)}</td>
+                    <td class="r ui-dm-hm" data-label="Failing senders">${d.failing_sources ? `<span class="ui-text-fail">${escapeHtml(String(d.failing_sources))}</span>` : '<span class="ui-muted">0</span>'}</td></tr>`;
             }).join('')}</tbody></table></div>
         </div><aside>${dmarcTodoCard(dmarcHomeTasks(domains), true)}</aside></div>`;
 }

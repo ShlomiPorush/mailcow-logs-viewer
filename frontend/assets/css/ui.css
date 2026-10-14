@@ -1464,7 +1464,15 @@ button.ui-st-card:hover { outline: 1px solid var(--ui-line); }
 .ui-domain-details { grid-column: 1 / -1; display: grid; gap: 16px; padding: 6px 0 10px; cursor: default; }
 .ui-domain-details.hidden { display: none; }
 .ui-dns-section { display: grid; gap: 10px; }
-.ui-dns-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; }
+/* Two lines of three: SPF, DKIM and DMARC first, then DNSSEC, DANE and MTA-STS */
+.ui-dns-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.ui-domain-tabs { display: none; }
+@media (max-width: 760px) {
+    .ui-dns-grid { grid-template-columns: minmax(0, 1fr); }
+    .ui-domain-tabs { display: flex; padding: 0; }
+    .ui-domain-details[data-tab="dns"] > .ui-md-ids,
+    .ui-domain-details[data-tab="info"] > .ui-dns-section { display: none; }
+}
 .ui-dns-grid.hidden { display: none; }
 .ui-dns-card { min-width: 0; padding: 12px 14px; border: 1px solid var(--ui-line); border-inline-start: 3px solid var(--ui-muted); border-radius: var(--ui-radius-sm); background: var(--ui-bg); }
 .ui-dns-card.ui-dns-ok { border-inline-start-color: var(--ui-ok); }
@@ -2471,6 +2479,15 @@ button.ui-dm-node:hover { border-color: var(--ui-ink); }
 @media (max-width: 760px) {
     .ui-dm-tbl .ui-dm-hm { display: none; }
     .ui-dm-tbl th, .ui-dm-tbl td { padding: 10px; }
+    /* The domains table: each domain a card with every figure, named */
+    .ui-dm-cards thead { display: none; }
+    .ui-dm-cards tr { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 14px; padding: 12px 16px; border-bottom: 1px solid var(--dm-line); }
+    .ui-dm-cards tr:last-child { border-bottom: 0; }
+    .ui-dm-cards td, .ui-dm-cards td.ui-dm-hm { display: grid; justify-items: start; gap: 3px; padding: 0; border: 0; text-align: start; }
+    .ui-dm-cards td:first-child { grid-column: 1 / -1; font-size: 15px; }
+    .ui-dm-cards td[data-label]::before { content: attr(data-label); color: var(--ui-muted); font-size: 12px; }
+    .ui-dm-cards tr.is-go:hover { background: color-mix(in srgb, var(--ui-ink) 3%, transparent); }
+    .ui-dm-cards tr.is-go:hover td { background: none; }
     .ui-dm-strip { grid-template-columns: 1fr 1fr; }
     .ui-dm-strip > div { border-top: 1px solid var(--dm-line); }
     .ui-dm-strip > div:nth-child(-n+2) { border-top: 0; }
