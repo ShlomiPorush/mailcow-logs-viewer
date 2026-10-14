@@ -772,8 +772,11 @@
 .ui-sec-card:focus { outline: none; }
 .ui-sec-card:focus-visible { outline: 2px solid var(--ui-focus); outline-offset: 2px; }
 .ui-sec-flag { display: inline-block; width: 16px; height: 12px; margin-inline-end: 5px; vertical-align: -1px; border-radius: 2px; }
-.ui-sec-pflag { display: none; }
+.ui-sec-pflag { display: inline-flex; flex: none; width: 16px; }
+.ui-sec-pflag .ui-sec-flag { margin: 0; }
+/* Where and when always on their own line under the address, never trailing after the tags */
 .ui-sec-where { display: inline-flex; align-items: center; }
+.ui-sec-top > .ui-sec-where { flex-basis: 100%; }
 .ui-sec-card.is-off .ui-sec-sent, .ui-sec-card.is-off .ui-sec-sent b { color: var(--ui-muted); }
 .ui-sec-card-head { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 8px 12px; }
 /* Fail2ban has no switch; its name lines up with the others */
@@ -887,8 +890,6 @@ body.ui-sheet-on { overflow: hidden; }
     .ui-sec-row .ui-sec-top { flex-wrap: nowrap; min-width: 0; }
     /* The top line is the flag, the address and the tag; where and when are in the sentence */
     .ui-sec-row .ui-sec-top > small { display: none; }
-    .ui-sec-row .ui-sec-pflag { display: inline-flex; }
-    .ui-sec-row .ui-sec-pflag .ui-sec-flag { margin: 0; }
     /* The four filters two by two, so History is in sight */
     .ui-sec-seg { display: grid; grid-template-columns: 1fr 1fr; width: 100%; overflow: visible; }
     .ui-sec-seg button { padding: 6px 8px; font-size: 12.5px; }
@@ -2177,7 +2178,7 @@ html .markdown-body .markdown-alert-caution .markdown-alert-title { color: var(-
 .copyable.ui-copy-wrap { display: inline; overflow-wrap: anywhere; font-size: inherit; }
 
 /* DMARC: room under the head buttons for the last-sync note that hangs below Sync */
-#dmarc-header-actions:has(.ui-dmarc-sync:not(.hidden)) { padding-bottom: 22px; }
+#dmarc-header-actions:has(.ui-dmarc-sync:not(.hidden) > .ui-dmarc-sync-info) { padding-bottom: 22px; }
 /* DMARC Record: each value next to its label, not across the card */
 .ui-dmarc-record .ui-kv { display: grid; grid-template-columns: minmax(150px, 220px) minmax(0, 1fr); }
 .ui-dmarc-record .ui-kv > b { margin-inline-start: 0; text-align: start; }
@@ -2622,3 +2623,17 @@ button.ui-dm-node:hover { border-color: var(--ui-ink); }
 .ui-ms-range label, .ui-ms-range input { min-width: 0; }
 /* A card does not cut the picker open inside it */
 .ui-table-card:has(.ui-picker-panel:not(.hidden)) { overflow: visible; }
+/* Phones: the page's main action on the title's line, the rest of the head under both */
+.ui-page-head > div:has(> .ui-head-slot) { flex: 1 1 100%; display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 12px; align-items: start; }
+.ui-page-head > div:has(> .ui-head-slot) > * { grid-column: 1 / -1; }
+.ui-page-head > div:has(> .ui-head-slot) > .ui-h1 { grid-column: 1; grid-row: 1; }
+.ui-page-head > div > .ui-head-slot { grid-column: 2; grid-row: 1; display: flex; }
+.ui-head-slot:not(:has(> :not(.hidden))) { display: none; }
+/* Without its icon the button leaves the title room for its help button */
+.ui-head-slot .ui-btn > svg { display: none; }
+@media (max-width: 380px) { .ui-page-head > div:has(> .ui-head-slot) > .ui-h1 { font-size: 24px; } }
+.ui-page-head > div > .ui-dmarc-sync-info { margin-top: 6px; }
+.ui-dmarc-sync:not(:has(> :not(.hidden))) { display: none; }
+.ui-head-tools:not(:has(> :not(.hidden))) { display: none; }
+/* The copy icon of a value that wraps stays on its last line, instead of a line of its own */
+.copyable.ui-copy-wrap .copy-icon { display: inline-block; vertical-align: -2px; margin-inline-start: 4px; }

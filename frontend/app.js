@@ -577,7 +577,7 @@ function topbarMove(el, target) {
 function topbarRestore() {
     for (const [el, mark] of topbarMoves.reverse()) mark.replaceWith(el);
     topbarMoves = [];
-    document.querySelectorAll('.ui-page-crumbs').forEach(nav => nav.remove());
+    document.querySelectorAll('.ui-page-crumbs, .ui-head-slot').forEach(el => el.remove());
 }
 
 function placeTopbar(route = topbarRoute) {
@@ -591,7 +591,10 @@ function placeTopbar(route = topbarRoute) {
     const title = intro ? intro.querySelector('.ui-h1') : null;
     const on = !!title && !TOPBAR_SKIP.has(route) && !window.matchMedia('(max-width: 760px)').matches;
     document.documentElement.classList.toggle('ui-has-topbar', on);
-    if (!on) return;
+    if (!on) {
+        placeHeadPrimary(route, intro, title);
+        return;
+    }
 
     const brandSlot = document.getElementById('ui-topbar-brand');
     topbarMove(document.querySelector('.ui-sidenav .ui-brand'), brandSlot);
@@ -605,6 +608,18 @@ function placeTopbar(route = topbarRoute) {
     // The DMARC sync note is too tall for the bar: it stays with the description
     if (route === 'dmarc') topbarMove(document.getElementById('dmarc-last-sync-info'), intro);
     updateTopbarCrumbs();
+}
+
+// Phones: the page's main action (Check Now, Fetch reports) sits on the title's line
+function placeHeadPrimary(route, intro, title) {
+    if (!title || !window.matchMedia('(max-width: 760px)').matches) return;
+    const primary = intro.parentNode.querySelector('.ui-head-primary');
+    if (!primary) return;
+    const slot = document.createElement('span');
+    slot.className = 'ui-head-slot';
+    title.after(slot);
+    topbarMove(primary, slot);
+    if (route === 'dmarc') topbarMove(document.getElementById('dmarc-last-sync-info'), intro);
 }
 
 // The tab open on the page: Security's Overview, a Status tab, a Settings section

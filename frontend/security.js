@@ -355,15 +355,20 @@ function securityAttempts(a) {
     return n ? `<span class="ui-sec-attempts" title="Attempts ${securityWindowText()}">${uiCountLabel(n, 'attempt', 'attempts')}</span>` : '';
 }
 
+// The flag leads the row in a slot of its own, so every address starts at the same place
+function securityPlaceFlag(code, country) {
+    return `<span class="ui-sec-pflag"${country ? ` title="${escapeHtml(country)}"` : ''}>${country ? securityFlag(code) : ''}</span>`;
+}
+
 function securityRow(a) {
     const d = securityDescribe(a);
     const open = securityOpenRow === a.ip;
-    const where = a.country || a.last ? `${a.country ? `${securityFlag(a.countryCode)}${escapeHtml(a.country)}` : ''}${a.country && a.last ? ' · ' : ''}${a.last ? formatAgo(a.last) : ''}` : '';
+    const where = a.country || a.last ? `${a.country ? escapeHtml(a.country) : ''}${a.country && a.last ? ' · ' : ''}${a.last ? formatAgo(a.last) : ''}` : '';
     return `
         <div class="ui-sec-row${open ? ' is-open' : ''}" onclick="securityRowClick(event, '${escapeJsArg(a.ip)}')" role="button" tabindex="0"
              onkeydown="if (event.key === 'Enter' && event.target === this) securityToggleRow('${escapeJsArg(a.ip)}')" aria-expanded="${open}">
             <div class="ui-sec-main">
-                <div class="ui-sec-top">${a.country ? `<span class="ui-sec-pflag" title="${escapeHtml(a.country)}">${securityFlag(a.countryCode)}</span>` : ''}<b class="ui-mono">${copyableText(a.ip)}</b>${securityAttempts(a)}${d.tag}${where ? `<small class="ui-muted ui-sec-where">${where}</small>` : ''}</div>
+                <div class="ui-sec-top">${securityPlaceFlag(a.countryCode, a.country)}<b class="ui-mono">${copyableText(a.ip)}</b>${securityAttempts(a)}${d.tag}${where ? `<small class="ui-muted ui-sec-where">${where}</small>` : ''}</div>
                 <p class="ui-sec-why">${d.why}</p>
             </div>
             <div class="ui-sec-acts">${d.acts}</div>
@@ -555,8 +560,8 @@ function securityHistoryRows() {
     return rows.map(h => `
         <div class="ui-sec-row is-static">
             <div class="ui-sec-main">
-                <div class="ui-sec-top"><b class="ui-mono">${copyableText(h.ip)}</b>${protectionStatus(h)}<span class="ui-sec-by">${escapeHtml(securityRuleName(h.rule))}</span>
-                    <small class="ui-muted ui-sec-where">${h.country_name ? `${securityFlag(h.country_code)}${escapeHtml(h.country_name)} · ` : ''}${formatAgo(h.ended_at || h.last_seen)}</small></div>
+                <div class="ui-sec-top">${securityPlaceFlag(h.country_code, h.country_name)}<b class="ui-mono">${copyableText(h.ip)}</b>${protectionStatus(h)}<span class="ui-sec-by">${escapeHtml(securityRuleName(h.rule))}</span>
+                    <small class="ui-muted ui-sec-where">${h.country_name ? `${escapeHtml(h.country_name)} · ` : ''}${formatAgo(h.ended_at || h.last_seen)}</small></div>
                 <p class="ui-sec-why">${escapeHtml(h.reason || '')}</p>
             </div>
         </div>`).join('');

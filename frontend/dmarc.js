@@ -835,7 +835,7 @@ function updateDmarcControls() {
         if (input) input.disabled = !allowed;
     }
 
-    // Sync from IMAP: without IMAP set up the button stays, disabled, and the line under it says why
+    // Fetch reports: without IMAP set up the button stays, disabled, and the line under it says why
     const syncBtn = document.getElementById('dmarc-sync-btn');
     if (dmarcImapStatus && !dmarcImapStatus.enabled) {
         syncContainer.classList.remove('hidden');
@@ -866,6 +866,10 @@ function updateDmarcControls() {
     } else {
         syncContainer.classList.add('hidden');
     }
+    // On a phone the button and the last sync line sit by the title, outside the block
+    const syncOff = syncContainer.classList.contains('hidden');
+    if (syncBtn) syncBtn.classList.toggle('hidden', syncOff);
+    lastSyncInfo.classList.toggle('hidden', syncOff);
 }
 
 async function triggerDmarcSync() {
@@ -878,7 +882,7 @@ async function triggerDmarcSync() {
     }
 
     btn.disabled = true;
-    btnText.textContent = 'Syncing...';
+    btnText.textContent = 'Fetching...';
 
     try {
         const response = await authenticatedFetch('/api/dmarc/imap/sync', {
@@ -888,9 +892,9 @@ async function triggerDmarcSync() {
         const result = await response.json();
 
         if (result.status === 'already_running') {
-            showToast('Sync is already in progress', 'info');
+            showToast('Reports are already being fetched', 'info');
         } else if (result.status === 'started') {
-            showToast('IMAP sync started', 'success');
+            showToast('Fetching reports from the mailbox', 'success');
 
             // Immediate UI update to show "Running" state
             await loadDmarcImapStatus();
@@ -904,10 +908,10 @@ async function triggerDmarcSync() {
 
     } catch (error) {
         console.error('Error triggering sync:', error);
-        showToast('Failed to start sync', 'error');
+        showToast('Could not start fetching reports. Try again.', 'error');
     } finally {
         btn.disabled = false;
-        btnText.textContent = 'Sync from IMAP';
+        btnText.textContent = 'Fetch reports';
     }
 }
 

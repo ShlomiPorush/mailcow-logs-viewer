@@ -1108,7 +1108,12 @@
                                 </button> <small id="domains-last-checked" class="ui-h1-note"></small></h1>
                         <p class="ui-muted" id="domains-summary">Domains and their DNS records</p>
                     </div>
-                    <div id="dns-check-info" class="ui-head-tools"></div>
+                    <div id="dns-check-info" class="ui-head-tools">
+                        <button type="button" id="check-all-dns-btn" onclick="checkAllDomainsDNS()" class="ui-btn ui-btn-primary ui-head-primary">
+                            <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+                            Check Now
+                        </button>
+                    </div>
                 </div>
                 <div id="domains-loading" class="ui-loading"><div class="loading"></div><p>Loading domains...</p></div>
                 <div id="domains-content" class="hidden ui-sec-block ui-scroll"></div>
@@ -1136,9 +1141,9 @@
                                 onchange="uploadDmarcReport(event)">
                         </label>
                         <div id="dmarc-sync-container" class="hidden ui-dmarc-sync">
-                            <button id="dmarc-sync-btn" onclick="triggerDmarcSync()" class="ui-btn ui-btn-primary">
+                            <button type="button" id="dmarc-sync-btn" onclick="triggerDmarcSync()" class="ui-btn ui-btn-primary ui-head-primary">
                                 <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
-                                <span id="dmarc-sync-btn-text">Sync from IMAP</span>
+                                <span id="dmarc-sync-btn-text">Fetch reports</span>
                             </button>
                             <div id="dmarc-last-sync-info" class="ui-dmarc-sync-info"></div>
                         </div>
