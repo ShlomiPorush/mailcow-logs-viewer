@@ -1783,7 +1783,7 @@ async function loadDashboardSecurityAlerts() {
         container.innerHTML = alerts.map(a => {
             const critical = a.severity === 'critical';
             return `
-                <div class="ui-alert ${critical ? 'ui-alert-fail' : 'ui-alert-warn'}">
+                <div class="ui-alert ui-alert-go ${critical ? 'ui-alert-fail' : 'ui-alert-warn'}" onclick="if (uiAlertRowClick(event)) openAlertActivity(${Number(a.id)})">
                     <span class="ui-alert-bar"></span>
                     <div class="ui-alert-text">
                         <div class="ui-alert-title">
@@ -1806,6 +1806,12 @@ async function loadDashboardSecurityAlerts() {
         container.classList.add('hidden');
     }
     updateAttentionState();
+}
+
+// A Needs attention row whose action opens a popup opens it from anywhere on
+// the row; its buttons keep their own actions, and selecting text opens nothing
+function uiAlertRowClick(event) {
+    return !event.target.closest('button, a') && !String(window.getSelection() || '');
 }
 
 // The count and the "all clear" line of Needs attention follow what is in it
@@ -1871,14 +1877,14 @@ async function loadDashboardAttention() {
     if (appVersion && appVersion.update_available) {
         appUpdateInfo = appVersion;
         items.push({ tone: 'info', title: `Version ${appVersion.latest_version} is available`,
-            detail: `You are running ${appVersion.current_version}. See what changed before updating.`, action: 'Read changes', onclick: 'showAppUpdateModal()' });
+            detail: `You are running ${appVersion.current_version}. See what changed before updating.`, action: 'Read changes', onclick: 'showAppUpdateModal()', popup: true });
     }
     if (mailcowVersion && mailcowVersion.update_available) {
         items.push({ tone: 'info', title: `mailcow ${mailcowVersion.latest_version} is available`,
-            detail: `You are running ${mailcowVersion.current_version}.`, action: 'Read changes', onclick: 'showMailcowUpdateModal()' });
+            detail: `You are running ${mailcowVersion.current_version}.`, action: 'Read changes', onclick: 'showMailcowUpdateModal()', popup: true });
     }
     container.innerHTML = items.map(item => `
-        <div class="ui-alert ui-alert-${item.tone}">
+        <div class="ui-alert ui-alert-${item.tone}${item.popup ? ' ui-alert-go' : ''}"${item.popup ? ` onclick="if (uiAlertRowClick(event)) ${item.onclick}"` : ''}>
             <span class="ui-alert-bar"></span>
             <div class="ui-alert-text"><div class="ui-alert-title"><b>${escapeHtml(item.title)}</b></div><p>${escapeHtml(item.detail)}</p></div>
             <button type="button" class="ui-btn ui-btn-sm" onclick="${item.onclick}">${escapeHtml(item.action)}</button>

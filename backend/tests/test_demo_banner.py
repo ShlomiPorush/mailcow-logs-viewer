@@ -65,3 +65,11 @@ def test_a_notice_replaces_the_whole_text_escaped_and_short():
     assert b"a&lt;b&gt;&quot;" in banner_html('a<b>"')
     long = banner_html("x" * 500)
     assert b"x" * NOTICE_MAX in long and b"x" * (NOTICE_MAX + 1) not in long
+
+
+def test_the_authentication_warning_is_hidden_in_the_demo():
+    # The demo has no sign-in on purpose; the id is the app's own banner
+    from pathlib import Path
+    index = Path(__file__).resolve().parents[2] / "frontend" / "index.html"
+    assert 'id="auth-off-banner"' in index.read_text(encoding="utf-8")
+    assert b"#auth-off-banner { display: none !important; }" in inject(PAGE)

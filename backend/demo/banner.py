@@ -4,7 +4,8 @@ The demo notice on every page.
 The regular frontend knows nothing about the demo. This middleware adds a
 slim notice at the top of the main column of every HTML page the app
 serves, styled with the interface's own theme variables so it follows the
-light and dark themes.
+light and dark themes. Its style also hides the app's "Authentication is
+off" warning, since the demo has no sign-in on purpose.
 
 DEMO_NOTICE replaces the notice text, for example to say that the demo
 runs an unreleased version. When it is empty the default text is shown.
@@ -27,6 +28,8 @@ STYLE = """
   text-underline-offset: 3px; margin-inline-start: auto; }
 .demo-banner a:focus-visible { outline: 2px solid var(--ui-focus); outline-offset: 2px; border-radius: 4px; }
 .demo-banner-short { display: none; }
+/* The demo is open on purpose: the "Authentication is off" warning is not news to visitors */
+#auth-off-banner { display: none !important; }
 @media (max-width: 760px) {
   .demo-banner { flex-wrap: nowrap; }
   .demo-banner-long { display: none; }
