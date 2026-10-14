@@ -948,11 +948,12 @@ async function showDmarcSyncHistory() {
                     <span class="ui-td">${formatDate(sync.started_at)}</span>
                     <span class="ui-td">${uiTag(sync.sync_type, sync.sync_type === 'manual' ? 'info' : '')}</span>
                     <span class="ui-td">${uiTag(sync.status, STATUS_TONE[sync.status] || '')}</span>
-                    <span class="ui-td ui-td-end"><small class="ui-sec-unit">Emails </small>${escapeHtml(String(sync.emails_found || 0))}</span>
-                    <span class="ui-td ui-td-end ui-text-ok"><small class="ui-sec-unit">Created </small>${escapeHtml(String(sync.reports_created || 0))}</span>
-                    <span class="ui-td ui-td-end ui-muted"><small class="ui-sec-unit">Duplicate </small>${escapeHtml(String(sync.reports_duplicate || 0))}</span>
-                    <span class="ui-td ui-td-end${sync.reports_failed > 0 ? ' ui-text-fail' : ''}"><small class="ui-sec-unit">Failed </small>${escapeHtml(String(sync.reports_failed || 0))}</span>
-                    <span class="ui-td">${sync.duration_seconds ? `${Math.round(sync.duration_seconds)}s` : '-'}</span>
+                    <span class="ui-tr-break" aria-hidden="true"></span>
+                    <span class="ui-td ui-td-end ui-td-count"><small class="ui-sec-unit">Emails </small>${escapeHtml(String(sync.emails_found || 0))}</span>
+                    <span class="ui-td ui-td-end ui-td-count ui-text-ok"><small class="ui-sec-unit">Created </small>${escapeHtml(String(sync.reports_created || 0))}</span>
+                    <span class="ui-td ui-td-end ui-td-count ui-muted"><small class="ui-sec-unit">Duplicate </small>${escapeHtml(String(sync.reports_duplicate || 0))}</span>
+                    <span class="ui-td ui-td-end ui-td-count${sync.reports_failed > 0 ? ' ui-text-fail' : ''}"><small class="ui-sec-unit">Failed </small>${escapeHtml(String(sync.reports_failed || 0))}</span>
+                    <span class="ui-td${sync.duration_seconds ? '' : ' ui-td-blank'}">${sync.duration_seconds ? `<small class="ui-sec-unit">Took </small>${Math.round(sync.duration_seconds)}s` : '-'}</span>
                 </div>`).join('')}
             </div>
         `;

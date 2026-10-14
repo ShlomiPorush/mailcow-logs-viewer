@@ -1286,6 +1286,10 @@ body { font-family: var(--ui-font); background: var(--ui-bg); color: var(--ui-in
     .ui-stack .ui-q-who { flex: 1 1 calc(100% - 40px); }
     .ui-stack .ui-td-wrap { flex: 1 1 100%; }
     .ui-stack .ui-row-actions { flex: 1 1 100%; justify-content: flex-start; flex-wrap: wrap; }
+    /* Counts get a line of their own under the row's heading line */
+    .ui-stack .ui-tr-break { display: block; flex: 1 1 100%; height: 0; margin-top: -4px; order: 1; }
+    .ui-stack .ui-td-count { order: 1; }
+    .ui-stack .ui-td-blank { display: none; }
     .ui-stack .ui-table-tools, .ui-stack > .ui-toolbar { min-width: 0; flex-wrap: wrap; }
     .ui-sec-table .ui-tr { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; min-width: 0; }
     .ui-sec-table .ui-tr-head { display: none; }
@@ -2623,6 +2627,8 @@ button.ui-dm-node:hover { border-color: var(--ui-ink); }
 .ui-ms-range label, .ui-ms-range input { min-width: 0; }
 /* A card does not cut the picker open inside it */
 .ui-table-card:has(.ui-picker-panel:not(.hidden)) { overflow: visible; }
+/* A line break in a row that stacks on phones; a wide table has no use for it */
+.ui-tr-break { display: none; }
 /* Phones: the page's main action on the title's line, the rest of the head under both */
 .ui-page-head > div:has(> .ui-head-slot) { flex: 1 1 100%; display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 12px; align-items: start; }
 .ui-page-head > div:has(> .ui-head-slot) > * { grid-column: 1 / -1; }
