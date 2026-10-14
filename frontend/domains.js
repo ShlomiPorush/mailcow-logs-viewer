@@ -203,7 +203,8 @@ function renderDomainAccordionRow(domain, open = false) {
     const dns = domain.dns_checks || {};
     const domainId = domainRowId(domain.domain_name);
     const issues = domainHasIssues(domain);
-    const fact = (label, value, note) => `<div class="ui-md-fact"><span>${label}</span><div>${escapeHtml(value)}</div>${note ? `<small class="ui-muted">${escapeHtml(note)}</small>` : ''}</div>`;
+    // On a phone a fact with a short note keeps it on the value's line
+    const fact = (label, value, note) => `<div class="ui-md-fact${note ? ' ui-md-fact-inline' : ''}"><span>${label}</span><div>${escapeHtml(value)}</div>${note ? `<small class="ui-muted">${escapeHtml(note)}</small>` : ''}</div>`;
 
     return `
         <div class="ui-tr ui-domain-row" data-domain-row="${escapeHtml(domain.domain_name)}" onclick="toggleDomainDetails('${escapeJsArg(domainId)}')">
