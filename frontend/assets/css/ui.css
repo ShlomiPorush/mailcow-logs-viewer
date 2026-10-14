@@ -836,11 +836,14 @@ select.ui-sec-in { text-align: start; }
 .ui-sheet-back { position: absolute; inset: 0; background: rgb(0 0 0 / .4); }
 .ui-sheet-panel { position: relative; display: flex; flex-direction: column; max-height: 88vh; max-height: 88dvh; background: var(--ui-bg);
     border-radius: 16px 16px 0 0; box-shadow: 0 -8px 30px rgb(0 0 0 / .2); transition: border-radius .2s ease; }
-/* A long read opens at three quarters and rises with the scroll to the full screen (utils.js) */
+/* A long read opens at four fifths and rises with the scroll to the full screen (utils.js) */
 .ui-sheet.is-expand .ui-sheet-panel { max-height: 100vh; max-height: 100dvh; height: auto; }
-.ui-sheet.is-expand:not(.is-full) .ui-sheet-panel:not([style*="height"]) { max-height: 75vh; max-height: 75dvh; }
+.ui-sheet.is-expand:not(.is-full) .ui-sheet-panel:not([style*="height"]) { max-height: 80vh; max-height: 80dvh; }
 .ui-sheet.is-expand.is-full .ui-sheet-panel { border-radius: 0; padding-top: env(safe-area-inset-top); }
-.ui-sheet-grip { align-self: center; width: 40px; height: 4px; margin-top: 8px; border-radius: 2px; background: var(--ui-line); }
+/* The grip is drawn small, held by a larger area around it */
+.ui-sheet-grip { flex: none; align-self: center; width: 120px; height: 20px; margin-bottom: -4px; background: linear-gradient(var(--ui-line), var(--ui-line)) center / 40px 4px no-repeat; cursor: grab; touch-action: none; transition: background-size .15s ease; }
+/* Held, the grip stands out */
+.ui-sheet-panel.is-held .ui-sheet-grip { background-image: linear-gradient(var(--ui-ink), var(--ui-ink)); background-size: 56px 5px; cursor: grabbing; }
 .ui-sheet-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 14px var(--ui-pad-x) 10px; border-bottom: 1px solid var(--ui-line); }
 .ui-sheet-head > :first-child { min-width: 0; }
 .ui-sheet-title { margin: 0; font-size: 16px; font-weight: 700; }
@@ -849,6 +852,11 @@ select.ui-sec-in { text-align: start; }
 .ui-sheet-body > .ui-sec-why { font-size: 13.5px; }
 .ui-sheet-body .ui-sec-detail { padding: 0; }
 .ui-sheet .markdown-body { font-family: inherit; background: transparent; color: var(--ui-ink); }
+/* One column as wide as the screen: long words wrap, wide tables and code scroll in place */
+.ui-sheet-body { grid-template-columns: minmax(0, 1fr); }
+.ui-sheet .markdown-body { min-width: 0; overflow-wrap: break-word; }
+.ui-sheet .markdown-body :is(pre, table) { display: block; max-width: 100%; overflow-x: auto; }
+.ui-sheet .markdown-body img { max-width: 100%; height: auto; }
 /* The reset drops list markers; the dialog gets them back from #changelog-content, the sheet here */
 .ui-sheet .markdown-body ul { list-style: disc; }
 .ui-sheet .markdown-body ol { list-style: decimal; }
@@ -2567,4 +2575,21 @@ button.ui-dm-node:hover { border-color: var(--ui-ink); }
     .ui-aa-two { grid-template-columns: 1fr; }
     .ui-alert { flex-wrap: wrap; }
     .ui-alert-acts { margin-inline-start: 18px; justify-content: flex-start; }
+}
+
+/* Phones: every dialog is a sheet like the help sheet, four fifths of the
+   screen, growing to the full screen as it is read (utils.js, uiDialogSheet) */
+@media (max-width: 760px) {
+    .ui-dialog-backdrop:not(.ui-docked) { align-items: flex-end; padding: 0; }
+    .ui-dialog-backdrop:not(.ui-docked) > .ui-dialog { width: 100%; height: auto; max-height: 80vh; max-height: 80dvh;
+        border-radius: 16px 16px 0 0; box-shadow: 0 -8px 30px rgb(0 0 0 / .2); transition: border-radius .2s ease; }
+    .ui-dialog-backdrop:not(.ui-docked) > .ui-dialog::before { content: ""; flex: none; align-self: center; width: 120px; height: 20px;
+        margin-bottom: -4px; background: linear-gradient(var(--ui-line), var(--ui-line)) center / 40px 4px no-repeat; transition: background-size .15s ease; }
+    .ui-dialog-backdrop:not(.ui-docked) > .ui-dialog.is-held::before { background-image: linear-gradient(var(--ui-ink), var(--ui-ink)); background-size: 56px 5px; }
+    /* Its head, header and tabs keep their size; the body takes what is left and scrolls */
+    .ui-dialog-backdrop:not(.ui-docked) > .ui-dialog > * { flex-shrink: 0; }
+    .ui-dialog-backdrop:not(.ui-docked) > .ui-dialog > .ui-dialog-body { flex: 1 1 auto; min-height: 0; }
+    .ui-dialog-backdrop.is-grown:not(.ui-docked) > .ui-dialog { max-height: 100vh; max-height: 100dvh; }
+    .ui-dialog-backdrop.is-full:not(.ui-docked) > .ui-dialog { border-radius: 0; padding-top: env(safe-area-inset-top); }
+    .ui-dialog-backdrop:not(.ui-docked) .ui-dialog-body { overscroll-behavior: contain; padding-bottom: calc(var(--ui-pad-x) + env(safe-area-inset-bottom)); }
 }
