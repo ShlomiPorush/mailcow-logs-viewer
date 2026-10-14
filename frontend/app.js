@@ -3491,20 +3491,21 @@ function setMessagesDatePresetActive(preset) {
 // Where the facets are hidden: outcome, direction and time open their choices in a panel, one at a time
 const MESSAGES_PICKERS = ['status', 'direction', 'time'];
 
+// They are pickers (utils.js, uiPicker): this opens one, or closes them and gives the focus back
 function toggleMessagesPicker(kind, open) {
+    if (kind && open !== false) {
+        uiPickerOpen(`messages-${kind}`);
+        return;
+    }
     MESSAGES_PICKERS.forEach(k => {
-        const panel = document.getElementById(`messages-${k}-panel`);
-        const button = document.getElementById(k === 'time' ? 'messages-date-range-label' : `messages-${k}-pick`);
-        if (!panel || !button) return;
-        const show = k === kind && (open === undefined ? panel.classList.contains('hidden') : open);
-        panel.classList.toggle('hidden', !show);
-        button.setAttribute('aria-expanded', String(show));
-        if (show && k === 'time') {
-            // The custom range starts from the one in use
-            document.getElementById('messages-time-start').value = document.getElementById('messages-date-range-start').value;
-            document.getElementById('messages-time-end').value = document.getElementById('messages-date-range-end').value;
-        }
+        if (uiPickerIsOpen(`messages-${k}`)) uiPickerClose(`messages-${k}`, { returnFocus: true });
     });
+}
+
+// The custom range in the Time picker starts from the one in use
+function messagesTimePanelOpened() {
+    document.getElementById('messages-time-start').value = document.getElementById('messages-date-range-start').value;
+    document.getElementById('messages-time-end').value = document.getElementById('messages-date-range-end').value;
 }
 
 function toggleMessagesTimePanel(open) {
@@ -3616,8 +3617,6 @@ function applyMessagesCustomDateRange() {
 
 // Close messages date range picker on outside click
 document.addEventListener('click', function(e) {
-    const pickers = document.getElementById('messages-pickers');
-    if (pickers && !pickers.contains(e.target)) toggleMessagesPicker(null, false);
     const container = document.getElementById('messages-date-range-picker-container');
     if (container && !container.contains(e.target)) {
         const dropdown = document.getElementById('messages-date-range-dropdown');
@@ -3653,11 +3652,13 @@ function setMessagesFacet(kind, value) {
     applyMessagesFilters();
 }
 
-function renderFacetList(kind, entries, counts, current) {
+// In the facets column the choices are toggle buttons; in a picker they are its options
+function renderFacetList(kind, entries, counts, current, asOptions = false) {
     return entries.map(([value, label]) => {
         const count = counts ? counts[value || 'all'] : undefined;
         const tone = kind === 'status' && value ? (UI_STATUS_TONE[value] || '') : '';
-        return `<button type="button" class="ui-fct" aria-pressed="${String(current === value)}" onclick="setMessagesFacet('${kind}', '${value}')">
+        const state = asOptions ? `role="option" tabindex="-1" aria-selected="${String(current === value)}"` : `aria-pressed="${String(current === value)}"`;
+        return `<button type="button" class="ui-fct" ${state} onclick="setMessagesFacet('${kind}', '${value}')">
             ${kind === 'status' && value ? `<i class="ui-fct-dot${tone ? ` ui-fct-${tone}` : ''}"></i>` : ''}${kind === 'direction' && value ? `<i class="ui-fct-dot ui-dir-${value}"></i>` : ''}<span>${escapeHtml(label)}</span>
             <small>${count === undefined ? '' : escapeHtml(String(count))}</small></button>`;
     }).join('');
@@ -3689,17 +3690,18 @@ async function loadMessageFacets(filters) {
     // Phones and tablets: the same facets behind the Outcome and Direction buttons, which name the choice in use
     const pick = (kind, entries, counts, current, anyLabel) => {
         const options = document.getElementById(`messages-${kind}-options`);
-        if (options) options.innerHTML = renderFacetList(kind, entries, counts, current);
+        if (options) options.innerHTML = renderFacetList(kind, entries, counts, current, true);
         const button = document.getElementById(`messages-${kind}-pick`);
+        const valueLabel = document.getElementById(`messages-${kind}-value`);
         const chosen = entries.find(([value]) => value === current);
-        if (button) {
-            button.textContent = current && chosen ? chosen[1] : anyLabel;
-            button.classList.toggle('is-set', !!current);
-        }
+        if (valueLabel) valueLabel.textContent = current && chosen ? chosen[1] : anyLabel;
+        if (button) button.classList.toggle('is-set', !!current);
     };
-    pick('status', MESSAGE_STATUS_FACETS, data && data.status, status, 'All outcomes');
-    pick('direction', MESSAGE_DIRECTION_FACETS, data && data.direction, direction, 'Any direction');
-    const timeButton = document.getElementById('messages-date-range-label');
+    pick('status', MESSAGE_STATUS_FACETS, data && data.status, status, 'All');
+    pick('direction', MESSAGE_DIRECTION_FACETS, data && data.direction, direction, 'Any');
+    // Options redrawn while the picker is open keep the focus inside it
+    uiPickerRefocus();
+    const timeButton = document.getElementById('messages-time-pick');
     if (timeButton) timeButton.classList.toggle('is-set', !!(filters.start_date || filters.end_date));
 }
 
