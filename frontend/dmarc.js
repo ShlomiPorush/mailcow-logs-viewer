@@ -486,7 +486,7 @@ function dmarcRecordsCard(x) {
         sent ? ['SPF', `${Math.round(x.spfPct)}% of mail aligned`, x.spfPct >= 95 ? dmarcTag('ok', 'OK') : dmarcTag('warn', 'Gaps'), 'dmarc'] : ['SPF', ...noMail, 'dmarc'],
         sent ? ['DKIM', x.dkimSeen ? 'Your mail is signed' : 'No signed mail in the reports', x.dkimSeen ? dmarcTag('ok', 'OK') : dmarcTag('fail', 'Missing', true), 'dmarc'] : ['DKIM', ...noMail, 'dmarc'],
         ['TLS-RPT', x.tlsRecord.record ? 'Receivers report encryption' : 'No record at _smtp._tls', x.tlsRecord.record ? dmarcTag('ok', 'OK') : dmarcTag('warn', 'Missing'), 'tls']];
-    return `<div class="ui-dm-card"><header>Records<small>a record opens its details</small></header>${rows.map(([label, sub, tag, kind]) =>
+    return `<div class="ui-dm-card"><header>Records</header>${rows.map(([label, sub, tag, kind]) =>
         `<button type="button" class="ui-dm-rec" onclick="openDmarcRecord('${kind}', '${name}')"><span><b>${label}</b><small>${escapeHtml(sub)}</small></span>${tag}<span class="ui-muted" aria-hidden="true">›</span></button>`).join('')}</div>`;
 }
 
@@ -549,7 +549,7 @@ async function loadDomainOverview(domain, updateUrl = true) {
             <div class="ui-dm-ttl"><div><small>Last 30 days</small><h2>${escapeHtml(domain)}${dmarcNotOnServer(x.overview)}</h2></div></div>
             <div class="ui-dm-lay"><div>
                 <div class="ui-dm-card"><header>Messages per day</header><div class="ui-dm-body">${dmarcChart(x.overview.daily_stats || [])}</div></div>
-                ${x.groups.length ? `<div class="ui-dm-card ui-dm-flow-card"><header>Mail flow<small>your domain, who sent it, who reported it</small></header><div class="ui-dm-body">${dmarcFlow(x)}</div></div>` : ''}
+                ${x.groups.length ? `<div class="ui-dm-card ui-dm-flow-card"><header>Mail flow</header><div class="ui-dm-body">${dmarcFlow(x)}</div></div>` : ''}
                 ${dmarcSendersCard(x)}
                 ${dmarcDaysCard(x)}
                 ${dmarcTlsCard(x)}
