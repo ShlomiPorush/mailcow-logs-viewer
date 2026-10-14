@@ -1203,6 +1203,15 @@ body { font-family: var(--ui-font); background: var(--ui-bg); color: var(--ui-in
 }
 .ui-alert-info .ui-alert-bar { background: var(--ui-info); }
 .ui-alert > .ui-btn { align-self: center; flex: none; }
+.ui-alert-go { cursor: pointer; }
+.ui-alert-go:hover { background: color-mix(in srgb, var(--ui-ink) 3%, transparent); }
+@media (max-width: 760px) {
+    /* Phones: the text takes the whole width, the actions go under it */
+    #dashboard-attention-panel .ui-alert { display: grid; grid-template-columns: 4px minmax(0, 1fr); column-gap: 14px; row-gap: 8px; }
+    #dashboard-attention-panel .ui-alert-bar { grid-row: 1 / span 2; }
+    #dashboard-attention-panel .ui-alert > .ui-btn,
+    #dashboard-attention-panel .ui-alert-acts { grid-column: 2; justify-self: start; align-self: start; margin-inline-start: 0; }
+}
 .ui-dash-clear { margin: 0; padding: var(--ui-pad-y) var(--ui-pad-x); border-top: 1px solid var(--ui-line); color: var(--ui-muted); }
 
 .ui-flow { padding: 0 var(--ui-pad-x) 14px; }
