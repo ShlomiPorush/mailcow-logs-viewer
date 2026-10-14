@@ -1564,6 +1564,16 @@
         </div>
     </div>
 
+    <div id="mailbox-activity-modal" class="hidden ui-dialog-backdrop" role="dialog" aria-labelledby="mailbox-activity-title" onclick="if (event.target === this) closeMailboxActivity()">
+        <div class="ui-dialog ui-dialog-fit ui-aa-dialog">
+            <div class="ui-dialog-head">
+                <h3 id="mailbox-activity-title">Activity</h3>
+                <button onclick="closeMailboxActivity()" class="ui-icon-btn" title="Close" aria-label="Close"><svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg></button>
+            </div>
+            <div id="mailbox-activity-content" class="ui-dialog-body"></div>
+        </div>
+    </div>
+
     <div id="dmarc-reports-management-modal" class="hidden ui-dialog-backdrop" role="dialog" aria-label="Manage Reports">
         <div class="ui-dialog ui-dialog-fit">
             <div class="ui-dialog-head">

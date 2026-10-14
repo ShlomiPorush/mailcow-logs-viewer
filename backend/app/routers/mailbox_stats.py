@@ -11,7 +11,9 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func, case, and_, or_
 from datetime import datetime, timezone, timedelta
 from typing import Optional, List
+from zoneinfo import ZoneInfo
 
+from ..config import settings
 from ..database import get_db
 from ..models import MailboxStatistics, AliasStatistics, MessageCorrelation
 
@@ -204,6 +206,7 @@ def _representative_legs(db: Session, address_column, emails_lower: list,
         email.label('email'),
         MessageCorrelation.final_status.label('final_status'),
         MessageCorrelation.direction.label('direction'),
+        MessageCorrelation.first_seen.label('first_seen'),
         func.row_number().over(
             partition_by=(email, message_key),
             order_by=(status_rank, MessageCorrelation.id.asc())
@@ -297,6 +300,59 @@ def get_bulk_message_counts(db: Session, emails: list, start_date: datetime, end
         result[em] = _counts_from_raw(sent_by_status, received_total, dir_counts)
 
     return result
+
+
+def _activity_buckets(start_date: datetime, end_date: datetime) -> tuple:
+    """
+    The time slots a mailbox's activity is drawn in: hours for a range of up
+    to two days, days beyond it, in the app's time zone (naive local times).
+    """
+    try:
+        zone_name = settings.tz or 'UTC'
+        zone = ZoneInfo(zone_name)
+    except Exception:
+        zone_name, zone = 'UTC', timezone.utc
+    unit = 'hour' if end_date - start_date <= timedelta(days=2) else 'day'
+    first = start_date.astimezone(zone).replace(tzinfo=None, minute=0, second=0, microsecond=0)
+    if unit == 'day':
+        first = first.replace(hour=0)
+    last = end_date.astimezone(zone).replace(tzinfo=None)
+    step = timedelta(hours=1) if unit == 'hour' else timedelta(days=1)
+    buckets = []
+    while first <= last:
+        buckets.append(first)
+        first += step
+    return unit, zone_name, buckets
+
+
+def get_bulk_activity(db: Session, addresses_by_mailbox: dict, start_date: datetime, end_date: datetime) -> dict:
+    """
+    Messages sent and received per time slot for each mailbox, its aliases
+    included, counted like the totals beside them (one per message and
+    address). Two aggregate queries, whatever the number of mailboxes.
+    """
+    unit, zone_name, buckets = _activity_buckets(start_date, end_date)
+    owner = {}
+    for mailbox, addresses in addresses_by_mailbox.items():
+        for address in addresses:
+            owner.setdefault(address.lower(), mailbox)
+    series = {mailbox: {'sent': [0] * len(buckets), 'received': [0] * len(buckets)}
+              for mailbox in addresses_by_mailbox}
+    index = {bucket: i for i, bucket in enumerate(buckets)}
+    if owner:
+        for side, column in (('sent', MessageCorrelation.sender), ('received', MessageCorrelation.recipient)):
+            legs = _representative_legs(db, column, list(owner), start_date, end_date)
+            # first_seen is stored as naive UTC; the slot is taken in local time
+            bucket = func.date_trunc(unit, func.timezone(zone_name, func.timezone('UTC', legs.c.first_seen)))
+            rows = db.query(legs.c.email, bucket.label('bucket'), func.count().label('cnt')).filter(
+                legs.c.leg_rank == 1
+            ).group_by(legs.c.email, bucket).all()
+            for row in rows:
+                i = index.get(row.bucket)
+                mailbox = owner.get(row.email)
+                if i is not None and mailbox:
+                    series[mailbox][side][i] += row.cnt
+    return {'unit': unit, 'buckets': [b.isoformat() for b in buckets], 'series': series}
 
 
 def get_message_counts_for_email(db: Session, email: str, start_date: datetime, end_date: datetime) -> dict:
@@ -616,7 +672,15 @@ def get_all_mailbox_stats(
         start_index = (page - 1) * page_size
         end_index = start_index + page_size
         paginated_result = result[start_index:end_index]
-        
+
+        # The activity over the range, drawn beside each mailbox on this page
+        activity = get_bulk_activity(db, {
+            mb['username']: [mb['username']] + [a['alias_address'] for a in mb['aliases']]
+            for mb in paginated_result
+        }, parsed_start, parsed_end)
+        for mb in paginated_result:
+            mb['activity'] = activity['series'][mb['username']]
+
         response = {
             "total": len(result),
             "page": page,
@@ -625,7 +689,9 @@ def get_all_mailbox_stats(
             "date_range": date_range,
             "start_date": format_datetime_utc(parsed_start),
             "end_date": format_datetime_utc(parsed_end),
-            "mailboxes": paginated_result
+            "mailboxes": paginated_result,
+            "activity_unit": activity['unit'],
+            "activity_buckets": activity['buckets']
         }
         
         # Cache the result

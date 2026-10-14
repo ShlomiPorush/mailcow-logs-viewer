@@ -285,6 +285,8 @@ async function loadMailboxStatsList(page = 1) {
             mailboxStatsCache.mailboxes = loaded;
         }
         mailboxStatsTotalPages = data.total_pages || 1;
+        mailboxStatsCache.activityUnit = data.activity_unit || 'day';
+        mailboxStatsCache.activityBuckets = data.activity_buckets || [];
 
         // Update count
         const countEl = document.getElementById('mailbox-stats-count');
@@ -320,6 +322,89 @@ function mailboxStatLink(email, filter, value, label, tone) {
         <b class="${!value ? 'ui-zero' : tone ? `ui-${tone}` : ''}">${(value || 0).toLocaleString()}</b>${label}</button>`;
 }
 
+// What the mailbox may use, as a line of tags under its address
+function mailboxServices(mb) {
+    const at = mb.attributes || {};
+    const services = [
+        ['IMAP', at.imap_access === '1', mb.last_imap_login],
+        ['POP3', at.pop3_access === '1', mb.last_pop3_login],
+        ['SMTP', at.smtp_access === '1', mb.last_smtp_login],
+        ['Sieve', at.sieve_access === '1'],
+        ['TLS', at.tls_enforce_in === '1' || at.tls_enforce_out === '1'],
+    ];
+    return `<span class="ui-ms-svcs">${services.map(([label, on, last]) => {
+        const name = label === 'TLS' ? 'TLS enforced' : label;
+        const tip = `${name}: ${on ? 'on' : 'off'}${last !== undefined ? `, last login ${last ? formatTime(last) : 'never'}` : ''}`;
+        return `<span class="ui-ms-svc${on ? ' is-on' : ''}" title="${escapeHtml(tip)}"><i></i>${label}</span>`;
+    }).join('')}</span>`;
+}
+
+// The mailbox's messages over the range, sent and received together; a click opens the chart
+function mailboxSparkline(mb) {
+    const act = mb.activity || { sent: [], received: [] };
+    const totals = act.sent.map((s, i) => s + (act.received[i] || 0));
+    const sum = totals.reduce((a, b) => a + b, 0);
+    const w = 96, h = 24, n = totals.length;
+    const max = Math.max(1, ...totals);
+    const pts = totals.map((v, i) => `${n > 1 ? (i / (n - 1) * w).toFixed(1) : w / 2},${(h - 2 - v / max * (h - 4)).toFixed(1)}`).join(' ');
+    const label = `Activity of ${mb.username}: ${sum.toLocaleString()} messages. Open the chart`;
+    return `<button type="button" class="ui-ms-spark${sum ? '' : ' is-empty'}" onclick="event.stopPropagation(); openMailboxActivity('${escapeJsArg(mb.username)}')" aria-label="${escapeHtml(label)}" title="${escapeHtml(label)}">
+        <svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" aria-hidden="true">${n ? `<polygon points="0,${h} ${pts} ${w},${h}"></polygon><polyline points="${pts}"></polyline>` : ''}</svg></button>`;
+}
+
+// A slot is a local date and time without a zone, already in the app's time zone
+function mailboxActivityLabel(bucket, unit) {
+    const [date, time] = bucket.split('T');
+    const [y, m, d] = date.split('-').map(Number);
+    const day = new Date(y, m - 1, d).toLocaleDateString('en-US', { weekday: 'short', day: 'numeric', month: 'short' });
+    return unit === 'hour' ? `${day}, ${time.slice(0, 5)}` : day;
+}
+
+function openMailboxActivity(username) {
+    const mb = (mailboxStatsCache.mailboxes || []).find(m => m.username === username);
+    if (!mb) return;
+    const unit = mailboxStatsCache.activityUnit || 'day';
+    const buckets = mailboxStatsCache.activityBuckets || [];
+    const act = mb.activity || { sent: [], received: [] };
+    const totals = buckets.map((_, i) => (act.sent[i] || 0) + (act.received[i] || 0));
+    const top = Math.ceil(Math.max(4, ...totals) / 4) * 4;
+    let busiest = null;
+    totals.forEach((v, i) => { if (v > 0 && (busiest === null || v > totals[busiest])) busiest = i; });
+    const range = document.getElementById('date-range-label')?.textContent || '';
+    document.getElementById('mailbox-activity-title').textContent = mb.username;
+    document.getElementById('mailbox-activity-content').innerHTML = `
+        <p class="ui-muted ui-aa-sub">${mb.name ? `${escapeHtml(mb.name)} · ` : ''}${escapeHtml(range)}, aliases included</p>
+        <div class="ui-aa-strip">
+            <div><small>Sent</small><b>${mb.combined_sent.toLocaleString()}</b></div>
+            <div><small>Received</small><b>${mb.combined_received.toLocaleString()}</b></div>
+            <div><small>Failed</small><b${mb.combined_failure_rate >= 10 ? ' class="ui-text-fail"' : ''}>${mb.combined_failure_rate}%</b></div>
+            <div><small>Busiest ${unit}</small><b>${busiest === null ? '-' : escapeHtml(mailboxActivityLabel(buckets[busiest], unit))}</b></div>
+        </div>
+        <section>
+            <div class="ui-aa-head"><b>Messages per ${unit}</b><span class="ui-muted">sent and received</span></div>
+            ${buckets.length ? `<div class="ui-aa-chart">
+                <div class="ui-aa-grid">${[top, top * .75, top * .5, top * .25, 0].map(v => `<i><span>${Math.round(v)}</span></i>`).join('')}</div>
+                <div class="ui-aa-cols ui-ma-cols">${buckets.map((b, i) => {
+                    const sent = act.sent[i] || 0, recv = act.received[i] || 0;
+                    const tip = `${mailboxActivityLabel(b, unit)}: ${sent} sent, ${recv} received`;
+                    return `<span class="ui-aa-col" title="${escapeHtml(tip)}"><i class="is-sent" style="height:${sent / top * 100}%"></i><i class="is-recv" style="height:${recv / top * 100}%"></i></span>`;
+                }).join('')}</div>
+            </div>
+            <div class="ui-aa-x"><span>${escapeHtml(mailboxActivityLabel(buckets[0], unit))}</span><span>${escapeHtml(mailboxActivityLabel(buckets[buckets.length - 1], unit))}</span></div>
+            <p class="ui-aa-legend"><span><i class="is-sent"></i>Sent</span><span><i class="is-recv"></i>Received</span></p>` : '<p class="ui-empty">No activity in this range.</p>'}
+        </section>
+        <div class="ui-aa-acts"><button type="button" class="ui-btn" onclick="closeMailboxActivity(); navigateToMessagesWithFilter({ email: '${escapeJsArg(mb.username)}', filterType: 'search' })">Open its messages</button></div>`;
+    document.getElementById('mailbox-activity-modal').classList.remove('hidden');
+}
+
+function closeMailboxActivity() {
+    document.getElementById('mailbox-activity-modal').classList.add('hidden');
+}
+
+document.addEventListener('keydown', event => {
+    if (event.key === 'Escape' && !document.getElementById('mailbox-activity-modal')?.classList.contains('hidden')) closeMailboxActivity();
+});
+
 function mailboxRateLimitLabel(mb) {
     if (!mb.rl_value) return 'None';
     const frame = { s: 'sec', m: 'min', h: 'hour', d: 'day' }[mb.rl_frame] || mb.rl_frame || 'min';
@@ -338,13 +423,11 @@ function renderMailboxStatsAccordion(mailboxes, page = 1, totalPages = 1, total 
 
     const hideZero = document.getElementById('mailbox-stats-hide-zero')?.checked ?? true;
     const sum = (mb, key) => (mb.aliases || []).reduce((total, a) => total + (a[key] || 0), 0);
-    const access = (on, label, last) => `
-        <div class="ui-md-fact"><span><i class="ui-mdot ${on ? 'ui-mdot-ok' : 'ui-mdot-fail'}"></i> ${label}</span>
-            ${last !== undefined ? `<div>${last ? formatTime(last) : 'Never'}</div>` : `<div>${on ? 'On' : 'Off'}</div>`}</div>`;
+    const lastLogin = (label, last) => `<div class="ui-md-fact"><span>Last ${label} login</span><div>${last ? formatTime(last) : 'Never'}</div></div>`;
 
     let html = `
         <div class="ui-table ui-stack ui-ms-table" data-sort-handler="mailboxStatsSortBy">
-            <div class="ui-tr ui-tr-head"><span data-sort-key="username"${mailboxStatsSortAttr('username')}>Mailbox</span><span class="ui-td-end" data-sort-key="sent_total"${mailboxStatsSortAttr('sent_total')}>Sent</span><span class="ui-td-end" data-sort-key="received_total"${mailboxStatsSortAttr('received_total')}>Received</span><span class="ui-td-end">Delivered</span><span class="ui-td-end" data-sort-key="failure_rate"${mailboxStatsSortAttr('failure_rate')}>Failed</span><span class="ui-td-end">Aliases</span><span class="ui-td-end" data-sort-key="quota_used"${mailboxStatsSortAttr('quota_used')}>Storage</span></div>
+            <div class="ui-tr ui-tr-head"><span data-sort-key="username"${mailboxStatsSortAttr('username')}>Mailbox</span><span>Activity</span><span class="ui-td-end" data-sort-key="sent_total"${mailboxStatsSortAttr('sent_total')}>Sent</span><span class="ui-td-end" data-sort-key="received_total"${mailboxStatsSortAttr('received_total')}>Received</span><span class="ui-td-end">Delivered</span><span class="ui-td-end" data-sort-key="failure_rate"${mailboxStatsSortAttr('failure_rate')}>Failed</span><span class="ui-td-end">Aliases</span><span class="ui-td-end" data-sort-key="quota_used"${mailboxStatsSortAttr('quota_used')}>Storage</span></div>
             ${mailboxes.map((mb, index) => {
         const isExpanded = mailboxStatsCache.expandedMailboxes.has(mb.username);
         const failTone = mb.combined_failure_rate >= 10 ? 'fail' : mb.combined_failure_rate >= 5 ? 'warn' : '';
@@ -355,7 +438,9 @@ function renderMailboxStatsAccordion(mailboxes, page = 1, totalPages = 1, total 
                 <div class="ui-td ui-q-who">
                     <div><svg id="accordion-icon-${index}" class="ui-domain-chevron" width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"${isExpanded ? ' style="transform: rotate(90deg)"' : ''}><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg>${copyableText(mb.username)} ${mb.active ? '' : uiTag('Inactive', 'fail')}</div>
                     ${mb.name ? `<small>${escapeHtml(mb.name)}</small>` : ''}
+                    ${mailboxServices(mb)}
                 </div>
+                <span class="ui-td ui-ms-spark-cell"><small class="ui-sec-unit">Activity </small>${mailboxSparkline(mb)}</span>
                 <span class="ui-td ui-td-end"><small class="ui-sec-unit">Sent </small>${mb.combined_sent.toLocaleString()}</span>
                 <span class="ui-td ui-td-end"><small class="ui-sec-unit">Received </small>${mb.combined_received.toLocaleString()}</span>
                 <span class="ui-td ui-td-end"><small class="ui-sec-unit">Delivered </small>${(mb.combined_delivered || 0).toLocaleString()}</span>
@@ -369,11 +454,9 @@ function renderMailboxStatsAccordion(mailboxes, page = 1, totalPages = 1, total 
                         <div class="ui-md-fact"><span>Messages in Mailbox</span><div>${(mb.messages_in_mailbox || 0).toLocaleString()}</div></div>
                         <div class="ui-md-fact"><span>Created / Modified</span><div>${mb.created ? formatTime(mb.created) : 'N/A'}</div><small class="ui-muted">${mb.modified ? formatTime(mb.modified) : 'N/A'}</small></div>
                         <div class="ui-md-fact"><span>Rate Limit</span><div>${escapeHtml(mailboxRateLimitLabel(mb))}</div></div>
-                        ${access(mb.attributes?.imap_access === '1', 'IMAP', mb.last_imap_login || null)}
-                        ${access(mb.attributes?.pop3_access === '1', 'POP3', mb.last_pop3_login || null)}
-                        ${access(mb.attributes?.smtp_access === '1', 'SMTP', mb.last_smtp_login || null)}
-                        ${access(mb.attributes?.sieve_access === '1', 'Sieve')}
-                        ${access(mb.attributes?.tls_enforce_in === '1' || mb.attributes?.tls_enforce_out === '1', 'TLS Enforce')}
+                        ${lastLogin('IMAP', mb.last_imap_login)}
+                        ${lastLogin('POP3', mb.last_pop3_login)}
+                        ${lastLogin('SMTP', mb.last_smtp_login)}
                     </div>
 
                     <h4 class="ui-md-h">Message Statistics</h4>

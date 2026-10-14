@@ -1590,7 +1590,25 @@ button.ui-st-card:hover { outline: 1px solid var(--ui-line); }
 .ui-ms-range { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .ui-ms-range label { display: grid; gap: 4px; color: var(--ui-muted); font-size: 12px; }
 #date-range-arrow { transition: transform .15s; }
-.ui-ms-table { --ui-cols: minmax(240px, 2.4fr) repeat(4, 90px) 70px 90px; --ui-table-min: 820px; }
+.ui-ms-table { --ui-cols: minmax(240px, 2.4fr) 112px repeat(4, 90px) 70px 90px; --ui-table-min: 940px; }
+/* What a mailbox may use, under its address */
+.ui-ms-svcs { display: flex; flex-wrap: wrap; gap: 2px 10px; margin-top: 4px; }
+.ui-ms-svc { display: inline-flex; align-items: center; gap: 4px; color: var(--ui-muted); font-size: 11.5px; font-weight: 600; text-decoration: line-through; }
+.ui-ms-svc i { width: 6px; height: 6px; border-radius: 50%; background: var(--ui-line); }
+.ui-ms-svc.is-on { color: var(--ui-ink); text-decoration: none; }
+.ui-ms-svc.is-on i { background: var(--ui-ok); }
+/* The activity over the range, a click away from its chart */
+.ui-ms-spark { display: inline-flex; padding: 3px 4px; border: 1px solid transparent; border-radius: 6px; background: none; color: var(--ui-ink); cursor: zoom-in; }
+.ui-ms-spark:hover, .ui-ms-spark:focus-visible { border-color: var(--ui-line); background: var(--ui-bg); }
+.ui-ms-spark polygon { fill: color-mix(in srgb, var(--ui-accent) 18%, transparent); stroke: none; }
+.ui-ms-spark polyline { fill: none; stroke: var(--ui-accent); stroke-width: 1.5; vector-effect: non-scaling-stroke; stroke-linejoin: round; }
+.ui-ms-spark.is-empty polyline { stroke: var(--ui-line); }
+.ui-ms-spark.is-empty polygon { fill: none; }
+/* The mailbox's chart: sent under received in each column */
+.ui-ma-cols .ui-aa-col { flex-direction: column-reverse; justify-content: flex-start; }
+.ui-ma-cols .ui-aa-col i { border-radius: 0; }
+.ui-ma-cols .ui-aa-col i.is-sent, .ui-aa-legend i.is-sent { background: var(--ui-dir-out); }
+.ui-ma-cols .ui-aa-col i.is-recv, .ui-aa-legend i.is-recv { background: var(--ui-dir-in); }
 .ui-ms-row { cursor: pointer; }
 .ui-ms-row:hover { background: color-mix(in srgb, var(--ui-accent) 4%, transparent); }
 .ui-ms-counts { grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); }
