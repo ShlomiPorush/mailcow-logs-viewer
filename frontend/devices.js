@@ -18,6 +18,7 @@ function devicesSortBy(key, dir) {
 }
 
 function applyDevicesFilters() {
+    uiFilterBarSync();
     loadDevices(1);
 }
 
@@ -26,6 +27,7 @@ function resetDevicesFilters() {
     document.getElementById('devices-type-filter').value = '';
     document.getElementById('devices-seen-filter').value = 'all';
     devicesSort = { by: 'last_seen', dir: 'desc' };
+    uiFilterBarSync();
     loadDevices(1);
 }
 
@@ -71,9 +73,10 @@ function renderDevicesSummary(data) {
 function renderDevicesTypes(types, picked) {
     const select = document.getElementById('devices-type-filter');
     const all = [...new Set([...(types || []), ...(picked ? [picked] : [])])];
-    select.innerHTML = '<option value="">All device types</option>'
+    select.innerHTML = '<option value="" data-short="All">All device types</option>'
         + all.map(t => `<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`).join('');
     select.value = picked;
+    uiFilterBarSync();
 }
 
 function renderDevicesList(container, data) {

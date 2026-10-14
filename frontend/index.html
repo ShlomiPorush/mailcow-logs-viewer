@@ -784,27 +784,27 @@
 
                 <div id="security-tab-events" class="ui-scroll ui-st-panel hidden" role="tabpanel">
                 <!-- Filters -->
-                <section class="ui-panel ui-filters ui-count-row">
-                    <div class="ui-filters-row">
-                        <input type="text" id="netfilter-filter-ip" class="ui-input" placeholder="IP Address" aria-label="IP Address" onkeypress="if(event.key==='Enter') applyNetfilterFilters()">
-                        <input type="text" id="netfilter-filter-username" class="ui-input" placeholder="Username" aria-label="Username" onkeypress="if(event.key==='Enter') applyNetfilterFilters()">
-                        <span id="security-count" class="ui-count"></span>
-                        <select id="netfilter-filter-action" class="ui-select" aria-label="Action">
-                            <option value="">All Actions</option>
+                <section class="ui-panel ui-filters ui-fbar">
+                    <div class="ui-fbar-pickers">
+                        <select id="netfilter-filter-action" class="ui-select" aria-label="Action" data-picker-label="Action" onchange="applyNetfilterFilters()">
+                            <option value="" data-short="All">All Actions</option>
                             <option value="ban">BAN</option>
                             <option value="unban">UNBAN</option>
                             <option value="warning">Warning</option>
                             <option value="info">Info</option>
                         </select>
-                        <select id="netfilter-filter-country" class="ui-select" aria-label="Country">
-                            <option value="">All Countries</option>
+                        <select id="netfilter-filter-country" class="ui-select" aria-label="Country" data-picker-label="Country" data-picker-search="Search countries" onchange="applyNetfilterFilters()">
+                            <option value="" data-short="All">All Countries</option>
                         </select>
-                        <div class="ui-filters-actions">
-                            <button onclick="applyNetfilterFilters()" class="ui-btn ui-btn-primary">Apply</button>
-                            <button onclick="clearNetfilterFilters()" class="ui-btn">Clear</button>
-                        </div>
+                        <button type="button" class="ui-btn ui-filters-toggle" aria-expanded="false" aria-controls="netfilter-more" onclick="uiToggleFilters(this)">Filters<span class="ui-tab-n hidden"></span></button>
+                    </div>
+                    <div id="netfilter-more" class="ui-fbar-more">
+                        <input type="text" id="netfilter-filter-ip" class="ui-input" placeholder="IP Address" aria-label="IP Address" onkeypress="if(event.key==='Enter') applyNetfilterFilters()">
+                        <input type="text" id="netfilter-filter-username" class="ui-input" placeholder="Username" aria-label="Username" onkeypress="if(event.key==='Enter') applyNetfilterFilters()">
+                        <button onclick="applyNetfilterFilters()" class="ui-btn ui-btn-primary">Apply</button>
                     </div>
                 </section>
+                <p class="ui-list-summary"><span id="security-count" class="ui-count"></span><button type="button" class="ui-clear-filters hidden" onclick="clearNetfilterFilters()">Clear filters</button></p>
                 <section class="ui-panel">
                     <div class="ui-panel-head">Security Events
                         <button onclick="exportCSV('netfilter')" class="ui-btn ui-btn-sm ui-head-actions">Export CSV</button>
@@ -843,19 +843,21 @@
                 <section class="ui-sec-block ui-scroll">
                     <div class="ui-list-head"><h2 class="ui-h2">Mail Queue</h2></div>
                     <div class="ui-panel ui-table-card">
-                    <section class="ui-panel ui-filters ui-count-row">
-                        <div class="ui-filters-row">
-                            <input type="text" id="queue-filter-search" class="ui-input" placeholder="Search sender/recipient..." aria-label="Search sender or recipient"
-                                onkeypress="if(event.key==='Enter') applyQueueFilters()">
+                    <section class="ui-panel ui-filters ui-fbar">
+                        <div class="ui-fbar-row">
+                            <label class="ui-search"><svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
+                                <input type="text" id="queue-filter-search" placeholder="Search sender/recipient..." aria-label="Search sender or recipient"
+                                    onkeypress="if(event.key==='Enter') applyQueueFilters()">
+                            </label>
+                            <button type="button" class="ui-btn ui-filters-toggle" aria-expanded="false" aria-controls="queue-more" onclick="uiToggleFilters(this)">Filters<span class="ui-tab-n hidden"></span></button>
+                        </div>
+                        <div id="queue-more" class="ui-fbar-more">
                             <input type="text" id="queue-filter-queue-id" class="ui-input" placeholder="Queue ID" aria-label="Queue ID"
                                 onkeypress="if(event.key==='Enter') applyQueueFilters()">
-                            <span id="queue-count" class="ui-count"></span>
-                            <div class="ui-filters-actions">
-                                <button onclick="applyQueueFilters()" class="ui-btn ui-btn-primary">Apply</button>
-                                <button onclick="clearQueueFilters()" class="ui-btn">Clear</button>
-                            </div>
+                            <button onclick="applyQueueFilters()" class="ui-btn ui-btn-primary">Apply</button>
                         </div>
                     </section>
+                    <p class="ui-list-summary"><span id="queue-count" class="ui-count"></span><button type="button" class="ui-clear-filters hidden" onclick="clearQueueFilters()">Clear filters</button></p>
                         <div id="queue-logs"><div class="ui-loading"><div class="loading"></div><p>Loading...</p></div></div>
                     </div>
                 </section>
@@ -880,14 +882,20 @@
                 </div>
                 <div class="ui-scroll" id="quarantine-tab-messages" role="tabpanel">
                 <section class="ui-sec-block">
-                    <div class="ui-list-head ui-q-head"><h2 class="ui-h2">Quarantined Messages</h2> <span id="quarantine-count" class="ui-count"></span>
-                        <select id="quarantine-sort" onchange="applyQuarantineSort()" class="ui-select ui-head-actions ui-select-auto" aria-label="Sort">
-                            <option value="newest">Newest first</option>
-                            <option value="score_desc">Score: high to low</option>
-                            <option value="score_asc">Score: low to high</option>
-                        </select>
-                    </div>
+                    <div class="ui-list-head"><h2 class="ui-h2">Quarantined Messages</h2></div>
+                    <div class="ui-panel ui-table-card">
+                    <section class="ui-panel ui-filters ui-fbar">
+                        <div class="ui-fbar-pickers">
+                            <select id="quarantine-sort" onchange="applyQuarantineSort()" class="ui-select" aria-label="Sort" data-picker-label="Sort" data-no-filter>
+                                <option value="newest" data-short="Newest">Newest first</option>
+                                <option value="score_desc" data-short="Highest score">Score: high to low</option>
+                                <option value="score_asc" data-short="Lowest score">Score: low to high</option>
+                            </select>
+                        </div>
+                    </section>
+                    <p class="ui-list-summary"><span id="quarantine-count" class="ui-count"></span></p>
                     <div id="quarantine-logs"><div class="ui-loading"><div class="loading"></div><p>Loading...</p></div></div>
+                    </div>
                 </section>
                 </div>
                 <!-- Auto-Rules tab (only with the read-write key) -->
@@ -968,33 +976,12 @@
                     <div id="suppression-stats" class="ui-kpis"></div>
 
                     <div class="ui-panel ui-table-card">
-                    <section class="ui-panel ui-filters ui-ms-filters ui-count-row">
-                        <div class="ui-filters-row">
+                    <section class="ui-panel ui-filters ui-fbar">
+                        <div class="ui-fbar-row">
                             <label class="ui-search ui-ms-search"><svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
                                 <input type="text" id="suppression-search" placeholder="Search email, notes..." aria-label="Search suppressions"
                                     onkeypress="if(event.key==='Enter') loadSuppressions()">
                             </label>
-                            <button type="button" class="ui-btn ui-filters-toggle" aria-expanded="false" onclick="uiToggleFilters(this)">Filters<span class="ui-tab-n hidden"></span></button>
-                            <span id="suppression-count" class="ui-count"></span>
-                            <select id="suppression-filter-reason"
-                                class="ui-select ui-select-auto ui-filter-extra" aria-label="Reason"
-                                onchange="loadSuppressions()">
-                                <option value="">All Reasons</option>
-                                <option value="hard_bounce">Hard Bounce</option>
-                                <option value="soft_bounce">Soft Bounce</option>
-                                <option value="deferred_stuck">Deferred Stuck</option>
-                                <option value="rejected">Rejected</option>
-                                <option value="manual">Manual</option>
-                            </select>
-                            <select id="suppression-filter-active"
-                                class="ui-select ui-select-auto ui-filter-extra" aria-label="State"
-                                onchange="loadSuppressions()">
-                                <option value="true">Active Only</option>
-                                <option value="">All</option>
-                                <option value="false">Inactive</option>
-                                <option value="expired">Expired</option>
-                            </select>
-                            <button onclick="clearSuppressionFilters()" class="ui-btn ui-filter-extra" title="Clear all filters">Clear</button>
                             <span class="ui-toolbar-gap"></span>
                             <button onclick="showAddSuppressionModal()" class="ui-btn ui-btn-primary">Add Suppression</button>
                             <button onclick="syncSuppressionsToRspamd()" id="suppression-sync-btn" class="ui-btn" title="Sync suppression list to Rspamd"><svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg> Sync to Rspamd</button>
@@ -1009,7 +996,26 @@
                                 </div>
                             </div>
                         </div>
+                        <div class="ui-fbar-pickers">
+                            <select id="suppression-filter-reason" class="ui-select" aria-label="Reason" data-picker-label="Reason"
+                                onchange="loadSuppressions()">
+                                <option value="" data-short="All">All Reasons</option>
+                                <option value="hard_bounce">Hard Bounce</option>
+                                <option value="soft_bounce">Soft Bounce</option>
+                                <option value="deferred_stuck">Deferred Stuck</option>
+                                <option value="rejected">Rejected</option>
+                                <option value="manual">Manual</option>
+                            </select>
+                            <select id="suppression-filter-active" class="ui-select" aria-label="State" data-picker-label="State"
+                                onchange="loadSuppressions()">
+                                <option value="true" data-short="Active">Active Only</option>
+                                <option value="">All</option>
+                                <option value="false">Inactive</option>
+                                <option value="expired">Expired</option>
+                            </select>
+                        </div>
                     </section>
+                    <p class="ui-list-summary"><span id="suppression-count" class="ui-count"></span><button type="button" class="ui-clear-filters hidden" onclick="clearSuppressionFilters()">Clear filters</button></p>
 
                     <div id="suppression-rw-note"></div>
                     <div id="suppression-list">
@@ -1178,57 +1184,53 @@
                     </div>
 
                     <div class="ui-panel ui-table-card">
-                    <section class="ui-panel ui-filters ui-ms-filters ui-count-row">
-                        <div class="ui-filters-row">
+                    <section class="ui-panel ui-filters ui-fbar">
+                        <div class="ui-fbar-row">
                             <label class="ui-search ui-ms-search"><svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
                                 <input type="text" id="mailbox-stats-search" oninput="applyMailboxStatsFilters()" placeholder="Search mailboxes..." aria-label="Search mailboxes">
                             </label>
-                            <button type="button" class="ui-btn ui-filters-toggle" aria-expanded="false" onclick="uiToggleFilters(this)">Filters<span class="ui-tab-n hidden"></span></button>
-                            <span id="mailbox-stats-count" class="ui-count"></span>
-                            <div class="ui-ms-picker ui-filter-extra" id="date-range-picker-container">
-                                <button type="button" onclick="toggleDateRangePicker()" id="date-range-picker-btn" class="ui-btn">
-                                    <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
-                                    <span id="date-range-label">Last 30 Days</span>
-                                    <svg width="14" height="14" id="date-range-arrow" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
-                                </button>
-                                <div id="date-range-dropdown" class="ui-panel ui-ms-dropdown hidden">
-                                    <p class="ui-md-h">Quick Select</p>
-                                    <div class="ui-chip-row">
-                                        <button type="button" onclick="selectDatePreset('today')" data-preset="today" class="date-preset-btn ui-chip" aria-pressed="false">Today</button>
-                                        <button type="button" onclick="selectDatePreset('7days')" data-preset="7days" class="date-preset-btn ui-chip" aria-pressed="false">7 Days</button>
-                                        <button type="button" onclick="selectDatePreset('30days')" data-preset="30days" class="date-preset-btn ui-chip" aria-pressed="true">30 Days</button>
-                                        <button type="button" onclick="selectDatePreset('90days')" data-preset="90days" class="date-preset-btn ui-chip" aria-pressed="false">90 Days</button>
-                                    </div>
-                                    <p class="ui-md-h">Custom Range</p>
-                                    <div class="ui-ms-range">
-                                        <label>From<input type="date" id="date-range-start" class="ui-input"></label>
-                                        <label>To<input type="date" id="date-range-end" class="ui-input"></label>
-                                    </div>
-                                    <button type="button" onclick="applyCustomDateRange()" class="ui-btn ui-btn-primary">Apply Custom Range</button>
+                            <button type="button" class="ui-btn ui-filters-toggle" aria-expanded="false" aria-controls="mailbox-stats-more" onclick="uiToggleFilters(this)">Filters<span class="ui-tab-n hidden"></span></button>
+                        </div>
+                        <div class="ui-fbar-pickers">
+                            <span class="ui-popover-host ui-picker" id="date-range-picker-container" data-picker="mailbox-stats-period" data-state="mailbox-stats-date-range" data-on-open="mailboxStatsPeriodOpened">
+                                <button type="button" id="date-range-picker-btn" class="ui-msg-range ui-picker-btn" aria-haspopup="dialog" aria-expanded="false" aria-controls="date-range-dropdown"><span class="ui-picker-name">Period:</span> <span id="date-range-label">Last 30 Days</span></button>
+                                <span id="date-range-dropdown" class="ui-popover ui-msg-time-panel ui-picker-panel ui-ms-dropdown hidden" role="dialog" aria-label="Period">
+                                    <span class="ui-label">Quick select</span>
+                                <div class="ui-chip-row">
+                                    <button type="button" onclick="selectDatePreset('today')" data-preset="today" class="date-preset-btn ui-chip" aria-pressed="false">Today</button>
+                                    <button type="button" onclick="selectDatePreset('7days')" data-preset="7days" class="date-preset-btn ui-chip" aria-pressed="false">7 Days</button>
+                                    <button type="button" onclick="selectDatePreset('30days')" data-preset="30days" class="date-preset-btn ui-chip" aria-pressed="true">30 Days</button>
+                                    <button type="button" onclick="selectDatePreset('90days')" data-preset="90days" class="date-preset-btn ui-chip" aria-pressed="false">90 Days</button>
                                 </div>
+                                    <span class="ui-label">Custom range</span>
+                                <div class="ui-ms-range">
+                                    <label>From<input type="date" id="date-range-start" class="ui-input"></label>
+                                    <label>To<input type="date" id="date-range-end" class="ui-input"></label>
+                                </div>
+                                <button type="button" onclick="applyCustomDateRange()" class="ui-btn ui-btn-primary">Apply Custom Range</button>
+                                </span>
                                 <!-- Hidden input for compatibility with existing code -->
                                 <input type="hidden" id="mailbox-stats-date-range" value="30days" data-filter-default="30days">
                                 <input type="hidden" id="mailbox-stats-start-date" value="">
                                 <input type="hidden" id="mailbox-stats-end-date" value="">
-                            </div>
-                            <select id="mailbox-stats-domain-filter" onchange="applyMailboxStatsFilters()" class="ui-select ui-select-auto ui-filter-extra" aria-label="Domain">
-                                <option value="">All Domains</option>
+                            </span>
+                            <select id="mailbox-stats-domain-filter" onchange="applyMailboxStatsFilters()" class="ui-select" aria-label="Domain" data-picker-label="Domain">
+                                <option value="" data-short="All">All Domains</option>
                             </select>
-                            <select id="mailbox-stats-sort" onchange="applyMailboxStatsFilters()"
-                                class="ui-select ui-select-auto ui-filter-extra" aria-label="Sort">
-                                <option value="sent_total-desc">Sent (High to Low)</option>
-                                <option value="received_total-desc">Received (High to Low)</option>
-                                <option value="failure_rate-desc">Failure Rate (High to Low)</option>
-                                <option value="quota_used-desc">Quota Used (High to Low)</option>
-                                <option value="username-asc">Username (A-Z)</option>
+                            <select id="mailbox-stats-sort" onchange="applyMailboxStatsFilters()" class="ui-select" aria-label="Sort" data-picker-label="Sort" data-no-filter>
+                                <option value="sent_total-desc" data-short="Sent">Sent (High to Low)</option>
+                                <option value="received_total-desc" data-short="Received">Received (High to Low)</option>
+                                <option value="failure_rate-desc" data-short="Failure rate">Failure Rate (High to Low)</option>
+                                <option value="quota_used-desc" data-short="Quota used">Quota Used (High to Low)</option>
+                                <option value="username-asc" data-short="Username">Username (A-Z)</option>
                             </select>
-                            <div class="ui-ms-opts ui-filter-extra">
-                                <label class="ui-check-label"><input type="checkbox" id="mailbox-stats-active-only" class="ui-check" checked onchange="applyMailboxStatsFilters()"> Active Only</label>
-                                <label class="ui-check-label"><input type="checkbox" id="mailbox-stats-hide-zero" class="ui-check" checked onchange="applyMailboxStatsFilters()"> Hide Zero Activity</label>
-                                <button onclick="resetMailboxStatsFilters()" class="ui-btn">Reset</button>
-                            </div>
+                        </div>
+                        <div id="mailbox-stats-more" class="ui-fbar-more">
+                            <label class="ui-check-label"><input type="checkbox" id="mailbox-stats-active-only" class="ui-check" checked onchange="applyMailboxStatsFilters()"> Active Only</label>
+                            <label class="ui-check-label"><input type="checkbox" id="mailbox-stats-hide-zero" class="ui-check" checked onchange="applyMailboxStatsFilters()"> Hide Zero Activity</label>
                         </div>
                     </section>
+                    <p class="ui-list-summary"><span id="mailbox-stats-count" class="ui-count"></span><button type="button" class="ui-clear-filters hidden" onclick="resetMailboxStatsFilters()">Clear filters</button></p>
 
 
                     <div id="mailbox-stats-loading" class="ui-loading"><div class="loading"></div><p>Loading mailbox statistics...</p></div>
@@ -1267,24 +1269,25 @@
 
                 <div class="ui-sec-block ui-scroll">
                     <div class="ui-panel ui-table-card">
-                    <section class="ui-panel ui-filters ui-count-row">
-                        <div class="ui-filters-row">
+                    <section class="ui-panel ui-filters ui-fbar">
+                        <div class="ui-fbar-row">
                             <label class="ui-search"><svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
                                 <input type="text" id="devices-search" oninput="applyDevicesFilters()" placeholder="Search user, device or IP..." aria-label="Search devices">
                             </label>
-                            <span id="devices-count" class="ui-count"></span>
-                            <select id="devices-type-filter" onchange="applyDevicesFilters()" class="ui-select ui-select-auto" aria-label="Device type">
-                                <option value="">All device types</option>
+                        </div>
+                        <div class="ui-fbar-pickers">
+                            <select id="devices-type-filter" onchange="applyDevicesFilters()" class="ui-select" aria-label="Device type" data-picker-label="Type">
+                                <option value="" data-short="All">All device types</option>
                             </select>
-                            <select id="devices-seen-filter" onchange="applyDevicesFilters()" class="ui-select ui-select-auto" aria-label="Last seen">
+                            <select id="devices-seen-filter" onchange="applyDevicesFilters()" class="ui-select" aria-label="Last seen" data-picker-label="Last seen">
                                 <option value="all">Any time</option>
                                 <option value="recent">Seen in 24 hours</option>
                                 <option value="new">New this week</option>
                                 <option value="stale">Not seen for 30 days</option>
                             </select>
-                            <button onclick="resetDevicesFilters()" class="ui-btn">Reset</button>
                         </div>
                     </section>
+                    <p class="ui-list-summary"><span id="devices-count" class="ui-count"></span><button type="button" class="ui-clear-filters hidden" onclick="resetDevicesFilters()">Clear filters</button></p>
                     <div id="devices-list"><div class="ui-loading"><div class="loading"></div><p>Loading devices...</p></div></div>
                     </div>
                     <div id="devices-foot" class="ui-list-head ui-list-foot hidden"><span id="devices-pager" class="ui-head-actions"></span></div>
@@ -1584,15 +1587,15 @@
                 <div id="dmarc-reports-domains"></div>
                 <div class="ui-subsection">
                     <h4 class="ui-md-h">All reports</h4>
-                    <section class="ui-panel ui-filters ui-count-row ui-mgmt-total">
-                        <div class="ui-filters-row">
+                    <section class="ui-panel ui-filters ui-fbar ui-mgmt-total">
+                        <div class="ui-fbar-row">
                             <label class="ui-search">
                                 <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
                                 <input type="text" id="dmarc-reports-search" placeholder="Search by domain or reporter..." aria-label="Search reports by domain or reporter" oninput="searchReportsManagement()">
                             </label>
-                            <span id="dmarc-reports-total" class="ui-count"></span>
                         </div>
                     </section>
+                    <p class="ui-list-summary"><span id="dmarc-reports-total" class="ui-count"></span></p>
                     <div id="dmarc-reports-management-content"><div class="ui-loading"><div class="loading"></div><p>Loading reports...</p></div></div>
                 </div>
             </div>

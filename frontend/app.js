@@ -1216,6 +1216,8 @@ function renderNetfilterData(data) {
 
     if (!data.data || data.data.length === 0) {
         container.innerHTML = '<p class="ui-empty">No logs found</p>';
+        const emptyCount = document.getElementById('security-count');
+        if (emptyCount) emptyCount.textContent = uiCountLabel(0, 'event', 'events');
         return;
     }
 
@@ -1426,7 +1428,7 @@ async function loadNetfilterCountries() {
         const currentValue = select.value;
         
         // Clear existing options except the "All Countries" default
-        select.innerHTML = '<option value="">All Countries</option>';
+        select.innerHTML = '<option value="" data-short="All">All Countries</option>';
         
         for (const c of countries) {
             const opt = document.createElement('option');
@@ -1437,6 +1439,7 @@ async function loadNetfilterCountries() {
         
         // Restore selection
         if (currentValue) select.value = currentValue;
+        uiFilterBarSync();
     } catch (err) {
         console.error('Failed to load netfilter countries:', err);
     }
@@ -2223,6 +2226,7 @@ function clearNetfilterFilters() {
 
 async function loadNetfilterLogs(page = 1) {
     const container = document.getElementById('netfilter-logs');
+    uiFilterBarSync();
 
     try {
         container.innerHTML = '<div class="ui-loading"><div class="loading"></div><p>Loading...</p></div>';
@@ -2314,6 +2318,7 @@ let allQueueData = [];
 
 async function loadQueue() {
     const container = document.getElementById('queue-logs');
+    uiFilterBarSync();
 
     try {
         container.innerHTML = '<div class="ui-loading"><div class="loading"></div><p>Loading...</p></div>';
@@ -2634,6 +2639,7 @@ function applyQuarantineSort() {
     if (typeof uiClearTableSort === 'function') uiClearTableSort('quarantine-logs');
     const select = document.getElementById('quarantine-sort');
     if (select) quarantineSortOrder = select.value;
+    uiFilterBarSync();
     if (quarantineLastData) {
         renderQuarantineData(quarantineLastData);
     } else {
@@ -2643,6 +2649,7 @@ function applyQuarantineSort() {
 
 async function loadQuarantine() {
     const container = document.getElementById('quarantine-logs');
+    uiFilterBarSync();
 
     try {
         container.innerHTML = '<div class="ui-loading"><div class="loading"></div><p>Loading...</p></div>';
