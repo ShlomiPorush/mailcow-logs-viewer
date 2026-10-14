@@ -482,7 +482,7 @@ function dmarcRecordsCard(x) {
     const sent = x.groups.reduce((s, g) => s + g.total, 0);
     const noMail = ['No mail in the last 30 days', dmarcTag('mut', 'No data')];
     const rows = [
-        ['DMARC', x.record.record ? `p=${policy || '?'}` : 'No record at _dmarc', policy === 'reject' ? dmarcTag('ok', 'Enforced') : policy === 'quarantine' ? dmarcTag('warn', 'Partial') : policy ? dmarcTag('warn', 'Monitoring') : dmarcTag('fail', 'Missing', true), 'dmarc'],
+        ['DMARC', x.record.record ? `p=${policy || '?'}` : 'No record at _dmarc', dmarcPolicyTag(policy), 'dmarc'],
         sent ? ['SPF', `${dmarcPct(x.spfPct)} of mail aligned`, x.spfPct >= 95 ? dmarcTag('ok', 'OK') : dmarcTag('warn', 'Gaps'), 'spf'] : ['SPF', ...noMail, 'spf'],
         sent ? ['DKIM', x.dkimSeen ? 'Your mail is signed' : 'No signed mail in the reports', x.dkimSeen ? dmarcTag('ok', 'OK') : dmarcTag('fail', 'Missing', true), 'dkim'] : ['DKIM', ...noMail, 'dkim'],
         ['TLS-RPT', x.tlsRecord.record ? 'Receivers report encryption' : 'No record at _smtp._tls', x.tlsRecord.record ? dmarcTag('ok', 'OK') : dmarcTag('warn', 'Missing'), 'tls']];
@@ -598,6 +598,14 @@ function dmarcCopyBlock(text) {
 
 // The domain shown in the record window, so a picked policy can be explained
 let dmarcRecordDomain = null;
+// How much a policy protects: None only reports, Quarantine sends to spam, Reject refuses
+const DMARC_POLICY_LEVEL = { none: ['fail', 'Monitoring'], quarantine: ['warn', 'Partial'], reject: ['ok', 'Enforced'] };
+
+function dmarcPolicyTag(policy) {
+    const level = DMARC_POLICY_LEVEL[policy];
+    return level ? dmarcTag(level[0], level[1]) : dmarcTag('fail', 'Missing', true);
+}
+
 const DMARC_POLICIES = [
     ['none', 'None', 'Mail that fails is still delivered. Reports only.'],
     ['quarantine', 'Quarantine', 'Mail that fails goes to spam.'],
@@ -627,8 +635,8 @@ function dmarcPolicyPlan(x, pick) {
 function dmarcPolicyChoice(x, pick) {
     const current = dmarcCurrentPolicy(x);
     return `<div class="ui-dm-pol" role="radiogroup" aria-label="Policy" onkeydown="dmarcPolicyKey(event)">${DMARC_POLICIES.map(([id, title, text]) => `
-        <button type="button" role="radio" class="${pick === id ? 'is-on' : ''}" aria-checked="${pick === id}" tabindex="${pick === id ? 0 : -1}" data-policy="${id}" onclick="dmarcPickPolicy('${id}')">
-            <span class="ui-dm-pol-t">${title}${current === id ? ` ${dmarcTag('mut', 'Now')}` : ''}</span><span class="ui-dm-pol-d">${text}</span></button>`).join('')}</div>
+        <button type="button" role="radio" class="ui-dm-${DMARC_POLICY_LEVEL[id][0]}${pick === id ? ' is-on' : ''}" aria-checked="${pick === id}" tabindex="${pick === id ? 0 : -1}" data-policy="${id}" onclick="dmarcPickPolicy('${id}')">
+            <span class="ui-dm-pol-t"><span>${title} ${dmarcPolicyTag(id)}</span>${current === id ? dmarcTag('mut', 'Now') : ''}</span><span class="ui-dm-pol-d">${text}</span></button>`).join('')}</div>
         <div id="dmarc-policy-plan" aria-live="polite">${dmarcPolicyPlan(x, pick)}</div>`;
 }
 
@@ -666,17 +674,17 @@ function dmarcDmarcRecord(x) {
         if (!/^mailto:/i.test(text)) return escapeHtml(text);
         return `<a href="${escapeHtml(text)}" class="ui-link">${escapeHtml(text.replace(/^mailto:/i, ''))}</a>`;
     };
-    return `${x.record.record ? `${dmarcCopyBlock(x.record.record)}
-            <dl class="ui-dm-kv"><dt>Policy</dt><dd>${escapeHtml(settings.policy || current || '-')}</dd>
+    return `${x.record.record ? `<h4 class="ui-dm-h4 ui-dm-h4-first">Current record</h4>${dmarcCopyBlock(x.record.record)}
+            <dl class="ui-dm-kv"><dt>Policy</dt><dd>${DMARC_POLICY_LEVEL[current] ? `${escapeHtml(current)} ${dmarcPolicyTag(current)}` : escapeHtml(settings.policy || current || '-')}</dd>
             <dt>Subdomains</dt><dd>${escapeHtml(settings.subdomain_policy || 'same as the domain')}</dd>
             <dt>Applied to</dt><dd>${escapeHtml(settings.percentage ?? 100)}% of mail</dd>
             <dt>Reports go to</dt><dd>${(settings.aggregate_report_uris || []).map(formatUriAsEmail).join(', ') || '-'}</dd>
             ${settings.forensic_report_uris && settings.forensic_report_uris.length ? `<dt>Failure reports go to</dt><dd>${settings.forensic_report_uris.map(formatUriAsEmail).join(', ')}</dd>` : ''}
             <dt>Alignment</dt><dd>SPF ${escapeHtml(settings.spf_alignment || 'relaxed')}, DKIM ${escapeHtml(settings.dkim_alignment || 'relaxed')}</dd></dl>
-            ${(x.record.warnings || []).map(w => `<p class="ui-text-warn ui-dm-note">${escapeHtml(w)}</p>`).join('')}`
+            ${(x.record.warnings || []).map(w => `<p class="ui-dm-callout ui-dm-warn">${escapeHtml(w)}</p>`).join('')}`
         : `<p class="ui-dm-lead"><b class="ui-text-fail">No DMARC record at _dmarc.${escapeHtml(x.name)}.</b> Receivers have no policy to refuse mail that pretends to be you.</p>`}
         <dl class="ui-dm-kv"><dt>SPF</dt><dd>${dmarcPct(x.spfPct)} of your mail is aligned with SPF</dd><dt>DKIM</dt><dd>${x.dkimSeen ? 'Your mail is signed' : 'No signed mail in the reports'}</dd></dl>
-        <h4 class="ui-dm-h4">Policy <small class="ui-muted">pick one to see what it would do</small></h4>
+        <h4 class="ui-dm-h4">Policy <small class="ui-muted">choose one to see what it would change and the record to publish</small></h4>
         ${dmarcPolicyChoice(x, next)}`;
 }
 

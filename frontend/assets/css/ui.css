@@ -2548,7 +2548,15 @@ button.ui-dm-node:hover { border-color: var(--ui-ink); }
 .ui-dm-pol > button:hover { border-color: color-mix(in srgb, var(--ui-focus) 50%, var(--dm-line)); }
 .ui-dm-pol > button:focus-visible { outline: 2px solid var(--ui-focus); outline-offset: 2px; }
 .ui-dm-pol > button.is-on { padding: 11px; border: 2px solid var(--ui-focus); background: color-mix(in srgb, var(--ui-focus) 6%, transparent); }
-.ui-dm-pol-t { display: flex; justify-content: space-between; gap: 6px; margin: 0 0 4px; font-size: 14px; font-weight: 650; }
+.ui-dm-pol-t { display: flex; justify-content: space-between; align-items: center; gap: 6px; margin: 0 0 4px; font-size: 14px; font-weight: 650; }
+.ui-dm-pol-t > span { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+/* Each policy in its colour: a bar at its start, the colour of its tag */
+.ui-dm-pol > button { border-inline-start: 4px solid var(--dm-t); }
+.ui-dm-pol > button.is-on { border-inline-start-width: 4px; border-inline-start-color: var(--dm-t); }
+/* A note from the record check, as a box in its colour */
+.ui-dm-callout { margin: 12px 0 0; padding: 10px 12px; border-inline-start: 4px solid var(--dm-t); border-radius: 8px; background: color-mix(in srgb, var(--dm-t) 9%, transparent); color: var(--ui-ink); font-size: 13px; }
+.ui-dm-h4-first { margin-top: 0; }
+.ui-dm-h4 > small { display: block; margin-top: 2px; font-size: 12px; font-weight: 500; }
 .ui-dm-pol-d { display: block; color: var(--ui-muted); font-size: 12.5px; }
 .ui-dm-code { display: flex; align-items: center; gap: 10px; margin-top: 10px; padding: 10px 12px; border: 1px solid var(--dm-line); border-radius: 8px; background: var(--dm-head);
     font: 12.5px var(--ui-mono); overflow-wrap: anywhere; }

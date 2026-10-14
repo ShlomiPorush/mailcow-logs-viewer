@@ -49,5 +49,9 @@ test('the choice is a radio group with the picked policy checked', () => {
     assert.match(html, /role="radiogroup"/);
     assert.equal((html.match(/role="radio"/g) || []).length, 3);
     assert.match(html, /aria-checked="true" tabindex="0" data-policy="quarantine"/);
-    assert.match(html, /data-policy="none"[^>]*>\s*<span class="ui-dm-pol-t">None <span class="tag">Now<\/span>/);
+    assert.match(html, /data-policy="none"[^>]*>\s*<span class="ui-dm-pol-t"><span>None <span class="tag">Monitoring<\/span><\/span><span class="tag">Now<\/span>/);
+    // Each policy in its colour: None red, Quarantine orange, Reject green
+    assert.match(html, /class="ui-dm-fail"[^>]*data-policy="none"/);
+    assert.match(html, /class="ui-dm-warn is-on"[^>]*data-policy="quarantine"/);
+    assert.match(html, /class="ui-dm-ok"[^>]*data-policy="reject"/);
 });

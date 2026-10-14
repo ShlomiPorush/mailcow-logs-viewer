@@ -9,6 +9,7 @@ const start = source.indexOf('// SPF or DKIM for the domain');
 const end = source.indexOf('function dmarcTlsRecord', start);
 assert.ok(start > 0 && end > start);
 const records = source.slice(source.indexOf('function dmarcRecordsCard'), source.indexOf('function dmarcSendersCard'));
+const policyTag = source.slice(source.indexOf('// How much a policy protects'), source.indexOf('const DMARC_POLICIES'));
 
 function load() {
     const context = vm.createContext({
@@ -20,7 +21,7 @@ function load() {
         dmarcRate: pct => `${Math.round(pct)}%`,
         dmarcTag: (tone, text) => `<span class="tag">${text}</span>`,
     });
-    vm.runInContext(source.slice(start, end) + records, context);
+    vm.runInContext(source.slice(start, end) + records + policyTag, context);
     return context;
 }
 
