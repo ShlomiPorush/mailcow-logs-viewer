@@ -76,12 +76,6 @@ function renderDomains(container, data) {
             if (data.last_dns_check) uiAgo(lastChecked, data.last_dns_check, 'Updated ');
             else lastChecked.textContent = 'Not checked yet';
         }
-        dnsCheckInfo.innerHTML = `
-            <button id="check-all-dns-btn" onclick="checkAllDomainsDNS()" class="ui-btn ui-btn-primary">
-                <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
-                Check Now
-            </button>
-        `;
     }
 
     const summary = document.getElementById('domains-summary');
@@ -167,9 +161,21 @@ function filterDomains() {
     }
 }
 
+// On a phone a result in the list is an icon with its own shape (check, exclamation mark,
+// cross), so it reads without the colour and three fit a line; wider screens show the word.
+// The icon carries the name of the result for screen readers.
+const DNS_ICON = {
+    ok: '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
+    warn: '<path d="M12 6v7.5"/><path d="M12 18h.01"/>',
+    fail: '<path d="M7 7l10 10M17 7L7 17"/>',
+};
+
 function dnsStatusTag(label, check) {
-    const [text, tone] = DNS_TAG[check.status] || ['-', ''];
-    return `<span class="ui-td" title="${escapeHtml(`${label}: ${check.message || 'Not checked'}`)}"><small class="ui-sec-unit">${label} </small>${tone ? uiTag(text, tone) : '<span class="ui-muted">-</span>'}</span>`;
+    const [text, tone] = DNS_TAG[check.status] || ['Not checked', ''];
+    const result = tone
+        ? `${uiTag(text, tone)}<span class="ui-dns-icon ui-tag-${tone}" role="img" aria-label="${escapeHtml(`${label}: ${text}`)}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${DNS_ICON[tone]}</svg></span>`
+        : `<span class="ui-muted" role="img" aria-label="${escapeHtml(`${label}: ${text}`)}">-</span>`;
+    return `<span class="ui-td ui-dns-cell" title="${escapeHtml(`${label}: ${check.message || 'Not checked'}`)}"><small class="ui-sec-unit" aria-hidden="true">${label} </small>${result}</span>`;
 }
 
 function renderDomainDnsSection(domain) {
@@ -197,7 +203,8 @@ function renderDomainAccordionRow(domain, open = false) {
     const dns = domain.dns_checks || {};
     const domainId = domainRowId(domain.domain_name);
     const issues = domainHasIssues(domain);
-    const fact = (label, value, note) => `<div class="ui-md-fact"><span>${label}</span><div>${escapeHtml(value)}</div>${note ? `<small class="ui-muted">${escapeHtml(note)}</small>` : ''}</div>`;
+    // On a phone a fact with a short note keeps it on the value's line
+    const fact = (label, value, note) => `<div class="ui-md-fact${note ? ' ui-md-fact-inline' : ''}"><span>${label}</span><div>${escapeHtml(value)}</div>${note ? `<small class="ui-muted">${escapeHtml(note)}</small>` : ''}</div>`;
 
     return `
         <div class="ui-tr ui-domain-row" data-domain-row="${escapeHtml(domain.domain_name)}" onclick="toggleDomainDetails('${escapeJsArg(domainId)}')">
@@ -210,7 +217,7 @@ function renderDomainAccordionRow(domain, open = false) {
                 <small>${escapeHtml(String(domain.mboxes_in_domain))} mailboxes, ${escapeHtml(String(domain.aliases_in_domain))} aliases${issues ? ', needs a DNS change' : ''}</small>
             </div>
             ${DNS_CHECKS.map(([label, key]) => dnsStatusTag(label, dns[key] || { status: 'unknown' })).join('')}
-            <span class="ui-td ui-td-end"><small class="ui-sec-unit">Storage </small>${formatBytes(domain.bytes_total)}</span>
+            <span class="ui-td ui-td-end ui-domain-storage"><small class="ui-sec-unit">Storage </small>${formatBytes(domain.bytes_total)}</span>
             <div id="${domainId}-details" class="ui-domain-details${open ? '' : ' hidden'}" data-tab="${domainTabs[domainId] || 'dns'}" onclick="event.stopPropagation()">
                 <div class="ui-tabs ui-domain-tabs" role="tablist" aria-label="Domain">
                     ${[['dns', 'DNS checks'], ['info', 'Details']].map(([tab, label]) => `<button type="button" class="modal-tab${(domainTabs[domainId] || 'dns') === tab ? ' active' : ''}" role="tab" aria-selected="${(domainTabs[domainId] || 'dns') === tab}" onclick="domainShowTab('${escapeJsArg(domainId)}', '${tab}')">${label}</button>`).join('')}

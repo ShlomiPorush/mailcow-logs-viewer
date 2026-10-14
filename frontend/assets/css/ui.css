@@ -772,8 +772,11 @@
 .ui-sec-card:focus { outline: none; }
 .ui-sec-card:focus-visible { outline: 2px solid var(--ui-focus); outline-offset: 2px; }
 .ui-sec-flag { display: inline-block; width: 16px; height: 12px; margin-inline-end: 5px; vertical-align: -1px; border-radius: 2px; }
-.ui-sec-pflag { display: none; }
+.ui-sec-pflag { display: inline-flex; flex: none; width: 16px; }
+.ui-sec-pflag .ui-sec-flag { margin: 0; }
+/* Where and when always on their own line under the address, never trailing after the tags */
 .ui-sec-where { display: inline-flex; align-items: center; }
+.ui-sec-top > .ui-sec-where { flex-basis: 100%; }
 .ui-sec-card.is-off .ui-sec-sent, .ui-sec-card.is-off .ui-sec-sent b { color: var(--ui-muted); }
 .ui-sec-card-head { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 8px 12px; }
 /* Fail2ban has no switch; its name lines up with the others */
@@ -887,8 +890,6 @@ body.ui-sheet-on { overflow: hidden; }
     .ui-sec-row .ui-sec-top { flex-wrap: nowrap; min-width: 0; }
     /* The top line is the flag, the address and the tag; where and when are in the sentence */
     .ui-sec-row .ui-sec-top > small { display: none; }
-    .ui-sec-row .ui-sec-pflag { display: inline-flex; }
-    .ui-sec-row .ui-sec-pflag .ui-sec-flag { margin: 0; }
     /* The four filters two by two, so History is in sight */
     .ui-sec-seg { display: grid; grid-template-columns: 1fr 1fr; width: 100%; overflow: visible; }
     .ui-sec-seg button { padding: 6px 8px; font-size: 12.5px; }
@@ -1285,6 +1286,10 @@ body { font-family: var(--ui-font); background: var(--ui-bg); color: var(--ui-in
     .ui-stack .ui-q-who { flex: 1 1 calc(100% - 40px); }
     .ui-stack .ui-td-wrap { flex: 1 1 100%; }
     .ui-stack .ui-row-actions { flex: 1 1 100%; justify-content: flex-start; flex-wrap: wrap; }
+    /* Counts get a line of their own under the row's heading line */
+    .ui-stack .ui-tr-break { display: block; flex: 1 1 100%; height: 0; margin-top: -4px; order: 1; }
+    .ui-stack .ui-td-count { order: 1; }
+    .ui-stack .ui-td-blank { display: none; }
     .ui-stack .ui-table-tools, .ui-stack > .ui-toolbar { min-width: 0; flex-wrap: wrap; }
     .ui-sec-table .ui-tr { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; min-width: 0; }
     .ui-sec-table .ui-tr-head { display: none; }
@@ -1514,7 +1519,36 @@ button.ui-st-card:hover { outline: 1px solid var(--ui-line); }
     .ui-count-row .ui-filters-row > .ui-count + * { margin-inline-start: 0; }
     .ui-domain-table .ui-tr:not(.ui-tr-head) > .ui-td:not(.ui-q-who) { flex: 0 0 auto; }
     .ui-domain-details { flex: 1 1 100%; }
+    /* Two even lines of three checks, each name beside its result; names and results line up
+       in columns across both lines. The storage is in the details. */
+    .ui-domain-table .ui-domain-row { display: grid; grid-template-columns: repeat(3, max-content minmax(0, 1fr)); gap: 6px 8px; }
+    .ui-domain-row > .ui-q-who, .ui-domain-row > .ui-domain-details { grid-column: 1 / -1; }
+    .ui-domain-row > .ui-dns-cell { display: contents; }
+    .ui-domain-row > .ui-dns-cell > * { align-self: center; justify-self: start; }
+    .ui-domain-row > .ui-dns-cell > .ui-sec-unit { margin: 0; }
+    .ui-domain-row > .ui-domain-storage { display: none; }
+    /* Details: each fact on one line, the name at the start and the value at the end */
+    .ui-domain-details .ui-md-ids .ui-md-fact { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: baseline; column-gap: 12px; padding: 7px 12px; }
+    .ui-domain-details .ui-md-ids .ui-md-fact > span { grid-row: 1 / span 2; margin: 0; }
+    .ui-domain-details .ui-md-ids .ui-md-fact > div, .ui-domain-details .ui-md-ids .ui-md-fact > small { text-align: end; }
+    /* A short note stays on the value's line: "0 B / 1.0 GB · 0% used" */
+    .ui-domain-details .ui-md-ids .ui-md-fact-inline { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: flex-end; column-gap: 5px; }
+    .ui-domain-details .ui-md-ids .ui-md-fact-inline > div { font-size: 13px; }
+    .ui-domain-details .ui-md-ids .ui-md-fact-inline > span { margin-inline-end: auto; padding-inline-end: 4px; }
+    .ui-md-fact-inline .ui-ms-wide-only { display: none; }
+    .ui-domain-details .ui-md-ids .ui-md-fact-inline > small::before { content: "· "; }
+    /* The mailbox's message count joins the quota line instead of a line of its own */
+    .ui-md-fact-inline > .ui-ms-msgs { display: inline; }
+    .ui-domain-details .ui-md-ids .ui-ms-msgs-fact { display: none; }
 }
+/* A DNS result in the domain list: the word on wide screens, an icon in its colour on a phone */
+.ui-dns-icon { display: none; }
+@media (max-width: 760px) {
+    .ui-domain-row > .ui-dns-cell > .ui-tag { display: none; }
+    .ui-domain-row > .ui-dns-cell > .ui-dns-icon { display: inline-flex; }
+}
+.ui-dns-icon { align-items: center; justify-content: center; width: 24px; height: 22px; border-radius: 6px; vertical-align: middle; }
+.ui-dns-icon svg { width: 14px; height: 14px; }
 
 /* ---------- DMARC (v3 language) ---------- */
 .ui-kpi b.ui-ok { color: var(--ui-ok); }
@@ -1608,6 +1642,35 @@ button.ui-st-card:hover { outline: 1px solid var(--ui-line); }
 .ui-kpi-btn:hover { background: color-mix(in srgb, var(--ui-ink) 5%, var(--ui-bg)); }
 .ui-kpi b.ui-spam { color: var(--ui-spam); }
 .ui-ms-aliases { --ui-cols: minmax(220px, 2fr) repeat(7, 76px) 70px; --ui-table-min: 860px; background: var(--ui-bg); }
+/* Wide screens: the counts are one row of tiles and every alias count has its column */
+.ui-ms-group { display: contents; }
+.ui-ms-msgs { display: none; }
+.ui-ms-group-h, .ui-ms-sub, .ui-ms-alias-chev, .ui-ms-alias-more { display: none; }
+@media (max-width: 760px) {
+    /* A mailbox: address and activity, storage and aliases, services, then its four figures */
+    .ui-ms-row { position: relative; }
+    .ui-ms-row > .ui-q-who { flex: 1 1 100%; min-width: 0; }
+    .ui-ms-row > .ui-q-who > div:first-child, .ui-ms-row .ui-ms-sub { padding-inline-end: 124px; }
+    .ui-ms-row > .ui-ms-spark-cell { position: absolute; top: 8px; inset-inline-end: 16px; }
+    .ui-ms-row > .ui-ms-spark-cell > .ui-sec-unit, .ui-ms-row > .ui-ms-wide, .ui-ms-row .ui-ms-name { display: none; }
+    .ui-ms-row .ui-ms-sub { display: block; }
+    /* The counts: traffic beside what became of the sent mail, a name and its number a line */
+    .ui-ms-counts { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 14px; padding: 10px 12px; }
+    .ui-ms-counts .ui-ms-group { display: block; min-width: 0; }
+    .ui-ms-counts .ui-ms-group-h { display: block; margin: 0 0 6px; color: var(--ui-muted); font-size: 12px; font-weight: 600; }
+    .ui-ms-counts .ui-kpi { display: flex; flex-direction: row-reverse; justify-content: space-between; align-items: baseline; gap: 8px; width: 100%; padding: 5px 0; outline: 0; border-top: 1px solid var(--ui-line); background: none; font-size: 13px; }
+    .ui-ms-counts .ui-kpi b { display: inline; font-size: 14px; font-weight: 700; letter-spacing: 0; }
+    /* An alias: its address and failure rate, the counts it has; a tap opens all of them */
+    .ui-ms-alias { cursor: pointer; }
+    .ui-ms-alias > .ui-ms-alias-name { flex: 1 1 calc(100% - 110px); min-width: 0; }
+    .ui-ms-alias > .ui-ms-alias-fail { flex: none; }
+    .ui-ms-alias > .ui-ms-count { order: 1; }
+    .ui-ms-alias > .ui-ms-count.is-zero, .ui-ms-alias.is-open > .ui-ms-count { display: none; }
+    .ui-ms-alias > .ui-ms-alias-more { order: 2; flex: 1 1 100%; margin-top: 4px; cursor: default; }
+    .ui-ms-alias.is-open > .ui-ms-alias-more { display: block; }
+    .ui-ms-alias-chev { display: inline-flex; padding: 0; margin-inline-end: 2px; border: 0; background: none; color: inherit; cursor: pointer; vertical-align: -1px; }
+    .ui-ms-alias.is-open .ui-ms-alias-chev .ui-domain-chevron { transform: rotate(90deg); }
+}
 .ui-link-cell { border: 0; background: none; color: inherit; font: inherit; cursor: pointer; }
 .ui-link-cell:hover { text-decoration: underline; }
 .ui-domain-details .ui-md-fact > span .ui-mdot { display: inline-block; margin-inline-end: 4px; }
@@ -2177,7 +2240,7 @@ html .markdown-body .markdown-alert-caution .markdown-alert-title { color: var(-
 .copyable.ui-copy-wrap { display: inline; overflow-wrap: anywhere; font-size: inherit; }
 
 /* DMARC: room under the head buttons for the last-sync note that hangs below Sync */
-#dmarc-header-actions:has(.ui-dmarc-sync:not(.hidden)) { padding-bottom: 22px; }
+#dmarc-header-actions:has(.ui-dmarc-sync:not(.hidden) > .ui-dmarc-sync-info) { padding-bottom: 22px; }
 /* DMARC Record: each value next to its label, not across the card */
 .ui-dmarc-record .ui-kv { display: grid; grid-template-columns: minmax(150px, 220px) minmax(0, 1fr); }
 .ui-dmarc-record .ui-kv > b { margin-inline-start: 0; text-align: start; }
@@ -2622,3 +2685,25 @@ button.ui-dm-node:hover { border-color: var(--ui-ink); }
 .ui-ms-range label, .ui-ms-range input { min-width: 0; }
 /* A card does not cut the picker open inside it */
 .ui-table-card:has(.ui-picker-panel:not(.hidden)) { overflow: visible; }
+/* A line break in a row that stacks on phones; a wide table has no use for it */
+.ui-tr-break { display: none; }
+/* Phones: the page's main action on the title's line, the rest of the head under both */
+.ui-page-head > div:has(> .ui-head-slot) { flex: 1 1 100%; display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 12px; align-items: start; }
+.ui-page-head > div:has(> .ui-head-slot) > * { grid-column: 1 / -1; }
+.ui-page-head > div:has(> .ui-head-slot) > .ui-h1 { grid-column: 1; grid-row: 1; }
+.ui-page-head > div > .ui-head-slot { grid-column: 2; grid-row: 1; display: flex; }
+.ui-head-slot:not(:has(> :not(.hidden))) { display: none; }
+/* Without its icon the button leaves the title room for its help button */
+.ui-head-slot .ui-btn > svg { display: none; }
+@media (max-width: 380px) { .ui-page-head > div:has(> .ui-head-slot) > .ui-h1 { font-size: 24px; } }
+/* Phones, DMARC: the last fetch and the secondary actions as one line of links */
+.ui-head-links { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; margin-top: 6px; font-size: 12px; }
+.ui-head-links:not(:has(> :not(.hidden))) { display: none; }
+.ui-head-links > .ui-btn { height: auto; min-height: 0; padding: 0; border: 0; background: none; box-shadow: none; color: inherit; font-size: 12px; font-weight: 600; text-decoration: underline; text-underline-offset: 3px; }
+.ui-head-links > .ui-btn > svg { display: none; }
+/* Everything of the DMARC head row has moved up; its empty row goes too */
+.ui-page-head:has(.ui-head-links) > #dmarc-header-actions { display: none; }
+.ui-dmarc-sync:not(:has(> :not(.hidden))) { display: none; }
+.ui-head-tools:not(:has(> :not(.hidden))) { display: none; }
+/* The copy icon of a value that wraps stays on its last line, instead of a line of its own */
+.copyable.ui-copy-wrap .copy-icon { display: inline-block; vertical-align: -2px; margin-inline-start: 4px; }

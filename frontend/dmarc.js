@@ -152,10 +152,10 @@ async function loadDmarcSettings() {
     }
 }
 
-// The upload and sync controls: settings once, the mailbox status each time
+// The upload and sync controls: the settings and the mailbox status each time,
+// so a change in Settings shows without reloading the page
 function dmarcLoadControls() {
-    const loads = [loadDmarcImapStatus()];
-    if (!dmarcConfiguration) loads.push(loadDmarcSettings());
+    const loads = [loadDmarcImapStatus(), loadDmarcSettings()];
     // Manage Reports counts the reports: opened straight on a domain, read the list for it
     if (!dmarcState.domains) dmarcGet('/api/dmarc/domains').then(list => dmarcUpdateManageButton(list.domains || [])).catch(() => {});
     return Promise.all(loads).then(updateDmarcControls);
@@ -824,18 +824,15 @@ function updateDmarcControls() {
     const syncContainer = document.getElementById('dmarc-sync-container');
     const lastSyncInfo = document.getElementById('dmarc-last-sync-info');
 
-    // Upload Report: shown once the settings are known; off in Settings means a disabled button that says so
+    // Upload Report: only when manual upload is turned on in Settings
     if (uploadBtn) {
-        const known = !!dmarcConfiguration;
         const allowed = dmarcConfiguration?.manual_upload_enabled === true;
-        uploadBtn.classList.toggle('hidden', !known);
-        uploadBtn.setAttribute('aria-disabled', allowed ? 'false' : 'true');
-        uploadBtn.title = allowed ? '' : 'Manual upload is turned off in Settings, DMARC';
+        uploadBtn.classList.toggle('hidden', !allowed);
         const input = document.getElementById('dmarc-file-input');
         if (input) input.disabled = !allowed;
     }
 
-    // Sync from IMAP: without IMAP set up the button stays, disabled, and the line under it says why
+    // Fetch reports: without IMAP set up the button stays, disabled, and the line under it says why
     const syncBtn = document.getElementById('dmarc-sync-btn');
     if (dmarcImapStatus && !dmarcImapStatus.enabled) {
         syncContainer.classList.remove('hidden');
@@ -866,6 +863,10 @@ function updateDmarcControls() {
     } else {
         syncContainer.classList.add('hidden');
     }
+    // On a phone the button and the last sync line sit by the title, outside the block
+    const syncOff = syncContainer.classList.contains('hidden');
+    if (syncBtn) syncBtn.classList.toggle('hidden', syncOff);
+    lastSyncInfo.classList.toggle('hidden', syncOff);
 }
 
 async function triggerDmarcSync() {
@@ -878,7 +879,7 @@ async function triggerDmarcSync() {
     }
 
     btn.disabled = true;
-    btnText.textContent = 'Syncing...';
+    btnText.textContent = 'Fetching...';
 
     try {
         const response = await authenticatedFetch('/api/dmarc/imap/sync', {
@@ -888,9 +889,9 @@ async function triggerDmarcSync() {
         const result = await response.json();
 
         if (result.status === 'already_running') {
-            showToast('Sync is already in progress', 'info');
+            showToast('Reports are already being fetched', 'info');
         } else if (result.status === 'started') {
-            showToast('IMAP sync started', 'success');
+            showToast('Fetching reports from the mailbox', 'success');
 
             // Immediate UI update to show "Running" state
             await loadDmarcImapStatus();
@@ -904,10 +905,10 @@ async function triggerDmarcSync() {
 
     } catch (error) {
         console.error('Error triggering sync:', error);
-        showToast('Failed to start sync', 'error');
+        showToast('Could not start fetching reports. Try again.', 'error');
     } finally {
         btn.disabled = false;
-        btnText.textContent = 'Sync from IMAP';
+        btnText.textContent = 'Fetch reports';
     }
 }
 
@@ -944,11 +945,12 @@ async function showDmarcSyncHistory() {
                     <span class="ui-td">${formatDate(sync.started_at)}</span>
                     <span class="ui-td">${uiTag(sync.sync_type, sync.sync_type === 'manual' ? 'info' : '')}</span>
                     <span class="ui-td">${uiTag(sync.status, STATUS_TONE[sync.status] || '')}</span>
-                    <span class="ui-td ui-td-end"><small class="ui-sec-unit">Emails </small>${escapeHtml(String(sync.emails_found || 0))}</span>
-                    <span class="ui-td ui-td-end ui-text-ok"><small class="ui-sec-unit">Created </small>${escapeHtml(String(sync.reports_created || 0))}</span>
-                    <span class="ui-td ui-td-end ui-muted"><small class="ui-sec-unit">Duplicate </small>${escapeHtml(String(sync.reports_duplicate || 0))}</span>
-                    <span class="ui-td ui-td-end${sync.reports_failed > 0 ? ' ui-text-fail' : ''}"><small class="ui-sec-unit">Failed </small>${escapeHtml(String(sync.reports_failed || 0))}</span>
-                    <span class="ui-td">${sync.duration_seconds ? `${Math.round(sync.duration_seconds)}s` : '-'}</span>
+                    <span class="ui-tr-break" aria-hidden="true"></span>
+                    <span class="ui-td ui-td-end ui-td-count"><small class="ui-sec-unit">Emails </small>${escapeHtml(String(sync.emails_found || 0))}</span>
+                    <span class="ui-td ui-td-end ui-td-count ui-text-ok"><small class="ui-sec-unit">Created </small>${escapeHtml(String(sync.reports_created || 0))}</span>
+                    <span class="ui-td ui-td-end ui-td-count ui-muted"><small class="ui-sec-unit">Duplicate </small>${escapeHtml(String(sync.reports_duplicate || 0))}</span>
+                    <span class="ui-td ui-td-end ui-td-count${sync.reports_failed > 0 ? ' ui-text-fail' : ''}"><small class="ui-sec-unit">Failed </small>${escapeHtml(String(sync.reports_failed || 0))}</span>
+                    <span class="ui-td${sync.duration_seconds ? '' : ' ui-td-blank'}">${sync.duration_seconds ? `<small class="ui-sec-unit">Took </small>${Math.round(sync.duration_seconds)}s` : '-'}</span>
                 </div>`).join('')}
             </div>
         `;
