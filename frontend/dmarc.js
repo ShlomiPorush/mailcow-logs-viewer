@@ -340,25 +340,7 @@ function dmarcFlow(x) {
         ${node(0, 0, x.name, `${dmarcNum(x.totals.total_messages)} messages · ${dmarcPct(x.totals.dmarc_pass_pct)} pass`, x.totals.dmarc_pass_pct)}
         ${groups.map((g, i) => node(1, i, g.name, `${dmarcNum(g.total)} · ${dmarcPct(g.passPct)} pass`, g.passPct, `loadSourceDetails('${domain}', '${escapeJsArg(g.ips[0].source_ip)}')`)).join('')}
         ${recv.map((r, i) => node(2, i, r.name, `${dmarcNum(r.count)} · ${dmarcPct(r.count ? r.pass / r.count * 100 : 0)} pass`, r.count ? r.pass / r.count * 100 : 0)).join('')}
-    </div><div class="ui-dm-legend ui-dm-flow-legend"><span><i class="is-ok"></i>95% or more pass</span><span><i class="is-warn"></i>80% or more</span><span><i class="is-fail"></i>Less</span><span class="ui-dm-flow-only">Line width is the volume</span><span class="ui-dm-flist-only">Bar length is the volume</span></div>
-    ${dmarcFlowList(groups, recv, domain)}`;
-}
-
-// On a phone the flow is two lists: who sent as the domain, and who reported it.
-// A bar shows each one's share of the volume, in the colour of its pass rate.
-function dmarcFlowList(groups, recv, domain) {
-    const row = (name, count, pct, max, action) => {
-        const tag = action ? 'button type="button"' : 'div';
-        return `<${tag} class="ui-dm-frow ui-dm-${dmarcTone(pct)}"${action ? ` onclick="${action}"` : ''}>
-            <b>${escapeHtml(name)}</b><span class="ui-dm-fnum">${dmarcNum(count)}</span>
-            <span class="ui-dm-fbar"><i style="width:${Math.max(2, count / max * 100)}%"></i></span><small>${dmarcPct(pct)} pass</small>
-        </${action ? 'button' : 'div'}>`;
-    };
-    const gmax = Math.max(1, ...groups.map(g => g.total)), rmax = Math.max(1, ...recv.map(r => r.count));
-    return `<div class="ui-dm-flist">
-        <section><h5>Sent by</h5>${groups.map(g => row(g.name, g.total, g.passPct, gmax, `loadSourceDetails('${domain}', '${escapeJsArg(g.ips[0].source_ip)}')`)).join('')}</section>
-        ${recv.length ? `<section><h5>Reported by</h5>${recv.map(r => row(r.name, r.count, r.count ? r.pass / r.count * 100 : 0, rmax)).join('')}</section>` : ''}
-    </div>`;
+    </div><div class="ui-dm-legend ui-dm-flow-legend"><span><i class="is-ok"></i>95% or more pass</span><span><i class="is-warn"></i>80% or more</span><span><i class="is-fail"></i>Less</span><span>Line width is the volume</span></div>`;
 }
 
 // Lay the flow out for its width: three columns side by side, or down the page on a phone
@@ -522,11 +504,12 @@ function dmarcSendersCard(x) {
 function dmarcDaysCard(x) {
     if (!x.days.length) return '';
     const name = escapeJsArg(x.name);
-    return `<div class="ui-dm-card"><header>Daily reports <span class="ui-count">${x.days.length}</span></header>
+    const open = dmarcState.daysOpen ?? !window.matchMedia('(max-width: 760px)').matches;
+    return `<details class="ui-dm-card ui-dm-fold"${open ? ' open' : ''} ontoggle="dmarcState.daysOpen = this.open"><summary>Daily reports <span class="ui-count">${x.days.length}</span></summary>
         <table class="ui-dm-tbl"><thead><tr><th>Day</th><th class="r">Messages</th><th class="r ui-dm-hm">Senders</th><th class="ui-dm-hm">Reported by</th><th class="r">Passed DMARC</th></tr></thead><tbody>
         ${x.days.map(r => `<tr class="is-go" onclick="loadReportDetails('${name}', '${escapeJsArg(r.date)}')"><td><button type="button" class="ui-dm-link">${dmarcDay(r.date)}</button></td>
             <td class="r ui-num">${dmarcNum(r.total_messages)}</td><td class="r ui-dm-hm">${dmarcNum(r.unique_ips)}</td><td class="ui-dm-hm ui-muted">${escapeHtml((r.reporters || []).join(', '))}</td>
-            <td class="r">${dmarcRate(r.dmarc_pass_pct, r.total_messages)}</td></tr>`).join('')}</tbody></table></div>`;
+            <td class="r">${dmarcRate(r.dmarc_pass_pct, r.total_messages)}</td></tr>`).join('')}</tbody></table></details>`;
 }
 
 // Whether mail to the domain arrived encrypted, from its TLS reports
@@ -566,7 +549,7 @@ async function loadDomainOverview(domain, updateUrl = true) {
             <div class="ui-dm-ttl"><div><small>Last 30 days</small><h2>${escapeHtml(domain)}${dmarcNotOnServer(x.overview)}</h2></div></div>
             <div class="ui-dm-lay"><div>
                 <div class="ui-dm-card"><header>Messages per day</header><div class="ui-dm-body">${dmarcChart(x.overview.daily_stats || [])}</div></div>
-                ${x.groups.length ? `<div class="ui-dm-card"><header>Mail flow<small>your domain, who sent it, who reported it</small></header><div class="ui-dm-body">${dmarcFlow(x)}</div></div>` : ''}
+                ${x.groups.length ? `<div class="ui-dm-card ui-dm-flow-card"><header>Mail flow<small>your domain, who sent it, who reported it</small></header><div class="ui-dm-body">${dmarcFlow(x)}</div></div>` : ''}
                 ${dmarcSendersCard(x)}
                 ${dmarcDaysCard(x)}
                 ${dmarcTlsCard(x)}

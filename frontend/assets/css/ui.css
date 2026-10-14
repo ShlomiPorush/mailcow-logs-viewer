@@ -2444,7 +2444,14 @@ html:has(#message-modal:not(.hidden):not(.ui-docked)) :is(.ui-page, .ui-scroll, 
 .ui-dm, .ui-dm-dialog { --dm-line: color-mix(in srgb, var(--ui-ink) 13%, transparent); --dm-head: color-mix(in srgb, var(--ui-ink) 4%, var(--ui-bg)); }
 .ui-dm { display: grid; gap: 18px; align-content: start; }
 .ui-dm-card { border: 1px solid var(--dm-line); border-radius: 10px; background: var(--ui-bg); overflow: hidden; }
-.ui-dm-card > header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 10px; padding: 11px 16px; background: var(--dm-head); border-bottom: 1px solid var(--dm-line); font-weight: 650; }
+/* A card that folds: its header is the summary, with a chevron at the end */
+.ui-dm-fold > summary { list-style: none; cursor: pointer; }
+.ui-dm-fold > summary::-webkit-details-marker { display: none; }
+.ui-dm-fold > summary::after { content: ""; width: 8px; height: 8px; margin-inline-start: auto; align-self: center; border: solid var(--ui-muted); border-width: 0 2px 2px 0; transform: rotate(45deg); transition: transform .15s; }
+.ui-dm-fold[open] > summary::after { transform: rotate(-135deg); }
+.ui-dm-fold:not([open]) > summary { border-bottom: 0; }
+.ui-dm-fold > summary:focus-visible { outline: 2px solid var(--ui-focus); outline-offset: -2px; }
+.ui-dm-card > header, .ui-dm-fold > summary { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 10px; padding: 11px 16px; background: var(--dm-head); border-bottom: 1px solid var(--dm-line); font-weight: 650; }
 .ui-dm-card > header small { font-weight: 500; color: var(--ui-muted); font-size: 12.5px; }
 .ui-dm-body { padding: 16px; }
 .ui-dm-empty { margin: 0; padding: 22px 16px; color: var(--ui-muted); }
@@ -2484,22 +2491,9 @@ html:has(#message-modal:not(.hidden):not(.ui-docked)) :is(.ui-page, .ui-scroll, 
 .ui-dm-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-inline-end: 6px; vertical-align: -1px; background: var(--ui-ok); }
 .ui-dm-legend i.is-warn { background: var(--ui-warn); } .ui-dm-legend i.is-fail { background: var(--ui-fail); }
 .ui-dm-flow-legend { margin: 12px 0 0; }
-/* The flow's phone form: two lists with a bar for the volume */
-.ui-dm-flist, .ui-dm-flist-only { display: none; }
-.ui-dm-flist { gap: 14px; margin-top: 12px; }
-.ui-dm-flist h5 { margin: 0 0 4px; color: var(--ui-muted); font-size: 12px; font-weight: 600; }
-.ui-dm-frow { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 4px 12px; width: 100%; padding: 8px 0; border: 0; border-top: 1px solid var(--dm-line); background: none; color: inherit; font: inherit; text-align: start; }
-button.ui-dm-frow { cursor: pointer; }
-button.ui-dm-frow:hover b { text-decoration: underline; }
-.ui-dm-frow b { overflow-wrap: anywhere; font-weight: 600; }
-.ui-dm-fnum { font-weight: 650; font-variant-numeric: tabular-nums; }
-.ui-dm-fbar { height: 6px; border-radius: 3px; background: color-mix(in srgb, var(--ui-ink) 7%, transparent); overflow: hidden; }
-.ui-dm-fbar i { display: block; height: 100%; border-radius: 3px; background: var(--dm-t); }
-.ui-dm-frow small { color: var(--dm-t); font-size: 12px; font-weight: 600; white-space: nowrap; }
+/* A phone leaves out the mail flow: the Senders table under it says the same */
 @media (max-width: 760px) {
-    .ui-dm-flow, .ui-dm-flow-only { display: none; }
-    .ui-dm-flist { display: grid; }
-    .ui-dm-flist-only { display: inline-flex; }
+    .ui-dm-flow-card { display: none; }
 }
 .ui-dm-flow-legend i { border-radius: 50%; }
 /* The chart: one column a day, passed below failed */
