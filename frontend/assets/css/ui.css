@@ -1532,8 +1532,13 @@ button.ui-st-card:hover { outline: 1px solid var(--ui-line); }
     .ui-domain-details .ui-md-ids .ui-md-fact > span { grid-row: 1 / span 2; margin: 0; }
     .ui-domain-details .ui-md-ids .ui-md-fact > div, .ui-domain-details .ui-md-ids .ui-md-fact > small { text-align: end; }
 }
-/* A DNS result in the domain list: OK, warning or error as an icon in its colour */
-.ui-dns-icon { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 22px; border-radius: 6px; vertical-align: middle; }
+/* A DNS result in the domain list: the word on wide screens, an icon in its colour on a phone */
+.ui-dns-icon { display: none; }
+@media (max-width: 760px) {
+    .ui-domain-row > .ui-dns-cell > .ui-tag { display: none; }
+    .ui-domain-row > .ui-dns-cell > .ui-dns-icon { display: inline-flex; }
+}
+.ui-dns-icon { align-items: center; justify-content: center; width: 24px; height: 22px; border-radius: 6px; vertical-align: middle; }
 .ui-dns-icon svg { width: 14px; height: 14px; }
 
 /* ---------- DMARC (v3 language) ---------- */

@@ -161,8 +161,9 @@ function filterDomains() {
     }
 }
 
-// In the list a result is an icon with its own shape (check, exclamation mark, cross),
-// so it reads without the colour; the name of the result is there for screen readers
+// On a phone a result in the list is an icon with its own shape (check, exclamation mark,
+// cross), so it reads without the colour and three fit a line; wider screens show the word.
+// The icon carries the name of the result for screen readers.
 const DNS_ICON = {
     ok: '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
     warn: '<path d="M12 6v7.5"/><path d="M12 18h.01"/>',
@@ -172,7 +173,7 @@ const DNS_ICON = {
 function dnsStatusTag(label, check) {
     const [text, tone] = DNS_TAG[check.status] || ['Not checked', ''];
     const result = tone
-        ? `<span class="ui-dns-icon ui-tag-${tone}" role="img" aria-label="${escapeHtml(`${label}: ${text}`)}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${DNS_ICON[tone]}</svg></span>`
+        ? `${uiTag(text, tone)}<span class="ui-dns-icon ui-tag-${tone}" role="img" aria-label="${escapeHtml(`${label}: ${text}`)}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${DNS_ICON[tone]}</svg></span>`
         : `<span class="ui-muted" role="img" aria-label="${escapeHtml(`${label}: ${text}`)}">-</span>`;
     return `<span class="ui-td ui-dns-cell" title="${escapeHtml(`${label}: ${check.message || 'Not checked'}`)}"><small class="ui-sec-unit" aria-hidden="true">${label} </small>${result}</span>`;
 }
