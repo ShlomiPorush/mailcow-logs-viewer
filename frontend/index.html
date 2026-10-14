@@ -1134,9 +1134,10 @@
                     </div>
                     <div id="dmarc-header-actions" class="ui-head-tools">
                         <button type="button" id="dmarc-manage-btn" class="hidden ui-btn" onclick="showReportsManagementModal()">Manage Reports</button>
-                        <label id="dmarc-upload-btn" class="hidden ui-btn">
+                        <label id="dmarc-upload-btn" class="hidden ui-btn ui-head-icon" tabindex="0" role="button" aria-label="Upload Report" title="Upload Report"
+                            onkeydown="if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); document.getElementById('dmarc-file-input').click(); }">
                             <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path></svg>
-                            Upload Report
+                            <span class="ui-head-icon-text">Upload Report</span>
                             <input type="file" id="dmarc-file-input" class="hidden" accept=".xml,.gz,.zip,.json"
                                 onchange="uploadDmarcReport(event)">
                         </label>
@@ -1547,15 +1548,15 @@
     <script src="/static/notifications.js?v=6"></script>
     <script src="/static/spam_filter.js?v=7"></script>
 
-    <!-- DMARC Sync History Modal -->
-    <div id="dmarc-sync-history-modal" class="hidden ui-dialog-backdrop" role="dialog" aria-label="IMAP Sync History">
+    <!-- DMARC fetch history -->
+    <div id="dmarc-sync-history-modal" class="hidden ui-dialog-backdrop" role="dialog" aria-label="Fetch history">
         <div class="ui-dialog ui-dialog-fit">
             <div class="ui-dialog-head">
-                <h3>IMAP Sync History</h3>
+                <h3>Fetch history</h3>
                 <button onclick="closeDmarcSyncHistoryModal()" class="ui-icon-btn" title="Close" aria-label="Close"><svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg></button>
             </div>
             <div class="ui-dialog-body">
-                <div id="dmarc-sync-history-content"><div class="ui-loading"><div class="loading"></div><p>Loading sync history...</p></div></div>
+                <div id="dmarc-sync-history-content"><div class="ui-loading"><div class="loading"></div><p>Loading the fetch history...</p></div></div>
             </div>
         </div>
     </div>

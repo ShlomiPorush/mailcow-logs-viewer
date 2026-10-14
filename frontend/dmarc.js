@@ -294,7 +294,7 @@ function dmarcChart(daily, opts = {}) {
     const short = v => v >= 10000 ? `${(v / 1000).toFixed(1).replace(/\.0$/, '')}k` : dmarcNum(v);
     const domain = dmarcState.currentDomain ? escapeJsArg(dmarcState.currentDomain) : '';
     const words = opts.tls ? ['encrypted', 'failed'] : ['passed', 'failed'];
-    return `<div class="ui-dm-legend"><span><i class="is-ok"></i>${opts.tls ? 'Encrypted' : 'Passed DMARC'}</span><span><i class="is-fail"></i>Failed</span>${opts.open !== null && domain ? '<span>A day opens its reports</span>' : ''}</div>
+    return `<div class="ui-dm-legend"><span><i class="is-ok"></i>${opts.tls ? 'Encrypted' : 'Passed DMARC'}</span><span><i class="is-fail"></i>Failed</span></div>
         <div class="ui-dm-chart"><div class="ui-dm-grid" style="height:${h}px">${[top, top * .75, top * .5, top * .25, 0].map(t => `<i><span>${short(Math.round(t))}</span></i>`).join('')}</div>
         <div class="ui-dm-cols" style="height:${h}px">${daily.map(x => {
             const tip = `${dmarcDay(x.date)}: ${dmarcNum(ok(x))} ${words[0]}, ${dmarcNum(bad(x))} ${words[1]}`;
@@ -308,9 +308,12 @@ function dmarcChart(daily, opts = {}) {
 
 function dmarcTodoCard(tasks, withDomain = false) {
     if (!tasks.length) return '<div class="ui-dm-card"><header>To do</header><p class="ui-dm-empty">Nothing to do. The records are in place and every sender passes.</p></div>';
-    return `<div class="ui-dm-card"><header>To do <span class="ui-count">${tasks.length}</span></header>${tasks.slice(0, 8).map(t => `
-        <div class="ui-dm-task ui-dm-${t.tone}"><div><b>${escapeHtml(t.title)}</b>${withDomain ? `<small class="ui-dm-task-domain">${escapeHtml(t.domain)}</small>` : ''}
-            <p>${escapeHtml(t.text)}</p><button type="button" class="ui-btn ui-btn-sm" onclick="${t.action}">${escapeHtml(t.label)}</button></div></div>`).join('')}
+    return `<div class="ui-dm-card ui-alerts-stack"><header>To do <span class="ui-count">${tasks.length}</span></header>${tasks.slice(0, 8).map(t => `
+        <div class="ui-alert ui-alert-${t.tone === 'mut' ? 'info' : t.tone}">
+            <span class="ui-alert-bar"></span>
+            <div class="ui-alert-text"><div class="ui-alert-title"><b>${escapeHtml(t.title)}</b></div>${withDomain ? `<small class="ui-dm-task-domain">${escapeHtml(t.domain)}</small>` : ''}<p>${escapeHtml(t.text)}</p></div>
+            <button type="button" class="ui-btn ui-btn-sm" onclick="${t.action}">${escapeHtml(t.label)}</button>
+        </div>`).join('')}
         ${tasks.length > 8 ? `<p class="ui-dm-more">and ${tasks.length - 8} more</p>` : ''}</div>`;
 }
 
@@ -343,8 +346,9 @@ function dmarcFlow(x) {
 // Lay the flow out for its width: three columns side by side, or down the page on a phone
 function drawDmarcFlow() {
     const el = document.getElementById('dmarc-flow');
+    // Watch the size even while the flow is hidden on a phone, to draw it on a wider screen
+    if (el) watchDmarcFlowSize();
     if (!el || !el.offsetWidth) return;
-    watchDmarcFlowSize();
     const svg = el.querySelector('svg');
     const w = el.clientWidth;
     const G = JSON.parse(el.dataset.g), L = JSON.parse(el.dataset.l);
@@ -478,18 +482,18 @@ function dmarcRecordsCard(x) {
     const sent = x.groups.reduce((s, g) => s + g.total, 0);
     const noMail = ['No mail in the last 30 days', dmarcTag('mut', 'No data')];
     const rows = [
-        ['DMARC', x.record.record ? `p=${policy || '?'}` : 'No record at _dmarc', policy === 'reject' ? dmarcTag('ok', 'Enforced') : policy === 'quarantine' ? dmarcTag('warn', 'Partial') : policy ? dmarcTag('warn', 'Monitoring') : dmarcTag('fail', 'Missing', true), 'dmarc'],
-        sent ? ['SPF', `${Math.round(x.spfPct)}% of mail aligned`, x.spfPct >= 95 ? dmarcTag('ok', 'OK') : dmarcTag('warn', 'Gaps'), 'dmarc'] : ['SPF', ...noMail, 'dmarc'],
-        sent ? ['DKIM', x.dkimSeen ? 'Your mail is signed' : 'No signed mail in the reports', x.dkimSeen ? dmarcTag('ok', 'OK') : dmarcTag('fail', 'Missing', true), 'dmarc'] : ['DKIM', ...noMail, 'dmarc'],
+        ['DMARC', x.record.record ? `p=${policy || '?'}` : 'No record at _dmarc', dmarcPolicyTag(policy), 'dmarc'],
+        sent ? ['SPF', `${dmarcPct(x.spfPct)} of mail aligned`, x.spfPct >= 95 ? dmarcTag('ok', 'OK') : dmarcTag('warn', 'Gaps'), 'spf'] : ['SPF', ...noMail, 'spf'],
+        sent ? ['DKIM', x.dkimSeen ? 'Your mail is signed' : 'No signed mail in the reports', x.dkimSeen ? dmarcTag('ok', 'OK') : dmarcTag('fail', 'Missing', true), 'dkim'] : ['DKIM', ...noMail, 'dkim'],
         ['TLS-RPT', x.tlsRecord.record ? 'Receivers report encryption' : 'No record at _smtp._tls', x.tlsRecord.record ? dmarcTag('ok', 'OK') : dmarcTag('warn', 'Missing'), 'tls']];
-    return `<div class="ui-dm-card"><header>Records<small>a record opens its details</small></header>${rows.map(([label, sub, tag, kind]) =>
+    return `<div class="ui-dm-card"><header>Records</header>${rows.map(([label, sub, tag, kind]) =>
         `<button type="button" class="ui-dm-rec" onclick="openDmarcRecord('${kind}', '${name}')"><span><b>${label}</b><small>${escapeHtml(sub)}</small></span>${tag}<span class="ui-muted" aria-hidden="true">›</span></button>`).join('')}</div>`;
 }
 
 function dmarcSendersCard(x) {
     if (!x.groups.length) return '';
     const name = escapeJsArg(x.name);
-    return `<div class="ui-dm-card"><header>Senders <span class="ui-count">${x.groups.length}</span><small>who sent mail as ${escapeHtml(x.name)}, failing first</small></header>
+    return `<div class="ui-dm-card"><header>Senders <span class="ui-count">${x.groups.length}</span></header>
         <table class="ui-dm-tbl"><thead><tr><th>Sender</th><th class="r">Messages</th><th class="r">Passed DMARC</th><th class="r ui-dm-hm">SPF aligned</th><th class="r ui-dm-hm">DKIM aligned</th><th class="r ui-dm-hm">Addresses</th></tr></thead><tbody>
         ${x.groups.map(g => `<tr class="is-go" onclick="loadSourceDetails('${name}', '${escapeJsArg(g.ips[0].source_ip)}')"><td><button type="button" class="ui-dm-link">${escapeHtml(g.name)}</button>${g.place ? `<small class="ui-dm-sub">${escapeHtml(g.place)}</small>` : ''}</td>
             <td class="r ui-num">${dmarcNum(g.total)}</td><td class="r">${dmarcRate(g.passPct, g.total)}</td>
@@ -500,11 +504,12 @@ function dmarcSendersCard(x) {
 function dmarcDaysCard(x) {
     if (!x.days.length) return '';
     const name = escapeJsArg(x.name);
-    return `<div class="ui-dm-card"><header>Daily reports <span class="ui-count">${x.days.length}</span></header>
+    const open = dmarcState.daysOpen ?? !window.matchMedia('(max-width: 760px)').matches;
+    return `<details class="ui-dm-card ui-dm-fold"${open ? ' open' : ''} ontoggle="dmarcState.daysOpen = this.open"><summary>Daily reports <span class="ui-count">${x.days.length}</span></summary>
         <table class="ui-dm-tbl"><thead><tr><th>Day</th><th class="r">Messages</th><th class="r ui-dm-hm">Senders</th><th class="ui-dm-hm">Reported by</th><th class="r">Passed DMARC</th></tr></thead><tbody>
         ${x.days.map(r => `<tr class="is-go" onclick="loadReportDetails('${name}', '${escapeJsArg(r.date)}')"><td><button type="button" class="ui-dm-link">${dmarcDay(r.date)}</button></td>
             <td class="r ui-num">${dmarcNum(r.total_messages)}</td><td class="r ui-dm-hm">${dmarcNum(r.unique_ips)}</td><td class="ui-dm-hm ui-muted">${escapeHtml((r.reporters || []).join(', '))}</td>
-            <td class="r">${dmarcRate(r.dmarc_pass_pct, r.total_messages)}</td></tr>`).join('')}</tbody></table></div>`;
+            <td class="r">${dmarcRate(r.dmarc_pass_pct, r.total_messages)}</td></tr>`).join('')}</tbody></table></details>`;
 }
 
 // Whether mail to the domain arrived encrypted, from its TLS reports
@@ -544,7 +549,7 @@ async function loadDomainOverview(domain, updateUrl = true) {
             <div class="ui-dm-ttl"><div><small>Last 30 days</small><h2>${escapeHtml(domain)}${dmarcNotOnServer(x.overview)}</h2></div></div>
             <div class="ui-dm-lay"><div>
                 <div class="ui-dm-card"><header>Messages per day</header><div class="ui-dm-body">${dmarcChart(x.overview.daily_stats || [])}</div></div>
-                ${x.groups.length ? `<div class="ui-dm-card"><header>Mail flow<small>your domain, who sent it, who reported it</small></header><div class="ui-dm-body">${dmarcFlow(x)}</div></div>` : ''}
+                ${x.groups.length ? `<div class="ui-dm-card ui-dm-flow-card"><header>Mail flow</header><div class="ui-dm-body">${dmarcFlow(x)}</div></div>` : ''}
                 ${dmarcSendersCard(x)}
                 ${dmarcDaysCard(x)}
                 ${dmarcTlsCard(x)}
@@ -563,12 +568,14 @@ async function loadDomainOverview(domain, updateUrl = true) {
 async function openDmarcRecord(kind, domain) {
     const modal = document.getElementById('dmarc-record-modal');
     const content = document.getElementById('dmarc-record-content');
-    document.getElementById('dmarc-record-title').textContent = `${kind === 'tls' ? 'TLS-RPT' : 'DMARC'} record · ${domain}`;
+    const titles = { dmarc: 'DMARC record', tls: 'TLS-RPT record', spf: 'SPF', dkim: 'DKIM' };
+    document.getElementById('dmarc-record-title').textContent = `${titles[kind]} · ${domain}`;
     content.innerHTML = '<div class="ui-loading"><div class="loading"></div><p>Loading...</p></div>';
     modal.classList.remove('hidden');
     try {
         const x = await dmarcLoadDomain(domain);
-        content.innerHTML = kind === 'tls' ? dmarcTlsRecord(x) : dmarcDmarcRecord(x);
+        dmarcRecordDomain = x;
+        content.innerHTML = kind === 'tls' ? dmarcTlsRecord(x) : kind === 'spf' || kind === 'dkim' ? dmarcAuthRecord(x, kind) : dmarcDmarcRecord(x);
     } catch (error) {
         content.innerHTML = `<p class="ui-dm-empty">Could not read the record: ${escapeHtml(error.message)}.</p>`;
     }
@@ -589,35 +596,117 @@ function dmarcCopyBlock(text) {
     return `<div class="ui-dm-code"><span>${escapeHtml(text)}</span><button type="button" class="ui-btn ui-btn-sm" onclick="copyToClipboard('${escapeJsArg(text)}', event)">Copy</button></div>`;
 }
 
-function dmarcDmarcRecord(x) {
+// The domain shown in the record window, so a picked policy can be explained
+let dmarcRecordDomain = null;
+// How much a policy protects: None only reports, Quarantine sends to spam, Reject refuses
+const DMARC_POLICY_LEVEL = { none: ['fail', 'Monitoring'], quarantine: ['warn', 'Partial'], reject: ['ok', 'Enforced'] };
+
+function dmarcPolicyTag(policy) {
+    const level = DMARC_POLICY_LEVEL[policy];
+    return level ? dmarcTag(level[0], level[1]) : dmarcTag('fail', 'Missing', true);
+}
+
+const DMARC_POLICIES = [
+    ['none', 'None', 'Mail that fails is still delivered. Reports only.'],
+    ['quarantine', 'Quarantine', 'Mail that fails goes to spam.'],
+    ['reject', 'Reject', 'Mail that fails is refused.'],
+];
+
+function dmarcCurrentPolicy(x) {
     const settings = x.record.settings || {};
-    const current = x.record.record ? String(x.record.policy || settings.policy || '').toLowerCase() : '';
-    const next = current === 'reject' ? null : current === 'quarantine' ? 'reject' : 'quarantine';
+    return x.record.record ? String(x.record.policy || settings.policy || '').toLowerCase() : '';
+}
+
+// What a policy would do for the domain, and the record that sets it
+function dmarcPolicyPlan(x, pick) {
+    const current = dmarcCurrentPolicy(x);
+    if (pick === current) return `<p class="ui-dm-note">${pick === 'reject' ? 'The strictest policy is in place.' : 'This is the policy in place.'}</p>`;
+    const settings = x.record.settings || {};
+    const rua = (settings.aggregate_report_uris || [])[0] || `mailto:dmarc@${x.name}`;
+    const record = dmarcCopyBlock(`_dmarc.${x.name}  TXT  "v=DMARC1; p=${pick}; rua=${rua}"`);
+    if (pick === 'none') return `<p class="ui-dm-note">With p=none, mail that fails is delivered and only reported.</p>${record}`;
     const failing = x.groups.filter(g => g.passPct < 50).reduce((s, g) => s + g.total, 0);
     const ready = x.groups.filter(g => g.passPct >= 50).every(g => g.passPct >= 95);
-    const rua = (settings.aggregate_report_uris || [])[0] || `mailto:dmarc@${x.name}`;
+    return `<p class="ui-dm-note">${ready ? '<b class="ui-text-ok">Ready.</b> Every sender that passes, passes on 95% or more.' : '<b class="ui-text-warn">Not yet.</b> A sender passes on under 95%: fix it first.'}
+        With p=${pick}, receivers would have ${pick === 'reject' ? 'refused' : 'sent to spam'} <b>${dmarcNum(failing)}</b> messages in the last 30 days, all from senders that fail.</p>${record}`;
+}
+
+// The policies as a radio group; the next stricter one is picked first
+function dmarcPolicyChoice(x, pick) {
+    const current = dmarcCurrentPolicy(x);
+    return `<div class="ui-dm-pol" role="radiogroup" aria-label="Policy" onkeydown="dmarcPolicyKey(event)">${DMARC_POLICIES.map(([id, title, text]) => `
+        <button type="button" role="radio" class="ui-dm-${DMARC_POLICY_LEVEL[id][0]}${pick === id ? ' is-on' : ''}" aria-checked="${pick === id}" tabindex="${pick === id ? 0 : -1}" data-policy="${id}" onclick="dmarcPickPolicy('${id}')">
+            <span class="ui-dm-pol-t"><span>${title} ${dmarcPolicyTag(id)}</span>${current === id ? dmarcTag('mut', 'Now') : ''}</span><span class="ui-dm-pol-d">${text}</span></button>`).join('')}</div>
+        <div id="dmarc-policy-plan" aria-live="polite">${dmarcPolicyPlan(x, pick)}</div>`;
+}
+
+function dmarcPickPolicy(pick) {
+    const x = dmarcRecordDomain;
+    const box = document.querySelector('#dmarc-record-content .ui-dm-pol');
+    if (!x || !box) return;
+    box.querySelectorAll('[role="radio"]').forEach(b => {
+        const on = b.dataset.policy === pick;
+        b.classList.toggle('is-on', on);
+        b.setAttribute('aria-checked', String(on));
+        b.tabIndex = on ? 0 : -1;
+        if (on) b.focus();
+    });
+    document.getElementById('dmarc-policy-plan').innerHTML = dmarcPolicyPlan(x, pick);
+}
+
+// Arrow keys move the pick, as in any radio group
+function dmarcPolicyKey(event) {
+    const step = { ArrowDown: 1, ArrowRight: 1, ArrowUp: -1, ArrowLeft: -1 }[event.key];
+    if (!step) return;
+    event.preventDefault();
+    const ids = DMARC_POLICIES.map(p => p[0]);
+    const at = ids.indexOf(event.target.closest('[role="radio"]')?.dataset.policy);
+    dmarcPickPolicy(ids[(at + step + ids.length) % ids.length]);
+}
+
+function dmarcDmarcRecord(x) {
+    const settings = x.record.settings || {};
+    const current = dmarcCurrentPolicy(x);
+    const next = current === 'reject' ? 'reject' : current === 'quarantine' ? 'reject' : 'quarantine';
     // Report URIs come from DNS: only mailto: becomes a link, anything else stays text
     const formatUriAsEmail = (uri) => {
         const text = String(uri).trim();
         if (!/^mailto:/i.test(text)) return escapeHtml(text);
         return `<a href="${escapeHtml(text)}" class="ui-link">${escapeHtml(text.replace(/^mailto:/i, ''))}</a>`;
     };
-    const option = (id, title, text) => `<div class="${current === id ? 'is-on' : ''}"><h4>${title}${current === id ? ` ${dmarcTag('mut', 'Now')}` : ''}</h4><p>${text}</p></div>`;
-    return `${x.record.record ? `${dmarcCopyBlock(x.record.record)}
-            <dl class="ui-dm-kv"><dt>Policy</dt><dd>${escapeHtml(settings.policy || current || '-')}</dd>
+    return `${x.record.record ? `<h4 class="ui-dm-h4 ui-dm-h4-first">Current record</h4>${dmarcCopyBlock(x.record.record)}
+            <dl class="ui-dm-kv"><dt>Policy</dt><dd>${DMARC_POLICY_LEVEL[current] ? `${escapeHtml(current)} ${dmarcPolicyTag(current)}` : escapeHtml(settings.policy || current || '-')}</dd>
             <dt>Subdomains</dt><dd>${escapeHtml(settings.subdomain_policy || 'same as the domain')}</dd>
             <dt>Applied to</dt><dd>${escapeHtml(settings.percentage ?? 100)}% of mail</dd>
             <dt>Reports go to</dt><dd>${(settings.aggregate_report_uris || []).map(formatUriAsEmail).join(', ') || '-'}</dd>
             ${settings.forensic_report_uris && settings.forensic_report_uris.length ? `<dt>Failure reports go to</dt><dd>${settings.forensic_report_uris.map(formatUriAsEmail).join(', ')}</dd>` : ''}
             <dt>Alignment</dt><dd>SPF ${escapeHtml(settings.spf_alignment || 'relaxed')}, DKIM ${escapeHtml(settings.dkim_alignment || 'relaxed')}</dd></dl>
-            ${(x.record.warnings || []).map(w => `<p class="ui-text-warn ui-dm-note">${escapeHtml(w)}</p>`).join('')}`
+            ${(x.record.warnings || []).map(w => `<p class="ui-dm-callout ui-dm-warn">${escapeHtml(w)}</p>`).join('')}`
         : `<p class="ui-dm-lead"><b class="ui-text-fail">No DMARC record at _dmarc.${escapeHtml(x.name)}.</b> Receivers have no policy to refuse mail that pretends to be you.</p>`}
-        <dl class="ui-dm-kv"><dt>SPF</dt><dd>${Math.round(x.spfPct)}% of your mail is aligned with SPF</dd><dt>DKIM</dt><dd>${x.dkimSeen ? 'Your mail is signed' : 'No signed mail in the reports'}</dd></dl>
-        <h4 class="ui-dm-h4">Policy</h4>
-        <div class="ui-dm-pol">${option('none', 'None', 'Mail that fails is still delivered. Reports only.')}${option('quarantine', 'Quarantine', 'Mail that fails goes to spam.')}${option('reject', 'Reject', 'Mail that fails is refused.')}</div>
-        ${next ? `<p class="ui-dm-note">${ready ? '<b class="ui-text-ok">Ready.</b> Every sender that passes, passes on 95% or more.' : '<b class="ui-text-warn">Not yet.</b> A sender passes on under 95%: fix it first.'}
-            With p=${next}, receivers would have ${next === 'reject' ? 'refused' : 'sent to spam'} <b>${dmarcNum(failing)}</b> messages in the last 30 days, all from senders that fail.</p>
-            ${dmarcCopyBlock(`_dmarc.${x.name}  TXT  "v=DMARC1; p=${next}; rua=${rua}"`)}` : '<p class="ui-dm-note ui-text-ok">The strictest policy is in place.</p>'}`;
+        <dl class="ui-dm-kv"><dt>SPF</dt><dd>${dmarcPct(x.spfPct)} of your mail is aligned with SPF</dd><dt>DKIM</dt><dd>${x.dkimSeen ? 'Your mail is signed' : 'No signed mail in the reports'}</dd></dl>
+        <h4 class="ui-dm-h4">Policy <small class="ui-muted">choose one to see what it would change and the record to publish</small></h4>
+        ${dmarcPolicyChoice(x, next)}`;
+}
+
+// SPF or DKIM for the domain, from the reports: how much mail passed, and each
+// sender's share that passed, weakest first; a sender opens its details
+function dmarcAuthRecord(x, kind) {
+    const label = kind === 'spf' ? 'SPF' : 'DKIM';
+    const sent = x.groups.reduce((s, g) => s + g.total, 0);
+    if (!sent) return `<p class="ui-dm-empty">No mail in the last 30 days, so the reports say nothing about ${label} yet.</p>`;
+    const field = kind === 'spf' ? 'spfPct' : 'dkimPct';
+    const pct = x.groups.reduce((s, g) => s + g[kind], 0) / sent * 100;
+    const name = escapeJsArg(x.name);
+    const lead = kind === 'spf' ? `${dmarcPct(pct)} of your mail passed SPF` : `${dmarcPct(pct)} of your mail was signed with DKIM`;
+    const note = kind === 'spf'
+        ? `SPF lists the servers allowed to send as ${escapeHtml(x.name)}. A sender of yours under 95% is missing from the SPF record; a sender that is not yours should fail.`
+        : `DKIM signs mail with a key published in DNS. A sender of yours under 95% does not sign as ${escapeHtml(x.name)}: turn DKIM on in that service; a sender that is not yours should fail.`;
+    const groups = [...x.groups].sort((a, b) => a[field] - b[field] || b.total - a.total);
+    return `<p class="ui-dm-lead"><b class="ui-text-${dmarcTone(pct)}">${lead}</b> in the last 30 days.</p>
+        <p class="ui-dm-note">${note}</p>
+        <table class="ui-dm-tbl"><thead><tr><th>Sender</th><th class="r">Messages</th><th class="r">${label} aligned</th></tr></thead><tbody>
+        ${groups.map(g => `<tr class="is-go" onclick="closeDmarcRecordModal(); loadSourceDetails('${name}', '${escapeJsArg(g.ips[0].source_ip)}')"><td><button type="button" class="ui-dm-link">${escapeHtml(g.name)}</button>${g.place ? `<small class="ui-dm-sub">${escapeHtml(g.place)}</small>` : ''}</td>
+            <td class="r ui-num">${dmarcNum(g.total)}</td><td class="r">${dmarcRate(g[field], g.total)}</td></tr>`).join('')}</tbody></table>`;
 }
 
 function dmarcTlsRecord(x) {
@@ -633,6 +722,20 @@ function dmarcTlsRecord(x) {
 // =============================================================================
 // A SENDER, A DAY OF REPORTS, A DAY OF TLS
 // =============================================================================
+
+// On a phone a detail table is a list: the name and its count on one line, then the
+// details and the results as tags. Wide screens keep the table.
+function dmarcMRow({ title, count, sub = '', tags = '', note = '', action = '' }) {
+    return `<div class="ui-dm-mrow${action ? ' is-go' : ''}"${action ? ` onclick="${action}"` : ''}>
+        <div class="ui-dm-mrow-top">${title}<span class="ui-dm-mrow-n">${count}</span></div>
+        ${sub ? `<div class="ui-dm-mrow-sub">${sub}</div>` : ''}
+        ${tags ? `<div class="ui-dm-mrow-tags">${tags}</div>` : ''}${note ? `<small class="ui-dm-mrow-note">${note}</small>` : ''}
+    </div>`;
+}
+
+function dmarcRateTag(label, pct, count) {
+    return count ? dmarcTag(dmarcTone(pct), `${label} ${dmarcPct(pct)}`) : '';
+}
 
 async function loadSourceDetails(domain, sourceIp, updateUrl = true) {
     dmarcState.currentView = 'source';
@@ -660,14 +763,20 @@ async function loadSourceDetails(domain, sourceIp, updateUrl = true) {
             ${sum.passPct < 50 ? `<div class="ui-dm-card ui-dm-alert"><div class="ui-dm-body"><b class="ui-text-fail">Not set up to send as ${escapeHtml(domain)}.</b>
                 <p>Receivers ${policy === 'reject' ? 'refused' : policy === 'quarantine' ? 'sent to spam' : 'still delivered'} these ${uiCountLabel(sum.total, 'message', 'messages')}${x.record.record ? '' : ', because there is no DMARC record'}.
                 If you know this sender (a CRM, a newsletter tool, a scanner), set up SPF or DKIM for it. If you do not, someone is sending as you: ${policy === 'reject' ? 'your policy already stops it.' : x.record.record ? 'a stricter policy stops it.' : 'a DMARC record lets receivers refuse it.'}</p></div></div>` : ''}
-            <div class="ui-dm-card"><header>Last 30 days</header><div class="ui-dm-strip">
+            <div class="ui-dm-card"><header>Last 30 days</header><div class="ui-dm-strip ui-dm-strip-facts">
                 <div><small>Messages</small><b class="is-big">${dmarcNum(sum.total)}</b></div>
                 <div><small>Passed DMARC</small><b class="is-big">${dmarcRate(sum.passPct, sum.total)}</b></div>
                 <div><small>SPF aligned</small><b class="is-big">${dmarcRate(sum.spfPct, sum.total)}</b></div>
                 <div><small>DKIM aligned</small><b class="is-big">${dmarcRate(sum.dkimPct, sum.total)}</b></div>
                 <div><small>Addresses</small><b class="is-big">${ips.length}</b></div></div></div>
             <div class="ui-dm-card"><header>What receivers saw <span class="ui-count">${rows.length}</span></header>
-            ${rows.length ? `<table class="ui-dm-tbl"><thead><tr><th>Address</th><th>From</th><th class="ui-dm-hm">Envelope from</th><th class="r">Messages</th><th>SPF</th><th>DKIM</th><th class="ui-dm-hm">Reported by</th></tr></thead><tbody>
+            ${rows.length ? `<div class="ui-dm-mlist">${rows.map(e => dmarcMRow({
+                title: `<b class="ui-mono">${escapeHtml(e.ip)}</b>`,
+                count: uiCountLabel(e.volume || 0, 'message', 'messages'),
+                sub: `From <b>${escapeHtml(e.header_from || '-')}</b>${e.envelope_from ? ` · envelope ${escapeHtml(e.envelope_from)}` : ''}`,
+                tags: `${e.spf_aligned ? dmarcTag('ok', 'SPF aligned') : dmarcTag('fail', `SPF ${e.spf_result || 'fail'}`)}${e.dkim_aligned ? dmarcTag('ok', 'DKIM aligned') : dmarcTag('fail', `DKIM ${e.dkim_result || 'fail'}`)}`,
+                note: e.reporter ? `Reported by ${escapeHtml(e.reporter)}` : '' })).join('')}</div>
+            <table class="ui-dm-tbl ui-dm-tbl-wide"><thead><tr><th>Address</th><th>From</th><th class="ui-dm-hm">Envelope from</th><th class="r">Messages</th><th>SPF</th><th>DKIM</th><th class="ui-dm-hm">Reported by</th></tr></thead><tbody>
             ${rows.map(e => `<tr><td class="ui-mono">${escapeHtml(e.ip)}</td><td>${escapeHtml(e.header_from || '-')}</td><td class="ui-dm-hm">${escapeHtml(e.envelope_from || '-')}</td><td class="r ui-num">${dmarcNum(e.volume)}</td>
                 <td>${e.spf_aligned ? dmarcTag('ok', 'Aligned') : dmarcTag('fail', e.spf_result || 'Fail')}</td><td>${e.dkim_aligned ? dmarcTag('ok', 'Aligned') : dmarcTag('fail', e.dkim_result || 'Fail')}</td>
                 <td class="ui-dm-hm ui-muted">${escapeHtml(e.reporter || '-')}</td></tr>`).join('')}</tbody></table>` : '<p class="ui-dm-empty">No details for this sender.</p>'}</div>`;
@@ -692,14 +801,21 @@ async function loadReportDetails(domain, reportDate, updateUrl = true) {
         const sender = s => s.asn_org || s.source_ip;
         dmarcView().innerHTML = `
             <div class="ui-dm-ttl"><div><small>DMARC reports</small><h2>${dmarcDay(reportDate, true)}</h2><p class="ui-muted">${escapeHtml(domain)}</p></div></div>
-            <div class="ui-dm-card"><header>That day</header><div class="ui-dm-strip">
+            <div class="ui-dm-card"><header>That day</header><div class="ui-dm-strip ui-dm-strip-facts">
                 <div><small>Messages</small><b class="is-big">${dmarcNum(t.total_messages)}</b></div>
                 <div><small>Passed DMARC</small><b class="is-big">${dmarcRate(t.dmarc_pass_pct, t.total_messages)}</b></div>
                 <div><small>SPF aligned</small><b class="is-big">${dmarcRate(t.spf_pass_pct, t.total_messages)}</b></div>
                 <div><small>DKIM aligned</small><b class="is-big">${dmarcRate(t.dkim_pass_pct, t.total_messages)}</b></div>
                 <div><small>Reported by</small><b>${escapeHtml((t.reporters || []).join(', ') || '-')}</b></div></div></div>
             <div class="ui-dm-card"><header>Who sent that day <span class="ui-count">${(r.sources || []).length}</span></header>
-            <table class="ui-dm-tbl"><thead><tr><th>Sender</th><th class="ui-dm-hm">Address</th><th class="ui-dm-hm">Envelope from</th><th class="r">Messages</th><th class="r">Passed DMARC</th><th class="r ui-dm-hm">SPF</th><th class="r ui-dm-hm">DKIM</th><th class="ui-dm-hm">Reported by</th></tr></thead><tbody>
+            <div class="ui-dm-mlist">${(r.sources || []).map(s => dmarcMRow({
+                title: `<button type="button" class="ui-dm-link">${escapeHtml(sender(s))}</button>`,
+                count: uiCountLabel(s.volume || 0, 'message', 'messages'),
+                sub: `<span class="ui-mono">${escapeHtml(s.source_ip)}</span>${s.envelope_from ? ` · envelope ${escapeHtml(s.envelope_from)}` : ''}`,
+                tags: `${dmarcRateTag('DMARC', s.dmarc_pass_pct, s.volume)}${dmarcRateTag('SPF', s.spf_pass_pct, s.volume)}${dmarcRateTag('DKIM', s.dkim_pass_pct, s.volume)}`,
+                note: s.reporter ? `Reported by ${escapeHtml(s.reporter)}` : '',
+                action: `loadSourceDetails('${name}', '${escapeJsArg(s.source_ip)}')` })).join('')}</div>
+            <table class="ui-dm-tbl ui-dm-tbl-wide"><thead><tr><th>Sender</th><th class="ui-dm-hm">Address</th><th class="ui-dm-hm">Envelope from</th><th class="r">Messages</th><th class="r">Passed DMARC</th><th class="r ui-dm-hm">SPF</th><th class="r ui-dm-hm">DKIM</th><th class="ui-dm-hm">Reported by</th></tr></thead><tbody>
             ${(r.sources || []).map(s => `<tr class="is-go" onclick="loadSourceDetails('${name}', '${escapeJsArg(s.source_ip)}')"><td><button type="button" class="ui-dm-link">${escapeHtml(sender(s))}</button></td>
                 <td class="ui-dm-hm ui-mono">${escapeHtml(s.source_ip)}</td><td class="ui-dm-hm">${escapeHtml(s.envelope_from || '-')}</td><td class="r ui-num">${dmarcNum(s.volume)}</td>
                 <td class="r">${dmarcRate(s.dmarc_pass_pct, s.volume)}</td><td class="r ui-dm-hm">${dmarcRate(s.spf_pass_pct, s.volume)}</td>
@@ -724,13 +840,19 @@ async function loadTLSReportDetails(domain, reportDate, updateUrl = true) {
         const s = r.stats || {};
         dmarcView().innerHTML = `
             <div class="ui-dm-ttl"><div><small>TLS reports</small><h2>${dmarcDay(reportDate, true)}</h2><p class="ui-muted">${escapeHtml(domain)}</p></div></div>
-            <div class="ui-dm-card"><header>That day</header><div class="ui-dm-strip">
+            <div class="ui-dm-card"><header>That day</header><div class="ui-dm-strip ui-dm-strip-facts">
                 <div><small>Sessions</small><b class="is-big">${dmarcNum(s.total_sessions)}</b></div>
                 <div><small>Encrypted</small><b class="is-big">${dmarcRate(s.success_rate, s.total_sessions)}</b></div>
                 <div><small>Failed</small><b class="is-big ${s.total_fail ? 'ui-text-fail' : ''}">${dmarcNum(s.total_fail)}</b></div>
                 <div><small>Receivers reporting</small><b class="is-big">${dmarcNum(s.total_providers)}</b></div></div></div>
             <div class="ui-dm-card"><header>Who reported <span class="ui-count">${(r.providers || []).length}</span></header>
-            <table class="ui-dm-tbl"><thead><tr><th>Reported by</th><th class="ui-dm-hm">Policy</th><th class="ui-dm-hm">MX</th><th class="r">Sessions</th><th class="r">Failed</th><th class="r">Encrypted</th></tr></thead><tbody>
+            <div class="ui-dm-mlist">${(r.providers || []).map(p => dmarcMRow({
+                title: `<b>${escapeHtml(p.organization_name)}</b>`,
+                count: uiCountLabel(p.total_sessions || 0, 'session', 'sessions'),
+                sub: [p.contact_info ? escapeHtml(p.contact_info) : '', escapeHtml((p.policies || []).flatMap(q => q.mx_host || []).join(', '))].filter(Boolean).join(' · '),
+                tags: `${(p.policies || []).map(q => dmarcTag('mut', String(q.policy_type || '').toUpperCase())).join('')}${dmarcRateTag('Encrypted', p.success_rate, p.total_sessions)}${p.failed_sessions ? dmarcTag('fail', `${dmarcNum(p.failed_sessions)} failed`) : ''}`,
+                note: (p.policies || []).flatMap(q => q.failure_details || []).map(f => `${escapeHtml(f.result_type || 'Failure')}: ${dmarcNum(f.failed_session_count)} sessions${f.receiving_mx_hostname ? ` to ${escapeHtml(f.receiving_mx_hostname)}` : ''}`).join('; ') })).join('')}</div>
+            <table class="ui-dm-tbl ui-dm-tbl-wide"><thead><tr><th>Reported by</th><th class="ui-dm-hm">Policy</th><th class="ui-dm-hm">MX</th><th class="r">Sessions</th><th class="r">Failed</th><th class="r">Encrypted</th></tr></thead><tbody>
             ${(r.providers || []).map(p => `<tr><td><b>${escapeHtml(p.organization_name)}</b>${p.contact_info ? `<small class="ui-dm-sub">${escapeHtml(p.contact_info)}</small>` : ''}</td>
                 <td class="ui-dm-hm">${(p.policies || []).map(q => dmarcTag('mut', String(q.policy_type || '').toUpperCase())).join(' ')}</td>
                 <td class="ui-dm-hm ui-mono">${escapeHtml((p.policies || []).flatMap(q => q.mx_host || []).join(', '))}</td><td class="r ui-num">${dmarcNum(p.total_sessions)}</td>
@@ -838,13 +960,13 @@ function updateDmarcControls() {
         syncContainer.classList.remove('hidden');
         if (syncBtn) {
             syncBtn.disabled = true;
-            syncBtn.title = 'IMAP sync is not set up';
+            syncBtn.title = 'Fetching reports needs IMAP set up in Settings';
         }
         lastSyncInfo.innerHTML = `<span class="ui-muted">Not set up</span>
             <button type="button" onclick="navigateTo('settings', { sub: 'dmarc_imap' })" class="ui-link-row ui-link">Set up IMAP</button>`;
     } else if (dmarcImapStatus && dmarcImapStatus.enabled) {
         syncContainer.classList.remove('hidden');
-        if (syncBtn && syncBtn.title === 'IMAP sync is not set up') {
+        if (syncBtn && syncBtn.title === 'Fetching reports needs IMAP set up in Settings') {
             syncBtn.disabled = false;
             syncBtn.title = '';
         }
@@ -854,11 +976,11 @@ function updateDmarcControls() {
             const tone = sync.status === 'error' ? 'ui-text-fail' : sync.status === 'running' ? 'ui-text-info' : 'ui-text-ok';
             const state = sync.status === 'error' ? 'failed' : sync.status === 'running' ? 'running' : 'done';
             lastSyncInfo.innerHTML = `
-                <span class="${tone}" title="${escapeHtml(formatTime(sync.started_at))}">Last sync ${state}: ${formatAgo(sync.started_at)}</span>
+                <span class="${tone}" title="${escapeHtml(formatTime(sync.started_at))}">Last fetch ${state}: ${formatAgo(sync.started_at)}</span>
                 <button type="button" onclick="showDmarcSyncHistory()" class="ui-link-row ui-link">View History</button>
             `;
         } else {
-            lastSyncInfo.innerHTML = '<span class="ui-muted">Never synced</span>';
+            lastSyncInfo.innerHTML = '<span class="ui-muted">Never fetched</span>';
         }
     } else {
         syncContainer.classList.add('hidden');
@@ -874,7 +996,7 @@ async function triggerDmarcSync() {
     const btnText = document.getElementById('dmarc-sync-btn-text');
 
     if (!dmarcImapStatus || !dmarcImapStatus.enabled) {
-        showToast('IMAP sync is not enabled', 'error');
+        showToast('Fetching reports needs IMAP set up in Settings', 'error');
         return;
     }
 
@@ -932,7 +1054,7 @@ async function showDmarcSyncHistory() {
         const data = await response.json();
 
         if (data.data.length === 0) {
-            content.innerHTML = '<p class="ui-empty">No sync history yet</p>';
+            content.innerHTML = '<p class="ui-empty">No fetches yet</p>';
             return;
         }
 
@@ -956,8 +1078,8 @@ async function showDmarcSyncHistory() {
         `;
 
     } catch (error) {
-        console.error('Error loading sync history:', error);
-        content.innerHTML = '<p class="ui-empty ui-text-fail">Failed to load sync history</p>';
+        console.error('Error loading the fetch history:', error);
+        content.innerHTML = '<p class="ui-empty ui-text-fail">Could not load the fetch history. Try again.</p>';
     }
 }
 
