@@ -2582,6 +2582,12 @@ button.ui-dm-node:hover { border-color: var(--ui-ink); }
     .ui-dm-strip > div { border-top: 1px solid var(--dm-line); }
     .ui-dm-strip > div:nth-child(-n+2) { border-top: 0; }
     .ui-dm-strip > div:nth-child(odd) { border-inline-start: 0; }
+    /* An odd last figure takes the whole line instead of half of it */
+    .ui-dm-strip > div:last-child:nth-child(odd) { grid-column: 1 / -1; }
+    /* Cards with three figures to a line, and figures with long values on a line of their own */
+    .ui-dm-cards-3 tr { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .ui-dm-cards td.ui-dm-wide { grid-column: 1 / -1; }
+    .ui-dm-cards td.ui-dm-note:first-child { font-size: 13px; }
     .ui-dm-pol { grid-template-columns: 1fr; }
     /* A record's facts: the name beside its value, as on a wide screen */
     .ui-dm-kv { grid-template-columns: minmax(96px, auto) minmax(0, 1fr); gap: 6px 12px; }
