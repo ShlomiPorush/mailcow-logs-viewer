@@ -478,8 +478,8 @@ function renderMailboxStatsAccordion(mailboxes, page = 1, totalPages = 1, total 
 
                 <div id="accordion-content-${index}" class="ui-domain-details${isExpanded ? '' : ' hidden'}" onclick="event.stopPropagation()">
                     <div class="ui-md-ids">
-                        <div class="ui-md-fact ui-md-fact-inline"><span>Quota Used</span><div>${mb.quota_used_formatted} / ${mb.quota_formatted}</div><small class="ui-muted">${mb.percent_in_use || 0}% used</small></div>
-                        <div class="ui-md-fact"><span>Messages in Mailbox</span><div>${(mb.messages_in_mailbox || 0).toLocaleString()}</div></div>
+                        <div class="ui-md-fact ui-md-fact-inline"><span>Quota<span class="ui-ms-wide-only"> Used</span></span><div>${mb.quota_used_formatted} / ${mb.quota_formatted}</div><small class="ui-muted">${mb.percent_in_use || 0}%<span class="ui-ms-wide-only"> used</span></small><small class="ui-muted ui-ms-msgs">${(mb.messages_in_mailbox || 0).toLocaleString()} messages</small></div>
+                        <div class="ui-md-fact ui-ms-msgs-fact"><span>Messages in Mailbox</span><div>${(mb.messages_in_mailbox || 0).toLocaleString()}</div></div>
                         <div class="ui-md-fact"><span>Created / Modified</span><div>${mb.created ? formatTime(mb.created) : 'N/A'}</div><small class="ui-muted">${mb.modified ? formatTime(mb.modified) : 'N/A'}</small></div>
                         <div class="ui-md-fact"><span>Rate Limit</span><div>${escapeHtml(mailboxRateLimitLabel(mb))}</div></div>
                         ${lastLogin('IMAP', mb.last_imap_login)}
