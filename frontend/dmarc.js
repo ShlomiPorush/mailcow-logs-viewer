@@ -294,7 +294,7 @@ function dmarcChart(daily, opts = {}) {
     const short = v => v >= 10000 ? `${(v / 1000).toFixed(1).replace(/\.0$/, '')}k` : dmarcNum(v);
     const domain = dmarcState.currentDomain ? escapeJsArg(dmarcState.currentDomain) : '';
     const words = opts.tls ? ['encrypted', 'failed'] : ['passed', 'failed'];
-    return `<div class="ui-dm-legend"><span><i class="is-ok"></i>${opts.tls ? 'Encrypted' : 'Passed DMARC'}</span><span><i class="is-fail"></i>Failed</span>${opts.open !== null && domain ? '<span>A day opens its reports</span>' : ''}</div>
+    return `<div class="ui-dm-legend"><span><i class="is-ok"></i>${opts.tls ? 'Encrypted' : 'Passed DMARC'}</span><span><i class="is-fail"></i>Failed</span>${opts.open !== null && domain ? '<span class="ui-dm-hint">A day opens its reports</span>' : ''}</div>
         <div class="ui-dm-chart"><div class="ui-dm-grid" style="height:${h}px">${[top, top * .75, top * .5, top * .25, 0].map(t => `<i><span>${short(Math.round(t))}</span></i>`).join('')}</div>
         <div class="ui-dm-cols" style="height:${h}px">${daily.map(x => {
             const tip = `${dmarcDay(x.date)}: ${dmarcNum(ok(x))} ${words[0]}, ${dmarcNum(bad(x))} ${words[1]}`;
@@ -493,7 +493,7 @@ function dmarcRecordsCard(x) {
 function dmarcSendersCard(x) {
     if (!x.groups.length) return '';
     const name = escapeJsArg(x.name);
-    return `<div class="ui-dm-card"><header>Senders <span class="ui-count">${x.groups.length}</span><small>who sent mail as ${escapeHtml(x.name)}, failing first</small></header>
+    return `<div class="ui-dm-card"><header>Senders <span class="ui-count">${x.groups.length}</span><small class="ui-dm-hint">who sent mail as ${escapeHtml(x.name)}, failing first</small></header>
         <table class="ui-dm-tbl"><thead><tr><th>Sender</th><th class="r">Messages</th><th class="r">Passed DMARC</th><th class="r ui-dm-hm">SPF aligned</th><th class="r ui-dm-hm">DKIM aligned</th><th class="r ui-dm-hm">Addresses</th></tr></thead><tbody>
         ${x.groups.map(g => `<tr class="is-go" onclick="loadSourceDetails('${name}', '${escapeJsArg(g.ips[0].source_ip)}')"><td><button type="button" class="ui-dm-link">${escapeHtml(g.name)}</button>${g.place ? `<small class="ui-dm-sub">${escapeHtml(g.place)}</small>` : ''}</td>
             <td class="r ui-num">${dmarcNum(g.total)}</td><td class="r">${dmarcRate(g.passPct, g.total)}</td>
@@ -573,6 +573,7 @@ async function openDmarcRecord(kind, domain) {
     modal.classList.remove('hidden');
     try {
         const x = await dmarcLoadDomain(domain);
+        dmarcRecordDomain = x;
         content.innerHTML = kind === 'tls' ? dmarcTlsRecord(x) : dmarcDmarcRecord(x);
     } catch (error) {
         content.innerHTML = `<p class="ui-dm-empty">Could not read the record: ${escapeHtml(error.message)}.</p>`;
@@ -594,20 +595,76 @@ function dmarcCopyBlock(text) {
     return `<div class="ui-dm-code"><span>${escapeHtml(text)}</span><button type="button" class="ui-btn ui-btn-sm" onclick="copyToClipboard('${escapeJsArg(text)}', event)">Copy</button></div>`;
 }
 
-function dmarcDmarcRecord(x) {
+// The domain shown in the record window, so a picked policy can be explained
+let dmarcRecordDomain = null;
+const DMARC_POLICIES = [
+    ['none', 'None', 'Mail that fails is still delivered. Reports only.'],
+    ['quarantine', 'Quarantine', 'Mail that fails goes to spam.'],
+    ['reject', 'Reject', 'Mail that fails is refused.'],
+];
+
+function dmarcCurrentPolicy(x) {
     const settings = x.record.settings || {};
-    const current = x.record.record ? String(x.record.policy || settings.policy || '').toLowerCase() : '';
-    const next = current === 'reject' ? null : current === 'quarantine' ? 'reject' : 'quarantine';
+    return x.record.record ? String(x.record.policy || settings.policy || '').toLowerCase() : '';
+}
+
+// What a policy would do for the domain, and the record that sets it
+function dmarcPolicyPlan(x, pick) {
+    const current = dmarcCurrentPolicy(x);
+    if (pick === current) return `<p class="ui-dm-note">${pick === 'reject' ? 'The strictest policy is in place.' : 'This is the policy in place.'}</p>`;
+    const settings = x.record.settings || {};
+    const rua = (settings.aggregate_report_uris || [])[0] || `mailto:dmarc@${x.name}`;
+    const record = dmarcCopyBlock(`_dmarc.${x.name}  TXT  "v=DMARC1; p=${pick}; rua=${rua}"`);
+    if (pick === 'none') return `<p class="ui-dm-note">With p=none, mail that fails is delivered and only reported.</p>${record}`;
     const failing = x.groups.filter(g => g.passPct < 50).reduce((s, g) => s + g.total, 0);
     const ready = x.groups.filter(g => g.passPct >= 50).every(g => g.passPct >= 95);
-    const rua = (settings.aggregate_report_uris || [])[0] || `mailto:dmarc@${x.name}`;
+    return `<p class="ui-dm-note">${ready ? '<b class="ui-text-ok">Ready.</b> Every sender that passes, passes on 95% or more.' : '<b class="ui-text-warn">Not yet.</b> A sender passes on under 95%: fix it first.'}
+        With p=${pick}, receivers would have ${pick === 'reject' ? 'refused' : 'sent to spam'} <b>${dmarcNum(failing)}</b> messages in the last 30 days, all from senders that fail.</p>${record}`;
+}
+
+// The policies as a radio group; the next stricter one is picked first
+function dmarcPolicyChoice(x, pick) {
+    const current = dmarcCurrentPolicy(x);
+    return `<div class="ui-dm-pol" role="radiogroup" aria-label="Policy" onkeydown="dmarcPolicyKey(event)">${DMARC_POLICIES.map(([id, title, text]) => `
+        <button type="button" role="radio" class="${pick === id ? 'is-on' : ''}" aria-checked="${pick === id}" tabindex="${pick === id ? 0 : -1}" data-policy="${id}" onclick="dmarcPickPolicy('${id}')">
+            <span class="ui-dm-pol-t">${title}${current === id ? ` ${dmarcTag('mut', 'Now')}` : ''}</span><span class="ui-dm-pol-d">${text}</span></button>`).join('')}</div>
+        <div id="dmarc-policy-plan" aria-live="polite">${dmarcPolicyPlan(x, pick)}</div>`;
+}
+
+function dmarcPickPolicy(pick) {
+    const x = dmarcRecordDomain;
+    const box = document.querySelector('#dmarc-record-content .ui-dm-pol');
+    if (!x || !box) return;
+    box.querySelectorAll('[role="radio"]').forEach(b => {
+        const on = b.dataset.policy === pick;
+        b.classList.toggle('is-on', on);
+        b.setAttribute('aria-checked', String(on));
+        b.tabIndex = on ? 0 : -1;
+        if (on) b.focus();
+    });
+    document.getElementById('dmarc-policy-plan').innerHTML = dmarcPolicyPlan(x, pick);
+}
+
+// Arrow keys move the pick, as in any radio group
+function dmarcPolicyKey(event) {
+    const step = { ArrowDown: 1, ArrowRight: 1, ArrowUp: -1, ArrowLeft: -1 }[event.key];
+    if (!step) return;
+    event.preventDefault();
+    const ids = DMARC_POLICIES.map(p => p[0]);
+    const at = ids.indexOf(event.target.closest('[role="radio"]')?.dataset.policy);
+    dmarcPickPolicy(ids[(at + step + ids.length) % ids.length]);
+}
+
+function dmarcDmarcRecord(x) {
+    const settings = x.record.settings || {};
+    const current = dmarcCurrentPolicy(x);
+    const next = current === 'reject' ? 'reject' : current === 'quarantine' ? 'reject' : 'quarantine';
     // Report URIs come from DNS: only mailto: becomes a link, anything else stays text
     const formatUriAsEmail = (uri) => {
         const text = String(uri).trim();
         if (!/^mailto:/i.test(text)) return escapeHtml(text);
         return `<a href="${escapeHtml(text)}" class="ui-link">${escapeHtml(text.replace(/^mailto:/i, ''))}</a>`;
     };
-    const option = (id, title, text) => `<div class="${current === id ? 'is-on' : ''}"><h4>${title}${current === id ? ` ${dmarcTag('mut', 'Now')}` : ''}</h4><p>${text}</p></div>`;
     return `${x.record.record ? `${dmarcCopyBlock(x.record.record)}
             <dl class="ui-dm-kv"><dt>Policy</dt><dd>${escapeHtml(settings.policy || current || '-')}</dd>
             <dt>Subdomains</dt><dd>${escapeHtml(settings.subdomain_policy || 'same as the domain')}</dd>
@@ -618,11 +675,8 @@ function dmarcDmarcRecord(x) {
             ${(x.record.warnings || []).map(w => `<p class="ui-text-warn ui-dm-note">${escapeHtml(w)}</p>`).join('')}`
         : `<p class="ui-dm-lead"><b class="ui-text-fail">No DMARC record at _dmarc.${escapeHtml(x.name)}.</b> Receivers have no policy to refuse mail that pretends to be you.</p>`}
         <dl class="ui-dm-kv"><dt>SPF</dt><dd>${Math.round(x.spfPct)}% of your mail is aligned with SPF</dd><dt>DKIM</dt><dd>${x.dkimSeen ? 'Your mail is signed' : 'No signed mail in the reports'}</dd></dl>
-        <h4 class="ui-dm-h4">Policy</h4>
-        <div class="ui-dm-pol">${option('none', 'None', 'Mail that fails is still delivered. Reports only.')}${option('quarantine', 'Quarantine', 'Mail that fails goes to spam.')}${option('reject', 'Reject', 'Mail that fails is refused.')}</div>
-        ${next ? `<p class="ui-dm-note">${ready ? '<b class="ui-text-ok">Ready.</b> Every sender that passes, passes on 95% or more.' : '<b class="ui-text-warn">Not yet.</b> A sender passes on under 95%: fix it first.'}
-            With p=${next}, receivers would have ${next === 'reject' ? 'refused' : 'sent to spam'} <b>${dmarcNum(failing)}</b> messages in the last 30 days, all from senders that fail.</p>
-            ${dmarcCopyBlock(`_dmarc.${x.name}  TXT  "v=DMARC1; p=${next}; rua=${rua}"`)}` : '<p class="ui-dm-note ui-text-ok">The strictest policy is in place.</p>'}`;
+        <h4 class="ui-dm-h4">Policy <small class="ui-muted">pick one to see what it would do</small></h4>
+        ${dmarcPolicyChoice(x, next)}`;
 }
 
 function dmarcTlsRecord(x) {

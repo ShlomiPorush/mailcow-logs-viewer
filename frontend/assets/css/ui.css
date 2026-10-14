@@ -2544,10 +2544,12 @@ button.ui-dm-node:hover { border-color: var(--ui-ink); }
 .ui-dm-kv { display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 6px 14px; margin: 12px 0 0; font-size: 13px; }
 .ui-dm-kv dt { color: var(--ui-muted); } .ui-dm-kv dd { margin: 0; overflow-wrap: anywhere; }
 .ui-dm-pol { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
-.ui-dm-pol > div { padding: 12px; border: 1px solid var(--dm-line); border-radius: 10px; }
-.ui-dm-pol > div.is-on { padding: 11px; border: 2px solid var(--ui-focus); background: color-mix(in srgb, var(--ui-focus) 6%, transparent); }
-.ui-dm-pol h4 { display: flex; justify-content: space-between; gap: 6px; margin: 0 0 4px; font-size: 14px; }
-.ui-dm-pol p { margin: 0; color: var(--ui-muted); font-size: 12.5px; }
+.ui-dm-pol > button { padding: 12px; border: 1px solid var(--dm-line); border-radius: 10px; background: none; color: inherit; font: inherit; text-align: start; cursor: pointer; }
+.ui-dm-pol > button:hover { border-color: color-mix(in srgb, var(--ui-focus) 50%, var(--dm-line)); }
+.ui-dm-pol > button:focus-visible { outline: 2px solid var(--ui-focus); outline-offset: 2px; }
+.ui-dm-pol > button.is-on { padding: 11px; border: 2px solid var(--ui-focus); background: color-mix(in srgb, var(--ui-focus) 6%, transparent); }
+.ui-dm-pol-t { display: flex; justify-content: space-between; gap: 6px; margin: 0 0 4px; font-size: 14px; font-weight: 650; }
+.ui-dm-pol-d { display: block; color: var(--ui-muted); font-size: 12.5px; }
 .ui-dm-code { display: flex; align-items: center; gap: 10px; margin-top: 10px; padding: 10px 12px; border: 1px solid var(--dm-line); border-radius: 8px; background: var(--dm-head);
     font: 12.5px var(--ui-mono); overflow-wrap: anywhere; }
 .ui-dm-code span { flex: 1; min-width: 0; }
@@ -2572,7 +2574,10 @@ button.ui-dm-node:hover { border-color: var(--ui-ink); }
     .ui-dm-strip > div { border-top: 1px solid var(--dm-line); }
     .ui-dm-strip > div:nth-child(-n+2) { border-top: 0; }
     .ui-dm-strip > div:nth-child(odd) { border-inline-start: 0; }
-    .ui-dm-pol, .ui-dm-kv { grid-template-columns: 1fr; }
+    .ui-dm-pol { grid-template-columns: 1fr; }
+    /* A record's facts: the name beside its value, as on a wide screen */
+    .ui-dm-kv { grid-template-columns: minmax(96px, auto) minmax(0, 1fr); gap: 6px 12px; }
+    .ui-dm-hint { display: none; }
     .ui-dm-ttl h2 { font-size: 22px; }
     .ui-dm-node { padding: 6px 8px; }
     .ui-dm-node small { font-size: 11px; }
