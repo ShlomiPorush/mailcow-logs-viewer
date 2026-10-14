@@ -308,9 +308,12 @@ function dmarcChart(daily, opts = {}) {
 
 function dmarcTodoCard(tasks, withDomain = false) {
     if (!tasks.length) return '<div class="ui-dm-card"><header>To do</header><p class="ui-dm-empty">Nothing to do. The records are in place and every sender passes.</p></div>';
-    return `<div class="ui-dm-card"><header>To do <span class="ui-count">${tasks.length}</span></header>${tasks.slice(0, 8).map(t => `
-        <div class="ui-dm-task ui-dm-${t.tone}"><div><b>${escapeHtml(t.title)}</b>${withDomain ? `<small class="ui-dm-task-domain">${escapeHtml(t.domain)}</small>` : ''}
-            <p>${escapeHtml(t.text)}</p><button type="button" class="ui-btn ui-btn-sm" onclick="${t.action}">${escapeHtml(t.label)}</button></div></div>`).join('')}
+    return `<div class="ui-dm-card ui-alerts-stack"><header>To do <span class="ui-count">${tasks.length}</span></header>${tasks.slice(0, 8).map(t => `
+        <div class="ui-alert ui-alert-${t.tone === 'mut' ? 'info' : t.tone}">
+            <span class="ui-alert-bar"></span>
+            <div class="ui-alert-text"><div class="ui-alert-title"><b>${escapeHtml(t.title)}</b></div>${withDomain ? `<small class="ui-dm-task-domain">${escapeHtml(t.domain)}</small>` : ''}<p>${escapeHtml(t.text)}</p></div>
+            <button type="button" class="ui-btn ui-btn-sm" onclick="${t.action}">${escapeHtml(t.label)}</button>
+        </div>`).join('')}
         ${tasks.length > 8 ? `<p class="ui-dm-more">and ${tasks.length - 8} more</p>` : ''}</div>`;
 }
 
@@ -838,13 +841,13 @@ function updateDmarcControls() {
         syncContainer.classList.remove('hidden');
         if (syncBtn) {
             syncBtn.disabled = true;
-            syncBtn.title = 'IMAP sync is not set up';
+            syncBtn.title = 'Fetching reports needs IMAP set up in Settings';
         }
         lastSyncInfo.innerHTML = `<span class="ui-muted">Not set up</span>
             <button type="button" onclick="navigateTo('settings', { sub: 'dmarc_imap' })" class="ui-link-row ui-link">Set up IMAP</button>`;
     } else if (dmarcImapStatus && dmarcImapStatus.enabled) {
         syncContainer.classList.remove('hidden');
-        if (syncBtn && syncBtn.title === 'IMAP sync is not set up') {
+        if (syncBtn && syncBtn.title === 'Fetching reports needs IMAP set up in Settings') {
             syncBtn.disabled = false;
             syncBtn.title = '';
         }
@@ -854,11 +857,11 @@ function updateDmarcControls() {
             const tone = sync.status === 'error' ? 'ui-text-fail' : sync.status === 'running' ? 'ui-text-info' : 'ui-text-ok';
             const state = sync.status === 'error' ? 'failed' : sync.status === 'running' ? 'running' : 'done';
             lastSyncInfo.innerHTML = `
-                <span class="${tone}" title="${escapeHtml(formatTime(sync.started_at))}">Last sync ${state}: ${formatAgo(sync.started_at)}</span>
+                <span class="${tone}" title="${escapeHtml(formatTime(sync.started_at))}">Last fetch ${state}: ${formatAgo(sync.started_at)}</span>
                 <button type="button" onclick="showDmarcSyncHistory()" class="ui-link-row ui-link">View History</button>
             `;
         } else {
-            lastSyncInfo.innerHTML = '<span class="ui-muted">Never synced</span>';
+            lastSyncInfo.innerHTML = '<span class="ui-muted">Never fetched</span>';
         }
     } else {
         syncContainer.classList.add('hidden');
@@ -874,7 +877,7 @@ async function triggerDmarcSync() {
     const btnText = document.getElementById('dmarc-sync-btn-text');
 
     if (!dmarcImapStatus || !dmarcImapStatus.enabled) {
-        showToast('IMAP sync is not enabled', 'error');
+        showToast('Fetching reports needs IMAP set up in Settings', 'error');
         return;
     }
 
@@ -932,7 +935,7 @@ async function showDmarcSyncHistory() {
         const data = await response.json();
 
         if (data.data.length === 0) {
-            content.innerHTML = '<p class="ui-empty">No sync history yet</p>';
+            content.innerHTML = '<p class="ui-empty">No fetches yet</p>';
             return;
         }
 
@@ -956,8 +959,8 @@ async function showDmarcSyncHistory() {
         `;
 
     } catch (error) {
-        console.error('Error loading sync history:', error);
-        content.innerHTML = '<p class="ui-empty ui-text-fail">Failed to load sync history</p>';
+        console.error('Error loading the fetch history:', error);
+        content.innerHTML = '<p class="ui-empty ui-text-fail">Could not load the fetch history. Try again.</p>';
     }
 }
 

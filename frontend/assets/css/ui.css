@@ -2511,12 +2511,12 @@ button.ui-dm-node:hover { border-color: var(--ui-ink); }
 .ui-dm-node b::before { content: ""; flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--dm-t); }
 .ui-dm-node small { display: block; margin-top: 2px; color: var(--ui-muted); font-size: 12px; }
 /* The side column: to do and the records */
-.ui-dm-task { display: grid; grid-template-columns: 4px minmax(0, 1fr); gap: 12px; padding: 12px 16px; border-bottom: 1px solid var(--dm-line); }
-.ui-dm-task:last-of-type { border-bottom: 0; }
-.ui-dm-task::before { content: ""; border-radius: 2px; background: var(--dm-t); }
-.ui-dm-task b { display: block; font-weight: 650; }
+.ui-alerts-stack .ui-alert { display: grid; grid-template-columns: 4px minmax(0, 1fr); column-gap: 14px; row-gap: 8px; }
+.ui-alerts-stack .ui-alert-bar { grid-row: 1 / span 2; }
+.ui-alerts-stack .ui-alert > .ui-btn { grid-column: 2; justify-self: start; align-self: start; margin-inline-start: 0; }
+.ui-alerts-stack > header + .ui-alert { border-top: 0; }
+.ui-alert-ok .ui-alert-bar { background: var(--ui-ok); }
 .ui-dm-task-domain { display: block; font-weight: 600; font-size: 12px; }
-.ui-dm-task p { margin: 3px 0 8px; color: var(--ui-muted); font-size: 12.5px; }
 .ui-dm-rec { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 10px; align-items: center; width: 100%; padding: 11px 16px; border: 0; border-bottom: 1px solid var(--dm-line);
     background: none; color: inherit; font: inherit; text-align: start; cursor: pointer; }
 .ui-dm-rec:last-child { border-bottom: 0; }
@@ -2549,11 +2549,12 @@ button.ui-dm-node:hover { border-color: var(--ui-ink); }
     .ui-dm-tbl th, .ui-dm-tbl td { padding: 10px; }
     /* The domains table: each domain a card with every figure, named */
     .ui-dm-cards thead { display: none; }
-    .ui-dm-cards tr { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 14px; padding: 12px 16px; border-bottom: 1px solid var(--dm-line); }
+    .ui-dm-cards tr { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px 20px; padding: 12px 16px; border-bottom: 1px solid var(--dm-line); }
     .ui-dm-cards tr:last-child { border-bottom: 0; }
-    .ui-dm-cards td, .ui-dm-cards td.ui-dm-hm { display: grid; justify-items: start; gap: 3px; padding: 0; border: 0; text-align: start; }
-    .ui-dm-cards td:first-child { grid-column: 1 / -1; font-size: 15px; }
-    .ui-dm-cards td[data-label]::before { content: attr(data-label); color: var(--ui-muted); font-size: 12px; }
+    .ui-dm-cards td, .ui-dm-cards td.ui-dm-hm { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; padding: 0; border: 0; text-align: end; }
+    .ui-dm-cards td:first-child { grid-column: 1 / -1; justify-content: flex-start; flex-wrap: wrap; gap: 2px 8px; font-size: 15px; }
+    .ui-dm-cards td:first-child .ui-dm-sup { align-self: center; margin: 0; font-size: 12px; line-height: normal; }
+    .ui-dm-cards td[data-label]::before { content: attr(data-label); flex: none; color: var(--ui-muted); font-size: 12px; text-align: start; }
     .ui-dm-cards tr.is-go:hover { background: color-mix(in srgb, var(--ui-ink) 3%, transparent); }
     .ui-dm-cards tr.is-go:hover td { background: none; }
     .ui-dm-strip { grid-template-columns: 1fr 1fr; }
@@ -2701,6 +2702,17 @@ button.ui-dm-node:hover { border-color: var(--ui-ink); }
 .ui-head-links:not(:has(> :not(.hidden))) { display: none; }
 .ui-head-links > .ui-btn { height: auto; min-height: 0; padding: 0; border: 0; background: none; box-shadow: none; color: inherit; font-size: 12px; font-weight: 600; text-decoration: underline; text-underline-offset: 3px; }
 .ui-head-links > .ui-btn > svg { display: none; }
+/* An action shown as an icon on the title line keeps its name for screen readers */
+.ui-head-slot { gap: 8px; }
+.ui-head-slot > .ui-head-icon { width: 38px; padding: 0; justify-content: center; }
+.ui-head-slot > .ui-head-icon > svg { display: inline-block; }
+.ui-head-slot > .ui-head-icon > .ui-head-icon-text { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+/* Two actions beside it leave the title a little less room */
+.ui-page-head > div:has(> .ui-head-slot > .ui-head-icon:not(.hidden)) > .ui-h1 { font-size: 21px; }
+@media (max-width: 380px) {
+    .ui-page-head > div:has(> .ui-head-slot > .ui-head-icon:not(.hidden)) > .ui-h1 { font-size: 18px; }
+    .ui-head-slot:has(> .ui-head-icon:not(.hidden)) > .ui-head-primary { padding-inline: 10px; }
+}
 /* Everything of the DMARC head row has moved up; its empty row goes too */
 .ui-page-head:has(.ui-head-links) > #dmarc-header-actions { display: none; }
 .ui-dmarc-sync:not(:has(> :not(.hidden))) { display: none; }

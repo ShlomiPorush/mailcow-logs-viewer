@@ -619,12 +619,14 @@ function placeHeadPrimary(route, intro, title) {
     slot.className = 'ui-head-slot';
     title.after(slot);
     topbarMove(primary, slot);
-    // DMARC: the last fetch, Manage Reports and Upload Report share one line of links under the description
+    // DMARC: the last fetch and Manage Reports share one line of links under the description
     if (route === 'dmarc') {
         const links = document.createElement('div');
         links.className = 'ui-head-links';
         intro.appendChild(links);
-        ['dmarc-last-sync-info', 'dmarc-manage-btn', 'dmarc-upload-btn'].forEach(id => topbarMove(document.getElementById(id), links));
+        ['dmarc-last-sync-info', 'dmarc-manage-btn'].forEach(id => topbarMove(document.getElementById(id), links));
+        // Upload Report is an icon beside Fetch reports
+        topbarMove(document.getElementById('dmarc-upload-btn'), slot);
     }
 }
 
