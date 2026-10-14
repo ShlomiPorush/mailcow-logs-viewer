@@ -824,13 +824,10 @@ function updateDmarcControls() {
     const syncContainer = document.getElementById('dmarc-sync-container');
     const lastSyncInfo = document.getElementById('dmarc-last-sync-info');
 
-    // Upload Report: shown once the settings are known; off in Settings means a disabled button that says so
+    // Upload Report: only when manual upload is turned on in Settings
     if (uploadBtn) {
-        const known = !!dmarcConfiguration;
         const allowed = dmarcConfiguration?.manual_upload_enabled === true;
-        uploadBtn.classList.toggle('hidden', !known);
-        uploadBtn.setAttribute('aria-disabled', allowed ? 'false' : 'true');
-        uploadBtn.title = allowed ? '' : 'Manual upload is turned off in Settings, DMARC';
+        uploadBtn.classList.toggle('hidden', !allowed);
         const input = document.getElementById('dmarc-file-input');
         if (input) input.disabled = !allowed;
     }

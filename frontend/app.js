@@ -577,7 +577,7 @@ function topbarMove(el, target) {
 function topbarRestore() {
     for (const [el, mark] of topbarMoves.reverse()) mark.replaceWith(el);
     topbarMoves = [];
-    document.querySelectorAll('.ui-page-crumbs, .ui-head-slot').forEach(el => el.remove());
+    document.querySelectorAll('.ui-page-crumbs, .ui-head-slot, .ui-head-links').forEach(el => el.remove());
 }
 
 function placeTopbar(route = topbarRoute) {
@@ -619,7 +619,13 @@ function placeHeadPrimary(route, intro, title) {
     slot.className = 'ui-head-slot';
     title.after(slot);
     topbarMove(primary, slot);
-    if (route === 'dmarc') topbarMove(document.getElementById('dmarc-last-sync-info'), intro);
+    // DMARC: the last fetch, Manage Reports and Upload Report share one line of links under the description
+    if (route === 'dmarc') {
+        const links = document.createElement('div');
+        links.className = 'ui-head-links';
+        intro.appendChild(links);
+        ['dmarc-last-sync-info', 'dmarc-manage-btn', 'dmarc-upload-btn'].forEach(id => topbarMove(document.getElementById(id), links));
+    }
 }
 
 // The tab open on the page: Security's Overview, a Status tab, a Settings section

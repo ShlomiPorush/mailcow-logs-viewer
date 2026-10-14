@@ -2696,7 +2696,13 @@ button.ui-dm-node:hover { border-color: var(--ui-ink); }
 /* Without its icon the button leaves the title room for its help button */
 .ui-head-slot .ui-btn > svg { display: none; }
 @media (max-width: 380px) { .ui-page-head > div:has(> .ui-head-slot) > .ui-h1 { font-size: 24px; } }
-.ui-page-head > div > .ui-dmarc-sync-info { margin-top: 6px; }
+/* Phones, DMARC: the last fetch and the secondary actions as one line of links */
+.ui-head-links { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; margin-top: 6px; font-size: 12px; }
+.ui-head-links:not(:has(> :not(.hidden))) { display: none; }
+.ui-head-links > .ui-btn { height: auto; min-height: 0; padding: 0; border: 0; background: none; box-shadow: none; color: inherit; font-size: 12px; font-weight: 600; text-decoration: underline; text-underline-offset: 3px; }
+.ui-head-links > .ui-btn > svg { display: none; }
+/* Everything of the DMARC head row has moved up; its empty row goes too */
+.ui-page-head:has(.ui-head-links) > #dmarc-header-actions { display: none; }
 .ui-dmarc-sync:not(:has(> :not(.hidden))) { display: none; }
 .ui-head-tools:not(:has(> :not(.hidden))) { display: none; }
 /* The copy icon of a value that wraps stays on its last line, instead of a line of its own */
