@@ -862,7 +862,8 @@ function showMarkdownModal(title, markdownContent) {
             label: title,
             head: `<h3 class="ui-sheet-title">${escapeHtml(title)}</h3>`,
             body: `<div class="markdown-body">${htmlContent}</div>`,
-            expand: true
+            expand: true,
+            progress: true
         });
         return;
     }
@@ -4705,6 +4706,7 @@ function revealChangelogModal(modal) {
     // Only once it is shown: a hidden element cannot be scrolled
     const body = modal.querySelector('.ui-dialog-body');
     if (body) body.scrollTop = 0;
+    uiReadProgress(modal.querySelector('.ui-dialog-head'), body);
 }
 
 function closeChangelogModal() {
@@ -4921,7 +4923,8 @@ async function showHelpModal(docName) {
         }
 
         const markdown = await response.text();
-        showMarkdownModal(`Help - ${docName}`, markdown);
+        // The document's file name, read as words: Abuse_Protection is Abuse Protection
+        showMarkdownModal(`Help - ${docName.replace(/_/g, ' ')}`, markdown);
 
     } catch (error) {
         console.error('Failed to load help documentation:', error);
