@@ -1127,8 +1127,9 @@ function uiDialogSheet(backdrop) {
     dialog.addEventListener('touchcancel', end);
 }
 
-// A dialog is prepared each time it is shown or added to the page
-new MutationObserver(records => {
+// A dialog is prepared each time it is shown or added to the page (only where
+// there is a page to watch: the frontend tests load this file without one)
+if (typeof MutationObserver !== 'undefined' && document.body) new MutationObserver(records => {
     for (const record of records) {
         if (record.type === 'attributes') {
             const el = record.target;
