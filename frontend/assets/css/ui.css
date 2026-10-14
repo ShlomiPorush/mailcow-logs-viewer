@@ -1531,6 +1531,10 @@ button.ui-st-card:hover { outline: 1px solid var(--ui-line); }
     .ui-domain-details .ui-md-ids .ui-md-fact { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: baseline; column-gap: 12px; padding: 7px 12px; }
     .ui-domain-details .ui-md-ids .ui-md-fact > span { grid-row: 1 / span 2; margin: 0; }
     .ui-domain-details .ui-md-ids .ui-md-fact > div, .ui-domain-details .ui-md-ids .ui-md-fact > small { text-align: end; }
+    /* A short note stays on the value's line: "0 B / 1.0 GB · 0% used" */
+    .ui-domain-details .ui-md-ids .ui-md-fact-inline { grid-template-columns: minmax(0, 1fr) auto auto; column-gap: 6px; }
+    .ui-domain-details .ui-md-ids .ui-md-fact-inline > span { grid-row: auto; margin-inline-end: 6px; }
+    .ui-domain-details .ui-md-ids .ui-md-fact-inline > small::before { content: "· "; }
 }
 /* A DNS result in the domain list: the word on wide screens, an icon in its colour on a phone */
 .ui-dns-icon { display: none; }
