@@ -2117,12 +2117,6 @@ html .markdown-body .markdown-alert-caution .markdown-alert-title { color: var(-
 .ui-q-row[onclick] { cursor: pointer; }
 .ui-q-row[onclick]:hover { background: color-mix(in srgb, var(--ui-accent) 5%, transparent); }
 .ui-q-row .ui-row-actions { flex-wrap: wrap; }
-.ui-q-head { flex-wrap: nowrap; }
-.ui-q-head .ui-h2 { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ui-q-head .ui-select { flex: none; }
-@media (max-width: 760px) {
-    .ui-q-head .ui-select { height: 32px; font-size: 13px; }
-}
 
 /* Logs on narrow screens: the service picker is one closed row; it opens on demand */
 .ui-logs-side-toggle { display: none; }
@@ -2614,8 +2608,6 @@ button.ui-dm-node:hover { border-color: var(--ui-ink); }
     .ui-fbar-row > .ui-toolbar-gap { display: none; }
     .ui-fbar-row > .ui-btn, .ui-fbar-row > .ui-more-wrap > .ui-btn { padding-inline: 10px; font-size: 13px; }
 }
-/* A picker standing in for a select at the end of a list head keeps its place there */
-.ui-picker-slot:has(+ select.ui-head-actions) { margin-inline-start: auto; }
 /* A picker panel stays within the screen and scrolls when its list is long */
 .ui-picker-panel { max-width: calc(100vw - 16px); }
 .ui-picker-panel[role="listbox"] { max-height: min(420px, 60vh); overflow-y: auto; }

@@ -882,15 +882,20 @@
                 </div>
                 <div class="ui-scroll" id="quarantine-tab-messages" role="tabpanel">
                 <section class="ui-sec-block">
-                    <div class="ui-list-head ui-q-head"><h2 class="ui-h2">Quarantined Messages</h2>
-                        <select id="quarantine-sort" onchange="applyQuarantineSort()" class="ui-select ui-head-actions ui-select-auto" aria-label="Sort" data-picker-label="Sort">
-                            <option value="newest" data-short="Newest">Newest first</option>
-                            <option value="score_desc" data-short="Highest score">Score: high to low</option>
-                            <option value="score_asc" data-short="Lowest score">Score: low to high</option>
-                        </select>
-                    </div>
-                    <p class="ui-list-summary ui-q-summary"><span id="quarantine-count" class="ui-count"></span></p>
+                    <div class="ui-list-head"><h2 class="ui-h2">Quarantined Messages</h2></div>
+                    <div class="ui-panel ui-table-card">
+                    <section class="ui-panel ui-filters ui-fbar">
+                        <div class="ui-fbar-pickers">
+                            <select id="quarantine-sort" onchange="applyQuarantineSort()" class="ui-select" aria-label="Sort" data-picker-label="Sort" data-no-filter>
+                                <option value="newest" data-short="Newest">Newest first</option>
+                                <option value="score_desc" data-short="Highest score">Score: high to low</option>
+                                <option value="score_asc" data-short="Lowest score">Score: low to high</option>
+                            </select>
+                        </div>
+                    </section>
+                    <p class="ui-list-summary"><span id="quarantine-count" class="ui-count"></span></p>
                     <div id="quarantine-logs"><div class="ui-loading"><div class="loading"></div><p>Loading...</p></div></div>
+                    </div>
                 </section>
                 </div>
                 <!-- Auto-Rules tab (only with the read-write key) -->
