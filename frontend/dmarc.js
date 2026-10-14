@@ -483,8 +483,8 @@ function dmarcRecordsCard(x) {
     const noMail = ['No mail in the last 30 days', dmarcTag('mut', 'No data')];
     const rows = [
         ['DMARC', x.record.record ? `p=${policy || '?'}` : 'No record at _dmarc', policy === 'reject' ? dmarcTag('ok', 'Enforced') : policy === 'quarantine' ? dmarcTag('warn', 'Partial') : policy ? dmarcTag('warn', 'Monitoring') : dmarcTag('fail', 'Missing', true), 'dmarc'],
-        sent ? ['SPF', `${Math.round(x.spfPct)}% of mail aligned`, x.spfPct >= 95 ? dmarcTag('ok', 'OK') : dmarcTag('warn', 'Gaps'), 'dmarc'] : ['SPF', ...noMail, 'dmarc'],
-        sent ? ['DKIM', x.dkimSeen ? 'Your mail is signed' : 'No signed mail in the reports', x.dkimSeen ? dmarcTag('ok', 'OK') : dmarcTag('fail', 'Missing', true), 'dmarc'] : ['DKIM', ...noMail, 'dmarc'],
+        sent ? ['SPF', `${dmarcPct(x.spfPct)} of mail aligned`, x.spfPct >= 95 ? dmarcTag('ok', 'OK') : dmarcTag('warn', 'Gaps'), 'spf'] : ['SPF', ...noMail, 'spf'],
+        sent ? ['DKIM', x.dkimSeen ? 'Your mail is signed' : 'No signed mail in the reports', x.dkimSeen ? dmarcTag('ok', 'OK') : dmarcTag('fail', 'Missing', true), 'dkim'] : ['DKIM', ...noMail, 'dkim'],
         ['TLS-RPT', x.tlsRecord.record ? 'Receivers report encryption' : 'No record at _smtp._tls', x.tlsRecord.record ? dmarcTag('ok', 'OK') : dmarcTag('warn', 'Missing'), 'tls']];
     return `<div class="ui-dm-card"><header>Records</header>${rows.map(([label, sub, tag, kind]) =>
         `<button type="button" class="ui-dm-rec" onclick="openDmarcRecord('${kind}', '${name}')"><span><b>${label}</b><small>${escapeHtml(sub)}</small></span>${tag}<span class="ui-muted" aria-hidden="true">›</span></button>`).join('')}</div>`;
@@ -568,13 +568,14 @@ async function loadDomainOverview(domain, updateUrl = true) {
 async function openDmarcRecord(kind, domain) {
     const modal = document.getElementById('dmarc-record-modal');
     const content = document.getElementById('dmarc-record-content');
-    document.getElementById('dmarc-record-title').textContent = `${kind === 'tls' ? 'TLS-RPT' : 'DMARC'} record · ${domain}`;
+    const titles = { dmarc: 'DMARC record', tls: 'TLS-RPT record', spf: 'SPF', dkim: 'DKIM' };
+    document.getElementById('dmarc-record-title').textContent = `${titles[kind]} · ${domain}`;
     content.innerHTML = '<div class="ui-loading"><div class="loading"></div><p>Loading...</p></div>';
     modal.classList.remove('hidden');
     try {
         const x = await dmarcLoadDomain(domain);
         dmarcRecordDomain = x;
-        content.innerHTML = kind === 'tls' ? dmarcTlsRecord(x) : dmarcDmarcRecord(x);
+        content.innerHTML = kind === 'tls' ? dmarcTlsRecord(x) : kind === 'spf' || kind === 'dkim' ? dmarcAuthRecord(x, kind) : dmarcDmarcRecord(x);
     } catch (error) {
         content.innerHTML = `<p class="ui-dm-empty">Could not read the record: ${escapeHtml(error.message)}.</p>`;
     }
@@ -674,9 +675,30 @@ function dmarcDmarcRecord(x) {
             <dt>Alignment</dt><dd>SPF ${escapeHtml(settings.spf_alignment || 'relaxed')}, DKIM ${escapeHtml(settings.dkim_alignment || 'relaxed')}</dd></dl>
             ${(x.record.warnings || []).map(w => `<p class="ui-text-warn ui-dm-note">${escapeHtml(w)}</p>`).join('')}`
         : `<p class="ui-dm-lead"><b class="ui-text-fail">No DMARC record at _dmarc.${escapeHtml(x.name)}.</b> Receivers have no policy to refuse mail that pretends to be you.</p>`}
-        <dl class="ui-dm-kv"><dt>SPF</dt><dd>${Math.round(x.spfPct)}% of your mail is aligned with SPF</dd><dt>DKIM</dt><dd>${x.dkimSeen ? 'Your mail is signed' : 'No signed mail in the reports'}</dd></dl>
+        <dl class="ui-dm-kv"><dt>SPF</dt><dd>${dmarcPct(x.spfPct)} of your mail is aligned with SPF</dd><dt>DKIM</dt><dd>${x.dkimSeen ? 'Your mail is signed' : 'No signed mail in the reports'}</dd></dl>
         <h4 class="ui-dm-h4">Policy <small class="ui-muted">pick one to see what it would do</small></h4>
         ${dmarcPolicyChoice(x, next)}`;
+}
+
+// SPF or DKIM for the domain, from the reports: how much mail passed, and each
+// sender's share that passed, weakest first; a sender opens its details
+function dmarcAuthRecord(x, kind) {
+    const label = kind === 'spf' ? 'SPF' : 'DKIM';
+    const sent = x.groups.reduce((s, g) => s + g.total, 0);
+    if (!sent) return `<p class="ui-dm-empty">No mail in the last 30 days, so the reports say nothing about ${label} yet.</p>`;
+    const field = kind === 'spf' ? 'spfPct' : 'dkimPct';
+    const pct = x.groups.reduce((s, g) => s + g[kind], 0) / sent * 100;
+    const name = escapeJsArg(x.name);
+    const lead = kind === 'spf' ? `${dmarcPct(pct)} of your mail passed SPF` : `${dmarcPct(pct)} of your mail was signed with DKIM`;
+    const note = kind === 'spf'
+        ? `SPF lists the servers allowed to send as ${escapeHtml(x.name)}. A sender of yours under 95% is missing from the SPF record; a sender that is not yours should fail.`
+        : `DKIM signs mail with a key published in DNS. A sender of yours under 95% does not sign as ${escapeHtml(x.name)}: turn DKIM on in that service; a sender that is not yours should fail.`;
+    const groups = [...x.groups].sort((a, b) => a[field] - b[field] || b.total - a.total);
+    return `<p class="ui-dm-lead"><b class="ui-text-${dmarcTone(pct)}">${lead}</b> in the last 30 days.</p>
+        <p class="ui-dm-note">${note}</p>
+        <table class="ui-dm-tbl"><thead><tr><th>Sender</th><th class="r">Messages</th><th class="r">${label} aligned</th></tr></thead><tbody>
+        ${groups.map(g => `<tr class="is-go" onclick="closeDmarcRecordModal(); loadSourceDetails('${name}', '${escapeJsArg(g.ips[0].source_ip)}')"><td><button type="button" class="ui-dm-link">${escapeHtml(g.name)}</button>${g.place ? `<small class="ui-dm-sub">${escapeHtml(g.place)}</small>` : ''}</td>
+            <td class="r ui-num">${dmarcNum(g.total)}</td><td class="r">${dmarcRate(g[field], g.total)}</td></tr>`).join('')}</tbody></table>`;
 }
 
 function dmarcTlsRecord(x) {
