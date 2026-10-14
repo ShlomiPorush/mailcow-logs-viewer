@@ -974,9 +974,10 @@
                                 <input type="text" id="suppression-search" placeholder="Search email, notes..." aria-label="Search suppressions"
                                     onkeypress="if(event.key==='Enter') loadSuppressions()">
                             </label>
+                            <button type="button" class="ui-btn ui-filters-toggle" aria-expanded="false" onclick="uiToggleFilters(this)">Filters<span class="ui-tab-n hidden"></span></button>
                             <span id="suppression-count" class="ui-count"></span>
                             <select id="suppression-filter-reason"
-                                class="ui-select ui-select-auto" aria-label="Reason"
+                                class="ui-select ui-select-auto ui-filter-extra" aria-label="Reason"
                                 onchange="loadSuppressions()">
                                 <option value="">All Reasons</option>
                                 <option value="hard_bounce">Hard Bounce</option>
@@ -986,14 +987,14 @@
                                 <option value="manual">Manual</option>
                             </select>
                             <select id="suppression-filter-active"
-                                class="ui-select ui-select-auto" aria-label="State"
+                                class="ui-select ui-select-auto ui-filter-extra" aria-label="State"
                                 onchange="loadSuppressions()">
                                 <option value="true">Active Only</option>
                                 <option value="">All</option>
                                 <option value="false">Inactive</option>
                                 <option value="expired">Expired</option>
                             </select>
-                            <button onclick="clearSuppressionFilters()" class="ui-btn" title="Clear all filters">Clear</button>
+                            <button onclick="clearSuppressionFilters()" class="ui-btn ui-filter-extra" title="Clear all filters">Clear</button>
                             <span class="ui-toolbar-gap"></span>
                             <button onclick="showAddSuppressionModal()" class="ui-btn ui-btn-primary">Add Suppression</button>
                             <button onclick="syncSuppressionsToRspamd()" id="suppression-sync-btn" class="ui-btn" title="Sync suppression list to Rspamd"><svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg> Sync to Rspamd</button>
@@ -1182,8 +1183,9 @@
                             <label class="ui-search ui-ms-search"><svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
                                 <input type="text" id="mailbox-stats-search" oninput="applyMailboxStatsFilters()" placeholder="Search mailboxes..." aria-label="Search mailboxes">
                             </label>
+                            <button type="button" class="ui-btn ui-filters-toggle" aria-expanded="false" onclick="uiToggleFilters(this)">Filters<span class="ui-tab-n hidden"></span></button>
                             <span id="mailbox-stats-count" class="ui-count"></span>
-                            <div class="ui-ms-picker" id="date-range-picker-container">
+                            <div class="ui-ms-picker ui-filter-extra" id="date-range-picker-container">
                                 <button type="button" onclick="toggleDateRangePicker()" id="date-range-picker-btn" class="ui-btn">
                                     <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
                                     <span id="date-range-label">Last 30 Days</span>
@@ -1205,22 +1207,22 @@
                                     <button type="button" onclick="applyCustomDateRange()" class="ui-btn ui-btn-primary">Apply Custom Range</button>
                                 </div>
                                 <!-- Hidden input for compatibility with existing code -->
-                                <input type="hidden" id="mailbox-stats-date-range" value="30days">
+                                <input type="hidden" id="mailbox-stats-date-range" value="30days" data-filter-default="30days">
                                 <input type="hidden" id="mailbox-stats-start-date" value="">
                                 <input type="hidden" id="mailbox-stats-end-date" value="">
                             </div>
-                            <select id="mailbox-stats-domain-filter" onchange="applyMailboxStatsFilters()" class="ui-select ui-select-auto" aria-label="Domain">
+                            <select id="mailbox-stats-domain-filter" onchange="applyMailboxStatsFilters()" class="ui-select ui-select-auto ui-filter-extra" aria-label="Domain">
                                 <option value="">All Domains</option>
                             </select>
                             <select id="mailbox-stats-sort" onchange="applyMailboxStatsFilters()"
-                                class="ui-select ui-select-auto" aria-label="Sort">
+                                class="ui-select ui-select-auto ui-filter-extra" aria-label="Sort">
                                 <option value="sent_total-desc">Sent (High to Low)</option>
                                 <option value="received_total-desc">Received (High to Low)</option>
                                 <option value="failure_rate-desc">Failure Rate (High to Low)</option>
                                 <option value="quota_used-desc">Quota Used (High to Low)</option>
                                 <option value="username-asc">Username (A-Z)</option>
                             </select>
-                            <div class="ui-ms-opts">
+                            <div class="ui-ms-opts ui-filter-extra">
                                 <label class="ui-check-label"><input type="checkbox" id="mailbox-stats-active-only" class="ui-check" checked onchange="applyMailboxStatsFilters()"> Active Only</label>
                                 <label class="ui-check-label"><input type="checkbox" id="mailbox-stats-hide-zero" class="ui-check" checked onchange="applyMailboxStatsFilters()"> Hide Zero Activity</label>
                                 <button onclick="resetMailboxStatsFilters()" class="ui-btn">Reset</button>

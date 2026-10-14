@@ -242,6 +242,7 @@ let mailboxStatsMoreObserver = null;
 
 // The first 50 mailboxes, or (page > 1) the next 50 as the list scrolls
 async function loadMailboxStatsList(page = 1) {
+    uiFilterBadges();
     if (page > 1 && (mailboxStatsLoading || page > mailboxStatsTotalPages)) return;
     const seq = ++mailboxStatsSeq;
     mailboxStatsLoading = true;
