@@ -2491,6 +2491,18 @@ html:has(#message-modal:not(.hidden):not(.ui-docked)) :is(.ui-page, .ui-scroll, 
 .ui-dm-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-inline-end: 6px; vertical-align: -1px; background: var(--ui-ok); }
 .ui-dm-legend i.is-warn { background: var(--ui-warn); } .ui-dm-legend i.is-fail { background: var(--ui-fail); }
 .ui-dm-flow-legend { margin: 12px 0 0; }
+/* A detail table's phone form (shown under 760px) */
+.ui-dm-mlist { display: none; }
+.ui-dm-mrow { display: grid; gap: 4px; padding: 11px 16px; border-top: 1px solid var(--dm-line); }
+.ui-dm-mrow:first-child { border-top: 0; }
+.ui-dm-mrow.is-go { cursor: pointer; }
+.ui-dm-mrow-top { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; min-width: 0; }
+.ui-dm-mrow-top > :first-child { min-width: 0; overflow-wrap: anywhere; }
+.ui-dm-mrow-n { flex: none; color: var(--ui-muted); font-size: 12.5px; font-variant-numeric: tabular-nums; }
+.ui-dm-mrow-sub { color: var(--ui-muted); font-size: 12.5px; overflow-wrap: anywhere; }
+.ui-dm-mrow-sub b { color: var(--ui-ink); font-weight: 600; }
+.ui-dm-mrow-tags { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; }
+.ui-dm-mrow-note { color: var(--ui-muted); font-size: 12px; }
 /* A phone leaves out the mail flow: the Senders table under it says the same */
 @media (max-width: 760px) {
     .ui-dm-flow-card { display: none; }
@@ -2584,10 +2596,13 @@ button.ui-dm-node:hover { border-color: var(--ui-ink); }
     .ui-dm-strip > div:nth-child(odd) { border-inline-start: 0; }
     /* An odd last figure takes the whole line instead of half of it */
     .ui-dm-strip > div:last-child:nth-child(odd) { grid-column: 1 / -1; }
-    /* Cards with three figures to a line, and figures with long values on a line of their own */
-    .ui-dm-cards-3 tr { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-    .ui-dm-cards td.ui-dm-wide { grid-column: 1 / -1; }
-    .ui-dm-cards td.ui-dm-note:first-child { font-size: 13px; }
+    /* A detail page's figures: each name beside its value, two to a line */
+    .ui-dm-strip.ui-dm-strip-facts { column-gap: 20px; padding: 2px 16px 6px; }
+    .ui-dm-strip.ui-dm-strip-facts > div { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 2px 8px; padding: 8px 0; border: 0; }
+    .ui-dm-strip.ui-dm-strip-facts b, .ui-dm-strip.ui-dm-strip-facts b.is-big { margin: 0; font-size: 15px; }
+    /* Detail tables become lists */
+    .ui-dm-tbl-wide { display: none; }
+    .ui-dm-mlist { display: block; }
     .ui-dm-pol { grid-template-columns: 1fr; }
     /* A record's facts: the name beside its value, as on a wide screen */
     .ui-dm-kv { grid-template-columns: minmax(96px, auto) minmax(0, 1fr); gap: 6px 12px; }

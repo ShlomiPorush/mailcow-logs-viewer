@@ -723,6 +723,20 @@ function dmarcTlsRecord(x) {
 // A SENDER, A DAY OF REPORTS, A DAY OF TLS
 // =============================================================================
 
+// On a phone a detail table is a list: the name and its count on one line, then the
+// details and the results as tags. Wide screens keep the table.
+function dmarcMRow({ title, count, sub = '', tags = '', note = '', action = '' }) {
+    return `<div class="ui-dm-mrow${action ? ' is-go' : ''}"${action ? ` onclick="${action}"` : ''}>
+        <div class="ui-dm-mrow-top">${title}<span class="ui-dm-mrow-n">${count}</span></div>
+        ${sub ? `<div class="ui-dm-mrow-sub">${sub}</div>` : ''}
+        ${tags ? `<div class="ui-dm-mrow-tags">${tags}</div>` : ''}${note ? `<small class="ui-dm-mrow-note">${note}</small>` : ''}
+    </div>`;
+}
+
+function dmarcRateTag(label, pct, count) {
+    return count ? dmarcTag(dmarcTone(pct), `${label} ${dmarcPct(pct)}`) : '';
+}
+
 async function loadSourceDetails(domain, sourceIp, updateUrl = true) {
     dmarcState.currentView = 'source';
     dmarcState.currentDomain = domain;
@@ -749,17 +763,23 @@ async function loadSourceDetails(domain, sourceIp, updateUrl = true) {
             ${sum.passPct < 50 ? `<div class="ui-dm-card ui-dm-alert"><div class="ui-dm-body"><b class="ui-text-fail">Not set up to send as ${escapeHtml(domain)}.</b>
                 <p>Receivers ${policy === 'reject' ? 'refused' : policy === 'quarantine' ? 'sent to spam' : 'still delivered'} these ${uiCountLabel(sum.total, 'message', 'messages')}${x.record.record ? '' : ', because there is no DMARC record'}.
                 If you know this sender (a CRM, a newsletter tool, a scanner), set up SPF or DKIM for it. If you do not, someone is sending as you: ${policy === 'reject' ? 'your policy already stops it.' : x.record.record ? 'a stricter policy stops it.' : 'a DMARC record lets receivers refuse it.'}</p></div></div>` : ''}
-            <div class="ui-dm-card"><header>Last 30 days</header><div class="ui-dm-strip">
+            <div class="ui-dm-card"><header>Last 30 days</header><div class="ui-dm-strip ui-dm-strip-facts">
                 <div><small>Messages</small><b class="is-big">${dmarcNum(sum.total)}</b></div>
                 <div><small>Passed DMARC</small><b class="is-big">${dmarcRate(sum.passPct, sum.total)}</b></div>
                 <div><small>SPF aligned</small><b class="is-big">${dmarcRate(sum.spfPct, sum.total)}</b></div>
                 <div><small>DKIM aligned</small><b class="is-big">${dmarcRate(sum.dkimPct, sum.total)}</b></div>
                 <div><small>Addresses</small><b class="is-big">${ips.length}</b></div></div></div>
             <div class="ui-dm-card"><header>What receivers saw <span class="ui-count">${rows.length}</span></header>
-            ${rows.length ? `<table class="ui-dm-tbl ui-dm-cards ui-dm-cards-3"><thead><tr><th>Address</th><th>From</th><th class="ui-dm-hm">Envelope from</th><th class="r">Messages</th><th>SPF</th><th>DKIM</th><th class="ui-dm-hm">Reported by</th></tr></thead><tbody>
-            ${rows.map(e => `<tr><td class="ui-mono">${escapeHtml(e.ip)}</td><td class="ui-dm-wide" data-label="From">${escapeHtml(e.header_from || '-')}</td><td class="ui-dm-hm ui-dm-wide" data-label="Envelope from">${escapeHtml(e.envelope_from || '-')}</td><td class="r ui-num" data-label="Messages">${dmarcNum(e.volume)}</td>
-                <td data-label="SPF">${e.spf_aligned ? dmarcTag('ok', 'Aligned') : dmarcTag('fail', e.spf_result || 'Fail')}</td><td data-label="DKIM">${e.dkim_aligned ? dmarcTag('ok', 'Aligned') : dmarcTag('fail', e.dkim_result || 'Fail')}</td>
-                <td class="ui-dm-hm ui-muted ui-dm-wide" data-label="Reported by">${escapeHtml(e.reporter || '-')}</td></tr>`).join('')}</tbody></table>` : '<p class="ui-dm-empty">No details for this sender.</p>'}</div>`;
+            ${rows.length ? `<div class="ui-dm-mlist">${rows.map(e => dmarcMRow({
+                title: `<b class="ui-mono">${escapeHtml(e.ip)}</b>`,
+                count: uiCountLabel(e.volume || 0, 'message', 'messages'),
+                sub: `From <b>${escapeHtml(e.header_from || '-')}</b>${e.envelope_from ? ` · envelope ${escapeHtml(e.envelope_from)}` : ''}`,
+                tags: `${e.spf_aligned ? dmarcTag('ok', 'SPF aligned') : dmarcTag('fail', `SPF ${e.spf_result || 'fail'}`)}${e.dkim_aligned ? dmarcTag('ok', 'DKIM aligned') : dmarcTag('fail', `DKIM ${e.dkim_result || 'fail'}`)}`,
+                note: e.reporter ? `Reported by ${escapeHtml(e.reporter)}` : '' })).join('')}</div>
+            <table class="ui-dm-tbl ui-dm-tbl-wide"><thead><tr><th>Address</th><th>From</th><th class="ui-dm-hm">Envelope from</th><th class="r">Messages</th><th>SPF</th><th>DKIM</th><th class="ui-dm-hm">Reported by</th></tr></thead><tbody>
+            ${rows.map(e => `<tr><td class="ui-mono">${escapeHtml(e.ip)}</td><td>${escapeHtml(e.header_from || '-')}</td><td class="ui-dm-hm">${escapeHtml(e.envelope_from || '-')}</td><td class="r ui-num">${dmarcNum(e.volume)}</td>
+                <td>${e.spf_aligned ? dmarcTag('ok', 'Aligned') : dmarcTag('fail', e.spf_result || 'Fail')}</td><td>${e.dkim_aligned ? dmarcTag('ok', 'Aligned') : dmarcTag('fail', e.dkim_result || 'Fail')}</td>
+                <td class="ui-dm-hm ui-muted">${escapeHtml(e.reporter || '-')}</td></tr>`).join('')}</tbody></table>` : '<p class="ui-dm-empty">No details for this sender.</p>'}</div>`;
     } catch (error) {
         console.error('Error loading the DMARC sender:', error);
         dmarcFailed(error);
@@ -781,18 +801,25 @@ async function loadReportDetails(domain, reportDate, updateUrl = true) {
         const sender = s => s.asn_org || s.source_ip;
         dmarcView().innerHTML = `
             <div class="ui-dm-ttl"><div><small>DMARC reports</small><h2>${dmarcDay(reportDate, true)}</h2><p class="ui-muted">${escapeHtml(domain)}</p></div></div>
-            <div class="ui-dm-card"><header>That day</header><div class="ui-dm-strip">
+            <div class="ui-dm-card"><header>That day</header><div class="ui-dm-strip ui-dm-strip-facts">
                 <div><small>Messages</small><b class="is-big">${dmarcNum(t.total_messages)}</b></div>
                 <div><small>Passed DMARC</small><b class="is-big">${dmarcRate(t.dmarc_pass_pct, t.total_messages)}</b></div>
                 <div><small>SPF aligned</small><b class="is-big">${dmarcRate(t.spf_pass_pct, t.total_messages)}</b></div>
                 <div><small>DKIM aligned</small><b class="is-big">${dmarcRate(t.dkim_pass_pct, t.total_messages)}</b></div>
                 <div><small>Reported by</small><b>${escapeHtml((t.reporters || []).join(', ') || '-')}</b></div></div></div>
             <div class="ui-dm-card"><header>Who sent that day <span class="ui-count">${(r.sources || []).length}</span></header>
-            <table class="ui-dm-tbl ui-dm-cards"><thead><tr><th>Sender</th><th class="ui-dm-hm">Address</th><th class="ui-dm-hm">Envelope from</th><th class="r">Messages</th><th class="r">Passed DMARC</th><th class="r ui-dm-hm">SPF</th><th class="r ui-dm-hm">DKIM</th><th class="ui-dm-hm">Reported by</th></tr></thead><tbody>
+            <div class="ui-dm-mlist">${(r.sources || []).map(s => dmarcMRow({
+                title: `<button type="button" class="ui-dm-link">${escapeHtml(sender(s))}</button>`,
+                count: uiCountLabel(s.volume || 0, 'message', 'messages'),
+                sub: `<span class="ui-mono">${escapeHtml(s.source_ip)}</span>${s.envelope_from ? ` · envelope ${escapeHtml(s.envelope_from)}` : ''}`,
+                tags: `${dmarcRateTag('DMARC', s.dmarc_pass_pct, s.volume)}${dmarcRateTag('SPF', s.spf_pass_pct, s.volume)}${dmarcRateTag('DKIM', s.dkim_pass_pct, s.volume)}`,
+                note: s.reporter ? `Reported by ${escapeHtml(s.reporter)}` : '',
+                action: `loadSourceDetails('${name}', '${escapeJsArg(s.source_ip)}')` })).join('')}</div>
+            <table class="ui-dm-tbl ui-dm-tbl-wide"><thead><tr><th>Sender</th><th class="ui-dm-hm">Address</th><th class="ui-dm-hm">Envelope from</th><th class="r">Messages</th><th class="r">Passed DMARC</th><th class="r ui-dm-hm">SPF</th><th class="r ui-dm-hm">DKIM</th><th class="ui-dm-hm">Reported by</th></tr></thead><tbody>
             ${(r.sources || []).map(s => `<tr class="is-go" onclick="loadSourceDetails('${name}', '${escapeJsArg(s.source_ip)}')"><td><button type="button" class="ui-dm-link">${escapeHtml(sender(s))}</button></td>
-                <td class="ui-dm-hm ui-mono ui-dm-wide" data-label="Address">${escapeHtml(s.source_ip)}</td><td class="ui-dm-hm ui-dm-wide" data-label="Envelope from">${escapeHtml(s.envelope_from || '-')}</td><td class="r ui-num" data-label="Messages">${dmarcNum(s.volume)}</td>
-                <td class="r" data-label="Passed DMARC">${dmarcRate(s.dmarc_pass_pct, s.volume)}</td><td class="r ui-dm-hm" data-label="SPF">${dmarcRate(s.spf_pass_pct, s.volume)}</td>
-                <td class="r ui-dm-hm" data-label="DKIM">${dmarcRate(s.dkim_pass_pct, s.volume)}</td><td class="ui-dm-hm ui-muted ui-dm-wide" data-label="Reported by">${escapeHtml(s.reporter || '-')}</td></tr>`).join('')}</tbody></table></div>
+                <td class="ui-dm-hm ui-mono">${escapeHtml(s.source_ip)}</td><td class="ui-dm-hm">${escapeHtml(s.envelope_from || '-')}</td><td class="r ui-num">${dmarcNum(s.volume)}</td>
+                <td class="r">${dmarcRate(s.dmarc_pass_pct, s.volume)}</td><td class="r ui-dm-hm">${dmarcRate(s.spf_pass_pct, s.volume)}</td>
+                <td class="r ui-dm-hm">${dmarcRate(s.dkim_pass_pct, s.volume)}</td><td class="ui-dm-hm ui-muted">${escapeHtml(s.reporter || '-')}</td></tr>`).join('')}</tbody></table></div>
             <div class="ui-dm-card"><header>Other days</header><div class="ui-dm-body">${dmarcChart(x.overview.daily_stats || [], { h: 90 })}</div></div>`;
     } catch (error) {
         console.error('Error loading the DMARC day:', error);
@@ -813,17 +840,23 @@ async function loadTLSReportDetails(domain, reportDate, updateUrl = true) {
         const s = r.stats || {};
         dmarcView().innerHTML = `
             <div class="ui-dm-ttl"><div><small>TLS reports</small><h2>${dmarcDay(reportDate, true)}</h2><p class="ui-muted">${escapeHtml(domain)}</p></div></div>
-            <div class="ui-dm-card"><header>That day</header><div class="ui-dm-strip">
+            <div class="ui-dm-card"><header>That day</header><div class="ui-dm-strip ui-dm-strip-facts">
                 <div><small>Sessions</small><b class="is-big">${dmarcNum(s.total_sessions)}</b></div>
                 <div><small>Encrypted</small><b class="is-big">${dmarcRate(s.success_rate, s.total_sessions)}</b></div>
                 <div><small>Failed</small><b class="is-big ${s.total_fail ? 'ui-text-fail' : ''}">${dmarcNum(s.total_fail)}</b></div>
                 <div><small>Receivers reporting</small><b class="is-big">${dmarcNum(s.total_providers)}</b></div></div></div>
             <div class="ui-dm-card"><header>Who reported <span class="ui-count">${(r.providers || []).length}</span></header>
-            <table class="ui-dm-tbl ui-dm-cards"><thead><tr><th>Reported by</th><th class="ui-dm-hm">Policy</th><th class="ui-dm-hm">MX</th><th class="r">Sessions</th><th class="r">Failed</th><th class="r">Encrypted</th></tr></thead><tbody>
+            <div class="ui-dm-mlist">${(r.providers || []).map(p => dmarcMRow({
+                title: `<b>${escapeHtml(p.organization_name)}</b>`,
+                count: uiCountLabel(p.total_sessions || 0, 'session', 'sessions'),
+                sub: [p.contact_info ? escapeHtml(p.contact_info) : '', escapeHtml((p.policies || []).flatMap(q => q.mx_host || []).join(', '))].filter(Boolean).join(' · '),
+                tags: `${(p.policies || []).map(q => dmarcTag('mut', String(q.policy_type || '').toUpperCase())).join('')}${dmarcRateTag('Encrypted', p.success_rate, p.total_sessions)}${p.failed_sessions ? dmarcTag('fail', `${dmarcNum(p.failed_sessions)} failed`) : ''}`,
+                note: (p.policies || []).flatMap(q => q.failure_details || []).map(f => `${escapeHtml(f.result_type || 'Failure')}: ${dmarcNum(f.failed_session_count)} sessions${f.receiving_mx_hostname ? ` to ${escapeHtml(f.receiving_mx_hostname)}` : ''}`).join('; ') })).join('')}</div>
+            <table class="ui-dm-tbl ui-dm-tbl-wide"><thead><tr><th>Reported by</th><th class="ui-dm-hm">Policy</th><th class="ui-dm-hm">MX</th><th class="r">Sessions</th><th class="r">Failed</th><th class="r">Encrypted</th></tr></thead><tbody>
             ${(r.providers || []).map(p => `<tr><td><b>${escapeHtml(p.organization_name)}</b>${p.contact_info ? `<small class="ui-dm-sub">${escapeHtml(p.contact_info)}</small>` : ''}</td>
-                <td class="ui-dm-hm ui-dm-wide" data-label="Policy">${(p.policies || []).map(q => dmarcTag('mut', String(q.policy_type || '').toUpperCase())).join(' ')}</td>
-                <td class="ui-dm-hm ui-mono ui-dm-wide" data-label="MX">${escapeHtml((p.policies || []).flatMap(q => q.mx_host || []).join(', '))}</td><td class="r ui-num" data-label="Sessions">${dmarcNum(p.total_sessions)}</td>
-                <td class="r ${p.failed_sessions ? 'ui-text-fail' : ''}" data-label="Failed">${dmarcNum(p.failed_sessions)}</td><td class="r ui-dm-wide" data-label="Encrypted">${dmarcRate(p.success_rate, p.total_sessions)}</td></tr>
+                <td class="ui-dm-hm">${(p.policies || []).map(q => dmarcTag('mut', String(q.policy_type || '').toUpperCase())).join(' ')}</td>
+                <td class="ui-dm-hm ui-mono">${escapeHtml((p.policies || []).flatMap(q => q.mx_host || []).join(', '))}</td><td class="r ui-num">${dmarcNum(p.total_sessions)}</td>
+                <td class="r ${p.failed_sessions ? 'ui-text-fail' : ''}">${dmarcNum(p.failed_sessions)}</td><td class="r">${dmarcRate(p.success_rate, p.total_sessions)}</td></tr>
                 ${(p.policies || []).flatMap(q => q.failure_details || []).map(f => `<tr><td colspan="6" class="ui-text-fail ui-dm-note">${escapeHtml(f.result_type || 'Failure')}: ${dmarcNum(f.failed_session_count)} sessions${f.receiving_mx_hostname ? ` to ${escapeHtml(f.receiving_mx_hostname)}` : ''}</td></tr>`).join('')}`).join('')}</tbody></table></div>`;
     } catch (error) {
         console.error('Error loading the TLS day:', error);
