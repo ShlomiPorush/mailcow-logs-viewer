@@ -1856,7 +1856,8 @@ button.ui-st-card:hover { outline: 1px solid var(--ui-line); }
 .ui-f2b-bans .ui-table { background: var(--ui-bg); }
 
 /* ---------- Quarantine details, rules, test ---------- */
-.ui-qd { display: grid; gap: 18px; }
+/* One column as wide as the dialog: a long address or ID wraps instead of widening it */
+.ui-qd { display: grid; grid-template-columns: minmax(0, 1fr); gap: 18px; }
 .ui-qd-facts { margin: 0; grid-template-columns: repeat(2, minmax(0, 1fr)); display: grid; background: var(--ui-bg); }
 .ui-qd-facts .ui-md-fact { outline: 1px solid var(--ui-line); }
 .ui-qd-wide { grid-column: 1 / -1; }
