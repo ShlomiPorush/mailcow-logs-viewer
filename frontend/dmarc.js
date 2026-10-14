@@ -152,10 +152,10 @@ async function loadDmarcSettings() {
     }
 }
 
-// The upload and sync controls: settings once, the mailbox status each time
+// The upload and sync controls: the settings and the mailbox status each time,
+// so a change in Settings shows without reloading the page
 function dmarcLoadControls() {
-    const loads = [loadDmarcImapStatus()];
-    if (!dmarcConfiguration) loads.push(loadDmarcSettings());
+    const loads = [loadDmarcImapStatus(), loadDmarcSettings()];
     // Manage Reports counts the reports: opened straight on a domain, read the list for it
     if (!dmarcState.domains) dmarcGet('/api/dmarc/domains').then(list => dmarcUpdateManageButton(list.domains || [])).catch(() => {});
     return Promise.all(loads).then(updateDmarcControls);
