@@ -2577,7 +2577,6 @@ button.ui-dm-node:hover { border-color: var(--ui-ink); }
     .ui-dm-pol { grid-template-columns: 1fr; }
     /* A record's facts: the name beside its value, as on a wide screen */
     .ui-dm-kv { grid-template-columns: minmax(96px, auto) minmax(0, 1fr); gap: 6px 12px; }
-    .ui-dm-hint { display: none; }
     .ui-dm-ttl h2 { font-size: 22px; }
     .ui-dm-node { padding: 6px 8px; }
     .ui-dm-node small { font-size: 11px; }

@@ -294,7 +294,7 @@ function dmarcChart(daily, opts = {}) {
     const short = v => v >= 10000 ? `${(v / 1000).toFixed(1).replace(/\.0$/, '')}k` : dmarcNum(v);
     const domain = dmarcState.currentDomain ? escapeJsArg(dmarcState.currentDomain) : '';
     const words = opts.tls ? ['encrypted', 'failed'] : ['passed', 'failed'];
-    return `<div class="ui-dm-legend"><span><i class="is-ok"></i>${opts.tls ? 'Encrypted' : 'Passed DMARC'}</span><span><i class="is-fail"></i>Failed</span>${opts.open !== null && domain ? '<span class="ui-dm-hint">A day opens its reports</span>' : ''}</div>
+    return `<div class="ui-dm-legend"><span><i class="is-ok"></i>${opts.tls ? 'Encrypted' : 'Passed DMARC'}</span><span><i class="is-fail"></i>Failed</span></div>
         <div class="ui-dm-chart"><div class="ui-dm-grid" style="height:${h}px">${[top, top * .75, top * .5, top * .25, 0].map(t => `<i><span>${short(Math.round(t))}</span></i>`).join('')}</div>
         <div class="ui-dm-cols" style="height:${h}px">${daily.map(x => {
             const tip = `${dmarcDay(x.date)}: ${dmarcNum(ok(x))} ${words[0]}, ${dmarcNum(bad(x))} ${words[1]}`;
@@ -493,7 +493,7 @@ function dmarcRecordsCard(x) {
 function dmarcSendersCard(x) {
     if (!x.groups.length) return '';
     const name = escapeJsArg(x.name);
-    return `<div class="ui-dm-card"><header>Senders <span class="ui-count">${x.groups.length}</span><small class="ui-dm-hint">who sent mail as ${escapeHtml(x.name)}, failing first</small></header>
+    return `<div class="ui-dm-card"><header>Senders <span class="ui-count">${x.groups.length}</span></header>
         <table class="ui-dm-tbl"><thead><tr><th>Sender</th><th class="r">Messages</th><th class="r">Passed DMARC</th><th class="r ui-dm-hm">SPF aligned</th><th class="r ui-dm-hm">DKIM aligned</th><th class="r ui-dm-hm">Addresses</th></tr></thead><tbody>
         ${x.groups.map(g => `<tr class="is-go" onclick="loadSourceDetails('${name}', '${escapeJsArg(g.ips[0].source_ip)}')"><td><button type="button" class="ui-dm-link">${escapeHtml(g.name)}</button>${g.place ? `<small class="ui-dm-sub">${escapeHtml(g.place)}</small>` : ''}</td>
             <td class="r ui-num">${dmarcNum(g.total)}</td><td class="r">${dmarcRate(g.passPct, g.total)}</td>
