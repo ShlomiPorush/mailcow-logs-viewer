@@ -340,14 +340,33 @@ function dmarcFlow(x) {
         ${node(0, 0, x.name, `${dmarcNum(x.totals.total_messages)} messages · ${dmarcPct(x.totals.dmarc_pass_pct)} pass`, x.totals.dmarc_pass_pct)}
         ${groups.map((g, i) => node(1, i, g.name, `${dmarcNum(g.total)} · ${dmarcPct(g.passPct)} pass`, g.passPct, `loadSourceDetails('${domain}', '${escapeJsArg(g.ips[0].source_ip)}')`)).join('')}
         ${recv.map((r, i) => node(2, i, r.name, `${dmarcNum(r.count)} · ${dmarcPct(r.count ? r.pass / r.count * 100 : 0)} pass`, r.count ? r.pass / r.count * 100 : 0)).join('')}
-    </div><div class="ui-dm-legend ui-dm-flow-legend"><span><i class="is-ok"></i>95% or more pass</span><span><i class="is-warn"></i>80% or more</span><span><i class="is-fail"></i>Less</span><span>Line width is the volume</span></div>`;
+    </div><div class="ui-dm-legend ui-dm-flow-legend"><span><i class="is-ok"></i>95% or more pass</span><span><i class="is-warn"></i>80% or more</span><span><i class="is-fail"></i>Less</span><span class="ui-dm-flow-only">Line width is the volume</span><span class="ui-dm-flist-only">Bar length is the volume</span></div>
+    ${dmarcFlowList(groups, recv, domain)}`;
+}
+
+// On a phone the flow is two lists: who sent as the domain, and who reported it.
+// A bar shows each one's share of the volume, in the colour of its pass rate.
+function dmarcFlowList(groups, recv, domain) {
+    const row = (name, count, pct, max, action) => {
+        const tag = action ? 'button type="button"' : 'div';
+        return `<${tag} class="ui-dm-frow ui-dm-${dmarcTone(pct)}"${action ? ` onclick="${action}"` : ''}>
+            <b>${escapeHtml(name)}</b><span class="ui-dm-fnum">${dmarcNum(count)}</span>
+            <span class="ui-dm-fbar"><i style="width:${Math.max(2, count / max * 100)}%"></i></span><small>${dmarcPct(pct)} pass</small>
+        </${action ? 'button' : 'div'}>`;
+    };
+    const gmax = Math.max(1, ...groups.map(g => g.total)), rmax = Math.max(1, ...recv.map(r => r.count));
+    return `<div class="ui-dm-flist">
+        <section><h5>Sent by</h5>${groups.map(g => row(g.name, g.total, g.passPct, gmax, `loadSourceDetails('${domain}', '${escapeJsArg(g.ips[0].source_ip)}')`)).join('')}</section>
+        ${recv.length ? `<section><h5>Reported by</h5>${recv.map(r => row(r.name, r.count, r.count ? r.pass / r.count * 100 : 0, rmax)).join('')}</section>` : ''}
+    </div>`;
 }
 
 // Lay the flow out for its width: three columns side by side, or down the page on a phone
 function drawDmarcFlow() {
     const el = document.getElementById('dmarc-flow');
+    // Watch the size even while the flow is hidden on a phone, to draw it on a wider screen
+    if (el) watchDmarcFlowSize();
     if (!el || !el.offsetWidth) return;
-    watchDmarcFlowSize();
     const svg = el.querySelector('svg');
     const w = el.clientWidth;
     const G = JSON.parse(el.dataset.g), L = JSON.parse(el.dataset.l);

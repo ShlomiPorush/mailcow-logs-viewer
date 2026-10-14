@@ -2484,6 +2484,23 @@ html:has(#message-modal:not(.hidden):not(.ui-docked)) :is(.ui-page, .ui-scroll, 
 .ui-dm-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-inline-end: 6px; vertical-align: -1px; background: var(--ui-ok); }
 .ui-dm-legend i.is-warn { background: var(--ui-warn); } .ui-dm-legend i.is-fail { background: var(--ui-fail); }
 .ui-dm-flow-legend { margin: 12px 0 0; }
+/* The flow's phone form: two lists with a bar for the volume */
+.ui-dm-flist, .ui-dm-flist-only { display: none; }
+.ui-dm-flist { gap: 14px; margin-top: 12px; }
+.ui-dm-flist h5 { margin: 0 0 4px; color: var(--ui-muted); font-size: 12px; font-weight: 600; }
+.ui-dm-frow { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 4px 12px; width: 100%; padding: 8px 0; border: 0; border-top: 1px solid var(--dm-line); background: none; color: inherit; font: inherit; text-align: start; }
+button.ui-dm-frow { cursor: pointer; }
+button.ui-dm-frow:hover b { text-decoration: underline; }
+.ui-dm-frow b { overflow-wrap: anywhere; font-weight: 600; }
+.ui-dm-fnum { font-weight: 650; font-variant-numeric: tabular-nums; }
+.ui-dm-fbar { height: 6px; border-radius: 3px; background: color-mix(in srgb, var(--ui-ink) 7%, transparent); overflow: hidden; }
+.ui-dm-fbar i { display: block; height: 100%; border-radius: 3px; background: var(--dm-t); }
+.ui-dm-frow small { color: var(--dm-t); font-size: 12px; font-weight: 600; white-space: nowrap; }
+@media (max-width: 760px) {
+    .ui-dm-flow, .ui-dm-flow-only { display: none; }
+    .ui-dm-flist { display: grid; }
+    .ui-dm-flist-only { display: inline-flex; }
+}
 .ui-dm-flow-legend i { border-radius: 50%; }
 /* The chart: one column a day, passed below failed */
 .ui-dm-chart { position: relative; }
