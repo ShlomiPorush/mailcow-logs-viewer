@@ -4,11 +4,11 @@ CRUD endpoints for quarantine rules and action history.
 Requires Read-Write API key (MAILCOW_API_KEY_RW) for all operations.
 """
 import asyncio
-import re
 import logging
 from datetime import datetime, timedelta
 from typing import Optional
 
+import regex
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
@@ -62,6 +62,11 @@ except ImportError:  # pragma: no cover - older Python
 # Sender, recipient and subject come from whoever sent the mail. A regex rule
 # only looks at this many leading characters, which bounds the work per item.
 REGEX_TARGET_MAX_CHARS = 1000
+# The nested-repetition check below catches the common slow patterns, not all
+# of them (overlapping alternatives such as (a|a)* pass it). Every match runs
+# in the regex module with this time limit, so no pattern can stall the job;
+# a match that runs out of time counts as no match.
+REGEX_MATCH_TIMEOUT_SECONDS = 0.1
 
 _REPEATS = (_sre_parse.MAX_REPEAT, _sre_parse.MIN_REPEAT)
 _ZERO_WIDTH = (_sre_parse.AT,)
@@ -130,8 +135,8 @@ def _is_nested_repetition(pattern: str) -> bool:
 def _validate_regex(pattern: str):
     """Validate a regex pattern."""
     try:
-        re.compile(pattern)
-    except re.error as e:
+        regex.compile(pattern)
+    except regex.error as e:
         raise HTTPException(status_code=400, detail=f"Invalid regex pattern: {e}")
     if _is_nested_repetition(pattern):
         raise HTTPException(
@@ -190,9 +195,16 @@ def _find_matching_rule(rules, sender: str, sender_domain: str, rcpt: str, subje
                                    f"has nested repetition. Edit the rule to rewrite it.")
                 continue
             try:
-                if re.search(value, (target or '')[:REGEX_TARGET_MAX_CHARS], re.IGNORECASE):
+                if regex.search(value, (target or '')[:REGEX_TARGET_MAX_CHARS], regex.IGNORECASE,
+                                timeout=REGEX_MATCH_TIMEOUT_SECONDS):
                     return rule
-            except re.error:
+            except TimeoutError:
+                if value not in _warned_patterns:
+                    _warned_patterns.add(value)
+                    logger.warning(f"[QUARANTINE RULES] Rule '{rule.name}' took too long to match and "
+                                   f"was skipped. Edit the rule to simplify its pattern.")
+                continue
+            except regex.error:
                 continue
         else:
             # Case-insensitive exact match
