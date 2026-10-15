@@ -48,7 +48,7 @@ Mailboxes this system has blocked. Click **Re-enable SMTP** once you have secure
 > Only mailboxes blocked *by this feature* are listed here. A mailbox that simply has SMTP switched off in mailcow - for example an incoming-only address such as a DMARC report mailbox - is not treated as an abuse case.
 
 ### 📈 Outbound Activity
-Every mailbox that sent mail during the current window, with its message count and status. Only mail the mailbox sent after logging in counts, here, for the limit and for anomaly detection; mail from outside that only claims one of your addresses as its sender does not.
+Every mailbox that sent mail during the current window, with its message count and status. Only mail the mailbox sent after logging in counts, here, for the limit and for anomaly detection; mail from outside that only claims one of your addresses as its sender does not. Mail sent from an alias, or from another address the mailbox may send as, counts for the mailbox that logged in, so that is the mailbox that gets blocked.
 
 - **Normal** - under the limit
 - **Over limit** - above the limit; it will be blocked on the next run unless whitelisted
@@ -58,7 +58,7 @@ Every mailbox that sent mail during the current window, with its message count a
 Use **Disable SMTP** to block a mailbox immediately without waiting for the threshold.
 
 ### ✅ Whitelist
-Mailboxes that legitimately send in bursts and must never be blocked automatically - newsletters, ticketing systems, monitoring, backup reports. Click **Edit whitelist**, enter one address per line, and save.
+Mailboxes that legitimately send in bursts and must never be blocked automatically - newsletters, ticketing systems, monitoring, backup reports. Click **Edit whitelist**, enter one address per line, and save. Enter the mailbox that logs in to send, not an alias it sends from.
 
 ## After Re-enabling a Mailbox
 

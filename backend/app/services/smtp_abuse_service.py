@@ -21,7 +21,7 @@ from typing import Dict, List, Optional
 from sqlalchemy import func
 
 from ..config import settings
-from ..correlation import submitted_with_auth
+from ..correlation import authenticated_submissions, submitting_mailbox
 from ..database import get_db_context
 from ..mailcow_api import mailcow_api
 from ..models import (
@@ -41,25 +41,26 @@ def normalize(email: str) -> str:
 # ── sync DB helpers (run via asyncio.to_thread from async callers) ──────────
 
 def fetch_outbound_counts(window_minutes: int, limit: Optional[int] = None) -> Dict[str, int]:
-    """Outbound message count per sender within the rolling window.
+    """Outbound message count per sending mailbox within the rolling window.
 
-    Grouped on lower(sender) so 'User@x' and 'user@x' are one mailbox - the
-    same normalisation used everywhere else for addresses. Only authenticated
-    submissions count: the envelope sender of unauthenticated mail is chosen
-    by the remote client, so it must never get a mailbox blocked.
+    Only authenticated submissions count: the envelope sender of
+    unauthenticated mail is chosen by the remote client, so it must never get
+    a mailbox blocked. Each one counts for the mailbox that logged in, not for
+    the alias or send-as address it used, so the mailbox that is blocked is
+    the one whose login sent the mail. Lowercased, like every other address.
     """
     cutoff = datetime.utcnow() - timedelta(minutes=window_minutes)
+    mailbox = submitting_mailbox()
     with get_db_context() as db:
-        q = db.query(
-            func.lower(MessageCorrelation.sender).label("email"),
+        q = authenticated_submissions(db.query(
+            mailbox.label("email"),
             func.count(MessageCorrelation.id).label("count"),
-        ).filter(
+        )).filter(
             func.lower(MessageCorrelation.direction) == "outbound",
-            submitted_with_auth(),
             MessageCorrelation.first_seen >= cutoff,
-            MessageCorrelation.sender.isnot(None),
-            MessageCorrelation.sender != "",
-        ).group_by(func.lower(MessageCorrelation.sender)).order_by(
+            mailbox.isnot(None),
+            mailbox != "",
+        ).group_by(mailbox).order_by(
             func.count(MessageCorrelation.id).desc()
         )
         if limit:

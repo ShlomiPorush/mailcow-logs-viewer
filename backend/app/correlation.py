@@ -16,7 +16,7 @@ import hashlib
 from datetime import datetime, timedelta
 from typing import Dict, Any, Optional, List
 from sqlalchemy.orm import Session
-from sqlalchemy import and_, exists, or_
+from sqlalchemy import and_, exists, func, literal_column, or_
 
 from .models import MessageCorrelation, PostfixLog, RspamdLog
 from .config import settings
@@ -64,13 +64,42 @@ def submitted_with_auth():
     envelope sender of such mail is whatever the remote client claimed.
     Rows without a linked Rspamd scan do not qualify.
     """
-    return exists().where(
-        RspamdLog.id == MessageCorrelation.rspamd_log_id,
-        or_(
-            RspamdLog.has_auth.is_(True),
-            and_(RspamdLog.user.isnot(None), RspamdLog.user != '', RspamdLog.user != 'unknown'),
-        ),
+    return exists().where(RspamdLog.id == MessageCorrelation.rspamd_log_id, _authenticated_scan())
+
+
+def _authenticated_scan():
+    return or_(
+        RspamdLog.has_auth.is_(True),
+        and_(RspamdLog.user.isnot(None), RspamdLog.user != '', RspamdLog.user != 'unknown'),
     )
+
+
+def authenticated_submissions(query):
+    """
+    Limit a message_correlations query to authenticated submissions, the same
+    rows as submitted_with_auth(), with their Rspamd scan joined so that
+    submitting_mailbox() can be used in it.
+    """
+    return query.select_from(MessageCorrelation).join(
+        RspamdLog, RspamdLog.id == MessageCorrelation.rspamd_log_id
+    ).filter(_authenticated_scan())
+
+
+def submitting_mailbox():
+    """
+    The mailbox an authenticated submission is counted for, lowercased: the
+    login Rspamd recorded, or the envelope sender when the scan has none.
+
+    mailcow lets a mailbox send from every alias that points to it and from the
+    addresses it may send as (sender ACL), so the envelope sender is not always
+    the mailbox that sent. Counting by it let one mailbox spread its mail over
+    several addresses, and pointed enforcement at an alias, which mailcow
+    cannot disable. Use inside authenticated_submissions().
+    """
+    # Literal SQL, not bound parameters, so the same expression can be grouped by
+    login = func.nullif(func.nullif(func.trim(RspamdLog.user), literal_column("''")),
+                        literal_column("'unknown'"))
+    return func.lower(func.coalesce(login, MessageCorrelation.sender))
 
 
 def extract_domain(email: str) -> Optional[str]:
