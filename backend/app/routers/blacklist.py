@@ -87,7 +87,7 @@ def get_monitored_hosts() -> Dict[str, Any]:
         logger.error(f"Error getting monitored hosts: {e}")
         return {"hosts": []}
 
-@router.get("/check")
+@router.post("/check")
 async def check_blacklists(
     host: str = Query(None, description="Host/IP to check (default: system IP)"),
     force: bool = Query(False, description="Force new check ignoring cache")

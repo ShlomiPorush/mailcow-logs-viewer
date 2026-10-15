@@ -4883,7 +4883,7 @@ Get status of all monitored hosts (system IP and transport configurations).
 
 ---
 
-### GET /api/blacklist/check
+### POST /api/blacklist/check
 
 Trigger a manual blacklist check.
 
