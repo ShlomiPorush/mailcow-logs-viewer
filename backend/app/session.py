@@ -20,6 +20,10 @@ logger = logging.getLogger(__name__)
 _session_store: Dict[str, Dict[str, Any]] = {}
 _session_lock = RLock()
 _next_capacity_cleanup = 0.0
+# Advances whenever every session is revoked. Access derived from a session
+# that outlives the request, such as a Live Logs stream, records it and ends
+# when it changes.
+_auth_generation = 0
 
 
 class SessionCapacityError(Exception):
@@ -161,11 +165,41 @@ def revoke_all_sessions() -> int:
 
     Returns the number of sessions that were ended.
     """
+    global _auth_generation
     with _session_lock:
         count = len(_session_store)
         _session_store.clear()
+        _auth_generation += 1
     logger.info(f"Revoked {count} session(s) after an authentication settings change")
     return count
+
+
+def auth_generation() -> int:
+    """The current value of the counter that revoke_all_sessions advances."""
+    with _session_lock:
+        return _auth_generation
+
+
+def session_key_from_request(request: Request) -> Optional[str]:
+    """The server-side key of the request's valid session, or None."""
+    session_id = request.cookies.get(SESSION_COOKIE_NAME)
+    if not session_id:
+        return None
+    with _session_lock:
+        try:
+            key = get_serializer().loads(session_id, max_age=settings.session_expiry_hours * 3600)
+        except (BadSignature, SignatureExpired):
+            return None
+        return key if is_session_active(key) else None
+
+
+def is_session_active(key: str) -> bool:
+    """Whether the session with this server-side key still exists and has not expired."""
+    with _session_lock:
+        session_data = _session_store.get(key)
+        if not session_data:
+            return False
+        return datetime.utcnow() <= datetime.fromisoformat(session_data["expires_at"])
 
 
 def get_session_from_request(request: Request) -> Optional[Dict[str, Any]]:
