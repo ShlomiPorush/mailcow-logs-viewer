@@ -13,7 +13,11 @@ import json
 
 import pytest
 from fastapi.testclient import TestClient
+import starlette.staticfiles as sf
 from starlette.websockets import WebSocketDisconnect
+
+_orig_init = sf.StaticFiles.__init__
+sf.StaticFiles.__init__ = lambda s, *a, **k: _orig_init(s, *a, **{**k, "check_dir": False})
 
 from app import session
 from app.config import settings
@@ -124,7 +128,7 @@ def _signed_in_client():
 def test_a_token_whose_session_ended_opens_no_stream(basic_auth):
     client = _signed_in_client()
     token = client.get("/api/raw-logs/ws-token").json()["token"]
-    assert client.post("/api/auth/logout").status_code == 200
+    assert client.post("/api/auth/logout", follow_redirects=False).status_code == 302
 
     with client.websocket_connect(f"/ws/raw-logs?token={token}", headers={"Origin": APP}) as ws:
         assert ws.receive_json()["type"] == "error"
@@ -145,7 +149,7 @@ def test_signing_out_closes_an_open_stream(basic_auth):
     token = client.get("/api/raw-logs/ws-token").json()["token"]
     with client.websocket_connect(f"/ws/raw-logs?token={token}", headers={"Origin": APP}) as ws:
         assert ws.receive_json()["type"] == "connected"
-        assert client.post("/api/auth/logout").status_code == 200
+        assert client.post("/api/auth/logout", follow_redirects=False).status_code == 302
         # A new log line arrives, broadcast on the app's own event loop
         ws.portal.call(raw_logs.log_stream_manager.broadcast, "postfix", [{"message": "after"}])
         with pytest.raises(WebSocketDisconnect) as closed:
