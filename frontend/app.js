@@ -4257,7 +4257,7 @@ async function checkBlacklists(force = false, host = null) {
         if (force) params.set('force', 'true');
         if (host) params.set('host', host);
         const qs = params.toString();
-        const response = await authenticatedFetch(`/api/blacklist/check${qs ? '?' + qs : ''}`);
+        const response = await authenticatedFetch(`/api/blacklist/check${qs ? '?' + qs : ''}`, { method: 'POST' });
         if (!response.ok) {
             throw new Error(`HTTP ${response.status}`);
         }
