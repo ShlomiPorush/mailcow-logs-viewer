@@ -54,6 +54,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Quarantine rule patterns are bounded** - Sender, recipient and subject come from whoever sent the mail. Contains and Regex rules now look at the first 1000 characters, and a regex with nested repetition such as `(a+)+`, which can take a very long time on some messages, is refused when saved. Such a rule saved earlier is skipped, so its mail stays in quarantine, with a warning in the log until you edit it.
 - **Smaller, read-only container** - The Docker image no longer contains the test tools. The shipped `docker-compose.yml` runs the app with a read-only filesystem, writing only to its data volume and `/tmp`; your own compose file keeps working unchanged and can add the same two settings (see Getting Started). At startup, the log file is now created by the app's own user instead of root.
 - **Pinned build actions** - The GitHub Actions that build and publish the image are pinned to exact versions, and updates to them arrive as reviewed pull requests.
+- **Quarantine rule patterns cannot stall the app** - A regex quarantine rule with nested repetition such as `(a+)+` is refused when saved, but other slow patterns, such as overlapping alternatives like `(a|a)*`, passed that check. On a sender or subject written to trigger it, such a rule could keep the app busy for a very long time. Every rule match now has a time limit of 0.1 seconds: a rule that runs out of time does not match that message, and the log names the rule to simplify.
 
 ### Fixed
 

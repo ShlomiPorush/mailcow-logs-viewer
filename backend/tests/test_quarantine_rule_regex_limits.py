@@ -4,7 +4,8 @@ The values come from mail senders, so a long subject made every regex rule
 scan all of it, and a pattern with nested repetition such as (a+)+ can take
 exponential time and stall the single application process. Matching now looks
 at the first 1000 characters only, and such patterns are refused when saved
-(and skipped if one was saved before).
+(and skipped if one was saved before). The check does not catch every slow
+pattern, so each match also runs with a time limit.
 """
 from types import SimpleNamespace
 
@@ -68,6 +69,36 @@ def test_create_rule_refuses_a_nested_repetition(monkeypatch):
     with pytest.raises(HTTPException) as err:
         qr.create_rule(body)
     assert err.value.status_code == 400
+
+
+def test_every_regex_match_has_a_time_limit(monkeypatch):
+    """The nested-repetition check misses slow patterns such as (a|a)*, so the
+    match itself must be bounded."""
+    calls = []
+    real_search = qr.regex.search
+
+    def spy(*args, **kwargs):
+        calls.append(kwargs)
+        return real_search(*args, **kwargs)
+
+    monkeypatch.setattr(qr.regex, "search", spy)
+    assert qr._find_matching_rule([_rule("^invoice")], "", "", "", "Invoice 12") is not None
+    assert calls and calls[0].get("timeout") == qr.REGEX_MATCH_TIMEOUT_SECONDS
+
+
+def test_a_match_that_runs_out_of_time_counts_as_no_match(monkeypatch):
+    real_search = qr.regex.search
+
+    def search(pattern, *args, **kwargs):
+        if pattern == "slow":
+            raise TimeoutError("regex timed out")
+        return real_search(pattern, *args, **kwargs)
+
+    monkeypatch.setattr(qr.regex, "search", search)
+    slow = _rule("slow")
+    good = _rule("^a+$", action="release")
+    assert qr._find_matching_rule([slow], "", "", "", "aaaa") is None
+    assert qr._find_matching_rule([slow, good], "", "", "", "aaaa") is good
 
 
 def test_a_stored_nested_repetition_rule_is_skipped():

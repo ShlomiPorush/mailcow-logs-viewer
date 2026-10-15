@@ -41,6 +41,9 @@ cryptography>=42.0.0
 # Secure XML parsing (DMARC reports are untrusted input)
 defusedxml>=0.7.1
 
+# Quarantine rule regexes run with a time limit (the re module has none)
+regex==2026.9.29
+
 # MaxMind
 geoip2>=4.7.0
 maxminddb>=2.4.0
