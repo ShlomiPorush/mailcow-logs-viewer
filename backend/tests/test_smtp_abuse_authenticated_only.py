@@ -25,7 +25,12 @@ DOMAIN = f"hosted-{MARK}.test"
 FORGED_A = f"victim-a@{DOMAIN}"
 FORGED_B = f"victim-b@{DOMAIN}"
 SENDER = f"sender@{DOMAIN}"
-ADDRESSES = (FORGED_A, FORGED_B, SENDER)
+# Aliases of SENDER: mailcow lets a mailbox send from every alias that points
+# to it, and from addresses its sender ACL allows
+ALIAS_A = f"sales@{DOMAIN}"
+ALIAS_B = f"info@{DOMAIN}"
+ADDRESSES = (FORGED_A, FORGED_B, SENDER, ALIAS_A, ALIAS_B)
+MAILBOXES = (FORGED_A, FORGED_B, SENDER)
 
 
 def _postgres_available() -> bool:
@@ -67,7 +72,7 @@ def env(monkeypatch):
     monkeypatch.setattr(settings._inner, "anomaly_alert_cooldown_hours", 24)
     _cleanup()
     with get_db_context() as db:
-        for address in ADDRESSES:
+        for address in MAILBOXES:
             db.add(MailboxStatistics(username=address, domain=DOMAIN))
         db.commit()
     try:
@@ -96,13 +101,13 @@ def _ingest(entry):
         correlate_rspamd_log(db, row)
 
 
-def _send(label, sender, rcpt, ip, count, authenticated=False):
+def _send(label, sender, rcpt, ip, count, authenticated=False, login=None):
     now = int(datetime.utcnow().replace(tzinfo=timezone.utc).timestamp())
     for i in range(count):
         _ingest({
             "unix_time": now - i, "message-id": f"{label}-{i}-{MARK}@sender.invalid",
             "sender_smtp": sender, "rcpt_smtp": [rcpt], "ip": ip,
-            "user": sender if authenticated else "unknown",
+            "user": (login or sender) if authenticated else "unknown",
             "symbols": {"MAILCOW_AUTH": {"score": 0.0}} if authenticated else {},
         })
 
@@ -157,3 +162,41 @@ def test_volume_spike_ignores_unauthenticated_forged_sender(env):
 def test_volume_spike_still_alerts_on_authenticated_burst(env):
     _send("spike-auth", SENDER, "dest@external.invalid", "198.51.100.20", 30, authenticated=True)
     assert _volume_alerts() == {SENDER}
+
+
+def test_mail_sent_from_aliases_counts_for_the_mailbox_that_logged_in(env):
+    """Counted per envelope sender, three messages from each of two aliases
+    stayed under the limit of 5, and an alias over it was the block target,
+    which mailcow cannot disable, so the mailbox that sent was never blocked."""
+    from app.services import smtp_abuse_service as svc
+    _send("alias-a", ALIAS_A, "dest@external.invalid", "198.51.100.20", 3, authenticated=True, login=SENDER)
+    _send("alias-b", ALIAS_B, "dest@external.invalid", "198.51.100.20", 3, authenticated=True, login=SENDER)
+    counts = svc.fetch_outbound_counts(60)
+    assert counts.get(SENDER) == 6
+    assert ALIAS_A not in counts and ALIAS_B not in counts
+    assert [c["email"] for c in svc.find_candidates() if c["email"] in ADDRESSES] == [SENDER]
+
+
+def test_an_authenticated_scan_without_a_login_counts_for_the_envelope_sender(env):
+    from app.services import smtp_abuse_service as svc
+    _send("no-login", SENDER, "dest@external.invalid", "198.51.100.20", 6, authenticated=True, login=" ")
+    assert svc.fetch_outbound_counts(60).get(SENDER) == 6
+
+
+def test_volume_spike_from_an_alias_alerts_on_the_mailbox(env):
+    _send("spike-alias", ALIAS_A, "dest@external.invalid", "198.51.100.20", 30, authenticated=True, login=SENDER)
+    assert _volume_alerts() == {SENDER}
+
+
+def test_alert_activity_shows_the_mail_sent_from_aliases(env):
+    from app.database import get_db_context
+    from app.models import SecurityAlert
+    from app.routers.security_alerts import _events
+    _send("activity-alias", ALIAS_B, "dest@external.invalid", "198.51.100.20", 30, authenticated=True, login=SENDER)
+    assert _volume_alerts() == {SENDER}
+    now = datetime.utcnow()
+    with get_db_context() as db:
+        alert = db.query(SecurityAlert).filter(
+            SecurityAlert.alert_type == "volume_spike", SecurityAlert.subject == SENDER).first()
+        rows = _events(db, alert, now - timedelta(days=1), now + timedelta(hours=1))
+    assert len(rows) == 30

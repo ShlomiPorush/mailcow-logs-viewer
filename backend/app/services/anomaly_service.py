@@ -18,7 +18,7 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import func
 
 from ..config import settings
-from ..correlation import submitted_with_auth
+from ..correlation import authenticated_submissions, submitting_mailbox
 from ..database import get_db_context
 from ..models import (
     MessageCorrelation,
@@ -94,12 +94,11 @@ def _is_recurring_daily_pattern(db, sender: str, recent_count: int,
     for day_back in range(1, settings.anomaly_baseline_days + 1):
         slot_end = now - timedelta(days=day_back) + tolerance
         slot_start = now - timedelta(days=day_back) - window - tolerance
-        slot_count = db.query(func.count(MessageCorrelation.id)).filter(
+        slot_count = authenticated_submissions(db.query(func.count(MessageCorrelation.id))).filter(
             MessageCorrelation.direction == "outbound",
-            submitted_with_auth(),
             MessageCorrelation.first_seen >= slot_start,
             MessageCorrelation.first_seen <= slot_end,
-            func.lower(MessageCorrelation.sender) == sender,
+            submitting_mailbox() == sender,
         ).scalar() or 0
         if slot_count >= recent_count * 0.5:
             recurring_days += 1
@@ -119,17 +118,18 @@ def detect_volume_spikes(db, pending) -> int:
     if not locals_:
         return 0
 
-    # Messages sent per local sender in the recent window
-    recent = db.query(
-        func.lower(MessageCorrelation.sender).label("sender"),
+    # Messages sent per local mailbox in the recent window, counted for the
+    # mailbox that logged in rather than the alias it sent from
+    mailbox = submitting_mailbox()
+    recent = authenticated_submissions(db.query(
+        mailbox.label("sender"),
         func.count(MessageCorrelation.id).label("cnt"),
-    ).filter(
+    )).filter(
         MessageCorrelation.direction == "outbound",
-        submitted_with_auth(),
         MessageCorrelation.first_seen >= window_start,
         MessageCorrelation.first_seen <= now,
-        func.lower(MessageCorrelation.sender).in_(locals_),
-    ).group_by(func.lower(MessageCorrelation.sender)).all()
+        mailbox.in_(locals_),
+    ).group_by(mailbox).all()
 
     alerts = 0
     window_hours = max(window_minutes / 60.0, 1e-6)
@@ -138,12 +138,11 @@ def detect_volume_spikes(db, pending) -> int:
             continue
 
         # Baseline: this sender's average per-window rate over the history period
-        baseline_total = db.query(func.count(MessageCorrelation.id)).filter(
+        baseline_total = authenticated_submissions(db.query(func.count(MessageCorrelation.id))).filter(
             MessageCorrelation.direction == "outbound",
-            submitted_with_auth(),
             MessageCorrelation.first_seen >= baseline_start,
             MessageCorrelation.first_seen < window_start,
-            func.lower(MessageCorrelation.sender) == sender,
+            submitting_mailbox() == sender,
         ).scalar() or 0
 
         baseline_hours = max((window_start - baseline_start).total_seconds() / 3600.0, 1e-6)

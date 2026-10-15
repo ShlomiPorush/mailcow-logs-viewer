@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 from ..database import get_db
 from ..models import SecurityAlert, MessageCorrelation, NetfilterLog
 from ..config import settings
-from ..correlation import submitted_with_auth
+from ..correlation import authenticated_submissions, submitting_mailbox
 from ..utils import internal_error, format_datetime_for_api as format_datetime_utc
 
 logger = logging.getLogger(__name__)
@@ -107,12 +107,12 @@ AFTER_HOURS = 2
 def _events(db: Session, alert: SecurityAlert, start, end):
     subject = (alert.subject or '').lower()
     if alert.alert_type == 'volume_spike':
-        return db.query(MessageCorrelation.first_seen, MessageCorrelation.recipient,
-                        MessageCorrelation.final_status, MessageCorrelation.subject).filter(
+        # The same messages the volume-spike alert counted
+        return authenticated_submissions(
+            db.query(MessageCorrelation.first_seen, MessageCorrelation.recipient,
+                     MessageCorrelation.final_status, MessageCorrelation.subject)).filter(
             MessageCorrelation.direction == 'outbound',
-            # The same messages the volume-spike alert counted
-            submitted_with_auth(),
-            func.lower(MessageCorrelation.sender) == subject,
+            submitting_mailbox() == subject,
             MessageCorrelation.first_seen >= start, MessageCorrelation.first_seen < end,
         ).all()
     return db.query(NetfilterLog.time, NetfilterLog.ip, NetfilterLog.country_name, NetfilterLog.asn_org).filter(
