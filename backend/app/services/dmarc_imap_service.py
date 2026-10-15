@@ -9,6 +9,7 @@ import gzip
 import zipfile
 import io
 import json
+import re
 from datetime import datetime, timezone
 from typing import List, Dict, Optional, Tuple
 from email.message import EmailMessage
@@ -25,6 +26,13 @@ from ..services.dmarc_notifications import send_dmarc_error_notification
 from ..services.dmarc_cache import clear_dmarc_cache
 
 logger = logging.getLogger(__name__)
+
+# Anyone can mail the report address, and a message is read whole into memory,
+# with each attachment decoded, before any report limit applies. Larger
+# messages are not downloaded. Real report emails are far below 1 MB; this
+# still fits a report at the 10 MB compressed limit after base64 encoding.
+MAX_REPORT_EMAIL_BYTES = 20 * 1024 * 1024
+_MB = 1024 * 1024
 
 
 def _decode_subject(raw_subject: str) -> str:
@@ -400,6 +408,26 @@ class DMARCImapService:
         
         return attachments
     
+    def _fetch_size(self, email_id: str) -> Optional[int]:
+        """The message size the server reports (RFC822.SIZE), or None if it gives none."""
+        status, data = self.connection.uid('FETCH', email_id, '(RFC822.SIZE)')
+        if status != 'OK':
+            return None
+        for item in data or []:
+            line = item[0] if isinstance(item, tuple) else item
+            match = re.search(rb'RFC822\.SIZE (\d+)', line) if isinstance(line, bytes) else None
+            if match:
+                return int(match.group(1))
+        return None
+
+    def _fetch_headers(self, email_id: str) -> EmailMessage:
+        """Message-ID and Subject only, without downloading the message or marking it read."""
+        status, data = self.connection.uid('FETCH', email_id, '(BODY.PEEK[HEADER.FIELDS (MESSAGE-ID SUBJECT)])')
+        for item in (data if status == 'OK' else None) or []:
+            if isinstance(item, tuple) and isinstance(item[1], bytes):
+                return email.message_from_bytes(item[1])
+        return email.message_from_bytes(b'')
+
     def process_email(self, email_id: str, db: SessionLocal) -> Dict:
         """
         Process a single DMARC or TLS-RPT email
@@ -424,6 +452,16 @@ class DMARCImapService:
         }
         
         try:
+            size = self._fetch_size(email_id)
+            if size is not None and size > MAX_REPORT_EMAIL_BYTES:
+                headers = self._fetch_headers(email_id)
+                result['message_id'] = headers.get('message-id', 'unknown')
+                result['subject'] = headers.get('subject', 'unknown')
+                result['error'] = (f"The email is {size / _MB:.0f} MB, larger than the "
+                                   f"{MAX_REPORT_EMAIL_BYTES // _MB} MB a report email may have, "
+                                   f"so it was not downloaded")
+                return result
+
             # Fetch email (email_id is already a string)
             status, msg_data = self.connection.uid('FETCH', email_id, '(RFC822)')
             
