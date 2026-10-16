@@ -30,14 +30,15 @@ router = APIRouter()
 # RFC 7208 section 12: modifier = name "=" macro-string, without a qualifier
 SPF_MODIFIER_RE = re.compile(r'^[A-Za-z][A-Za-z0-9._-]*=')
 SPF_MECHANISM_NAMES = {'a', 'mx', 'ptr', 'ip4', 'ip6', 'include', 'exists'}
-# RFC 7208 sections 4.6.1 and 5: an optional qualifier, the whole mechanism name,
-# then only what that mechanism takes (a domain after ':', a CIDR length after '/')
+# RFC 7208 sections 4.6.1 and 5: an optional qualifier, the whole mechanism name
+# (in any case), then only what that mechanism takes (a domain after ':', a CIDR
+# length after '/')
 SPF_MECHANISM_RE = re.compile(
     r'[+\-~?]?(?:all'
     r'|(?:include|exists):.+'
     r'|(?:a|mx)(?::[^/]+)?(?:/\d+)?(?://\d+)?'
     r'|ptr(?::.+)?'
-    r'|ip[46]:[^/]+(?:/\d+)?)')
+    r'|ip[46]:[^/]+(?:/\d+)?)', re.IGNORECASE)
 
 _server_ip_cache = None
 
@@ -262,7 +263,7 @@ async def check_spf_record(domain: str, spf_source_ips: Optional[List[Dict[str, 
         spf_records = []
         for rdata in answers:
             txt_data = b''.join(rdata.strings).decode('utf-8')
-            if txt_data.startswith('v=spf1'):
+            if txt_data.lower().startswith('v=spf1'):
                 spf_records.append(txt_data)
         
         if len(spf_records) > 1:
@@ -288,7 +289,7 @@ async def check_spf_record(domain: str, spf_source_ips: Optional[List[Dict[str, 
         
         spf_record = spf_records[0]
         
-        if not spf_record.startswith('v=spf1 ') and spf_record != 'v=spf1':
+        if not spf_record.lower().startswith('v=spf1 ') and spf_record.lower() != 'v=spf1':
             return {
                 'status': 'error',
                 'message': 'Invalid SPF syntax - must start with "v=spf1 " (with space)',
@@ -326,7 +327,7 @@ async def check_spf_record(domain: str, spf_source_ips: Optional[List[Dict[str, 
         has_neutral = '?all' in spf_lower
         has_pass_all = '+all' in spf_lower or ' all' in spf_lower
         
-        has_redirect = any(m.startswith('redirect=') for m in mechanisms)
+        has_redirect = any(m.lower().startswith('redirect=') for m in mechanisms)
         
         if not (has_strict_all or has_soft_fail or has_neutral or has_pass_all or has_redirect):
             return {
@@ -339,9 +340,9 @@ async def check_spf_record(domain: str, spf_source_ips: Optional[List[Dict[str, 
                 'warnings': ['SPF should end with -all or ~all']
             }
         
-        includes_mx = any(m.lstrip('+-~?') in ['mx'] or m.lstrip('+-~?').startswith('mx:') for m in mechanisms)
+        includes_mx = any(m.lstrip('+-~?').lower() in ['mx'] or m.lstrip('+-~?').lower().startswith('mx:') for m in mechanisms)
         
-        includes = [m.replace('include:', '') for m in mechanisms if m.startswith('include:')]
+        includes = [m[len('include:'):] for m in mechanisms if m.lower().startswith('include:')]
         
         dns_lookup_count = await count_spf_dns_lookups(domain, spf_record, None)
 
@@ -414,7 +415,7 @@ async def check_spf_record(domain: str, spf_source_ips: Optional[List[Dict[str, 
             message = 'SPF uses ?all (neutral). Consider using -all for stricter policy'
             warnings = ['Using ?all provides minimal protection']
         elif has_redirect:
-            redirect_domain = next((m.split('=', 1)[1] for m in mechanisms if m.startswith('redirect=')), 'unknown')
+            redirect_domain = next((m.split('=', 1)[1] for m in mechanisms if m.lower().startswith('redirect=')), 'unknown')
             
             if server_authorized:
                 status = 'success'
@@ -429,7 +430,7 @@ async def check_spf_record(domain: str, spf_source_ips: Optional[List[Dict[str, 
             message = 'SPF record found'
             warnings = []
 
-        if any(m.lstrip('+-~?') == 'ptr' or m.lstrip('+-~?').startswith('ptr:') for m in mechanisms):
+        if any(m.lstrip('+-~?').lower() == 'ptr' or m.lstrip('+-~?').lower().startswith('ptr:') for m in mechanisms):
             if status == 'success':
                 status = 'warning'
             warnings = warnings + ['The ptr mechanism is discouraged (RFC 7208): it is slow and unreliable. This check does not evaluate it']
@@ -517,8 +518,10 @@ async def check_ip_in_spf(domain: str, ip_to_check: str, spf_record: str, resolv
 
     for part in parts:
         clean_part = part.lstrip('+-~?')
+        # Names are case-insensitive (RFC 7208 4.6.1); values keep their text
+        name = clean_part.lower()
 
-        if clean_part.startswith('ip4:') or clean_part.startswith('ip6:'):
+        if name.startswith('ip4:') or name.startswith('ip6:'):
             mech_prefix = clean_part[:4]   # 'ip4:' / 'ip6:'
             ip_spec = clean_part[4:]
             try:
@@ -529,21 +532,21 @@ async def check_ip_in_spf(domain: str, ip_to_check: str, spf_record: str, resolv
             except Exception:
                 pass
 
-        elif clean_part in ['a'] or clean_part.startswith('a:'):
-            check_domain = domain if clean_part == 'a' else clean_part.split(':', 1)[1]
+        elif name in ['a'] or name.startswith('a:'):
+            check_domain = domain if name == 'a' else clean_part.split(':', 1)[1]
             try:
                 a_records = await resolve_dns_with_fallback(check_domain, address_record_type, timeout=5)
                 for rdata in a_records:
                     try:
                         if ipaddress.ip_address(str(rdata)) == target_ip:
-                            return True, f'a:{check_domain}' if clean_part.startswith('a:') else 'a'
+                            return True, f'a:{check_domain}' if name.startswith('a:') else 'a'
                     except ValueError:
                         continue
             except Exception:
                 pass
 
-        elif clean_part in ['mx'] or clean_part.startswith('mx:'):
-            check_domain = domain if clean_part == 'mx' else clean_part.split(':', 1)[1]
+        elif name in ['mx'] or name.startswith('mx:'):
+            check_domain = domain if name == 'mx' else clean_part.split(':', 1)[1]
             try:
                 mx_records = await resolve_dns_with_fallback(check_domain, 'MX', timeout=5)
                 for mx in mx_records:
@@ -552,7 +555,7 @@ async def check_ip_in_spf(domain: str, ip_to_check: str, spf_record: str, resolv
                         for rdata in mx_a_records:
                             try:
                                 if ipaddress.ip_address(str(rdata)) == target_ip:
-                                    return True, f'mx:{check_domain}' if clean_part.startswith('mx:') else 'mx'
+                                    return True, f'mx:{check_domain}' if name.startswith('mx:') else 'mx'
                             except ValueError:
                                 continue
                     except Exception:
@@ -560,13 +563,13 @@ async def check_ip_in_spf(domain: str, ip_to_check: str, spf_record: str, resolv
             except Exception:
                 pass
         
-        elif clean_part.startswith('include:'):
-            include_domain = clean_part.replace('include:', '')
+        elif name.startswith('include:'):
+            include_domain = clean_part[len('include:'):]
             try:
                 include_answers = await resolve_dns_with_fallback(include_domain, 'TXT', timeout=5)
                 for rdata in include_answers:
                     include_spf = b''.join(rdata.strings).decode('utf-8')
-                    if include_spf.startswith('v=spf1'):
+                    if include_spf.lower().startswith('v=spf1'):
                         authorized, method = await check_ip_in_spf(
                             include_domain, 
                             ip_to_check, 
@@ -580,13 +583,13 @@ async def check_ip_in_spf(domain: str, ip_to_check: str, spf_record: str, resolv
             except Exception:
                 pass
         
-        elif clean_part.startswith('redirect='):
-            redirect_domain = clean_part.replace('redirect=', '')
+        elif name.startswith('redirect='):
+            redirect_domain = clean_part[len('redirect='):]
             try:
                 redirect_answers = await resolve_dns_with_fallback(redirect_domain, 'TXT', timeout=5)
                 for rdata in redirect_answers:
                     redirect_spf = b''.join(rdata.strings).decode('utf-8')
-                    if redirect_spf.startswith('v=spf1'):
+                    if redirect_spf.lower().startswith('v=spf1'):
                         authorized, method = await check_ip_in_spf(
                             redirect_domain, 
                             ip_to_check, 
@@ -624,15 +627,17 @@ async def count_spf_dns_lookups(domain: str, spf_record: str, resolver=None, vis
     
     for part in parts:
         clean_part = part.lstrip('+-~?')
+        # Names are case-insensitive (RFC 7208 4.6.1); values keep their text
+        name = clean_part.lower()
         
-        if clean_part.startswith('include:'):
+        if name.startswith('include:'):
             lookup_count += 1
-            include_domain = clean_part.replace('include:', '')
+            include_domain = clean_part[len('include:'):]
             try:
                 include_answers = await resolve_dns_with_fallback(include_domain, 'TXT', timeout=5)
                 for rdata in include_answers:
                     include_spf = b''.join(rdata.strings).decode('utf-8')
-                    if include_spf.startswith('v=spf1'):
+                    if include_spf.lower().startswith('v=spf1'):
                         nested_count = await count_spf_dns_lookups(
                             include_domain,
                             include_spf,
@@ -645,19 +650,20 @@ async def count_spf_dns_lookups(domain: str, spf_record: str, resolver=None, vis
             except Exception:
                 pass
         
-        elif clean_part in ['a'] or clean_part.startswith('a:'):
+        # a and mx are one lookup each, with or without a CIDR length (RFC 7208 4.6.4)
+        elif name in ['a'] or name.startswith(('a:', 'a/')):
             lookup_count += 1
         
-        elif clean_part in ['mx'] or clean_part.startswith('mx:'):
+        elif name in ['mx'] or name.startswith(('mx:', 'mx/')):
             lookup_count += 1
         
-        elif clean_part.startswith('exists:'):
+        elif name.startswith('exists:'):
             lookup_count += 1
 
-        elif clean_part == 'ptr' or clean_part.startswith('ptr:'):
+        elif name == 'ptr' or name.startswith('ptr:'):
             lookup_count += 1
 
-        elif clean_part.startswith('redirect='):
+        elif name.startswith('redirect='):
             lookup_count += 1
 
     return lookup_count

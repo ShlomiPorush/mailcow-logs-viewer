@@ -91,3 +91,96 @@ async def test_a_term_that_only_starts_like_a_mechanism_is_an_error(monkeypatch,
 async def test_well_formed_mechanisms_stay_valid(monkeypatch, term):
     result = await _check(monkeypatch, f'v=spf1 {term} -all')
     assert 'Invalid' not in result['message'], result['message']
+
+
+@pytest.mark.parametrize('term', ['MX', 'Include:example.com', 'IP4:192.0.2.0/24', 'A/24', 'Ptr', 'Redirect=example.net'])
+@pytest.mark.asyncio
+async def test_mechanism_names_are_case_insensitive(monkeypatch, term):
+    """RFC 7208 section 4.6.1: mechanism and modifier names are case-insensitive."""
+    result = await _check(monkeypatch, f'v=spf1 {term} -all')
+    assert 'Invalid' not in result['message'], result['message']
+
+
+@pytest.mark.asyncio
+async def test_a_record_written_in_upper_case_is_checked_like_lower_case(monkeypatch):
+    """V=SPF1 and -ALL too: the version and every name are case-insensitive
+    (RFC 7208 section 12, ABNF strings per RFC 5234)."""
+    result = await _check(monkeypatch, 'V=SPF1 MX -ALL')
+    assert result['status'] == 'success', result['message']
+    assert result['record'] == 'V=SPF1 MX -ALL'
+    assert result['has_strict_all'] is True
+    assert result['includes_mx'] is True
+    assert result['dns_lookups'] == 1
+
+
+class FakeAddr:
+    def __init__(self, ip):
+        self.ip = ip
+
+    def __str__(self):
+        return self.ip
+
+
+class FakeMX:
+    def __init__(self, exchange):
+        self.exchange = exchange
+
+
+def _fake_dns(monkeypatch, records):
+    """records: {(name, type): [rdata, ...]}; anything else resolves to nothing."""
+    async def fake_resolve(query, record_type='TXT', timeout=5):
+        return records.get((query.lower(), record_type), [])
+    monkeypatch.setattr(domains, 'resolve_dns_with_fallback', fake_resolve)
+
+
+@pytest.mark.parametrize('record, lookups', [
+    ('v=spf1 a/24 -all', 1),
+    ('v=spf1 mx/24 -all', 1),
+    ('v=spf1 a//64 mx//64 -all', 2),
+    ('v=spf1 a:mail.example.com/24//64 mx:example.net//64 -all', 2),
+    ('v=spf1 a/24 mx/24 a:mail.example.com/24//64 ip4:192.0.2.0/24 -all', 3),
+])
+@pytest.mark.asyncio
+async def test_a_and_mx_with_a_cidr_length_are_dns_lookups(monkeypatch, record, lookups):
+    """RFC 7208 section 4.6.4: every a and mx term is a DNS lookup, whatever its CIDR length."""
+    _fake_dns(monkeypatch, {})
+    assert await domains.count_spf_dns_lookups('example.com', record) == lookups
+
+
+@pytest.mark.asyncio
+async def test_upper_case_terms_are_counted_as_dns_lookups(monkeypatch):
+    _fake_dns(monkeypatch, {('example.net', 'TXT'): [FakeTXT('V=SPF1 MX A -ALL')]})
+    record = 'v=spf1 A MX/24 Include:example.net EXISTS:%{i}.example.org PTR Redirect=example.org'
+    # A, MX/24, Include (+ its MX and A), EXISTS, PTR, Redirect
+    assert await domains.count_spf_dns_lookups('example.com', record) == 8
+
+
+_AUTH_DNS = {
+    ('mail.example.com', 'A'): [FakeAddr('192.0.2.10')],
+    ('example.com', 'A'): [FakeAddr('192.0.2.20')],
+    ('example.com', 'MX'): [FakeMX('mx.example.com')],
+    ('mx.example.com', 'A'): [FakeAddr('192.0.2.30')],
+}
+
+
+@pytest.mark.parametrize('lower, upper, ip, nested', [
+    ('v=spf1 ip4:192.0.2.0/24 -all', 'V=SPF1 IP4:192.0.2.0/24 -ALL', '192.0.2.5', None),
+    ('v=spf1 ip6:2001:db8::/32 -all', 'v=spf1 IP6:2001:DB8::/32 -all', '2001:db8::5', None),
+    ('v=spf1 a:mail.example.com -all', 'v=spf1 A:mail.example.com -all', '192.0.2.10', None),
+    ('v=spf1 a -all', 'v=spf1 A -all', '192.0.2.20', None),
+    ('v=spf1 mx -all', 'v=spf1 MX -all', '192.0.2.30', None),
+    ('v=spf1 include:example.net -all', 'v=spf1 Include:example.net -all', '198.51.100.7', 'v=spf1 ip4:198.51.100.0/24 -all'),
+    ('v=spf1 include:example.net -all', 'v=spf1 include:example.net -all', '198.51.100.7', 'V=SPF1 IP4:198.51.100.0/24 -ALL'),
+    ('v=spf1 redirect=example.net', 'v=spf1 REDIRECT=example.net', '198.51.100.7', 'v=spf1 ip4:198.51.100.0/24 -all'),
+])
+@pytest.mark.asyncio
+async def test_an_upper_case_record_authorizes_like_lower_case(monkeypatch, lower, upper, ip, nested):
+    dns = dict(_AUTH_DNS)
+    if nested:
+        dns[('example.net', 'TXT')] = [FakeTXT(nested)]
+    _fake_dns(monkeypatch, dns)
+    ok_lower, method_lower = await domains.check_ip_in_spf('example.com', ip, lower)
+    ok_upper, method_upper = await domains.check_ip_in_spf('example.com', ip, upper)
+    assert ok_lower is True, method_lower
+    assert ok_upper is True, method_upper
+    assert method_upper.lower() == method_lower.lower()
