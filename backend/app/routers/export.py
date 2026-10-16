@@ -238,10 +238,10 @@ def export_netfilter_csv(
                 query = query.filter(or_(NetfilterLog.action == 'ban', NetfilterLog.action == 'banned'))
             else:
                 query = query.filter(NetfilterLog.action == action)
-        
+
         if country_code:
             query = query.filter(NetfilterLog.country_code == country_code.upper())
-        
+
         if start_date:
             query = query.filter(NetfilterLog.time >= start_date)
         
