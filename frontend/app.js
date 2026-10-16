@@ -365,6 +365,9 @@ async function fetchRwStatus() {
         renderSecurityLists();
         renderSecuritySettings();
     }
+    // Same for the Queue and Quarantine rows and their actions
+    if (currentTab === 'queue' && allQueueData.length) applyQueueFilters();
+    if (currentTab === 'quarantine' && quarantineLastData) renderQuarantineData(quarantineLastData);
 }
 
 // Auto-Rules release and delete held mail in mailcow, so they need the Read-Write key.
