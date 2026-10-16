@@ -1630,7 +1630,7 @@ function switchTab(tab, params = {}) {
             tabContent.classList.remove('hidden');
             tabContent.innerHTML = `
                 <div class="ui-disabled-page">
-                    ${uiLocked(`${featureLabel} is disabled`, 'This feature has been turned off by the administrator in Settings → Application → Features.',
+                    ${uiLocked(`${featureLabel} is disabled`, 'This feature has been turned off by the administrator in Settings → Features.',
                         `<button onclick="navigateTo('dashboard')" class="ui-btn ui-btn-primary">Go to Dashboard</button>`)}
                 </div>`;
         }

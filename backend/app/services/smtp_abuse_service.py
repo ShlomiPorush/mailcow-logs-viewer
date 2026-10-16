@@ -129,7 +129,7 @@ def record_security_alert(email: str, count: int, revoked: int, automatic: bool)
         f"(limit: {settings.smtp_abuse_threshold}).\n\n"
         f"IMAP access is unchanged. App passwords revoked: {revoked}.\n"
         "Review the mailbox, reset its password, then re-enable SMTP from "
-        "Security → Abuse Protection."
+        "Security → Settings → Outgoing spam."
     )
     with get_db_context() as db:
         db.add(SecurityAlert(
@@ -310,7 +310,7 @@ async def _notify_operator_blocked(email: str, count: int, revoked: int) -> None
                 ('App passwords revoked', revoked),
             ]),
             e.banner('warn', 'What to do',
-                     "Secure the account, then turn sending back on from Security, Abuse Protection. "
+                     "Secure the account, then turn sending back on from Security, Settings, Outgoing spam. "
                      "Receiving mail (IMAP) still works."),
         ],
         footer="SMTP abuse protection is on in Settings, SMTP Abuse.")

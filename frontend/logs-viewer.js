@@ -67,7 +67,7 @@ async function loadLogViewer() {
             const output = document.getElementById('logs-output');
             if (output) {
                 output.innerHTML = `<div class="ui-logs-locked">${uiLocked('Live Log Viewer is Disabled',
-                    'Raw log collection is currently turned off. Enable it in Settings → Raw Logs to start viewing live logs.')}</div>`;
+                    'Raw log collection is currently turned off. Enable it in Settings → Logs to start viewing live logs.')}</div>`;
             }
             // Hide the service sidebar
             const sidebar = document.getElementById('logs-service-list');
@@ -87,7 +87,7 @@ async function loadLogViewer() {
         } else {
             const output = document.getElementById('logs-output');
             if (output) {
-                output.innerHTML = `<div class="ui-logs-locked">${uiLocked('No log services available', 'Enable services in Settings → Raw Logs.')}</div>`;
+                output.innerHTML = `<div class="ui-logs-locked">${uiLocked('No log services available', 'Enable services in Settings → Logs.')}</div>`;
             }
         }
     } catch (error) {

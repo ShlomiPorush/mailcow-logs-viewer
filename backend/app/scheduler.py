@@ -1406,7 +1406,7 @@ def _notify_protection(banned, failed, alerts):
     if not lines:
         return
     subject = 'Possible stolen password' if alerts else 'Protection rules banned addresses' if banned else 'Protection rules could not ban'
-    review = 'Review them on the Security page, Protection tab.'
+    review = 'Review them on the Security page, Overview tab.'
     lines.append('')
     lines.append(review)
 
@@ -1430,7 +1430,7 @@ def _notify_protection(banned, failed, alerts):
     blocks.append(e.paragraph(review, muted=True))
     html = e.render(title=subject, topic='Security', tone='fail' if alerts or failed else 'warn',
                     intro=intro or None, blocks=blocks,
-                    footer='The protection rules are set on the Security page, Protection tab.')
+                    footer='The protection rules are set on the Security page, Settings tab.')
     notify(subject, '\n'.join(lines), html_content=html, alert_type='security')
 
 
