@@ -128,6 +128,7 @@ def reschedule_interval_jobs():
         _reschedule_smtp_abuse_job()
         _reschedule_anomaly_job()
         _reschedule_dovecot_correlation_job()
+        _reschedule_geoip_job()
 
     except Exception as e:
         logger.warning("Failed to reschedule interval jobs: %s", e)
@@ -174,6 +175,25 @@ def _reschedule_anomaly_job():
     else:
         try:
             scheduler.remove_job('anomaly_detection')
+        except Exception:
+            pass
+
+
+def _reschedule_geoip_job():
+    """Add or remove the weekly GeoIP update when the MaxMind license is saved or removed."""
+    if not scheduler.running:
+        return
+    if is_license_configured():
+        scheduler.add_job(
+            update_geoip_database,
+            trigger=CronTrigger(day_of_week='sun', hour=3, minute=0),
+            id='update_geoip',
+            name='Update GeoIP',
+            replace_existing=True
+        )
+    else:
+        try:
+            scheduler.remove_job('update_geoip')
         except Exception:
             pass
 

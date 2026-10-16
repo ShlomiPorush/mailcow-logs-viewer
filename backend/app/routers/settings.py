@@ -1224,11 +1224,13 @@ def validate_geoip_db():
     
     # Reload readers to pick up any new files
     reload_geoip_readers()
-    
+    # The test lookups once more, for the result of each database
+    checked = validate_geoip_database()
+
     return {
         "valid": get_geoip_db_valid() is True,
-        "city_ok": get_geoip_db_valid() is True,
-        "asn_ok": get_geoip_db_valid() is True,
+        "city_ok": checked['city_ok'],
+        "asn_ok": checked['asn_ok'],
         "db_valid": get_geoip_db_valid(),
     }
 
