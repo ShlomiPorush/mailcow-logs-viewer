@@ -58,7 +58,6 @@ def test_the_notification_itself_goes_to_the_channels_without_smtp(monkeypatch):
 def test_failed_import_job_reaches_the_channels_without_smtp(monkeypatch):
     _channels_only(monkeypatch)
     monkeypatch.setattr(scheduler.settings._inner, "dmarc_imap_enabled", True)
-    monkeypatch.setattr(scheduler, "_cleanup_stale_dmarc_syncs", lambda: None)
     failed = [{'email_id': '7', 'message_id': '<m@example.com>', 'subject': 'Report', 'error': 'Not a report'}]
     monkeypatch.setattr(scheduler, "sync_dmarc_reports_from_imap",
                         lambda trigger: {'status': 'error', 'error_message': 'IMAP failed',
