@@ -258,26 +258,35 @@ def test_after_the_upgrade_the_threshold_counts_new_bounces_only(suppression_set
             assert rows[email].expires_at < datetime.utcnow() + timedelta(days=21, minutes=1), email
 
 
-# -- 0018: Contains rules an earlier edit escaped twice -----------------------
+# -- 0018: Sender Domain Contains rules an earlier edit escaped twice ----------
 
 # The pattern the rule dialog saves for a Contains rule on example.com after
 # an earlier version opened and saved it again (made by the real dialog code
 # in .github/tests/queue-quarantine-actions.test.cjs)
 TWICE_SAVED = r"example\\\.com"
 REPAIRED = r"example\.com"
+# A Sender Contains rule created once for the text a\.b: a quoted local part
+# can hold that, so the same shape is not proof of damage there
+SENDER_BACKSLASH = r"a\\\.b"
+# A Subject Contains rule for Invoice.pdf an earlier edit escaped twice, and
+# what its Repair button in the Auto-Rules list saves (queue-quarantine-actions.test.cjs)
+SUBJECT_TWICE = r"Invoice\\\.pdf"
+SUBJECT_REPAIRED = r"Invoice\.pdf"
 
 # name -> (match_type, match_value, is_regex, value after the upgrade)
 RULES = {
     "domain twice": ("sender_domain", TWICE_SAVED, True, REPAIRED),
-    "sender twice": ("sender", r"user@example\\\.com", True, r"user@example\.com"),
-    "recipient three times": ("recipient", r"user@example\\\\\\\.com", True, r"user@example\.com"),
+    "domain three times": ("sender_domain", r"example\\\\\\\.com", True, REPAIRED),
     "domain once": ("sender_domain", r"example\.org", True, r"example\.org"),
+    "sender twice": ("sender", r"user@example\\\.com", True, r"user@example\\\.com"),
+    "sender backslash": ("sender", SENDER_BACKSLASH, True, SENDER_BACKSLASH),
+    "recipient three times": ("recipient", r"user@example\\\\\\\.com", True, r"user@example\\\\\\\.com"),
     "plain text": ("sender", "noreply", True, "noreply"),
-    "subject twice": ("subject", r"Invoice\\\.pdf", True, r"Invoice\\\.pdf"),
+    "subject twice": ("subject", SUBJECT_TWICE, True, SUBJECT_TWICE),
     "regex": ("sender", r"^.*@(spam|junk)\.example$", True, r"^.*@(spam|junk)\.example$"),
     "regex with escapes": ("sender", r"a\\\.b|c", True, r"a\\\.b|c"),
     "regex digits": ("sender", r"invoice\\d+", True, r"invoice\\d+"),
-    "exact": ("sender", TWICE_SAVED, False, TWICE_SAVED),
+    "exact": ("sender_domain", TWICE_SAVED, False, TWICE_SAVED),
 }
 
 
@@ -305,7 +314,7 @@ def _matches(rule, sender="user@example.com", rcpt="user@example.com", subject="
     return _find_matching_rule([rule], sender, domain, rcpt, subject) is rule
 
 
-def test_twice_escaped_contains_rules_are_repaired(caplog):
+def test_only_twice_escaped_sender_domain_rules_are_repaired(caplog):
     from app.models import QuarantineRule
     revision = _revision("repair_twice_escaped_rules")
     with _schema(QuarantineRule) as isolated:
@@ -317,12 +326,41 @@ def test_twice_escaped_contains_rules_are_repaired(caplog):
         after = _rules(isolated)
         for name, (_, _, _, expected) in RULES.items():
             assert after[name].match_value == expected, name
-        for name in ("domain twice", "sender twice", "recipient three times"):
+        for name in ("domain twice", "domain three times"):
             assert _matches(after[name]), name
-        assert caplog.text.count("Upgrade: repaired rule") == 3
+        assert caplog.text.count("Upgrade: repaired rule") == 2
         assert f"sender_domain pattern {TWICE_SAVED} is now {REPAIRED}" in caplog.text
         # Running it again changes nothing
         caplog.clear()
         _upgrade(isolated, revision)
         assert {n: r.match_value for n, r in _rules(isolated).items()} == {n: v[3] for n, v in RULES.items()}
         assert "repaired" not in caplog.text
+
+
+def test_a_sender_rule_for_a_backslash_keeps_matching_it():
+    from app.models import QuarantineRule
+    revision = _revision("repair_twice_escaped_rules")
+    quoted = r'"a\.b"@example.com'
+    with _schema(QuarantineRule) as isolated:
+        _seed_rules(isolated)
+        assert _matches(_rules(isolated)["sender backslash"], sender=quoted)
+        _upgrade(isolated, revision)
+        rule = _rules(isolated)["sender backslash"]
+        assert rule.match_value == SENDER_BACKSLASH
+        assert _matches(rule, sender=quoted)
+        assert not _matches(rule, sender="a.b@example.com")
+
+
+def test_a_twice_escaped_subject_rule_is_left_for_its_repair_button():
+    from app.models import QuarantineRule
+    revision = _revision("repair_twice_escaped_rules")
+    with _schema(QuarantineRule) as isolated:
+        _seed_rules(isolated)
+        _upgrade(isolated, revision)
+        rule = _rules(isolated)["subject twice"]
+        assert rule.match_value == SUBJECT_TWICE
+        assert not _matches(rule, subject="Invoice.pdf")
+        # What the Repair button saves matches the subject the rule was made for
+        rule.match_value = SUBJECT_REPAIRED
+        assert _matches(rule, subject="Invoice.pdf")
+        assert not _matches(rule, subject="Invoice-pdf")

@@ -3111,16 +3111,19 @@ async function loadQuarantineRules() {
         container.innerHTML = `<div class="ui-table ui-stack ui-qr-table">${data.data.map(rule => {
             const matchLabels = { sender: 'Sender', sender_domain: 'Sender Domain', recipient: 'Recipient', subject: 'Subject' };
             const actionLabel = rule.action === 'delete' ? 'Delete' : 'Release';
+            const repair = quarantineRuleRepair(rule);
 
             return `
             <div class="ui-tr${rule.enabled ? '' : ' ui-row-off'}">
                 <div class="ui-td ui-q-who">
                     <div><b dir="auto">${escapeHtml(rule.name)}</b> ${uiTag(actionLabel, rule.action === 'delete' ? 'fail' : 'ok')}
-                        ${rule.is_regex ? uiTag('Regex', 'info') : ''} ${!rule.enabled ? uiTag('Disabled', '') : ''}</div>
+                        ${rule.is_regex ? uiTag('Regex', 'info') : ''} ${!rule.enabled ? uiTag('Disabled', '') : ''} ${repair ? uiTag('Check', 'warn') : ''}</div>
                     <small>${escapeHtml(matchLabels[rule.match_type] || rule.match_type)}: <code class="ui-mono" dir="auto">${escapeHtml(rule.match_value)}</code></small>
+                    ${repair ? '<small class="ui-text-warn">Looks for a backslash. An earlier version may have changed this rule when it was edited.</small>' : ''}
                     <small>Hits: ${escapeHtml(String(rule.hit_count))}${rule.last_hit_at ? ' · Last: ' + formatTime(rule.last_hit_at) : ''}${rule.notes ? ' · ' + escapeHtml(rule.notes) : ''}</small>
                 </div>
                 <span class="ui-td ui-td-end ui-row-actions">
+                    ${repair ? `<button onclick="repairQuarantineRule(${Number(rule.id)})" title="${escapeHtml(`Look for "${repair.text}" instead`)}" class="ui-btn ui-btn-sm">Repair</button>` : ''}
                     <button onclick="toggleQuarantineRule(${Number(rule.id)})" title="${rule.enabled ? 'Click to disable this rule' : 'Click to enable this rule'}"
                         class="ui-btn ui-btn-sm${rule.enabled ? ' ui-btn-on' : ''}">${rule.enabled ? 'Enabled' : 'Disabled'}</button>
                     <button onclick="showEditQuarantineRuleModal(${Number(rule.id)})" title="Edit" class="ui-btn ui-btn-sm">Edit</button>
@@ -3169,6 +3172,17 @@ function quarantineRuleMatchMode(rule) {
         }
     }
     return { mode: 'contains', value: text };
+}
+
+// Earlier versions escaped a Contains rule's text again when it was edited, so
+// the rule came to look for backslashes. A Contains rule whose text is itself
+// only escaped text may be one of those: its Repair saves that text as the
+// pattern, which removes one level of escaping. Null for any other rule.
+function quarantineRuleRepair(rule) {
+    const ruleMode = quarantineRuleMatchMode(rule);
+    if (ruleMode.mode !== 'contains' || !ruleMode.value.includes('\\')) return null;
+    const once = quarantineRuleMatchMode({ is_regex: true, match_value: ruleMode.value });
+    return once.mode === 'contains' ? { pattern: ruleMode.value, text: once.value } : null;
 }
 
 function _showQuarantineRuleModal(rule, prefill) {
@@ -3308,7 +3322,11 @@ async function saveQuarantineRule(ruleId) {
     }
     
     const body = { name, match_type: matchType, match_value: matchValue, is_regex: isRegex, action, notes };
-    
+    await _submitQuarantineRule(ruleId, body);
+}
+
+// Create (ruleId null) or update a rule, then draw the list again
+async function _submitQuarantineRule(ruleId, body, doneMessage) {
     try {
         const isEdit = ruleId !== null;
         const url = isEdit ? `/api/quarantine/rules/${ruleId}` : '/api/quarantine/rules';
@@ -3326,11 +3344,21 @@ async function saveQuarantineRule(ruleId) {
         }
         
         closeQuarantineRuleModal();
-        showToast(isEdit ? 'Rule updated' : 'Rule created', 'success');
+        showToast(doneMessage || (isEdit ? 'Rule updated' : 'Rule created'), 'success');
         await loadQuarantineRules();
     } catch (err) {
         showToast('Failed to save rule: ' + err.message, 'error');
     }
+}
+
+async function repairQuarantineRule(ruleId) {
+    const rule = _quarantineRulesCache?.data?.find(r => r.id === ruleId);
+    const repair = rule && quarantineRuleRepair(rule);
+    if (!repair) { showToast('Rule not found', 'error'); return; }
+    await _submitQuarantineRule(ruleId, {
+        name: rule.name, match_type: rule.match_type, match_value: repair.pattern,
+        is_regex: true, action: rule.action, notes: rule.notes || null,
+    }, 'Rule repaired');
 }
 
 async function deleteQuarantineRule(ruleId, ruleName) {

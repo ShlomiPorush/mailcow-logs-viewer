@@ -194,6 +194,71 @@ test('a Contains rule saved twice by an earlier version opens as Contains with i
     assert.equal(sent.is_regex, true);
 });
 
+// Other rules an earlier edit escaped twice are not changed by the upgrade: the
+// Auto-Rules list flags them, and Repair removes one level of escaping. The
+// subject values are also in test_quarantine_spam_upgrade.py.
+const SUBJECT_TWICE = 'Invoice\\\\\\.pdf';
+const SUBJECT_REPAIRED = 'Invoice\\.pdf';
+const listed = (id, match_type, match_value, is_regex) => ({
+    id, name: `Rule ${id}`, match_type, match_value, is_regex, action: 'release', enabled: true,
+    hit_count: 0, last_hit_at: null, notes: 'Kept as it is',
+});
+
+// Draw the Auto-Rules list for these rules; returns the app and each rule's row
+async function drawRules(rules) {
+    const app = loadApp();
+    app.context.authenticatedFetch = async () => ({ ok: true, json: async () => ({ total: rules.length, data: rules }) });
+    await app.context.loadQuarantineRules();
+    const rows = app.elements['quarantine-rules-list'].innerHTML.split('<div class="ui-tr').slice(1);
+    return { app, rows: Object.fromEntries(rules.map((r, i) => [r.id, rows[i]])) };
+}
+
+const BACKSLASH_NOTE = 'Looks for a backslash. An earlier version may have changed this rule when it was edited.';
+
+test('a Contains rule that looks for a backslash is flagged in the list with a Repair button', async () => {
+    const { rows } = await drawRules([
+        listed(1, 'subject', SUBJECT_TWICE, true),
+        listed(2, 'sender', 'a\\\\\\.b', true),            // Contains a\.b: flagged, left to the owner
+        listed(3, 'sender', REPAIRED, true),                // Contains example.com
+        listed(4, 'sender', 'a\\\\\\.b|c', true),           // Regex
+        listed(5, 'subject', 'a\\\\\\.b\\*', true),         // Contains a\.b*: no Contains text escaped twice
+        listed(6, 'sender', SUBJECT_TWICE, false),          // Exact Match
+    ]);
+    for (const id of [1, 2]) {
+        assert.match(rows[id], /ui-tag ui-tag-warn">Check</, `rule ${id}`);
+        assert.ok(rows[id].includes(BACKSLASH_NOTE), `rule ${id}`);
+        assert.ok(rows[id].includes(`onclick="repairQuarantineRule(${id})"`), `rule ${id}`);
+    }
+    for (const id of [3, 4, 5, 6]) {
+        assert.ok(!rows[id].includes('ui-tag-warn') && !rows[id].includes(BACKSLASH_NOTE) && !rows[id].includes('repairQuarantineRule'),
+            `rule ${id}`);
+    }
+});
+
+test('Repair saves the rule with one level of escaping removed, and it is no longer flagged', async () => {
+    const damaged = listed(1, 'subject', SUBJECT_TWICE, true);
+    const { app } = await drawRules([damaged]);
+    let request = null;
+    app.context.authenticatedFetch = async (url, options) => {
+        if (options && options.method) {
+            request = { url, method: options.method, body: JSON.parse(options.body) };
+            return { ok: true, json: async () => ({}) };
+        }
+        return { ok: true, json: async () => ({ total: 1, data: [{ ...damaged, match_value: request.body.match_value }] }) };
+    };
+    await app.context.repairQuarantineRule(1);
+    assert.equal(request.url, '/api/quarantine/rules/1');
+    assert.equal(request.method, 'PUT');
+    assert.deepEqual(request.body, { name: 'Rule 1', match_type: 'subject', match_value: SUBJECT_REPAIRED,
+                                     is_regex: true, action: 'release', notes: 'Kept as it is' });
+    const row = app.elements['quarantine-rules-list'].innerHTML;
+    assert.ok(row.includes('Invoice\\.pdf') && !row.includes('repairQuarantineRule') && !row.includes(BACKSLASH_NOTE));
+    // The edit dialog now opens it as Contains Invoice.pdf
+    const { shownMode, shownValue } = await editAndSave({ ...damaged, match_value: SUBJECT_REPAIRED });
+    assert.equal(shownMode, 'contains');
+    assert.equal(shownValue, 'Invoice.pdf');
+});
+
 // Auto refresh while the Read-Write status is still loading: the rows wait for
 // it, as on the first load, instead of showing the lock for a moment
 async function refreshWhileRwLoads(page, data, refresh) {

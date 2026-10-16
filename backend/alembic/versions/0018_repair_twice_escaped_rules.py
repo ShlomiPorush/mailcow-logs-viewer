@@ -1,13 +1,15 @@
-"""Repair quarantine rules whose Contains text an earlier edit escaped twice.
+"""Repair Sender Domain rules whose Contains text an earlier edit escaped twice.
 
 A Contains rule is stored as a regex that only escapes its text
 (example.com -> example\\.com). Earlier versions opened such a rule with the
 stored pattern as its text and escaped it again on save
-(example\\\\\\.com), so it stopped matching. On Sender, Sender Domain and
-Recipient rules a backslash cannot be part of the text, so a pattern that
-only escapes a text that itself only escapes a text was saved twice; one
-level is removed until that is no longer the case. Subject rules can
-contain a backslash and are left as they are, as are real regexes.
+(example\\\\\\.com), so it stopped matching. A domain cannot contain a
+backslash, so on a Sender Domain rule a pattern that only escapes a text
+that itself only escapes a text was saved twice; one level is removed until
+that is no longer the case. Sender, Recipient and Subject rules can be
+meant to look for a backslash (a quoted local part can hold one), so they
+are left as they are; the Auto-Rules list flags them with a Repair button.
+Real regexes are left as they are.
 
 Revision ID: 0018
 Revises: 0017
@@ -28,7 +30,7 @@ logger = logging.getLogger("app.migrations")
 
 # What the rule dialog escapes for a Contains rule (frontend/app.js)
 SPECIAL = set(".*+?^${}()|[]\\")
-FIELDS = ("sender", "sender_domain", "recipient")
+FIELDS = ("sender_domain",)
 
 
 def unescape(value):
