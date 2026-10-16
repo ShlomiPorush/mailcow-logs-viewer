@@ -221,8 +221,10 @@ function securityProtectionItems() {
         const bans = r.mode === 'enforce' && caps.can_ban;
         return item(bans ? 'on' : 'watch', SECURITY_RULE_NAMES[key], bans ? 'bans' : 'watching', key);
     };
+    // Without the Read-Write key the check does not run, even when it is switched on
     const abuse = typeof smtpAbuseStatus !== 'undefined' && smtpAbuseStatus
-        ? item(smtpAbuseStatus.enabled ? 'on' : 'off', 'Outgoing spam', '', 'abuse') : '';
+        ? smtpAbuseStatus.enabled && !smtpAbuseStatus.rw_key_configured ? item('off', 'Outgoing spam', 'needs a Read-Write key', 'abuse')
+        : item(smtpAbuseStatus.enabled ? 'on' : 'off', 'Outgoing spam', '', 'abuse') : '';
     return [f2b, ...SECURITY_RULE_ORDER.map(rule), abuse].filter(Boolean);
 }
 
@@ -1199,7 +1201,7 @@ function securityCardHtml(key) {
         on = !!enabled;
         toggle = securityToggle(name, on, !editable, `setSecurityAbuse('smtp_abuse_enabled', this.checked)`, editable ? ''
             : securityAppSettings && securityAppSettings.settings_edit_via_ui_enabled && !securityAppSettings.settings_migrated ? 'Settings are not migrated yet' : 'Editing settings is off');
-        status = `${on ? uiTag('Stops mailboxes', 'fail') : ''}<span class="ui-tag ui-tag-warn ui-tab-tag" title="This feature is new - please report any issues on GitHub">Beta</span>
+        status = `${!on ? '' : mailcowRwConfigured ? uiTag('Stops mailboxes', 'fail') : uiTag('Needs a Read-Write key', '')}<span class="ui-tag ui-tag-warn ui-tab-tag" title="This feature is new - please report any issues on GitHub">Beta</span>
             <button type="button" onclick="event.stopPropagation(); showHelpModal('Abuse_Protection')" class="ui-icon-btn ui-help-btn" title="Help - Abuse Protection" aria-label="Help - Abuse Protection"><svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg></button>`;
         sentence = securityAbuseSentence(open);
     } else {

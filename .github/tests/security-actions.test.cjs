@@ -118,3 +118,25 @@ test('the denylist offers Remove on a rule ban only with the Read-Write key', ()
     assert.match(box.innerHTML, /203\.0\.113\.7\/32/);
     assert.doesNotMatch(box.innerHTML, /undoProtectionHit/);
 });
+
+test('Outgoing spam counts as on only when its check can run', () => {
+    const context = load();
+    const abuse = () => context.securityProtectionItems().find(p => p.key === 'abuse');
+    vm.runInContext('fail2banPolicy = null; smtpAbuseStatus = { enabled: true, rw_key_configured: false }', context);
+    assert.equal(abuse().state, 'off');
+    assert.match(abuse().note, /Read-Write/);
+    vm.runInContext('smtpAbuseStatus = { enabled: true, rw_key_configured: true }', context);
+    assert.equal(abuse().state, 'on');
+});
+
+test('the Outgoing spam card says it stops mailboxes only with the Read-Write key', () => {
+    const context = load();
+    vm.runInContext(`securityAppSettings = { configuration: { smtp_abuse_enabled: true }, env_locked_keys: [],
+        settings_edit_via_ui_enabled: true, settings_migrated: true }; mailcowRwConfigured = false`, context);
+    const card = () => vm.runInContext("securityCardHtml('abuse')", context);
+    assert.doesNotMatch(card(), /Stops mailboxes/);
+    assert.match(card(), /Needs a Read-Write key/);
+    vm.runInContext('mailcowRwConfigured = true', context);
+    assert.match(card(), /Stops mailboxes/);
+});
+
