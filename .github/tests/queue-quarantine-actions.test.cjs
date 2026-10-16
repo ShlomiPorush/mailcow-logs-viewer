@@ -80,3 +80,15 @@ test('quarantine rows get their actions when the Read-Write status arrives after
     await app.context.fetchRwStatus();
     assert.doesNotMatch(app.elements['quarantine-logs'].innerHTML, /Quarantine actions are locked/);
 });
+
+test('Suppress stays on queue rows without the Read-Write key', () => {
+    const html = drawQueue(loadApp(), false);
+    assert.match(html, /showAddSuppressionModal\('user@example\.org'\)/);
+    assert.doesNotMatch(html, /queue-action-btn|queue-checkbox/);
+    assert.match(html, /Actions<\/span>/);
+});
+
+test('with the key, queue rows keep every action', () => {
+    const html = drawQueue(loadApp(), true);
+    for (const action of ['queueRetry', 'queueHold', 'queueDeleteItem', 'showAddSuppressionModal']) assert.match(html, new RegExp(action + '\\('));
+});

@@ -2425,7 +2425,7 @@ function applyQueueFilters() {
     const lockedNote = canAct ? '' : `<div class="ui-list-note">${uiLocked('Queue actions are locked', `Retry, hold, release, delete and flush ${UI_RW_KEY_TEXT}`)}</div>`;
     const cols = canAct
         ? '--ui-cols: 20px minmax(200px, 1.6fr) 84px minmax(240px, 2.8fr) 70px 318px; --ui-table-min: 1000px'
-        : '--ui-cols: minmax(200px, 1.6fr) 84px minmax(240px, 2.8fr) 70px; --ui-table-min: 640px';
+        : '--ui-cols: minmax(200px, 1.6fr) 84px minmax(240px, 2.8fr) 70px 104px; --ui-table-min: 740px';
 
     container.innerHTML = `
         ${lockedNote}
@@ -2444,7 +2444,7 @@ function applyQueueFilters() {
                 <button onclick="queueDeleteAll()" id="queue-delete-all-btn" class="ui-btn ui-btn-sm ui-btn-danger-solid">Delete All</button>
             </div>
         ` : ''}
-            <div class="ui-tr ui-tr-head">${canAct ? '<span></span>' : ''}<span>Recipient</span><span>State</span><span>Last response</span><span class="ui-td-end">Size</span>${canAct ? '<span class="ui-td-end">Actions</span>' : ''}</div>
+            <div class="ui-tr ui-tr-head">${canAct ? '<span></span>' : ''}<span>Recipient</span><span>State</span><span>Last response</span><span class="ui-td-end">Size</span><span class="ui-td-end">Actions</span></div>
             ${filteredData.map(item => {
                 const qid = item.queue_id || '';
                 const queueName = (item.queue_name || '').toLowerCase();
@@ -2474,15 +2474,15 @@ function applyQueueFilters() {
                         ? responses.map(r => `<div>${recipients.length > 1 ? `<span class="ui-muted">${escapeHtml(r.email)}:</span> ` : ''}${escapeHtml(r.response)}</div>`).join('')
                         : `<span class="ui-muted">${isHold ? 'Put on hold' : '-'}</span>`}</div>
                     <span class="ui-td ui-td-end">${formatSize(item.message_size)}</span>
-                    ${canAct ? `
                     <span class="ui-td ui-td-end ui-row-actions">
+                    ${canAct ? `
                         <button onclick="queueRetry('${escapeJsArg(qid)}')" title="Retry delivery" class="queue-action-btn ui-btn ui-btn-sm">Retry</button>
                         ${isHold
                             ? `<button onclick="queueUnhold('${escapeJsArg(qid)}')" title="Release from hold" class="queue-action-btn ui-btn ui-btn-sm">Unhold</button>`
                             : `<button onclick="queueHold('${escapeJsArg(qid)}')" title="Hold message" class="queue-action-btn ui-btn ui-btn-sm">Hold</button>`}
-                        <button onclick="queueDeleteItem('${escapeJsArg(qid)}')" title="Delete from queue" class="queue-action-btn ui-btn ui-btn-sm ui-btn-danger">Delete</button>
+                        <button onclick="queueDeleteItem('${escapeJsArg(qid)}')" title="Delete from queue" class="queue-action-btn ui-btn ui-btn-sm ui-btn-danger">Delete</button>` : ''}
                         ${suppress}
-                    </span>` : ''}
+                    </span>
                 </div>`;
             }).join('')}
         </div>
