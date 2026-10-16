@@ -117,3 +117,30 @@ def test_the_events_export_keeps_the_action_and_country_filters(netfilter_rows):
     assert _exported_ips(country_code='tl') == ['192.0.2.1', '192.0.2.2', '192.0.2.3']
     assert _exported_ips(action='ban', country_code='OL') == ['192.0.2.4']
 
+
+# ------------------------------------------------------------- Outgoing spam
+
+@pytest.mark.parametrize('revoke', [False, True])
+def test_the_outgoing_spam_status_says_whether_app_passwords_are_revoked(monkeypatch, revoke):
+    from app.routers import smtp_abuse
+
+    async def no_mailboxes():
+        return []
+    monkeypatch.setattr(mailcow_api, 'get_mailboxes', no_mailboxes)
+    monkeypatch.setattr(smtp_abuse.svc, 'fetch_outbound_counts', lambda *a: {})
+    monkeypatch.setattr(smtp_abuse.svc, 'fetch_whitelist', lambda: [])
+    monkeypatch.setattr(smtp_abuse.svc, 'fetch_latest_actions', lambda: {})
+    monkeypatch.setattr(settings._inner, 'smtp_abuse_revoke_app_passwords', revoke)
+    status = asyncio.run(smtp_abuse.get_status(limit=10))
+    assert status['revoke_app_passwords'] is revoke
+
+
+@pytest.mark.parametrize('revoked', [0, 2])
+def test_the_operator_alert_says_imap_is_unchanged_only_when_no_app_password_was_revoked(monkeypatch, revoked):
+    from app.services import notification_service, smtp_abuse_service
+    sent = {}
+    monkeypatch.setattr(notification_service, 'notify',
+                        lambda subject, text, html, recipient, alert_type: sent.update(text=text))
+    asyncio.run(smtp_abuse_service._notify_operator_blocked('user@example.com', 500, revoked))
+    assert ('IMAP access is unchanged' in sent['text']) is (revoked == 0)
+    assert 'Abuse Protection' not in sent['text'] and 'Security → Settings → Outgoing spam' in sent['text']

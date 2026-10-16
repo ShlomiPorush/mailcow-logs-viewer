@@ -140,3 +140,35 @@ test('the Outgoing spam card says it stops mailboxes only with the Read-Write ke
     assert.match(card(), /Stops mailboxes/);
 });
 
+
+test('Disable SMTP mentions app passwords only when they are revoked', async () => {
+    for (const revoke of [false, true]) {
+        const context = load();
+        const { asked } = recordRequests(context);
+        vm.runInContext(`smtpAbuseStatus = { enabled: true, rw_key_configured: true, revoke_app_passwords: ${revoke} }`, context);
+        await context.smtpAbuseAction('user@example.com', 'block');
+        assert.equal(/app passwords/.test(asked[0]), revoke, asked[0]);
+    }
+});
+
+test('the Outgoing spam card and its setting do not say IMAP is never affected', () => {
+    const intro = revoke => {
+        const context = load();
+        const panel = { innerHTML: '', insertAdjacentHTML() {} };
+        context.document = { getElementById: id => (id === 'smtp-abuse-panel' ? panel : null) };
+        context.securityUpdateSaveBar = () => {};
+        vm.runInContext(`smtpAbuseStatus = { enabled: true, rw_key_configured: true, revoke_app_passwords: ${revoke},
+            window_minutes: 60, mailboxes: [] }`, context);
+        context.renderSmtpAbusePanel();
+        return panel.innerHTML.match(/ui-sa-intro">([\s\S]*?)<\/p>/)[1];
+    };
+    assert.doesNotMatch(intro(true), /IMAP/);
+    assert.match(intro(true), /app passwords are revoked/);
+    assert.doesNotMatch(intro(false), /app passwords/);
+    const context = load();
+    vm.runInContext(fs.readFileSync(path.join(frontend, 'settings.js'), 'utf8'), context);
+    assert.doesNotMatch(context.SETTINGS_FIELD_DESCRIPTIONS.smtp_abuse_enabled, /IMAP is never affected/);
+    const tab = context.SETTINGS_EDIT_TABS.find(t => t.id === 'smtp_abuse').description;
+    assert.doesNotMatch(tab, /IMAP is never affected|Abuse Protection/);
+    assert.match(tab, /Security → Settings → Outgoing spam/);
+});
