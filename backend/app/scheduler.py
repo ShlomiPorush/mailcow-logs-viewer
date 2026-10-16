@@ -2088,9 +2088,10 @@ async def _run_check_monitored_hosts(force: bool, send_notification: bool):
 
                 # Notification destinations must fire even with no email configured
                 if notification_email or any_channel_configured():
-                    # Build aggregated email content
-                    many = len(listed_hosts) != 1
-                    title = f"{len(listed_hosts)} host{'s are' if many else ' is'} on a blacklist"
+                    # Build aggregated email content. A host listed only on
+                    # lists that never alert is neither counted nor shown.
+                    many = actionable_count != 1
+                    title = f"{actionable_count} host{'s are' if many else ' is'} on a blacklist"
                     subject = f"Blacklist: {title}"
                     intro = f"Servers that use these blacklists may reject or junk mail from {'these hosts' if many else 'this host'}."
 
@@ -2098,7 +2099,7 @@ async def _run_check_monitored_hosts(force: bool, send_notification: bool):
                     
                     html_rows = ""
                     
-                    for host_data in listed_hosts:
+                    for host_data in actionable_listed_hosts:
                         hostname = host_data['hostname']
                         ip = host_data['ip']
                         source = host_data.get('source', '')
