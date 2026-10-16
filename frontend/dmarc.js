@@ -617,18 +617,30 @@ function dmarcCurrentPolicy(x) {
     return x.record.record ? String(x.record.policy || settings.policy || '').toLowerCase() : '';
 }
 
+// The published record with only p= changed, so its other tags stay; a new record when there is none
+function dmarcRecordWithPolicy(x, pick) {
+    const record = String(x.record.record || '').trim();
+    if (!record) return `v=DMARC1; p=${pick}; rua=mailto:dmarc@${x.name}`;
+    const tag = /(^|;)(\s*)p(\s*=\s*)[^;]*/i;
+    return tag.test(record) ? record.replace(tag, `$1$2p$3${pick}`) : record.replace(/^v\s*=\s*DMARC1\s*;?/i, `v=DMARC1; p=${pick};`);
+}
+
 // What a policy would do for the domain, and the record that sets it
 function dmarcPolicyPlan(x, pick) {
     const current = dmarcCurrentPolicy(x);
     if (pick === current) return `<p class="ui-dm-note">${pick === 'reject' ? 'The strictest policy is in place.' : 'This is the policy in place.'}</p>`;
-    const settings = x.record.settings || {};
-    const rua = (settings.aggregate_report_uris || [])[0] || `mailto:dmarc@${x.name}`;
-    const record = dmarcCopyBlock(`_dmarc.${x.name}  TXT  "v=DMARC1; p=${pick}; rua=${rua}"`);
+    const record = dmarcCopyBlock(`_dmarc.${x.name}  TXT  "${dmarcRecordWithPolicy(x, pick)}"`);
     if (pick === 'none') return `<p class="ui-dm-note">With p=none, mail that fails is delivered and only reported.</p>${record}`;
-    const failing = x.groups.filter(g => g.passPct < 50).reduce((s, g) => s + g.total, 0);
-    const ready = x.groups.filter(g => g.passPct >= 50).every(g => g.passPct >= 95);
-    return `<p class="ui-dm-note">${ready ? '<b class="ui-text-ok">Ready.</b> Every sender that passes, passes on 95% or more.' : '<b class="ui-text-warn">Not yet.</b> A sender passes on under 95%: fix it first.'}
-        With p=${pick}, receivers would have ${pick === 'reject' ? 'refused' : 'sent to spam'} <b>${dmarcNum(failing)}</b> messages in the last 30 days, all from senders that fail.</p>${record}`;
+    if (!x.groups.length) return `<p class="ui-dm-note"><b class="ui-text-warn">No data.</b> No mail in the last 30 days, so the reports cannot tell yet.</p>${record}`;
+    // The policy acts on every message that failed DMARC, whoever sent it
+    const failing = x.groups.reduce((s, g) => s + g.total - g.pass, 0);
+    // Senders that pass on most of their mail count as yours, and each must pass on 95% or more
+    const yours = x.groups.filter(g => g.passPct >= 50);
+    const verdict = !yours.length ? '<b class="ui-text-warn">Not yet.</b> No sender passes on most of its mail: set up SPF or DKIM first.'
+        : yours.every(g => g.passPct >= 95) ? '<b class="ui-text-ok">Ready.</b> Every sender that passes, passes on 95% or more.'
+        : '<b class="ui-text-warn">Not yet.</b> A sender passes on under 95%: fix it first.';
+    return `<p class="ui-dm-note">${verdict}
+        With p=${pick}, receivers would have ${pick === 'reject' ? 'refused' : 'sent to spam'} <b>${dmarcNum(failing)}</b> messages in the last 30 days: the ones that failed DMARC.</p>${record}`;
 }
 
 // The policies as a radio group; the next stricter one is picked first
@@ -668,6 +680,8 @@ function dmarcDmarcRecord(x) {
     const settings = x.record.settings || {};
     const current = dmarcCurrentPolicy(x);
     const next = current === 'reject' ? 'reject' : current === 'quarantine' ? 'reject' : 'quarantine';
+    // The record says r or s
+    const alignment = value => ({ r: 'relaxed', s: 'strict' })[value] || value || 'relaxed';
     // Report URIs come from DNS: only mailto: becomes a link, anything else stays text
     const formatUriAsEmail = (uri) => {
         const text = String(uri).trim();
@@ -680,7 +694,7 @@ function dmarcDmarcRecord(x) {
             <dt>Applied to</dt><dd>${escapeHtml(settings.percentage ?? 100)}% of mail</dd>
             <dt>Reports go to</dt><dd>${(settings.aggregate_report_uris || []).map(formatUriAsEmail).join(', ') || '-'}</dd>
             ${settings.forensic_report_uris && settings.forensic_report_uris.length ? `<dt>Failure reports go to</dt><dd>${settings.forensic_report_uris.map(formatUriAsEmail).join(', ')}</dd>` : ''}
-            <dt>Alignment</dt><dd>SPF ${escapeHtml(settings.spf_alignment || 'relaxed')}, DKIM ${escapeHtml(settings.dkim_alignment || 'relaxed')}</dd></dl>
+            <dt>Alignment</dt><dd>SPF ${escapeHtml(alignment(settings.spf_alignment))}, DKIM ${escapeHtml(alignment(settings.dkim_alignment))}</dd></dl>
             ${(x.record.warnings || []).map(w => `<p class="ui-dm-callout ui-dm-warn">${escapeHtml(w)}</p>`).join('')}`
         : `<p class="ui-dm-lead"><b class="ui-text-fail">No DMARC record at _dmarc.${escapeHtml(x.name)}.</b> Receivers have no policy to refuse mail that pretends to be you.</p>`}
         <dl class="ui-dm-kv"><dt>SPF</dt><dd>${dmarcPct(x.spfPct)} of your mail is aligned with SPF</dd><dt>DKIM</dt><dd>${x.dkimSeen ? 'Your mail is signed' : 'No signed mail in the reports'}</dd></dl>
