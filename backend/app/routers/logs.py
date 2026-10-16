@@ -871,8 +871,12 @@ def _manage_external(current: dict) -> str:
 
 def _same_entry(a: str, b: str) -> bool:
     """1.2.3.4 and 1.2.3.4/32 (or 2001:db8::1 and 2001:db8::1/128) are the same list
-    entry; an IPv6 address with /32 is a whole network."""
-    return security_addresses._bare(a) == security_addresses._bare(b)
+    entry; an IPv6 address with /32 is a whole network. Entries are compared as the
+    networks mailcow reads them; a hostname by its text."""
+    try:
+        return ipaddress.ip_network(a.strip(), strict=False) == ipaddress.ip_network(b.strip(), strict=False)
+    except ValueError:
+        return security_addresses._bare(a) == security_addresses._bare(b)
 
 
 async def _add_to_fail2ban_list(ip: str, list_name: str, remove: bool = False) -> dict:
@@ -890,8 +894,8 @@ async def _add_to_fail2ban_list(ip: str, list_name: str, remove: bool = False) -
         if len(kept) == len(lists[list_name]):
             return {"status": "success", "msg": f"IP {ip} is not in the {label}"}
         lists[list_name] = kept
-    elif ip in lists[list_name]:
-        return {"status": "success", "msg": f"IP {ip} is already in the {label}"}
+    elif any(_same_entry(entry, ip) for entry in lists[list_name]):
+        return {"status": "success", "msg": f"IP {ip} is already in the {label}", "already": True}
     else:
         lists[list_name].append(ip)
 

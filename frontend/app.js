@@ -1396,7 +1396,7 @@ async function banIP(ip, btnEl) {
         const result = await response.json();
 
         if (result.status === 'success') {
-            showToast(`IP ${ip} added to blacklist`, 'success');
+            showToast(result.already ? result.msg : `IP ${ip} added to blacklist`, 'success');
             // Refresh fail2ban data and netfilter logs
             fail2banSettingsLoaded = false;
             fail2banActiveBans = null;
@@ -1434,7 +1434,7 @@ async function allowIP(ip, btnEl) {
         });
         const result = await res.json();
         if (res.ok && result.status === 'success') {
-            showToast(`IP ${ip} added to the allowlist`, 'success');
+            showToast(result.already ? result.msg : `IP ${ip} added to the allowlist`, 'success');
             fail2banSettingsLoaded = false;
             fail2banActiveBans = null;
             loadFail2BanSettings();

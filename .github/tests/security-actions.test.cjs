@@ -197,3 +197,18 @@ test('Unban names and drops the network Fail2ban banned around the address', asy
     assert.deepEqual(toasts, [['198.51.100.0/24 unbanned successfully', 'success']]);
     assert.equal(vm.runInContext('JSON.stringify(fail2banActiveBans.map(b => b.network))', context), '["203.0.113.5/32"]');
 });
+
+test('Ban and Allow say so when the address is already on the list', async () => {
+    const context = load();
+    recordRequests(context);
+    const toasts = [];
+    context.showToast = message => toasts.push(message);
+    context.authenticatedFetch = async (url, options = {}) => {
+        const label = url.endsWith('/allow') ? 'allowlist' : 'blacklist';
+        const msg = `IP ${JSON.parse(options.body).ip} is already in the ${label}`;
+        return { ok: true, json: async () => ({ status: 'success', msg, already: true }) };
+    };
+    await context.banIP('198.51.100.7');
+    await context.allowIP('192.0.2.10');
+    assert.deepEqual(toasts, ['IP 198.51.100.7/32 is already in the blacklist', 'IP 192.0.2.10/32 is already in the allowlist']);
+});
