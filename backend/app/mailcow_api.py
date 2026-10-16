@@ -33,13 +33,14 @@ def mailcow_reply(response) -> list:
 def mailcow_handled_items(response, item_ids) -> set:
     """The ids among item_ids that mailcow reports as done. mailcow names each
     item it handled in a success entry (msg ["item_released", id]); a reply
-    that names no item counts only when every entry in it is a success."""
+    that names none of them counts only when every entry in it is a success."""
     entries = mailcow_reply(response)
     wanted = {str(i) for i in item_ids}
-    named = [entry.get("msg") for entry in entries
-             if entry.get("type") == "success" and isinstance(entry.get("msg"), list)]
+    named = {str(part) for entry in entries
+             if entry.get("type") == "success" and isinstance(entry.get("msg"), list)
+             for part in entry["msg"][1:]} & wanted
     if named:
-        return {str(part) for msg in named for part in msg[1:]} & wanted
+        return named
     if entries and all(entry.get("type") == "success" for entry in entries):
         return wanted
     return set()

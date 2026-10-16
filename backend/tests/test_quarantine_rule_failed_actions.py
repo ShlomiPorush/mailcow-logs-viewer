@@ -121,6 +121,13 @@ def test_success_that_names_no_item_records_the_whole_batch(state):
     assert sorted(_logged(state.db)) == [("DEL1", "delete"), ("REL1", "release")]
 
 
+def test_success_that_names_other_things_records_the_whole_batch(state):
+    # Another reply format must not stop History for good
+    _reply(scheduler.mailcow_api.release_quarantine, [{"type": "success", "log": [], "msg": ["released", "1 item"]}])
+    asyncio.run(scheduler.process_quarantine_rules_job())
+    assert sorted(_logged(state.db)) == [("DEL1", "delete"), ("REL1", "release")]
+
+
 def test_empty_or_unexpected_reply_is_not_recorded(state):
     for reply in ([], None, {"type": "error", "msg": "route not found"}):
         state.db.add.reset_mock()
