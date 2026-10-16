@@ -71,3 +71,23 @@ async def test_mechanism_written_as_a_modifier_is_a_warning(monkeypatch):
     assert result['status'] == 'warning', result['message']
     assert any('include=example.net' in w for w in result['warnings'])
     assert result['dns_lookups'] == 1
+
+
+@pytest.mark.parametrize('term', ['abc', 'mxfoo', 'allx', 'ptrx', 'a:', 'include', 'ip4', '--all', '-redirect=example.net'])
+@pytest.mark.asyncio
+async def test_a_term_that_only_starts_like_a_mechanism_is_an_error(monkeypatch, term):
+    """RFC 7208 sections 4.6.1 and 5: the mechanism name is matched whole, then
+    only what that mechanism allows may follow (nothing, ':' or '/')."""
+    result = await _check(monkeypatch, f'v=spf1 mx {term} -all')
+    assert result['status'] == 'error', result['message']
+    assert f'Invalid SPF mechanisms: {term}' in result['message']
+
+
+@pytest.mark.parametrize('term', ['a', 'a:mail.example.com', 'a/24', 'a:mail.example.com/24//64', 'a//64',
+                                  'mx/24', 'mx:example.net', 'ip4:192.0.2.0/24', 'ip4:192.0.2.1',
+                                  'ip6:2001:db8::/32', 'ip6:2001:db8::1', '~include:example.com',
+                                  '+exists:%{i}.example.net', '?all'])
+@pytest.mark.asyncio
+async def test_well_formed_mechanisms_stay_valid(monkeypatch, term):
+    result = await _check(monkeypatch, f'v=spf1 {term} -all')
+    assert 'Invalid' not in result['message'], result['message']

@@ -30,6 +30,14 @@ router = APIRouter()
 # RFC 7208 section 12: modifier = name "=" macro-string, without a qualifier
 SPF_MODIFIER_RE = re.compile(r'^[A-Za-z][A-Za-z0-9._-]*=')
 SPF_MECHANISM_NAMES = {'a', 'mx', 'ptr', 'ip4', 'ip6', 'include', 'exists'}
+# RFC 7208 sections 4.6.1 and 5: an optional qualifier, the whole mechanism name,
+# then only what that mechanism takes (a domain after ':', a CIDR length after '/')
+SPF_MECHANISM_RE = re.compile(
+    r'[+\-~?]?(?:all'
+    r'|(?:include|exists):.+'
+    r'|(?:a|mx)(?::[^/]+)?(?:/\d+)?(?://\d+)?'
+    r'|ptr(?::.+)?'
+    r'|ip[46]:[^/]+(?:/\d+)?)')
 
 _server_ip_cache = None
 
@@ -293,15 +301,13 @@ async def check_spf_record(domain: str, spf_source_ips: Optional[List[Dict[str, 
         parts = spf_record.split()
         mechanisms = parts[1:] if len(parts) > 1 else []
         
-        # ptr and exp= are legal (RFC 7208); ptr is only discouraged, a warning below
-        valid_prefixes = ['ip4:', 'ip6:', 'a', 'mx', 'include:', 'exists:', 'redirect', 'all', 'ptr', 'exp=']
+        # ptr is legal (RFC 7208), only discouraged: a warning below
         invalid_mechanisms = []
 
         for mechanism in mechanisms:
-            clean_mech = mechanism.lstrip('+-~?')
-            is_valid = any(clean_mech == prefix or clean_mech.startswith(prefix) for prefix in valid_prefixes)
-            # Unknown modifiers (name=value, no qualifier) must be ignored (RFC 7208 section 6)
-            if not is_valid and not SPF_MODIFIER_RE.match(mechanism):
+            # Modifiers (redirect=, exp= and unknown ones, which must be ignored,
+            # RFC 7208 section 6) are name=value with no qualifier
+            if not SPF_MECHANISM_RE.fullmatch(mechanism) and not SPF_MODIFIER_RE.match(mechanism):
                 invalid_mechanisms.append(mechanism)
         
         if invalid_mechanisms:
