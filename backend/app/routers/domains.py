@@ -678,7 +678,7 @@ def parse_dkim_parameters(dkim_record: str) -> Dict[str, Any]:
             info.append({
                 'level': 'info',
                 'message': 'DKIM uses strict subdomain mode (t=s)',
-                'description': 'Only the main domain can send emails. Subdomains like mail.example.com will fail DKIM validation'
+                'description': 'Signatures with this key must use the same domain in i= as in d=, not a subdomain of it (RFC 6376). This is the recommended setting'
             })
     
     if 'h' in params:

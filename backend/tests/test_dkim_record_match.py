@@ -113,3 +113,11 @@ async def test_revoked_key_is_still_reported(monkeypatch):
 
     assert result['match'] is False
     assert result['status'] == 'error'
+
+
+def test_strict_flag_text_follows_rfc_6376():
+    # t=s: the i= domain must be d= itself, not a subdomain of it (RFC 6376 3.6.1)
+    info = domains.parse_dkim_parameters(MAILCOW_RECORD)['info']
+    (strict,) = [i for i in info if 't=s' in i['message']]
+    assert 'i=' in strict['description'] and 'd=' in strict['description']
+    assert 'Only the main domain can send' not in strict['description']
