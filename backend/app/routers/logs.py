@@ -840,9 +840,9 @@ def _manage_external(current: dict) -> str:
 
 
 def _same_entry(a: str, b: str) -> bool:
-    """1.2.3.4 and 1.2.3.4/32 (or /128) are the same list entry."""
-    bare = lambda v: v[:-3] if v.endswith("/32") else v[:-4] if v.endswith("/128") else v
-    return bare(a.strip()) == bare(b.strip())
+    """1.2.3.4 and 1.2.3.4/32 (or 2001:db8::1 and 2001:db8::1/128) are the same list
+    entry; an IPv6 address with /32 is a whole network."""
+    return security_addresses._bare(a) == security_addresses._bare(b)
 
 
 async def _add_to_fail2ban_list(ip: str, list_name: str, remove: bool = False) -> dict:

@@ -1281,8 +1281,8 @@ function renderNetfilterData(data) {
             ${uniqueLogs.map((log, index) => {
                 const isBan = log.action === 'ban' || log.action === 'banned';
                 const isWarningOrUnban = log.action === 'warning' || log.action === 'unban';
-                // Check if IP is in the blacklist (with or without /32)
-                const ipInBlacklist = log.ip && fail2banBlacklist.some(entry => entry === log.ip || entry === log.ip + '/32');
+                // Check if IP is in the blacklist (with or without /32, or /128)
+                const ipInBlacklist = log.ip && fail2banBlacklist.some(entry => entry === log.ip || entry === fail2banEntry(log.ip));
                 // Show unban if: banned OR already in blacklist
                 const showUnban = mailcowRwConfigured && log.ip && (isBan || ipInBlacklist);
                 // Show ban if: warning/unban AND NOT already in blacklist
@@ -1300,8 +1300,8 @@ function renderNetfilterData(data) {
                     <span>${uiActionTag(log.action)}</span>
                     <span class="ui-ev-where" title="${escapeHtml(place + org)}">${flagUrl ? `<img src="${flagUrl}" alt="" width="16" height="12" onerror="this.style.display='none'">` : ''}${escapeHtml(place || '-')}</span>
                     <span class="ui-st-acts">
-                        ${showUnban ? `<button onclick="unbanIP('${escapeJsArg(log.ip)}', this)" class="ui-btn ui-btn-sm" title="Unban ${escapeHtml(log.ip)}/32">Unban</button>` : ''}
-                        ${showBan ? `<button onclick="banIP('${escapeJsArg(log.ip)}', this)" class="ui-btn ui-btn-sm ui-btn-danger" title="Put ${escapeHtml(log.ip)}/32 on the denylist; it stays until removed">Ban permanently</button>` : ''}
+                        ${showUnban ? `<button onclick="unbanIP('${escapeJsArg(log.ip)}', this)" class="ui-btn ui-btn-sm" title="Unban ${escapeHtml(fail2banEntry(log.ip))}">Unban</button>` : ''}
+                        ${showBan ? `<button onclick="banIP('${escapeJsArg(log.ip)}', this)" class="ui-btn ui-btn-sm ui-btn-danger" title="Put ${escapeHtml(fail2banEntry(log.ip))} on the denylist; it stays until removed">Ban permanently</button>` : ''}
                         <button type="button" class="ui-icon-btn ui-icon-btn-sm ui-ev-toggle" aria-expanded="false" aria-controls="ev-detail-${index}" title="Show the log line" onclick="toggleEventDetail(this)"><svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg></button>
                     </span>
                     <div class="ui-ev-detail" id="ev-detail-${index}" hidden>
@@ -1322,8 +1322,20 @@ function toggleEventDetail(btn) {
     btn.setAttribute('aria-expanded', !detail.hidden);
 }
 
+// A single address as a Fail2ban list entry: /32 for IPv4, /128 for IPv6. mailcow
+// reads the prefix as a network, so 2001:db8::1/32 would be all of 2001:db8::/32.
+function fail2banEntry(ip) {
+    return ip.includes('/') ? ip : `${ip}/${ip.includes(':') ? 128 : 32}`;
+}
+
+// The address a single-address entry holds; a network entry stays as it is
+function fail2banBare(entry) {
+    const value = String(entry || '');
+    return value.replace(value.includes(':') ? /\/128$/ : /\/32$/, '');
+}
+
 async function unbanIP(ip, btnEl) {
-    const ipWithMask = ip.includes('/') ? ip : ip + '/32';
+    const ipWithMask = fail2banEntry(ip);
     if (!await showConfirmModal({ title: 'Unban IP', message: 'Unban IP ' + ipWithMask + '?', confirmText: 'Unban' })) return;
     try {
         if (btnEl) {
@@ -1340,8 +1352,7 @@ async function unbanIP(ip, btnEl) {
             showToast('IP ' + ip + ' unbanned successfully', 'success');
             // mailcow queues the unban and lifts it a few seconds later: the address
             // leaves the lists now, and Fail2ban is asked again once it has acted
-            const bare = entry => String(entry || '').replace(/\/(32|128)$/, '');
-            if (fail2banActiveBans) fail2banActiveBans = fail2banActiveBans.filter(b => bare(b.ip || b.network) !== bare(ip));
+            if (fail2banActiveBans) fail2banActiveBans = fail2banActiveBans.filter(b => fail2banBare(b.ip || b.network) !== fail2banBare(ip));
             renderSecurityOverview();
             refreshSecurityAddresses();
             setTimeout(() => { fail2banSettingsLoaded = false; loadFail2BanSettings(); }, 5000);
@@ -1363,7 +1374,7 @@ async function unbanIP(ip, btnEl) {
 }
 
 async function banIP(ip, btnEl) {
-    const ipWithMask = ip.includes('/') ? ip : ip + '/32';
+    const ipWithMask = fail2banEntry(ip);
     if (!await showConfirmModal({ title: 'Ban IP', message: `Are you sure you want to permanently ban ${ipWithMask}?\n\nThis will add the IP to the Fail2Ban blacklist.`, confirmText: 'Ban', isDangerous: true })) return;
 
     if (btnEl) {
@@ -1405,7 +1416,7 @@ async function banIP(ip, btnEl) {
 }
 
 async function allowIP(ip, btnEl) {
-    const ipWithMask = ip.includes('/') ? ip : ip + '/32';
+    const ipWithMask = fail2banEntry(ip);
     if (!await showConfirmModal({ title: 'Allow IP', message: `Add ${ipWithMask} to the Fail2Ban allowlist?\n\nFailed attempts from this address will never lead to a ban.`, confirmText: 'Allow' })) return;
     if (btnEl) {
         btnEl.disabled = true;

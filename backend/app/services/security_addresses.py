@@ -130,8 +130,11 @@ def attempt_sources(db: Session, hours: int, now: Optional[datetime] = None) -> 
 # ---------------------------------------------------------------- the lists
 
 def _bare(entry: str) -> str:
+    """The address a single-address entry holds: /32 for IPv4, /128 for IPv6. An
+    IPv6 address with /32 is a network, as mailcow's netfilter reads it."""
     entry = (entry or "").strip()
-    return entry[:-3] if entry.endswith("/32") else entry[:-4] if entry.endswith("/128") else entry
+    suffix = "/128" if ":" in entry else "/32"
+    return entry[:-len(suffix)] if entry.endswith(suffix) else entry
 
 
 def _entry_for(entries: List[str], ip: str) -> Optional[str]:

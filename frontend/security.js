@@ -118,7 +118,7 @@ async function loadSecurityHistory() {
 
 // ----------------------------------------------------------------- the addresses
 
-const securityBare = entry => String(entry || '').replace(/\/(32|128)$/, '');
+const securityBare = entry => fail2banBare(entry);
 
 // The country's flag, before its name; nothing when the code is unknown
 function securityFlag(code) {
@@ -313,7 +313,7 @@ function securityDescribe(a) {
         return {
             tag: `${uiTag('Banned', 'fail')}<span class="ui-sec-by">by Fail2ban</span>`,
             why: `${tries}<b>${a.f2b.banned_until ? `${escapeHtml(a.f2b.banned_until)} left` : 'Banned now'}</b>, then Fail2ban lets it try again.${a.f2b.queued_for_unban ? ' Unbanning...' : ''}`,
-            acts: rw && !a.f2b.queued_for_unban ? `<button ${B} onclick="unbanIP('${ipArg}', this)" title="Unban ${escapeHtml(a.ip)}/32">Unban</button>
+            acts: rw && !a.f2b.queued_for_unban ? `<button ${B} onclick="unbanIP('${ipArg}', this)" title="Unban ${escapeHtml(fail2banEntry(a.ip))}">Unban</button>
                 <button type="button" class="ui-btn ui-btn-sm ui-btn-danger" onclick="banIP('${ipArg}', this)" title="Put it on the denylist">Ban permanently</button>` : ''
         };
     }
@@ -344,8 +344,8 @@ function securityDescribe(a) {
     return {
         tag: '',
         why: `${attemptsText}.${policy}`,
-        acts: rw && known ? `<button type="button" class="ui-btn ui-btn-sm ui-btn-danger" onclick="banIP('${ipArg}', this)" title="Put ${escapeHtml(a.ip)}/32 on the denylist; it stays until removed">Ban permanently</button>
-            <button ${B} onclick="allowIP('${ipArg}', this)" title="Never ban ${escapeHtml(a.ip)}/32">Allow</button>` : ''
+        acts: rw && known ? `<button type="button" class="ui-btn ui-btn-sm ui-btn-danger" onclick="banIP('${ipArg}', this)" title="Put ${escapeHtml(fail2banEntry(a.ip))} on the denylist; it stays until removed">Ban permanently</button>
+            <button ${B} onclick="allowIP('${ipArg}', this)" title="Never ban ${escapeHtml(fail2banEntry(a.ip))}">Allow</button>` : ''
     };
 }
 
