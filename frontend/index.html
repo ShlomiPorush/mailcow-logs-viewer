@@ -160,6 +160,23 @@
             /* gray-100 - white text in dark mode */
         }
 
+        /* Links and callout titles keep their colour; the rule above made them plain text */
+        .dark .update-changelog-content.markdown-body a,
+        .dark #changelog-content.markdown-body a,
+        .dark .update-changelog-content.markdown-body .markdown-alert-title,
+        .dark #changelog-content.markdown-body .markdown-alert-title {
+            color: var(--ui-info) !important;
+        }
+
+        .dark .update-changelog-content.markdown-body .markdown-alert-tip .markdown-alert-title,
+        .dark #changelog-content.markdown-body .markdown-alert-tip .markdown-alert-title { color: var(--ui-ok) !important; }
+        .dark .update-changelog-content.markdown-body .markdown-alert-important .markdown-alert-title,
+        .dark #changelog-content.markdown-body .markdown-alert-important .markdown-alert-title { color: var(--ui-spam) !important; }
+        .dark .update-changelog-content.markdown-body .markdown-alert-warning .markdown-alert-title,
+        .dark #changelog-content.markdown-body .markdown-alert-warning .markdown-alert-title { color: var(--ui-warn) !important; }
+        .dark .update-changelog-content.markdown-body .markdown-alert-caution .markdown-alert-title,
+        .dark #changelog-content.markdown-body .markdown-alert-caution .markdown-alert-title { color: var(--ui-fail) !important; }
+
         .dark .update-changelog-content.markdown-body h1,
         .dark .update-changelog-content.markdown-body h2,
         .dark .update-changelog-content.markdown-body h3,

@@ -5025,11 +5025,14 @@ const DOCS_REPO_URL = 'https://github.com/ShlomiPorush/mailcow-logs-viewer/blob/
 // A help page is also a page of the documentation site (documentation/HelpDocs).
 // In the app its screenshots are left out, since the page itself is on screen,
 // and its relative links, which work on the site, point to the site instead.
-function helpDocMarkdown(markdown) {
+// A link to a section of the same page goes there too: the window's headings
+// have no anchors. docName is the file's name, such as Spam_Filter.
+function helpDocMarkdown(markdown, docName) {
     return markdown
         .replace(/^[ \t]*!\[[^\]]*\]\([^)\s]*\)[ \t]*$/gm, '')
         .replace(/(\]\()([^)\s]+)(\))/g, (match, open, target, close) => {
-            if (/^[a-z][a-z0-9+.-]*:/i.test(target) || target.startsWith('#')) return match;
+            if (/^[a-z][a-z0-9+.-]*:/i.test(target)) return match;
+            if (target.startsWith('#')) return `${open}${DOCS_SITE_URL}HelpDocs/${docName}/${target}${close}`;
             const [path, anchor] = target.split('#');
             const hash = anchor ? `#${anchor}` : '';
             const parts = ['documentation', 'HelpDocs'];
@@ -5057,7 +5060,7 @@ async function showHelpModal(docName, title) {
             throw new Error(`Failed to load documentation: ${response.statusText}`);
         }
 
-        const markdown = helpDocMarkdown(await response.text());
+        const markdown = helpDocMarkdown(await response.text(), docName);
         // Else the document's file name, read as words: Spam_Filter is Spam Filter
         showMarkdownModal(`Help - ${title || docName.replace(/_/g, ' ')}`, markdown);
 
