@@ -72,3 +72,48 @@ def test_a_slash_32_ipv6_network_is_not_read_as_an_address():
     assert _bare('2001:db8::1/128') == '2001:db8::1'
     assert _bare('198.51.100.7/32') == '198.51.100.7'
 
+
+# ------------------------------------------------------------- Events CSV export
+
+def _postgres_available() -> bool:
+    try:
+        from app.database import engine
+        with engine.connect():
+            return True
+    except Exception:
+        return False
+
+
+@pytest.fixture()
+def netfilter_rows():
+    if not _postgres_available():
+        pytest.skip('PostgreSQL not available')
+    from app.database import get_db_context, init_db
+    from app.models import NetfilterLog
+    init_db()
+    rows = [('192.0.2.1', 'ban', 'TL'), ('192.0.2.2', 'banned', 'TL'), ('192.0.2.3', 'warning', 'TL'),
+            ('192.0.2.4', 'ban', 'OL'), ('192.0.2.5', 'unban', 'OL')]
+    with get_db_context() as db:
+        for n, (ip, action, country) in enumerate(rows):
+            db.add(NetfilterLog(time=datetime.utcnow() - timedelta(minutes=n), priority=MARKER, ip=ip,
+                                action=action, country_code=country, message=f'{MARKER} {ip} {action}'))
+        db.commit()
+    yield
+    with get_db_context() as db:
+        db.query(NetfilterLog).filter(NetfilterLog.priority == MARKER).delete(synchronize_session=False)
+        db.commit()
+
+
+def _exported_ips(**params):
+    res = _client().get('/api/export/netfilter/csv', params={'search': MARKER, **params})
+    assert res.status_code == 200, res.text
+    return sorted(r['IP'] for r in csv.DictReader(io.StringIO(res.content.decode('utf-8-sig'))))
+
+
+def test_the_events_export_keeps_the_action_and_country_filters(netfilter_rows):
+    assert _exported_ips() == ['192.0.2.1', '192.0.2.2', '192.0.2.3', '192.0.2.4', '192.0.2.5']
+    # Ban also matches the older "banned" lines, as the list does
+    assert _exported_ips(action='ban') == ['192.0.2.1', '192.0.2.2', '192.0.2.4']
+    assert _exported_ips(country_code='tl') == ['192.0.2.1', '192.0.2.2', '192.0.2.3']
+    assert _exported_ips(action='ban', country_code='OL') == ['192.0.2.4']
+
