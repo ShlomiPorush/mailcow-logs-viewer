@@ -23,7 +23,7 @@ from sqlalchemy import func
 from ..config import settings
 from ..correlation import authenticated_submissions, submitting_mailbox
 from ..database import get_db_context
-from ..mailcow_api import mailcow_api
+from ..mailcow_api import mailcow_api, mailcow_reply
 from ..models import (
     MessageCorrelation,
     SecurityAlert,
@@ -279,9 +279,8 @@ def _ensure_mailcow_success(email: str, response, action: str) -> None:
     type "danger", e.g. when the address is an alias, not a mailbox). The
     action must not be recorded as done when nothing actually changed -
     an unrecorded failure is retried on the next run."""
-    items = response if isinstance(response, list) else [response] if isinstance(response, dict) else []
-    for item in items:
-        if isinstance(item, dict) and item.get("type") == "danger":
+    for item in mailcow_reply(response):
+        if item.get("type") == "danger":
             raise RuntimeError(f"mailcow rejected {action} for {email}: {item.get('msg')}")
 
 

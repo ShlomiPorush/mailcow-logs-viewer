@@ -19,7 +19,7 @@ from sqlalchemy.exc import IntegrityError
 
 from .config import settings, set_cached_active_domains
 from .database import get_db_context, SessionLocal
-from .mailcow_api import mailcow_api
+from .mailcow_api import mailcow_api, mailcow_handled_items
 from .models import EasDevice, PostfixLog, RspamdLog, NetfilterLog, MessageCorrelation, DMARCSync, DomainDNSCheck, MailboxStatistics, AliasStatistics, MonitoredHost, BlacklistCheck, DMARCReport, DMARCRecord, TLSReport, TLSReportPolicy, SpamSuppression, RawServiceLog, SystemSetting
 from .correlation import (
     detect_direction,
@@ -4353,34 +4353,40 @@ async def _process_quarantine_rules_in_worker():
             release_items = [(item, rule) for item, rule in actions_to_take if rule.action == 'release']
             delete_items = [(item, rule) for item, rule in actions_to_take if rule.action == 'delete']
             
-            released_count = 0
-            deleted_count = 0
-            done = set()  # the actions mailcow actually carried out
-            
+            # The item ids mailcow confirmed, per action
+            done = {'release': set(), 'delete': set()}
+
             # Execute releases
             if release_items:
                 release_ids = [str(item.get('id', '')) for item, _ in release_items]
                 try:
-                    await mailcow_api.release_quarantine(release_ids)
-                    released_count = len(release_ids)
-                    done.add('release')
+                    reply = await mailcow_api.release_quarantine(release_ids)
+                    done['release'] = mailcow_handled_items(reply, release_ids)
+                    if len(done['release']) < len(release_ids):
+                        logger.warning(f"[QUARANTINE RULES] mailcow did not release "
+                                       f"{len(release_ids) - len(done['release'])} item(s): {reply}")
                 except Exception as e:
                     logger.error(f"[QUARANTINE RULES] Release failed: {e}")
-            
+
             # Execute deletes
             if delete_items:
                 delete_ids = [str(item.get('id', '')) for item, _ in delete_items]
                 try:
-                    await mailcow_api.delete_quarantine(delete_ids)
-                    deleted_count = len(delete_ids)
-                    done.add('delete')
+                    reply = await mailcow_api.delete_quarantine(delete_ids)
+                    done['delete'] = mailcow_handled_items(reply, delete_ids)
+                    if len(done['delete']) < len(delete_ids):
+                        logger.warning(f"[QUARANTINE RULES] mailcow did not delete "
+                                       f"{len(delete_ids) - len(done['delete'])} item(s): {reply}")
                 except Exception as e:
                     logger.error(f"[QUARANTINE RULES] Delete failed: {e}")
-            
-            # Log actions and update hit counts (a failed call is retried next run)
+            released_count = len(done['release'])
+            deleted_count = len(done['delete'])
+
+            # Log actions and update hit counts (an item mailcow did not
+            # confirm is retried next run)
             rule_hit_counts = {}  # rule_id -> count
             for item, rule in actions_to_take:
-                if rule.action not in done:
+                if str(item.get('id', '')) not in done.get(rule.action, ()):
                     continue
                 log_entry = QuarantineRuleLog(
                     rule_id=rule.id,

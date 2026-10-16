@@ -1,4 +1,8 @@
-"""History and Hits only record what mailcow actually did."""
+"""History and Hits only record what mailcow actually did.
+
+mailcow answers HTTP 200 also when it refuses an item, with an entry of type
+"danger" in the reply, and reports each item it handled with its own
+"success" entry naming the item."""
 import asyncio
 from contextlib import contextmanager
 from types import SimpleNamespace
@@ -43,9 +47,20 @@ def state(monkeypatch):
         {"id": "REL1", "sender": "user@example.com", "rcpt": "rcpt@example.net", "subject": "hello"},
     ]
     monkeypatch.setattr(scheduler.mailcow_api, "get_quarantine", AsyncMock(return_value=items))
-    monkeypatch.setattr(scheduler.mailcow_api, "release_quarantine", AsyncMock())
-    monkeypatch.setattr(scheduler.mailcow_api, "delete_quarantine", AsyncMock())
-    return SimpleNamespace(db=db, allow=allow, deny=deny)
+
+    def answer(done):
+        # One success entry per item mailcow handled
+        async def call(ids):
+            return [{"type": "success", "log": [], "msg": [done, i]} for i in ids]
+        return AsyncMock(side_effect=call)
+    monkeypatch.setattr(scheduler.mailcow_api, "release_quarantine", answer("item_released"))
+    monkeypatch.setattr(scheduler.mailcow_api, "delete_quarantine", answer("item_deleted"))
+    return SimpleNamespace(db=db, allow=allow, deny=deny, items=items)
+
+
+def _reply(call, value):
+    call.side_effect = None
+    call.return_value = value
 
 
 def _logged(db):
@@ -72,3 +87,44 @@ def test_successful_actions_are_recorded(state):
     asyncio.run(scheduler.process_quarantine_rules_job())
     assert sorted(_logged(state.db)) == [("DEL1", "delete"), ("REL1", "release")]
     assert state.allow.hit_count == 1 and state.deny.hit_count == 1
+
+
+def test_release_refused_with_http_200_is_not_recorded(state):
+    _reply(scheduler.mailcow_api.release_quarantine, [{"type": "danger", "log": [], "msg": "access_denied"}])
+    asyncio.run(scheduler.process_quarantine_rules_job())
+    assert _logged(state.db) == [("DEL1", "delete")]
+    assert state.allow.hit_count == 0 and state.allow.last_hit_at is None
+
+
+def test_delete_refused_with_http_200_is_not_recorded(state):
+    _reply(scheduler.mailcow_api.delete_quarantine, [{"type": "danger", "log": [], "msg": "access_denied"}])
+    asyncio.run(scheduler.process_quarantine_rules_job())
+    assert _logged(state.db) == [("REL1", "release")]
+    assert state.deny.hit_count == 0 and state.deny.last_hit_at is None
+
+
+def test_mixed_batch_records_only_the_items_mailcow_handled(state):
+    state.items.append({"id": "REL2", "sender": "other@example.com", "rcpt": "rcpt@example.net", "subject": "hi"})
+    _reply(scheduler.mailcow_api.release_quarantine, [
+        {"type": "danger", "log": [], "msg": "access_denied"},
+        {"type": "success", "log": [], "msg": ["item_released", "REL2"]},
+    ])
+    asyncio.run(scheduler.process_quarantine_rules_job())
+    assert sorted(_logged(state.db)) == [("DEL1", "delete"), ("REL2", "release")]
+    assert state.allow.hit_count == 1
+
+
+def test_success_that_names_no_item_records_the_whole_batch(state):
+    # Without item names, only an all-success reply counts
+    _reply(scheduler.mailcow_api.release_quarantine, [{"type": "success", "log": [], "msg": "Released"}])
+    asyncio.run(scheduler.process_quarantine_rules_job())
+    assert sorted(_logged(state.db)) == [("DEL1", "delete"), ("REL1", "release")]
+
+
+def test_empty_or_unexpected_reply_is_not_recorded(state):
+    for reply in ([], None, {"type": "error", "msg": "route not found"}):
+        state.db.add.reset_mock()
+        _reply(scheduler.mailcow_api.release_quarantine, reply)
+        asyncio.run(scheduler.process_quarantine_rules_job())
+        assert ("REL1", "release") not in _logged(state.db), reply
+    assert state.allow.hit_count == 0
