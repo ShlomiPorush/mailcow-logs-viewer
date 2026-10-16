@@ -69,7 +69,8 @@ function alertActivityChart(data) {
     const sent = alertActivityIsSentMail(a);
     const { cols, minutes } = alertActivityColumns(data);
     const at = new Date(a.created_at);
-    const from = new Date(at.getTime() - data.window_minutes * 60000);
+    // An SMTP block whose window is not known (its abuse action is gone) marks no period
+    const from = data.window_minutes ? new Date(at.getTime() - data.window_minutes * 60000) : null;
     const max = Math.max(4, ...cols.map(c => c.count));
     const top = Math.ceil(max / 4) * 4;
     // A spike's usual rate, per column; a burst or a block has no usual rate, only a threshold
@@ -84,7 +85,7 @@ function alertActivityChart(data) {
         <div class="ui-aa-chart">
             <div class="ui-aa-grid">${[top, top * .75, top * .5, top * .25, 0].map(v => `<i><span>${Math.round(v)}</span></i>`).join('')}</div>
             <div class="ui-aa-cols">${cols.map(c => {
-                const inAlert = new Date(c.start.getTime() + minutes * 60000) > from && c.start <= at;
+                const inAlert = from && new Date(c.start.getTime() + minutes * 60000) > from && c.start <= at;
                 const tip = `${fmt(c.start)}: ${c.count} ${what}`;
                 return `<span class="ui-aa-col${inAlert ? ' is-alert' : ''}" data-tip="${escapeHtml(tip)}" title="${escapeHtml(tip)}"><i style="height:${c.count / top * 100}%"></i></span>`;
             }).join('')}</div>
@@ -92,7 +93,7 @@ function alertActivityChart(data) {
             ${markAt >= 0 ? `<div class="ui-aa-mark" style="left:${(markAt + .5) / cols.length * 100}%"><span>Alert ${at.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}</span></div>` : ''}
         </div>
         <div class="ui-aa-x"><span>${escapeHtml(fmt(cols[0].start))}</span><span>${escapeHtml(fmt(cols[cols.length - 1].start))}</span></div>
-        <p class="ui-aa-legend"><span><i></i>${sent ? 'Sent' : 'Failed logins'}, per ${escapeHtml(per)}</span><span><i class="is-alert"></i>The alert's ${escapeHtml(String(data.window_minutes))} minutes</span>${usual !== null ? `<span><i class="is-usual"></i>Its usual rate over ${escapeHtml(String(data.baseline_days))} days</span>` : ''}</p>`;
+        <p class="ui-aa-legend"><span><i></i>${sent ? 'Sent' : 'Failed logins'}, per ${escapeHtml(per)}</span>${from ? `<span><i class="is-alert"></i>The alert's ${escapeHtml(String(data.window_minutes))} minutes</span>` : ''}${usual !== null ? `<span><i class="is-usual"></i>Its usual rate over ${escapeHtml(String(data.baseline_days))} days</span>` : ''}</p>`;
 }
 
 function alertActivityList(title, rows, total, tone) {
@@ -109,13 +110,20 @@ function renderAlertActivity() {
     const spike = a.alert_type === 'volume_spike';
     const sent = alertActivityIsSentMail(a);
     const at = new Date(a.created_at);
-    const from = new Date(at.getTime() - data.window_minutes * 60000);
-    const before = data.buckets.filter(b => new Date(b.start) < from).reduce((s, b) => s + b.count, 0);
     const around = data.around;
+    // Without a known window, "Around the alert" starts where the server says
+    const lead = data.window_minutes ?? Math.round((at - new Date(around.from)) / 60000);
+    const from = new Date(at.getTime() - lead * 60000);
+    const before = data.buckets.filter(b => new Date(b.start) < from).reduce((s, b) => s + b.count, 0);
     const critical = a.severity === 'critical';
     document.getElementById('alert-activity-title').innerHTML = `<span class="ui-tag ${critical ? 'ui-tag-fail' : 'ui-tag-warn'}">${escapeHtml((a.severity || 'warning').toUpperCase())}</span> ${escapeHtml(a.subject || '')}`;
     const results = { delivered: 'ok', sent: 'ok', deferred: 'warn', bounced: 'fail', rejected: 'fail', expired: 'fail', discarded: 'fail' };
-    const figures = sent ? [
+    const figures = sent && data.window_minutes == null ? [
+        ['Counted for the block', (a.metric_value || 0).toLocaleString(), true],
+        ['The window', 'Unknown'],
+        ['The limit', (a.baseline_value || 0).toLocaleString()],
+        [`Sent in the ${data.baseline_days} days before`, before.toLocaleString()]
+    ] : sent ? [
         [`Sent in the alert's ${data.window_minutes} minutes`, (a.metric_value || 0).toLocaleString(), true],
         ['That is, an hour', Math.round((a.metric_value || 0) * 60 / data.window_minutes).toLocaleString(), true],
         // A block has no usual rate: its baseline value is the abuse protection limit
@@ -132,7 +140,7 @@ function renderAlertActivity() {
         <p class="ui-muted ui-aa-sub">${escapeHtml(a.title)} · ${escapeHtml(formatTime(a.created_at))}</p>
         <div class="ui-aa-strip">${figures.map(([label, value, bad]) => `<div><small>${escapeHtml(label)}</small><b${bad ? ' class="ui-text-fail"' : ''}>${escapeHtml(value)}</b></div>`).join('')}</div>
         <section>${alertActivityChart(data)}</section>
-        <section><div class="ui-aa-head"><b>Around the alert</b><span class="ui-muted">${uiCountLabel(around.total, sent ? 'message' : 'failed login', sent ? 'messages' : 'failed logins')}, from ${escapeHtml(String(data.window_minutes))} minutes before it to an hour after</span></div>
+        <section><div class="ui-aa-head"><b>Around the alert</b><span class="ui-muted">${uiCountLabel(around.total, sent ? 'message' : 'failed login', sent ? 'messages' : 'failed logins')}, from ${escapeHtml(String(lead))} minutes before it to an hour after</span></div>
             ${around.total ? `<div class="ui-aa-two">${sent
                 ? alertActivityList('Recipient domains', around.recipient_domains, around.total) + alertActivityList('What happened to them', around.results, around.total, n => results[n] || 'muted')
                     + `<div class="ui-aa-box ui-aa-wide"><h4>Subjects</h4>${around.subjects.map(s => `<div class="ui-aa-subj"><span title="${escapeHtml(s.name)}" dir="auto">${escapeHtml(s.name)}</span><small>${uiCountLabel(s.count, 'message', 'messages')}</small></div>`).join('')}</div>`

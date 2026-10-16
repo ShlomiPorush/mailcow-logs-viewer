@@ -60,6 +60,18 @@ test('an SMTP block shows the mailbox sent mail, its limit and Open in Messages'
     assert.match(html, /navigateToMessagesWithFilter\(\{ email: 'user@example\.com', filterType: 'user' \}\)/);
 });
 
+test('an SMTP block whose window is not known says so instead of using today\'s window', () => {
+    const at = AT.getTime();
+    const html = harness().render(activity({ alert_type: 'smtp_abuse_block', subject: 'user@example.com', metric_value: 40, baseline_value: 30 },
+        { window: null, around: { total: 3, from: new Date(at - 3600000).toISOString(), to: new Date(at + 3600000).toISOString(),
+            recipient_domains: [{ name: 'example.net', count: 3 }], results: [], subjects: [] } }));
+    assert.equal(figure(html, 'Counted for the block'), '40');
+    assert.equal(figure(html, 'The window'), 'Unknown');
+    assert.equal(figure(html, 'The limit'), '30');
+    assert.doesNotMatch(html, /null|NaN|an hour<\/small>|is-alert"/);
+    assert.match(html, /from 60 minutes before it to an hour after/);
+});
+
 test('a volume spike keeps its usual rate and opens Messages on the mailbox that logged in', () => {
     const html = harness().render(activity({ alert_type: 'volume_spike', subject: 'user@example.com', metric_value: 40, baseline_value: 0.5 }));
     assert.equal(figure(html, 'Usual, an hour \\(7 days\\)'), '0.50');

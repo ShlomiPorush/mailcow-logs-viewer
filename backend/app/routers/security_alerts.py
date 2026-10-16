@@ -12,7 +12,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from ..database import get_db
-from ..models import SecurityAlert, MessageCorrelation, NetfilterLog
+from ..models import SecurityAlert, MessageCorrelation, NetfilterLog, SMTPAbuseAction
 from ..config import settings
 from ..correlation import authenticated_submissions, submitting_mailbox
 from ..utils import internal_error, format_datetime_for_api as format_datetime_utc
@@ -104,6 +104,10 @@ def acknowledge_all_alerts(db: Session = Depends(get_db)):
 BUCKET_MINUTES = 15
 AFTER_HOURS = 2
 SENT_MAIL_ALERTS = ('volume_spike', 'smtp_abuse_block')
+# An SMTP block is recorded twice at once: its abuse action, then its alert
+BLOCK_ACTION_MATCH = timedelta(minutes=5)
+# How far before an SMTP block "Around the alert" starts when its window is not known
+UNKNOWN_WINDOW_MINUTES = 60
 
 
 def _events(db: Session, alert: SecurityAlert, start, end):
@@ -121,6 +125,20 @@ def _events(db: Session, alert: SecurityAlert, start, end):
         func.lower(NetfilterLog.username) == subject,
         NetfilterLog.time >= start, NetfilterLog.time < end,
     ).all()
+
+
+def _block_window(db: Session, alert: SecurityAlert) -> Optional[int]:
+    """The window an SMTP block counted in, from its own abuse action; None when that action is gone."""
+    at = alert.created_at
+    actions = db.query(SMTPAbuseAction.created_at, SMTPAbuseAction.window_minutes).filter(
+        SMTPAbuseAction.email == (alert.subject or '').lower(),
+        SMTPAbuseAction.action == 'blocked',
+        SMTPAbuseAction.created_at >= at - BLOCK_ACTION_MATCH,
+        SMTPAbuseAction.created_at <= at + BLOCK_ACTION_MATCH,
+    ).all()
+    if not actions:
+        return None
+    return max(min(actions, key=lambda r: abs(r[0] - at))[1], 1)
 
 
 def _top(counter: Counter, limit: int = 6) -> list:
@@ -141,10 +159,12 @@ def alert_activity(alert_id: int, db: Session = Depends(get_db)):
         if not alert:
             raise HTTPException(status_code=404, detail="Alert not found")
         at = alert.created_at
-        # The window the alert counted in: abuse protection has its own
-        window = (settings.smtp_abuse_window_minutes if alert.alert_type == 'smtp_abuse_block'
-                  else settings.anomaly_check_interval)
-        window = max(int(window or 15), 1)
+        # The window the alert counted in: an SMTP block keeps the one it was
+        # blocked with, even after the setting changed; None when not known
+        if alert.alert_type == 'smtp_abuse_block':
+            window = _block_window(db, alert)
+        else:
+            window = max(int(settings.anomaly_check_interval or 15), 1)
         start = (at - timedelta(days=max(int(settings.anomaly_baseline_days or 7), 1))).replace(minute=0, second=0, microsecond=0)
         end = at + timedelta(hours=AFTER_HOURS)
         rows = _events(db, alert, start, end)
@@ -158,7 +178,7 @@ def alert_activity(alert_id: int, db: Session = Depends(get_db)):
             t += step
             i += 1
 
-        around_from, around_to = at - timedelta(minutes=window), at + timedelta(hours=1)
+        around_from, around_to = at - timedelta(minutes=window or UNKNOWN_WINDOW_MINUTES), at + timedelta(hours=1)
         near = [row for row in rows if row[0] and around_from <= row[0] <= around_to]
         if alert.alert_type in SENT_MAIL_ALERTS:
             around = {
