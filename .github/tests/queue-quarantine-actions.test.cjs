@@ -81,6 +81,24 @@ test('quarantine rows get their actions when the Read-Write status arrives after
     assert.doesNotMatch(app.elements['quarantine-logs'].innerHTML, /Quarantine actions are locked/);
 });
 
+test('a direct load of the Queue waits for the Read-Write status instead of showing the lock', async () => {
+    const app = loadApp();
+    let answerRw;
+    const rw = new Promise(resolve => { answerRw = resolve; });
+    app.context.authenticatedFetch = async url => url === '/api/rw-status'
+        ? rw.then(() => ({ ok: true, json: async () => ({ rw_configured: true }) }))
+        : { ok: true, json: async () => ({ data: QUEUE }) };
+    vm.runInContext(`currentTab = 'queue'; rwStatusReady = fetchRwStatus();`, app.context);
+    const loading = app.context.loadQueue();
+    await new Promise(resolve => setImmediate(resolve));
+    assert.doesNotMatch(app.elements['queue-logs'].innerHTML, /actions are locked/);
+    answerRw();
+    await loading;
+    const html = app.elements['queue-logs'].innerHTML;
+    assert.doesNotMatch(html, /actions are locked/);
+    assert.match(html, /queueRetry\(/);
+});
+
 test('Suppress stays on queue rows without the Read-Write key', () => {
     const html = drawQueue(loadApp(), false);
     assert.match(html, /showAddSuppressionModal\('user@example\.org'\)/);

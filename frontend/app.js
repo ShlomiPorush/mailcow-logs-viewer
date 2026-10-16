@@ -190,6 +190,8 @@ let currentFilters = {
 
 // Global RW API key status (shared across all features)
 let mailcowRwConfigured = false;
+// The first RW status check; Queue and Quarantine wait for it before drawing their rows
+let rwStatusReady = Promise.resolve();
 
 // Feature toggles - features in this list are disabled (hidden from UI, jobs stopped)
 window.disabledFeatures = [];
@@ -421,7 +423,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     await loadAppInfo();
     loadMailcowVersionStatus();
-    fetchRwStatus();
+    rwStatusReady = fetchRwStatus().catch(() => {});
 
     // Initialize router and get initial route from URL
     const routeInfo = typeof initRouter === 'function' ? initRouter() : { baseRoute: 'dashboard', params: {} };
@@ -2359,6 +2361,7 @@ async function loadQueue() {
 
         const data = await response.json();
         console.log('Queue data:', data);
+        await rwStatusReady;
 
         allQueueData = data.data || [];
         updateQueueSummary();
@@ -2690,6 +2693,7 @@ async function loadQuarantine() {
 
         const data = await response.json();
         console.log('Quarantine data:', data);
+        await rwStatusReady;
 
         renderQuarantineData(data);
     } catch (error) {
