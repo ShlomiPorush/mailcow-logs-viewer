@@ -345,7 +345,7 @@ Native `title` tooltips. Dynamic ones show the expression that builds the text.
 | Security | dynamic: `Replace it with ${escapeHtml(old.address)}/128` | `frontend/security.js:780` (renderSecurityLists) |
 | Security | "Lift the ban; the rule leaves it alone for a week" | `frontend/security.js:796` (renderSecurityLists) |
 | Security | "Note what it catches; ban nothing" | `frontend/security.js:1181` (securityCardBody) |
-| Security | dynamic: `${caps.can_ban ? 'Put what it catches on the Fail2ban blacklist' : 'Banning n...` | `frontend/security.js:1182` (securityCardBody) |
+| Security | dynamic: `${caps.can_ban ? 'Put what it catches on the Fail2ban denylist' : 'Banning ne...` | `frontend/security.js:1182` (securityCardBody) |
 | Security | "Remove" | `frontend/security.js:1192` (securityCardBody) |
 | Security | dynamic: `${escapeHtml(String(s.tries))} tries from ${escapeHtml(String(s.addresses))} ...` | `frontend/security.js:1198` (securityCardBody) |
 | Security | "Remove" | `frontend/security.js:1204` (securityCardBody) |
@@ -501,7 +501,7 @@ Transient notifications from `showToast(message, type)` (utils.js). Type default
 | Security | dynamic: `lifted.map(fail2banBare).join(', ') + ' unbanned successfully'` [success] | `frontend/app.js:1356` (unbanIP) |
 | Security | dynamic: `'Failed to unban: ' + (result.msg \|\| result.detail \|\| 'Unknown error')` [error] | `frontend/app.js:1365` (unbanIP) |
 | Security | dynamic: `'Failed to unban IP: ' + err.message` [error] | `frontend/app.js:1372` (unbanIP) |
-| Security | dynamic: `result.already ? result.msg : `IP ${ip} added to blacklist`` [success] | `frontend/app.js:1399` (banIP) |
+| Security | dynamic: `result.already ? result.msg : `IP ${ip} added to the denylist`` [success] | `frontend/app.js:1399` (banIP) |
 | Security | dynamic: `'Failed to ban: ' + (result.msg \|\| result.detail \|\| 'Unknown error')` [error] | `frontend/app.js:1407` (banIP) |
 | Security | dynamic: `'Failed to ban IP: ' + err.message` [error] | `frontend/app.js:1414` (banIP) |
 | Security | "Failed to dismiss alert" [error] | `frontend/app.js:2073` (acknowledgeSecurityAlert) |

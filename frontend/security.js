@@ -1179,7 +1179,7 @@ function securityCardBody(key) {
         <div class="ui-sec-mode">
             <div class="ui-seg" role="group" aria-label="What the rule does">
                 <button type="button" aria-pressed="${r.mode !== 'enforce'}" onclick="setProtectionMode('${key}', 'watch')" title="Note what it catches; ban nothing">Watch first</button>
-                <button type="button" aria-pressed="${r.mode === 'enforce'}" onclick="setProtectionMode('${key}', 'enforce')" ${caps.can_ban ? '' : 'disabled'} title="${caps.can_ban ? 'Put what it catches on the Fail2ban blacklist' : 'Banning needs the Read-Write API key'}">Ban</button>
+                <button type="button" aria-pressed="${r.mode === 'enforce'}" onclick="setProtectionMode('${key}', 'enforce')" ${caps.can_ban ? '' : 'disabled'} title="${caps.can_ban ? 'Put what it catches on the Fail2ban denylist' : 'Banning needs the Read-Write API key'}">Ban</button>
             </div>
             <span class="ui-muted">${r.mode === 'enforce' ? 'Bans as soon as it catches an address.' : 'Notes who it catches, and bans nothing. You decide on the Overview.'}</span>
         </div>`;
