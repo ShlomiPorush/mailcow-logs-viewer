@@ -401,3 +401,34 @@ async def test_an_include_or_redirect_with_a_macro_is_one_lookup_and_not_followe
     record = 'v=spf1 include:%{d}._spf.example.net redirect=%{d}._spf.example.org'
     assert await domains.count_spf_dns_lookups('example.com', record) == 2
     assert not any('%' in q for q in queries), queries
+
+
+@pytest.mark.parametrize('term', ['ip4:mail.example.com', 'ip4:192.0.2', 'ip4:192.0.2.300', 'ip4:192.0.2.01',
+                                  'ip6:zz::1', 'ip6:2001:db8:::1', '-ip6:mail:example'])
+@pytest.mark.asyncio
+async def test_ip4_and_ip6_take_an_address_not_a_name(monkeypatch, term):
+    result = await _check(monkeypatch, f'v=spf1 mx {term} -all')
+    assert result['status'] == 'error', result['message']
+    assert term in result['message']
+
+
+@pytest.mark.parametrize('term', ['ip4:192.0.2.1', 'ip4:192.0.2.0/24', 'ip6:2001:db8::1', 'ip6:2001:db8::/32',
+                                  'IP4:198.51.100.0/24'])
+@pytest.mark.asyncio
+async def test_ip4_and_ip6_addresses_stay_valid(monkeypatch, term):
+    result = await _check(monkeypatch, f'v=spf1 mx {term} -all')
+    assert result['status'] == 'success', result['message']
+
+
+@pytest.mark.asyncio
+async def test_a_redirect_counts_the_lookups_of_its_target(monkeypatch):
+    # RFC 7208 4.6.4: the record a redirect points to counts toward the limit
+    records = {'example.com': 'v=spf1 mx redirect=_spf.example.net',
+               '_spf.example.net': 'v=spf1 a mx include:_inc.example.org -all',
+               '_inc.example.org': 'v=spf1 a -all'}
+
+    async def fake_resolve(query, record_type='TXT', timeout=5):
+        return [FakeTXT(records[query])] if record_type == 'TXT' and query in records else []
+    monkeypatch.setattr(domains, 'resolve_dns_with_fallback', fake_resolve)
+    # mx, redirect, then a, mx, include and the included a
+    assert await domains.count_spf_dns_lookups('example.com', records['example.com']) == 6

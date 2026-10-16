@@ -48,6 +48,23 @@ SPF_MECHANISM_RE = re.compile(
     # RFC 7208 section 5.6: ip4 takes an IPv4 network and ip6 an IPv6 one; only IPv6 has ':'
     r'|ip4:[^/:]+(?:/' + SPF_IP4_CIDR + r')?'
     r'|ip6:[^/]*:[^/]*(?:/' + SPF_IP6_CIDR + r')?)', re.IGNORECASE)
+
+
+def spf_term_valid(term: str) -> bool:
+    """A mechanism matches its grammar, and the value of ip4 or ip6 is an address
+    of that family (RFC 7208 section 5.6), not a host name or the other family"""
+    if not SPF_MECHANISM_RE.fullmatch(term):
+        return False
+    name, _, value = term.lstrip('+-~?').partition(':')
+    if name.lower() in ('ip4', 'ip6'):
+        try:
+            address = ipaddress.ip_address(value.split('/')[0])
+        except ValueError:
+            return False
+        return address.version == (4 if name.lower() == 'ip4' else 6)
+    return True
+
+
 # RFC 7208 section 5.6: a or mx, an optional domain, then the dual CIDR length
 SPF_A_MX_RE = re.compile(
     r'(a|mx)(?::(' + SPF_DOMAIN_SPEC + r'))?'
@@ -321,7 +338,7 @@ async def check_spf_record(domain: str, spf_source_ips: Optional[List[Dict[str, 
         for mechanism in mechanisms:
             # Modifiers (redirect=, exp= and unknown ones, which must be ignored,
             # RFC 7208 section 6) are name=value with no qualifier
-            if not SPF_MECHANISM_RE.fullmatch(mechanism) and not SPF_MODIFIER_RE.match(mechanism):
+            if not spf_term_valid(mechanism) and not SPF_MODIFIER_RE.match(mechanism):
                 invalid_mechanisms.append(mechanism)
         
         if invalid_mechanisms:
@@ -531,7 +548,7 @@ async def check_ip_in_spf(domain: str, ip_to_check: str, spf_record: str, resolv
 
     for part in parts:
         # A term with invalid syntax, also in an included record, never authorizes
-        if not SPF_MECHANISM_RE.fullmatch(part) and not SPF_MODIFIER_RE.match(part):
+        if not spf_term_valid(part) and not SPF_MODIFIER_RE.match(part):
             continue
         clean_part = part.lstrip('+-~?')
         # Names are case-insensitive (RFC 7208 4.6.1); values keep their text
@@ -687,7 +704,21 @@ async def count_spf_dns_lookups(domain: str, spf_record: str, resolver=None, vis
             lookup_count += 1
 
         elif name.startswith('redirect='):
+            # The redirect target's own lookups count too (RFC 7208 4.6.4)
             lookup_count += 1
+            redirect_domain = clean_part[len('redirect='):]
+            if '%' in redirect_domain:
+                continue
+            try:
+                redirect_answers = await resolve_dns_with_fallback(redirect_domain, 'TXT', timeout=5)
+                for rdata in redirect_answers:
+                    redirect_spf = b''.join(rdata.strings).decode('utf-8')
+                    if redirect_spf.lower().startswith('v=spf1'):
+                        lookup_count += await count_spf_dns_lookups(
+                            redirect_domain, redirect_spf, resolver, visited_domains.copy(), depth + 1)
+                        break
+            except Exception:
+                pass
 
     return lookup_count
 
