@@ -46,7 +46,7 @@ Configure the app with [environment variables](documentation/ENV_Settings.md). T
 
 ## Quick start
 
-You need Docker with Docker Compose, and a mailcow server with a read-only API key, created in the API section of the mailcow admin interface.
+You need Docker with Docker Compose, and a mailcow server with a read-only API key, created in the mailcow admin interface under **System** > **Configuration** > **Access** > **Administrators** > **API**.
 
 1. Create a directory and save [docker-compose.yml](docker-compose.yml) and [env.example](env.example) in it.
 2. Copy `env.example` to `.env` and set at least `MAILCOW_URL`, `MAILCOW_API_KEY` and `POSTGRES_PASSWORD`. Turn on sign-in (`BASIC_AUTH_ENABLED=true` with `AUTH_USERNAME` and `AUTH_PASSWORD`), since anyone who can open the app can read all mail logs.

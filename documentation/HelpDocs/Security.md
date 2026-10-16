@@ -56,7 +56,9 @@ What the actions do:
 - **Ban** uses the rule's current ban length; **Ban permanently** keeps the address denylisted until removal. Rule bans expire only entries the app owns.
 - A permanent row ban needs confirmation. A single address is written as `/32` for IPv4 and `/128` for IPv6.
 - **Allow** adds an allowlist entry after confirmation. The denylist still takes priority if both lists contain it.
-- **Unban** queues a Fail2ban unban after confirmation. The row disappears immediately; mailcow can take a few seconds. Further failures can cause another ban.
+- **Ban permanently** and **Allow** do not add an address that the list already holds in another notation, such as `198.51.100.7` and `198.51.100.7/32`. The message then says the address "is already in the allowlist", or "is already in the blacklist" for the denylist.
+- **Unban** lifts the ban Fail2ban actually made, after confirmation. When Fail2ban bans networks (see **Ban the network** under [Fail2ban](#fail2ban)), the whole banned network, such as `198.51.100.0/24`, is unbanned. The button and confirmation on the Overview name that network, and the message afterwards names what was unbanned. The row disappears immediately; mailcow can take a few seconds. Further failures can cause another ban.
+- If Fail2ban has no ban for the address, **Unban** changes nothing and says the address "is not banned by Fail2ban now". For an address on the denylist it says to remove it from the denylist instead.
 - **Undo** cancels a pending rule ban or removes the denylist entry the app added. **Dismiss** closes a watched catch without changing mailcow. Both pause that rule for this address for 7 days.
 - **Remove from allowlist** or **Remove from denylist** removes the covering entry after confirmation.
 
@@ -91,9 +93,13 @@ The **Lists** tab shows mailcow's Fail2ban allowlist and denylist, one entry per
 - **Allowlist**: never banned, by Fail2ban or by the rules. Put your own offices and monitoring here. An entry that failed logins today says how many, and that it was never banned.
 - **Denylist**: banned until removed. The denylist wins over the allowlist. An entry says who added it: "Added by hand", or "Added by" and a rule name with the end of its ban.
 
-Use **Add** for an address or CIDR network. An address without a prefix is added as `/32` for IPv4 and `/128` for IPv6. **Remove** asks for confirmation.
+Use **Add** for an address or CIDR network. An address without a prefix is added as `/32` for IPv4 and `/128` for IPv6. An address the list already holds in another notation is not added again. **Remove** asks for confirmation. Removing a rule entry works like **Undo**, including the week-long pause for that rule. Changes take a few seconds in mailcow.
 
-An IPv6 entry ending in `/32`, such as `2001:db8::1/32`, covers the whole network `2001:db8::/32` in mailcow, and the page shows it as that network. Earlier versions of the app wrote single IPv6 addresses this way, so check both lists for such entries and replace them. Removing a rule entry works like **Undo**, including the week-long pause for that rule. Changes take a few seconds in mailcow.
+### Entries tagged Whole network
+
+Earlier versions of the app wrote a single IPv6 address as a `/32`, such as `2001:db8::1/32`. mailcow reads that entry as the whole network `2001:db8::/32`, so on the denylist it blocks every address of that network, and on the allowlist it exempts all of them from Fail2ban. The **Lists** tab tags such an entry **Whole network** and says which network it blocks or exempts. A network you entered on purpose, such as `2001:db8::/32`, is not tagged.
+
+**Repair** replaces the entry with the single address as `/128`, such as `2001:db8::1/128`, after confirmation. The app makes the change in one edit of mailcow's list and reads the list back to confirm it. **Remove** deletes the entry instead. Both need the read-write API key. While any such entry is left, the [Dashboard](Dashboard.md#needs-attention) lists it under **Needs attention**. The app never changes these entries without your click.
 
 The app reads both lists fresh from mailcow right before every change, so an entry added in mailcow in the meantime is kept.
 
@@ -218,7 +224,7 @@ Each event shows **When**, **Address**, **Account** (or the attempts left before
 - **Filters** shows **IP Address** and **Username**; both match part of the value. Press Enter or click **Apply**.
 - **Clear filters** removes them all.
 
-**Unban** on a ban event, or on an address that is on the denylist, asks mailcow to lift the ban. **Ban permanently** on a warning or unban event adds the address to the denylist. Both work as on the [Overview](#each-address-and-what-you-can-do).
+**Unban** shows on a ban event and on an address that is on the denylist. It asks mailcow to lift the Fail2ban ban; for an address on the denylist it says to remove it from the denylist on **Lists** instead. **Ban permanently** on a warning or unban event adds the address to the denylist. Both work as on the [Overview](#each-address-and-what-you-can-do).
 
 **Export CSV** downloads the events that match all the filters, up to the CSV export limit set in [Settings](Settings.md).
 

@@ -52,8 +52,7 @@ The protection checks every minute. It counts, per mailbox, the messages sent wi
 
 - Only mail a mailbox sent after logging in counts. A message counts when its Rspamd scan shows an authenticated sender. Mail from outside that only claims one of your addresses as its sender does not count, so nobody outside can get a mailbox stopped.
 - Each message counts for the mailbox that logged in, not for the address in its From. Mail sent from an alias, or from another address mailcow lets the mailbox send as, counts for that mailbox, and that mailbox is stopped.
-- The counter counts authenticated message submissions stored by the app, rather than recipients.
-<!-- VERIFY: one message_correlations row per submission (per Message-ID and Postfix queue chain), so a message to many recipients counts once. Confirm with a test send to several recipients. -->
+- The counter counts messages, not recipients: a message to many recipients is one submission and counts once.
 
 A mailbox is stopped when its count is above the limit (more than 100 with the default), unless it is whitelisted, already stopped, or in its pause after you re-enabled it.
 

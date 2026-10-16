@@ -42,7 +42,7 @@ The `db` service in `docker-compose.yml` falls back to `mailcowlogs` and `change
 
 ### Allowed IPs of the API keys
 
-Each key has its own list of allowed IPs in mailcow. It must hold the address mailcow sees, which can change when the app moves to another Docker network. See [Getting started](GETTING_STARTED.md); check the write key with **Validate** under **Settings** > **Mailcow**.
+Each key has its own list of allowed IPs in mailcow, under **System** > **Configuration** > **Access** > **Administrators** > **API**. It must hold the address mailcow sees, which can change when the app moves to another Docker network. See [Getting started](GETTING_STARTED.md); check the write key with **Validate** under **Settings** > **Mailcow**.
 
 ## Fetch configuration
 

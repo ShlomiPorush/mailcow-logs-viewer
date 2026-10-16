@@ -53,7 +53,7 @@ For **Postfix Logs**, **Rspamd Logs** and **Netfilter Logs** you see **Last Fetc
 | **Spam Filter** | **Detect Suppressions**, **Sync to Rspamd**, **Expire Suppressions**, **Cleanup Deferred Queue** |
 | **Quarantine** | **Process Quarantine Rules** |
 
-**Run** starts a job now; its schedule stays the same. While a job runs, its **Run** button is disabled. A job whose feature is off under **Settings** > **Features** has no **Run** and is marked **feature off**. A job that is off for another reason, such as a missing read-write API key or a setting that is off, is marked **off**, says why and has a **Settings** button that opens the right category.
+**Run** starts a job now; its schedule stays the same. While a job runs, its **Run** button is disabled. **DMARC & TLS IMAP Import** and **IP Blacklist Check (All Hosts)** can also be started elsewhere in the app. When **Run** meets such a run already in progress, it does not start a second one: the job stays **running** and then shows the result of the run in progress. A job whose feature is off under **Settings** > **Features** has no **Run** and is marked **feature off**. A job that is off for another reason, such as a missing read-write API key or a setting that is off, is marked **off**, says why and has a **Settings** button that opens the right category.
 
 A manual run does everything the scheduled run does. **Sync to Rspamd**, **Cleanup Deferred Queue**, **Protection Rules**, **Outgoing Spam** and **Process Quarantine Rules** can change mailcow, **IP Blacklist Check (All Hosts)** and **Anomaly Detection** can send alerts, and **Weekly Summary Report** sends the summary email. See [Notifications](../Notifications.md).
 

@@ -144,7 +144,9 @@ Quick fill also replaces a generated rule name. Change **Action** to **Delete** 
 
 **Edit** opens the **Edit Rule** dialog with the rule's values. Click **Save Changes** to store them.
 
-A **Contains** rule opens as **Contains** with its plain text, and any other pattern opens as **Regex (advanced)**, so saving keeps the rule as it was. A rule that an older version escaped twice opens with a backslash in its value, such as `example\.com`. Remove the backslash and save to repair it.
+A **Contains** rule opens as **Contains** with its plain text, and any other pattern opens as **Regex (advanced)**, so saving keeps the rule as it was.
+
+Editing a **Contains** rule in an earlier version escaped its text a second time, so the rule stopped matching. The upgrade repairs such **Sender**, **Sender Domain** and **Recipient** rules by itself and names each repaired rule in the application log. **Subject** rules are left as they are, because a subject can contain a backslash. A **Subject** rule that was escaped twice opens with a backslash in its value, such as `example\.com`; remove the backslash and save to repair it.
 
 ### Which rule wins
 
@@ -154,7 +156,7 @@ Each held message is handled by one rule at most. The app checks the **Delete** 
 
 **Process Quarantine Rules** runs every **Quarantine Rules Interval** (5 minutes by default). It reads current quarantine, matches enabled rules and requests release or deletion for up to **Quarantine Rules Max Actions** messages (50). Other messages wait.
 
-Each release or deletion that mailcow carries out is added to the history and counted in the rule's **Hits**. Old history is removed after **Quarantine Rules Log Retention Days** (30). If mailcow refuses a release or deletion, nothing is recorded, the error goes to the application log, and the message stays in quarantine for the next run.
+Only the releases and deletions that mailcow confirms are added to the history and counted in the rule's **Hits**. Old history is removed after **Quarantine Rules Log Retention Days** (30). If mailcow refuses a release or deletion, that message is not recorded, the error goes to the application log, and the message stays in quarantine for the next run. The other messages of the same run still count.
 
 You can see the job and start it at once with **Run** on **Status** > **Jobs**, in the **Quarantine** group. See [Status](Status.md).
 

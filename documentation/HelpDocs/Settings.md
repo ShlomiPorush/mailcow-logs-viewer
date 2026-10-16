@@ -61,7 +61,7 @@ The **Status** panel checks the **Read-Write API Key** and the **Rspamd Password
 | Setting | Variable | Default | Notes |
 | --- | --- | --- | --- |
 | **mailcow URL** | `MAILCOW_URL` | Required | For example `https://mail.example.com`. |
-| **mailcow API Key** | `MAILCOW_API_KEY` | Required | The read-only key. mailcow must allow this app's IP address for it. |
+| **mailcow API Key** | `MAILCOW_API_KEY` | Required | The read-only key, from **System** > **Configuration** > **Access** > **Administrators** > **API** in mailcow. mailcow must allow this app's IP address for it. |
 | **mailcow API Key (read-write)** | `MAILCOW_API_KEY_RW` | Unset | Needed for every action that changes mailcow. Allow this app's IP address for it too. |
 | **Rspamd Password** | `RSPAMD_PASSWORD` | Unset | Needed to view Rspamd maps; editing them also needs the read-write key. |
 | **Rspamd URL** | `RSPAMD_URL` | Empty | Empty reaches Rspamd through the mailcow URL plus `/rspamd`. |

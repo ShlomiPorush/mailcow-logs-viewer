@@ -95,7 +95,7 @@ server {
 
 1. Save the file in nginx's site configuration directory.
 2. Run `nginx -t`, then reload nginx.
-3. Set `FORWARDED_ALLOW_IPS` to the address nginx uses to reach the app.
+3. Set `FORWARDED_ALLOW_IPS` to the gateway address of the app's Docker network. nginx connects to `127.0.0.1:8080`, but Docker forwards the published port, so the app sees the connection come from that gateway. See [Trusted proxy addresses](#trusted-proxy-addresses).
 
 The WebSocket block follows [nginx's WebSocket proxying guide](https://nginx.org/en/docs/http/websocket.html).
 
@@ -124,7 +124,7 @@ Keep the existing `mailcow-logs-network` definition; the app reaches its databas
 
 ### Add the host name and a server block
 
-<!-- VERIFY: Test the custom-site include paths, ACME challenge handling and certificate renewal on the supported mailcow release. These nginx files are not part of this checkout. -->
+<!-- VERIFY: On a real mailcow, confirm that acme-mailcow adds logs.example.com to the certificate and keeps it on renewal. The include paths, listen files and challenge routing were tested with the nginx image of mailcow 2026-09a (ghcr.io/mailcow/nginx:1.30.4-1). -->
 Point a DNS record for `logs.example.com` at the mailcow host. In mailcow's `mailcow.conf`, add `logs.example.com` to `ADDITIONAL_SAN` (keep the names already there, separated by commas). Do not add it as another mailcow web interface name; the app gets its own server block.
 
 In the mailcow directory, create `data/conf/nginx/logs-viewer.conf`:
@@ -138,6 +138,10 @@ server {
     ssl_certificate /etc/ssl/mail/cert.pem;
     ssl_certificate_key /etc/ssl/mail/key.pem;
     client_max_body_size 20m;
+    root /web;
+
+    resolver 127.0.0.11 valid=10s ipv6=off;
+    set $logs_viewer http://mailcow-logs-app:8080;
 
     location ^~ /.well-known/acme-challenge/ {
         allow all;
@@ -146,7 +150,7 @@ server {
 
     location /ws/raw-logs {
         if ($scheme = http) { return 301 https://$host$request_uri; }
-        proxy_pass http://mailcow-logs-app:8080;
+        proxy_pass $logs_viewer;
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection "upgrade";
@@ -160,7 +164,7 @@ server {
 
     location / {
         if ($scheme = http) { return 301 https://$host$request_uri; }
-        proxy_pass http://mailcow-logs-app:8080;
+        proxy_pass $logs_viewer;
         proxy_set_header Host $http_host;
         proxy_set_header X-Forwarded-Host $http_host;
         proxy_set_header X-Forwarded-Proto $scheme;
@@ -169,12 +173,14 @@ server {
 }
 ```
 
+Three lines in this block matter for mailcow. `root /web;` lets nginx serve the challenge file that `acme-mailcow` writes for the new name; without it the challenge returns 404 and the name never gets onto the certificate. `resolver` and `set $logs_viewer` make nginx look up the app when a request arrives: with the name written directly in `proxy_pass`, `nginx-mailcow` does not start while the app is down, and mailcow's web interface goes down with it. `ipv6=off` is needed because the app listens on IPv4 only.
+
 ### Apply and check
 
 1. Run `docker compose up -d` in the app's directory and in the mailcow directory.
 2. In the mailcow directory, run `docker compose exec nginx-mailcow nginx -t`, then `docker compose restart nginx-mailcow`. Browsers show a certificate error until mailcow's certificate includes the new name.
-3. Set `FORWARDED_ALLOW_IPS` to the address of `nginx-mailcow` on mailcow's network.
-4. On mailcow's network, the app may reach mailcow from a different address. Check the allowed IPs of both API keys in mailcow, then click **Validate** next to the read-write key in **Settings** > **Mailcow**.
+3. Set `FORWARDED_ALLOW_IPS` to the IPv4 address of `nginx-mailcow` on mailcow's network.
+4. On mailcow's network, the app may reach mailcow from a different address. Check the allowed IPs of both API keys in mailcow under **System** > **Configuration** > **Access** > **Administrators** > **API**, then click **Validate** next to the read-write key in **Settings** > **Mailcow**.
 
 ## Caddy
 
@@ -186,7 +192,7 @@ logs.example.com {
 }
 ```
 
-With Caddy in a container on a shared network, use `reverse_proxy mailcow-logs-app:8080`. Caddy passes WebSockets and the forwarded headers by itself; see its [reverse_proxy directive](https://caddyserver.com/docs/caddyfile/directives/reverse_proxy). Set `FORWARDED_ALLOW_IPS` to the address Caddy connects from.
+With Caddy in a container on a shared network, use `reverse_proxy mailcow-logs-app:8080`. Caddy passes WebSockets and the forwarded headers by itself; see its [reverse_proxy directive](https://caddyserver.com/docs/caddyfile/directives/reverse_proxy). Set `FORWARDED_ALLOW_IPS` to the address the app sees Caddy connect from: the gateway address of the app's Docker network when Caddy runs on the host, or the Caddy container's address on the shared network when Caddy runs in a container.
 
 ## Traefik
 
@@ -212,8 +218,6 @@ networks:
 ```
 
 Keep the `mailcow-logs-network` definition for the database. Set `FORWARDED_ALLOW_IPS` to the Traefik container's address on the `traefik` network.
-
-<!-- VERIFY: Exercise the nginx, Caddy and Traefik recipes on live proxies: HTTPS login, a Settings save, nested-route reload, report upload and the Logs WebSocket. They have been checked against app requirements, not deployed by this documentation change. -->
 
 ## Check the result
 

@@ -73,12 +73,13 @@ The check reads the TXT record at the domain that starts with `v=spf1` and repor
 
 - **Error** when there is no SPF record, when there is more than one (receivers then treat SPF as broken), when the record does not start with `v=spf1 `, when it has no `all` at the end and no `redirect=`, when it needs more than 10 DNS lookups, or when it allows every server with `+all` (a bare `all` counts as `+all`).
 - **Error** when a sending IP of yours is not allowed by the record. The message names the IP.
-- **Error** for a term the check does not know. It accepts `ip4`, `ip6`, `a`, `mx`, `include`, `exists`, `ptr`, `redirect`, `exp` and `all`.
+- **Error** for a mechanism the check does not know. It accepts the mechanisms `ip4`, `ip6`, `a`, `mx`, `include`, `exists`, `ptr` and `all`, and the modifiers `redirect=` and `exp=`.
 - **Warning** for `?all`, which protects almost nothing.
+- **Warning** for a mechanism written with `=` instead of `:`, such as `include=spf.example.net`. SPF reads it as an unknown modifier and ignores it, so the message asks "Did you mean include:spf.example.net?".
 - **Warning** for `ptr`, which RFC 7208 discourages because it is slow and unreliable. The check counts it as a DNS lookup but does not evaluate it.
 - **OK** for `-all` and for `~all`. With `~all` the message suggests `-all`.
 
-Any other term is reported as an invalid mechanism. This includes modifiers other than `redirect=` and `exp=`, although RFC 7208 lets receivers ignore unknown modifiers.
+Other modifiers (`name=value`), such as `ra=` from RFC 6652, are ignored, as RFC 7208 requires.
 
 The lookup count includes nested `include:` terms. See [The SPF record](#the-spf-record) for the limit.
 

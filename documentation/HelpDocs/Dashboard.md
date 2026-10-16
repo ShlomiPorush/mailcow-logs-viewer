@@ -18,11 +18,12 @@ The server checks, each with a button to where you handle it:
 | **mailcow is not reachable** | The mailcow API did not answer. Logs and server data may be out of date. | **Open settings** |
 | **mail.example.com is on a blocklist**, or **N of your addresses are on a blocklist** | The last blocklist check found one of your sending addresses listed. The row says on how many lists. | **Check listing** (opens Status) |
 | **A mailcow container is stopped**, or **N mailcow containers are stopped** | mailcow reports a stopped container. The row says how many are running. | **Open status** |
+| **A Fail2ban entry blocks the whole 2001:db8::/32 network** (or **exempts**), or **N Fail2ban entries cover whole /32 networks** | An earlier version of the app wrote a single IPv6 address to a Fail2ban list as a `/32` network. The row names the address and the entry. See [Entries tagged Whole network](Security.md#entries-tagged-whole-network). | **Open lists** (opens Security, Lists) |
 | **DMARC needs attention for example.com**, or **for N domains** | DMARC Insights recommends a stricter policy, reports a low pass rate, or sees new failing senders. The row shows the first recommendation. | **Open DMARC** |
 | **Version X is available** | A newer version of this app exists. | **Read changes** |
 | **mailcow X is available** | A newer mailcow version exists. | **Read changes** |
 
-**Read changes** opens the release notes in a window; a click anywhere on those two rows does the same. The blocklist row is not checked while **IP Blacklist Monitor** is turned off, and the DMARC row while **DMARC & TLS** is turned off.
+**Read changes** opens the release notes in a window; a click anywhere on those two rows does the same. The blocklist row is not checked while **IP Blacklist Monitor** is turned off, the Fail2ban row while **Security** is turned off, and the DMARC row while **DMARC & TLS** is turned off.
 
 ### Security alerts
 
@@ -48,15 +49,18 @@ The volume spike and failed login alerts are also sent by email, with the subjec
 ![Show activity window](../../images/docs/dashboard-alert-activity-light.webp#gh-light-mode-only)
 ![Show activity window](../../images/docs/dashboard-alert-activity-dark.webp#gh-dark-mode-only)
 
+The window is the one the alert was raised with, not today's settings: the check window named in a volume spike or login burst alert, or the outgoing spam window an **SMTP disabled** block used. The baseline days come from the volume spike alert too; other alerts use the current **Anomaly Baseline Days**. When the app cannot tell which window an alert used, the window shows as **Unknown**.
+
 A row of figures comes first:
 
 - For a volume spike: **Sent in the alert's N minutes**, the same as **That is, an hour**, **Usual, an hour** over the baseline days, and **Sent in the N days before**.
-- For an **SMTP disabled** alert: the same, with **The limit, in N minutes** in place of the usual rate. N is the outgoing spam window.
+- For an **SMTP disabled** alert: the same, with **The limit, in N minutes** in place of the usual rate.
 - For a login burst: **Failed logins in N minutes**, **The alert starts at**, **From addresses** (every address the failed logins came from) and **Failed in the N days before**.
+- With an unknown window, the row starts with **Counted for the alert** (**Counted for the block** for an **SMTP disabled** alert) and **The window**: **Unknown**, followed by the usual rate, the limit or the alert threshold, and the count of the days before.
 
-The chart shows **What it sent** or **Failed logins** for that subject. Choose **24 hours**, **2 days** or the baseline length (default 7 days). Short views use 15-minute bars; the baseline view uses hours, or several hours per bar when the baseline is longer than 7 days. The alert window is highlighted, with its time marked and a usual-rate line for volume spikes. Hover for counts. The chart extends 2 hours after the alert.
+The chart shows **What it sent** or **Failed logins** for that subject. Choose **24 hours**, **2 days** or the baseline length (default 7 days). Short views use 15-minute bars; the baseline view uses hours, or several hours per bar when the baseline is longer than 7 days. A known alert window is highlighted, with its time marked and a usual-rate line for volume spikes. Hover for counts. The chart extends 2 hours after the alert.
 
-**Around the alert** lists what happened from one window before the alert to an hour after it. The window is the anomaly check interval (15 minutes by default), or the outgoing spam window for an **SMTP disabled** alert:
+**Around the alert** lists what happened from one window before the alert to an hour after it, or from 60 minutes before when the window is unknown:
 
 - For a volume spike or an **SMTP disabled** alert: **Recipient domains**, **What happened to them** (the delivery results) and the **Subjects**.
 - For a failed login burst: the **Addresses**, **Countries** and **Networks** that tried.
