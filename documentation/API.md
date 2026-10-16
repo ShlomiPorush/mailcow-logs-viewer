@@ -1,72 +1,114 @@
-# mailcow Logs Viewer - API Documentation
+# API reference
 
-This document describes all available API endpoints for the mailcow Logs Viewer application.
+Use these endpoints to read viewer data, manage saved configuration and request mailcow actions. Paths without an `/api` prefix below are relative to the API base URL; `/login` and `/ws/raw-logs` are application-root paths.
 
-**Base URL:** `http://your-server:8080/api`
+**Base URL:** `https://logs.example.com/api`
 
-**Authentication:** The application supports two authentication methods that can be enabled independently or together:
-- **Basic Authentication**: HTTP Basic Auth with username/password
-- **OAuth2/OIDC**: OAuth2/OpenID Connect authentication with any standard identity provider
-
-When authentication is enabled, all API endpoints (except public endpoints listed below) require authentication. See [Authentication](#authentication) section for details.
+**Authentication:** When Basic authentication or OAuth2/OIDC is enabled, every endpoint except the public ones listed under [Authentication](#authentication) needs a session cookie or Basic Auth credentials.
 
 ---
 
-## Table of Contents
+## Contents
 
-1. [Authentication](#authentication)
-2. [OAuth2 Authentication Endpoints](#oauth2-authentication-endpoints)
-3. [Health & Info](#health--info)
-4. [Job Status Tracking](#job-status-tracking)
-5. [Domains](#domains)
-6. [Mailbox Statistics](#mailbox-statistics)
-7. [Devices](#devices)
-8. [Rate Limits](#rate-limits)
-9. [Messages (Unified View)](#messages-unified-view)
-10. [Logs](#logs)
-   - [Postfix Logs](#postfix-logs)
-   - [Rspamd Logs](#rspamd-logs)
-   - [Netfilter Logs](#netfilter-logs)
-   - [Fail2Ban Configuration](#fail2ban-configuration)
-11. [Queue & Quarantine](#queue--quarantine)
-12. [Statistics](#statistics)
-13. [Status](#status)
-14. [Settings](#settings)
-    - [GeoIP Management](#geoip-management)
-    - [SMTP & IMAP Test](#smtp--imap-test)
-15. [Export](#export)
-16. [DMARC](#dmarc)
-    - [DMARC IMAP Auto-Import](#dmarc-imap-auto-import)
-17. [Blacklist Monitoring](#blacklist-monitoring)
-18. [Reporting](#reporting)
-19. [Raw Logs (Live Log Viewer)](#raw-logs-live-log-viewer)
-20. [Spam Filter](#spam-filter)
-    - [Rspamd Maps](#rspamd-maps)
-    - [Suppressions](#suppressions)
-21. [Quarantine Auto-Rules](#quarantine-auto-rules)
+- [Authentication](#authentication)
+
+- [Health & Info](#health--info)
+
+- [OAuth2 Authentication Endpoints](#oauth2-authentication-endpoints)
+
+- [Job Status Tracking](#job-status-tracking)
+
+- [Domains](#domains)
+
+- [Mailbox Statistics](#mailbox-statistics)
+
+- [Devices](#devices)
+
+- [Rate Limits](#rate-limits)
+
+- [Messages (Unified View)](#messages-unified-view)
+
+- [Logs](#logs)
+
+- [Queue & Quarantine](#queue--quarantine)
+
+- [Statistics](#statistics)
+
+- [Status](#status)
+
+- [Settings](#settings)
+
+- [GeoIP Management](#geoip-management)
+
+- [SMTP & IMAP Test](#smtp--imap-test)
+
+- [Export](#export)
+
+- [DMARC](#dmarc)
+
+- [DMARC IMAP Auto-Import](#dmarc-imap-auto-import)
+
+- [TLS-RPT (TLS Reporting)](#tls-rpt-tls-reporting)
+
+- [Blacklist Monitoring](#blacklist-monitoring)
+
+- [Reporting](#reporting)
+
+- [Error Responses](#error-responses)
+
+- [System Status](#system-status)
+
+- [Raw Logs (Live Log Viewer)](#raw-logs-live-log-viewer)
+
+- [Spam Filter](#spam-filter)
+
+- [Quarantine Auto-Rules](#quarantine-auto-rules)
+
+- [Security Alerts (Anomaly Detection)](#security-alerts-anomaly-detection)
+
+- [SMTP Abuse Protection](#smtp-abuse-protection)
+
+- [DMARC Insights](#dmarc-insights)
+
+- [Protection rules](#protection-rules)
+
+- [Notification Destinations](#notification-destinations)
+
+- [In-app documentation](#in-app-documentation)
 
 ---
 
 ## Authentication
 
-### Overview
+### Sign-in methods
 
-The application supports two authentication methods that can be enabled independently or simultaneously:
+You can enable either method, or both:
 
-1. **Basic Authentication**: Traditional HTTP Basic Auth with username/password
-2. **OAuth2/OIDC**: OAuth2/OpenID Connect authentication with any standard identity provider (Authentik, Mailcow, Keycloak, Google, Microsoft, etc.)
+1. **Basic Authentication**: HTTP Basic Auth with one username and password
+2. **OAuth2/OIDC**: sign-in through an OAuth2/OpenID Connect identity provider (Authentik, mailcow, Keycloak, Google, Microsoft and others)
+
+With both off (the default), no endpoint needs credentials.
 
 **Public Endpoints (No Authentication Required):**
+
 - `GET /api/health` - Health check (for Docker monitoring)
+
 - `GET /api/info` - Application information
+
 - `GET /api/auth/provider-info` - Authentication provider information
+
 - `GET /login` - Login page (HTML)
+
 - `GET /api/auth/login` - OAuth2 login initiation
+
 - `GET /api/auth/callback` - OAuth2 callback handler
 
 **Protected Endpoints (Authentication Required):**
+
 - `GET /api/auth/verify` - Verify Basic Auth credentials (returns 401 if invalid)
+
 - `POST /api/auth/session` - Exchange Basic Auth credentials for a session cookie (used by the login form)
+
 - All other `/api/*` endpoints
 
 ### Authentication Methods
@@ -76,48 +118,45 @@ The application supports two authentication methods that can be enabled independ
 When `BASIC_AUTH_ENABLED=true` (or legacy `AUTH_ENABLED=true`), use HTTP Basic Authentication:
 
 - Username: `AUTH_USERNAME` (default: `admin`)
-- Password: `AUTH_PASSWORD`
+
+- Password: `AUTH_PASSWORD` (if it is empty, protected requests return 500)
+
+A request without credentials gets 401 with a plain-text body and no `WWW-Authenticate` header, so browsers do not show their own password prompt. Wrong credentials also get 401. Page paths outside `/api` redirect to `/login?next=<page>` instead.
+
+After 10 failed Basic Auth attempts within 15 minutes from one client address (IPv6 clients are counted per /64), every request from that client that carries Basic credentials gets 429 with `Retry-After: 900`, including the public `GET /api/info`. A correct password resets the count.
 
 **Example Request:**
 ```bash
-curl -u username:password http://your-server:8080/api/info
+curl -u username:password https://logs.example.com/api/info
 ```
 
 Or with explicit header:
 ```bash
 curl -H "Authorization: Basic $(echo -n 'username:password' | base64)" \
-  http://your-server:8080/api/info
+  https://logs.example.com/api/info
 ```
 
 **Session cookie (what the web UI uses):**
 
-The browser sends the password once, to `POST /api/auth/session`, and gets back an
-`HttpOnly` session cookie that authenticates every later request. No credential is
-stored in the browser, so a script running in the page cannot read it. The cookie is
-marked `Secure` when the request arrives over HTTPS (directly, or through a reverse
-proxy that sets `X-Forwarded-Proto`), and `SameSite=lax` in all cases.
+The browser sends the password once, to `POST /api/auth/session`, and gets back an `HttpOnly` session cookie named `session_id` that authenticates every later request. The browser does not keep the password, and page scripts cannot read the cookie. The cookie is marked `Secure` when the request arrives over HTTPS (directly, or through a reverse proxy that sets `X-Forwarded-Proto`), and `SameSite=lax` in all cases.
 
 ```bash
 # Log in once and keep the cookie
-curl -u username:password -c cookies.txt -X POST http://your-server:8080/api/auth/session
+
+curl -u username:password -c cookies.txt -X POST https://logs.example.com/api/auth/session
 
 # Every later call needs only the cookie
-curl -b cookies.txt http://your-server:8080/api/info
+
+curl -b cookies.txt https://logs.example.com/api/info
 ```
 
-Sessions live in the application's memory, so restarting the container signs
-everyone out. `POST /api/auth/logout` ends the session and clears the cookie
-(`curl -b cookies.txt -X POST http://your-server:8080/api/auth/logout`).
-API clients that prefer to send `Authorization: Basic` on every request can keep
-doing that; nothing about it changed.
+Sessions live in the application's memory, so restarting the container signs everyone out. One process holds at most `SESSION_MAX_ENTRIES` live sessions (default 50); when it is full, a new sign-in gets 503 with `Retry-After: 60`. `POST /api/auth/logout` ends the session and clears the cookie (`curl -b cookies.txt -X POST https://logs.example.com/api/auth/logout`). API clients can also send `Authorization: Basic` on every request instead of using a session.
 
 #### OAuth2/OIDC Authentication
 
-When `OAUTH2_ENABLED=true`, users can authenticate via OAuth2/OIDC. The application supports:
-- **OIDC Discovery**: Automatic endpoint discovery via `.well-known/openid-configuration`
-- **Manual Configuration**: Explicit endpoint configuration for providers without discovery
+When `OAUTH2_ENABLED=true`, users sign in through the identity provider. The app finds the provider's endpoints through `.well-known/openid-configuration` (OIDC discovery), or uses endpoints you set yourself for providers without discovery.
 
-**Configuration:** See [OAuth2 Configuration Guide](../documentation/OAuth2_Configuration.md) for detailed setup instructions.
+**Configuration:** See [OAuth2 Configuration Guide](OAuth2_Configuration.md) for setup.
 
 **Authentication Flow:**
 1. User initiates login via `GET /api/auth/login`
@@ -128,25 +167,22 @@ When `OAUTH2_ENABLED=true`, users can authenticate via OAuth2/OIDC. The applicat
 6. User is redirected to main application
 
 **Session Management:**
+
 - Sessions are stored server-side with signed session IDs
-- HTTP-only cookies prevent XSS attacks
+
+- HttpOnly prevents scripts from reading the session cookie; it does not prevent script injection
+
 - Session expiration configurable via `SESSION_EXPIRY_HOURS` (default: 24 hours)
 
 ### Login Endpoint
 
 #### GET /login
 
-Serves the login page (HTML). This endpoint is always publicly accessible.
+Serves the login page (HTML). This endpoint is always public. The page shows the Basic Auth form when `BASIC_AUTH_ENABLED=true`, the OAuth2 button when `OAUTH2_ENABLED=true`, and an "OR" separator when both are on.
 
-**Response:** HTML page with login form
+**Query parameter:** `next`, the local page to open after sign-in. The app accepts only a path on this site; anything else, and any path under `/login`, `/api/` or `/static/`, becomes `/`.
 
-**Features:**
-- Dynamically displays available authentication methods
-- Shows Basic Auth form if `BASIC_AUTH_ENABLED=true`
-- Shows OAuth2 login button if `OAUTH2_ENABLED=true`
-- "OR" separator appears only when both methods are enabled
-
-**Note:** When authentication is disabled, accessing this endpoint will automatically redirect to the main application.
+When authentication is disabled, or the request already has a valid session, the endpoint redirects (302) to `next` instead of serving the page.
 
 ---
 
@@ -167,48 +203,23 @@ Health check endpoint for monitoring and load balancers.
 }
 ```
 
-On HTTP 503, the values are `"unhealthy"` and `"disconnected"`. This public
-endpoint does not expose configuration details.
+On HTTP 503, the values are `"unhealthy"` and `"disconnected"`. This public endpoint does not expose configuration details.
 
 ---
 
 ### GET /info
 
-Application information and configuration.
+Read app branding and sign-in flags without authentication. When authentication is enabled, unauthenticated callers receive only `name`, `app_title`, `app_logo_url`, `auth_enabled`, `basic_auth_enabled` and `oauth2_enabled`.
 
-**Authentication:** Not required (public endpoint)
+Authenticated callers, or callers when authentication is disabled, also receive `version`, `mailcow_url`, `local_domains`, `fetch_interval`, `retention_days`, `timezone`, `blacklist_count` and `disabled_features`. The version comes from the running image.
 
-**Response:**
-```json
-{
-  "name": "mailcow Logs Viewer",
-  "version": "2.6.0",
-  "mailcow_url": "https://mail.example.com",
-  "local_domains": ["example.com", "mail.example.com"],
-  "fetch_interval": 60,
-  "retention_days": 7,
-  "timezone": "UTC",
-  "app_title": "mailcow Logs Viewer",
-  "app_logo_url": "",
-  "blacklist_count": 3,
-  "auth_enabled": true,
-  "basic_auth_enabled": true,
-  "oauth2_enabled": false,
-  "disabled_features": ["quarantine", "spam-filter"]
-}
-```
-
-**Response Fields:**
-- `auth_enabled`: Boolean - Whether any authentication is enabled
-- `basic_auth_enabled`: Boolean - Whether Basic Authentication is enabled
-- `oauth2_enabled`: Boolean - Whether OAuth2/OIDC authentication is enabled
-- `disabled_features`: Array of strings - List of currently disabled feature IDs. Valid values: `netfilter`, `queue`, `quarantine`, `spam-filter`, `domains`, `dmarc`, `mailbox-stats`, `rate-limits`, `logs`, `blacklist`, `devices`. Empty array if all features are enabled
+`disabled_features` contains the configured feature IDs. This is configuration metadata, not a per-endpoint authorization policy.
 
 ---
 
 ### GET /rw-status
 
-Check if a Read-Write API key (`MAILCOW_API_KEY_RW`) is configured. This is a unified endpoint used by all features that require write access (Fail2Ban settings, Quarantine management, etc.).
+Check whether a read-write mailcow API key (`MAILCOW_API_KEY_RW`, from ENV or **Settings**) is configured. Every feature that writes to mailcow (Fail2ban, quarantine actions and others) depends on it.
 
 **Response:**
 ```json
@@ -217,13 +228,9 @@ Check if a Read-Write API key (`MAILCOW_API_KEY_RW`) is configured. This is a un
 }
 ```
 
-**Response Fields:**
-- `rw_configured`: Boolean - `true` if `MAILCOW_API_KEY_RW` is set, `false` otherwise
+- `rw_configured`: Boolean. `true` if a read-write key is set, `false` otherwise. The key is not tested; use [`POST /api/settings/mailcow/rw-key/validate`](#post-apisettingsmailcowrw-keyvalidate) for that.
 
-**Notes:**
-- Fetched once by the frontend at startup and cached in a global variable
-- Used to conditionally show/hide edit controls, action buttons, and write-operation UI
-- Does not validate the key - only checks if it is configured
+The web interface reads this once at startup to show or hide write controls.
 
 ---
 
@@ -245,237 +252,172 @@ Get authentication provider information for frontend.
 ```
 
 **Response Fields:**
+
 - `oauth2_enabled`: Boolean - Whether OAuth2 is enabled
+
 - `basic_auth_enabled`: Boolean - Whether Basic Auth is enabled
+
 - `provider_name`: String - OAuth2 provider name (null if OAuth2 disabled)
 
 ---
 
 ### GET /api/auth/login
 
-Initiate OAuth2 login flow. Redirects user to OAuth2 provider.
+**Query Parameters:**
+
+| Parameter | Type | Default | Constraints and purpose |
+| --- | --- | --- | --- |
+| `next` | string or null | Unset | Local page to open after sign-in. Same rules as `next` on [`GET /login`](#get-login); anything else becomes `/`. |
+
+Start the OAuth2 sign-in. The endpoint redirects the browser to the provider.
 
 **Authentication:** Not required (public endpoint)
 
-**Response:** HTTP 302 Redirect to OAuth2 provider authorization URL
+**Response:** HTTP 307 redirect to the provider's authorization URL. The response also sets a short-lived `oauth_state_<state>` cookie (HttpOnly, 10 minutes) that ties the callback to this browser.
 
 **Error Responses:**
+
 - `400 Bad Request`: OAuth2 is not enabled
-- `500 Internal Server Error`: OAuth2 configuration error
+
+- `500 Internal Server Error`: OAuth2 is not configured correctly (missing client settings, or discovery failed)
 
 **Notes:**
-- Generates CSRF state token for security
+
+- The signed `state` value protects against CSRF and expires after 10 minutes
+
 - Sends a PKCE code challenge (RFC 7636, `code_challenge_method=S256`); the callback sends the matching `code_verifier` with the token request
-- Only works when `OAUTH2_ENABLED=true`
-- User will be redirected back to `/api/auth/callback` after authentication
+
+- The provider sends the user back to `/api/auth/callback`
 
 ---
 
 ### GET /api/auth/callback
 
-Handle OAuth2 callback from provider. This endpoint processes the authorization code and creates a session.
+**Query Parameters:**
+
+| Parameter | Type | Default | Constraints and purpose |
+| --- | --- | --- | --- |
+| `code` | string | Unset | Authorization code from the provider |
+| `state` | string | Unset | Signed state from `GET /api/auth/login` |
+| `error` | string | Unset | Set by the provider when it declined the sign-in |
+
+The provider sends the browser here after sign-in. The endpoint exchanges the code for tokens, reads the user information and creates a server-side session that expires after `SESSION_EXPIRY_HOURS`.
 
 **Authentication:** Not required (public endpoint)
 
-**Query Parameters:**
+**Response:** HTTP 302 redirect to the local `next` page chosen at login, or `/`, with the HttpOnly session cookie set.
 
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `code` | string | Authorization code from provider |
-| `state` | string | CSRF state token (must match login request) |
-| `error` | string | Error code from provider (if authentication failed) |
+**Errors:** OAuth2 disabled returns 400. Every other failure redirects to `/login?error=<code>`:
 
-**Response:** HTTP 302 Redirect to `/` (main application) with session cookie set
-
-**Error Handling:**
-- Invalid or missing state token → Redirects to `/login?error=invalid_state`
-- Missing authorization code → Redirects to `/login?error=missing_code`
-- Provider error → Redirects to `/login?error=oauth2_error`
-- Server error → Redirects to `/login?error=server_error`
-
-**Notes:**
-- Creates server-side session with user information
-- Sets HTTP-only session cookie
-- Session expiration controlled by `SESSION_EXPIRY_HOURS`
+| Code | Meaning |
+| --- | --- |
+| `invalid_state` | The state is missing, invalid, expired, already used, or does not match this browser's cookie. Checked first, so a provider error with a bad state also gives this code. |
+| `oauth2_error` | The provider declined (`error` was set), or the token or user information request failed |
+| `missing_code` | No `code` in the callback |
+| `no_token` | The token response had no access token |
+| `session_capacity` | The session store is full (see `SESSION_MAX_ENTRIES` above) |
+| `server_error` | Any other error |
 
 ---
 
 ### POST /api/auth/logout
 
-Logout and clear session.
+Sign out: deletes the server-side session (OAuth2 or Basic Auth) and clears the session cookie.
 
-**Authentication:** Not required (but session cookie must be present)
+**Authentication:** Required while authentication is enabled (a valid session or Basic Auth credentials).
 
-**Response:** HTTP 302 Redirect to `/login` with session cookie cleared
+**Response:** HTTP 302 redirect to `/login` with the session cookie cleared.
 
-**Notes:**
-- Deletes server-side session
-- Clears session cookie
-- Works for both OAuth2 and Basic Auth sessions
-- POST only, so another site cannot log you out with a link or an image. `GET /api/auth/logout` returns `405 Method Not Allowed`. A cross-site POST is rejected with 403 by the same-origin check
+The endpoint takes POST only, so another site cannot sign you out with a link or an image. `GET /api/auth/logout` returns `405 Method Not Allowed` with `Allow: POST`. A cross-site POST gets 403 from the [same-origin check](#403-forbidden).
 
 ---
 
 ### GET /api/auth/status
 
-Check current authentication status and get user information.
+Read the current session or validated Basic Auth identity. This route is protected when authentication is enabled, so a request without valid credentials receives 401 rather than a public signed-out status.
 
-**Authentication:** Not required (returns status based on current session/credentials)
+The response has `authenticated`, `auth_type` and `user`. Browser sessions from either method return their stored user object. A Basic Auth session includes `username` and `auth_method: "basic"`; direct Basic Auth headers return `user: null`. With authentication disabled and no session, the response is:
 
-**Response (OAuth2 Session):**
-```json
-{
-  "authenticated": true,
-  "auth_type": "oauth2",
-  "user": {
-    "email": "user@example.com",
-    "name": "John Doe",
-    "sub": "user-id-123"
-  }
-}
-```
-
-**Response (Basic Auth):**
-```json
-{
-  "authenticated": true,
-  "auth_type": "basic",
-  "user": null
-}
-```
-
-**Response (Not Authenticated):**
-```json
-{
-  "authenticated": false,
-  "auth_type": null,
-  "user": null
-}
-```
-
-**Response Fields:**
-- `authenticated`: Boolean - Whether user is authenticated
-- `auth_type`: String - Authentication method: `"oauth2"`, `"basic"`, or `null`
-- `user`: Object - User information (OAuth2 only, null for Basic Auth)
-
-**Notes:**
-- Checks for OAuth2 session cookie first
-- Falls back to Basic Auth header if OAuth2 not found
-- User object structure depends on OAuth2 provider (varies by provider)
+`{ "authenticated": false, "auth_type": null, "user": null }`
 
 ---
 
 ### GET /api/auth/verify
 
-Verify Basic Auth credentials. Used by the login form to validate username/password before redirecting to the main app. This endpoint is **not** in the public paths: the middleware validates the `Authorization: Basic` header and returns 401 if credentials are wrong.
+Return `{ "verified": true }` after the authentication middleware accepts the request. With authentication enabled, use a valid session or Basic Auth credentials. The current login form creates a session through `POST /api/auth/session` instead of using this endpoint.
 
-**Authentication:** Required (HTTP Basic Auth). Invalid or missing credentials return 401.
+---
 
-**Response (Valid credentials):** `200 OK`
-```json
-{
-  "verified": true
-}
-```
+### POST /api/auth/session
 
-**Error Responses:**
-- `401 Unauthorized`: Invalid or missing Basic Auth credentials (e.g. wrong username or password)
+Exchange valid Basic Auth credentials in the Authorization header for an HttpOnly `session_id` cookie. No JSON body is required. The response is `{ "authenticated": true, "auth_type": "basic" }`.
 
-**Notes:**
-- Only relevant when Basic Auth is enabled
-- Login page calls this endpoint to test credentials; on 401 it shows "Invalid username or password" and does not redirect
+With authentication off, the endpoint returns 400; with only OAuth2 enabled, it returns 401. Invalid credentials return 401. A client locked out after failed attempts gets 429 (see [Basic Authentication](#basic-authentication)). A full session store returns 503 with `Retry-After: 60`.
 
 ---
 
 ## Job Status Tracking
 
-### Overview
+### Job state
 
-The application includes a real-time job status tracking system that monitors all background jobs. Each job reports its execution status, timestamp, and any errors that occurred.
+`GET /api/settings/info` includes job state, last-run timestamps and errors. State is process-local and resets at app restart. Disabled features and missing prerequisites are returned with the job metadata.
 
 ### Job Status Data Structure
 
-```python
-job_status = {
-    'fetch_logs': {'last_run': datetime, 'status': str, 'error': str|None},
-    'complete_correlations': {'last_run': datetime, 'status': str, 'error': str|None},
-    'update_final_status': {'last_run': datetime, 'status': str, 'error': str|None},
-    'expire_correlations': {'last_run': datetime, 'status': str, 'error': str|None},
-    'cleanup_logs': {'last_run': datetime, 'status': str, 'error': str|None},
-    'check_app_version': {'last_run': datetime, 'status': str, 'error': str|None},
-    'dns_check': {'last_run': datetime, 'status': str, 'error': str|None},
-    'update_geoip': {'last_run': datetime, 'status': str, 'error': str|None},
-    'cleanup_deferred_queue': {'last_run': datetime, 'status': str, 'error': str|None}
-}
-```
+The scheduler keeps one entry per job ID, each starting as `{"last_run": null, "status": "idle", "error": null}`. The IDs are `fetch_logs`, `complete_correlations`, `update_final_status`, `expire_correlations`, `correlate_dovecot`, `cleanup_logs`, `cleanup_dmarc_reports`, `check_app_version`, `dns_check`, `update_geoip`, `dmarc_imap_sync`, `mailbox_stats`, `alias_stats`, `blacklist_check`, `send_weekly_summary`, `sync_transports`, `fetch_raw_logs`, `cleanup_raw_logs`, `detect_suppressions`, `sync_suppressions`, `expire_suppressions`, `process_quarantine_rules`, `cleanup_deferred_queue`, `anomaly_detection`, `smtp_abuse`, `protection_rules`, `eas_devices` and `cleanup_eas_devices`. `sync_local_domains` is added on its first run. The raw log jobs keep their status in the raw log worker, which is what `GET /api/settings/info` reads for `fetch_raw_logs` and `cleanup_raw_logs`.
 
 ### Status Values
 
-| Status | Description | Badge Color |
-|--------|-------------|-------------|
-| `running` | Job is currently executing | Blue (bg-blue-500) |
-| `success` | Job completed successfully | Green (bg-green-600) |
-| `failed` | Job encountered an error | Red (bg-red-600) |
-| `idle` | Job hasn't run yet | Gray (bg-gray-500) |
-| `scheduled` | Job is scheduled but runs infrequently | Purple (bg-purple-600) |
+| Status | Meaning |
+| --- | --- |
+| `idle` | The job has not run yet |
+| `running` | The job is running |
+| `success` | The last run finished |
+| `failed` | The last run hit an error |
+| `disabled` | The job is off because its feature or a prerequisite is off |
+| `skipped` | The job ran but had nothing to do because its setting is off (weekly summary) |
+| `unknown` | No status is recorded, or the raw log worker status could not be read |
 
 ### Accessing Job Status
 
-Job status is accessible through:
-1. **Backend Function**: `get_job_status()` in `scheduler.py`
-2. **API Endpoint**: `GET /api/settings/info` (includes `background_jobs` field)
-3. **Frontend Display**: Settings page > Background Jobs section
+Read job status through `GET /api/settings/info` (the `background_jobs` field). The web interface shows it in **Status** > **Jobs**.
 
 ### Background Jobs List
 
+Times of day follow the container's clock.
+
 | Job Name | Interval | Description |
 |----------|----------|-------------|
-| **Fetch Logs** | 60 seconds | Imports Postfix, Rspamd, and Netfilter logs from mailcow API |
-| **Complete Correlations** | 120 seconds (2 min) | Links Postfix logs to message correlations |
-| **Update Final Status** | 120 seconds (2 min) | Updates message delivery status for late-arriving logs |
-| **Expire Correlations** | 60 seconds (1 min) | Marks old incomplete correlations as expired (after 10 minutes) |
-| **Cleanup Logs** | Daily at 2 AM | Removes logs older than retention period |
-| **Check App Version** | 6 hours | Checks GitHub for application updates |
-| **DNS Check** | 6 hours | Validates DNS records (SPF, DKIM, DMARC) for all active domains |
-| **Update GeoIP** | Weekly (Sunday 3 AM) | Updates MaxMind GeoIP databases for DMARC source IP enrichment |
-| **Detect Suppressions** | 5 minutes | Scans Postfix logs for hard bounces to auto-suppress recipients |
-| **Cleanup Deferred Queue** | 5 minutes | Deletes deferred emails stuck longer than threshold and suppresses recipients |
-| **Sync Suppressions** | 10 minutes | Syncs active suppressions to Rspamd recipient denylist |
-| **Expire Suppressions** | 1 hour | Deactivates expired suppression entries |
-| **Process Quarantine Rules** | 5 minutes | Processes quarantine auto-rules (release/delete matching emails) |
-
-### Implementation Details
-
-**Update Function:**
-```python
-def update_job_status(job_name: str, status: str, error: str = None):
-    """Update job execution status"""
-    job_status[job_name] = {
-        'last_run': datetime.now(timezone.utc),
-        'status': status,
-        'error': error
-    }
-```
-
-**Usage in Jobs:**
-```python
-async def some_background_job():
-    try:
-        update_job_status('job_name', 'running')
-        # ... job logic ...
-        update_job_status('job_name', 'success')
-    except Exception as e:
-        update_job_status('job_name', 'failed', str(e))
-```
-
-**UI Display:**
-- Compact card layout with status badges
-- Icon indicators (⏱ ⏳ 📅 🗂 📋)
-- Last run timestamp always visible
-- Error messages displayed in red alert boxes
-- Pending items count for correlation jobs
-
----
+| **Fetch Logs** | Every `FETCH_INTERVAL` seconds (default 60) | Imports Postfix and Rspamd logs from the mailcow API, plus Netfilter logs while the Security feature is on. Runs the protection rules after each fetch. |
+| **Run Correlation** | Every 30 seconds | Correlates new Postfix and Rspamd logs into messages. Has no status entry. |
+| **Complete Correlations** | Every `CORRELATION_CHECK_INTERVAL` seconds (default 120) | Links Postfix logs to message correlations |
+| **Update Final Status** | Every `CORRELATION_CHECK_INTERVAL` seconds (default 120) | Updates message delivery status for late-arriving logs |
+| **Expire Correlations** | Every 60 seconds | Marks incomplete correlations as expired after `MAX_CORRELATION_AGE_MINUTES` (default 10) |
+| **Correlate Dovecot** | Every 60 seconds | Adds the Dovecot delivery outcome to messages. Runs only while the `dovecot` raw log service is collected. |
+| **Cleanup Logs** | Daily at 2 AM | Removes logs older than the retention period |
+| **Cleanup DMARC Reports** | Daily at 2:15 AM | Removes DMARC and TLS reports older than `DMARC_RETENTION_DAYS`. DMARC feature only. |
+| **Check App Version** | Every 6 hours, first run at startup | Checks GitHub for application updates |
+| **DNS Check** | Every 6 hours, and 60 seconds after startup | Checks SPF, DKIM, DMARC, DNSSEC, TLSA, MTA-STS and TLS-RPT for all active domains. Domains feature only. |
+| **Sync Local Domains** | Every 6 hours, first run at startup | Refreshes the active domain list from mailcow |
+| **Update GeoIP** | Weekly (Sunday 3 AM), and 60 seconds after startup | Downloads the MaxMind GeoLite2 City and ASN databases when a file is missing or 7 or more days old. Runs only when the MaxMind Account ID and License Key are set. |
+| **DMARC IMAP Sync** | Every `DMARC_IMAP_INTERVAL` seconds (default 3600), and 30 seconds after startup when `DMARC_IMAP_RUN_ON_STARTUP` is on | Imports DMARC and TLS reports from IMAP. Needs the DMARC feature and IMAP import on. |
+| **Mailbox Stats** | Every 5 minutes, and 45 seconds after startup | Fetches mailbox statistics. Runs while Mailbox Stats or Rate Limits is on. |
+| **Alias Stats** | Every 5 minutes, and 50 seconds after startup | Syncs alias data. Mailbox Stats feature only. |
+| **ActiveSync Devices** | Every minute | Records ActiveSync devices from the SOGo log. Does nothing while Devices is off. |
+| **Cleanup ActiveSync Devices** | Daily at 3:30 AM | Removes devices not seen within `EAS_DEVICES_RETENTION_DAYS` (default 90; 0 keeps them) |
+| **Blacklist Check** | Daily at 5 AM, and 15 seconds after startup | Checks monitored hosts against DNS blacklists. Blacklist feature only. |
+| **Sync Transports** | Every 6 hours, and 30 seconds after startup | Syncs transports and relayhosts from mailcow for blacklist monitoring. Blacklist feature only. |
+| **Weekly Summary** | Monday at 9 AM | Sends the weekly summary email when it is turned on |
+| **Anomaly Detection** | Every `ANOMALY_CHECK_INTERVAL` minutes (default 15) | Detects outbound volume spikes and sign-in failure bursts. Runs while anomaly detection is on. |
+| **SMTP Abuse** | Every minute | Disables SMTP for mailboxes over the sending threshold. Needs SMTP abuse protection on and a read-write API key. |
+| **Protection Rules** | After each log fetch | Evaluates the protection rules on new Netfilter lines and writes bans when a read-write API key is set. Security feature only. |
+| **Fetch Raw Logs** | Every `RAW_LOGS_FETCH_INTERVAL` seconds (default 30) | Collects raw service logs for the Logs page and the pages that read them |
+| **Cleanup Raw Logs** | Daily at 3 AM | Removes raw logs older than `RAW_LOGS_RETENTION_DAYS` (default 2) |
+| **Detect Suppressions** | Every 5 minutes | Suppresses recipients of bounced messages found in Postfix logs, and of deferred messages too while deferred queue cleanup is off. Runs while the Spam Filter feature, suppressions and automatic detection are on. |
+| **Cleanup Deferred Queue** | Every 5 minutes | Deletes deferred messages stuck longer than `QUEUE_CLEANUP_THRESHOLD_MINUTES` (default 60) and suppresses their recipients. Needs suppressions, queue cleanup and a read-write API key. |
+| **Sync Suppressions** | Every 10 minutes | Syncs active suppressions to the Rspamd recipient denylist. Needs the Rspamd password and Rspamd sync turned on. |
+| **Expire Suppressions** | Every hour | Deactivates expired suppression entries |
+| **Process Quarantine Rules** | Every `QUARANTINE_RULES_INTERVAL` minutes (default 5) | Applies the quarantine auto-rules (release or delete matching messages). Needs the Quarantine feature and a read-write API key. |
 
 ## Domains
 
@@ -510,15 +452,15 @@ Get list of all domains with statistics and cached DNS validation results.
       "dns_checks": {
         "spf": {
           "status": "success",
-          "message": "SPF configured correctly with strict -all policy. Server IP authorized via ip4:1.2.3.4",
-          "record": "v=spf1 mx include:_spf.google.com -all",
+          "message": "SPF configured correctly with strict -all policy. Server IP authorized via ip4:192.0.2.10",
+          "record": "v=spf1 mx include:_spf.example.net -all",
           "has_strict_all": true,
           "includes_mx": true,
-          "includes": ["_spf.google.com"],
+          "includes": ["_spf.example.net"],
           "warnings": [],
           "dns_lookups": 3,
           "checked_ips": [
-            {"ip": "1.2.3.4", "source": "auto-detected", "authorized": true}
+            {"ip": "192.0.2.10", "source": "auto-detected", "authorized": true}
           ]
         },
         "dkim": {
@@ -551,7 +493,7 @@ Get list of all domains with statistics and cached DNS validation results.
       },
       "alias_domains": [
         {
-          "domain_name": "alias-of-example.com",
+          "domain_name": "alias.example.com",
           "dns_checks": {
             "spf": {"status": "success", "message": "..."},
             "dkim": {"status": "success", "message": "..."},
@@ -566,35 +508,61 @@ Get list of all domains with statistics and cached DNS validation results.
 ```
 
 **Response Fields:**
+
 - `total`: Total number of domains
+
 - `active`: Number of active domains
+
 - `last_dns_check`: Timestamp of last global DNS check (only updated by scheduled or manual full checks)
+
 - `domains`: Array of domain objects
 
 **Domain Object Fields:**
+
 - `domain_name`: Domain name
+
 - `active`: Boolean indicating if domain is active
+
 - `mboxes_in_domain`: Number of mailboxes
+
 - `mboxes_left`: Available mailbox slots
+
 - `max_num_mboxes_for_domain`: Maximum mailboxes allowed
+
 - `aliases_in_domain`: Number of aliases
+
 - `aliases_left`: Available alias slots
+
 - `max_num_aliases_for_domain`: Maximum aliases allowed
+
 - `created`: Domain creation timestamp (UTC)
+
 - `bytes_total`: Total storage used (bytes)
+
 - `msgs_total`: Total messages
+
 - `quota_used_in_domain`: Storage quota used (string format)
+
 - `max_quota_for_domain`: Maximum storage quota
+
 - `backupmx`: Boolean - true if domain is backup MX
+
 - `relay_all_recipients`: Boolean - true if relaying all recipients
+
 - `relay_unknown_only`: Boolean - true if relaying only unknown recipients
+
 - `dns_checks`: DNS validation results (cached from database)
+
 - `alias_domains`: Array of the domain's mailcow alias domains, each with its own `domain_name` and cached `dns_checks`. Empty array when the domain has no alias domains
 
 **DNS Check Status Values:**
+
 - `success`: Check passed with no issues
+
 - `warning`: Check passed but with recommendations for improvement
+
 - `error`: Check failed or record not found
+
 - `unknown`: Check not yet performed
 
 **SPF Status Indicators:**
@@ -603,47 +571,69 @@ Get list of all domains with statistics and cached DNS validation results.
 - **Multiple Records**: Error (only one SPF record allowed per domain)
 - **Invalid Syntax**: Error (must start with `v=spf1 ` with space)
 - **Invalid Mechanisms**: Error (only valid mechanisms allowed)
+
 - `-all`: Strict policy (status: success)
+
 - `~all`: Soft fail (status: success, informational)
-- `?all`: Neutral (status: warning) - Provides minimal protection
-- `+all`: Pass all (status: error) - Provides no protection
+
+- `?all`: Neutral (status: warning); gives minimal protection
+
+- `+all`: Pass all (status: error); gives no protection
+
 - Missing `all`: No policy defined (status: error)
 
 **New SPF Fields:**
+
 - `dns_lookups`: Integer count of DNS lookups (0-999)
+
 - `warnings`: Array of warning messages
+
 - `checked_ips`: Array of every source IP validated against the record. Each entry has:
   - `ip`: The IP address that was checked
-  - `source`: Where the IP came from - one of `auto-detected` (WAN IP), `transport`, `relayhost`, `configured` (manual entry), `dmarc-history`
+  - `source`: Where the IP came from: one of `auto-detected` (WAN IP), `transport`, `relayhost`, `configured` (manual entry), `dmarc-history`
   - `authorized`: Boolean per-IP verdict
   - The set of validated sources is controlled by the `DOMAIN_SPF_SOURCE_*` settings; the overall check fails if any IP is not authorized. Cached results written before this field existed lack the key
 
 **DKIM Validation:**
+
 - Fetches expected DKIM record from mailcow API
+
 - Queries DNS for actual DKIM record
+
 - Compares expected vs actual records
+
 - `match`: Boolean indicating if records match
 - **Parameter Validation**: Checks for security issues
   - `t=y` (Testing mode): Critical error
   - `t=s` (Strict subdomain): Informational only
   - `h=sha1` (Weak hash): Warning
-  - `p=` (Empty key): Error - key revoked
+  - `p=` (Empty key): Error (key revoked)
   - Unknown key types: Warning
 
 **New DKIM Fields:**
-- `warnings`: Array of security warnings (with icons: ❌ ⚠️)
+
+- `warnings`: Array of security warnings
+
 - `info`: Array of informational messages (plain text)
+
 - `parameters`: Dictionary of parsed DKIM tags (v, k, t, h, p, etc.)
 
 **DMARC Policy Types:**
+
 - `reject`: Strict policy (status: success)
-- `quarantine`: Moderate policy (status: warning) - Consider upgrading to reject
-- `none`: Monitor only (status: warning) - Provides no protection
+
+- `quarantine`: Moderate policy (status: warning); consider moving to reject
+
+- `none`: Requests monitoring without DMARC policy enforcement (status: warning)
 
 **Notes:**
+
 - DNS checks are cached in database for performance
+
 - `last_dns_check` only updates from global/scheduled checks, not individual domain checks
+
 - `checked_at` (per domain) updates whenever that specific domain is checked
+
 - All timestamps include UTC timezone indicator ('Z' suffix)
 
 ---
@@ -652,10 +642,9 @@ Get list of all domains with statistics and cached DNS validation results.
 
 Manually trigger DNS validation for all active domains.
 
-**Description:** 
-Performs DNS checks (SPF, DKIM, DMARC) for all active domains and updates the global `last_dns_check` timestamp. Results are cached in database.
+**Description:** Performs DNS checks (SPF, DKIM, DMARC) for all active domains and updates the global `last_dns_check` timestamp. Results are cached in database.
 
-**Authentication:** Required
+**Authentication:** Required when sign-in is enabled.
 
 **Response:**
 ```json
@@ -668,9 +657,13 @@ Performs DNS checks (SPF, DKIM, DMARC) for all active domains and updates the gl
 ```
 
 **Response Fields:**
+
 - `status`: `success` (all domains checked) or `partial` (some domains failed)
+
 - `message`: Summary message
+
 - `domains_checked`: Number of domains successfully checked
+
 - `errors`: Array of error messages for failed domains (empty if all successful)
 
 **Error Response (partial success):**
@@ -686,11 +679,16 @@ Performs DNS checks (SPF, DKIM, DMARC) for all active domains and updates the gl
 ```
 
 **Notes:**
+
 - Checks active domains and their mailcow alias domains
+
 - Updates `is_full_check=true` flag in database
+
 - Updates global `last_dns_check` timestamp
+
 - Frontend shows progress with toast notifications
-- Returns immediately with status (check runs asynchronously)
+
+- Waits for the domain checks to finish, then returns their counts and errors.
 
 ---
 
@@ -704,7 +702,7 @@ Manually trigger DNS validation for a specific domain.
 |-----------|------|-------------|
 | `domain` | string | Domain name to check |
 
-**Authentication:** Required
+**Authentication:** Required when sign-in is enabled.
 
 **Example Request:**
 ```
@@ -720,15 +718,15 @@ POST /api/domains/example.com/check-dns
     "domain": "example.com",
     "spf": {
       "status": "success",
-      "message": "SPF configured correctly with strict -all policy. Server IP authorized via ip4:1.2.3.4",
-      "record": "v=spf1 mx include:_spf.google.com -all",
+      "message": "SPF configured correctly with strict -all policy. Server IP authorized via ip4:192.0.2.10",
+      "record": "v=spf1 mx include:_spf.example.net -all",
       "has_strict_all": true,
       "includes_mx": true,
-      "includes": ["_spf.google.com"],
+      "includes": ["_spf.example.net"],
       "warnings": [],
       "dns_lookups": 3,
       "checked_ips": [
-        {"ip": "1.2.3.4", "source": "auto-detected", "authorized": true}
+        {"ip": "192.0.2.10", "source": "auto-detected", "authorized": true}
       ]
     },
     "dkim": {
@@ -761,275 +759,23 @@ POST /api/domains/example.com/check-dns
 ```
 
 **Notes:**
+
 - Only checks the specified domain
+
 - Updates `is_full_check=false` flag in database
+
 - Does NOT update global `last_dns_check` timestamp
-- Frontend updates only that domain's section (no page refresh)
-- Useful for verifying DNS changes immediately
+
 
 ---
 
-### DNS Check Technical Details
+DNS record checks are described in [Domains](HelpDocs/Domains.md).
 
-**Async DNS Validation:**
-- All DNS queries use async resolvers with 5-second timeout
-- Queries run in parallel for performance
-- Comprehensive error handling for timeouts, NXDOMAIN, NoAnswer
+### GET /api/domains/{domain}/dns-check
 
-**SPF Validation:**
-- Queries TXT records for SPF (`v=spf1`)
-- Validates syntax and structure:
-  - Checks for multiple SPF records (RFC violation)
-  - Validates `v=spf1` with space after
-  - Checks for valid mechanisms only (ip4, ip6, a, mx, include, exists, all)
-  - Validates presence of `all` mechanism
-- Detects policy: `-all`, `~all`, `?all`, `+all`, or missing
-- Checks for `mx` mechanism
-- Extracts `include:` directives
-- **DNS Lookup Counter** (RFC 7208 compliance):
-  - Recursively counts DNS lookups through includes
-  - Counts `a`, `mx`, `exists:`, `redirect=`, and `include:` mechanisms
-  - Maximum 10 lookups enforced (returns error if exceeded)
-  - Returns `dns_lookups` field with count
-- **Source IP Authorization**:
-  - Validates a configurable set of source IPs (see `checked_ips`): the auto-detected WAN IP, public IPs of active mailcow transports and relayhosts, manually configured hosts, and optionally IPs seen with a passing SPF result in recent DMARC reports (`DOMAIN_SPF_SOURCE_*` settings)
-  - Verifies each IP is authorized via:
-    - Direct `ip4:` match (including CIDR ranges)
-    - `a` record resolution
-    - `mx` record resolution
-    - Recursive `include:` checking (up to 10 levels)
-  - Returns authorization method in message (e.g., "Server IP authorized via ip4:X.X.X.X")
-  - Returns error if any validated IP is not found in the SPF record
-- Provides policy-specific warnings and recommendations
+Run DNS checks for one valid domain and return the result object directly. This route calls the DNS checker on every request; it does not use the stored-check cache or save a new check. Invalid domain names return 400.
 
-**DKIM Validation:**
-- Fetches expected DKIM value from mailcow API (`/api/v1/get/dkim/{domain}`)
-- Queries DNS at `{selector}._domainkey.{domain}`
-- Compares expected vs actual records tag by tag, in any order and spacing
-  - **Mismatch** (error): the key (`p=`), key type (`k=`, default `rsa`) or version differs, or `h=` does not allow `sha256`
-  - **Other tag differences** (warning): for example `t=s` missing or `h=sha256` added by the DNS provider; signatures still verify
-- **Parameter Validation**:
-  - Parses all DKIM tags (v, k, t, h, p, etc.)
-  - **Testing Mode Detection** (`t=y`): Returns critical error
-    - Warning: "Emails will pass validation even with invalid signatures"
-    - Never use in production
-  - **Strict Subdomain Mode** (`t=s`): Returns informational message
-    - Only main domain can send, subdomains will fail DKIM
-    - Does NOT affect validation status (remains "success")
-  - **Revoked Key Detection** (`p=` empty): Returns error
-    - Indicates DKIM has been intentionally disabled
-  - **Weak Hash Algorithm** (`h=sha1`): Returns warning
-    - Recommends upgrade to SHA256
-  - **Key Type Validation** (`k=`): Validates rsa or ed25519
-- Returns three arrays:
-  - `warnings`: Security issues (errors and warnings with icons)
-  - `info`: Informational messages (plain text, no status impact)
-  - `parameters`: Parsed DKIM parameter dictionary
-- Reports mismatch details
-
-**DMARC Validation:**
-- Queries TXT records at `_dmarc.{domain}`
-- Parses policy (`p=` tag)
-- Checks for subdomain policy (`sp=` tag)
-- Validates percentage (`pct=` tag)
-- Provides policy upgrade recommendations
-
-**Background Checks:**
-- Automated DNS checks run every 6 hours via scheduler
-- Only checks active domains
-- All automated checks marked as `is_full_check=true`
-- Results cached in `domain_dns_checks` table
-
-**Caching:**
-- DNS results stored in PostgreSQL with JSONB columns
-- Indexed on `domain_name` and `checked_at` for performance
-- Upsert pattern (update if exists, insert if new)
-- `is_full_check` flag distinguishes check types
-
----
-
-### DNS Validation Examples
-
-#### SPF Examples
-
-**Example 1: Too Many DNS Lookups**
-```json
-{
-  "status": "error",
-  "message": "SPF has too many DNS lookups (11). Maximum is 10",
-  "record": "v=spf1 include:_spf.exmail.email -all",
-  "has_strict_all": true,
-  "includes_mx": false,
-  "includes": ["_spf.exmail.email"],
-  "warnings": [
-    "SPF record exceeds the 10 DNS lookup limit with 11 lookups",
-    "This will cause SPF validation to fail"
-  ],
-  "dns_lookups": 11
-}
-```
-
-**Example 2: Server IP Not Authorized**
-```json
-{
-  "status": "error",
-  "message": "Server IP 1.2.3.4 is NOT authorized in SPF record",
-  "record": "v=spf1 ip4:1.2.3.4 -all",
-  "has_strict_all": true,
-  "includes_mx": false,
-  "includes": [],
-  "warnings": [
-    "Mail server IP not found in SPF record"
-  ],
-  "dns_lookups": 0
-}
-```
-
-**Example 3: Multiple SPF Records**
-```json
-{
-  "status": "error",
-  "message": "Multiple SPF records found (2). Only one is allowed",
-  "record": "v=spf1 mx -all; v=spf1 ip4:1.2.3.4 -all",
-  "has_strict_all": false,
-  "includes_mx": false,
-  "includes": [],
-  "warnings": [
-    "Multiple SPF records invalidate ALL records"
-  ]
-}
-```
-
-**Example 4: Success with Server IP Authorization**
-```json
-{
-  "status": "success",
-  "message": "SPF configured correctly with strict -all policy. Server IP authorized via include:_spf.google.com (ip4:1.2.3.4)",
-  "record": "v=spf1 include:_spf.google.com -all",
-  "has_strict_all": true,
-  "includes_mx": false,
-  "includes": ["_spf.google.com"],
-  "warnings": [],
-  "dns_lookups": 3
-}
-```
-
-#### DKIM Examples
-
-**Example 1: Testing Mode (Critical)**
-```json
-{
-  "status": "error",
-  "message": "DKIM is in TESTING mode (t=y) - Emails will pass validation even with invalid signatures. Remove t=y for production!",
-  "selector": "dkim",
-  "dkim_domain": "dkim._domainkey.example.com",
-  "expected_record": "v=DKIM1;k=rsa;t=y;p=MIIBIjANBg...",
-  "actual_record": "v=DKIM1;k=rsa;t=y;p=MIIBIjANBg...",
-  "match": true,
-  "warnings": [],
-  "info": [],
-  "parameters": {
-    "v": "DKIM1",
-    "k": "rsa",
-    "t": "y",
-    "p": "MIIBIjANBg..."
-  }
-}
-```
-
-**Example 2: Strict Subdomain Mode (Informational)**
-```json
-{
-  "status": "success",
-  "message": "DKIM configured correctly",
-  "selector": "dkim",
-  "dkim_domain": "dkim._domainkey.example.com",
-  "expected_record": "v=DKIM1;k=rsa;t=s;p=MIIBIjANBg...",
-  "actual_record": "v=DKIM1;k=rsa;t=s;p=MIIBIjANBg...",
-  "match": true,
-  "warnings": [],
-  "info": [
-    "DKIM uses strict subdomain mode (t=s)"
-  ],
-  "parameters": {
-    "v": "DKIM1",
-    "k": "rsa",
-    "t": "s",
-    "p": "MIIBIjANBg..."
-  }
-}
-```
-
-**Example 3: SHA1 Warning**
-```json
-{
-  "status": "warning",
-  "message": "DKIM configured but has warnings",
-  "selector": "dkim",
-  "dkim_domain": "dkim._domainkey.example.com",
-  "expected_record": "v=DKIM1;k=rsa;h=sha1;p=MIIBIjANBg...",
-  "actual_record": "v=DKIM1;k=rsa;h=sha1;p=MIIBIjANBg...",
-  "match": true,
-  "warnings": [
-    "⚠️ DKIM uses SHA1 hash algorithm (h=sha1)"
-  ],
-  "info": [],
-  "parameters": {
-    "v": "DKIM1",
-    "k": "rsa",
-    "h": "sha1",
-    "p": "MIIBIjANBg..."
-  }
-}
-```
-
-**Example 4: Revoked Key**
-```json
-{
-  "status": "error",
-  "message": "DKIM key is revoked (p= is empty)",
-  "selector": "dkim",
-  "dkim_domain": "dkim._domainkey.example.com",
-  "expected_record": "v=DKIM1;k=rsa;p=",
-  "actual_record": "v=DKIM1;k=rsa;p=",
-  "match": true,
-  "warnings": [
-    "❌ DKIM key is revoked (p= is empty)"
-  ],
-  "info": [],
-  "parameters": {
-    "v": "DKIM1",
-    "k": "rsa",
-    "p": ""
-  }
-}
-```
-
-**Example 5: Multiple Issues**
-```json
-{
-  "status": "warning",
-  "message": "DKIM configured but has warnings",
-  "selector": "dkim",
-  "dkim_domain": "dkim._domainkey.example.com",
-  "expected_record": "v=DKIM1;k=rsa;t=s;h=sha1;p=MIIBIjANBg...",
-  "actual_record": "v=DKIM1;k=rsa;t=s;h=sha1;p=MIIBIjANBg...",
-  "match": true,
-  "warnings": [
-    "⚠️ DKIM uses SHA1 hash algorithm (h=sha1)"
-  ],
-  "info": [
-    "DKIM uses strict subdomain mode (t=s)"
-  ],
-  "parameters": {
-    "v": "DKIM1",
-    "k": "rsa",
-    "t": "s",
-    "h": "sha1",
-    "p": "MIIBIjANBg..."
-  }
-}
-```
+The result includes `domain`, `checked_at`, `spf`, `dkim`, `dmarc`, `dnssec`, `tlsa`, `mta_sts`, `tls_rpt`. The POST force-check endpoint also saves the result and wraps it in `data`.
 
 ---
 
@@ -1037,49 +783,41 @@ POST /api/domains/example.com/check-dns
 
 ### GET /api/mailbox-stats/summary
 
-Get summary statistics for all mailboxes.
-
 **Query Parameters:**
 
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `date_range` | string | Date range: `today`, `7days`, `30days`, `90days` (default: `30days`) |
+| Parameter | Type | Default | Constraints and purpose |
+| --- | --- | --- | --- |
+| `date_range` | string | `30days` | `today`, `7days`, `30days`, `90days` or `custom` |
+| `start_date` | string or null | Unset | Start date (`YYYY-MM-DD`); required when `date_range` is `custom` |
+| `end_date` | string or null | Unset | End date (`YYYY-MM-DD`); required when `date_range` is `custom` |
 
-**Response:**
-```json
-{
-  "total_mailboxes": 25,
-  "active_mailboxes": 23,
-  "inactive_mailboxes": 2,
-  "total_sent": 1234,
-  "total_received": 5678,
-  "sent_failed": 45,
-  "failure_rate": 3.6,
-  "date_range": "30days",
-  "start_date": "2026-01-16T00:00:00Z",
-  "end_date": "2026-02-16T00:00:00Z"
-}
-```
+Read server-wide traffic for the selected period. Mailbox search and domain filters on the UI list do not change this endpoint's totals.
+
+The successful response contains `total_sent`, `total_received`, `total_messages`, `sent_failed`, `failure_rate`, `date_range`, `start_date`, `end_date` and `last_update`. It does not return mailbox inventory counts on success.
+
+`sent_failed` counts bounced and rejected outgoing messages. Deferred messages are counted separately, and a later successful delivery leg takes precedence for message counting. Values come from collected correlations, so retention limits the history.
 
 ---
 
 ### GET /api/mailbox-stats/all
 
-Get all mailbox statistics with message counts and aliases (paginated).
-
 **Query Parameters:**
 
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `domain` | string | Filter by domain name. A mailcow alias domain is accepted and resolves to its target domain |
-| `active_only` | bool | Only show active mailboxes (default: `true`) |
-| `hide_zero` | bool | Hide mailboxes with zero activity (default: `false`) |
-| `search` | string | Search mailbox username, name, or alias address |
-| `date_range` | string | Date range: `today`, `7days`, `30days`, `90days` (default: `30days`) |
-| `sort_by` | string | Sort by: `sent_total`, `received_total`, `failure_rate`, `quota_used`, `username` |
-| `sort_order` | string | Sort order: `asc`, `desc` (default: `desc`) |
-| `page` | int | Page number (default: `1`) |
-| `page_size` | int | Items per page, 10-100 (default: `50`) |
+| Parameter | Type | Default | Constraints and purpose |
+| --- | --- | --- | --- |
+| `domain` | string or null | Unset | Only mailboxes of this domain. An alias domain shows the mailboxes of its target domain. |
+| `active_only` | boolean | `true` | Only active mailboxes |
+| `hide_zero` | boolean | `false` | Leave out mailboxes with no activity in the period |
+| `search` | string or null | Unset | Substring match on the address, the name, or any of the mailbox's aliases |
+| `date_range` | string | `30days` | `today`, `7days`, `30days`, `90days` or `custom` |
+| `start_date` | string or null | Unset | Start date (`YYYY-MM-DD`); required when `date_range` is `custom` |
+| `end_date` | string or null | Unset | End date (`YYYY-MM-DD`); required when `date_range` is `custom` |
+| `sort_by` | string | `sent_total` | `sent_total`, `received_total`, `failure_rate`, `username` or `quota_used`; any other value sorts by total messages. Sent and received include aliases. |
+| `sort_order` | string | `desc` | `desc`; any other value sorts ascending |
+| `page` | integer | `1` | Page number, at least 1 |
+| `page_size` | integer | `50` | Items per page, 10 to 100 |
+
+Get all mailbox statistics with message counts and aliases (paginated).
 
 **Example Request:**
 ```
@@ -1129,9 +867,9 @@ GET /api/mailbox-stats/all?date_range=30days&active_only=true&hide_zero=true&sor
         "sent_bounced": 3,
         "sent_deferred": 2,
         "sent_rejected": 0,
-        "sent_failed": 5,
+        "sent_failed": 3,
         "received_total": 320,
-        "failure_rate": 3.3
+        "failure_rate": 2.0
       },
       "aliases": [
         {
@@ -1148,7 +886,7 @@ GET /api/mailbox-stats/all?date_range=30days&active_only=true&hide_zero=true&sor
           "failure_rate": 4.0
         },
         {
-          "alias_address": "user@alias-of-example.com",
+          "alias_address": "user@alias.example.com",
           "active": true,
           "is_catch_all": false,
           "is_domain_alias": true,
@@ -1163,11 +901,11 @@ GET /api/mailbox-stats/all?date_range=30days&active_only=true&hide_zero=true&sor
         }
       ],
       "alias_count": 2,
-      "combined_sent": 200,
-      "combined_received": 420,
-      "combined_total": 620,
-      "combined_failed": 7,
-      "combined_failure_rate": 3.5,
+      "combined_sent": 212,
+      "combined_received": 424,
+      "combined_total": 636,
+      "combined_failed": 5,
+      "combined_failure_rate": 2.4,
       "created": "2025-01-01T00:00:00Z",
       "modified": "2026-01-15T12:00:00Z"
     }
@@ -1189,11 +927,13 @@ GET /api/mailbox-stats/all?date_range=30days&active_only=true&hide_zero=true&sor
 | `rl_value` / `rl_frame` | Rate limiting (e.g., 100/m = 100 per minute) |
 | `attributes` | Access permissions from mailcow |
 | `mailbox_counts` | Message statistics for mailbox only |
-| `aliases` | Array of alias statistics. Addresses on a mailcow alias domain (user@alias.tld for user@target.tld) appear here as rows with `is_domain_alias: true`; they are listed only when they have traffic in the selected range |
+| `aliases` | Array of alias statistics. Addresses on a mailcow alias domain (user@alias.example.com for user@example.com) appear here as rows with `is_domain_alias: true`; they are listed only when they have traffic in the selected range |
 | `combined_*` | Combined totals (mailbox + all aliases, including alias-domain addresses) |
 | `created` / `modified` | Mailbox creation and last update timestamps |
 
 ---
+
+The response also includes `activity_unit` and `activity_buckets`; each mailbox has its corresponding `activity` series and combined delivery/status counts. Rows count a mailbox together with its aliases, while `mailbox_counts` covers its own address. Failed means bounced plus rejected, excluding deferred.
 
 ### GET /api/mailbox-stats/domains
 
@@ -1208,11 +948,11 @@ Get list of domains with mailbox counts for filter dropdown.
       "mailbox_count": 15
     },
     {
-      "domain": "company.org",
+      "domain": "example.org",
       "mailbox_count": 10
     },
     {
-      "domain": "alias-of-example.com",
+      "domain": "alias.example.com",
       "mailbox_count": 15,
       "alias_of": "example.com"
     }
@@ -1221,6 +961,7 @@ Get list of domains with mailbox counts for filter dropdown.
 ```
 
 **Notes:**
+
 - mailcow alias domains are listed too, marked with `alias_of` (their target domain) and showing the target's mailbox count. Selecting one filters to the target domain's mailboxes
 
 ### Caching
@@ -1234,20 +975,14 @@ The Mailbox Statistics API uses in-memory caching to improve performance:
 | **Cached Parameters** | domain, active_only, hide_zero, search, date_range, start_date, end_date, sort_by, sort_order, page, page_size |
 
 **Cache Behavior:**
+
 - First request with specific parameters fetches from database and caches result
+
 - Subsequent requests with identical parameters return cached data
+
 - Cache automatically expires after 5 minutes
+
 - Changing any parameter results in a cache miss (new database query)
-
-**Cache Management:**
-```python
-from app.routers.mailbox_stats import clear_stats_cache
-
-# Clear all stats cache (e.g., after data import)
-clear_stats_cache()
-```
-
----
 
 ## Devices
 
@@ -1255,19 +990,19 @@ ActiveSync devices recorded from SOGo's access log. The `eas_devices` job reads 
 
 ### GET /api/devices
 
-List the recorded devices, filtered, sorted and paged.
-
 **Query Parameters:**
 
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `search` | string | - | Matches user, device ID, device type or IP (case-insensitive substring) |
-| `device_type` | string | - | Exact device type, as listed in `device_types` |
-| `seen` | string | `all` | `all`, `recent` (seen in 24 hours), `new` (first seen in 7 days) or `stale` (not seen for 30 days) |
+| Parameter | Type | Default | Constraints and purpose |
+| --- | --- | --- | --- |
+| `page` | integer | `1` | Page number, at least 1 |
+| `per_page` | integer | `50` | 1 to 200 |
+| `search` | string or null | Unset | Case-insensitive substring of the user, device ID, device type or last IP |
+| `device_type` | string or null | Unset | Exact device type (one of `device_types` in the response) |
+| `seen` | string | `all` | `all`, `recent` (seen in the last 24 hours), `new` (first seen in the last 7 days) or `stale` (not seen for 30 days) |
 | `sort_by` | string | `last_seen` | `username`, `device_type`, `last_ip`, `last_command`, `first_seen` or `last_seen` |
 | `sort_dir` | string | `desc` | `asc` or `desc` |
-| `page` | integer | `1` | Page number |
-| `per_page` | integer | `50` | Rows per page (1-200) |
+
+List the recorded devices, filtered, sorted and paged.
 
 **Response:**
 ```json
@@ -1307,85 +1042,58 @@ List the recorded devices, filtered, sorted and paged.
 ```
 
 **Notes:**
+
 - `summary` counts every device, not only the filtered page
+
 - `last_ip` is `null` when SOGo logged something other than an IP address
+
 - The location fields come from the MaxMind GeoIP databases, looked up when the list is read; they are `null` when `geoip` is `false` or the address is not in the database
-- `client` is the mail app recognised from the device ID and type (`Apple Mail`, `Samsung Email`, `Outlook`, `Windows Mail`, `Gmail`), `null` when not recognised; `model` is a Samsung model code such as `SM-S918B`, else `null`
+
+- `client` is the mail app recognized from the device ID and type (`Apple Mail`, `Samsung Email`, `Outlook`, `Windows Mail`, `Gmail`), `null` when not recognized; `model` is a Samsung model code such as `SM-S918B`, else `null`
+
 - `last_status` is the HTTP status SOGo answered; `401` means the device's password was refused
+
 - A connected phone's `last_seen` can be up to an hour old: SOGo logs a `Ping` when it ends, and mailcow allows a Ping of up to 59 minutes
+
+---
+
+### GET /api/mailbox-stats/refresh
+
+Read the last metadata synchronization timestamps. This GET does not request a refresh.
+
+`{ "last_mailbox_update": "2026-10-16T09:00:00Z", "last_alias_update": "2026-10-16T09:00:00Z" }`
+
+Either timestamp can be null. A database failure returns an `error` field.
 
 ---
 
 ## Rate Limits
 
-mailcow rate-limits senders through rspamd, which counts every send against a Redis key and writes a line to the `ratelimited` log when a sender runs out. These endpoints show who is hitting a limit, reset a stuck counter, and change the limits themselves. The write endpoints require a Read-Write API key (`MAILCOW_API_KEY_RW`).
+mailcow rate-limits senders through rspamd, which counts every send against a Redis key and writes a line to the `ratelimited` log when a sender runs out. These endpoints show who is hitting a limit, reset a stuck counter, and change the limits themselves. The write endpoints need a read-write API key (`MAILCOW_API_KEY_RW`) and return 503 without one. Limit values are whole messages per time frame; `0` removes the limit. Time frames are `s` (second), `m` (minute), `h` (hour) and `d` (day).
 
-These endpoints back the Rate Limits view of the Mailbox Statistics page. They are covered by the `rate-limits` feature id in `disabled_features`: as with every other toggleable feature, disabling it hides the view in the web interface and does not change any response below.
+These endpoints back **Mailbox Stats** > **Rate Limits**. Turning off `rate-limits` hides the view and stops collecting its required raw service unless another enabled surface needs it. Feature switches are not an API authorization boundary.
 
 ### GET /api/rate-limits/events
 
-List the senders that hit a rate limit in the window, grouped by sender.
-
 **Query Parameters:**
 
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `hours` | integer | `168` | Size of the window in hours (min: 1, max: 720) |
+| Parameter | Type | Default | Constraints and purpose |
+| --- | --- | --- | --- |
+| `hours` | integer | `168` | Chart window in hours, 1 to 8760 |
 
-**Response:**
-```json
-{
-  "hours": 168,
-  "total_events": 12,
-  "by_sender": [
-    {
-      "user": "newsletter@example.com",
-      "events": 9,
-      "last_seen": "2026-09-13T09:14:03Z",
-      "last_rl_hash": "RLwhscgno1zwitb6nif6i83msr",
-      "current_limit": {
-        "value": 100,
-        "frame": "m"
-      },
-      "recent": [
-        {
-          "time": "2026-09-13T09:14:03Z",
-          "rcpt": "someone@remote.example",
-          "subject": "Weekly report",
-          "qid": "03D246E37D5",
-          "rl_hash": "RLwhscgno1zwitb6nif6i83msr"
-        }
-      ]
-    }
-  ],
-  "events": [
-    {
-      "user": "newsletter@example.com",
-      "time": "2026-09-13T09:14:03Z",
-      "rcpt": "someone@remote.example",
-      "subject": "Weekly report",
-      "qid": "03D246E37D5",
-      "rl_hash": "RLwhscgno1zwitb6nif6i83msr"
-    }
-  ]
-}
-```
+Read grouped sender history and a windowed activity chart from collected `ratelimited` logs. The endpoint reads the newest 5,000 log rows and does not call mailcow.
 
-**Response Fields:**
-- `by_sender`: One entry per sender, sorted by `events` descending
-- `recent`: Up to 5 newest events for that sender
-- `events`: Flat feed of the 50 newest events across all senders
-- `current_limit`: The configured limit, read from the locally synced mailbox row; `null` when the sender has no configured limit
-- `last_rl_hash`: The counter of the most recent event, the value `POST /api/rate-limits/reset` takes
+The response contains `hours`, `total_events`, `window_senders`, `by_sender`, `events`, `bucket` and `by_bucket`. The window applies to chart totals and buckets only. `by_sender` covers all sender history in the scanned rows, sorted by hit count.
 
-**Notes:**
-- Reads only the collected `ratelimited` log and never calls mailcow, so it stays fast and still answers while mailcow is unreachable
+Each sender has `user`, `events`, `last_seen`, `last_rl_hash`, `current_limit`, `recent` and optional `last_reset`. `recent` contains up to 5 events; the flat `events` feed contains up to 50. Event fields are `time`, `rcpt`, `subject`, `qid` and `rl_hash`; the flat feed also includes `user`.
+
+`current_limit` is `{value, frame}` from the locally synced mailbox, or null. Buckets use `{bucket, count}`, hourly for windows of 24 hours or less and daily for longer windows.
 
 ---
 
 ### GET /api/rate-limits/limits
 
-Get the configured rate limits: the mailboxes that have one, and every local domain.
+Get the configured rate limits for every locally synced mailbox and every active local domain.
 
 **Response:**
 ```json
@@ -1412,14 +1120,26 @@ Get the configured rate limits: the mailboxes that have one, and every local dom
 ```
 
 **Response Fields:**
-- `rw_key_configured`: Whether a Read-Write API key is available, which is what the write endpoints need
-- `mailboxes`: Only mailboxes that have a limit, read from the local sync
+
+- `rw_key_configured`: Whether a read-write API key is set; the write endpoints need it
+
+- `mailboxes`: Every synced mailbox, read from the local sync; `rl_value` and `rl_frame` are null when no limit is set.
+
 - `domains`: Every local domain with the limit fetched from mailcow; `rl_value` is `null` when the domain has no limit. Cached in-process for 300 seconds
+
 - `domains_error`: The mailcow error text when the domain limits could not be read, `null` otherwise
 
 ---
 
 ### POST /api/rate-limits/mailbox
+
+**JSON fields:**
+
+| Field | Type | Default | Constraints and purpose |
+| --- | --- | --- | --- |
+| `mailbox` | string | Required | Mailbox address; must be a synced mailbox |
+| `value` | integer | Required | Messages per frame, 0 or more; `0` removes the limit |
+| `frame` | string | Required | `s`, `m`, `h` or `d` |
 
 Set the rate limit of one mailbox.
 
@@ -1431,14 +1151,6 @@ Set the rate limit of one mailbox.
   "frame": "m"
 }
 ```
-
-**Request Fields:**
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `mailbox` | string | Yes | A known local mailbox |
-| `value` | integer | Yes | Messages allowed per frame; `0` removes the limit |
-| `frame` | string | Yes | `s` (second), `m` (minute), `h` (hour) or `d` (day) |
 
 **Response:**
 ```json
@@ -1456,16 +1168,28 @@ Set the rate limit of one mailbox.
 ```
 
 **Notes:**
+
 - The local mailbox row is updated on success, so the page shows the new limit immediately instead of waiting for the next mailbox sync
 
 **Error Responses:**
+
 - `400 Bad Request`: Unknown mailbox, negative value, or invalid frame
+
 - `502 Bad Gateway`: mailcow did not apply the change
-- `503 Service Unavailable`: No Read-Write API key configured
+
+- `503 Service Unavailable`: No read-write API key configured
 
 ---
 
 ### POST /api/rate-limits/domain
+
+**JSON fields:**
+
+| Field | Type | Default | Constraints and purpose |
+| --- | --- | --- | --- |
+| `domain` | string | Required | A local domain |
+| `value` | integer | Required | Messages per frame, 0 or more; `0` removes the limit |
+| `frame` | string | Required | `s`, `m`, `h` or `d` |
 
 Set the rate limit of one domain.
 
@@ -1477,14 +1201,6 @@ Set the rate limit of one domain.
   "frame": "h"
 }
 ```
-
-**Request Fields:**
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `domain` | string | Yes | A known local domain |
-| `value` | integer | Yes | Messages allowed per frame; `0` removes the limit |
-| `frame` | string | Yes | `s` (second), `m` (minute), `h` (hour) or `d` (day) |
 
 **Response:**
 ```json
@@ -1502,17 +1218,29 @@ Set the rate limit of one domain.
 ```
 
 **Notes:**
+
 - The domain is validated against the local domain list
+
 - A successful change busts the cached domain limits, so the next `GET /api/rate-limits/limits` reads mailcow again
 
 **Error Responses:**
+
 - `400 Bad Request`: Unknown domain, negative value, or invalid frame
+
 - `502 Bad Gateway`: mailcow did not apply the change
-- `503 Service Unavailable`: No Read-Write API key configured
+
+- `503 Service Unavailable`: No read-write API key configured
 
 ---
 
 ### POST /api/rate-limits/reset
+
+**JSON fields:**
+
+| Field | Type | Default | Constraints and purpose |
+| --- | --- | --- | --- |
+| `rl_hash` | string | Required | The counter's hash from the `ratelimited` log: `RL` followed by letters and digits |
+| `user` | string or null | Unset | Sender to record the reset against (shown as `last_reset` in the events) |
 
 Reset an active counter so a blocked sender can send again immediately. The configured limit is not changed.
 
@@ -1523,29 +1251,57 @@ Reset an active counter so a blocked sender can send again immediately. The conf
 }
 ```
 
-**Request Fields:**
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `rl_hash` | string | Yes | The counter to reset, as reported in `last_rl_hash` or `rl_hash` |
-
 **Response:**
 ```json
 {
   "rl_hash": "RLwhscgno1zwitb6nif6i83msr",
-  "mailcow_response": [
-    {
-      "type": "success",
-      "msg": "Rate limit hash has been deleted"
-    }
-  ]
+  "reset": true,
+  "mailcow_response": null
 }
 ```
 
+mailcow usually answers this call with an empty body, so `mailcow_response` is often `null`.
+
 **Error Responses:**
+
 - `400 Bad Request`: The value is not a rate limit hash (it must match `^RL[A-Za-z0-9]+$`)
+
 - `502 Bad Gateway`: mailcow did not reset the counter
-- `503 Service Unavailable`: No Read-Write API key configured
+
+- `503 Service Unavailable`: No read-write API key configured
+
+---
+
+### GET /api/rate-limits/sender-events
+
+**Query Parameters:**
+
+| Parameter | Type | Default | Constraints and purpose |
+| --- | --- | --- | --- |
+| `user` | string | `` | The sender address to read the history of |
+
+Read one sender's full collected refused-message history. A non-empty `user` is required by the handler; otherwise it returns 400.
+
+The response contains normalized `user`, true database `total` and newest-first `events`, capped at 2,000 rows. Event fields are `time`, `rcpt`, `subject`, `qid` and `rl_hash`. The response is independent of the activity-chart window.
+
+---
+
+### POST /api/rate-limits/bulk
+
+**JSON fields:**
+
+| Field | Type | Default | Constraints and purpose |
+| --- | --- | --- | --- |
+| `mailboxes` | array of strings | `[]` | Mailbox addresses |
+| `domains` | array of strings | `[]` | Local domains |
+| `value` | integer | Required | Messages per frame, 0 or more; `0` removes the limits |
+| `frame` | string | Required | `s`, `m`, `h` or `d` |
+
+Set one limit on many mailboxes and domains at once (**Apply to filtered** on the page). Needs a read-write API key. More than 1,000 items in total, or none, returns 400.
+
+Example body: `{ "mailboxes": ["alice@example.com"], "domains": ["example.com"], "value": 100, "frame": "h" }`.
+
+Names the server does not know are skipped, not rejected. All mailboxes go to mailcow in one call, then all domains in a second. Response fields are `mailboxes_updated`, `domains_updated`, `skipped`, `value` and `frame`. If the domain call fails after the mailbox call succeeded, the mailbox change stays in place.
 
 ---
 
@@ -1553,23 +1309,23 @@ Reset an active counter so a blocked sender can send again immediately. The conf
 
 ### GET /messages
 
-Get unified messages view combining Postfix and Rspamd data.
-
 **Query Parameters:**
 
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `page` | int | Page number (default: 1) |
-| `limit` | int | Items per page (default: 50, max: 500) |
-| `search` | string | Search in sender, recipient, subject, message_id, queue_id |
-| `sender` | string | Filter by sender email |
-| `recipient` | string | Filter by recipient email |
-| `direction` | string | Filter by direction: `inbound`, `outbound`, `internal` |
-| `status` | string | Filter by status: `delivered`, `bounced`, `deferred`, `rejected`, `spam`, `discarded`, `expired`<br>**Note:** `spam` filter checks both `final_status='spam'` and `is_spam=True` from Rspamd. `discarded` means a Dovecot Sieve rule dropped the message after Postfix handed it over (issue #65) |
-| `user` | string | Filter by authenticated user |
-| `ip` | string | Filter by source IP address |
-| `start_date` | datetime | Start date (ISO format) |
-| `end_date` | datetime | End date (ISO format) |
+| Parameter | Type | Default | Constraints and purpose |
+| --- | --- | --- | --- |
+| `page` | integer | `1` | Page number, at least 1 |
+| `limit` | integer | `50` | Items per page, 1 to 500 |
+| `search` | string or null | Unset | Case-insensitive substring of sender, recipient, subject, Message-ID, queue ID, or the Rspamd client IP or user |
+| `sender` | string or null | Unset | Substring of the sender |
+| `recipient` | string or null | Unset | Substring of the recipient |
+| `direction` | string or null | Unset | Exact direction: `inbound`, `outbound` or `internal` |
+| `status` | string or null | Unset | Exact final status, such as `delivered`, `deferred`, `bounced`, `rejected` or `discarded`. `spam` also matches messages Rspamd marked as spam. |
+| `user` | string or null | Unset | Substring of the authenticated sender (Rspamd user) |
+| `ip` | string or null | Unset | Substring of the source IP (Rspamd) |
+| `start_date` | datetime or null | Unset | Earliest `first_seen` (ISO 8601) |
+| `end_date` | datetime or null | Unset | Latest `first_seen` (ISO 8601) |
+
+Get unified messages view combining Postfix and Rspamd data.
 
 **Example Request:**
 ```
@@ -1589,7 +1345,7 @@ GET /api/messages?page=1&limit=50&direction=outbound&sender=user@example.com
       "message_id": "<unique-id@example.com>",
       "queue_id": "ABC123DEF",
       "sender": "user@example.com",
-      "recipient": "recipient@gmail.com",
+      "recipient": "recipient@example.net",
       "subject": "Hello World",
       "direction": "outbound",
       "final_status": "delivered",
@@ -1602,15 +1358,15 @@ GET /api/messages?page=1&limit=50&direction=outbound&sender=user@example.com
       "spam_score": 0.5,
       "is_spam": false,
       "user": "user@example.com",
-      "ip": "192.168.1.100"
+      "ip": "192.0.2.100"
     }
   ]
 }
 ```
 
-**One row per message (issue #36):** a message that was delivered more than once - a forward, a BCC copy, a quarantine release - has one correlation per delivery leg, but the list returns a single row for it. Rows are grouped by Message-ID; a correlation without a Message-ID is grouped by its own `correlation_key` and is therefore never merged with another one. The filters apply to the legs first, and the earliest matching leg represents the message, so a search always answers with the leg that matched it. `deliveries` is the total number of legs that message has in the database, including legs the filters did not match, and is `1` for an ordinary message. `total` and `pages` count messages, not legs. The full list of legs, in order, is available as `related_deliveries` in `GET /message/{correlation_key}/details`.
+**One row per message:** a message that was delivered more than once (a forward, a BCC copy, a quarantine release) has one correlation per delivery leg, but the list returns a single row for it. Rows are grouped by Message-ID; a correlation without a Message-ID is grouped by its own `correlation_key` and is therefore never merged with another one. The filters apply to the legs first, and the earliest matching leg represents the message, so a search always answers with the leg that matched it. `deliveries` is the total number of legs that message has in the database, including legs the filters did not match, and is `1` for an ordinary message. `total` and `pages` count messages, not legs. The full list of legs, in order, is available as `related_deliveries` in `GET /message/{correlation_key}/details`.
 
-**Dovecot delivery fields (issue #65):** `dovecot_status` is the outcome of the final LMTP hop as reported by Dovecot - one of `stored`, `discarded`, `rejected`, `forwarded`, `failed`, or `null` when no Dovecot information is available (raw log collection disabled, or the message left the server). `dovecot_mailbox` names the folder the message was filed into (e.g. `INBOX`, `Junk`). A message dropped by a Sieve `discard` rule gets `final_status` `discarded` instead of a false `delivered`.
+**Dovecot delivery fields:** `dovecot_status` is the outcome of the final LMTP hop as reported by Dovecot: one of `stored`, `discarded`, `rejected`, `forwarded`, `failed`, or `null` when no matching Dovecot information is available, such as mail delivered outside this server. `dovecot_mailbox` names the folder the message was filed into (e.g. `INBOX`, `Junk`). A message dropped by a Sieve `discard` rule gets `final_status` `discarded` instead of a false `delivered`.
 
 ---
 
@@ -1631,8 +1387,11 @@ Get complete message details with all related logs.
   "message_id": "<unique-id@example.com>",
   "queue_id": "ABC123DEF",
   "sender": "user@example.com",
-  "recipient": "recipient@gmail.com",
-  "recipients": ["recipient@gmail.com", "cc@gmail.com"],
+  "recipient": "recipient@example.net",
+  "recipients": [
+    "recipient@example.net",
+    "cc@example.net"
+  ],
   "recipient_count": 2,
   "subject": "Hello World",
   "direction": "outbound",
@@ -1643,7 +1402,7 @@ Get complete message details with all related logs.
   "related_deliveries": [
     {
       "correlation_key": "789abc012def...",
-      "sender": "recipient@gmail.com",
+      "sender": "recipient@example.net",
       "recipient": "forward-target@example.org",
       "direction": "outbound",
       "final_status": "rejected",
@@ -1659,12 +1418,20 @@ Get complete message details with all related logs.
     "required_score": 15,
     "action": "no action",
     "symbols": {
-      "MAILCOW_AUTH": {"score": -20, "description": "mailcow authenticated"},
-      "RCVD_COUNT_ZERO": {"score": 0, "options": ["0"]}
+      "MAILCOW_AUTH": {
+        "score": -20,
+        "description": "mailcow authenticated"
+      },
+      "RCVD_COUNT_ZERO": {
+        "score": 0,
+        "options": [
+          "0"
+        ]
+      }
     },
     "is_spam": false,
     "direction": "outbound",
-    "ip": "192.168.1.100",
+    "ip": "192.0.2.100",
     "user": "user@example.com",
     "has_auth": true,
     "size": 1024
@@ -1677,9 +1444,9 @@ Get complete message details with all related logs.
       {
         "time": "2025-12-25T10:30:06Z",
         "priority": "info",
-        "message": "lmtp(recipient@gmail.com)<123><AbCdEf>: sieve: msgid=<unique-id@example.com>: stored mail into mailbox 'Junk'",
+        "message": "lmtp(recipient@example.net)<123><AbCdEf>: sieve: msgid=<unique-id@example.com>: stored mail into mailbox 'Junk'",
         "verdict": "stored",
-        "recipient": "recipient@gmail.com",
+        "recipient": "recipient@example.net",
         "mailbox": "Junk"
       }
     ]
@@ -1699,25 +1466,69 @@ Get complete message details with all related logs.
       "time": "2025-12-25T10:30:05Z",
       "program": "postfix/smtp",
       "priority": "info",
-      "message": "ABC123DEF: to=<recipient@gmail.com>, relay=gmail-smtp-in.l.google.com...",
+      "message": "ABC123DEF: to=<recipient@example.net>, relay=mx.example.org...",
       "status": "sent",
-      "relay": "gmail-smtp-in.l.google.com[142.251.168.26]:25",
+      "relay": "mx.example.org[192.0.2.26]:25",
       "delay": 1.5,
       "dsn": "2.0.0"
     }
   ],
   "postfix_by_recipient": {
-    "recipient@gmail.com": [...],
-    "cc@gmail.com": [...],
-    "_system": [...]
+    "recipient@example.net": [
+      {
+        "time": "2025-12-25T10:30:05Z",
+        "program": "postfix/smtp",
+        "priority": "info",
+        "message": "ABC123DEF: to=<recipient@example.net>, relay=mx.example.org...",
+        "status": "sent",
+        "relay": "mx.example.org[192.0.2.26]:25",
+        "delay": 1.5,
+        "dsn": "2.0.0"
+      }
+    ],
+    "_system": [
+      {
+        "time": "2025-12-25T10:30:00Z",
+        "program": "postfix/smtpd",
+        "priority": "info",
+        "message": "ABC123DEF: client=...",
+        "status": null,
+        "relay": null,
+        "delay": null,
+        "dsn": null
+      }
+    ]
   },
   "netfilter": []
 }
 ```
 
-**`related_deliveries` (issue #36):** a Message-ID can map to several correlations, one per delivery leg. A forward, a Sieve redirect or any other re-submission delivers the same message a second time through its own Postfix queue chain, with its own sender, recipient, direction and status, and its own `correlation_key`. `GET /messages` shows all of them as one row, so this list is where the individual legs are read. It holds the other legs of the same Message-ID, ordered by `first_seen`, and is empty for the vast majority of messages. The first leg of a message keeps the historical `correlation_key` (SHA256 of `msgid:<message-id>`), so links created before this change keep resolving; an additional leg is keyed by SHA256 of `msgid:<message-id>:queue:<queue-id>`.
+**`related_deliveries`:** a Message-ID can map to several correlations, one per delivery leg. A forward, a Sieve redirect or any other re-submission delivers the same message a second time through its own Postfix queue chain, with its own sender, recipient, direction and status, and its own `correlation_key`. `GET /messages` shows all of them as one row, so this list is where the individual legs are read. It holds the other legs of the same Message-ID, ordered by `first_seen`, and is empty for the vast majority of messages. The first leg of a message keeps the historical `correlation_key` (SHA256 of `msgid:<message-id>`), so links created before this change keep resolving; an additional leg is keyed by SHA256 of `msgid:<message-id>:queue:<queue-id>`.
 
-**`dovecot` object (issue #65):** the mailbox-delivery outcome reported by Dovecot for the final LMTP hop. `status` is one of `stored`, `discarded`, `rejected`, `forwarded`, `failed`; `mailbox` is the target folder; `detail` carries the reject reason, forward target or storage error; `logs` lists the matching raw Dovecot lines (available while raw log retention keeps them). The whole object is `null` when no Dovecot information exists for the message.
+**`dovecot` object:** the mailbox-delivery outcome reported by Dovecot for the final LMTP hop. `status` is one of `stored`, `discarded`, `rejected`, `forwarded`, `failed`; `mailbox` is the target folder; `detail` carries the reject reason, forward target or storage error; `logs` lists the matching raw Dovecot lines (available while raw log retention keeps them). The whole object is `null` when no Dovecot information exists for the message.
+
+---
+
+### GET /api/messages/facets
+
+**Query Parameters:**
+
+| Parameter | Type | Default | Constraints and purpose |
+| --- | --- | --- | --- |
+| `search`, `sender`, `recipient`, `direction`, `status`, `user`, `ip`, `start_date`, `end_date` | as in `GET /api/messages` | Unset | Same filters as the message list |
+| `since` | array of strings | `[]` | Time ranges to count, as `name:ISO-start` (for example `today:2026-09-27T00:00:00Z`). Repeat the parameter for more ranges; up to 8 are read. `name` is 1 to 16 lower-case letters or digits; invalid entries are skipped. |
+
+Read filter counts for the message search.
+
+Returns `status` counts (`delivered`, `deferred`, `bounced`, `rejected`, `spam`, `discarded`) and `direction` counts (`inbound`, `outbound`, `internal`), each with an `all` count. Each status or direction count applies the other filters but not its own. When `since` is given, `time` contains an `all` count and one count per valid named range; these time counts ignore `start_date` and `end_date`. Counts are messages, not delivery legs.
+
+---
+
+### GET /api/message/{correlation_key}
+
+Read the older compact message-detail representation. Returns identity and addressing fields, `direction`, `final_status`, `first_seen`, `last_seen`, `rspamd`, `postfix` and `timeline`. An unknown key returns 404.
+
+Use `GET /api/message/{correlation_key}/details` for the current UI detail representation, including Dovecot data and related deliveries.
 
 ---
 
@@ -1727,21 +1538,21 @@ Get complete message details with all related logs.
 
 #### GET /logs/postfix
 
-Get Postfix logs grouped by Queue-ID.
-
 **Query Parameters:**
 
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `page` | int | Page number (default: 1) |
-| `limit` | int | Items per page (default: 50, max: 500) |
-| `search` | string | Search in message, sender, recipient, queue_id |
-| `sender` | string | Filter by sender |
-| `recipient` | string | Filter by recipient |
-| `status` | string | Filter by status: `sent`, `bounced`, `deferred`, `rejected` |
-| `queue_id` | string | Filter by specific queue ID |
-| `start_date` | datetime | Start date |
-| `end_date` | datetime | End date |
+| Parameter | Type | Default | Constraints and purpose |
+| --- | --- | --- | --- |
+| `page` | integer | `1` | Page number, at least 1 |
+| `limit` | integer | `50` | Items per page, 1 to 500 |
+| `search` | string or null | Unset | Case-insensitive substring of the log message, sender, recipient or queue ID |
+| `sender` | string or null | Unset | Substring of the sender |
+| `recipient` | string or null | Unset | Substring of the recipient |
+| `status` | string or null | Unset | Exact Postfix status, such as `sent`, `deferred`, `bounced` or `rejected` |
+| `queue_id` | string or null | Unset | Exact queue ID |
+| `start_date` | datetime or null | Unset | Earliest log time (ISO 8601) |
+| `end_date` | datetime or null | Unset | Latest log time (ISO 8601) |
+
+Get Postfix logs grouped by queue ID (one row per queue; lines without a queue ID are left out).
 
 **Response:**
 ```json
@@ -1762,7 +1573,7 @@ Get Postfix logs grouped by Queue-ID.
       "sender": "sender@example.com",
       "recipient": "user@example.com",
       "status": "sent",
-      "relay": "mail.example.com[1.2.3.4]:25",
+      "relay": "mail.example.com[192.0.2.10]:25",
       "delay": 1.5,
       "dsn": "2.0.0",
       "correlation_key": "abc123..."
@@ -1775,7 +1586,7 @@ Get Postfix logs grouped by Queue-ID.
 
 #### GET /logs/postfix/by-queue/{queue_id}
 
-Get all Postfix logs for a specific Queue-ID with linked Rspamd data.
+Get all Postfix logs for one queue ID, oldest first, with linked Rspamd data. A queue ID with no logs returns 404.
 
 **Path Parameters:**
 
@@ -1792,7 +1603,7 @@ Get all Postfix logs for a specific Queue-ID with linked Rspamd data.
     "score": 0.5,
     "required_score": 15,
     "action": "no action",
-    "symbols": {...},
+    "symbols": {},
     "is_spam": false,
     "direction": "outbound",
     "subject": "Hello World"
@@ -1823,23 +1634,23 @@ Get all Postfix logs for a specific Queue-ID with linked Rspamd data.
 
 #### GET /logs/rspamd
 
-Get Rspamd spam analysis logs.
-
 **Query Parameters:**
 
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `page` | int | Page number (default: 1) |
-| `limit` | int | Items per page (default: 50, max: 500) |
-| `search` | string | Search in subject, sender, message_id |
-| `sender` | string | Filter by sender |
-| `direction` | string | Filter: `inbound`, `outbound`, `internal`, `unknown` |
-| `min_score` | float | Minimum spam score |
-| `max_score` | float | Maximum spam score |
-| `action` | string | Filter by action: `no action`, `greylist`, `add header`, `reject` |
-| `is_spam` | boolean | Filter spam only (`true`) or clean only (`false`) |
-| `start_date` | datetime | Start date |
-| `end_date` | datetime | End date |
+| Parameter | Type | Default | Constraints and purpose |
+| --- | --- | --- | --- |
+| `page` | integer | `1` | Page number, at least 1 |
+| `limit` | integer | `50` | Items per page, 1 to 500 |
+| `search` | string or null | Unset | Case-insensitive substring of the subject, SMTP sender or Message-ID |
+| `sender` | string or null | Unset | Substring of the SMTP sender |
+| `direction` | string or null | Unset | `inbound`, `outbound`, `internal` or `unknown` |
+| `min_score` | float or null | Unset | Lowest Rspamd score |
+| `max_score` | float or null | Unset | Highest Rspamd score |
+| `action` | string or null | Unset | Exact Rspamd action, such as `no action`, `add header`, `rewrite subject`, `greylist` or `reject` |
+| `is_spam` | boolean or null | Unset | Only spam (`true`) or only non-spam (`false`) |
+| `start_date` | datetime or null | Unset | Earliest log time (ISO 8601) |
+| `end_date` | datetime or null | Unset | Latest log time (ISO 8601) |
+
+Get Rspamd spam analysis logs.
 
 **Response:**
 ```json
@@ -1861,7 +1672,7 @@ Get Rspamd spam analysis logs.
       "required_score": 15,
       "action": "no action",
       "direction": "outbound",
-      "ip": "192.168.1.100",
+      "ip": "192.0.2.100",
       "is_spam": false,
       "has_auth": true,
       "user": "sender@example.com",
@@ -1881,20 +1692,22 @@ Get Rspamd spam analysis logs.
 
 #### GET /logs/netfilter
 
-Get Netfilter authentication failure logs.
-
 **Query Parameters:**
 
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `page` | int | Page number (default: 1) |
-| `limit` | int | Items per page (default: 50, max: 500) |
-| `search` | string | Search in message, IP, username |
-| `ip` | string | Filter by IP address |
-| `username` | string | Filter by username |
-| `action` | string | Filter: `warning`, `banned` |
-| `start_date` | datetime | Start date |
-| `end_date` | datetime | End date |
+| Parameter | Type | Default | Constraints and purpose |
+| --- | --- | --- | --- |
+| `page` | integer | `1` | Page number, at least 1 |
+| `limit` | integer | `50` | Rows per page, 1 to 500 |
+| `search` | string or null | Unset | Case-insensitive substring of the message, IP or username |
+| `ip` | string or null | Unset | Substring of the IP, or the exact IP when `exact_ip` is true |
+| `exact_ip` | boolean | `false` | Match the IP exactly instead of as a part |
+| `username` | string or null | Unset | Case-insensitive substring of the username |
+| `action` | string or null | Unset | `warning`, `ban`, `unban` or `info`; `ban` also matches older `banned` lines |
+| `country_code` | string or null | Unset | Two-letter country code, in any case |
+| `start_date` | datetime or null | Unset | Earliest log time (ISO 8601) |
+| `end_date` | datetime or null | Unset | Latest log time (ISO 8601) |
+
+Get stored Netfilter log lines (failed logins, Fail2ban bans and unbans, and other messages), newest first.
 
 **Response:**
 ```json
@@ -1908,13 +1721,18 @@ Get Netfilter authentication failure logs.
       "id": 999,
       "time": "2025-12-25T10:30:00Z",
       "priority": "warn",
-      "message": "1.1.1.1 matched rule id 3...",
-      "ip": "1.1.1.1",
+      "message": "198.51.100.53 matched rule id 3...",
+      "ip": "198.51.100.53",
       "rule_id": 3,
       "attempts_left": 9,
       "username": "user@example.com",
       "auth_method": "SASL LOGIN",
-      "action": "warning"
+      "action": "warning",
+      "country_code": "NL",
+      "country_name": "Netherlands",
+      "city": "Amsterdam",
+      "asn": "AS64496",
+      "asn_org": "Example Hosting"
     }
   ]
 }
@@ -1922,15 +1740,15 @@ Get Netfilter authentication failure logs.
 
 #### GET /logs/netfilter/overview
 
+**Query Parameters:**
+
+| Parameter | Type | Default | Constraints and purpose |
+| --- | --- | --- | --- |
+| `hours` | integer | `24` | Period in hours, 1 to 168 |
+
 Attempts against the server over the last hours, grouped by source address. Used by the Security page.
 
 Only lines where netfilter matched a rule count as an attempt; the "N more attempts ... until banned" line that follows each one is not counted again. The service comes from the log text (SMTP auth, SMTP probe, IMAP, POP3, Sieve, SOGo, mailcow UI, Rspamd UI); failed logins are the attempts that are not SMTP probes.
-
-**Query Parameters:**
-
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `hours` | int | Window in hours (default: 24, max: 168) |
 
 **Response:**
 ```json
@@ -1949,6 +1767,8 @@ Only lines where netfilter matched a rule count as an attempt; the "N more attem
       "usernames": ["admin@example.com"],
       "country_code": "NL",
       "country_name": "Netherlands",
+      "city": "Amsterdam",
+      "asn_org": "Example Hosting",
       "last_action": null
     }
   ],
@@ -1965,7 +1785,69 @@ Only lines where netfilter matched a rule count as an attempt; the "N more attem
 }
 ```
 
-`sources` holds the 50 addresses with the most attempts; `last_action` is the last Fail2ban `ban` or `unban` seen for the address in the window, or `null`. `latest` holds the 20 most recent failed logins.
+`sources` holds the 50 addresses with the most attempts; `last_action` is the last Fail2ban `ban` or `unban` seen for the address in the window, or `null`. `usernames` holds up to 5 names. `latest` holds the 20 most recent failed logins. The overview reads at most the 50,000 newest lines in the period.
+
+---
+
+#### GET /api/logs/netfilter/countries
+
+Read the recorded country choices as an array of `{code, name}` objects. Only entries with a country code are included. A read failure returns an empty array.
+
+---
+
+#### GET /api/logs/netfilter/stats/by-country
+
+**Query Parameters:**
+
+| Parameter | Type | Default | Constraints and purpose |
+| --- | --- | --- | --- |
+| `days` | integer | `30` | Days to look back, 1 to 365 |
+
+Read countries grouped over the selected number of days. The response contains `days`, `since` and `data`. `since` reports retained history when it is shorter than the requested period.
+
+Returns up to 10 countries, sorted by `warning` and then `total`. Rows contain `country_code`, `country_name`, `ban`, `unban`, `warning`, `total` and `addresses`. `warning` counts attempts (lines where netfilter matched a rule); `ban` and `unban` count Fail2ban ban and unban lines; `total` is their sum; `addresses` is the number of distinct addresses with attempts. Lines without a stored country are located with GeoIP when it is available.
+
+---
+
+#### GET /api/logs/netfilter/stats/by-network
+
+**Query Parameters:**
+
+| Parameter | Type | Default | Constraints and purpose |
+| --- | --- | --- | --- |
+| `days` | integer | `30` | Days to look back, 1 to 365 |
+
+Read attempted logins grouped by ASN/network. The response contains `days`, `since` and `data`; each row has `asn`, `asn_org`, `attempts` and `addresses`. Returns up to 8 networks with the most attempts. Only attempt lines with a known ASN count; `asn_org` falls back to the ASN when the organization is unknown.
+
+---
+
+#### GET /api/security/addresses
+
+**Query Parameters:**
+
+| Parameter | Type | Default | Constraints and purpose |
+| --- | --- | --- | --- |
+| `list` | string | `review` | `review` or `banned` |
+| `country` | string or null | Unset | Only addresses from this country, matched by name as in `countries[].country_name`; up to 100 characters |
+| `after` | string or null | Unset | The `next` value from the previous page; up to 200 characters |
+| `limit` | integer | `50` | Addresses per page, 1 to 200 |
+| `q` | string or null | Unset | Only addresses whose IP contains this text; up to 100 characters |
+| `network` | string or null | Unset | Only addresses from this network, matched by ASN organization as in `networks[].asn_org`; up to 200 characters |
+| `days` | integer | `1` | Period in days (addresses that tried in the last N days), 1 to 365 |
+
+Read the Security page's cursor-paginated `review` or `banned` addresses. Use the previous response's `next` as `after`. Results are cached for 10 seconds per period.
+
+The response contains `list`, `country`, `network`, `total`, `counts`, `all_counts`, `items`, `next`, `days`, `countries`, `networks`, `since` and `fail2ban_known`. `total` counts the requested list after `country`, `network` and `q`; `counts` gives both lists with those filters; `all_counts` gives both lists without them. `countries` (top 10) and `networks` (top 8) count every address on either list in the period, ignoring `country`, `network` and `q`. Country rows have `country_name`, `country_code`, `addresses`, `attempts`, `review` and `banned`; network rows have `asn_org` and the same counts. `review` and `banned` there are attempt totals per list, not address counts.
+
+Items contain `ip`, `state`, `tries`, `attempts`, `users`, `services`, `hits`, `country`, `country_code`, `city`, `org`, `last_seen`, `f2b` and `listed_as`:
+
+- `state`: `review` (open rule catch), `allow` (on the allowlist, shown under review), `quiet` (attempts only, shown under review), `banned` (rule ban or active Fail2ban ban) or `deny` (on the denylist, shown under banned)
+- `tries` counts failed logins; `attempts` counts every attempt line
+- `hits`: the address's open protection hits
+- `f2b`: mailcow's active-ban entry, or `null`
+- `listed_as`: the allowlist or denylist entry that holds the address, or `null`
+
+A false `fail2ban_known` means current mailcow ban state was unavailable.
 
 ---
 
@@ -1973,7 +1855,7 @@ Only lines where netfilter matched a rule count as an attempt; the "N more attem
 
 #### GET /fail2ban
 
-Get current Fail2Ban configuration from mailcow (real-time proxy to `/api/v1/get/fail2ban`).
+Get the current Fail2ban configuration from mailcow (passed through from `/api/v1/get/fail2ban`). The fields are mailcow's.
 
 **Response:**
 ```json
@@ -1986,10 +1868,10 @@ Get current Fail2Ban configuration from mailcow (real-time proxy to `/api/v1/get
   "max_attempts": 10,
   "retry_window": 600,
   "manage_external": 0,
-  "whitelist": "127.0.0.1/8\n10.0.0.0/8",
+  "whitelist": "192.0.2.0/24\n198.51.100.0/24",
   "blacklist": "",
   "perm_bans": [],
-  "active_bans": [...]
+  "active_bans": []
 }
 ```
 
@@ -2007,15 +1889,18 @@ Get current Fail2Ban configuration from mailcow (real-time proxy to `/api/v1/get
 | `manage_external` | int | Whether Fail2Ban is managed externally (0/1) |
 | `whitelist` | string | Newline-separated list of allowlisted IPs/networks |
 | `blacklist` | string | Newline-separated list of denylisted IPs/networks |
-| `perm_bans` | array | List of permanently banned IPs |
-| `active_bans` | array | List of currently active bans |
+| `perm_bans` | array | Permanent ban entries from mailcow |
+| `active_bans` | array | Active ban entries from mailcow (each with `network`, `ip` and `queued_for_unban`) |
 
 **Error Responses:**
-- `503 Service Unavailable`: Could not reach the mailcow API
+
+- `503 Service Unavailable`: mailcow returned no Fail2ban configuration
+
+- `502 Bad Gateway`: The mailcow request failed
 
 #### POST /fail2ban
 
-Update Fail2Ban configuration on mailcow. Requires the Read-Write API key (`MAILCOW_API_KEY_RW`).
+Update the Fail2ban configuration on mailcow. Needs a read-write API key (`MAILCOW_API_KEY_RW`).
 
 **Request Body:**
 ```json
@@ -2028,33 +1913,24 @@ Update Fail2Ban configuration on mailcow. Requires the Read-Write API key (`MAIL
     "retry_window": "600",
     "netban_ipv4": "24",
     "netban_ipv6": "64",
-    "whitelist": "127.0.0.1/8",
-    "blacklist": "10.100.6.5/32"
+    "whitelist": "192.0.2.0/24",
+    "blacklist": "192.0.2.5/32"
   }
 }
 ```
 
-> **Note:** All parameters must be sent in the request body, not just the ones that changed.
+Send the complete configuration, including unchanged values, either inside an `attr` object or as the top-level object. When `manage_external` is left out, the current mailcow value is kept.
 
 **Response:**
 ```json
-[
-  {
-    "type": "success",
-    "log": ["fail2ban", "edit", { ... }],
-    "msg": ["fail2ban_edit_ok"]
-  }
-]
+{ "status": "success", "msg": ["fail2ban_edit_ok"] }
 ```
 
-**Error Responses:**
-- `400 Bad Request`: Invalid payload or mailcow rejected the update
-- `403 Forbidden`: Read-Write API key is not configured
-- `503 Service Unavailable`: Could not reach the mailcow API
+The app turns mailcow's first result into `status` and `msg`. A mailcow rejection returns HTTP 200 with `status: "error"`. When mailcow does not answer with a list, the success object adds `raw`. A missing or refused read-write API key (including a read-only key), or a failed mailcow request, returns 502. A body that is not valid JSON returns 500.
 
-#### POST /fail2ban/ban, POST /fail2ban/allow
+#### POST /fail2ban/ban
 
-Add an address to the Fail2Ban blacklist (`ban`) or whitelist (`allow`, so its failed attempts never lead to a ban). Every other Fail2Ban setting is kept. Requires the Read-Write API key.
+Add an address to the Fail2ban denylist (`blacklist`). Every other Fail2ban setting is kept, and the lists are read fresh right before writing. Needs a read-write API key.
 
 **Request Body:**
 ```json
@@ -2063,16 +1939,46 @@ Add an address to the Fail2Ban blacklist (`ban`) or whitelist (`allow`, so its f
 
 **Response:**
 ```json
-{ "status": "success", "msg": "IP 198.51.100.23/32 added to allowlist" }
+{ "status": "success", "msg": "IP 198.51.100.23/32 added to blacklist" }
 ```
+
+A missing `ip` returns 400. If the current settings cannot be read, 503. A missing or refused read-write API key returns 502. An address already on the list returns `success` with `IP ... is already in the blacklist`. A mailcow rejection returns HTTP 200 with `status: "error"`.
+
+#### POST /fail2ban/allow
+
+Add an address to the mailcow allowlist. Send `{ "ip": "192.0.2.10/32" }`. Same rules, errors and response shape as `ban`; success answers `IP ... added to allowlist` (or `is already in the allowlist`).
 
 #### POST /fail2ban/unban
 
-Lift an active ban for an address. Requires the Read-Write API key. Same request body and response shape as above.
+Lift an active ban with mailcow's unban action. The denylist and other settings are not changed. Send `{ "ip": "198.51.100.23" }`; a bare address is sent as /32 (IPv4) or /128 (IPv6). The response has `status` and `msg` from mailcow's first result, plus `raw` when mailcow does not answer with a list. A missing `ip` returns 400. Any mailcow failure, including a missing or refused read-write API key, returns 502.
 
 #### RW Status Check
 
-See [GET /rw-status](#get-rw-status) - unified endpoint for checking Read-Write API key availability.
+See [GET /rw-status](#get-rw-status) to check whether a read-write API key is configured.
+
+---
+
+#### POST /api/fail2ban/policy
+
+Change the Fail2ban policy while keeping the allowlist, denylist and external-management flag, which are read fresh right before writing. Needs a read-write API key.
+
+Send `ban_time` and `max_ban_time` as seconds, each at least 60, with the longest ban no shorter than the first ban. Also send `max_attempts` (at least 1), `retry_window` (at least 1 second), `netban_ipv4` (8 to 32) and `netban_ipv6` (8 to 128). `ban_time_increment` is optional: `true`, `1` or `"1"` turns it on, and any other value or leaving it out turns it off.
+
+A field that is not a whole number, or is out of range, returns 400; unavailable current settings return 503; a missing or refused read-write API key returns 502. Success answers `{ "status": "success", "msg": "Fail2ban policy saved" }`. Check `status` even after HTTP 200, because mailcow can report a rejected update in the body.
+
+---
+
+#### POST /api/fail2ban/remove
+
+Remove an address from the mailcow denylist or allowlist without replacing the other settings. Needs a read-write API key.
+
+Body: `{ "ip": "192.0.2.10", "list": "blacklist" }`, with `list` equal to `blacklist` or `whitelist`. `192.0.2.10` and `192.0.2.10/32` (or `/128`) match the same entry. A missing IP or an invalid list returns 400; unavailable current settings return 503; a missing or refused read-write API key returns 502. The response contains `status` and `msg`; an absent entry answers `success` with `IP ... is not in the blacklist` (or `allowlist`).
+
+---
+
+#### GET /api/geoip/{ip}
+
+Read the MaxMind location for an address. Returns `{ "available": false }` if the City database is not installed. Otherwise returns `available: true`, `ip`, `country_code`, `country_name`, `city`, `asn` and `asn_org`. Each location field is `null` when the address is not found; `asn` and `asn_org` are also `null` without the ASN database.
 
 ---
 
@@ -2080,7 +1986,7 @@ See [GET /rw-status](#get-rw-status) - unified endpoint for checking Read-Write 
 
 ### GET /queue
 
-Get current mail queue from mailcow (real-time).
+Read the current mail queue live from mailcow.
 
 **Response:**
 ```json
@@ -2095,7 +2001,7 @@ Get current mail queue from mailcow (real-time).
       "forced_expire": false,
       "sender": "sender@example.com",
       "recipients": [
-        "user@example.com (connect to example.com[1.2.3.4]:25: Connection timed out)"
+        "user@example.com (connect to example.com[192.0.2.10]:25: Connection timed out)"
       ]
     }
   ]
@@ -2105,7 +2011,7 @@ Get current mail queue from mailcow (real-time).
 
 ### POST /queue/action
 
-Perform an action on mail queue items. Requires a Read-Write API key (`MAILCOW_API_KEY_RW`).
+Perform an action on mail queue items. Needs a read-write API key (`MAILCOW_API_KEY_RW`).
 
 **Request Body:**
 ```json
@@ -2139,18 +2045,22 @@ Perform an action on mail queue items. Requires a Read-Write API key (`MAILCOW_A
 ```
 
 **Error Responses:**
+
 - `400 Bad Request`: Missing `items` array or invalid action
-- `502 Bad Gateway`: RW API key not configured, or mailcow did not answer
+
+- `502 Bad Gateway`: Read-write API key not configured or refused, or mailcow did not answer
 
 **Notes:**
+
 - Proxies to mailcow `POST /api/v1/edit/mailq` with `{"items": [...], "attr": {"action": "..."}}`
+
 - For bulk actions (`flush`, `super_delete`), use `["mailqitems-all"]` as items
 
 ---
 
 ### POST /queue/delete
 
-Delete specific mail queue items. Requires a Read-Write API key (`MAILCOW_API_KEY_RW`).
+Delete specific mail queue items. Needs a read-write API key (`MAILCOW_API_KEY_RW`).
 
 **Request Body:**
 ```json
@@ -2172,18 +2082,22 @@ Delete specific mail queue items. Requires a Read-Write API key (`MAILCOW_API_KE
 ```
 
 **Error Responses:**
+
 - `400 Bad Request`: Missing `items` array
-- `502 Bad Gateway`: RW API key not configured, or mailcow did not answer
+
+- `502 Bad Gateway`: Read-write API key not configured or refused, or mailcow did not answer
 
 **Notes:**
+
 - Proxies to mailcow `POST /api/v1/delete/mailq` with queue IDs array
-- For deleting ALL items, use `POST /queue/action` with `action: "super_delete"` instead
+
+- To delete all items, use `POST /queue/action` with `action: "super_delete"` instead
 
 ---
 
 ### GET /quarantine
 
-Get quarantined messages from mailcow (real-time).
+Read the quarantined messages live from mailcow.
 
 **Response:**
 ```json
@@ -2193,7 +2107,7 @@ Get quarantined messages from mailcow (real-time).
     {
       "id": 123,
       "subject": "Suspicious Email",
-      "sender": "spammer@evil.com",
+      "sender": "spammer@example.org",
       "rcpt": "user@example.com",
       "created": "2025-12-25T10:30:00Z",
       "action": "reject",
@@ -2209,13 +2123,13 @@ Get quarantined messages from mailcow (real-time).
 
 ### RW Status Check
 
-Quarantine actions require a Read-Write API key. See [GET /rw-status](#get-rw-status) for checking availability.
+Quarantine actions need a read-write API key. See [GET /rw-status](#get-rw-status) for checking availability.
 
 ---
 
 ### POST /quarantine/release
 
-Release (approve) quarantined messages on mailcow. Requires a Read-Write API key (`MAILCOW_API_KEY_RW`).
+Release (approve) quarantined messages on mailcow. Needs a read-write API key (`MAILCOW_API_KEY_RW`).
 
 **Request Body:**
 ```json
@@ -2245,19 +2159,22 @@ Release (approve) quarantined messages on mailcow. Requires a Read-Write API key
 ```
 
 **Error Responses:**
+
 - `400 Bad Request`: Missing `items` array
-- `502 Bad Gateway`: RW API key not configured, or mailcow did not answer
+
+- `502 Bad Gateway`: Read-write API key not configured or refused, or mailcow did not answer
 
 **Notes:**
+
 - Proxies to mailcow `POST /api/v1/edit/qitem` with `{"items": [...], "attr": {"action": "release"}}`
+
 - Released messages are delivered to the original recipient's mailbox
-- Supports releasing multiple messages in a single request
 
 ---
 
 ### POST /quarantine/delete
 
-Permanently delete quarantined messages on mailcow. Requires a Read-Write API key (`MAILCOW_API_KEY_RW`).
+Permanently delete quarantined messages on mailcow. Needs a read-write API key (`MAILCOW_API_KEY_RW`).
 
 **Request Body:**
 ```json
@@ -2287,19 +2204,22 @@ Permanently delete quarantined messages on mailcow. Requires a Read-Write API ke
 ```
 
 **Error Responses:**
+
 - `400 Bad Request`: Missing `items` array
-- `502 Bad Gateway`: RW API key not configured, or mailcow did not answer
+
+- `502 Bad Gateway`: Read-write API key not configured or refused, or mailcow did not answer
 
 **Notes:**
+
 - Proxies to mailcow `POST /api/v1/delete/qitem` with `["id1", "id2"]`
+
 - Deleted messages are permanently removed and cannot be recovered
-- Supports deleting multiple messages in a single request
 
 ---
 
 ### POST /quarantine/learnham
 
-Release quarantined messages and train Rspamd that they are **not spam** (ham). Requires a Read-Write API key (`MAILCOW_API_KEY_RW`).
+Release quarantined messages and train Rspamd that they are **not spam** (ham). Needs a read-write API key (`MAILCOW_API_KEY_RW`).
 
 **Request Body:**
 ```json
@@ -2321,19 +2241,22 @@ Release quarantined messages and train Rspamd that they are **not spam** (ham). 
 ```
 
 **Error Responses:**
+
 - `400 Bad Request`: Missing `items` array
-- `502 Bad Gateway`: RW API key not configured, or mailcow did not answer
+
+- `502 Bad Gateway`: Read-write API key not configured or refused, or mailcow did not answer
 
 **Notes:**
+
 - Proxies to mailcow `POST /api/v1/edit/qitem` with `{"items": [...], "attr": {"action": "learnham"}}`
-- The message is released to the recipient's mailbox AND Rspamd is trained to recognize similar messages as legitimate
-- Supports multiple items in a single request
+
+- mailcow performs its `learnham` action on the selected messages
 
 ---
 
 ### POST /quarantine/learnspam
 
-Delete quarantined messages and train Rspamd that they are **spam**. Requires a Read-Write API key (`MAILCOW_API_KEY_RW`).
+Delete quarantined messages and train Rspamd that they are **spam**. Needs a read-write API key (`MAILCOW_API_KEY_RW`).
 
 **Request Body:**
 ```json
@@ -2355,13 +2278,16 @@ Delete quarantined messages and train Rspamd that they are **spam**. Requires a 
 ```
 
 **Error Responses:**
+
 - `400 Bad Request`: Missing `items` array
-- `502 Bad Gateway`: RW API key not configured, or mailcow did not answer
+
+- `502 Bad Gateway`: Read-write API key not configured or refused, or mailcow did not answer
 
 **Notes:**
+
 - Proxies to mailcow `POST /api/v1/edit/qitem` with `{"items": [...], "attr": {"action": "learnspam"}}`
-- The message is permanently deleted AND Rspamd is trained to recognize similar messages as spam
-- Supports multiple items in a single request
+
+- mailcow performs its `learnspam` action on the selected messages
 
 ---
 
@@ -2429,12 +2355,14 @@ Get detailed information about a specific quarantine item, including full email 
 | `fuzzy_hashes` | array | Fuzzy hash data for the email |
 
 **Error Responses:**
+
 - `502 Bad Gateway`: Failed to fetch details from mailcow
 
 **Notes:**
+
 - Proxies to mailcow's `/inc/ajax/qitem_details.php?id={item_id}` using the API key for authentication
+
 - The response is the first element of the array returned by mailcow
-- Used by the frontend's email detail modal
 
 ---
 
@@ -2442,48 +2370,29 @@ Get detailed information about a specific quarantine item, including full email 
 
 ### GET /stats/dashboard
 
-Get main dashboard statistics.
+Read current aggregate counts. The response has:
 
-**Response:**
-```json
-{
-  "messages": {
-    "24h": 1234,
-    "7d": 8765,
-    "30d": 34567
-  },
-  "spam": {
-    "24h": 56,
-    "7d": 234,
-    "percentage_24h": 4.54
-  },
-  "failed_deliveries": {
-    "24h": 12,
-    "7d": 45
-  },
-  "auth_failures": {
-    "24h": 89,
-    "7d": 456
-  },
-  "direction": {
-    "inbound_24h": 800,
-    "outbound_24h": 434,
-    "internal_24h": 120
-  }
-}
-```
+- `messages`: `24h`, `7d`, `30d` delivery-leg counts, plus deduplicated `unique_24h` and `unique_7d` message counts.
+
+- `blocked`: `24h`, `7d`, `percentage_24h` for bounced, rejected and spam statuses.
+
+- `deferred` and `auth_failures`: `24h` and `7d` counts.
+
+- `direction`: `inbound_24h`, `outbound_24h`, `internal_24h`.
+
+There is no top-level spam or failed_deliveries object. A data-read failure can return an error and zero-valued fallback fields with HTTP 200, so inspect `error` as well as the HTTP status.
 
 ---
 
 ### GET /stats/timeline
 
-Get message timeline for charts.
-
 **Query Parameters:**
 
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `hours` | int | Number of hours to show (default: 24) |
+| Parameter | Type | Default | Constraints and purpose |
+| --- | --- | --- | --- |
+| `hours` | integer | `24` | How many hours back to chart, one bucket per hour |
+
+Get message timeline for charts.
 
 **Response:**
 ```json
@@ -2509,13 +2418,13 @@ Get message timeline for charts.
 
 ### GET /stats/top-spam-triggers
 
-Get top spam detection symbols.
-
 **Query Parameters:**
 
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `limit` | int | Number of results (default: 10) |
+| Parameter | Type | Default | Constraints and purpose |
+| --- | --- | --- | --- |
+| `limit` | integer | `10` | Number of symbols to return |
+
+Get the Rspamd symbols seen most often on spam in the last 7 days. On a read error, the response is `{ "triggers": [], "error": "..." }` with HTTP 200.
 
 **Response:**
 ```json
@@ -2532,20 +2441,20 @@ Get top spam detection symbols.
 
 ### GET /stats/top-blocked-ips
 
-Get top blocked/warned IP addresses.
-
 **Query Parameters:**
 
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `limit` | int | Number of results (default: 10) |
+| Parameter | Type | Default | Constraints and purpose |
+| --- | --- | --- | --- |
+| `limit` | integer | `10` | Number of addresses to return |
+
+Get the addresses with the most Netfilter (Fail2ban) log entries in the last 7 days. On a read error, the response is `{ "blocked_ips": [], "error": "..." }` with HTTP 200.
 
 **Response:**
 ```json
 {
   "blocked_ips": [
     {
-      "ip": "1.1.1.1",
+      "ip": "198.51.100.53",
       "count": 45,
       "last_seen": "2025-12-25T10:30:00Z"
     }
@@ -2557,13 +2466,13 @@ Get top blocked/warned IP addresses.
 
 ### GET /stats/recent-activity
 
-Get recent message activity stream.
-
 **Query Parameters:**
 
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `limit` | int | Number of results (default: 20) |
+| Parameter | Type | Default | Constraints and purpose |
+| --- | --- | --- | --- |
+| `limit` | integer | `20` | Number of messages to return |
+
+Get the most recently updated messages, newest first.
 
 **Response:**
 ```json
@@ -2572,7 +2481,7 @@ Get recent message activity stream.
     {
       "time": "2025-12-25T10:30:00Z",
       "sender": "user@example.com",
-      "recipient": "other@gmail.com",
+      "recipient": "other@example.net",
       "subject": "Hello World",
       "direction": "outbound",
       "status": "delivered",
@@ -2622,6 +2531,12 @@ An ignored container is still listed but never counted: `running`, `stopped` and
 
 ### PUT /status/containers/{container}/ignore
 
+**JSON fields:**
+
+| Field | Type | Default | Constraints and purpose |
+| --- | --- | --- | --- |
+| `ignored` | boolean | Required | `true` to ignore the container, `false` to count it again |
+
 Ignore or stop ignoring one container, for example `ipv6nat-mailcow` on a server without IPv6. The choice is stored on the server for every user.
 
 **Request:**
@@ -2656,6 +2571,12 @@ Get storage/disk usage information.
 
 ### GET /status/version
 
+**Query Parameters:**
+
+| Parameter | Type | Default | Constraints and purpose |
+| --- | --- | --- | --- |
+| `force` | boolean | `false` | Force a fresh version check |
+
 Get mailcow version and update status.
 
 **Response:**
@@ -2673,13 +2594,13 @@ Get mailcow version and update status.
 
 ### GET /status/app-version
 
-Get application version and check for updates from GitHub.
-
 **Query Parameters:**
 
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `force` | boolean | Force a fresh version check regardless of cache age (default: false) |
+| Parameter | Type | Default | Constraints and purpose |
+| --- | --- | --- | --- |
+| `force` | boolean | `false` | Force a fresh version check |
+
+Get application version and check for updates from GitHub.
 
 **Response:**
 ```json
@@ -2687,17 +2608,23 @@ Get application version and check for updates from GitHub.
   "current_version": "1.4.9",
   "latest_version": "1.4.9",
   "update_available": false,
-  "changelog": "### Added\n\n#### Background Jobs Enhanced UI\n- Compact layout...",
+  "changelog": "### Added\n\n#### Background jobs list\n- Compact layout...",
   "last_checked": "2026-01-08T15:52:46Z"
 }
 ```
 
 **Implementation Notes:**
+
 - Version checks are performed by the scheduler every 6 hours
+
 - Results are cached in `app_version_cache` (managed by `scheduler.py`)
+
 - Status endpoint retrieves cached data via `get_app_version_cache()`
+
 - Use `force=true` parameter to bypass cache and trigger immediate check
+
 - All timestamps include UTC timezone indicator ('Z' suffix)
+
 - Changelog is retrieved from GitHub releases in Markdown format
 
 **Version Check Process:**
@@ -2804,10 +2731,9 @@ Get combined status summary for dashboard.
 
 Get system configuration and status information.
 
-**Description:**
-Returns comprehensive system configuration, import status, correlation status, and background job status. When `SETTINGS_EDIT_VIA_UI_ENABLED=true`, also includes editable configuration and migration status.
+**Description:** Returns system configuration, import status, correlation status, and background job status. When `SETTINGS_EDIT_VIA_UI_ENABLED=true`, also includes editable configuration and migration status.
 
-**Authentication:** Required
+**Authentication:** Required when sign-in is enabled.
 
 **Response:**
 ```json
@@ -2822,12 +2748,16 @@ Returns comprehensive system configuration, import status, correlation status, a
   },
   "configuration": {
     "mailcow_url": "https://mail.example.com",
+    "server_ip": "192.0.2.10",
     "local_domains": ["example.com"],
     "fetch_interval": 60,
     "fetch_count_postfix": 2000,
     "fetch_count_rspamd": 500,
     "fetch_count_netfilter": 500,
+    "fetch_max_pages": 50,
     "retention_days": 7,
+    "max_correlation_age_minutes": 10,
+    "correlation_check_interval": 120,
     "timezone": "UTC",
     "app_title": "mailcow Logs Viewer",
     "log_level": "WARNING",
@@ -2836,6 +2766,8 @@ Returns comprehensive system configuration, import status, correlation status, a
     "max_search_results": 1000,
     "csv_export_limit": 10000,
     "scheduler_workers": 4,
+    "rspamd_configured": true,
+    "database_version": "16.4",
     "auth_enabled": true,
     "basic_auth_enabled": true,
     "oauth2_enabled": false,
@@ -2925,7 +2857,7 @@ Returns comprehensive system configuration, import status, correlation status, a
       "schedule": "Daily at 2 AM",
       "description": "Removes old logs based on retention period",
       "retention": "7 days",
-      "status": "scheduled",
+      "status": "success",
       "last_run": "2026-01-08T02:00:00Z",
       "error": null
     },
@@ -2945,7 +2877,8 @@ Returns comprehensive system configuration, import status, correlation status, a
     },
     "update_geoip": {
       "schedule": "Weekly (Sunday 3 AM)",
-      "description": "Updates MaxMind GeoIP databases for DMARC source IP enrichment",
+      "description": "Updates MaxMind GeoIP databases (City & ASN)",
+      "enabled": true,
       "status": "success",
       "last_run": "2026-01-05T03:00:00Z",
       "error": null
@@ -2956,7 +2889,7 @@ Returns comprehensive system configuration, import status, correlation status, a
       "message_id": "<unique-id@example.com>",
       "queue_id": "ABC123",
       "sender": "user@example.com",
-      "recipient": "other@gmail.com",
+      "recipient": "other@example.net",
       "created_at": "2025-12-25T10:28:00Z",
       "age_minutes": 2
     }
@@ -2965,52 +2898,49 @@ Returns comprehensive system configuration, import status, correlation status, a
 ```
 
 **Response Fields (when `SETTINGS_EDIT_VIA_UI_ENABLED=true`):**
+
 - `settings_edit_via_ui_enabled`: Boolean indicating if UI editing is enabled
+
 - `settings_migrated`: Boolean indicating if settings have been migrated from ENV to DB
-- `editable_config`: Dictionary of editable settings (sensitive fields masked) - only present when UI editing is enabled
+
+- `editable_config`: Dictionary of editable settings (sensitive fields masked); only present when UI editing is enabled
+
+**Configuration notes:**
+
+- `auth_username` is `null` unless Basic Auth is on; `oauth2_provider_name` is `null` unless OAuth2 is on.
+
+- `mailcow_rw_key_status` and `rspamd_password_status`: without a read-write API key or Rspamd password, the field is `{"configured": false, "valid": false, "error": null}`. With one that has not been checked since the last change, it is `null`.
+
+- If the data cannot be read, the endpoint still answers 200 with `error` set and empty `configuration`, `import_status`, `correlation_status` and `background_jobs`.
 
 **Background Jobs Status Tracking:**
 
-Each background job reports real-time execution status:
+The real response has one entry per job (29 in total; the example shows 8). Each entry reports its current state:
 
 | Field | Type | Description |
 |-------|------|-------------|
 | `interval` / `schedule` | string | How often the job runs |
 | `description` | string | Human-readable job description |
-| `status` | string | Current status: `running`, `success`, `failed`, `idle`, `scheduled` |
+| `status` | string | Current status: `idle`, `running`, `success`, `failed`, `disabled`, `skipped` or `unknown` (see [Status Values](#status-values)) |
 | `last_run` | datetime | UTC timestamp of last execution (with 'Z' suffix) |
 | `error` | string / null | Error message if job failed, otherwise null |
 | `pending_items` | int | Number of items waiting (for correlation jobs only) |
 | `max_age` / `expire_after` / `retention` | string | Job-specific configuration |
+| `services` | string | Comma-separated raw log services collected (`fetch_raw_logs` only) |
 
-**Status Values:**
-- `running` - Job is currently executing
-- `success` - Job completed successfully
-- `failed` - Job encountered an error
-- `idle` - Job hasn't run yet
-- `scheduled` - Job is scheduled but runs infrequently (e.g., daily cleanup)
-
-**Job Descriptions:**
-
-1. **fetch_logs**: Fetches Postfix, Rspamd, and Netfilter logs from mailcow API every 60 seconds
-2. **complete_correlations**: Links Postfix logs to message correlations every 2 minutes
-3. **update_final_status**: Updates message delivery status when late-arriving Postfix logs are found
-4. **expire_correlations**: Marks old incomplete correlations as expired after 10 minutes
-5. **cleanup_logs**: Removes logs older than retention period (runs daily at 2 AM)
-6. **check_app_version**: Checks GitHub for application updates every 6 hours
-7. **dns_check**: Validates DNS records (SPF, DKIM, DMARC) for all active domains every 6 hours
-8. **update_geoip**: Updates MaxMind GeoLite2 databases (City + ASN) for DMARC source IP enrichment (runs weekly on Sunday at 3 AM)
+A job that is off reports `status: "disabled"` and an interval such as `Disabled (feature off)`. What each job does is in the [Background Jobs List](#background-jobs-list).
 
 ---
+
+The full result also includes `smtp_configuration`, `dmarc_configuration`, `geoip_configuration` and `raw_logs_required`. Editable mode adds `default_config` as well as `editable_config` and `settings_migrated`. Job metadata can include `enabled`, `feature_disabled`, `disabled_reason` and `settings_section`. The Status and Settings pages read these keys. Without MaxMind credentials, `geoip_configuration.databases` has the shape `{"City": {"installed": false, "version": null, "last_updated": null}, "ASN": {...}}`.
 
 ### GET /api/settings
 
 Get editable settings configuration for UI editing.
 
-**Description:**
-Returns all settings that can be edited via the web UI, along with feature flags and migration status. Only available when `SETTINGS_EDIT_VIA_UI_ENABLED=true`.
+**Description:** Returns all settings that can be edited via the web UI, along with feature flags and migration status. It remains readable when UI editing is off; database overrides reload only when editing is enabled.
 
-**Authentication:** Required
+**Authentication:** Required when sign-in is enabled.
 
 **Response:**
 ```json
@@ -3029,7 +2959,6 @@ Returns all settings that can be edited via the web UI, along with feature flags
     "retention_days": 7,
     "max_correlation_age_minutes": 10,
     "correlation_check_interval": 120,
-    "app_port": 8080,
     "log_level": "WARNING",
     "app_title": "mailcow Logs Viewer",
     "app_logo_url": "",
@@ -3061,7 +2990,7 @@ Returns all settings that can be edited via the web UI, along with feature flags
     "dmarc_allow_report_delete": false,
     "enable_weekly_summary": true,
     "dmarc_imap_enabled": true,
-    "dmarc_imap_host": "imap.gmail.com",
+    "dmarc_imap_host": "imap.example.net",
     "dmarc_imap_port": 993,
     "dmarc_imap_use_ssl": true,
     "dmarc_imap_user": "dmarc@example.com",
@@ -3077,37 +3006,60 @@ Returns all settings that can be edited via the web UI, along with feature flags
 ```
 
 **Response Fields:**
+
+- `default_config`: Application defaults for editable fields.
+
 - `settings_edit_via_ui_enabled`: Boolean indicating if UI editing is enabled
+
 - `settings_migrated`: Boolean indicating if settings have been migrated from ENV to DB
+
 - `configuration`: Dictionary of all editable settings (sensitive fields are masked with `********`)
-- `env_locked_keys`: Array of setting keys where an ENV variable is explicitly set (ENV always overrides DB for these keys)
+
+- `env_locked_keys`: Setting keys set by an environment variable. The environment value always wins over the database. Empty when UI editing is off.
 
 **Sensitive Fields (Masked):**
+
 - `mailcow_api_key`
+
+- `mailcow_api_key_rw`
+
+- `rspamd_password`
+
 - `auth_password`
+
 - `oauth2_client_secret`
+
 - `smtp_password`
+
 - `dmarc_imap_password`
+
 - `session_secret_key`
+
 - `maxmind_license_key`
 
 **Notes:**
+
 - Automatically reloads settings from database if UI editing is enabled
+
 - Sensitive fields are masked with `********` in responses
+
 - Empty sensitive fields are returned as empty string `""`
+
 - `env_locked_keys` shows which fields are controlled by ENV and cannot be overridden from the UI
-- Only editable settings are included (PostgreSQL database settings are excluded)
+
+- Only editable settings are included. The PostgreSQL settings, `SETTINGS_EDIT_VIA_UI_ENABLED`, `AUTH_ENABLED`, `TZ`, `APP_PORT`, `CORS_ALLOWED_ORIGINS` and the legacy `WEBHOOK_*` settings are excluded.
 
 ---
 
 ### PUT /api/settings
 
-Update settings from web UI.
+Send a JSON object in the request body. The object itself contains the setting keys shown below; there is no `body` wrapper.
 
-**Description:**
-Updates application settings stored in database. Only available when `SETTINGS_EDIT_VIA_UI_ENABLED=true`. Settings are validated before saving, and all components (including MailcowAPI) are automatically reloaded.
+Update settings from the web UI.
 
-**Authentication:** Required
+**Description:** Updates application settings stored in the database. Only available when `SETTINGS_EDIT_VIA_UI_ENABLED=true`. Settings are validated before saving. After saving, the app reloads the settings, the mailcow API client and the OAuth2 client, reschedules the interval jobs, and deletes some data of features that are now off (see [purge-feature-data](#post-apisettingspurge-feature-data)).
+
+**Authentication:** Required when sign-in is enabled.
 
 **Request Body:**
 ```json
@@ -3126,18 +3078,25 @@ Updates application settings stored in database. Only available when `SETTINGS_E
 ```
 
 **Request Fields:**
+
 - Any editable setting key (see `GET /api/settings` for full list)
+
 - Sensitive fields: Send `********` to keep current value unchanged, send empty string `""` to clear the value
-- Non-sensitive fields: Send `null` or omit to use default value
+
+- Omit a field to leave it unchanged. `null` is kept for optional fields, coerced to an empty string for non-optional strings, and to zero/false for non-optional numbers/booleans; it is not a reset-to-default instruction.
+
+Changing sign-in settings revokes existing sessions; the operator who saved gets a replacement session cookie. The response always includes `mailcow_rw_key_changed` and `rspamd_password_changed`: each is `true` when that credential is set after the save and it, or the address it is sent to, changed. Changed server or account values cannot reuse a masked stored secret; send the secret again for the new destination.
+
+A key set by an environment variable can be saved, but the saved value has no effect while the variable is set; no error is returned. Keys that are not editable settings are ignored. A body with no editable change saves nothing and returns the current configuration without the `*_changed` keys.
 
 #### Basic Auth Lockout Prevention
 
-When enabling Basic Auth (`basic_auth_enabled` changing from `false` to `true`), the request must include two additional verification fields:
+When the request sends `basic_auth_enabled` as JSON `true` while Basic Auth is off, it must include two more fields (a string such as `"true"` skips this check):
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `verify_username` | string | Yes (when enabling auth) | The username to verify - must match `auth_username` being saved |
-| `verify_password` | string | Yes (when enabling auth) | The password to verify - must match `auth_password` being saved |
+| `verify_username` | string | Yes (when enabling auth) | Must match `auth_username` in the request, or the stored username (default `admin`) when the request does not change it |
+| `verify_password` | string | Yes (when enabling auth) | Must match `auth_password` in the request, or the stored password when the request omits it or sends `********` |
 
 This prevents users from accidentally locking themselves out of the application by enabling authentication without knowing the credentials.
 
@@ -3152,7 +3111,7 @@ This prevents users from accidentally locking themselves out of the application 
 }
 ```
 
-> **Note:** `verify_username` and `verify_password` are only required when enabling Basic Auth (switching from `false` to `true`). They are not needed when disabling Basic Auth or when Basic Auth is already enabled.
+`verify_username` and `verify_password` are only required when enabling Basic Auth (switching from `false` to `true`). They are not needed when disabling Basic Auth or when Basic Auth is already enabled.
 
 **Response:**
 ```json
@@ -3170,7 +3129,9 @@ This prevents users from accidentally locking themselves out of the application 
     "smtp_user": "noreply@example.com",
     "smtp_password": "********",
     "admin_email": "admin@example.com"
-  }
+  },
+  "mailcow_rw_key_changed": false,
+  "rspamd_password_changed": false
 }
 ```
 
@@ -3186,9 +3147,19 @@ This prevents users from accidentally locking themselves out of the application 
 **400 Bad Request** (Validation error):
 ```json
 {
-  "detail": "Validation error: 1 validation error for Settings\nmailcow_url\n  Input should be a valid string [type=string_type, input_value=None, input_type=NoneType]"
+  "detail": "Invalid settings for: smtp_port"
 }
 ```
+
+When no field can be named, `detail` is `Invalid settings. Check the submitted values.`
+
+**400 Bad Request** (other checks), with these `detail` texts:
+
+- An unknown feature in `disabled_features`: `disabled_features accepts only known feature names.`
+- A server address changed but its stored secret was not sent again: `You changed the server the {names} is sent to. Enter the {names} again: ...`
+- A server address changed for a secret set by an environment variable: `The {label} is set by the {SECRET} environment variable, so it can only be sent to a different server from there. ...`
+- An invalid address in `admin_email`, `blacklist_alert_email` or `dmarc_error_email`: `{label}: "{bad}" is not an email address. Separate several addresses with commas.`
+- Clearing the password while Basic Auth is on: `Cannot clear the password while Basic Auth is enabled. Disable Basic Auth first, or set a new password.`
 
 **400 Bad Request** (No password when enabling Basic Auth):
 ```json
@@ -3212,12 +3183,11 @@ This prevents users from accidentally locking themselves out of the application 
 ```
 
 **Notes:**
-- Only editable settings are accepted (PostgreSQL settings are filtered out)
-- Settings are validated using Pydantic before saving
-- `********` for sensitive fields means "keep current value" (not changed)
-- Settings are automatically reloaded after saving
-- MailcowAPI configuration is automatically updated
-- Returns updated configuration with masked sensitive fields
+
+- `********` for sensitive fields means "keep current value"
+
+- Returns the updated configuration with masked sensitive fields
+
 - When enabling Basic Auth, credential verification uses timing-safe comparison (`secrets.compare_digest`)
 
 ---
@@ -3226,10 +3196,9 @@ This prevents users from accidentally locking themselves out of the application 
 
 Import current configuration from environment variables to database.
 
-**Description:**
-Migrates all current effective settings (from defaults + ENV + existing DB) into database. This allows users to transition from ENV-only management to UI management. After migration, ENV variables can be removed (except `SETTINGS_EDIT_VIA_UI_ENABLED`).
+**Description:** Migrates all current effective settings (from defaults + ENV + existing DB) into database. This allows users to transition from ENV-only management to UI management. After migration, remove only optional variables you intend to manage in the UI. Keep `MAILCOW_URL`, `MAILCOW_API_KEY`, the database connection values and `SETTINGS_EDIT_VIA_UI_ENABLED`; required mailcow values are read before database overrides load.
 
-**Authentication:** Required
+**Authentication:** Required when sign-in is enabled.
 
 **Response:**
 ```json
@@ -3248,10 +3217,15 @@ Migrates all current effective settings (from defaults + ENV + existing DB) into
 ```
 
 **Response Fields:**
+
 - `message`: Success message
+
 - `settings_edit_via_ui_enabled`: Always `true` (only available when enabled)
+
 - `settings_migrated`: Always `true` after import
+
 - `configuration`: Updated configuration with masked sensitive fields
+
 - `env_locked_keys`: Array of setting keys where ENV is set and overrides DB values
 
 **Error Responses:**
@@ -3264,23 +3238,30 @@ Migrates all current effective settings (from defaults + ENV + existing DB) into
 ```
 
 **Notes:**
+
 - Imports all editable settings from current effective configuration
+
 - Settings are automatically reloaded after import
+
 - MailcowAPI configuration is automatically updated
+
 - `env_locked_keys` shows which fields are controlled by ENV and cannot be overridden from the UI
+
 - After migration, settings are managed via UI and stored in database
+
 - `SETTINGS_EDIT_VIA_UI_ENABLED` must remain in ENV (not stored in DB)
 
 ---
 
 ### POST /api/settings/purge-feature-data
 
+Send a JSON object in the request body with the feature ID shown below; there is no `body` wrapper.
+
 Delete all database data associated with a disabled feature.
 
-**Description:**
-When a feature is disabled, this endpoint permanently deletes all stored data from that feature's database tables. The feature must already be disabled (in `disabled_features`). Only available when `SETTINGS_EDIT_VIA_UI_ENABLED=true`.
+**Description:** When a feature is disabled, this endpoint permanently deletes all stored data from that feature's database tables. The feature must already be disabled (in `disabled_features`). Only available when `SETTINGS_EDIT_VIA_UI_ENABLED=true`.
 
-**Authentication:** Required
+**Authentication:** Required when sign-in is enabled.
 
 **Request Body:**
 ```json
@@ -3290,9 +3271,10 @@ When a feature is disabled, this endpoint permanently deletes all stored data fr
 ```
 
 **Request Fields:**
-- `feature`: Feature ID to purge. Valid values: `netfilter`, `domains`, `dmarc`, `mailbox-stats`, `logs`, `blacklist`, `spam-filter`, `quarantine`, `devices`
 
-**Feature → Tables Mapping:**
+- `feature` (string, required): Feature ID to purge. Valid values: `netfilter`, `domains`, `dmarc`, `mailbox-stats`, `logs`, `blacklist`, `spam-filter`, `quarantine`, `devices`
+
+**Feature to Tables Mapping:**
 
 | Feature | Tables Truncated |
 |---------|-----------------|
@@ -3300,7 +3282,7 @@ When a feature is disabled, this endpoint permanently deletes all stored data fr
 | `domains` | `domain_dns_checks` |
 | `dmarc` | `dmarc_reports`, `dmarc_records`, `dmarc_syncs`, `tls_reports`, `tls_report_policies` |
 | `mailbox-stats` | `mailbox_statistics`, `alias_statistics` |
-| `logs` | `raw_service_logs` (only the services no other page reads; `dovecot`, `ratelimited` and `sogo` stay while their pages are on) |
+| `logs` | `raw_service_logs` (only services nothing collects any more; `dovecot` always stays because message details read it, `ratelimited` stays while Rate Limits is on, `sogo` stays while Devices is on) |
 | `blacklist` | `blacklist_checks`, `monitored_hosts` |
 | `spam-filter` | `spam_suppressions` |
 | `quarantine` | `quarantine_rules`, `quarantine_rule_logs` |
@@ -3344,17 +3326,21 @@ When a feature is disabled, this endpoint permanently deletes all stored data fr
 }
 ```
 
+**500 Internal Server Error**: `Purge failed. Check the application logs.` Nothing is deleted.
+
 **Notes:**
-- Tables are truncated with `CASCADE` to handle foreign key relationships
-- The frontend automatically calls this endpoint after saving settings with newly disabled features
-- A confirmation dialog warns the user before disabling a feature that data will be deleted
-- Features without database tables (e.g., `queue`, `rate-limits`) are not purgeable - the endpoint returns 400 for unknown features
+
+- Tables are truncated with `CASCADE` to handle foreign key relationships. For `raw_service_logs`, only the rows of services no longer collected are deleted.
+
+- `PUT /api/settings` already deletes some data of features that are off: alias statistics, mailbox statistics (when Mailbox Stats and Rate Limits are both off), ActiveSync devices, raw log rows nothing collects and the Rate Limits reset history. The Settings page then calls this endpoint for each newly disabled feature, after a confirmation that data will be deleted.
+
+- Features without database tables (for example `queue`, `rate-limits`) cannot be purged; the endpoint returns 400 for them.
 
 ---
 
 ### GET /settings/health
 
-Detailed health check with timing information.
+Detailed health check with timing information. Unlike `GET /api/health`, it needs authentication when sign-in is enabled. On a database failure it answers 200 with `"status": "unhealthy"`, `timestamp` and `error`.
 
 **Response:**
 ```json
@@ -3388,26 +3374,63 @@ Manually trigger a background job.
 | `job_name` | string | Name of the job to run |
 
 **Supported Job Names:**
+
+- `correlate_dovecot`: Link Dovecot delivery outcomes
+
+- `cleanup_dmarc_reports`: Remove old DMARC and TLS reports
+
+- `dmarc_imap_sync`: Import reports from IMAP
+
+- `anomaly_detection`: Run anomaly detection
+
+- `smtp_abuse`: Run SMTP abuse enforcement
+
+- `protection_rules`: Process protection rules
+
+- `fetch_raw_logs`: Collect raw service logs
+
+- `cleanup_raw_logs`: Remove old raw logs
+
 - `fetch_logs`: Import logs from mailcow
+
 - `complete_correlations`: Link logs to messages
+
 - `update_final_status`: Update delivery status
+
 - `expire_correlations`: Expire old correlations
+
 - `cleanup_logs`: Clean up old logs
+
 - `check_app_version`: Check for updates
+
 - `dns_check`: Validate DNS records
+
 - `sync_local_domains`: Sync domains
+
 - `update_geoip`: Update MaxMind databases
+
 - `mailbox_stats`: Update mailbox statistics
+
 - `alias_stats`: Update alias statistics
+
 - `blacklist_check`: Check blacklists
+
 - `sync_transports`: Sync transports
+
 - `send_weekly_summary`: Send weekly summary email
+
 - `detect_suppressions`: Detect bounces and suppress recipients
+
 - `sync_suppressions`: Sync suppressions to Rspamd
+
 - `expire_suppressions`: Expire old suppressions
+
 - `process_quarantine_rules`: Process quarantine auto-rules
+
 - `cleanup_deferred_queue`: Clean up stuck deferred queue items
+
 - `eas_devices`: Record ActiveSync devices from the SOGo log
+
 - `cleanup_eas_devices`: Remove ActiveSync devices not seen within the retention period
 
 **Response:**
@@ -3420,8 +3443,12 @@ Manually trigger a background job.
 ```
 
 **Error Responses:**
+
 - `404`: Unknown job name
+
 - `409`: Job is already running
+
+The job runs in the background after the response. This endpoint does not check whether the job's feature or prerequisites are on: a job that is switched off returns at once, and its status then shows `success`.
 
 ---
 
@@ -3431,7 +3458,7 @@ Manually trigger a background job.
 
 Get detailed GeoIP status for frontend polling during setup/download.
 
-**Authentication:** Required
+**Authentication:** Required when sign-in is enabled.
 
 **Response:**
 ```json
@@ -3461,15 +3488,23 @@ Get detailed GeoIP status for frontend polling during setup/download.
 ```
 
 **Response Fields:**
+
 - `configured`: Boolean - whether MaxMind Account ID and License Key are set
+
 - `db_valid`: Boolean or null - `true` if DB validated, `false` if corrupt, `null` if not yet checked
+
 - `databases`: Object - file-level info for City and ASN databases (size, age, availability)
+
 - `job_status`: String - last GeoIP update job status: `idle`, `running`, `success`, `failed`
+
 - `job_error`: String or null - error message if last job failed
+
 - `job_last_run`: String or null - ISO timestamp of last job execution
 
 **Notes:**
+
 - Used by the GeoIP Setup Modal to poll download progress
+
 - Returns `configured: false` when credentials are not set
 
 ---
@@ -3478,7 +3513,7 @@ Get detailed GeoIP status for frontend polling during setup/download.
 
 Trigger GeoIP database download in background.
 
-**Authentication:** Required
+**Authentication:** Required when sign-in is enabled.
 
 **Response:**
 ```json
@@ -3489,12 +3524,17 @@ Trigger GeoIP database download in background.
 ```
 
 **Error Responses:**
-- `400`: MaxMind license key not configured
+
+- `400`: The MaxMind Account ID or License Key is not set (`detail`: `MaxMind license key not configured`)
 
 **Notes:**
+
 - Returns immediately; download runs in background
-- Use `GET /api/settings/geoip/status` to poll progress (`job_status` field)
-- Download includes both GeoLite2-City and GeoLite2-ASN databases
+
+- Use `GET /api/settings/geoip/status` to poll progress (`job_status` field). `job_status` changes to `running` only when the background task starts, so the first poll can still show the previous result.
+
+- Downloads the GeoLite2 City and ASN databases that are missing or 7 or more days old. Fresh files are kept.
+
 - After download completes, readers are reloaded and validated automatically
 
 ---
@@ -3503,7 +3543,7 @@ Trigger GeoIP database download in background.
 
 Validate MaxMind license key on-demand. Result is persisted to database.
 
-**Authentication:** Required
+**Authentication:** Required when sign-in is enabled.
 
 **Response (valid):**
 ```json
@@ -3533,24 +3573,32 @@ Validate MaxMind license key on-demand. Result is persisted to database.
 ```
 
 **Response Fields:**
+
 - `configured`: Boolean - whether a MaxMind license key is present
+
 - `valid`: Boolean - whether the license key passed MaxMind's validation API
+
 - `error`: String or null - error description if validation failed (`"Invalid"`, `"Connection error"`, `"Status {code}"`)
 
 **Notes:**
+
 - Validates against MaxMind's `secret-scanning.maxmind.com` API with a 5-second timeout
+
 - Result is **persisted in the database** (`system_settings` table) so it survives page refreshes and container restarts
+
 - The `maxmind_status` field in `GET /api/settings/info` returns the last persisted result (or `null` if never checked)
-- Clearing MaxMind credentials via `PUT /api/settings` automatically clears the persisted validation result
-- The scheduled "Update MaxMind Databases" job also marks the license as valid after a successful database download
+
+- A `PUT /api/settings` that includes `maxmind_account_id`, or a `maxmind_license_key` other than `********`, clears the persisted validation result
+
+- After any Update GeoIP run that ends with a City or ASN database file on disk, the license is stored as valid
 
 ---
 
 ### POST /api/settings/mailcow/rw-key/validate
 
-Check that mailcow accepts the Read-Write API key (`MAILCOW_API_KEY_RW`) for writes, without changing anything. The Settings page calls it right after a new or changed key or mailcow URL is saved, and from the Validate button. Result is persisted to database.
+Check that mailcow accepts the read-write API key (`MAILCOW_API_KEY_RW`) for writes, without changing anything. The Settings page calls it right after a new or changed key or mailcow URL is saved, and from the Validate button. The result is stored in the database.
 
-**Authentication:** Required
+**Authentication:** Required when sign-in is enabled.
 
 **Response (accepted):**
 ```json
@@ -3571,18 +3619,29 @@ Check that mailcow accepts the Read-Write API key (`MAILCOW_API_KEY_RW`) for wri
 }
 ```
 
+**Response (not configured):** `{"configured": false, "valid": false, "error": null}`. This result is not stored.
+
 **Response Fields:**
-- `configured`: Boolean - whether a Read-Write key is set
+
+- `configured`: Boolean - whether a read-write API key is set
+
 - `valid`: Boolean - whether mailcow accepted the key for writes
+
 - `error`: String or null - `"rejected"` (401: wrong or inactive key, or this server's IP is not allowed for the key), `"read_only"` (403: a read-only key), `"connection"` (mailcow not reachable), `"unexpected"` (any other answer)
+
 - `http_status`: Integer - mailcow's status code, present when mailcow answered with an error
 
 **Notes:**
+
 - Sends one `POST /api/v1/edit/mlv-key-check` to mailcow. mailcow checks the key and its allowed IPs before routing, so an accepted key gets `404 route not found` and nothing is changed
+
 - No retry: every rejected key is also a failed login for mailcow's Fail2ban
+
 - The `mailcow_rw_key_status` field in `GET /api/settings/info` returns the last result for the current mailcow URL and key; `null` if not checked since either changed
-- `PUT /api/settings` returns `mailcow_rw_key_changed: true` when the saved mailcow URL or Read-Write key differs from before
-- When mailcow refuses the Read-Write key during an action (quarantine, queue, Fail2Ban, rate limits and other writes), the endpoint answers `502` at once, without retries, and `detail` says whether the key was rejected or is read-only and what to fix
+
+- `PUT /api/settings` returns `mailcow_rw_key_changed: true` when the saved mailcow URL or read-write API key differs from before
+
+- When mailcow refuses the read-write API key during an action (quarantine, queue, Fail2Ban, rate limits and other writes), the endpoint answers `502` at once, without retries, and `detail` says whether the key was rejected or is read-only and what to fix
 
 ---
 
@@ -3590,7 +3649,7 @@ Check that mailcow accepts the Read-Write API key (`MAILCOW_API_KEY_RW`) for wri
 
 Check that Rspamd accepts the Rspamd password (`RSPAMD_PASSWORD`), the way the Rspamd web UI logs in, without changing anything. The Settings page calls it right after a new or changed password, Rspamd URL or mailcow URL is saved, and from the Validate button. Result is persisted to database.
 
-**Authentication:** Required
+**Authentication:** Required when sign-in is enabled.
 
 **Response (rejected):**
 ```json
@@ -3602,16 +3661,26 @@ Check that Rspamd accepts the Rspamd password (`RSPAMD_PASSWORD`), the way the R
 }
 ```
 
+**Response (not configured):** `{"configured": false, "valid": false, "error": null}`. This result is not stored.
+
 **Response Fields:**
+
 - `configured`: Boolean - whether an Rspamd password is set
+
 - `valid`: Boolean - whether Rspamd accepted the password
+
 - `error`: String or null - `"rejected"` (401 or 403: wrong password), `"redirected"` (a proxy answered with a redirect before Rspamd saw the password; set `RSPAMD_URL`), `"connection"` (Rspamd not reachable), `"unexpected"` (any other answer)
+
 - `http_status`: Integer - the status code, present when the answer was an error
 
 **Notes:**
+
 - Sends one `GET /rspamd/auth` with the `Password` header, through the mailcow proxy or straight to `RSPAMD_URL` when it is set. An accepted password gets `200` with `"auth": "ok"`
+
 - No retry: a wrong password is also a failed login for mailcow's Fail2ban
+
 - The `rspamd_password_status` field in `GET /api/settings/info` returns the last result for the current address and password; `null` if not checked since either changed
+
 - `PUT /api/settings` returns `rspamd_password_changed: true` when the saved password, Rspamd URL or mailcow URL differs from before
 
 ---
@@ -3620,7 +3689,7 @@ Check that Rspamd accepts the Rspamd password (`RSPAMD_PASSWORD`), the way the R
 
 Validate GeoIP database integrity by running test IP lookups.
 
-**Authentication:** Required
+**Authentication:** Required when sign-in is enabled.
 
 **Response:**
 ```json
@@ -3633,10 +3702,14 @@ Validate GeoIP database integrity by running test IP lookups.
 ```
 
 **Response Fields:**
-- `valid`: Boolean - overall validation result
-- `city_ok`: Boolean - City database passed lookup test
-- `asn_ok`: Boolean - ASN database passed lookup test
-- `db_valid`: Boolean or null - current `_geoip_db_valid` state after reload
+
+- `valid`: Boolean. `true` when the City database answered a test lookup. The ASN database does not affect it.
+
+- `city_ok`: Boolean. The same value as `valid`.
+
+- `asn_ok`: Boolean. The same value as `valid`; the ASN result is not reported separately.
+
+- `db_valid`: Boolean or null. The stored validation state after the reload.
 
 **Error Response (DB not found):**
 ```json
@@ -3649,8 +3722,11 @@ Validate GeoIP database integrity by running test IP lookups.
 ```
 
 **Notes:**
+
 - Reloads readers before validation to pick up newly downloaded files
-- Tests lookups against well-known IPs (8.8.8.8, 1.1.1.1)
+
+- Looks up 8.8.8.8 and 1.1.1.1; only the City lookup decides the result
+
 - Called by the GeoIP Setup Modal as Step 3 (integrity check)
 
 ---
@@ -3671,7 +3747,10 @@ Test SMTP connection with detailed logging for diagnostics.
     "Starting SMTP connection test...",
     "Host: mail.example.com",
     "Port: 587",
-    "Use TLS: true",
+    "Use TLS: True",
+    "Use SSL: False",
+    "Verify SSL: Automatic",
+    "Relay Mode: False",
     "User: noreply@example.com",
     "Connecting to SMTP server...",
     "Connected",
@@ -3679,10 +3758,10 @@ Test SMTP connection with detailed logging for diagnostics.
     "TLS established",
     "Logging in...",
     "Login successful",
-    "Sending test email...",
+    "Sending test email to admin@example.com...",
     "Test email sent successfully",
     "Connection closed",
-    "✓ SMTP test completed successfully"
+    "SMTP test completed successfully"
   ]
 }
 ```
@@ -3695,21 +3774,34 @@ Test SMTP connection with detailed logging for diagnostics.
     "Starting SMTP connection test...",
     "Host: mail.example.com",
     "Port: 587",
+    "Use TLS: True",
+    "Use SSL: False",
+    "Verify SSL: Automatic",
+    "Relay Mode: False",
+    "User: noreply@example.com",
     "Connecting to SMTP server...",
-    "✗ Authentication failed: (535, b'5.7.8 Error: authentication failed')"
+    "Connected",
+    "Starting TLS...",
+    "TLS established",
+    "Logging in...",
+    "Authentication failed: (535, b'5.7.8 Error: authentication failed')"
   ]
 }
 ```
 
+In the real output, the final success line starts with a check mark and each failure line with a cross mark; the examples leave the marks out.
+
 **Response Fields:**
+
 - `success`: Boolean indicating if test passed
+
 - `logs`: Array of log messages showing connection attempt details
 
 **Notes:**
-- Sends actual test email to configured admin email address
-- Tests full connection flow: connect → TLS → authenticate → send
-- Useful for diagnosing SMTP configuration issues
-- Returns detailed error messages on failure
+
+- Sends a test email to the valid addresses in `ADMIN_EMAIL`, or to `SMTP_USER` when `ADMIN_EMAIL` is empty. If no valid address is left, the test fails. This test can send while normal SMTP delivery is turned off.
+
+- Runs the full flow: connect (SSL when `SMTP_USE_SSL` is on or the port is 465, otherwise STARTTLS when `SMTP_USE_TLS` is on), log in (skipped in relay mode), send.
 
 ---
 
@@ -3727,7 +3819,8 @@ Test IMAP connection with detailed logging for diagnostics.
     "Starting IMAP connection test...",
     "Host: mail.example.com",
     "Port: 993",
-    "Use SSL: true",
+    "Use SSL: True",
+    "Verify SSL: Automatic",
     "User: dmarc@example.com",
     "Folder: INBOX",
     "Connecting to IMAP server...",
@@ -3735,18 +3828,19 @@ Test IMAP connection with detailed logging for diagnostics.
     "Logging in...",
     "Login successful",
     "Listing mailboxes...",
-    "Found 5 mailboxes:",
-    "  - \"INBOX\"",
-    "  - \"Sent\"",
-    "  - \"Drafts\"",
-    "  - \"Spam\"",
-    "  - \"Trash\"",
+    "Found 7 mailboxes:",
+    "  - (\\HasNoChildren) \"/\" \"INBOX\"",
+    "  - (\\HasNoChildren \\Sent) \"/\" \"Sent\"",
+    "  - (\\HasNoChildren \\Drafts) \"/\" \"Drafts\"",
+    "  - (\\HasNoChildren \\Junk) \"/\" \"Junk\"",
+    "  - (\\HasNoChildren \\Trash) \"/\" \"Trash\"",
+    "  ... and 2 more",
     "Selecting folder: INBOX",
     "Folder selected: 42 messages",
     "Searching for emails...",
     "Found 42 emails in folder",
     "Connection closed",
-    "✓ IMAP test completed successfully"
+    "IMAP test completed successfully"
   ]
 }
 ```
@@ -3759,22 +3853,31 @@ Test IMAP connection with detailed logging for diagnostics.
     "Starting IMAP connection test...",
     "Host: mail.example.com",
     "Port: 993",
+    "Use SSL: True",
+    "Verify SSL: Automatic",
+    "User: dmarc@example.com",
+    "Folder: INBOX",
     "Connecting to IMAP server...",
-    "✗ IMAP error: [AUTHENTICATIONFAILED] Authentication failed."
+    "Connected using SSL",
+    "Logging in...",
+    "IMAP error: [AUTHENTICATIONFAILED] Authentication failed."
   ]
 }
 ```
 
+As with the SMTP test, the real success and failure lines start with a check or cross mark.
+
 **Response Fields:**
+
 - `success`: Boolean indicating if test passed
+
 - `logs`: Array of log messages showing connection attempt details
 
 **Notes:**
-- Tests full connection flow: connect → authenticate → list folders → select folder
-- Shows available mailboxes and message count
-- Useful for diagnosing IMAP configuration issues
-- Does not modify or process any emails
-- Returns detailed error messages on failure
+
+- Runs the full flow: connect, log in, list folders (up to 5 shown), open the folder read-only, count its messages.
+
+- Does not modify or process any emails.
 
 ---
 
@@ -3784,28 +3887,24 @@ CSV downloads use UTF-8 with a byte order mark (BOM) so spreadsheet applications
 
 CSV serialization is streamed in chunks. Source rows are fetched in batches of 500 through a database cursor. The cursor and database session close when the download finishes or disconnects. The frontend still buffers the complete download before saving it.
 
-CSV downloads are intended for spreadsheet viewing. Text with a formula-like
-prefix is prefixed with an apostrophe; fields are quoted and embedded quotes are
-escaped. Numeric values, including negative scores, retain their values. This
-changes only the downloaded representation, not stored messages or settings.
-Spreadsheet import settings vary; saving and reopening a CSV can remove text
-escaping. Treat exported content as untrusted when importing into other tools.
+Each export holds the newest rows first and stops at `CSV_EXPORT_LIMIT` rows (default 10,000). Each export route also answers `HEAD` with the same headers and no body.
 
+CSV downloads are intended for spreadsheet viewing. Text with a formula-like prefix is prefixed with an apostrophe; fields are quoted and embedded quotes are escaped. Numeric values, including negative scores, retain their values. This changes only the downloaded representation, not stored messages or settings. Spreadsheet import settings vary; saving and reopening a CSV can remove text escaping. Treat exported content as untrusted when importing into other tools.
 
 ### GET /export/postfix/csv
 
-Export Postfix logs to CSV file.
-
 **Query Parameters:**
 
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `search` | string | Search filter |
-| `sender` | string | Filter by sender |
-| `recipient` | string | Filter by recipient |
-| `status` | string | Filter by status |
-| `start_date` | datetime | Start date |
-| `end_date` | datetime | End date |
+| Parameter | Type | Default | Constraints and purpose |
+| --- | --- | --- | --- |
+| `search` | string or null | Unset | Substring of the log message, sender, recipient or queue ID |
+| `sender` | string or null | Unset | Substring of the sender |
+| `recipient` | string or null | Unset | Substring of the recipient |
+| `status` | string or null | Unset | Exact Postfix status |
+| `start_date` | datetime or null | Unset | Earliest log time (ISO 8601) |
+| `end_date` | datetime or null | Unset | Latest log time (ISO 8601) |
+
+Export Postfix logs to a CSV file, one row per log line.
 
 **Response:** CSV file download
 
@@ -3815,20 +3914,20 @@ Export Postfix logs to CSV file.
 
 ### GET /export/rspamd/csv
 
-Export Rspamd logs to CSV file.
-
 **Query Parameters:**
 
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `search` | string | Search filter |
-| `sender` | string | Filter by sender |
-| `direction` | string | Filter by direction |
-| `min_score` | float | Minimum spam score |
-| `max_score` | float | Maximum spam score |
-| `is_spam` | boolean | Filter by spam status |
-| `start_date` | datetime | Start date |
-| `end_date` | datetime | End date |
+| Parameter | Type | Default | Constraints and purpose |
+| --- | --- | --- | --- |
+| `search` | string or null | Unset | Substring of the subject, SMTP sender or Message-ID |
+| `sender` | string or null | Unset | Substring of the SMTP sender |
+| `direction` | string or null | Unset | Exact direction |
+| `min_score` | float or null | Unset | Lowest score |
+| `max_score` | float or null | Unset | Highest score |
+| `is_spam` | boolean or null | Unset | Only spam or only non-spam |
+| `start_date` | datetime or null | Unset | Earliest log time (ISO 8601) |
+| `end_date` | datetime or null | Unset | Latest log time (ISO 8601) |
+
+Export Rspamd logs to a CSV file.
 
 **Response:** CSV file download
 
@@ -3838,17 +3937,17 @@ Export Rspamd logs to CSV file.
 
 ### GET /export/netfilter/csv
 
-Export Netfilter logs to CSV file.
-
 **Query Parameters:**
 
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `search` | string | Search filter |
-| `ip` | string | Filter by IP |
-| `username` | string | Filter by username |
-| `start_date` | datetime | Start date |
-| `end_date` | datetime | End date |
+| Parameter | Type | Default | Constraints and purpose |
+| --- | --- | --- | --- |
+| `search` | string or null | Unset | Substring of the log message, IP or username |
+| `ip` | string or null | Unset | Substring of the IP |
+| `username` | string or null | Unset | Substring of the username |
+| `start_date` | datetime or null | Unset | Earliest log time (ISO 8601) |
+| `end_date` | datetime or null | Unset | Latest log time (ISO 8601) |
+
+Export Netfilter logs to a CSV file.
 
 **Response:** CSV file download
 
@@ -3858,21 +3957,21 @@ Export Netfilter logs to CSV file.
 
 ### GET /export/messages/csv
 
-Export Messages (correlations) to CSV file.
-
 **Query Parameters:**
 
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `search` | string | Search filter |
-| `sender` | string | Filter by sender |
-| `recipient` | string | Filter by recipient |
-| `direction` | string | Filter by direction |
-| `status` | string | Filter by status |
-| `user` | string | Filter by authenticated user |
-| `ip` | string | Filter by IP address |
-| `start_date` | datetime | Start date |
-| `end_date` | datetime | End date |
+| Parameter | Type | Default | Constraints and purpose |
+| --- | --- | --- | --- |
+| `search` | string or null | Unset | Substring of sender, recipient, subject, Message-ID or queue ID |
+| `sender` | string or null | Unset | Substring of the sender |
+| `recipient` | string or null | Unset | Substring of the recipient |
+| `direction` | string or null | Unset | Exact direction |
+| `status` | string or null | Unset | Exact final status |
+| `user` | string or null | Unset | Substring of the Rspamd user |
+| `ip` | string or null | Unset | Substring of the Rspamd client IP |
+| `start_date` | datetime or null | Unset | Earliest `first_seen` (ISO 8601) |
+| `end_date` | datetime or null | Unset | Latest `first_seen` (ISO 8601) |
+
+Export messages to a CSV file, one row per delivery leg. The filters are close to those of `GET /api/messages`, with two differences: `search` does not match the Rspamd IP or user, and `status=spam` matches only the final status `spam`.
 
 **Response:** CSV file download
 
@@ -3882,23 +3981,41 @@ Export Messages (correlations) to CSV file.
 
 ## DMARC
 
-### Report Management
+`DISABLED_FEATURES=dmarc` hides the **DMARC & TLS** page and stops the IMAP import, retention cleanup and related jobs, but the `/api/dmarc/*` endpoints still answer.
 
-`GET /api/dmarc/reports/all?page=1&limit=50` returns a combined page of DMARC and TLS report summaries, newest first. Equal import timestamps are ordered by report type and descending ID.
+### GET /api/dmarc/reports/config
 
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `page` | omitted | Positive page number. Omit it to retain the legacy unpaginated response. |
-| `limit` | 50 | Reports per page, from 1 to 200. Used when `page` is supplied. |
-| `search` | omitted | Keeps the reports whose domain or reporter (`org_name`) contains this text, in any case. `%`, `_` and `\` match literally. Leading and trailing spaces are ignored, only the first 255 characters are used, and an empty value lists every report. With `page`, `total` and `total_pages` count the matching reports. |
-| `sort_by` | `created_at` | Orders a paged request by `created_at` (import date), `type`, `domain`, `reporter`, `records` (record or policy count) or `period` (start of the report period). Domain and reporter compare in lower case. Any other value is refused with `422`. |
-| `sort_dir` | `desc` | `asc` or `desc`; any other value is refused with `422`. |
+Read `{ "allow_delete": false }`, reflecting `DMARC_ALLOW_REPORT_DELETE`. Report deletion is off by default.
 
-Paged responses contain `reports`, `total`, `allow_delete`, `page`, `limit`, `total_pages`, `sort_by`, and `sort_dir`. The order covers DMARC and TLS reports together and is applied before paging, so the next page continues it; empty values sort last, and ties fall back to the newest import, then type, then the highest ID. Without `page`, the legacy response keeps its newest-first order and ignores `sort_by` and `sort_dir`. `total` counts all reports of both types. Empty results return page 1 of 1. A page beyond the end is clamped to the last available page, including after deletions. Concurrent imports or deletions may shift reports between requests; reload from page 1 to refresh the history.
+---
+
+### POST /api/dmarc/cache/clear
+
+Clear the in-memory DMARC cache (it holds the domain list from `GET /api/dmarc/domains` for 5 minutes) and signal other app processes to clear theirs. No body is required. Returns `{ "status": "success", "message": "Cache cleared" }`.
+
+---
+
+### GET /api/dmarc/reports/all
+
+**Query Parameters:**
+
+| Parameter | Type | Default | Constraints and purpose |
+| --- | --- | --- | --- |
+| `page` | integer or null | Unset | Page number, at least 1. Omit it for the older unpaginated response. |
+| `limit` | integer | `50` | Reports per page, 1 to 200. Used only with `page`. |
+| `search` | string or null | Unset | Keeps the reports whose domain or reporter (`org_name`) contains this text, in any case. `%`, `_` and `\` match literally. Leading and trailing spaces are ignored, only the first 255 characters are used, and an empty value lists every report. |
+| `sort_by` | string | `created_at` | Orders a paged request by `created_at` (import date), `type`, `domain`, `reporter`, `records` (record or policy count) or `period` (start of the report period). Domain and reporter compare in lower case. Any other value returns `422`. |
+| `sort_dir` | string | `desc` | `asc` or `desc`; any other value returns `422`. |
+
+`GET /api/dmarc/reports/all?page=1&limit=50` returns a combined page of DMARC and TLS report summaries, newest first. In paged responses, equal import timestamps are ordered by report type and then descending ID.
+
+Paged responses contain `reports`, `total`, `allow_delete`, `page`, `limit`, `total_pages`, `sort_by`, and `sort_dir`. The order covers DMARC and TLS reports together and is applied before paging, so the next page continues it; empty values sort last, and ties fall back to the newest import, then type, then the highest ID. Without `page`, the response keeps its newest-first order and ignores `sort_by` and `sort_dir`. In both forms, `total` counts the reports of both types that match `search` (all reports when `search` is empty). Empty results return page 1 of 1. A page beyond the end is clamped to the last available page, including after deletions. Concurrent imports or deletions may shift reports between requests; reload from page 1 to refresh the history.
 
 Each report contains `id`, `type` (`dmarc` or `tls`), `domain`, `org_name`, `begin_date`, `end_date`, `record_count`, `created_at`, and `report_id`. Unpaginated responses retain only the original top-level fields: `reports`, `total`, and `allow_delete`.
 
-`GET /api/dmarc/reports/domains` returns how many reports each domain has, sorted by domain name. Domain names are compared trimmed and in lower case, so `Example.com` and `example.com` count as one domain.
+### GET /api/dmarc/reports/domains
+
+This endpoint returns how many reports each domain has, sorted by domain name. Domain names are compared trimmed and in lower case, so `Example.com` and `example.com` count as one domain.
 
 ```json
 {
@@ -3910,9 +4027,12 @@ Each report contains `id`, `type` (`dmarc` or `tls`), `domain`, `org_name`, `beg
 ```
 
 - `dmarc_reports`, `tls_reports`: Number of stored DMARC and TLS reports for the domain
+
 - `last_report`: Unix timestamp of the end of the domain's latest report period (DMARC or TLS), or `null`
 
-`DELETE /api/dmarc/reports/domains/{domain}` deletes every DMARC and TLS report of one domain, with their records and policies, in one transaction. The domain is matched the same way (trimmed, lower case). It is refused with `403` unless report deletion is turned on (`DMARC_ALLOW_REPORT_DELETE=true`, off by default), answers `400` for an empty domain and `404` when the domain has no reports. Each deletion is written to the application log with the domain and the counts.
+### DELETE /api/dmarc/reports/domains/{domain}
+
+This endpoint deletes every DMARC and TLS report of one domain, with their records and policies, in one transaction. The domain is matched the same way (trimmed, lower case). It is refused with `403` unless report deletion is turned on (`DMARC_ALLOW_REPORT_DELETE=true`, off by default), answers `400` for an empty domain or one longer than 255 characters, and `404` when the domain has no reports. Each deletion is written to the application log with the domain and the counts.
 
 ```json
 {
@@ -3927,590 +4047,224 @@ Each report contains `id`, `type` (`dmarc` or `tls`), `domain`, `org_name`, `beg
 
 Reports that arrive later for the domain (from IMAP or an upload) are imported as usual.
 
-### Overview
+### DELETE /api/dmarc/reports/{report_type}/{report_id}
 
-The DMARC module provides comprehensive email authentication monitoring through DMARC (Domain-based Message Authentication, Reporting & Conformance) aggregate reports. It includes automatic report parsing, GeoIP enrichment for source IPs, and detailed analytics.
+Delete one imported report and its records/policies. `report_type` accepts `dmarc` or `tls`; `report_id` is its integer database ID.
 
-**Features:**
-- Automatic DMARC report parsing (XML, GZ, ZIP formats)
-- GeoIP enrichment (country, city, ISP/ASN) via MaxMind databases
-- Domain-centric view with daily aggregation
-- Source IP analysis with authentication results
-- Historical trending and compliance monitoring
+Deletion disabled returns 403. Unknown type returns 400; a non-integer `report_id` returns 422; a missing report returns 404. Success returns `{ "status": "success", "message": "DMARC report deleted" }` (or `"TLS report deleted"`).
 
 ---
 
+Read imported report data through the endpoints below. For protocol background and user actions, see [DMARC & TLS](HelpDocs/DMARC.md).
+
 ### GET /api/dmarc/domains
 
-Get list of all domains with DMARC statistics.
-
-**Query Parameters:**
-
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `days` | integer | 30 | Number of days to look back (1-365) |
+List every domain with DMARC or TLS reports, with 30-day statistics.
 
 **Response:**
 ```json
 {
-  "total_domains": 5,
-  "total_messages": 12458,
-  "total_unique_ips": 142,
-  "overall_dmarc_pass_pct": 97.2,
   "domains": [
     {
       "domain": "example.com",
-      "total_messages": 8234,
-      "unique_ips": 89,
-      "dmarc_pass_pct": 98.5,
-      "spf_pass_pct": 99.1,
-      "dkim_pass_pct": 98.9,
-      "policy_p": "reject",
-      "policy_sp": null,
-      "last_report_date": 1704758400
+      "report_count": 42,
+      "tls_report_count": 7,
+      "first_report": 1764547200,
+      "last_report": 1767312000,
+      "has_dmarc": true,
+      "has_tls": true,
+      "tls_rpt_status": "success",
+      "tls_first_report": 1764547200,
+      "tls_last_report": 1767225599,
+      "stats_30d": {
+        "total_messages": 8234,
+        "unique_ips": 89,
+        "dmarc_pass_pct": 98.5,
+        "tls_success_pct": 100.0,
+        "tls_sessions": 1520
+      },
+      "failing_sources": 2,
+      "dmarc_record": {"checked": true, "found": true, "status": "success", "policy": "reject"},
+      "tls_rpt_record": {"checked": true, "found": true, "status": "success"},
+      "on_mailcow": true
     }
+  ],
+  "total": 1,
+  "daily": [
+    {"date": "2026-01-01", "total": 310, "dmarc_pass": 305, "dmarc_fail": 5}
   ]
 }
 ```
 
 **Response Fields:**
-- `total_domains`: Number of domains with DMARC reports
-- `total_messages`: Total email messages across all domains
-- `total_unique_ips`: Total unique source IPs
-- `overall_dmarc_pass_pct`: Overall DMARC pass rate percentage
-- `domains`: Array of domain statistics
+
+- `domains`: The domains, newest `last_report` first. `total`: number of domains.
 
 **Domain Object Fields:**
-- `domain`: Domain name
-- `total_messages`: Total messages for this domain
-- `unique_ips`: Number of unique source IPs
-- `dmarc_pass_pct`: Percentage of messages passing DMARC (aligned SPF or aligned DKIM passed, per RFC 7489)
-- `spf_pass_pct`: SPF pass rate
-- `dkim_pass_pct`: DKIM pass rate
-- `policy_p`: Published DMARC policy (none, quarantine, reject)
-- `policy_sp`: Subdomain policy (if different from main policy)
-- `last_report_date`: Unix timestamp of most recent report
+
+- `report_count`, `tls_report_count`: Stored DMARC and TLS reports for the domain
+
+- `first_report`, `last_report`: Unix timestamps of the start of the first and the end of the last DMARC report period (TLS report period for a domain with only TLS reports)
+
+- `has_dmarc`, `has_tls`: Whether the domain has DMARC or TLS reports
+
+- `stats_30d`: `total_messages`, `unique_ips`, `dmarc_pass_pct` (aligned SPF or aligned DKIM passed, per RFC 7489), `tls_success_pct` and `tls_sessions` for reports that started in the last 30 days. The published DMARC policy is in `dmarc_record.policy`.
+
 - `tls_first_report`, `tls_last_report`: Unix timestamps of the domain's first and last TLS report, or `null` without TLS reports
-- `stats_30d.tls_sessions`: TLS sessions reported in the last 30 days
+
 - `tls_rpt_status`: Result of the last DNS check of the domain's TLS-RPT record (`success`, `warning`, `error`, `unknown`), or `null` when the domain has not been checked. The daily DNS check covers the mailcow domains only
+
 - `dmarc_record`: `{checked, found, status, policy}`. The domain's DMARC record from the stored DNS check, or looked up live when the domain has none (a domain that is not in mailcow). `checked` is false when it could not be read; `policy` is `none`, `quarantine` or `reject` when a record was found
+
 - `tls_rpt_record`: `{checked, found, status}`, the same for the TLS-RPT record
+
 - `failing_sources`: How many source IPs failed DMARC for most of their mail in the last 30 days
+
 - `on_mailcow`: `true` when the domain is an active domain or alias domain on this mailcow server, `false` when it is not, `null` while the server's domains are not known yet. Read on every request, not cached with the list
+
 - `stats_30d.dmarc_pass_pct` is `0` and `stats_30d.tls_success_pct` is `100` when there were no messages or TLS sessions in the last 30 days; check `stats_30d.total_messages` and `stats_30d.tls_sessions` before reading them as a rate
 
-**Top-level field:** `daily`, messages per day across every domain in the last 30 days: `[{date, total, dmarc_pass, dmarc_fail}]`. The list is cached for 5 minutes.
+**Top-level field:** `daily`, messages per day across every domain in the last 30 days: `[{date, total, dmarc_pass, dmarc_fail}]`.
+
+The list is cached for 5 minutes. Uploads, IMAP imports, deletions, retention cleanup and `POST /api/dmarc/cache/clear` clear the cache sooner.
 
 ---
 
 ### GET /api/dmarc/domains/{domain}/overview
 
-Get detailed overview for a specific domain with daily breakdown.
-
-**Path Parameters:**
-- `domain`: Domain name (URL encoded)
-
 **Query Parameters:**
 
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `days` | integer | 30 | Number of days to look back (1-365) |
+| Parameter | Type | Default | Constraints and purpose |
+| --- | --- | --- | --- |
+| `days` | integer | `30` | How many days back to read, by report start date |
 
-**Response:**
-```json
-{
-  "domain": "example.com",
-  "total_messages": 8234,
-  "unique_ips": 89,
-  "unique_reporters": 12,
-  "dmarc_pass_pct": 98.5,
-  "spf_pass_pct": 99.1,
-  "dkim_pass_pct": 98.9,
-  "policy": {
-    "p": "reject",
-    "sp": null,
-    "adkim": "r",
-    "aspf": "r",
-    "pct": 100,
-    "fo": "0"
-  },
-  "daily_stats": [
-    {
-      "date": 1704758400,
-      "total_messages": 287,
-      "dmarc_pass_pct": 98.3,
-      "spf_pass_pct": 99.0,
-      "dkim_pass_pct": 98.6
-    }
-  ]
-}
-```
+Read the report summary and DNS-record state for one domain. The response contains `domain`, `policy`, `daily_stats`, `totals`, `dmarc_record`, `tls_rpt_record` and `on_mailcow`.
 
-**Response Fields:**
-- `domain`: Domain name
-- `total_messages`: Total messages in period
-- `unique_ips`: Number of unique source IPs
-- `unique_reporters`: Number of unique organizations sending reports
-- `dmarc_pass_pct`: DMARC pass rate (aligned SPF or aligned DKIM passed)
-- `spf_pass_pct`: SPF pass rate
-- `dkim_pass_pct`: DKIM pass rate
-- `policy`: Published DMARC policy object
-- `daily_stats`: Array of daily statistics
-- `dmarc_record`: DNS check of the domain's DMARC record (`status`, `message`, `record`, `policy`, `settings`, `warnings`)
-- `tls_rpt_record`: DNS check of the domain's TLS-RPT record at `_smtp._tls` (`status`, `message`, `record`, `report_uris`, `warnings`). Both come from the cached DNS check, or a live lookup when none is cached
-- `on_mailcow`: whether the domain is on this mailcow server, as in the domains list
+`policy` contains `p`, `sp`, `pct`, `adkim` and `aspf` from the latest report in the period; missing tags default to `p: "none"`, `pct: 100`, `adkim: "r"`, `aspf: "r"`. It is null when there are no reports in the period. `dmarc_record` and `tls_rpt_record` are full DNS check results (`status`, `message`, `record` and more), not the short form of the domain list; `dmarc_record` also has `settings`, the parsed record tags. Daily rows use an ISO date and contain `date`, `total`, `dmarc_pass`, `dmarc_fail`, `spf_pass` and `dkim_pass`.
 
-**Policy Object:**
-- `p`: Domain policy (none, quarantine, reject)
-- `sp`: Subdomain policy
-- `adkim`: DKIM alignment mode (r=relaxed, s=strict)
-- `aspf`: SPF alignment mode (r=relaxed, s=strict)
-- `pct`: Percentage of messages to apply policy to
-- `fo`: Failure reporting options
-
-**Daily Stats Object:**
-- `date`: Unix timestamp (midnight UTC)
-- `total_messages`: Messages for this day
-- `dmarc_pass_pct`: DMARC pass rate
-- `spf_pass_pct`: SPF pass rate
-- `dkim_pass_pct`: DKIM pass rate
+`totals` contains `total_messages`, `dmarc_pass`, `dmarc_fail`, `unique_ips` and `unique_reporters`, plus `dmarc_pass_pct` when reports exist. The record objects come from cached DNS checks or live checks when missing. The response does not place totals or pass percentages at the top level.
 
 ---
 
 ### GET /api/dmarc/domains/{domain}/reports
 
-Get daily aggregated reports for a specific domain.
-
-**Path Parameters:**
-- `domain`: Domain name (URL encoded)
-
 **Query Parameters:**
 
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `days` | integer | 30 | Number of days to look back (1-365) |
+| Parameter | Type | Default | Constraints and purpose |
+| --- | --- | --- | --- |
+| `days` | integer | `30` | How many days back to read, by report start date |
+| `page` | integer | `1` | Page of days, starting at 1 |
+| `limit` | integer | `50` | Days per page |
 
-**Response:**
-```json
-{
-  "domain": "example.com",
-  "reports": [
-    {
-      "date": 1704758400,
-      "report_count": 12,
-      "unique_ips": 45,
-      "total_messages": 287,
-      "dmarc_pass_pct": 98.3,
-      "spf_pass_pct": 99.0,
-      "dkim_pass_pct": 98.6,
-      "reporters": [
-        "Google",
-        "Microsoft",
-        "Yahoo"
-      ]
-    }
-  ]
-}
-```
+Read DMARC report data aggregated by day, newest first. The response contains `domain`, `total`, `page`, `limit`, `pages` and `data`; `pages` is 0 when there is no data.
 
-**Response Fields:**
-- `domain`: Domain name
-- `reports`: Array of daily aggregated reports
-
-**Report Object:**
-- `date`: Unix timestamp (midnight UTC)
-- `report_count`: Number of DMARC reports received for this day
-- `unique_ips`: Number of unique source IPs
-- `total_messages`: Total messages in all reports
-- `dmarc_pass_pct`: DMARC compliance rate
-- `spf_pass_pct`: SPF pass rate
-- `dkim_pass_pct`: DKIM pass rate
-- `reporters`: Array of organizations that sent reports (e.g., "Google", "Microsoft")
+Each data row contains `date` (ISO date), `total_messages`, `dmarc_pass_pct`, `spf_pass_pct`, `dkim_pass_pct`, `unique_ips`, `reporters` and `reports`. Each entry in `reports` has `report_id`, `org_name`, `begin_date`, `end_date`, `volume` and `dmarc_pass_pct`. Use the daily details endpoint for its source breakdown.
 
 ---
 
 ### GET /api/dmarc/domains/{domain}/sources
 
-Get source IP analysis with GeoIP enrichment.
-
-Each source also has `reporters`: `[{org_name, count, dmarc_pass}]`, the receivers that reported the address and how much of its mail, most first.
-
-**Path Parameters:**
-- `domain`: Domain name (URL encoded)
-
 **Query Parameters:**
 
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `days` | integer | 30 | Number of days to look back (1-365) |
+| Parameter | Type | Default | Constraints and purpose |
+| --- | --- | --- | --- |
+| `days` | integer | `30` | How many days back to read, by report start date |
+| `page` | integer | `1` | Page of source addresses, starting at 1 |
+| `limit` | integer | `50` | Source addresses per page |
 
-**Response:**
-```json
-{
-  "domain": "example.com",
-  "sources": [
-    {
-      "source_ip": "8.8.8.8",
-      "total_messages": 1250,
-      "dmarc_pass_pct": 100.0,
-      "spf_pass_pct": 100.0,
-      "dkim_pass_pct": 100.0,
-      "country_code": "US",
-      "country_name": "United States",
-      "country_emoji": "🇺🇸",
-      "city": "Mountain View",
-      "asn": "AS15169",
-      "asn_org": "Google LLC",
-      "first_seen": 1704153600,
-      "last_seen": 1704758400
-    },
-    {
-      "source_ip": "8.8.4.4",
-      "total_messages": 1250,
-      "dmarc_pass_pct": 100.0,
-      "spf_pass_pct": 100.0,
-      "dkim_pass_pct": 100.0,
-      "country_code": "US",
-      "country_name": "United States",
-      "country_emoji": "🇺🇸",
-      "city": "Mountain View",
-      "asn": "AS15169",
-      "asn_org": "Google LLC",
-      "first_seen": 1704153600,
-      "last_seen": 1704758400
-    }
-  ]
-}
-```
+Read source addresses, sorted by message count, with report and GeoIP data. The response contains `domain`, `total`, `page`, `limit`, `pages` and `data`.
 
-**Response Fields:**
-- `domain`: Domain name
-- `sources`: Array of source IP objects (ordered by message count, descending)
+Each data row has `source_ip`, `country_code`, `country_name`, `country_emoji` (a display string), `city`, `asn`, `asn_org`, `total_count`, `dmarc_pass`, `dmarc_pass_pct`, `spf_pass`, `spf_pass_pct`, `dkim_pass`, `dkim_pass_pct` and `reporters`. Location values can be null. Reporter entries contain `org_name`, `count` and `dmarc_pass`.
 
-**Source Object Fields:**
-- `source_ip`: IP address of sending server
-- `total_messages`: Number of messages from this IP
-- `dmarc_pass_pct`: DMARC pass rate for this IP
-- `spf_pass_pct`: SPF pass rate
-- `dkim_pass_pct`: DKIM pass rate
-- `country_code`: ISO 3166-1 alpha-2 country code (e.g., "US", "IL")
-- `country_name`: Full country name
-- `country_emoji`: Flag emoji representation (e.g., 🇺🇸, 🇮🇱)
-- `city`: City name (from MaxMind City database)
-- `asn`: Autonomous System Number (e.g., "AS15169")
-- `asn_org`: ISP/Organization name from ASN database
-- `first_seen`: Unix timestamp of first message from this IP
-- `last_seen`: Unix timestamp of last message from this IP
-
-**GeoIP Notes:**
-- GeoIP fields may be `null` if MaxMind databases are not configured
-- `country_emoji` defaults to 🌍 (globe) when country is unknown
-- GeoIP data requires MaxMind GeoLite2 databases (City + ASN)
-- City accuracy varies by IP (typically accurate to city level for data center IPs)
-- ASN provides ISP/hosting provider information
+Use source details for the envelope-from groups reported for one address.
 
 ---
 
 ### POST /api/dmarc/upload
 
-Upload and parse a DMARC aggregate report file.
+Upload a report as multipart form field `file`; a request without it returns 422. The filename chooses the parser: a name ending in `.json`, `.json.gz` or `.json.zip` (any case) is read as TLS-RPT, anything else as DMARC.
 
-**Content-Type:** `multipart/form-data`
+<!-- VERIFY: plain .xml DMARC uploads are refused by services/dmarc_parser.py:78 although the upload docstring (routers/dmarc.py:1786) and the file picker (frontend/index.html accept=".xml,...") offer them. Fix the code or keep this text. -->
+DMARC accepts gzip-compressed XML (filename ending in `.gz`) and ZIP files (`.zip`; the first `.xml` member is read). A plain `.xml` file is refused with 400. The DMARC extension check is case-sensitive, so `.GZ` or `.ZIP` is also refused.
 
-**Form Data:**
+An upload larger than 10 MB returns 413. A report that decompresses to more than 10 MB returns 400. Manual upload is on by default (`DMARC_MANUAL_UPLOAD_ENABLED=true`); turned off, the endpoint returns 403. Invalid reports return 400.
 
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `file` | file | Yes | DMARC report file (XML, GZ, or ZIP format) |
+Success returns HTTP 200 with `status: "success"`, `report_type` (`dmarc` or `tls-rpt`), `message`, numeric database `report_id`, and `records_count` for DMARC or `policies_count` for TLS. Duplicate report IDs return HTTP 200 with `status: "duplicate"`, `report_type` and `message`.
 
-**Supported File Formats:**
-- `.xml` - Raw XML DMARC report
-- `.gz` - Gzip-compressed XML report (most common)
-- `.zip` - ZIP-compressed XML report (used by Google)
+`curl -b cookies.txt -F "file=@report.xml.gz" https://logs.example.com/api/dmarc/upload`
 
-**Request Example:**
-```bash
-curl -X POST http://your-server:8080/api/dmarc/upload \
-  -u username:password \
-  -F "file=@google.com!example.com!1704067200!1704153599.xml.gz"
-```
+---
 
-**Success Response (201 Created):**
-```json
-{
-  "status": "success",
-  "message": "Uploaded report for example.com from Google",
-  "report_id": 123,
-  "records_count": 45
-}
-```
+### GET /api/dmarc/domains/{domain}/reports/{report_date}/details
 
-**Duplicate Response (200 OK):**
-```json
-{
-  "status": "duplicate",
-  "message": "Report 12345678901234567890 already exists"
-}
-```
+Read one domain's DMARC day breakdown. `report_date` is `YYYY-MM-DD`. Response fields are `domain`, `date`, `totals` and `sources`.
 
-**Error Response (400 Bad Request):**
-```json
-{
-  "detail": "Failed to parse DMARC report"
-}
-```
+`totals` contains `total_messages`, `dmarc_pass`, `dmarc_pass_pct`, `spf_pass`, `spf_pass_pct`, `dkim_pass`, `dkim_pass_pct`, `unique_ips` and `reporters`. `sources` has one row per sending address and reporter, largest volume first, so `unique_ips` counts these rows, not distinct addresses. Each row has `source_ip`, `source_name`, `country_code`, `country_name`, `city`, `asn`, `asn_org`, `header_from`, `envelope_from`, `reporter`, `volume`, `dmarc_pass`, `dmarc_fail`, `spf_pass`, `dkim_pass`, `dmarc_pass_pct`, `spf_pass_pct` and `dkim_pass_pct`.
 
-**Error Response (500 Internal Server Error):**
-```json
-{
-  "detail": "Error message with details"
-}
-```
+A malformed date returns 400. A day without reports currently returns 500 instead of the intended 404.
 
-**Response Fields:**
+---
 
-**Success Response:**
-- `status`: "success"
-- `message`: Human-readable description of uploaded report
-- `report_id`: Database ID of created report
-- `records_count`: Number of source IP records parsed
+### GET /api/dmarc/domains/{domain}/sources/{source_ip}/details
 
-**Duplicate Response:**
-- `status`: "duplicate"
-- `message`: Indicates report already exists (based on unique report_id from XML)
+**Query Parameters:**
 
-**Processing Details:**
-1. File is decompressed (if GZ or ZIP)
-2. XML is parsed and validated
-3. Report metadata extracted (domain, org, date range, policy)
-4. Individual records parsed (source IP, counts, auth results)
-5. GeoIP enrichment applied to each source IP (if MaxMind configured)
-6. Data stored in database with proper indexing
-7. Duplicate detection based on unique report_id from XML
+| Parameter | Type | Default | Constraints and purpose |
+| --- | --- | --- | --- |
+| `days` | integer | `30` | How many days back to read, by report start date |
 
-**Parsed Data Includes:**
-- Report metadata (report ID, organization, date range)
-- Domain and published DMARC policy
-- Individual source records:
-  - Source IP address
-  - Message count from this source
-  - SPF/DKIM authentication results
-  - Policy evaluation (disposition)
-  - GeoIP enrichment (country, city, ISP/ASN)
+Read a source address for one domain across the selected days. Response fields are `domain`, `source_ip`, `source_name`, country/city/ASN fields, `totals` and `envelope_from_groups`.
 
-**GeoIP Enrichment:**
-- Automatically applied to all source IPs during upload
-- Uses MaxMind GeoLite2 databases (if configured)
-- Gracefully degrades if databases unavailable
-- Enriches with: country, city, ISP, ASN
-
-**File Naming Convention:**
-DMARC report filenames typically follow this pattern:
-```
-<receiver>!<sender-domain>!<begin-timestamp>!<end-timestamp>.<ext>
-```
-Example: `google.com!example.com!1704067200!1704153599.xml.gz`
-
-**Notes:**
-- Reports are identified by unique report_id (from XML)
-- Duplicate uploads are detected and rejected gracefully
-- Large reports (1000+ records) may take a few seconds to process
-- File size limit depends on server configuration (typically 10MB)
-- Malformed XML files are rejected with 400 error
+Totals include message and pass counts, percentages, `unique_envelopes` and `reporters`. `envelope_from_groups` has one row per envelope-from and reporter, largest volume first, with `envelope_from`, `header_from`, `reporter`, `volume`, `dmarc_pass`, `dmarc_fail`, `spf_aligned`, `dkim_aligned`, `spf_result` and `dkim_result`. It has no daily breakdown. An address with no records in the period currently returns 500 instead of the intended 404.
 
 ---
 
 ## DMARC IMAP Auto-Import
 
-The DMARC module supports automatic import of DMARC reports via IMAP. This allows the system to periodically check a mailbox and automatically process incoming reports without manual uploads.
-
-**Features:**
-- Automatic periodic syncing from IMAP mailbox
-- Configurable sync interval and folder
-- Manual sync trigger via API
-- Comprehensive sync history tracking
-- Email notifications on sync failures
-- Support for SSL/TLS connections
-- Automatic duplicate detection
-
-**Configuration:**
-Set these environment variables to enable IMAP auto-import:
-- `DMARC_IMAP_ENABLED=true`
-- `DMARC_IMAP_HOST=mail.example.com`
-- `DMARC_IMAP_PORT=993`
-- `DMARC_IMAP_USE_SSL=true`
-- `DMARC_IMAP_USER=dmarc@example.com`
-- `DMARC_IMAP_PASSWORD=your-password`
-- `DMARC_IMAP_FOLDER=INBOX`
-- `DMARC_IMAP_INTERVAL=3600` (seconds between syncs)
-- `DMARC_IMAP_DELETE_AFTER=false` (delete processed emails)
-- `DMARC_MANUAL_UPLOAD_ENABLED=true` (allow manual uploads)
-
----
+The IMAP importer reads both DMARC and TLS report attachments. Configure it through **Settings** > **DMARC & TLS IMAP**; see [Settings](HelpDocs/Settings.md#dmarc--tls-imap). Report history is stored in the database.
 
 ### GET /api/dmarc/imap/status
 
-Get current IMAP auto-import configuration and last sync information.
+Read import state even when IMAP import is disabled. Passwords are omitted.
 
-**Response:**
-```json
-{
-  "enabled": true,
-  "manual_upload_enabled": true,
-  "host": "mail.example.com",
-  "port": 993,
-  "use_ssl": true,
-  "user": "dmarc@example.com",
-  "folder": "INBOX",
-  "interval_seconds": 3600,
-  "delete_after_processing": false,
-  "last_sync": {
-    "sync_id": 42,
-    "sync_type": "auto",
-    "status": "success",
-    "started_at": "2026-01-12T08:45:20Z",
-    "completed_at": "2026-01-12T08:45:21Z",
-    "emails_found": 5,
-    "emails_processed": 5,
-    "reports_created": 4,
-    "reports_duplicate": 0,
-    "reports_failed": 1,
-    "error_message": null
-  }
-}
-```
+The response has `enabled`, `configuration`, `latest_sync` and `stats_24h`. Configuration contains `host`, `port`, `user`, `folder`, `delete_after`, `interval_seconds` and `interval_minutes`, with null values while disabled.
 
-**Response Fields:**
-- `enabled`: Whether IMAP auto-import is enabled
-- `manual_upload_enabled`: Whether manual uploads are still allowed
-- `host`: IMAP server hostname
-- `port`: IMAP server port (typically 993 for SSL, 143 for non-SSL)
-- `use_ssl`: Whether SSL/TLS is used
-- `user`: IMAP username/email
-- `folder`: Mailbox folder being monitored (e.g., "INBOX")
-- `interval_seconds`: Seconds between automatic sync runs
-- `delete_after_processing`: Whether emails are deleted after successful processing
-- `last_sync`: Last sync operation details (null if never run)
+`latest_sync` is null before a run; otherwise it contains `id`, `sync_type`, `started_at`, `completed_at`, `status`, `emails_found`, `emails_processed`, `reports_created`, `reports_duplicate`, `reports_failed` and `error_message`.
 
-**Last Sync Object:**
-- `sync_id`: Unique sync operation ID
-- `sync_type`: "auto" (scheduled) or "manual" (API triggered)
-- `status`: "success", "error", or "running"
-- `started_at`: ISO 8601 timestamp with Z suffix
-- `completed_at`: ISO 8601 timestamp with Z suffix (null if running)
-- `emails_found`: Number of DMARC emails found in folder
-- `emails_processed`: Number of emails successfully processed
-- `reports_created`: Number of new DMARC reports created
-- `reports_duplicate`: Number of duplicate reports skipped
-- `reports_failed`: Number of emails that failed processing
-- `error_message`: Error description if sync failed
-
-**Notes:**
-- Sensitive information (password) is never returned
-- Returns 404 if IMAP auto-import is not configured
-- Last sync information persists across restarts
+`stats_24h` contains `total_syncs`, `total_reports_created` and `total_reports_failed`. History is stored in PostgreSQL and survives app restarts.
 
 ---
 
 ### POST /api/dmarc/imap/sync
 
-Manually trigger IMAP sync operation.
+Queue a manual report import and return immediately. No body is required. IMAP import must be enabled, or the endpoint returns 400.
 
-**Request:** No body required
+`{ "status": "started", "message": "IMAP import of DMARC and TLS reports started" }`
 
-**Response:**
-```json
-{
-  "sync_id": 43,
-  "sync_type": "manual",
-  "status": "success",
-  "started_at": "2026-01-12T10:30:00Z",
-  "completed_at": "2026-01-12T10:30:05Z",
-  "emails_found": 3,
-  "emails_processed": 3,
-  "reports_created": 2,
-  "reports_duplicate": 1,
-  "reports_failed": 0,
-  "error_message": null,
-  "failed_emails": null
-}
-```
+Read `GET /api/dmarc/imap/status` or `GET /api/dmarc/imap/history` for the result. The request first sets every sync run still marked `running` to `failed`, with the message "Interrupted by manual restart". If the import cannot be queued, the endpoint returns 500.
 
-**Error Response (IMAP disabled):**
-```json
-{
-  "status": "disabled",
-  "message": "DMARC IMAP sync is not enabled"
-}
-```
-
-**Error Response (Connection failed):**
-```json
-{
-  "sync_id": 44,
-  "sync_type": "manual",
-  "status": "error",
-  "started_at": "2026-01-12T10:35:00Z",
-  "completed_at": "2026-01-12T10:35:30Z",
-  "emails_found": 0,
-  "emails_processed": 0,
-  "reports_created": 0,
-  "reports_duplicate": 0,
-  "reports_failed": 0,
-  "error_message": "[Errno 110] Connection timed out",
-  "failed_emails": null
-}
-```
-
-**Response Fields:**
-- `sync_id`: Unique ID for this sync operation
-- `sync_type`: Always "manual" for API-triggered syncs
-- `status`: "success" or "error"
-- `started_at`: ISO 8601 timestamp when sync started
-- `completed_at`: ISO 8601 timestamp when sync finished
-- `emails_found`: Number of DMARC emails found
-- `emails_processed`: Number of emails processed
-- `reports_created`: Number of new reports created
-- `reports_duplicate`: Number of duplicate reports skipped
-- `reports_failed`: Number of emails that failed processing
-- `error_message`: Error description if sync failed (null on success)
-- `failed_emails`: Array of failed email details (null if none failed)
-
-**Failed Email Object** (when reports_failed > 0):
-```json
-{
-  "email_id": "21",
-  "message_id": "",
-  "subject": "Report Domain: example.com",
-  "error": "No DMARC attachments found"
-}
-```
-
-Bounces and other emails without a report are marked as read and skipped; they are not counted as failed.
-
-**Notes:**
-- Returns immediately with sync results (synchronous operation)
-- Can be called while automatic sync is disabled
-- Creates sync history record for tracking
-- Duplicate reports are detected and skipped gracefully
-- Failed emails are logged but don't prevent other emails from processing
-- Email notifications sent if SMTP configured and failures occur
+Manual and scheduled imports send the same failed-report email when some emails fail and notification SMTP is configured. Bounces and emails without reports are skipped rather than treated as report failures.
 
 ---
 
 ### GET /api/dmarc/imap/history
 
-Get history of IMAP sync operations.
-
 **Query Parameters:**
 
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `limit` | integer | 20 | Maximum number of sync records to return (1-100) |
+| Parameter | Type | Default | Constraints and purpose |
+| --- | --- | --- | --- |
+| `limit` | integer | `20` | Sync runs per page |
+| `page` | integer | `1` | Page to return, starting at 1 |
+
+Get history of IMAP sync operations.
 
 **Response:**
 ```json
 {
+  "total": 43,
+  "page": 1,
+  "limit": 20,
+  "pages": 3,
   "data": [
     {
       "id": 43,
@@ -4518,7 +4272,6 @@ Get history of IMAP sync operations.
       "status": "success",
       "started_at": "2026-01-12T10:30:00Z",
       "completed_at": "2026-01-12T10:30:05Z",
-      "duration_seconds": 5,
       "emails_found": 3,
       "emails_processed": 3,
       "reports_created": 2,
@@ -4533,7 +4286,6 @@ Get history of IMAP sync operations.
       "status": "success",
       "started_at": "2026-01-12T08:45:20Z",
       "completed_at": "2026-01-12T08:45:21Z",
-      "duration_seconds": 1,
       "emails_found": 5,
       "emails_processed": 5,
       "reports_created": 4,
@@ -4554,37 +4306,52 @@ Get history of IMAP sync operations.
 ```
 
 **Response Fields:**
-- `data`: Array of sync history records (newest first)
+
+- `total`: Number of stored sync runs. `page`, `limit`: the page returned. `pages`: number of pages, 0 when there is no history.
+
+- `data`: Sync runs on this page, newest first
 
 **Sync Record Fields:**
+
 - `id`: Unique sync ID
-- `sync_type`: "auto" or "manual"
-- `status`: "success", "error", or "running"
+
+- `sync_type`: `auto` or `manual`
+
+- `status`: `success`, `error`, `running`, or `failed` (a run interrupted by a manual import or cleaned up as stale)
+
 - `started_at`: ISO 8601 timestamp
+
 - `completed_at`: ISO 8601 timestamp (null if still running)
-- `duration_seconds`: Sync duration in seconds (null if still running)
+
 - `emails_found`: Number of emails found
+
 - `emails_processed`: Number of emails processed
+
 - `reports_created`: Number of new reports created
+
 - `reports_duplicate`: Number of duplicates skipped
+
 - `reports_failed`: Number of failed emails
+
 - `error_message`: Error description (null if no errors)
+
 - `failed_emails`: Array of failed email details (null if none)
 
 **Notes:**
-- Results ordered by most recent first
-- Running syncs show null for completed_at and duration_seconds
-- Failed email details include message ID, subject, and error reason
-- Useful for debugging sync issues and monitoring system health
-- History persists across application restarts
+
+- Running syncs have a null `completed_at`.
+
+- Each entry in `failed_emails` has `email_id` (the IMAP UID), `message_id`, `subject` and `error`.
+
+- History persists across application restarts.
 
 ---
 
 ## TLS-RPT (TLS Reporting)
 
-### Overview
+### Data returned
 
-TLS-RPT (TLS Reporting) provides visibility into TLS connection failures when other mail servers attempt to deliver emails to your domain. This helps identify MTA-STS policy issues and certificate problems.
+TLS-RPT reports (RFC 8460) tell you when other mail servers failed to set up TLS while delivering to your domain, which points to MTA-STS policy or certificate problems.
 
 ---
 
@@ -4606,156 +4373,63 @@ The domain's TLS-RPT record. Comes from the cached DNS check, or a live lookup w
 }
 ```
 
+`status` is `success`, `warning` (no record published; the result then also has an `info` list with the record to publish), `error` (more than one record, or no usable `rua` address) or `unknown` (the lookup failed). `record` is null when nothing is published.
+
 ---
 
 ### GET /api/dmarc/domains/{domain}/tls-reports
 
-Get TLS reports for a specific domain (individual reports).
-
-**Path Parameters:**
-
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `domain` | string | Domain name |
-
 **Query Parameters:**
 
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `days` | integer | 30 | Number of days to look back |
+| Parameter | Type | Default | Constraints and purpose |
+| --- | --- | --- | --- |
+| `days` | integer | `30` | How many days back to read, by report start date |
+| `page` | integer | `1` | Page of reports, starting at 1 |
+| `limit` | integer | `50` | Reports per page |
 
-**Response:**
-```json
-{
-  "domain": "example.com",
-  "total": 15,
-  "data": [
-    {
-      "id": 1,
-      "report_id": "2026-01-14T00:00:00Z!example.com!google.com",
-      "organization_name": "Google Inc.",
-      "start_datetime": "2026-01-14T00:00:00Z",
-      "end_datetime": "2026-01-15T00:00:00Z",
-      "total_success": 1250,
-      "total_fail": 5,
-      "success_rate": 99.6
-    }
-  ]
-}
-```
+Read individual TLS reports, newest first by start time. The response contains `domain`, `total`, `page`, `limit`, `pages`, `totals` and `data`.
+
+`totals.total_reports` counts every report in the period. `total_successful_sessions`, `total_failed_sessions`, `overall_success_rate` and `unique_organizations` cover only the reports on the current page; `overall_success_rate` is 100 when there are no sessions. Each data row contains `id`, `report_id`, `organization_name`, `contact_info`, `start_datetime`, `end_datetime`, `successful_sessions`, `failed_sessions`, `total_sessions`, `success_rate` and `policies`. Each policy has `policy_type`, `policy_domain`, `mx_host`, `successful_sessions`, `failed_sessions` and `failure_details`.
 
 ---
 
 ### GET /api/dmarc/domains/{domain}/tls-reports/daily
 
-Get TLS reports aggregated by date (daily view).
-
-**Path Parameters:**
-
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `domain` | string | Domain name |
-
 **Query Parameters:**
 
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `days` | integer | 30 | Number of days to look back |
-| `page` | integer | 1 | Page number |
-| `page_size` | integer | 20 | Items per page |
+| Parameter | Type | Default | Constraints and purpose |
+| --- | --- | --- | --- |
+| `days` | integer | `30` | How many days back to read, by report start date |
+| `page` | integer | `1` | Page of days, starting at 1 |
+| `limit` | integer | `30` | Days per page |
 
-**Response:**
-```json
-{
-  "domain": "example.com",
-  "totals": {
-    "total_days": 14,
-    "total_reports": 28,
-    "total_successful_sessions": 15000,
-    "total_failed_sessions": 25,
-    "overall_success_rate": 99.83
-  },
-  "data": [
-    {
-      "date": "2026-01-17",
-      "report_count": 3,
-      "organization_count": 2,
-      "organizations": ["Google Inc.", "Microsoft Corporation"],
-      "total_success": 1500,
-      "total_fail": 2,
-      "success_rate": 99.87
-    }
-  ]
-}
-```
+Read TLS reports aggregated by UTC date. The response contains `domain`, `total`, `page`, `limit`, `pages`, `totals` and `data`.
+
+Totals contain `total_days`, `total_reports`, `total_successful_sessions`, `total_failed_sessions` and `overall_success_rate`. Data rows contain `date`, `report_count`, `total_success`, `total_fail`, `total_sessions`, `success_rate`, `organizations`, `organization_count` and `reports`.
 
 ---
 
 ### GET /api/dmarc/domains/{domain}/tls-reports/{report_date}/details
 
-Get detailed TLS reports for a specific date.
+Read a day's TLS report providers and policy details. `report_date` is a date in `YYYY-MM-DD` form. A day without reports returns 404. A malformed date currently returns 500 (the DMARC day endpoint returns 400 for the same input).
 
-**Path Parameters:**
-
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `domain` | string | Domain name |
-| `report_date` | string | Date in YYYY-MM-DD format |
-
-**Response:**
-```json
-{
-  "domain": "example.com",
-  "date": "2026-01-17",
-  "stats": {
-    "total_reports": 3,
-    "total_providers": 2,
-    "total_success": 1500,
-    "total_fail": 2,
-    "total_sessions": 1502,
-    "success_rate": 99.87
-  },
-  "providers": [
-    {
-      "report_id": "2026-01-17T00:00:00Z!example.com!google.com",
-      "organization_name": "Google Inc.",
-      "contact_info": "smtp-tls-reporting@google.com",
-      "start_datetime": "2026-01-17T00:00:00Z",
-      "end_datetime": "2026-01-18T00:00:00Z",
-      "successful_sessions": 1200,
-      "failed_sessions": 1,
-      "total_sessions": 1201,
-      "success_rate": 99.92,
-      "policies": [
-        {
-          "policy_type": "sts",
-          "policy_domain": "example.com",
-          "mx_host": "mail.example.com",
-          "successful_sessions": 1200,
-          "failed_sessions": 1,
-          "total_sessions": 1201,
-          "success_rate": 99.92,
-          "failure_details": null
-        }
-      ]
-    }
-  ]
-}
-```
+The response contains `domain`, `date`, `stats` and `providers`. Stats contain `total_reports`, `total_providers`, `total_success`, `total_fail`, `total_sessions` and `success_rate`. `providers` has one entry per report (a provider that sent two reports that day appears twice): `report_id`, `organization_name`, `contact_info`, `start_datetime`, `end_datetime`, `successful_sessions`, `failed_sessions`, `total_sessions`, `success_rate` and `policies`. Each policy adds `total_sessions`, `success_rate` and `failure_details`.
 
 ---
 
 ### POST /api/dmarc/upload (TLS-RPT Support)
 
-The existing DMARC upload endpoint also accepts TLS-RPT reports.
+The DMARC upload endpoint also accepts TLS-RPT reports (RFC 8460 JSON).
 
 **Supported TLS-RPT Formats:**
-- `.json.gz` - Gzip-compressed JSON (standard format)
-- `.json` - Plain JSON
 
-**Detection:**
-- File is identified as TLS-RPT if JSON contains `"policies"` array
-- TLS-RPT reports use RFC 8460 JSON format
+- `.json.gz`: gzip-compressed JSON (the usual format)
+
+- `.json`: plain JSON
+
+- `.json.zip`: ZIP file; the first `.json` member is read
+
+**Detection:** The filename decides: a name ending in `.json`, `.json.gz` or `.json.zip` (any case) is parsed as TLS-RPT; anything else is parsed as DMARC. A TLS-RPT report needs `report-id`, a valid `date-range` and at least one policy with a valid `policy-domain`, or it is refused with 400.
 
 ---
 
@@ -4763,27 +4437,27 @@ The existing DMARC upload endpoint also accepts TLS-RPT reports.
 
 ### GET /api/blacklist/summary
 
-Get a high-level blacklist summary for the dashboard, aggregated across ALL active monitored hosts (WAN IP, transports, relayhosts, manual hosts) instead of only the auto-detected server IP.
+Get the blacklist summary for the dashboard, combined across all active monitored hosts (WAN IP, transports, relayhosts, manual hosts), not only the auto-detected server IP.
 
 **Response:**
 ```json
 {
   "has_data": true,
-  "server_ip": "1.2.3.4",
+  "server_ip": "192.0.2.10",
   "status": "listed",
   "listed_count": 1,
   "total_blacklists": 60,
   "checked_at": "2026-01-25T14:00:00Z",
   "hosts": [
     {
-      "hostname": "1.2.3.4",
+      "hostname": "192.0.2.10",
       "source": "system",
       "status": "listed",
       "listed_count": 1,
       "checked_at": "2026-01-25T14:00:00Z"
     },
     {
-      "hostname": "5.6.7.8",
+      "hostname": "198.51.100.20",
       "source": "relayhost:smtp.example.com",
       "status": "clean",
       "listed_count": 0,
@@ -4796,13 +4470,21 @@ Get a high-level blacklist summary for the dashboard, aggregated across ALL acti
 ```
 
 **Response Fields:**
+
 - `has_data`: `true` when at least one host has a check fresher than 24 hours
+
 - `server_ip`: The auto-detected WAN IP (kept for backward compatibility); falls back to the single monitored host when unavailable
+
 - `status`: `listed` if any host is listed, else `error` if any fresh check errored, else `clean` if at least one host has fresh data, else `unknown`
+
 - `listed_count` / `total_blacklists`: Sums across hosts with fresh (under 24h) data
+
 - `checked_at`: Most recent check across all hosts
+
 - `hosts`: One entry per active monitored host. A host's `status` is `unknown` and its `listed_count` is `0` when its latest check is older than 24 hours
+
 - `hosts_total`: Number of active monitored hosts
+
 - `hosts_listed`: Number of hosts currently listed (fresh data only)
 
 ---
@@ -4818,6 +4500,12 @@ A blocklist can be ignored for every monitored address (for example UCEPROTECT L
 ```
 
 ### PUT /api/blacklist/lists/{zone}/ignore
+
+**JSON fields:**
+
+| Field | Type | Default | Constraints and purpose |
+| --- | --- | --- | --- |
+| `ignored` | boolean | Required | `true` to ignore the blocklist, `false` to count it again |
 
 **Request:**
 ```json
@@ -4835,66 +4523,34 @@ Returns `404` for a zone that is not one of the checked blocklists.
 
 ### GET /api/blacklist/config
 
-Get blacklist configuration (enabled status, alert email, etc).
+Read the server-IP check cache metadata. It returns `total_blacklists`, `cache_ttl_hours` (24), `cache_valid`, `last_check`, `server_ip`, `listed_count` and `status`.
 
-**Response:**
-```json
-{
-  "enabled": true,
-  "alert_email": "admin@example.com",
-  "checks_enabled": true,
-  "auto_check_hour": 5
-}
-```
+The check fields can be null before a saved result exists. Monitoring-source settings and recipient addresses are not part of this response.
 
 ---
 
 ### GET /api/blacklist/monitored
 
-Get status of all monitored hosts (system IP and transport configurations).
+Read every active monitored host, reconciling the saved list with the enabled server, transport, relayhost and manual sources first. The response contains a `hosts` array.
 
-**Response:**
-```json
-{
-  "hosts": [
-    {
-      "hostname": "1.2.3.4",
-      "source": "system",
-      "active": true,
-      "status": "clean",
-      "checked_at": "2026-01-25T14:00:00Z",
-      "listed_count": 0,
-      "total_blacklists": 30,
-      "results": [...]
-    },
-    {
-      "hostname": "5.6.7.8",
-      "source": "relayhost:smtp.example.com",
-      "active": true,
-      "status": "listed",
-      "checked_at": "2026-01-25T14:00:00Z",
-      "listed_count": 2,
-      "total_blacklists": 30,
-      "results": [...]
-    }
-  ]
-}
-```
+Each host has `hostname`, `source`, `last_seen`, `has_data` and `status`. When a saved check exists, it also has `listed_count`, `total_blacklists`, `checked_at`, `cache_valid` and per-list `results`. Ignored-list handling adjusts the displayed totals and adds ignore metadata.
+
+`has_data` means a saved check exists; inspect `cache_valid` to determine whether it is within the 24-hour cache lifetime. A host with no check has `status: "unknown"`. This route does not include an `active` field in each result.
 
 ---
 
 ### POST /api/blacklist/check
 
-Trigger a manual blacklist check.
-
 **Query Parameters:**
 
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `host` | string | Optional. Host/IP to check. If omitted, checks ALL monitored hosts in a background batch job. |
-| `force` | bool | Optional. If `true`, ignores cache and forces a fresh DNS lookup. Default: `false`. |
+| Parameter | Type | Default | Constraints and purpose |
+| --- | --- | --- | --- |
+| `host` | string | Unset | Host name or IP to check; omit it to check all monitored hosts in the background |
+| `force` | boolean | `false` | Check again even when a result from the last 24 hours exists |
 
-**Response (Batch Mode - No Host):**
+Start a manual blacklist check.
+
+**Response (batch mode, no `host`):**
 ```json
 {
   "status": "started",
@@ -4902,20 +4558,13 @@ Trigger a manual blacklist check.
 }
 ```
 
-**Response (Single Host):**
-```json
-{
-  "server_ip": "1.2.3.4",
-  "status": "clean",
-  ... (full results)
-}
-```
+**Response (Single Host):** Returns the check result with `server_ip`, `checked_at`, `status`, the per-list `results` and the `total_blacklists`, `listed_count`, `clean_count`, `error_count` and `timeout_count` totals. Cached responses can include cache metadata. Hostname input first tries an IPv4 lookup; a lookup failure leaves the hostname for the checker. Checker exceptions produce HTTP 200 with `status: "error"` and an `error` message, so inspect the body.
 
 ---
 
 ### GET /api/blacklist/progress
 
-Get real-time progress of the current blacklist check batch job.
+Get the progress of the current blacklist check batch.
 
 **Response:**
 ```json
@@ -4927,8 +4576,11 @@ Get real-time progress of the current blacklist check batch job.
   "percent": 2
 }
 ```
+
 - `current`: Global progress counter across all hosts.
+
 - `total`: Total items to check (Number of Hosts * Number of Blacklists).
+
 - `percent`: Integer percentage (0-100).
 
 ---
@@ -4937,63 +4589,33 @@ Get real-time progress of the current blacklist check batch job.
 
 ### GET /api/system/summary
 
-Get the weekly system summary report data (JSON).
+Read the data used by the weekly summary email. The response contains:
 
-**Response:**
-```json
-{
-  "date": "25/01/2026",
-  "system": {
-    "hostname": "mail.example.com",
-    "ip": "1.2.3.4",
-    "version": "2.2.0",
-    "uptime_days": 15
-  },
-  "counts": {
-    "domains": 5,
-    "mailboxes": 25,
-    "aliases": 50,
-    "total_storage": "100G",
-    "queue_size": 12,
-    "quarantine_count": 5
-  },
-  "traffic": {
-    "sent": 1234,
-    "received": 5678,
-    "failed": 45,
-    "failure_rate": 3.6,
-    "bounced": 10,
-    "rejected": 5
-  },
-  "security": {
-    "dns_issues": [
-      {
-        "domain": "example.com",
-        "issue": "SPF Record Missing"
-      }
-    ],
-    "blacklist_status": {
-      "listed": true,
-      "blacklists": ["Spamhaus ZEN"]
-    }
-  },
-  "top_failures": [
-    {
-      "username": "user@example.com",
-      "failed": 15,
-      "rate": 10.5
-    }
-  ]
-}
-```
+| Field | Content |
+| --- | --- |
+| `timestamp` | Time the summary was generated, in UTC ISO format. |
+| `traffic` | Mailbox traffic totals for the last seven days, with the same fields as `GET /api/mailbox-stats/summary`. |
+| `system` | Total and active counts for domains, mailboxes and aliases, from `GET /api/status/mailcow-info`. |
+| `storage` | `disk`, `used`, `total` and `used_percent`, from mailcow's mail-storage status. |
+| `blacklist` | `status`, `listed_count`, `total_hosts` and the monitored `hosts` list. |
+| `top_failures` | Up to five active mailboxes with failed outgoing messages, selected from the first 20 results ordered by failure rate. |
+| `dns_issues` | Active domains with SPF, DKIM or DMARC issues. Each entry has `domain` and an `issues` array. |
+| `queue` | An object with the current queue `count`. |
+| `quarantine` | An object with the current quarantine `count`. |
+
+Queue and quarantine counts fall back to zero if their mailcow read fails.
 
 ---
 
 ### POST /api/system/summary/email
 
-Trigger the weekly summary email manually.
+**Query Parameters:**
 
-**Authentication:** Required
+| Parameter | Type | Default | Constraints and purpose |
+| --- | --- | --- | --- |
+| `force` | boolean | `false` | Send even when the weekly summary is turned off |
+
+Send the weekly summary email now. The email is built and sent in the background after the response.
 
 **Response:**
 ```json
@@ -5003,13 +4625,16 @@ Trigger the weekly summary email manually.
 }
 ```
 
+With the weekly summary turned off and no `force`, the response is `{ "status": "skipped", "reason": "Weekly summary disabled" }`.
+
 ---
 
 ## Error Responses
 
-All endpoints may return the following error responses:
+Most errors are JSON with a `detail` field. Each endpoint section lists its own codes.
 
 ### 400 Bad Request
+
 ```json
 {
   "detail": "Invalid parameter value"
@@ -5017,6 +4642,7 @@ All endpoints may return the following error responses:
 ```
 
 ### 404 Not Found
+
 ```json
 {
   "detail": "Resource not found"
@@ -5024,30 +4650,44 @@ All endpoints may return the following error responses:
 ```
 
 ### 401 Unauthorized
+
+Returned by the authentication middleware when authentication is enabled and the request has no valid session or Basic Auth credentials. The body is plain text, not JSON: `Authentication required`, or `Incorrect username or password` for wrong Basic Auth credentials. There is no `WWW-Authenticate` header, so browsers do not show their own password prompt.
+
+### 403 Forbidden
+
+A POST, PUT, PATCH or DELETE whose `Origin` (or, without it, `Referer`) names another host is rejected before it reaches the endpoint, whether or not authentication is enabled:
+
 ```json
 {
-  "detail": "Authentication required"
+  "detail": "This request came from another site and was rejected."
 }
 ```
 
-**Note:** Returned when authentication is enabled but no valid credentials are provided. The response does not include `WWW-Authenticate` header to prevent browser popup dialogs.
+Requests with neither header (curl, scripts) pass. Origins listed exactly in `CORS_ALLOWED_ORIGINS` also pass. Some endpoints use 403 for their own reasons too, such as a disabled feature or a setting locked by ENV; their sections say so.
+
+### 422, 429 and 503
+
+422 reports request validation errors (wrong type, out-of-range value). 429 means the client is locked out after failed Basic Auth attempts (`Retry-After: 900`). 503 can mean the session store is full, upstream data is unavailable, or no read-write API key is configured, depending on the endpoint. Some endpoints return an `error` field with HTTP 200; check it.
 
 ### 500 Internal Server Error
+
 ```json
 {
-  "error": "Internal server error",
-  "detail": "Error description (only in debug mode)"
+  "detail": "Internal server error"
 }
 ```
 
+An unexpected exception that no endpoint handled returns `{ "error": "Internal server error", "detail": "An error occurred" }` instead. With `DEBUG=true`, `detail` contains the exception text.
+
 ### 502 Bad Gateway
+
 ```json
 {
   "detail": "mailcow did not answer. Try again in a moment."
 }
 ```
 
-**Note:** Returned by every endpoint that reads from or writes to mailcow when mailcow fails or refuses the request after three tries. In debug mode `detail` is the underlying error.
+Most failed mailcow API calls return 502. When mailcow rejects the read-write API key, the 502 `detail` says so, and the app does not retry. Some status reads return 503 or fallback data instead.
 
 ---
 
@@ -5055,50 +4695,27 @@ All endpoints may return the following error responses:
 
 ### GET /api/status/container-logs
 
-Get the application's internal container logs (stdout/stderr).
-
 **Query Parameters:**
 
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `lines` | int | 100 | Number of lines to fetch (min: 10, max: 1000) |
+| Parameter | Type | Default | Constraints and purpose |
+| --- | --- | --- | --- |
+| `lines` | integer | `100` | Number of lines, 10 to 1000 |
 
-**Authentication:** Required
+Read the last application log lines from `/app/data/container.log`. The response contains a `logs` array. These are the viewer's own application logs, rather than mailcow service logs.
 
-**Example Request:**
-```
-GET /api/status/container-logs?lines=50
-```
-
-**Response:**
-```json
-{
-  "logs": [
-    "2026-01-29 12:00:01 - INFO - Checking for updates...",
-    "2026-01-29 12:00:02 - INFO - Database connection successful",
-    "2026-01-29 12:00:05 - INFO - [Scheduler] Job 'blacklist_check' executed successfully"
-  ]
-}
-```
+A missing file or read failure returns an explanatory line in that array. The route does not access the Docker daemon or stream arbitrary container stdout.
 
 ---
 
 ## Raw Logs (Live Log Viewer)
 
-Endpoints for the Live Log Viewer feature. Provides access to raw logs collected from all mailcow services via a background worker. Logs are stored in a dedicated `raw_service_logs` database table and streamed in real-time via WebSocket.
+Endpoints behind the **Logs** page. A background worker collects raw logs from the mailcow services, stores them in the `raw_service_logs` table and streams new lines over a WebSocket.
 
 **Supported Services:** `acme`, `api`, `autodiscover`, `dovecot`, `netfilter`, `postfix`, `ratelimited`, `rspamd-history`, `sogo`, `watchdog`
 
 ### GET /api/raw-logs/services
 
-List all enabled services with metadata and log entry counts.
-
-**Authentication:** Required
-
-**Example Request:**
-```
-GET /api/raw-logs/services
-```
+List the services selected for the Logs page, with metadata and the number of stored lines for each.
 
 **Response:**
 ```json
@@ -5110,7 +4727,7 @@ GET /api/raw-logs/services
       "icon": "mail",
       "description": "Mail transfer agent logs",
       "has_smart_filters": true,
-      "entry_count": 1523
+      "log_count": 1523
     },
     {
       "id": "dovecot",
@@ -5118,191 +4735,62 @@ GET /api/raw-logs/services
       "icon": "inbox",
       "description": "IMAP/POP3 server logs",
       "has_smart_filters": false,
-      "entry_count": 980
+      "log_count": 980
     }
-  ]
+  ],
+  "ws_connections": 1,
+  "raw_logs_enabled": true
 }
 ```
+
+`ws_connections` is the number of open live streams. `raw_logs_enabled` mirrors the raw-log collection setting.
 
 ---
 
 ### GET /api/raw-logs/{service}
 
-Query stored logs for a specific service with pagination, search, and time filtering.
-
-**Path Parameters:**
-
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `service` | string | Service ID (e.g., `postfix`, `dovecot`, `api`) |
-
 **Query Parameters:**
 
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `limit` | int | 500 | Number of entries to return (max: 5000) |
-| `offset` | int | 0 | Pagination offset |
-| `search` | string | - | Full-text search across log message content |
-| `since` | ISO 8601 | - | Only return entries newer than this timestamp |
-| `smart_filter` | string | - | Apply a predefined smart filter (Postfix only) |
+| Parameter | Type | Default | Constraints and purpose |
+| --- | --- | --- | --- |
+| `page` | integer | `1` | Page number, at least 1 |
+| `limit` | integer | `200` | Results per page, 1 to 1000 |
+| `search` | string or null | Unset | Case-insensitive substring of the message. For `rspamd-history`, of the subject, SMTP or MIME sender, IP or action. |
+| `program` | string or null | Unset | Substring of the program name |
+| `start_date` | string or null | Unset | Earliest time (ISO 8601); an unparsable value is ignored |
+| `end_date` | string or null | Unset | Latest time (ISO 8601); an unparsable value is ignored |
+| `order` | string | `desc` | `asc` for oldest first; anything else is newest first |
+| `smart_filter` | string or null | Unset | Comma-separated smart filter IDs (Postfix only); a line matching any of them is returned |
 
-**Authentication:** Required
+Read stored log lines for one service. An unknown service returns 404. The response contains `data`, `page`, `limit`, `total`, `pages` and `service`.
 
-**Example Request:**
-```
-GET /api/raw-logs/postfix?limit=100&search=reject&smart_filter=noqueue_reject
-```
+Each data row contains the original mailcow log object, plus `_id`, `_service` and `_stored_at`.
 
-**Response:**
-```json
-{
-  "service": "postfix",
-  "entries": [
-    {
-      "id": 12345,
-      "service": "postfix",
-      "time": "2026-04-15T01:21:25Z",
-      "message_hash": "a1b2c3d4...",
-      "raw_data": {
-        "time": "1776189085",
-        "program": "postfix/smtpd",
-        "priority": "info",
-        "message": "NOQUEUE: reject: RCPT from unknown[1.2.3.4]: 554 5.7.1 ..."
-      },
-      "created_at": "2026-04-15T01:21:30Z"
-    }
-  ],
-  "total": 1523,
-  "limit": 100,
-  "offset": 0
-}
-```
+`GET /api/raw-logs/postfix?page=1&limit=200&search=reject&order=desc`
 
 ---
 
 ### GET /api/raw-logs/{service}/smart-filters
 
-Get available smart filter definitions for a specific service. Currently only Postfix has smart filters.
+Read smart-filter definitions. Services other than `postfix` return an empty filters list.
 
-**Path Parameters:**
+The response contains `service` and `filters`. Each filter has `id`, `label`, `pattern`, `field`, `color` and `description`. `field` is `message` or `program`; `pattern` is a single string.
 
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `service` | string | Service ID |
-
-**Authentication:** Required
-
-**Example Request:**
-```
-GET /api/raw-logs/postfix/smart-filters
-```
-
-**Response:**
-```json
-{
-  "service": "postfix",
-  "filters": [
-    {
-      "id": "postscreen",
-      "label": "Postscreen",
-      "description": "Postscreen connection screening",
-      "patterns": ["postscreen"]
-    },
-    {
-      "id": "noqueue_reject",
-      "label": "NOQUEUE Reject",
-      "description": "Rejected before queuing",
-      "patterns": ["NOQUEUE: reject"]
-    },
-    {
-      "id": "dnsbl",
-      "label": "DNSBL Block",
-      "description": "DNS blacklist blocks",
-      "patterns": ["dnsbl", "zen.spamhaus", "bl.spamcop"]
-    },
-    {
-      "id": "pregreet",
-      "label": "Pregreet",
-      "description": "Pregreet detection (bot behavior)",
-      "patterns": ["PREGREET"]
-    },
-    {
-      "id": "sender_restrictions",
-      "label": "Sender Restrictions",
-      "description": "Sender address restrictions",
-      "patterns": ["Sender address rejected", "smtpd_sender_restrictions"]
-    },
-    {
-      "id": "recipient_restrictions",
-      "label": "Recipient Restrictions",
-      "description": "Recipient address restrictions",
-      "patterns": ["Recipient address rejected", "smtpd_recipient_restrictions"]
-    },
-    {
-      "id": "relay_denied",
-      "label": "Relay Denied",
-      "description": "Relay access denied",
-      "patterns": ["Relay access denied"]
-    },
-    {
-      "id": "connections",
-      "label": "Connections",
-      "description": "Connection events",
-      "patterns": ["connect from", "disconnect from"]
-    }
-  ]
-}
-```
+Postfix filter IDs are `postscreen`, `noqueue_reject`, `dnsbl`, `pregreet`, `sender_restrict`, `recipient_restrict`, `relay_restrict` and `connections`.
 
 ---
 
 ### GET /api/raw-logs/worker-status
 
-Get the health and status of the raw logs background worker.
+Read raw-log settings and worker state. The response contains `enabled`, `fetch_interval`, `fetch_count`, `retention_days`, `services`, `jobs` and `ws_connections`.
 
-**Authentication:** Required
-
-**Example Request:**
-```
-GET /api/raw-logs/worker-status
-```
-
-**Response:**
-```json
-{
-  "enabled": true,
-  "scheduler_running": true,
-  "fetch_interval": 20,
-  "retention_days": 2,
-  "enabled_services": ["postfix", "dovecot", "sogo", "netfilter", "api", "watchdog"],
-  "jobs": {
-    "fetch_raw_logs": {
-      "last_run": "2026-04-15T01:20:00Z",
-      "status": "success",
-      "error": null,
-      "stats": { "postfix": 15, "dovecot": 3, "api": 8 }
-    },
-    "cleanup_raw_logs": {
-      "last_run": "2026-04-15T03:00:00Z",
-      "status": "success",
-      "error": null
-    }
-  }
-}
-```
+`jobs` contains the raw fetch and cleanup job status. `ws_connections` maps service names to active stream counts. `services` is the Logs page's configured selection; required services from other pages may also be collected.
 
 ---
 
 ### GET /api/raw-logs/ws-token
 
-Issue a one-time short-lived token for WebSocket authentication. This endpoint is protected by the standard HTTP authentication middleware, so only authenticated users can obtain a token. The token expires after 30 seconds and can only be used once.
-
-**Authentication:** Required
-
-**Example Request:**
-```
-GET /api/raw-logs/ws-token
-```
+Issue a one-time token for the live log WebSocket. Only an authenticated caller can get one. The token expires after 30 seconds and works once.
 
 **Response:**
 ```json
@@ -5312,17 +4800,19 @@ GET /api/raw-logs/ws-token
 }
 ```
 
+Tokens are bound to the requesting session. A token issued before sign-out, session expiry or a change to the sign-in settings can no longer open a stream.
+
 ---
 
 ### WebSocket: /ws/raw-logs
 
-Real-time log streaming via WebSocket. Connects to receive new log entries as they are ingested by the background worker.
+Live log streaming. The server pushes new lines as the background worker stores them.
 
 **Authentication Flow:**
-1. Client calls `GET /api/raw-logs/ws-token` (authenticated via HTTP) to obtain a one-time token
-2. Client connects to the WebSocket with the token as a query parameter
-3. Server validates and consumes the token (single use)
-4. If authentication is disabled, the token is accepted but not validated
+1. Call `GET /api/raw-logs/ws-token` to get a one-time token
+2. Connect to the WebSocket with the token as a query parameter
+3. The server checks and consumes the token
+4. With authentication disabled, no token is needed
 
 **Connection URL:**
 ```
@@ -5333,17 +4823,17 @@ wss://your-server/ws/raw-logs?service=postfix&token=<one-time-token>
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
-| `service` | string | Initial service to stream (e.g., `postfix`) |
-| `token` | string | One-time auth token from `/api/raw-logs/ws-token` |
+| `service` | string | Initial service to stream (default `postfix`). A service not selected for the Logs page falls back to the first selected one. |
+| `token` | string | One-time token from `/api/raw-logs/ws-token` |
 
-**Client → Server Messages:**
+**Client to Server Messages:**
 
 Switch to a different service:
 ```json
 {"action": "subscribe", "service": "dovecot"}
 ```
 
-**Server → Client Messages:**
+**Server to Client Messages:**
 
 Connection confirmed:
 ```json
@@ -5364,7 +4854,7 @@ New log entries (pushed automatically when worker ingests new data):
       "time": "1776189085",
       "program": "postfix/smtpd",
       "priority": "info",
-      "message": "connect from unknown[1.2.3.4]"
+      "message": "connect from unknown[192.0.2.10]"
     }
   ],
   "timestamp": "2026-04-15T01:21:25Z"
@@ -5385,58 +4875,46 @@ Authentication error (connection will be closed with code 4401):
 |------|---------|
 | `4401` | Authentication required - invalid or missing token |
 | `1000` | Normal closure |
+| `4001` | The session ended or authentication settings revoked it. |
+| `1013` | A client could not receive within the send time budget. |
 
 **Notes:**
-- The WebSocket connection auto-reconnects on drop (3-second delay), except on auth failure (4401)
-- Only entries for the currently selected service are streamed
-- Use `subscribe` action to change services without reconnecting
-- Tokens are single-use and expire after 30 seconds
+
+- Only entries for the current service are streamed. Use the `subscribe` action to change services without reconnecting. The server answers with `type: "subscribed"`, or with `type: "error"` for a service that is not selected.
+
+- The server also broadcasts `service_counts` messages with updated per-service counts.
+
+- The web interface reconnects after a drop (3-second delay), except after 4401.
+
+- A cross-site `Origin` or `Referer` is refused before the upgrade with HTTP 403. A stream tied to a session closes when that session ends or is revoked.
 
 ---
 
 ## Spam Filter
 
-The Spam Filter feature provides two capabilities:
-1. **Rspamd Maps** - Direct editor for Rspamd map files
-2. **Suppressions** - Email suppression list with automatic bounce detection
+The Spam Filter feature has two parts:
+1. **Rspamd Maps**: an editor for Rspamd map files
+2. **Suppressions**: a recipient suppression list with automatic bounce detection
 
 ### Rspamd Maps
 
 #### GET /api/rspamd/config
 
-Check if Rspamd is configured (password set).
+Read connection and feature prerequisites:
 
-**Response:**
-```json
-{
-  "configured": true,
-  "rw_configured": true
-}
-```
+`{ "rspamd_configured": true, "rw_key_configured": true, "suppression_enabled": false, "suppression_configured": false }`
 
-**Response Fields:**
-- `configured`: Boolean - `true` if `RSPAMD_PASSWORD` is set
-- `rw_configured`: Boolean - `true` if `MAILCOW_API_KEY_RW` is set (required for writing)
+`rspamd_configured` means a password is set. `rw_key_configured` means a read-write API key is set. `suppression_configured` requires suppression enabled and a read-write API key; these flags do not validate the credentials.
 
 ---
 
 #### GET /api/rspamd/maps
 
-List all available Rspamd map files with metadata.
+List known Rspamd maps and available metadata. The response is an object with `configured` and `maps`, plus `rw_key_configured` when connected.
 
-**Response:**
-```json
-[
-  {
-    "filename": "global_smtp_from_whitelist.map",
-    "display_name": "Envelope Sender Allowlist",
-    "category": "sender",
-    "description": "Allowlisted envelope senders",
-    "regex": false,
-    "entry_count": 5
-  }
-]
-```
+With no Rspamd password, `configured` is false and `message` explains what to add. A connection failure can return `configured: true`, an `error`, and the known map metadata with HTTP 200. Inspect that error before treating the list as live data.
+
+Each entry includes `filename`, `name`, `category`, `description` and `supports_regex`; suppression-managed maps also have `managed_by_suppression`. Connected entries add `map_id`, `loaded`, `editable` and `rspamd_description`. Use only filenames returned by this endpoint; unknown map filenames return 404.
 
 ---
 
@@ -5450,20 +4928,21 @@ Read the content of a specific Rspamd map file.
 |-----------|------|-------------|
 | `filename` | string | Map filename (e.g., `global_smtp_from_whitelist.map`) |
 
-**Response:**
-```json
-{
-  "filename": "global_smtp_from_whitelist.map",
-  "content": "user@example.com\nadmin@example.com",
-  "entry_count": 2
-}
-```
+**Response:** `{ "filename": "global_smtp_from_whitelist.map", "content": "/^alice@example\\.com$/i", "entry_count": 1 }`
+
+The response can also include map `metadata`. A known map not yet loaded returns empty content, zero entries and a message. An unknown filename returns 404, a missing Rspamd password 400, and an Rspamd failure 502.
 
 ---
 
 #### PUT /api/rspamd/maps/{filename}
 
-Update a Rspamd map file. Requires Read-Write API key.
+**JSON fields:**
+
+| Field | Type | Default | Constraints and purpose |
+| --- | --- | --- | --- |
+| `content` | string | Required | The whole new map, one entry per line; lines starting with `#` are comments |
+
+Replace the content of an Rspamd map through the mailcow API. Needs a read-write API key: without one, the endpoint returns 403. An unknown filename returns 404; a mailcow failure returns 502.
 
 **Path Parameters:**
 
@@ -5482,20 +4961,35 @@ Update a Rspamd map file. Requires Read-Write API key.
 ```json
 {
   "success": true,
-  "message": "Map updated successfully"
+  "filename": "global_smtp_from_whitelist.map",
+  "entry_count": 2,
+  "normalized_entries": 2,
+  "content": "/^user@example\\.com$/i\n/^admin@example\\.com$/i",
+  "warnings": [],
+  "api_response": []
 }
 ```
+
+Before saving, bare addresses are converted into anchored, escaped regexp entries; `normalized_entries` counts the converted lines and `content` is what was saved. Warnings do not block the save. Invalid entries return 400 with a `detail` object containing `message` and `validation_errors`.
 
 ---
 
 #### POST /api/rspamd/validate
 
-Validate regex patterns before saving.
+**JSON fields:**
+
+| Field | Type | Default | Constraints and purpose |
+| --- | --- | --- | --- |
+| `content` | string | Required | Map content to check |
+| `filename` | string or null | Unset | Accepted but not used |
+
+Check map entries (including regexp syntax) without saving. Unlike the save, this check does not convert bare addresses first.
 
 **Request Body:**
 ```json
 {
-  "patterns": ["/.*@example\\.com/i", "/invalid[/"]
+  "content": "/^alice@example\\.com$/i\n/invalid[/",
+  "filename": "global_smtp_from_whitelist.map"
 }
 ```
 
@@ -5503,13 +4997,16 @@ Validate regex patterns before saving.
 ```json
 {
   "valid": false,
+  "entry_count": 2,
   "errors": [
     {
       "line": 2,
-      "pattern": "/invalid[/",
-      "error": "unterminated character set"
+      "content": "/invalid[/",
+      "severity": "error",
+      "error": "Invalid regex: unterminated character set at position 7"
     }
-  ]
+  ],
+  "warnings": []
 }
 ```
 
@@ -5519,19 +5016,20 @@ Validate regex patterns before saving.
 
 #### GET /api/suppressions
 
-List suppression entries with pagination, search, and filters.
-
 **Query Parameters:**
 
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `page` | integer | `1` | Page number |
-| `per_page` | integer | `50` | Items per page (max 200) |
-| `search` | string | `""` | Search by email address |
-| `reason` | string | `""` | Filter by reason: `hard_bounce`, `soft_bounce`, `rejected`, `manual` |
-| `active` | string | `""` | Filter by active status: `true` or `false` |
-| `sort` | string | `created_at` | Sort field: `email`, `reason`, `bounce_count`, `created_at`, `expires_at` |
-| `order` | string | `desc` | Sort order: `asc` or `desc` |
+| Parameter | Type | Default | Constraints and purpose |
+| --- | --- | --- | --- |
+| `page` | integer | `1` | Page number, at least 1 |
+| `per_page` | integer | `50` | 1 to 200 |
+| `search` | string or null | Unset | Case-insensitive substring of the address, the notes or the last bounce message |
+| `type_filter` | string or null | Unset | `email` or `domain`; other values are ignored |
+| `reason_filter` | string or null | Unset | `hard_bounce`, `soft_bounce`, `deferred_stuck`, `rejected` or `manual`; other values are ignored |
+| `active_filter` | string or null | Unset | `true` (active), `false` (inactive) or `expired` (inactive with a past expiry) |
+| `sort_by` | string | `created_at` | `email`, `reason`, `bounce_count`, `created_at` or `expires_at` |
+| `sort_dir` | string | `desc` | `asc` or `desc` |
+
+List suppression entries with pagination, search, and filters.
 
 **Response:**
 ```json
@@ -5571,64 +5069,51 @@ List suppression entries with pagination, search, and filters.
 ```
 
 **Notes:**
+
 - `expires_at`: `null` means permanent block (never expires)
+
 - `expires_in`: Only present when `expires_at` is set and not expired
+
 - `is_expired`: `true` when `expires_at` is in the past
 
 ---
 
 #### GET /api/suppressions/stats
 
-Get suppression statistics summary.
-
-**Response:**
-```json
-{
-  "total": 150,
-  "active": 120,
-  "inactive": 30,
-  "synced": 115,
-  "pending_sync": 5,
-  "expired": 10,
-  "by_reason": {
-    "hard_bounce": 80,
-    "soft_bounce": 40,
-    "rejected": 15,
-    "manual": 15
-  },
-  "by_source": {
-    "auto": 135,
-    "manual": 10,
-    "import": 5
-  }
-}
-```
+Read suppression totals. Response keys are `total`, `active`, `expired`, `hard_bounce`, `soft_bounce`, `rejected`, `manual`, `pending_sync` and `auto_detected`. The reason counts are top-level fields, not a by_reason object.
 
 ---
 
 #### GET /api/suppressions/config
 
-Get suppression feature configuration.
+Read the suppression settings and connection prerequisites. The response contains:
 
-**Response:**
-```json
-{
-  "enabled": true,
-  "auto_detect": true,
-  "rspamd_sync": true,
-  "rspamd_configured": true,
-  "hard_bounce_action": "suppress",
-  "soft_bounce_action": "suppress",
-  "soft_bounce_threshold": 3,
-  "base_expiry_days": 7,
-  "max_expiry_days": 90,
-  "whitelist_domains": ["example.com"]
-}
-```
+- `suppression_enabled`, `suppression_auto_detect`, `suppression_rspamd_sync`.
+
+- `suppression_whitelist_domains` (the configured comma-separated string).
+
+- `suppression_hard_bounce_action`, `suppression_soft_bounce_action`, `suppression_soft_bounce_threshold`.
+
+- `suppression_base_expiry_days`, `suppression_max_expiry_days`.
+
+- `rspamd_configured`, `rw_key_configured`, `is_fully_configured`.
+
+`is_fully_configured` checks suppression enabled plus the read-write API key; check `rspamd_configured` separately for map sync.
 
 ---
 
 #### POST /api/suppressions
+
+**JSON fields:**
+
+| Field | Type | Default | Constraints and purpose |
+| --- | --- | --- | --- |
+| `email` | string | Required | An address, a domain, or a `/regex/` pattern; stored in lower case |
+| `type` | string | `email` | `email` or `domain` |
+| `reason` | string | `manual` | `hard_bounce`, `soft_bounce`, `rejected` or `manual` |
+| `notes` | string or null | Unset | Free text |
+| `permanent` | boolean | `true` | `true` never expires; `false` uses `expires_at` |
+| `expires_at` | string or null | Unset | Expiry (ISO 8601), used only when `permanent` is `false` |
 
 Create a new suppression entry.
 
@@ -5644,32 +5129,39 @@ Create a new suppression entry.
 }
 ```
 
-**Request Fields:**
-
-| Field | Type | Required | Default | Description |
-|-------|------|----------|---------|-------------|
-| `email` | string | Yes | - | Email address, domain, or regex pattern |
-| `type` | string | No | `email` | `email` or `domain` |
-| `reason` | string | No | `manual` | `manual`, `hard_bounce`, `soft_bounce`, `rejected` |
-| `notes` | string | No | `null` | Free text notes |
-| `permanent` | boolean | No | `true` | `true` = never expires, `false` = uses `expires_at` |
-| `expires_at` | string | No | `null` | ISO 8601 datetime (used when `permanent=false`) |
-
-**Response:** `200 OK` - Returns the created suppression object (same format as list item)
+**Response:** `200 OK` with the created suppression object (same format as a list item)
 
 **Error Responses:**
+
 - `409 Conflict`: Email already exists in suppression list
+
 - `422 Unprocessable Entity`: Validation error (invalid email/type/reason)
 
 **Notes:**
+
 - Domain type entries are stored as regex patterns (e.g., `/.+@example\.com/i`)
+
 - Regex patterns (starting with `/`) bypass email format validation
+
 - When written to Rspamd, a regex pattern is anchored as a whole (`/^(?:pattern)$/i`). Entries created automatically (`source: auto`, from bounces and the deferred queue cleanup) are always written as the exact address, even when they look like a pattern
-- If `permanent=false` and no `expires_at` is provided, default expiry is `base_expiry_days` from config
+
+- If `permanent=false` and no `expires_at` is provided, the entry expires after `SUPPRESSION_BASE_EXPIRY_DAYS`. An unparsable `expires_at` returns 400.
+
+- After saving, the app also tries to remove matching messages from the mail queue.
+
+- Re-adding an inactive entry reactivates it as a permanent manual entry. An existing active entry returns 409.
 
 ---
 
 #### PUT /api/suppressions/{suppression_id}
+
+**JSON fields:**
+
+| Field | Type | Default | Constraints and purpose |
+| --- | --- | --- | --- |
+| `active` | boolean or null | Unset | Turn the entry on or off |
+| `notes` | string or null | Unset | Free text |
+| `expires_at` | string or null | Unset | New expiry (ISO 8601); `"null"` or `""` makes the entry permanent |
 
 Update an existing suppression entry.
 
@@ -5688,24 +5180,21 @@ Update an existing suppression entry.
 }
 ```
 
-**Request Fields:**
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `active` | boolean | Toggle active/inactive (triggers re-sync) |
-| `notes` | string | Update notes |
-| `expires_at` | string | ISO datetime to set expiry, or `"null"` / `""` to make permanent |
-
 **Notes:**
-- All fields are optional - only provided fields are updated
+
+- All fields are optional; only the fields you send are updated
+
 - Setting `expires_at` to `"null"` or `""` clears the expiry (permanent block)
-- Changing `active` sets `synced_to_rspamd = false` to trigger re-sync
+
+- Sending `active` sets `synced_to_rspamd = false` to trigger a re-sync
+
+- An unknown ID returns 404; an unparsable `expires_at` returns 400. The response is the updated entry.
 
 ---
 
 #### DELETE /api/suppressions/{suppression_id}
 
-Permanently delete a suppression entry.
+Permanently delete a suppression entry. An unknown ID returns 404.
 
 **Response:**
 ```json
@@ -5722,7 +5211,7 @@ Permanently delete a suppression entry.
 
 Bulk import suppressions from CSV data.
 
-**Request Body:** Multipart form with CSV file
+**Request Body:** Multipart form with the file in the `file` field. A filename that does not end in `.csv` returns 400.
 
 **CSV Format:**
 ```csv
@@ -5744,13 +5233,7 @@ user@example.com,email,manual,Imported entry
 
 #### GET /api/suppressions/export
 
-Export all suppressions as CSV download. The final `_csv_escape_v1` column lists
-which cells received a text prefix. Keep this column when importing the file back
-into the application: the importer restores those values automatically. Older
-files without this column remain supported and are never automatically unescaped.
-Headered files map columns by name; headerless imports retain the four-column
-`email,type,reason,notes` format. As before, imports create active, unsynced entries
-with source `import`; this is a list transfer, not a backup of counts or sync state.
+Export all suppressions as CSV download. The final `_csv_escape_v1` column lists which cells received a text prefix. Keep this column when importing the file back into the application: the importer restores those values automatically. Files without this column are still accepted and are never unescaped. Files with a header row map columns by name; files without one use the four columns `email,type,reason,notes`. Imports create active, unsynced entries with source `import`; this is a list transfer, not a backup of counts or sync state.
 
 **Response:** CSV file download with headers `email,type,reason,source,notes,bounce_count,hard_bounces,soft_bounces,active,expires_at,created_at,_csv_escape_v1`
 
@@ -5770,20 +5253,24 @@ Manually trigger sync of active suppressions to Rspamd's `global_rcpt_blacklist.
 ```
 
 **Notes:**
+
 - Only active, non-expired entries are synced
+
 - Managed entries are placed between markers in the map file
+
 - Manual entries above the markers are preserved
-- Requires both `RSPAMD_PASSWORD` and `MAILCOW_API_KEY_RW`
+
+- Needs a read-write API key (403 without one) and `RSPAMD_PASSWORD` (400 without it). A mailcow failure returns 502.
 
 ---
 
 ## Quarantine Auto-Rules
 
-Manage quarantine auto-rules that automatically release or delete quarantined emails based on matching patterns. All endpoints require a Read-Write API key (`MAILCOW_API_KEY_RW`).
+Manage rules that release or delete quarantined messages automatically. Every endpoint in this section, including the rule list and the action history, needs a read-write API key (`MAILCOW_API_KEY_RW`) and returns 403 without one.
 
 ### GET /api/quarantine/rules
 
-List all quarantine rules.
+List all quarantine rules, delete rules first, then newest first.
 
 **Response:**
 ```json
@@ -5809,15 +5296,31 @@ List all quarantine rules.
 ```
 
 **Response Fields:**
+
 - `match_type`: One of `sender`, `sender_domain`, `recipient`, `subject`
+
 - `is_regex`: Whether `match_value` is a regex pattern
+
 - `action`: `release` (deliver to inbox) or `delete` (permanently remove)
+
 - `hit_count`: Number of quarantine items matched by this rule
+
 - `last_hit_at`: Timestamp of the last match
 
 ---
 
 ### POST /api/quarantine/rules
+
+**JSON fields:**
+
+| Field | Type | Default | Constraints and purpose |
+| --- | --- | --- | --- |
+| `name` | string | Required | 1 to 255 characters |
+| `match_type` | string | Required | `sender`, `sender_domain`, `recipient` or `subject` |
+| `match_value` | string | Required | 1 to 500 characters |
+| `is_regex` | boolean | `false` | Treat `match_value` as a regular expression |
+| `action` | string | Required | `release` or `delete` |
+| `notes` | string or null | Unset | Free text |
 
 Create a new quarantine rule.
 
@@ -5826,33 +5329,36 @@ Create a new quarantine rule.
 {
   "name": "Block spam domain",
   "match_type": "sender_domain",
-  "match_value": "spammer.com",
+  "match_value": "example.net",
   "is_regex": false,
   "action": "delete",
   "notes": "Known spam source"
 }
 ```
 
-**Request Fields:**
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `name` | string | Yes | Rule name (1-255 characters) |
-| `match_type` | string | Yes | `sender`, `sender_domain`, `recipient`, or `subject` |
-| `match_value` | string | Yes | Value or regex pattern to match (1-500 characters) |
-| `is_regex` | boolean | No | Whether `match_value` is a regex (default: false) |
-| `action` | string | Yes | `release` or `delete` |
-| `notes` | string | No | Optional description |
-
 **Response:** The created rule object (same format as GET response)
 
 **Error Responses:**
-- `400 Bad Request`: Invalid match_type, action, or regex pattern
-- `403 Forbidden`: No Read-Write API key configured
+
+- `400 Bad Request`: Invalid `match_type` or `action`, an invalid regex, or a regex with nested repetition such as `(a+)+` (refused because it can take very long on some messages)
+
+- `403 Forbidden`: No read-write API key configured
 
 ---
 
 ### PUT /api/quarantine/rules/{id}
+
+**JSON fields:**
+
+| Field | Type | Default | Constraints and purpose |
+| --- | --- | --- | --- |
+| `name` | string or null | Unset | 1 to 255 characters |
+| `match_type` | string or null | Unset | `sender`, `sender_domain`, `recipient` or `subject` |
+| `match_value` | string or null | Unset | 1 to 500 characters |
+| `is_regex` | boolean or null | Unset | Treat `match_value` as a regular expression |
+| `action` | string or null | Unset | `release` or `delete` |
+| `enabled` | boolean or null | Unset | Turn the rule on or off |
+| `notes` | string or null | Unset | Free text |
 
 Update an existing quarantine rule. Only provided fields are updated.
 
@@ -5867,7 +5373,9 @@ Update an existing quarantine rule. Only provided fields are updated.
 **Response:** The updated rule object
 
 **Error Responses:**
+
 - `404 Not Found`: Rule not found
+
 - `400 Bad Request`: Invalid field values
 
 ---
@@ -5888,15 +5396,15 @@ Delete a quarantine rule permanently.
 
 ### POST /api/quarantine/rules/{id}/toggle
 
-Toggle a rule's enabled/disabled state.
+Turn a rule on or off.
 
-**Response:** The updated rule object with `enabled` toggled
+**Response:** The updated rule object with `enabled` switched. An unknown ID returns 404 (also for `DELETE`).
 
 ---
 
 ### POST /api/quarantine/rules/test
 
-Dry-run test all rules (enabled and disabled) against current quarantine items. No actions are taken.
+Dry-run all rules (enabled and disabled) against the current quarantine. Nothing is changed. With no rules or an empty quarantine, the response has zero counts and a `message`.
 
 **Response:**
 ```json
@@ -5906,11 +5414,11 @@ Dry-run test all rules (enabled and disabled) against current quarantine items. 
   "matches": [
     {
       "quarantine_id": "12345",
-      "sender": "spam@bad.com",
+      "sender": "spam@example.org",
       "recipient": "user@example.com",
       "subject": "You won a prize!",
       "rule_id": 1,
-      "rule_name": "Block bad.com",
+      "rule_name": "Block example.org",
       "action": "delete",
       "rule_enabled": true
     }
@@ -5919,27 +5427,32 @@ Dry-run test all rules (enabled and disabled) against current quarantine items. 
 ```
 
 **Response Fields:**
+
 - `rule_enabled`: `true` if the rule is active, `false` if disabled (match shown but won't execute)
+
 - Results include matches from disabled rules so users can test before enabling
 
 **Notes:**
+
 - Delete rules are checked before release rules (delete always wins)
+
 - Each quarantine item is matched against the first matching rule only
+
 - No quarantine items are modified
 
 ---
 
 ### GET /api/quarantine/rules/logs
 
-Get quarantine rule action history (paginated).
-
 **Query Parameters:**
 
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `limit` | integer | `50` | Max results (max: 200) |
-| `offset` | integer | `0` | Pagination offset |
-| `rule_id` | integer | (none) | Filter by specific rule ID |
+| Parameter | Type | Default | Constraints and purpose |
+| --- | --- | --- | --- |
+| `limit` | integer | `50` | Entries to return, at most 200 |
+| `offset` | integer | `0` | Entries to skip, 0 or more |
+| `rule_id` | integer or null | Unset | Only actions of this rule |
+
+Get quarantine rule action history (paginated).
 
 **Response:**
 ```json
@@ -5952,11 +5465,11 @@ Get quarantine rule action history (paginated).
       "rule_name": "Block spam domain",
       "action": "delete",
       "quarantine_id": "12345",
-      "sender": "spam@bad.com",
+      "sender": "spam@example.org",
       "recipient": "user@example.com",
       "subject": "Buy now!",
       "matched_field": "sender_domain",
-      "matched_value": "bad.com",
+      "matched_value": "example.org",
       "created_at": "2026-04-21T10:30:00Z"
     }
   ]
@@ -5964,24 +5477,27 @@ Get quarantine rule action history (paginated).
 ```
 
 **Notes:**
+
 - Logs are automatically pruned based on `QUARANTINE_RULES_LOG_RETENTION_DAYS` (default: 30)
-- Each entry represents one automated action taken by the scheduler
+
+- Each entry is one action the scheduled job took
+
 ---
 
 ## Security Alerts (Anomaly Detection)
 
-Alerts raised by anomaly detection (outbound volume spikes, authentication-failure bursts) and by SMTP abuse protection. Surfaced as a banner on the Dashboard.
+Alerts raised by anomaly detection (outbound volume spikes, authentication-failure bursts) and by SMTP abuse protection. Unacknowledged alerts appear in the Dashboard's **Needs attention** panel.
 
 ### GET /api/security-alerts
 
-List security alerts, newest first.
-
 **Query Parameters:**
 
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `acknowledged` | boolean | (none) | Filter by acknowledged state (`false` = outstanding only) |
-| `limit` | integer | `50` | Max results (max: 500) |
+| Parameter | Type | Default | Constraints and purpose |
+| --- | --- | --- | --- |
+| `acknowledged` | boolean or null | Unset | `true` for acknowledged alerts only, `false` for unacknowledged only; omit for all |
+| `limit` | integer | `50` | Most alerts to return, 1 to 500 |
+
+List security alerts, newest first. `enabled` reflects `ANOMALY_DETECTION_ENABLED` only; alerts are still listed and can be acknowledged when it is off. `unacknowledged_count` counts every unacknowledged alert, whatever the filter and limit. `severity` is `warning` or `critical`.
 
 **Response:**
 ```json
@@ -6009,18 +5525,20 @@ List security alerts, newest first.
 
 ### GET /api/security-alerts/{alert_id}/activity
 
-The history behind an alert, for its Show activity window. For a `volume_spike` it counts the mailbox's outbound messages; for an `auth_failure_burst` the username's failed logins.
+The history behind an alert, for its **Show activity** window. For a `volume_spike` it counts the mailbox's outbound messages; for any other type, including `auth_failure_burst` and `smtp_abuse_block`, the failed logins of the alert's subject.
 
-- `buckets`: `[{start, count}]` per `bucket_minutes` (15) from `baseline_days` before the alert to two hours after it
+- `buckets`: `[{start, count}]` per `bucket_minutes` (15) from `baseline_days` before the alert to two hours after it; the first bucket starts on the hour
+
 - `window_minutes`, `baseline_days`: the check window and baseline period the alert was raised with, not today's settings. For a `volume_spike` or an `auth_failure_burst` they are read from the alert's detail; for an `smtp_abuse_block`, the window comes from its abuse action. `window_minutes` is `null` when it is not known. `baseline_days` is today's setting when the alert does not name it
-- `around`: from the check window (an hour when it is `null`) before the alert to an hour after it: `total`, and for a volume spike `recipient_domains`, `results` and `subjects`, for a burst `addresses`, `countries` and `networks`, each `[{name, count}]`, most first
+- `around`: from the check window (an hour when it is `null`) before the alert to an hour after it (`from`, `to`): `total`, and for a volume spike `recipient_domains`, `results` and `subjects`, for a burst `addresses`, `countries` and `networks`, each `[{name, count}]`, most first. Each list holds up to 6 entries (`subjects` up to 5)
+
 - `alert`: the alert itself
 
 Returns 404 for an unknown alert.
 
 ### POST /api/security-alerts/{alert_id}/acknowledge
 
-Mark a single alert as acknowledged (removes it from the dashboard banner).
+Mark a single alert as acknowledged, which removes it from the Dashboard's **Needs attention** panel. Returns `{ "status": "success" }`; an unknown ID returns 404.
 
 ### POST /api/security-alerts/acknowledge-all
 
@@ -6037,17 +5555,17 @@ Acknowledge every outstanding alert.
 
 Automatic and manual control of outbound (SMTP) access per mailbox. Receiving over IMAP is never affected.
 
-> **Requires:** `MAILCOW_API_KEY_RW`. All write endpoints return `403` when `SMTP_ABUSE_ENABLED=false` and `503` when no Read-Write key is configured.
+The read endpoints (`GET status`, `GET whitelist`, `GET history`) work without a read-write API key and with the feature off. The write endpoints return `403` when `SMTP_ABUSE_ENABLED=false` and `503` when `MAILCOW_API_KEY_RW` is not configured.
 
 ### GET /api/smtp-abuse/status
 
-Current outbound activity per mailbox, block state and whitelist.
-
 **Query Parameters:**
 
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `limit` | integer | `200` | Max mailboxes to return (max: 1000) |
+| Parameter | Type | Default | Constraints and purpose |
+| --- | --- | --- | --- |
+| `limit` | integer | `200` | Most mailboxes to count by outbound volume, 1 to 1000; mailboxes this system blocked are always included |
+
+Current outbound activity per mailbox, block state and whitelist. Mailboxes are sorted by `message_count`, highest first. `over_threshold` means strictly above `threshold`. `smtp_access` is `true` when mailcow's state could not be read.
 
 **Response:**
 ```json
@@ -6073,7 +5591,8 @@ Current outbound activity per mailbox, block state and whitelist.
 ```
 
 **Notes:**
-- `blocked_by_protection` distinguishes mailboxes **this system** blocked from mailboxes that simply have SMTP disabled in mailcow (e.g. an incoming-only DMARC report mailbox), which are not listed as abuse cases
+
+- `blocked_by_protection` marks mailboxes this system blocked. Mailboxes with SMTP turned off in mailcow for another reason (for example an incoming-only DMARC report mailbox) are left out.
 
 ### GET /api/smtp-abuse/whitelist
 
@@ -6086,6 +5605,13 @@ Active whitelist entries. Whitelisted mailboxes are never blocked automatically.
 
 ### POST /api/smtp-abuse/whitelist
 
+**JSON fields:**
+
+| Field | Type | Default | Constraints and purpose |
+| --- | --- | --- | --- |
+| `email` | string | Required | Address to whitelist; trimmed and lowercased; up to 254 characters |
+| `notes` | string or null | Unset | Note stored with the entry; replaces any earlier note |
+
 Add (or re-activate) a single whitelist entry.
 
 **Request Body:**
@@ -6093,9 +5619,17 @@ Add (or re-activate) a single whitelist entry.
 { "email": "newsletter@example.com", "notes": "Marketing sender" }
 ```
 
+Returns `{ "email": "newsletter@example.com", "active": true }`. An invalid address returns 422.
+
 ### PUT /api/smtp-abuse/whitelist
 
-Replace the whole whitelist (used by the "one address per line" editor in the UI). Addresses are lowercased; an invalid address returns `422`.
+**JSON fields:**
+
+| Field | Type | Default | Constraints and purpose |
+| --- | --- | --- | --- |
+| `emails` | array of strings | `[]` | Complete list of addresses to keep active, at most 5000 |
+
+Replace the whole whitelist (used by the one-address-per-line editor in the UI). Addresses are lowercased and blank entries are skipped. An invalid address, or more than 5000 entries, returns `422`. Entries that stay on the list keep their notes.
 
 **Request Body:**
 ```json
@@ -6109,11 +5643,11 @@ Replace the whole whitelist (used by the "one address per line" editor in the UI
 
 ### DELETE /api/smtp-abuse/whitelist/{email}
 
-Deactivate a whitelist entry. Returns `404` if the address is not on the list.
+Deactivate a whitelist entry. Returns `{ "email": "...", "active": false }`, or `404` if the address is not on the list.
 
 ### POST /api/smtp-abuse/mailboxes/{email}/block
 
-Disable SMTP for a mailbox immediately. Also revokes its app passwords (when `SMTP_ABUSE_REVOKE_APP_PASSWORDS=true`), records a security alert, and notifies the operator and the mailbox owner.
+Disable SMTP for a mailbox immediately. Also revokes its app passwords (when `SMTP_ABUSE_REVOKE_APP_PASSWORDS=true`), records a security alert, and notifies the operator and the mailbox owner (the owner only when notification SMTP is configured). A manual block does not check the whitelist. If mailcow refuses the change (for example, the address is an alias), the endpoint returns 500; if the mailcow request fails, 502. The same errors apply to unblock.
 
 **Response:**
 ```json
@@ -6136,13 +5670,13 @@ Re-enable SMTP for a mailbox. Starts the grace period (`SMTP_ABUSE_UNBLOCK_GRACE
 
 ### GET /api/smtp-abuse/history
 
-Audit trail of block/unblock actions.
-
 **Query Parameters:**
 
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `limit` | integer | `50` | Max results (max: 500) |
+| Parameter | Type | Default | Constraints and purpose |
+| --- | --- | --- | --- |
+| `limit` | integer | `50` | Most recent actions to return, 1 to 500 |
+
+Audit trail of block and unblock actions. `action` is `blocked` or `unblocked`; `operator` is `smtp-abuse` for automatic blocks and `manual` for API actions.
 
 **Response:**
 ```json
@@ -6167,13 +5701,15 @@ Audit trail of block/unblock actions.
 
 ### GET /api/dmarc/insights
 
-Policy recommendations and new-source (possible spoofing) detection, computed from collected DMARC reports. Read-only - never changes DNS.
-
 **Query Parameters:**
 
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `domain` | string | (none) | Return insights for a single domain; omit for all domains with data |
+| Parameter | Type | Default | Constraints and purpose |
+| --- | --- | --- | --- |
+| `domain` | string or null | Unset | Return only this domain's insight (exact match); omit for every domain with report data in the window |
+
+Policy recommendations and new-source (possible spoofing) detection, computed from collected DMARC reports over the last `DMARC_INSIGHTS_WINDOW_DAYS` (default 28). It is read-only and never changes DNS.
+
+Without `domain`, only domains with data are listed, most actionable first (low pass rate, then new sources, then tighten recommendations). With `domain`, the response is that domain's insight object on its own (`domain`, `has_data`, `window_days`, `current_policy`, `total_messages`, `pass_rate`, `recommendations`, `new_sources`). A domain without reports in the window returns `{"domain": "...", "has_data": false, "recommendations": [], "new_sources": []}`.
 
 **Response (all domains):**
 ```json
@@ -6184,6 +5720,7 @@ Policy recommendations and new-source (possible spoofing) detection, computed fr
     {
       "domain": "example.com",
       "has_data": true,
+      "window_days": 28,
       "current_policy": "none",
       "total_messages": 5400,
       "pass_rate": 99.8,
@@ -6197,26 +5734,78 @@ Policy recommendations and new-source (possible spoofing) detection, computed fr
         }
       ],
       "new_sources": [
-        { "source_ip": "45.66.77.88", "failing_messages": 80, "first_seen_window_days": 7 }
+        { "source_ip": "198.51.100.88", "failing_messages": 80, "first_seen_window_days": 7 }
       ]
     }
   ]
 }
 ```
 
-**Recommendation types:** `tighten_policy`, `low_pass_rate`, `monitor`, `insufficient_volume`, `already_strict`
+**Recommendation types:** `low_pass_rate` (severity `warning`: pass rate under 90% with enough volume), `already_strict` (`info`: the policy is `reject`), `insufficient_volume` (`info`: fewer than `DMARC_INSIGHTS_MIN_VOLUME` messages, default 100), `tighten_policy` (`success`: pass rate at or above `DMARC_INSIGHTS_PASS_THRESHOLD`, default 99.5), `monitor` (`info`). Only `tighten_policy` adds `current_policy` and `recommended_policy`.
+
+`new_sources` lists up to 20 addresses, most failing messages first, that fail DMARC and first appeared in the last quarter of the window (at least 3 days, so 7 days with the default 28-day window).
 
 ---
 
-## Settings - Connection Tests
+## Protection rules
+
+These routes back **Security** > **Settings**. Rule configuration and watch mode work with UI settings editing off. Enforcing bans needs a read-write API key.
+
+### GET /api/protection/rules
+
+Return `rules`, `trap_suggestions`, `country_suggestions` and `capabilities`. Capabilities contain `can_ban` (a read-write API key is set), `geoip` and `raw_logs` (Dovecot raw logs are collected; the breach rule needs them for IMAP logins). `trap_suggestions` rows are `{name, tries, addresses}` for up to 12 unknown account names tried in the last 7 days. `country_suggestions` rows are `{code, name, tries}` for up to 12 countries with failed logins in the last 7 days.
+
+### PUT /api/protection/rules
+
+Send `{ "rules": { ... } }` to update rule fields. Omitted rules and fields keep their current values. Unknown rule keys and fields are ignored. The response is `{ "rules": { ... } }` with the effective rules. Invalid settings return 400.
+
+Setting any ban rule to `enforce` without a read-write API key returns 400; this also blocks every save while a stored rule is still in `enforce`. Country codes are uppercased and deduplicated. Switching a rule to `watch`, or disabling it, moves its pending automatic bans back to `watching`.
+
+All rules have `enabled` (default false) and `notify` (default true). Ban rules also have `mode` (`watch` by default or `enforce`) and `ban_hours` (0 through 8760; zero is indefinite).
+
+| Rule ID | Other fields and defaults | Validation |
+| --- | --- | --- |
+| `trap` | `names: []`, `ban_hours: 720` | Names are trimmed, lowercased and deduplicated. Each must be an address or bare name of up to 255 characters using letters, digits and `. _ % + -`. A real mailbox or alias, or a bare name equal to a real mailbox's local part, returns 400. Names after the first 500 are dropped without an error. |
+| `unknown_accounts` | `threshold: 5`, `window_minutes: 60`, `ban_hours: 168` | Threshold 2 through 100; window 5 through 1440 minutes. |
+| `repeat_offender` | `threshold: 3`, `window_days: 30`, `ban_hours: 0` | Threshold 2 through 50; window 1 through 365 days. |
+| `subnet` | `threshold: 5`, `window_hours: 24`, `ban_hours: 24` | Threshold 2 through 256 addresses; window 1 through 168 hours. |
+| `country` | `countries: []`, `ban_hours: 168` | Two-letter country codes; country matching needs GeoIP. |
+| `breach` | `failures: 3`, `window_minutes: 60`, `new_country: true` | Failures 1 through 50; window 5 through 1440 minutes. Alerts only; has no ban mode. |
+
+### GET /api/protection/hits
+
+**Query Parameters:**
+
+| Parameter | Type | Default | Constraints and purpose |
+| --- | --- | --- | --- |
+| `status` | string | `active` | `active`, `history`, `watching`, `dismissed` or `all` |
+| `limit` | integer | `200` | Most hits to return, 1 to 1000 |
+
+Return `hits` and per-status `counts`. Status groups are active (watching, pending, banned, alert), history (dismissed, expired, undone), watching, dismissed or all. History sorts by end time; other views sort by last seen. `counts` covers all hits, whatever the filter, and leaves out statuses with no hits.
+
+Each hit has `id`, `ip`, `rule`, `mode` (`watch`, `enforce` or `manual`), `status`, `reason`, `usernames`, `attempts`, `country_code`, `country_name`, `first_seen`, `last_seen`, `ended_at`, `ban_hours`, `banned_at`, `expires_at` (null means no end), `owned` and `error`. A `watching` hit with no activity for 7 days becomes `expired`.
+
+### POST /api/protection/hits/{hit_id}/dismiss
+
+Dismiss a watching or alert hit and return the updated hit. This does not change mailcow. Other states are returned unchanged. Missing ID returns 404.
+
+### POST /api/protection/hits/{hit_id}/ban
+
+Ban a watching hit from a ban-capable rule and return the updated hit, whose `mode` becomes `manual`. Missing ID returns 404. A non-ban rule or a missing read-write API key returns 400; a non-watching state returns 409. If the address is on the allowlist by then, the hit becomes `dismissed` and the endpoint returns 502 with that reason. On any other failure the hit stays `pending`, keeps the error, and the next rules run tries again (502).
+
+### POST /api/protection/hits/{hit_id}/undo
+
+Undo a banned or pending hit and return it. Missing ID returns 404; other states return 409. Lifting a ban the app added without a read-write API key returns 400; a mailcow failure returns 502. Undoing a pending hit changes nothing in mailcow. Entries the app did not add are left in mailcow. If another rule still bans the same address, that hit takes over the entry and it stays in mailcow. Dismissed and undone addresses are left alone by that rule for a week.
+
+---
 
 ## Notification Destinations
 
-Manage where alerts are delivered. Multiple destinations can be configured; every alert goes to all enabled ones.
+Manage where alerts are delivered. Multiple destinations can be configured; each alert goes to enabled destinations subscribed to its topic. See [Notifications](Notifications.md) for email routing and delivery exceptions.
 
 ### GET /api/notifications/types
 
-Field specification per service type - used by the settings UI to render only the relevant inputs - plus the list of alert types a destination can subscribe to.
+The fields each service type needs (the settings form shows only these) and the alert types a destination can subscribe to. A field can also carry `placeholder` and, for the ntfy server URL, `default` (`https://ntfy.sh`). Fields with `secret: true` are masked once saved.
 
 ```json
 {
@@ -6266,11 +5855,22 @@ List configured destinations. Secret fields are returned masked as `********`.
 }
 ```
 
-- `alert_types`: The alert types this destination is subscribed to. An empty array means the destination receives **every** alert.
+- `alert_types`: The alert types this destination is subscribed to. An empty array means the destination receives every alert.
+- `last_status`: `success`, `failed`, or `null` before the first delivery. `last_error` holds the failure text (secrets removed, up to 500 characters).
 
 ### POST /api/notifications/channels
 
-Create a destination. Returns `422` if a required field for that type is missing, or if `alert_types` contains an unknown id.
+**JSON fields:**
+
+| Field | Type | Default | Constraints and purpose |
+| --- | --- | --- | --- |
+| `name` | string | Required | 1 to 100 characters; leading and trailing spaces are removed |
+| `channel_type` | string | Required | `slack`, `discord`, `telegram`, `ntfy`, `gotify` or `webhook` |
+| `config` | object | `{}` | The type's fields from `GET /api/notifications/types`, by `key` |
+| `alert_types` | array of strings or null | Unset | Alert type IDs to subscribe to. Empty, unset or all four means every alert. |
+| `enabled` | boolean | `true` | Disabled destinations receive no alerts |
+
+Create a destination. Returns `422` for an unknown `channel_type`, a missing required field for that type, or an unknown ID in `alert_types`. A literal `********` counts as empty here, because there is no stored secret yet.
 
 ```json
 {
@@ -6284,26 +5884,61 @@ Create a destination. Returns `422` if a required field for that type is missing
 
 - `alert_types` is optional: omit it (or subscribe to all types) to receive every alert.
 
+Returns the created destination object with its integer `id`, `name`, `channel_type`, masked `config`, `alert_types`, `enabled`, `last_status`, `last_error` and `last_sent_at`.
+
 ### PUT /api/notifications/channels/{id}
 
-Update a destination. Send a secret field back as `********` to keep the stored value unchanged. Send `alert_types` to change which alerts the destination receives.
+**JSON fields:**
+
+| Field | Type | Default | Constraints and purpose |
+| --- | --- | --- | --- |
+| `name` | string | Required | 1 to 100 characters |
+| `channel_type` | string | Required | Same values as for create |
+| `config` | object | `{}` | The type's fields; send a secret as `********` to keep the stored value |
+| `alert_types` | array of strings or null | Unset | As for create |
+| `enabled` | boolean | `true` | As for create |
+
+Update a destination. The body replaces the whole destination: an omitted `alert_types` resets the destination to every alert, and an omitted `enabled` turns it back on. Send a secret field back as `********` to keep the stored value.
+
+Changing `server_url` or `url` while keeping a masked secret returns 422 and asks for the secret again, so a stored secret is never sent to a new server. A different service type does not inherit secrets from the old type. An unknown ID returns 404. The response is the saved destination object with secrets masked.
 
 ### DELETE /api/notifications/channels/{id}
 
 Remove a destination.
 
+Success returns `{ "status": "success" }`; an unknown ID returns 404.
+
 ### POST /api/notifications/channels/{id}/test
 
-Send a test notification to a saved destination.
+Send a test notification ("Test notification") to a saved destination. An unknown ID returns 404.
 
 ```json
 { "success": true, "logs": ["Channel: Ops Slack (slack)", "Sending test notification...", "Delivered successfully"] }
 ```
 
+The test sends even when the destination is disabled and bypasses topic selection. It updates the stored last-delivery result.
+
 ### POST /api/notifications/test
 
-Test a configuration **before** saving it (the Send test button in the editor).
+**JSON fields:**
+
+| Field | Type | Default | Constraints and purpose |
+| --- | --- | --- | --- |
+| `channel_type` | string | Required | One of the six service types |
+| `config` | object | `{}` | The type's fields, with real secret values |
+
+Test a configuration before saving it (the test button in the destination editor). An unknown `channel_type` returns 422; a missing required field returns `success: false` with the reason in `logs`.
 
 ```json
 { "channel_type": "ntfy", "config": {"server_url": "https://ntfy.sh", "topic": "mailcow-alerts"} }
 ```
+
+Draft tests use the submitted values directly. They do not resolve `********` against an existing destination. Use the saved-channel test for stored secrets. Both test routes return `success` and `logs`.
+
+## In-app documentation
+
+### GET /api/docs/{doc_name}
+
+Return a help page as plain-text Markdown, fetched from `documentation/HelpDocs` on the `main` branch of the GitHub repository (10-second timeout). Only names on a fixed list are accepted: `Domains`, `DMARC`, `Mailbox_Stats`, `IP_Blacklist_Monitor`, `Spam_Filter`, `Quarantine`, `Abuse_Protection`, `Rate_Limits` and `Devices`.
+
+Other names return 404. An HTTP error from GitHub (including a missing file) also returns 404; a network failure returns 503.

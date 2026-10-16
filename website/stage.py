@@ -29,6 +29,21 @@ EXCLUDE = {"documentation/UI_Behavior_Catalog.md"}
 
 LINK = re.compile(r"(\]\()([^)\s]+)(\))")
 
+# GitHub callouts ("> [!NOTE]"), which GitHub and the app's help render as
+# boxes, become Material admonitions
+CALLOUT = re.compile(r"^> \[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\][ \t]*\n((?:>.*(?:\n|$))*)", re.M)
+CALLOUT_KIND = {"NOTE": "note", "TIP": "tip", "IMPORTANT": 'info "Important"',
+                "WARNING": "warning", "CAUTION": 'danger "Caution"'}
+
+
+def callouts(text):
+    def fix(match):
+        body = [re.sub(r"^> ?", "", line) for line in match.group(2).splitlines()]
+        lines = "".join(f"    {line}\n" if line.strip() else "\n" for line in body)
+        return f"!!! {CALLOUT_KIND[match.group(1)]}\n\n{lines}"
+
+    return CALLOUT.sub(fix, text)
+
 
 def pages():
     """Map each published source file (repo-relative) to its staged path."""
@@ -105,7 +120,7 @@ def main():
         text = (REPO / source).read_text(encoding="utf-8")
         out = STAGE / staged
         out.parent.mkdir(parents=True, exist_ok=True)
-        out.write_text(rewrite(source, text, mapping, errors), encoding="utf-8", newline="\n")
+        out.write_text(callouts(rewrite(source, text, mapping, errors)), encoding="utf-8", newline="\n")
 
     shutil.copytree(REPO / "images", STAGE / "images")
     shutil.copytree(REPO / "website" / "assets", STAGE / "assets")

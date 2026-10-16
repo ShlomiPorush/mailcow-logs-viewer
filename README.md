@@ -1,9 +1,30 @@
 # mailcow Logs Viewer
 
-A modern, self-hosted dashboard for monitoring, analyzing, and managing your mailcow mail server. Track email delivery, investigate spam, manage quarantine, detect bounce-based abuse, and validate DNS configurations — all from a single interface.
+A self-hosted dashboard for mailcow mail servers. Read message delivery logs, security events, DNS checks, DMARC and TLS reports, queue and quarantine data from one app. A read-write API key also lets you ban addresses, release mail, manage the queue and edit Rspamd maps.
 
 ![Dashboard](images/Main-light.png#gh-light-mode-only)
 ![Dashboard](images/Main-dark.png#gh-dark-mode-only)
+
+## What it does
+
+| Page | What you get |
+|---|---|
+| [Dashboard](documentation/HelpDocs/Dashboard.md) | What needs attention now, mail flow of the last 24 hours, security alerts with the activity behind them, server health. |
+| [Messages](documentation/HelpDocs/Messages.md) | Messages linked across Postfix, Rspamd and Dovecot, with filters, delivery details and CSV export. |
+| [Queue](documentation/HelpDocs/Queue.md) | The Postfix queue with the reason each message is waiting. Flush, hold, release and delete. |
+| [Quarantine](documentation/HelpDocs/Quarantine.md) | Quarantined mail with its spam score and symbols. Release or delete, and rules that do it for you. |
+| [Security](documentation/HelpDocs/Security.md) | Every address that tried to log in and what was done about it. Fail2ban settings, allowlist and denylist, and protection rules that catch trap accounts, unknown accounts, repeat offenders, attacking networks and countries. |
+| [Outgoing spam](documentation/HelpDocs/Abuse_Protection.md) | Turns off sending for a mailbox that sends far more than you allow, and tells you. |
+| [Spam Filter](documentation/HelpDocs/Spam_Filter.md) | Suppression of recipients that keep bouncing, and an editor for mailcow's Rspamd maps. |
+| [DMARC & TLS](documentation/HelpDocs/DMARC.md) | DMARC and TLS reports per domain and sender, imported from a mailbox or uploaded, with what to fix before a stricter policy. |
+| [Domains](documentation/HelpDocs/Domains.md) | SPF, DKIM, DMARC, MTA-STS, DNSSEC and DANE checks for every domain, with alerts when a record changes. |
+| [Status](documentation/HelpDocs/Status.md) | Containers, storage, background jobs and [blocklist checks](documentation/HelpDocs/IP_Blacklist_Monitor.md) for your sending addresses. |
+| [Mailbox Stats](documentation/HelpDocs/Mailbox_Stats.md) | Sent and received mail per mailbox and alias, quota, last logins, and [rate limits](documentation/HelpDocs/Rate_Limits.md). |
+| [Devices](documentation/HelpDocs/Devices.md) | Phones, tablets and Outlook clients that sync over ActiveSync. |
+| [Logs](documentation/HelpDocs/Logs.md) | Live and past logs of ten mailcow services. |
+| [Notifications](documentation/Notifications.md) | Alerts by email and to Slack, Discord, Telegram, ntfy, Gotify or your own webhook. |
+
+Configure the app with [environment variables](documentation/ENV_Settings.md). To edit supported settings in the browser, enable and migrate [Settings](documentation/HelpDocs/Settings.md); environment values take priority. Sign in with [Basic authentication or OAuth2/OIDC](documentation/OAuth2_Configuration.md). The interface has light and dark themes and a phone layout.
 
 ![Messages](images/Messages-light.png#gh-light-mode-only)
 ![Messages](images/Messages-dark.png#gh-dark-mode-only)
@@ -11,223 +32,56 @@ A modern, self-hosted dashboard for monitoring, analyzing, and managing your mai
 ![Message Logs](images/Message_Details_Logs-light.png#gh-light-mode-only)
 ![Message Logs](images/Message_Details_Logs-dark.png#gh-dark-mode-only)
 
-![Rate Limits](images/Rate_Limits-light.png#gh-light-mode-only)
-![Rate Limits](images/Rate_Limits-dark.png#gh-dark-mode-only)
-
 ![Security](images/Security-light.png#gh-light-mode-only)
 ![Security](images/Security-dark.png#gh-dark-mode-only)
 
 ![Domains](images/Domains-light.png#gh-light-mode-only)
 ![Domains](images/Domains-dark.png#gh-dark-mode-only)
 
+![Rate Limits](images/Rate_Limits-light.png#gh-light-mode-only)
+![Rate Limits](images/Rate_Limits-dark.png#gh-dark-mode-only)
+
 ![Status](images/Status-light.png#gh-light-mode-only)
 ![Status](images/Status-dark.png#gh-dark-mode-only)
 
----
+## Quick start
 
-## Features
+You need Docker with Docker Compose, and a mailcow server with a read-only API key, created in the API section of the mailcow admin interface.
 
-### 📊 Dashboard
-- Real-time statistics (24h / 7d / 30d) — messages, spam, bounces, auth failures
-- Container status overview and storage usage
-- Quick search across all logs and recent activity stream
+1. Create a directory and save [docker-compose.yml](docker-compose.yml) and [env.example](env.example) in it.
+2. Copy `env.example` to `.env` and set at least `MAILCOW_URL`, `MAILCOW_API_KEY` and `POSTGRES_PASSWORD`. Turn on sign-in (`BASIC_AUTH_ENABLED=true` with `AUTH_USERNAME` and `AUTH_PASSWORD`), since anyone who can open the app can read all mail logs.
+3. Start it with `docker compose up -d` and open `http://<your-server>:8080`.
 
-### 📬 Messages
-- Unified view combining Postfix + Rspamd data with smart correlation
-- Direction detection (Inbound / Outbound / Internal)
-- Status tracking: delivered, bounced, deferred, expired, spam
-- Filter by sender, recipient, user, IP, direction
-- CSV export, result count display, smart auto-refresh
+The full steps, the read-write key and updating are in [Getting started](documentation/GETTING_STARTED.md). To serve the app over HTTPS, see [Reverse proxy](documentation/Reverse_Proxy.md).
 
-### 📋 Message Details
-- **Overview**: Message summary with all recipients
-- **Logs**: Postfix delivery timeline with error summary and relay info
-- **Spam Analysis**: Full Rspamd symbols with scores and descriptions
-- **Security**: Netfilter events for the sender's IP
-
-### 🔒 Security (Netfilter)
-- Failed authentication attempts with IP, username, method, and action
-- Security events chart — bans, unbans, and warnings per country
-- Fail2Ban management — ban/unban IPs directly (requires RW API key)
-- GeoIP enrichment with country flags and ASN info
-- Red indicator on tab when 24h activity exists
-
-### 📮 Queue
-- Real-time mail queue from mailcow API
-- Deferred messages with failure reasons
-- **Suppress button** — quick-add any recipient to the suppression list
-- Bulk queue operations (delete items, requires RW API key)
-
-### 🛡️ Quarantine
-- View quarantined emails with spam scores and quarantine reasons
-- **Release / Delete** individual or bulk items
-- **Auto-Rules** — automatically release or delete quarantine items based on matching rules
-  - Match by Sender, Sender Domain, Recipient, or Subject
-  - Exact Match, Contains, and Regex match modes
-  - Dry-run testing, action history log, safety limits
-  - Inline rule creation from any quarantine email (pre-filled)
-
-### 🚫 Spam Filter — Suppressions & Rspamd Maps
-- **Email Suppression List** — automatically block recipients that bounce
-  - Hard bounces (5.x.x) detected from Postfix logs
-  - Deferred queue cleanup — scans live queue for stuck emails and auto-cleans
-  - Progressive blocking with immediate Rspamd sync
-  - Manual management, import/export CSV, domain regex support
-- **Rspamd Maps Editor** — direct editor for all 13 Rspamd map files
-  - Built-in Regex Wizard for email, domain, TLD, and keyword patterns
-  - Pattern validation before saving
-
-### 🌐 Domains
-- DNS validation for SPF, DKIM, and DMARC with actionable recommendations
-- SPF: DNS lookup counter + server IP authorization check
-- DKIM: key validation with mailcow configuration comparison
-- DMARC: policy analysis with enforcement level recommendations
-- Automated DNS checks every 6 hours
-- Domain info: mailboxes, aliases, storage, relay settings
-
-### 📊 Mailbox Statistics
-- Per-mailbox message stats: sent, received, failed, failure rate
-- Per-alias statistics with message counts
-- Quota usage, login times, rate limits
-- Sorting and filtering by date range, domain, activity
-
-### 📱 Devices (ActiveSync)
-- Phones, tablets and Outlook clients that sync over ActiveSync, read from the SOGo log
-- Per device: user, type or model, mail app, device ID, last IP with its location, last request, first and last seen
-- Marks new devices and devices whose password is refused
-- Filter by device type and last seen; configurable retention
-
-### 📧 DMARC Reports
-- DMARC/SMTP-TLS report viewer with compliance analysis
-- GeoIP enrichment with MaxMind (City + ASN)
-- Manual upload (XML, GZ, ZIP) and IMAP auto-import
-- Daily aggregation with sync history and error notifications
-
-### 📝 Logs (Raw Log Viewer)
-- Live log viewer for all mailcow services via WebSocket
-- 10 services: Postfix, Dovecot, Rspamd, SOGo, Netfilter, ACME, API, Autodiscover, Ratelimited, Watchdog
-- Real-time streaming with service filtering and search
-- Configurable fetch interval and retention
-
-### 📈 Status
-- Container states, storage usage, system info
-- Background jobs monitoring with status, intervals, and last run times
-- Manual job triggers (Run Now)
-- Correlation completion rate
-
-### ⚙️ Settings (Web UI)
-- **Full settings editor in the browser** — all configuration manageable via UI when enabled
-- Organized into tabs: General, Fetch, Alerts, DMARC, Blacklist, Logs, Spam Filter, Quarantine, Authentication
-- ENV variable override indicators (ENV always wins over DB)
-- Import settings from `.env` file, reset to defaults
-- GeoIP setup modal with download progress and health badges
-
-### 🔐 Authentication
-- **Basic Auth** — built-in HTTP Basic Authentication
-- **OAuth2/OIDC** — supports any standard provider (Mailcow, Keycloak, Auth0, Google, etc.)
-- Both methods can be enabled simultaneously
-
----
-
-## Quick Start
-
-```bash
-mkdir mailcow-logs-viewer && cd mailcow-logs-viewer
-
-# Download docker-compose.yml and env.example
-# Configure .env with your mailcow details
-
-docker compose up -d
-# Open http://localhost:8080
-```
-
-> **Image tags:** use `latest` (or a version tag like `2.7.1`). A `dev` tag also exists on the registries; it is an untested preview built between releases - do not run it on a production server.
-
-📖 **Full installation guide:** [Getting Started](documentation/GETTING_STARTED.md)
-
-📘 **Technical Overview: Email Authentication & Monitoring:** How can **mailcow-logs-viewer** help you with this [Read more](documentation/Email_Authentication_Monitoring.md)
-
----
-
-## Architecture
-
-| Component | Technology |
-|-----------|------------|
-| Backend | Python 3.11 + FastAPI |
-| Database | PostgreSQL 15 |
-| Frontend | HTML/JS + Tailwind CSS |
-| Scheduler | APScheduler |
-
----
-
-## Configuration
-
-All settings via environment variables or the **web UI** (when `SETTINGS_EDIT_VIA_UI_ENABLED=true`).
-
-### Required Settings
-
-| Variable | Description |
-|----------|-------------|
-| `MAILCOW_URL` | mailcow instance URL |
-| `MAILCOW_API_KEY` | mailcow Read-Only API key |
-| `POSTGRES_PASSWORD` | Database password |
-
-### Key Optional Settings
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `MAILCOW_API_KEY_RW` | (empty) | Read-Write API key — enables edit features (Fail2Ban, Queue, Quarantine, Rspamd sync) |
-| `FETCH_INTERVAL` | `60` | Seconds between log fetches |
-| `RETENTION_DAYS` | `7` | Days to keep logs |
-| `RSPAMD_PASSWORD` | (empty) | Rspamd password — enables Spam Filter maps editor |
-| `SUPPRESSION_ENABLED` | `true` | Enable automatic email suppression |
-| `BASIC_AUTH_ENABLED` | `false` | Enable HTTP Basic Authentication. Off by default: without it (or OAuth2), anyone who can reach port 8080 has full access |
-| `SETTINGS_EDIT_VIA_UI_ENABLED` | `false` | Allow managing settings from the web UI (`env.example` sets it to `true`) |
-| `TZ` | `UTC` | Timezone |
-
-📖 **Full reference:** [ENV Settings](documentation/ENV_Settings.md)
-
----
+The Compose file uses the `latest` release image. Pin a version tag to control upgrades.
 
 ## Documentation
 
-| Document | Description |
-|----------|-------------|
-| [Getting Started](documentation/GETTING_STARTED.md) | Installation and setup guide |
-| [ENV Settings](documentation/ENV_Settings.md) | Complete environment variables reference |
-| [API Documentation](documentation/API.md) | REST API reference |
-| [Settings UI](documentation/Settings_UI.md) | Web-based settings editor guide |
-| [OAuth2 Configuration](documentation/OAuth2_Configuration.md) | OAuth2/OIDC setup guide |
-| [Reverse Proxy](documentation/Reverse_Proxy.md) | Serving the viewer over HTTPS, including mailcow's own nginx |
-| [Upgrade to V2](documentation/UpdateV2.md) | Migration guide from V1 |
-| [Changelog](CHANGELOG.md) | Version history |
+The documentation is also published at [shlomiporush.github.io/mailcow-logs-viewer](https://shlomiporush.github.io/mailcow-logs-viewer/), and each page's help opens from the help button next to its title in the app.
 
----
+- [Getting started](documentation/GETTING_STARTED.md)
+- [Using the app](documentation/Using_the_App.md)
+- [Settings](documentation/HelpDocs/Settings.md)
+- [Environment variables](documentation/ENV_Settings.md)
+- [Sign-in: Basic authentication and OAuth2/OIDC](documentation/OAuth2_Configuration.md)
+- [Reverse proxy](documentation/Reverse_Proxy.md)
+- [Notifications](documentation/Notifications.md)
+- [API](documentation/API.md)
+- [Upgrading from v1 to v2](documentation/UpdateV2.md)
+- [Changelog](CHANGELOG.md)
 
-## Requirements
+## Help and issues
 
-- Docker & Docker Compose
-- mailcow with API access
-- 512MB RAM minimum
-- 1GB disk (varies with retention)
-
----
+- The app's own log: `docker compose logs app`, or **View Container Logs** at the bottom of the sidebar.
+- Health check: `http://<your-server>:8080/api/health`.
+- Bugs and feature requests: [open an issue](https://github.com/ShlomiPorush/mailcow-logs-viewer/issues).
 
 ## License
 
-MIT License
-
----
-
-## Support
-
-- **Logs**: `docker compose logs app`
-- **Health**: `http://localhost:8080/api/health`
-- **Issues**: Open issue on GitHub
-
----
+MIT License.
 
 ## Credits
 
-* **Flags**: Flag icons are sourced from [Flagpedia.net](https://flagpedia.net/).
-* **Location Data**: This product includes GeoLite2 data created by MaxMind, available from [https://www.maxmind.com](https://www.maxmind.com).
+- Flag icons from [Flagpedia.net](https://flagpedia.net/).
+- This product includes GeoLite2 data created by MaxMind, available from [https://www.maxmind.com](https://www.maxmind.com).

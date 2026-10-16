@@ -1,438 +1,179 @@
-# mailcow Logs Viewer - Getting Started
+# Getting started
 
-Get up and running in 5 minutes! 🚀
+mailcow Logs Viewer runs next to your mailcow server in Docker. Docker Compose starts the app and a PostgreSQL database, and the app reads mailcow through the mailcow API.
 
----
+## Before you start
 
-# Quick Start (TL;DR)
+You need:
 
-## Minimum Required Configuration
+- Docker with the Compose plugin.
+- Network access from the app to your mailcow server's HTTPS address.
+- Admin access to mailcow, to create API keys.
+- Outbound DNS for the domain and blocklist checks, and outbound HTTPS for version checks, the in-app help and the optional MaxMind downloads.
 
-```bash
-mkdir mailcow-logs-viewer && cd mailcow-logs-viewer
-# Download docker-compose.yml and env.example, then:
-mv env.example .env
-nano .env
-```
+The app listens on port `8080`. Keep it on a private network while you set it up. Before you open it to the internet, turn on [sign-in](OAuth2_Configuration.md) and put it behind an [HTTPS reverse proxy](Reverse_Proxy.md).
 
-**Update these required settings in `.env`:**
+## 1. Create the mailcow API keys
 
-```env
-MAILCOW_URL=https://mail.example.com
-MAILCOW_API_KEY=your_api_key_here
-POSTGRES_PASSWORD=a7f3c8e2-4b1d-4f9a-8c3e-7d2f1a9b5e4c
-```
+The app needs a read-only key. A second, read-write key is optional: it is needed only to change things in mailcow from the app (release or delete quarantined mail, act on the queue, ban or unban addresses in Fail2ban, edit rate limits, write Rspamd maps, block abusive senders automatically). You can add it later.
 
-> **💡 Tip:** After starting the application, you can configure most other settings from the web UI (Settings tab). See [Settings UI Guide](Settings_UI.md) for details.
+<!-- VERIFY: Confirm the API configuration menu path and key labels on the supported mailcow release; this checkout cannot prove mailcow's administrator UI. -->
+In the mailcow admin interface, open the API settings (**System** > **API** in the app's own help text):
 
-**Start:**
-```bash
-docker compose up -d
-```
+1. Under the read-only access section, enter the IP address the app connects from in the allowed IPs field, turn the key on and save. Copy the key.
+2. If you want the read-write key now, do the same in the read-write access section and copy that key too.
 
-**Access:** `http://localhost:8080`
+The allowed IPs must include the address mailcow sees when the app connects, which can differ from the address you expect when both run on one host. If mailcow rejects the key later, check this first.
 
----
+> [!WARNING]
+> The read-write key can change mailcow. Everyone who can sign in to the app can use every action it offers, so give sign-in only to mailcow administrators.
 
-## Optional: Enable Settings UI
+## 2. Download the files
 
-To manage most settings from the web interface instead of `.env`:
+On the Docker host:
 
-```env
-SETTINGS_EDIT_VIA_UI_ENABLED=true
-```
-
-After restarting, go to the **Settings** tab in the web UI to configure:
-- Fetch intervals and retention
-- SMTP notifications
-- DMARC settings
-- Authentication
-- MaxMind GeoIP
-- And many more...
-
-See [Settings UI Guide](Settings_UI.md) for details.
-
----
-
-## Optional Features (via ENV or UI)
-
-All optional features can be configured either via `.env` file or through the web UI (when `SETTINGS_EDIT_VIA_UI_ENABLED=true`).
-
-**📖 Complete reference:** See [ENV Settings Documentation](ENV_Settings.md) for all available environment variables.
-
-
-
----
-
-# Detailed Installation Guide
-
-## Prerequisites
-
-- Docker & Docker Compose installed
-- mailcow instance with API access
-- mailcow API key (generate from mailcow admin panel)
-
----
-
-## Installation Steps
-
-### Step 1: Create Project Directory
-
-```bash
+```sh
 mkdir mailcow-logs-viewer
 cd mailcow-logs-viewer
+curl -fsSLO https://raw.githubusercontent.com/ShlomiPorush/mailcow-logs-viewer/main/docker-compose.yml
+curl -fsSL -o .env https://raw.githubusercontent.com/ShlomiPorush/mailcow-logs-viewer/main/env.example
 ```
 
-### Step 2: Download Configuration Files
+You can also save [docker-compose.yml](../docker-compose.yml) and [env.example](../env.example) by hand and rename `env.example` to `.env`.
 
-Download these two files to your project directory:
+<!-- VERIFY: Before publishing v3, confirm that the image referenced by docker-compose.yml contains v3. The latest image can still contain the previous release during development. -->
+The Compose file uses `ghcr.io/shlomiporush/mailcow-logs-viewer:latest` and `postgres:15-alpine`. To stay on one release, replace `latest` with that version's tag.
 
-- 📄 **[docker-compose.yml](../docker-compose.yml)** - Docker Compose configuration
-- 📄 **[env.example](../env.example)** - Environment variables template
+## 3. Set the required values
 
-Then rename the environment file:
+Open `.env` and set these values:
 
-```bash
-mv env.example .env
-```
-
-> [!NOTE]
-> The shipped `docker-compose.yml` runs the application container with a read-only filesystem: it writes only to the `/app/data` volume and to `/tmp`. If you use your own compose file, you can add the same two settings to the `app` service:
->
-> ```yaml
->     read_only: true
->     tmpfs:
->       - /tmp:size=64m
-> ```
->
-> Keep a volume mapped to `/app/data` when you do; the application cannot start read-only without it.
-
-### Step 3: Configure Environment
-
-Edit the `.env` file and configure the settings for your environment:
-
-```bash
-nano .env
-```
-
-#### Required Settings
-
-**⚠️ You must update these settings:**
-
-| Variable | Description | Example |
-|----------|-------------|---------|
-| `MAILCOW_URL` | Your mailcow instance URL (without trailing slash) | `https://mail.example.com` |
-| `MAILCOW_API_KEY` | Your mailcow API key | `abc123-def456...` |
-| `POSTGRES_PASSWORD` | Database password<br>⚠️ Avoid special chars (`@:/?#`) - breaks connection strings<br>💡 Use UUID: `uuidgen` or https://it-tools.tech/uuid-generator | `a7f3c8e2-4b1d-4f9a-8c3e-7d2f1a9b5e4c` |
-
-**Optional:** Enable Settings UI to manage other settings from the web interface:
-```env
+```dotenv
+MAILCOW_URL=https://mail.example.com
+MAILCOW_API_KEY=replace-with-read-only-key
+POSTGRES_USER=mailcowlogs
+POSTGRES_PASSWORD=replace-with-a-random-hex-password
+POSTGRES_DB=mailcowlogs
+POSTGRES_HOST=db
+POSTGRES_PORT=5432
 SETTINGS_EDIT_VIA_UI_ENABLED=true
-```
-
-> **💡 Tip:** After enabling Settings UI, you can configure most other settings (fetch intervals, retention, SMTP, DMARC, authentication, etc.) directly from the **Settings** tab in the web UI. See [Settings UI Guide](Settings_UI.md) and [Complete ENV Reference](ENV_Settings.md) for details.
-
-#### Optional: Enable Authentication
-
-For production deployments, enable HTTP Basic Authentication:
-
-```env
 BASIC_AUTH_ENABLED=true
-AUTH_USERNAME=your_username
-AUTH_PASSWORD=your_secure_password
+AUTH_USERNAME=admin
+AUTH_PASSWORD=replace-with-a-long-random-password
 ```
 
-When enabled:
-- All pages and API endpoints require authentication
-- Users are redirected to a login page if not authenticated
-- Use strong passwords in production
-- **Important**: Use HTTPS/TLS when exposing over the internet - see the [Reverse Proxy guide](Reverse_Proxy.md), which covers serving the viewer through mailcow's own nginx without installing anything extra
+If you created the read-write key, add it too:
 
-> **💡 Tip:** Authentication can also be configured via the Settings UI when `SETTINGS_EDIT_VIA_UI_ENABLED=true`.
+```dotenv
+MAILCOW_API_KEY_RW=replace-with-read-write-key
+```
 
-### Step 4: Get Your mailcow API Key
+- `MAILCOW_URL` is the address of your mailcow web interface, without a trailing slash.
+- Use only letters and digits in `POSTGRES_PASSWORD`, for example the output of `openssl rand -hex 32`. The app puts the password into a database URL as it is, so characters such as `@`, `/` or `:` break the connection.
+- `SETTINGS_EDIT_VIA_UI_ENABLED=true` lets you change settings in the app. Without it, every setting comes from `.env` and the Settings page is read-only.
+- The three `AUTH` lines turn on sign-in with a username and password. Without any sign-in, anyone who can reach the app can read all mail logs.
 
-1. Log in to your mailcow admin panel
-2. Navigate to **System** → **Configuration** → **Access**
-3. Extend **API** section
-4. Copy & Enable **Read-Only Access**
-5. Paste the generated API key to your `.env` file
+## 4. Start the app
 
-### Step 5: Configure Postfix (Important!)
+From the directory with `docker-compose.yml` and `.env`:
 
-For optimal message correlation, add this line to your Postfix configuration:
+```sh
+docker compose up -d
+docker compose ps
+docker compose logs --tail 100 app
+```
 
-#### Add to `data/conf/postfix/extra.cf`:
+Check the health endpoint:
+
+```sh
+curl http://localhost:8080/api/health
+```
+
+A working app answers with HTTP 200 and `{"status":"healthy","database":"connected"}`. HTTP 503 means the app cannot reach its database. The health check does not test the connection to mailcow.
+
+## 5. Sign in
+
+Open `http://localhost:8080` on the Docker host, or the host's private address from your network. Enter the **Username** and **Password** from `.env` and click **Sign In**. When OAuth2 is set up, the login page also shows a **Login with** button for your provider.
+
+<!-- SHOT: getting-started-login | Login page with Username, Password and Sign In -->
+
+There is no setup wizard and no separate first administrator account. With no sign-in configured, the Dashboard opens directly and shows a warning banner; see [Using the app](Using_the_App.md#signing-in-and-out).
+
+## 6. Check the first import
+
+1. Open **About** and check that **Database** and **mailcow API** are connected.
+2. Open **Status** > **Server** and look at **Log import**.
+3. Open **Status** > **Jobs** and check **Fetch Logs** for errors.
+
+The app fetches mail logs every 60 seconds. Mailboxes, domains, DNS checks and blocklist checks run on their own schedules, so some pages fill in later. The app sees only the log history that mailcow still keeps; older logs cannot be recovered.
+
+If you added the read-write key, open **Settings** > **Mailcow** and click **Validate** next to **Read-Write API Key**. The check tells you whether mailcow rejects the key, whether it is a read-only key, or whether mailcow cannot be reached.
+
+## 7. Move settings into the app
+
+1. Open **Settings** and click **Migrate Settings from ENV**, then **Import**. This copies your current configuration into the database. Until you do this, the fields on the Settings page cannot be edited.
+2. A variable that is set in `.env` always wins over the value saved in the app, and its field shows **Set by ENV**. To manage a value in the app instead, delete its line from `.env` and run `docker compose up -d`. An empty line such as `SMTP_HOST=` still counts as set.
+3. Always keep `MAILCOW_URL`, `MAILCOW_API_KEY`, the `POSTGRES_` values and `SETTINGS_EDIT_VIA_UI_ENABLED=true` in `.env`. The app needs them before it can read the saved settings.
+
+[Settings](HelpDocs/Settings.md) describes every tab and setting.
+
+## 8. Add optional connections
+
+| Connection | Where | What it gives you |
+| --- | --- | --- |
+| Rspamd password | **Settings** > **Mailcow** | Rspamd maps on the Spam Filter page; editing them also needs the read-write key. Leave **Rspamd URL** empty to reach Rspamd through mailcow's `/rspamd` path. |
+| SMTP | **Settings** > **SMTP** | Email alerts, test emails and the weekly summary. |
+| Alert destinations | **Settings** > **Notifications** | Alerts in Slack, Discord, Telegram, ntfy, Gotify or a JSON webhook. |
+| Report mailbox | **Settings** > **DMARC & TLS IMAP** | Automatic import of DMARC and TLS reports over IMAP. |
+| MaxMind | **Settings** > **MaxMind** | Country, city and network for IP addresses. |
+
+Certificate checking for SMTP and IMAP is **Off** by default. Set it to **Automatic** or **On** unless the server uses a self-signed certificate. See [Notifications](Notifications.md) and the [environment variable reference](ENV_Settings.md).
+
+## Optional: give every message a Message-ID
+
+The app joins the Rspamd and Postfix log lines of a message by its Message-ID. When a message arrives without a Message-ID header, its Rspamd result (spam score, symbols) is not attached to it. To make Postfix add the header when it is missing, add this line to `data/conf/postfix/extra.cf` in your mailcow directory and restart Postfix (`docker compose restart postfix-mailcow`):
+
 ```conf
 always_add_missing_headers = yes
 ```
 
-**Why is this needed?**
+This also adds missing `From`, `To` and `Date` headers. Postfix warns that adding headers can break a DKIM signature that covers a header the sender left out, so leave it off if you see DKIM failures after the change.
 
-This ensures Postfix always adds a Message-ID header when missing. The mailcow Logs Viewer uses Message-ID to correlate:
-- Rspamd logs (spam filtering)
-- Postfix logs (delivery)
-- Netfilter logs (authentication)
+## Data and backups
 
-Without Message-ID, some messages won't be properly linked between log sources.
+PostgreSQL keeps its data in the `postgres_data` volume. The app writes only to the `mailcowlogs_data` volume (mounted at `/app/data`) and to a small `/tmp`; the rest of its file system is read-only.
 
-### Step 6: Start the Application
+The database holds message history, reports and saved settings. `/app/data` holds the downloaded GeoIP databases and the app's own log. Back up both before an update.
 
-```bash
+> [!WARNING]
+> Do not delete the Compose volumes to fix a startup problem. That deletes all stored history and saved settings. Also, changing `POSTGRES_PASSWORD` later does not change the password of a database that already exists.
+
+## Updating
+
+1. Read the [changelog](../CHANGELOG.md) for the new version.
+2. Back up the volumes.
+3. If you pinned the image tag, change it to the new version.
+4. Pull and restart:
+
+```sh
+docker compose pull app
 docker compose up -d
+docker compose ps
+docker compose logs --tail 100 app
 ```
 
-### Step 7: Access the Dashboard
-
-Open your browser:
-
-```
-http://localhost:8080
-```
-
-**If authentication is enabled**, you'll be redirected to the login page. Enter your credentials to access the dashboard.
-
-Wait 1-2 minutes for the first logs to appear.
-
----
-
-## Verify Installation
-
-### Check Application Health
-
-```bash
-curl http://localhost:8080/api/health
-```
-
-Expected response:
-```json
-{
-  "status": "healthy",
-  "database": "connected",
-  "version": "2.0.0"
-}
-```
-
-### Check Logs
-
-```bash
-docker compose logs -f app
-```
-
-You should see:
-```
-INFO - Starting mailcow Logs Viewer
-INFO - Database initialized successfully
-INFO - Scheduler started
-INFO - ✅ Imported 50 Postfix logs
-INFO - ✅ Imported 45 Rspamd logs
-```
-
----
-
-# Optional Features Configuration
-
-> **💡 Tip:** Most settings can be configured via the web UI when `SETTINGS_EDIT_VIA_UI_ENABLED=true`. See [Settings UI Guide](Settings_UI.md) and [Complete ENV Reference](ENV_Settings.md) for all available options.
-
-## MaxMind GeoIP Integration
-
-Add geographic location data to your DMARC reports and log analysis.
-
-### Setup Steps:
-
-1. Sign up for a free MaxMind account at [https://www.maxmind.com/](https://www.maxmind.com/)
-2. Create a **License Key**
-3. Copy your **Account ID** and **License Key**
-4. Add the credentials to your `.env` file:
-
-```env
-MAXMIND_ACCOUNT_ID=your_account_id
-MAXMIND_LICENSE_KEY=your_license_key
-```
-
-5. **Map the data volume** in your `docker-compose.yml`:
-
-```yaml
-services:
-  app:
-    # ... other configurations
-    volumes:
-      - ./data:/app/data
-```
-
-> [!NOTE]
-> The application will automatically download and update the GeoIP database into this folder using the credentials provided.
-
-**If not configured:** The application works normally without GeoIP data.
-
----
-
-## SMTP Email Notifications
-
-Configure email notifications for system alerts and DMARC processing errors.
-
-Add to your `.env` file:
-
-```env
-SMTP_ENABLED=true
-SMTP_HOST=smtp.yourdomain.com
-SMTP_PORT=587
-SMTP_USE_TLS=true
-SMTP_USER=your_smtp_user
-SMTP_PASSWORD=your_smtp_password
-SMTP_FROM=noreply@yourdomain.com
-```
-
-**If not configured:** No email notifications will be sent (default: `SMTP_ENABLED=false`).
-
-**Certificate check (recommended):** by default the SMTP password is sent without checking the server's certificate. Add `SMTP_VERIFY_SSL=auto` (and `DMARC_IMAP_VERIFY_SSL=auto` for the IMAP import below) to check it for servers reached by a host name, or `true` to check every server. Leave it off only for a server with a self-signed certificate. See [ENV_Settings.md](ENV_Settings.md#smtp-configuration).
-
----
-
-## DMARC Configuration
-
-### Retention Period
-
-Control how long DMARC reports are stored:
-
-```env
-DMARC_RETENTION_DAYS=60
-```
-
-**Default:** 60 days if not specified.
-
-### Manual Upload
-
-Enable/disable manual DMARC report upload via the web interface:
-
-```env
-DMARC_MANUAL_UPLOAD_ENABLED=true
-```
-
-**Default:** `true` (enabled).
-
-### IMAP Auto-Import
-
-Automatically fetch DMARC reports from an email inbox:
-
-```env
-DMARC_IMAP_ENABLED=true
-DMARC_IMAP_HOST=imap.yourdomain.com
-DMARC_IMAP_PORT=993
-DMARC_IMAP_USE_SSL=true
-DMARC_IMAP_USER=dmarc@yourdomain.com
-DMARC_IMAP_PASSWORD=your_password
-DMARC_IMAP_FOLDER=INBOX
-DMARC_IMAP_DELETE_AFTER=true
-DMARC_IMAP_INTERVAL=3600
-DMARC_IMAP_RUN_ON_STARTUP=true
-```
-
-**Configuration options:**
-- `DMARC_IMAP_DELETE_AFTER`: Delete emails after processing (default: `true`)
-- `DMARC_IMAP_INTERVAL`: Check interval in seconds (default: 3600 = 1 hour)
-- `DMARC_IMAP_RUN_ON_STARTUP`: Process existing emails on startup (default: `true`)
-
-**If not configured:** IMAP auto-import remains disabled (default: `DMARC_IMAP_ENABLED=false`).
-
-### DMARC Error Notifications
-
-Override the admin email specifically for DMARC processing errors:
-
-```env
-DMARC_ERROR_EMAIL=dmarc-alerts@yourdomain.com
-```
-
-**If not configured:** Uses `ADMIN_EMAIL` if set (can be configured via Settings UI).
-
-
----
-
-# Troubleshooting
-
-## Common Issues
-
-### No logs appearing?
-
-- Wait 1-2 minutes for the first fetch cycle
-- Check `FETCH_INTERVAL` in `.env` (default: 60 seconds)
-- View logs: `docker compose logs app | grep -i "imported"`
-
-### Cannot connect to mailcow API?
-
-- Verify `MAILCOW_URL` is correct (no trailing slash)
-- Check API key is valid and has read access
-- Ensure mailcow is accessible from the container
-
-### Database connection failed?
-
-- Wait 30 seconds for PostgreSQL to fully start
-- Check database password in `.env`
-- Restart: `docker compose restart`
-
-### Container won't start?
-
-- Verify required settings (`MAILCOW_URL`, `MAILCOW_API_KEY`, `POSTGRES_PASSWORD`) are set
-- Check Docker logs: `docker compose logs -f`
-
-### Port 8080 already in use?
-
-Change the port mapping in `docker-compose.yml` and restart:
-```bash
-docker compose down
-docker compose up -d
-```
-
-### IMAP not working?
-
-- Verify credentials and connection settings
-- Check firewall allows outbound connections to IMAP server
-- For Gmail: use App Passwords, not your regular password
-
-### No email notifications?
-
-- Ensure `SMTP_ENABLED=true`
-- Verify SMTP credentials and server settings
-- Check Docker logs for SMTP errors
-
----
-
-# Updating the Application
-
-To update to the latest version:
-
-```bash
-docker compose pull
-docker compose up -d
-```
-
-**That's it!** The application will automatically:
-- Run database migrations
-- Initialize new features
-- Apply your configuration
-
----
-
-## Documentation
-
-- **[API Documentation](API.md)** - Full API reference
-- **[ENV Settings Reference](ENV_Settings.md)** - Complete environment variables guide
-- **[Settings UI Guide](Settings_UI.md)** - Configure settings from web interface
-- **[Changelog](../CHANGELOG.md)** - Version history
-
----
-
-## Support
-
-**Logs**: `docker compose logs app`  
-**Health**: `http://localhost:8080/api/health`  
-**Issues**: Open issue on GitHub
-
----
-
-## Need Help?
-
-If you encounter any issues, please open an issue on GitHub with:
-- Your Docker logs
-- Your `.env` configuration (remove sensitive data)
-- Description of the problem
+The app updates its database on startup and does not start if that fails; the reason is in the log. After the update, check `/api/health`, sign in, and look at **About**, **Status** > **Server** and **Status** > **Jobs**.
+
+Sessions live in the app's memory, so every restart or update signs everyone out, even with `SESSION_SECRET_KEY` set.
+
+## If startup or import fails
+
+| Problem | What to check |
+| --- | --- |
+| The app does not start | Required values in `.env`, the database container's health, the database credentials, and errors in `docker compose logs app`. |
+| `/api/health` returns 503 | `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_USER`, `POSTGRES_PASSWORD` and `POSTGRES_DB`. |
+| No new messages | **Fetch Logs** in **Status** > **Jobs**, `MAILCOW_URL`, and that the read-only key is on and allows the app's IP address. |
+| An action is locked | Add `MAILCOW_API_KEY_RW` and click **Validate** in **Settings** > **Mailcow**. |
+| mailcow rejects a key after a network change | Update the key's allowed IPs to the address mailcow now sees. |
+| Saving or other actions return 403 behind a proxy | The proxy must pass the original host name; see [Reverse proxy](Reverse_Proxy.md). |
+| Port 8080 is taken | Change the host side of the port mapping in `docker-compose.yml`, for example `127.0.0.1:8081:8080`. The app still listens on 8080 inside the container. |

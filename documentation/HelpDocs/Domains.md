@@ -1,147 +1,251 @@
-# Domains Page - User Guide
+# Domains
 
-## Overview
-The Domains page displays all email domains configured in your mailcow server, along with comprehensive DNS validation and domain statistics.
+The Domains page lists the domains of your mailcow server and checks the DNS records that decide whether their mail is trusted: SPF, DKIM, DMARC, DNSSEC, DANE and MTA-STS. The domain list and the DKIM key come from the mailcow API; the records are read from public DNS.
 
-## Key Features
+<!-- SHOT: domains-list | Domains page with several domains, one with a DMARC warning and one with an SPF error, "Updated 2 h ago" next to the title -->
 
-### Domain Information
-- **Domain Name**: Your email domain
-- **Active Status**: Whether the domain is currently active
-- **Mailboxes**: Current/Maximum mailbox count and available slots
-- **Aliases**: Current/Maximum alias count and available slots  
-- **Storage**: Total storage used and quota (if applicable)
+## The page head
 
-### DNS Security Validation
-The system automatically validates SPF, DKIM, DMARC, DNSSEC, DANE and MTA-STS for every domain:
+**Updated** gives the last check of all domains, or **Not checked yet**. Checking one domain does not change that time.
 
-#### SPF (Sender Policy Framework)
-- **Purpose**: Specifies which mail servers can send email on behalf of your domain
-- **Source IP Validation**: The check does not only parse the record - it verifies that every IP your mail can actually leave from is authorized. Which IPs are validated is configurable under **Settings → Domains → SPF check sources**:
-  - Auto-detected WAN IP (on by default)
-  - Public IPs of active mailcow transports
-  - Public IPs of active mailcow relayhosts
-  - Manually configured IPs or hostnames
-  - Source IPs observed with a passing SPF result in the last 30 days of imported DMARC aggregate reports (the DMARC history source)
-- If **any** validated IP is not authorized by the record, the SPF check reports an error naming the offending IP(s)
-- **Checked IPs**: The SPF card contains an expandable **Checked IPs** list showing every validated IP, where it came from (Auto-detected WAN, Transport, Relay host, Configured, DMARC history) and a per-IP **Authorized** / **Not authorized** verdict
-- **Status Indicators**:
-  - ✓ **Success**: SPF record exists and is properly configured
-  - ⚠ **Warning**: SPF record exists but may need optimization
-  - ✗ **Error**: SPF record is missing or incorrect
-  - ? **Unknown**: Not yet checked
+The summary counts domains, inactive domains and domains needing a DNS change. Only SPF, DKIM and DMARC warnings or errors count toward **needs a DNS change** and its filter. **DNS looks right.** does not mean every optional check passed.
+
+**Check Now** checks every active domain and every alias domain at once. When it finishes, a message says how many domains were checked and the list reloads. If one of the domains could not be checked, the message says **DNS check failed**; the others are still saved. While a check runs, a second one is refused with **DNS check already in progress**.
+
+The app also checks all domains on its own: about a minute after it starts, then every 6 hours.
+
+## The domain list
+
+Above the list, **Search domains...** filters by name and **Show only domains with issues** keeps the domains that need a DNS change. **Clear filters** resets both.
+
+Each row shows:
+
+- **Domain**: the name, an **Inactive** tag for a domain that is turned off in mailcow, and under it the number of mailboxes and aliases. A domain that needs a DNS change also says "needs a DNS change".
+- **SPF**, **DKIM**, **DMARC**, **DNSSEC**, **DANE**, **MTA-STS**: the result of each check, as **OK**, **Warning** or **Error**. A `-` means the check has not run yet or could not reach a result. Point at a result to see its message.
+- **Storage**: the space the domain's mailboxes use.
+
+On a phone the results are icons: a check mark for OK, an exclamation mark for a warning and a cross for an error.
+
+There is no MX column. The app does not check MX records on their own; it reads them only as part of the DANE and MTA-STS checks.
+
+Inactive domains stay in the list but are left out of **Check Now** and of the checks every 6 hours. Use **Check** in the open domain to check one.
+
+## An open domain
+
+Click a row to open it. On a phone, the open domain has two tabs, **DNS checks** and **Details**; on a wider screen both parts show at once.
+
+<!-- SHOT: domains-open | An open domain with the DNS Security Records cards: SPF with "Checked IPs (3)" expanded, DKIM with "View Record" expanded, DMARC with a warning -->
+
+### DNS Security Records
+
+One card per check, in the same order as the columns. Each card has:
+
+- The check's name and its result: **OK**, **Warning**, **Error** or **Not checked**.
+- A message that says what was found, for example "SPF configured correctly with strict -all policy".
+- **View Record**: the record as it is published in DNS, with a button to copy it. For DKIM it also shows the **Record Name**, such as `dkim._domainkey.example.com`.
+- **Checked IPs** on the SPF card: see [SPF](#spf).
+- Warnings and notes, one per line.
+- **Expected Value** on a DKIM card with an error: the record mailcow expects, to copy into your DNS.
+
+Next to the heading, **Updated** says when this domain was last checked. **Check** checks this domain again right away and shows the new results with the domain still open. It checks only this domain, not its alias domains.
+
+### Details
+
+mailcow's domain details include mailbox and alias usage against their limits, **Storage Used** and quota (**Unlimited** when unset), **Total Messages**, **Created Date** and the relay flags **Backup MX**, **Relay All Recipients** and **Relay Unknown Only**.
+
+### Alias domains
+
+Expand **Alias domains** for their DNS cards. Alias domains deliver to their target domain's mailboxes, but sending under an alias domain still needs appropriate authentication records. DMARC can inherit the organizational domain's policy.
+
+The app reads the alias domains from mailcow when it starts and every 6 hours after that. Alias domains are checked by **Check Now** and by the checks every 6 hours.
+
+## The checks
+
+The checks use public DNS resolvers, with DNS over HTTPS as a fallback. They do not use records available only in your internal DNS. Cached answers and propagation can make other servers see a different result.
+
+When a lookup fails, for example because it timed out, the card says the check failed instead of reporting the record as missing.
+
+### SPF
+
+The check reads the TXT record at the domain that starts with `v=spf1` and reports:
+
+- **Error** when there is no SPF record, when there is more than one (receivers then treat SPF as broken), when the record does not start with `v=spf1 `, when it has no `all` at the end and no `redirect=`, when it needs more than 10 DNS lookups, or when it allows every server with `+all` (a bare `all` counts as `+all`).
+- **Error** when a sending IP of yours is not allowed by the record. The message names the IP.
+- **Error** for a term the check does not know. It accepts `ip4`, `ip6`, `a`, `mx`, `include`, `exists`, `redirect` and `all`.
+- **Warning** for `?all`, which protects almost nothing.
+- **OK** for `-all` and for `~all`. With `~all` the message suggests `-all`.
+
+<!-- VERIFY: the SPF check reports the deprecated ptr mechanism and the exp= modifier as "Invalid SPF mechanisms" (an error), although both are legal in RFC 7208 -->
+Anything else, including the deprecated `ptr` mechanism and the `exp=` modifier, is reported as an invalid mechanism.
+
+The lookup count includes nested `include:` terms. See [The SPF record](#the-spf-record) for the limit.
+
+**Checked IPs** tests configured sending IPs against SPF, following `include:` and `redirect=`. Each shows its source and **Authorized** or **Not authorized**. Configure sources under **Settings** > **Domains** > **SPF check sources**:
+
+| Setting | Source label | Default |
+|---|---|---|
+| **Domain SPF Source Server IP** | Auto-detected WAN | On |
+| **Domain SPF Source Transports** | Transport | Off |
+| **Domain SPF Source Relayhosts** | Relay host | Off |
+| **Domain SPF Source Manual Hosts** | Configured | Empty |
+| **Domain SPF Source DMARC History** | DMARC history | Off |
+
+- **Auto-detected WAN** is the public IP mailcow reports for the server. Turn it off when your mail leaves through a relay host and the server's own IP is not meant to be in SPF.
+- **Transport** and **Relay host** are the public IPs of the active transports and relay hosts in mailcow. Private and loopback addresses are skipped.
+- **Configured** takes IP addresses and host names, separated by commas. Add only addresses that send mail: every entry must pass, so an inbound-only MX here causes a false error.
+- **DMARC history** adds up to 20 addresses that passed SPF for the domain in the DMARC reports of the last 30 days. When no reports exist, or the newest is more than 7 days old, the card says so.
 
 > [!NOTE]
-> The DMARC history source is off by default. With relaxed alignment, an ESP subdomain IP can appear as an aligned pass in DMARC reports without being in your domain's own SPF record - enabling this source can then cause a false warning.
+> With relaxed alignment, a mail service that sends from its own subdomain can pass DMARC for you without being in your domain's SPF record. Its addresses then show up in the DMARC history source and fail this check, which is a false error. That is why the DMARC history source is off by default.
 
-> [!NOTE]
-> Settings are edited on the **Settings** page (requires `SETTINGS_EDIT_VIA_UI_ENABLED=true`). Every setting can also be provided as an environment variable - see [ENV_Settings.md](../ENV_Settings.md).
+### DKIM
 
-#### DKIM (DomainKeys Identified Mail)
-- **Purpose**: Adds a digital signature to outgoing emails
-- **Validation**: Compares your DNS record with mailcow's configured DKIM key
-- **Status**: Same indicators as SPF
+The check asks mailcow for the domain's DKIM selector and key, reads the TXT record at `<selector>._domainkey.<domain>` and compares the two tag by tag.
 
-#### DMARC (Domain-based Message Authentication)
-- **Purpose**: Defines how recipients should handle emails that fail authentication
-- **Policy Levels**:
-  - `reject`: Strongest protection (recommended)
-  - `quarantine`: Moderate protection
-  - `none`: Monitoring only (weakest)
-- **Status**: Same indicators as SPF
+- **Error** when mailcow has no DKIM key for the domain, when the record is missing, or when the record does not match. A mismatch is a different public key (`p=`), a different key type (`k=`), a version other than `DKIM1`, or an `h=` list that does not allow `sha256`, which mailcow signs with. A card with an error shows the **Expected Value** to publish.
+- **Error** when the record has `t=y`. In test mode receivers treat failed signatures as if the message were not signed.
+- **Error** when the key is empty (`p=`), which revokes it.
+- **Warning** when the key matches but other tags differ from mailcow, for example a `t=s` that your DNS provider dropped. These differences do not break signatures.
+- **OK** when the published record matches mailcow.
 
-### Alias Domains
-Domains configured in mailcow as **alias domains** (a domain whose mail is delivered to the mailboxes of another domain) are shown inside their target domain's expanded view, each with its own DNS validation summary.
-- Alias domains need their own SPF, DKIM and DMARC records - mail sent as `user@alias.tld` is authenticated against `alias.tld`, not against the target domain
-- Alias domains are included in the scheduled and manual "Check All DNS" runs
-- The mapping is synced from mailcow automatically (every 5 minutes, together with the domain list)
+Tag order, spaces and line breaks inside the key do not count as differences. A `t=s` record adds a note about subdomains. The flag actually requires the signature's `i=` domain to equal its `d=` domain; it does not ban mail from subdomains. See [RFC 6376, section 3.6.1](https://www.rfc-editor.org/rfc/rfc6376.html#section-3.6.1).
 
-#### DNSSEC
-- **Purpose**: DNSSEC signs your DNS records so nobody can forge them - including your MX, SPF, DKIM and DMARC records. It is also required for DANE
-- **How it is checked**: The domain is looked up through validating resolvers; a validated answer means the domain is signed and the chain of trust from the registrar is intact
-- **Statuses**: Validated is a pass. A domain without DNSSEC, or with keys published but no DS record at the registrar, is a warning. A broken signature is an error - resolvers that check signatures cannot resolve the domain at all, so mail can fail
-- **Optional**: DNSSEC is recommended, not required. A failed lookup shows as unknown, never as "not enabled"
+### DMARC
 
-#### DANE (TLSA)
-- **Purpose**: DANE lets senders verify your mail server's TLS certificate through DNS, preventing TLS downgrade and man-in-the-middle attacks
-- **Where the records live**: For SMTP, TLSA records are published under each MX hostname (`_25._tcp.<mx-host>`), not under the domain itself - the check resolves your MX hosts and looks there
-- **Is DANE actually active**: Senders only use TLSA records when the domain's MX records, the MX host's address and the TLSA records are all DNSSEC validated. Records without that are a warning, because senders ignore them
-- **Certificate match**: The check connects to each MX host on port 25, starts TLS and compares the certificate with the TLSA records. A validated record that does not match is an error - senders that use DANE will refuse to deliver. This usually happens after the certificate key changed without updating the TLSA record. Only `3 x x` (DANE-EE) records can be compared; mailcow publishes `3 1 1` by default
-- **Port 25 blocked**: When this server cannot connect to the MX on port 25, the certificate is shown as "not compared", never as a mismatch
-- **Other warnings**: MX hosts without a TLSA record, or no record in the recommended `3 1 1` form (DANE-EE, SPKI, SHA-256)
-- **Optional**: A domain without TLSA records gets an informational warning, never an error. Domains that do not accept mail (null MX) are skipped
+The check reads the TXT record at `_dmarc.<domain>` that starts with `v=DMARC1`.
 
-#### MTA-STS
-- **Purpose**: MTA-STS (RFC 8461) lets your domain tell sending servers to require TLS and verified certificates when delivering mail to you, closing the TLS-downgrade gap without DNSSEC
-- **How it works**: A TXT record at `_mta-sts.<domain>` points senders at a policy file served from `https://mta-sts.<domain>/.well-known/mta-sts.txt`. The check validates both, and verifies that your MX hosts are covered by the policy
-- **Statuses**: `enforce` mode with covered MX hosts is a pass. `testing` and `none` modes are warnings - the policy exists but does not protect delivery. A published record whose policy file cannot be fetched is an error, because enforcing senders treat that as a hard failure. An MX host missing from an enforced policy is an error - those senders will refuse to deliver through it
-- **Optional**: A domain without MTA-STS gets an informational warning, never an error
+- **Error** when there is no record.
+- **Warning** for `p=none`, or a record without a known policy. The message says the policy is too weak.
+- **OK** for `p=quarantine` and `p=reject`.
 
----
+The DMARC & TLS page shows more about the record and what changing its policy would do. See [DMARC & TLS](DMARC.md).
 
-## How to Use
+### DNSSEC
 
-### Viewing Domains
-1. All domains are displayed in an expandable list
-2. Quick overview shows domain name, status, and DNS validation summary
-3. Click any domain row to expand and view detailed information
+The check looks the domain up through validating resolvers.
 
-### DNS Validation
-- **Automatic Checks**: DNS records are validated every 6 hours in the background
-- **Manual Check**: Click the "Check DNS" button within any domain's details to force an immediate validation
-- **Last Checked**: Timestamp shows when DNS was last validated
+- **OK**: the domain is signed and the chain of trust from the parent zone is intact.
+- **Warning**: the domain is not signed. Or it publishes keys, but the DS record at the registrar is missing, so nobody can validate it.
+- **Error**: validation fails. Resolvers that check signatures cannot resolve the domain at all, so mail to and from it can fail. The usual cause is a DS record at the registrar that no longer matches the keys at the DNS provider.
+- **Not checked**: the lookup failed or the domain does not exist in DNS.
 
-### Search & Filter
-- **Search Box**: Filter domains by name
-- **Issues Filter**: Check "Show DNS Issues Only" to display only domains with DNS problems
+### DANE
 
-### Understanding DNS Status
-When you expand a domain, the DNS Security section shows:
-- Detailed status message for each record type
-- The actual DNS record value (for DKIM and DMARC)
-- The expandable **Checked IPs** list on the SPF card (every validated IP with its source and verdict)
-- Specific warnings or recommendations
-- Time of last validation
+The DANE check reads MX hosts and their `_25._tcp.<mx-host>` TLSA records, then connects on port 25 to compare certificates.
 
-### DNS Change Alerts
-When a scheduled or manual check finds that a domain's SPF, DKIM, DMARC, TLSA, MTA-STS or TLS-RPT record has **changed** since the previous check, an alert is sent by email and to your notification destinations (alert type "DNS record changes").
-The same alert is sent when DNSSEC stops validating for a domain that was validated before, and when a DNSSEC-validated TLSA record stops matching the certificate of an MX host.
-- Only definite changes trigger an alert: a value that is present and different, or a record that verifiably disappeared
-- Failed lookups and timeouts are ignored, so a DNS hiccup never fires a false alarm
-- Controlled by the **DNS Change Alerts Enabled** toggle under **Settings → Notifications → Alert types** (on by default)
+- **OK**: the MX records, the TLSA records and the MX host addresses are DNSSEC-validated, and the certificate matches, or could not be compared, on every MX host.
+- **Error**: DANE is active and a TLSA record does not match the certificate of an MX host. Senders that use DANE refuse to deliver to it. This usually happens after the certificate's key changed and the TLSA record was not updated.
+- **Warning**: no TLSA records are published (DANE is optional); or they are published but not DNSSEC-validated, so senders ignore them; or a record does not match the certificate while DNSSEC is still off, which breaks mail as soon as DNSSEC is turned on. Also a warning when an MX host has no TLSA record, or when no record uses the recommended `3 1 1` form.
+- **Not checked**: the domain has a null MX and accepts no mail, it has no MX records, or the lookups failed.
 
----
+Notes give each certificate result. Comparison supports usage 3 (DANE-EE), including mailcow's `3 1 1`. An unreachable port 25 gives "not compared", not a mismatch.
 
-## Best Practices
+### MTA-STS
 
-1. **Regular Monitoring**: Review DNS status regularly, especially after DNS changes
-2. **Fix Issues Promptly**: Address DNS warnings and errors as soon as possible
-3. **Strong DMARC Policy**: Aim for `quarantine` or `reject` policy
-4. **SPF Optimization**: Keep SPF records concise (under 10 DNS lookups)
-5. **DKIM Key Rotation**: Periodically rotate DKIM keys for security
+The check reads `_mta-sts.<domain>`, fetches the HTTPS policy without redirects and checks its `mx:` patterns against MX hosts. See [The MTA-STS policy](#the-mta-sts-policy) for the file path and syntax.
 
----
+- **OK**: the policy is in `enforce` mode and covers every MX host.
+- **Error**: more than one `v=STSv1` record; the record exists but the policy file cannot be fetched; the file has no `version: STSv1` or an unknown mode; or an MX host is missing from an enforced policy, so those senders refuse to deliver through it.
+- **Warning**: no record (MTA-STS is optional), mode `testing` (failures are reported but delivery is not protected), mode `none`, or an MX host missing from a policy that is not enforced.
 
-## Troubleshooting
+The notes show the mode, the policy id, the max age and the MX patterns of the policy.
 
-### DNS Changes Not Reflected
-- DNS changes can take 24-72 hours to propagate globally
-- Use the manual "Check DNS" button to verify after waiting
-- Check your DNS provider's interface to confirm records are published
+### TLS-RPT
 
-### "DNS Query Timeout" Errors
-- Indicates temporary DNS server issues
-- Wait a few minutes and try again
-- If persistent, check your DNS provider's status
+The same checks also read the TLS-RPT record at `_smtp._tls.<domain>`. It has no card on this page; the DMARC & TLS page shows it with the domain's TLS reports. See [DMARC & TLS](DMARC.md).
 
-### "Record Mismatch" Warnings
-- A mismatch means the published key, key type or allowed hash differs from mailcow, so signatures will fail
-- Tag order, spacing and optional tags such as `t=s` or `h=sha256` do not cause a mismatch; differences in them are shown as warnings
-- Compare the "Expected" vs "Actual" record values
-- Update your DNS to match the expected value
-- Wait for DNS propagation, then check again
+## DNS change alerts
 
-## Related Resources
-- [SPF Record Syntax](https://en.wikipedia.org/wiki/Sender_Policy_Framework)
-- [DKIM Overview](https://en.wikipedia.org/wiki/DomainKeys_Identified_Mail)
-- [DMARC Policy Guide](https://dmarc.org/)
+Checks compare records with the previous results. Changes alert **Admin Email** and destinations receiving **DNS record changes**, with old and new values. Example subject: `DNS records changed for example.com: SPF, DKIM`.
+
+An alert is sent when:
+
+- An SPF, DKIM, DMARC, TLSA, MTA-STS or TLS-RPT record has a new value, appeared, or verifiably disappeared.
+- DNSSEC stops validating for a domain that validated before.
+- A DNSSEC-validated TLSA record stops matching the certificate of an MX host.
+
+A failed lookup or a timeout never counts as a change, so a DNS hiccup does not raise an alarm. The first check of a domain has nothing to compare with and sends no alert. Alias domains are watched the same way.
+
+**DNS Change Alerts Enabled** under **Settings** > **Notifications** defaults on. See [Notifications](../Notifications.md).
+
+## The weekly summary
+
+The weekly summary email has a **DNS issues** section that lists the active domains whose SPF, DKIM or DMARC check ended in an error at the last check. Warnings, such as `p=none`, are not listed. See [Notifications](../Notifications.md).
+
+## Settings that change this page
+
+| Where | Setting | What it does |
+|---|---|---|
+| **Settings** > **Domains** | **SPF check sources** | Which sending IPs every SPF record must allow. See [SPF](#spf). |
+| **Settings** > **Notifications** | **DNS Change Alerts Enabled** | Sends an alert when a record changes. On by default. |
+| **Settings** > **Features** | **Domains** | Turns the page and its DNS checks on or off. |
+
+Each setting also has an environment variable, for example `DOMAIN_SPF_SOURCE_SERVER_IP` and `DNS_CHANGE_ALERTS_ENABLED`. See [Settings](Settings.md) and [ENV_Settings.md](../ENV_Settings.md).
+
+## When something is missing
+
+- The page is not in the menu: the Domains feature is off. Turn it on under **Settings** > **Features**. While it is off, the DNS checks every 6 hours do not run.
+- **Failed to load domains**: the app could not read the domain list from mailcow. The message under it gives the reason. Check the mailcow connection on the Status page. A read-only mailcow API key is enough for this page.
+- **No domains found**: mailcow has no domains.
+- **Not checked yet**: the first check has not run. It starts about a minute after the app starts; **Check Now** runs it at once.
+- A card says **Not checked** with a message: the check could not reach a result. The message says why, for example a failed lookup or a domain without MX records.
+- **DKIM not configured in mailcow**: mailcow has no DKIM key for the domain. Create one in mailcow under the domain's DKIM settings, then publish it.
+- A message that ends with "Check the application logs.": something unexpected went wrong in the check. The app's log has the details.
+- A record you changed still shows the old value: the public resolvers keep an answer until its TTL runs out. Wait for the record's TTL, then use **Check**.
+
+## How the DNS records work
+
+### The SPF record
+
+SPF checks the connecting IP against the envelope sender domain's record, not the visible From address. For a server that sends directly:
+
+```text
+example.com.  TXT  "v=spf1 mx a -all"
+```
+
+Add an `include:` for an authorized sending service, for example `include:spf.mailservice.example.net`. Mail sent through a relay needs the relay's IPs authorized too.
+
+Publish one SPF record. `-all` returns fail for unmatched IPs; `~all` returns softfail. Neither passes DMARC through SPF, though aligned DKIM can still pass. `+all` authorizes every IP. Forwarding can break SPF because the connecting IP changes.
+
+SPF allows 10 DNS-querying terms during evaluation, including nested terms. Exceeding that gives `permerror`; not every sending IP reaches the same terms. The app counts `include`, `a`, `mx`, `exists` and `redirect`. See [RFC 7208, section 4.6.4](https://www.rfc-editor.org/rfc/rfc7208.html#section-4.6.4).
+
+### The DKIM record
+
+DKIM signs mail with a private key; receivers check the signature with the DNS public key at `<selector>._domainkey.<domain>`. Publish the value from mailcow or **Expected Value**. Whitespace and quoted TXT fragments do not change the key.
+
+Use a 2048-bit RSA key when supported by your DNS provider. Remove testing flag `t=y` after setup. Flag `t=s` requires the signature's `i=` domain to equal its `d=` domain; it does not prohibit mail from subdomains. See [RFC 6376, section 3.6.1](https://www.rfc-editor.org/rfc/rfc6376.html#section-3.6.1).
+
+For rotation, publish a new selector first, switch signing, then retain the old key long enough for queued mail to arrive.
+
+### The DMARC record
+
+DMARC connects SPF and DKIM to the visible From domain. Publish its record at `_dmarc.example.com`. Policies `none`, `quarantine` and `reject` request monitoring, suspicious-mail handling and rejection. Receivers apply their own policies too. See [How DMARC works](DMARC.md#how-dmarc-works) for alignment, reporting and policy changes.
+
+### DNSSEC signing
+
+Your DNS provider signs the zone and publishes DNSKEY records; your registrar publishes the matching DS record in the parent zone. A missing DS leaves no chain of trust. A mismatched DS can break resolution and mail. Coordinate keys and DS records when moving DNS providers.
+
+### DANE and TLSA records
+
+DANE authenticates an MX host's TLS certificate through DNSSEC. For mailcow's usual public-key pin:
+
+```text
+_25._tcp.mail.example.com.  TLSA  3 1 1 <SHA-256 hash of the certificate's public key>
+```
+
+The values mean end-entity certificate (3), public key (1) and SHA-256 (1). Keeping the same key preserves the pin through certificate renewal. Publish records for every MX host. Before changing keys, publish both old and new pins and allow caches to update. A validated pin that matches no active key stops DANE delivery.
+
+### The MTA-STS policy
+
+MTA-STS requires TLS and a trusted certificate without DNSSEC. Initial policy discovery can be blocked, unlike DANE. See [RFC 8461, section 10.2](https://www.rfc-editor.org/rfc/rfc8461.html#section-10.2).
+
+Publish `v=STSv1; id=20260101T000000` at `_mta-sts.example.com` and serve this file at `https://mta-sts.example.com/.well-known/mta-sts.txt` without redirects:
+
+```text
+version: STSv1
+mode: enforce
+mx: mail.example.com
+max_age: 604800
+```
+
+Start with `mode: testing` and read [TLS reports](DMARC.md#how-tls-rpt-and-mta-sts-work) before enforcing. Every MX must match a policy line; `*.example.com` matches one label. Change `id` when the policy changes. The HTTPS host needs a trusted certificate.
