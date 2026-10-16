@@ -1502,6 +1502,7 @@ async function smartRefreshQueue() {
     if (!response.ok) return;
 
     const data = await response.json();
+    await rwStatusReady;
 
     if (hasDataChanged(data, 'queue')) {
         console.log('[REFRESH] Queue data changed, updating UI');
@@ -1518,6 +1519,7 @@ async function smartRefreshQuarantine() {
     if (!response.ok) return;
 
     const data = await response.json();
+    await rwStatusReady;
 
     if (hasDataChanged(data, 'quarantine')) {
         console.log('[REFRESH] Quarantine data changed, updating UI');

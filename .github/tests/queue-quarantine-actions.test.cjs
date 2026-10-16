@@ -193,3 +193,34 @@ test('a Contains rule saved twice by an earlier version opens as Contains with i
     assert.equal(sent.match_value, REPAIRED);
     assert.equal(sent.is_regex, true);
 });
+
+// Auto refresh while the Read-Write status is still loading: the rows wait for
+// it, as on the first load, instead of showing the lock for a moment
+async function refreshWhileRwLoads(page, data, refresh) {
+    const app = loadApp();
+    let answerRw;
+    const rw = new Promise(resolve => { answerRw = resolve; });
+    app.context.authenticatedFetch = async url => url === '/api/rw-status'
+        ? rw.then(() => ({ ok: true, json: async () => ({ rw_configured: true }) }))
+        : { ok: true, json: async () => data };
+    vm.runInContext(`currentTab = '${page}'; rwStatusReady = fetchRwStatus();`, app.context);
+    const refreshing = app.context[refresh]();
+    await new Promise(resolve => setImmediate(resolve));
+    assert.doesNotMatch(app.elements[`${page}-logs`]?.innerHTML || '', /actions are locked/);
+    answerRw();
+    await refreshing;
+    const html = app.elements[`${page}-logs`].innerHTML;
+    assert.doesNotMatch(html, /actions are locked/);
+    return html;
+}
+
+test('auto refresh of the Queue waits for the Read-Write status', async () => {
+    const html = await refreshWhileRwLoads('queue', { data: QUEUE }, 'smartRefreshQueue');
+    assert.match(html, /queueRetry\(/);
+});
+
+test('auto refresh of the Quarantine waits for the Read-Write status', async () => {
+    const data = { total: 1, data: [{ id: 7, sender: 'sender@example.com', rcpt: 'user@example.org', subject: 'Hello', score: 9, action: 'reject', created: 1760000000 }] };
+    const html = await refreshWhileRwLoads('quarantine', data, 'smartRefreshQuarantine');
+    assert.match(html, /Hello/);
+});
