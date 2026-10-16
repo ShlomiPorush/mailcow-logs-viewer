@@ -2224,8 +2224,6 @@ async def dmarc_imap_sync_job():
     if not settings.dmarc_imap_enabled:
         logger.debug("DMARC IMAP sync is disabled, skipping")
         return
-    
-    await asyncio.to_thread(_cleanup_stale_dmarc_syncs)
 
     # Start the current job
     update_job_status('dmarc_imap_sync', 'running')
@@ -2259,6 +2257,9 @@ async def dmarc_imap_sync_job():
         elif result.get('status') == 'disabled':
             logger.debug("DMARC IMAP sync is disabled")
             update_job_status('dmarc_imap_sync', 'disabled')
+        elif result.get('status') == 'already_running':
+            # Another import runs (Fetch reports, or an earlier run); it sets the status when it ends
+            logger.info("DMARC IMAP sync already running, skipped this run")
         else:
             # Sync finished successfully
             logger.info(f"DMARC IMAP sync completed: {result.get('reports_created', 0)} created")
@@ -2276,19 +2277,6 @@ async def dmarc_imap_sync_job():
 # =============================================================================
 # CLEANUP
 # =============================================================================
-
-def _cleanup_stale_dmarc_syncs():
-    """Keep best-effort stale-sync cleanup within a worker-owned session."""
-    try:
-        with SessionLocal() as db:
-            db.query(DMARCSync).filter(DMARCSync.status == 'running').update({
-                "status": "failed",
-                "error_message": "Stale job cleaned by scheduler"
-            })
-            db.commit()
-    except Exception as cleanup_err:
-        logger.warning(f"Background cleanup failed: {cleanup_err}")
-
 
 async def cleanup_old_logs():
     """Run retention database work in the configured scheduler worker pool."""
