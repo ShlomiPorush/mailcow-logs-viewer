@@ -484,6 +484,8 @@ async def app_info(request: Request):
             "timezone": settings.tz,
             "blacklist_count": len(settings.blacklist_emails_list),
             "disabled_features": sorted(settings.disabled_features_set),
+            # The search offers settings only while the edit form exists
+            "settings_edit_via_ui_enabled": settings.edit_settings_via_ui_enabled,
         })
 
     return info

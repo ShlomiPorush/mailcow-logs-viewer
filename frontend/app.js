@@ -525,6 +525,8 @@ async function loadAppInfo() {
             console.log('Disabled features:', window.disabledFeatures);
             applyFeatureToggles();
         }
+        // With editing off the Settings page has no fields for the search to open
+        window.settingsEditable = data.settings_edit_via_ui_enabled !== false;
 
         // Load app version status for update check
         await loadAppVersionStatus();
