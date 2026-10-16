@@ -289,7 +289,8 @@ async def check_spf_record(domain: str, spf_source_ips: Optional[List[Dict[str, 
         parts = spf_record.split()
         mechanisms = parts[1:] if len(parts) > 1 else []
         
-        valid_prefixes = ['ip4:', 'ip6:', 'a', 'mx', 'include:', 'exists:', 'redirect', 'all']
+        # ptr and exp= are legal (RFC 7208); ptr is only discouraged, a warning below
+        valid_prefixes = ['ip4:', 'ip6:', 'a', 'mx', 'include:', 'exists:', 'redirect', 'all', 'ptr', 'exp=']
         invalid_mechanisms = []
         
         for mechanism in mechanisms:
@@ -416,6 +417,11 @@ async def check_spf_record(domain: str, spf_source_ips: Optional[List[Dict[str, 
             status = 'success'
             message = 'SPF record found'
             warnings = []
+
+        if any(m.lstrip('+-~?') == 'ptr' or m.lstrip('+-~?').startswith('ptr:') for m in mechanisms):
+            if status == 'success':
+                status = 'warning'
+            warnings = warnings + ['The ptr mechanism is discouraged (RFC 7208): it is slow and unreliable. This check does not evaluate it']
 
         if history_notes:
             warnings = warnings + history_notes
@@ -628,10 +634,13 @@ async def count_spf_dns_lookups(domain: str, spf_record: str, resolver=None, vis
         
         elif clean_part.startswith('exists:'):
             lookup_count += 1
-        
+
+        elif clean_part == 'ptr' or clean_part.startswith('ptr:'):
+            lookup_count += 1
+
         elif clean_part.startswith('redirect='):
             lookup_count += 1
-    
+
     return lookup_count
 
 
