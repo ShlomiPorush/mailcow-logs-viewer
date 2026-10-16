@@ -30,17 +30,27 @@ router = APIRouter()
 # RFC 7208 section 12: modifier = name "=" macro-string, without a qualifier
 SPF_MODIFIER_RE = re.compile(r'^[A-Za-z][A-Za-z0-9._-]*=')
 SPF_MECHANISM_NAMES = {'a', 'mx', 'ptr', 'ip4', 'ip6', 'include', 'exists'}
+# RFC 7208 sections 4.6.1 and 5.6: a CIDR length is decimal without a leading
+# zero, 0 to 32 for IPv4 and 0 to 128 for IPv6
+SPF_IP4_CIDR = r'(?:3[0-2]|[12][0-9]|[0-9])'
+SPF_IP6_CIDR = r'(?:12[0-8]|1[01][0-9]|[1-9][0-9]|[0-9])'
+# RFC 7208 section 7.1: a macro %{...} may hold '/', so only a '/' outside a
+# macro starts the CIDR length
+SPF_DOMAIN_SPEC = r'(?:%\{[^}]*\}|%(?!\{)|[^/%])+'
 # RFC 7208 sections 4.6.1 and 5: an optional qualifier, the whole mechanism name
 # (in any case), then only what that mechanism takes (a domain after ':', a CIDR
 # length after '/')
 SPF_MECHANISM_RE = re.compile(
     r'[+\-~?]?(?:all'
     r'|(?:include|exists):.+'
-    r'|(?:a|mx)(?::[^/]+)?(?:/\d+)?(?://\d+)?'
+    r'|(?:a|mx)(?::' + SPF_DOMAIN_SPEC + r')?(?:/' + SPF_IP4_CIDR + r')?(?://' + SPF_IP6_CIDR + r')?'
     r'|ptr(?::.+)?'
-    r'|ip[46]:[^/]+(?:/\d+)?)', re.IGNORECASE)
+    r'|ip4:[^/]+(?:/' + SPF_IP4_CIDR + r')?'
+    r'|ip6:[^/]+(?:/' + SPF_IP6_CIDR + r')?)', re.IGNORECASE)
 # RFC 7208 section 5.6: a or mx, an optional domain, then the dual CIDR length
-SPF_A_MX_RE = re.compile(r'(a|mx)(?::([^/]+))?((?:/(\d+))?(?://(\d+))?)', re.IGNORECASE)
+SPF_A_MX_RE = re.compile(
+    r'(a|mx)(?::(' + SPF_DOMAIN_SPEC + r'))?'
+    r'((?:/(' + SPF_IP4_CIDR + r'))?(?://(' + SPF_IP6_CIDR + r'))?)', re.IGNORECASE)
 
 _server_ip_cache = None
 
@@ -519,6 +529,9 @@ async def check_ip_in_spf(domain: str, ip_to_check: str, spf_record: str, resolv
     parts = spf_record.split()
 
     for part in parts:
+        # A term with invalid syntax, also in an included record, never authorizes
+        if not SPF_MECHANISM_RE.fullmatch(part) and not SPF_MODIFIER_RE.match(part):
+            continue
         clean_part = part.lstrip('+-~?')
         # Names are case-insensitive (RFC 7208 4.6.1); values keep their text
         name = clean_part.lower()
@@ -538,6 +551,9 @@ async def check_ip_in_spf(domain: str, ip_to_check: str, spf_record: str, resolv
             # Each resolved address covers the CIDR length for its family (default /32, /128)
             mech, host, cidr, ip4_len, ip6_len = SPF_A_MX_RE.fullmatch(clean_part).groups()
             mech = mech.lower()
+            # A macro (RFC 7208 section 7) cannot be expanded here: skip the term
+            if host and '%' in host:
+                continue
             check_domain = host or domain
             prefix_len = (ip6_len or '128') if target_ip.version == 6 else (ip4_len or '32')
             method = f'{mech}:{host}{cidr}' if host else f'{mech}{cidr}'

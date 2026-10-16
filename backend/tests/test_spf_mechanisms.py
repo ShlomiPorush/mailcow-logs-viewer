@@ -236,3 +236,89 @@ async def test_a_and_mx_without_a_length_need_the_exact_address(monkeypatch, ter
 async def test_mx_with_a_cidr_length_counts_as_mx(monkeypatch):
     result = await _check(monkeypatch, 'v=spf1 mx/24 -all')
     assert result['includes_mx'] is True
+
+
+@pytest.mark.parametrize('term', ['a/33//64', 'a/24//129', 'mx/33', 'mx//129', 'a:mail.example.com/24//200',
+                                  'a/024', 'a//064', 'mx/00', 'a/-1', 'a/\uff12\uff14',
+                                  'ip4:192.0.2.0/33', 'ip4:192.0.2.0/024', 'ip6:2001:db8::/129', 'ip6:2001:db8::/064'])
+@pytest.mark.asyncio
+async def test_an_invalid_cidr_length_is_an_error(monkeypatch, term):
+    """RFC 7208 sections 5.6 and 4.6.1: a length is decimal digits without a
+    leading zero, 0 to 32 for IPv4 and 0 to 128 for IPv6, whichever family the
+    server uses."""
+    result = await _check(monkeypatch, f'v=spf1 {term} -all')
+    assert result['status'] == 'error', result['message']
+    assert f'Invalid SPF mechanisms: {term}' in result['message']
+
+
+@pytest.mark.parametrize('term, address_type, address, server', [
+    ('a/33//64', 'AAAA', '2001:db8::1', '2001:db8::99'),
+    ('a/24//129', 'A', '192.0.2.1', '192.0.2.99'),
+])
+@pytest.mark.asyncio
+async def test_an_invalid_length_for_the_other_family_never_authorizes(monkeypatch, term, address_type, address, server):
+    _fake_dns(monkeypatch, {
+        ('example.com', 'TXT'): [FakeTXT(f'v=spf1 {term} -all')],
+        ('example.com', address_type): [FakeAddr(address)],
+    })
+    monkeypatch.setattr(settings._inner, 'domain_spf_source_dmarc_history', False)
+    result = await domains.check_spf_record('example.com', spf_source_ips=[{'ip': server, 'source': 'test'}])
+    assert result['status'] == 'error', result['message']
+    assert f'Invalid SPF mechanisms: {term}' in result['message']
+
+
+@pytest.mark.parametrize('nested, ip', [
+    ('v=spf1 a:mail.example.com/24//129 -all', '192.0.2.99'),
+    ('v=spf1 a:mail.example.com/33//64 -all', '2001:db8:1::99'),
+    ('v=spf1 ip4:198.51.100.0/024 -all', '198.51.100.7'),
+])
+@pytest.mark.asyncio
+async def test_an_invalid_term_in_an_included_record_never_authorizes(monkeypatch, nested, ip):
+    _fake_dns(monkeypatch, {**_CIDR_DNS, ('example.net', 'TXT'): [FakeTXT(nested)]})
+    assert await domains.check_ip_in_spf('example.com', ip, 'v=spf1 include:example.net -all') == (False, None)
+
+
+@pytest.mark.parametrize('term', ['a/32//128', 'a/0//0', 'a/16', 'a//100', 'mx/9//8', 'mx:example.net/30//127',
+                                  'ip4:192.0.2.0/0', 'ip4:192.0.2.0/32', 'ip6:2001:db8::/128', 'ip6:2001:db8::/0'])
+@pytest.mark.asyncio
+async def test_cidr_lengths_within_range_stay_valid(monkeypatch, term):
+    result = await _check(monkeypatch, f'v=spf1 {term} -all')
+    assert 'Invalid' not in result['message'], result['message']
+
+
+@pytest.mark.parametrize('term', ['a:%{d/}', 'a:%{l1r+-}.example.com', 'mx:%{d/}', 'a:%{d/}/24//64',
+                                  'a:%{ir.}.example.net', 'a:%{d2,=_}', 'A:%{D/}', 'a:%%.%_.%-.example.com'])
+@pytest.mark.asyncio
+async def test_a_slash_or_other_delimiter_in_a_macro_is_valid(monkeypatch, term):
+    """RFC 7208 section 7.1: '/' and . - + , _ = are macro delimiters, so only a
+    '/' outside %{...} starts the CIDR length."""
+    result = await _check(monkeypatch, f'v=spf1 {term} -all')
+    assert 'Invalid' not in result['message'], result['message']
+
+
+@pytest.mark.asyncio
+async def test_an_unclosed_macro_is_an_error(monkeypatch):
+    result = await _check(monkeypatch, 'v=spf1 a:%{d/24 -all')
+    assert result['status'] == 'error', result['message']
+    assert 'Invalid SPF mechanisms: a:%{d/24' in result['message']
+
+
+@pytest.mark.asyncio
+async def test_a_term_with_a_macro_is_skipped_when_checking_an_ip(monkeypatch):
+    """The dashboard cannot expand macros: the term is neither looked up nor an error."""
+    queries = []
+
+    async def fake_resolve(query, record_type='TXT', timeout=5):
+        queries.append(query)
+        return _CIDR_DNS.get((query.lower(), record_type), [])
+    monkeypatch.setattr(domains, 'resolve_dns_with_fallback', fake_resolve)
+    assert await domains.check_ip_in_spf('example.com', '192.0.2.20', 'v=spf1 a:%{d/} mx:%{d}/24 a -all') == (True, 'a')
+    assert queries and not any('%' in q for q in queries)
+
+
+@pytest.mark.asyncio
+async def test_a_macro_term_does_not_block_an_authorized_server(monkeypatch):
+    _fake_dns(monkeypatch, {('example.com', 'TXT'): [FakeTXT('v=spf1 a:%{d/} ip4:192.0.2.99 -all')]})
+    monkeypatch.setattr(settings._inner, 'domain_spf_source_dmarc_history', False)
+    result = await domains.check_spf_record('example.com', spf_source_ips=[{'ip': '192.0.2.99', 'source': 'test'}])
+    assert result['status'] == 'success', result['message']
