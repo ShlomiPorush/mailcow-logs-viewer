@@ -1418,20 +1418,13 @@ function renderSettings(content, data) {
                     const _maxmindChanged = ('maxmind_account_id' in payload || 'maxmind_license_key' in payload);
                     if (_maxmindChanged) _cachedMaxMindStatus = null; // Clear stale validation cache
                     const _maxmindHasValues = (payload.maxmind_license_key && payload.maxmind_license_key !== '' && payload.maxmind_license_key !== '********');
-                    if (_maxmindChanged && _maxmindHasValues) {
-                        // The form reloads now, so the save bar clears behind the window;
-                        // the window reloads it again on close to show the new GeoIP status
-                        showGeoIPSetupModal();
-                        await loadSettings();
-                        return;
-                    }
-                    
                     // The rest of the app reads features, title, logo, sign-in and the mailcow
                     // address once, when the page loads: a change to one of them reloads it.
                     // Any other save refreshes Settings in place.
                     const shellChanged = SETTINGS_READ_AT_PAGE_LOAD.some(key =>
                         key in payload && String(payload[key] ?? '') !== String(data.editable_config[key] ?? ''));
-                    if (featuresChanged || shellChanged) {
+                    const needsReload = featuresChanged || shellChanged;
+                    if (needsReload) {
                         const purgeableNewlyDisabled = newlyDisabledFeatures.filter(f => PURGEABLE_FEATURES.includes(f));
                         if (purgeableNewlyDisabled.length > 0) {
                             showToast(`Purging data for ${purgeableNewlyDisabled.length} disabled feature(s)...`, 'info');
@@ -1452,6 +1445,18 @@ function renderSettings(content, data) {
                         if (checkToast) {
                             try { sessionStorage.setItem(SETTINGS_TOAST_AFTER_RELOAD, JSON.stringify(checkToast)); } catch (e) { /* private mode: the status tag still shows it */ }
                         }
+                    }
+
+                    if (_maxmindChanged && _maxmindHasValues) {
+                        // The form reloads now, so the save bar clears behind the window. On
+                        // close the window shows the new GeoIP status, or reloads the page when
+                        // the same save changed what the page reads at load.
+                        showGeoIPSetupModal(needsReload);
+                        await loadSettings();
+                        return;
+                    }
+
+                    if (needsReload) {
                         showToast(featuresChanged ? 'Features updated - reloading...' : 'Settings saved - reloading...', 'success');
                         setTimeout(() => location.reload(), 600);
                         return;
@@ -1487,7 +1492,8 @@ function renderSettings(content, data) {
     }
 }
 
-async function showGeoIPSetupModal() {
+// reloadPage: reload the whole page on close instead of only Settings
+async function showGeoIPSetupModal(reloadPage = false) {
     // Create modal overlay
     const overlay = document.createElement('div');
     overlay.id = 'geoip-setup-overlay';
@@ -1552,6 +1558,10 @@ async function showGeoIPSetupModal() {
     const closeBtn = document.getElementById('geoip-setup-close-btn');
     closeBtn.addEventListener('click', async () => {
         overlay.remove();
+        if (reloadPage) {
+            location.reload();
+            return;
+        }
         await loadSettings();
     });
     
