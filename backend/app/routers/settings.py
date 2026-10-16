@@ -18,7 +18,7 @@ from ..database import get_db, get_db_context
 from ..models import PostfixLog, RspamdLog, NetfilterLog, MessageCorrelation
 from ..config import settings, EDITABLE_SETTING_KEYS, FEATURE_IDS, reload_settings, Settings
 from ..config import _get_field_annotations, get_env_locked_keys
-from ..scheduler import last_fetch_run_time, get_job_status, update_job_status, reschedule_interval_jobs, dovecot_correlation_available, cleanup_disabled_feature_data, _mailbox_sync_needed
+from ..scheduler import last_fetch_run_time, get_job_status, update_job_status, JOB_SKIPPED, reschedule_interval_jobs, dovecot_correlation_available, cleanup_disabled_feature_data, _mailbox_sync_needed
 from ..services.settings_store import get_config_overrides_from_db, save_config_overrides_to_db, has_config_overrides_in_db, get_maxmind_validation_status, save_maxmind_validation_status, clear_maxmind_validation_status
 from ..services.settings_store import credential_fingerprint, get_credential_check_status, save_credential_check_status
 from ..services.connection_test import test_smtp_connection, test_imap_connection
@@ -1360,11 +1360,12 @@ def trigger_job(job_name: str, background_tasks: BackgroundTasks):
     async def run_job_wrapper():
         try:
             if asyncio.iscoroutinefunction(job_func):
-                await job_func()
+                result = await job_func()
             else:
-                await run_in_threadpool(job_func)
-            # Self-managing jobs update their own status internally
-            if not self_managing:
+                result = await run_in_threadpool(job_func)
+            # Self-managing jobs update their own status internally, and a run
+            # that skipped leaves it to the run that holds the job
+            if not self_managing and result != JOB_SKIPPED:
                 update_job_status(status_key, 'success')
         except Exception as e:
             logger.error(f"Manual job {job_name} failed: {e}")

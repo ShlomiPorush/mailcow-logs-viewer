@@ -334,6 +334,10 @@ job_status = {
 _blacklist_last_listed_actionable_count = 0
 _blacklist_check_lock = asyncio.Lock()
 
+# Returned by a job that skipped because another run of it holds its lock; that
+# run sets the job status when it ends, so a manual run must not mark it done
+JOB_SKIPPED = "skipped"
+
 def update_job_status(job_name: str, status: str, error: str = None):
     """Update job execution status"""
     job_status[job_name] = {
@@ -1952,7 +1956,7 @@ async def check_monitored_hosts_job(force: bool = False, send_notification: bool
     # listed-count used for cleared/improved notifications - never overlap.
     if _blacklist_check_lock.locked():
         logger.info("[BLACKLIST] Check already in progress, skipping this trigger")
-        return
+        return JOB_SKIPPED
     async with _blacklist_check_lock:
         await _run_check_monitored_hosts(force, send_notification)
 
@@ -2281,6 +2285,7 @@ async def dmarc_imap_sync_job():
         elif result.get('status') == 'already_running':
             # Another import runs (Fetch reports, or an earlier run); it sets the status when it ends
             logger.info("DMARC IMAP sync already running, skipped this run")
+            return JOB_SKIPPED
         else:
             # Sync finished successfully
             logger.info(f"DMARC IMAP sync completed: {result.get('reports_created', 0)} created")
