@@ -4564,7 +4564,9 @@ function statusJobCategories(jobs) {
             jobs: [
                 ['DNS Check (All Domains)', 'dns_check', jobs.dns_check],
                 ['IP Blacklist Check (All Hosts)', 'blacklist_check', jobs.blacklist_check],
-                ['Protection Rules', 'protection_rules', jobs.protection_rules]
+                ['Protection Rules', 'protection_rules', jobs.protection_rules],
+                ['Anomaly Detection', 'anomaly_detection', jobs.anomaly_detection],
+                ['Outgoing Spam', 'smtp_abuse', jobs.smtp_abuse]
             ]
         },
         {

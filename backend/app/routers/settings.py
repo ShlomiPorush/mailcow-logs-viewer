@@ -628,6 +628,7 @@ def get_settings_info(db: Session = Depends(get_db)):
                     "interval": "After each log fetch" if settings.is_feature_enabled('netfilter') else "Disabled (Security feature off)",
                     "description": "Notes the addresses the protection rules would ban (watch mode)",
                     "enabled": settings.is_feature_enabled('netfilter'),
+                    "feature_disabled": not settings.is_feature_enabled('netfilter'),
                     "status": jobs_status.get('protection_rules', {}).get('status', 'idle') if settings.is_feature_enabled('netfilter') else 'disabled',
                     "last_run": format_datetime_utc(jobs_status.get('protection_rules', {}).get('last_run')) if settings.is_feature_enabled('netfilter') else None,
                     "error": jobs_status.get('protection_rules', {}).get('error') if settings.is_feature_enabled('netfilter') else None
