@@ -4317,6 +4317,7 @@ async def _process_quarantine_rules_in_worker():
             
             released_count = 0
             deleted_count = 0
+            done = set()  # the actions mailcow actually carried out
             
             # Execute releases
             if release_items:
@@ -4324,6 +4325,7 @@ async def _process_quarantine_rules_in_worker():
                 try:
                     await mailcow_api.release_quarantine(release_ids)
                     released_count = len(release_ids)
+                    done.add('release')
                 except Exception as e:
                     logger.error(f"[QUARANTINE RULES] Release failed: {e}")
             
@@ -4333,12 +4335,15 @@ async def _process_quarantine_rules_in_worker():
                 try:
                     await mailcow_api.delete_quarantine(delete_ids)
                     deleted_count = len(delete_ids)
+                    done.add('delete')
                 except Exception as e:
                     logger.error(f"[QUARANTINE RULES] Delete failed: {e}")
             
-            # Log actions and update hit counts
+            # Log actions and update hit counts (a failed call is retried next run)
             rule_hit_counts = {}  # rule_id -> count
             for item, rule in actions_to_take:
+                if rule.action not in done:
+                    continue
                 log_entry = QuarantineRuleLog(
                     rule_id=rule.id,
                     rule_name=rule.name,
