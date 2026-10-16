@@ -1,0 +1,67 @@
+# Documentation site on GitHub Pages.
+#
+# A pull request that touches the docs only builds the site (strict, so a
+# broken link fails the check). A merge to main that touches the docs builds
+# and publishes it. Runs only when the docs change, never on code-only changes.
+name: Docs
+
+on:
+  pull_request:
+    paths: &docs-paths
+      - README.md
+      - CHANGELOG.md
+      - documentation/**
+      - images/**
+      - website/**
+      - .github/workflows/docs.yml
+  push:
+    branches: [main]
+    paths: *docs-paths
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docs-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: website/requirements.txt
+
+      - name: Install MkDocs
+        run: pip install -r website/requirements.txt
+
+      - name: Build the site
+        run: |
+          python website/stage.py
+          mkdocs build --strict -f website/mkdocs.yml
+
+      - name: Upload the site
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: website/.site
+
+  deploy:
+    if: github.event_name != 'pull_request'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

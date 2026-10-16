@@ -1,0 +1,87 @@
+# Documentation site, published to GitHub Pages by .github/workflows/docs.yml.
+# Build locally: python website/stage.py && mkdocs build --strict -f website/mkdocs.yml
+site_name: mailcow Logs Viewer
+site_description: Documentation for mailcow Logs Viewer, a self-hosted monitoring dashboard for mailcow mail servers.
+site_url: https://shlomiporush.github.io/mailcow-logs-viewer/
+repo_url: https://github.com/ShlomiPorush/mailcow-logs-viewer
+repo_name: ShlomiPorush/mailcow-logs-viewer
+edit_uri: ""
+
+docs_dir: .stage
+site_dir: .site
+
+theme:
+  name: material
+  font: false
+  logo: assets/app-icon.svg
+  favicon: assets/favicon-32x32.png
+  icon:
+    repo: fontawesome/brands/github
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark theme
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light theme
+  features:
+    - navigation.sections
+    - navigation.top
+    - navigation.footer
+    - search.highlight
+    - content.code.copy
+    - toc.follow
+
+extra_css:
+  - assets/ui-tokens.css
+  - assets/v3.css
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+      # GitHub-style heading IDs, so in-page links work both on GitHub and here
+      slugify: !!python/object/apply:pymdownx.slugs.slugify
+        kwds:
+          case: lower
+  - pymdownx.details
+  - pymdownx.highlight
+  - pymdownx.inlinehilite
+  - pymdownx.superfences
+
+validation:
+  omitted_files: warn
+  absolute_links: warn
+  unrecognized_links: warn
+  anchors: warn
+
+nav:
+  - Home: index.md
+  - Setup:
+      - Getting Started: GETTING_STARTED.md
+      - Environment Variables: ENV_Settings.md
+      - Settings in the Web UI: Settings_UI.md
+      - Reverse Proxy: Reverse_Proxy.md
+      - OAuth2 / OIDC: OAuth2_Configuration.md
+      - Upgrade to v2: UpdateV2.md
+  - Pages:
+      - Domains: HelpDocs/Domains.md
+      - DMARC: HelpDocs/DMARC.md
+      - Mailbox Statistics: HelpDocs/Mailbox_Stats.md
+      - Rate Limits: HelpDocs/Rate_Limits.md
+      - Spam Filter: HelpDocs/Spam_Filter.md
+      - Quarantine: HelpDocs/Quarantine.md
+      - Abuse Protection: HelpDocs/Abuse_Protection.md
+      - Devices: HelpDocs/Devices.md
+      - IP Blacklist Monitor: HelpDocs/IP_Blacklist_Monitor.md
+  - Reference:
+      - Email Authentication: Email_Authentication_Monitoring.md
+      - API: API.md
+      - Changelog: changelog.md
