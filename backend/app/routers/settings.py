@@ -931,6 +931,9 @@ def purge_feature_data(body: Dict[str, Any], db: Session = Depends(get_db)):
                 from ..raw_logs_worker import delete_uncollected_raw_logs
                 deleted_counts[table_name] = delete_uncollected_raw_logs(db)
                 continue
+            if table_name == 'mailbox_statistics' and settings.is_feature_enabled('rate-limits'):
+                # Rate Limits reads each mailbox's configured limit from it
+                continue
             # nosemgrep: python.sqlalchemy.security.audit.avoid-sqlalchemy-text.avoid-sqlalchemy-text
             count = db.execute(text(f"SELECT COUNT(*) FROM {table_name}")).scalar() or 0
             if count > 0:
