@@ -1089,6 +1089,8 @@ def get_report_details(
             'sources': sources_list
         }
         
+    except HTTPException:
+        raise
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD")
     except Exception as e:
@@ -1308,6 +1310,8 @@ def get_source_details(
             'envelope_from_groups': envelope_list
         }
         
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error fetching source details: {e}")
         raise internal_error(e)
@@ -1599,6 +1603,8 @@ def get_tls_report_details(
         
     except HTTPException:
         raise
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD")
     except Exception as e:
         logger.error(f"Error fetching TLS report details for {domain}/{report_date}: {e}")
         raise internal_error(e)
