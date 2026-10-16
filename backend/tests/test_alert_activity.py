@@ -179,3 +179,71 @@ def test_an_smtp_block_without_its_action_has_an_unknown_window(env, monkeypatch
 
 def test_an_unknown_alert_is_not_found(env):
     assert _client().get('/api/security-alerts/999999999/activity').status_code == 404
+
+
+def _raise_anomaly_alert(monkeypatch, alert_type, subject):
+    """Raise the alert through its real detector, as the scheduler does."""
+    from app.database import get_db_context
+    from app.models import MailboxStatistics, SecurityAlert
+    from app.services import anomaly_service
+    monkeypatch.setattr(settings._inner, 'anomaly_volume_multiplier', 10.0)
+    monkeypatch.setattr(settings._inner, 'anomaly_volume_min_messages', 20)
+    monkeypatch.setattr(settings._inner, 'anomaly_auth_failure_threshold', 10)
+    monkeypatch.setattr(settings._inner, 'anomaly_alert_cooldown_hours', 24)
+    monkeypatch.setattr(anomaly_service, '_is_recurring_daily_pattern', lambda *a, **k: False)
+    with get_db_context() as db:
+        # The fixture's own alert would hold the detector back (cooldown)
+        db.query(SecurityAlert).filter(SecurityAlert.alert_type == alert_type,
+                                       SecurityAlert.subject == subject).delete(synchronize_session=False)
+        if alert_type == 'volume_spike' and not db.query(MailboxStatistics).filter(MailboxStatistics.username == SENDER).first():
+            db.add(MailboxStatistics(username=SENDER, domain='activity.example'))
+        db.commit()
+        if alert_type == 'volume_spike':
+            anomaly_service.detect_volume_spikes(db, [])
+        else:
+            anomaly_service.detect_auth_failure_bursts(db, [])
+        return db.query(SecurityAlert.id).filter(SecurityAlert.alert_type == alert_type,
+                                                 SecurityAlert.subject == subject).first()[0]
+
+
+@pytest.fixture()
+def no_mailbox():
+    yield
+    from app.database import get_db_context
+    from app.models import MailboxStatistics
+    with get_db_context() as db:
+        db.query(MailboxStatistics).filter(MailboxStatistics.username == SENDER).delete(synchronize_session=False)
+        db.commit()
+
+
+def test_a_spike_keeps_its_own_window_and_baseline_after_the_settings_change(env, monkeypatch, no_mailbox):
+    # Raised while the check counts 15 minutes against a 7 day baseline
+    alert_id = _raise_anomaly_alert(monkeypatch, 'volume_spike', SENDER)
+    # Later the settings change, and the alert is opened again
+    monkeypatch.setattr(settings._inner, 'anomaly_check_interval', 60)
+    monkeypatch.setattr(settings._inner, 'anomaly_baseline_days', 3)
+    data = _client().get(f'/api/security-alerts/{alert_id}/activity').json()
+    assert data['window_minutes'] == 15
+    # Its usual rate was measured over 7 days
+    assert data['baseline_days'] == 7
+    assert 7 * 24 * 4 <= len(data['buckets'])
+    # Its 15 minutes before it, to an hour after
+    assert _minutes_around(data['around']) == 75
+    assert data['around']['total'] == 30
+
+
+def test_a_burst_keeps_its_own_window_after_the_setting_changes(env, monkeypatch):
+    alert_id = _raise_anomaly_alert(monkeypatch, 'auth_failure_burst', USER)
+    monkeypatch.setattr(settings._inner, 'anomaly_check_interval', 60)
+    data = _client().get(f'/api/security-alerts/{alert_id}/activity').json()
+    assert data['window_minutes'] == 15
+    assert _minutes_around(data['around']) == 75
+    assert data['around']['total'] == 12
+
+
+def test_an_anomaly_alert_that_does_not_name_its_window_has_an_unknown_window(env, monkeypatch):
+    # The fixture's spike has no detail: not today's setting either
+    monkeypatch.setattr(settings._inner, 'anomaly_check_interval', 60)
+    data = _client().get(f'/api/security-alerts/{env[0]}/activity').json()
+    assert data['window_minutes'] is None
+    assert _minutes_around(data['around']) == 120

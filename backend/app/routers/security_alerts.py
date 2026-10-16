@@ -3,6 +3,7 @@ Security Alerts API - anomaly-detection findings (compromised mailbox /
 auth attack) surfaced on the dashboard.
 """
 import logging
+import re
 from collections import Counter
 from datetime import timedelta
 from typing import Optional
@@ -106,8 +107,12 @@ AFTER_HOURS = 2
 SENT_MAIL_ALERTS = ('volume_spike', 'smtp_abuse_block')
 # An SMTP block is recorded twice at once: its abuse action, then its alert
 BLOCK_ACTION_MATCH = timedelta(minutes=5)
-# How far before an SMTP block "Around the alert" starts when its window is not known
+# How far before an alert "Around the alert" starts when its window is not known
 UNKNOWN_WINDOW_MINUTES = 60
+# An anomaly alert names the window it counted in, and a spike its baseline
+# period, in its detail (anomaly_service): the settings may have changed since
+DETAIL_WINDOW_RE = re.compile(r"in the last (\d+) minutes")
+DETAIL_BASELINE_RE = re.compile(r"over the past (\d+) days")
 
 
 def _events(db: Session, alert: SecurityAlert, start, end):
@@ -141,6 +146,11 @@ def _block_window(db: Session, alert: SecurityAlert) -> Optional[int]:
     return max(min(actions, key=lambda r: abs(r[0] - at))[1], 1)
 
 
+def _detail_number(alert: SecurityAlert, pattern) -> Optional[int]:
+    match = pattern.search(alert.detail or "")
+    return max(int(match.group(1)), 1) if match else None
+
+
 def _top(counter: Counter, limit: int = 6) -> list:
     return [{'name': name, 'count': count} for name, count in counter.most_common(limit)]
 
@@ -159,13 +169,15 @@ def alert_activity(alert_id: int, db: Session = Depends(get_db)):
         if not alert:
             raise HTTPException(status_code=404, detail="Alert not found")
         at = alert.created_at
-        # The window the alert counted in: an SMTP block keeps the one it was
-        # blocked with, even after the setting changed; None when not known
+        # The window the alert counted in, even after the setting changed:
+        # an SMTP block keeps the one it was blocked with, an anomaly alert
+        # the one its detail names; None when not known
         if alert.alert_type == 'smtp_abuse_block':
             window = _block_window(db, alert)
         else:
-            window = max(int(settings.anomaly_check_interval or 15), 1)
-        start = (at - timedelta(days=max(int(settings.anomaly_baseline_days or 7), 1))).replace(minute=0, second=0, microsecond=0)
+            window = _detail_number(alert, DETAIL_WINDOW_RE)
+        baseline_days = _detail_number(alert, DETAIL_BASELINE_RE) or max(int(settings.anomaly_baseline_days or 7), 1)
+        start = (at - timedelta(days=baseline_days)).replace(minute=0, second=0, microsecond=0)
         end = at + timedelta(hours=AFTER_HOURS)
         rows = _events(db, alert, start, end)
 
@@ -198,7 +210,7 @@ def alert_activity(alert_id: int, db: Session = Depends(get_db)):
             'alert': _serialize(alert),
             'bucket_minutes': BUCKET_MINUTES,
             'window_minutes': window,
-            'baseline_days': int(settings.anomaly_baseline_days or 7),
+            'baseline_days': baseline_days,
             'buckets': buckets,
             'around': {'from': format_datetime_utc(around_from), 'to': format_datetime_utc(around_to), 'total': len(near), **around},
         }

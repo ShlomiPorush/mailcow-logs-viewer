@@ -118,11 +118,18 @@ function renderAlertActivity() {
     const critical = a.severity === 'critical';
     document.getElementById('alert-activity-title').innerHTML = `<span class="ui-tag ${critical ? 'ui-tag-fail' : 'ui-tag-warn'}">${escapeHtml((a.severity || 'warning').toUpperCase())}</span> ${escapeHtml(a.subject || '')}`;
     const results = { delivered: 'ok', sent: 'ok', deferred: 'warn', bounced: 'fail', rejected: 'fail', expired: 'fail', discarded: 'fail' };
-    const figures = sent && data.window_minutes == null ? [
-        ['Counted for the block', (a.metric_value || 0).toLocaleString(), true],
+    const unknown = data.window_minutes == null;
+    const figures = sent && unknown ? [
+        [spike ? 'Counted for the alert' : 'Counted for the block', (a.metric_value || 0).toLocaleString(), true],
         ['The window', 'Unknown'],
-        ['The limit', (a.baseline_value || 0).toLocaleString()],
+        spike ? [`Usual, an hour (${data.baseline_days} days)`, (a.baseline_value || 0).toFixed(2)]
+            : ['The limit', (a.baseline_value || 0).toLocaleString()],
         [`Sent in the ${data.baseline_days} days before`, before.toLocaleString()]
+    ] : unknown ? [
+        ['Counted for the alert', (a.metric_value || 0).toLocaleString(), true],
+        ['The window', 'Unknown'],
+        ['The alert starts at', (a.baseline_value || 0).toLocaleString()],
+        [`Failed in the ${data.baseline_days} days before`, before.toLocaleString()]
     ] : sent ? [
         [`Sent in the alert's ${data.window_minutes} minutes`, (a.metric_value || 0).toLocaleString(), true],
         ['That is, an hour', Math.round((a.metric_value || 0) * 60 / data.window_minutes).toLocaleString(), true],
