@@ -885,6 +885,8 @@ async function loadSettings() {
 
 // The latest version, its state and the update note, by id
 function renderLatestVersionState(versionInfo) {
+    // The server answers "unknown" when GitHub could not be reached
+    if (versionInfo.latest_version === 'unknown') return `Not known ${uiTag('Check failed', 'warn')}`;
     const tag = versionInfo.update_available ? uiTag('Update Available', 'ok')
         : versionInfo.latest_version ? uiTag('Up to Date', 'info') : '';
     return `${versionInfo.latest_version ? `v${escapeHtml(versionInfo.latest_version)}` : 'Checking...'} ${tag}`;

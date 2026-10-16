@@ -2143,7 +2143,8 @@ async function loadDashboardHealth() {
         }
         if (versionRes.ok) {
             const v = await versionRes.json();
-            setDashKpi('dash-kpi-version', v.current_version || '-', '', v.update_available ? `${v.latest_version} available` : 'Up to date');
+            setDashKpi('dash-kpi-version', v.current_version || '-', '', v.update_available ? `${v.latest_version} available`
+                : v.latest_version === 'unknown' ? 'Update check failed' : 'Up to date');
         }
     } catch (error) {
         console.error('Failed to load dashboard health:', error);
