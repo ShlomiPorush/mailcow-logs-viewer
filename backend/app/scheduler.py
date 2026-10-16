@@ -2244,9 +2244,9 @@ async def dmarc_imap_sync_job():
             logger.error(f"DMARC IMAP sync failed: {error_msg}")
             update_job_status('dmarc_imap_sync', 'failed', error_msg)
             
-            # Send notification if needed
+            # Report the failures; the notification goes to the channels even without SMTP
             failed_emails = result.get('failed_emails')
-            if failed_emails and settings.notification_smtp_configured:
+            if failed_emails:
                 try:
                     await asyncio.get_running_loop().run_in_executor(
                         _thread_pool_executor,
