@@ -86,3 +86,8 @@ test('the address buttons name the entry they write', () => {
     assert.doesNotMatch(acts, /2001:db8::9\/32/);
 });
 
+test('the failed logins of an address are counted over the chosen period', () => {
+    const context = load();
+    vm.runInContext('securityDays = 7', context);
+    assert.match(context.securityFailedText(address(), []), /4 in the last 7 days/);
+});

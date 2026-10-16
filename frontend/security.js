@@ -432,11 +432,11 @@ function securityRowClick(event, ip) {
     securityToggleRow(ip);
 }
 
-// Failed logins in the last 24 hours. The overview counts them for its busiest
-// addresses only; for any other one they are counted in its own log lines.
+// Failed logins in the chosen period, as the list counts them. An address without
+// any there has the last 24 hours counted in its own log lines.
 function securityFailedText(a, lines) {
     const services = a.services.length ? ` <span class="ui-muted">(${escapeHtml(a.services.join(', '))})</span>` : '';
-    if (a.tries) return `${Number(a.tries).toLocaleString()} in the last 24 hours${services}`;
+    if (a.tries) return `${Number(a.tries).toLocaleString()} ${securityWindowText()}${services}`;
     if (!Array.isArray(lines)) return '<span class="ui-muted">Counting...</span>';
     const tries = lines.filter(e => e.rule_id !== null && e.rule_id !== undefined);
     const recent = tries.filter(e => Date.now() - new Date(e.time).getTime() < 24 * 3600 * 1000);
