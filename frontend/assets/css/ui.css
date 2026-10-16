@@ -692,8 +692,8 @@
 /* The period sits at the end of the row, so its choices open toward the start */
 .ui-sec-dhost .ui-popover { inset-inline-start: auto; inset-inline-end: 0; width: 220px; }
 .ui-sec-days small { font-size: 12px; white-space: nowrap; }
-.ui-sec-filter { display: inline-flex; align-items: center; gap: 4px; padding: 2px 4px 2px 9px; border-radius: 999px; background: var(--ui-ink); color: var(--ui-bg); font-size: 12px; font-weight: 600; }
-.ui-sec-filter button { border: 0; background: none; color: inherit; font-size: 14px; line-height: 1; cursor: pointer; padding: 0 4px; }
+.ui-sec-filter, .ui-logs-filter { display: inline-flex; align-items: center; gap: 4px; padding: 2px 4px 2px 9px; border-radius: 999px; background: var(--ui-ink); color: var(--ui-bg); font-size: 12px; font-weight: 600; }
+.ui-sec-filter button, .ui-logs-filter button { border: 0; background: none; color: inherit; font-size: 14px; line-height: 1; cursor: pointer; padding: 0 4px; }
 .ui-sec-note { margin: 0; padding: 4px var(--ui-pad-x) 10px; font-size: 12.5px; color: var(--ui-muted); }
 .ui-sec-list { display: grid; }
 .ui-sec-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 14px; align-items: center; padding: 11px var(--ui-pad-x);
@@ -1997,6 +1997,8 @@ button.ui-st-card:hover { outline: 1px solid var(--ui-line); }
 .ui-logs-conn { display: inline-flex; align-items: center; gap: 6px; }
 .ui-logs-status #logs-ws-indicator { display: inline-block; }
 .ui-logs-status b { color: var(--ui-ink); }
+/* A long search wraps inside the filter tag instead of pushing its clear button out of the card */
+.ui-logs-filter { overflow-wrap: anywhere; }
 .ui-chip.ui-chip-red { color: var(--ui-fail); border-color: color-mix(in srgb, var(--ui-fail) 40%, var(--ui-line)); }
 .ui-chip.ui-chip-orange, .ui-chip.ui-chip-yellow { color: var(--ui-warn); border-color: color-mix(in srgb, var(--ui-warn) 40%, var(--ui-line)); }
 .ui-chip.ui-chip-blue { color: var(--ui-info); border-color: color-mix(in srgb, var(--ui-info) 40%, var(--ui-line)); }

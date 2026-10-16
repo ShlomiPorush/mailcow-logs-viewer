@@ -1181,14 +1181,12 @@ function updateFilterBadge(hasFilters, visible, total) {
         return;
     }
     if (!badge) {
-        badge = document.createElement('div');
+        // In the status bar, next to the count: inside the terminal it scrolled away with the lines
+        badge = document.createElement('span');
         badge.id = 'logs-filter-badge';
-        badge.className = 'absolute bottom-12 left-1/2 -translate-x-1/2 bg-blue-600 text-white text-xs px-3 py-1.5 rounded-full shadow-lg flex items-center gap-2 z-10';
-        const terminal = document.getElementById('logs-terminal');
-        if (terminal) {
-            terminal.style.position = 'relative';
-            terminal.appendChild(badge);
-        }
+        badge.className = 'ui-logs-filter';
+        const count = document.getElementById('logs-entry-count');
+        if (count) count.after(badge);
     }
     // Build description of active filters
     const parts = [];
@@ -1203,7 +1201,7 @@ function updateFilterBadge(hasFilters, visible, total) {
         parts.push(filterNames.join(', '));
     }
     badge.innerHTML = `<span>Showing ${visible} of ${total} - filter: <strong>${parts.join(' + ')}</strong></span>` +
-        `<button onclick="clearLogSearch()" class="ml-1 hover:text-yellow-300 font-bold" title="Clear all filters">✕</button>`;
+        `<button type="button" onclick="clearLogSearch()" aria-label="Clear all filters" title="Clear all filters">&times;</button>`;
 }
 
 function clearLogDisplay() {
