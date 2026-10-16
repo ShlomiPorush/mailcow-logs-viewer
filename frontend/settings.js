@@ -955,7 +955,7 @@ function renderSettings(content, data) {
     const editing = !!(data.settings_edit_via_ui_enabled && data.editable_config);
     content.innerHTML = `
         ${!data.settings_edit_via_ui_enabled ? `<div class="ui-list-note ui-flush">${uiLocked('Editing settings is off',
-            'These values come from the environment and are shown read-only. To change them here, set <code>SETTINGS_EDIT_VIA_UI_ENABLED=true</code> and restart the container.', '')}</div>` : ''}
+            'These values come from the environment and are shown read-only. To change them here, set <code>SETTINGS_EDIT_VIA_UI_ENABLED=true</code> in <code>.env</code> and run <code>docker compose up -d</code>. A restart does not read <code>.env</code> again.', '')}</div>` : ''}
 
         ${!data.settings_edit_via_ui_enabled ? `
         <section class="ui-panel">

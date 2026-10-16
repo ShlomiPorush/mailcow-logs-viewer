@@ -1163,7 +1163,7 @@ function securityCardBody(key) {
         const envLocked = k => securityAppSettings && (securityAppSettings.env_locked_keys || []).includes(k);
         const revoke = securityAbuseValue('smtp_abuse_revoke_app_passwords');
         return `
-            ${securityAppSettings && !securityAppSettings.settings_edit_via_ui_enabled ? uiLocked('Editing settings is off', 'These values come from the environment and are shown read-only. To change them here, set <code>SETTINGS_EDIT_VIA_UI_ENABLED=true</code> and restart the container.') : ''}
+            ${securityAppSettings && !securityAppSettings.settings_edit_via_ui_enabled ? uiLocked('Editing settings is off', 'These values come from the environment and are shown read-only. To change them here, set <code>SETTINGS_EDIT_VIA_UI_ENABLED=true</code> in <code>.env</code> and run <code>docker compose up -d</code>. A restart does not read <code>.env</code> again.') : ''}
             ${securityAppSettings && securityAppSettings.settings_edit_via_ui_enabled && !securityAppSettings.settings_migrated
                 ? uiLocked('Settings are not migrated yet', 'These values are read-only until the configuration is copied into the database: click <strong>Migrate Settings from ENV</strong> on the Settings page.', `<button type="button" class="ui-btn ui-btn-sm" onclick="navigateTo('settings')">Open Settings</button>`) : ''}
             <div class="ui-sec-fields">
