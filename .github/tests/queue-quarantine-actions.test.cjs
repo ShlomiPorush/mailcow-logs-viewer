@@ -160,3 +160,36 @@ test('a regex with a leading ^ and an Exact Match rule save unchanged', async ()
     assert.equal(result.sent.match_value, 'NoReply@Example.com');
     assert.equal(result.sent.is_regex, false);
 });
+
+// Save the rule dialog with these field values, and return what it sent
+async function saveFields(fields, ruleId) {
+    const app = loadApp();
+    app.context.closeQuarantineRuleModal = () => {};
+    app.context.loadQuarantineRules = async () => {};
+    for (const [id, value] of Object.entries(fields)) app.elements[id] = { value };
+    let sent = null;
+    app.context.authenticatedFetch = async (url, options) => { sent = JSON.parse(options.body); return { ok: true, json: async () => ({}) }; };
+    await app.context.saveQuarantineRule(ruleId);
+    return sent;
+}
+
+// The pattern a Contains rule for example.com got when an earlier version
+// opened it with its stored pattern and saved it again. The upgrade repairs
+// it (backend/alembic/versions/0018_*, tested in test_quarantine_spam_upgrade.py).
+const TWICE_SAVED = 'example\\\\\\.com';
+const REPAIRED = 'example\\.com';
+
+test('a Contains rule saved twice by an earlier version opens as Contains with its text once repaired', async () => {
+    const fields = { 'qrule-name': 'Rule', 'qrule-match-type': 'sender_domain', 'qrule-match-value': 'example.com',
+                     'qrule-match-mode': 'contains', 'qrule-action': 'release', 'qrule-notes': '' };
+    const created = await saveFields(fields, null);
+    assert.equal(created.match_value, REPAIRED);
+    // The earlier edit dialog showed the stored pattern in the Contains field
+    const edited = await saveFields({ ...fields, 'qrule-match-value': created.match_value }, 3);
+    assert.equal(edited.match_value, TWICE_SAVED);
+    const { shownMode, shownValue, sent } = await editAndSave({ ...rule(REPAIRED, true), match_type: 'sender_domain' });
+    assert.equal(shownMode, 'contains');
+    assert.equal(shownValue, 'example.com');
+    assert.equal(sent.match_value, REPAIRED);
+    assert.equal(sent.is_regex, true);
+});

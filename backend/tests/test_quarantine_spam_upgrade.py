@@ -188,3 +188,73 @@ def test_nothing_changes_when_soft_bounces_are_not_counted(suppression_settings)
             rows = _suppressions(isolated)
             for email, (_, _, _, active) in SUPPRESSIONS.items():
                 assert (rows[email].active, rows[email].synced_to_rspamd) == (active, True), (action, email)
+
+
+# -- 0018: Contains rules an earlier edit escaped twice -----------------------
+
+# The pattern the rule dialog saves for a Contains rule on example.com after
+# an earlier version opened and saved it again (made by the real dialog code
+# in .github/tests/queue-quarantine-actions.test.cjs)
+TWICE_SAVED = r"example\\\.com"
+REPAIRED = r"example\.com"
+
+# name -> (match_type, match_value, is_regex, value after the upgrade)
+RULES = {
+    "domain twice": ("sender_domain", TWICE_SAVED, True, REPAIRED),
+    "sender twice": ("sender", r"user@example\\\.com", True, r"user@example\.com"),
+    "recipient three times": ("recipient", r"user@example\\\\\\\.com", True, r"user@example\.com"),
+    "domain once": ("sender_domain", r"example\.org", True, r"example\.org"),
+    "plain text": ("sender", "noreply", True, "noreply"),
+    "subject twice": ("subject", r"Invoice\\\.pdf", True, r"Invoice\\\.pdf"),
+    "regex": ("sender", r"^.*@(spam|junk)\.example$", True, r"^.*@(spam|junk)\.example$"),
+    "regex with escapes": ("sender", r"a\\\.b|c", True, r"a\\\.b|c"),
+    "regex digits": ("sender", r"invoice\\d+", True, r"invoice\\d+"),
+    "exact": ("sender", TWICE_SAVED, False, TWICE_SAVED),
+}
+
+
+def _seed_rules(isolated):
+    from app.models import QuarantineRule
+    with Session(isolated) as db:
+        for name, (match_type, value, is_regex, _) in RULES.items():
+            db.add(QuarantineRule(name=name, match_type=match_type, match_value=value,
+                                  is_regex=is_regex, action="release"))
+        db.commit()
+
+
+def _rules(isolated):
+    from app.models import QuarantineRule
+    with Session(isolated) as db:
+        rules = db.query(QuarantineRule).all()
+        for rule in rules:
+            db.expunge(rule)
+    return {rule.name: rule for rule in rules}
+
+
+def _matches(rule, sender="user@example.com", rcpt="user@example.com", subject="Hello"):
+    from app.routers.quarantine_rules import _find_matching_rule
+    domain = sender.split("@")[-1]
+    return _find_matching_rule([rule], sender, domain, rcpt, subject) is rule
+
+
+def test_twice_escaped_contains_rules_are_repaired(caplog):
+    from app.models import QuarantineRule
+    revision = _revision("repair_twice_escaped_rules")
+    with _schema(QuarantineRule) as isolated:
+        _seed_rules(isolated)
+        before = _rules(isolated)
+        assert not _matches(before["domain twice"]), "the damaged rule should not match before the upgrade"
+        with caplog.at_level("WARNING", logger="app.migrations"):
+            _upgrade(isolated, revision)
+        after = _rules(isolated)
+        for name, (_, _, _, expected) in RULES.items():
+            assert after[name].match_value == expected, name
+        for name in ("domain twice", "sender twice", "recipient three times"):
+            assert _matches(after[name]), name
+        assert caplog.text.count("Upgrade: repaired rule") == 3
+        assert f"sender_domain pattern {TWICE_SAVED} is now {REPAIRED}" in caplog.text
+        # Running it again changes nothing
+        caplog.clear()
+        _upgrade(isolated, revision)
+        assert {n: r.match_value for n, r in _rules(isolated).items()} == {n: v[3] for n, v in RULES.items()}
+        assert "repaired" not in caplog.text
