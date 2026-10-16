@@ -3974,6 +3974,12 @@ def start_scheduler():
 # SPAM SUPPRESSION SCHEDULER JOBS
 # =============================================================================
 
+# PostfixLog ids already counted, with their created_at. The 10-minute window
+# below is wider than the 5-minute run interval, so every line is in two runs;
+# this keeps a bounce from being counted twice. Pruned to the window each run.
+_counted_bounce_log_ids = {}
+
+
 def _detect_suppressions_worker():
     """Scan and persist suppressions with a worker-owned database session."""
     with get_db_context() as db:
@@ -3981,6 +3987,8 @@ def _detect_suppressions_worker():
         # Uses created_at (DB insert time) instead of time (original mailcow timestamp)
         # so that historical bounces imported via paginated fetch are still detected
         cutoff = datetime.utcnow() - timedelta(minutes=10)
+        for log_id in [i for i, created in _counted_bounce_log_ids.items() if created < cutoff]:
+            del _counted_bounce_log_ids[log_id]
 
         # When queue_cleanup_enabled, soft bounces are handled by
         # cleanup_deferred_queue_job (checks the live queue directly).
@@ -4002,6 +4010,8 @@ def _detect_suppressions_worker():
             PostfixLog.queue_id.isnot(None),
             or_(*[PostfixLog.program.like(f'%/{agent}') for agent in POSTFIX_DELIVERY_AGENTS]),
         ).all()
+        bounce_logs = [log for log in bounce_logs
+                       if getattr(log, 'id', None) not in _counted_bounce_log_ids]
 
         if not bounce_logs:
             return 0, 0, []
@@ -4068,8 +4078,11 @@ def _detect_suppressions_worker():
                 existing.last_bounce_message = log.message[:500] if log.message else None
                 existing.updated_at = datetime.utcnow()
 
-                # Re-activate if expired
-                if not existing.active or (existing.expires_at and existing.expires_at < datetime.utcnow()):
+                # Re-activate if expired; Count then suppress waits for the threshold
+                below_threshold = (is_soft and settings.suppression_soft_bounce_action == 'count'
+                                   and existing.soft_bounce_count < settings.suppression_soft_bounce_threshold)
+                if (not existing.active or (existing.expires_at and existing.expires_at < datetime.utcnow())) \
+                        and not below_threshold:
                     existing.active = True
                     existing.synced_to_rspamd = False
 
@@ -4093,7 +4106,7 @@ def _detect_suppressions_worker():
                 is_active = True
                 # For soft bounces with count action, only activate if threshold reached
                 if is_soft and settings.suppression_soft_bounce_action == 'count':
-                    is_active = False
+                    is_active = settings.suppression_soft_bounce_threshold <= 1
 
                 new_entry = SpamSuppression(
                     email=recipient,
@@ -4116,6 +4129,9 @@ def _detect_suppressions_worker():
                 new_count += 1
 
         db.commit()
+        for log in bounce_logs:
+            if getattr(log, 'id', None) is not None:
+                _counted_bounce_log_ids[log.id] = log.created_at
 
     return new_count, updated_count, emails_for_queue_cleanup
 
