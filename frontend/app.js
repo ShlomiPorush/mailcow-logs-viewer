@@ -4235,7 +4235,7 @@ async function loadStatusExtended() {
         renderStatusImport(data.import_status || {});
 
         // Render Correlation Status
-        renderStatusCorrelation(data.correlation_status || {}, data.recent_incomplete_correlations || []);
+        renderStatusCorrelation(data.correlation_status || {}, data.recent_incomplete_correlations || [], (data.configuration || {}).max_correlation_age_minutes);
 
         // Render Background Jobs
         renderStatusJobs(data.background_jobs || {});
@@ -4560,7 +4560,7 @@ function renderStatusImport(imports) {
     `;
 }
 
-function renderStatusCorrelation(correlation, incompleteList) {
+function renderStatusCorrelation(correlation, incompleteList, maxAgeMinutes) {
     const container = document.getElementById('status-correlation');
     setStatusKpi('status-kpi-linking', `${correlation.completion_rate || 0}%`, correlation.incomplete ? 'warn' : '');
     const linkingNote = document.getElementById('status-kpi-linking-note');
@@ -4583,7 +4583,7 @@ function renderStatusCorrelation(correlation, incompleteList) {
                         <span class="ui-td ui-td-end ui-text-warn">${escapeHtml(String(item.age_minutes))}m ago</span>
                     </div>`).join('')}
             </div>
-            <p class="ui-kv-note ui-list-foot">These will be automatically completed or expired within 1-2 minutes</p>
+            <p class="ui-kv-note ui-list-foot">Each is linked when its delivery logs arrive, or marked expired once it is ${escapeHtml(String(maxAgeMinutes || 10))} minutes old.</p>
         </section>` : '';
 }
 
