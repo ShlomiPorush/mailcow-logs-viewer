@@ -565,7 +565,7 @@ const SETTINGS_TAB_FEATURE_MAP = {
     'blacklist': 'blacklist',
     'dmarc': 'dmarc',
     'dmarc_imap': 'dmarc',
-    'logs': 'logs',
+    // Not 'logs': the raw logs other pages read are fetched and kept by its settings either way
     'spam_filter': 'spam-filter',
     'quarantine': 'quarantine',
     'devices': 'devices'
