@@ -15,6 +15,7 @@ from apscheduler.triggers.interval import IntervalTrigger
 from apscheduler.triggers.cron import CronTrigger
 from sqlalchemy.orm import Session
 from sqlalchemy import desc, or_
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 
 from .config import settings, set_cached_active_domains
@@ -3974,21 +3975,30 @@ def start_scheduler():
 # SPAM SUPPRESSION SCHEDULER JOBS
 # =============================================================================
 
-# PostfixLog ids already counted, with their created_at. The 10-minute window
+# The highest PostfixLog id bounce detection has counted. The 10-minute window
 # below is wider than the 5-minute run interval, so every line is in two runs;
-# this keeps a bounce from being counted twice. Pruned to the window each run.
-_counted_bounce_log_ids = {}
+# only lines above this mark are counted. It is stored, and locked, in the
+# same transaction as the suppressions, so a restart or two runs at once
+# cannot count a line twice. Postfix lines are inserted under
+# _postfix_ingest_lock by the single app process, so a line never becomes
+# visible after a line with a higher id.
+BOUNCE_WATERMARK_KEY = 'suppression_bounce_log_watermark'
 
 
 def _detect_suppressions_worker():
     """Scan and persist suppressions with a worker-owned database session."""
     with get_db_context() as db:
+        db.execute(pg_insert(SystemSetting).values(
+            key=BOUNCE_WATERMARK_KEY, value='0', updated_at=datetime.utcnow(),
+        ).on_conflict_do_nothing(index_elements=['key']))
+        mark = db.query(SystemSetting).filter(
+            SystemSetting.key == BOUNCE_WATERMARK_KEY).with_for_update().one()
+        counted_up_to = int(mark.value or 0)
+
         # Look for recently imported bounced emails (last 10 minutes by import time)
         # Uses created_at (DB insert time) instead of time (original mailcow timestamp)
         # so that historical bounces imported via paginated fetch are still detected
         cutoff = datetime.utcnow() - timedelta(minutes=10)
-        for log_id in [i for i, created in _counted_bounce_log_ids.items() if created < cutoff]:
-            del _counted_bounce_log_ids[log_id]
 
         # When queue_cleanup_enabled, soft bounces are handled by
         # cleanup_deferred_queue_job (checks the live queue directly).
@@ -4003,6 +4013,7 @@ def _detect_suppressions_worker():
         # covers rows stored before the parser stopped reading status= and
         # dsn= out of those fields.
         bounce_logs = db.query(PostfixLog).filter(
+            PostfixLog.id > counted_up_to,
             PostfixLog.created_at >= cutoff,
             PostfixLog.status.in_(statuses_to_check),
             PostfixLog.recipient.isnot(None),
@@ -4010,11 +4021,10 @@ def _detect_suppressions_worker():
             PostfixLog.queue_id.isnot(None),
             or_(*[PostfixLog.program.like(f'%/{agent}') for agent in POSTFIX_DELIVERY_AGENTS]),
         ).all()
-        bounce_logs = [log for log in bounce_logs
-                       if getattr(log, 'id', None) not in _counted_bounce_log_ids]
 
         if not bounce_logs:
             return 0, 0, []
+        mark.value = str(max(log.id for log in bounce_logs))
 
         whitelist = settings.suppression_whitelist_domains_list
         new_count = 0
@@ -4129,9 +4139,6 @@ def _detect_suppressions_worker():
                 new_count += 1
 
         db.commit()
-        for log in bounce_logs:
-            if getattr(log, 'id', None) is not None:
-                _counted_bounce_log_ids[log.id] = log.created_at
 
     return new_count, updated_count, emails_for_queue_cleanup
 

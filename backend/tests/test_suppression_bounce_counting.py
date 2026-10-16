@@ -39,8 +39,6 @@ def env(monkeypatch):
     }.items():
         monkeypatch.setattr(settings._inner, key, value)
     monkeypatch.setattr(sch.mailcow_api, 'headers_rw', None)   # no queue calls
-    if hasattr(sch, '_counted_bounce_log_ids'):
-        monkeypatch.setattr(sch, '_counted_bounce_log_ids', {})
 
     emails = []
 
@@ -124,3 +122,47 @@ def test_threshold_of_one_suppresses_at_once(env, monkeypatch):
     env.bounce(email, '4.4.1', 1)
     env.detect()
     assert env.row(email).active is True
+
+
+def test_a_restart_does_not_count_a_bounce_again(env):
+    import app.scheduler as sch
+    email = 'soft-restart@example.com'
+    env.bounce(email, '4.4.1', 1)
+    env.detect()
+    # A new process starts with empty memory; the line is still in the window
+    if hasattr(sch, '_counted_bounce_log_ids'):
+        sch._counted_bounce_log_ids.clear()
+    env.detect()
+    row = env.row(email)
+    assert row.soft_bounce_count == 1 and row.bounce_count == 1
+    assert row.active is False
+
+
+def test_two_runs_at_once_count_each_bounce_once(env, monkeypatch):
+    import threading
+    import time
+    import app.scheduler as sch
+    email = 'soft-concurrent@example.com'
+    env.bounce(email, '4.4.1', 1)
+    real = sch.auto_suppression_address
+
+    def slow(address):
+        # Keeps the first run busy while the second one starts
+        time.sleep(0.5)
+        return real(address)
+    monkeypatch.setattr(sch, 'auto_suppression_address', slow)
+    errors = []
+
+    def run():
+        try:
+            sch._detect_suppressions_worker()
+        except Exception as e:
+            errors.append(e)
+    threads = [threading.Thread(target=run) for _ in range(2)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(30)
+    assert errors == []
+    row = env.row(email)
+    assert row.soft_bounce_count == 1 and row.bounce_count == 1
