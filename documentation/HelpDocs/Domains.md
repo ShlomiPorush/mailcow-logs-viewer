@@ -73,7 +73,7 @@ The check reads the TXT record at the domain that starts with `v=spf1` and repor
 
 - **Error** when there is no SPF record, when there is more than one (receivers then treat SPF as broken), when the record does not start with `v=spf1 `, when it has no `all` at the end and no `redirect=`, when it needs more than 10 DNS lookups, or when it allows every server with `+all` (a bare `all` counts as `+all`).
 - **Error** when a sending IP of yours is not allowed by the record. The message names the IP.
-- **Error** for a mechanism the check does not know. It accepts the mechanisms `ip4`, `ip6`, `a`, `mx`, `include`, `exists`, `ptr` and `all`, and the modifiers `redirect=` and `exp=`.
+- **Error** for a term the check does not accept: an unknown mechanism, a name that only starts like one (such as `mxfoo`), an `ip4:` or `ip6:` value that is not an address of that family, or a CIDR length out of range (0 to 32 for IPv4, 0 to 128 for IPv6). It accepts the mechanisms `ip4`, `ip6`, `a`, `mx`, `include`, `exists`, `ptr` and `all` in any letter case, and the modifiers `redirect=` and `exp=`. `a` and `mx` may carry a CIDR length, such as `a/24` or `mx//64`.
 - **Warning** for `?all`, which protects almost nothing.
 - **Warning** for a mechanism written with `=` instead of `:`, such as `include=spf.example.net`. SPF reads it as an unknown modifier and ignores it, so the message asks "Did you mean include:spf.example.net?".
 - **Warning** for `ptr`, which RFC 7208 discourages because it is slow and unreliable. The check counts it as a DNS lookup but does not evaluate it.
@@ -81,9 +81,9 @@ The check reads the TXT record at the domain that starts with `v=spf1` and repor
 
 Other modifiers (`name=value`), such as `ra=` from RFC 6652, are ignored, as RFC 7208 requires.
 
-The lookup count includes nested `include:` terms. See [The SPF record](#the-spf-record) for the limit.
+The lookup count includes nested `include:` terms and the record a `redirect=` points to. See [The SPF record](#the-spf-record) for the limit.
 
-**Checked IPs** tests configured sending IPs against SPF, following `include:` and `redirect=`. Each shows its source and **Authorized** or **Not authorized**. Configure sources under **Settings** > **Domains** > **SPF check sources**:
+**Checked IPs** tests configured sending IPs against SPF, following `include:` and `redirect=`. An `a` or `mx` term with a CIDR length, such as `a/24`, covers the whole network around each address it resolves to. A term with a macro (`%{...}`) cannot be expanded by the app and is skipped. Each shows its source and **Authorized** or **Not authorized**. Configure sources under **Settings** > **Domains** > **SPF check sources**:
 
 | Setting | Source label | Default |
 |---|---|---|
@@ -210,7 +210,7 @@ Add an `include:` for an authorized sending service, for example `include:spf.ma
 
 Publish one SPF record. `-all` returns fail for unmatched IPs; `~all` returns softfail. Neither passes DMARC through SPF, though aligned DKIM can still pass. `+all` authorizes every IP. Forwarding can break SPF because the connecting IP changes.
 
-SPF allows 10 DNS-querying terms during evaluation, including nested terms. Exceeding that gives `permerror`; not every sending IP reaches the same terms. The app counts `include`, `a`, `mx`, `exists` and `redirect`. See [RFC 7208, section 4.6.4](https://www.rfc-editor.org/rfc/rfc7208.html#section-4.6.4).
+SPF allows 10 DNS-querying terms during evaluation, including nested terms. Exceeding that gives `permerror`; not every sending IP reaches the same terms. The app counts `include`, `a`, `mx`, `exists`, `ptr` and `redirect`, and the terms of the records they point to. See [RFC 7208, section 4.6.4](https://www.rfc-editor.org/rfc/rfc7208.html#section-4.6.4).
 
 ### The DKIM record
 
