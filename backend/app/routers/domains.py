@@ -45,8 +45,9 @@ SPF_MECHANISM_RE = re.compile(
     r'|(?:include|exists):.+'
     r'|(?:a|mx)(?::' + SPF_DOMAIN_SPEC + r')?(?:/' + SPF_IP4_CIDR + r')?(?://' + SPF_IP6_CIDR + r')?'
     r'|ptr(?::.+)?'
-    r'|ip4:[^/]+(?:/' + SPF_IP4_CIDR + r')?'
-    r'|ip6:[^/]+(?:/' + SPF_IP6_CIDR + r')?)', re.IGNORECASE)
+    # RFC 7208 section 5.6: ip4 takes an IPv4 network and ip6 an IPv6 one; only IPv6 has ':'
+    r'|ip4:[^/:]+(?:/' + SPF_IP4_CIDR + r')?'
+    r'|ip6:[^/]*:[^/]*(?:/' + SPF_IP6_CIDR + r')?)', re.IGNORECASE)
 # RFC 7208 section 5.6: a or mx, an optional domain, then the dual CIDR length
 SPF_A_MX_RE = re.compile(
     r'(a|mx)(?::(' + SPF_DOMAIN_SPEC + r'))?'
@@ -579,6 +580,9 @@ async def check_ip_in_spf(domain: str, ip_to_check: str, spf_record: str, resolv
         
         elif name.startswith('include:'):
             include_domain = clean_part[len('include:'):]
+            # A macro (RFC 7208 section 7) cannot be expanded here: skip the term
+            if '%' in include_domain:
+                continue
             try:
                 include_answers = await resolve_dns_with_fallback(include_domain, 'TXT', timeout=5)
                 for rdata in include_answers:
@@ -599,6 +603,8 @@ async def check_ip_in_spf(domain: str, ip_to_check: str, spf_record: str, resolv
         
         elif name.startswith('redirect='):
             redirect_domain = clean_part[len('redirect='):]
+            if '%' in redirect_domain:
+                continue
             try:
                 redirect_answers = await resolve_dns_with_fallback(redirect_domain, 'TXT', timeout=5)
                 for rdata in redirect_answers:
@@ -647,6 +653,9 @@ async def count_spf_dns_lookups(domain: str, spf_record: str, resolver=None, vis
         if name.startswith('include:'):
             lookup_count += 1
             include_domain = clean_part[len('include:'):]
+            # Still one lookup, but a macro cannot be expanded to follow it
+            if '%' in include_domain:
+                continue
             try:
                 include_answers = await resolve_dns_with_fallback(include_domain, 'TXT', timeout=5)
                 for rdata in include_answers:

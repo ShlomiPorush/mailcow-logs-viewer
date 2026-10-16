@@ -322,3 +322,82 @@ async def test_a_macro_term_does_not_block_an_authorized_server(monkeypatch):
     monkeypatch.setattr(settings._inner, 'domain_spf_source_dmarc_history', False)
     result = await domains.check_spf_record('example.com', spf_source_ips=[{'ip': '192.0.2.99', 'source': 'test'}])
     assert result['status'] == 'success', result['message']
+
+
+@pytest.mark.parametrize('term', ['ip4:2001:db8::/32', 'ip4:2001:db8::1', 'IP4:2001:db8::/32', 'ip4:::ffff:192.0.2.1',
+                                  'ip6:192.0.2.0/24', 'ip6:192.0.2.1', 'IP6:192.0.2.0/24'])
+@pytest.mark.asyncio
+async def test_an_address_of_the_other_family_is_an_error(monkeypatch, term):
+    """RFC 7208 section 5.6: ip4 takes an IPv4 network and ip6 an IPv6 network."""
+    result = await _check(monkeypatch, f'v=spf1 {term} -all')
+    assert result['status'] == 'error', result['message']
+    assert f'Invalid SPF mechanisms: {term}' in result['message']
+
+
+@pytest.mark.parametrize('term, server', [
+    ('ip4:2001:db8::/32', '2001:db8::99'),
+    ('ip6:192.0.2.0/24', '192.0.2.99'),
+])
+@pytest.mark.asyncio
+async def test_an_address_of_the_other_family_never_authorizes(monkeypatch, term, server):
+    _fake_dns(monkeypatch, {
+        ('example.com', 'TXT'): [FakeTXT(f'v=spf1 {term} -all')],
+        ('example.net', 'TXT'): [FakeTXT(f'v=spf1 {term} -all')],
+    })
+    monkeypatch.setattr(settings._inner, 'domain_spf_source_dmarc_history', False)
+    result = await domains.check_spf_record('example.com', spf_source_ips=[{'ip': server, 'source': 'test'}])
+    assert result['status'] == 'error', result['message']
+    assert f'Invalid SPF mechanisms: {term}' in result['message']
+    assert await domains.check_ip_in_spf('example.com', server, 'v=spf1 include:example.net -all') == (False, None)
+
+
+@pytest.mark.parametrize('term', ['ip4:192.0.2.1', 'ip6:2001:db8::1', 'ip6:::ffff:192.0.2.1', 'ip6:::ffff:192.0.2.0/120'])
+@pytest.mark.asyncio
+async def test_an_address_of_its_own_family_stays_valid(monkeypatch, term):
+    result = await _check(monkeypatch, f'v=spf1 {term} -all')
+    assert 'Invalid' not in result['message'], result['message']
+
+
+# A wildcard TXT record that would answer the macro target if it were looked up as written
+_MACRO_TARGET_DNS = {
+    ('%{d}._spf.example.net', 'TXT'): [FakeTXT('v=spf1 ip4:192.0.2.99 -all')],
+    ('example.com', 'A'): [FakeAddr('192.0.2.20')],
+}
+
+
+@pytest.mark.parametrize('record', ['v=spf1 include:%{d}._spf.example.net -all', 'v=spf1 redirect=%{d}._spf.example.net',
+                                    'v=spf1 Include:%{d}._spf.example.net -all', 'v=spf1 REDIRECT=%{d}._spf.example.net'])
+@pytest.mark.asyncio
+async def test_an_include_or_redirect_with_a_macro_is_skipped_when_checking_an_ip(monkeypatch, record):
+    """The dashboard cannot expand macros: the target is neither looked up nor an error."""
+    queries = []
+
+    async def fake_resolve(query, record_type='TXT', timeout=5):
+        queries.append(query)
+        return _MACRO_TARGET_DNS.get((query, record_type), [])
+    monkeypatch.setattr(domains, 'resolve_dns_with_fallback', fake_resolve)
+    assert await domains.check_ip_in_spf('example.com', '192.0.2.99', record) == (False, None)
+    assert not any('%' in q for q in queries), queries
+
+
+@pytest.mark.asyncio
+async def test_an_include_with_a_macro_does_not_block_an_authorized_server(monkeypatch):
+    _fake_dns(monkeypatch, {('example.com', 'TXT'): [FakeTXT('v=spf1 include:%{d}._spf.example.net a -all')],
+                            ('example.com', 'A'): [FakeAddr('192.0.2.20')]})
+    monkeypatch.setattr(settings._inner, 'domain_spf_source_dmarc_history', False)
+    result = await domains.check_spf_record('example.com', spf_source_ips=[{'ip': '192.0.2.20', 'source': 'test'}])
+    assert result['status'] == 'success', result['message']
+    assert 'authorized via a' in result['message']
+
+
+@pytest.mark.asyncio
+async def test_an_include_or_redirect_with_a_macro_is_one_lookup_and_not_followed(monkeypatch):
+    queries = []
+
+    async def fake_resolve(query, record_type='TXT', timeout=5):
+        queries.append(query)
+        return [FakeTXT('v=spf1 a mx -all')] if record_type == 'TXT' else []
+    monkeypatch.setattr(domains, 'resolve_dns_with_fallback', fake_resolve)
+    record = 'v=spf1 include:%{d}._spf.example.net redirect=%{d}._spf.example.org'
+    assert await domains.count_spf_dns_lookups('example.com', record) == 2
+    assert not any('%' in q for q in queries), queries
