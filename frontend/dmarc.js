@@ -238,7 +238,7 @@ function dmarcHomeTasks(domains) {
     return tasks.sort((a, b) => b.w - a.w);
 }
 
-function dmarcPolicyTag(d) {
+function dmarcDomainPolicyTag(d) {
     const rec = d.dmarc_record || {};
     if (!rec.checked) return dmarcTag('mut', 'Not checked');
     if (!rec.found) return dmarcTag('fail', 'No record', true);
@@ -269,7 +269,7 @@ function renderDmarcHome() {
             ${domains.map(d => {
                 const s = d.stats_30d || {}, tls = d.tls_rpt_record || {};
                 return `<tr class="is-go" onclick="loadDomainOverview('${escapeJsArg(d.domain)}')"><td data-sort="${escapeHtml(d.domain)}"><button type="button" class="ui-dm-link">${escapeHtml(d.domain)}</button>${dmarcNotOnServer(d)}</td>
-                    <td data-label="DMARC policy">${dmarcPolicyTag(d)}</td><td class="r ui-num" data-label="Messages">${d.has_dmarc ? dmarcNum(s.total_messages) : '<span class="ui-muted">-</span>'}</td>
+                    <td data-label="DMARC policy">${dmarcDomainPolicyTag(d)}</td><td class="r ui-num" data-label="Messages">${d.has_dmarc ? dmarcNum(s.total_messages) : '<span class="ui-muted">-</span>'}</td>
                     <td class="r" data-label="Passed DMARC">${dmarcRate(s.dmarc_pass_pct, d.has_dmarc && s.total_messages)}</td>
                     <td class="ui-dm-hm" data-label="TLS-RPT">${!tls.checked ? dmarcTag('mut', 'Not checked') : tls.found ? dmarcTag('ok', 'Published') : dmarcTag('warn', 'Missing')}</td>
                     <td class="r ui-dm-hm" data-label="Encrypted">${dmarcRate(s.tls_success_pct, d.has_tls && s.tls_sessions)}</td>
