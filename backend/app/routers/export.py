@@ -292,7 +292,10 @@ def export_messages_csv(
             MessageCorrelation.queue_id, MessageCorrelation.message_id,
             MessageCorrelation.rspamd_log_id, MessageCorrelation.is_complete,
         ), load_only(RspamdLog.id, RspamdLog.score, RspamdLog.is_spam, RspamdLog.user, RspamdLog.ip))
-        
+
+        # The filters mean what they mean in the Messages list (messages.py)
+        query = query.filter(MessageCorrelation.correlation_key != "BLACKLISTED")
+
         # Apply filters
         if search:
             search_term = f"%{search}%"
@@ -302,7 +305,9 @@ def export_messages_csv(
                     MessageCorrelation.recipient.ilike(search_term),
                     MessageCorrelation.subject.ilike(search_term),
                     MessageCorrelation.message_id.ilike(search_term),
-                    MessageCorrelation.queue_id.ilike(search_term)
+                    MessageCorrelation.queue_id.ilike(search_term),
+                    RspamdLog.ip.ilike(search_term),
+                    RspamdLog.user.ilike(search_term)
                 )
             )
         
@@ -315,15 +320,18 @@ def export_messages_csv(
         if direction:
             query = query.filter(MessageCorrelation.direction == direction)
         
-        if status:
+        if status == 'spam':
+            # Spam is the final status or Rspamd's verdict
+            query = query.filter(or_(MessageCorrelation.final_status == 'spam', RspamdLog.is_spam == True))  # noqa: E712
+        elif status:
             query = query.filter(MessageCorrelation.final_status == status)
-        
+
         if start_date:
             query = query.filter(MessageCorrelation.first_seen >= start_date)
-        
+
         if end_date:
             query = query.filter(MessageCorrelation.first_seen <= end_date)
-        
+
         # Filtering the joined columns excludes messages without a matching log.
         if user:
             query = query.filter(RspamdLog.user.ilike(f"%{user}%"))
