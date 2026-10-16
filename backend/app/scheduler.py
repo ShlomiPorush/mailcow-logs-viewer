@@ -129,6 +129,7 @@ def reschedule_interval_jobs():
         _reschedule_anomaly_job()
         _reschedule_dovecot_correlation_job()
         _reschedule_geoip_job()
+        _reschedule_quarantine_rules_job()
 
     except Exception as e:
         logger.warning("Failed to reschedule interval jobs: %s", e)
@@ -194,6 +195,27 @@ def _reschedule_geoip_job():
     else:
         try:
             scheduler.remove_job('update_geoip')
+        except Exception:
+            pass
+
+
+def _reschedule_quarantine_rules_job():
+    """Add, move or remove the quarantine rules job when settings are reloaded
+    (interval, the Read-Write key and the Quarantine feature can all change)."""
+    if not scheduler.running:
+        return
+    if settings.is_feature_enabled('quarantine') and mailcow_api.has_rw_key:
+        scheduler.add_job(
+            process_quarantine_rules_job,
+            trigger=IntervalTrigger(minutes=settings.quarantine_rules_interval),
+            id='process_quarantine_rules',
+            name='Process Quarantine Rules',
+            replace_existing=True,
+            max_instances=1
+        )
+    else:
+        try:
+            scheduler.remove_job('process_quarantine_rules')
         except Exception:
             pass
 
