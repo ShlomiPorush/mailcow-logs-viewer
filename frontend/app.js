@@ -5021,7 +5021,8 @@ document.addEventListener('DOMContentLoaded', function () {
 // HELP DOCUMENTATION MODAL
 // =============================================================================
 
-async function showHelpModal(docName) {
+// title: the name the page shows, when it is not the document's file name
+async function showHelpModal(docName, title) {
     try {
         const response = await authenticatedFetch(`/api/docs/${docName}`);
 
@@ -5030,8 +5031,8 @@ async function showHelpModal(docName) {
         }
 
         const markdown = await response.text();
-        // The document's file name, read as words: Abuse_Protection is Abuse Protection
-        showMarkdownModal(`Help - ${docName.replace(/_/g, ' ')}`, markdown);
+        // Else the document's file name, read as words: Spam_Filter is Spam Filter
+        showMarkdownModal(`Help - ${title || docName.replace(/_/g, ' ')}`, markdown);
 
     } catch (error) {
         console.error('Failed to load help documentation:', error);
