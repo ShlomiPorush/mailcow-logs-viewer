@@ -305,7 +305,8 @@ function securityDescribe(a) {
         return {
             tag: `${uiTag('Banned', 'fail')}<span class="ui-sec-by">by ${escapeHtml(securityRuleName(hit.rule))}</span>`,
             why: `${escapeHtml(hit.reason || '')}. Banned ${formatAgo(hit.banned_at || hit.last_seen)}, <b>${hit.expires_at ? `until ${escapeHtml(formatTime(hit.expires_at))}` : 'until removed'}</b>.`,
-            acts: undo
+            // Lifting a ban the rules wrote takes it off mailcow's denylist: that needs the key
+            acts: rw || !hit.owned ? undo : ''
         };
     }
     if (a.state === 'banned') {
@@ -777,7 +778,7 @@ function renderSecurityLists() {
         const hit = ruleBans.get(securityBare(entry));
         if (hit) {
             return row(entry, `Added by ${escapeHtml(securityRuleName(hit.rule))}, ${hit.expires_at ? `until ${escapeHtml(formatTime(hit.expires_at))}` : 'until removed'}`,
-                `<button type="button" class="ui-btn ui-btn-sm" onclick="undoProtectionHit(${Number(hit.id)}, this)" title="Lift the ban; the rule leaves it alone for a week">Remove</button>`);
+                rw ? `<button type="button" class="ui-btn ui-btn-sm" onclick="undoProtectionHit(${Number(hit.id)}, this)" title="Lift the ban; the rule leaves it alone for a week">Remove</button>` : '');
         }
         const n = tried(entry);
         return row(entry, `Added by hand${n ? `, still tried ${Number(n).toLocaleString()} time${n === 1 ? '' : 's'} today` : ''}`,

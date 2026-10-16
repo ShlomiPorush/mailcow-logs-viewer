@@ -91,3 +91,30 @@ test('the failed logins of an address are counted over the chosen period', () =>
     vm.runInContext('securityDays = 7', context);
     assert.match(context.securityFailedText(address(), []), /4 in the last 7 days/);
 });
+
+const ownedBan = { id: 5, rule: 'trap', status: 'banned', owned: true, reason: 'Tried the trap account admin',
+    banned_at: '2026-10-16T10:00:00Z', last_seen: '2026-10-16T10:00:00Z', expires_at: null };
+
+test('a ban the rules wrote offers Undo only with the Read-Write key', () => {
+    const context = load();
+    const banned = address({ state: 'banned', hits: [ownedBan] });
+    vm.runInContext('mailcowRwConfigured = false', context);
+    assert.doesNotMatch(context.securityDescribe(banned).acts, /Undo/);
+    // A ban the rules did not write is only forgotten, which needs no key
+    assert.match(context.securityDescribe(address({ state: 'banned', hits: [{ ...ownedBan, owned: false }] })).acts, /Undo/);
+    // A ban that is not written yet can always be cancelled
+    assert.match(context.securityDescribe(address({ state: 'review', hits: [{ ...ownedBan, status: 'pending' }] })).acts, /Undo/);
+    vm.runInContext('mailcowRwConfigured = true', context);
+    assert.match(context.securityDescribe(banned).acts, /Undo/);
+});
+
+test('the denylist offers Remove on a rule ban only with the Read-Write key', () => {
+    const context = load();
+    const box = { innerHTML: '' };
+    context.document = { getElementById: id => (id === 'security-lists' ? box : null) };
+    vm.runInContext(`mailcowRwConfigured = false; fail2banActiveBans = []; fail2banWhitelist = [];
+        fail2banBlacklist = ['203.0.113.7/32']; securityHits = [${JSON.stringify({ ...ownedBan, ip: '203.0.113.7' })}]`, context);
+    context.renderSecurityLists();
+    assert.match(box.innerHTML, /203\.0\.113\.7\/32/);
+    assert.doesNotMatch(box.innerHTML, /undoProtectionHit/);
+});
