@@ -146,7 +146,7 @@ Quick fill also replaces a generated rule name. Change **Action** to **Delete** 
 
 A **Contains** rule opens as **Contains** with its plain text, and any other pattern opens as **Regex (advanced)**, so saving keeps the rule as it was.
 
-Editing a **Contains** rule in an earlier version escaped its text a second time, so the rule stopped matching. The upgrade repairs such **Sender**, **Sender Domain** and **Recipient** rules by itself and names each repaired rule in the application log. **Subject** rules are left as they are, because a subject can contain a backslash. A **Subject** rule that was escaped twice opens with a backslash in its value, such as `example\.com`; remove the backslash and save to repair it.
+Editing a **Contains** rule in an earlier version escaped its text a second time, so the rule stopped matching. The upgrade repairs such **Sender Domain** rules by itself and names each one in the application log, since a domain cannot contain a backslash. **Sender**, **Recipient** and **Subject** rules are not changed, because their text can contain a real backslash. In the rules list, a **Contains** rule whose text looks for a backslash gets a **Check** tag with the note "Looks for a backslash. An earlier version may have changed this rule when it was edited." **Repair** removes one level of escaping and saves the rule; it needs the read-write API key like any rule change. Leave the rule as it is if it really looks for a backslash.
 
 ### Which rule wins
 
