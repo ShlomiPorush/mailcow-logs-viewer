@@ -43,6 +43,9 @@ function navigateToMessagesWithFilter(options) {
             if (filterSender) filterSender.value = options.email;
         } else if (options.filterType === 'recipient') {
             if (filterRecipient) filterRecipient.value = options.email;
+        } else if (options.filterType === 'user') {
+            // The mailbox that logged in, whichever address or alias it sent from
+            if (filterUser) filterUser.value = options.email;
         } else {
             // Default: use search field
             if (filterSearch) filterSearch.value = options.email;

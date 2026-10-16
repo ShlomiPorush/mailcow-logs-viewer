@@ -14,6 +14,7 @@ from app.config import settings
 
 SENDER = f'spike-{uuid.uuid4().hex[:6]}@activity.example'
 USER = f'burst-{uuid.uuid4().hex[:6]}@activity.example'
+WIDE = f'wide-{uuid.uuid4().hex[:6]}@activity.example'
 MARKER = f'activity-{uuid.uuid4().hex[:8]}'
 
 
@@ -35,6 +36,7 @@ def env(monkeypatch):
     init_db()
     monkeypatch.setattr(settings._inner, 'anomaly_check_interval', 15)
     monkeypatch.setattr(settings._inner, 'anomaly_baseline_days', 7)
+    monkeypatch.setattr(settings._inner, 'smtp_abuse_window_minutes', 60)
     now = datetime.utcnow().replace(second=0, microsecond=0)
 
     def cleanup():
@@ -42,7 +44,7 @@ def env(monkeypatch):
             db.query(MessageCorrelation).filter(MessageCorrelation.sender == SENDER).delete(synchronize_session=False)
             db.query(RspamdLog).filter(RspamdLog.sender_smtp == SENDER).delete(synchronize_session=False)
             db.query(NetfilterLog).filter(NetfilterLog.priority == MARKER).delete(synchronize_session=False)
-            db.query(SecurityAlert).filter(SecurityAlert.subject.in_([SENDER, USER])).delete(synchronize_session=False)
+            db.query(SecurityAlert).filter(SecurityAlert.subject.in_([SENDER, USER, WIDE])).delete(synchronize_session=False)
             db.commit()
     cleanup()
     with get_db_context() as db:
@@ -72,11 +74,18 @@ def env(monkeypatch):
         for i in range(12):
             db.add(NetfilterLog(time=now - timedelta(minutes=5, seconds=i), priority=MARKER, ip=f'192.0.2.{i % 3 + 1}', username=USER,
                                 rule_id=3, country_name='Testland', asn_org='Test Net', message='failed'))
+        # Failed logins for another username from nine addresses
+        for i in range(18):
+            db.add(NetfilterLog(time=now - timedelta(minutes=5, seconds=i), priority=MARKER, ip=f'198.51.100.{i % 9 + 1}', username=WIDE,
+                                rule_id=3, country_name='Testland', asn_org='Test Net', message='failed'))
         spike = SecurityAlert(alert_type='volume_spike', severity='critical', subject=SENDER, title='spike', metric_value=30, baseline_value=0.01, created_at=now)
         burst = SecurityAlert(alert_type='auth_failure_burst', severity='warning', subject=USER, title='burst', metric_value=12, baseline_value=10, created_at=now)
-        db.add_all([spike, burst])
+        # Abuse protection disabled SMTP for the same mailbox
+        block = SecurityAlert(alert_type='smtp_abuse_block', severity='critical', subject=SENDER, title='block', metric_value=30, baseline_value=25, created_at=now)
+        wide = SecurityAlert(alert_type='auth_failure_burst', severity='warning', subject=WIDE, title='wide', metric_value=18, baseline_value=10, created_at=now)
+        db.add_all([spike, burst, block, wide])
         db.commit()
-        ids = (spike.id, burst.id)
+        ids = (spike.id, burst.id, block.id, wide.id)
     yield ids
     cleanup()
 
@@ -106,8 +115,25 @@ def test_a_burst_opens_on_the_usernames_failed_logins(env):
     assert sum(b['count'] for b in data['buckets']) == 12
     around = data['around']
     assert around['total'] == 12
-    assert len(around['addresses']) == 3 and around['countries'] == [{'name': 'Testland', 'count': 12}]
+    assert len(around['addresses']) == 3 and around['address_count'] == 3 and around['countries'] == [{'name': 'Testland', 'count': 12}]
     assert around['networks'] == [{'name': 'Test Net', 'count': 12}]
+
+
+def test_a_burst_counts_every_address_not_only_the_top_ones(env):
+    around = _client().get(f'/api/security-alerts/{env[3]}/activity').json()['around']
+    assert around['total'] == 18
+    assert len(around['addresses']) == 6 and around['address_count'] == 9
+
+
+def test_an_smtp_block_opens_on_the_mailboxs_sent_mail(env):
+    # The block counted the mailbox's sent mail in the abuse window, not failed logins
+    data = _client().get(f'/api/security-alerts/{env[2]}/activity').json()
+    assert data['window_minutes'] == 60
+    assert sum(b['count'] for b in data['buckets']) == 32
+    around = data['around']
+    assert around['total'] == 30
+    assert around['recipient_domains'][0] == {'name': 'a.example', 'count': 20}
+    assert around['subjects'] == [{'name': 'Win a prize', 'count': 30}]
 
 
 def test_an_unknown_alert_is_not_found(env):
