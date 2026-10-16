@@ -2,21 +2,26 @@
 
 A modern, self-hosted dashboard for monitoring, analyzing, and managing your mailcow mail server. Track email delivery, investigate spam, manage quarantine, detect bounce-based abuse, and validate DNS configurations — all from a single interface.
 
-![Main](images/Main.png)
+![Dashboard](images/Main-light.png#gh-light-mode-only)
+![Dashboard](images/Main-dark.png#gh-dark-mode-only)
 
-![Messages](images/Messages.png)
+![Messages](images/Messages-light.png#gh-light-mode-only)
+![Messages](images/Messages-dark.png#gh-dark-mode-only)
 
-![Message Details](images/Message_Details_Overview.png)
+![Message Logs](images/Message_Details_Logs-light.png#gh-light-mode-only)
+![Message Logs](images/Message_Details_Logs-dark.png#gh-dark-mode-only)
 
-![Message Logs](images/Message_Details_Logs.png)
+![Rate Limits](images/Rate_Limits-light.png#gh-light-mode-only)
+![Rate Limits](images/Rate_Limits-dark.png#gh-dark-mode-only)
 
-![Rate Limits](images/Rate_Limits.png)
+![Security](images/Security-light.png#gh-light-mode-only)
+![Security](images/Security-dark.png#gh-dark-mode-only)
 
-![Security](images/Security.png)
+![Domains](images/Domains-light.png#gh-light-mode-only)
+![Domains](images/Domains-dark.png#gh-dark-mode-only)
 
-![Domains](images/Domains.png)
-
-![Status](images/Status.png)
+![Status](images/Status-light.png#gh-light-mode-only)
+![Status](images/Status-dark.png#gh-dark-mode-only)
 
 ---
 
@@ -85,6 +90,12 @@ A modern, self-hosted dashboard for monitoring, analyzing, and managing your mai
 - Per-alias statistics with message counts
 - Quota usage, login times, rate limits
 - Sorting and filtering by date range, domain, activity
+
+### 📱 Devices (ActiveSync)
+- Phones, tablets and Outlook clients that sync over ActiveSync, read from the SOGo log
+- Per device: user, type or model, mail app, device ID, last IP with its location, last request, first and last seen
+- Marks new devices and devices whose password is refused
+- Filter by device type and last seen; configurable retention
 
 ### 📧 DMARC Reports
 - DMARC/SMTP-TLS report viewer with compliance analysis
@@ -170,8 +181,8 @@ All settings via environment variables or the **web UI** (when `SETTINGS_EDIT_VI
 | `RETENTION_DAYS` | `7` | Days to keep logs |
 | `RSPAMD_PASSWORD` | (empty) | Rspamd password — enables Spam Filter maps editor |
 | `SUPPRESSION_ENABLED` | `true` | Enable automatic email suppression |
-| `BASIC_AUTH_ENABLED` | `true` | Enable HTTP Basic Authentication |
-| `SETTINGS_EDIT_VIA_UI_ENABLED` | `true` | Allow managing settings from the web UI |
+| `BASIC_AUTH_ENABLED` | `false` | Enable HTTP Basic Authentication. Off by default: without it (or OAuth2), anyone who can reach port 8080 has full access |
+| `SETTINGS_EDIT_VIA_UI_ENABLED` | `false` | Allow managing settings from the web UI (`env.example` sets it to `true`) |
 | `TZ` | `UTC` | Timezone |
 
 📖 **Full reference:** [ENV Settings](documentation/ENV_Settings.md)

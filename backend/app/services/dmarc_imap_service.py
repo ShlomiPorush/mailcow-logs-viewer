@@ -9,12 +9,14 @@ import gzip
 import zipfile
 import io
 import json
+import re
 from datetime import datetime, timezone
 from typing import List, Dict, Optional, Tuple
 from email.message import EmailMessage
 from email.header import decode_header as decode_rfc2047
 
 from ..config import settings
+from .mail_tls import mail_tls_context, certificate_error_hint
 from ..database import SessionLocal
 from ..models import DMARCSync, DMARCReport, DMARCRecord, TLSReport, TLSReportPolicy
 from ..services.dmarc_parser import parse_dmarc_file
@@ -24,6 +26,13 @@ from ..services.dmarc_notifications import send_dmarc_error_notification
 from ..services.dmarc_cache import clear_dmarc_cache
 
 logger = logging.getLogger(__name__)
+
+# Anyone can mail the report address, and a message is read whole into memory,
+# with each attachment decoded, before any report limit applies. Larger
+# messages are not downloaded. Real report emails are far below 1 MB; this
+# still fits a report at the 10 MB compressed limit after base64 encoding.
+MAX_REPORT_EMAIL_BYTES = 20 * 1024 * 1024
+_MB = 1024 * 1024
 
 
 def _decode_subject(raw_subject: str) -> str:
@@ -70,7 +79,8 @@ class DMARCImapService:
                 raise ValueError(f"IMAP server configuration incomplete: host={self.host}, port={self.port}")
             
             if self.use_ssl:
-                self.connection = imaplib.IMAP4_SSL(self.host, self.port, timeout=30)
+                context = mail_tls_context(self.host, settings.dmarc_imap_verify_ssl, "DMARC_IMAP_VERIFY_SSL")
+                self.connection = imaplib.IMAP4_SSL(self.host, self.port, ssl_context=context, timeout=30)
             else:
                 self.connection = imaplib.IMAP4(self.host, self.port, timeout=30)
             
@@ -83,8 +93,12 @@ class DMARCImapService:
             logger.error(error_msg)
             raise ConnectionError(error_msg) from e
         except Exception as e:
-            error_msg = f"Failed to connect to IMAP server {self.host}:{self.port}: {e}"
+            hint = certificate_error_hint(e, "DMARC_IMAP_VERIFY_SSL")
+            error_msg = f"Failed to connect to IMAP server {self.host}:{self.port}: {hint or e}"
             logger.error(error_msg)
+            if hint:
+                # The sync stores this message, so it has to name the setting to change
+                raise ConnectionError(error_msg) from e
             raise
     
     def disconnect(self):
@@ -258,7 +272,24 @@ class DMARCImapService:
         except Exception as e:
             logger.error(f"Error validating TLS-RPT email: {e}")
             return False
-    
+
+    def is_bounce(self, msg: EmailMessage) -> bool:
+        """
+        Detect a delivery status notification (RFC 3464).
+
+        The report mailbox is often also the address that mailcow sends its
+        own DMARC reports from, so bounces of those reports land here. A bounce
+        may carry the original outgoing report, which must not be imported.
+        TLS-RPT mail is also multipart/report, but with report-type=tlsrpt.
+        """
+        if msg.get_content_type() == 'multipart/report':
+            if str(msg.get_param('report-type', '')).lower() == 'delivery-status':
+                return True
+        return any(
+            part.get_content_type() in ('message/delivery-status', 'message/global-delivery-status')
+            for part in msg.walk()
+        )
+
     def detect_email_type(self, msg: EmailMessage) -> str:
         """
         Detect if email is DMARC or TLS-RPT by inspecting attachments
@@ -377,6 +408,26 @@ class DMARCImapService:
         
         return attachments
     
+    def _fetch_size(self, email_id: str) -> Optional[int]:
+        """The message size the server reports (RFC822.SIZE), or None if it gives none."""
+        status, data = self.connection.uid('FETCH', email_id, '(RFC822.SIZE)')
+        if status != 'OK':
+            return None
+        for item in data or []:
+            line = item[0] if isinstance(item, tuple) else item
+            match = re.search(rb'RFC822\.SIZE (\d+)', line) if isinstance(line, bytes) else None
+            if match:
+                return int(match.group(1))
+        return None
+
+    def _fetch_headers(self, email_id: str) -> EmailMessage:
+        """Message-ID and Subject only, without downloading the message or marking it read."""
+        status, data = self.connection.uid('FETCH', email_id, '(BODY.PEEK[HEADER.FIELDS (MESSAGE-ID SUBJECT)])')
+        for item in (data if status == 'OK' else None) or []:
+            if isinstance(item, tuple) and isinstance(item[1], bytes):
+                return email.message_from_bytes(item[1])
+        return email.message_from_bytes(b'')
+
     def process_email(self, email_id: str, db: SessionLocal) -> Dict:
         """
         Process a single DMARC or TLS-RPT email
@@ -387,6 +438,7 @@ class DMARCImapService:
         - reports_duplicate: int
         - error: str or None
         - report_type: 'dmarc' or 'tls-rpt'
+        - skipped: why the email is not a report (bounce or no report attached), or None
         """
         result = {
             'success': False,
@@ -395,10 +447,21 @@ class DMARCImapService:
             'error': None,
             'message_id': None,
             'subject': None,
-            'report_type': None
+            'report_type': None,
+            'skipped': None
         }
         
         try:
+            size = self._fetch_size(email_id)
+            if size is not None and size > MAX_REPORT_EMAIL_BYTES:
+                headers = self._fetch_headers(email_id)
+                result['message_id'] = headers.get('message-id', 'unknown')
+                result['subject'] = headers.get('subject', 'unknown')
+                result['error'] = (f"The email is {size / _MB:.0f} MB, larger than the "
+                                   f"{MAX_REPORT_EMAIL_BYTES // _MB} MB a report email may have, "
+                                   f"so it was not downloaded")
+                return result
+
             # Fetch email (email_id is already a string)
             status, msg_data = self.connection.uid('FETCH', email_id, '(RFC822)')
             
@@ -410,7 +473,11 @@ class DMARCImapService:
             msg = email.message_from_bytes(msg_data[0][1])
             result['message_id'] = msg.get('message-id', 'unknown')
             result['subject'] = msg.get('subject', 'unknown')
-            
+
+            if self.is_bounce(msg):
+                result['skipped'] = 'bounce'
+                return result
+
             # Detect email type
             email_type = self.detect_email_type(msg)
             result['report_type'] = email_type
@@ -420,7 +487,7 @@ class DMARCImapService:
             elif email_type == 'dmarc':
                 return self._process_dmarc_email(msg, db, result)
             else:
-                result['error'] = "Not a valid DMARC or TLS-RPT report email"
+                result['skipped'] = 'no report attached'
                 return result
             
         except Exception as e:
@@ -532,8 +599,7 @@ class DMARCImapService:
                     contact_info=parsed_data.get('contact_info', ''),
                     policy_domain=parsed_data['policy_domain'],
                     start_datetime=parsed_data['start_datetime'],
-                    end_datetime=parsed_data['end_datetime'],
-                    raw_json=parsed_data.get('raw_json', '')
+                    end_datetime=parsed_data['end_datetime']
                 )
                 db.add(tls_report)
                 db.flush()
@@ -671,8 +737,12 @@ class DMARCImapService:
                     email_id = email_id.decode() if isinstance(email_id, bytes) else email_id
                     result = self.process_email(email_id, db)
                     sync_record.emails_processed += 1
-                    
-                    if result['success']:
+
+                    if result['skipped']:
+                        # Not a report (e.g. a bounce): not a failure, and never deleted
+                        logger.info(f"Skipped email {email_id} ({result['skipped']}): {_decode_subject(result['subject'])}")
+                        self.mark_as_processed(email_id)
+                    elif result['success']:
                         sync_record.reports_created += result['reports_created']
                         sync_record.reports_duplicate += result['reports_duplicate']
                         

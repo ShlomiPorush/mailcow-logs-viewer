@@ -164,7 +164,7 @@ def test_head_requires_authentication(export_client, monkeypatch, path, attribut
     assert client.head(path, auth=credentials).status_code == 200
     assert client.post("/api/auth/session", auth=credentials).status_code == 200
     assert client.head(path).status_code == 200
-    client.get("/api/auth/logout")
+    client.post("/api/auth/logout")
 
 
 @pytest.mark.parametrize("path,attribute,column", ROUTES)

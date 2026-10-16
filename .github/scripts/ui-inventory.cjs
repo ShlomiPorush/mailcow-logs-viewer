@@ -195,10 +195,17 @@ function collect(dir = FRONTEND) {
     const undefinedHandlers = new Map();
 
     for (const f of files) {
-        HANDLER_ATTR.lastIndex = 0;
-        let m;
-        while ((m = HANDLER_ATTR.exec(f.text))) {
-            const expr = m[3];
+        // Inline handlers, and the handlers of picker options (utils.js, uiPicker),
+        // which are passed as an onclick property and written out by the picker
+        const exprs = [...f.text.matchAll(HANDLER_ATTR)].map(m => m[3])
+            .concat([...f.text.matchAll(/\bonclick:\s*`([^`]*)`/g)].map(m => m[1]));
+        // A picker opens through the shared controller, not a handler: each one is an action
+        for (const m of f.text.matchAll(/data-picker="([a-z0-9-]+)"|\buiPicker\(\{\s*id:\s*'([a-z0-9-]+)'/g)) {
+            const key = `picker:${m[1] || m[2]}`;
+            if (!actions.has(key)) actions.set(key, new Set());
+            actions.get(key).add(f.name);
+        }
+        for (const expr of exprs) {
             // Handler attributes that are themselves template output, e.g.
             // onclick="${action}", are resolved at runtime; the browser pass checks those.
             if (/^\s*\$\{[^}]*\}\s*$/.test(expr)) continue;

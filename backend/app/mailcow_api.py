@@ -6,19 +6,44 @@ import asyncio
 import httpx
 import logging
 import weakref
+from http.cookiejar import CookieJar, DefaultCookiePolicy
 from urllib.parse import quote
 from typing import List, Dict, Any, Optional
 from datetime import datetime
-from tenacity import retry, stop_after_attempt, wait_exponential, RetryError
+from tenacity import retry, retry_if_not_exception_type, stop_after_attempt, wait_exponential
 
 from .config import settings
 
 logger = logging.getLogger(__name__)
 
 
+def _forget_security_addresses() -> None:
+    """Fail2ban changed: the Security page's lists are read again on the next request."""
+    from .services import security_addresses
+    security_addresses.forget()
+
+
 class MailcowAPIError(Exception):
     """Custom exception for mailcow API errors"""
     pass
+
+
+class MailcowRwKeyError(MailcowAPIError):
+    """mailcow refused the Read-Write key: 'rejected' (401) or 'read_only' (403).
+
+    Final, so never retried; the API answers it with a message that says what to fix.
+    """
+    MESSAGES = {
+        "rejected": "mailcow rejected the Read-Write API key. Check in mailcow under System → API "
+                    "that the key is correct and active, and that the IP address of this server is allowed. "
+                    "Settings → Mailcow can check the key.",
+        "read_only": "The Read-Write API key is a read-only key in mailcow. "
+                     "Put the Read-Write key from System → API in Settings → Mailcow.",
+    }
+
+    def __init__(self, code: str):
+        self.code = code
+        super().__init__(self.MESSAGES[code])
 
 
 class MailcowAPI:
@@ -42,6 +67,10 @@ class MailcowAPI:
             client = httpx.AsyncClient(
                 timeout=self.timeout,
                 verify=self.verify_ssl,
+                # Every request carries the API key, so mailcow's session
+                # cookie is never kept: a session mailcow stopped honouring
+                # would otherwise ride along on every later call
+                cookies=CookieJar(policy=DefaultCookiePolicy(allowed_domains=[])),
                 # Keep idle connections long enough to bridge the polling
                 # jobs (raw logs every ~60s, log fetch every ~30s), so
                 # steady-state polling reuses one connection instead of
@@ -52,6 +81,15 @@ class MailcowAPI:
             )
             self._clients[loop] = client
         return client
+
+    def _discard_client(self, client: httpx.AsyncClient) -> None:
+        """Stop using a client mailcow refused (401, 403) or dropped, so the next
+        try opens new connections. It is closed a little later, once requests
+        still on it are done."""
+        loop = asyncio.get_running_loop()
+        if self._clients.get(loop) is client:
+            del self._clients[loop]
+            loop.call_later(30, lambda: loop.create_task(client.aclose()))
 
     def _drop_clients(self):
         """Close all cached clients (config changed). Safe from any thread."""
@@ -111,7 +149,8 @@ class MailcowAPI:
     
     @retry(
         stop=stop_after_attempt(3),
-        wait=wait_exponential(multiplier=1, min=2, max=10)
+        wait=wait_exponential(multiplier=1, min=2, max=10),
+        reraise=True,
     )
     async def _make_request(self, endpoint: str, method: str = "GET", **kwargs) -> Any:
         """
@@ -143,9 +182,12 @@ class MailcowAPI:
                 
         except httpx.HTTPStatusError as e:
             logger.error(f"HTTP error {e.response.status_code} for {url}: {e}")
+            if e.response.status_code in (401, 403):
+                self._discard_client(client)
             raise MailcowAPIError(f"API returned status {e.response.status_code}")
         except httpx.RequestError as e:
             logger.error(f"Request error for {url}: {e}")
+            self._discard_client(client)
             raise MailcowAPIError(f"Failed to connect to mailcow API: {e}")
         except Exception as e:
             logger.error(f"Unexpected error for {url}: {e}")
@@ -153,7 +195,10 @@ class MailcowAPI:
     
     @retry(
         stop=stop_after_attempt(3),
-        wait=wait_exponential(multiplier=1, min=2, max=10)
+        wait=wait_exponential(multiplier=1, min=2, max=10),
+        # A refused key stays refused, and every try is a failed login for Fail2ban
+        retry=retry_if_not_exception_type(MailcowRwKeyError),
+        reraise=True,
     )
     async def _make_rw_request(self, endpoint: str, method: str = "POST", **kwargs) -> Any:
         """
@@ -189,10 +234,12 @@ class MailcowAPI:
             )
                 
             if response.status_code == 401:
-                raise MailcowAPIError("Read-Write API key authentication failed (401)")
+                self._discard_client(client)
+                raise MailcowRwKeyError("rejected")
                 
             if response.status_code == 403:
-                raise MailcowAPIError("Read-Write API key does not have sufficient permissions (403)")
+                self._discard_client(client)
+                raise MailcowRwKeyError("read_only")
                 
             response.raise_for_status()
                 
@@ -207,7 +254,82 @@ class MailcowAPI:
         except httpx.HTTPStatusError as e:
             raise MailcowAPIError(f"RW API request failed with status {e.response.status_code}: {e.response.text}")
         except httpx.RequestError as e:
+            self._discard_client(client)
             raise MailcowAPIError(f"RW API request failed: {str(e)}")
+
+    async def check_rw_key(self) -> Dict[str, Any]:
+        """Check that mailcow accepts the Read-Write key for writes, changing nothing.
+
+        POSTs to an edit route that does not exist. mailcow checks the key and
+        its allowed IPs before routing, so the answer tells the cases apart:
+        404 "route not found" = accepted for writes, 403 = a read-only key,
+        401 = wrong or inactive key, or this server's IP is not allowed.
+        No retry: a rejected key is a final answer, and every rejection is
+        also a failed login for mailcow's Fail2ban.
+        """
+        if not self.headers_rw:
+            return {"configured": False, "valid": False, "error": None}
+        client = self._get_client()
+        try:
+            response = await client.post(f"{self.base_url}/api/v1/edit/mlv-key-check",
+                                         headers=self.headers_rw, json={"items": [], "attr": {}})
+        except httpx.RequestError as e:
+            self._discard_client(client)
+            logger.warning(f"Read-Write API key check could not reach mailcow: {e}")
+            return {"configured": True, "valid": False, "error": "connection"}
+        status = response.status_code
+        if status == 404:
+            return {"configured": True, "valid": True, "error": None}
+        if status in (401, 403):
+            self._discard_client(client)
+        error = {401: "rejected", 403: "read_only"}.get(status, "unexpected")
+        logger.warning(f"Read-Write API key check failed: HTTP {status}")
+        return {"configured": True, "valid": False, "error": error, "http_status": status}
+
+    def _rspamd_url(self, endpoint: str) -> str:
+        """Where an Rspamd controller endpoint ('/rspamd/...') is reached: through
+        the mailcow proxy, or straight at RSPAMD_URL when that is set."""
+        rspamd_base = (settings.rspamd_url or '').strip().rstrip('/')
+        if not rspamd_base:
+            return f"{self.base_url}{endpoint}"
+        direct_endpoint = endpoint
+        if direct_endpoint.startswith('/rspamd'):
+            direct_endpoint = direct_endpoint[len('/rspamd'):] or '/'
+        return f"{rspamd_base}{direct_endpoint}"
+
+    async def check_rspamd_password(self) -> Dict[str, Any]:
+        """Check that Rspamd accepts the password, the way its web UI logs in.
+
+        GET /auth answers 200 with "auth": "ok" for a good password and 401 or
+        403 otherwise; it changes nothing. A redirect means a proxy answered
+        before Rspamd saw the password. No retry: a wrong password is a failed
+        login for mailcow's Fail2ban.
+        """
+        if not settings.rspamd_password:
+            return {"configured": False, "valid": False, "error": None}
+        client = self._get_client()
+        try:
+            response = await client.get(self._rspamd_url("/rspamd/auth"),
+                                        headers={"Password": settings.rspamd_password})
+        except httpx.RequestError as e:
+            logger.warning(f"Rspamd password check could not reach Rspamd: {e}")
+            return {"configured": True, "valid": False, "error": "connection"}
+        status = response.status_code
+        if status == 200:
+            try:
+                accepted = response.json().get("auth") == "ok"
+            except ValueError:
+                accepted = False
+            if accepted:
+                return {"configured": True, "valid": True, "error": None}
+        if status in (401, 403):
+            error = "rejected"
+        elif status in (301, 302, 303, 307, 308):
+            error = "redirected"
+        else:
+            error = "unexpected"
+        logger.warning(f"Rspamd password check failed: HTTP {status}")
+        return {"configured": True, "valid": False, "error": error, "http_status": status}
 
     async def get_postfix_logs(self, count: int = 500) -> List[Dict[str, Any]]:
         """
@@ -232,7 +354,7 @@ class MailcowAPI:
             
         except MailcowAPIError as e:
             logger.error(f"Failed to fetch Postfix logs: {e}")
-            return []
+            raise
     
     async def get_rspamd_logs(self, count: int = 500) -> List[Dict[str, Any]]:
         """
@@ -257,7 +379,7 @@ class MailcowAPI:
             
         except MailcowAPIError as e:
             logger.error(f"Failed to fetch Rspamd logs: {e}")
-            return []
+            raise
     
     async def get_postfix_logs_page(self, page_size: int, offset: int) -> List[Dict[str, Any]]:
         """
@@ -294,7 +416,7 @@ class MailcowAPI:
             
         except MailcowAPIError as e:
             logger.error(f"Failed to fetch Postfix logs page (offset={offset}): {e}")
-            return []
+            raise
     
     async def get_rspamd_logs_page(self, page_size: int, offset: int) -> List[Dict[str, Any]]:
         """
@@ -331,7 +453,7 @@ class MailcowAPI:
             
         except MailcowAPIError as e:
             logger.error(f"Failed to fetch Rspamd logs page (offset={offset}): {e}")
-            return []
+            raise
     
     async def get_raw_logs_range(self, service: str, offset: int, page_size: int) -> List[Dict[str, Any]]:
         """
@@ -368,13 +490,7 @@ class MailcowAPI:
         end = offset + page_size - 1
         endpoint = f"/api/v1/get/logs/{service}/{start}-{end}"
         logger.debug(f"Fetching raw log range for {service}: {start}-{end}")
-        try:
-            data = await self._make_request(endpoint)
-        except RetryError as e:
-            # _make_request's retry decorator does not re-raise the original
-            # exception, so callers would otherwise have to know about tenacity.
-            last = e.last_attempt.exception() if e.last_attempt else None
-            raise MailcowAPIError(f"Range fetch failed for {service} {start}-{end}: {last}") from e
+        data = await self._make_request(endpoint)
 
         if isinstance(data, list):
             return data
@@ -427,7 +543,7 @@ class MailcowAPI:
             
         except MailcowAPIError as e:
             logger.error(f"Failed to fetch Netfilter logs: {e}")
-            return []
+            raise
     
     # Allowed services for the raw logs viewer
     ALLOWED_RAW_LOG_SERVICES = frozenset([
@@ -470,7 +586,7 @@ class MailcowAPI:
             
         except MailcowAPIError as e:
             logger.error(f"Failed to fetch raw logs for {service}: {e}")
-            return []
+            raise
     
     async def get_queue(self) -> List[Dict[str, Any]]:
         """
@@ -492,7 +608,7 @@ class MailcowAPI:
             
         except MailcowAPIError as e:
             logger.error(f"Failed to fetch queue: {e}")
-            return []
+            raise
 
     async def edit_queue(self, item_ids: List[str], action: str) -> Any:
         """
@@ -559,7 +675,7 @@ class MailcowAPI:
             
         except MailcowAPIError as e:
             logger.error(f"Failed to fetch quarantine: {e}")
-            return []
+            raise
 
     async def get_status_containers(self) -> List[Dict[str, Any]]:
         """
@@ -590,7 +706,7 @@ class MailcowAPI:
             
         except MailcowAPIError as e:
             logger.error(f"Failed to fetch container status: {e}")
-            return []
+            raise
 
     async def get_status_vmail(self) -> Dict[str, Any]:
         """
@@ -618,7 +734,7 @@ class MailcowAPI:
             
         except MailcowAPIError as e:
             logger.error(f"Failed to fetch vmail status: {e}")
-            return {}
+            raise
     
     async def get_status_version(self) -> str:
         """
@@ -649,7 +765,7 @@ class MailcowAPI:
             
         except MailcowAPIError as e:
             logger.error(f"Failed to fetch version: {e}")
-            return 'unknown'
+            raise
     
     async def get_domains(self) -> List[Dict[str, Any]]:
         """
@@ -671,7 +787,7 @@ class MailcowAPI:
             
         except MailcowAPIError as e:
             logger.error(f"Failed to fetch domains: {e}")
-            return []
+            raise
     
     async def get_active_domains(self) -> List[str]:
         """
@@ -681,22 +797,17 @@ class MailcowAPI:
             List of active domain names (where active=1)
         """
         logger.info("Fetching active domains")
-        try:
-            domains = await self.get_domains()
-            
-            # Filter active domains and extract domain_name
-            active_domains = [
-                domain.get('domain_name', '')
-                for domain in domains
-                if domain.get('active') == 1 and domain.get('domain_name')
-            ]
-            
-            logger.info(f"Found {len(active_domains)} active domains: {', '.join(active_domains)}")
-            return active_domains
-            
-        except Exception as e:
-            logger.error(f"Failed to fetch active domains: {e}")
-            return []
+        domains = await self.get_domains()
+
+        # Filter active domains and extract domain_name
+        active_domains = [
+            domain.get('domain_name', '')
+            for domain in domains
+            if domain.get('active') == 1 and domain.get('domain_name')
+        ]
+
+        logger.info(f"Found {len(active_domains)} active domains: {', '.join(active_domains)}")
+        return active_domains
     
     async def get_alias_domains(self) -> List[str]:
         """
@@ -731,7 +842,7 @@ class MailcowAPI:
 
         except MailcowAPIError as e:
             logger.error(f"Failed to fetch alias domains: {e}")
-            return []
+            raise
 
     async def get_alias_domain_map(self) -> Dict[str, str]:
         """
@@ -742,22 +853,15 @@ class MailcowAPI:
         which primary domain each alias points at.
         """
         logger.info("Fetching alias domain map")
-        try:
-            data = await self._make_request("/api/v1/get/alias-domain/all")
-            if not isinstance(data, list):
-                return {}
-            return {
-                item['alias_domain'].lower(): item['target_domain'].lower()
-                for item in data
-                if item.get('active', 0) == 1
-                and item.get('alias_domain') and item.get('target_domain')
-            }
-        except MailcowAPIError as e:
-            logger.error(f"Failed to fetch alias domains: {e}")
-            return []
-        except Exception as e:
-            logger.error(f"Failed to fetch alias domains: {e}")
-            return []
+        data = await self._make_request("/api/v1/get/alias-domain/all")
+        if not isinstance(data, list):
+            return {}
+        return {
+            item['alias_domain'].lower(): item['target_domain'].lower()
+            for item in data
+            if item.get('active', 0) == 1
+            and item.get('alias_domain') and item.get('target_domain')
+        }
     
     async def get_mailboxes(self) -> List[Dict[str, Any]]:
         """
@@ -779,7 +883,7 @@ class MailcowAPI:
             
         except MailcowAPIError as e:
             logger.error(f"Failed to fetch mailboxes: {e}")
-            return []
+            raise
 
     async def edit_mailbox(self, mailbox: str, attributes: Dict[str, Any]) -> Any:
         """
@@ -833,13 +937,7 @@ class MailcowAPI:
         """
         endpoint = f"/api/v1/get/rl-mbox/{quote(mailbox, safe='@')}"
         logger.debug(f"Fetching rate limit for mailbox {mailbox}")
-        try:
-            data = await self._make_request(endpoint)
-        except RetryError as e:
-            # _make_request's retry decorator does not re-raise the original
-            # exception, so callers would otherwise have to know about tenacity.
-            last = e.last_attempt.exception() if e.last_attempt else None
-            raise MailcowAPIError(f"Rate limit fetch failed for mailbox {mailbox}: {last}") from e
+        data = await self._make_request(endpoint)
 
         if not isinstance(data, dict):
             logger.warning(f"Unexpected rl-mbox response format for {mailbox}: {type(data)}")
@@ -861,11 +959,7 @@ class MailcowAPI:
         """
         endpoint = f"/api/v1/get/rl-domain/{quote(domain, safe='')}"
         logger.debug(f"Fetching rate limit for domain {domain}")
-        try:
-            data = await self._make_request(endpoint)
-        except RetryError as e:
-            last = e.last_attempt.exception() if e.last_attempt else None
-            raise MailcowAPIError(f"Rate limit fetch failed for domain {domain}: {last}") from e
+        data = await self._make_request(endpoint)
 
         if not isinstance(data, dict):
             logger.warning(f"Unexpected rl-domain response format for {domain}: {type(data)}")
@@ -897,15 +991,11 @@ class MailcowAPI:
                 "rl_frame": frame
             }
         }
-        try:
-            data = await self._make_rw_request(
-                "/api/v1/edit/rl-mbox/",
-                method="POST",
-                json=payload
-            )
-        except RetryError as e:
-            last = e.last_attempt.exception() if e.last_attempt else None
-            raise MailcowAPIError(f"Rate limit update failed for mailbox {mailbox}: {last}") from e
+        data = await self._make_rw_request(
+            "/api/v1/edit/rl-mbox/",
+            method="POST",
+            json=payload
+        )
 
         logger.info(f"Mailbox rate limit response for {mailbox}: {data}")
         return data
@@ -940,16 +1030,11 @@ class MailcowAPI:
                 "rl_frame": frame
             }
         }
-        try:
-            data = await self._make_rw_request(
-                "/api/v1/edit/rl-mbox/",
-                method="POST",
-                json=payload
-            )
-        except RetryError as e:
-            last = e.last_attempt.exception() if e.last_attempt else None
-            raise MailcowAPIError(
-                f"Rate limit update failed for {len(items)} mailboxes: {last}") from e
+        data = await self._make_rw_request(
+            "/api/v1/edit/rl-mbox/",
+            method="POST",
+            json=payload
+        )
 
         logger.info(f"Mailbox rate limit response for {len(items)} mailboxes: {data}")
         return data
@@ -979,15 +1064,11 @@ class MailcowAPI:
                 "rl_frame": frame
             }
         }
-        try:
-            data = await self._make_rw_request(
-                "/api/v1/edit/rl-domain/",
-                method="POST",
-                json=payload
-            )
-        except RetryError as e:
-            last = e.last_attempt.exception() if e.last_attempt else None
-            raise MailcowAPIError(f"Rate limit update failed for domain {domain}: {last}") from e
+        data = await self._make_rw_request(
+            "/api/v1/edit/rl-domain/",
+            method="POST",
+            json=payload
+        )
 
         logger.info(f"Domain rate limit response for {domain}: {data}")
         return data
@@ -1020,16 +1101,11 @@ class MailcowAPI:
                 "rl_frame": frame
             }
         }
-        try:
-            data = await self._make_rw_request(
-                "/api/v1/edit/rl-domain/",
-                method="POST",
-                json=payload
-            )
-        except RetryError as e:
-            last = e.last_attempt.exception() if e.last_attempt else None
-            raise MailcowAPIError(
-                f"Rate limit update failed for {len(items)} domains: {last}") from e
+        data = await self._make_rw_request(
+            "/api/v1/edit/rl-domain/",
+            method="POST",
+            json=payload
+        )
 
         logger.info(f"Domain rate limit response for {len(items)} domains: {data}")
         return data
@@ -1051,15 +1127,11 @@ class MailcowAPI:
             MailcowAPIError: If the request fails or no RW key is configured
         """
         logger.info(f"Releasing rate limit counter {rl_hash}")
-        try:
-            data = await self._make_rw_request(
-                "/api/v1/delete/rlhash",
-                method="POST",
-                json=[rl_hash]
-            )
-        except RetryError as e:
-            last = e.last_attempt.exception() if e.last_attempt else None
-            raise MailcowAPIError(f"Rate limit release failed for {rl_hash}: {last}") from e
+        data = await self._make_rw_request(
+            "/api/v1/delete/rlhash",
+            method="POST",
+            json=[rl_hash]
+        )
 
         logger.info(f"Rate limit release response for {rl_hash}: {data}")
         return data
@@ -1084,7 +1156,7 @@ class MailcowAPI:
             
         except MailcowAPIError as e:
             logger.error(f"Failed to fetch aliases: {e}")
-            return []
+            raise
     
     async def test_connection(self) -> bool:
         """
@@ -1145,7 +1217,7 @@ class MailcowAPI:
         """
         logger.info(f"Fetching DKIM configuration for {domain}")
         try:
-            data = await self._make_request(f"/api/v1/get/dkim/{domain}")
+            data = await self._make_request(f"/api/v1/get/dkim/{quote(domain, safe='')}")
             
             # Handle different response formats
             if isinstance(data, dict):
@@ -1164,7 +1236,7 @@ class MailcowAPI:
                 
         except MailcowAPIError as e:
             logger.error(f"Failed to fetch DKIM configuration for {domain}: {e}")
-            return None
+            raise
     
     async def get_transports(self) -> List[Dict[str, Any]]:
         """
@@ -1201,7 +1273,7 @@ class MailcowAPI:
             
         except MailcowAPIError as e:
             logger.error(f"Failed to fetch transports: {e}")
-            return []
+            raise
     
     async def get_relayhosts(self) -> List[Dict[str, Any]]:
         """
@@ -1238,7 +1310,7 @@ class MailcowAPI:
             
         except MailcowAPIError as e:
             logger.error(f"Failed to fetch relayhosts: {e}")
-            return []
+            raise
 
 
     async def get_fail2ban(self) -> Optional[Dict[str, Any]]:
@@ -1264,6 +1336,7 @@ class MailcowAPI:
                 return None
                 
         except MailcowAPIError as e:
+            # The Security page must still load without Fail2ban
             logger.error(f"Failed to fetch Fail2Ban configuration: {e}")
             return None
 
@@ -1295,6 +1368,7 @@ class MailcowAPI:
             json=payload
         )
         logger.info(f"Fail2Ban update response: {data}")
+        _forget_security_addresses()
         return data
 
     async def unban_fail2ban(self, ip: str) -> Dict[str, Any]:
@@ -1322,6 +1396,7 @@ class MailcowAPI:
             json=payload
         )
         logger.info(f"Fail2Ban unban response: {data}")
+        _forget_security_addresses()
         return data
 
     async def release_quarantine(self, item_ids: List[str]) -> Any:
@@ -1427,12 +1502,13 @@ class MailcowAPI:
         Returns:
             Parsed JSON response with detailed quarantine info
         """
-        url = f"{self.base_url}/inc/ajax/qitem_details.php?id={item_id}"
+        url = f"{self.base_url}/inc/ajax/qitem_details.php"
         
         client = self._get_client()
         try:
             response = await client.get(
                 url,
+                params={"id": item_id},
                 headers=self.headers
             )
             response.raise_for_status()
@@ -1478,13 +1554,7 @@ class MailcowAPI:
         # get a 302 from that proxy before the Password header is ever checked.
         # RSPAMD_URL points straight at the Rspamd controller instead.
         rspamd_base = (settings.rspamd_url or '').strip().rstrip('/')
-        if rspamd_base:
-            direct_endpoint = endpoint
-            if direct_endpoint.startswith('/rspamd'):
-                direct_endpoint = direct_endpoint[len('/rspamd'):] or '/'
-            url = f"{rspamd_base}{direct_endpoint}"
-        else:
-            url = f"{self.base_url}{endpoint}"
+        url = self._rspamd_url(endpoint)
 
         headers = {"Password": rspamd_pw}
         if extra_headers:

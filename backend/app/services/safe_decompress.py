@@ -15,10 +15,14 @@ from io import BytesIO
 logger = logging.getLogger(__name__)
 
 # Hard cap on decompressed report size. Real aggregate reports are < 1 MB;
-# 50 MB leaves generous headroom for very large senders.
-MAX_DECOMPRESSED_BYTES = 50 * 1024 * 1024
+# 10 MB still leaves ample headroom for very large senders. Parsing builds the
+# whole XML tree / JSON object in memory, which takes many times the text
+# size, so this cap is what bounds the memory a single report can use.
+MAX_DECOMPRESSED_BYTES = 10 * 1024 * 1024
 
-# Hard cap on the compressed input itself (upload / mail attachment).
+# Hard cap on the compressed input itself (upload / mail attachment). Never
+# above MAX_DECOMPRESSED_BYTES: a plain .json TLS-RPT report is not
+# decompressed, so this is also the cap for uncompressed reports.
 MAX_COMPRESSED_BYTES = 10 * 1024 * 1024
 
 _CHUNK_SIZE = 1024 * 1024

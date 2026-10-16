@@ -82,7 +82,7 @@ def parse_dmarc_file(file_content: bytes, filename: str) -> Optional[Dict[str, A
             return None
         
         # Parse XML
-        return parse_dmarc_xml(xml_content.decode('utf-8'), xml_content.decode('utf-8'))
+        return parse_dmarc_xml(xml_content.decode('utf-8'))
 
     except DecompressionLimitError as e:
         logger.error(f"Rejected oversized DMARC file {filename}: {e}")
@@ -143,16 +143,16 @@ DMARC_NAMESPACES = [
 ]
 
 
-def parse_dmarc_xml(xml_string: str, raw_xml: str) -> Dict[str, Any]:
+def parse_dmarc_xml(xml_string: str) -> Dict[str, Any]:
     """
     Parse DMARC XML content
     
     Args:
         xml_string: XML content as string
-        raw_xml: Original raw XML for storage
         
     Returns:
-        Dictionary with parsed DMARC data
+        Dictionary with parsed DMARC data. The original XML is not kept:
+        nothing reads it, and storing it multiplied the size of every report.
     """
     try:
         # defusedxml blocks entity-expansion attacks (billion laughs / quadratic blowup)
@@ -218,7 +218,6 @@ def parse_dmarc_xml(xml_string: str, raw_xml: str) -> Dict[str, Any]:
             'end_date': end_date,
             'policy_published': policy_published,
             'records': records,
-            'raw_xml': raw_xml
         }
         
     except Exception as e:

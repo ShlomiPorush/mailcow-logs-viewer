@@ -15,8 +15,10 @@ const VALID_ROUTES = [
     'domains',
     'dmarc',
     'mailbox-stats',
+    'devices',
     'logs',
-    'settings'
+    'settings',
+    'about'
 ];
 
 // URL aliases: URL path -> internal route name
@@ -28,6 +30,48 @@ const ROUTE_ALIASES = {
 const ROUTE_DISPLAY = {
     'netfilter': 'security'
 };
+
+// Pages with tabs: every tab has its own address (/security/protection), so a
+// tab can be reloaded, shared and reached with Back. The first tab is the
+// page's own address. select() picks the tab before the page loads; show()
+// switches it on a page already open. tabs: null takes any section name.
+const SUBPAGES = {
+    // protection, fail2ban and abuse are the old addresses of what is now the Settings tab
+    netfilter: { tabs: ['overview', 'lists', 'settings', 'events', 'protection', 'fail2ban', 'abuse'], current: () => securityTab,
+        select: t => securityShowTab(t), show: t => securityShowTab(t) },
+    quarantine: { tabs: ['messages', 'rules'], current: () => quarantineTab,
+        select: t => quarantineShowTab(t), show: t => quarantineShowTab(t) },
+    status: { tabs: ['server', 'blocklists', 'jobs'], current: () => statusTab,
+        select: t => statusShowTab(t), show: t => statusShowTab(t) },
+    'spam-filter': { tabs: ['suppressions', 'maps'], current: () => spamFilterSubTab,
+        select: t => { spamFilterSubTab = t; }, show: t => spamFilterSwitchSubTab(t) },
+    'mailbox-stats': { tabs: ['statistics', 'rate-limits'], current: () => mailboxStatsView,
+        select: t => { mailboxStatsView = t; }, show: t => mailboxStatsSwitchView(t) },
+    settings: { tabs: null, get first() { return settingsFirstTab || 'features'; }, current: () => settingsTab,
+        select: t => { settingsTab = t; }, show: t => { settingsTab = t; if (window.settingsShowTab) window.settingsShowTab(t); } }
+};
+
+function subpageFirst(route) {
+    const page = SUBPAGES[route];
+    return page.first || page.tabs[0];
+}
+
+function isSubpage(route, name) {
+    const page = SUBPAGES[route];
+    if (!page || !name) return false;
+    return page.tabs ? page.tabs.includes(name) : /^[a-z0-9_-]+$/.test(name);
+}
+
+// A tab was opened on the page on screen: give it its address. While a page
+// loads (replace), the address is corrected instead of adding a Back step.
+function routerSyncSubpage(route, name, replace = false) {
+    if (typeof currentTab === 'undefined' || currentTab !== route || !SUBPAGES[route]) return;
+    const path = buildPath(route, { sub: name });
+    if (window.location.pathname === path) return;
+    const state = { route, params: { sub: name } };
+    if (replace) history.replaceState(state, '', path);
+    else history.pushState(state, '', path);
+}
 
 /**
  * Parse the current URL path into route components
@@ -62,6 +106,12 @@ function parseRoute() {
         return { baseRoute: 'dashboard', params: {} };
     }
 
+    // A tab of the page; an unknown one opens the page's first tab
+    if (SUBPAGES[baseRoute]) {
+        const sub = decodeURIComponent(segments[1] || '');
+        return { baseRoute, params: { sub: isSubpage(baseRoute, sub) ? sub : subpageFirst(baseRoute) } };
+    }
+
     return { baseRoute, params: {} };
 }
 
@@ -77,6 +127,15 @@ function parseDmarcRoute(segments) {
     // segments[3] = id (date or IP)
 
     const params = { domain: null, type: null, id: null };
+
+    // The TLS tab: /dmarc/tls, /dmarc/tls/<domain>, /dmarc/tls/<domain>/<date>
+    if (segments[1] === 'tls') {
+        return { baseRoute: 'dmarc', params: {
+            tab: 'tls',
+            domain: segments[2] ? decodeURIComponent(segments[2]) : null,
+            id: segments[3] ? decodeURIComponent(segments[3]) : null
+        } };
+    }
 
     if (segments.length >= 2) {
         params.domain = decodeURIComponent(segments[1]);
@@ -107,6 +166,21 @@ function buildPath(baseRoute, params = {}) {
     // Use display name for URL (e.g., netfilter -> /security)
     const urlSegment = ROUTE_DISPLAY[baseRoute] || baseRoute;
     let path = `/${urlSegment}`;
+
+    // A page's tab; the first tab is the page's own address
+    if (SUBPAGES[baseRoute] && params.sub && params.sub !== subpageFirst(baseRoute)) {
+        path += `/${encodeURIComponent(params.sub)}`;
+    }
+
+    // The DMARC page's TLS tab
+    if (baseRoute === 'dmarc' && params.tab === 'tls') {
+        path += '/tls';
+        if (params.domain) {
+            path += `/${encodeURIComponent(params.domain)}`;
+            if (params.id) path += `/${encodeURIComponent(params.id)}`;
+        }
+        return path;
+    }
 
     // Handle DMARC nested routes
     if (baseRoute === 'dmarc' && params.domain) {
@@ -146,12 +220,23 @@ function navigateTo(route, params = {}, updateHistory = true) {
 
     // Note: disabled feature guard is in switchTab() which shows a "Feature Disabled" page
 
+    // A page with tabs opens on the tab it was left on
+    if (SUBPAGES[route] && !params.sub) {
+        params = { ...params, sub: SUBPAGES[route].current() };
+    }
+
     // Build the new path
     const newPath = buildPath(route, params);
 
-    // Update history if path actually changed
+    // Update history if path actually changed. With a dialog open, its history
+    // entry becomes the new page instead of stacking one more entry
     if (updateHistory && window.location.pathname !== newPath) {
-        history.pushState({ route, params }, '', newPath);
+        if (overlayHistoryEntry) {
+            overlayHistoryEntry = false;
+            history.replaceState({ route, params }, '', newPath);
+        } else {
+            history.pushState({ route, params }, '', newPath);
+        }
     }
 
     // Always switch to the tab (even if URL is same, to handle returning to main view)
@@ -161,6 +246,69 @@ function navigateTo(route, params = {}, updateHistory = true) {
         console.error('switchTab function not found');
     }
 }
+
+// =============================================================================
+// Dialogs and the phone More sheet own one history entry while open, so the
+// Back button (a phone's back gesture above all) closes them instead of
+// leaving the page. The entry has the same address as the page.
+// =============================================================================
+
+// The docked message pane on the desktop Messages page is part of the page, not a dialog.
+// The search over a phone's screen (search.js) is one too
+const OVERLAY_SELECTOR = '.ui-dialog-backdrop:not(.hidden):not(.ui-docked), #container-logs-modal:not(.hidden), #mobile-menu.active, .ui-gs.is-sheet';
+let overlayHistoryEntry = false;
+let overlayIgnorePop = false;
+let overlaySyncQueued = false;
+
+// The phone search is under a message it opened, though it comes later in the page
+function openOverlays() {
+    const open = [...document.querySelectorAll(OVERLAY_SELECTOR)].filter(el => el.getClientRects().length > 0);
+    return [...open.filter(el => el.matches('.ui-gs')), ...open.filter(el => !el.matches('.ui-gs'))];
+}
+
+// Close the dialog on top the way a user would: its Close or Cancel button
+function closeTopOverlay() {
+    const open = openOverlays();
+    const top = open[open.length - 1];
+    if (!top) return false;
+    if (top.id === 'mobile-menu') {
+        closeMobileMenu();
+        return true;
+    }
+    const button = top.querySelector('[aria-label="Close"], [id$="-cancel"]')
+        || [...top.querySelectorAll('button')].find(b => /^(cancel|close)$/i.test(b.textContent.trim())
+            || /^close/i.test(b.getAttribute('onclick') || ''));
+    if (button) button.click();
+    else top.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    return true;
+}
+
+// Keep one history entry while anything is open, and drop it when all is closed
+function syncOverlayHistory() {
+    overlaySyncQueued = false;
+    const open = openOverlays().length > 0;
+    if (open && !overlayHistoryEntry) {
+        history.pushState({ ...(history.state || {}), overlay: true }, '', window.location.href);
+        overlayHistoryEntry = true;
+    } else if (!open && overlayHistoryEntry) {
+        overlayHistoryEntry = false;
+        if (history.state && history.state.overlay) {
+            overlayIgnorePop = true;
+            history.back();
+        }
+    }
+}
+
+function watchOverlays() {
+    const queue = () => {
+        if (overlaySyncQueued) return;
+        overlaySyncQueued = true;
+        requestAnimationFrame(syncOverlayHistory);
+    };
+    // Dialogs open by a class change or by being added to the page
+    new MutationObserver(queue).observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ['class'] });
+}
+document.addEventListener('DOMContentLoaded', watchOverlays);
 
 /**
  * Navigate specifically within DMARC section
@@ -203,6 +351,19 @@ function initRouter() {
 
     // Handle browser back/forward buttons
     window.addEventListener('popstate', (event) => {
+        // Back with a dialog or sheet open closes it and stays on the page
+        if (overlayIgnorePop) {
+            overlayIgnorePop = false;
+            return;
+        }
+        if (overlayHistoryEntry) {
+            overlayHistoryEntry = false;
+            closeTopOverlay();
+            // Another dialog may still be open under it
+            setTimeout(syncOverlayHistory, 0);
+            return;
+        }
+
         const routeInfo = event.state || parseRoute();
         const route = routeInfo.route || routeInfo.baseRoute || getCurrentRoute();
         const params = routeInfo.params || {};
@@ -236,9 +397,11 @@ const TAB_LABELS = {
     'domains': 'Domains',
     'dmarc': 'DMARC & TLS',
     'mailbox-stats': 'Mailbox Stats',
+    'devices': 'Devices',
     'logs': 'Logs',
     'settings': 'Settings',
-    'spam-filter': 'Spam Filter'
+    'spam-filter': 'Spam Filter',
+    'about': 'About'
 };
 
 /**
@@ -334,6 +497,8 @@ window.getCurrentRoute = getCurrentRoute;
 window.getFullRoute = getFullRoute;
 window.parseRoute = parseRoute;
 window.buildPath = buildPath;
+window.SUBPAGES = SUBPAGES;
+window.routerSyncSubpage = routerSyncSubpage;
 window.initRouter = initRouter;
 window.VALID_ROUTES = VALID_ROUTES;
 window.toggleMobileMenu = toggleMobileMenu;

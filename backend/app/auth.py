@@ -3,14 +3,16 @@ Authentication Middleware for FastAPI
 Supports both OAuth2 (session cookies) and Basic Auth
 Protects ALL endpoints when authentication is enabled
 """
+import ipaddress
 import logging
 import time
 from threading import RLock
 from collections import deque
-from typing import Dict, Deque
+from typing import Dict, Deque, Optional
+from urllib.parse import quote, urlsplit, urlunsplit
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
-from starlette.responses import Response
+from starlette.responses import RedirectResponse, Response
 from fastapi import HTTPException, status
 import secrets
 import base64
@@ -30,17 +32,25 @@ _auth_lock = RLock()
 _next_capacity_cleanup = 0.0
 
 
-def _failure_capacity_reached(ip: str) -> bool:
-    """Preserve tracked clients, rejecting new identities when storage is full."""
+def _make_room_for_new_client() -> None:
+    """Admit a new client to a full table by dropping the least recent one.
+
+    A full table must never refuse a correct password, and it must keep
+    counting wrong guesses from new clients. Expired counters are reclaimed
+    first; otherwise the client whose last failure is oldest makes room. The
+    table is ordered by last failure, so that is its first entry. Cycling
+    an entry out this way takes as many fresh networks as the table holds.
+    """
     with _auth_lock:
         global _next_capacity_cleanup
-        if ip in _auth_failures or len(_auth_failures) < settings.auth_max_failure_clients:
-            return False
+        if len(_auth_failures) < settings.auth_max_failure_clients:
+            return
         now = time.monotonic()
         if now >= _next_capacity_cleanup:
             cleanup_expired_auth_failures()
             _next_capacity_cleanup = now + 1.0
-        return len(_auth_failures) >= settings.auth_max_failure_clients
+        while _auth_failures and len(_auth_failures) >= settings.auth_max_failure_clients:
+            _auth_failures.pop(next(iter(_auth_failures)))
 
 
 def _client_ip(request: Request) -> str:
@@ -49,8 +59,20 @@ def _client_ip(request: Request) -> str:
     Uvicorn applies FORWARDED_ALLOW_IPS before the request reaches us. Reading
     X-Forwarded-For again would bypass that trust boundary and let a direct
     caller (or a forged prefix before a real proxy chain) choose its counter.
+
+    IPv6 clients are counted per /64 network: a single host usually holds a
+    whole /64, so counting addresses would give it unlimited fresh budgets.
     """
-    return (request.client.host if request.client else None) or "unknown"
+    host = (request.client.host if request.client else None) or "unknown"
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        return host
+    if address.version == 6:
+        if address.ipv4_mapped:
+            return str(address.ipv4_mapped)
+        return str(ipaddress.ip_network(f"{address}/64", strict=False))
+    return str(address)
 
 
 def _is_rate_limited(ip: str) -> bool:
@@ -76,9 +98,12 @@ def cleanup_expired_auth_failures() -> None:
 
 def _record_auth_failure(ip: str) -> None:
     with _auth_lock:
-        if _failure_capacity_reached(ip):
-            return
-        failures = _auth_failures.setdefault(ip, deque())
+        # Re-inserted on every failure, which keeps the table ordered by last failure
+        failures = _auth_failures.pop(ip, None)
+        if failures is None:
+            _make_room_for_new_client()
+            failures = deque()
+        _auth_failures[ip] = failures
         failures.append(time.time())
         # Bound each client counter to the lockout threshold
         while len(failures) > _AUTH_MAX_FAILURES:
@@ -131,7 +156,7 @@ def _authenticate_basic_request(request: Request) -> bool:
             return False
 
         client_ip = _client_ip(request)
-        if _is_rate_limited(client_ip) or _failure_capacity_reached(client_ip):
+        if _is_rate_limited(client_ip):
             raise HTTPException(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
                 detail="Too many failed login attempts. Try again later.",
@@ -171,6 +196,42 @@ def is_request_authenticated(request: Request) -> bool:
     return False
 
 
+def safe_return_path(value: Optional[str]) -> str:
+    """The local page to return to after signing in, or / for anything else.
+
+    Only a path on this site is accepted, so the login page cannot be used to
+    send someone to another site.
+    """
+    if not value or len(value) > 2048 or not value.startswith("/") or value.startswith("//"):
+        return "/"
+    if "\\" in value or any(ord(c) < 32 or ord(c) == 127 for c in value):
+        return "/"
+    # Rebuilt from its parts: a path on this site, never a scheme or a host
+    parts = urlsplit(value)
+    if parts.scheme or parts.netloc or not parts.path.startswith("/"):
+        return "/"
+    if parts.path == "/login" or parts.path.startswith(("/login/", "/api/", "/static/")):
+        return "/"
+    return urlunsplit(("", "", parts.path, parts.query, parts.fragment))
+
+
+def _login_redirect(request: Request) -> Response:
+    """Send a signed-out page request to the login page, keeping the page asked for.
+
+    Done here rather than by the page's own script, so the browser never draws
+    the app before finding out there is no session.
+    """
+    target = request.url.path + (f"?{request.url.query}" if request.url.query else "")
+    url = "/login"
+    if safe_return_path(target) != "/":
+        url += "?next=" + quote(target, safe="")
+    return RedirectResponse(
+        url=url,
+        status_code=status.HTTP_302_FOUND,
+        headers={"Cache-Control": "no-store"},
+    )
+
+
 class BasicAuthMiddleware(BaseHTTPMiddleware):
     """
     Middleware that enforces authentication on ALL requests
@@ -189,17 +250,17 @@ class BasicAuthMiddleware(BaseHTTPMiddleware):
         # Health check endpoint must be accessible for Docker health monitoring
         # Info endpoint is used to check if authentication is enabled
         # Auth endpoints handle their own authentication
-        public_paths = [
+        # Exact paths only; /static/ is the one prefix (the frontend files).
+        public_paths = {
             "/login",
-            "/static/",
             "/api/health",
             "/api/info",
             "/api/auth/login",
             "/api/auth/callback",
             "/api/auth/provider-info",
-        ]
-        
-        if any(path == p or path.startswith(p) for p in public_paths):
+        }
+
+        if path in public_paths or path.startswith("/static/"):
             return await call_next(request)
         
         # A valid session cookie is accepted for both authentication methods:
@@ -219,8 +280,7 @@ class BasicAuthMiddleware(BaseHTTPMiddleware):
                     content="Authentication required",
                     status_code=status.HTTP_401_UNAUTHORIZED,
                 )
-            # For frontend routes, allow through (frontend will redirect)
-            return await call_next(request)
+            return _login_redirect(request)
         
         # Fall back to Basic Auth (if enabled)
         if not settings.is_basic_auth_enabled:
@@ -230,8 +290,8 @@ class BasicAuthMiddleware(BaseHTTPMiddleware):
                     content="Authentication required",
                     status_code=status.HTTP_401_UNAUTHORIZED,
                 )
-            return await call_next(request)
-        
+            return _login_redirect(request)
+
         # Check if password is configured
         if not settings.auth_password:
             logger.error("Authentication enabled but password not set")
@@ -243,11 +303,10 @@ class BasicAuthMiddleware(BaseHTTPMiddleware):
         # Extract credentials from Authorization header
         authorization = request.headers.get("Authorization", "")
         
-        # For frontend routes (not API), allow access without Authorization header
-        # The frontend JavaScript will handle authentication and redirect if needed
-        # This enables clean URLs like /dashboard, /messages, /dmarc etc.
+        # Pages (clean URLs like /dashboard, /messages, /dmarc) need the session
+        # cookie; without one they go to the login page
         if not path.startswith("/api/"):
-            return await call_next(request)
+            return _login_redirect(request)
         
         # For all other paths (API endpoints), require authentication
         if not authorization.startswith("Basic "):

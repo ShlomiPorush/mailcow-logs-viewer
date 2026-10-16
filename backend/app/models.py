@@ -245,6 +245,7 @@ class DMARCReport(Base):
     
     domain_id = Column(String(255), index=True)
     
+    # No longer written (always NULL); kept so an older version can still run
     raw_xml = Column(Text)
     
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
@@ -433,7 +434,7 @@ class TLSReport(Base):
     start_datetime = Column(DateTime, nullable=False)
     end_datetime = Column(DateTime, nullable=False)
     
-    # Raw JSON for reference
+    # No longer written (always NULL); kept so an older version can still run
     raw_json = Column(Text)
     
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
@@ -602,6 +603,33 @@ class RawServiceLog(Base):
     
     def __repr__(self):
         return f"<RawServiceLog(service={self.service}, time={self.time})>"
+
+
+class EasDevice(Base):
+    """
+    One ActiveSync device of one user, built from SOGo's access log lines for
+    /Microsoft-Server-ActiveSync. Each row keeps the newest request seen for
+    the pair (user, device id) and when the pair was first and last seen.
+    """
+    __tablename__ = "eas_devices"
+
+    id = Column(Integer, primary_key=True, index=True)
+    username = Column(String(255), nullable=False)
+    device_id = Column(String(255), nullable=False)
+    device_type = Column(String(100))
+    last_ip = Column(String(255))
+    last_command = Column(String(64))
+    last_status = Column(Integer)
+    first_seen = Column(DateTime, nullable=False)
+    last_seen = Column(DateTime, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint('username', 'device_id', name='uq_eas_device'),
+        Index('idx_eas_device_last_seen', 'last_seen'),
+    )
+
+    def __repr__(self):
+        return f"<EasDevice(username={self.username}, device_id={self.device_id})>"
 
 
 class SpamSuppression(Base):
@@ -787,6 +815,53 @@ class SMTPAbuseAction(Base):
 
     def __repr__(self):
         return f"<SMTPAbuseAction(email={self.email}, action={self.action}, count={self.message_count})>"
+
+
+class ProtectionHit(Base):
+    """
+    An address a protection rule caught, and what happened to it.
+
+    One open hit per address and rule: later tries by the same address are
+    added to it rather than opening a new one. In watch mode a hit only records
+    what the rule would have banned (status 'watching'); the usernames tried and
+    the netfilter log ids are the evidence shown to the admin.
+    """
+    __tablename__ = "protection_hits"
+
+    id = Column(Integer, primary_key=True, index=True)
+    ip = Column(String(50), nullable=False, index=True)
+    rule = Column(String(40), nullable=False, index=True)
+    mode = Column(String(20), nullable=False, default="watch")        # 'watch' | 'enforce' | 'manual' (Ban now)
+    # Open: 'watching' (watch mode), 'pending' (to be banned), 'banned', 'alert' (breach alert, never banned)
+    # Closed: 'dismissed', 'expired', 'undone'
+    status = Column(String(20), nullable=False, default="watching", index=True)
+    reason = Column(Text)
+    usernames = Column(JSONB, default=list)
+    log_ids = Column(JSONB, default=list)
+    attempts = Column(Integer, nullable=False, default=0)
+    country_code = Column(String(2))
+    country_name = Column(String(100))
+
+    first_seen = Column(DateTime, nullable=False)
+    last_seen = Column(DateTime, nullable=False, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    ended_at = Column(DateTime)
+
+    # Enforcement: the ban length (0 = permanent), when it was written and when
+    # it ends, and whether this app added the entry to the Fail2ban blacklist.
+    # Only entries the app added are ever removed by it.
+    ban_hours = Column(Integer)
+    banned_at = Column(DateTime)
+    expires_at = Column(DateTime, index=True)
+    owned = Column(Boolean)
+    error = Column(Text)
+
+    __table_args__ = (
+        Index('idx_protection_hits_ip_rule_status', 'ip', 'rule', 'status'),
+    )
+
+    def __repr__(self):
+        return f"<ProtectionHit(ip={self.ip}, rule={self.rule}, status={self.status})>"
 
 
 class NotificationChannel(Base):

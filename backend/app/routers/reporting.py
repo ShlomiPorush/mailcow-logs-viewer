@@ -4,8 +4,8 @@ API endpoints for system reports and summary
 import asyncio
 import logging
 from fastapi import APIRouter, HTTPException, BackgroundTasks
-from datetime import datetime, timezone
-from typing import Dict, Any, List
+from datetime import datetime, timedelta, timezone
+from typing import Dict, Any, List, Tuple
 
 from ..database import get_db_context
 from ..config import settings
@@ -161,279 +161,125 @@ def send_summary_report_email(
     background_tasks.add_task(generate_and_send_email)
     return {"status": "queued", "message": "Weekly summary email generation started"}
 
+def _n(value) -> str:
+    """A count with thousands separators; anything else as it is."""
+    return f"{value:,}" if isinstance(value, int) and not isinstance(value, bool) else str(value)
+
+
+def _listed_on(host) -> List[str]:
+    return [str(r.get('name', 'Unknown')) for r in host.get('results', []) if r.get('listed')]
+
+
+def build_summary_email(data: Dict[str, Any], now: datetime = None) -> Tuple[str, str, str]:
+    """Subject, plain text and HTML of the weekly summary."""
+    from ..services import email_layout as e
+
+    now = now or e.local_now()
+    system = data['system']
+    traffic = data['traffic']
+    storage = data['storage']
+    hosts = data['blacklist'].get('hosts', [])
+    top_failures = data['top_failures']
+    dns_issues = data['dns_issues']
+    queue = data['queue']['count']
+    quarantine = data['quarantine']['count']
+
+    start = now - timedelta(days=6)
+    period = f"{e.format_date(start)} to {e.format_date(now)}"
+    listed = [h for h in hosts if h.get('status') == 'listed']
+    rate = traffic.get('failure_rate', 0) or 0
+    rate_high = rate > 5
+
+    attention = []
+    if listed:
+        attention.append(f"{len(listed)} host{'s' if len(listed) != 1 else ''} on a blacklist")
+    if dns_issues:
+        attention.append(f"DNS issues on {len(dns_issues)} domain{'s' if len(dns_issues) != 1 else ''}")
+    if rate_high:
+        attention.append(f"a failure rate of {rate}%")
+    if attention:
+        intro = f"{period}. Needs a look: {', '.join(attention)}."
+    else:
+        intro = f"{period}. Nothing needs your attention."
+
+    blocks = [
+        e.stats([
+            ('Sent', _n(traffic.get('total_sent', 0))),
+            ('Received', _n(traffic.get('total_received', 0))),
+            ('Failed', _n(traffic.get('sent_failed', 0)), 'fail' if traffic.get('sent_failed') else None),
+            ('Failure rate', f"{rate}%", 'fail' if rate_high else 'ok', 'Above 5%' if rate_high else 'Under 5%'),
+            ('Queue', _n(queue), 'warn' if queue else None),
+            ('Quarantine', _n(quarantine), 'warn' if quarantine else None),
+        ]),
+        e.panel('System', e.kv([
+            ('Mailboxes', _n(system['mailboxes']['active'])),
+            ('Aliases', _n(system['aliases']['active'])),
+            ('Domains', _n(system['domains']['active'])),
+            ('Storage used', storage['used_percent']),
+        ])),
+        e.panel('Blacklists', e.table(['Host', 'Status', 'Listed on'], [
+            [h.get('hostname'),
+             e.tag('Listed', 'fail') if h.get('status') == 'listed' else e.tag(str(h.get('status', 'unknown')).capitalize(), 'ok' if h.get('status') == 'clean' else 'muted'),
+             ', '.join(_listed_on(h)) if h.get('status') == 'listed' else '-']
+            for h in hosts
+        ], empty='No hosts are monitored'), count=len(hosts) or None),
+    ]
+    if dns_issues:
+        blocks.append(e.panel('DNS issues', e.table(
+            ['Domain', 'Issue'], [[i['domain'], '\n'.join(i['issues'])] for i in dns_issues]), count=len(dns_issues)))
+    if top_failures:
+        blocks.append(e.panel('Mailboxes with the most failures', e.table(
+            ['Mailbox', ('Received', 'right'), ('Sent', 'right'), ('Failed', 'right'), ('Rate', 'right')],
+            [[m.get('username'), _n(m.get('combined_received', 0)), _n(m.get('combined_sent', 0)),
+              e.strong(_n(m.get('combined_failed', 0)), 'fail'), e.strong(f"{m.get('combined_failure_rate', 0)}%", 'fail')]
+             for m in top_failures])))
+
+    html_content = e.render(
+        title='Your server this week', topic='Weekly summary', tone='info', intro=intro, blocks=blocks,
+        footer='The weekly summary is on in Settings, Notifications.', when=now)
+
+    lines = ['Your server this week', intro, '',
+             f"Sent: {_n(traffic.get('total_sent', 0))}",
+             f"Received: {_n(traffic.get('total_received', 0))}",
+             f"Failed: {_n(traffic.get('sent_failed', 0))}",
+             f"Failure rate: {rate}%",
+             f"Queue: {_n(queue)}",
+             f"Quarantine: {_n(quarantine)}", '',
+             f"Mailboxes: {_n(system['mailboxes']['active'])}",
+             f"Aliases: {_n(system['aliases']['active'])}",
+             f"Domains: {_n(system['domains']['active'])}",
+             f"Storage used: {storage['used_percent']}", '', 'Blacklists:']
+    lines += [f"  {h.get('hostname')}: {h.get('status', 'unknown')}"
+              + (f" ({', '.join(_listed_on(h))})" if h.get('status') == 'listed' else '') for h in hosts] or ['  No hosts are monitored']
+    if dns_issues:
+        lines += ['', 'DNS issues:'] + [f"  {i['domain']}: {'; '.join(i['issues'])}" for i in dns_issues]
+    if top_failures:
+        lines += ['', 'Mailboxes with the most failures:'] + [
+            f"  {m.get('username')}: {_n(m.get('combined_failed', 0))} failed ({m.get('combined_failure_rate', 0)}%)"
+            for m in top_failures]
+    lines += ['', 'The weekly summary is on in Settings, Notifications.']
+
+    subject = f"Weekly summary: {period}"
+    return subject, '\n'.join(lines), html_content
+
+
 async def generate_and_send_email():
     """
     Generate and send the weekly summary email
     """
     try:
-        # Get all data
         data = await get_system_summary_data()
-        
-        system = data['system']
-        traffic = data['traffic']
-        storage = data['storage']
-        blacklist = data['blacklist']
-        top_failures = data['top_failures']
-        dns_issues = data['dns_issues']
-        queue = data['queue']
-        quarantine = data['quarantine']
+        subject, text_content, html_content = build_summary_email(data)
 
-        # Format free storage
-        storage_display = f"{storage['used_percent']}" 
-
-        # --- PREPARE HTML TABLES ---
-        
-        # 1. Blacklist Rows
-        hosts_list = blacklist.get('hosts', [])
-        blacklist_rows = ""
-        if hosts_list:
-            for h in hosts_list:
-                status = h.get('status', 'unknown')
-                status_color = '#dc2626' if status == 'listed' else '#16a34a'
-                
-                details = '-'
-                if status == 'listed':
-                    results = h.get('results', [])
-                    # FIX: Use 'name' instead of 'rbl'
-                    listed_rbls = [str(r.get('name', 'Unknown')) for r in results if r.get('listed')]
-                    details = ', '.join(listed_rbls)
-                
-                blacklist_rows += f"""
-                                            <tr>
-                                                <td>{h.get('hostname')}</td>
-                                                <td>
-                                                    <span style="color: {status_color}; font-weight: bold;">
-                                                        {status.upper()}
-                                                    </span>
-                                                </td>
-                                                <td style="font-size: 11px; color: #6b7280;">
-                                                    {details}
-                                                </td>
-                                            </tr>
-                """
-        else:
-             blacklist_rows = '<tr><td colspan="3" align="center">No hosts monitored</td></tr>'
-
-        # 2. DNS Issues Rows
-        dns_rows = ""
-        if dns_issues:
-             for item in dns_issues:
-                 dns_rows += f"<tr><td>{item['domain']}</td><td style='color: #b45309;'>{', '.join(item['issues'])}</td></tr>"
-
-        # 3. Top Failures Rows
-        failures_rows = ""
-        if top_failures:
-            for m in top_failures:
-                # FIX: Use 'combined_fails' if available, or fallbacks. Using correct key from mailbox_stats.
-                failed_count = m.get('combined_failed', 0)
-                fail_rate = m.get('combined_failure_rate', 0)
-                failures_rows += f"""
-                                            <tr>
-                                                <td>{m.get('username')}</td>
-                                                <td align="center">{m.get('combined_received', 0)}</td>
-                                                <td align="center">{m.get('combined_sent', 0)}</td>
-                                                <td align="center" style="color: #dc2626; font-weight: bold;">{failed_count}</td>
-                                                <td align="center" style="color: #dc2626; font-weight: bold;">{fail_rate}%</td>
-                                            </tr>
-                """
-
-        # Current Date
-        # FIX: Date format to DD/MM/YYYY
-        current_date = datetime.now().strftime('%d/%m/%Y')
-
-        # New HTML Template Matching Requirements
-        html_content = f"""
-        <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
-        <html xmlns="http://www.w3.org/1999/xhtml">
-        <head>
-            <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
-            <title>Weekly Server Summary</title>
-            <style type="text/css">
-                body {{ font-family: Arial, sans-serif; line-height: 1.6; color: #333333; margin: 0; padding: 0; }}
-                table {{ border-collapse: collapse; mso-table-lspace:0pt; mso-table-rspace:0pt; }}
-                td, th {{ vertical-align: top; }}
-                .stat-box {{ background-color: #f9fafb; border: 1px solid #e5e7eb; border-radius: 4px; padding: 15px; text-align: center; }}
-                .stat-value {{ font-size: 20px; font-weight: bold; color: #1f2937; margin-bottom: 5px; }}
-                .stat-label {{ font-size: 11px; color: #6b7280; text-transform: uppercase; font-weight: 600; }}
-                .section-header {{ margin: 0 0 15px 0; font-size: 16px; color: #333333; border-bottom: 2px solid #f3f4f6; padding-bottom: 10px; }}
-                .data-table {{ width: 100%; font-size: 13px; }}
-                .data-table th {{ background-color: #f3f4f6; color: #6b7280; font-weight: 600; text-transform: uppercase; padding: 8px; text-align: left; font-size: 11px; }}
-                .data-table td {{ padding: 8px; border-bottom: 1px solid #e5e7eb; color: #333333; }}
-            </style>
-        </head>
-        <body style="margin: 0; padding: 0; background-color: #f4f4f4;">
-            <table border="0" cellpadding="0" cellspacing="0" width="100%" style="background-color: #f4f4f4; padding: 20px;">
-                <tr>
-                    <td align="center">
-                        <table border="0" cellpadding="0" cellspacing="0" width="600" style="background-color: #ffffff; border-radius: 5px; overflow: hidden; box-shadow: 0 2px 5px rgba(0,0,0,0.1);">
-                            
-                            <!-- Header -->
-                            <tr>
-                                <td bgcolor="#2563eb" style="padding: 20px; text-align: center; color: #ffffff;">
-                                    <h1 style="margin: 0; font-size: 24px;">Weekly Server Summary</h1>
-                                    <p style="margin: 5px 0 0 0; font-size: 14px; opacity: 0.9;">{current_date}</p>
-                                </td>
-                            </tr>
-                            
-                            <!-- ZONE 1: System Summary -->
-                            <tr>
-                                <td style="padding: 25px 25px 10px 25px;">
-                                    <h2 class="section-header">System Summary</h2>
-                                    <table border="0" cellpadding="0" cellspacing="0" width="100%">
-                                        <tr>
-                                            <td width="32%" class="stat-box">
-                                                <div class="stat-value">{system['mailboxes']['active']}</div>
-                                                <div class="stat-label">Mailboxes</div>
-                                            </td>
-                                            <td width="2%">&nbsp;</td>
-                                            <td width="32%" class="stat-box">
-                                                <div class="stat-value">{system['aliases']['active']}</div>
-                                                <div class="stat-label">Aliases</div>
-                                            </td>
-                                            <td width="2%">&nbsp;</td>
-                                            <td width="32%" class="stat-box">
-                                                <div class="stat-value">{system['domains']['active']}</div>
-                                                <div class="stat-label">Domains</div>
-                                            </td>
-                                        </tr>
-                                        <tr><td colspan="5" height="10"></td></tr>
-                                        <tr>
-                                            <td width="32%" class="stat-box">
-                                                <div class="stat-value">{storage_display}</div>
-                                                <div class="stat-label">Storage Used</div>
-                                            </td>
-                                            <td width="2%">&nbsp;</td>
-                                            <td width="32%" class="stat-box">
-                                                <div class="stat-value">{queue['count']}</div>
-                                                <div class="stat-label">Queue</div>
-                                            </td>
-                                            <td width="2%">&nbsp;</td>
-                                            <td width="32%" class="stat-box">
-                                                <div class="stat-value">{quarantine['count']}</div>
-                                                <div class="stat-label">Quarantine</div>
-                                            </td>
-                                        </tr>
-                                    </table>
-                                </td>
-                            </tr>
-
-                            <!-- ZONE 2: Email Traffic Summary -->
-                            <tr>
-                                <td style="padding: 10px 25px;">
-                                    <h2 class="section-header">Email Traffic Summary</h2>
-                                    <table border="0" cellpadding="0" cellspacing="0" width="100%">
-                                        <tr>
-                                            <td width="23%" class="stat-box">
-                                                <div class="stat-value">{traffic['total_sent']}</div>
-                                                <div class="stat-label">Sent</div>
-                                            </td>
-                                            <td width="2%">&nbsp;</td>
-                                            <td width="23%" class="stat-box">
-                                                <div class="stat-value">{traffic['total_received']}</div>
-                                                <div class="stat-label">Received</div>
-                                            </td>
-                                            <td width="2%">&nbsp;</td>
-                                            <td width="23%" class="stat-box">
-                                                <div class="stat-value" style="color: #dc2626;">{traffic['sent_failed']}</div>
-                                                <div class="stat-label">Failed</div>
-                                            </td>
-                                            <td width="2%">&nbsp;</td>
-                                            <td width="23%" class="stat-box" style="background-color: {'#fee2e2' if traffic['failure_rate'] > 5 else '#dcfce7'}; border-color: {'#fecaca' if traffic['failure_rate'] > 5 else '#bbf7d0'};">
-                                                <div class="stat-value" style="color: {'#dc2626' if traffic['failure_rate'] > 5 else '#16a34a'};">{traffic['failure_rate']}%</div>
-                                                <div class="stat-label" style="color: {'#991b1b' if traffic['failure_rate'] > 5 else '#166534'};">Rating</div>
-                                            </td>
-                                        </tr>
-                                    </table>
-                                </td>
-                            </tr>
-
-                            <!-- ZONE 3: Blacklist Status -->
-                            <tr>
-                                <td style="padding: 10px 25px;">
-                                    <h2 class="section-header">Blacklist Status</h2>
-                                    <table border="0" cellpadding="0" cellspacing="0" class="data-table">
-                                        <thead>
-                                            <tr>
-                                                <th>Address</th>
-                                                <th>Status</th>
-                                                <th>Details</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody>
-                                            {blacklist_rows}
-                                        </tbody>
-                                    </table>
-                                </td>
-                            </tr>
-
-                            <!-- ZONE 4: DNS Issues (Active & Errors Only) -->
-                             {f'''
-                            <tr>
-                                <td style="padding: 10px 25px;">
-                                    <h2 class="section-header" style="color: #d97706; border-color: #fef3c7;">DNS Issues (Active Domains)</h2>
-                                    <table border="0" cellpadding="0" cellspacing="0" class="data-table">
-                                        <thead>
-                                            <tr style="background-color: #fffbeb;">
-                                                <th style="color: #92400e;">Domain</th>
-                                                <th style="color: #92400e;">Issue</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody>
-                                            {dns_rows}
-                                        </tbody>
-                                    </table>
-                                </td>
-                            </tr>
-                            ''' if dns_issues else ''}
-
-                            <!-- ZONE 5: Top 5 Worst Mailboxes -->
-                            {f'''
-                            <tr>
-                                <td style="padding: 10px 25px 25px 25px;">
-                                    <h2 class="section-header" style="color: #dc2626; border-color: #fee2e2;">Top 5 Worst Rated Mailboxes</h2>
-                                    <table border="0" cellpadding="0" cellspacing="0" class="data-table">
-                                        <thead>
-                                            <tr style="background-color: #fef2f2;">
-                                                <th style="color: #991b1b;">Mailbox</th>
-                                                <th style="text-align: center; color: #991b1b;">Recv</th>
-                                                <th style="text-align: center; color: #991b1b;">Sent</th>
-                                                <th style="text-align: center; color: #991b1b;">Fail</th>
-                                                <th style="text-align: center; color: #991b1b;">Rating</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody>
-                                            {failures_rows}
-                                        </tbody>
-                                    </table>
-                                </td>
-                            </tr>
-                            ''' if top_failures else ''}
-
-                            <!-- Footer -->
-                            <tr>
-                                <td bgcolor="#f4f4f4" align="center" style="padding: 20px; color: #9ca3af; font-size: 11px;">
-                                    Generated by mailcow Logs Viewer
-                                </td>
-                            </tr>
-                        </table>
-                    </td>
-                </tr>
-            </table>
-        </body>
-        </html>
-        """
-        
         recipient = settings.admin_email
         if recipient:
-            # FIX: Subject date format
-            subject = f"Weekly Server Summary - {current_date}"
             # Send in executor - smtplib blocks the event loop
             await asyncio.get_running_loop().run_in_executor(
                 None,
                 send_notification_email,
                 recipient,
                 subject,
-                "Please view this email in an HTML-compatible client.",
+                text_content,
                 html_content
             )
             logger.info(f"Weekly summary report sent to {recipient}")

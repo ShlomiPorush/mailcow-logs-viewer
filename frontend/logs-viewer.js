@@ -66,19 +66,8 @@ async function loadLogViewer() {
         if (data.raw_logs_enabled === false) {
             const output = document.getElementById('logs-output');
             if (output) {
-                output.innerHTML = `
-                    <div class="flex flex-col items-center justify-center py-16 text-center">
-                        <svg class="w-16 h-16 text-gray-400 dark:text-gray-500 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"></path>
-                        </svg>
-                        <h3 class="text-lg font-semibold text-gray-300 mb-2">Live Log Viewer is Disabled</h3>
-                        <p class="text-sm text-gray-500 max-w-md">
-                            Raw log collection is currently turned off. Enable it in
-                            <a href="#" onclick="event.preventDefault(); navigateTo('settings')" class="text-blue-400 hover:text-blue-300 underline">Settings → Raw Logs</a>
-                            to start viewing live logs.
-                        </p>
-                    </div>
-                `;
+                output.innerHTML = `<div class="ui-logs-locked">${uiLocked('Live Log Viewer is Disabled',
+                    'Raw log collection is currently turned off. Enable it in Settings → Raw Logs to start viewing live logs.')}</div>`;
             }
             // Hide the service sidebar
             const sidebar = document.getElementById('logs-service-list');
@@ -98,7 +87,7 @@ async function loadLogViewer() {
         } else {
             const output = document.getElementById('logs-output');
             if (output) {
-                output.innerHTML = '<span class="text-yellow-400">No log services available. Enable services in Settings → Raw Logs.</span>';
+                output.innerHTML = `<div class="ui-logs-locked">${uiLocked('No log services available', 'Enable services in Settings → Raw Logs.')}</div>`;
             }
         }
     } catch (error) {
@@ -115,42 +104,45 @@ function renderLogServiceList(services) {
     if (!container) return;
     
     if (services.length === 0) {
-        container.innerHTML = '<p class="text-xs text-gray-500 dark:text-gray-400 text-center py-4">No services enabled</p>';
+        container.innerHTML = '<p class="ui-empty">No services enabled</p>';
         return;
     }
     
     container.innerHTML = services.map(svc => {
         const iconPath = LOG_SERVICE_ICONS[svc.icon] || LOG_SERVICE_ICONS.file;
         const isActive = svc.id === logsState.activeService;
-        const countStr = svc.log_count >= 1000 ? (svc.log_count / 1000).toFixed(1) + 'K' : svc.log_count.toString();
+        const countStr = svc.log_count >= 1000 ? (svc.log_count / 1000).toFixed(1) + 'K' : String(Number(svc.log_count));
         
         return `
-            <button onclick="selectLogService('${escapeJsArg(svc.id)}')" 
-                id="log-svc-${escapeHtml(svc.id)}"
-                class="w-full flex items-center gap-2 px-3 py-2 rounded-md text-left text-sm transition-colors log-service-btn ${
-                    isActive 
-                    ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-700' 
-                    : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
-                }" data-service="${escapeHtml(svc.id)}">
-                <svg class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <button onclick="selectLogService('${escapeJsArg(svc.id)}')" id="log-svc-${escapeHtml(svc.id)}"
+                class="log-service-btn ui-log-svc"${isActive ? ' aria-current="true"' : ''} data-service="${escapeHtml(svc.id)}">
+                <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="${iconPath}"></path>
                 </svg>
-                <span class="flex-1 truncate font-medium">${escapeHtml(svc.name)}</span>
-                <span class="text-xs text-gray-400 dark:text-gray-500 font-mono">${countStr}</span>
+                <span class="ui-log-svc-name">${escapeHtml(svc.name)}</span>
+                <small>${countStr}</small>
             </button>
         `;
     }).join('');
+    updateLogServiceToggle();
 }
 
+// Narrow screens: the service list folds into one row that names the current service
+function toggleLogServices(open) {
+    const side = document.getElementById('logs-side');
+    const toggle = document.getElementById('logs-side-toggle');
+    if (!side) return;
+    const show = typeof open === 'boolean' ? open : !side.classList.contains('is-open');
+    side.classList.toggle('is-open', show);
+    if (toggle) toggle.setAttribute('aria-expanded', show);
+}
 
-function filterLogServices(query) {
-    const buttons = document.querySelectorAll('.log-service-btn');
-    const q = query.toLowerCase();
-    buttons.forEach(btn => {
-        const service = btn.dataset.service || '';
-        const text = btn.textContent.toLowerCase();
-        btn.style.display = (text.includes(q) || service.includes(q)) ? '' : 'none';
-    });
+function updateLogServiceToggle() {
+    const active = document.querySelector('#logs-service-list .ui-log-svc[aria-current="true"]');
+    const name = document.getElementById('logs-side-current');
+    const count = document.getElementById('logs-side-count');
+    if (name) name.textContent = active ? (active.querySelector('.ui-log-svc-name') || active).textContent.trim() : '-';
+    if (count) count.textContent = active && active.querySelector('small') ? active.querySelector('small').textContent.trim() : '';
 }
 
 async function selectLogService(serviceId) {
@@ -160,18 +152,11 @@ async function selectLogService(serviceId) {
     
     // Update sidebar active state
     document.querySelectorAll('.log-service-btn').forEach(btn => {
-        const isActive = btn.dataset.service === serviceId;
-        if (isActive) {
-            btn.className = btn.className.replace(
-                /text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700/g, ''
-            );
-            btn.classList.add('bg-blue-50', 'dark:bg-blue-900/30', 'text-blue-700', 'dark:text-blue-300', 'border', 'border-blue-200', 'dark:border-blue-700');
-            btn.classList.remove('hover:bg-gray-100', 'dark:hover:bg-gray-700');
-        } else {
-            btn.classList.remove('bg-blue-50', 'dark:bg-blue-900/30', 'text-blue-700', 'dark:text-blue-300', 'border', 'border-blue-200', 'dark:border-blue-700');
-            btn.classList.add('text-gray-700', 'dark:text-gray-300', 'hover:bg-gray-100', 'dark:hover:bg-gray-700');
-        }
+        if (btn.dataset.service === serviceId) btn.setAttribute('aria-current', 'true');
+        else btn.removeAttribute('aria-current');
     });
+    updateLogServiceToggle();
+    toggleLogServices(false);
     
     // Update status bar
     const activeServiceEl = document.getElementById('logs-active-service');
@@ -221,35 +206,64 @@ async function loadSmartFilters(serviceId) {
         
         container.classList.remove('hidden');
         
-        const colorClasses = {
-            red: 'border-red-300 dark:border-red-700 text-red-700 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20',
-            orange: 'border-orange-300 dark:border-orange-700 text-orange-700 dark:text-orange-400 hover:bg-orange-50 dark:hover:bg-orange-900/20',
-            yellow: 'border-yellow-300 dark:border-yellow-700 text-yellow-700 dark:text-yellow-400 hover:bg-yellow-50 dark:hover:bg-yellow-900/20',
-            blue: 'border-blue-300 dark:border-blue-700 text-blue-700 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20',
-        };
-        
-        const activeColorClasses = {
-            red: 'bg-red-500 border-red-500 text-white',
-            orange: 'bg-orange-500 border-orange-500 text-white',
-            yellow: 'bg-yellow-500 border-yellow-500 text-white',
-            blue: 'bg-blue-500 border-blue-500 text-white',
-        };
-        
-        chipsContainer.innerHTML = logsState.smartFilters.map(f => {
-            const colors = colorClasses[f.color] || colorClasses.blue;
-            return `<button onclick="toggleSmartFilter('${f.id}')" 
-                id="smart-filter-${f.id}"
-                class="px-2.5 py-1 text-xs font-medium rounded-full border transition-colors ${colors}"
-                title="${escapeHtml(f.description || '')}"
-                data-filter-id="${f.id}" data-color="${f.color}">
-                ${escapeHtml(f.label)}
-            </button>`;
-        }).join('');
+        chipsContainer.innerHTML = logsState.smartFilters.map(f => `<button onclick="toggleSmartFilter('${escapeJsArg(f.id)}')"
+                id="smart-filter-${escapeHtml(f.id)}" class="ui-chip ui-chip-${escapeHtml(f.color || 'blue')}" aria-pressed="false"
+                title="${escapeHtml(f.description || '')}" data-filter-id="${escapeHtml(f.id)}" data-color="${escapeHtml(f.color || 'blue')}">${escapeHtml(f.label)}</button>`).join('');
+        fitQuickFilters();
         
     } catch (error) {
         console.error('[LOGS] Failed to load smart filters:', error);
         container.classList.add('hidden');
     }
+}
+
+// Quick filters fold to a row and a half, so the cut second row shows there is more
+let quickFiltersOpen = false;
+function fitQuickFilters() {
+    const chips = document.getElementById('logs-smart-filter-chips');
+    const more = document.getElementById('logs-quick-more');
+    if (!chips || !more) return;
+    if (!quickFiltersObserver && typeof ResizeObserver === 'function') {
+        let lastWidth = 0;
+        quickFiltersObserver = new ResizeObserver(entries => {
+            const width = Math.round(entries[0].contentRect.width);
+            if (width && width !== lastWidth) { lastWidth = width; fitQuickFilters(); }
+        });
+        quickFiltersObserver.observe(chips);
+    }
+    chips.classList.remove('is-folded');
+    const first = chips.firstElementChild;
+    if (!first) { more.classList.add('hidden'); return; }
+    // Fold only when it saves at least a row; otherwise show them all, no link
+    const rowH = first.offsetHeight;
+    const foldH = Math.round(rowH * 1.6 + 6);
+    const overflows = chips.scrollHeight > foldH + rowH;
+    // An active filter never hides in the folded part
+    const activeHidden = [...chips.querySelectorAll('[aria-pressed="true"]')].some(c => c.offsetTop - chips.offsetTop > rowH);
+    if (activeHidden) quickFiltersOpen = true;
+    more.classList.toggle('hidden', !overflows);
+    chips.classList.toggle('is-folded', overflows && !quickFiltersOpen);
+    chips.style.setProperty('--ui-fold-h', `${foldH}px`);
+    more.textContent = quickFiltersOpen ? 'Show less' : `Show all ${chips.children.length}`;
+    more.setAttribute('aria-expanded', quickFiltersOpen);
+}
+
+function toggleQuickFilters() {
+    quickFiltersOpen = !quickFiltersOpen;
+    fitQuickFilters();
+}
+// Refit when the chips get their size: the page was hidden, or the width changed
+let quickFiltersObserver = null;
+
+// The custom date range opens from its chip; the presets fill it and load
+function toggleLogCustomRange(open) {
+    const box = document.getElementById('logs-custom-range');
+    const btn = document.getElementById('logs-custom-range-btn');
+    if (!box) return;
+    const show = typeof open === 'boolean' ? open : box.classList.contains('hidden');
+    box.classList.toggle('hidden', !show);
+    if (btn) { btn.setAttribute('aria-expanded', show); btn.setAttribute('aria-pressed', show); }
+    if (show) { const from = document.getElementById('logs-date-from'); if (from) from.focus(); }
 }
 
 async function toggleSmartFilter(filterId) {
@@ -261,23 +275,9 @@ async function toggleSmartFilter(filterId) {
     }
     
     // Update chip visual
-    const colorClasses = {
-        red: { inactive: 'border-red-300 dark:border-red-700 text-red-700 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20', active: 'bg-red-500 border-red-500 text-white' },
-        orange: { inactive: 'border-orange-300 dark:border-orange-700 text-orange-700 dark:text-orange-400 hover:bg-orange-50 dark:hover:bg-orange-900/20', active: 'bg-orange-500 border-orange-500 text-white' },
-        yellow: { inactive: 'border-yellow-300 dark:border-yellow-700 text-yellow-700 dark:text-yellow-400 hover:bg-yellow-50 dark:hover:bg-yellow-900/20', active: 'bg-yellow-500 border-yellow-500 text-white' },
-        blue: { inactive: 'border-blue-300 dark:border-blue-700 text-blue-700 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20', active: 'bg-blue-500 border-blue-500 text-white' },
-    };
-    
     const btn = document.getElementById(`smart-filter-${filterId}`);
-    if (btn) {
-        const color = btn.dataset.color || 'blue';
-        const isActive = logsState.activeSmartFilters.includes(filterId);
-        const classes = colorClasses[color] || colorClasses.blue;
-        
-        // Reset classes
-        btn.className = `px-2.5 py-1 text-xs font-medium rounded-full border transition-colors ${isActive ? classes.active : classes.inactive}`;
-    }
-    
+    if (btn) btn.setAttribute('aria-pressed', logsState.activeSmartFilters.includes(filterId) ? 'true' : 'false');
+
     // Client-side filter: show/hide existing log lines
     applyLogFilter();
 }
@@ -331,6 +331,8 @@ async function fetchOlderLogs() {
     if (logsState.isLoadingMore || logsState.oldestPageLoaded <= 1) return;
     
     logsState.isLoadingMore = true;
+    // Clear during the request makes its result stale
+    const view = logsState.viewId;
     const pageToLoad = logsState.oldestPageLoaded - 1;
     
     // Show loading indicator at the history edge (top normally, bottom in
@@ -361,6 +363,7 @@ async function fetchOlderLogs() {
         
         const data = await response.json();
         const entries = data.data || [];
+        if (view !== logsState.viewId) return;
         
         if (entries.length > 0) {
             logsState.oldestPageLoaded = pageToLoad;
@@ -457,6 +460,9 @@ function renderLogEntries(entries, serviceId, replace = false, prepend = false) 
     if (replace) {
         output.innerHTML = '';
         logsState.allEntries = [];
+    } else if (entries.length) {
+        // New lines after a Clear replace its note
+        output.querySelectorAll('.logs-placeholder').forEach(el => el.remove());
     }
     
     // Store entries
@@ -880,7 +886,7 @@ function updateWsIndicator(connected) {
     const status = document.getElementById('logs-ws-status');
     
     if (indicator) {
-        indicator.className = `w-2 h-2 rounded-full ${connected ? 'bg-green-500' : logsState.isPaused ? 'bg-yellow-500' : 'bg-red-500'}`;
+        indicator.className = `ui-mdot ${connected ? 'ui-mdot-ok' : logsState.isPaused ? 'ui-mdot-warn' : 'ui-mdot-fail'}`;
     }
     if (status) {
         status.textContent = connected ? 'Connected' : logsState.isPaused ? 'Paused' : 'Disconnected';
@@ -905,12 +911,7 @@ function updateLogStatusBar() {
     }
     
     if (updateEl) {
-        if (logsState.lastUpdateTime) {
-            const seconds = Math.floor((new Date() - logsState.lastUpdateTime) / 1000);
-            updateEl.textContent = `Last update: ${seconds}s ago`;
-        } else {
-            updateEl.textContent = 'Last update: just now';
-        }
+        uiAgo(updateEl, (logsState.lastUpdateTime || new Date()).toISOString(), 'Updated ');
     }
 }
 
@@ -929,19 +930,13 @@ function toggleLogPause() {
         // Paused → show Resume
         if (text) text.textContent = 'Resume';
         if (icon) icon.innerHTML = '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>';
-        if (btn) {
-            btn.classList.add('border-yellow-500', 'bg-yellow-500', 'text-white');
-            btn.classList.remove('border-gray-300', 'dark:border-gray-600', 'text-gray-700', 'dark:text-gray-300');
-        }
+        if (btn) btn.setAttribute('aria-pressed', 'true');
         disconnectLogWebSocket();
     } else {
         // Resumed → show Pause
         if (text) text.textContent = 'Pause';
         if (icon) icon.innerHTML = '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>';
-        if (btn) {
-            btn.classList.remove('border-yellow-500', 'bg-yellow-500', 'text-white');
-            btn.classList.add('border-gray-300', 'dark:border-gray-600', 'text-gray-700', 'dark:text-gray-300');
-        }
+        if (btn) btn.setAttribute('aria-pressed', 'false');
         connectLogWebSocket(logsState.activeService);
     }
     
@@ -952,15 +947,7 @@ function toggleAutoScroll() {
     logsState.autoScroll = !logsState.autoScroll;
     
     const btn = document.getElementById('logs-autoscroll-btn');
-    if (btn) {
-        if (logsState.autoScroll) {
-            btn.classList.add('border-blue-500', 'bg-blue-500', 'text-white');
-            btn.classList.remove('border-gray-300', 'dark:border-gray-600', 'text-gray-700', 'dark:text-gray-300');
-        } else {
-            btn.classList.remove('border-blue-500', 'bg-blue-500', 'text-white');
-            btn.classList.add('border-gray-300', 'dark:border-gray-600', 'text-gray-700', 'dark:text-gray-300');
-        }
-    }
+    if (btn) btn.setAttribute('aria-pressed', logsState.autoScroll ? 'true' : 'false');
     
     if (logsState.autoScroll) {
         const terminal = document.getElementById('logs-terminal');
@@ -987,15 +974,7 @@ function toggleWordWrap() {
         output.style.wordWrap = logsState.wordWrap ? 'break-word' : 'normal';
     }
     
-    if (btn) {
-        if (logsState.wordWrap) {
-            btn.classList.add('border-blue-500', 'bg-blue-500', 'text-white');
-            btn.classList.remove('border-gray-300', 'dark:border-gray-600', 'text-gray-700', 'dark:text-gray-300');
-        } else {
-            btn.classList.remove('border-blue-500', 'bg-blue-500', 'text-white');
-            btn.classList.add('border-gray-300', 'dark:border-gray-600', 'text-gray-700', 'dark:text-gray-300');
-        }
-    }
+    if (btn) btn.setAttribute('aria-pressed', logsState.wordWrap ? 'true' : 'false');
 }
 
 function searchLogs() {
@@ -1137,11 +1116,7 @@ function setLiveButtonActive(active) {
     const btn = document.getElementById('logs-live-btn');
     if (!btn) return;
     
-    if (active) {
-        btn.className = 'inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md border border-green-500 bg-green-500 text-white transition-colors';
-    } else {
-        btn.className = 'inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors';
-    }
+    btn.setAttribute('aria-pressed', active ? 'true' : 'false');
 }
 
 function clearLogSearch() {
@@ -1153,16 +1128,7 @@ function clearLogSearch() {
     if (logsState.activeSmartFilters.length > 0) {
         logsState.activeSmartFilters.forEach(filterId => {
             const btn = document.getElementById(`smart-filter-${filterId}`);
-            if (btn) {
-                const color = btn.dataset.color || 'blue';
-                const inactiveClasses = {
-                    red: 'border-red-300 dark:border-red-700 text-red-700 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20',
-                    orange: 'border-orange-300 dark:border-orange-700 text-orange-700 dark:text-orange-400 hover:bg-orange-50 dark:hover:bg-orange-900/20',
-                    yellow: 'border-yellow-300 dark:border-yellow-700 text-yellow-700 dark:text-yellow-400 hover:bg-yellow-50 dark:hover:bg-yellow-900/20',
-                    blue: 'border-blue-300 dark:border-blue-700 text-blue-700 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20',
-                };
-                btn.className = `px-2.5 py-1 text-xs font-medium rounded-full border transition-colors ${inactiveClasses[color] || inactiveClasses.blue}`;
-            }
+            if (btn) btn.setAttribute('aria-pressed', 'false');
         });
         logsState.activeSmartFilters = [];
     }
@@ -1230,7 +1196,7 @@ function updateFilterBadge(hasFilters, visible, total) {
     if (logsState.activeSmartFilters.length > 0) {
         const filterNames = logsState.activeSmartFilters.map(id => {
             const f = logsState.smartFilters.find(sf => sf.id === id);
-            return f ? f.label : id;
+            return escapeHtml(f ? f.label : id);
         });
         parts.push(filterNames.join(', '));
     }
@@ -1242,10 +1208,16 @@ function clearLogDisplay() {
     // Clear display
     const output = document.getElementById('logs-output');
     if (output) {
-        output.innerHTML = '<span class="text-gray-500">Display cleared. New logs will appear here.</span>';
+        output.innerHTML = '<span class="text-gray-500 logs-placeholder">Display cleared. New logs will appear here.</span>';
     }
     logsState.entryCount = 0;
     logsState.allEntries = [];
+    // A cleared screen does not refill with history: no older pages, and a
+    // history request already on its way is dropped
+    logsState.oldestPageLoaded = 1;
+    logsState.viewId = (logsState.viewId || 0) + 1;
+    const loader = document.getElementById('logs-load-more-indicator');
+    if (loader) loader.remove();
     
     // Clear search
     const searchInput = document.getElementById('logs-search-input');
@@ -1256,10 +1228,7 @@ function clearLogDisplay() {
     if (logsState.activeSmartFilters.length > 0) {
         logsState.activeSmartFilters.forEach(filterId => {
             const chip = document.querySelector(`[data-filter-id="${filterId}"]`);
-            if (chip) {
-                chip.classList.remove('bg-blue-100', 'dark:bg-blue-900/40', 'text-blue-700', 'dark:text-blue-300', 'border-blue-300', 'dark:border-blue-600');
-                chip.classList.add('bg-gray-100', 'dark:bg-gray-700', 'text-gray-600', 'dark:text-gray-400', 'border-gray-300', 'dark:border-gray-600');
-            }
+            if (chip) chip.setAttribute('aria-pressed', 'false');
         });
         logsState.activeSmartFilters = [];
     }

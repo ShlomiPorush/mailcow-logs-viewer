@@ -18,6 +18,7 @@ ALLOWED_DOCS = {
     "Quarantine": "Quarantine.md",
     "Abuse_Protection": "Abuse_Protection.md",
     "Rate_Limits": "Rate_Limits.md",
+    "Devices": "Devices.md",
 }
 
 @router.get("/docs/{doc_name}", response_class=PlainTextResponse)

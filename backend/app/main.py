@@ -7,20 +7,25 @@ root = logging.getLogger()
 root.handlers = []
 
 import asyncio
+import mimetypes
 import time
 
 from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import HTMLResponse, JSONResponse
+from .frontend_assets import stamp_asset_versions
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.convertors import Convertor, register_url_convertor
 from starlette.datastructures import MutableHeaders
 from contextlib import asynccontextmanager, suppress
+from typing import Optional
 
 from .config import settings, set_cached_active_domains, reload_settings
 from .database import init_db, check_db_connection
 from .scheduler import start_scheduler, stop_scheduler
 from .raw_logs_worker import start_raw_logs_scheduler, stop_raw_logs_scheduler
-from .mailcow_api import mailcow_api
+from .mailcow_api import mailcow_api, MailcowAPIError
+from .utils import internal_error
 from .routers import (
     logs,
     stats,
@@ -28,6 +33,7 @@ from .routers import (
     domains as domains_router,
     dmarc as dmarc_router,
     mailbox_stats as mailbox_stats_router,
+    devices as devices_router,
     documentation,
     blacklist as blacklist_router,
     reporting,
@@ -38,11 +44,14 @@ from .routers import (
     quarantine_rules as quarantine_rules_router,
     security_alerts as security_alerts_router,
     smtp_abuse as smtp_abuse_router,
+    protection as protection_router,
     notifications as notifications_router,
     rate_limits as rate_limits_router,
 )
 from .migrations import run_migrations
-from .auth import BasicAuthMiddleware
+from .auth import BasicAuthMiddleware, safe_return_path
+from .origin_guard import SameOriginGuardMiddleware
+from .session import get_session_from_request
 from .services.auth_cleanup import auth_store_maintenance
 from .version import __version__
 
@@ -82,6 +91,28 @@ async def _loop_lag_watchdog():
             logger.debug(f"Loop lag watchdog iteration failed: {e}")
 
 
+def log_authentication_state() -> None:
+    """Log which authentication is in force; running without any is a warning."""
+    if settings.is_authentication_enabled:
+        auth_methods = []
+        if settings.is_basic_auth_enabled:
+            auth_methods.append("Basic Auth")
+            if not settings.auth_password:
+                logger.warning("WARNING: Basic Auth enabled but password not set!")
+        if settings.is_oauth2_enabled:
+            auth_methods.append(f"OAuth2 ({settings.oauth2_provider_name})")
+            if not settings.oauth2_client_id or not settings.oauth2_client_secret:
+                logger.warning("WARNING: OAuth2 enabled but client credentials not configured!")
+
+        logger.info(f"Authentication is ENABLED: {', '.join(auth_methods)}")
+    else:
+        logger.warning(
+            "Authentication is DISABLED: anyone who can reach this app can read the logs, "
+            "change settings and run mailcow actions. Set BASIC_AUTH_ENABLED=true with "
+            "AUTH_PASSWORD, or configure OAuth2, unless access is restricted another way."
+        )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifecycle management"""
@@ -104,21 +135,23 @@ async def lifespan(app: FastAPI):
         from .migrations import run_alembic_upgrade
         run_alembic_upgrade()
 
-        # Load settings overrides from DB (if UI editing is enabled and overrides exist)
+        # Load settings overrides from DB (if UI editing is enabled and overrides exist).
+        # A failed read aborts startup: authentication enabled from the UI is
+        # stored only there, and starting without it would serve with auth off.
         if settings.edit_settings_via_ui_enabled:
+            from .database import get_db_context
+            with get_db_context() as db:
+                reload_settings(db)
+            logger.info("Settings loaded from database overrides")
             try:
-                from .database import get_db_context
-                with get_db_context() as db:
-                    reload_settings(db)
-                    # Reload services that cache settings values
-                    mailcow_api.reload_config()
-                    from .services.oauth2_client import oauth2_client
-                    oauth2_client.reload_config()
-                    logger.info("Settings loaded from database overrides")
+                # Reload services that cache settings values
+                mailcow_api.reload_config()
+                from .services.oauth2_client import oauth2_client
+                oauth2_client.reload_config()
             except Exception as e:
-                logger.warning(f"Could not load settings from DB: {e}")
+                logger.warning(f"Could not apply the stored settings to the mailcow and OAuth2 clients: {e}")
     except Exception as e:
-        logger.error(f"Failed to initialize database: {e}")
+        logger.error(f"Failed to initialize database or load the stored settings: {e}")
         raise
     
     # Log effective configuration (after DB overrides are loaded)
@@ -127,20 +160,7 @@ async def lifespan(app: FastAPI):
     if settings.blacklist_emails_list:
         logger.info(f"Blacklist enabled with {len(settings.blacklist_emails_list)} email(s)")
     
-    if settings.is_authentication_enabled:
-        auth_methods = []
-        if settings.is_basic_auth_enabled:
-            auth_methods.append("Basic Auth")
-            if not settings.auth_password:
-                logger.warning("WARNING: Basic Auth enabled but password not set!")
-        if settings.is_oauth2_enabled:
-            auth_methods.append(f"OAuth2 ({settings.oauth2_provider_name})")
-            if not settings.oauth2_client_id or not settings.oauth2_client_secret:
-                logger.warning("WARNING: OAuth2 enabled but client credentials not configured!")
-        
-        logger.info(f"Authentication is ENABLED: {', '.join(auth_methods)}")
-    else:
-        logger.info("Authentication is DISABLED")
+    log_authentication_state()
     
     # GeoIP initialization
     try:
@@ -231,19 +251,36 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# Add Basic Auth Middleware FIRST (before CORS)
+# Add Basic Auth Middleware FIRST (innermost)
 # This ensures ALL requests are authenticated when enabled
 app.add_middleware(BasicAuthMiddleware)
 
-# CORS middleware - allow all origins because the app runs behind a reverse proxy in Docker.
-# The reverse proxy (nginx/traefik) handles origin restrictions.
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],  # nosemgrep: python.fastapi.security.wildcard-cors.wildcard-cors
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# Writes and the live log WebSocket must come from the app's own pages,
+# with or without authentication
+app.add_middleware(SameOriginGuardMiddleware)
+
+
+def configure_cors(application: FastAPI) -> None:
+    """Allow cross-origin API access only for the exact origins in CORS_ALLOWED_ORIGINS.
+
+    The web interface is served from the same origin as the API and needs no
+    CORS at all, so by default no CORS policy is installed. Credentials are
+    never combined with a wildcard or a reflected Origin.
+    """
+    origins = settings.cors_allowed_origins_list
+    if not origins:
+        return
+    application.add_middleware(
+        CORSMiddleware,
+        allow_origins=origins,
+        allow_credentials=True,
+        allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
+        allow_headers=["Content-Type", "Authorization"],
+    )
+    logger.info(f"Cross-origin API access allowed for: {', '.join(origins)}")
+
+
+configure_cors(app)
 
 # Security headers on every response.
 # CSP notes: the frontend relies on inline event handlers and inline <script>
@@ -324,7 +361,7 @@ class SlowRequestLogMiddleware:
 app.add_middleware(SecurityHeadersMiddleware, csp=_CSP)
 
 # Registered last so it is the outermost middleware: the measured time then
-# covers auth/CORS/security-headers as well, not just the route handler.
+# covers auth/origin guard/security-headers as well, not just the route handler.
 app.add_middleware(SlowRequestLogMiddleware)
 
 # Include routers
@@ -342,6 +379,7 @@ if settings_router:
 app.include_router(domains_router.router, prefix="/api", tags=["Domains"])
 app.include_router(dmarc_router.router, prefix="/api", tags=["DMARC"])
 app.include_router(mailbox_stats_router.router, prefix="/api", tags=["Mailbox Stats"])
+app.include_router(devices_router.router, prefix="/api", tags=["Devices"])
 app.include_router(documentation.router, prefix="/api", tags=["Documentation"])
 app.include_router(blacklist_router.router, prefix="/api/blacklist", tags=["Blacklist"])
 app.include_router(raw_logs_router.router, prefix="/api", tags=["Raw Logs"])
@@ -350,6 +388,7 @@ app.include_router(suppressions_router.router, prefix="/api", tags=["Suppression
 app.include_router(quarantine_rules_router.router, tags=["Quarantine Rules"])
 app.include_router(security_alerts_router.router, prefix="/api", tags=["Security Alerts"])
 app.include_router(smtp_abuse_router.router, prefix="/api", tags=["SMTP Abuse Protection"])
+app.include_router(protection_router.router, prefix="/api", tags=["Protection Rules"])
 app.include_router(notifications_router.router, prefix="/api", tags=["Notifications"])
 app.include_router(rate_limits_router.router, prefix="/api", tags=["Rate Limits"])
 
@@ -360,13 +399,17 @@ app.include_router(rate_limits_router.router, prefix="/api", tags=["Rate Limits"
 # them (see backend/tests/test_route_exposure.py).
 app.include_router(raw_logs_router.ws_router, tags=["Raw Logs WebSocket"])
 
-# Mount static files (frontend)
+# Mount static files (frontend). The slim Python image has no MIME entry for
+# web fonts, so they would go out as application/octet-stream.
+mimetypes.add_type("font/woff2", ".woff2")
 app.mount("/static", StaticFiles(directory="/app/frontend"), name="static")
 
 
 @app.get("/login", response_class=HTMLResponse)
-def login_page():
-    """Serve the login page"""
+def login_page(request: Request, next: Optional[str] = None):
+    """Serve the login page, or skip it when there is nothing to sign in to"""
+    if not settings.is_authentication_enabled or get_session_from_request(request):
+        return RedirectResponse(url=safe_return_path(next), status_code=302, headers={"Cache-Control": "no-store"})
     try:
         with open("/app/frontend/login.html", "r") as f:
             return HTMLResponse(content=f.read())
@@ -384,7 +427,9 @@ def root():
     # If user reaches here, they are authenticated
     try:
         with open("/app/frontend/index.html", "r") as f:
-            return HTMLResponse(content=f.read())
+            html = f.read()
+        # Asset links carry a content hash, and the page itself is always revalidated
+        return HTMLResponse(content=stamp_asset_versions(html, "/app/frontend"), headers={"Cache-Control": "no-cache"})
     except FileNotFoundError:
         return HTMLResponse(
             content="<h1>mailcow Logs Viewer</h1><p>Frontend not found. Please check installation.</p>",
@@ -444,6 +489,14 @@ async def app_info(request: Request):
     return info
 
 
+@app.exception_handler(MailcowAPIError)
+async def mailcow_exception_handler(request: Request, exc: MailcowAPIError):
+    """A mailcow failure no route turned into an answer: say it was mailcow"""
+    logger.error(f"mailcow request failed: {exc}")
+    error = internal_error(exc)
+    return JSONResponse(status_code=error.status_code, content={"detail": error.detail})
+
+
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
     """Global exception handler"""
@@ -457,16 +510,39 @@ async def global_exception_handler(request: Request, exc: Exception):
     )
 
 
+class SpaPathConvertor(Convertor):
+    """Any path except those under /api and /ws.
+
+    Those prefixes belong to the API and the WebSocket. If the page route
+    matched them, an unknown API path such as /api/does-not-exist would get
+    index.html with 200 (and any other method a misleading 405), hiding typos
+    from scripts. Left unmatched, it gets FastAPI's JSON 404 for every method.
+    """
+
+    regex = r"(?!(?:api|ws)(?:/|$)).*"
+
+    def convert(self, value: str) -> str:
+        return value
+
+    def to_string(self, value: str) -> str:
+        return value
+
+
+register_url_convertor("spa_path", SpaPathConvertor())
+
+
 # SPA catch-all route - must be AFTER all other routes and exception handlers
 # Returns index.html for all frontend routes (e.g., /dashboard, /messages, /dmarc)
-@app.get("/{full_path:path}", response_class=HTMLResponse)
+@app.get("/{full_path:spa_path}", response_class=HTMLResponse)
 def spa_catch_all(full_path: str):
     """Serve the SPA for all frontend routes - enables clean URLs"""
     # API and static routes are handled by their respective routers/mounts
-    # This catch-all only receives unmatched routes
+    # This catch-all only receives unmatched routes outside /api and /ws
     try:
         with open("/app/frontend/index.html", "r") as f:
-            return HTMLResponse(content=f.read())
+            html = f.read()
+        # Asset links carry a content hash, and the page itself is always revalidated
+        return HTMLResponse(content=stamp_asset_versions(html, "/app/frontend"), headers={"Cache-Control": "no-cache"})
     except FileNotFoundError:
         return HTMLResponse(
             content="<h1>mailcow Logs Viewer</h1><p>Frontend not found. Please check installation.</p>",

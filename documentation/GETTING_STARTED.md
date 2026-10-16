@@ -96,6 +96,17 @@ Then rename the environment file:
 mv env.example .env
 ```
 
+> [!NOTE]
+> The shipped `docker-compose.yml` runs the application container with a read-only filesystem: it writes only to the `/app/data` volume and to `/tmp`. If you use your own compose file, you can add the same two settings to the `app` service:
+>
+> ```yaml
+>     read_only: true
+>     tmpfs:
+>       - /tmp:size=64m
+> ```
+>
+> Keep a volume mapped to `/app/data` when you do; the application cannot start read-only without it.
+
 ### Step 3: Configure Environment
 
 Edit the `.env` file and configure the settings for your environment:
@@ -273,6 +284,8 @@ SMTP_FROM=noreply@yourdomain.com
 ```
 
 **If not configured:** No email notifications will be sent (default: `SMTP_ENABLED=false`).
+
+**Certificate check (recommended):** by default the SMTP password is sent without checking the server's certificate. Add `SMTP_VERIFY_SSL=auto` (and `DMARC_IMAP_VERIFY_SSL=auto` for the IMAP import below) to check it for servers reached by a host name, or `true` to check every server. Leave it off only for a server with a self-signed certificate. See [ENV_Settings.md](ENV_Settings.md#smtp-configuration).
 
 ---
 

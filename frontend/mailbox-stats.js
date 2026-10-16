@@ -14,7 +14,8 @@ let mailboxStatsCache = {
     mailboxes: null,
     domains: null,
     lastLoad: null,
-    expandedMailboxes: new Set() // Track expanded accordion states
+    expandedMailboxes: new Set(), // Track expanded accordion states
+    openAliases: new Set() // Aliases opened on a phone to show all their counts
 };
 
 // =============================================================================
@@ -47,6 +48,7 @@ function initMailboxStatsPage() {
 
 
 function mailboxStatsSwitchView(view) {
+    const requested = view;
     const disabled = window.disabledFeatures || [];
     // The feature can be turned off while the Rate Limits view is open
     if (view === 'rate-limits' && disabled.includes('rate-limits')) {
@@ -60,6 +62,8 @@ function mailboxStatsSwitchView(view) {
         view = 'rate-limits';
     }
     mailboxStatsView = view;
+    // A view this page cannot show corrects the address instead of adding a Back step
+    routerSyncSubpage('mailbox-stats', view, view !== requested);
 
     document.querySelectorAll('[id^="mailbox-stats-view-"]').forEach(btn => {
         btn.classList.remove('active');
@@ -149,7 +153,7 @@ async function loadMailboxStats() {
         // Update last update time
         const lastUpdateEl = document.getElementById('mailbox-stats-last-update');
         if (lastUpdateEl && summary.last_update) {
-            lastUpdateEl.textContent = `Last updated: ${formatTime(summary.last_update)}`;
+            uiAgo(lastUpdateEl, summary.last_update, 'Updated ');
         }
 
         // Show content, hide loading
@@ -162,13 +166,10 @@ async function loadMailboxStats() {
         console.error('Error loading mailbox stats:', error);
         if (loading) {
             loading.innerHTML = `
-                <div class="text-center py-12">
-                    <svg class="w-12 h-12 text-red-500 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                    </svg>
-                    <p class="text-red-500 mb-2">Failed to load mailbox statistics</p>
-                    <p class="text-gray-500 dark:text-gray-400 text-sm">${escapeHtml(error.message)}</p>
-                    <button onclick="loadMailboxStats()" class="mt-4 px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">Retry</button>
+                <div class="ui-empty">
+                    <p class="ui-text-fail">Failed to load mailbox statistics</p>
+                    <p>${escapeHtml(error.message)}</p>
+                    <button onclick="loadMailboxStats()" class="ui-btn ui-btn-sm">Retry</button>
                 </div>
             `;
         }
@@ -220,7 +221,7 @@ function populateMailboxStatsDomainFilter(domains) {
     if (!select) return;
 
     // Clear existing options except "All Domains"
-    select.innerHTML = '<option value="">All Domains</option>';
+    select.innerHTML = '<option value="" data-short="All">All Domains</option>';
 
     // Add domain options
     domains.forEach(d => {
@@ -231,12 +232,22 @@ function populateMailboxStatsDomainFilter(domains) {
             : `${d.domain} (${d.mailbox_count})`;
         select.appendChild(option);
     });
+    uiFilterBarSync();
 }
 
 // Current page for pagination
 let mailboxStatsPage = 1;
+let mailboxStatsTotalPages = 1;
+let mailboxStatsLoading = false;
+let mailboxStatsSeq = 0;          // an answer for filters no longer chosen is dropped
+let mailboxStatsMoreObserver = null;
 
+// The first 50 mailboxes, or (page > 1) the next 50 as the list scrolls
 async function loadMailboxStatsList(page = 1) {
+    uiFilterBarSync();
+    if (page > 1 && (mailboxStatsLoading || page > mailboxStatsTotalPages)) return;
+    const seq = ++mailboxStatsSeq;
+    mailboxStatsLoading = true;
     mailboxStatsPage = page;
     const dateRange = document.getElementById('mailbox-stats-date-range')?.value || '30days';
     const customStartDate = document.getElementById('mailbox-stats-start-date')?.value || '';
@@ -267,345 +278,266 @@ async function loadMailboxStatsList(page = 1) {
         if (!response.ok) throw new Error('Failed to fetch mailboxes');
 
         const data = await response.json();
-        mailboxStatsCache.mailboxes = data.mailboxes || [];
+        if (seq !== mailboxStatsSeq) return;
+        const loaded = data.mailboxes || [];
+        if (page > 1) {
+            const have = new Set(mailboxStatsCache.mailboxes.map(m => m.username));
+            mailboxStatsCache.mailboxes = mailboxStatsCache.mailboxes.concat(loaded.filter(m => !have.has(m.username)));
+        } else {
+            mailboxStatsCache.mailboxes = loaded;
+        }
+        mailboxStatsTotalPages = data.total_pages || 1;
+        mailboxStatsCache.activityUnit = data.activity_unit || 'day';
+        mailboxStatsCache.activityBuckets = data.activity_buckets || [];
 
         // Update count
         const countEl = document.getElementById('mailbox-stats-count');
-        if (countEl) countEl.textContent = `${data.total || 0} mailboxes`;
+        if (countEl) countEl.textContent = uiCountLabel(data.total || 0, 'mailbox', 'mailboxes');
 
-        // Update pagination info
-        const pageInfoEl = document.getElementById('mailbox-stats-page-info');
-        if (pageInfoEl && data.total_pages > 1) {
-            pageInfoEl.textContent = `Page ${data.page} of ${data.total_pages}`;
-        } else if (pageInfoEl) {
-            pageInfoEl.textContent = '';
-        }
-
-        renderMailboxStatsAccordion(data.mailboxes || [], data.page, data.total_pages);
+        renderMailboxStatsAccordion(mailboxStatsCache.mailboxes, data.page, data.total_pages, data.total || 0);
 
     } catch (error) {
         console.error('Error loading mailbox list:', error);
+    } finally {
+        if (seq === mailboxStatsSeq) mailboxStatsLoading = false;
     }
 }
 
-function renderMailboxStatsAccordion(mailboxes, page = 1, totalPages = 1) {
+// When the end of the list comes near, the next page is asked for
+function mailboxStatsWatchMore(more) {
+    if (mailboxStatsMoreObserver) mailboxStatsMoreObserver.disconnect();
+    mailboxStatsMoreObserver = null;
+    const sentinel = document.getElementById('mailbox-stats-more');
+    if (!more || !sentinel || typeof IntersectionObserver === 'undefined') return;
+    mailboxStatsMoreObserver = new IntersectionObserver(entries => {
+        if (!entries.some(e => e.isIntersecting)) return;
+        mailboxStatsMoreObserver.disconnect();
+        loadMailboxStatsList(mailboxStatsPage + 1);
+    }, { rootMargin: '0px 0px 400px 0px' });
+    mailboxStatsMoreObserver.observe(sentinel);
+}
+
+// A count that opens Messages filtered on this address
+function mailboxStatLink(email, filter, value, label, tone) {
+    const args = `{ email: '${escapeJsArg(email)}', filterType: 'search', ${filter} }`;
+    return `<button type="button" class="ui-kpi ui-kpi-btn" onclick="event.stopPropagation(); navigateToMessagesWithFilter(${args})" title="Open these messages">
+        <b class="${!value ? 'ui-zero' : tone ? `ui-${tone}` : ''}">${(value || 0).toLocaleString()}</b>${label}</button>`;
+}
+
+// The counts of a mailbox or an alias: its traffic, and what became of the mail it sent.
+// Each count opens its messages. Wide screens show them as one row of tiles.
+function mailboxCountGroups(email, c) {
+    return `<div class="ui-kpis ui-ms-counts">
+        <div class="ui-ms-group"><h5 class="ui-ms-group-h">Traffic</h5>
+            ${mailboxStatLink(email, "direction: 'outbound'", c.sent, 'Sent', 'dir-out')}
+            ${mailboxStatLink(email, "direction: 'inbound'", c.received, 'Received', 'dir-in')}
+            ${mailboxStatLink(email, "direction: 'internal'", c.internal, 'Internal', 'dir-int')}</div>
+        <div class="ui-ms-group"><h5 class="ui-ms-group-h">Sent mail</h5>
+            ${mailboxStatLink(email, "status: 'delivered'", c.delivered, 'Delivered', 'ok')}
+            ${mailboxStatLink(email, "status: 'deferred'", c.deferred, 'Deferred', 'warn')}
+            ${mailboxStatLink(email, "status: 'bounced'", c.bounced, 'Bounced', 'fail')}
+            ${mailboxStatLink(email, "status: 'rejected'", c.rejected, 'Rejected', 'fail')}</div>
+    </div>`;
+}
+
+// On a phone an alias shows the counts it has; a tap opens all of them
+function toggleMailboxAlias(row, address) {
+    const open = !row.classList.contains('is-open');
+    row.classList.toggle('is-open', open);
+    row.querySelector('.ui-ms-alias-chev')?.setAttribute('aria-expanded', String(open));
+    if (open) mailboxStatsCache.openAliases.add(address);
+    else mailboxStatsCache.openAliases.delete(address);
+}
+
+// What the mailbox may use, as a line of tags under its address
+function mailboxServices(mb) {
+    const at = mb.attributes || {};
+    const services = [
+        ['IMAP', at.imap_access === '1', mb.last_imap_login],
+        ['POP3', at.pop3_access === '1', mb.last_pop3_login],
+        ['SMTP', at.smtp_access === '1', mb.last_smtp_login],
+        ['Sieve', at.sieve_access === '1'],
+        ['TLS', at.tls_enforce_in === '1' || at.tls_enforce_out === '1'],
+    ];
+    return `<span class="ui-ms-svcs">${services.map(([label, on, last]) => {
+        const name = label === 'TLS' ? 'TLS enforced' : label;
+        const tip = `${name}: ${on ? 'on' : 'off'}${last !== undefined ? `, last login ${last ? formatTime(last) : 'never'}` : ''}`;
+        return `<span class="ui-ms-svc${on ? ' is-on' : ''}" title="${escapeHtml(tip)}"><i></i>${label}</span>`;
+    }).join('')}</span>`;
+}
+
+// The mailbox's messages over the range, sent and received together; a click opens the chart
+function mailboxSparkline(mb) {
+    const act = mb.activity || { sent: [], received: [] };
+    const totals = act.sent.map((s, i) => s + (act.received[i] || 0));
+    const sum = totals.reduce((a, b) => a + b, 0);
+    const w = 96, h = 24, n = totals.length;
+    const max = Math.max(1, ...totals);
+    const pts = totals.map((v, i) => `${n > 1 ? (i / (n - 1) * w).toFixed(1) : w / 2},${(h - 2 - v / max * (h - 4)).toFixed(1)}`).join(' ');
+    const label = `Activity of ${mb.username}: ${sum.toLocaleString()} messages. Open the chart`;
+    return `<button type="button" class="ui-ms-spark${sum ? '' : ' is-empty'}" onclick="event.stopPropagation(); openMailboxActivity('${escapeJsArg(mb.username)}')" aria-label="${escapeHtml(label)}" title="${escapeHtml(label)}">
+        <svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" aria-hidden="true">${n ? `<polygon points="0,${h} ${pts} ${w},${h}"></polygon><polyline points="${pts}"></polyline>` : ''}</svg></button>`;
+}
+
+// A slot is a local date and time without a zone, already in the app's time zone
+function mailboxActivityLabel(bucket, unit) {
+    const [date, time] = bucket.split('T');
+    const [y, m, d] = date.split('-').map(Number);
+    const day = new Date(y, m - 1, d).toLocaleDateString('en-US', { weekday: 'short', day: 'numeric', month: 'short' });
+    return unit === 'hour' ? `${day}, ${time.slice(0, 5)}` : day;
+}
+
+function openMailboxActivity(username) {
+    const mb = (mailboxStatsCache.mailboxes || []).find(m => m.username === username);
+    if (!mb) return;
+    const unit = mailboxStatsCache.activityUnit || 'day';
+    const buckets = mailboxStatsCache.activityBuckets || [];
+    const act = mb.activity || { sent: [], received: [] };
+    const totals = buckets.map((_, i) => (act.sent[i] || 0) + (act.received[i] || 0));
+    const top = Math.ceil(Math.max(4, ...totals) / 4) * 4;
+    let busiest = null;
+    totals.forEach((v, i) => { if (v > 0 && (busiest === null || v > totals[busiest])) busiest = i; });
+    const range = document.getElementById('date-range-label')?.textContent || '';
+    document.getElementById('mailbox-activity-title').textContent = mb.username;
+    document.getElementById('mailbox-activity-content').innerHTML = `
+        <p class="ui-muted ui-aa-sub">${mb.name ? `${escapeHtml(mb.name)} · ` : ''}${escapeHtml(range)}, aliases included</p>
+        <div class="ui-aa-strip">
+            <div><small>Sent</small><b>${mb.combined_sent.toLocaleString()}</b></div>
+            <div><small>Received</small><b>${mb.combined_received.toLocaleString()}</b></div>
+            <div><small>Failed</small><b${mb.combined_failure_rate >= 10 ? ' class="ui-text-fail"' : ''}>${mb.combined_failure_rate}%</b></div>
+            <div><small>Busiest ${unit}</small><b>${busiest === null ? '-' : escapeHtml(mailboxActivityLabel(buckets[busiest], unit))}</b></div>
+        </div>
+        <section>
+            <div class="ui-aa-head"><b>Messages per ${unit}</b><span class="ui-muted">sent and received</span></div>
+            ${buckets.length ? `<div class="ui-aa-chart">
+                <div class="ui-aa-grid">${[top, top * .75, top * .5, top * .25, 0].map(v => `<i><span>${Math.round(v)}</span></i>`).join('')}</div>
+                <div class="ui-aa-cols ui-ma-cols">${buckets.map((b, i) => {
+                    const sent = act.sent[i] || 0, recv = act.received[i] || 0;
+                    const tip = `${mailboxActivityLabel(b, unit)}: ${sent} sent, ${recv} received`;
+                    return `<span class="ui-aa-col" title="${escapeHtml(tip)}"><i class="is-sent" style="height:${sent / top * 100}%"></i><i class="is-recv" style="height:${recv / top * 100}%"></i></span>`;
+                }).join('')}</div>
+            </div>
+            <div class="ui-aa-x"><span>${escapeHtml(mailboxActivityLabel(buckets[0], unit))}</span><span>${escapeHtml(mailboxActivityLabel(buckets[buckets.length - 1], unit))}</span></div>
+            <p class="ui-aa-legend"><span><i class="is-sent"></i>Sent</span><span><i class="is-recv"></i>Received</span></p>` : '<p class="ui-empty">No activity in this range.</p>'}
+        </section>
+        <div class="ui-aa-acts"><button type="button" class="ui-btn" onclick="closeMailboxActivity(); navigateToMessagesWithFilter({ email: '${escapeJsArg(mb.username)}', filterType: 'search' })">Open its messages</button></div>`;
+    document.getElementById('mailbox-activity-modal').classList.remove('hidden');
+}
+
+function closeMailboxActivity() {
+    document.getElementById('mailbox-activity-modal').classList.add('hidden');
+}
+
+document.addEventListener('keydown', event => {
+    if (event.key === 'Escape' && !document.getElementById('mailbox-activity-modal')?.classList.contains('hidden')) closeMailboxActivity();
+});
+
+function mailboxRateLimitLabel(mb) {
+    if (!mb.rl_value) return 'None';
+    const frame = { s: 'sec', m: 'min', h: 'hour', d: 'day' }[mb.rl_frame] || mb.rl_frame || 'min';
+    return `${mb.rl_value}/${frame}`;
+}
+
+function renderMailboxStatsAccordion(mailboxes, page = 1, totalPages = 1, total = 0) {
     const container = document.getElementById('mailbox-stats-list');
     if (!container) return;
 
     if (mailboxes.length === 0) {
-        container.innerHTML = `
-            <div class="bg-white dark:bg-gray-800 rounded-lg shadow p-8 text-center">
-                <svg class="w-12 h-12 text-gray-400 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4"></path>
-                </svg>
-                <p class="text-gray-500 dark:text-gray-400">No mailboxes found</p>
-            </div>
-        `;
+        container.innerHTML = '<p class="ui-empty ui-panel">No mailboxes found</p>';
+        mailboxStatsWatchMore(false);
         return;
     }
 
-    // Build mailbox rows first
-    let html = mailboxes.map((mb, index) => {
+    const hideZero = document.getElementById('mailbox-stats-hide-zero')?.checked ?? true;
+    const sum = (mb, key) => (mb.aliases || []).reduce((total, a) => total + (a[key] || 0), 0);
+    const lastLogin = (label, last) => `<div class="ui-md-fact"><span>Last ${label} login</span><div>${last ? formatTime(last) : 'Never'}</div></div>`;
+
+    let html = `
+        <div class="ui-table ui-stack ui-ms-table" data-sort-handler="mailboxStatsSortBy">
+            <div class="ui-tr ui-tr-head"><span data-sort-key="username"${mailboxStatsSortAttr('username')}>Mailbox</span><span>Activity</span><span class="ui-td-end" data-sort-key="sent_total"${mailboxStatsSortAttr('sent_total')}>Sent</span><span class="ui-td-end" data-sort-key="received_total"${mailboxStatsSortAttr('received_total')}>Received</span><span class="ui-td-end">Delivered</span><span class="ui-td-end" data-sort-key="failure_rate"${mailboxStatsSortAttr('failure_rate')}>Failed</span><span class="ui-td-end">Aliases</span><span class="ui-td-end" data-sort-key="quota_used"${mailboxStatsSortAttr('quota_used')}>Storage</span></div>
+            ${mailboxes.map((mb, index) => {
         const isExpanded = mailboxStatsCache.expandedMailboxes.has(mb.username);
-        const statusClass = mb.active
-            ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300'
-            : 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300';
-
-        // Failure rate color
-        const failureColor = mb.combined_failure_rate >= 10 ? 'text-red-600 dark:text-red-400'
-            : mb.combined_failure_rate >= 5 ? 'text-yellow-600 dark:text-yellow-400'
-                : 'text-green-600 dark:text-green-400';
-
-        // Quota bar
-        const quotaPercent = mb.percent_in_use || 0;
-        const quotaColor = quotaPercent >= 90 ? 'bg-red-500' : quotaPercent >= 75 ? 'bg-yellow-500' : 'bg-blue-500';
-
+        const failTone = mb.combined_failure_rate >= 10 ? 'fail' : mb.combined_failure_rate >= 5 ? 'warn' : '';
+        const aliases = (mb.aliases || []).filter(a => !hideZero || (a.sent_total || 0) + (a.received_total || 0) > 0);
+        const email = mb.username;
         return `
-            <div class="bg-white dark:bg-gray-800 rounded-lg shadow overflow-hidden mb-2">
-                <!-- Accordion Header -->
-                <div onclick="toggleMailboxAccordion('${escapeJsArg(mb.username)}')" 
-                     class="cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
-                    <div class="px-4 py-3">
-                        <!-- Desktop: 3-column grid | Mobile: stacked layout -->
-                        <div class="hidden md:grid md:grid-cols-3 items-center gap-2">
-                            <!-- Zone 1: Mailbox Info (Desktop) -->
-                            <div class="flex items-center gap-3 min-w-0">
-                                <svg id="accordion-icon-${index}" class="w-5 h-5 text-gray-400 transition-transform flex-shrink-0 ml-1 ${isExpanded ? 'rotate-90' : ''}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
-                                </svg>
-                                <div class="min-w-0">
-                                    <div class="font-medium text-gray-900 dark:text-white truncate">${escapeHtml(mb.username)}</div>
-                                    <div class="flex items-center gap-2 mt-0.5">
-                                        <span class="px-2 py-0.5 text-xs font-medium rounded-full ${statusClass}">${mb.active ? 'Active' : 'Inactive'}</span>
-                                        ${mb.name ? `<span class="text-xs text-gray-500 dark:text-gray-400 truncate">${escapeHtml(mb.name)}</span>` : ''}
-                                    </div>
-                                </div>
-                            </div>
-                            
-                            <!-- Zone 2: Stats Badges (Desktop - center) -->
-                            <div class="flex flex-row items-center justify-center gap-1">
-                                <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium ${getDirectionBadgeClass('outbound')} whitespace-nowrap">
-                                    ↑ ${mb.combined_sent.toLocaleString()} Sent
-                                </span>
-                                <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium ${getDirectionBadgeClass('inbound')} whitespace-nowrap">
-                                    ↓ ${mb.combined_received.toLocaleString()} Received
-                                </span>
-                                <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium ${getStatusBadgeClass('delivered')} whitespace-nowrap">
-                                    ✓ ${(mb.combined_delivered || 0).toLocaleString()} Delivered
-                                </span>
-                                <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium ${getStatusBadgeClass('bounced')} whitespace-nowrap">
-                                    ${mb.combined_failure_rate}% Failed
-                                </span>
-                            </div>
-                            
-                            <!-- Zone 3: Aliases + Storage (Desktop - right) -->
-                            <div class="flex items-center justify-end gap-6">
-                                <div class="text-center">
-                                    <p class="text-xs text-gray-500 dark:text-gray-400">Aliases</p>
-                                    <p class="text-sm font-semibold text-gray-900 dark:text-white">${mb.alias_count || 0}</p>
-                                </div>
-                                <div class="text-center">
-                                    <p class="text-xs text-gray-500 dark:text-gray-400">Storage</p>
-                                    <p class="text-sm font-semibold text-gray-900 dark:text-white">${mb.quota_used_formatted}</p>
-                                </div>
-                            </div>
-                        </div>
-                        
-                        <!-- Mobile Layout: Stacked -->
-                        <div class="md:hidden">
-                            <!-- Row 1: Arrow + Email + Active indicator on right -->
-                            <div class="flex items-center gap-3">
-                                <svg id="accordion-icon-mobile-${index}" class="w-5 h-5 text-gray-400 transition-transform flex-shrink-0 ${isExpanded ? 'rotate-90' : ''}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
-                                </svg>
-                                <div class="min-w-0 flex-1">
-                                    <div class="font-medium text-gray-900 dark:text-white">${escapeHtml(mb.username)}</div>
-                                </div>
-                                <!-- Active indicator dot on right -->
-                                <div class="flex items-center gap-1.5 flex-shrink-0">
-                                    <span class="w-2.5 h-2.5 rounded-full ${mb.active ? 'bg-green-500' : 'bg-red-500'}"></span>
-                                    <span class="text-xs text-gray-500 dark:text-gray-400">${mb.active ? 'Active' : 'Inactive'}</span>
-                                </div>
-                            </div>
-                            
-                            <!-- Row 2: Direction badges (Sent, Received) -->
-                            <div class="flex gap-1 mt-2 ml-8">
-                                <span class="inline-flex items-center px-1.5 py-0.5 rounded-full text-xs font-medium ${getDirectionBadgeClass('outbound')} whitespace-nowrap">
-                                    ↑ ${mb.combined_sent.toLocaleString()} Sent
-                                </span>
-                                <span class="inline-flex items-center px-1.5 py-0.5 rounded-full text-xs font-medium ${getDirectionBadgeClass('inbound')} whitespace-nowrap">
-                                    ↓ ${mb.combined_received.toLocaleString()} Received
-                                </span>
-                            </div>
-                            
-                            <!-- Row 3: Status badges (Delivered, Failed) -->
-                            <div class="flex gap-1 mt-1 ml-8">
-                                <span class="inline-flex items-center px-1.5 py-0.5 rounded-full text-xs font-medium ${getStatusBadgeClass('delivered')} whitespace-nowrap">
-                                    ✓ ${(mb.combined_delivered || 0).toLocaleString()} Delivered
-                                </span>
-                                <span class="inline-flex items-center px-1.5 py-0.5 rounded-full text-xs font-medium ${getStatusBadgeClass('bounced')} whitespace-nowrap">
-                                    ${mb.combined_failure_rate}% Failed
-                                </span>
-                            </div>
-                        </div>
-                    </div>
+            <div class="ui-tr ui-ms-row" onclick="toggleMailboxAccordion('${escapeJsArg(mb.username)}')">
+                <div class="ui-td ui-q-who">
+                    <div><svg id="accordion-icon-${index}" class="ui-domain-chevron" width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"${isExpanded ? ' style="transform: rotate(90deg)"' : ''}><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg>${copyableText(mb.username)} ${mb.active ? '' : uiTag('Inactive', 'fail')}</div>
+                    ${mb.name ? `<small class="ui-ms-name">${escapeHtml(mb.name)}</small>` : ''}
+                    <small class="ui-ms-sub">${escapeHtml(mb.quota_used_formatted)} · ${uiCountLabel(mb.alias_count || 0, 'alias', 'aliases')}</small>
+                    ${mailboxServices(mb)}
                 </div>
-                
-                <!-- Accordion Content (Domains-style layout) -->
-                <div id="accordion-content-${index}" class="${isExpanded ? '' : 'hidden'} border-t border-gray-200 dark:border-gray-700">
-                    <!-- Mailbox Info Section -->
-                    <div class="p-6 bg-gray-50 dark:bg-gray-700/30">
-                        <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
-                            <div>
-                                <p class="text-xs text-gray-500 dark:text-gray-400 font-medium mb-1">Quota Used</p>
-                                <p class="text-lg font-bold text-gray-900 dark:text-white">${mb.quota_used_formatted} / ${mb.quota_formatted}</p>
-                                <p class="text-xs text-gray-500 dark:text-gray-400">${mb.percent_in_use || 0}% used</p>
-                            </div>
-                            <div>
-                                <p class="text-xs text-gray-500 dark:text-gray-400 font-medium mb-1">Messages in Mailbox</p>
-                                <p class="text-lg font-bold text-gray-900 dark:text-white">${(mb.messages_in_mailbox || 0).toLocaleString()}</p>
-                            </div>
-                            <div>
-                                <p class="text-xs text-gray-500 dark:text-gray-400 font-medium mb-1">Created / Modified</p>
-                                <p class="text-xs text-gray-900 dark:text-white">${mb.created ? formatTime(mb.created) : 'N/A'}</p>
-                                <p class="text-xs text-gray-500 dark:text-gray-400">${mb.modified ? formatTime(mb.modified) : 'N/A'}</p>
-                            </div>
-                            <div>
-                                <p class="text-xs text-gray-500 dark:text-gray-400 font-medium mb-1">Rate Limit</p>
-                                <p class="text-sm font-semibold text-gray-900 dark:text-white">${mb.rl_value ? mb.rl_value + '/' + (mb.rl_frame === 's' ? 'sec' : mb.rl_frame === 'm' ? 'min' : mb.rl_frame === 'h' ? 'hour' : mb.rl_frame === 'd' ? 'day' : mb.rl_frame || 'min') : 'None'}</p>
-                            </div>
-                        </div>
-                        
-                        <!-- Access Permissions with Last Login Dates -->
-                        <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4 mt-4 pt-4 border-t border-gray-200 dark:border-gray-600">
-                            <div class="flex flex-col">
-                                <div class="flex items-center gap-2">
-                                    <span class="w-2 h-2 rounded-full ${mb.attributes?.imap_access === '1' ? 'bg-green-500' : 'bg-red-500'}"></span>
-                                    <span class="text-xs font-medium text-gray-700 dark:text-gray-300">IMAP</span>
-                                </div>
-                                <span class="text-xs text-gray-500 dark:text-gray-400 ml-4">${mb.last_imap_login ? formatTime(mb.last_imap_login) : 'Never'}</span>
-                            </div>
-                            <div class="flex flex-col">
-                                <div class="flex items-center gap-2">
-                                    <span class="w-2 h-2 rounded-full ${mb.attributes?.pop3_access === '1' ? 'bg-green-500' : 'bg-red-500'}"></span>
-                                    <span class="text-xs font-medium text-gray-700 dark:text-gray-300">POP3</span>
-                                </div>
-                                <span class="text-xs text-gray-500 dark:text-gray-400 ml-4">${mb.last_pop3_login ? formatTime(mb.last_pop3_login) : 'Never'}</span>
-                            </div>
-                            <div class="flex flex-col">
-                                <div class="flex items-center gap-2">
-                                    <span class="w-2 h-2 rounded-full ${mb.attributes?.smtp_access === '1' ? 'bg-green-500' : 'bg-red-500'}"></span>
-                                    <span class="text-xs font-medium text-gray-700 dark:text-gray-300">SMTP</span>
-                                </div>
-                                <span class="text-xs text-gray-500 dark:text-gray-400 ml-4">${mb.last_smtp_login ? formatTime(mb.last_smtp_login) : 'Never'}</span>
-                            </div>
-                            <div class="flex flex-col">
-                                <div class="flex items-center gap-2">
-                                    <span class="w-2 h-2 rounded-full ${mb.attributes?.sieve_access === '1' ? 'bg-green-500' : 'bg-red-500'}"></span>
-                                    <span class="text-xs font-medium text-gray-700 dark:text-gray-300">Sieve</span>
-                                </div>
-                            </div>
-                            <div class="flex flex-col">
-                                <div class="flex items-center gap-2">
-                                    <span class="w-2 h-2 rounded-full ${mb.attributes?.tls_enforce_in === '1' || mb.attributes?.tls_enforce_out === '1' ? 'bg-green-500' : 'bg-gray-400'}"></span>
-                                    <span class="text-xs font-medium text-gray-700 dark:text-gray-300">TLS Enforce</span>
-                                </div>
-                            </div>
-                        </div>
+                <span class="ui-td ui-ms-spark-cell"><small class="ui-sec-unit">Activity </small>${mailboxSparkline(mb)}</span>
+                <span class="ui-td ui-td-end"><small class="ui-sec-unit">Sent </small>${mb.combined_sent.toLocaleString()}</span>
+                <span class="ui-td ui-td-end"><small class="ui-sec-unit">Received </small>${mb.combined_received.toLocaleString()}</span>
+                <span class="ui-td ui-td-end"><small class="ui-sec-unit">Delivered </small>${(mb.combined_delivered || 0).toLocaleString()}</span>
+                <span class="ui-td ui-td-end${failTone ? ` ui-text-${failTone}` : ''}"><small class="ui-sec-unit">Failed </small>${mb.combined_failure_rate}%</span>
+                <span class="ui-td ui-td-end ui-ms-wide"><small class="ui-sec-unit">Aliases </small>${mb.alias_count || 0}</span>
+                <span class="ui-td ui-td-end ui-ms-wide"><small class="ui-sec-unit">Storage </small>${mb.quota_used_formatted}</span>
+
+                <div id="accordion-content-${index}" class="ui-domain-details${isExpanded ? '' : ' hidden'}" onclick="event.stopPropagation()">
+                    <div class="ui-md-ids">
+                        <div class="ui-md-fact ui-md-fact-inline"><span>Quota<span class="ui-ms-wide-only"> Used</span></span><div>${mb.quota_used_formatted} / ${mb.quota_formatted}</div><small class="ui-muted">${mb.percent_in_use || 0}%<span class="ui-ms-wide-only"> used</span></small><small class="ui-muted ui-ms-msgs">${(mb.messages_in_mailbox || 0).toLocaleString()} messages</small></div>
+                        <div class="ui-md-fact ui-ms-msgs-fact"><span>Messages in Mailbox</span><div>${(mb.messages_in_mailbox || 0).toLocaleString()}</div></div>
+                        <div class="ui-md-fact"><span>Created / Modified</span><div>${mb.created ? formatTime(mb.created) : 'N/A'}</div><small class="ui-muted">${mb.modified ? formatTime(mb.modified) : 'N/A'}</small></div>
+                        <div class="ui-md-fact"><span>Rate Limit</span><div>${escapeHtml(mailboxRateLimitLabel(mb))}</div></div>
+                        ${lastLogin('IMAP', mb.last_imap_login)}
+                        ${lastLogin('POP3', mb.last_pop3_login)}
+                        ${lastLogin('SMTP', mb.last_smtp_login)}
                     </div>
-                    
-                    <!-- Message Stats Section -->
-                    <div class="p-6">
-                        <h4 class="text-sm font-semibold text-gray-900 dark:text-white mb-4">Message Statistics</h4>
-                        
-                        <!-- Direction Stats Row -->
-                        <div class="grid grid-cols-3 gap-2 mb-4">
-                            <div class="p-3 ${getDirectionBgClass('outbound')} rounded-lg text-center cursor-pointer hover:opacity-80 transition-opacity"
-                                 onclick="event.stopPropagation(); navigateToMessagesWithFilter({ email: '${escapeJsArg(mb.username)}', filterType: 'search', direction: 'outbound' })">
-                                <div class="text-xl font-bold ${getDirectionTextClass('outbound')}">${mb.combined_sent || 0}</div>
-                                <div class="text-xs text-gray-500 dark:text-gray-400 mt-1">Sent</div>
-                            </div>
-                            <div class="p-3 ${getDirectionBgClass('inbound')} rounded-lg text-center cursor-pointer hover:opacity-80 transition-opacity"
-                                 onclick="event.stopPropagation(); navigateToMessagesWithFilter({ email: '${escapeJsArg(mb.username)}', filterType: 'search', direction: 'inbound' })">
-                                <div class="text-xl font-bold ${getDirectionTextClass('inbound')}">${mb.combined_received || 0}</div>
-                                <div class="text-xs text-gray-500 dark:text-gray-400 mt-1">Received</div>
-                            </div>
-                            <div class="p-3 ${getDirectionBgClass('internal')} rounded-lg text-center cursor-pointer hover:opacity-80 transition-opacity"
-                                 onclick="event.stopPropagation(); navigateToMessagesWithFilter({ email: '${escapeJsArg(mb.username)}', filterType: 'search', direction: 'internal' })">
-                                <div class="text-xl font-bold ${getDirectionTextClass('internal')}">${mb.combined_internal || 0}</div>
-                                <div class="text-xs text-gray-500 dark:text-gray-400 mt-1">Internal</div>
-                            </div>
-                        </div>
-                        
-                        <!-- Status Stats Row -->
-                        <div class="grid grid-cols-4 gap-2">
-                            <div class="p-3 ${getStatusBgClass('delivered')} rounded-lg text-center cursor-pointer hover:opacity-80 transition-opacity"
-                                 onclick="event.stopPropagation(); navigateToMessagesWithFilter({ email: '${escapeJsArg(mb.username)}', filterType: 'search', status: 'delivered' })">
-                                <div class="text-xl font-bold ${getStatusTextClass('delivered')}">${mb.combined_delivered || 0}</div>
-                                <div class="text-xs text-gray-500 dark:text-gray-400 mt-1">Delivered</div>
-                            </div>
-                            <div class="p-3 ${getStatusBgClass('deferred')} rounded-lg text-center cursor-pointer hover:opacity-80 transition-opacity"
-                                 onclick="event.stopPropagation(); navigateToMessagesWithFilter({ email: '${escapeJsArg(mb.username)}', filterType: 'search', status: 'deferred' })">
-                                <div class="text-xl font-bold ${getStatusTextClass('deferred')}">${(mb.mailbox_counts?.sent_deferred || 0) + (mb.aliases || []).reduce((sum, a) => sum + (a.sent_deferred || 0), 0)}</div>
-                                <div class="text-xs text-gray-500 dark:text-gray-400 mt-1">Deferred</div>
-                            </div>
-                            <div class="p-3 ${getStatusBgClass('bounced')} rounded-lg text-center cursor-pointer hover:opacity-80 transition-opacity"
-                                 onclick="event.stopPropagation(); navigateToMessagesWithFilter({ email: '${escapeJsArg(mb.username)}', filterType: 'search', status: 'bounced' })">
-                                <div class="text-xl font-bold ${getStatusTextClass('bounced')}">${(mb.mailbox_counts?.sent_bounced || 0) + (mb.aliases || []).reduce((sum, a) => sum + (a.sent_bounced || 0), 0)}</div>
-                                <div class="text-xs text-gray-500 dark:text-gray-400 mt-1">Bounced</div>
-                            </div>
-                            <div class="p-3 ${getStatusBgClass('rejected')} rounded-lg text-center cursor-pointer hover:opacity-80 transition-opacity"
-                                 onclick="event.stopPropagation(); navigateToMessagesWithFilter({ email: '${escapeJsArg(mb.username)}', filterType: 'search', status: 'rejected' })">
-                                <div class="text-xl font-bold ${getStatusTextClass('rejected')}">${(mb.mailbox_counts?.sent_rejected || 0) + (mb.aliases || []).reduce((sum, a) => sum + (a.sent_rejected || 0), 0)}</div>
-                                <div class="text-xs text-gray-500 dark:text-gray-400 mt-1">Rejected</div>
-                            </div>
-                        </div>
-                    </div>
-                        
-                    <!-- Aliases Section -->
+
+                    <h4 class="ui-md-h">Message Statistics</h4>
+                    ${mailboxCountGroups(email, {
+                        sent: mb.combined_sent,
+                        received: mb.combined_received,
+                        internal: mb.combined_internal,
+                        delivered: mb.combined_delivered,
+                        deferred: (mb.mailbox_counts?.sent_deferred || 0) + sum(mb, 'sent_deferred'),
+                        bounced: (mb.mailbox_counts?.sent_bounced || 0) + sum(mb, 'sent_bounced'),
+                        rejected: (mb.mailbox_counts?.sent_rejected || 0) + sum(mb, 'sent_rejected'),
+                    })}
+
                     ${mb.aliases && mb.aliases.length > 0 ? `
-                        <div class="p-6 border-t border-gray-200 dark:border-gray-700">
-                            <h4 class="text-sm font-semibold text-gray-900 dark:text-white mb-4">Aliases (${mb.aliases.length})</h4>
-                            <div class="overflow-x-auto">
-                                <table class="min-w-full text-sm">
-                                    <thead>
-                                        <tr class="text-xs text-gray-500 dark:text-gray-400 uppercase">
-                                            <th class="text-left py-2 pr-4">Alias</th>
-                                            <th class="text-center py-2 px-2">Sent</th>
-                                            <th class="text-center py-2 px-2">Received</th>
-                                            <th class="text-center py-2 px-2">Internal</th>
-                                            <th class="text-center py-2 px-2">Delivered</th>
-                                            <th class="text-center py-2 px-2">Deferred</th>
-                                            <th class="text-center py-2 px-2">Bounced</th>
-                                            <th class="text-center py-2 px-2">Rejected</th>
-                                            <th class="text-center py-2 pl-2">Fail %</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody class="divide-y divide-gray-100 dark:divide-gray-700">
-                                        ${(() => {
-                    const hideZero = document.getElementById('mailbox-stats-hide-zero')?.checked ?? true;
-                    const filteredAliases = hideZero
-                        ? mb.aliases.filter(a => (a.sent_total || 0) + (a.received_total || 0) > 0)
-                        : mb.aliases;
-                    return filteredAliases.map(alias => `
-                                                <tr class="hover:bg-gray-50 dark:hover:bg-gray-700/30">
-                                                    <td class="py-2 pr-4">
-                                                        <div class="flex items-center gap-2">
-                                                            <span class="text-gray-900 dark:text-white">${escapeHtml(alias.alias_address)}</span>
-                                                            ${alias.is_catch_all ? '<span class="px-1.5 py-0.5 text-xs bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300 rounded">catch-all</span>' : ''}
-                                                            ${alias.is_domain_alias ? '<span class="px-1.5 py-0.5 text-xs bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300 rounded" title="Address on a mailcow alias domain that points at this mailbox">domain alias</span>' : ''}
-                                                            ${!alias.active ? '<span class="px-1.5 py-0.5 text-xs bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400 rounded">inactive</span>' : ''}
-                                                        </div>
-                                                    </td>
-                                                    <td class="text-center py-2 px-2 ${getDirectionTextClass('outbound')} cursor-pointer hover:underline" onclick="event.stopPropagation(); navigateToMessagesWithFilter({ email: '${escapeJsArg(alias.alias_address)}', filterType: 'search', direction: 'outbound' })">${alias.sent_total || 0}</td>
-                                                    <td class="text-center py-2 px-2 ${getDirectionTextClass('inbound')} cursor-pointer hover:underline" onclick="event.stopPropagation(); navigateToMessagesWithFilter({ email: '${escapeJsArg(alias.alias_address)}', filterType: 'search', direction: 'inbound' })">${alias.received_total || 0}</td>
-                                                    <td class="text-center py-2 px-2 ${getDirectionTextClass('internal')} cursor-pointer hover:underline" onclick="event.stopPropagation(); navigateToMessagesWithFilter({ email: '${escapeJsArg(alias.alias_address)}', filterType: 'search', direction: 'internal' })">${alias.direction_internal || 0}</td>
-                                                    <td class="text-center py-2 px-2 ${getStatusTextClass('delivered')} cursor-pointer hover:underline" onclick="event.stopPropagation(); navigateToMessagesWithFilter({ email: '${escapeJsArg(alias.alias_address)}', filterType: 'search', status: 'delivered' })">${alias.sent_delivered || 0}</td>
-                                                    <td class="text-center py-2 px-2 ${getStatusTextClass('deferred')} cursor-pointer hover:underline" onclick="event.stopPropagation(); navigateToMessagesWithFilter({ email: '${escapeJsArg(alias.alias_address)}', filterType: 'search', status: 'deferred' })">${alias.sent_deferred || 0}</td>
-                                                    <td class="text-center py-2 px-2 ${getStatusTextClass('bounced')} cursor-pointer hover:underline" onclick="event.stopPropagation(); navigateToMessagesWithFilter({ email: '${escapeJsArg(alias.alias_address)}', filterType: 'search', status: 'bounced' })">${alias.sent_bounced || 0}</td>
-                                                    <td class="text-center py-2 px-2 ${getStatusTextClass('rejected')} cursor-pointer hover:underline" onclick="event.stopPropagation(); navigateToMessagesWithFilter({ email: '${escapeJsArg(alias.alias_address)}', filterType: 'search', status: 'rejected' })">${alias.sent_rejected || 0}</td>
-                                                    <td class="text-center py-2 pl-2 ${alias.failure_rate >= 5 ? 'text-red-600 dark:text-red-400' : 'text-gray-500'}">${alias.failure_rate || 0}%</td>
-                                                </tr>
-                                            `).join('');
-                })()}
-                                    </tbody>
-                                </table>
-                            </div>
+                        <h4 class="ui-md-h">Aliases (${mb.aliases.length})</h4>
+                        <div class="ui-table ui-stack ui-ms-aliases">
+                            <div class="ui-tr ui-tr-head"><span>Alias</span><span class="ui-td-end">Sent</span><span class="ui-td-end">Received</span><span class="ui-td-end">Internal</span><span class="ui-td-end">Delivered</span><span class="ui-td-end">Deferred</span><span class="ui-td-end">Bounced</span><span class="ui-td-end">Rejected</span><span class="ui-td-end">Fail %</span></div>
+                            ${aliases.map(alias => {
+            const go = (filter, value, label, tone) => `<button type="button" class="ui-td ui-td-end ui-link-cell ui-ms-count${!value ? ' is-zero ui-zero' : tone ? ` ui-text-${tone}` : ''}" onclick="event.stopPropagation(); navigateToMessagesWithFilter({ email: '${escapeJsArg(alias.alias_address)}', filterType: 'search', ${filter} })"><small class="ui-sec-unit">${label} </small>${value || 0}</button>`;
+            const open = mailboxStatsCache.openAliases.has(alias.alias_address);
+            return `
+                            <div class="ui-tr ui-ms-alias${open ? ' is-open' : ''}" onclick="toggleMailboxAlias(this, '${escapeJsArg(alias.alias_address)}')">
+                                <span class="ui-td ui-ms-alias-name"><button type="button" class="ui-ms-alias-chev" aria-expanded="${open}" aria-label="All counts of ${escapeHtml(alias.alias_address)}"><svg class="ui-domain-chevron" width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg></button>${copyableText(alias.alias_address)}
+                                    ${alias.is_catch_all ? uiTag('catch-all', 'warn') : ''}
+                                    ${alias.is_domain_alias ? '<span class="ui-tag ui-tag-info" title="Address on a mailcow alias domain that points at this mailbox">domain alias</span>' : ''}
+                                    ${!alias.active ? uiTag('inactive', '') : ''}</span>
+                                ${go("direction: 'outbound'", alias.sent_total, 'Sent', 'dir-out')}
+                                ${go("direction: 'inbound'", alias.received_total, 'Received', 'dir-in')}
+                                ${go("direction: 'internal'", alias.direction_internal, 'Internal', 'dir-int')}
+                                ${go("status: 'delivered'", alias.sent_delivered, 'Delivered', 'ok')}
+                                ${go("status: 'deferred'", alias.sent_deferred, 'Deferred', 'warn')}
+                                ${go("status: 'bounced'", alias.sent_bounced, 'Bounced', 'fail')}
+                                ${go("status: 'rejected'", alias.sent_rejected, 'Rejected', 'fail')}
+                                <span class="ui-td ui-td-end ui-ms-alias-fail${alias.failure_rate >= 5 ? ' ui-text-fail' : ' ui-muted'}"><small class="ui-sec-unit">Fail </small>${alias.failure_rate || 0}%</span>
+                                <div class="ui-ms-alias-more" onclick="event.stopPropagation()">${mailboxCountGroups(alias.alias_address, {
+                                    sent: alias.sent_total, received: alias.received_total, internal: alias.direction_internal,
+                                    delivered: alias.sent_delivered, deferred: alias.sent_deferred, bounced: alias.sent_bounced, rejected: alias.sent_rejected,
+                                })}</div>
+                            </div>`;
+        }).join('')}
                         </div>
                     ` : ''}
                 </div>
-            </div>
-        `;
-    }).join('');
+            </div>`;
+    }).join('')}
+        </div>`;
 
-    // Add pagination controls if there are multiple pages
-    if (totalPages > 1) {
-        html += `
-            <div class="flex items-center justify-center gap-2 mt-4 p-4 bg-white dark:bg-gray-800 rounded-lg shadow">
-                <button onclick="loadMailboxStatsPage(1)" ${page === 1 ? 'disabled' : ''} 
-                    class="px-3 py-1.5 text-sm text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600 rounded ${page === 1 ? 'opacity-50 cursor-not-allowed' : 'hover:bg-gray-100 dark:hover:bg-gray-700'}">
-                    First
-                </button>
-                <button onclick="loadMailboxStatsPage(${page - 1})" ${page === 1 ? 'disabled' : ''} 
-                    class="px-3 py-1.5 text-sm text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600 rounded ${page === 1 ? 'opacity-50 cursor-not-allowed' : 'hover:bg-gray-100 dark:hover:bg-gray-700'}">
-                    Previous
-                </button>
-                <span class="px-4 py-1.5 text-sm text-gray-700 dark:text-gray-300">
-                    Page ${page} of ${totalPages}
-                </span>
-                <button onclick="loadMailboxStatsPage(${page + 1})" ${page === totalPages ? 'disabled' : ''} 
-                    class="px-3 py-1.5 text-sm text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600 rounded ${page === totalPages ? 'opacity-50 cursor-not-allowed' : 'hover:bg-gray-100 dark:hover:bg-gray-700'}">
-                    Next
-                </button>
-                <button onclick="loadMailboxStatsPage(${totalPages})" ${page === totalPages ? 'disabled' : ''} 
-                    class="px-3 py-1.5 text-sm text-gray-900 dark:text-white border border-gray-300 dark:border-gray-600 rounded ${page === totalPages ? 'opacity-50 cursor-not-allowed' : 'hover:bg-gray-100 dark:hover:bg-gray-700'}">
-                    Last
-                </button>
-            </div>
-        `;
-    }
+    // More load as the list scrolls; at the end, a line says all are shown
+    if (page < totalPages) html += '<p id="mailbox-stats-more" class="ui-msg-more" aria-live="polite">Loading more...</p>';
+    else if (totalPages > 1) html += `<p class="ui-msg-more">All ${uiCountLabel(total || mailboxes.length, 'mailbox', 'mailboxes')} shown</p>`;
 
     container.innerHTML = html;
+    mailboxStatsWatchMore(page < totalPages);
 }
 
 function toggleMailboxAccordion(username) {
@@ -625,10 +557,7 @@ function toggleMailboxAccordion(username) {
         } else {
             mailboxStatsCache.expandedMailboxes.delete(username);
         }
-    }
-
-    if (icon) {
-        icon.classList.toggle('rotate-90');
+        if (icon) icon.style.transform = isHidden ? 'rotate(90deg)' : '';
     }
 }
 
@@ -636,61 +565,20 @@ function toggleMailboxAccordion(username) {
 // DATE RANGE PICKER
 // =============================================================================
 
-// Date range picker state
-let dateRangePickerOpen = false;
-
-function toggleDateRangePicker() {
-    const dropdown = document.getElementById('date-range-dropdown');
-    const arrow = document.getElementById('date-range-arrow');
-
-    if (!dropdown) return;
-
-    dateRangePickerOpen = !dateRangePickerOpen;
-
-    if (dateRangePickerOpen) {
-        dropdown.classList.remove('hidden');
-        arrow?.classList.add('rotate-180');
-
-        // Set default dates for custom range inputs
-        const today = new Date();
-        const thirtyDaysAgo = new Date(today);
-        thirtyDaysAgo.setDate(today.getDate() - 30);
-
-        const startInput = document.getElementById('date-range-start');
-        const endInput = document.getElementById('date-range-end');
-
-        if (startInput && !startInput.value) {
-            startInput.value = thirtyDaysAgo.toISOString().split('T')[0];
-        }
-        if (endInput && !endInput.value) {
-            endInput.value = today.toISOString().split('T')[0];
-        }
-
-        // Add click outside listener
-        setTimeout(() => {
-            document.addEventListener('click', closeDateRangePickerOnClickOutside);
-        }, 0);
-    } else {
-        closeDateRangePicker();
-    }
+// The period is a picker (utils.js, uiPicker); opening it fills the custom range
+// with the last 30 days when it is empty
+function mailboxStatsPeriodOpened() {
+    const today = new Date();
+    const thirtyDaysAgo = new Date(today);
+    thirtyDaysAgo.setDate(today.getDate() - 30);
+    const startInput = document.getElementById('date-range-start');
+    const endInput = document.getElementById('date-range-end');
+    if (startInput && !startInput.value) startInput.value = thirtyDaysAgo.toISOString().split('T')[0];
+    if (endInput && !endInput.value) endInput.value = today.toISOString().split('T')[0];
 }
 
 function closeDateRangePicker() {
-    const dropdown = document.getElementById('date-range-dropdown');
-    const arrow = document.getElementById('date-range-arrow');
-
-    if (dropdown) dropdown.classList.add('hidden');
-    if (arrow) arrow.classList.remove('rotate-180');
-    dateRangePickerOpen = false;
-
-    document.removeEventListener('click', closeDateRangePickerOnClickOutside);
-}
-
-function closeDateRangePickerOnClickOutside(e) {
-    const container = document.getElementById('date-range-picker-container');
-    if (container && !container.contains(e.target)) {
-        closeDateRangePicker();
-    }
+    if (uiPickerIsOpen('mailbox-stats-period')) uiPickerClose('mailbox-stats-period', { returnFocus: true });
 }
 
 function selectDatePreset(preset) {
@@ -723,12 +611,7 @@ function selectDatePreset(preset) {
 function updateDatePresetButtons(activePreset) {
     const buttons = document.querySelectorAll('.date-preset-btn');
     buttons.forEach(btn => {
-        const preset = btn.getAttribute('data-preset');
-        if (preset === activePreset) {
-            btn.className = 'date-preset-btn px-3 py-1.5 text-xs font-medium rounded-md border border-blue-500 bg-blue-500 text-white transition-colors';
-        } else {
-            btn.className = 'date-preset-btn px-3 py-1.5 text-xs font-medium rounded-md border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors';
-        }
+        btn.setAttribute('aria-pressed', btn.getAttribute('data-preset') === activePreset ? 'true' : 'false');
     });
 }
 
@@ -823,4 +706,24 @@ function resetMailboxStatsFilters() {
 
     // Reload everything
     loadMailboxStats();
+}
+
+// The mailbox list is paged on the server, so its column headers sort there
+function mailboxStatsSortAttr(key) {
+    const [by, order] = (document.getElementById('mailbox-stats-sort')?.value || 'sent_total-desc').split('-');
+    return ` aria-sort="${by === key ? (order === 'asc' ? 'ascending' : 'descending') : 'none'}"`;
+}
+
+function mailboxStatsSortBy(key, order) {
+    const select = document.getElementById('mailbox-stats-sort');
+    if (!select) return;
+    const value = `${key}-${order}`;
+    if (![...select.options].some(o => o.value === value)) {
+        const option = document.createElement('option');
+        option.value = value;
+        option.textContent = `${select.querySelector(`option[value^="${key}-"]`)?.textContent.replace(/\s*\(.*\)$/, '') || key} (${order === 'asc' ? 'Low to High' : 'High to Low'})`;
+        select.appendChild(option);
+    }
+    select.value = value;
+    applyMailboxStatsFilters();
 }

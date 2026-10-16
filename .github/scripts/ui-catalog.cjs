@@ -20,7 +20,7 @@ const START = '<!-- generated:start (node .github/scripts/ui-catalog.cjs --write
 const END = '<!-- generated:end -->';
 
 const PAGE_BY_FILE = {
-    'dmarc.js': 'DMARC', 'domains.js': 'Domains', 'logs-viewer.js': 'Logs', 'mailbox-stats.js': 'Mailbox stats',
+    'devices.js': 'Devices', 'dmarc.js': 'DMARC', 'domains.js': 'Domains', 'logs-viewer.js': 'Logs', 'mailbox-stats.js': 'Mailbox stats',
     'message-details.js': 'Message details', 'notifications.js': 'Settings', 'rate-limits.js': 'Mailbox stats',
     'settings.js': 'Settings', 'smtp-abuse.js': 'Security', 'spam_filter.js': 'Spam filter',
     'utils.js': 'Shared', 'export.js': 'Shared', 'router.js': 'Shell',
@@ -28,7 +28,7 @@ const PAGE_BY_FILE = {
 const PAGE_BY_SECTION = {
     dashboard: 'Dashboard', messages: 'Messages', netfilter: 'Security', queue: 'Queue', quarantine: 'Quarantine',
     'spam-filter': 'Spam filter', status: 'Status', domains: 'Domains', dmarc: 'DMARC', 'mailbox-stats': 'Mailbox stats',
-    logs: 'Logs', settings: 'Settings',
+    devices: 'Devices', logs: 'Logs', settings: 'Settings',
 };
 // app.js holds most pages; its functions are placed by name.
 const PAGE_BY_FUNCTION = [

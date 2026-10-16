@@ -23,50 +23,29 @@ Most common type of DMARC report, containing:
 
 ### Report Organization
 
-The DMARC interface has multiple navigation levels:
+The page has a few levels; the breadcrumbs lead back from each:
 
-#### 1. Domains View (Main Page)
-- Lists all domains with DMARC reporting enabled
-- Shows summary statistics:
-  - Total reports received
-  - Date range of reports
-  - Overall DMARC compliance rate
+#### 1. All Domains (Main Page)
+- **Last 30 days**: domains with reports, messages reported, how many passed DMARC, and how many domains enforce a policy (quarantine or reject)
+- **Messages per day** across every domain
+- **Domains**: each with its DMARC policy, messages, DMARC pass rate, whether a TLS-RPT record is published, how much mail to it was encrypted, and how many senders fail DMARC. A row opens the domain
+- **To do** (beside the list): what needs attention on every domain, the most important first, such as a missing DMARC record, senders that fail DMARC, a policy that only monitors, or a missing TLS-RPT record
 
-#### 2. Domain Overview
-Click a domain to see:
-- **Report Timeline**: Graph showing reports over time
-- **Top Sending Sources**: Most active IP addresses
-- **Compliance Summary**: Pass/fail statistics
-- **Policy Effectiveness**: How well your DMARC policy is working
-- **DNS Records**: The DMARC Record and TLS-RPT Record cards at the top show whether each record is published and where reports are sent
-- **TLS Reports**: TLS-RPT reports for the domain (see below)
+#### 2. A Domain
+- **Messages per day**: passed and failed DMARC; a day opens its reports
+- **Mail flow**: your domain, the senders that sent mail as it, and the receivers that reported it. Line width is the volume, colour is the pass rate
+- **Senders**: who sent mail as the domain, failing first. Senders are grouped by their network (ASN, from the MaxMind database); an address with no known network stands alone
+- **Daily reports**: one row a day, with the senders and the receivers that reported it
+- **Encryption of mail to you (TLS)**: from the TLS-RPT reports, with a row per receiver that reported
+- **To do** and **Records** (beside the content): the records are DMARC, SPF, DKIM and TLS-RPT. A record opens a window with what is published, what it means, the three DMARC policies with whether the domain is ready for the next one, and a record to copy
 
-#### 3. Individual Report Details
-Click a specific report to view:
-- **Report Metadata**:
-  - Reporting organization (e.g., Gmail, Outlook)
-  - Date range covered
-  - Report ID
-- **Authentication Results**:
-  - SPF alignment status
-  - DKIM alignment status
-  - Overall DMARC result
-- **Message Statistics**:
-  - Total messages evaluated
-  - Disposition applied (none/quarantine/reject)
+#### 3. A Day of Reports
+- What the receivers reported that day: messages, DMARC, SPF and DKIM pass rates, and a row per sender and receiver. A sender opens its details
 
-#### 4. Source IP Details
-Click an IP address to see:
-- **Geographic Information**:
-  - Country
-  - Region/City
-  - ISP/Organization
-- **Authentication Details**:
-  - SPF check result
-  - DKIM check result
-  - DMARC alignment status
-- **Volume**: Number of messages from this source
-- **Reverse DNS**: Hostname associated with the IP
+#### 4. A Sender
+- **Where it is**: country, city and network (ASN)
+- **What it means**: a sender that fails DMARC is either a service you use that is not set up (set up SPF or DKIM for it), or someone sending as you (the policy handles it)
+- **What receivers saw**: each address, envelope sender, SPF and DKIM result, and the reporting receiver
 
 ---
 
@@ -166,7 +145,7 @@ v=DMARC1; p=none; rua=mailto:dmarc@example.net;
 ### 2. Parameter Details
 
 * **`p=none` (Monitoring Mode):** The recommended starting point. It ensures no mail is blocked while you collect data to verify that all legitimate sources are correctly authenticated.
-* **`rua=mailto:...`:** This is the feedback loop trigger. Ensure this address is the mailbox configured under **Settings → DMARC IMAP** in mailcow Logs Viewer.
+* **`rua=mailto:...`:** This is the feedback loop trigger. Ensure this address is the mailbox configured under **Settings → DMARC & TLS IMAP** in mailcow Logs Viewer.
 * **`v=DMARC1`:** Required version prefix.
 
 ### 3. External Domain Reporting (Verification)
@@ -201,10 +180,10 @@ To receive them, create a **TXT** record at the `_smtp._tls` subdomain (e.g., `_
 v=TLSRPTv1; rua=mailto:dmarc@example.net
 ```
 
-* **`rua=`**: Where reports are sent. Use the mailbox configured under **Settings → DMARC IMAP**; the same sync imports DMARC and TLS reports. Senders deliver only to `mailto:` and `https:` addresses.
+* **`rua=`**: Where reports are sent. Use the mailbox configured under **Settings → DMARC & TLS IMAP**; the same sync imports DMARC and TLS reports. Senders deliver only to `mailto:` and `https:` addresses.
 * Publish exactly one such record. Senders ignore the domain when there is more than one.
 
-The reports appear in the **TLS Reports** tab of the domain. The **TLS-RPT Record** card at the top of the domain page, next to the DMARC Record card, shows whether the record is published and where reports go. A change to the record triggers a DNS change alert, like the other records.
+The reports appear on the domain, under **Encryption of mail to you (TLS)**, and a day opens its report. The **TLS-RPT** record in the domain's **Records** shows whether it is published and where reports go, and gives a record to copy when it is missing. A change to the record triggers a DNS change alert, like the other records.
 
 ---
 
@@ -238,7 +217,7 @@ When using email services (marketing, support desk, etc.):
 
 ### No Reports Appearing
 - **Check DMARC Record**: Verify `rua=` tag has correct email
-- **No TLS reports**: Check the TLS-RPT Record card at the top of the domain page; without a `_smtp._tls` record no TLS reports are sent
+- **No TLS reports**: Check the TLS-RPT record in the domain's **Records**; without a `_smtp._tls` record no TLS reports are sent
 - **Wait**: Reports can take 24-48 hours to arrive
 - **Email Access**: Ensure reporting email is accessible
 
@@ -260,6 +239,13 @@ When using email services (marketing, support desk, etc.):
 > Settings are edited on the **Settings** page (requires `SETTINGS_EDIT_VIA_UI_ENABLED=true`). Every setting can also be provided as an environment variable - see [ENV_Settings.md](../ENV_Settings.md).
 - Older DMARC and TLS reports are automatically deleted daily (cleanup job runs at 2:15 AM) to save space
 - Export reports before they're deleted if long-term analysis is needed
+
+### Deleting reports
+**Manage Reports** on the DMARC & TLS page opens a window with two lists:
+- **Reports by domain**: each domain with its number of DMARC and TLS reports and the date of its latest report. A click on a column header sorts by it. **Delete all** removes every DMARC and TLS report of that domain, for example a domain you no longer host. The confirmation shows how many reports will be deleted; this cannot be undone.
+- **All reports**: every report, newest first, with **Delete** for a single report. A click on a column header sorts the whole list by it (a second click turns it around), across all pages. The search above it finds reports by domain or by reporter (the organization that sent the report), and the total shows how many match.
+
+Deleting is off by default. Turn it on under **Settings → DMARC** (`DMARC_ALLOW_REPORT_DELETE=true`). A domain whose reports were deleted comes back if new reports for it arrive.
 
 ---
 
