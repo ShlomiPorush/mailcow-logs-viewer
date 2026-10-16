@@ -91,3 +91,27 @@ def test_unsupported_extension_returns_none():
 def test_missing_metadata_raises():
     with pytest.raises(Exception):
         parse_dmarc_xml("<feedback></feedback>")
+
+
+def test_parse_plain_xml_file():
+    # The upload picker and the IMAP import both offer a plain .xml report
+    result = parse_dmarc_file(VALID_REPORT.encode(), "example.net!example.com!1700000000!1700086400.xml")
+    assert result is not None
+    assert result["report_id"] == "1234567890"
+
+
+def test_plain_xml_with_byte_order_mark():
+    result = parse_dmarc_file(b"\xef\xbb\xbf" + VALID_REPORT.encode(), "report.xml")
+    assert result is not None
+
+
+@pytest.mark.parametrize("name", ["REPORT.XML.GZ", "report.gz", "report"])
+def test_gzip_is_read_whatever_its_name(name):
+    assert parse_dmarc_file(gzip.compress(VALID_REPORT.encode()), name) is not None
+
+
+def test_zip_is_read_whatever_its_name():
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("REPORT.XML", VALID_REPORT)
+    assert parse_dmarc_file(buf.getvalue(), "Report.ZIP") is not None

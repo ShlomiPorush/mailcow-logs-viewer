@@ -5,6 +5,8 @@ import asyncio
 import logging
 import hashlib
 import json
+import zipfile
+from io import BytesIO
 from typing import Annotated, List, Optional
 from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, BackgroundTasks, Query
@@ -1785,7 +1787,7 @@ async def upload_report(
     
     Supported formats:
     - DMARC: .xml, .xml.gz, .zip (XML content)
-    - TLS-RPT: .json, .json.gz
+    - TLS-RPT: .json, .json.gz, .zip (JSON content)
     """
     if not settings.dmarc_manual_upload_enabled:
         raise HTTPException(
@@ -1812,12 +1814,26 @@ async def upload_report(
         raise internal_error(e)
 
 
+def _is_tls_rpt_upload(file_content: bytes, filename: str) -> bool:
+    """TLS-RPT by its name (.json, .json.gz, RFC 8460), or a ZIP by any name
+    that holds JSON and no XML: senders name their ZIPs freely."""
+    if filename.lower().endswith(('.json', '.json.gz', '.json.zip')):
+        return True
+    if file_content[:4] != b'PK\x03\x04':
+        return False
+    try:
+        with zipfile.ZipFile(BytesIO(file_content)) as z:
+            names = [n.lower() for n in z.namelist()]
+    except zipfile.BadZipFile:
+        return False
+    return any(n.endswith('.json') for n in names) and not any(n.endswith('.xml') for n in names)
+
+
 def _upload_report_worker(file_content: bytes, filename: str):
     """Own parsing, persistence, rollback, and response construction in one worker."""
     with SessionLocal() as db:
         try:
-            name = filename.lower()
-            if name.endswith(('.json', '.json.gz', '.json.zip')):
+            if _is_tls_rpt_upload(file_content, filename):
                 return _upload_tls_rpt_report(file_content, filename, db)
             return _upload_dmarc_report(file_content, filename, db)
         except Exception:
