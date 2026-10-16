@@ -2055,7 +2055,7 @@ function updateConnectionTestModal(status, logs) {
 
     const ok = status === 'success';
     content.innerHTML = `
-        <div class="ui-md-verdict-bar ${ok ? 'ui-md-verdict-ok' : 'ui-md-verdict-fail'}">${ok ? '✓ Connection Successful' : '✗ Connection Failed'}</div>
+        <div class="ui-md-verdict-bar ${ok ? 'ui-md-verdict-ok' : 'ui-md-verdict-fail'}">${ok ? 'Connection Successful' : 'Connection Failed'}</div>
         <div class="ui-set-log">
             ${logs.map(log => {
         let tone = '';

@@ -3251,8 +3251,8 @@ function _showQuarantineRuleModal(rule, prefill) {
                     </label>
                     <label><span class="ui-label">Action</span>
                         <select id="qrule-action" class="ui-select">
-                            <option value="release" ${defaultAction === 'release' ? 'selected' : ''}>✅ Release</option>
-                            <option value="delete" ${defaultAction === 'delete' ? 'selected' : ''}>🗑️ Delete</option>
+                            <option value="release" ${defaultAction === 'release' ? 'selected' : ''}>Release</option>
+                            <option value="delete" ${defaultAction === 'delete' ? 'selected' : ''}>Delete</option>
                         </select>
                     </label>
                 </div>
@@ -3466,7 +3466,7 @@ async function testQuarantineRules() {
                         <div class="ui-kpi"><b>${escapeHtml(String(data.total_matches))}</b>matched</div>
                         <div class="ui-kpi"><b class="ui-muted">${escapeHtml(String(data.total_quarantine))}</b>total</div>
                     </div>
-                    ${disabledCount > 0 ? `<p class="ui-text-warn">⚠ ${disabledCount} from disabled rules</p>` : ''}
+                    ${disabledCount > 0 ? `<p class="ui-text-warn">${disabledCount} from disabled rules</p>` : ''}
                     ${noMatches ? '<p class="ui-empty">No quarantine items matched any rules.</p>' : groupsHtml}
                     <p class="ui-kv-note ui-list-foot">This is a dry-run preview. No actions were taken.</p>
                 </div>

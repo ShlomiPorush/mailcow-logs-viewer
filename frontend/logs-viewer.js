@@ -392,7 +392,7 @@ async function fetchOlderLogs() {
         
     } catch (error) {
         console.error('[LOGS] Failed to load older logs:', error);
-        if (loader) loader.textContent = '✕ Failed to load older logs';
+        if (loader) loader.textContent = 'Failed to load older logs';
         setTimeout(() => { if (loader) loader.remove(); }, 3000);
     } finally {
         logsState.isLoadingMore = false;

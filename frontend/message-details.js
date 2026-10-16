@@ -855,10 +855,11 @@ function updateSecurityTabIndicator(data) {
     const securityTab = document.getElementById('modal-tab-netfilter');
     if (!securityTab) return;
 
-    const hasSecurityEvents = data.netfilter && data.netfilter.length > 0;
-    const indicator = hasSecurityEvents ? '🔴' : '🟢';
+    // A red count of the security events, as on the page tabs; none, no count
+    const events = data.netfilter ? data.netfilter.length : 0;
+    const indicator = events ? ` <span class="ui-tab-n is-fail" title="Security events">${events}</span>` : '';
 
-    securityTab.innerHTML = `<span>Security ${indicator}</span>`;
+    securityTab.innerHTML = `<span>Security</span>${indicator}`;
 }
 
 function closeMessageModal() {

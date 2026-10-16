@@ -300,12 +300,12 @@ async function validateMapContent(filename) {
 
         if (data.valid) {
             statusEl.innerHTML = warnings.length
-                ? uiTag(`✓ Valid, ${warnings.length} warning(s)`, 'warn')
-                : uiTag('✓ Valid', 'ok');
+                ? uiTag(`Valid, ${warnings.length} warning(s)`, 'warn')
+                : uiTag('Valid', 'ok');
             errorsEl.classList.toggle('hidden', warnings.length === 0);
             errorsEl.innerHTML = warningHtml;
         } else {
-            statusEl.innerHTML = uiTag(`✗ ${data.errors.length} error(s)`, 'fail');
+            statusEl.innerHTML = uiTag(`${data.errors.length} error(s)`, 'fail');
             errorsEl.classList.remove('hidden');
             errorsEl.innerHTML = data.errors.map(e => line(e, 'fail')).join('') + warningHtml;
         }
@@ -364,7 +364,7 @@ async function saveMapContent(filename) {
 
         if (!(result.normalized_entries > 0)) mapEditorSaved = content;
         const statusEl = document.getElementById('map-validation-status');
-        if (statusEl) statusEl.innerHTML = uiTag('✓ Saved', 'ok');
+        if (statusEl) statusEl.innerHTML = uiTag('Saved', 'ok');
         uiSaveBarUpdate('map-savebar', 0);
         document.getElementById('map-entry-count').textContent = uiCountLabel(result.entry_count, 'entry', 'entries');
         
@@ -475,7 +475,7 @@ function renderSuppressionItem(s) {
     let syncBadge = '<span class="ui-muted">-</span>';
     if (s.active) {
         syncBadge = s.synced_to_rspamd
-            ? '<span class="ui-text-ok" title="Synced to Rspamd">✓ Synced</span>'
+            ? '<span class="ui-text-ok" title="Synced to Rspamd">Synced</span>'
             : `<span class="ui-text-warn" title="${suppressionSyncLocked() ? 'Not synced: syncing to Rspamd needs the Read-Write API key' : 'Pending sync to Rspamd'}">⟳ Pending</span>`;
     } else if (s.synced_to_rspamd) {
         // Inactive entries: show "Removed" if was synced, nothing if never synced
