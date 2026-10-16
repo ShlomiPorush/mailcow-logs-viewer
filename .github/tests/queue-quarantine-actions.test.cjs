@@ -92,3 +92,53 @@ test('with the key, queue rows keep every action', () => {
     const html = drawQueue(loadApp(), true);
     for (const action of ['queueRetry', 'queueHold', 'queueDeleteItem', 'showAddSuppressionModal']) assert.match(html, new RegExp(action + '\\('));
 });
+
+// Open the edit dialog for a stored rule, save it as the dialog shows it, and
+// return what the dialog showed and what it sent
+async function editAndSave(rule) {
+    const app = loadApp();
+    app.context.closeQuarantineRuleModal = () => {};
+    app.context.loadQuarantineRules = async () => {};
+    app.context._showQuarantineRuleModal(rule, null);
+    const html = app.inserted.pop();
+    const modeSelect = html.match(/<select id="qrule-match-mode"[\s\S]*?<\/select>/)[0];
+    const shownMode = (modeSelect.match(/<option value="(\w+)" selected>/) || [])[1];
+    const shownValue = decodeEntities(html.match(/id="qrule-match-value" value="([^"]*)"/)[1]);
+    const fields = { 'qrule-name': rule.name, 'qrule-match-type': rule.match_type, 'qrule-match-value': shownValue,
+                     'qrule-match-mode': shownMode, 'qrule-action': rule.action, 'qrule-notes': '' };
+    for (const [id, value] of Object.entries(fields)) app.elements[id] = { value };
+    let sent = null;
+    app.context.authenticatedFetch = async (url, options) => { sent = JSON.parse(options.body); return { ok: true, json: async () => ({}) }; };
+    await app.context.saveQuarantineRule(rule.id);
+    return { shownMode, shownValue, sent };
+}
+
+const rule = (match_value, is_regex) => ({ id: 3, name: 'Rule', match_type: 'sender', match_value, is_regex, action: 'release' });
+
+test('a Contains rule opens as Contains with its plain text and saves unchanged', async () => {
+    const { shownMode, shownValue, sent } = await editAndSave(rule('example\\.com', true));
+    assert.equal(shownMode, 'contains');
+    assert.equal(shownValue, 'example.com');
+    assert.equal(sent.match_value, 'example\\.com');
+    assert.equal(sent.is_regex, true);
+});
+
+test('a regex without a leading ^ opens as Regex and saves unchanged', async () => {
+    for (const value of ['.*@(spam|junk)\\.example$', 'invoice\\d+', 'a\\.b|c']) {
+        const { shownMode, shownValue, sent } = await editAndSave(rule(value, true));
+        assert.equal(shownMode, 'regex', value);
+        assert.equal(shownValue, value);
+        assert.equal(sent.match_value, value);
+        assert.equal(sent.is_regex, true);
+    }
+});
+
+test('a regex with a leading ^ and an Exact Match rule save unchanged', async () => {
+    let result = await editAndSave(rule('^noreply@example\\.com$', true));
+    assert.equal(result.shownMode, 'regex');
+    assert.equal(result.sent.match_value, '^noreply@example\\.com$');
+    result = await editAndSave(rule('NoReply@Example.com', false));
+    assert.equal(result.shownMode, 'exact');
+    assert.equal(result.sent.match_value, 'NoReply@Example.com');
+    assert.equal(result.sent.is_regex, false);
+});

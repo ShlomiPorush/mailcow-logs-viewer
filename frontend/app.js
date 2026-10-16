@@ -3145,16 +3145,36 @@ function showAddRuleFromQuarantine(sender, recipient, subject) {
     _showQuarantineRuleModal(null, prefill);
 }
 
+// A Contains rule is saved as a regex that only escapes its text. Read such a
+// rule back as Contains with the plain text, so saving it again does not escape
+// it twice; any other regex is Regex, with or without a leading ^.
+const QRULE_REGEX_SPECIAL = '.*+?^${}()|[]\\';
+function quarantineRuleMatchMode(rule) {
+    const value = rule.match_value || '';
+    if (!rule.is_regex) return { mode: 'exact', value };
+    let text = '';
+    for (let i = 0; i < value.length; i++) {
+        if (value[i] === '\\' && i + 1 < value.length && QRULE_REGEX_SPECIAL.includes(value[i + 1])) {
+            text += value[++i];
+        } else if (QRULE_REGEX_SPECIAL.includes(value[i])) {
+            return { mode: 'regex', value };
+        } else {
+            text += value[i];
+        }
+    }
+    return { mode: 'contains', value: text };
+}
+
 function _showQuarantineRuleModal(rule, prefill) {
     const isEdit = !!rule;
     const title = isEdit ? 'Edit Rule' : 'Add Quarantine Rule';
-    
+    const ruleMode = isEdit ? quarantineRuleMatchMode(rule) : { mode: 'exact', value: '' };
+
     // Determine default values: edit mode uses rule data, prefill uses quarantine data
     const defaultName = isEdit ? escapeHtml(rule.name) : (prefill ? escapeHtml(`Rule for ${prefill.sender}`) : '');
     const defaultMatchType = isEdit ? rule.match_type : (prefill ? 'sender' : 'sender');
-    const defaultMatchValue = isEdit ? escapeHtml(rule.match_value) : (prefill ? escapeHtml(prefill.sender) : '');
+    const defaultMatchValue = isEdit ? escapeHtml(ruleMode.value) : (prefill ? escapeHtml(prefill.sender) : '');
     const defaultAction = isEdit ? rule.action : 'release';
-    const defaultIsRegex = isEdit ? rule.is_regex : false;
     const defaultNotes = isEdit && rule.notes ? escapeHtml(rule.notes) : '';
     
     // For pre-fill mode, provide quick-fill buttons for sender/domain/recipient
@@ -3204,9 +3224,9 @@ function _showQuarantineRuleModal(rule, prefill) {
                 </label>
                 <label><span class="ui-label">Match Mode</span>
                     <select id="qrule-match-mode" onchange="updateQRuleMatchHelp()" class="ui-select">
-                        <option value="exact" ${!defaultIsRegex ? 'selected' : ''}>Exact Match - matches the full value exactly</option>
-                        <option value="contains" ${defaultIsRegex && !(isEdit && rule.match_value.startsWith('^')) ? 'selected' : ''}>Contains - matches if value appears anywhere</option>
-                        <option value="regex" ${defaultIsRegex && isEdit && rule.match_value.startsWith('^') ? 'selected' : ''}>Regex (advanced) - custom regular expression</option>
+                        <option value="exact" ${ruleMode.mode === 'exact' ? 'selected' : ''}>Exact Match - matches the full value exactly</option>
+                        <option value="contains" ${ruleMode.mode === 'contains' ? 'selected' : ''}>Contains - matches if value appears anywhere</option>
+                        <option value="regex" ${ruleMode.mode === 'regex' ? 'selected' : ''}>Regex (advanced) - custom regular expression</option>
                     </select>
                     <small id="qrule-match-help" class="ui-muted"></small>
                 </label>
