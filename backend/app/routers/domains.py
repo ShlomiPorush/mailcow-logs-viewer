@@ -27,6 +27,10 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+# RFC 7208 section 12: modifier = name "=" macro-string, without a qualifier
+SPF_MODIFIER_RE = re.compile(r'^[A-Za-z][A-Za-z0-9._-]*=')
+SPF_MECHANISM_NAMES = {'a', 'mx', 'ptr', 'ip4', 'ip6', 'include', 'exists'}
+
 _server_ip_cache = None
 
 
@@ -292,11 +296,12 @@ async def check_spf_record(domain: str, spf_source_ips: Optional[List[Dict[str, 
         # ptr and exp= are legal (RFC 7208); ptr is only discouraged, a warning below
         valid_prefixes = ['ip4:', 'ip6:', 'a', 'mx', 'include:', 'exists:', 'redirect', 'all', 'ptr', 'exp=']
         invalid_mechanisms = []
-        
+
         for mechanism in mechanisms:
             clean_mech = mechanism.lstrip('+-~?')
             is_valid = any(clean_mech == prefix or clean_mech.startswith(prefix) for prefix in valid_prefixes)
-            if not is_valid:
+            # Unknown modifiers (name=value, no qualifier) must be ignored (RFC 7208 section 6)
+            if not is_valid and not SPF_MODIFIER_RE.match(mechanism):
                 invalid_mechanisms.append(mechanism)
         
         if invalid_mechanisms:
@@ -422,6 +427,14 @@ async def check_spf_record(domain: str, spf_source_ips: Optional[List[Dict[str, 
             if status == 'success':
                 status = 'warning'
             warnings = warnings + ['The ptr mechanism is discouraged (RFC 7208): it is slow and unreliable. This check does not evaluate it']
+
+        # A mechanism written with = is an unknown modifier, so SPF ignores it
+        for term in mechanisms:
+            name, sep, value = term.partition('=')
+            if sep and SPF_MODIFIER_RE.match(term) and name.lower() in SPF_MECHANISM_NAMES:
+                if status == 'success':
+                    status = 'warning'
+                warnings = warnings + [f'{term} is ignored by SPF. Did you mean {name}:{value}?']
 
         if history_notes:
             warnings = warnings + history_notes

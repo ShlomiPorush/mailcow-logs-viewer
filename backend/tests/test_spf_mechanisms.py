@@ -41,3 +41,33 @@ async def test_unknown_mechanism_is_still_an_error(monkeypatch):
     result = await _check(monkeypatch, 'v=spf1 mx bogus:example.net -all')
     assert result['status'] == 'error'
     assert 'Invalid SPF mechanisms: bogus:example.net' in result['message']
+
+
+@pytest.mark.asyncio
+async def test_unknown_modifiers_are_ignored(monkeypatch):
+    """RFC 7208 section 6: unknown modifiers (name=value) must be ignored.
+    ra=, rp= and rr= are the SPF failure reporting modifiers of RFC 6652."""
+    result = await _check(monkeypatch, 'v=spf1 mx ra=postmaster rp=10 rr=all -all')
+    assert result['status'] == 'success', result['message']
+    assert 'Invalid' not in result['message']
+    # Only mx is a lookup; a modifier is never resolved
+    assert result['dns_lookups'] == 1
+
+
+@pytest.mark.parametrize('term', ['-foo=bar', '=bar', 'foo'])
+@pytest.mark.asyncio
+async def test_terms_that_are_no_modifier_are_still_errors(monkeypatch, term):
+    """Modifiers take no qualifier and need a name: these are invalid terms."""
+    result = await _check(monkeypatch, f'v=spf1 mx {term} -all')
+    assert result['status'] == 'error'
+    assert f'Invalid SPF mechanisms: {term}' in result['message']
+
+
+@pytest.mark.asyncio
+async def test_mechanism_written_as_a_modifier_is_a_warning(monkeypatch):
+    """include=example.net is an unknown modifier, so SPF ignores it, but it
+    is almost always a typo for include:example.net."""
+    result = await _check(monkeypatch, 'v=spf1 mx include=example.net -all')
+    assert result['status'] == 'warning', result['message']
+    assert any('include=example.net' in w for w in result['warnings'])
+    assert result['dns_lookups'] == 1
