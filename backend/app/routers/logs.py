@@ -1,6 +1,7 @@
 """
 API endpoints for log retrieval and search
 """
+import ipaddress
 import logging
 from fastapi import APIRouter, Depends, Query, HTTPException, Request
 from starlette.concurrency import run_in_threadpool
@@ -809,17 +810,26 @@ async def unban_fail2ban(request: Request):
         if not ip:
             raise HTTPException(status_code=400, detail="Missing 'ip' field")
         
-        result = await mailcow_api.unban_fail2ban(ip)
+        current = await mailcow_api.get_fail2ban()
+        if current is None:
+            raise HTTPException(status_code=503, detail="Could not fetch current Fail2Ban settings")
+        # mailcow answers success to any unban and its netfilter skips one it has no
+        # ban for, so only an address Fail2ban banned now is sent, as the ban it is
+        networks = _bans_covering(ip, current.get("active_bans"))
+        if not networks:
+            if any(_same_entry(entry, ip) for entry in _split_ip_list(current.get("blacklist", ""))):
+                return {"status": "error", "msg": f"{security_addresses._bare(ip)} is on the denylist. Remove it from the denylist to lift the ban."}
+            return {"status": "error", "msg": f"{security_addresses._bare(ip)} is not banned by Fail2ban now"}
+
+        result = await mailcow_api.unban_fail2ban(networks)
         
         # mailcow returns a list with status objects
         if isinstance(result, list) and len(result) > 0:
             first = result[0]
-            if first.get("type") == "success":
-                return {"status": "success", "msg": first.get("msg", f"IP {ip} unbanned")}
-            else:
+            if first.get("type") != "success":
                 return {"status": "error", "msg": first.get("msg", "Unban failed")}
         
-        return {"status": "success", "msg": f"IP {ip} unbanned", "raw": result}
+        return {"status": "success", "msg": f"{', '.join(networks)} unbanned", "networks": networks}
         
     except HTTPException:
         raise
@@ -828,6 +838,25 @@ async def unban_fail2ban(request: Request):
         if isinstance(e, MailcowRwKeyError):
             raise internal_error(e)
         raise HTTPException(status_code=502, detail="mailcow did not accept the unban. Check the Read-Write API key and try again.")
+
+
+def _bans_covering(ip: str, active_bans) -> List[str]:
+    """The Fail2ban bans that hold the address, by the network mailcow keys them
+    with: with netban_ipv4 24, 198.51.100.7 is banned as 198.51.100.0/24."""
+    try:
+        target = ipaddress.ip_network(ip.strip(), strict=False)
+    except ValueError:
+        return []
+    networks = []
+    for ban in active_bans or []:
+        key = ban.get("network") if isinstance(ban, dict) else None
+        try:
+            net = ipaddress.ip_network(key or "", strict=False)
+        except ValueError:
+            continue
+        if net.version == target.version and target.subnet_of(net) and key not in networks:
+            networks.append(key)
+    return networks
 
 
 def _split_ip_list(value) -> List[str]:

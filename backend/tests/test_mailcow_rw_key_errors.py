@@ -77,9 +77,15 @@ def test_rate_limit_writes_say_the_key_is_read_only():
     assert rate_limits._write_failed(MailcowAPIError("boom"), "generic").detail == "generic"
 
 
-def test_unban_says_the_key_was_rejected(mailcow):
+def test_unban_says_the_key_was_rejected(mailcow, monkeypatch):
+    from app.mailcow_api import mailcow_api
     answer, _ = mailcow
     answer["status"] = 401
+
+    async def banned():  # the read-only key still reads the ban
+        return {"active_bans": [{"network": "192.0.2.1/32", "ip": "192.0.2.1"}]}
+
+    monkeypatch.setattr(mailcow_api, "get_fail2ban", banned)
     with pytest.raises(HTTPException) as raised:
         asyncio.run(logs.unban_fail2ban(_Request({"ip": "192.0.2.1"})))
     assert raised.value.status_code == 502
