@@ -2,7 +2,8 @@
 
 The Logs page shows the raw log lines of each mailcow service: live as they arrive, and back through the lines the app has stored. A background job reads the logs through the mailcow API every 30 seconds by default, keeps them for 2 days, and streams new lines to the open page.
 
-<!-- SHOT: logs | Logs page on a wide screen: the Service list with Postfix selected, the toolbar, the Range chips, the Quick Filters with NOQUEUE Reject on, colored Postfix lines and the status bar showing Connected -->
+![Logs](../../images/docs/logs-light.webp#gh-light-mode-only)
+![Logs](../../images/docs/logs-dark.webp#gh-dark-mode-only)
 
 ## Services
 

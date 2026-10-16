@@ -6,7 +6,8 @@ The page has two tabs: **Suppressions** and **Rspamd Maps**.
 
 ## Suppressions
 
-<!-- SHOT: spam-filter-suppressions | Spam Filter > Suppressions: key figures, filter bar, a list with an automatic hard bounce, a Deferred Stuck entry, a domain entry with the Domain tag and a manual permanent entry -->
+![Spam Filter, Suppressions](../../images/docs/spam-filter-suppressions-light.webp#gh-light-mode-only)
+![Spam Filter, Suppressions](../../images/docs/spam-filter-suppressions-dark.webp#gh-dark-mode-only)
 
 Suppressions block recipients that keep bouncing, plus addresses and domains you add by hand. The app writes active entries to `global_rcpt_blacklist.map` (**Recipient Denylist**) so Rspamd rejects new mail to them. See [How suppressions work](#how-suppressions-work).
 
@@ -66,7 +67,8 @@ After it adds or updates entries, the app writes the list to Rspamd at once when
 
 ### Add a suppression
 
-<!-- SHOT: spam-filter-add-suppression | Add Suppression dialog with Type Domain, the pattern hint, Permanent block unchecked and Expires after (days) shown -->
+![Add Suppression dialog](../../images/docs/spam-filter-add-suppression-light.webp#gh-light-mode-only)
+![Add Suppression dialog](../../images/docs/spam-filter-add-suppression-dark.webp#gh-dark-mode-only)
 
 **Add Suppression** opens a dialog:
 
@@ -137,7 +139,8 @@ The result gives imported and skipped counts. Re-importing an export does not re
 
 ## Rspamd Maps
 
-<!-- SHOT: spam-filter-maps | Spam Filter > Rspamd Maps: the four groups with Loaded dots and the Auto-managed tag on Recipient Denylist -->
+![Spam Filter, Rspamd Maps](../../images/docs/spam-filter-maps-light.webp#gh-light-mode-only)
+![Spam Filter, Rspamd Maps](../../images/docs/spam-filter-maps-dark.webp#gh-dark-mode-only)
 
 This tab lists the 13 Rspamd map files mailcow ships, grouped as **Sender Rules**, **Recipient Rules**, **Content Rules** and **System**. Each row shows the map's name and purpose, its file name, and whether Rspamd has it **Loaded** or **Not loaded**. **Recipient Denylist** carries an **Auto-managed** tag because the suppression list writes to it.
 
@@ -161,7 +164,8 @@ The app treats every map the same way: a line between slashes is checked as a re
 
 ### Edit a map
 
-<!-- SHOT: spam-filter-map-editor | Map editor for Recipient Denylist: entry count, Regex Wizard open with a Domain pattern, text with manual lines and the managed section, validation warning on a bare address -->
+![Map editor for Recipient Denylist](../../images/docs/spam-filter-map-editor-light.webp#gh-light-mode-only)
+![Map editor for Recipient Denylist](../../images/docs/spam-filter-map-editor-dark.webp#gh-dark-mode-only)
 
 Open a map to edit its text. Lines starting with `#` are comments; blank lines do not count as entries. **Rspamd Maps** in the breadcrumb returns to the list.
 

@@ -8,7 +8,8 @@ The feature is marked **Beta**. It is off by default and needs a read-write API 
 
 The card switch turns the protection on or off. **Edit** opens its settings. The closed card shows the current limit and **Stops mailboxes** while enabled.
 
-<!-- SHOT: abuse-card | Security > Settings, the Outgoing spam card open: the limit sentence, the two fields, Blocked by abuse protection with one mailbox, Outbound activity and the Whitelist -->
+![Security, Settings, the Outgoing spam card open](../../images/docs/abuse-card-light.webp#gh-light-mode-only)
+![Security, Settings, the Outgoing spam card open](../../images/docs/abuse-card-dark.webp#gh-dark-mode-only)
 
 The open card turns the sentence into fields:
 

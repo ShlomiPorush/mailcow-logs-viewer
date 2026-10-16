@@ -2,9 +2,10 @@
 
 The Queue page shows the messages waiting in the Postfix queue of your mailcow server, read live from the mailcow API each time the page loads. With a read-write API key you can retry, hold, release and delete them.
 
-<!-- SHOT: queue | Queue page with the Read-Write key: the summary under the title, the toolbar with Select All, Flush All and Delete All, and three rows: one Deferred with a remote server answer, one On hold, one Active -->
+![Queue page](../../images/docs/queue-light.webp#gh-light-mode-only)
+![Queue page](../../images/docs/queue-dark.webp#gh-dark-mode-only)
 
-## Summary
+## Counts
 
 The summary counts messages waiting for retry, on hold and being delivered. The sidebar shows the total. With none queued, the page says "The queue is empty."
 
@@ -63,7 +64,7 @@ Actions are disabled while a request runs. A notice shows the result or failure 
 
 ## When something is missing
 
-- **Queue actions are locked**: add the read-write API key through **Open Settings**. This also unlocks **Suppress** on this page.
+- **Queue actions are locked**: add the read-write API key through **Open Settings**. The same key also brings back **Suppress**.
 - **"Failed to load queue" with a reason.** The app could not read the queue from mailcow. Check the mailcow connection on the [Status](Status.md) page.
 - **"No matching queue entries".** No queued message matches the search or the queue ID. **Clear filters** shows the whole queue.
 

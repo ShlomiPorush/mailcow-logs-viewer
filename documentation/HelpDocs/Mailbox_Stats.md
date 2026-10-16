@@ -2,7 +2,8 @@
 
 **Mailbox Stats** lists your mailboxes and their aliases from mailcow, with the messages this app has recorded for each of them. The page has two tabs: **Statistics** and [**Rate Limits**](Rate_Limits.md).
 
-<!-- SHOT: mailbox-stats-statistics | Mailbox Stats > Statistics with filters and an expanded mailbox showing services, counts and aliases -->
+![Mailbox Stats, Statistics](../../images/docs/mailbox-stats-statistics-light.webp#gh-light-mode-only)
+![Mailbox Stats, Statistics](../../images/docs/mailbox-stats-statistics-dark.webp#gh-dark-mode-only)
 
 ## Statistics
 
@@ -30,7 +31,8 @@ The **Aliases** table gives the same counts per alias, with the tags **catch-all
 
 Click the small chart in **Activity** to see the mailbox's sent and received messages, aliases included, per hour for periods up to two days and per day for longer ones. **Open its messages** opens Messages searched for the mailbox.
 
-<!-- SHOT: mailbox-stats-activity | Activity window with sent and received bars and Open its messages -->
+![Activity window](../../images/docs/mailbox-stats-activity-light.webp#gh-light-mode-only)
+![Activity window](../../images/docs/mailbox-stats-activity-dark.webp#gh-dark-mode-only)
 
 ## Settings that change this page
 

@@ -2,7 +2,8 @@
 
 The Dashboard combines imported mail logs with live server data from mailcow: attention items, mail flow, recent deliveries, protections and server health.
 
-<!-- SHOT: dashboard | Dashboard on a wide screen: Needs attention with one server check and one security alert, Mail flow with the hourly bars, Latest messages, Security, Server health and Hosted -->
+![Dashboard](../../images/docs/dashboard-light.webp#gh-light-mode-only)
+![Dashboard](../../images/docs/dashboard-dark.webp#gh-dark-mode-only)
 
 For navigation, theme, sign-in and read-write API key notices, see [Using the app](../Using_the_App.md).
 
@@ -44,7 +45,8 @@ The volume spike and failed login alerts are also sent by email, with the subjec
 
 **Show activity** compares activity around the alert with earlier activity for that mailbox or username.
 
-<!-- SHOT: dashboard-alert-activity | Show activity window of an Outbound volume spike: the figures row, the chart with the alert marked and the usual rate line, Around the alert with recipient domains, results and subjects -->
+![Show activity window](../../images/docs/dashboard-alert-activity-light.webp#gh-light-mode-only)
+![Show activity window](../../images/docs/dashboard-alert-activity-dark.webp#gh-dark-mode-only)
 
 A row of figures comes first:
 

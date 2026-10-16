@@ -8,7 +8,8 @@ The tabs are **Overview**, **Lists**, **Settings** and **Events**. The page refr
 
 **Overview** groups login attempts and probes by address for the selected period. Its tab count is **To review**.
 
-<!-- SHOT: security-overview | Security > Overview: the Protection row, To review with a rule catch and an unbanned address, the Where attacks come from and Networks that try most panels -->
+![Security, Overview](../../images/docs/security-overview-light.webp#gh-light-mode-only)
+![Security, Overview](../../images/docs/security-overview-dark.webp#gh-dark-mode-only)
 
 ### The Protection row
 
@@ -87,7 +88,8 @@ Both panels use the list's period. Their bars count attempts; an address may con
 
 The **Lists** tab shows mailcow's Fail2ban allowlist and denylist, one entry per row. The number on the tab is the count of both. An entry can be a single address or a network, such as `192.0.2.0/24`.
 
-<!-- SHOT: security-lists | Security > Lists: Allowlist with two entries, Denylist with one entry added by hand and one added by a rule -->
+![Security, Lists](../../images/docs/security-lists-light.webp#gh-light-mode-only)
+![Security, Lists](../../images/docs/security-lists-dark.webp#gh-dark-mode-only)
 
 - **Allowlist**: never banned, by Fail2ban or by the rules. Put your own offices and monitoring here. An entry that failed logins today says how many, and that it was never banned.
 - **Denylist**: banned until removed. The denylist wins over the allowlist. An entry says who added it: "Added by hand", or "Added by" and a rule name with the end of its ban.
@@ -100,7 +102,8 @@ The app reads both lists fresh from mailcow right before every change, so an ent
 
 **Settings** has cards for **Fail2ban**, six [protection rules](#protection-rules) and **Outgoing spam**. **Edit** shows fields; **Done** closes them. Card switches turn protections on or off, except Fail2ban, which is always on.
 
-<!-- SHOT: security-settings | Security > Settings: the Unknown accounts card open with Watch first selected, the other cards closed, the save bar showing two changes -->
+![Security, Settings](../../images/docs/security-settings-light.webp#gh-light-mode-only)
+![Security, Settings](../../images/docs/security-settings-dark.webp#gh-dark-mode-only)
 
 Use **Save changes** or **Discard** for pending edits. Failed edits stay on screen with an error.
 
@@ -207,7 +210,8 @@ This card stops a mailbox from sending when it sends more than a set number of m
 
 **Events** shows netfilter lines newest first, 50 per page. Its tab count follows the filters.
 
-<!-- SHOT: security-events | Security > Events: the filter bar with Filters open, a page of events with one row expanded to its log line -->
+![Security, Events](../../images/docs/security-events-light.webp#gh-light-mode-only)
+![Security, Events](../../images/docs/security-events-dark.webp#gh-dark-mode-only)
 
 Each event shows **When**, **Address**, **Account** (or the attempts left before a ban, when the line names no account), **Action** and **Where** (country and city, with the network on hover). The arrow at the end of a row shows the full log line.
 

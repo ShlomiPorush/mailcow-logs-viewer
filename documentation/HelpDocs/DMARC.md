@@ -14,7 +14,8 @@ Open a domain, then a sender or report day. Use the breadcrumbs to return.
 
 ## All domains
 
-<!-- SHOT: dmarc-all-domains | DMARC & TLS, all domains: the Last 30 days figures, Messages per day, the Domains table with four domains (one marked "Not on server"), and a To do list with three items -->
+![DMARC & TLS, all domains](../../images/docs/dmarc-all-domains-light.webp#gh-light-mode-only)
+![DMARC & TLS, all domains](../../images/docs/dmarc-all-domains-dark.webp#gh-dark-mode-only)
 
 ### Last 30 days
 
@@ -54,7 +55,8 @@ The list shows up to 8 items and the remaining count. With none, it says "Nothin
 
 ## A domain
 
-<!-- SHOT: dmarc-domain | A domain on DMARC & TLS: Messages per day, the Mail flow with three senders and two receivers, the Senders table with one failing sender, and To do and Records on the side -->
+![A domain on DMARC & TLS](../../images/docs/dmarc-domain-light.webp#gh-light-mode-only)
+![A domain on DMARC & TLS](../../images/docs/dmarc-domain-dark.webp#gh-dark-mode-only)
 
 The domain's name, with **Not on server** when it applies, and from top to bottom:
 
@@ -102,7 +104,8 @@ Without mail in the last 30 days, SPF and DKIM say **No mail in the last 30 days
 
 Open record windows from **Records** or **To do**.
 
-<!-- SHOT: dmarc-record-window | The DMARC record window for a domain with p=none: Current record, its settings, and the policy choice with Quarantine picked, showing "Ready." and a record to copy -->
+![The DMARC record window for a domain](../../images/docs/dmarc-record-window-light.webp#gh-light-mode-only)
+![The DMARC record window for a domain](../../images/docs/dmarc-record-window-dark.webp#gh-dark-mode-only)
 
 ### DMARC record
 
@@ -135,7 +138,8 @@ With a record: the record with **Copy**, where reports go, and any warnings, for
 
 ## A sender
 
-<!-- SHOT: dmarc-sender | A sender that fails DMARC: the red "Not set up to send as example.com" box, the Last 30 days figures and the What receivers saw table -->
+![A sender that fails DMARC](../../images/docs/dmarc-sender-light.webp#gh-light-mode-only)
+![A sender that fails DMARC](../../images/docs/dmarc-sender-dark.webp#gh-dark-mode-only)
 
 The sender's name, its city, country and network, and a tag: **Fails DMARC** (it failed for more than half of its mail), **Passes on DKIM only** or **Passes**.
 
@@ -190,7 +194,8 @@ Upload is allowed by default. Turn it off with **Manual Upload Enabled** under *
 
 ## Manage Reports
 
-<!-- SHOT: dmarc-manage-reports | Manage Reports with deletion on: Reports by domain with three domains and Delete all, and All reports with a search and the first page -->
+![Manage Reports](../../images/docs/dmarc-manage-reports-light.webp#gh-light-mode-only)
+![Manage Reports](../../images/docs/dmarc-manage-reports-dark.webp#gh-dark-mode-only)
 
 **Manage Reports** opens a window with two lists.
 

@@ -2,7 +2,8 @@
 
 **Devices** lists the phones, tablets and Outlook clients that sync with your mailcow server over ActiveSync. The app finds them in the SOGo log, which it reads through the mailcow API, and updates the list every minute.
 
-<!-- SHOT: devices-list | Devices with a new device, an older device, location data and the Last seen filter -->
+![Devices](../../images/docs/devices-list-light.webp#gh-light-mode-only)
+![Devices](../../images/docs/devices-list-dark.webp#gh-dark-mode-only)
 
 ## Find a device
 

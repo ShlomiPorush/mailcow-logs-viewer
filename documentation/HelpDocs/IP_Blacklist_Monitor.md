@@ -2,7 +2,8 @@
 
 **Status** > **Blocklists** checks the public addresses your mail leaves from against DNS blocklists.
 
-<!-- SHOT: status-blocklists | Status > Blocklists with a listed host, an expanded clean host and Ignored lists -->
+![Status, Blocklists](../../images/docs/status-blocklists-light.webp#gh-light-mode-only)
+![Status, Blocklists](../../images/docs/status-blocklists-dark.webp#gh-dark-mode-only)
 
 ## Monitored addresses
 

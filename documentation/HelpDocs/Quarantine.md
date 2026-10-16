@@ -6,7 +6,8 @@ The page has two tabs: **Messages** and **Auto-Rules**.
 
 ## Messages
 
-<!-- SHOT: quarantine-messages | Quarantine > Messages with the read-write key: toolbar, five held messages with Why tags, scores and row actions -->
+![Quarantine, Messages](../../images/docs/quarantine-messages-light.webp#gh-light-mode-only)
+![Quarantine, Messages](../../images/docs/quarantine-messages-dark.webp#gh-dark-mode-only)
 
 The summary counts held messages. With none held, the list says **No quarantined messages**.
 
@@ -58,7 +59,8 @@ With nothing selected, the toolbar shows **Release All** and **Delete All** inst
 
 ### Message details
 
-<!-- SHOT: quarantine-details | Quarantine Item Details window: facts, Rspamd Symbols table, folded informational symbols, Email Content, action footer -->
+![Quarantine Item Details window](../../images/docs/quarantine-details-light.webp#gh-light-mode-only)
+![Quarantine Item Details window](../../images/docs/quarantine-details-dark.webp#gh-dark-mode-only)
 
 **Quarantine Item Details** shows:
 
@@ -73,7 +75,8 @@ With the read-write key, the bottom of the window has **Spam**, **Not Spam**, **
 
 ## Auto-Rules
 
-<!-- SHOT: quarantine-auto-rules | Quarantine > Auto-Rules: toolbar, three rules (one Delete, one Release, one disabled) with hits, Recent Activity open -->
+![Quarantine, Auto-Rules](../../images/docs/quarantine-auto-rules-light.webp#gh-light-mode-only)
+![Quarantine, Auto-Rules](../../images/docs/quarantine-auto-rules-dark.webp#gh-dark-mode-only)
 
 Auto-rules compare a message field with a value, then tell mailcow to release or delete matches.
 
@@ -91,7 +94,8 @@ With no rules, the list says **No rules configured. Click "Add Rule" to create o
 
 ### Create a rule
 
-<!-- SHOT: quarantine-rule-dialog | Add Quarantine Rule dialog opened from a message's Rule button, with the Quick fill chips -->
+![Add Quarantine Rule dialog](../../images/docs/quarantine-rule-dialog-light.webp#gh-light-mode-only)
+![Add Quarantine Rule dialog](../../images/docs/quarantine-rule-dialog-dark.webp#gh-dark-mode-only)
 
 **Add Rule** opens the **Add Quarantine Rule** dialog:
 

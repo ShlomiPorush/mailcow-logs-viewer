@@ -2,7 +2,8 @@
 
 The Domains page lists the domains of your mailcow server and checks the DNS records that decide whether their mail is trusted: SPF, DKIM, DMARC, DNSSEC, DANE and MTA-STS. The domain list and the DKIM key come from the mailcow API; the records are read from public DNS.
 
-<!-- SHOT: domains-list | Domains page with several domains, one with a DMARC warning and one with an SPF error, "Updated 2 h ago" next to the title -->
+![Domains page](../../images/docs/domains-list-light.webp#gh-light-mode-only)
+![Domains page](../../images/docs/domains-list-dark.webp#gh-dark-mode-only)
 
 ## The page head
 
@@ -34,7 +35,8 @@ Inactive domains stay in the list but are left out of **Check Now** and of the c
 
 Click a row to open it. On a phone, the open domain has two tabs, **DNS checks** and **Details**; on a wider screen both parts show at once.
 
-<!-- SHOT: domains-open | An open domain with the DNS Security Records cards: SPF with "Checked IPs (3)" expanded, DKIM with "View Record" expanded, DMARC with a warning -->
+![An open domain](../../images/docs/domains-open-light.webp#gh-light-mode-only)
+![An open domain](../../images/docs/domains-open-dark.webp#gh-dark-mode-only)
 
 ### DNS Security Records
 

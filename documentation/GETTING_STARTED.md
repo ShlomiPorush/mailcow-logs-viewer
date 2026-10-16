@@ -95,7 +95,8 @@ A working app answers with HTTP 200 and `{"status":"healthy","database":"connect
 
 Open `http://localhost:8080` on the Docker host, or the host's private address from your network. Enter the **Username** and **Password** from `.env` and click **Sign In**. When OAuth2 is set up, the login page also shows a **Login with** button for your provider.
 
-<!-- SHOT: getting-started-login | Login page with Username, Password and Sign In -->
+![Login page](../images/docs/getting-started-login-light.webp#gh-light-mode-only)
+![Login page](../images/docs/getting-started-login-dark.webp#gh-dark-mode-only)
 
 There is no setup wizard and no separate first administrator account. With no sign-in configured, the Dashboard opens directly and shows a warning banner; see [Using the app](Using_the_App.md#signing-in-and-out).
 

@@ -2,7 +2,8 @@
 
 **Status** shows whether mailcow and this app are healthy: containers, mail storage, blocklists, log imports, message linking and background jobs. The data comes from the mailcow API and from the app itself.
 
-<!-- SHOT: status-server | Status > Server with Needs attention, Mail storage, mailcow, Message linking and Containers -->
+![Status, Server](../../images/docs/status-server-light.webp#gh-light-mode-only)
+![Status, Server](../../images/docs/status-server-dark.webp#gh-dark-mode-only)
 
 ## Needs attention
 
@@ -36,7 +37,8 @@ For **Postfix Logs**, **Rspamd Logs** and **Netfilter Logs** you see **Last Fetc
 
 **All**, **Problems** and **Off** filter the jobs. Open a group to see each job's description, schedule, last run, status and last error. A group with a failed job opens by itself.
 
-<!-- SHOT: status-jobs | Status > Jobs with a failed group expanded, an off job with Settings and an enabled job with Run -->
+![Status, Jobs](../../images/docs/status-jobs-light.webp#gh-light-mode-only)
+![Status, Jobs](../../images/docs/status-jobs-dark.webp#gh-dark-mode-only)
 
 | Group | Jobs |
 | --- | --- |

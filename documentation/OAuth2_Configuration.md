@@ -19,7 +19,8 @@ To set it up in the app instead, open **Settings** > **Authentication**, fill in
 
 On the login page, enter **Username** and **Password** and click **Sign In**. Scripts and API clients can send an `Authorization: Basic` header with every request instead.
 
-<!-- SHOT: authentication-login | Login page with OAuth2 provider button, OR separator and Basic Auth form -->
+![Login page](../images/docs/authentication-login-light.webp#gh-light-mode-only)
+![Login page](../images/docs/authentication-login-dark.webp#gh-dark-mode-only)
 
 After 10 failed attempts within 15 minutes, the app refuses further Basic sign-in attempts from that address ("Too many login attempts") until the oldest failures are more than 15 minutes old. IPv6 addresses are counted per `/64` network. Users who are already signed in are not affected.
 

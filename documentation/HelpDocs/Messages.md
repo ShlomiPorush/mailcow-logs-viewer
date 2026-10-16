@@ -2,7 +2,8 @@
 
 The Messages page lists messages the app has imported from your mailcow server and shows their delivery results. The app builds each message from the Postfix, Rspamd and Dovecot logs it imports from mailcow, and links them as described in [How a message is put together](#how-a-message-is-put-together).
 
-<!-- SHOT: messages | Messages on a screen 1280 px or wider: the filters column with counts, the list with one row selected, and the message docked in the reading pane on the Overview tab -->
+![Messages](../../images/docs/messages-light.webp#gh-light-mode-only)
+![Messages](../../images/docs/messages-dark.webp#gh-dark-mode-only)
 
 ## Layout
 
@@ -55,7 +56,8 @@ The unfiltered first batch refreshes every 30 seconds. Search, address, outcome 
 
 Click a message for its details. The same details open from Dashboard activity and global search.
 
-<!-- SHOT: message-details-logs | Message details window on the Logs tab for a deferred message: the Delivery Error box with one remote server answer and an attempts tag, the summary strip and the Complete Log Timeline -->
+![Message details window on the Logs tab for a deferred message](../../images/docs/message-details-logs-light.webp#gh-light-mode-only)
+![Message details window on the Logs tab for a deferred message](../../images/docs/message-details-logs-dark.webp#gh-dark-mode-only)
 
 ### The header
 

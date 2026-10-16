@@ -2,7 +2,8 @@
 
 The search in the top bar finds pages and their tabs, settings, messages, domains, mailboxes and IP addresses from one box. Pages and settings are found in the app itself; the other kinds are looked up on the server as you type.
 
-<!-- SHOT: search-all | The search open on a wide screen with "example" typed: the All tab with Pages, Settings, Messages, Domains and Mailboxes sections, the counts in the tabs and the key hints at the bottom -->
+![Search](../../images/docs/search-all-light.webp#gh-light-mode-only)
+![Search](../../images/docs/search-all-dark.webp#gh-dark-mode-only)
 
 ## Opening the search
 

@@ -13,7 +13,8 @@ To edit settings here:
 3. Remove from `.env` the variables you want to manage here. Keep `MAILCOW_URL`, `MAILCOW_API_KEY`, the `POSTGRES_*` values and `SETTINGS_EDIT_VIA_UI_ENABLED`: the app needs them before it can read the database.
 4. Recreate the app again. A field whose variable is still set shows **Set by ENV** and stays locked, even when the variable is empty (`SMTP_HOST=`).
 
-<!-- SHOT: settings-env-migration | Settings before migration with Migrate Settings from ENV and disabled fields -->
+![Settings before migration](../../images/docs/settings-env-migration-light.webp#gh-light-mode-only)
+![Settings before migration](../../images/docs/settings-env-migration-dark.webp#gh-dark-mode-only)
 
 If you later turn `SETTINGS_EDIT_VIA_UI_ENABLED` off, the app ignores the saved values, so put your sign-in settings back into `.env` first.
 
@@ -25,7 +26,8 @@ Passwords and keys are never shown. A stored one reads **Stored**, with **Replac
 
 Most changes apply when you save. A change to the features, the app title or logo, sign-in or the mailcow URL reloads the page. A change to sign-in settings signs out every other session; you stay signed in.
 
-<!-- SHOT: settings-mailcow | Settings > Mailcow with credential validation status, Stored secret controls and a Set by ENV field -->
+![Settings, Mailcow](../../images/docs/settings-mailcow-light.webp#gh-light-mode-only)
+![Settings, Mailcow](../../images/docs/settings-mailcow-dark.webp#gh-dark-mode-only)
 
 The sections below follow the menu. Each table gives the variable and the default; [Environment variables](../ENV_Settings.md) describes every variable in full.
 
@@ -231,7 +233,8 @@ A free MaxMind account lets the app download the GeoLite2 City and ASN databases
 
 Saving a new license key opens **GeoIP Database Setup**, which checks the key, downloads missing databases and tests them. If a step fails, it says why; click **Close**, fix the account ID or key and save again. After three minutes the window stops waiting for the download; check **Database Health** later.
 
-<!-- SHOT: settings-geoip-setup | GeoIP Database Setup showing the three stages and a download or validation result -->
+![GeoIP Database Setup](../../images/docs/settings-geoip-setup-light.webp#gh-light-mode-only)
+![GeoIP Database Setup](../../images/docs/settings-geoip-setup-dark.webp#gh-dark-mode-only)
 
 | Setting | Variable | Default | Notes |
 | --- | --- | --- | --- |

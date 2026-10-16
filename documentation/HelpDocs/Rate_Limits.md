@@ -2,7 +2,8 @@
 
 **Mailbox Stats** > **Rate Limits** shows who ran into mailcow's sending limits and lets you change the limit of each mailbox and domain. The hits come from mailcow's `ratelimited` log, which this app collects; the limits are read from mailcow.
 
-<!-- SHOT: rate-limits-page | Rate Limits with activity chart, Blocked senders and Configured limits -->
+![Rate Limits](../../images/docs/rate-limits-page-light.webp#gh-light-mode-only)
+![Rate Limits](../../images/docs/rate-limits-page-dark.webp#gh-dark-mode-only)
 
 ## Rate limit activity
 
@@ -19,7 +20,8 @@ Click a sender to see each refused message with **Time**, **Recipient**, **Subje
 
 **Reset counter** lets the sender send again right away; the limit stays as it is. The button appears only when mailcow's log names the counter.
 
-<!-- SHOT: rate-limits-sender | Blocked sender detail with full event history, current limit and Reset counter -->
+![Blocked sender detail](../../images/docs/rate-limits-sender-light.webp#gh-light-mode-only)
+![Blocked sender detail](../../images/docs/rate-limits-sender-dark.webp#gh-dark-mode-only)
 
 ## Configured limits
 
@@ -29,7 +31,8 @@ To change one entry, click **Edit**, enter the number of messages in **Allow**, 
 
 **Apply to filtered** sets one limit on everything the table shows, and only on that. The panel shows how many mailboxes and domains match. Enter the limit, click **Apply** and confirm; `0` removes the limit from all of them. One apply can change up to 1,000 entries. An entry the app no longer knows, for example one deleted in mailcow since the page loaded, is skipped and keeps its limit.
 
-<!-- SHOT: rate-limits-bulk | Configured limits filtered to example.com with Apply to filtered open and mailbox/domain counts -->
+![Configured limits filtered to example.com](../../images/docs/rate-limits-bulk-light.webp#gh-light-mode-only)
+![Configured limits filtered to example.com](../../images/docs/rate-limits-bulk-dark.webp#gh-dark-mode-only)
 
 ## Settings that change this page
 

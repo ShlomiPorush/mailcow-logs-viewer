@@ -2,7 +2,8 @@
 
 **About** shows whether everything the app relies on is working, how sign-in is set up and which version is running. Version information comes from the project's releases on GitHub.
 
-<!-- SHOT: about-page | About showing dependency cards, Version and Configuration in one view -->
+![About](../../images/docs/about-page-light.webp#gh-light-mode-only)
+![About](../../images/docs/about-page-dark.webp#gh-dark-mode-only)
 
 ## What the app relies on
 

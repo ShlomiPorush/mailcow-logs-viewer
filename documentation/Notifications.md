@@ -6,7 +6,8 @@ The app sends alerts by email and to destinations you add, such as Slack, Telegr
 
 Under **Alert destinations**, click **+ Add destination**, pick the **Service**, fill in its fields and tick the topics under **Which alerts to send here**.
 
-<!-- SHOT: notifications-destinations | Settings > Notifications with two destinations and the email address fields -->
+![Settings, Notifications](../images/docs/notifications-destinations-light.webp#gh-light-mode-only)
+![Settings, Notifications](../images/docs/notifications-destinations-dark.webp#gh-dark-mode-only)
 
 | Service | Fields |
 | --- | --- |
@@ -23,7 +24,8 @@ A self-hosted service needs a URL the app's container can reach. Enter the final
 
 The dot next to a destination shows whether its last message got through, and a failure shows its error. A destination with **Enabled** off gets no alerts. If you change a destination's server URL, type its token again: a saved token is only sent to the server it was entered for.
 
-<!-- SHOT: notifications-editor | Add destination with Telegram fields and all four alert topic checkboxes -->
+![Add destination](../images/docs/notifications-editor-light.webp#gh-light-mode-only)
+![Add destination](../images/docs/notifications-editor-dark.webp#gh-dark-mode-only)
 
 ## Which alert goes where
 
