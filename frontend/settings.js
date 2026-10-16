@@ -1419,8 +1419,10 @@ function renderSettings(content, data) {
                     if (_maxmindChanged) _cachedMaxMindStatus = null; // Clear stale validation cache
                     const _maxmindHasValues = (payload.maxmind_license_key && payload.maxmind_license_key !== '' && payload.maxmind_license_key !== '********');
                     if (_maxmindChanged && _maxmindHasValues) {
-                        // Modal handles loadSettings on close
+                        // The form reloads now, so the save bar clears behind the window;
+                        // the window reloads it again on close to show the new GeoIP status
                         showGeoIPSetupModal();
+                        await loadSettings();
                         return;
                     }
                     
