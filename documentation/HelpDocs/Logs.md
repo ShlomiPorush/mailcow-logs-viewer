@@ -59,7 +59,7 @@ The status bar shows **Connected**, **Paused** or **Disconnected**, loaded and s
 
 "Search logs..." filters loaded lines when you press Enter or the search button. It searches program and message text, plus structured fields such as Rspamd addresses, subject and action or API request data.
 
-The filter badge gives matching and loaded counts. Its close button, **Clear search**, or an empty search clears both text and quick filters.
+The filter badge in the status bar under the log gives matching and loaded counts, and stays in sight while the view follows the newest lines. Its close button, **Clear search**, or an empty search clears both text and quick filters.
 
 The search does not ask the server. To search further back, load a longer time range first.
 
