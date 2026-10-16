@@ -4,7 +4,7 @@ import importlib.util
 import pathlib
 import uuid
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import pytest
 from sqlalchemy import create_engine, text
@@ -86,10 +86,11 @@ def test_bounce_mark_starts_at_the_newest_stored_line():
         assert _mark(isolated) == "999999"
 
 
-# -- 0017: soft-bounce suppressions active below the threshold ----------------
+# -- 0017: automatic soft-bounce suppressions start counting again -------------
 
-# email -> (reason, source, soft_bounce_count, active); with a threshold of 5
-# only the first two are wrong (with the default of 3, only the first)
+# email -> (reason, source, soft_bounce_count, active). Earlier versions could
+# count a bounce twice, so with Count then suppress every automatic soft-bounce
+# entry is lifted and its counts start again, at, above or below the threshold
 SUPPRESSIONS = {
     "below@example.com": ("soft_bounce", "auto", 2, True),
     "four@example.com": ("soft_bounce", "auto", 4, True),
@@ -102,17 +103,18 @@ SUPPRESSIONS = {
     "hard@example.com": ("hard_bounce", "auto", 0, True),
     "stuck@example.com": ("deferred_stuck", "auto", 1, True),
 }
+LIFTED = ("below@example.com", "four@example.com", "at@example.com", "above@example.com", "off@example.com")
+EXPIRES = datetime(2030, 1, 1)
 
 
 def _seed_suppressions(isolated):
     from app.models import SpamSuppression
-    expires = datetime(2030, 1, 1)
     with Session(isolated) as db:
         for email, (reason, source, soft, active) in SUPPRESSIONS.items():
             db.add(SpamSuppression(email=email, type="email", reason=reason, source=source,
                                    bounce_count=max(soft, 1), soft_bounce_count=soft,
                                    hard_bounce_count=1 if reason == "hard_bounce" else 0,
-                                   active=active, synced_to_rspamd=True, expires_at=expires))
+                                   active=active, synced_to_rspamd=True, expires_at=EXPIRES))
         db.commit()
 
 
@@ -131,49 +133,55 @@ def suppression_settings(monkeypatch):
     return monkeypatch
 
 
-TURNED_OFF = ("below@example.com", "four@example.com")
-
-
-def _check_only_below_turned_off(isolated):
+def _check_soft_bounces_lifted(isolated, upgraded_at):
     rows = _suppressions(isolated)
-    for email in TURNED_OFF:
-        assert (rows[email].active, rows[email].synced_to_rspamd) == (False, False), email
-    # Counts and expiry stay as they were
-    assert rows["four@example.com"].soft_bounce_count == 4 and rows["four@example.com"].bounce_count == 4
-    assert rows["four@example.com"].expires_at == datetime(2030, 1, 1)
-    for email, (_, _, _, active) in SUPPRESSIONS.items():
-        if email not in TURNED_OFF:
-            assert (rows[email].active, rows[email].synced_to_rspamd) == (active, True), email
+    for email in LIFTED:
+        row = rows[email]
+        assert (row.active, row.synced_to_rspamd) == (False, False), email
+        assert (row.soft_bounce_count, row.bounce_count) == (0, 0), email
+        # The escalated expiry is not kept: the entry reads as expired
+        assert upgraded_at - timedelta(minutes=1) <= row.expires_at <= datetime.utcnow(), email
+    for email, (reason, _, soft, active) in SUPPRESSIONS.items():
+        if email not in LIFTED:
+            row = rows[email]
+            assert (row.active, row.synced_to_rspamd) == (active, True), email
+            assert (row.soft_bounce_count, row.bounce_count, row.expires_at) == (soft, max(soft, 1), EXPIRES), email
 
 
-def test_suppressions_below_the_threshold_are_turned_off(suppression_settings, caplog):
+def test_automatic_soft_bounce_suppressions_are_lifted_and_counted_again(suppression_settings, caplog):
     from app.models import SpamSuppression
     suppression_settings.setenv("SUPPRESSION_SOFT_BOUNCE_THRESHOLD", "5")
     revision = _revision("soft_bounce_threshold_repair")
     with _schema(SpamSuppression, SystemSetting) as isolated:
         _seed_suppressions(isolated)
+        upgraded_at = datetime.utcnow()
         with caplog.at_level("WARNING", logger="app.migrations"):
             _upgrade(isolated, revision)
-        _check_only_below_turned_off(isolated)
-        assert "turned off 2 automatic soft-bounce suppression(s) below the Soft Bounce Threshold of 5" in caplog.text
+        _check_soft_bounces_lifted(isolated, upgraded_at)
+        assert ("lifted 5 automatic soft-bounce suppression(s) (4 of them active) and reset their bounce counts; "
+                "the Soft Bounce Threshold of 5 counts new bounces only") in caplog.text
         # Running it again changes nothing and says nothing
         caplog.clear()
+        before = _suppressions(isolated)
         _upgrade(isolated, revision)
-        _check_only_below_turned_off(isolated)
-        assert "turned off" not in caplog.text
+        assert _suppressions(isolated) == before
+        assert "lifted" not in caplog.text
 
 
-def test_the_threshold_saved_from_the_ui_is_used(suppression_settings):
+def test_the_threshold_saved_from_the_ui_is_reported(suppression_settings, caplog):
     from app.models import SpamSuppression
     suppression_settings.setenv("SETTINGS_EDIT_VIA_UI_ENABLED", "true")
     revision = _revision("soft_bounce_threshold_repair")
     with _schema(SpamSuppression, SystemSetting) as isolated:
         _seed_suppressions(isolated)
         with Session(isolated) as db:
-            db.add(SystemSetting(key="config.suppression_soft_bounce_threshold", value="5"))
+            db.add(SystemSetting(key="config.suppression_soft_bounce_threshold", value="4"))
             db.commit()
-        _upgrade(isolated, revision)
-        _check_only_below_turned_off(isolated)
+        upgraded_at = datetime.utcnow()
+        with caplog.at_level("WARNING", logger="app.migrations"):
+            _upgrade(isolated, revision)
+        _check_soft_bounces_lifted(isolated, upgraded_at)
+        assert "the Soft Bounce Threshold of 4 counts new bounces only" in caplog.text
 
 
 def test_nothing_changes_when_soft_bounces_are_not_counted(suppression_settings):
@@ -186,8 +194,68 @@ def test_nothing_changes_when_soft_bounces_are_not_counted(suppression_settings)
             _seed_suppressions(isolated)
             _upgrade(isolated, revision)
             rows = _suppressions(isolated)
-            for email, (_, _, _, active) in SUPPRESSIONS.items():
-                assert (rows[email].active, rows[email].synced_to_rspamd) == (active, True), (action, email)
+            for email, (_, _, soft, active) in SUPPRESSIONS.items():
+                row = rows[email]
+                assert (row.active, row.synced_to_rspamd) == (active, True), (action, email)
+                assert (row.soft_bounce_count, row.expires_at) == (soft, EXPIRES), (action, email)
+
+
+def test_after_the_upgrade_the_threshold_counts_new_bounces_only(suppression_settings, monkeypatch):
+    """Threshold 3. An earlier version counted one real soft bounce twice
+    (count 2, suppressed), and another recipient reached the threshold the
+    same way. After the upgrade one new real soft bounce suppresses neither;
+    the third new one does, with the expiry of three bounces."""
+    from app.config import settings
+    from app.models import SpamSuppression
+    import app.scheduler as sch
+    suppression_settings.setenv("SUPPRESSION_SOFT_BOUNCE_THRESHOLD", "3")
+    for key, value in {
+        "suppression_soft_bounce_action": "count", "suppression_soft_bounce_threshold": 3,
+        "suppression_hard_bounce_action": "suppress", "suppression_whitelist_domains": "",
+        "suppression_base_expiry_days": 7, "suppression_max_expiry_days": 90, "queue_cleanup_enabled": False,
+    }.items():
+        monkeypatch.setattr(settings._inner, key, value)
+    revision = _revision("soft_bounce_threshold_repair")
+    legacy = {"twice@example.com": 2, "at-threshold@example.com": 3}
+    with _schema(SpamSuppression, SystemSetting, PostfixLog) as isolated:
+        @contextmanager
+        def isolated_db():
+            db = Session(isolated, autoflush=False)
+            try:
+                yield db
+                db.commit()
+            finally:
+                db.close()
+        monkeypatch.setattr(sch, "get_db_context", isolated_db)
+        now = datetime.utcnow()
+        with Session(isolated) as db:
+            for email, count in legacy.items():
+                db.add(SpamSuppression(email=email, type="email", reason="soft_bounce", source="auto",
+                                       bounce_count=count, soft_bounce_count=count, hard_bounce_count=0,
+                                       active=True, synced_to_rspamd=True,
+                                       expires_at=now + timedelta(days=7 * count)))
+            db.commit()
+        _upgrade(isolated, revision)
+
+        def bounce(n):
+            with Session(isolated) as db:
+                stamp = datetime.utcnow()
+                for i, email in enumerate(legacy):
+                    db.add(PostfixLog(time=stamp, created_at=stamp, program="postfix/smtp", priority="info",
+                                      message=f"deferred {n}", queue_id=f"Q{n}R{i}", recipient=email,
+                                      status="deferred", dsn="4.4.1"))
+                db.commit()
+            sch._detect_suppressions_worker()
+            return _suppressions(isolated)
+
+        rows = bounce(1)
+        for email in legacy:
+            assert (rows[email].active, rows[email].soft_bounce_count, rows[email].bounce_count) == (False, 1, 1), email
+        bounce(2)
+        rows = bounce(3)
+        for email in legacy:
+            assert (rows[email].active, rows[email].soft_bounce_count) == (True, 3), email
+            assert rows[email].expires_at < datetime.utcnow() + timedelta(days=21, minutes=1), email
 
 
 # -- 0018: Contains rules an earlier edit escaped twice -----------------------
