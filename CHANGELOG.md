@@ -2142,7 +2142,7 @@ CORRELATION_CHECK_INTERVAL=120
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for information on how to contribute to this project.
+Contributions are welcome: open an issue or a pull request on [GitHub](https://github.com/ShlomiPorush/mailcow-logs-viewer).
 
 ## Support
 

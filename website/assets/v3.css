@@ -1,0 +1,118 @@
+/*
+ * The app's v3 look for the documentation site.
+ *
+ * The fonts and the --ui-* tokens come from frontend/assets/css/ui.css (built
+ * into assets/ui-tokens.css by website/stage.py). This file only maps them
+ * onto Material's --md-* variables and shapes Material's components like the
+ * app's sidebar, tables and banners.
+ */
+
+/* ---------- Material variables mapped onto the tokens ---------- */
+
+:root {
+    --md-text-font: 'Onest', 'Noto Sans Hebrew';
+    --md-code-font: 'IBM Plex Mono';
+}
+
+[data-md-color-scheme="default"], [data-md-color-scheme="slate"] {
+    color-scheme: light;
+    --md-default-bg-color: var(--ui-bg);
+    --md-default-fg-color: var(--ui-ink);
+    --md-default-fg-color--light: var(--ui-muted);
+    --md-default-fg-color--lighter: var(--ui-muted);
+    --md-default-fg-color--lightest: var(--ui-line);
+    --md-primary-fg-color: var(--ui-bg);
+    --md-primary-fg-color--light: var(--ui-panel);
+    --md-primary-fg-color--dark: var(--ui-ink);
+    --md-primary-bg-color: var(--ui-ink);
+    --md-primary-bg-color--light: var(--ui-muted);
+    --md-accent-fg-color: var(--ui-info);
+    --md-accent-fg-color--transparent: color-mix(in srgb, var(--ui-info) 10%, transparent);
+    --md-typeset-color: var(--ui-ink);
+    --md-typeset-a-color: var(--ui-info);
+    --md-typeset-table-color: var(--ui-line);
+    --md-code-bg-color: var(--ui-panel);
+    --md-code-fg-color: var(--ui-ink);
+    --md-footer-bg-color: var(--ui-panel);
+    --md-footer-bg-color--dark: var(--ui-panel);
+    --md-footer-fg-color: var(--ui-ink);
+    --md-footer-fg-color--light: var(--ui-muted);
+    --md-footer-fg-color--lighter: var(--ui-muted);
+    --md-admonition-bg-color: var(--ui-bg);
+}
+[data-md-color-scheme="slate"] { color-scheme: dark; }
+
+body { -webkit-font-smoothing: antialiased; }
+:focus-visible { outline: 2px solid var(--ui-focus); outline-offset: 2px; }
+
+/* ---------- Header: flat, like the app's surfaces ---------- */
+
+.md-header { border-bottom: 1px solid var(--ui-line); box-shadow: none; }
+.md-header[data-md-state="shadow"], .md-header--shadow { box-shadow: none; }
+.md-header__title { margin-inline-start: .2rem; font-weight: 700; letter-spacing: -.01em; }
+.md-header__button.md-logo img, .md-nav__button.md-logo img { height: 30px; width: 30px; border-radius: var(--ui-radius-sm); }
+.md-search__form { border-radius: var(--ui-radius-sm); background: var(--ui-panel); }
+.md-search__form:hover { background: color-mix(in srgb, var(--ui-ink) 8%, var(--ui-panel)); }
+.md-search__input { color: var(--ui-ink); }
+.md-search__input::placeholder, .md-search__icon { color: var(--ui-muted); }
+[data-md-toggle="search"]:checked ~ .md-header .md-search__form { border-radius: var(--ui-radius-sm) var(--ui-radius-sm) 0 0; }
+.md-source { color: var(--ui-muted); }
+
+/* ---------- Navigation: the app's sidebar (group labels, dark pill for the current page) ---------- */
+
+.md-nav { font-size: .7rem; }
+/* The site name is already in the header; the drawer on small screens keeps it */
+@media screen and (min-width: 76.25em) { .md-nav--primary > .md-nav__title { display: none; } }
+.md-nav__title { color: var(--ui-side-muted); font-weight: 600; }
+.md-nav--primary .md-nav__item--section > .md-nav__link { color: var(--ui-side-muted); font-size: .6rem; font-weight: 600; text-transform: none; }
+.md-sidebar--primary .md-nav__link { padding: 5px 10px; margin-top: 2px; border-radius: var(--ui-radius-sm); color: var(--ui-side-ink); font-weight: 500; }
+@media (hover: hover) {
+    .md-sidebar--primary .md-nav__link:not(.md-nav__link--active):hover,
+    .md-sidebar--primary .md-nav__link:not(.md-nav__link--active):focus {
+        color: var(--ui-side-ink);
+        background: color-mix(in srgb, var(--ui-side-ink) 8%, transparent);
+    }
+}
+.md-sidebar--primary .md-nav__link--active,
+.md-sidebar--primary .md-nav__link--active:hover { background: var(--ui-side-on); color: var(--ui-side-on-ink); font-weight: 650; }
+.md-sidebar--primary .md-nav__item--section > .md-nav__link { padding-top: 10px; background: none; }
+.md-nav--secondary .md-nav__link { color: var(--ui-muted); }
+.md-nav--secondary .md-nav__link--active, .md-nav--secondary .md-nav__link:hover { color: var(--ui-ink); }
+
+/* ---------- Content ---------- */
+
+.md-typeset { font-size: .78rem; line-height: 1.65; }
+.md-typeset h1 { margin-bottom: 1em; color: var(--ui-ink); font-size: 1.75rem; line-height: 1.1; font-weight: 800; letter-spacing: -.035em; }
+.md-typeset h2 { font-size: 1.15rem; font-weight: 750; letter-spacing: -.02em; }
+.md-typeset h3 { font-size: .95rem; font-weight: 650; letter-spacing: -.01em; }
+.md-typeset h4 { font-weight: 650; }
+.md-typeset a { text-underline-offset: 2px; }
+.md-typeset a:hover { text-decoration: underline; }
+.md-typeset hr { border-bottom-color: var(--ui-line); }
+.md-typeset img { border-radius: var(--ui-radius); }
+
+/* Inline code and code blocks: panels with the mono font */
+.md-typeset code { border-radius: 6px; font-size: .85em; }
+.md-typeset pre > code { border-radius: var(--ui-radius); padding: 1em 1.2em; }
+.md-typeset .highlight { border-radius: var(--ui-radius); }
+
+/* Tables: the app's data table (muted header, row lines, no zebra) */
+.md-typeset table:not([class]) { border: 1px solid var(--ui-line); border-radius: var(--ui-radius); box-shadow: none; font-size: .72rem; }
+.md-typeset table:not([class]) th { background: var(--ui-panel); color: var(--ui-muted); font-weight: 600; }
+.md-typeset table:not([class]) td { border-top: 1px solid var(--ui-line); }
+/* Names in the first column (variables, endpoints) stay whole */
+.md-typeset table:not([class]) td:first-child code { white-space: nowrap; word-break: normal; }
+.md-typeset table:not([class]) tbody tr:hover { background: color-mix(in srgb, var(--ui-accent) 4%, transparent); box-shadow: none; }
+
+/* Blockquotes and admonitions: the app's banners */
+[dir] .md-typeset blockquote { padding: .6em 1em; border-inline-start: 0; border-radius: var(--ui-radius); background: color-mix(in srgb, var(--ui-info) 10%, transparent); color: var(--ui-ink); }
+.md-typeset .admonition, .md-typeset details { border: 0; border-radius: var(--ui-radius); box-shadow: none; font-size: .74rem;
+    background: color-mix(in srgb, var(--ui-info) 10%, transparent); }
+.md-typeset .admonition-title, .md-typeset summary { background: none !important; font-weight: 650; }
+.md-typeset .admonition.warning, .md-typeset details.warning { background: color-mix(in srgb, var(--ui-warn) 12%, transparent); }
+.md-typeset .admonition.danger, .md-typeset details.danger { background: color-mix(in srgb, var(--ui-fail) 11%, transparent); }
+.md-typeset .admonition.success, .md-typeset details.success { background: color-mix(in srgb, var(--ui-ok) 11%, transparent); }
+
+/* Footer */
+.md-footer { border-top: 1px solid var(--ui-line); }
+.md-footer-meta { background: var(--ui-panel); }

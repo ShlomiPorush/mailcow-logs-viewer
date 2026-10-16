@@ -85,3 +85,6 @@ Thumbs.db
 # Maxmind
 data
 old-data
+# Documentation site build output
+website/.stage/
+website/.site/

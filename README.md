@@ -2,21 +2,26 @@
 
 A modern, self-hosted dashboard for monitoring, analyzing, and managing your mailcow mail server. Track email delivery, investigate spam, manage quarantine, detect bounce-based abuse, and validate DNS configurations — all from a single interface.
 
-![Main](images/Main.png)
+![Dashboard](images/Main-light.png#gh-light-mode-only)
+![Dashboard](images/Main-dark.png#gh-dark-mode-only)
 
-![Messages](images/Messages.png)
+![Messages](images/Messages-light.png#gh-light-mode-only)
+![Messages](images/Messages-dark.png#gh-dark-mode-only)
 
-![Message Details](images/Message_Details_Overview.png)
+![Message Logs](images/Message_Details_Logs-light.png#gh-light-mode-only)
+![Message Logs](images/Message_Details_Logs-dark.png#gh-dark-mode-only)
 
-![Message Logs](images/Message_Details_Logs.png)
+![Rate Limits](images/Rate_Limits-light.png#gh-light-mode-only)
+![Rate Limits](images/Rate_Limits-dark.png#gh-dark-mode-only)
 
-![Rate Limits](images/Rate_Limits.png)
+![Security](images/Security-light.png#gh-light-mode-only)
+![Security](images/Security-dark.png#gh-dark-mode-only)
 
-![Security](images/Security.png)
+![Domains](images/Domains-light.png#gh-light-mode-only)
+![Domains](images/Domains-dark.png#gh-dark-mode-only)
 
-![Domains](images/Domains.png)
-
-![Status](images/Status.png)
+![Status](images/Status-light.png#gh-light-mode-only)
+![Status](images/Status-dark.png#gh-dark-mode-only)
 
 ---
 
