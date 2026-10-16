@@ -13,7 +13,7 @@ The tabs are **Overview**, **Lists**, **Settings** and **Events**. The page refr
 
 ### The Protection row
 
-**Protection** shows the Fail2ban policy, each [rule](#protection-rules) as banning, watching, alerting or off, and whether **Outgoing spam** is on. Click a protection to edit it. On a phone, expand the **Protection** chip first.
+**Protection** shows the Fail2ban policy, each [rule](#protection-rules) as banning, watching, alerting or off, and whether **Outgoing spam** is on. When **Outgoing spam** is switched on but there is no read-write API key, it shows as off with "needs a Read-Write key", because the check cannot run. Click a protection to edit it. On a phone, expand the **Protection** chip first.
 
 ### To review, Banned and History
 
@@ -46,7 +46,7 @@ Each row shows the address, its attempts in the period, a tag, its country and w
 | **Banning** | A rule in ban mode caught it; the ban is written on the next run. | **Undo** |
 | **Not banned yet** | Writing the ban to mailcow failed. The error is shown, and the next run tries again. | **Undo** |
 | **Possible stolen password** (red) | An account logged in in a suspicious way. Alert only: nothing was banned. | **Dismiss** |
-| **Banned** by a rule | A rule banned it. The row says when, and until when or "until removed". | **Undo** |
+| **Banned** by a rule | A rule banned it. The row says when, and until when or "until removed". | **Undo** (with the read-write key) |
 | **Banned** by Fail2ban | Fail2ban banned it. The row shows the time left, then Fail2ban lets it try again. | **Unban**, **Ban permanently** |
 | **Allowlisted** | It is on the allowlist, so it is never banned. If a network entry holds it, the entry is shown. | **Remove from allowlist** |
 | **Denylisted** | It is on the denylist: banned until removed. | **Remove from denylist** |
@@ -54,8 +54,7 @@ Each row shows the address, its attempts in the period, a tag, its country and w
 What the actions do:
 
 - **Ban** uses the rule's current ban length; **Ban permanently** keeps the address denylisted until removal. Rule bans expire only entries the app owns.
-- A permanent row ban needs confirmation. For one IPv6 address, use **Lists** with an explicit `/128`; bare addresses currently get `/32`.
-<!-- VERIFY: Ban permanently, Allow, Unban and the Lists Add form append /32 to any address without a slash, also to an IPv6 address (app.js banIP, allowIP, unbanIP). Check what mailcow does with 2001:db8::1/32 before documenting IPv6 here. -->
+- A permanent row ban needs confirmation. A single address is written as `/32` for IPv4 and `/128` for IPv6.
 - **Allow** adds an allowlist entry after confirmation. The denylist still takes priority if both lists contain it.
 - **Unban** queues a Fail2ban unban after confirmation. The row disappears immediately; mailcow can take a few seconds. Further failures can cause another ban.
 - **Undo** cancels a pending rule ban or removes the denylist entry the app added. **Dismiss** closes a watched catch without changing mailcow. Both pause that rule for this address for 7 days.
@@ -65,9 +64,7 @@ What the actions do:
 
 Address details show location, network, failed logins, **Accounts it tried**, rule catches under **What the rules said**, and the 40 newest netfilter lines under **Raw log**. **All events of this address** opens filtered Events.
 
-<!-- VERIFY: the Failed logins line in the details says "in the last 24 hours", but the number is counted over the chosen period (security.js securityFailedText). Fix the label or the count, then describe it here. -->
-
-The failed-login count can use the selected period while its label still says "in the last 24 hours". Read it against the period you selected.
+The failed-login count covers the selected period and names it, for example "in the last 7 days". An address with no failed logins in that period shows the count of the last 24 hours from its newest log lines.
 
 ### Where attacks come from and Networks that try most
 
@@ -94,7 +91,9 @@ The **Lists** tab shows mailcow's Fail2ban allowlist and denylist, one entry per
 - **Allowlist**: never banned, by Fail2ban or by the rules. Put your own offices and monitoring here. An entry that failed logins today says how many, and that it was never banned.
 - **Denylist**: banned until removed. The denylist wins over the allowlist. An entry says who added it: "Added by hand", or "Added by" and a rule name with the end of its ban.
 
-Use **Add** for an address or CIDR network. Include `/128` for one IPv6 address to avoid the current `/32` default. **Remove** asks for confirmation. Removing a rule entry works like **Undo**, including the week-long pause for that rule. Changes take a few seconds in mailcow.
+Use **Add** for an address or CIDR network. An address without a prefix is added as `/32` for IPv4 and `/128` for IPv6. **Remove** asks for confirmation.
+
+An IPv6 entry ending in `/32`, such as `2001:db8::1/32`, covers the whole network `2001:db8::/32` in mailcow, and the page shows it as that network. Earlier versions of the app wrote single IPv6 addresses this way, so check both lists for such entries and replace them. Removing a rule entry works like **Undo**, including the week-long pause for that rule. Changes take a few seconds in mailcow.
 
 The app reads both lists fresh from mailcow right before every change, so an entry added in mailcow in the meantime is kept.
 
@@ -125,8 +124,7 @@ This card changes mailcow's own Fail2ban policy. It is tagged **Always on**: the
 
 Saving needs a [read-write API key](#when-something-is-missing). The app rereads the lists before saving to keep entries added elsewhere.
 
-If you manage the firewall outside mailcow, keep that option configured in mailcow. The app does not expose it, but preserves its current `manage_external` value when changing Fail2ban settings or lists.
-<!-- VERIFY: mailcow's label for manage_external ("Manage Fail2Ban externally"?) and where it is in the mailcow admin UI -->
+mailcow also has **Manage Fail2Ban externally**, in **System** > **Configuration** > **Options** > **Fail2ban parameters**. With it on, Fail2ban keeps its ban list but sets no firewall rules, and you block the listed addresses with your own firewall. The app does not show this option, and keeps its current value when it changes Fail2ban settings or lists.
 
 ### Protection rules
 
@@ -222,7 +220,7 @@ Each event shows **When**, **Address**, **Account** (or the attempts left before
 
 **Unban** on a ban event, or on an address that is on the denylist, asks mailcow to lift the ban. **Ban permanently** on a warning or unban event adds the address to the denylist. Both work as on the [Overview](#each-address-and-what-you-can-do).
 
-**Export CSV** downloads the events that match the **IP Address** and **Username** filters, up to the CSV export limit set in [Settings](Settings.md). The **Action** and **Country** filters do not apply to the file.
+**Export CSV** downloads the events that match all the filters, up to the CSV export limit set in [Settings](Settings.md).
 
 ## Settings that change this page
 
@@ -237,15 +235,16 @@ See [Settings](Settings.md) for each of them.
 ## When something is missing
 
 - **Security is off**: opening the page shows "Security is disabled" with a button to the Dashboard.
-- **No read-write API key**: with only the read-only key, the page shows everything and changes nothing in mailcow. Locked areas say so: "Ban, Allow and Unban are locked" on the Overview, "The lists are read-only here" on Lists, "Editing Fail2ban is locked" on the Fail2ban card and "Ban and Unban are locked" on Events, each with **Open Settings**. Rules can still watch, and **Dismiss** or cancellation of a pending ban still works. Lifting an owned ban already written to mailcow needs the read-write API key, even if **Undo** remains visible. **Ban** is disabled. See [Getting started](../GETTING_STARTED.md) for creating the key.
+- **No read-write API key**: with only the read-only key, the page shows everything and changes nothing in mailcow. Locked areas say so: "Ban, Allow and Unban are locked" on the Overview, "The lists are read-only here" on Lists, "Editing Fail2ban is locked" on the Fail2ban card and "Ban and Unban are locked" on Events, each with **Open Settings**. Rules can still watch, and **Dismiss** and **Undo** on a pending ban still work. A ban a rule already wrote to mailcow can only be lifted with the read-write API key, so it shows no **Undo**, and its denylist entry no **Remove**. **Ban** is disabled. See [Getting started](../GETTING_STARTED.md) for creating the key.
 - **mailcow does not answer about Fail2ban**: the Overview says that its bans are not shown and nothing can be banned from here, **Banned** shows only the rules' bans, and the Lists and the Fail2ban card say that mailcow did not answer. The Protection row shows Fail2ban with "?". The next refresh tries again.
 - **No MaxMind GeoIP**: the country panel says "No country for these addresses. Configure MaxMind to see where they come from." The **Countries** card shows **Needs MaxMind GeoIP** and cannot be turned on, and the country check of **Possible stolen password** is disabled. The same text shows when MaxMind is set up but the listed addresses have no country.
 - **Empty lists**: "Nothing to review." on **To review**, "Nothing is banned right now." on **Banned**, "Nothing here yet." on **History**, and "No logs found" on **Events**.
 
 ## How Fail2ban works in mailcow
 
-Mailcow's `netfilter-mailcow` container counts failed logins reported by mail services. Reaching the attempt limit within the retry window triggers a firewall ban for the address or configured network. Repeated bans can grow up to the maximum ban time.
-<!-- VERIFY: the list of containers that report to netfilter-mailcow, and that bans are written as firewall rules on the host -->
+Mailcow's `netfilter-mailcow` container reads the log lines that Postfix, Dovecot and SOGo send it, and the failed logins the mailcow web interface reports. It matches them against its rules: failed SMTP, IMAP, POP3, SOGo, mailcow UI and Rspamd UI logins, and SMTP protocol errors. Reaching the attempt limit within the retry window bans the address, or the configured network around it. Repeated bans can grow up to the maximum ban time.
+
+The container runs on the host network, so a ban is a rule in the `MAILCOW` chain of the Docker host's firewall (nftables or iptables, whichever the host uses). Private and loopback addresses are never banned.
 
 The allowlist exempts addresses; the denylist blocks until removal and takes priority. Policies and lists live in mailcow. The app reads them with its read-only API key and changes them with its read-write API key.
 

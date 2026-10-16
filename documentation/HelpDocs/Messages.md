@@ -23,8 +23,8 @@ Each filter choice shows how many messages match it.
 
 - Each group counts matches with the other groups applied, so you can see how changing one filter affects the result.
 - **Spam** shows messages whose final status is spam and also those Rspamd classed as spam, whatever happened to them afterwards.
-- **Today** starts at midnight. **7 Days**, **30 Days** and **90 Days** count back from now. Presets use browser time. Custom dates currently start at midnight UTC, with the end expanded to the parsed date's end in browser time; this can shift the selected dates outside UTC. List timestamps use the [shared time-zone rules](../Using_the_App.md#shared-behavior). After you pick one, the **Time:** button reads **Last 7 Days** and so on.
-- **Custom range** opens **From** and **To** date fields and **Apply**. The range runs from the start of the From day to the end of the To day. Both dates are required; the end date cannot be before the start date.
+- **Today** starts at midnight. **7 Days**, **30 Days** and **90 Days** count back from now. A preset ends at the moment you pick it. Presets and custom dates use browser time; list timestamps use the [shared time-zone rules](../Using_the_App.md#shared-behavior). After you pick one, the **Time:** button reads **Last 7 Days** and so on.
+- **Custom range** opens **From** and **To** date fields and **Apply**. The range runs from the start of the From day to the end of the To day in browser time, and the **Time:** button shows the two days. Both dates are required; the end date cannot be before the start date.
 - **Export CSV** at the bottom of the column downloads the filtered list, see [Export CSV](#export-csv).
 
 Above the list:
@@ -50,7 +50,7 @@ Each row shows:
 
 Each row is one message, not one delivery. Deliveries that share a Message-ID are grouped, and the earliest delivery that matches your filters stands for the message. The total in the summary line counts messages the same way, so it agrees with the Dashboard's **Messages** figure.
 
-The unfiltered first batch refreshes every 30 seconds. Search, address, outcome and direction filters or loading more stop refreshes. A time-only filter currently fails to stop refreshes, so unfiltered results can replace it. Reapply the range if that happens.
+The first batch refreshes every 30 seconds, with the time filter kept. Search, address, outcome and direction filters or loading more stop refreshes. A preset covers time up to the moment you picked it, so pick it again to see newer messages.
 
 ## Message details
 
@@ -115,7 +115,7 @@ A message Rspamd did not scan says "No spam analysis data available".
 
 ### Security
 
-**Security** shows the client IP's failed logins and bans from an hour before to an hour after the message. Its tab dot is red with events, green without.
+**Security** shows the client IP's failed logins and bans from an hour before to an hour after the message. With events, the tab shows their number in red.
 
 Events include time, IP, action, **User**, **Method**, **Attempts remaining** and the log line. Without them, it says "No security events detected".
 
@@ -131,12 +131,11 @@ Close the window with **Close**, Escape, a click outside, or Back. Closing the r
 
 The file has these columns: **Time**, **Sender**, **Recipient**, **Subject**, **Direction**, **Status**, **Queue ID**, **Message ID**, **Spam Score**, **Is Spam**, **User**, **IP** and **Is Complete**.
 
-The export differs from the list in a few ways:
+The export applies the same filters and search as the list, but differs in two ways:
 
+<!-- VERIFY: owner's decision pending (finding 20): the export's row structure (one row per delivery) and its order (latest activity). Update the next item once decided. -->
 - It has one row per delivery, not per message, ordered by the latest activity.
 - It stops at **CSV Export Limit** rows (**Settings** > **Application**, 10000 by default).
-- Its search matches the sender, recipient, subject, Message-ID and queue ID, but not the client IP or user. Use the **Source IP** and **Authenticated User** fields for those.
-- **Spam** exports only messages whose final status is spam.
 
 A text cell that starts with `=`, `+`, `-` or `@` gets a leading apostrophe, so a spreadsheet does not read it as a formula.
 

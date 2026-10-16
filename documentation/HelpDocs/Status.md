@@ -46,16 +46,16 @@ For **Postfix Logs**, **Rspamd Logs** and **Netfilter Logs** you see **Last Fetc
 | **Correlation Engine** | **Complete Correlations**, **Update Final Status**, **Expire Correlations**, **Dovecot Deliveries** |
 | **Data Sync** | **Sync Active Domains**, **Mailbox Statistics**, **Alias Statistics**, **Sync Transports & Relayhosts** |
 | **DMARC & TLS** | **DMARC & TLS IMAP Import**, **Cleanup DMARC & TLS Reports**, **Weekly Summary Report** |
-| **Security & Monitoring** | **DNS Check (All Domains)**, **IP Blacklist Check (All Hosts)**, **Protection Rules** |
+| **Security & Monitoring** | **DNS Check (All Domains)**, **IP Blacklist Check (All Hosts)**, **Protection Rules**, **Anomaly Detection**, **Outgoing Spam** |
 | **System** | **Check App Version**, **Update MaxMind Databases** |
 | **Live Logs** | **Fetch Raw Logs**, **Cleanup Raw Logs** |
 | **Devices** | **ActiveSync Devices**, **Cleanup ActiveSync Devices** |
 | **Spam Filter** | **Detect Suppressions**, **Sync to Rspamd**, **Expire Suppressions**, **Cleanup Deferred Queue** |
 | **Quarantine** | **Process Quarantine Rules** |
 
-**Run** starts a job now; its schedule stays the same. While a job runs, its **Run** button is disabled. A job whose feature is off under **Settings** > **Features** has no **Run** and is marked **feature off** or **off**. A job that is off for another reason, such as a missing read-write API key or a setting that is off, says why and has a **Settings** button that opens the right category.
+**Run** starts a job now; its schedule stays the same. While a job runs, its **Run** button is disabled. A job whose feature is off under **Settings** > **Features** has no **Run** and is marked **feature off**. A job that is off for another reason, such as a missing read-write API key or a setting that is off, is marked **off**, says why and has a **Settings** button that opens the right category.
 
-A manual run does everything the scheduled run does. **Sync to Rspamd**, **Cleanup Deferred Queue**, **Protection Rules** and **Process Quarantine Rules** can change mailcow, **IP Blacklist Check (All Hosts)** can send blocklist alerts, and **Weekly Summary Report** sends the summary email. See [Notifications](../Notifications.md).
+A manual run does everything the scheduled run does. **Sync to Rspamd**, **Cleanup Deferred Queue**, **Protection Rules**, **Outgoing Spam** and **Process Quarantine Rules** can change mailcow, **IP Blacklist Check (All Hosts)** and **Anomaly Detection** can send alerts, and **Weekly Summary Report** sends the summary email. See [Notifications](../Notifications.md).
 
 ## Settings that change this page
 

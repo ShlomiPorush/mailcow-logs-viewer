@@ -35,14 +35,14 @@ The page updates itself every 30 seconds while it is open, and again after every
 
 ## Actions
 
-Queue actions need a [read-write API key](../Using_the_App.md#the-read-write-api-key). Without it the queue stays readable, but actions and selection controls are hidden.
+Queue actions need a [read-write API key](../Using_the_App.md#the-read-write-api-key). Without it the queue stays readable and each row keeps **Suppress**, but the other actions and the selection controls are hidden.
 
 Each row has:
 
 - **Retry** asks Postfix to try delivering the message now.
 - **Hold** moves the message to the hold queue, where Postfix leaves it alone until it is released. A held message has **Unhold** instead, which puts it back in line for delivery.
 - **Delete** removes the message from the queue after you confirm "Delete this message from the queue?".
-- **Suppress** opens the **Add Suppression** dialog of the Spam Filter page with the recipient filled in, so future mail to that address is blocked. With several recipients, **Suppress** is a menu where you pick the address. See [Spam Filter](Spam_Filter.md).
+- **Suppress** opens the **Add Suppression** dialog of the Spam Filter page with the recipient filled in, so future mail to that address is blocked. With several recipients, **Suppress** is a menu where you pick the address. Adding a suppression does not need the read-write key. See [Spam Filter](Spam_Filter.md).
 
 Above the list:
 
@@ -59,12 +59,13 @@ Actions are disabled while a request runs. A notice shows the result or failure 
 ## Settings that change this page
 
 - **Settings** > **Mailcow** > **Connection**: **mailcow API Key (read-write)** (`MAILCOW_API_KEY_RW`) turns on the actions.
+<!-- VERIFY: owner's decision pending (finding 6): queue cleanup deletes stuck mail to whitelisted domains too. Update the last sentence of the next item once decided. -->
 - **Settings** > **Spam Filter** > **Deferred Queue Cleanup**: when **Suppression Enabled**, **Queue Cleanup Enabled**, the Spam Filter feature and the read-write API key are all on, **Cleanup Deferred Queue** runs every 5 minutes. It deletes deferred messages whose age since arrival reaches **Queue Cleanup Threshold Minutes** (60 by default) and suppresses recipients outside the whitelist. Messages to whitelisted domains are still deleted. See [Spam Filter](Spam_Filter.md#automatic-suppressions).
 - **Settings** > **Features**: turning off **Queue** removes the page and its counter.
 
 ## When something is missing
 
-- **Queue actions are locked**: add the read-write API key through **Open Settings**. The same key also brings back **Suppress**.
+- **Queue actions are locked**: add the read-write API key through **Open Settings**.
 - **"Failed to load queue" with a reason.** The app could not read the queue from mailcow. Check the mailcow connection on the [Status](Status.md) page.
 - **"No matching queue entries".** No queued message matches the search or the queue ID. **Clear filters** shows the whole queue.
 

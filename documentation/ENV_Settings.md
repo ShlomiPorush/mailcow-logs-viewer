@@ -82,7 +82,8 @@ Each key has its own list of allowed IPs in mailcow. It must hold the address ma
 | --- | --- | --- |
 | `DISABLED_FEATURES` | Empty | Comma-separated features to turn off, for example `queue,quarantine`. Their pages disappear and their jobs stop. |
 
-The names are `netfilter` (Security), `queue`, `quarantine`, `spam-filter`, `domains`, `dmarc`, `mailbox-stats`, `rate-limits`, `logs`, `blacklist` (IP Blacklist Monitor) and `devices`. At startup the app deletes the stored devices, alias statistics and Logs page entries of features that are off. Turning a feature off on the Settings page deletes all of its data; see [Settings](HelpDocs/Settings.md#features).
+<!-- VERIFY: owner's decision pending (finding 57): at startup DISABLED_FEATURES deletes only rebuildable data, while the Settings switch deletes all of it. Update the next paragraph once decided. -->
+The names are `netfilter` (Security), `queue`, `quarantine`, `spam-filter`, `domains`, `dmarc`, `mailbox-stats`, `rate-limits`, `logs`, `blacklist` (IP Blacklist Monitor) and `devices`. At startup the app deletes only part of the data of features that are off: the stored devices, the mailbox and alias details, the Rate Limits counter resets and the Logs page entries. Turning a feature off on the Settings page deletes all of its data; see [Settings](HelpDocs/Settings.md#features).
 
 ## Blacklist configuration
 
@@ -160,10 +161,10 @@ Destinations such as Slack or Telegram are set on the Settings page only; see [N
 
 | Variable | Default | Effect |
 | --- | --- | --- |
-| `SMTP_ABUSE_ENABLED` | `false` | Stop a mailbox from sending when it goes over the limit. Needs the read-write key. Receiving is not affected. |
+| `SMTP_ABUSE_ENABLED` | `false` | Stop a mailbox from sending when it goes over the limit. Needs the read-write key. The mailbox still receives mail. |
 | `SMTP_ABUSE_THRESHOLD` | `100` | Messages one mailbox may send in the window. |
 | `SMTP_ABUSE_WINDOW_MINUTES` | `60` | Length of the rolling window in minutes. |
-| `SMTP_ABUSE_REVOKE_APP_PASSWORDS` | `true` | Also delete the mailbox's app passwords when it is stopped. |
+| `SMTP_ABUSE_REVOKE_APP_PASSWORDS` | `true` | Also delete the mailbox's app passwords when it is stopped. Mail apps that sign in with one, including IMAP clients, then need a new one. |
 | `SMTP_ABUSE_UNBLOCK_GRACE_MINUTES` | `60` | After you let a mailbox send again, it is not stopped again for this many minutes. |
 | `SMTP_ABUSE_HELP_ADDRESS` | Empty | Contact named in the email to the stopped mailbox. Empty uses `ADMIN_EMAIL`, then the words `your administrator`. |
 
@@ -221,7 +222,7 @@ Use a mailbox that only receives reports: the import reads its unread emails and
 
 | Variable | Default | Effect |
 | --- | --- | --- |
-| `RAW_LOGS_ENABLED` | `true` | Collect logs for the Logs page. Off: the page keeps what it has and collects nothing new. |
+| `RAW_LOGS_ENABLED` | `true` | Collect logs for the Logs page. Off: nothing new is collected for it, and the page says collection is off instead of showing logs. The services other pages read are collected either way. |
 | `RAW_LOGS_FETCH_INTERVAL` | `30` | Seconds between reads. |
 | `RAW_LOGS_FETCH_COUNT` | `1000` | Entries per service per read. |
 | `RAW_LOGS_RETENTION_DAYS` | `2` | Days to keep raw logs. Also limits the history on Rate Limits. |

@@ -33,8 +33,7 @@ A bar per day across every domain, passed in green and failed in red. Point at a
 Open a domain from the table, ordered by latest report.
 
 - **Domain**: the name. A small **Not on server** note marks a domain that is not an active domain or alias domain on this mailcow server, for example a domain you removed from mailcow that still has reports.
-  <!-- VERIFY: frontend/dmarc.js declares dmarcPolicyTag twice; the second declaration (which takes a policy string) wins, so this column currently shows "Missing" for every domain. Fix the code or this text. -->
-- **DMARC policy**: this column currently shows **Missing** even when a record exists. Open the domain's **Records** > **DMARC** window for the published record.
+- **DMARC policy**: the published policy, **Reject**, **Quarantine** or **None**; **No record** when the domain has none, or **Not checked** before its DNS check.
 - **Messages** and **Passed DMARC**: from the DMARC reports. A domain with only TLS reports shows `-`.
 - **TLS-RPT**: **Published**, **Missing** or **Not checked**.
 - **Encrypted**: the share of TLS sessions to the domain that succeeded, from its TLS reports.
@@ -112,7 +111,7 @@ Open record windows from **Records** or **To do**.
 With a record, the window shows:
 
 - **Current record**: the record as published, with **Copy**.
-- **Policy**, **Subdomains** (the `sp=` policy, or "same as the domain"), **Applied to** (the `pct=` share of mail, 100% when not set), **Reports go to** (the `rua=` addresses), **Failure reports go to** (the `ruf=` addresses, only when set) and **Alignment** for SPF and DKIM (`r` for relaxed, `s` for strict; relaxed when not set).
+- **Policy**, **Subdomains** (the `sp=` policy, or "same as the domain"), **Applied to** (the `pct=` share of mail, 100% when not set), **Reports go to** (the `rua=` addresses), **Failure reports go to** (the `ruf=` addresses, only when set) and **Alignment** for SPF and DKIM, **relaxed** or **strict** (relaxed when not set).
 - The notes of the DNS check, for example the advice to use a stricter policy.
 
 Without a record, it says **No DMARC record at _dmarc.<domain>.**
@@ -121,12 +120,9 @@ Below, two lines say how much of the domain's mail is aligned with SPF and wheth
 
 **Policy** offers **None**, **Quarantine** and **Reject**, each with what it does. **Now** marks the policy in place, and the next stricter one is picked when the window opens. Pick a policy to see what it would change:
 
-- **Ready.** means each sender group at or above 50% DMARC pass reaches 95%. Groups below 50% are excluded, so **Ready.** can appear with no qualifying groups. **Not yet.** means a group falls between 50% and 95%. Review known senders before changing policy.
-- A count labeled as mail receivers would send to spam or refuse. It counts every message from groups below 50% pass, including their passing messages, and misses failures in other groups. This is a rough group total, not an exact policy simulation.
-- The record to publish, with **Copy**, for example `_dmarc.example.com  TXT  "v=DMARC1; p=quarantine; rua=mailto:dmarc-reports@example.com"`. It keeps the first `rua=` address of your current record, or uses `mailto:dmarc@<domain>` when there is none.
-
-> [!NOTE]
-> The record to copy has only `p=` and `rua=`. Keep any needed `sp=`, `pct=`, `adkim=`, `aspf=`, `ruf=` and `fo=` tags, plus additional `rua=` addresses, before publishing.
+- **Ready.** means that every sender group passing DMARC on most of its mail passes on 95% or more. Senders that fail on most of their mail are treated as not yours. **Not yet.** means such a group passes on under 95%, or no group passes on most of its mail. Without mail in the last 30 days, it says **No data.** Review known senders before changing policy.
+- How many messages receivers would have sent to spam or refused in the last 30 days with that policy: every message that failed DMARC, from any sender.
+- The record to publish, with **Copy**: your current record with only `p=` changed, so all its other tags stay, for example `_dmarc.example.com  TXT  "v=DMARC1; p=quarantine; rua=mailto:dmarc-reports@example.com; adkim=s"`. Without a record, it is `v=DMARC1; p=<policy>; rua=mailto:dmarc@<domain>`.
 
 ### SPF and DKIM
 
@@ -174,7 +170,7 @@ Reading a report in a mail client before import makes it ineligible until you ma
 > [!NOTE]
 > Use a mailbox that receives only reports. With **IMAP Scan All Unseen** on, the import reads every unread message in the folder and marks it as read, reports or not.
 
-**Fetch reports** starts an import and reloads the page after a few seconds. It currently marks all history rows labeled `running` as failed, even if their import is active. The backend does not prevent overlapping imports, so wait for the current run to finish before starting another.
+**Fetch reports** starts an import and reloads the page after a few seconds. Only one import runs at a time: while one runs, **Fetch reports** says "Reports are already being fetched", and a scheduled import skips its turn. An import left `running` because the app stopped during it is marked `failed` when the next one starts.
 
 **View History** opens **Fetch history**, the last 20 imports: **Date**, **Type** (`auto` or `manual`), **Status** (`success`, `error`, `running` or `failed`), **Emails**, **Created**, **Duplicate**, **Failed** and **Duration**. An import whose connection failed has the status `error`. An import that finished with some failed emails has the status `success` and a number under **Failed**.
 
@@ -182,11 +178,10 @@ Reading a report in a mail client before import makes it ineligible until you ma
 
 **Upload Report** imports one file:
 
-- DMARC: a gzip file (`.xml.gz`) or a ZIP that holds the XML.
-- TLS: `.json`, `.json.gz` or `.json.zip`.
+- DMARC: a plain `.xml` file, a gzip file (`.xml.gz`) or a ZIP that holds the XML.
+- TLS: `.json`, `.json.gz`, or a ZIP that holds the JSON, whatever its name.
 
-<!-- VERIFY: the file picker and the upload docstring accept a plain .xml file, but parse_dmarc_file only handles .gz and .zip, so a plain .xml DMARC report fails on upload ("Failed to upload report") and in the IMAP import. Fix the parser or keep this list. -->
-The file may be at most 10 MB and must expand to 10 MB or less. A ZIP whose name does not end in `.json.zip` is read as a DMARC report.
+The file may be at most 10 MB and must expand to 10 MB or less. The app tells XML, gzip and ZIP apart by their content, not by the file name.
 
 Upload results give the record or policy count, identify duplicates, or show **Failed to upload report**. Successful imports reload the page.
 
@@ -211,7 +206,7 @@ Every day at 02:15 the app deletes DMARC and TLS reports that were imported more
 
 ## Emails from this page
 
-- **Import errors.** When an import leaves messages it could not import, the app sends `DMARC & TLS: N report emails could not be imported`, with the subject, Message-ID and error of each message. It goes to **Report Import Error Email**, or the **Admin Email** when that is empty (both under **Settings** > **Notifications**), and to the notification destinations that receive **DMARC processing errors**. Email needs SMTP; other notification channels can receive the alert independently. Skipped bounces do not trigger it.
+- **Import errors.** When an import leaves messages it could not import, the app sends `DMARC & TLS: N report emails could not be imported`, with the subject, Message-ID and error of each message. It goes to **Report Import Error Email**, or the **Admin Email** when that is empty (both under **Settings** > **Notifications**), and to the notification destinations that receive **DMARC processing errors**. Email needs SMTP; the other notification destinations receive the alert without it. Skipped bounces do not trigger it.
 - **The weekly summary** has no figures from the reports. Its **DNS issues** section lists DMARC records with an error, from the DNS checks. See [Domains](Domains.md#the-weekly-summary).
 - **DNS change alerts** cover the DMARC and TLS-RPT records. See [Domains](Domains.md#dns-change-alerts).
 

@@ -9,6 +9,7 @@
 
 The chart counts blocked sends in the chosen **Window**. **Last 24 hours** shows them per hour; **Last 7 days**, **Last 30 days** (the default), **Last 90 days** and **Last year** show them per day.
 
+<!-- VERIFY: owner's decision pending (finding 35): windows longer than the raw log retention. Update this note once decided. -->
 > [!NOTE]
 > Hits are kept only as long as the raw logs: **Raw Logs Retention Days** under **Settings** > **Logs**, 2 days by default. With the default, every window longer than two days shows the same two days. The page also reads at most the newest 5,000 hits.
 
@@ -38,7 +39,7 @@ To change one entry, click **Edit**, enter the number of messages in **Allow**, 
 
 Changing limits and resetting counters need the read-write API key. Without it, **Editing rate limits is locked** appears, **Edit** and **Apply to filtered** are gone, and **Reset counter** is disabled. See [The Read-Write API key](../Using_the_App.md#the-read-write-api-key).
 
-**Rate Limits** under **Settings** > **Features** is separate from **Mailbox Stats**; with only Rate Limits on, the sidebar entry is called **Rate Limits**. While it is on, the app collects the `ratelimited` log even if the Logs page is off or the service is unticked there. Turning it off forgets the counter resets and deletes the collected hits, unless the Logs page still collects that service. With the Logs page off, its settings tab is hidden; set the retention with `RAW_LOGS_RETENTION_DAYS`.
+**Rate Limits** under **Settings** > **Features** is separate from **Mailbox Stats**; with only Rate Limits on, the sidebar entry is called **Rate Limits**. While it is on, the app collects the `ratelimited` log even if the Logs page is off or the service is unticked there. Turning it off asks you to confirm first: it forgets the counter resets and deletes the collected hits, unless the Logs page still collects that service. The retention of the hits stays under **Settings** > **Logs**, also while the Logs page is off.
 
 ## When something is missing
 

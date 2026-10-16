@@ -116,12 +116,9 @@ The match modes:
 
 | Match Mode | Matches when | Example |
 |---|---|---|
-| **Exact Match** | The field equals the value. Address fields ignore case; see the Subject limit below. | `noreply@example.com` matches only that address. |
+| **Exact Match** | The field equals the value. Case is ignored. | `noreply@example.com` matches only that address. |
 | **Contains** | The value appears anywhere in the field. Case is ignored. | `example.com` matches `alerts@example.com` and `user@mail.example.com`. |
 | **Regex (advanced)** | The regular expression finds a match anywhere in the field. Case is ignored. Use `^` and `$` to match the whole field. | `^news[0-9]*@example\.com$` matches `news@example.com` and `news42@example.com`. |
-
-<!-- VERIFY: Exact Match on Subject. _find_matching_rule (backend/app/routers/quarantine_rules.py) compares target == value.lower(), but the subject is never lowercased (scheduler.py _process_quarantine_rules_in_worker and the /test endpoint), so an Exact Match Subject rule only matches all-lowercase subjects. Fix the code or document the limit. -->
-For **Subject**, **Exact Match** currently matches only an all-lowercase subject against the lowercased value. To match a mixed-case subject, use **Regex (advanced)** with an anchored pattern such as `^Invoice$`.
 
 The app stores a **Contains** rule as a pattern with every special character escaped, which is why the rule list shows the **Regex** tag on it.
 
@@ -147,8 +144,7 @@ Quick fill also replaces a generated rule name. Change **Action** to **Delete** 
 
 **Edit** opens the **Edit Rule** dialog with the rule's values. Click **Save Changes** to store them.
 
-<!-- VERIFY: Editing a Contains or Regex rule. _showQuarantineRuleModal (frontend/app.js) opens a Contains rule with its stored, already escaped value and saveQuarantineRule escapes it again, so example.com becomes example\\\.com after a save. A Regex rule whose pattern does not start with ^ opens with Match Mode Contains and is escaped on save. Fix the code or document the workaround. -->
-When editing a **Contains** rule, re-enter its original text before saving: the field currently contains an escaped pattern that would be escaped again. For a custom regex, explicitly select **Regex (advanced)** and check the pattern before saving.
+A **Contains** rule opens as **Contains** with its plain text, and any other pattern opens as **Regex (advanced)**, so saving keeps the rule as it was. A rule that an older version escaped twice opens with a backslash in its value, such as `example\.com`. Remove the backslash and save to repair it.
 
 ### Which rule wins
 
@@ -158,15 +154,11 @@ Each held message is handled by one rule at most. The app checks the **Delete** 
 
 **Process Quarantine Rules** runs every **Quarantine Rules Interval** (5 minutes by default). It reads current quarantine, matches enabled rules and requests release or deletion for up to **Quarantine Rules Max Actions** messages (50). Other messages wait.
 
-Runs with matches update history and **Hits**, then remove history older than **Quarantine Rules Log Retention Days** (30).
+Each release or deletion that mailcow carries out is added to the history and counted in the rule's **Hits**. Old history is removed after **Quarantine Rules Log Retention Days** (30). If mailcow refuses a release or deletion, nothing is recorded, the error goes to the application log, and the message stays in quarantine for the next run.
 
-<!-- VERIFY: History entries and Hits are written for every matched message even when mailcow's release or delete call failed (scheduler.py _process_quarantine_rules_in_worker logs the error and continues). Fix the code or document it. -->
-History and **Hits** count matched messages even if mailcow rejected the release or deletion. Check the quarantine and the application log to confirm a failed action.
+You can see the job and start it at once with **Run** on **Status** > **Jobs**, in the **Quarantine** group. See [Status](Status.md).
 
-You can see the job and start it at once with **Run now** on **Status** > **Jobs**, in the **Quarantine** group. See [Status](Status.md).
-
-<!-- VERIFY: Quarantine Rules Interval. The job is added only at startup (scheduler.py, "Quarantine Auto-Rules") and _reschedule_suppression_jobs has no quarantine equivalent, so a new interval, or a read-write key added later, may only apply after a restart. -->
-Restart the app after changing **Quarantine Rules Interval**. If the read-write API key was absent at startup, restart after adding it to schedule automatic rule runs.
+A new **Quarantine Rules Interval** applies as soon as you save it. The job starts once the read-write API key and the Quarantine feature are both on, and stops when either is off. No restart is needed.
 
 ### Test Rules
 

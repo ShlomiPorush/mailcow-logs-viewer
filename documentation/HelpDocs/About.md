@@ -24,7 +24,7 @@ Each card shows a state and a short line on what it means. Every card except **D
 
 ## Version
 
-**Current Version** opens the release notes of the version you run. **Latest Version** shows the newest release, tagged **Up to Date** or **Update Available**. The app checks every 6 hours; **Check Now** checks at once and updates **Last checked**.
+**Current Version** opens the release notes of the version you run. **Latest Version** shows the newest release, tagged **Up to Date** or **Update Available**, or **Not known** tagged **Check failed** when GitHub could not be reached. The app checks every 6 hours; **Check Now** checks at once and updates **Last checked**.
 
 When an update is out, the panel shows its release notes and a **View release notes** link. Checking does not install anything; see [Updating](../GETTING_STARTED.md#updating).
 
@@ -35,4 +35,4 @@ When an update is out, the panel shows its release notes and a **View release no
 ## When something is missing
 
 - **Failed to load the app information. Refresh the page to try again.** The app could not load this page's data. Refresh; if it keeps failing, check the app's log with **View Container Logs**.
-- **The version check fails.** When GitHub cannot be reached, **Latest Version** shows no real version number and **Check App Version** under **Status** > **Jobs** shows the error. The rest of the app works as usual. Check that the app can reach `api.github.com`, then use **Check Now**.
+- **The version check fails.** When GitHub cannot be reached, **Latest Version** shows **Not known** with **Check failed**, the Dashboard's **This app** card says **Update check failed**, and **Check App Version** under **Status** > **Jobs** shows the error. The rest of the app works as usual. Check that the app can reach `api.github.com`, then use **Check Now**.

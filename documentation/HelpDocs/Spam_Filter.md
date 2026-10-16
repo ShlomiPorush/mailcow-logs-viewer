@@ -28,7 +28,7 @@ Next to the search are **Add Suppression**, **Sync to Rspamd** and **More**, whi
 
 ### The list
 
-<!-- VERIFY: Will unsync needs active=False and synced_to_rspamd=True (frontend/spam_filter.js renderSuppressionItem), but Disable, Expire Suppressions and the sync all leave inactive rows with synced_to_rspamd=False, so the tag may never appear. Fix the code or drop the Will unsync sentence in the Rspamd row of the table below. -->
+<!-- VERIFY: owner's decision pending (finding 42): the Will unsync tag can never appear (it needs active=False with synced_to_rspamd=True, which no code path leaves). The Rspamd row below does not mention it; update that row once decided. -->
 | Column | What it shows |
 |---|---|
 | **Address** | The suppressed address. Click it to copy. A domain suppression shows the domain with a **Domain** tag; hover over the tag for the stored pattern. **Inactive** and **Expired** tags mark entries that are off. Notes appear under the address. |
@@ -58,10 +58,10 @@ From the mail queue, every 5 minutes (**Cleanup Deferred Queue**, needs **Queue 
 
 - It looks at the deferred queue in mailcow. A message that arrived longer ago than **Queue Cleanup Threshold Minutes** (60 by default) is deleted from the queue, and its recipients are suppressed with the reason **Deferred Stuck**.
 
-<!-- VERIFY: Whitelist and queue cleanup. cleanup_deferred_queue_job (backend/app/scheduler.py) adds a stuck message to the delete list before it checks the whitelist, so mail to a whitelisted domain is still deleted from the queue, only not suppressed. Fix the code or document that whitelisted domains still lose their stuck mail. -->
+<!-- VERIFY: owner's decision pending (finding 6): cleanup_deferred_queue_job deletes stuck mail to whitelisted domains too and only skips the suppression. Update the next paragraph and the Suppression Whitelist Domains item below once decided. -->
 The whitelist prevents recipient suppression, but it does not protect queued messages from deletion. Cleanup uses age since arrival, including time before a message became deferred.
 
-A new automatic entry lasts **Suppression Base Expiry Days** (7 by default). Each detected bounce sets the expiry to base days times bounce count, capped at **Suppression Max Expiry Days** (90). Another detection also reactivates an inactive entry.
+A new automatic entry lasts **Suppression Base Expiry Days** (7 by default). Each detected bounce sets the expiry to base days times bounce count, capped at **Suppression Max Expiry Days** (90). Each bounce in the log is counted once. Another detection also reactivates an inactive entry, except a soft bounce under **Count then suppress** that has not reached the threshold.
 
 After it adds or updates entries, the app writes the list to Rspamd at once when **Suppression Rspamd Sync** is on. An automatic entry is always written as the exact address, so an odd-looking recipient can never block other recipients.
 
@@ -72,12 +72,11 @@ After it adds or updates entries, the app writes the list to Rspamd at once when
 
 **Add Suppression** opens a dialog:
 
-<!-- VERIFY: The dialog offers Reason "Deferred Stuck", but SuppressionCreateRequest.validate_reason (backend/app/routers/suppressions.py) accepts only hard_bounce, soft_bounce, rejected and manual, so saving with Deferred Stuck fails. Fix the code or remove the option. -->
 | Field | What to enter |
 |---|---|
 | **Type** | **Email Address** or **Domain**. |
 | **Email Address** or **Domain Name** | The address, for example `bob@example.net`, or a plain domain name, for example `example.net`. |
-| **Reason** | **Manual**, **Hard Bounce**, **Soft Bounce** or **Rejected**. The dialog also offers **Deferred Stuck**, but saving that choice currently fails. |
+| **Reason** | **Manual**, **Hard Bounce**, **Soft Bounce**, **Deferred Stuck** or **Rejected**. |
 | **Notes (optional)** | Why you added it. |
 | **Permanent block** | On by default. Turn it off to set **Expires after (days)**, from 1 to 365, 7 by default. |
 
@@ -205,15 +204,15 @@ In **Settings** > **Spam Filter**:
 
 - **Suppression Enabled** defaults off. **Suppression Auto Detect** and **Suppression Rspamd Sync** default on and control bounce detection and automatic map writes. Page edits can sync even when these automatic switches are off.
 - **Suppression Hard Bounce Action** defaults to **Suppress**; **Ignore** skips hard bounces.
-<!-- VERIFY: Suppression Soft Bounce Threshold is defined in backend/app/config.py but never read. With Count then suppress, _detect_suppressions_worker (scheduler.py) creates an inactive entry on the first soft bounce and its reactivate branch turns it on at the second, whatever the threshold. Fix the code or document the real behaviour. -->
-- **Suppression Soft Bounce Action** defaults to **Count then suppress**. It records the first detection inactive, then a later detection activates it. **Suppression Soft Bounce Threshold** defaults to 3 but is currently unused. **Suppress** activates immediately; **Ignore** skips soft bounces.
+<!-- VERIFY: owner's decision pending (finding 14): the soft-bounce settings apply only to log detection, which runs only while Queue Cleanup Enabled is off (on by default). Keep or change the note below once decided. -->
+- **Suppression Soft Bounce Action** defaults to **Count then suppress**. It records soft bounces on an inactive entry and activates it when the recipient reaches **Suppression Soft Bounce Threshold** soft bounces (3 by default). **Suppress** activates at the first soft bounce; **Ignore** skips soft bounces. Deferred messages are read from the logs only while **Queue Cleanup Enabled** is off; while it is on, the queue cleanup handles them instead.
 - **Queue Cleanup Enabled** defaults on. **Queue Cleanup Threshold Minutes** defaults to 60, measured since arrival.
 - **Suppression Base Expiry Days** and **Suppression Max Expiry Days** default to 7 and 90. Repeated detections extend expiry as [described above](#automatic-suppressions).
 - **Suppression Whitelist Domains** accepts comma-separated exact domains and prevents suppression, but does not protect queued mail from deletion.
 
 Under **Settings** > **Mailcow**, **Rspamd Password** is required to read maps and sync. Leave **Rspamd URL** empty to use mailcow's path; set a direct URL such as `http://rspamd-mailcow:11334` if that path fails. **Connection** > **mailcow API Key (read-write)** enables map writes, sync and queue deletion. See [Settings](Settings.md#spam-filter).
 
-On **Status** > **Jobs**, the **Spam Filter** group offers **Run now** for **Detect Suppressions** (5 minutes), **Sync to Rspamd** (10 minutes), **Expire Suppressions** (hourly) and **Cleanup Deferred Queue** (5 minutes).
+On **Status** > **Jobs**, the **Spam Filter** group offers **Run** for **Detect Suppressions** (5 minutes), **Sync to Rspamd** (10 minutes), **Expire Suppressions** (hourly) and **Cleanup Deferred Queue** (5 minutes).
 
 All require **Suppression Enabled**. With it off, manual entries can still sync, but expiry does not run. See [Settings](Settings.md), [Status](Status.md) and [environment variables](../ENV_Settings.md).
 

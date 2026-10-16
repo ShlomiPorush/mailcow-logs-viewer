@@ -9,7 +9,7 @@
 
 The four figures at the top show **Messages Sent**, **Messages Received**, **Failed** and **Failure Rate** for the chosen period. They count every mailbox and alias; the search and filters do not change them. **Failed** is sent mail that bounced or was rejected.
 
-**Period** offers **Today**, **7 Days**, **30 Days** (the default) and **90 Days**. For other dates, enter **From** and **To** and click **Apply Custom Range**. **Today** and custom dates start at midnight UTC.
+**Period** offers **Today**, **7 Days**, **30 Days** (the default) and **90 Days**. For other dates, enter **From** and **To** and click **Apply Custom Range**. Days, for **Today** and for custom dates, are days in the app's time zone (`TZ`, UTC when unset), as in the activity window.
 
 The search finds mailbox addresses, display names and alias addresses. **Domain** lists each domain with its number of mailboxes; an alias domain shows as "alias of" its target and lists the target's mailboxes.
 
@@ -38,7 +38,7 @@ Click the small chart in **Activity** to see the mailbox's sent and received mes
 
 The counts come from the message history, which **Retention Days** under **Settings** > **Fetch** keeps for 7 days by default. A longer period cannot show more than that. Mailbox and alias details sync from mailcow every 5 minutes, and the list can be up to 5 minutes old.
 
-**Mailbox Stats** and **Rate Limits** are separate switches under **Settings** > **Features**. Turning off **Mailbox Stats** deletes the stored mailbox and alias details, not the messages. If **Rate Limits** stays on, the sidebar entry is called **Rate Limits** and opens only that tab.
+**Mailbox Stats** and **Rate Limits** are separate switches under **Settings** > **Features**. Turning off **Mailbox Stats** deletes the stored mailbox and alias details, not the messages. While **Rate Limits** is on, the mailbox details stay, because Rate Limits reads each mailbox's limit from them. If **Rate Limits** stays on, the sidebar entry is called **Rate Limits** and opens only that tab.
 
 ## When something is missing
 

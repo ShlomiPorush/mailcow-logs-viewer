@@ -7,7 +7,7 @@ The Logs page shows the raw log lines of each mailcow service: live as they arri
 
 ## Services
 
-The **Service** column on the left lists the services that are switched on under **Settings** > **Logs**, each with the number of lines stored for it (shown in thousands as `K` above 999). The page opens on Postfix, or on the first service in the list when Postfix is off. A click opens another service.
+The **Service** column on the left lists the services that are switched on under **Settings** > **Logs**, each with the number of lines stored for it (shown in thousands as `K` above 999). The counts update as new lines arrive. The page opens on Postfix, or on the first service in the list when Postfix is off. A click opens another service.
 
 | Service | What its log holds |
 |---|---|
@@ -70,9 +70,7 @@ The search does not ask the server. To search further back, load a longer time r
 - **1h**, **6h**, **24h** and **48h** load the period up to now.
 - **Custom** opens **From date** and **To date** fields with date and time, and **Load**.
 
-<!-- VERIFY: while a time range is loaded the stream stays connected (loadDateRangeLogs does not disconnect it), so new live lines may still be added at the end of the range. Check in the browser and say so if they are. -->
-
-Ranges load in pages of 1000 with progress. The existing live stream stays connected, so newer entries can appear outside the requested range. Use **Pause** for a fixed historical view, or **Live** to reload the latest lines. Only retained logs are available (2 days by default).
+Ranges load in pages of 1000 with progress. A loaded range shows only its own lines: new live lines are not added, and the status bar counts the range. **Live** goes back to the latest lines. Only retained logs are available (2 days by default).
 
 ## Quick Filters
 
@@ -119,7 +117,7 @@ Some services are read by other pages too. Their rows say "Always collected for"
 
 These services keep being collected while their dependent pages need them, even if hidden here. Dovecot always supports message details. Ratelimited and SOGo stop only when neither Logs nor Rate Limits or Devices needs them. An environment value for `RAW_LOGS_SERVICES` locks the switches.
 
-Turning off the **Logs** feature under **Settings** > **Features** removes the page from the menu and stops collecting the services only this page uses.
+Turning off the **Logs** feature under **Settings** > **Features** removes the page from the menu and stops collecting the services only this page uses. The **Logs** settings tab stays, because the services other pages read are still fetched and kept by its settings.
 
 ## When something is missing
 

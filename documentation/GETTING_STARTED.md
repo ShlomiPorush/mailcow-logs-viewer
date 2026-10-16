@@ -17,11 +17,10 @@ The app listens on port `8080`. Keep it on a private network while you set it up
 
 The app needs a read-only key. A second, read-write key is optional: it is needed only to change things in mailcow from the app (release or delete quarantined mail, act on the queue, ban or unban addresses in Fail2ban, edit rate limits, write Rspamd maps, block abusive senders automatically). You can add it later.
 
-<!-- VERIFY: Confirm the API configuration menu path and key labels on the supported mailcow release; this checkout cannot prove mailcow's administrator UI. -->
-In the mailcow admin interface, open the API settings (**System** > **API** in the app's own help text):
+In the mailcow admin interface, open **System** > **Configuration**, then **Access** > **Administrators**, and expand **API**:
 
-1. Under the read-only access section, enter the IP address the app connects from in the allowed IPs field, turn the key on and save. Copy the key.
-2. If you want the read-write key now, do the same in the read-write access section and copy that key too.
+1. Under **Read-Only Access**, enter the IP address the app connects from in **Allow API access from these IPs/CIDR network notations**, tick **Activate API** and click **Save changes**. Copy the **API key**.
+2. If you want the read-write key now, do the same under **Read-Write Access** and copy that key too.
 
 The allowed IPs must include the address mailcow sees when the app connects, which can differ from the address you expect when both run on one host. If mailcow rejects the key later, check this first.
 

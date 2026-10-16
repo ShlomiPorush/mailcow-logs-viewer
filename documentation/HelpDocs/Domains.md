@@ -73,12 +73,12 @@ The check reads the TXT record at the domain that starts with `v=spf1` and repor
 
 - **Error** when there is no SPF record, when there is more than one (receivers then treat SPF as broken), when the record does not start with `v=spf1 `, when it has no `all` at the end and no `redirect=`, when it needs more than 10 DNS lookups, or when it allows every server with `+all` (a bare `all` counts as `+all`).
 - **Error** when a sending IP of yours is not allowed by the record. The message names the IP.
-- **Error** for a term the check does not know. It accepts `ip4`, `ip6`, `a`, `mx`, `include`, `exists`, `redirect` and `all`.
+- **Error** for a term the check does not know. It accepts `ip4`, `ip6`, `a`, `mx`, `include`, `exists`, `ptr`, `redirect`, `exp` and `all`.
 - **Warning** for `?all`, which protects almost nothing.
+- **Warning** for `ptr`, which RFC 7208 discourages because it is slow and unreliable. The check counts it as a DNS lookup but does not evaluate it.
 - **OK** for `-all` and for `~all`. With `~all` the message suggests `-all`.
 
-<!-- VERIFY: the SPF check reports the deprecated ptr mechanism and the exp= modifier as "Invalid SPF mechanisms" (an error), although both are legal in RFC 7208 -->
-Anything else, including the deprecated `ptr` mechanism and the `exp=` modifier, is reported as an invalid mechanism.
+Any other term is reported as an invalid mechanism. This includes modifiers other than `redirect=` and `exp=`, although RFC 7208 lets receivers ignore unknown modifiers.
 
 The lookup count includes nested `include:` terms. See [The SPF record](#the-spf-record) for the limit.
 
@@ -110,7 +110,7 @@ The check asks mailcow for the domain's DKIM selector and key, reads the TXT rec
 - **Warning** when the key matches but other tags differ from mailcow, for example a `t=s` that your DNS provider dropped. These differences do not break signatures.
 - **OK** when the published record matches mailcow.
 
-Tag order, spaces and line breaks inside the key do not count as differences. A `t=s` record adds a note about subdomains. The flag actually requires the signature's `i=` domain to equal its `d=` domain; it does not ban mail from subdomains. See [RFC 6376, section 3.6.1](https://www.rfc-editor.org/rfc/rfc6376.html#section-3.6.1).
+Tag order, spaces and line breaks inside the key do not count as differences. A `t=s` record adds a note: signatures with this key must use the same domain in `i=` as in `d=`, not a subdomain of it. That is the recommended setting. See [RFC 6376, section 3.6.1](https://www.rfc-editor.org/rfc/rfc6376.html#section-3.6.1).
 
 ### DMARC
 

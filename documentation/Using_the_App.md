@@ -81,7 +81,7 @@ The app reads mailcow with a read-only API key. Changing mailcow needs a second,
 
 ## Shared behavior
 
-- Click a value with a copy icon to copy it. The app uses the browser clipboard API, which needs HTTPS or `localhost`.
+- Click a value with a copy icon to copy it. The app uses the browser clipboard API, which needs HTTPS or `localhost`. Over plain HTTP the app says "Copying needs HTTPS. Select the text and copy it yourself."
 - Notices appear at the bottom of the screen.
 - Actions that ask for confirmation show a dialog. **Cancel** cancels the action. Individual pages describe which actions ask first.
 - Shared timestamps use `TZ` when it names a zone other than UTC. With `TZ` unset or set to `UTC`, they use your browser's local time. Date filters and some chart labels also use browser time.

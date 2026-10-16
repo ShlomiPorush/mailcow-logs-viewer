@@ -33,10 +33,10 @@ The sections below follow the menu. Each table gives the variable and the defaul
 
 ## Features
 
-Switches for **Security**, **Queue**, **Quarantine**, **Spam Filter**, **Domains**, **DMARC & TLS**, **Mailbox Stats**, **Rate Limits**, **Devices**, **Logs** and **IP Blacklist Monitor**, all on by default. A feature that is off disappears from the menu, stops its background jobs and hides its category here. The switches are saved in `DISABLED_FEATURES`; if that variable is set, the whole list is locked.
+Switches for **Security**, **Queue**, **Quarantine**, **Spam Filter**, **Domains**, **DMARC & TLS**, **Mailbox Stats**, **Rate Limits**, **Devices**, **Logs** and **IP Blacklist Monitor**, all on by default. A feature that is off disappears from the menu, stops its background jobs and hides its category here. The **Logs** category stays, because the logs other pages read are collected and kept by its settings. The switches are saved in `DISABLED_FEATURES`; if that variable is set, the whole list is locked.
 
 > [!WARNING]
-> Turning a feature off deletes the data the viewer stored for it, such as DMARC reports, quarantine rules or device history. Saving asks first (**Disable & Delete Data**); Queue and Rate Limits switch off without asking. Turning a feature on again starts from scratch.
+> Turning a feature off deletes the data the viewer stored for it, such as DMARC reports, quarantine rules or device history. Saving asks first (**Disable & Delete Data**); only Queue, which stores nothing, switches off without asking. Turning a feature on again starts from scratch.
 
 Logs that other pages need keep coming in with the Logs page off: Dovecot for message details and Security, Ratelimited for Rate Limits, SOGo for Devices.
 
@@ -93,7 +93,7 @@ Collection for the [Logs](Logs.md) page. A service marked **Always collected for
 
 | Setting | Variable | Default | Notes |
 | --- | --- | --- | --- |
-| **Raw Logs Enabled** | `RAW_LOGS_ENABLED` | `true` | Off: the Logs page keeps what it has and collects nothing new. |
+| **Raw Logs Enabled** | `RAW_LOGS_ENABLED` | `true` | Off: nothing new is collected for the Logs page, and the page says collection is off instead of showing logs. |
 | **Raw Logs Fetch Interval** | `RAW_LOGS_FETCH_INTERVAL` | `30` | Seconds. |
 | **Raw Logs Fetch Count** | `RAW_LOGS_FETCH_COUNT` | `1000` | |
 | **Raw Logs Retention Days** | `RAW_LOGS_RETENTION_DAYS` | `2` | Also limits the history on Rate Limits. |
@@ -171,7 +171,7 @@ This beta feature only alerts; it never blocks. It compares what each mailbox se
 
 ## SMTP Abuse (Beta)
 
-This beta feature stops a mailbox from sending when it goes over a limit; receiving is not affected. It needs the read-write API key. The same values, the stopped mailboxes and the whitelist are on the **Outgoing spam** card under **Security** > **Settings**; see [Outgoing spam](Abuse_Protection.md).
+This beta feature stops a mailbox from sending when it goes over a limit. The mailbox still receives mail; if its app passwords are revoked too, mail apps that sign in with one stop working. It needs the read-write API key. The same values, the stopped mailboxes and the whitelist are on the **Outgoing spam** card under **Security** > **Settings**; see [Outgoing spam](Abuse_Protection.md).
 
 | Setting | Variable | Default | Notes |
 | --- | --- | --- | --- |
@@ -229,7 +229,7 @@ Which sending addresses must pass each domain's SPF check on [Domains](Domains.m
 
 ## MaxMind
 
-A free MaxMind account lets the app download the GeoLite2 City and ASN databases, which turn IP addresses into countries and networks. The **Status** panel shows **License** with **Validate**, **Database Health** and the size and age of each database. **DB Corrupt** comes with **Repair**, which downloads the databases again. The databases update every Sunday at 03:00.
+A free MaxMind account lets the app download the GeoLite2 City and ASN databases, which turn IP addresses into countries and networks. The **Status** panel shows **License** with **Validate**, **Database Health** and the size and age of each database. **DB Corrupt** comes with **Repair**, which downloads the databases again. The databases update every Sunday at 03:00. Saving or removing the license key adds or removes that weekly update at once.
 
 Saving a new license key opens **GeoIP Database Setup**, which checks the key, downloads missing databases and tests them. If a step fails, it says why; click **Close**, fix the account ID or key and save again. After three minutes the window stops waiting for the download; check **Database Health** later.
 
@@ -257,6 +257,8 @@ Which addresses **Status** > **Blocklists** checks, and the DNS resolver it asks
 
 Automatic bounce handling for [Spam Filter](Spam_Filter.md). Nothing happens until **Suppression Enabled** is on, even though the other switches start on.
 
+<!-- VERIFY: owner's decision pending (finding 14): the soft-bounce settings work only while Queue Cleanup Enabled is off (on by default). Update the two notes in the table once decided. -->
+
 | Setting | Variable | Default | Notes |
 | --- | --- | --- | --- |
 | **Suppression Enabled** | `SUPPRESSION_ENABLED` | `false` | |
@@ -273,7 +275,7 @@ Automatic bounce handling for [Spam Filter](Spam_Filter.md). Nothing happens unt
 
 ## Quarantine
 
-Limits for the rules on **Quarantine** > **Rules**.
+Limits for the rules on **Quarantine** > **Auto-Rules**. A new **Quarantine Rules Interval** applies when you save it.
 
 | Setting | Variable | Default | Notes |
 | --- | --- | --- | --- |

@@ -40,7 +40,7 @@ Each alert goes to its email recipients and to every enabled destination that ha
 
 Unticking all topics is the same as ticking all. To stop a destination, turn off **Enabled**.
 
-Report-import errors are sent only when SMTP is configured, to destinations too. Protection rule messages follow each rule's **Email me when it bans** box (**Email me on every alert** for **Possible stolen password**), which covers destinations as well; see [Protection rules](HelpDocs/Security.md#protection-rules). Adding a destination does not turn on any of these features.
+Protection rule messages follow each rule's **Email me when it bans** box (**Email me on every alert** for **Possible stolen password**), which covers destinations as well; see [Protection rules](HelpDocs/Security.md#protection-rules). Adding a destination does not turn on any of these features.
 
 ## Email addresses
 
@@ -50,7 +50,7 @@ Report-import errors are sent only when SMTP is configured, to destinations too.
 
 ## SMTP
 
-Email needs **SMTP Enabled** with a host, user and password, or with **SMTP Relay Mode**, a host and **SMTP From** ([all SMTP fields](HelpDocs/Settings.md#smtp)). Without it, destinations still get every alert except report-import errors.
+Email needs **SMTP Enabled** with a host, user and password, or with **SMTP Relay Mode**, a host and **SMTP From** ([all SMTP fields](HelpDocs/Settings.md#smtp)). Without it, destinations still get every alert.
 
 **SMTP Verify SSL** set to **Automatic** checks the certificate of host names such as `smtp.example.com` and skips `localhost`, IP addresses and container names. **Off** (the default) never checks; **On** always does.
 
@@ -69,9 +69,9 @@ Parts in braces change with each message, such as `{mailbox}`. A topic in the la
 | `Protection rules banned addresses` | A protection rule run banned addresses. | **Security** |
 | `Protection rules could not ban` | Bans failed in a run with nothing else to report. The next run retries. | **Security** |
 | `[Security] SMTP disabled (abuse protection): {mailbox}` | Abuse protection stops sending for a mailbox, automatically or when you block it. | **Security** |
-| `Security alert: outgoing mail has been paused for your account` | The same event, to the mailbox owner: sending is paused, receiving still works, and whom to contact. | The blocked mailbox, by email only |
+| `Security alert: outgoing mail has been paused for your account` | The same event, to the mailbox owner: sending is paused, receiving still works, a mail app that used a revoked app password needs a new one (when they were revoked), and whom to contact. | The blocked mailbox, by email only |
 | `DNS records changed for {domain}: {types}` | A DNS check finds a record changed since the last check, with old and new values. | **DNS record changes** |
-| `Blacklist: 1 host is on a blacklist` or `Blacklist: {count} hosts are on a blacklist` | A check of all hosts finds a listing. Repeats on every such check while the listing lasts. | **IP blacklist** |
+| `Blacklist: 1 host is on a blacklist` or `Blacklist: {count} hosts are on a blacklist` | A check of all hosts finds a listing. Only hosts on a list that alerts are counted. Repeats on every such check while the listing lasts. | **IP blacklist** |
 | `Blacklist: 1 host still listed (was {previous})` or `Blacklist: {count} hosts still listed (was {previous})` | Fewer hosts are listed than at the last check. | **IP blacklist** |
 | `Blacklist: all hosts are clear` | No host is listed any more. | **IP blacklist** |
 | `DMARC & TLS: 1 report email could not be imported` or `DMARC & TLS: {count} report emails could not be imported` | An IMAP import skipped report emails. | **DMARC processing errors** |
@@ -81,7 +81,7 @@ Blocklist alerts come from the daily 05:00 check, the check at startup, **Check 
 
 The weekly summary goes out at 09:00 in the container's time zone (`TZ`). It covers the last seven days of mail, the current system figures, blocklists, DNS problems and the five mailboxes with the most failures. **Run** on **Weekly Summary Report** under **Status** > **Jobs** sends it at once, unless **Enable Weekly Summary** is off.
 
-What the owner of a blocked mailbox is told is in [Abuse Protection](HelpDocs/Abuse_Protection.md#what-happens-when-a-mailbox-is-stopped). Turning sending back on sends no email.
+What the owner of a blocked mailbox is told is in [Outgoing spam](HelpDocs/Abuse_Protection.md#what-happens-when-a-mailbox-is-stopped). Turning sending back on sends no email.
 
 ## Custom webhook payload
 
