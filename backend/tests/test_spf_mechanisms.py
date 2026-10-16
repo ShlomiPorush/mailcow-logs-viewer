@@ -184,3 +184,55 @@ async def test_an_upper_case_record_authorizes_like_lower_case(monkeypatch, lowe
     assert ok_lower is True, method_lower
     assert ok_upper is True, method_upper
     assert method_upper.lower() == method_lower.lower()
+
+
+_CIDR_DNS = {
+    ('example.com', 'A'): [FakeAddr('192.0.2.20')],
+    ('mail.example.com', 'A'): [FakeAddr('192.0.2.10')],
+    ('mail.example.com', 'AAAA'): [FakeAddr('2001:db8:1::10')],
+    ('example.com', 'MX'): [FakeMX('mx.example.com')],
+    ('example.net', 'MX'): [FakeMX('mx.example.com')],
+    ('mx.example.com', 'A'): [FakeAddr('192.0.2.30')],
+    ('mx.example.com', 'AAAA'): [FakeAddr('2001:db8:2::30')],
+}
+
+
+@pytest.mark.parametrize('term, ip, method', [
+    ('a/24', '192.0.2.99', 'a/24'),
+    ('A/24', '192.0.2.99', 'a/24'),
+    ('a:mail.example.com/24', '192.0.2.99', 'a:mail.example.com/24'),
+    ('a:mail.example.com//64', '2001:db8:1::99', 'a:mail.example.com//64'),
+    ('a:mail.example.com/24//64', '192.0.2.99', 'a:mail.example.com/24//64'),
+    ('a:mail.example.com/24//64', '2001:db8:1::99', 'a:mail.example.com/24//64'),
+    ('mx/24', '192.0.2.99', 'mx/24'),
+    ('mx:example.net/24', '192.0.2.99', 'mx:example.net/24'),
+    ('mx//64', '2001:db8:2::99', 'mx//64'),
+])
+@pytest.mark.asyncio
+async def test_a_and_mx_apply_their_cidr_length(monkeypatch, term, ip, method):
+    """RFC 7208 section 5.6: a/24 authorizes the /24 around each address the name resolves to."""
+    _fake_dns(monkeypatch, _CIDR_DNS)
+    assert await domains.check_ip_in_spf('example.com', ip, f'v=spf1 {term} -all') == (True, method)
+
+
+@pytest.mark.parametrize('term, ip', [
+    ('a', '192.0.2.99'),
+    ('a:mail.example.com', '192.0.2.99'),
+    ('a:mail.example.com', '2001:db8:1::99'),
+    ('mx', '192.0.2.99'),
+    ('mx:example.net', '2001:db8:2::99'),
+    # Each length applies to its own address family only
+    ('a:mail.example.com//64', '192.0.2.99'),
+    ('a:mail.example.com/24', '2001:db8:1::99'),
+    ('a/24', '198.51.100.20'),
+])
+@pytest.mark.asyncio
+async def test_a_and_mx_without_a_length_need_the_exact_address(monkeypatch, term, ip):
+    _fake_dns(monkeypatch, _CIDR_DNS)
+    assert await domains.check_ip_in_spf('example.com', ip, f'v=spf1 {term} -all') == (False, None)
+
+
+@pytest.mark.asyncio
+async def test_mx_with_a_cidr_length_counts_as_mx(monkeypatch):
+    result = await _check(monkeypatch, 'v=spf1 mx/24 -all')
+    assert result['includes_mx'] is True

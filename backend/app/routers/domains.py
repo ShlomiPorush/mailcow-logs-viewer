@@ -39,6 +39,8 @@ SPF_MECHANISM_RE = re.compile(
     r'|(?:a|mx)(?::[^/]+)?(?:/\d+)?(?://\d+)?'
     r'|ptr(?::.+)?'
     r'|ip[46]:[^/]+(?:/\d+)?)', re.IGNORECASE)
+# RFC 7208 section 5.6: a or mx, an optional domain, then the dual CIDR length
+SPF_A_MX_RE = re.compile(r'(a|mx)(?::([^/]+))?((?:/(\d+))?(?://(\d+))?)', re.IGNORECASE)
 
 _server_ip_cache = None
 
@@ -340,7 +342,7 @@ async def check_spf_record(domain: str, spf_source_ips: Optional[List[Dict[str, 
                 'warnings': ['SPF should end with -all or ~all']
             }
         
-        includes_mx = any(m.lstrip('+-~?').lower() in ['mx'] or m.lstrip('+-~?').lower().startswith('mx:') for m in mechanisms)
+        includes_mx = any(m.lstrip('+-~?').lower() in ['mx'] or m.lstrip('+-~?').lower().startswith(('mx:', 'mx/')) for m in mechanisms)
         
         includes = [m[len('include:'):] for m in mechanisms if m.lower().startswith('include:')]
         
@@ -532,34 +534,30 @@ async def check_ip_in_spf(domain: str, ip_to_check: str, spf_record: str, resolv
             except Exception:
                 pass
 
-        elif name in ['a'] or name.startswith('a:'):
-            check_domain = domain if name == 'a' else clean_part.split(':', 1)[1]
+        elif SPF_A_MX_RE.fullmatch(clean_part):
+            # Each resolved address covers the CIDR length for its family (default /32, /128)
+            mech, host, cidr, ip4_len, ip6_len = SPF_A_MX_RE.fullmatch(clean_part).groups()
+            mech = mech.lower()
+            check_domain = host or domain
+            prefix_len = (ip6_len or '128') if target_ip.version == 6 else (ip4_len or '32')
+            method = f'{mech}:{host}{cidr}' if host else f'{mech}{cidr}'
             try:
-                a_records = await resolve_dns_with_fallback(check_domain, address_record_type, timeout=5)
-                for rdata in a_records:
+                if mech == 'a':
+                    hosts = [check_domain]
+                else:
+                    mx_records = await resolve_dns_with_fallback(check_domain, 'MX', timeout=5)
+                    hosts = [str(mx.exchange) for mx in mx_records]
+                for host_name in hosts:
                     try:
-                        if ipaddress.ip_address(str(rdata)) == target_ip:
-                            return True, f'a:{check_domain}' if name.startswith('a:') else 'a'
-                    except ValueError:
-                        continue
-            except Exception:
-                pass
-
-        elif name in ['mx'] or name.startswith('mx:'):
-            check_domain = domain if name == 'mx' else clean_part.split(':', 1)[1]
-            try:
-                mx_records = await resolve_dns_with_fallback(check_domain, 'MX', timeout=5)
-                for mx in mx_records:
-                    try:
-                        mx_a_records = await resolve_dns_with_fallback(str(mx.exchange), address_record_type, timeout=5)
-                        for rdata in mx_a_records:
-                            try:
-                                if ipaddress.ip_address(str(rdata)) == target_ip:
-                                    return True, f'mx:{check_domain}' if name.startswith('mx:') else 'mx'
-                            except ValueError:
-                                continue
+                        address_records = await resolve_dns_with_fallback(host_name, address_record_type, timeout=5)
                     except Exception:
-                        pass
+                        continue
+                    for rdata in address_records:
+                        try:
+                            if target_ip in ipaddress.ip_network(f'{rdata}/{prefix_len}', strict=False):
+                                return True, method
+                        except ValueError:
+                            continue
             except Exception:
                 pass
         
