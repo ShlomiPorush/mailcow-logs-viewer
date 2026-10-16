@@ -19,6 +19,14 @@ ALLOWED_DOCS = {
     "Abuse_Protection": "Abuse_Protection.md",
     "Rate_Limits": "Rate_Limits.md",
     "Devices": "Devices.md",
+    "Dashboard": "Dashboard.md",
+    "Messages": "Messages.md",
+    "Security": "Security.md",
+    "Queue": "Queue.md",
+    "Status": "Status.md",
+    "Logs": "Logs.md",
+    "Settings": "Settings.md",
+    "About": "About.md",
 }
 
 @router.get("/docs/{doc_name}", response_class=PlainTextResponse)

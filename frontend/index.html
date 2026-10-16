@@ -570,7 +570,11 @@
                 </div>
                 <div class="ui-page-head">
                     <div>
-                        <h1 class="ui-h1">Dashboard</h1>
+                        <h1 class="ui-h1">Dashboard <button onclick="showHelpModal('Dashboard')" class="ui-icon-btn ui-help-btn" title="Help - Dashboard">
+                                <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                                </svg>
+                            </button></h1>
                         <p class="ui-muted" id="dashboard-subtitle">The last 24 hours, with the last 7 days for comparison</p>
                     </div>
                 </div>
@@ -641,7 +645,11 @@
                 <div class="ui-msgs">
                     <!-- Facets: outcome and direction with counts, time, the other filters -->
                     <aside class="ui-facets" aria-label="Filters">
-                        <h1 class="ui-h1">Messages</h1>
+                        <h1 class="ui-h1">Messages <button onclick="showHelpModal('Messages')" class="ui-icon-btn ui-help-btn" title="Help - Messages">
+                                <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                                </svg>
+                            </button></h1>
                         <h3>Outcome</h3>
                         <div id="messages-facet-status" class="ui-fct-list"></div>
                         <h3>Direction</h3>
@@ -763,7 +771,11 @@
             <div id="content-netfilter" class="tab-content hidden ui-page">
                 <div class="ui-page-head">
                     <div>
-                        <h1 class="ui-h1">Security</h1>
+                        <h1 class="ui-h1">Security <button onclick="showHelpModal('Security')" class="ui-icon-btn ui-help-btn" title="Help - Security">
+                                <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                                </svg>
+                            </button></h1>
                         <p class="ui-muted">Who tries to get in, what stops them, and what is waiting for you</p>
                     </div>
                 </div>
@@ -836,7 +848,11 @@
             <div id="content-queue" class="tab-content hidden ui-page">
                 <div class="ui-page-head">
                     <div>
-                        <h1 class="ui-h1">Queue</h1>
+                        <h1 class="ui-h1">Queue <button onclick="showHelpModal('Queue')" class="ui-icon-btn ui-help-btn" title="Help - Queue">
+                                <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                                </svg>
+                            </button></h1>
                         <p class="ui-muted" id="queue-summary">Messages waiting in the Postfix queue</p>
                     </div>
                 </div>
@@ -1029,7 +1045,11 @@
             <div id="content-status" class="tab-content hidden ui-page">
                 <div class="ui-page-head">
                     <div>
-                        <h1 class="ui-h1">Status <small id="status-last-checked" class="ui-h1-note"></small></h1>
+                        <h1 class="ui-h1">Status <button onclick="showHelpModal('Status')" class="ui-icon-btn ui-help-btn" title="Help - Status">
+                                <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                                </svg>
+                            </button> <small id="status-last-checked" class="ui-h1-note"></small></h1>
                         <p class="ui-muted" id="status-subtitle">Containers, blocklists, background jobs and data</p>
                     </div>
                     
@@ -1303,7 +1323,11 @@
             <div id="content-logs" class="tab-content hidden ui-page">
                 <div class="ui-page-head">
                     <div>
-                        <h1 class="ui-h1">Logs</h1>
+                        <h1 class="ui-h1">Logs <button onclick="showHelpModal('Logs')" class="ui-icon-btn ui-help-btn" title="Help - Logs">
+                                <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                                </svg>
+                            </button></h1>
                         <p class="ui-muted">Live and past log lines of each mailcow service</p>
                     </div>
                 </div>
@@ -1416,7 +1440,11 @@
             <div id="content-about" class="tab-content hidden ui-page">
                 <div class="ui-page-head">
                     <div>
-                        <h1 class="ui-h1">About</h1>
+                        <h1 class="ui-h1">About <button onclick="showHelpModal('About')" class="ui-icon-btn ui-help-btn" title="Help - About">
+                                <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                                </svg>
+                            </button></h1>
                         <p class="ui-muted">Is everything this app relies on working, and which version is running</p>
                     </div>
                 </div>
@@ -1426,7 +1454,11 @@
             <div id="content-settings" class="tab-content hidden ui-page">
                 <div class="ui-page-head">
                     <div>
-                        <h1 class="ui-h1">Settings</h1>
+                        <h1 class="ui-h1">Settings <button onclick="showHelpModal('Settings')" class="ui-icon-btn ui-help-btn" title="Help - Settings">
+                                <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                                </svg>
+                            </button></h1>
                         <p class="ui-muted">Application configuration</p>
                     </div>
                 </div>
