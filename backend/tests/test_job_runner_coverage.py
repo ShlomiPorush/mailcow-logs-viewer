@@ -33,7 +33,8 @@ def test_every_status_page_job_is_runnable(client):
     missing = []
     for job_name in scheduler.job_status:
         resp = client.post(f"/api/settings/jobs/{job_name}/run")
-        if resp.status_code != 200:
+        # 409: a known job that cannot run in this test setup (its feature or setting is off)
+        if resp.status_code not in (200, 409):
             missing.append(f"{job_name} -> {resp.status_code} {resp.text}")
     assert not missing, "jobs listed on the Status page that the runner rejects:\n" + "\n".join(missing)
 
