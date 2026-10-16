@@ -13,7 +13,7 @@ from ..database import get_db
 from ..models import PostfixLog, RspamdLog, NetfilterLog, MessageCorrelation
 from ..mailcow_api import MailcowRwKeyError, mailcow_api
 from ..config import settings
-from ..services import geoip_service, security_addresses
+from ..services import geoip_service, protection_rules, security_addresses
 from ..services.security_addresses import netfilter_service  # noqa: F401  (tests import it from here)
 from ..utils import internal_error, format_datetime_for_api as format_datetime_utc
 
@@ -704,7 +704,8 @@ async def get_fail2ban():
         if data is None:
             raise HTTPException(status_code=503, detail="Could not fetch Fail2Ban configuration from mailcow")
         
-        return data
+        # Single IPv6 addresses an earlier version wrote as /32 networks
+        return {**data, "legacy_entries": security_addresses.legacy_entries(data)}
     except HTTPException:
         raise
     except Exception as e:
@@ -946,6 +947,52 @@ async def remove_from_fail2ban_list(request: Request):
         raise
     except Exception as e:
         logger.error(f"Error removing IP from the Fail2Ban list: {e}")
+        raise internal_error(e)
+
+
+@router.post("/fail2ban/repair")
+async def repair_fail2ban_entry(request: Request):
+    """
+    Replace an entry an earlier version wrote as a /32 network (2001:db8::1/32) with
+    the single address it was meant to be (2001:db8::1/128), in one edit, then read
+    the list back to confirm it. Body: {"entry", "list": "blacklist" | "whitelist"}.
+    Requires Read-Write API key.
+    """
+    try:
+        body = await request.json()
+        entry, list_name = (body.get("entry") or "").strip(), body.get("list")
+        if list_name not in ("blacklist", "whitelist"):
+            raise HTTPException(status_code=400, detail="'list' must be blacklist or whitelist")
+        address = security_addresses.legacy_ipv6_entry(entry)
+        if not address:
+            raise HTTPException(status_code=400, detail=f"{entry} is not a single address written as a /32 network")
+        single = f"{address}/128"
+
+        current = await mailcow_api.get_fail2ban()
+        if current is None:
+            raise HTTPException(status_code=503, detail="Could not fetch current Fail2Ban settings")
+        lists = {name: _split_ip_list(current.get(name, "")) for name in ("blacklist", "whitelist")}
+        if entry not in lists[list_name]:
+            return {"status": "error", "msg": f"{entry} is no longer on the list"}
+        # The address takes the old entry's place, once if the list holds it already
+        lists[list_name] = list(dict.fromkeys(single if e == entry else e for e in lists[list_name]))
+
+        logger.info(f"Replacing {entry} with {single} on the Fail2Ban {list_name}")
+        result = await mailcow_api.edit_fail2ban(
+            protection_rules.fail2ban_attrs(current, lists["blacklist"], lists["whitelist"]))
+        failed = [m for m in result if isinstance(m, dict) and m.get("type") != "success"] if isinstance(result, list) else []
+        if failed:
+            return {"status": "error", "msg": failed[0].get("msg", "Update failed")}
+
+        after = await mailcow_api.get_fail2ban()
+        written = _split_ip_list((after or {}).get(list_name, ""))
+        if after is None or entry in written or single not in written:
+            return {"status": "error", "msg": "mailcow took the change, but the list did not show it when checked. Refresh to see what it holds."}
+        return {"status": "success", "msg": f"{entry} replaced with {single}"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error repairing a Fail2Ban list entry: {e}")
         raise internal_error(e)
 
 

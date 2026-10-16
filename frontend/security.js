@@ -771,12 +771,25 @@ function renderSecurityLists() {
         </form>` : '';
     const row = (entry, note, action) => `
         <div class="ui-sec-lrow"><b class="ui-mono">${copyableText(entry)}</b><span class="ui-sec-why">${note}</span><span class="ui-sec-acts">${action}</span></div>`;
+    // A single IPv6 address an earlier version wrote as a /32 network covers all of it
+    const legacyRow = (list, entry) => {
+        const old = fail2banLegacy.find(l => l.list === list && l.entry === entry);
+        if (!old) return '';
+        const effect = list === 'whitelist' ? `Exempts the whole ${escapeHtml(old.network)} network from Fail2ban.` : `Blocks the whole ${escapeHtml(old.network)} network.`;
+        return row(entry, `${uiTag('Whole network', 'warn')} ${effect} An earlier version wrote this single address as a network.`,
+            rw ? `<button type="button" class="ui-btn ui-btn-sm" onclick="securityRepairListEntry('${list}', '${escapeJsArg(entry)}', this)" title="Replace it with ${escapeHtml(old.address)}/128">Repair</button>
+                <button type="button" class="ui-btn ui-btn-sm" onclick="securityRemoveFromList('${list}', '${escapeJsArg(entry)}', this)">Remove</button>` : '');
+    };
     const allowRows = fail2banWhitelist.map(entry => {
+        const legacy = legacyRow('whitelist', entry);
+        if (legacy) return legacy;
         const n = tried(entry);
         return row(entry, n ? `Failed ${Number(n).toLocaleString()} login${n === 1 ? '' : 's'} today, never banned` : '',
             rw ? `<button type="button" class="ui-btn ui-btn-sm" onclick="securityRemoveFromList('whitelist', '${escapeJsArg(entry)}', this)">Remove</button>` : '');
     }).join('');
     const denyRows = fail2banBlacklist.map(entry => {
+        const legacy = legacyRow('blacklist', entry);
+        if (legacy) return legacy;
         const hit = ruleBans.get(securityBare(entry));
         if (hit) {
             return row(entry, `Added by ${escapeHtml(securityRuleName(hit.rule))}, ${hit.expires_at ? `until ${escapeHtml(formatTime(hit.expires_at))}` : 'until removed'}`,
@@ -830,6 +843,34 @@ async function securityRemoveFromList(list, entry, button) {
         showToast(`Could not remove ${entry}: ${error.message}`, 'error');
         if (button) button.disabled = false;
     }
+}
+
+// Replaces an entry an earlier version wrote as a /32 network with the single
+// address it was meant to be, in one edit of mailcow's list
+async function securityRepairListEntry(list, entry, button) {
+    const old = fail2banLegacy.find(l => l.list === list && l.entry === entry);
+    if (!old) return;
+    const single = `${old.address}/128`;
+    const label = list === 'whitelist' ? 'allowlist' : 'denylist';
+    const effect = list === 'whitelist'
+        ? `Only ${old.address} stays exempt from Fail2ban; the rest of ${old.network} can be banned again.`
+        : `Only ${old.address} stays banned; the rest of ${old.network} is no longer blocked.`;
+    if (!await showConfirmModal({ title: 'Repair the entry', message: `Replace ${entry} with ${single} on the ${label}?\n\n${effect}`, confirmText: 'Repair' })) return;
+    if (button) button.disabled = true;
+    try {
+        const res = await authenticatedFetch('/api/fail2ban/repair', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ entry, list })
+        });
+        const result = await res.json().catch(() => ({}));
+        if (!res.ok || result.status !== 'success') throw new Error(result.msg || result.detail || `HTTP ${res.status}`);
+        showToast(`${entry} replaced with ${single} on the ${label}`, 'success');
+    } catch (error) {
+        showToast(`Could not repair ${entry}: ${error.message}`, 'error');
+        if (button) button.disabled = false;
+    }
+    // The list is read again either way, so it shows what mailcow holds now
+    fail2banSettingsLoaded = false;
+    loadFail2BanSettings();
 }
 
 // =============================================================================

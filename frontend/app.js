@@ -1876,13 +1876,14 @@ async function loadDashboardAttention() {
             return null;
         }
     };
-    const [blacklist, summary, insights, appVersion, mailcowVersion, connection] = await Promise.all([
+    const [blacklist, summary, insights, appVersion, mailcowVersion, connection, fail2ban] = await Promise.all([
         off('blacklist') ? null : get('/api/blacklist/summary'),
         get('/api/status/summary'),
         off('dmarc') ? null : get('/api/dmarc/insights'),
         get('/api/status/app-version'),
         get('/api/status/version'),
         get('/api/status/mailcow-connection'),
+        off('netfilter') ? null : get('/api/fail2ban'),
     ]);
     const items = [];
     if (connection && connection.connected === false) {
@@ -1904,6 +1905,16 @@ async function loadDashboardAttention() {
     if (containers && containers.stopped > 0) {
         items.push({ tone: 'fail', title: containers.stopped === 1 ? 'A mailcow container is stopped' : `${containers.stopped} mailcow containers are stopped`,
             detail: `${containers.running || 0} of ${containers.total || 0} containers are running.`, action: 'Open status', onclick: "navigateTo('status')" });
+    }
+    // Single IPv6 addresses an earlier version wrote as /32 networks
+    const legacy = (fail2ban && fail2ban.legacy_entries) || [];
+    if (legacy.length) {
+        const first = legacy[0];
+        items.push({ tone: 'warn',
+            title: legacy.length === 1 ? `A Fail2ban entry ${first.list === 'whitelist' ? 'exempts' : 'blocks'} the whole ${first.network} network` : `${legacy.length} Fail2ban entries cover whole /32 networks`,
+            detail: legacy.length === 1 ? `An earlier version wrote ${first.address} as ${first.entry}. Repair it on the Security page's Lists tab.`
+                : 'An earlier version wrote single IPv6 addresses as networks. Repair them on the Security page\'s Lists tab.',
+            action: 'Open lists', onclick: "navigateTo('netfilter', { sub: 'lists' })" });
     }
     const dmarc = insights ? (insights.insights || []).filter(i =>
         i.recommendations.some(r => r.type === 'tighten_policy' || r.type === 'low_pass_rate') || (i.new_sources && i.new_sources.length > 0)) : [];
@@ -2307,6 +2318,7 @@ let fail2banActiveBans = null;   // null until mailcow has answered
 let fail2banBlacklist = [];
 let fail2banWhitelist = [];
 let fail2banPermBans = [];
+let fail2banLegacy = [];         // single IPv6 addresses an earlier version wrote as /32 networks
 let fail2banPolicy = null;       // how Fail2ban bans: times, attempts, window, network size
 
 // Fail2ban's bans, lists and policy from mailcow. The Security page shows them in
@@ -2324,6 +2336,7 @@ async function loadFail2BanSettings() {
         fail2banPermBans = data.perm_bans || [];
         fail2banBlacklist = list(data.blacklist);
         fail2banWhitelist = list(data.whitelist);
+        fail2banLegacy = data.legacy_entries || [];
         fail2banPolicy = {
             ban_time: data.ban_time, max_ban_time: data.max_ban_time, ban_time_increment: !!Number(data.ban_time_increment),
             max_attempts: data.max_attempts, retry_window: data.retry_window,
