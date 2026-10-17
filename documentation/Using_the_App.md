@@ -26,7 +26,12 @@ Changing mailcow needs the read-write API key (`MAILCOW_API_KEY_RW`): queue and 
 
 ## Time zone
 
-Timestamps use `TZ` when it names a zone other than UTC. With `TZ` unset or set to `UTC`, they use your browser's local time. Date filters on Messages and some chart labels use browser time. Mailbox Stats counts days in `TZ` (UTC when unset).
+The app shows times in the time zone set by `TZ` in `.env`, for example `TZ=Europe/Berlin`. Without `TZ`, or with `TZ=UTC`, it shows them in your browser's time zone.
+
+Exceptions:
+
+- The date filters on Messages and the activity chart of a security alert always use your browser's time zone.
+- Mailbox Stats counts whole days in `TZ`, or in UTC when `TZ` is not set.
 
 ## Copying
 
