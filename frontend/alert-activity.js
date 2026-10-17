@@ -77,7 +77,7 @@ function alertActivityChart(data) {
     const top = Math.ceil(max / 4) * 4;
     // A spike's usual rate, per column; a burst or a block has no usual rate, only a threshold
     const usual = spike ? (a.baseline_value || 0) * minutes / 60 : null;
-    const fmt = d => formatInZone(d, { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+    const fmt = d => formatInZone(d, { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false });
     const what = sent ? 'sent' : 'failed logins';
     const markAt = cols.findIndex(c => at >= c.start && at < new Date(c.start.getTime() + minutes * 60000));
     const ranges = [['24h', '24 hours'], ['48h', '2 days'], ['7d', `${escapeHtml(String(data.baseline_days))} days`]];
@@ -92,7 +92,7 @@ function alertActivityChart(data) {
                 return `<span class="ui-aa-col${inAlert ? ' is-alert' : ''}" data-tip="${escapeHtml(tip)}" title="${escapeHtml(tip)}"><i style="height:${c.count / top * 100}%"></i></span>`;
             }).join('')}</div>
             ${usual !== null ? `<div class="ui-aa-usual" style="bottom:${Math.max(usual / top * 100, .6)}%"><span>usual: ${(a.baseline_value || 0).toFixed(2)} an hour</span></div>` : ''}
-            ${markAt >= 0 ? `<div class="ui-aa-mark" style="left:${(markAt + .5) / cols.length * 100}%"><span>Alert ${formatInZone(at, { hour: '2-digit', minute: '2-digit' })}</span></div>` : ''}
+            ${markAt >= 0 ? `<div class="ui-aa-mark" style="left:${(markAt + .5) / cols.length * 100}%"><span>Alert ${formatInZone(at, { hour: '2-digit', minute: '2-digit', hour12: false })}</span></div>` : ''}
         </div>
         <div class="ui-aa-x"><span>${escapeHtml(fmt(cols[0].start))}</span><span>${escapeHtml(fmt(cols[cols.length - 1].start))}</span></div>
         <p class="ui-aa-legend"><span><i></i>${sent ? 'Sent' : 'Failed logins'}, per ${escapeHtml(per)}</span>${from ? `<span><i class="is-alert"></i>The alert's ${escapeHtml(String(data.window_minutes))} minutes</span>` : ''}${usual !== null ? `<span><i class="is-usual"></i>Its usual rate over ${escapeHtml(String(data.baseline_days))} days</span>` : ''}</p>`;
