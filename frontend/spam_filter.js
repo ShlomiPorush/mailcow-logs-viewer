@@ -738,7 +738,7 @@ function showEditSuppressionModal(s) {
             </label>
             <div id="edit-suppression-expiry-row" class="ui-form-sub ${isPermanent ? 'hidden' : ''}">
                 <label><span class="ui-label">Expiry date & time</span>
-                    <input type="datetime-local" id="edit-suppression-expiry" value="${currentExpiry}" class="ui-input">
+                    <input type="datetime-local" id="edit-suppression-expiry" value="${currentExpiry}" data-shown="${currentExpiry}" class="ui-input">
                 </label>
                 <div class="ui-chip-row">
                     <button onclick="extendExpiryBy(7)" class="ui-chip">+7 days</button>
@@ -784,12 +784,16 @@ async function saveEditSuppression(id) {
     if (permanent) {
         expiresAt = 'null';  // clear expiry = permanent
     } else {
-        const expiry = fromZonedInputValue(document.getElementById('edit-suppression-expiry')?.value);
+        const input = document.getElementById('edit-suppression-expiry');
+        const expiry = fromZonedInputValue(input?.value);
         if (!expiry) {
             showToast('Please set an expiry date', 'error');
             return;
         }
-        expiresAt = expiry.toISOString();
+        // The field holds whole minutes: an expiry nobody touched is not sent,
+        // so it keeps its seconds
+        const wasPermanent = !(suppressionItemsById.get(id) || {}).expires_at;
+        expiresAt = !wasPermanent && input.value === input.dataset.shown ? undefined : expiry.toISOString();
     }
     
     try {

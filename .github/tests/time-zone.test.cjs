@@ -117,18 +117,33 @@ function suppressionEditor(expiresAt) {
     c.suppressionDialog = (id, title, html) => { body = html; };
     c.authenticatedFetch = async (url, options) => { sent.push(JSON.parse(options.body)); return { ok: true }; };
     for (const name of ['showToast', 'loadSuppressions', 'loadSuppressionStats', 'autoSyncToRspamd']) c[name] = () => {};
-    c.showEditSuppressionModal({ id: 7, email: 'user@example.com', reason: 'hard_bounce', expires_at: expiresAt, created_at: expiresAt });
+    const item = { id: 7, email: 'user@example.com', reason: 'hard_bounce', expires_at: expiresAt, created_at: expiresAt };
+    c.__item = item;
+    vm.runInContext('suppressionItemsById.set(7, __item)', c);
+    c.showEditSuppressionModal(item);
     const shown = body.match(/id="edit-suppression-expiry" value="([^"]*)"/)[1];
+    // The field as the browser builds it from the HTML
     element('edit-suppression-expiry').value = shown;
+    element('edit-suppression-expiry').dataset.shown = body.match(/id="edit-suppression-expiry" value="[^"]*" data-shown="([^"]*)"/)[1];
     return { c, element, shown, sent };
 }
 
-test('the expiry editor shows the expiry in the app zone and saves it unchanged', async () => {
-    const { c, shown, sent } = suppressionEditor('2026-10-25T00:30:00Z');
+test('the expiry editor shows the expiry in the app zone and reads a new one there', async () => {
+    const { c, element, shown, sent } = suppressionEditor('2026-10-25T00:30:00Z');
     // 00:30 UTC is the first 02:30 in Berlin that night
     assert.equal(shown, '2026-10-25T02:30');
+    // 03:30 on the same night is after the clocks went back, so UTC+1
+    element('edit-suppression-expiry').value = '2026-10-25T03:30';
     await c.saveEditSuppression(7);
-    assert.equal(sent[0].expires_at, '2026-10-25T00:30:00.000Z');
+    assert.equal(sent[0].expires_at, '2026-10-25T02:30:00.000Z');
+});
+
+test('saving an expiry that was not touched keeps it to the second', async () => {
+    // A real expiry is "now plus N days", with seconds; the field only holds minutes
+    const { c, shown, sent } = suppressionEditor('2026-10-31T21:25:10.541492Z');
+    assert.equal(shown, '2026-10-31T22:25');
+    await c.saveEditSuppression(7);
+    assert.equal(sent[0].expires_at, undefined, 'an untouched expiry is not sent');
 });
 
 test('+7 days on the expiry keeps its time of day across the change to summer time', () => {
