@@ -1,56 +1,44 @@
 # Rate Limits
 
-**Mailbox Stats** > **Rate Limits** shows who ran into mailcow's sending limits and lets you change the limit of each mailbox and domain. The hits come from mailcow's `ratelimited` log, which this app collects; the limits are read from mailcow.
+Hits come from mailcow's `ratelimited` log; configured limits come from mailcow.
 
 ![Rate Limits](../../images/docs/rate-limits-page-light.webp#gh-light-mode-only)
 ![Rate Limits](../../images/docs/rate-limits-page-dark.webp#gh-dark-mode-only)
 
 ## Rate limit activity
 
-The chart counts blocked sends in the chosen **Window**. **Last 24 hours** shows them per hour; **Last 7 days**, **Last 30 days** (the default), **Last 90 days** and **Last year** show them per day.
+The chart counts blocked sends in the selected window: hourly for the last 24 hours, daily for longer windows.
 
 <!-- VERIFY: owner's decision pending (finding 35): windows longer than the raw log retention. Update this note once decided. -->
-> [!NOTE]
-> Hits are kept only as long as the raw logs: **Raw Logs Retention Days** under **Settings** > **Logs**, 2 days by default. With the default, every window longer than two days shows the same two days. The page also reads at most the newest 5,000 hits.
+Hits are kept only as long as **Raw Logs Retention Days** under **Settings** > **Logs**, 2 days by default. With that default, longer windows show the same two days. The page reads at most the newest 5,000 hits.
 
 ## Blocked senders
 
-The table lists every sender with recorded hits, newest **Last hit** first. **Hits** counts all of a sender's recorded hits, not only those in the window. Search by sender address. **Limit** is the mailbox's own limit, and **Last reset** shows a counter reset made from this page.
+**Hits** counts all recorded hits for a sender, regardless of the chart's window. **Limit** is the mailbox's own limit; **Last reset** records a reset made here. Sender details include up to 2,000 refused messages.
 
-Click a sender to see each refused message with **Time**, **Recipient**, **Subject** and **Queue id**, newest first, up to 2,000. **All senders** goes back to the list.
-
-**Reset counter** lets the sender send again right away; the limit stays as it is. The button appears only when mailcow's log names the counter.
+**Reset counter** lets the sender send again immediately without changing its limit. It appears only when mailcow's log names the counter.
 
 ![Blocked sender detail](../../images/docs/rate-limits-sender-light.webp#gh-light-mode-only)
 ![Blocked sender detail](../../images/docs/rate-limits-sender-dark.webp#gh-dark-mode-only)
 
 ## Configured limits
 
-The table lists every domain, then every active mailbox, with its limit or **No limit**. **All**, **Mailboxes** and **Domains** filter by type, the search filters by name, and **Hide no limit** hides entries without a limit.
+**Remove limit** and saving `0` both remove a limit.
 
-To change one entry, click **Edit**, enter the number of messages in **Allow**, choose **per second**, **per minute**, **per hour** or **per day**, and click **Save**. **Remove limit** removes it after you confirm; saving `0` does the same.
-
-**Apply to filtered** sets one limit on everything the table shows, and only on that. The panel shows how many mailboxes and domains match. Enter the limit, click **Apply** and confirm; `0` removes the limit from all of them. One apply can change up to 1,000 entries. An entry the app no longer knows, for example one deleted in mailcow since the page loaded, is skipped and keeps its limit.
-
-![Configured limits filtered to example.com](../../images/docs/rate-limits-bulk-light.webp#gh-light-mode-only)
-![Configured limits filtered to example.com](../../images/docs/rate-limits-bulk-dark.webp#gh-dark-mode-only)
+**Apply to filtered** changes only matching rows, up to 1,000 entries per apply. A value of `0` removes their limits. Entries the app no longer knows are skipped and keep their limits.
 
 ## Settings that change this page
 
-Changing limits and resetting counters need the read-write API key. Without it, **Editing rate limits is locked** appears, **Edit** and **Apply to filtered** are gone, and **Reset counter** is disabled. See [The Read-Write API key](../Using_the_App.md#the-read-write-api-key).
+Changing limits and resetting counters require the [read-write API key](../Using_the_App.md#the-read-write-api-key).
 
-**Rate Limits** under **Settings** > **Features** is separate from **Mailbox Stats**; with only Rate Limits on, the sidebar entry is called **Rate Limits**. While it is on, the app collects the `ratelimited` log even if the Logs page is off or the service is unticked there. Turning it off asks you to confirm first: it forgets the counter resets and deletes the collected hits, unless the Logs page still collects that service. The retention of the hits stays under **Settings** > **Logs**, also while the Logs page is off.
+The Rate Limits feature is separate from Mailbox Stats. While enabled, it collects `ratelimited` logs even if the Logs page is off or that service is unticked there. Turning it off forgets counter resets and deletes collected hits, unless the Logs page still collects the service. Retention stays under **Settings** > **Logs**, even with the Logs page off.
 
 ## When something is missing
 
-**No rate limit hits have been collected** means the app has no recorded hits. A limit creates no hit until mailcow refuses a message.
-
-**No matches** means the search or filters hide every row. **Domain limits could not be read from mailcow** means mailcow did not answer for at least one domain; the mailbox limits still show.
-
-If the page cannot load, it shows **Failed to load rate limits**. Press **Refresh** to try again.
+No hits appear until mailcow refuses a message. **Domain limits could not be read from mailcow** means at least one domain could not be read; mailbox limits still show.
 
 ## How sending limits work
 
-A limit is a setting: so many messages per second, minute, hour or day. The counter is what mailcow has counted against it; once the allowance is used up, mailcow refuses the sender's mail. **Reset counter** empties it so the sender can send now; changing the limit changes the rule for later mail.
+A limit allows a number of messages per period. Once the allowance is used, mailcow refuses further sends. Resetting the counter empties the count; changing the limit changes the rule.
 
-mailcow uses a mailbox's own limit when it has one, and the domain limit then does not apply to that mailbox. Mailboxes without their own limit share the domain limit: together they can send that many messages per period. Limits apply to senders that authenticate to mailcow, that is, your own mailboxes. They are separate from [SMTP abuse protection](Abuse_Protection.md), which turns off a mailbox's SMTP access.
+A mailbox's own limit overrides the domain limit. Mailboxes without their own limit share the domain allowance. Limits apply to authenticated senders and are separate from [SMTP abuse protection](Abuse_Protection.md), which disables SMTP access.

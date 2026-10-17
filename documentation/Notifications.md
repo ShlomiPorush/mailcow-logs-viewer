@@ -4,25 +4,14 @@ The app sends alerts by email and to destinations you add, such as Slack, Telegr
 
 ## Alert destinations
 
-Under **Alert destinations**, click **+ Add destination**, pick the **Service**, fill in its fields and tick the topics under **Which alerts to send here**.
-
 ![Settings, Notifications](../images/docs/notifications-destinations-light.webp#gh-light-mode-only)
 ![Settings, Notifications](../images/docs/notifications-destinations-dark.webp#gh-dark-mode-only)
 
-| Service | Fields |
-| --- | --- |
-| **Slack** | **Incoming Webhook URL**. |
-| **Discord** | **Webhook URL**. |
-| **Telegram** | **Bot token** and **Chat ID**. |
-| **ntfy** | **Server URL**, **Topic** and optional **Access token**. The server defaults to `https://ntfy.sh`. |
-| **Gotify** | **Server URL** and **Application token**. |
-| **Custom webhook (JSON)** | **Endpoint URL** and optional **Authorization header**. |
-
-A self-hosted service needs a URL the app's container can reach. Enter the final URL: the app does not follow redirects.
+ntfy defaults to `https://ntfy.sh`. A self-hosted service needs a URL the app's container can reach. Enter the final URL: the app does not follow redirects.
 
 **Send test** in the editor tries the values you typed without saving them. **Test** in the list tries the saved destination, even a disabled one. Saved secrets show as `********`; type them again to use **Send test**.
 
-The dot next to a destination shows whether its last message got through, and a failure shows its error. A destination with **Enabled** off gets no alerts. If you change a destination's server URL, type its token again: a saved token is only sent to the server it was entered for.
+The dot next to a destination shows whether its last message got through, and a failure shows its error. If you change a destination's server URL, type its token again: a saved token is only sent to the server it was entered for.
 
 ![Add destination](../images/docs/notifications-editor-light.webp#gh-light-mode-only)
 ![Add destination](../images/docs/notifications-editor-dark.webp#gh-dark-mode-only)
@@ -38,27 +27,25 @@ Each alert goes to its email recipients and to every enabled destination that ha
 | **DNS record changes** | A changed SPF, DKIM, DMARC, TLSA, MTA-STS or TLS-RPT record, DNSSEC that stopped validating, or a TLSA record that no longer matches the certificate. | **Admin Email** |
 | **DMARC processing errors** | DMARC or TLS report emails the IMAP import could not read. | **Report Import Error Email**, else **Admin Email** |
 
-Unticking all topics is the same as ticking all. To stop a destination, turn off **Enabled**.
+Unticking all topics is the same as ticking all; to stop a destination, turn off **Enabled**.
 
 Protection rule messages follow each rule's **Email me when it bans** box (**Email me on every alert** for **Possible stolen password**), which covers destinations as well; see [Protection rules](HelpDocs/Security.md#protection-rules). Adding a destination does not turn on any of these features.
 
 ## Email addresses
 
-**Blacklist Alert Email** and **Report Import Error Email** replace **Admin Email** for their topic when they are set. Each field takes several addresses separated by commas; they all get one message and see each other in `To`. Settings refuses an entry that is not an email address, and an invalid address from the environment is skipped and logged.
-
-**Enable Weekly Summary** and **DNS Change Alerts Enabled** turn those messages on or off. Both are on by default; see [Settings](HelpDocs/Settings.md#notifications) for their environment variables.
+Each address field takes several addresses separated by commas; they all get one message and see each other in `To`. Settings refuses an entry that is not an email address, and an invalid address from the environment is skipped and logged.
 
 ## SMTP
 
-Email needs **SMTP Enabled** with a host, user and password, or with **SMTP Relay Mode**, a host and **SMTP From** ([all SMTP fields](HelpDocs/Settings.md#smtp)). Without it, destinations still get every alert.
+Email needs **SMTP Enabled** with a host, user and password, or with **SMTP Relay Mode**, a host and **SMTP From** ([all SMTP fields](HelpDocs/Settings.md#smtp)); enabled destinations receive their subscribed alerts without SMTP, but the weekly summary and mailbox-owner notices are email-only.
 
-**SMTP Verify SSL** set to **Automatic** checks the certificate of host names such as `smtp.example.com` and skips `localhost`, IP addresses and container names. **Off** (the default) never checks; **On** always does.
+**SMTP Verify SSL** defaults to **Off**; **Automatic** checks dotted host names but skips `localhost`, IP addresses and single-label container names, while **On** always checks the certificate.
 
-**Test SMTP** sends a real email to **Admin Email** (or **SMTP User** when it is empty) and shows the connection log, even while **SMTP Enabled** is off.
+**Test SMTP** sends a real email to **Admin Email** (or **SMTP User** when it is empty), even while **SMTP Enabled** is off.
 
 ## Every email subject
 
-Parts in braces change with each message, such as `{mailbox}`. A topic in the last column means the message goes to that topic's email recipients and destinations.
+A topic in the last column means the message goes to that topic's email recipients and destinations.
 
 | Subject | When it is sent | Sent to |
 | --- | --- | --- |
@@ -79,7 +66,7 @@ Parts in braces change with each message, such as `{mailbox}`. A topic in the la
 
 Blocklist alerts come from the daily 05:00 check, the check at startup, **Check all now** on **Status** > **Blocklists** and **Run** on **IP Blacklist Check (All Hosts)**; a check of one host sends nothing. Ignored lists never count, and UCEPROTECT Level 2 and 3 do not count on their own. The previous count is kept in memory, so a restart resets it.
 
-The weekly summary goes out at 09:00 in the container's time zone (`TZ`). It covers the last seven days of mail, the current system figures, blocklists, DNS problems and the five mailboxes with the most failures. **Run** on **Weekly Summary Report** under **Status** > **Jobs** sends it at once, unless **Enable Weekly Summary** is off.
+The weekly summary uses the container's time zone (`TZ`) for its Monday 09:00 schedule. It covers the last seven days of mail, the current system figures, blocklists, DNS problems and the five mailboxes with the most failures. **Run** on **Weekly Summary Report** under **Status** > **Jobs** sends it at once, unless **Enable Weekly Summary** is off. **Enable Weekly Summary** and **DNS Change Alerts Enabled** are both on by default.
 
 What the owner of a blocked mailbox is told is in [Outgoing spam](HelpDocs/Abuse_Protection.md#what-happens-when-a-mailbox-is-stopped). Turning sending back on sends no email.
 
@@ -101,7 +88,6 @@ Destinations get plain text, cut to about 1,900 characters; email has the full t
 ## When nothing arrives
 
 - **A destination gets nothing.** Check **Enabled**, its topics and its error, then click **Test**. A test skips the topic check.
-- **No email arrives.** Check the SMTP settings and the addresses, then click **Test SMTP**.
 - **There is no Notifications tab.** It appears only while `SETTINGS_EDIT_VIA_UI_ENABLED` is on, and it stays read-only until you click **Migrate Settings from ENV**; see [Settings](HelpDocs/Settings.md#enable-editing-and-migrate-from-env). Saved destinations keep working either way.
 
 The old single webhook (`WEBHOOK_*` variables) becomes a destination once during the upgrade, if no destination exists yet. After that the app ignores those variables.

@@ -7,22 +7,19 @@
 
 ## Monitored addresses
 
-**Check all now** checks every address again; the app waits 10 seconds between addresses. **Check now** checks one address. Each address shows its source, its result and when it was last checked:
+**Check all now** checks every address again, waiting 10 seconds between addresses.
 
 | Result | Meaning |
 | --- | --- |
-| **Not checked yet** | No saved check. |
 | **Listed on** | At least one list you count reports the address. |
 | **Clean on** | No list you count reports it. Single lists can still have failed. |
 | **Check error** | No listing, but a Spamhaus query failed or more than half of the queries failed. |
 
-Listings appear under the address with the list's answer. **Look up** opens the list's lookup page (for lists that have an HTTPS one), where you can see the reason and request removal. The app cannot remove a listing.
-
-**All N lists** (or **N other lists**) opens every other result. Hover a result for the DNS answer or the error.
+Listings appear under the address with the list's answer. **Look up** opens the list's lookup page (for lists that have an HTTPS one), where you can see the reason and request removal. The app cannot remove a listing. Hover a result for the DNS answer or the error.
 
 ## Ignore a list
 
-**Ignore list**, **Ignore** and **Ignore this list** (in **Needs attention**) all ignore a list for every address: the app still checks and shows it, but no longer counts it or alerts on it. **Ignored lists** shows them with **Stop ignoring**. The saved results stay, so a list counts again at once when you stop ignoring it.
+Ignoring a list applies to every address: the app still checks and shows it, but no longer counts it or alerts on it. The saved results stay, so a list counts again at once when you stop ignoring it.
 
 ## Settings that change this page
 

@@ -9,7 +9,7 @@ A self-hosted dashboard for mailcow mail servers. It collects mailcow's logs and
 
 - Follow every message from arrival to delivery, with its spam score and full log, and export the list to CSV.
 - See the mail queue and the quarantine, and act on them. Rules can release or delete quarantined mail for you.
-- See every failed login, ban and unban addresses, and let protection rules ban trap accounts, repeat offenders, attacking networks and countries.
+- See failed logins, ban and unban addresses, and use protection rules to block attackers based on trap-account hits, repeat bans, network or country.
 - Turn off sending for a mailbox that sends more mail than you allow.
 - Read DMARC and TLS reports, and find out what to fix before you move to a stricter DMARC policy.
 - Check SPF, DKIM, DMARC, MTA-STS, DNSSEC and DANE for every domain, and get an alert when a record changes.

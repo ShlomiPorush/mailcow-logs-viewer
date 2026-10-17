@@ -97,8 +97,6 @@ server {
 2. Run `nginx -t`, then reload nginx.
 3. Set `FORWARDED_ALLOW_IPS` to the gateway address of the app's Docker network. nginx connects to `127.0.0.1:8080`, but Docker forwards the published port, so the app sees the connection come from that gateway. See [Trusted proxy addresses](#trusted-proxy-addresses).
 
-The WebSocket block follows [nginx's WebSocket proxying guide](https://nginx.org/en/docs/http/websocket.html).
-
 ## mailcow's nginx
 
 You can also use the nginx and certificate that mailcow already runs.

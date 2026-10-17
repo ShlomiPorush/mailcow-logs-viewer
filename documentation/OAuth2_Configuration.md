@@ -15,9 +15,9 @@ AUTH_USERNAME=admin
 AUTH_PASSWORD=replace-with-a-long-random-password
 ```
 
-To set it up in the app instead, open **Settings** > **Authentication**, fill in **Auth Username** and **Auth Password**, turn on **Basic Auth Enabled** and save. The **Verify Credentials** window asks you to type the username and password again, so you cannot lock yourself out with a typo. The app does not let you clear the password while Basic authentication is on.
+To set it up in the app instead, fill in **Auth Username** and **Auth Password** in **Settings** > **Authentication**, turn on **Basic Auth Enabled** and save. The app asks you to type the username and password again, so you cannot lock yourself out with a typo, and it does not let you clear the password while Basic authentication is on.
 
-On the login page, enter **Username** and **Password** and click **Sign In**. Scripts and API clients can send an `Authorization: Basic` header with every request instead.
+Scripts and API clients can send an `Authorization: Basic` header with every request instead of signing in.
 
 ![Login page](../images/docs/authentication-login-light.webp#gh-light-mode-only)
 ![Login page](../images/docs/authentication-login-dark.webp#gh-dark-mode-only)
@@ -45,8 +45,6 @@ SESSION_SECRET_KEY=replace-with-the-generated-secret
 SESSION_EXPIRY_HOURS=24
 ```
 
-In **Settings** > **Authentication** the same values are in the groups **OAuth2 / OIDC**, **OAuth2 - Discovery (automatic)**, **OAuth2 - Endpoints (only without discovery)**, **OAuth2 - Credentials** and **Sessions**. Their labels start with **Oauth2**, for example **Oauth2 Provider Name**.
-
 The app uses PKCE (`S256`) on every login and sends the client secret when it exchanges the code. After sign-in it reads the user's details from the provider's UserInfo endpoint, so the access token must be allowed to call it.
 
 ### Discovery or manual endpoints
@@ -70,8 +68,6 @@ OAUTH2_USERINFO_URL=https://identity.example.com/oauth/userinfo
 If discovery fails and all three endpoints are set, the app uses them.
 
 ## Provider recipes
-
-Each recipe gives the provider lines for step 4. Use them together with the client, callback and session lines above.
 
 ### Authentik
 
@@ -172,4 +168,3 @@ If you lock yourself out:
 | "Invalid authentication state" | Start the login again in the same browser and finish it within 10 minutes. |
 | "Login capacity reached" | Sign out unused sessions or wait for them to expire, or raise **Session Max Entries**. |
 | Everyone gets "Too many login attempts" at once | The app sees the proxy's address instead of the visitor's. Check `FORWARDED_ALLOW_IPS` in [Reverse proxy](Reverse_Proxy.md). |
-| Everyone is signed out after a restart | Expected: sessions are kept in memory. |

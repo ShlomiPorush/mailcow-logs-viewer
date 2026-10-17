@@ -6,23 +6,25 @@ Set these variables in the `.env` file next to `docker-compose.yml`; with the su
 
 A variable that is set, even to an empty value (`SMTP_HOST=`), wins over the value saved on the Settings page and locks its field there. Saved values are used only while `SETTINGS_EDIT_VIA_UI_ENABLED=true`. To move variables into the Settings page, see [Settings](HelpDocs/Settings.md#enable-editing-and-migrate-from-env).
 
+The required settings, `SETTINGS_EDIT_VIA_UI_ENABLED`, `APP_PORT` and every variable from [Environment-only and legacy settings](#environment-only-and-legacy-settings) down can be set only here. Notification destinations, ignored containers and blocklists, protection rules, quarantine rules and the outgoing spam whitelist have no variables; you manage them on their pages.
+
 Switches take `true` or `false`. **Required** means the app does not start without it, **Unset** means no value, and **Empty** means an empty string.
 
 ## Required settings
 
-These stay in `.env` even when you manage everything else on the Settings page: the app reads them before it can reach the database.
+The app reads these before it can reach the database, so they stay in `.env`.
 
 | Variable | Default | Effect |
 | --- | --- | --- |
-| `MAILCOW_URL` | Required | mailcow address, such as `https://mail.example.com`. A trailing slash is removed. |
-| `MAILCOW_API_KEY` | Required | Read-only mailcow API key. It must be active, and its allowed IPs must include the address this app connects from. |
-| `POSTGRES_HOST` | `db` | PostgreSQL host. `db` is the database container in the supplied Compose file. |
-| `POSTGRES_PORT` | `5432` | PostgreSQL port. |
-| `POSTGRES_USER` | Required | PostgreSQL user. `env.example` uses `mailcowlogs`. |
-| `POSTGRES_PASSWORD` | Required | PostgreSQL password. Replace the `changeme` from `env.example` with a long random value; hexadecimal avoids characters that break the database URL. |
-| `POSTGRES_DB` | Required | PostgreSQL database name. `env.example` uses `mailcowlogs`. |
+| `MAILCOW_URL` | Required | mailcow address, such as `https://mail.example.com`. |
+| `MAILCOW_API_KEY` | Required | Read-only mailcow API key. It must be active, and its allowed IPs (mailcow **System** > **Configuration** > **Access** > **Administrators** > **API**) must hold the address mailcow sees for this app, which can change when the app moves to another Docker network. See [Getting started](GETTING_STARTED.md). |
+| `POSTGRES_HOST` | `db` | `db` is the database container of the supplied Compose file. |
+| `POSTGRES_PORT` | `5432` | |
+| `POSTGRES_USER` | Required | `env.example` uses `mailcowlogs`. |
+| `POSTGRES_PASSWORD` | Required | Replace the `changeme` from `env.example` with a long random value; hexadecimal avoids characters that break the database URL. |
+| `POSTGRES_DB` | Required | `env.example` uses `mailcowlogs`. |
 
-The `db` service in `docker-compose.yml` falls back to `mailcowlogs` and `changeme`, but the app reads only `.env` and does not start without them.
+The `db` service in `docker-compose.yml` falls back to `mailcowlogs` and `changeme`, but the app does not: it does not start without these values in `.env`.
 
 ## Settings UI configuration
 
@@ -34,15 +36,11 @@ The `db` service in `docker-compose.yml` falls back to `mailcowlogs` and `change
 
 | Variable | Default | Effect |
 | --- | --- | --- |
-| `MAILCOW_API_KEY_RW` | Unset | Separate read-write mailcow API key, needed for every action that changes mailcow. Without it the app only monitors. |
+| `MAILCOW_API_KEY_RW` | Unset | Separate read-write mailcow API key, needed for every action that changes mailcow. Without it the app only monitors. It has its own allowed IPs, with the same rule as `MAILCOW_API_KEY`; check it with **Validate** under **Settings** > **Mailcow**. |
 | `RSPAMD_PASSWORD` | Unset | Rspamd UI password, needed to view Rspamd maps. Editing them also needs the read-write key. |
 | `RSPAMD_URL` | Empty | Empty reaches Rspamd through the mailcow URL plus `/rspamd`. Set a direct address, such as `http://rspamd-mailcow:11334`, only when that path fails. |
 | `MAILCOW_API_TIMEOUT` | `30` | Seconds before a mailcow API request gives up. |
 | `MAILCOW_API_VERIFY_SSL` | `true` | Check mailcow's certificate. Turn off only for a test server with a self-signed certificate. |
-
-### Allowed IPs of the API keys
-
-Each key has its own list of allowed IPs in mailcow, under **System** > **Configuration** > **Access** > **Administrators** > **API**. It must hold the address mailcow sees, which can change when the app moves to another Docker network. See [Getting started](GETTING_STARTED.md); check the write key with **Validate** under **Settings** > **Mailcow**.
 
 ## Fetch configuration
 
@@ -71,7 +69,7 @@ Each key has its own list of allowed IPs in mailcow, under **System** > **Config
 | `APP_TITLE` | `mailcow Logs Viewer` | Name in the sidebar and the browser tab. |
 | `APP_LOGO_URL` | Empty | Logo image address. Empty shows the project icon. |
 | `LOG_LEVEL` | `WARNING` | `DEBUG`, `INFO`, `WARNING`, `ERROR` or `CRITICAL`. Anything else means `WARNING`. |
-| `DEBUG` | `false` | Debug mode. Keep off in production. |
+| `DEBUG` | `false` | Logs every SQL statement, puts exception text in API error responses and turns off database connection pooling. Keep off in production. |
 | `MAX_SEARCH_RESULTS` | `1000` | Not used by this version. |
 | `CSV_EXPORT_LIMIT` | `10000` | Most rows in one CSV export. |
 | `SCHEDULER_WORKERS` | `4` | Threads for background jobs such as the IMAP import, 1 to 64. |
@@ -80,7 +78,7 @@ Each key has its own list of allowed IPs in mailcow, under **System** > **Config
 
 | Variable | Default | Effect |
 | --- | --- | --- |
-| `DISABLED_FEATURES` | Empty | Comma-separated features to turn off, for example `queue,quarantine`. Their pages disappear and their jobs stop. |
+| `DISABLED_FEATURES` | Empty | Comma-separated features to turn off, for example `queue,quarantine`. Their pages disappear and jobs used only by those features stop; shared jobs continue while another enabled page needs them. API routes remain available. |
 
 <!-- VERIFY: owner's decision pending (finding 57): at startup DISABLED_FEATURES deletes only rebuildable data, while the Settings switch deletes all of it. Update the next paragraph once decided. -->
 The names are `netfilter` (Security), `queue`, `quarantine`, `spam-filter`, `domains`, `dmarc`, `mailbox-stats`, `rate-limits`, `logs`, `blacklist` (IP Blacklist Monitor) and `devices`. At startup the app deletes only part of the data of features that are off: the stored devices, the mailbox and alias details, the Rate Limits counter resets and the Logs page entries. Turning a feature off on the Settings page deletes all of its data; see [Settings](HelpDocs/Settings.md#features).
@@ -110,8 +108,8 @@ The names are `netfilter` (Security), `queue`, `quarantine`, `spam-filter`, `dom
 | Variable | Default | Effect |
 | --- | --- | --- |
 | `BASIC_AUTH_ENABLED` | `false` | Sign-in with username and password. Needs a password. |
-| `AUTH_USERNAME` | `admin` | Basic authentication username. |
-| `AUTH_PASSWORD` | Empty | Basic authentication password. The Settings page will not clear it while Basic authentication is on. |
+| `AUTH_USERNAME` | `admin` | |
+| `AUTH_PASSWORD` | Empty | The Settings page will not clear it while Basic authentication is on. |
 | `AUTH_MAX_FAILURE_CLIENTS` | `10000` | How many client addresses the failed-login counter tracks, at least 1. When full, the oldest make room. |
 | `OAUTH2_ENABLED` | `false` | Sign-in through an OAuth2/OIDC provider. |
 | `OAUTH2_PROVIDER_NAME` | `OAuth2 Provider` | Text on the login button. |
@@ -120,12 +118,12 @@ The names are `netfilter` (Security), `queue`, `quarantine`, `spam-filter`, `dom
 | `OAUTH2_AUTHORIZATION_URL` | Unset | Authorization endpoint, only without discovery. |
 | `OAUTH2_TOKEN_URL` | Unset | Token endpoint, only without discovery. |
 | `OAUTH2_USERINFO_URL` | Unset | UserInfo endpoint, only without discovery. |
-| `OAUTH2_CLIENT_ID` | Unset | Client ID from the provider. |
-| `OAUTH2_CLIENT_SECRET` | Unset | Client secret from the provider. |
+| `OAUTH2_CLIENT_ID` | Unset | |
+| `OAUTH2_CLIENT_SECRET` | Unset | |
 | `OAUTH2_REDIRECT_URI` | Unset | Callback address, exactly as registered with the provider, such as `https://logs.example.com/api/auth/callback`. |
 | `OAUTH2_SCOPES` | `openid profile email` | Scopes, separated by spaces. |
-| `SESSION_SECRET_KEY` | Empty | Signs the session cookie. Set a long random value, for example from `openssl rand -hex 32`. Sessions live in memory, so a restart signs everyone out either way. |
-| `SESSION_EXPIRY_HOURS` | `24` | Hours before a session ends. |
+| `SESSION_SECRET_KEY` | Empty | Signs the session cookie. Empty uses a temporary key for each run. Set a long random value, for example from `openssl rand -hex 32`. Sessions live in memory, so a restart signs everyone out either way. |
+| `SESSION_EXPIRY_HOURS` | `24` | |
 | `SESSION_MAX_ENTRIES` | `50` | Most signed-in sessions at once, at least 1. When full, new sign-ins wait; existing sessions stay. |
 
 See [Sign-in configuration](OAuth2_Configuration.md) for provider recipes.
@@ -135,15 +133,15 @@ See [Sign-in configuration](OAuth2_Configuration.md) for provider recipes.
 | Variable | Default | Effect |
 | --- | --- | --- |
 | `SMTP_ENABLED` | `false` | Turns on all email from the app. |
-| `SMTP_HOST` | Unset | SMTP server host name. |
-| `SMTP_PORT` | `587` | SMTP port. Port 465 always uses implicit TLS. |
+| `SMTP_HOST` | Unset | |
+| `SMTP_PORT` | `587` | Port 465 always uses implicit TLS. |
 | `SMTP_USE_TLS` | `false` | STARTTLS. Set `true` for port 587. |
 | `SMTP_USE_SSL` | `false` | Implicit TLS. Wins over STARTTLS. |
 | `SMTP_VERIFY_SSL` | `false` | Certificate check: `false` (off), `auto` (checks host names such as `smtp.example.com`, skips `localhost`, IP addresses and container names) or `true` (always). Use `auto` unless the certificate is self-signed. |
-| `SMTP_USER` | Unset | SMTP username. Also the From address when `SMTP_FROM` is empty. |
-| `SMTP_PASSWORD` | Unset | SMTP password. |
+| `SMTP_USER` | Unset | |
+| `SMTP_PASSWORD` | Unset | |
 | `SMTP_RELAY_MODE` | `false` | Send without logging in, through a relay that trusts this app. Needs `SMTP_HOST` and `SMTP_FROM`. |
-| `SMTP_FROM` | Unset | From address, such as `alerts@example.com`. |
+| `SMTP_FROM` | Unset | From address, such as `alerts@example.com`. Empty uses `SMTP_USER`. |
 
 ## Admin and notification configuration
 
@@ -198,13 +196,13 @@ Use a mailbox that only receives reports: the import reads its unread emails and
 | Variable | Default | Effect |
 | --- | --- | --- |
 | `DMARC_IMAP_ENABLED` | `false` | Import DMARC and TLS report emails over IMAP. |
-| `DMARC_IMAP_HOST` | Unset | IMAP server host name. |
-| `DMARC_IMAP_PORT` | `993` | IMAP port. |
+| `DMARC_IMAP_HOST` | Unset | |
+| `DMARC_IMAP_PORT` | `993` | |
 | `DMARC_IMAP_USE_SSL` | `true` | Implicit TLS. With `false` the connection is not encrypted at all (no STARTTLS). |
 | `DMARC_IMAP_VERIFY_SSL` | `false` | Certificate check, same values as `SMTP_VERIFY_SSL`. |
-| `DMARC_IMAP_USER` | Unset | IMAP account, such as `reports@example.com`. |
-| `DMARC_IMAP_PASSWORD` | Unset | IMAP password. |
-| `DMARC_IMAP_FOLDER` | `INBOX` | Folder to read. |
+| `DMARC_IMAP_USER` | Unset | Such as `reports@example.com`. |
+| `DMARC_IMAP_PASSWORD` | Unset | |
+| `DMARC_IMAP_FOLDER` | `INBOX` | |
 | `DMARC_IMAP_DELETE_AFTER` | `true` | Delete each report email after it is imported. Emails that fail stay, marked as read. |
 | `DMARC_IMAP_INTERVAL` | `3600` | Seconds between imports. |
 | `DMARC_IMAP_RUN_ON_STARTUP` | `true` | Import once when the app starts. |
@@ -215,14 +213,14 @@ Use a mailbox that only receives reports: the import reads its unread emails and
 
 | Variable | Default | Effect |
 | --- | --- | --- |
-| `MAXMIND_ACCOUNT_ID` | Unset | MaxMind account ID for downloading the GeoLite2 databases. |
-| `MAXMIND_LICENSE_KEY` | Unset | MaxMind license key. |
+| `MAXMIND_ACCOUNT_ID` | Unset | Needed, with the license key, to download the GeoLite2 databases. |
+| `MAXMIND_LICENSE_KEY` | Unset | |
 
 ## Raw logs configuration
 
 | Variable | Default | Effect |
 | --- | --- | --- |
-| `RAW_LOGS_ENABLED` | `true` | Collect logs for the Logs page. Off: nothing new is collected for it, and the page says collection is off instead of showing logs. The services other pages read are collected either way. |
+| `RAW_LOGS_ENABLED` | `true` | Collect logs for the Logs page. Off: the page says collection is off; services needed by other enabled pages are still collected. |
 | `RAW_LOGS_FETCH_INTERVAL` | `30` | Seconds between reads. |
 | `RAW_LOGS_FETCH_COUNT` | `1000` | Entries per service per read. |
 | `RAW_LOGS_RETENTION_DAYS` | `2` | Days to keep raw logs. Also limits the history on Rate Limits. |
@@ -240,7 +238,7 @@ Some services are collected whatever this list says, because other pages read th
 
 | Variable | Default | Effect |
 | --- | --- | --- |
-| `SUPPRESSION_ENABLED` | `false` | Main switch. Nothing below happens while it is off. |
+| `SUPPRESSION_ENABLED` | `false` | Enables the suppression jobs: bounce detection, deferred queue cleanup, Rspamd sync and expiry. Manual API actions still work while it is off. |
 | `SUPPRESSION_AUTO_DETECT` | `true` | Find bounces in the Postfix logs and suppress their recipients. |
 | `SUPPRESSION_RSPAMD_SYNC` | `true` | Copy active suppressions to Rspamd's `global_rcpt_blacklist.map`, so mail to them is rejected. Needs `RSPAMD_PASSWORD` and the read-write key. |
 | `SUPPRESSION_HARD_BOUNCE_ACTION` | `suppress` | For permanent failures (5.x.x): `suppress` or `ignore`. |
@@ -261,8 +259,6 @@ Some services are collected whatever this list says, because other pages read th
 | `QUARANTINE_RULES_LOG_RETENTION_DAYS` | `30` | Days to keep the history of what the rules did. |
 
 ## Environment-only and legacy settings
-
-These cannot be set on the Settings page.
 
 | Variable | Default | Effect |
 | --- | --- | --- |
@@ -305,11 +301,7 @@ These apply only to the `demo` image, which starts `demo.main:app` with made-up 
 
 | Variable | Default | Effect |
 | --- | --- | --- |
-| `DEMO_MODE` | `true` in the demo image | A label only. `APP_MODULE=demo.main:app` is what starts the demo. |
+| `DEMO_MODE` | `true` in the demo image | A label only. `APP_MODULE=demo.main:app` starts the demo. |
 | `DEMO_NOTICE` | Empty | Replaces the text of the demo banner. |
 | `DEMO_RESET_TIME` | `00:00` | Daily restart time as `HH:MM`, in the container's timezone. An invalid value means midnight. |
 | `DEMO_RESET_AFTER_SECONDS` | Unset | For testing: restart after this many seconds instead of at the daily time. |
-
-## Settings that cannot be changed via UI
-
-The required settings, `SETTINGS_EDIT_VIA_UI_ENABLED`, `APP_PORT` and everything from [Environment-only and legacy settings](#environment-only-and-legacy-settings) on are set only here. Notification destinations, ignored containers and blocklists, protection rules, quarantine rules and the outgoing spam whitelist have no variables; you manage them on their pages.

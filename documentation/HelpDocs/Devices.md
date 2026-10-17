@@ -1,37 +1,23 @@
 # Devices
 
-**Devices** lists the phones, tablets and Outlook clients that sync with your mailcow server over ActiveSync. The app finds them in the SOGo log, which it reads through the mailcow API, and updates the list every minute.
+**Devices** lists the phones, tablets and Outlook clients that sync with your mailcow server over ActiveSync. The app finds them in the SOGo log, which it reads through the mailcow API, and updates the list every minute. **Not checked yet** next to the title appears for about a minute after the app starts.
 
 ![Devices](../../images/docs/devices-list-light.webp#gh-light-mode-only)
 ![Devices](../../images/docs/devices-list-dark.webp#gh-dark-mode-only)
 
 ## Find a device
 
-**Checked** next to the title shows the last update. **Not checked yet** appears for about a minute after the app starts.
-
-Search by user, device ID, device type or IP address. **Type** picks one device type, as the devices report it.
-
-The **Last seen** filter offers:
-
-| Choice | Devices included |
-| --- | --- |
-| **Any time** | All recorded devices. |
-| **Seen in 24 hours** | A request in the last 24 hours. |
-| **New this week** | First recorded in the last 7 days. |
-| **Not seen for 30 days** | No request in the last 30 days. |
-
-Click a column heading to sort; the default is most recent **Last seen** first. The list shows 50 devices per page, with **Prev** and **Next**. **Clear filters** restores the default filters and sort.
+Search matches the user, device ID, device type and IP address. **New this week** in the **Last seen** filter means first recorded by this app in the last 7 days. The list starts with the most recent **Last seen** first.
 
 ## Read the list
 
 | Column | What it means |
 | --- | --- |
-| **User** | The account in the ActiveSync request. |
 | **Device** | The reported type (for Samsung, the model, such as `SM-S918B`) and the mail app, when recognized. Hover for the device ID. **New**: first seen in the last 7 days. |
 | **Last IP** | The address of the latest request, with country and city when GeoIP is set up. Hover the place for the network. |
 | **Last request** | The latest ActiveSync command, such as `Ping`, `Sync`, `FolderSync` or `SendMail`, with a tag when it failed. |
 | **First seen** | The earliest request this app recorded, which can be later than the day the device was set up. |
-| **Last seen** | The latest recorded request, grayed out after 30 days. Hover either time for the exact time. |
+| **Last seen** | The latest recorded request, grayed out after 30 days. |
 
 The app recognizes Outlook, Windows Mail, Apple Mail, Samsung Email and Gmail by the way they name the device. **Gmail** can also be another Android mail app that names devices the same way. Other apps get no label.
 
@@ -48,8 +34,6 @@ Turning off **Devices** under **Settings** > **Features** hides the page, stops 
 ## When something is missing
 
 **No ActiveSync devices yet** means no ActiveSync request has been recorded. Devices that use only IMAP, CalDAV or CardDAV never appear. Clients that send their requests in ActiveSync's encoded form have no user name in the log line and cannot be listed.
-
-**No devices match these filters** offers **Reset filters**.
 
 **The last check failed** next to the title means the update job failed: open [Status](Status.md#jobs) > **Jobs** and look at **ActiveSync Devices**.
 
