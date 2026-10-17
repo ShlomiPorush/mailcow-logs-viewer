@@ -18,6 +18,7 @@ from ..database import get_db, get_db_context
 from ..models import PostfixLog, RspamdLog, NetfilterLog, MessageCorrelation
 from ..config import settings, EDITABLE_SETTING_KEYS, FEATURE_IDS, reload_settings, Settings
 from ..config import _get_field_annotations, get_env_locked_keys
+from ..app_time import app_tz
 from ..scheduler import last_fetch_run_time, get_job_status, update_job_status, JOB_SKIPPED, reschedule_interval_jobs, dovecot_correlation_available, cleanup_disabled_feature_data, _mailbox_sync_needed
 from ..services.settings_store import get_config_overrides_from_db, save_config_overrides_to_db, has_config_overrides_in_db, get_maxmind_validation_status, save_maxmind_validation_status, clear_maxmind_validation_status
 from ..services.settings_store import credential_fingerprint, get_credential_check_status, save_credential_check_status
@@ -343,7 +344,7 @@ def get_settings_info(db: Session = Depends(get_db)):
                 "retention_days": settings.retention_days,
                 "max_correlation_age_minutes": settings.max_correlation_age_minutes,
                 "correlation_check_interval": settings.correlation_check_interval,
-                "timezone": settings.tz,
+                "timezone": app_tz().key,
                 "app_title": settings.app_title,
                 "log_level": settings.log_level,
                 "blacklist_enabled": len(settings.blacklist_emails_list) > 0,

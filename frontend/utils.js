@@ -377,16 +377,10 @@ function renderMarkdown(markdownText) {
 function formatListTime(isoString) {
     if (!isoString) return '-';
     const date = new Date(isoString);
-    const tz = appTimezone && appTimezone !== 'UTC' ? appTimezone : undefined;
-    try {
-        const day = d => new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
-        if (day(date) === day(new Date())) {
-            return new Intl.DateTimeFormat(undefined, { timeZone: tz, hour: '2-digit', minute: '2-digit', hour12: false }).format(date);
-        }
-        return new Intl.DateTimeFormat(undefined, { timeZone: tz, day: 'numeric', month: 'short' }).format(date);
-    } catch (e) {
-        return formatTime(isoString);
+    if (zonedDateString(date) === zonedDateString(new Date())) {
+        return formatInZone(date, { hour: '2-digit', minute: '2-digit', hour12: false });
     }
+    return formatInZone(date, { day: 'numeric', month: 'short' });
 }
 
 // A "More" menu for a table row. It opens as a popover, so the table's own
@@ -447,50 +441,102 @@ function uiAgo(el, iso, prefix = '') {
     }
 }
 
+// ---------------------------------------------------------------------------
+// The app's time zone. Every time on screen, every "day" and every time a user
+// types or picks follows the zone the server works in (/api/info `timezone`:
+// TZ or Settings > Application, UTC when unset), never the browser's zone.
+// ---------------------------------------------------------------------------
+
+function appTz() {
+    return (typeof appTimezone === 'string' && appTimezone) || 'UTC';
+}
+
+const tzPartFormats = new Map();
+function tzPartFormat(tz) {
+    if (!tzPartFormats.has(tz)) {
+        tzPartFormats.set(tz, new Intl.DateTimeFormat('en-US', {
+            timeZone: tz, hourCycle: 'h23', weekday: 'short',
+            year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit'
+        }));
+    }
+    return tzPartFormats.get(tz);
+}
+
+// The wall-clock parts of an instant in the app's zone (month is 1-12)
+function zonedParts(value, tz = appTz()) {
+    const date = value instanceof Date ? value : new Date(value);
+    const parts = {};
+    for (const p of tzPartFormat(tz).formatToParts(date)) parts[p.type] = p.value;
+    return {
+        year: +parts.year, month: +parts.month, day: +parts.day,
+        hour: +parts.hour, minute: +parts.minute, second: +parts.second, weekday: parts.weekday
+    };
+}
+
+// The instant whose wall-clock time in the app's zone is the one given. A time
+// skipped by a daylight saving change moves forward; a repeated one takes the
+// first of the two.
+function zonedTimeToDate(year, month, day, hour = 0, minute = 0, second = 0, tz = appTz()) {
+    const wall = Date.UTC(year, month - 1, day, hour, minute, second);
+    const offsetAt = t => {
+        const p = zonedParts(new Date(t), tz);
+        return Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second) - t;
+    };
+    const wallOf = t => t + offsetAt(t);
+    // The offsets a day before and after cover both sides of any change
+    const early = wall - offsetAt(wall - 86400000);
+    const late = wall - offsetAt(wall + 86400000);
+    const fits = [early, late].filter(t => wallOf(t) === wall);
+    return new Date(fits.length ? Math.min(...fits) : early);
+}
+
+const pad2 = n => String(n).padStart(2, '0');
+
+// YYYY-MM-DD of an instant in the app's zone
+function zonedDateString(value = new Date(), tz = appTz()) {
+    const p = zonedParts(value, tz);
+    return `${p.year}-${pad2(p.month)}-${pad2(p.day)}`;
+}
+
+// YYYY-MM-DD n days after another one (calendar days, no zone involved)
+function addDaysToDateString(dateStr, days) {
+    const [y, m, d] = dateStr.split('-').map(Number);
+    const next = new Date(Date.UTC(y, m - 1, d + days));
+    return `${next.getUTCFullYear()}-${pad2(next.getUTCMonth() + 1)}-${pad2(next.getUTCDate())}`;
+}
+
+// The instant a day (YYYY-MM-DD) starts in the app's zone
+function zonedDayStart(dateStr, tz = appTz()) {
+    const [y, m, d] = dateStr.split('-').map(Number);
+    return zonedTimeToDate(y, m, d, 0, 0, 0, tz);
+}
+
+// The value of an <input type="datetime-local"> for an instant, in the app's zone
+function toZonedInputValue(value, tz = appTz()) {
+    const p = zonedParts(value, tz);
+    return `${p.year}-${pad2(p.month)}-${pad2(p.day)}T${pad2(p.hour)}:${pad2(p.minute)}`;
+}
+
+// The instant an <input type="datetime-local"> value means, read in the app's zone
+function fromZonedInputValue(text, tz = appTz()) {
+    const m = /^(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}):(\d{2})(?::(\d{2}))?)?$/.exec(text || '');
+    if (!m) return null;
+    return zonedTimeToDate(+m[1], +m[2], +m[3], +(m[4] || 0), +(m[5] || 0), +(m[6] || 0), tz);
+}
+
+// Intl formatting in the app's zone
+function formatInZone(value, options, locale = undefined) {
+    const date = value instanceof Date ? value : new Date(value);
+    if (isNaN(date)) return '-';
+    return new Intl.DateTimeFormat(locale, { ...options, timeZone: appTz() }).format(date);
+}
+
 function formatTime(isoString) {
     if (!isoString) return '-';
-    const date = new Date(isoString);
-    // Use timezone from app configuration if set, otherwise use browser's local timezone
-    // The date is already in UTC (with 'Z' suffix), so browser will convert it correctly
-    try {
-        if (appTimezone && appTimezone !== 'UTC') {
-            // Use Intl.DateTimeFormat with app timezone
-            const formatter = new Intl.DateTimeFormat(undefined, {
-                day: '2-digit',
-                month: '2-digit',
-                year: 'numeric',
-                hour: '2-digit',
-                minute: '2-digit',
-                second: '2-digit',
-                hour12: false,
-                timeZone: appTimezone
-            });
-            return formatter.format(date);
-        } else {
-            // Use browser's local timezone and locale
-            return date.toLocaleString(undefined, {
-                day: '2-digit',
-                month: '2-digit',
-                year: 'numeric',
-                hour: '2-digit',
-                minute: '2-digit',
-                second: '2-digit',
-                hour12: false
-            });
-        }
-    } catch (e) {
-        // Fallback to browser's local timezone if timezone is invalid
-        console.warn('Invalid timezone, using browser local timezone:', appTimezone, e);
-        return date.toLocaleString(undefined, {
-            day: '2-digit',
-            month: '2-digit',
-            year: 'numeric',
-            hour: '2-digit',
-            minute: '2-digit',
-            second: '2-digit',
-            hour12: false
-        });
-    }
+    return formatInZone(isoString, {
+        day: '2-digit', month: '2-digit', year: 'numeric',
+        hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false
+    });
 }
 
 function formatDate(isoString) {
@@ -499,11 +545,11 @@ function formatDate(isoString) {
     return formatTime(isoString);
 }
 
+// DD/MM of a day (YYYY-MM-DD) as written, or of an instant in the app's zone
 function formatDateShort(dateStr) {
-    const date = new Date(dateStr);
-    const month = (date.getMonth() + 1).toString().padStart(2, '0');
-    const day = date.getDate().toString().padStart(2, '0');
-    return `${day}/${month}`;
+    const day = /^d{4}-d{2}-d{2}$/.test(dateStr) ? dateStr : zonedDateString(dateStr);
+    const [, month, date] = day.split('-');
+    return `${date}/${month}`;
 }
 
 function formatSeconds(seconds) {
