@@ -198,24 +198,17 @@ function renderRateLimitActivityCard() {
 }
 
 
-// The API buckets in UTC. An hour bucket is a moment, so it is localised like
-// every other timestamp; a day bucket is a date, so it is labelled verbatim.
+// An hour bucket is the UTC instant the hour starts, shown in the app's zone; a
+// day bucket is already a day in the app's zone, so it is labelled as it is.
 // Labels are numeric (14.09) like every other date in the app, never month
 // names, which would follow the browser language instead of the UI language.
 function rateLimitBucketLabel(bucket, granularity) {
     if (!bucket) return '';
 
     if (granularity === 'hour') {
-        const date = new Date(`${bucket}:00Z`);
-        const options = { hour: '2-digit', minute: '2-digit', hour12: false };
-        try {
-            if (typeof appTimezone !== 'undefined' && appTimezone && appTimezone !== 'UTC') {
-                return new Intl.DateTimeFormat(undefined, { ...options, timeZone: appTimezone }).format(date);
-            }
-        } catch (e) {
-            console.warn('Invalid timezone, using browser local timezone:', appTimezone, e);
-        }
-        return date.toLocaleTimeString(undefined, options);
+        // An older server sends the UTC hour without a zone (YYYY-MM-DDTHH:00)
+        const date = new Date(/(Z|[+-]\d{2}:?\d{2})$/.test(bucket) ? bucket : `${bucket}:00Z`);
+        return formatInZone(date, { hour: '2-digit', minute: '2-digit', hour12: false });
     }
 
     const [, month, day] = bucket.split('-');
@@ -224,19 +217,10 @@ function rateLimitBucketLabel(bucket, granularity) {
 
 
 // Short timestamp for narrow screens: day.month and the time, no year, no
-// seconds. Same timezone handling as formatTime in utils.js.
+// seconds, in the app's zone like formatTime in utils.js.
 function rateLimitShortTime(isoString) {
     if (!isoString) return '-';
-    const date = new Date(isoString);
-    const options = { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false };
-    try {
-        if (typeof appTimezone !== 'undefined' && appTimezone && appTimezone !== 'UTC') {
-            return new Intl.DateTimeFormat(undefined, { ...options, timeZone: appTimezone }).format(date);
-        }
-    } catch (e) {
-        console.warn('Invalid timezone, using browser local timezone:', appTimezone, e);
-    }
-    return date.toLocaleString(undefined, options);
+    return formatInZone(isoString, { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false });
 }
 
 

@@ -511,6 +511,20 @@ function zonedDayStart(dateStr, tz = appTz()) {
     return zonedTimeToDate(y, m, d, 0, 0, 0, tz);
 }
 
+// The same wall-clock time n days later (or earlier) in the app's zone, so a
+// daylight saving change in between does not move the hour
+function addDaysInZone(value, days, tz = appTz()) {
+    const p = zonedParts(value, tz);
+    return zonedTimeToDate(p.year, p.month, p.day + days, p.hour, p.minute, p.second, tz);
+}
+
+// A day (YYYY-MM-DD) written as it is, with Intl options; no zone moves it
+function formatDayKey(dateStr, options, locale = 'en-US') {
+    const [y, m, d] = String(dateStr).slice(0, 10).split('-').map(Number);
+    if (!y || !m || !d) return '-';
+    return new Intl.DateTimeFormat(locale, { ...options, timeZone: 'UTC' }).format(new Date(Date.UTC(y, m - 1, d)));
+}
+
 // The value of an <input type="datetime-local"> for an instant, in the app's zone
 function toZonedInputValue(value, tz = appTz()) {
     const p = zonedParts(value, tz);
@@ -547,7 +561,7 @@ function formatDate(isoString) {
 
 // DD/MM of a day (YYYY-MM-DD) as written, or of an instant in the app's zone
 function formatDateShort(dateStr) {
-    const day = /^d{4}-d{2}-d{2}$/.test(dateStr) ? dateStr : zonedDateString(dateStr);
+    const day = /^\d{4}-\d{2}-\d{2}$/.test(dateStr) ? dateStr : zonedDateString(dateStr);
     const [, month, date] = day.split('-');
     return `${date}/${month}`;
 }

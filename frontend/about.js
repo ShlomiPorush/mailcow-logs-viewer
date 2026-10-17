@@ -33,7 +33,7 @@ async function loadAbout() {
         <div class="ui-st-cards ui-about-health">${aboutHealthCards(info, mailcow, rw, health).join('')}</div>
         <div class="ui-dash-grid ui-status-pair">
             ${aboutVersionPanel(appVersion, versionInfo)}
-            ${aboutConfigurationPanel(config)}
+            ${aboutConfigurationPanel(config, app)}
         </div>
     `;
     wireVersionPanel(box, appVersion, versionInfo);
@@ -135,14 +135,25 @@ function aboutVersionPanel(appVersion, versionInfo) {
         </section>`;
 }
 
-function aboutConfigurationPanel(config) {
+function aboutConfigurationPanel(config, app = null) {
     const kv = (label, value, cls = '') => `<div class="ui-kv"><span>${label}</span><b class="${cls}">${value}</b></div>`;
     return `
         <section class="ui-panel">
             <div class="ui-panel-head">Configuration</div>
             ${kv('mailcow URL', escapeHtml(config.mailcow_url || 'N/A'), 'ui-mono ui-kv-small')}
             ${kv('Server IP', config.server_ip ? `<span class="ui-text-ok">✓</span> ${escapeHtml(config.server_ip)}` : '<span class="ui-muted">Not available</span>', 'ui-mono ui-kv-small')}
+            ${kv('Time zone', aboutTimeZone(config, app), 'ui-kv-small')}
         </section>`;
+}
+
+// The zone every time in the app follows, and why it is UTC when none or an unknown one is set
+function aboutTimeZone(config, app) {
+    const zone = (app && app.timezone) || config.timezone || 'UTC';
+    if (app && app.timezone_valid === false) {
+        return `${escapeHtml(zone)} <small class="ui-text-warn">${escapeHtml(`"${app.timezone_configured}" is not a known time zone`)}</small>`;
+    }
+    if (app && !app.timezone_configured) return `${escapeHtml(zone)} <small class="ui-muted">not set</small>`;
+    return escapeHtml(zone);
 }
 
 // The version number opens its changelog; Check Now asks GitHub again

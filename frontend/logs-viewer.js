@@ -739,22 +739,8 @@ function formatLogTimestamp(timeVal) {
         
         if (isNaN(date.getTime())) return String(timeVal);
         
-        // Use the same format as the Messages page (DD.MM.YYYY, HH:mm:ss)
-        const options = {
-            day: '2-digit',
-            month: '2-digit',
-            year: 'numeric',
-            hour: '2-digit',
-            minute: '2-digit',
-            second: '2-digit',
-            hour12: false
-        };
-        
-        if (appTimezone && appTimezone !== 'UTC') {
-            options.timeZone = appTimezone;
-        }
-        
-        return date.toLocaleString(undefined, options);
+        // The same format as the Messages page (formatTime), in the app's zone
+        return formatTime(date);
     } catch {
         return String(timeVal);
     }
@@ -988,20 +974,14 @@ function searchLogs() {
 }
 
 /** Fill date inputs with a preset (minutes ago → now) */
-function setLogTimePreset(minutes) {
-    const now = new Date();
+function setLogTimePreset(minutes, now = new Date()) {
     const from = new Date(now.getTime() - minutes * 60 * 1000);
     
-    // Format for datetime-local input (YYYY-MM-DDTHH:MM)
-    const fmt = (d) => {
-        const pad = (n) => String(n).padStart(2, '0');
-        return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-    };
-    
+    // The inputs hold wall times in the app's zone (YYYY-MM-DDTHH:MM)
     const fromInput = document.getElementById('logs-date-from');
     const toInput = document.getElementById('logs-date-to');
-    if (fromInput) fromInput.value = fmt(from);
-    if (toInput) toInput.value = fmt(now);
+    if (fromInput) fromInput.value = toZonedInputValue(from);
+    if (toInput) toInput.value = toZonedInputValue(now);
     
     // Auto-load
     loadDateRangeLogs();
@@ -1013,8 +993,11 @@ async function loadDateRangeLogs() {
     const toInput = document.getElementById('logs-date-to');
     const loadingEl = document.getElementById('logs-range-loading');
     
-    const startDate = fromInput?.value ? new Date(fromInput.value).toISOString() : null;
-    const endDate = toInput?.value ? new Date(toInput.value).toISOString() : null;
+    // Wall times in the app's zone; "To" covers its whole minute, so the last seconds stay in
+    const from = fromZonedInputValue(fromInput?.value);
+    const to = fromZonedInputValue(toInput?.value);
+    const startDate = from ? from.toISOString() : null;
+    const endDate = to ? new Date(to.getTime() + (toInput.value.length > 16 ? 999 : 59999)).toISOString() : null;
     
     if (!startDate) {
         // No date selected - do nothing

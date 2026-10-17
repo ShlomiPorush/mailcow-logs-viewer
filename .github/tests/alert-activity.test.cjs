@@ -1,3 +1,6 @@
+// The browser is in New York; the chart follows the app's zone, not the browser's
+process.env.TZ = 'America/New_York';
+
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -7,22 +10,25 @@ const { test } = require('node:test');
 const source = fs.readFileSync(path.join(__dirname, '../../frontend/alert-activity.js'), 'utf8');
 const app = fs.readFileSync(path.join(__dirname, '../../frontend/app.js'), 'utf8');
 const AT = new Date('2026-10-13T12:00:00Z');
+// The time helpers the chart formats and groups with, in the app's zone
+const utils = fs.readFileSync(path.join(__dirname, '../../frontend/utils.js'), 'utf8');
+const zoneHelpers = utils.slice(utils.indexOf('function appTz()'), utils.indexOf('function formatSeconds('));
 
 // What GET /api/security-alerts/{id}/activity answers: quarters of an hour
 // from the baseline period before the alert to two hours after it
-function activity(alert, { baselineDays = 7, window = 15, around = {} } = {}) {
+function activity(alert, { baselineDays = 7, window = 15, around = {}, at = AT } = {}) {
     const buckets = [];
-    for (let t = AT.getTime() - baselineDays * 86400000; t < AT.getTime() + 2 * 3600000; t += 15 * 60000) {
+    for (let t = at.getTime() - baselineDays * 86400000; t < at.getTime() + 2 * 3600000; t += 15 * 60000) {
         buckets.push({ start: new Date(t).toISOString(), count: 1 });
     }
     return {
-        alert: { id: 1, severity: 'critical', title: 'title', created_at: AT.toISOString(), acknowledged: false, ...alert },
+        alert: { id: 1, severity: 'critical', title: 'title', created_at: at.toISOString(), acknowledged: false, ...alert },
         bucket_minutes: 15, window_minutes: window, baseline_days: baselineDays, buckets,
         around: { total: 0, ...around },
     };
 }
 
-function harness() {
+function harness(appTimezone = 'UTC') {
     const elements = {};
     const element = id => elements[id] || (elements[id] = { innerHTML: '', textContent: '', classList: { add() {}, remove() {}, contains: () => false } });
     const context = vm.createContext({
@@ -32,7 +38,9 @@ function harness() {
         uiCountLabel: (n, one, many) => `${n} ${n === 1 ? one : many}`,
         formatTime: value => value,
         authenticatedFetch: async () => ({ ok: false, status: 500 }),
+        appTimezone,
     });
+    vm.runInContext(zoneHelpers, context);
     vm.runInContext(source, context);
     const run = expression => vm.runInContext(expression, context);
     return {
@@ -131,4 +139,30 @@ test('Messages can be opened filtered by the authenticated user', () => {
     assert.equal(fields['messages-filter-user'].value, 'user@example.com');
     assert.equal(fields['messages-filter-sender'].value, '');
     assert.equal(fields['messages-filter-search'].value, '');
+});
+
+// ---------- times in the app's zone ----------
+
+test('the alert mark and the time axis are in the app zone', () => {
+    // 12:00 UTC is 14:00 in Berlin (08:00 in New York); the last quarter starts at 13:45 UTC
+    const html = harness('Europe/Berlin').render(activity({ alert_type: 'volume_spike', subject: 'user@example.com', metric_value: 40, baseline_value: 0.5 }));
+    assert.match(html, /<span>Alert (14:00|02:00 PM)<\/span>/);
+    assert.match(html, /<div class="ui-aa-x"><span>[^<]*<\/span><span>Tue, Oct 13,? (15:45|03:45 PM)<\/span><\/div>/);
+});
+
+test('hour columns start on whole hours of the app zone, also in a zone half an hour off', () => {
+    const zoned = (zone, t) => Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone: zone, hour: 'numeric', minute: 'numeric', hourCycle: 'h23' })
+        .formatToParts(t.getTime()).map(p => [p.type, Number(p.value)]));
+    for (const [zone, at] of [['Asia/Kolkata', AT], ['Europe/Berlin', new Date('2026-11-10T12:00:00Z')]]) {
+        const h = harness(zone);
+        for (const days of [7, 14]) {
+            const { cols, minutes } = h.columns(activity({ alert_type: 'volume_spike' }, { baselineDays: days, at }), '7d');
+            for (const c of cols.slice(1)) {
+                const p = zoned(zone, c.start);
+                assert.equal(p.minute, 0, `${zone}, ${days} days: ${c.start.toISOString()}`);
+                // Two-hour columns start on even hours there (in winter Berlin is UTC+1, so not on even UTC hours)
+                assert.equal(p.hour % (minutes / 60), 0, `${zone}, ${days} days: ${c.start.toISOString()}`);
+            }
+        }
+    }
 });

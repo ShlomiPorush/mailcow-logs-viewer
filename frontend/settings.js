@@ -15,7 +15,8 @@ let settingsFirstTab = null;
 // Labels the key cannot spell well. Next to the other addresses, "Error Email" alone would not say whose errors
 const SETTINGS_LABEL_OVERRIDES = {
     dmarc_error_email: 'Report Import Error Email',
-    eas_devices_retention_days: 'Retention Days'
+    eas_devices_retention_days: 'Retention Days',
+    tz: 'Time Zone'
 };
 
 // Settings the API returns masked as ******** (same list as the backend)
@@ -242,6 +243,7 @@ var SETTINGS_FIELD_DESCRIPTIONS = {
     log_level: 'Log level: DEBUG, INFO, WARNING, ERROR, CRITICAL. Default: WARNING.',
     app_title: 'Application title (shown in browser tab).',
     app_logo_url: 'Logo URL (optional; leave empty to use the default project icon).',
+    tz: 'Every time and day in the app follows this zone: the pages, emails, CSV exports and when the daily and weekly jobs run. Pick the time zone of your mailcow server. Default: UTC.',
     debug: 'Enable debug mode (shows detailed errors). Use only for development. Never enable in production. Default: false.',
     max_search_results: 'Maximum records to return in search results. Default: 1000.',
     csv_export_limit: 'CSV export row limit. Default: 10000.',
@@ -359,6 +361,27 @@ const SETTINGS_FIELD_OPTIONS = {
     ]
 };
 
+// The IANA time zones this browser knows, UTC first; none where the browser
+// cannot list them (the field is then a text box)
+function settingsTimeZoneNames() {
+    let names = [];
+    try {
+        names = Intl.supportedValuesOf('timeZone');
+    } catch (e) {
+        return [];
+    }
+    return ['UTC', ...names.filter(name => name !== 'UTC')];
+}
+
+function settingsTimeZoneKnown(name) {
+    try {
+        new Intl.DateTimeFormat('en-US', { timeZone: name });
+        return true;
+    } catch (e) {
+        return false;
+    }
+}
+
 // Edit form tabs (same order as env.example sections) with descriptions from env.example
 // Keys grouped logically within each tab
 var SETTINGS_EDIT_TABS = [
@@ -384,8 +407,9 @@ var SETTINGS_EDIT_TABS = [
         ]
     },
     {
-        id: 'application', label: 'Application', description: 'Web app port, title and logo. Log level: DEBUG, INFO, WARNING, ERROR, CRITICAL. Debug mode shows detailed errors (do not enable in production). Search/CSV limits and scheduler worker count.', groups: [
+        id: 'application', label: 'Application', description: 'Web app port, title, logo and time zone. Log level: DEBUG, INFO, WARNING, ERROR, CRITICAL. Debug mode shows detailed errors (do not enable in production). Search/CSV limits and scheduler worker count.', groups: [
             { label: 'Basic', keys: ['app_port', 'app_title', 'app_logo_url'] },
+            { label: 'Time', keys: ['tz'] },
             { label: 'Logging', keys: ['log_level', 'debug'] },
             { label: 'Limits', keys: ['max_search_results', 'csv_export_limit', 'scheduler_workers'] }
         ]
@@ -695,6 +719,8 @@ function renderSettingsEditField(key, value, sensitiveKeys, description, envLock
     ]);
     const isUserSpecific = USER_SPECIFIC_KEYS.has(key);
     const isChanged = hasDefault && !sensitive && !isUserSpecific && (function() {
+        // An empty time zone is UTC, the default
+        if (key === 'tz') return (String(value || '').trim() || 'UTC') !== (String(defaultValue || '').trim() || 'UTC');
         if (isBool) return value !== defaultValue;
         if (isNum) return Number(value) !== Number(defaultValue);
         return String(value || '') !== String(defaultValue || '');
@@ -754,6 +780,28 @@ function renderSettingsEditField(key, value, sensitiveKeys, description, envLock
             '<input type="checkbox" id="edit-' + keyAttr + '" name="' + keyAttr + '" ' + (displayVal ? 'checked' : '') + ' ' + disabledAttr + ' class="ui-check">' +
             '<span class="ui-set-bool-text"><span class="ui-set-bool-label">' + escapeHtml(label) + labelLockIcon + (envLocked ? '' : (isChanged ? ' <span class="ui-set-pill is-changed" title="Differs from the default">Changed</span>' : '')) + '</span>' + asSpan(descHtml) + asSpan(envLockedHtml) + '</span></label>' +
             clearBtnHtml + '</div>';
+    }
+
+    const zones = key === 'tz' ? settingsTimeZoneNames() : [];
+    if (zones.length) {
+        const current = String(displayVal).trim();
+        // A name the server or this browser does not know: the app runs in UTC until it is fixed
+        const unknown = current !== '' && (!settingsTimeZoneKnown(current)
+            || (typeof appTimezoneStatus !== 'undefined' && appTimezoneStatus.valid === false && appTimezoneStatus.configured === current));
+        const names = current && !zones.includes(current) ? [current, ...zones] : zones;
+        const optionsHtml = '<option value=""' + (current === '' ? ' selected' : '') + '>Not set (UTC)</option>' +
+            names.map(name => '<option value="' + escapeHtml(name) + '"' + (name === current ? ' selected' : '') + '>' +
+                escapeHtml(name + (name === current && unknown ? ' (unknown)' : '')) + '</option>').join('');
+        const note = unknown
+            ? '<small class="ui-text-warn" role="status">' + escapeHtml(`"${current}" is not a known time zone, so the app uses UTC. `) +
+                (envLocked ? 'Fix TZ in the environment.' : 'Pick a time zone from the list.') + '</small>'
+            : (current === '' || current === 'UTC') && !envLocked
+                ? '<small class="ui-muted">Times are shown in UTC. Pick the time zone of your mailcow server so times and days match it.</small>'
+                : '';
+        return '<div class="ui-set-field' + (envLocked ? ' is-locked' : '') + '"><label for="edit-' + keyAttr + '" class="ui-label">' + escapeHtml(label) + labelLockIcon + changedPill + '</label>' +
+            descHtml +
+            '<select id="edit-' + keyAttr + '" name="' + keyAttr + '" ' + disabledAttr + ' class="ui-select' + changed + '">' + optionsHtml + '</select>' +
+            note + clearBtnHtml + '</div>';
     }
 
     // Dropdown for fields with predefined options
@@ -1911,9 +1959,9 @@ async function validateCredential(name, toastNow) {
     return toast;
 }
 
-// Settings the rest of the app reads once, when the page loads (from /api/info);
-// saving a change to one reloads the page so it takes effect everywhere
-const SETTINGS_READ_AT_PAGE_LOAD = ['app_title', 'app_logo_url', 'basic_auth_enabled', 'oauth2_enabled', 'mailcow_url'];
+// Settings the rest of the app reads once, when the page loads (from /api/info; the
+// time zone is one of them); saving a change to one reloads the page so it takes effect everywhere
+const SETTINGS_READ_AT_PAGE_LOAD = ['app_title', 'app_logo_url', 'basic_auth_enabled', 'oauth2_enabled', 'mailcow_url', 'tz'];
 
 // A toast that has to outlive the reload after saving (a credential check)
 const SETTINGS_TOAST_AFTER_RELOAD = 'settingsToastAfterReload';
