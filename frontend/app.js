@@ -3646,12 +3646,13 @@ function toggleMessagesDateRangePicker() {
 }
 
 // Where a Messages time preset starts ('' for all time): today is the day in the
-// app's zone, and "Last 7 Days" starts at the same time of day 7 days back there
+// app's zone, and "Last 7 Days" is the last 7 x 24 hours, the same window as
+// Mailbox Stats and the Dashboard, also across a daylight saving change
 function messagesPresetStart(preset, now = new Date()) {
     if (preset === 'today') return zonedDayStart(zonedDateString(now)).toISOString();
     const days = { '7days': 7, '30days': 30, '90days': 90 }[preset];
     if (!days) return '';
-    return addDaysInZone(now, -days).toISOString();
+    return new Date(new Date(now).getTime() - days * 86400000).toISOString();
 }
 
 function selectMessagesDatePreset(preset, now = new Date()) {

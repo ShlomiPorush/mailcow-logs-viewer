@@ -876,7 +876,8 @@ function uiSortValue(cell) {
         const dotted = /\d\.\d/.test(text);
         const y = String(c).length === 4 ? c : a;
         const mo = dotted ? b : a, da = dotted ? a : b;
-        const time = Date.parse(`${y}-${String(mo).padStart(2, '0')}-${String(da).padStart(2, '0')}T${(text.match(/\d{1,2}:\d{2}(:\d{2})?/) || ['00:00'])[0].padStart(5, '0')}`);
+        // Read as UTC: only the order counts, and the browser's zone would fold the hour it skips
+        const time = Date.parse(`${y}-${String(mo).padStart(2, '0')}-${String(da).padStart(2, '0')}T${(text.match(/\d{1,2}:\d{2}(:\d{2})?/) || ['00:00'])[0].padStart(5, '0')}Z`);
         if (!isNaN(time)) return { n: time, t };
     }
     return { n: null, t };

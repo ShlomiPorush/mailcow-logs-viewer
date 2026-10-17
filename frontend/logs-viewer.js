@@ -171,10 +171,8 @@ async function selectLogService(serviceId) {
     // Reset date range
     logsState.dateRange = null;
     logsState.timeRangeMinutes = '';
-    const fromInput = document.getElementById('logs-date-from');
-    const toInput = document.getElementById('logs-date-to');
-    if (fromInput) fromInput.value = '';
-    if (toInput) toInput.value = '';
+    setLogDateInput(document.getElementById('logs-date-from'), null);
+    setLogDateInput(document.getElementById('logs-date-to'), null);
     
     // Load smart filters
     await loadSmartFilters(serviceId);
@@ -973,18 +971,36 @@ function searchLogs() {
     applyLogFilter();
 }
 
+// A date input holding an exact instant: it shows the wall time in the app's
+// zone, and the instant is sent while the field still shows it. A wall time
+// alone cannot tell the two hours apart when the clocks go back.
+function setLogDateInput(input, date) {
+    if (!input) return;
+    input.value = date ? toZonedInputValue(date) : '';
+    input.dataset.shown = input.value;
+    input.dataset.instant = date ? date.toISOString() : '';
+}
+
+// The instant a date input means: the one a preset put there, else the wall
+// time typed, read in the app's zone ("To" covers its whole minute)
+function readLogDateInput(input, isEnd) {
+    if (!input || !input.value) return null;
+    if (input.dataset.instant && input.value === input.dataset.shown) return input.dataset.instant;
+    const date = fromZonedInputValue(input.value);
+    if (!date) return null;
+    return (isEnd ? new Date(date.getTime() + (input.value.length > 16 ? 999 : 59999)) : date).toISOString();
+}
+
 /** Fill date inputs with a preset (minutes ago → now) */
 function setLogTimePreset(minutes, now = new Date()) {
     const from = new Date(now.getTime() - minutes * 60 * 1000);
     
-    // The inputs hold wall times in the app's zone (YYYY-MM-DDTHH:MM)
-    const fromInput = document.getElementById('logs-date-from');
-    const toInput = document.getElementById('logs-date-to');
-    if (fromInput) fromInput.value = toZonedInputValue(from);
-    if (toInput) toInput.value = toZonedInputValue(now);
+    // The inputs show wall times in the app's zone; the exact instants are sent
+    setLogDateInput(document.getElementById('logs-date-from'), from);
+    setLogDateInput(document.getElementById('logs-date-to'), now);
     
     // Auto-load
-    loadDateRangeLogs();
+    return loadDateRangeLogs();
 }
 
 /** Load ALL logs within the selected date range */
@@ -993,11 +1009,9 @@ async function loadDateRangeLogs() {
     const toInput = document.getElementById('logs-date-to');
     const loadingEl = document.getElementById('logs-range-loading');
     
-    // Wall times in the app's zone; "To" covers its whole minute, so the last seconds stay in
-    const from = fromZonedInputValue(fromInput?.value);
-    const to = fromZonedInputValue(toInput?.value);
-    const startDate = from ? from.toISOString() : null;
-    const endDate = to ? new Date(to.getTime() + (toInput.value.length > 16 ? 999 : 59999)).toISOString() : null;
+    // Wall times in the app's zone, or the instants of a preset; "To" covers its whole minute
+    const startDate = readLogDateInput(fromInput, false);
+    const endDate = readLogDateInput(toInput, true);
     
     if (!startDate) {
         // No date selected - do nothing
@@ -1082,10 +1096,8 @@ async function resetToLiveLogs() {
     logsState.timeRangeMinutes = '';
     
     // Clear date inputs
-    const fromInput = document.getElementById('logs-date-from');
-    const toInput = document.getElementById('logs-date-to');
-    if (fromInput) fromInput.value = '';
-    if (toInput) toInput.value = '';
+    setLogDateInput(document.getElementById('logs-date-from'), null);
+    setLogDateInput(document.getElementById('logs-date-to'), null);
     
     // Mark Live as active
     setLiveButtonActive(true);
@@ -1217,10 +1229,8 @@ function clearLogDisplay() {
     }
     
     // Clear date range
-    const fromInput = document.getElementById('logs-date-from');
-    const toInput = document.getElementById('logs-date-to');
-    if (fromInput) fromInput.value = '';
-    if (toInput) toInput.value = '';
+    setLogDateInput(document.getElementById('logs-date-from'), null);
+    setLogDateInput(document.getElementById('logs-date-to'), null);
     logsState.dateRange = null;
     logsState.timeRangeMinutes = '';
     

@@ -107,6 +107,16 @@ test('the app zone is used when it is UTC, and an unknown zone falls back to UTC
     assert.doesNotThrow(() => c.formatTime('2026-10-25T00:30:00Z'));
 });
 
+test('a table sorts shown times in order, also those in the hour the browser zone skips', () => {
+    const c = load([]);
+    const cell = text => ({ hasAttribute: () => false, cloneNode: () => ({ querySelectorAll: () => [], textContent: text }) });
+    // 02:30 does not exist on 2026-03-08 in New York; in Berlin it is just a time before 03:15
+    const early = c.uiSortValue(cell('03/08/2026, 02:30:00')).n;
+    const late = c.uiSortValue(cell('03/08/2026, 03:15:00')).n;
+    assert.ok(early < late, `${early} < ${late}`);
+    assert.equal(c.uiSortValue(cell('25.10.2026 02:30')).n, Date.parse('2026-10-25T02:30:00Z'));
+});
+
 // ---------- finding 1: the suppression expiry editor ----------
 
 function suppressionEditor(expiresAt) {
@@ -169,14 +179,48 @@ test('the Logs range is read in the app zone, and To covers its whole minute', a
     assert.equal(params.get('end_date'), '2026-10-25T00:45:59.999Z');
 });
 
-test('a Logs preset fills the inputs with wall times in the app zone', () => {
+function logsRange() {
     const c = load(['logs-viewer.js']);
     const element = page(c);
-    c.loadDateRangeLogs = () => {};
+    const urls = [];
+    c.authenticatedFetch = async url => { urls.push(url); return { ok: true, json: async () => ({ data: [], total: 0 }) }; };
+    for (const name of ['renderLogEntries', 'setLiveButtonActive', 'updateLogStatusBar', 'applyLogFilter', 'showToast']) c[name] = () => {};
+    const sent = () => {
+        const params = new URL(urls[urls.length - 1], 'http://viewer.test').searchParams;
+        return [params.get('start_date'), params.get('end_date')];
+    };
+    return { c, element, sent };
+}
+
+test('a Logs preset shows wall times in the app zone and sends the exact hour it means', async () => {
+    const { c, element, sent } = logsRange();
+    // 01:10 UTC on 2026-10-25 is the second 02:10 in Berlin, an hour after the first one
     c.__now = new Date('2026-10-25T01:10:00Z');
-    vm.runInContext('setLogTimePreset(60, __now)', c);
+    await vm.runInContext('setLogTimePreset(60, __now)', c);
     assert.equal(element('logs-date-from').value, '2026-10-25T02:10');
     assert.equal(element('logs-date-to').value, '2026-10-25T02:10');
+    assert.deepEqual(sent(), ['2026-10-25T00:10:00.000Z', '2026-10-25T01:10:00.000Z']);
+    // Load again on the untouched fields keeps the same hour
+    await c.loadDateRangeLogs();
+    assert.deepEqual(sent(), ['2026-10-25T00:10:00.000Z', '2026-10-25T01:10:00.000Z']);
+    // A time typed over the preset is read in the app zone, To with its whole minute
+    element('logs-date-to').value = '2026-10-25T02:40';
+    await c.loadDateRangeLogs();
+    assert.deepEqual(sent(), ['2026-10-25T00:10:00.000Z', '2026-10-25T00:40:59.999Z']);
+});
+
+test('a Logs preset does not outlive the fields it filled', async () => {
+    const { c, element, sent } = logsRange();
+    c.__now = new Date('2026-10-25T01:10:00Z');
+    await vm.runInContext('setLogTimePreset(60, __now)', c);
+    // Back to live clears the fields; the same text typed later is read as typed
+    c.fetchInitialLogs = async () => {};
+    c.connectLogWebSocket = async () => {};
+    await c.resetToLiveLogs();
+    element('logs-date-from').value = '2026-10-25T02:10';
+    element('logs-date-to').value = '2026-10-25T02:10';
+    await c.loadDateRangeLogs();
+    assert.deepEqual(sent(), ['2026-10-25T00:10:00.000Z', '2026-10-25T00:10:59.999Z']);
 });
 
 test('a raw log time is shown in the app zone, also when it is UTC', () => {

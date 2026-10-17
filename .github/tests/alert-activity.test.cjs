@@ -28,7 +28,8 @@ function activity(alert, { baselineDays = 7, window = 15, around = {}, at = AT }
     };
 }
 
-function harness(appTimezone = 'UTC') {
+// browserLocale: the language of the browser, for formats that name no locale
+function harness(appTimezone = 'UTC', { browserLocale } = {}) {
     const elements = {};
     const element = id => elements[id] || (elements[id] = { innerHTML: '', textContent: '', classList: { add() {}, remove() {}, contains: () => false } });
     const context = vm.createContext({
@@ -40,6 +41,11 @@ function harness(appTimezone = 'UTC') {
         authenticatedFetch: async () => ({ ok: false, status: 500 }),
         appTimezone,
     });
+    if (browserLocale) {
+        context.__locale = browserLocale;
+        vm.runInContext(`{ const Format = Intl.DateTimeFormat;
+            Intl.DateTimeFormat = function (locale, options) { return new Format(locale ?? __locale, options); }; }`, context);
+    }
     vm.runInContext(zoneHelpers, context);
     vm.runInContext(source, context);
     const run = expression => vm.runInContext(expression, context);
@@ -143,11 +149,41 @@ test('Messages can be opened filtered by the authenticated user', () => {
 
 // ---------- times in the app's zone ----------
 
-test('the alert mark and the time axis are in the app zone', () => {
+test('the alert mark and the time axis are in the app zone, written like every other label in any browser language', () => {
     // 12:00 UTC is 14:00 in Berlin (08:00 in New York); the last quarter starts at 13:45 UTC
-    const html = harness('Europe/Berlin').render(activity({ alert_type: 'volume_spike', subject: 'user@example.com', metric_value: 40, baseline_value: 0.5 }));
-    assert.match(html, /<span>Alert (14:00|02:00 PM)<\/span>/);
-    assert.match(html, /<div class="ui-aa-x"><span>[^<]*<\/span><span>Tue, Oct 13,? (15:45|03:45 PM)<\/span><\/div>/);
+    for (const browserLocale of [undefined, 'de-DE', 'he-IL']) {
+        const html = harness('Europe/Berlin', { browserLocale }).render(activity({ alert_type: 'volume_spike', subject: 'user@example.com', metric_value: 40, baseline_value: 0.5 }));
+        assert.match(html, /<span>Alert 14:00<\/span>/, browserLocale);
+        assert.match(html, /<div class="ui-aa-x"><span>[^<]*<\/span><span>Tue, Oct 13, 15:45<\/span><\/div>/, browserLocale);
+    }
+});
+
+test('on the night the clocks go back, columns are spans of time that do not overlap, and the mark sits on the alert', () => {
+    // 01:30 UTC on 2026-10-25 is the second 02:30 in Berlin; the alert's quarter holds 50 messages
+    const at = new Date('2026-10-25T01:30:00Z');
+    const data = activity({ alert_type: 'volume_spike', subject: 'user@example.com', metric_value: 50, baseline_value: 0.5 }, { baselineDays: 14, at });
+    data.buckets.find(b => b.start === at.toISOString()).count = 50;
+    const h = harness('Europe/Berlin');
+    const { cols, minutes } = h.columns(data, '7d');
+    assert.equal(minutes, 120);
+    for (const [i, c] of cols.entries()) {
+        assert.ok(c.start < c.end, `${c.start.toISOString()} has a length`);
+        if (cols[i + 1]) assert.equal(c.end.getTime(), cols[i + 1].start.getTime(), `${c.start.toISOString()} ends where the next starts`);
+        // A column counts exactly the quarters inside its span
+        const inside = data.buckets.filter(b => Date.parse(b.start) >= c.start && Date.parse(b.start) < c.end);
+        assert.equal(c.count, inside.reduce((n, b) => n + b.count, 0), c.start.toISOString());
+    }
+    // 02:00 CEST, 02:00 CET and 04:00 CET start columns: the two 02:00 are an hour apart
+    const starts = cols.map(c => c.start.toISOString());
+    for (const s of ['2026-10-24T22:00:00.000Z', '2026-10-25T00:00:00.000Z', '2026-10-25T01:00:00.000Z', '2026-10-25T03:00:00.000Z']) assert.ok(starts.includes(s), s);
+    // The mark sits on the column that counted the alert's 50
+    const html = h.render(data, '7d');
+    const tips = [...html.matchAll(/<span class="ui-aa-col[^"]*" data-tip="([^"]*)"/g)].map(m => m[1]);
+    const left = Number(html.match(/<div class="ui-aa-mark" style="left:([\d.]+)%"/)[1]);
+    const marked = Math.floor(left / 100 * tips.length);
+    // [01:00Z, 03:00Z) is 02:00 to 04:00 CET: seven quarters of 1 and the alert's 50
+    assert.match(tips[marked], /^Sun, Oct 25, 02:00: 57 sent/);
+    assert.match(html, /<span>Alert 02:30<\/span>/);
 });
 
 test('hour columns start on whole hours of the app zone, also in a zone half an hour off', () => {

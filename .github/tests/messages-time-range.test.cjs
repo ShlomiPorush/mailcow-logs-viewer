@@ -120,12 +120,19 @@ test('Today starts at midnight in the app time zone', () => {
     assert.equal(h.run("messagesPresetStart('today', __now)"), '2026-10-24T22:00:00.000Z');
 });
 
-test('Last 7 Days starts at the same time of day in the app zone, across the change to summer time', () => {
+test('Last 7, 30 and 90 Days are that many times 24 hours back, like Mailbox Stats, across a daylight saving change', () => {
     const h = harness({});
-    // 14:00 CEST on 2026-03-29 goes back to 14:00 CET on 2026-03-22
+    // 14:00 CEST on 2026-03-29: 7 x 24 hours back is 13:00 CET on 2026-03-22, the
+    // same window the server counts for Mailbox Stats and the Dashboard
     h.context.__now = new Date('2026-03-29T12:00:00Z');
     h.run("selectMessagesDatePreset('7days', __now)");
-    assert.equal(h.element('messages-start-date').value, '2026-03-22T13:00:00.000Z');
+    assert.equal(h.element('messages-start-date').value, '2026-03-22T12:00:00.000Z');
+    assert.equal(h.element('messages-end-date').value, '2026-03-29T12:00:00.000Z');
+    // Back over the end of summer time, too
+    h.context.__now = new Date('2026-11-01T12:00:00Z');
+    assert.equal(h.run("messagesPresetStart('7days', __now)"), '2026-10-25T12:00:00.000Z');
+    assert.equal(h.run("messagesPresetStart('30days', __now)"), '2026-10-02T12:00:00.000Z');
+    assert.equal(h.run("messagesPresetStart('90days', __now)"), '2026-08-03T12:00:00.000Z');
     h.run("selectMessagesDatePreset('', __now)");
     assert.equal(h.element('messages-start-date').value, '');
     assert.equal(h.element('messages-end-date').value, '');
