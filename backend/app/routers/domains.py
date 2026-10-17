@@ -15,7 +15,8 @@ from datetime import datetime, timezone, timedelta
 from sqlalchemy.orm import Session
 from sqlalchemy import text, func
 from app.database import get_db, get_db_context
-from app.models import DomainDNSCheck, DMARCReport, DMARCRecord
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from app.models import DomainDNSCheck, DMARCReport, DMARCRecord, SystemSetting
 from app.services.alias_domains import get_alias_domain_map, aliases_of_domain
 from app.utils import format_datetime_for_api
 from app.config import settings
@@ -1876,22 +1877,38 @@ async def check_domain_dns(domain: str, spf_source_ips: Optional[List[Dict[str, 
         }
 
 
+# When every domain was last checked together (the 6-hourly job or Check all).
+# It is kept apart from the per-domain rows: checking one domain on its own
+# rewrites that domain's row, which used to erase this time or move it back.
+DNS_FULL_CHECK_KEY = 'dns_last_full_check'
+
+
+def _last_full_dns_check(db: Session) -> Optional[datetime]:
+    """When every domain was last checked together (the 6-hourly job or Check all)."""
+    stored = db.query(SystemSetting.value).filter(SystemSetting.key == DNS_FULL_CHECK_KEY).scalar()
+    if stored:
+        try:
+            return datetime.fromisoformat(stored)
+        except ValueError:
+            logger.warning(f"Ignoring an unreadable {DNS_FULL_CHECK_KEY}: {stored!r}")
+    # Before the time was stored on its own: the newest row a full check wrote
+    last = db.query(DomainDNSCheck.checked_at).filter(
+        DomainDNSCheck.is_full_check == True
+    ).order_by(DomainDNSCheck.checked_at.desc()).first()
+    return last[0] if last else None
+
+
 def _build_domain_list_worker(domains):
     """Build detached domain and DNS results in a worker-owned session."""
     with get_db_context() as db:
-        # Get last DNS check time FIRST
-        last_check = db.query(DomainDNSCheck).filter(
-        DomainDNSCheck.is_full_check == True
-        ).order_by(
-            DomainDNSCheck.checked_at.desc()
-        ).first()
+        last_check = _last_full_dns_check(db)
         
         if not domains:
             return {
                 'domains': [],
                 'total': 0,
                 'active': 0,
-                'last_dns_check': format_datetime_for_api(last_check.checked_at) if (last_check and last_check.checked_at) else None
+                'last_dns_check': format_datetime_for_api(last_check) if last_check else None
             }
         
         alias_domain_map = get_alias_domain_map(db)
@@ -1942,7 +1959,7 @@ def _build_domain_list_worker(domains):
             'domains': result_domains,
             'total': len(result_domains),
             'active': active_count,
-            'last_dns_check': format_datetime_for_api(last_check.checked_at) if (last_check and last_check.checked_at) else None
+            'last_dns_check': format_datetime_for_api(last_check) if last_check else None
         }
 
 
@@ -2159,6 +2176,12 @@ async def save_dns_check_to_db(db: Session, domain_name: str, dns_data: Dict[str
                 is_full_check=is_full_check
             )
             db.add(new_check)
+
+        if is_full_check:
+            stamp = checked_at.replace(tzinfo=None)  # naive UTC, like checked_at
+            db.execute(pg_insert(SystemSetting).values(
+                key=DNS_FULL_CHECK_KEY, value=stamp.isoformat(), updated_at=stamp,
+            ).on_conflict_do_update(index_elements=['key'], set_={'value': stamp.isoformat(), 'updated_at': stamp}))
 
         db.commit()
         logger.info(f"Saved DNS check for {domain_name}")

@@ -941,6 +941,10 @@ def purge_feature_data(body: Dict[str, Any], db: Session = Depends(get_db)):
                 # nosemgrep: python.sqlalchemy.security.audit.avoid-sqlalchemy-text.avoid-sqlalchemy-text
                 db.execute(text(f"TRUNCATE TABLE {table_name} CASCADE"))
             deleted_counts[table_name] = count
+        if feature == 'domains':
+            from .domains import DNS_FULL_CHECK_KEY
+            from ..models import SystemSetting
+            db.query(SystemSetting).filter(SystemSetting.key == DNS_FULL_CHECK_KEY).delete(synchronize_session=False)
         db.commit()
         total = sum(deleted_counts.values())
         logger.info(f"Purged data for feature '{feature}': {deleted_counts} (total {total} rows)")
