@@ -239,15 +239,17 @@ def parse_reset_time(value):
 
 
 def seconds_until_reset(reset_time=DEFAULT_RESET_TIME, now=None):
-    """Seconds until the next reset_time (hour, minute) in the process's
-    local time zone (TZ). Always in the future: at exactly that minute the
-    next one is a day away."""
+    """Seconds until the next reset_time (hour, minute) in the app's time
+    zone (app_time.py), whatever the container clock says. Always in the
+    future: at exactly that minute the next one is a day away."""
+    from app.app_time import app_tz
+    zone = app_tz()
     now = now if now is not None else time.time()
     hour, minute = reset_time
-    today = datetime.datetime.fromtimestamp(now).astimezone().date()
+    today = datetime.datetime.fromtimestamp(now, zone).date()
     for day in (today, today + datetime.timedelta(days=1)):
-        # Built as a local wall-clock time, so a DST change lands on the right instant
-        at = datetime.datetime(day.year, day.month, day.day, hour, minute).astimezone()
+        # Built as a wall-clock time in the zone, so a DST change lands on the right instant
+        at = datetime.datetime(day.year, day.month, day.day, hour, minute, tzinfo=zone)
         if at.timestamp() > now + 1:
             return at.timestamp() - now
     return 86400.0
@@ -272,6 +274,7 @@ def schedule_nightly_reset():
     timer.daemon = True
     timer.name = "demo-nightly-reset"
     timer.start()
-    at = datetime.datetime.fromtimestamp(time.time() + delay).astimezone()
+    from app.app_time import app_tz
+    at = datetime.datetime.fromtimestamp(time.time() + delay, app_tz())
     logger.warning(f"[DEMO] Next reset at {at:%Y-%m-%d %H:%M %Z}")
     return timer

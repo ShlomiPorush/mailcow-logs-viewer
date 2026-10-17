@@ -129,9 +129,13 @@ def test_reports_parse_with_the_application_parsers():
 
 @pytest.fixture
 def jerusalem(monkeypatch):
+    # The app works in Jerusalem time; the container clock is elsewhere and
+    # must not matter
     if not hasattr(time, "tzset"):
         pytest.skip("time.tzset is POSIX only")
-    monkeypatch.setenv("TZ", "Asia/Jerusalem")
+    from app.config import settings
+    monkeypatch.setattr(settings._inner, "tz", "Asia/Jerusalem")
+    monkeypatch.setenv("TZ", "America/New_York")
     time.tzset()
     yield
     monkeypatch.delenv("TZ")
@@ -142,7 +146,7 @@ def jerusalem(monkeypatch):
 EVENING = 1_790_533_800
 
 
-def test_the_reset_defaults_to_midnight_in_the_container_time_zone(jerusalem):
+def test_the_reset_defaults_to_midnight_in_the_app_time_zone(jerusalem):
     assert seed.seconds_until_reset(seed.parse_reset_time(None), EVENING) == pytest.approx(2.5 * 3600)
 
 
