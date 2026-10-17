@@ -36,6 +36,14 @@ theme:
     - content.code.copy
     - toc.follow
 
+plugins:
+  - search
+  # Click a screenshot to see it full size; auto_themed keeps the light and
+  # dark copies of an image in separate galleries
+  - glightbox:
+      auto_themed: true
+      auto_caption: false
+
 extra_css:
   - assets/ui-tokens.css
   - assets/v3.css
@@ -70,7 +78,6 @@ nav:
       - Reverse Proxy: Reverse_Proxy.md
       - Settings: HelpDocs/Settings.md
       - Notifications: Notifications.md
-      - Upgrade from v1: UpdateV2.md
   # In the order of the app's sidebar
   - Pages:
       - Using the App: Using_the_App.md

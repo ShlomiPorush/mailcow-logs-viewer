@@ -23,7 +23,7 @@ Each filter choice shows how many messages match it.
 
 - Each group counts matches with the other groups applied, so you can see how changing one filter affects the result.
 - **Spam** shows messages whose final status is spam and also those Rspamd classed as spam, whatever happened to them afterwards.
-- **Today** starts at midnight. **7 Days**, **30 Days** and **90 Days** count back from now. A preset ends at the moment you pick it. Presets and custom dates use browser time; list timestamps use the [shared time-zone rules](../Using_the_App.md#shared-behavior). After you pick one, the **Time:** button reads **Last 7 Days** and so on.
+- **Today** starts at midnight. **7 Days**, **30 Days** and **90 Days** count back from now. A preset ends at the moment you pick it. Presets and custom dates use browser time; list timestamps use the [time-zone rules](../Using_the_App.md#time-zone). After you pick one, the **Time:** button reads **Last 7 Days** and so on.
 - **Custom range** opens **From** and **To** date fields and **Apply**. The range runs from the start of the From day to the end of the To day in browser time, and the **Time:** button shows the two days. Both dates are required; the end date cannot be before the start date.
 - **Export CSV** at the bottom of the column downloads the filtered list, see [Export CSV](#export-csv).
 
@@ -153,7 +153,7 @@ A text cell that starts with `=`, `+`, `-` or `@` gets a leading apostrophe, so 
 | **Maxmind Account Id**, **Maxmind License Key** | **Settings** > **MaxMind** | Country, city and network of the client IP. |
 | **Security** | **Settings** > **Features** | Turned off, hides the Security tab of the details. |
 
-See [Using the app](../Using_the_App.md#shared-behavior) for how `TZ` affects timestamps.
+See [Using the app](../Using_the_App.md#time-zone) for how `TZ` affects timestamps.
 
 ## When something is missing
 

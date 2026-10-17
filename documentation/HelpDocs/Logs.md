@@ -26,7 +26,7 @@ On a narrow screen the column folds into one row that names the open service and
 
 ## The log view
 
-Entries show their time, program and message. Timestamps follow the [shared time-zone rules](../Using_the_App.md#shared-behavior). Line colors follow keywords:
+Entries show their time, program and message. Timestamps follow the [time-zone rules](../Using_the_App.md#time-zone). Line colors follow keywords:
 
 - Red: the message contains reject, error, blocked, denied, failed or fatal.
 - Yellow: warning, pregreet or timeout.

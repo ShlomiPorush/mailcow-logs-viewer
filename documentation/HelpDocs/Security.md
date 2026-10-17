@@ -2,7 +2,7 @@
 
 The Security page shows who tries to get into your mail server, what stops them, and what waits for your decision. It reads the netfilter log that mailcow's Fail2ban writes, the Fail2ban settings and lists from the mailcow API, and the catches of the app's own protection rules.
 
-The tabs are **Overview**, **Lists**, **Settings** and **Events**. The page refreshes every 30 seconds. For tab addresses and older links, see [Using the app](../Using_the_App.md#page-addresses).
+The tabs are **Overview**, **Lists**, **Settings** and **Events**. The page refreshes every 30 seconds.
 
 ## Overview
 
