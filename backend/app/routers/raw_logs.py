@@ -31,7 +31,8 @@ from ..raw_logs_worker import (
     set_ws_broadcast_fn,
     set_ws_broadcast_all_fn,
 )
-from ..utils import internal_error
+from ..app_time import day_bounds, utc_naive
+from ..utils import internal_error, format_datetime_for_api
 
 logger = logging.getLogger(__name__)
 
@@ -366,6 +367,25 @@ def get_worker_status():
     }
 
 
+def _is_day(value: Optional[str]) -> bool:
+    return bool(value) and len(value) == 10 and value[4] == '-' and value[7] == '-'
+
+
+def _range_bound(value: Optional[str], end: bool) -> Optional[datetime]:
+    """A range bound as stored times are kept (naive UTC). An instant without a
+    zone is UTC; a date is a day in the app's time zone, so its end bound is the
+    start of the next day. None when empty or unreadable."""
+    if not value:
+        return None
+    try:
+        if _is_day(value):
+            start, next_day = day_bounds(datetime.strptime(value, '%Y-%m-%d').date())
+            return next_day if end else start
+        return utc_naive(datetime.fromisoformat(value.replace('Z', '+00:00')))
+    except ValueError:
+        return None
+
+
 @router.get("/raw-logs/{service}")
 def get_raw_logs(
     service: str = Path(..., description="Service name (e.g., postfix, dovecot)"),
@@ -390,20 +410,18 @@ def get_raw_logs(
         with get_db_context() as db:
             query = db.query(RawServiceLog).filter(RawServiceLog.service == service)
 
-            # Date range filter
-            if start_date:
-                try:
-                    start_dt = datetime.fromisoformat(start_date.replace('Z', '+00:00'))
-                    query = query.filter(RawServiceLog.time >= start_dt)
-                except ValueError:
-                    pass
-            
-            if end_date:
-                try:
-                    end_dt = datetime.fromisoformat(end_date.replace('Z', '+00:00'))
-                    query = query.filter(RawServiceLog.time <= end_dt)
-                except ValueError:
-                    pass
+            # Date range filter: instants (UTC unless they say otherwise), or
+            # whole days (YYYY-MM-DD) in the app's time zone
+            start_bound = _range_bound(start_date, end=False)
+            if start_bound is not None:
+                query = query.filter(RawServiceLog.time >= start_bound)
+
+            end_bound = _range_bound(end_date, end=True)
+            if end_bound is not None:
+                if _is_day(end_date):
+                    query = query.filter(RawServiceLog.time < end_bound)
+                else:
+                    query = query.filter(RawServiceLog.time <= end_bound)
             
             # Text search in raw_data JSONB
             if search:
@@ -456,7 +474,7 @@ def get_raw_logs(
                 entry = log.raw_data.copy() if log.raw_data else {}
                 entry['_id'] = log.id
                 entry['_service'] = log.service
-                entry['_stored_at'] = log.created_at.isoformat() if log.created_at else None
+                entry['_stored_at'] = format_datetime_for_api(log.created_at)
                 data.append(entry)
             
             return {

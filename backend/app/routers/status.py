@@ -16,7 +16,7 @@ from ..scheduler import check_app_version_update, get_app_version_cache
 from ..database import SessionLocal
 from ..models import KnownContainer
 from ..services.ignore_lists import load_ignored, set_ignored, IGNORED_CONTAINERS_KEY
-from ..utils import internal_error
+from ..utils import internal_error, format_datetime_for_api
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +30,18 @@ version_cache = {
     "update_available": False,
     "changelog": None
 }
+
+def _started_at(value):
+    """A container start time as UTC with Z. Docker gives RFC 3339 in UTC with
+    nanoseconds; anything unreadable is passed on as it came."""
+    if not value or not isinstance(value, str):
+        return value
+    try:
+        parsed = datetime.fromisoformat(value.replace('Z', '+00:00'))
+    except ValueError:
+        return value
+    return format_datetime_for_api(parsed)
+
 
 async def _get_containers_status_internal():
     """Fetch mailcow asynchronously, then persist and build status in a worker."""
@@ -103,7 +115,7 @@ def _store_container_status_worker(containers_data):
                 simplified_containers[container_key] = {
                     "name": display_name,
                     "state": state,
-                    "started_at": info.get('started_at', None),
+                    "started_at": _started_at(info.get('started_at')),
                     "ignored": container_key in ignored
                 }
 
@@ -390,13 +402,13 @@ async def get_mailcow_connection_status():
         is_connected = await mailcow_api.test_connection()
         return {
             "connected": is_connected,
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": format_datetime_for_api(datetime.now(timezone.utc))
         }
     except Exception as e:
         logger.error(f"Error checking mailcow connection: {e}")
         return {
             "connected": False,
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": format_datetime_for_api(datetime.now(timezone.utc)),
             "error": "Unable to load system status. Check the application logs."
         }
 

@@ -21,6 +21,7 @@ from app.services.ignore_lists import load_ignored, set_ignored, IGNORED_BLOCKLI
 from app.routers.domains import get_cached_server_ip, init_server_ip
 from app.database import get_db_context
 from app.models import MonitoredHost, BlacklistCheck
+from app.utils import format_datetime_for_api
 
 logger = logging.getLogger(__name__)
 
@@ -127,7 +128,7 @@ async def check_blacklists(
         from app.services.blacklist_service import applicable_blacklists
         return {
             "server_ip": target_ip,
-            "checked_at": datetime.now(timezone.utc).isoformat() + 'Z',
+            "checked_at": format_datetime_for_api(datetime.now(timezone.utc)),
             "total_blacklists": len(applicable_blacklists(target_ip)) if target_ip else len(BLACKLISTS),
             "listed_count": 0,
             "clean_count": 0,

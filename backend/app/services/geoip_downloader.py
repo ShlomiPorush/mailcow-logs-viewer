@@ -7,7 +7,7 @@ import os
 import tarfile
 import tempfile
 from pathlib import Path
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from urllib.parse import quote, quote_plus
 import requests
 
@@ -15,6 +15,7 @@ logger = logging.getLogger(__name__)
 
 # Import settings (will use DB overrides if SETTINGS_EDIT_VIA_UI_ENABLED is true)
 from ..config import settings
+from ..utils import format_datetime_for_api
 
 # Configuration from settings (supports DB overrides)
 def get_maxmind_license_key() -> str:
@@ -79,8 +80,8 @@ def get_db_age_days(db_path: str) -> int:
     
     # Get file modification time
     mtime = path.stat().st_mtime
-    modified_date = datetime.fromtimestamp(mtime)
-    age_days = (datetime.now() - modified_date).days
+    modified_date = datetime.fromtimestamp(mtime, timezone.utc)
+    age_days = (datetime.now(timezone.utc) - modified_date).days
     
     return age_days
 
@@ -377,6 +378,6 @@ def get_geoip_status() -> dict:
             status[db_name]['size_mb'] = round(db_path.stat().st_size / (1024 * 1024), 1)
             
             mtime = db_path.stat().st_mtime
-            status[db_name]['last_modified'] = datetime.fromtimestamp(mtime).isoformat()
+            status[db_name]['last_modified'] = format_datetime_for_api(datetime.fromtimestamp(mtime, timezone.utc))
     
     return status
