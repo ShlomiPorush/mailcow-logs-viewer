@@ -65,6 +65,29 @@ def test_the_date_is_in_the_app_timezone(monkeypatch):
     assert e.local_now().utcoffset().total_seconds() in (2 * 3600, 3 * 3600)
 
 
+def test_an_email_time_is_in_the_app_timezone_and_names_it(monkeypatch):
+    """Emails printed the time without a zone, so a reader could not tell
+    UTC from local time."""
+    from datetime import timezone
+    from app.config import settings
+    monkeypatch.setattr(settings._inner, 'tz', 'Europe/Berlin')
+    winter = datetime(2026, 1, 15, 12, 0, tzinfo=timezone.utc)
+    assert e.format_date(winter, time=True) == '15/01/2026 13:00 CET'
+    assert e.format_date(datetime(2026, 7, 15, 12, 0), time=True) == '15/07/2026 14:00 CEST'
+    assert e.format_date(winter) == '15/01/2026'
+    # Late in the UTC evening it is already the next day in Tokyo
+    monkeypatch.setattr(settings._inner, 'tz', 'Asia/Tokyo')
+    assert e.format_date(datetime(2026, 1, 15, 20, 0, tzinfo=timezone.utc)) == '16/01/2026'
+    html = e.render(title='T', topic='Weekly', app_title='My Logs', when=winter)
+    assert '15/01/2026 21:00 JST' in html
+
+
+def test_an_email_time_in_utc_says_utc(monkeypatch):
+    from app.config import settings
+    monkeypatch.setattr(settings._inner, 'tz', '')
+    assert e.format_date(datetime(2026, 1, 15, 12, 0), time=True) == '15/01/2026 12:00 UTC'
+
+
 def test_addresses_keep_the_text_colour():
     """Gmail and Outlook made the address in a title a blue underlined link of
     their own; Outlook ignores color:inherit, so the link has the text colour."""
@@ -117,10 +140,33 @@ def _summary_data():
     }
 
 
-def test_weekly_summary_uses_the_layout_and_names_what_needs_a_look():
+def test_weekly_summary_title_is_the_exact_window_it_counts(monkeypatch):
+    """The counts are a rolling 7 days up to now; the title used to start at
+    now - 6 days and named no time or zone."""
+    from datetime import timezone
+    from app.config import settings
     from app.routers.reporting import build_summary_email
+    monkeypatch.setattr(settings._inner, 'tz', 'Europe/Berlin')
+    data = _summary_data()
+    data['traffic'].update(start_date='2026-10-19T07:00:00Z', end_date='2026-10-26T08:00:00Z')
+    subject, text, html = build_summary_email(data, now=datetime(2026, 10, 26, 8, 0, 3, tzinfo=timezone.utc))
+    # The window crosses the end of summer time, so each end carries its own zone
+    assert subject == 'Weekly summary: 19/10/2026 09:00 CEST to 26/10/2026 09:00 CET'
+    assert '19/10/2026 09:00 CEST to 26/10/2026 09:00 CET.' in text
+
+    # Without the window in the data, it is the 7 days up to now
+    data['traffic'].pop('start_date')
+    data['traffic'].pop('end_date')
+    subject, _, _ = build_summary_email(data, now=datetime(2026, 1, 12, 8, 0, tzinfo=timezone.utc))
+    assert subject == 'Weekly summary: 05/01/2026 09:00 to 12/01/2026 09:00 CET'
+
+
+def test_weekly_summary_uses_the_layout_and_names_what_needs_a_look(monkeypatch):
+    from app.config import settings
+    from app.routers.reporting import build_summary_email
+    monkeypatch.setattr(settings._inner, 'tz', 'UTC')
     subject, text, html = build_summary_email(_summary_data(), now=datetime(2026, 10, 11))
-    assert subject == 'Weekly summary: 05/10/2026 to 11/10/2026'
+    assert subject == 'Weekly summary: 04/10/2026 00:00 to 11/10/2026 00:00 UTC'
     assert LAYOUT_MARK in html
     assert 'Failure rate' in html and 'Rating' not in html
     assert '12,480' in html

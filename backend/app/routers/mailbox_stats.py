@@ -11,9 +11,8 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func, case, and_, or_
 from datetime import datetime, timezone, timedelta
 from typing import Optional, List
-from zoneinfo import ZoneInfo
 
-from ..config import settings
+from ..app_time import app_tz, as_utc, day_bounds, local_today, to_local, utc_naive
 from ..database import get_db
 from ..models import MailboxStatistics, AliasStatistics, MessageCorrelation
 
@@ -96,15 +95,6 @@ def format_unix_timestamp(timestamp: Optional[int]) -> Optional[str]:
         return None
 
 
-def _app_zone() -> tuple:
-    """The app's time zone (TZ) and its name; UTC when TZ is not a known zone."""
-    try:
-        zone_name = settings.tz or 'UTC'
-        return zone_name, ZoneInfo(zone_name)
-    except Exception:
-        return 'UTC', timezone.utc
-
-
 def parse_date_range(date_range: str, start_date: Optional[str] = None, end_date: Optional[str] = None) -> tuple[datetime, datetime]:
     """Parse date range string into start and end datetimes
 
@@ -112,19 +102,22 @@ def parse_date_range(date_range: str, start_date: Optional[str] = None, end_date
     A day is a day in the app's time zone, like the activity chart; both ends return in UTC.
     """
     now = datetime.now(timezone.utc)
-    _, zone = _app_zone()
 
     if date_range == "custom" and start_date and end_date:
         # Parse custom date range
         try:
             start = datetime.fromisoformat(start_date.replace('Z', '+00:00'))
             if start.tzinfo is None:
-                start = start.replace(hour=0, minute=0, second=0, microsecond=0, tzinfo=zone).astimezone(timezone.utc)
+                start = as_utc(day_bounds(start.date())[0])
+            else:
+                start = as_utc(start)
 
             end = datetime.fromisoformat(end_date.replace('Z', '+00:00'))
             if end.tzinfo is None:
-                # Set end time to end of day
-                end = end.replace(hour=23, minute=59, second=59, microsecond=999999, tzinfo=zone).astimezone(timezone.utc)
+                # The last moment of the end day
+                end = as_utc(day_bounds(end.date())[1]) - timedelta(microseconds=1)
+            else:
+                end = as_utc(end)
 
             return start, end
         except ValueError:
@@ -133,7 +126,7 @@ def parse_date_range(date_range: str, start_date: Optional[str] = None, end_date
             start = now - timedelta(days=30)
             end = now
     elif date_range == "today":
-        start = now.astimezone(zone).replace(hour=0, minute=0, second=0, microsecond=0).astimezone(timezone.utc)
+        start = as_utc(day_bounds(local_today())[0])
         end = now
     elif date_range == "7days":
         start = now - timedelta(days=7)
@@ -316,20 +309,24 @@ def get_bulk_message_counts(db: Session, emails: list, start_date: datetime, end
 def _activity_buckets(start_date: datetime, end_date: datetime) -> tuple:
     """
     The time slots a mailbox's activity is drawn in: hours for a range of up
-    to two days, days beyond it, in the app's time zone (naive local times).
+    to two days, days beyond it. An hour slot is the naive UTC time it starts
+    at, so the repeated hour at the end of daylight saving is two slots; a day
+    slot is a date in the app's time zone.
     """
-    zone_name, zone = _app_zone()
     unit = 'hour' if end_date - start_date <= timedelta(days=2) else 'day'
-    first = start_date.astimezone(zone).replace(tzinfo=None, minute=0, second=0, microsecond=0)
-    if unit == 'day':
-        first = first.replace(hour=0)
-    last = end_date.astimezone(zone).replace(tzinfo=None)
-    step = timedelta(hours=1) if unit == 'hour' else timedelta(days=1)
     buckets = []
-    while first <= last:
-        buckets.append(first)
-        first += step
-    return unit, zone_name, buckets
+    if unit == 'hour':
+        cursor = utc_naive(start_date).replace(minute=0, second=0, microsecond=0)
+        last = utc_naive(end_date)
+        while cursor <= last:
+            buckets.append(cursor)
+            cursor += timedelta(hours=1)
+    else:
+        day, last_day = to_local(start_date).date(), to_local(end_date).date()
+        while day <= last_day:
+            buckets.append(day)
+            day += timedelta(days=1)
+    return unit, buckets
 
 
 def get_bulk_activity(db: Session, addresses_by_mailbox: dict, start_date: datetime, end_date: datetime) -> dict:
@@ -337,8 +334,11 @@ def get_bulk_activity(db: Session, addresses_by_mailbox: dict, start_date: datet
     Messages sent and received per time slot for each mailbox, its aliases
     included, counted like the totals beside them (one per message and
     address). Two aggregate queries, whatever the number of mailboxes.
+
+    Hour slots are sent as UTC instants with Z, for the page to show in the
+    app's time zone; day slots as YYYY-MM-DD days of the app's time zone.
     """
-    unit, zone_name, buckets = _activity_buckets(start_date, end_date)
+    unit, buckets = _activity_buckets(start_date, end_date)
     owner = {}
     for mailbox, addresses in addresses_by_mailbox.items():
         for address in addresses:
@@ -349,8 +349,12 @@ def get_bulk_activity(db: Session, addresses_by_mailbox: dict, start_date: datet
     if owner:
         for side, column in (('sent', MessageCorrelation.sender), ('received', MessageCorrelation.recipient)):
             legs = _representative_legs(db, column, list(owner), start_date, end_date)
-            # first_seen is stored as naive UTC; the slot is taken in local time
-            bucket = func.date_trunc(unit, func.timezone(zone_name, func.timezone('UTC', legs.c.first_seen)))
+            # first_seen is stored as naive UTC: an hour is cut in UTC, a day
+            # is taken in the app's time zone
+            if unit == 'hour':
+                bucket = func.date_trunc('hour', legs.c.first_seen)
+            else:
+                bucket = func.date(func.timezone(app_tz().key, func.timezone('UTC', legs.c.first_seen)))
             rows = db.query(legs.c.email, bucket.label('bucket'), func.count().label('cnt')).filter(
                 legs.c.leg_rank == 1
             ).group_by(legs.c.email, bucket).all()
@@ -359,7 +363,11 @@ def get_bulk_activity(db: Session, addresses_by_mailbox: dict, start_date: datet
                 mailbox = owner.get(row.email)
                 if i is not None and mailbox:
                     series[mailbox][side][i] += row.cnt
-    return {'unit': unit, 'buckets': [b.isoformat() for b in buckets], 'series': series}
+    if unit == 'hour':
+        keys = [format_datetime_utc(b) for b in buckets]
+    else:
+        keys = [b.isoformat() for b in buckets]
+    return {'unit': unit, 'buckets': keys, 'series': series}
 
 
 def get_message_counts_for_email(db: Session, email: str, start_date: datetime, end_date: datetime) -> dict:

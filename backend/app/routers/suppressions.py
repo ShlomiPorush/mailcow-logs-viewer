@@ -23,6 +23,7 @@ from ..config import settings
 from ..models import SpamSuppression
 from ..mailcow_api import mailcow_api, MailcowAPIError
 from ..utils import internal_error
+from ..app_time import to_local
 
 logger = logging.getLogger(__name__)
 
@@ -606,11 +607,15 @@ def export_suppressions(db: Session = Depends(get_csv_db)):
     
     columns = ['email', 'type', 'reason', 'source', 'notes', 'bounce_count',
                'hard_bounces', 'soft_bounces', 'active', 'expires_at', 'created_at']
+
+    def csv_time(value):
+        # The app's time zone with its offset, like the log exports
+        return to_local(value).isoformat(sep=' ', timespec='seconds') if value else ''
+
     rows = (dict(zip(columns, [
         s.email, s.type, s.reason, s.source or '', s.notes or '',
         s.bounce_count, s.hard_bounce_count, s.soft_bounce_count,
-        s.active, s.expires_at.isoformat() if s.expires_at else '',
-        s.created_at.isoformat() if s.created_at else '',
+        s.active, csv_time(s.expires_at), csv_time(s.created_at),
     ])) for s in suppressions)
     return csv_download(rows, "spam_suppressions.csv", columns, escape_metadata=True)
 

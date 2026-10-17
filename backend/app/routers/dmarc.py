@@ -27,11 +27,17 @@ from ..services.dmarc_cache import (
 from ..config import settings, get_cached_active_domains
 from ..scheduler import update_job_status
 from .domains import get_cached_dns_check, check_dmarc_record, check_tls_rpt_record, parse_dmarc_record_tags, _public_cached_dns_result
-from ..utils import internal_error
+from ..utils import internal_error, format_datetime_for_api
+from ..app_time import day_bounds, day_key, epoch, epoch_day_key, utc_naive
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+def _cutoff_epoch(days: int) -> int:
+    """Unix seconds of the moment `days` days ago, for DMARC begin_date windows."""
+    return epoch(datetime.now(timezone.utc) - timedelta(days=days))
 
 # =============================================================================
 # DOMAINS LIST
@@ -210,7 +216,7 @@ def get_all_reports(
                 "begin_date": report.begin_date,
                 "end_date": report.end_date,
                 "record_count": record_count,
-                "created_at": report.created_at.isoformat() if report.created_at else None,
+                "created_at": format_datetime_for_api(report.created_at),
                 "report_id": report.report_id
             })
         
@@ -243,10 +249,10 @@ def get_all_reports(
                 "type": "tls",
                 "domain": report.policy_domain,
                 "org_name": report.organization_name,
-                "begin_date": int(report.start_datetime.timestamp()) if report.start_datetime else None,
-                "end_date": int(report.end_datetime.timestamp()) if report.end_datetime else None,
+                "begin_date": epoch(report.start_datetime) if report.start_datetime else None,
+                "end_date": epoch(report.end_datetime) if report.end_datetime else None,
                 "record_count": policy_count,
-                "created_at": report.created_at.isoformat() if report.created_at else None,
+                "created_at": format_datetime_for_api(report.created_at),
                 "report_id": report.report_id
             })
         
@@ -311,7 +317,7 @@ def get_reports_by_domain(db: Session = Depends(get_db)):
         for name, count, last in tls_rows:
             row = entry(name)
             row["tls_reports"] = count
-            last = int(last.timestamp()) if last else None
+            last = epoch(last) if last else None
             if last is not None and (row["last_report"] is None or last > row["last_report"]):
                 row["last_report"] = last
 
@@ -567,7 +573,7 @@ def _build_domains_list():
 
         def tls_ts(domain, i):
             value = tls_period.get(domain, (None, None))[i]
-            return int(value.timestamp()) if value else None
+            return epoch(value) if value else None
 
         # The TLS-RPT record result from the last DNS check, for the TLS tab;
         # None until the domain has been checked
@@ -577,11 +583,12 @@ def _build_domains_list():
         }
         
         domains_list = []
-        
+        # The last 30 days: DMARC periods are unix times, TLS periods naive UTC
+        thirty_days_ago = _cutoff_epoch(30)
+        thirty_days_ago_datetime = utc_naive(datetime.now(timezone.utc) - timedelta(days=30))
+
         for domain in all_domains:
-            thirty_days_ago = int((datetime.now() - timedelta(days=30)).timestamp())
-            thirty_days_ago_datetime = datetime.now() - timedelta(days=30)
-            
+
             # Get TLS stats for this domain
             tls_stats = db.query(
                 func.count(TLSReport.id).label('tls_report_count'),
@@ -661,8 +668,8 @@ def _build_domains_list():
                     'domain': domain,
                     'report_count': 0,
                     'tls_report_count': tls_report_count,
-                    'first_report': int(first_tls.timestamp()) if first_tls else None,
-                    'last_report': int(tls_report.end_datetime.timestamp()) if tls_report and tls_report.end_datetime else None,
+                    'first_report': epoch(first_tls) if first_tls else None,
+                    'last_report': epoch(tls_report.end_datetime) if tls_report and tls_report.end_datetime else None,
                     'has_dmarc': False,
                     'has_tls': True,
                     'tls_rpt_status': tls_rpt_status.get(domain),
@@ -684,7 +691,7 @@ def _build_domains_list():
             func.sum(DMARCRecord.count),
             func.sum(case((or_(DMARCRecord.spf_result == 'pass', DMARCRecord.dkim_result == 'pass'), DMARCRecord.count), else_=0))
         ).join(DMARCReport, DMARCRecord.dmarc_report_id == DMARCReport.id).filter(
-            DMARCReport.begin_date >= int((datetime.now() - timedelta(days=30)).timestamp())
+            DMARCReport.begin_date >= _cutoff_epoch(30)
         ).group_by(DMARCReport.domain, DMARCRecord.source_ip).all():
             if total and (passed or 0) / total < 0.5:
                 failing[name] = failing.get(name, 0) + 1
@@ -705,9 +712,9 @@ def _build_domains_list():
             DMARCReport.begin_date, func.sum(DMARCRecord.count),
             func.sum(case((or_(DMARCRecord.spf_result == 'pass', DMARCRecord.dkim_result == 'pass'), DMARCRecord.count), else_=0))
         ).join(DMARCReport, DMARCRecord.dmarc_report_id == DMARCReport.id).filter(
-            DMARCReport.begin_date >= int((datetime.now() - timedelta(days=30)).timestamp())
+            DMARCReport.begin_date >= _cutoff_epoch(30)
         ).group_by(DMARCReport.id, DMARCReport.begin_date).all():
-            day = datetime.fromtimestamp(begin).date().isoformat()
+            day = epoch_day_key(begin)
             entry = daily.setdefault(day, {'date': day, 'total': 0, 'dmarc_pass': 0, 'dmarc_fail': 0})
             entry['total'] += total or 0
             entry['dmarc_pass'] += passed or 0
@@ -774,7 +781,7 @@ def _load_overview_dns(domain: str):
 def _load_domain_overview(domain: str, days: int, dmarc_record: dict, tls_rpt_record: dict):
     """Read and aggregate reports entirely within a worker-owned session."""
     with SessionLocal() as db:
-        cutoff_timestamp = int((datetime.now() - timedelta(days=days)).timestamp())
+        cutoff_timestamp = _cutoff_epoch(days)
         
         reports = db.query(DMARCReport).filter(
             and_(
@@ -807,7 +814,7 @@ def _load_domain_overview(domain: str, days: int, dmarc_record: dict, tls_rpt_re
         all_reporters = set()
         
         for report in reports:
-            report_date = datetime.fromtimestamp(report.begin_date).date().isoformat()
+            report_date = epoch_day_key(report.begin_date)
             
             if report_date not in daily_data:
                 daily_data[report_date] = {
@@ -887,7 +894,7 @@ def get_domain_reports(
     Groups multiple reports from same day together
     """
     try:
-        cutoff_timestamp = int((datetime.now() - timedelta(days=days)).timestamp())
+        cutoff_timestamp = _cutoff_epoch(days)
         
         reports = db.query(DMARCReport).filter(
             and_(
@@ -899,7 +906,7 @@ def get_domain_reports(
         daily_reports = {}
         
         for report in reports:
-            report_date = datetime.fromtimestamp(report.begin_date).date().isoformat()
+            report_date = epoch_day_key(report.begin_date)
             
             if report_date not in daily_reports:
                 daily_reports[report_date] = {
@@ -989,15 +996,14 @@ def get_report_details(
     Shows all sources (IPs) that sent emails on that day
     """
     try:
-        date_obj = datetime.strptime(report_date, '%Y-%m-%d').date()
-        start_timestamp = int(datetime.combine(date_obj, datetime.min.time()).timestamp())
-        end_timestamp = int(datetime.combine(date_obj, datetime.max.time()).timestamp())
-        
+        # The day in the app time zone, like the daily list it was picked from
+        day_start, next_day = day_bounds(datetime.strptime(report_date, '%Y-%m-%d').date())
+
         reports = db.query(DMARCReport).filter(
             and_(
                 DMARCReport.domain == domain,
-                DMARCReport.begin_date >= start_timestamp,
-                DMARCReport.begin_date <= end_timestamp
+                DMARCReport.begin_date >= epoch(day_start),
+                DMARCReport.begin_date < epoch(next_day)
             )
         ).all()
         
@@ -1115,7 +1121,7 @@ def get_domain_sources(
     With GeoIP enrichment
     """
     try:
-        cutoff_timestamp = int((datetime.now() - timedelta(days=days)).timestamp())
+        cutoff_timestamp = _cutoff_epoch(days)
         
         records_query = db.query(
             DMARCRecord.source_ip,
@@ -1222,7 +1228,7 @@ def get_source_details(
     Shows all dates when this IP sent emails, grouped by envelope_from
     """
     try:
-        cutoff_timestamp = int((datetime.now() - timedelta(days=days)).timestamp())
+        cutoff_timestamp = _cutoff_epoch(days)
         
         records = db.query(DMARCRecord, DMARCReport).join(
             DMARCReport,
@@ -1332,7 +1338,7 @@ def get_domain_tls_reports(
     Returns list of TLS reports with organization, date range, success/fail counts
     """
     try:
-        cutoff_date = datetime.now(timezone.utc) - timedelta(days=days)
+        cutoff_date = utc_naive(datetime.now(timezone.utc) - timedelta(days=days))
         
         # Query TLS reports for domain
         reports_query = db.query(TLSReport).filter(
@@ -1378,8 +1384,8 @@ def get_domain_tls_reports(
                 'report_id': report.report_id,
                 'organization_name': report.organization_name,
                 'contact_info': report.contact_info,
-                'start_datetime': report.start_datetime.isoformat() if report.start_datetime else None,
-                'end_datetime': report.end_datetime.isoformat() if report.end_datetime else None,
+                'start_datetime': format_datetime_for_api(report.start_datetime),
+                'end_datetime': format_datetime_for_api(report.end_datetime),
                 'successful_sessions': report_success,
                 'failed_sessions': report_fail,
                 'total_sessions': report_success + report_fail,
@@ -1421,7 +1427,7 @@ def get_domain_tls_daily_reports(
     Groups multiple reports from same day together, like DMARC daily reports
     """
     try:
-        cutoff_date = datetime.now(timezone.utc) - timedelta(days=days)
+        cutoff_date = utc_naive(datetime.now(timezone.utc) - timedelta(days=days))
         
         # Query all TLS reports for domain
         reports = db.query(TLSReport).filter(
@@ -1435,7 +1441,7 @@ def get_domain_tls_daily_reports(
         daily_data = {}
         for report in reports:
             if report.start_datetime:
-                date_key = report.start_datetime.strftime('%Y-%m-%d')
+                date_key = day_key(report.start_datetime)
                 if date_key not in daily_data:
                     daily_data[date_key] = {
                         'date': date_key,
@@ -1527,15 +1533,14 @@ def get_tls_report_details(
     Shows all reports and policies from that day with breakdown by provider
     """
     try:
-        date_obj = datetime.strptime(report_date, '%Y-%m-%d').date()
-        start_dt = datetime.combine(date_obj, datetime.min.time(), tzinfo=timezone.utc)
-        end_dt = datetime.combine(date_obj, datetime.max.time(), tzinfo=timezone.utc)
-        
+        # The day in the app time zone, like the daily list it was picked from
+        start_dt, end_dt = day_bounds(datetime.strptime(report_date, '%Y-%m-%d').date())
+
         reports = db.query(TLSReport).filter(
             and_(
                 TLSReport.policy_domain == domain,
                 TLSReport.start_datetime >= start_dt,
-                TLSReport.start_datetime <= end_dt
+                TLSReport.start_datetime < end_dt
             )
         ).all()
         
@@ -1576,8 +1581,8 @@ def get_tls_report_details(
                 'report_id': report.report_id,
                 'organization_name': report.organization_name,
                 'contact_info': report.contact_info,
-                'start_datetime': report.start_datetime.isoformat() if report.start_datetime else None,
-                'end_datetime': report.end_datetime.isoformat() if report.end_datetime else None,
+                'start_datetime': format_datetime_for_api(report.start_datetime),
+                'end_datetime': format_datetime_for_api(report.end_datetime),
                 'successful_sessions': report_success,
                 'failed_sessions': report_fail,
                 'total_sessions': report_success + report_fail,
@@ -1625,9 +1630,8 @@ def get_imap_status(db: Session = Depends(get_db)):
             DMARCSync.started_at.desc()
         ).first()
         
-        # Get sync stats (last 24 hours)
-        from datetime import datetime, timedelta
-        twenty_four_hours_ago = datetime.now() - timedelta(hours=24)
+        # Get sync stats (last 24 hours); started_at is stored as naive UTC
+        twenty_four_hours_ago = utc_naive(datetime.now(timezone.utc) - timedelta(hours=24))
         
         recent_syncs = db.query(DMARCSync).filter(
             DMARCSync.started_at >= twenty_four_hours_ago
@@ -1650,8 +1654,8 @@ def get_imap_status(db: Session = Depends(get_db)):
             'latest_sync': {
                 'id': latest_sync.id,
                 'sync_type': latest_sync.sync_type,
-                'started_at': latest_sync.started_at.strftime('%Y-%m-%dT%H:%M:%SZ') if latest_sync.started_at else None,
-                'completed_at': latest_sync.completed_at.strftime('%Y-%m-%dT%H:%M:%SZ') if latest_sync.completed_at else None,
+                'started_at': format_datetime_for_api(latest_sync.started_at),
+                'completed_at': format_datetime_for_api(latest_sync.completed_at),
                 'status': latest_sync.status,
                 'emails_found': latest_sync.emails_found,
                 'emails_processed': latest_sync.emails_processed,
@@ -1764,8 +1768,8 @@ def get_sync_history(
                     'id': sync.id,
                     'sync_type': sync.sync_type,
                     'status': sync.status,
-                    'started_at': sync.started_at.strftime('%Y-%m-%dT%H:%M:%SZ') if sync.started_at else None,
-                    'completed_at': sync.completed_at.strftime('%Y-%m-%dT%H:%M:%SZ') if sync.completed_at else None,
+                    'started_at': format_datetime_for_api(sync.started_at),
+                    'completed_at': format_datetime_for_api(sync.completed_at),
                     'emails_found': sync.emails_found,
                     'emails_processed': sync.emails_processed,
                     'reports_created': sync.reports_created,
