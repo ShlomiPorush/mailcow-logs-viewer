@@ -11,7 +11,7 @@ from typing import Optional
 from ..models import PostfixLog, RspamdLog, NetfilterLog, MessageCorrelation
 from ..app_time import local_now, to_local
 from ..config import settings
-from ..utils import internal_error
+from ..utils import internal_error, RangeStart, RangeEnd
 from ..services.csv_export import csv_download, csv_query_rows, get_csv_db
 
 logger = logging.getLogger(__name__)
@@ -33,8 +33,8 @@ def export_postfix_csv(
     sender: Optional[str] = Query(None),
     recipient: Optional[str] = Query(None),
     status: Optional[str] = Query(None),
-    start_date: Optional[datetime] = Query(None),
-    end_date: Optional[datetime] = Query(None),
+    start_date: Optional[RangeStart] = Query(None),
+    end_date: Optional[RangeEnd] = Query(None),
     db: Session = Depends(get_csv_db)
 ):
     """
@@ -117,8 +117,8 @@ def export_rspamd_csv(
     min_score: Optional[float] = Query(None),
     max_score: Optional[float] = Query(None),
     is_spam: Optional[bool] = Query(None),
-    start_date: Optional[datetime] = Query(None),
-    end_date: Optional[datetime] = Query(None),
+    start_date: Optional[RangeStart] = Query(None),
+    end_date: Optional[RangeEnd] = Query(None),
     db: Session = Depends(get_csv_db)
 ):
     """
@@ -208,8 +208,8 @@ def export_netfilter_csv(
     username: Optional[str] = Query(None),
     action: Optional[str] = Query(None),
     country_code: Optional[str] = Query(None),
-    start_date: Optional[datetime] = Query(None),
-    end_date: Optional[datetime] = Query(None),
+    start_date: Optional[RangeStart] = Query(None),
+    end_date: Optional[RangeEnd] = Query(None),
     db: Session = Depends(get_csv_db)
 ):
     """
@@ -295,8 +295,8 @@ def export_messages_csv(
     status: Optional[str] = Query(None),
     user: Optional[str] = Query(None),
     ip: Optional[str] = Query(None),
-    start_date: Optional[datetime] = Query(None),
-    end_date: Optional[datetime] = Query(None),
+    start_date: Optional[RangeStart] = Query(None),
+    end_date: Optional[RangeEnd] = Query(None),
     db: Session = Depends(get_csv_db)
 ):
     """

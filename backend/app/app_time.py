@@ -120,6 +120,24 @@ def day_bounds(day: date) -> Tuple[datetime, datetime]:
     return utc_naive(start), utc_naive(end)
 
 
+def is_date_only(value: Optional[str]) -> bool:
+    """A date such as 2026-01-15, not an instant."""
+    return bool(value) and len(value) == 10 and value[4] == '-' and value[7] == '-'
+
+
+def range_bound(value: str, end: bool) -> datetime:
+    """A range bound from a request, as naive UTC for queries.
+
+    A date (YYYY-MM-DD) is a day in the app's zone: a start is the start of
+    that day, an end its last microsecond, so `<=` keeps the whole day. An
+    instant without a zone is UTC. Raises ValueError when unreadable.
+    """
+    if is_date_only(value):
+        start, next_day = day_bounds(datetime.strptime(value, '%Y-%m-%d').date())
+        return next_day - timedelta(microseconds=1) if end else start
+    return utc_naive(datetime.fromisoformat(value.replace('Z', '+00:00')))
+
+
 def day_key(value: datetime) -> str:
     """The app-zone day (YYYY-MM-DD) of a stored or aware time."""
     return to_local(value).strftime("%Y-%m-%d")

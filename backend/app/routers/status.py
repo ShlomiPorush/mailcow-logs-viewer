@@ -278,16 +278,7 @@ async def get_version_status(force: bool = Query(False, description="Force a fre
             version_cache["checked_at"] = now
         
         # Format last_checked with UTC timezone indicator ('Z' suffix)
-        last_checked = None
-        if version_cache["checked_at"]:
-            if version_cache["checked_at"].tzinfo is None:
-                # If naive, assume UTC
-                dt = version_cache["checked_at"].replace(tzinfo=timezone.utc)
-            else:
-                dt = version_cache["checked_at"]
-            # Convert to UTC and format with 'Z' suffix
-            dt_utc = dt.astimezone(timezone.utc)
-            last_checked = dt_utc.replace(microsecond=0).isoformat().replace('+00:00', 'Z')
+        last_checked = format_datetime_for_api(version_cache["checked_at"])
         
         return {
             "current_version": version_cache["current_version"],
@@ -325,16 +316,7 @@ async def get_app_version_status(force: bool = Query(False, description="Force a
             app_version_cache = get_app_version_cache()  # Get updated cache
         
         # Format last_checked with UTC timezone indicator ('Z' suffix)
-        last_checked = None
-        if app_version_cache["checked_at"]:
-            if app_version_cache["checked_at"].tzinfo is None:
-                # If naive, assume UTC
-                dt = app_version_cache["checked_at"].replace(tzinfo=timezone.utc)
-            else:
-                dt = app_version_cache["checked_at"]
-            # Convert to UTC and format with 'Z' suffix
-            dt_utc = dt.astimezone(timezone.utc)
-            last_checked = dt_utc.replace(microsecond=0).isoformat().replace('+00:00', 'Z')
+        last_checked = format_datetime_for_api(app_version_cache["checked_at"])
         
         return {
             "current_version": app_version_cache["current_version"],

@@ -15,7 +15,7 @@ from pydantic import BaseModel, Field
 from ..database import get_db_context
 from ..models import QuarantineRule, QuarantineRuleLog
 from ..mailcow_api import mailcow_api
-from ..utils import internal_error
+from ..utils import internal_error, format_datetime_for_api
 
 logger = logging.getLogger(__name__)
 
@@ -156,10 +156,10 @@ def _rule_to_dict(rule: QuarantineRule) -> dict:
         "action": rule.action,
         "enabled": rule.enabled,
         "hit_count": rule.hit_count or 0,
-        "last_hit_at": rule.last_hit_at.isoformat() + 'Z' if rule.last_hit_at else None,
+        "last_hit_at": format_datetime_for_api(rule.last_hit_at),
         "notes": rule.notes,
-        "created_at": rule.created_at.isoformat() + 'Z' if rule.created_at else None,
-        "updated_at": rule.updated_at.isoformat() + 'Z' if rule.updated_at else None,
+        "created_at": format_datetime_for_api(rule.created_at),
+        "updated_at": format_datetime_for_api(rule.updated_at),
     }
 
 
@@ -298,7 +298,7 @@ def get_rule_logs(
                 "subject": log.subject,
                 "matched_field": log.matched_field,
                 "matched_value": log.matched_value,
-                "created_at": log.created_at.isoformat() + 'Z' if log.created_at else None,
+                "created_at": format_datetime_for_api(log.created_at),
             } for log in logs]
         }
 

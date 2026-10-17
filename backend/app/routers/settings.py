@@ -219,20 +219,29 @@ def _normalize_address_lists(allowed: Dict[str, Any]) -> None:
         allowed[key] = ", ".join(split_addresses(str(allowed[key])))
 
 
-def _validate_time_zone(allowed: Dict[str, Any]) -> None:
-    """Refuse a time zone name nobody knows, such as Europe/Berlinn ('' is UTC).
+def _validate_time_zone(allowed: Dict[str, Any], db: Session) -> None:
+    """Refuse a time zone name nobody knows, such as Europe/Berlinn ('' is UTC),
+    also while TZ in the environment locks the field: the stored value becomes
+    the zone the day TZ leaves the environment.
 
     The page posts every key on each save, so a value that is not a new choice
-    (the one in effect, or one TZ in the environment overrides anyway) never
-    blocks saving the other settings.
+    never blocks saving the other settings: the stored value sent back as it
+    is, or the one in effect. An unknown name that only echoes TZ from the
+    environment is not stored.
     """
     if "tz" not in allowed:
         return
     zone = allowed["tz"] = str(allowed["tz"] or "").strip()
-    if "tz" in get_env_locked_keys() or zone == configured_zone_name():
+    if is_valid_zone(zone):
         return
-    if not is_valid_zone(zone):
-        raise HTTPException(status_code=400, detail=f"Unknown time zone: {zone}")
+    stored = get_config_overrides_from_db(db, _get_field_annotations()).get("tz")
+    if zone == str(stored or "").strip():
+        return
+    if zone == configured_zone_name():
+        if "tz" in get_env_locked_keys():
+            del allowed["tz"]
+        return
+    raise HTTPException(status_code=400, detail=f"Unknown time zone: {zone}")
 
 
 # Settings that decide who can sign in. A change to any of them ends every
@@ -758,7 +767,7 @@ def update_settings(body: Dict[str, Any], request: Request = None, response: Res
         allowed["disabled_features"] = ",".join(features)
     _reject_moved_secrets(allowed)
     _normalize_address_lists(allowed)
-    _validate_time_zone(allowed)
+    _validate_time_zone(allowed, db)
     # For sensitive keys, mask placeholder means "do not change" - omit from payload
     # Empty string means "clear this value" and should be kept
     for sk in _SENSITIVE_SETTING_KEYS:

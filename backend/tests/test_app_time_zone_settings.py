@@ -23,8 +23,11 @@ def store(monkeypatch):
     data = {}
     monkeypatch.delenv("TZ", raising=False)
     monkeypatch.setenv("SETTINGS_EDIT_VIA_UI_ENABLED", "true")
-    monkeypatch.setattr(ss, "get_config_overrides_from_db", lambda db, types_: {
-        k: ss._deserialize_value(ss._serialize_value(v), k, types_[k]) for k, v in data.items()})
+
+    def overrides(db, types_):
+        return {k: ss._deserialize_value(ss._serialize_value(v), k, types_[k]) for k, v in data.items()}
+    monkeypatch.setattr(ss, "get_config_overrides_from_db", overrides)
+    monkeypatch.setattr(rs, "get_config_overrides_from_db", overrides)
     monkeypatch.setattr(rs, "save_config_overrides_to_db", lambda db, ov: data.update(ov))
     monkeypatch.setattr(rs, "has_config_overrides_in_db", lambda db: bool(data))
     monkeypatch.setattr(rs, "cleanup_disabled_feature_data", lambda db: None)
@@ -111,6 +114,39 @@ def test_an_unknown_stored_zone_does_not_block_saving_other_settings(store):
     _put({"tz": "Mars/Olympus", "app_title": "Mail logs"})
 
     assert store.data["app_title"] == "Mail logs"
+
+
+def test_a_new_unknown_zone_is_refused_while_env_locks_the_field(store, monkeypatch):
+    # Stored, it would become the zone the day TZ leaves the environment
+    monkeypatch.setenv("TZ", "Europe/Berlin")
+    cfg.reload_settings(object())
+
+    with pytest.raises(HTTPException) as refused:
+        _put({"tz": "Europe/Berlinn", "app_title": "Mail logs"})
+
+    assert refused.value.status_code == 400
+    assert refused.value.detail == "Unknown time zone: Europe/Berlinn"
+    assert store.data == {}
+
+
+def test_the_stored_zone_sent_back_unchanged_does_not_block_a_save_while_locked(store, monkeypatch):
+    store.data["tz"] = "Mars/Olympus"
+    monkeypatch.setenv("TZ", "Europe/Berlin")
+    cfg.reload_settings(object())
+
+    _put({"tz": "Mars/Olympus", "app_title": "Mail logs"})
+
+    assert store.data == {"tz": "Mars/Olympus", "app_title": "Mail logs"}
+
+
+def test_an_unknown_zone_from_env_sent_back_is_not_stored(store, monkeypatch):
+    # The locked field echoes the environment; it is not a choice to keep
+    monkeypatch.setenv("TZ", "Europe/Berlinn")
+    cfg.reload_settings(object())
+
+    _put({"tz": "Europe/Berlinn", "app_title": "Mail logs"})
+
+    assert store.data == {"app_title": "Mail logs"}
 
 
 # --- The jobs list names the zone -------------------------------------------

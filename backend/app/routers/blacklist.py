@@ -28,12 +28,8 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 def format_datetime(dt: datetime) -> str:
-    """Format datetime as UTC ISO string"""
-    if not dt:
-        return None
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
-    return dt.astimezone(timezone.utc).isoformat().replace('+00:00', 'Z')
+    """Format datetime as UTC ISO string with Z"""
+    return format_datetime_for_api(dt) if dt else None
 
 @router.get("/monitored")
 def get_monitored_hosts() -> Dict[str, Any]:

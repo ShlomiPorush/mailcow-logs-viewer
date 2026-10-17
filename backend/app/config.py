@@ -1186,20 +1186,35 @@ def reload_settings(db: Optional[Any] = None) -> None:
     root.setLevel(getattr(logging, _settings_wrapper.log_level, logging.WARNING))
 
 
+class AppZoneFormatter(logging.Formatter):
+    """Log lines with their time in the app's time zone and its offset, for
+    example 2026-01-15 13:30:05+01:00, whatever the container clock says. The
+    zone is read for every line, so a new zone in Settings applies at once."""
+
+    def formatTime(self, record, datefmt=None):
+        from datetime import datetime
+        from .app_time import UTC, configured_zone_name, zone_for
+        try:
+            # Not app_tz(): it may log a warning, and this runs inside a handler
+            zone = zone_for(configured_zone_name()) or UTC
+        except Exception:
+            zone = UTC
+        return datetime.fromtimestamp(record.created, zone).isoformat(sep=' ', timespec='seconds')
+
+
 def setup_logging():
     """Configure application logging"""
     root = logging.getLogger()
-    
+
     # Remove ALL existing handlers
     for handler in root.handlers[:]:
         root.removeHandler(handler)
-    
+
     log_format = '%(asctime)s - %(levelname)s - %(message)s'
-    date_format = '%Y-%m-%d %H:%M:%S'
-    
+
     # Console Handler
     console_handler = logging.StreamHandler()
-    console_handler.setFormatter(logging.Formatter(log_format, datefmt=date_format))
+    console_handler.setFormatter(AppZoneFormatter(log_format))
     root.addHandler(console_handler)
     
     # File Handler (logs to /app/data/container.log)
@@ -1221,7 +1236,7 @@ def setup_logging():
             backupCount=3,
             encoding='utf-8'
         )
-        file_handler.setFormatter(logging.Formatter(log_format, datefmt=date_format))
+        file_handler.setFormatter(AppZoneFormatter(log_format))
         root.addHandler(file_handler)
         
     except Exception as e:

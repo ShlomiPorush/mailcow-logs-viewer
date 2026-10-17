@@ -22,7 +22,7 @@ from ..database import SessionLocal, get_db, get_db_context
 from ..config import settings
 from ..models import SpamSuppression
 from ..mailcow_api import mailcow_api, MailcowAPIError
-from ..utils import internal_error
+from ..utils import internal_error, format_datetime_for_api
 from ..app_time import to_local
 
 logger = logging.getLogger(__name__)
@@ -836,11 +836,11 @@ def _serialize_suppression(s: SpamSuppression, now: datetime) -> dict:
         "correlation_key": s.correlation_key,
         "active": s.active,
         "synced_to_rspamd": s.synced_to_rspamd,
-        "expires_at": s.expires_at.isoformat() + 'Z' if s.expires_at else None,
+        "expires_at": format_datetime_for_api(s.expires_at),
         "is_expired": is_expired,
         "expires_in": expires_in,
-        "created_at": s.created_at.isoformat() + 'Z' if s.created_at else None,
-        "updated_at": s.updated_at.isoformat() + 'Z' if s.updated_at else None,
+        "created_at": format_datetime_for_api(s.created_at),
+        "updated_at": format_datetime_for_api(s.updated_at),
     }
 
 

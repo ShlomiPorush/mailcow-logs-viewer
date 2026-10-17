@@ -16,7 +16,8 @@ from ..mailcow_api import MailcowRwKeyError, mailcow_api
 from ..config import settings
 from ..services import geoip_service, protection_rules, security_addresses
 from ..services.security_addresses import netfilter_service  # noqa: F401  (tests import it from here)
-from ..utils import internal_error, format_datetime_for_api as format_datetime_utc
+from ..app_time import as_utc
+from ..utils import internal_error, format_datetime_for_api as format_datetime_utc, RangeStart, RangeEnd
 
 logger = logging.getLogger(__name__)
 
@@ -104,8 +105,8 @@ def get_postfix_logs(
     recipient: Optional[str] = Query(None, description="Filter by recipient"),
     status: Optional[str] = Query(None, description="Filter by status"),
     queue_id: Optional[str] = Query(None, description="Filter by queue ID"),
-    start_date: Optional[datetime] = Query(None, description="Start date"),
-    end_date: Optional[datetime] = Query(None, description="End date"),
+    start_date: Optional[RangeStart] = Query(None, description="Start date"),
+    end_date: Optional[RangeEnd] = Query(None, description="End date"),
     db: Session = Depends(get_db)
 ):
     """
@@ -252,8 +253,8 @@ def get_rspamd_logs(
     max_score: Optional[float] = Query(None),
     action: Optional[str] = Query(None),
     is_spam: Optional[bool] = Query(None),
-    start_date: Optional[datetime] = Query(None),
-    end_date: Optional[datetime] = Query(None),
+    start_date: Optional[RangeStart] = Query(None),
+    end_date: Optional[RangeEnd] = Query(None),
     db: Session = Depends(get_db)
 ):
     """
@@ -512,8 +513,8 @@ def get_netfilter_logs(
     username: Optional[str] = Query(None),
     action: Optional[str] = Query(None),
     country_code: Optional[str] = Query(None, description="Filter by country code (e.g., US, IL)"),
-    start_date: Optional[datetime] = Query(None),
-    end_date: Optional[datetime] = Query(None),
+    start_date: Optional[RangeStart] = Query(None),
+    end_date: Optional[RangeEnd] = Query(None),
     db: Session = Depends(get_db)
 ):
     """
@@ -1161,18 +1162,14 @@ async def get_quarantine():
                 if isinstance(item['created'], (int, float)):
                     # Convert Unix timestamp to ISO format with 'Z' suffix
                     dt = datetime.fromtimestamp(item['created'], tz=timezone.utc)
-                    item['created'] = dt.replace(microsecond=0).isoformat().replace('+00:00', 'Z')
+                    item['created'] = format_datetime_utc(dt)
                     # Sort on the number, like the ISO branch (not on the string)
                     item['_created_timestamp'] = dt.timestamp()
                 elif isinstance(item['created'], str):
                     # Parse ISO string and ensure it has 'Z' suffix for UTC
                     try:
-                        dt = datetime.fromisoformat(item['created'].replace('Z', '+00:00'))
-                        if dt.tzinfo is None:
-                            dt = dt.replace(tzinfo=timezone.utc)
-                        else:
-                            dt = dt.astimezone(timezone.utc)
-                        item['created'] = dt.replace(microsecond=0).isoformat().replace('+00:00', 'Z')
+                        dt = as_utc(datetime.fromisoformat(item['created'].replace('Z', '+00:00')))
+                        item['created'] = format_datetime_utc(dt)
                         # Store the datetime object for sorting
                         item['_created_timestamp'] = dt.timestamp()
                     except (ValueError, AttributeError):

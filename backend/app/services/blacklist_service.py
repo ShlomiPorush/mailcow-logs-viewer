@@ -353,11 +353,7 @@ def reconcile_monitored_hosts(db) -> bool:
 
 def _format_checked_at(dt: Optional[datetime]) -> Optional[str]:
     """Format a (possibly naive UTC) datetime as an ISO string with Z suffix"""
-    if not dt:
-        return None
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
-    return dt.astimezone(timezone.utc).isoformat().replace('+00:00', '') + 'Z'
+    return format_datetime_for_api(dt) if dt else None
 
 
 def aggregate_blacklist_summary(host_rows: List[Dict[str, Any]],

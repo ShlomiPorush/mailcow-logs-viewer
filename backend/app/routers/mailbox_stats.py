@@ -35,8 +35,9 @@ _cache_ttl_seconds = 300  # 5 minutes cache TTL
 
 
 def _get_cache_key(prefix: str, **params) -> str:
-    """Generate a cache key from parameters"""
-    param_str = json.dumps(params, sort_keys=True, default=str)
+    """Generate a cache key from parameters. The app's time zone is part of it:
+    days and ranges depend on it, so a new zone never serves the old one's."""
+    param_str = json.dumps({**params, "_tz": app_tz().key}, sort_keys=True, default=str)
     hash_val = hashlib.md5(param_str.encode()).hexdigest()[:16]
     return f"{prefix}:{hash_val}"
 
