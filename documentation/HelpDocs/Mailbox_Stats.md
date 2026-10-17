@@ -9,7 +9,7 @@ Counts cover only messages this app has recorded, not the mailbox's whole histor
 
 The summary counts every mailbox and alias for the chosen period (30 days by default); the search and filters do not change it. **Failed** is sent mail that bounced or was rejected; **Failure Rate** divides that count by sent mail. Each message counts once per address, using its best delivery outcome, so a later successful delivery is not a failure.
 
-Days, for **Today** and for custom dates, are days in the app's time zone (`TZ`, UTC when unset), as in the activity window.
+Days, for **Today** and for custom dates, are days in the [app's time zone](../Using_the_App.md#time-zone), as in the activity window.
 
 The search finds mailbox addresses, display names and alias addresses. In **Domain**, an alias domain shows as "alias of" its target and lists the target's mailboxes.
 
@@ -19,7 +19,7 @@ The search finds mailbox addresses, display names and alias addresses. In **Doma
 
 A service tag under the address (**IMAP**, **POP3**, **SMTP**, **Sieve**) is lit when the service is on; **TLS** is lit when TLS is enforced. Hover **IMAP**, **POP3** or **SMTP** for the last login. The counts in the row include the mailbox's aliases. **Failed** is the share of sent mail that bounced or was rejected, amber from 5% and red from 10%.
 
-In an open row, **Created / Modified** are the times this app first recorded the mailbox and last synced it, not mailcow's own dates. **Message Statistics** counts the mailbox and its aliases together; click a count to open [Messages](Messages.md) searched for the mailbox address, with that direction or status. The **Aliases** table gives the same counts per alias; **domain alias** marks an address on a mailcow alias domain.
+In an open row, **First seen** and **Last synced** are when this app first recorded the mailbox and last read it from mailcow. **Message Statistics** counts the mailbox and its aliases together; click a count to open [Messages](Messages.md) searched for the mailbox address, with that direction or status. The **Aliases** table gives the same counts per alias; **domain alias** marks an address on a mailcow alias domain.
 
 ## Activity window
 

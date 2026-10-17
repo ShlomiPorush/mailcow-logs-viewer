@@ -68,6 +68,7 @@ The `db` service in `docker-compose.yml` falls back to `mailcowlogs` and `change
 | `APP_PORT` | `8080` | Environment only, and used only when the app is started directly with Python. The container always listens on 8080; change the host port in `docker-compose.yml`. |
 | `APP_TITLE` | `mailcow Logs Viewer` | Name in the sidebar and the browser tab. |
 | `APP_LOGO_URL` | Empty | Logo image address. Empty shows the project icon. |
+| `TZ` | Unset (UTC) | The app's time zone, an IANA name such as `Europe/Berlin`. Times on screen, days, times you type, emails, CSV exports and scheduled jobs follow it; the browser's and the containers' zones do not. An unknown name means UTC, and Settings and About say so. Use the time zone of your mailcow server. |
 | `LOG_LEVEL` | `WARNING` | `DEBUG`, `INFO`, `WARNING`, `ERROR` or `CRITICAL`. Anything else means `WARNING`. |
 | `DEBUG` | `false` | Logs every SQL statement, puts exception text in API error responses and turns off database connection pooling. Keep off in production. |
 | `MAX_SEARCH_RESULTS` | `1000` | Not used by this version. |
@@ -262,7 +263,6 @@ Some services are collected whatever this list says, because other pages read th
 
 | Variable | Default | Effect |
 | --- | --- | --- |
-| `TZ` | `UTC` | Container timezone. When it is a zone other than UTC, the app shows times in that zone; with `UTC` or unset, it shows them in the browser's local time. |
 | `AUTH_ENABLED` | `false` | Old name for `BASIC_AUTH_ENABLED`. While it is `true`, Basic authentication stays on whatever the newer switch says. |
 | `CORS_ALLOWED_ORIGINS` | Empty | Other sites allowed to call the API with the user's session. See [Cross-site requests](#cross-site-requests). |
 | `WEBHOOK_ENABLED` | `false` | Old single-webhook switch. On upgrade, an old webhook becomes a destination under **Settings** > **Notifications**. |
@@ -303,5 +303,5 @@ These apply only to the `demo` image, which starts `demo.main:app` with made-up 
 | --- | --- | --- |
 | `DEMO_MODE` | `true` in the demo image | A label only. `APP_MODULE=demo.main:app` starts the demo. |
 | `DEMO_NOTICE` | Empty | Replaces the text of the demo banner. |
-| `DEMO_RESET_TIME` | `00:00` | Daily restart time as `HH:MM`, in the container's timezone. An invalid value means midnight. |
+| `DEMO_RESET_TIME` | `00:00` | Daily restart time as `HH:MM`, in the app's time zone (`TZ`). An invalid value means midnight. |
 | `DEMO_RESET_AFTER_SECONDS` | Unset | For testing: restart after this many seconds instead of at the daily time. |

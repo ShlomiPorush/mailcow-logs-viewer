@@ -66,7 +66,7 @@ A topic in the last column means the message goes to that topic's email recipien
 
 Blocklist alerts come from the daily 05:00 check, the check at startup, **Check all now** on **Status** > **Blocklists** and **Run** on **IP Blacklist Check (All Hosts)**; a check of one host sends nothing. Ignored lists never count, and UCEPROTECT Level 2 and 3 do not count on their own. The previous count is kept in memory, so a restart resets it.
 
-The weekly summary uses the container's time zone (`TZ`) for its Monday 09:00 schedule. It covers the last seven days of mail, the current system figures, blocklists, DNS problems and the five mailboxes with the most failures. **Run** on **Weekly Summary Report** under **Status** > **Jobs** sends it at once, unless **Enable Weekly Summary** is off. **Enable Weekly Summary** and **DNS Change Alerts Enabled** are both on by default.
+The weekly summary is sent on Mondays at 09:00 in the app's time zone (`TZ`) and covers the seven days before it: mail, the current system figures, blocklists, DNS problems and the five mailboxes with the most failures. **Run** on **Weekly Summary Report** under **Status** > **Jobs** sends it at once, unless **Enable Weekly Summary** is off. **Enable Weekly Summary** and **DNS Change Alerts Enabled** are both on by default.
 
 What the owner of a blocked mailbox is told is in [Outgoing spam](HelpDocs/Abuse_Protection.md#what-happens-when-a-mailbox-is-stopped). Turning sending back on sends no email.
 

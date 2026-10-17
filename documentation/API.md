@@ -7,6 +7,7 @@ What applies to every endpoint:
 - **Authentication:** with Basic authentication or OAuth2/OIDC on, every endpoint except the [public ones](#sign-in-methods) needs a session cookie or Basic credentials.
 - **Read-write key:** endpoints that change mailcow need `MAILCOW_API_KEY_RW`. The status code when it is missing depends on the endpoint and is given in its entry. When mailcow refuses the key during an action, the endpoint answers 502 at once, without retries, and `detail` says whether the key was rejected or is read-only. [`GET /rw-status`](#get-rw-status) says whether a key is set.
 - **Feature switches:** `DISABLED_FEATURES` hides pages and stops jobs used only by those features; collection shared with enabled pages continues. It does not block their API routes.
+- **Times:** a time is ISO 8601 in UTC with `Z`, or unix seconds where the entry says so. A date without a time (`YYYY-MM-DD`), in a request or a response, is a day in the app's time zone (`TZ`, UTC when unset).
 - **Errors:** see [Error Responses](#error-responses).
 
 ## Contents
@@ -138,7 +139,7 @@ Public. Returns 200 with `{ "status": "healthy", "database": "connected" }`, or 
 
 Public. Without valid credentials while authentication is on, the response has only `name`, `app_title`, `app_logo_url`, `auth_enabled`, `basic_auth_enabled` and `oauth2_enabled`.
 
-Signed-in callers, or any caller while authentication is off, also get `version` (from the running image), `mailcow_url`, `local_domains`, `fetch_interval`, `retention_days`, `timezone`, `blacklist_count`, `disabled_features` and `settings_edit_via_ui_enabled`. The top-bar search leaves out settings while `settings_edit_via_ui_enabled` is `false`.
+Signed-in callers, or any caller while authentication is off, also get `version` (from the running image), `mailcow_url`, `local_domains`, `fetch_interval`, `retention_days`, `timezone` (the zone in use, `UTC` when unset or unknown), `timezone_valid` (false when the configured name is unknown), `timezone_configured` (the configured name, empty when unset), `blacklist_count`, `disabled_features` and `settings_edit_via_ui_enabled`. The top-bar search leaves out settings while `settings_edit_via_ui_enabled` is `false`.
 
 ---
 
@@ -379,7 +380,7 @@ Server-wide traffic for the period: `total_sent`, `total_received`, `total_messa
 
 `sent_failed` counts bounced and rejected outgoing messages; deferred messages are counted separately, and a later successful delivery leg wins. Values come from collected correlations, so retention limits the history.
 
-For both traffic endpoints, `today` and custom date-only boundaries use the app's `TZ`; the returned boundaries are UTC. An unknown `date_range`, or `custom` without both valid dates, falls back to the last 30 days.
+For both traffic endpoints, `today` and custom date-only boundaries are days in the app's time zone; the returned boundaries are UTC. An unknown `date_range`, or `custom` without both valid dates, falls back to the last 30 days.
 
 ---
 

@@ -9,7 +9,7 @@ The app builds messages from imported Postfix, Rspamd and Dovecot logs. See [How
 
 Filter counts apply the other groups' choices, so each count shows what changing that filter would return. **Spam** includes both messages with a final spam status and those Rspamd classed as spam, whatever happened afterwards.
 
-**Today** starts at midnight; the day-count presets count back from now. Each preset ends when you pick it. Custom ranges include both whole days. These filters use browser time, which may differ from the time zone used for displayed timestamps.
+**Today** starts at midnight; the day-count presets count back from now. Each preset ends when you pick it. Custom ranges include both whole days. Days are days in the [app's time zone](../Using_the_App.md#time-zone).
 
 Search matches part of the sender, recipient, subject, Message-ID, queue ID, client IP or authenticated user, ignoring case. It runs on Enter. The separate sender, recipient, authenticated user and source IP filters also match partial values.
 

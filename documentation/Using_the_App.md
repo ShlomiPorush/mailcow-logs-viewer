@@ -26,12 +26,7 @@ Changing mailcow needs the read-write API key (`MAILCOW_API_KEY_RW`): queue and 
 
 ## Time zone
 
-The app shows times in the time zone set by `TZ` in `.env`, for example `TZ=Europe/Berlin`. Without `TZ`, or with `TZ=UTC`, it shows them in your browser's time zone.
-
-Exceptions:
-
-- The date filters on Messages and the activity chart of a security alert always use your browser's time zone.
-- Mailbox Stats counts whole days in `TZ`, or in UTC when `TZ` is not set.
+The app works in one time zone: `TZ` in `.env`, or **Time Zone** under **Settings** > **Application**, for example `Europe/Berlin`. Times on screen, what counts as a day, times you type, emails, CSV exports and scheduled jobs all follow it. The time zone of your browser and of the containers does not matter. Without a time zone the app uses UTC, so set the one your mailcow server uses.
 
 ## Copying
 

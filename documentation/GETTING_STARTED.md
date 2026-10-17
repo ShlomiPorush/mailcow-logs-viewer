@@ -67,6 +67,7 @@ SETTINGS_EDIT_VIA_UI_ENABLED=true
 BASIC_AUTH_ENABLED=true
 AUTH_USERNAME=admin
 AUTH_PASSWORD=replace-with-a-long-random-password
+TZ=Europe/Berlin
 ```
 
 - `MAILCOW_URL` is your mailcow web address, without a trailing slash.
@@ -74,6 +75,7 @@ AUTH_PASSWORD=replace-with-a-long-random-password
 - Use only letters and digits in `POSTGRES_PASSWORD`, for example the output of `openssl rand -hex 32`. Characters such as `@`, `/` or `:` break the database connection.
 - `SETTINGS_EDIT_VIA_UI_ENABLED=true` lets you change settings in the app. Without it, the Settings page is read-only.
 - The `AUTH` lines turn on sign-in. Without sign-in, anyone who can reach the app can read all mail logs.
+- `TZ` is the time zone the app works in: times on screen, days, emails and scheduled jobs. Use the one your mailcow server uses. Without it, the app uses UTC.
 
 ## 5. Start the app
 

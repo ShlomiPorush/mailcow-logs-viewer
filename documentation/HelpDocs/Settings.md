@@ -40,7 +40,7 @@ All features are on by default. A feature that is off disappears from the menu, 
 
 ## Application
 
-The port is set in `docker-compose.yml`, not here.
+**Time Zone** is the time zone the whole app works in; see [Using the app](../Using_the_App.md#time-zone). Saving a new one reloads the page and moves the scheduled jobs at once. The port is set in `docker-compose.yml`, not here.
 
 ## Mailcow
 
@@ -115,4 +115,4 @@ Limits for the rules on **Quarantine** > **Auto-Rules**. A new **Quarantine Rule
 - **Saving says a password is set by an environment variable**: you changed the server it is sent to. Change the server in `.env` too, or undo the change.
 - **The app stops at startup with a settings error**: it could not read the saved settings from the database. It stops rather than start with your saved sign-in turned off, and starts once the database answers.
 
-PostgreSQL values, `SETTINGS_EDIT_VIA_UI_ENABLED`, `CORS_ALLOWED_ORIGINS`, `TZ` and the container options are set only in the environment; see [Environment variables](../ENV_Settings.md).
+PostgreSQL values, `SETTINGS_EDIT_VIA_UI_ENABLED`, `CORS_ALLOWED_ORIGINS` and the container options are set only in the environment; see [Environment variables](../ENV_Settings.md).
