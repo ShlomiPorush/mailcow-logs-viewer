@@ -202,3 +202,71 @@ test('hour columns start on whole hours of the app zone, also in a zone half an 
         }
     }
 });
+
+// A steady 4 messages an hour (1 a quarter) and a usual rate of 4 an hour: in
+// every column, whatever its real length, the bar sits on the usual level
+const steadyCases = [
+    // The clocks go forward: 00:00 CET to 04:00 CEST is three real hours
+    ['Europe/Berlin', '2026-03-29T12:00:00Z', 14],
+    // The data ends 2 hours after the alert, in the middle of a column
+    ['Europe/Berlin', '2026-03-28T23:30:00Z', 14],
+    ['Europe/Berlin', '2026-10-25T01:30:00Z', 14],
+    // Half an hour off UTC, so the data starts in the middle of a column
+    ['Asia/Kolkata', '2026-10-13T12:00:00Z', 14],
+    // Five-hour columns do not divide a day: 20:00 to 00:00 is four hours
+    ['Europe/Berlin', '2026-03-29T12:00:00Z', 35],
+];
+
+function steadyChart(zone, at, baselineDays) {
+    const data = activity({ alert_type: 'volume_spike', subject: 'user@example.com', metric_value: 1, baseline_value: 4 },
+        { baselineDays, at: new Date(at) });
+    const h = harness(zone);
+    return { data, h, ...h.columns(data, '7d') };
+}
+
+test('each column counts only what falls in its own span, from the first quarter to the last', () => {
+    // The alert at 23:30 UTC on 2026-03-28: the last column runs from 00:00 CET to
+    // the end of the data at 01:30 UTC (03:30 CEST), two and a half real hours
+    const { cols: lastDay } = steadyChart(...steadyCases[1]);
+    const last = lastDay[lastDay.length - 1];
+    assert.equal(last.start.toISOString(), '2026-03-28T23:00:00.000Z');
+    assert.equal(last.end.toISOString(), '2026-03-29T01:30:00.000Z');
+    assert.equal(last.count, 10);
+    for (const [zone, at, days] of steadyCases) {
+        const { data, cols } = steadyChart(zone, at, days);
+        const label = `${zone}, ${at}, ${days} days`;
+        assert.equal(cols[0].start.toISOString(), new Date(data.buckets[0].start).toISOString(), `${label}: the first column starts with the data`);
+        const lastQuarter = Date.parse(data.buckets[data.buckets.length - 1].start) + data.bucket_minutes * 60000;
+        assert.equal(cols[cols.length - 1].end.getTime(), lastQuarter, `${label}: the last column ends with the data`);
+        for (const [i, c] of cols.entries()) {
+            if (cols[i + 1]) assert.equal(c.end.getTime(), cols[i + 1].start.getTime(), `${label}: ${c.start.toISOString()} ends where the next starts`);
+            const inside = data.buckets.filter(b => Date.parse(b.start) >= c.start && Date.parse(b.start) < c.end);
+            assert.equal(c.count, inside.reduce((n, b) => n + b.count, 0), `${label}: ${c.start.toISOString()}`);
+        }
+    }
+});
+
+const drawnColumns = html => [...html.matchAll(/<span class="ui-aa-col[^"]*" data-tip="([^"]*)"[^>]*><i style="height:([\d.]+)%"><\/i>(?:<b class="ui-aa-norm" style="bottom:([\d.]+)%"><\/b>)?<\/span>/g)];
+
+test('normal traffic sits on the usual level of every column, also one a clock change made longer or shorter', () => {
+    // 00:00 CET to 04:00 CEST on 2026-03-29 is three real hours: 12 messages are usual there, not a rise
+    {
+        const { data, h } = steadyChart(...steadyCases[0]);
+        const html = h.render(data, '7d');
+        const line = html.match(/<div class="ui-aa-usual" style="bottom:([\d.]+)%"/);
+        const [tip, bar, own] = drawnColumns(html).find(c => c[1].startsWith('Sun, Mar 29, 00:00')).slice(1);
+        assert.match(tip, /^Sun, Mar 29, 00:00: 12 sent in 3 hours$/);
+        assert.equal(Number(own ?? line?.[1]), Number(bar));
+    }
+    for (const [zone, at, days] of steadyCases) {
+        const { data, h } = steadyChart(zone, at, days);
+        const html = h.render(data, '7d');
+        const line = html.match(/<div class="ui-aa-usual" style="bottom:([\d.]+)%"/);
+        const cols = drawnColumns(html);
+        assert.ok(cols.length > 100, `${zone}, ${at}: the columns are drawn`);
+        for (const [, tip, bar, own] of cols) {
+            const usual = Number(own ?? line?.[1]);
+            assert.ok(Math.abs(Number(bar) - usual) < 1e-9, `${zone}, ${at}, ${days} days: "${tip}" is at ${bar}%, its usual level at ${usual}%`);
+        }
+    }
+});
