@@ -18,8 +18,8 @@ from ..database import get_db, get_db_context
 from ..models import PostfixLog, RspamdLog, NetfilterLog, MessageCorrelation
 from ..config import settings, EDITABLE_SETTING_KEYS, FEATURE_IDS, reload_settings, Settings
 from ..config import _get_field_annotations, get_env_locked_keys
-from ..app_time import app_tz
-from ..scheduler import last_fetch_run_time, get_job_status, update_job_status, JOB_SKIPPED, reschedule_interval_jobs, dovecot_correlation_available, cleanup_disabled_feature_data, _mailbox_sync_needed
+from ..app_time import app_tz, configured_zone_name, is_valid_zone
+from ..scheduler import last_fetch_run_time, get_job_status, update_job_status, JOB_SKIPPED, reschedule_interval_jobs, clock_schedule, dovecot_correlation_available, cleanup_disabled_feature_data, _mailbox_sync_needed
 from ..services.settings_store import get_config_overrides_from_db, save_config_overrides_to_db, has_config_overrides_in_db, get_maxmind_validation_status, save_maxmind_validation_status, clear_maxmind_validation_status
 from ..services.settings_store import credential_fingerprint, get_credential_check_status, save_credential_check_status
 from ..services.connection_test import test_smtp_connection, test_imap_connection
@@ -217,6 +217,22 @@ def _normalize_address_lists(allowed: Dict[str, Any]) -> None:
                 f"{label}: \"{bad[0]}\" is not an email address. "
                 f"Separate several addresses with commas."))
         allowed[key] = ", ".join(split_addresses(str(allowed[key])))
+
+
+def _validate_time_zone(allowed: Dict[str, Any]) -> None:
+    """Refuse a time zone name nobody knows, such as Europe/Berlinn ('' is UTC).
+
+    The page posts every key on each save, so a value that is not a new choice
+    (the one in effect, or one TZ in the environment overrides anyway) never
+    blocks saving the other settings.
+    """
+    if "tz" not in allowed:
+        return
+    zone = allowed["tz"] = str(allowed["tz"] or "").strip()
+    if "tz" in get_env_locked_keys() or zone == configured_zone_name():
+        return
+    if not is_valid_zone(zone):
+        raise HTTPException(status_code=400, detail=f"Unknown time zone: {zone}")
 
 
 # Settings that decide who can sign in. A change to any of them ends every
@@ -434,7 +450,7 @@ def get_settings_info(db: Session = Depends(get_db)):
                     "error": jobs_status.get('correlate_dovecot', {}).get('error')
                 },
                 "cleanup_logs": {
-                    "schedule": "Daily at 2 AM",
+                    "schedule": clock_schedule('cleanup_logs'),
                     "description": "Removes old logs based on retention period",
                     "retention": f"{settings.retention_days} days",
                     "status": jobs_status.get('cleanup_logs', {}).get('status', 'unknown'),
@@ -442,7 +458,7 @@ def get_settings_info(db: Session = Depends(get_db)):
                     "error": jobs_status.get('cleanup_logs', {}).get('error')
                 },
                 "cleanup_dmarc_reports": {
-                    "schedule": "Daily at 2:15 AM" if settings.is_feature_enabled('dmarc') else "Disabled (feature off)",
+                    "schedule": clock_schedule('cleanup_dmarc_reports') if settings.is_feature_enabled('dmarc') else "Disabled (feature off)",
                     "description": "Removes DMARC and TLS reports older than the retention period",
                     "retention": f"{settings.dmarc_retention_days} days",
                     "feature_disabled": not settings.is_feature_enabled('dmarc'),
@@ -482,7 +498,7 @@ def get_settings_info(db: Session = Depends(get_db)):
                     "error": jobs_status.get('dmarc_imap_sync', {}).get('error') if (settings.is_feature_enabled('dmarc') and settings.dmarc_imap_enabled) else None
                 },
                 "update_geoip": {
-                    "schedule": "Weekly (Sunday 3 AM)" if is_license_configured() else "Disabled",
+                    "schedule": clock_schedule('update_geoip') if is_license_configured() else "Disabled",
                     "description": "Updates MaxMind GeoIP databases (City & ASN)",
                     "enabled": is_license_configured(),
                     "status": jobs_status.get('update_geoip', {}).get('status', 'idle') if is_license_configured() else 'disabled',
@@ -514,7 +530,7 @@ def get_settings_info(db: Session = Depends(get_db)):
                     "error": jobs_status.get('eas_devices', {}).get('error') if settings.is_feature_enabled('devices') else None
                 },
                 "cleanup_eas_devices": {
-                    "schedule": "Daily at 3:30 AM" if settings.is_feature_enabled('devices') else "Disabled (feature off)",
+                    "schedule": clock_schedule('cleanup_eas_devices') if settings.is_feature_enabled('devices') else "Disabled (feature off)",
                     "description": "Removes ActiveSync devices not seen within the retention period",
                     "retention": (f"{settings.eas_devices_retention_days} days" if settings.eas_devices_retention_days > 0 else "Forever") if settings.is_feature_enabled('devices') else None,
                     "feature_disabled": not settings.is_feature_enabled('devices'),
@@ -523,7 +539,7 @@ def get_settings_info(db: Session = Depends(get_db)):
                     "error": jobs_status.get('cleanup_eas_devices', {}).get('error') if settings.is_feature_enabled('devices') else None
                 },
                 "blacklist_check": {
-                    "schedule": "Daily at 5 AM" if settings.is_feature_enabled('blacklist') else "Disabled (feature off)",
+                    "schedule": clock_schedule('blacklist_check') if settings.is_feature_enabled('blacklist') else "Disabled (feature off)",
                     "description": "Checks monitored hosts against DNS blacklists",
                     "feature_disabled": not settings.is_feature_enabled('blacklist'),
                     "status": jobs_status.get('blacklist_check', {}).get('status', 'unknown') if settings.is_feature_enabled('blacklist') else 'disabled',
@@ -539,7 +555,7 @@ def get_settings_info(db: Session = Depends(get_db)):
                     "error": jobs_status.get('sync_transports', {}).get('error') if settings.is_feature_enabled('blacklist') else None
                 },
                 "send_weekly_summary": {
-                    "schedule": "Monday at 9:00 AM" if settings.enable_weekly_summary else "Disabled",
+                    "schedule": clock_schedule('send_weekly_summary') if settings.enable_weekly_summary else "Disabled",
                     "description": "Sends a weekly summary report via email",
                     "enabled": settings.enable_weekly_summary,
                     "status": jobs_status.get('send_weekly_summary', {}).get('status', 'idle') if settings.enable_weekly_summary else 'disabled',
@@ -556,7 +572,7 @@ def get_settings_info(db: Session = Depends(get_db)):
                     "error": _get_raw_logs_job_status('fetch_raw_logs', 'error', True)
                 },
                 "cleanup_raw_logs": {
-                    "schedule": "Daily at 3:00 AM",
+                    "schedule": clock_schedule('cleanup_raw_logs'),
                     "description": "Removes raw logs older than retention period",
                     "retention": f"{settings.raw_logs_retention_days} days",
                     "enabled": True,
@@ -742,6 +758,7 @@ def update_settings(body: Dict[str, Any], request: Request = None, response: Res
         allowed["disabled_features"] = ",".join(features)
     _reject_moved_secrets(allowed)
     _normalize_address_lists(allowed)
+    _validate_time_zone(allowed)
     # For sensitive keys, mask placeholder means "do not change" - omit from payload
     # Empty string means "clear this value" and should be kept
     for sk in _SENSITIVE_SETTING_KEYS:

@@ -192,8 +192,8 @@ class Settings(BaseSettings):
         description="Logging level: DEBUG, INFO, WARNING, ERROR, CRITICAL"
     )
     tz: str = Field(
-        default="UTC",
-        description="Timezone"
+        default="",
+        description="The app time zone, an IANA name such as Europe/Berlin (UTC when empty or unknown, see app_time.py)"
     )
     app_title: str = Field(default="mailcow Logs Viewer", description="Application title")
     app_logo_url: str = Field(default="", description="Application logo URL (optional)")
@@ -1028,12 +1028,12 @@ class Settings(BaseSettings):
 
 def _get_editable_setting_keys() -> frozenset:
     """All Settings field names that are editable from UI (excludes DB keys, UI-edit flag, and deprecated/legacy fields)."""
-    # auth_enabled deprecated, tz legacy, app_port is Docker-level.
+    # auth_enabled deprecated, app_port is Docker-level.
     # cors_allowed_origins is applied once at startup, so it lives in ENV only.
     # webhook_* are legacy single-webhook settings, superseded by the
     # notification channels UI (they are migrated into a channel on upgrade).
     excluded = _DB_ONLY_KEYS | {
-        _EDIT_VIA_UI_FLAG_KEY, "auth_enabled", "tz", "app_port", "cors_allowed_origins",
+        _EDIT_VIA_UI_FLAG_KEY, "auth_enabled", "app_port", "cors_allowed_origins",
         "webhook_enabled", "webhook_type", "webhook_url", "webhook_telegram_chat_id",
     }
     keys = set(Settings.model_fields.keys()) - excluded

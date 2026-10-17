@@ -24,9 +24,8 @@ from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Set, Any
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from apscheduler.triggers.interval import IntervalTrigger
-from apscheduler.triggers.cron import CronTrigger
 
+from .app_time import UTC, app_tz
 from .config import settings
 from .database import get_db_context
 from .mailcow_api import mailcow_api, MailcowAPIError
@@ -34,8 +33,10 @@ from .models import RawServiceLog, SystemSetting
 
 logger = logging.getLogger(__name__)
 
-# Separate scheduler instance for raw logs (independent from main scheduler)
+# Separate scheduler instance for raw logs (independent from main scheduler).
+# Constructed in UTC like the main one (scheduler.py); started in the app's zone.
 raw_logs_scheduler = AsyncIOScheduler(
+    timezone=UTC,
     job_defaults={
         'misfire_grace_time': 30,
         'coalesce': True,
@@ -559,12 +560,16 @@ def start_raw_logs_scheduler():
         logger.info("[RAW LOGS] Logs page is off; collecting only what other pages read")
     
     load_catchup_state()
+    # Trigger helpers shared with the main scheduler (imported here: scheduler.py
+    # imports this module)
+    from .scheduler import every, clock_trigger, clock_schedule
+    raw_logs_scheduler.timezone = app_tz()
 
     try:
         # Fetch job - every RAW_LOGS_FETCH_INTERVAL seconds
         raw_logs_scheduler.add_job(
             fetch_raw_service_logs,
-            trigger=IntervalTrigger(seconds=settings.raw_logs_fetch_interval),
+            trigger=every(seconds=settings.raw_logs_fetch_interval),
             id='fetch_raw_logs',
             name='Fetch Raw Service Logs',
             replace_existing=True,
@@ -574,7 +579,7 @@ def start_raw_logs_scheduler():
         # Cleanup job - daily at 3:00 AM
         raw_logs_scheduler.add_job(
             cleanup_raw_service_logs,
-            trigger=CronTrigger(hour=3, minute=0),
+            trigger=clock_trigger('cleanup_raw_logs'),
             id='cleanup_raw_logs',
             name='Cleanup Raw Service Logs',
             replace_existing=True
@@ -587,7 +592,7 @@ def start_raw_logs_scheduler():
         logger.info(f"   [FETCH] Every {settings.raw_logs_fetch_interval}s, {settings.raw_logs_fetch_count} logs/service")
         logger.info(f"   [SERVICES] {', '.join(services)} ({len(services)} enabled)")
         logger.info(f"   [RETENTION] {settings.raw_logs_retention_days} days")
-        logger.info(f"   [CLEANUP] Daily at 3:00 AM")
+        logger.info(f"   [CLEANUP] {clock_schedule('cleanup_raw_logs')}")
         
     except Exception as e:
         logger.error(f"[RAW LOGS] Failed to start scheduler: {e}")
@@ -619,12 +624,13 @@ def reschedule_raw_logs_jobs():
         # Nothing to collect: stop the scheduler
         stop_raw_logs_scheduler()
         return
-    
+
+    from .scheduler import every
     try:
         # Update fetch interval
         raw_logs_scheduler.add_job(
             fetch_raw_service_logs,
-            trigger=IntervalTrigger(seconds=settings.raw_logs_fetch_interval),
+            trigger=every(seconds=settings.raw_logs_fetch_interval),
             id='fetch_raw_logs',
             name='Fetch Raw Service Logs',
             replace_existing=True,

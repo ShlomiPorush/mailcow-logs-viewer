@@ -18,6 +18,7 @@ from sqlalchemy import desc, or_
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 
+from .app_time import UTC, app_tz
 from .config import settings, set_cached_active_domains
 from .database import get_db_context, SessionLocal
 from .mailcow_api import mailcow_api, mailcow_handled_items
@@ -73,7 +74,7 @@ def reschedule_interval_jobs():
         # Reschedule fetch_logs
         scheduler.add_job(
             fetch_all_logs,
-            trigger=IntervalTrigger(seconds=settings.fetch_interval),
+            trigger=every(seconds=settings.fetch_interval),
             id='fetch_logs',
             name='Fetch mailcow Logs',
             replace_existing=True,
@@ -82,7 +83,7 @@ def reschedule_interval_jobs():
         # Reschedule complete_correlations
         scheduler.add_job(
             complete_incomplete_correlations,
-            trigger=IntervalTrigger(seconds=settings.correlation_check_interval),
+            trigger=every(seconds=settings.correlation_check_interval),
             id='complete_correlations',
             name='Complete Correlations',
             replace_existing=True,
@@ -91,7 +92,7 @@ def reschedule_interval_jobs():
         # Reschedule update_final_status
         scheduler.add_job(
             update_final_status_for_correlations,
-            trigger=IntervalTrigger(seconds=settings.correlation_check_interval),
+            trigger=every(seconds=settings.correlation_check_interval),
             id='update_final_status',
             name='Update Final Status',
             replace_existing=True,
@@ -101,7 +102,7 @@ def reschedule_interval_jobs():
         if settings.dmarc_imap_enabled:
             scheduler.add_job(
                 dmarc_imap_sync_job,
-                IntervalTrigger(seconds=settings.dmarc_imap_interval),
+                every(seconds=settings.dmarc_imap_interval),
                 id='dmarc_imap_sync',
                 name='DMARC IMAP Sync',
                 replace_existing=True
@@ -132,6 +133,9 @@ def reschedule_interval_jobs():
         _reschedule_geoip_job()
         _reschedule_quarantine_rules_job()
 
+        # A new time zone moves every clock-time job now, not at the next restart
+        apply_app_time_zone()
+
     except Exception as e:
         logger.warning("Failed to reschedule interval jobs: %s", e)
 
@@ -143,7 +147,7 @@ def _reschedule_smtp_abuse_job():
     if settings.smtp_abuse_enabled and mailcow_api.has_rw_key:
         scheduler.add_job(
             smtp_abuse_job,
-            trigger=IntervalTrigger(minutes=1),
+            trigger=every(minutes=1),
             id='smtp_abuse',
             name='SMTP Abuse Protection',
             replace_existing=True,
@@ -166,7 +170,7 @@ def _reschedule_anomaly_job():
     if settings.anomaly_detection_enabled:
         scheduler.add_job(
             anomaly_detection_job,
-            trigger=IntervalTrigger(minutes=settings.anomaly_check_interval),
+            trigger=every(minutes=settings.anomaly_check_interval),
             id='anomaly_detection',
             name='Anomaly Detection',
             replace_existing=True,
@@ -188,7 +192,7 @@ def _reschedule_geoip_job():
     if is_license_configured():
         scheduler.add_job(
             update_geoip_database,
-            trigger=CronTrigger(day_of_week='sun', hour=3, minute=0),
+            trigger=clock_trigger('update_geoip'),
             id='update_geoip',
             name='Update GeoIP',
             replace_existing=True
@@ -208,7 +212,7 @@ def _reschedule_quarantine_rules_job():
     if settings.is_feature_enabled('quarantine') and mailcow_api.has_rw_key:
         scheduler.add_job(
             process_quarantine_rules_job,
-            trigger=IntervalTrigger(minutes=settings.quarantine_rules_interval),
+            trigger=every(minutes=settings.quarantine_rules_interval),
             id='process_quarantine_rules',
             name='Process Quarantine Rules',
             replace_existing=True,
@@ -231,7 +235,7 @@ def _reschedule_dovecot_correlation_job():
     if dovecot_correlation_available():
         scheduler.add_job(
             correlate_dovecot_logs,
-            trigger=IntervalTrigger(seconds=60),
+            trigger=every(seconds=60),
             id='correlate_dovecot',
             name='Correlate Dovecot Deliveries',
             replace_existing=True,
@@ -257,7 +261,7 @@ def _reschedule_suppression_jobs():
     if spam_enabled and settings.suppression_auto_detect:
         scheduler.add_job(
             detect_suppressions_job,
-            trigger=IntervalTrigger(minutes=5),
+            trigger=every(minutes=5),
             id='detect_suppressions',
             name='Detect Suppressions',
             replace_existing=True,
@@ -274,7 +278,7 @@ def _reschedule_suppression_jobs():
     if spam_enabled and settings.suppression_rspamd_sync and settings.is_rspamd_configured:
         scheduler.add_job(
             sync_suppressions_to_rspamd_job,
-            trigger=IntervalTrigger(minutes=10),
+            trigger=every(minutes=10),
             id='sync_suppressions',
             name='Sync Suppressions to Rspamd',
             replace_existing=True,
@@ -291,7 +295,7 @@ def _reschedule_suppression_jobs():
     if spam_enabled:
         scheduler.add_job(
             expire_suppressions_job,
-            trigger=IntervalTrigger(hours=1),
+            trigger=every(hours=1),
             id='expire_suppressions',
             name='Expire Suppressions',
             replace_existing=True,
@@ -308,7 +312,7 @@ def _reschedule_suppression_jobs():
     if spam_enabled and settings.queue_cleanup_enabled and mailcow_api.has_rw_key:
         scheduler.add_job(
             cleanup_deferred_queue_job,
-            trigger=IntervalTrigger(minutes=5),
+            trigger=every(minutes=5),
             id='cleanup_deferred_queue',
             name='Cleanup Deferred Queue',
             replace_existing=True,
@@ -483,12 +487,64 @@ def get_app_version_cache():
     """Get app version cache (for API endpoint)"""
     return app_version_cache
 
+# Constructed in UTC: without an explicit zone APScheduler asks the container
+# for its own (tzlocal), which raises on an unknown TZ and stopped the app at
+# import. start_scheduler() switches to the app's zone (app_time).
 scheduler = AsyncIOScheduler(
+    timezone=UTC,
     job_defaults={
         'misfire_grace_time': 30,
         'coalesce': True,
     }
 )
+
+# Jobs that run at a clock time, in the app's time zone, never the container's
+CLOCK_JOBS = {
+    'cleanup_logs': {'hour': 2, 'minute': 0},
+    'cleanup_dmarc_reports': {'hour': 2, 'minute': 15},
+    'update_geoip': {'day_of_week': 'sun', 'hour': 3, 'minute': 0},
+    'cleanup_eas_devices': {'hour': 3, 'minute': 30},
+    'blacklist_check': {'hour': 5, 'minute': 0},
+    'send_weekly_summary': {'day_of_week': 'mon', 'hour': 9, 'minute': 0},
+    'cleanup_raw_logs': {'hour': 3, 'minute': 0},  # raw_logs_worker.py
+}
+_WEEKDAY_NAMES = {'mon': 'Monday', 'sun': 'Sunday'}
+
+
+def every(**interval) -> IntervalTrigger:
+    """An interval trigger. Its zone does not change when it fires, but it has
+    to be given: otherwise APScheduler asks tzlocal, which raises on an unknown TZ."""
+    return IntervalTrigger(timezone=UTC, **interval)
+
+
+def clock_trigger(job_id: str) -> CronTrigger:
+    """The trigger of a clock-time job, in the app's time zone."""
+    return CronTrigger(timezone=app_tz(), **CLOCK_JOBS[job_id])
+
+
+def clock_schedule(job_id: str) -> str:
+    """When a clock-time job runs, as the jobs list shows it: 'Daily at 02:00 (Europe/Berlin)'."""
+    spec = CLOCK_JOBS[job_id]
+    at = f"{spec['hour']:02d}:{spec['minute']:02d}"
+    day = spec.get('day_of_week')
+    when = f"Weekly, {_WEEKDAY_NAMES[day]} at {at}" if day else f"Daily at {at}"
+    return f"{when} ({app_tz().key})"
+
+
+def apply_app_time_zone() -> None:
+    """Move both schedulers, and every clock-time job they hold, to the app's
+    current time zone. Runs at start and after every settings save, so a new
+    zone takes effect at once."""
+    from .raw_logs_worker import raw_logs_scheduler
+    zone = app_tz()
+    for sched in (scheduler, raw_logs_scheduler):
+        sched.timezone = zone
+        if not sched.running:
+            continue
+        for job in sched.get_jobs():
+            if job.id in CLOCK_JOBS and str(job.trigger.timezone) != zone.key:
+                sched.reschedule_job(job.id, trigger=clock_trigger(job.id))
+                logger.info(f"[SCHEDULER] {job.id}: {clock_schedule(job.id)}")
 
 seen_postfix: Set[str] = set()
 _postfix_ingest_lock = threading.Lock()
@@ -3539,11 +3595,14 @@ def start_scheduler():
 
         # Features switched off in the meantime should not leave data behind
         cleanup_disabled_feature_data()
+
+        # Clock-time jobs run in the app's time zone (an unknown one is UTC)
+        scheduler.timezone = app_tz()
         
         # Job 1: Fetch logs from API (every fetch_interval seconds)
         scheduler.add_job(
             fetch_all_logs,
-            trigger=IntervalTrigger(seconds=settings.fetch_interval),
+            trigger=every(seconds=settings.fetch_interval),
             id='fetch_logs',
             name='Fetch mailcow Logs',
             replace_existing=True,
@@ -3553,7 +3612,7 @@ def start_scheduler():
         # Job 2: Run correlation (every 30 seconds, after logs are imported)
         scheduler.add_job(
             run_correlation,
-            trigger=IntervalTrigger(seconds=30),
+            trigger=every(seconds=30),
             id='run_correlation',
             name='Correlate Logs',
             replace_existing=True,
@@ -3563,7 +3622,7 @@ def start_scheduler():
         # Job 3: Complete incomplete correlations (every 2 minutes)
         scheduler.add_job(
             complete_incomplete_correlations,
-            trigger=IntervalTrigger(seconds=settings.correlation_check_interval),
+            trigger=every(seconds=settings.correlation_check_interval),
             id='complete_correlations',
             name='Complete Correlations',
             replace_existing=True,
@@ -3574,7 +3633,7 @@ def start_scheduler():
         # This is separate to ensure old correlations get expired reliably
         scheduler.add_job(
             expire_old_correlations,
-            trigger=IntervalTrigger(seconds=60),
+            trigger=every(seconds=60),
             id='expire_correlations',
             name='Expire Old Correlations',
             replace_existing=True,
@@ -3586,7 +3645,7 @@ def start_scheduler():
         # after the initial correlation was created
         scheduler.add_job(
             update_final_status_for_correlations,
-            trigger=IntervalTrigger(seconds=settings.correlation_check_interval),
+            trigger=every(seconds=settings.correlation_check_interval),
             id='update_final_status',
             name='Update Final Status',
             replace_existing=True,
@@ -3598,7 +3657,7 @@ def start_scheduler():
         if dovecot_correlation_available():
             scheduler.add_job(
                 correlate_dovecot_logs,
-                trigger=IntervalTrigger(seconds=60),
+                trigger=every(seconds=60),
                 id='correlate_dovecot',
                 name='Correlate Dovecot Deliveries',
                 replace_existing=True,
@@ -3612,7 +3671,7 @@ def start_scheduler():
         # Job 6: Cleanup old logs (daily at 2 AM)
         scheduler.add_job(
             cleanup_old_logs,
-            trigger=CronTrigger(hour=2, minute=0),
+            trigger=clock_trigger('cleanup_logs'),
             id='cleanup_logs',
             name='Cleanup Old Logs',
             replace_existing=True
@@ -3622,7 +3681,7 @@ def start_scheduler():
         if settings.is_feature_enabled('dmarc'):
             scheduler.add_job(
                 cleanup_old_dmarc_reports,
-                trigger=CronTrigger(hour=2, minute=15),
+                trigger=clock_trigger('cleanup_dmarc_reports'),
                 id='cleanup_dmarc_reports',
                 name='Cleanup Old DMARC Reports',
                 replace_existing=True
@@ -3633,7 +3692,7 @@ def start_scheduler():
         # Job 7: Check app version updates (every 6 hours, starting immediately)
         scheduler.add_job(
             check_app_version_update,
-            trigger=IntervalTrigger(hours=6),
+            trigger=every(hours=6),
             id='check_app_version',
             name='Check App Version Updates',
             replace_existing=True,
@@ -3645,7 +3704,7 @@ def start_scheduler():
         if settings.smtp_abuse_enabled and mailcow_api.has_rw_key:
             scheduler.add_job(
                 smtp_abuse_job,
-                trigger=IntervalTrigger(minutes=1),
+                trigger=every(minutes=1),
                 id='smtp_abuse',
                 name='SMTP Abuse Protection',
                 replace_existing=True,
@@ -3663,7 +3722,7 @@ def start_scheduler():
         if settings.anomaly_detection_enabled:
             scheduler.add_job(
                 anomaly_detection_job,
-                trigger=IntervalTrigger(minutes=settings.anomaly_check_interval),
+                trigger=every(minutes=settings.anomaly_check_interval),
                 id='anomaly_detection',
                 name='Anomaly Detection',
                 replace_existing=True,
@@ -3677,7 +3736,7 @@ def start_scheduler():
         if settings.is_feature_enabled('domains'):
             scheduler.add_job(
                 check_all_domains_dns_background,
-                trigger=IntervalTrigger(hours=6),
+                trigger=every(hours=6),
                 id='dns_check_background',
                 name='DNS Check (All Domains)',
                 replace_existing=True,
@@ -3698,7 +3757,7 @@ def start_scheduler():
         # Job 9: Sync local domains (every 6 hours)
         scheduler.add_job(
             sync_local_domains,
-            IntervalTrigger(hours=6),
+            every(hours=6),
             id='sync_local_domains',
             name='Sync Local Domains',
             replace_existing=True,
@@ -3711,7 +3770,7 @@ def start_scheduler():
         if is_license_configured():
             scheduler.add_job(
                 update_geoip_database,
-                trigger=CronTrigger(day_of_week='sun', hour=3, minute=0),
+                trigger=clock_trigger('update_geoip'),
                 id='update_geoip',
                 name='Update GeoIP',
                 replace_existing=True
@@ -3733,7 +3792,7 @@ def start_scheduler():
         if settings.is_feature_enabled('dmarc') and settings.dmarc_imap_enabled:
             scheduler.add_job(
                 dmarc_imap_sync_job,
-                IntervalTrigger(seconds=settings.dmarc_imap_interval),
+                every(seconds=settings.dmarc_imap_interval),
                 id='dmarc_imap_sync',
                 name='DMARC IMAP Sync',
                 replace_existing=True
@@ -3745,7 +3804,7 @@ def start_scheduler():
             scheduler.add_job(
                 dmarc_imap_sync_job,
                 'date',
-                run_date=datetime.now() + timedelta(seconds=30),
+                run_date=datetime.now(timezone.utc) + timedelta(seconds=30),
                 id='dmarc_imap_sync_startup',
                 name='DMARC IMAP Sync (Startup)'
             )
@@ -3757,7 +3816,7 @@ def start_scheduler():
         if _mailbox_sync_needed():
             scheduler.add_job(
                 update_mailbox_statistics,
-                IntervalTrigger(minutes=5),
+                every(minutes=5),
                 id='mailbox_stats',
                 name='Update Mailbox Statistics',
                 replace_existing=True,
@@ -3782,7 +3841,7 @@ def start_scheduler():
         if settings.is_feature_enabled('mailbox-stats'):
             scheduler.add_job(
                 update_alias_statistics,
-                IntervalTrigger(minutes=5),
+                every(minutes=5),
                 id='alias_stats',
                 name='Update Alias Statistics',
                 replace_existing=True,
@@ -3805,7 +3864,7 @@ def start_scheduler():
         # the feature themselves, so they are always registered.
         scheduler.add_job(
             update_eas_devices,
-            IntervalTrigger(minutes=1),
+            every(minutes=1),
             id='eas_devices',
             name='Update ActiveSync Devices',
             replace_existing=True,
@@ -3813,7 +3872,7 @@ def start_scheduler():
         )
         scheduler.add_job(
             cleanup_eas_devices,
-            trigger=CronTrigger(hour=3, minute=30),
+            trigger=clock_trigger('cleanup_eas_devices'),
             id='cleanup_eas_devices',
             name='Cleanup ActiveSync Devices',
             replace_existing=True,
@@ -3824,7 +3883,7 @@ def start_scheduler():
         if settings.is_feature_enabled('blacklist'):
             scheduler.add_job(
                 check_monitored_hosts_job,
-                trigger=CronTrigger(hour=5, minute=0),
+                trigger=clock_trigger('blacklist_check'),
                 id='blacklist_check',
                 name='IP Blacklist Check (Daily)',
                 replace_existing=True,
@@ -3847,7 +3906,7 @@ def start_scheduler():
         if settings.is_feature_enabled('blacklist'):
             scheduler.add_job(
                 sync_transports_job,
-                trigger=IntervalTrigger(hours=6),
+                trigger=every(hours=6),
                 id='sync_transports',
                 name='Sync Transports & Relayhosts',
                 replace_existing=True
@@ -3865,7 +3924,7 @@ def start_scheduler():
         # Job 15: Weekly Summary Email (Every Monday at 9:00 AM)
         scheduler.add_job(
             send_weekly_summary_email_job,
-            trigger=CronTrigger(day_of_week='mon', hour=9, minute=0),
+            trigger=clock_trigger('send_weekly_summary'),
             id='send_weekly_summary',
             name='Send Weekly Summary',
             replace_existing=True
@@ -3876,7 +3935,7 @@ def start_scheduler():
             # Detect bounces from postfix logs every 5 minutes
             scheduler.add_job(
                 detect_suppressions_job,
-                trigger=IntervalTrigger(minutes=5),
+                trigger=every(minutes=5),
                 id='detect_suppressions',
                 name='Detect Suppressions',
                 replace_existing=True,
@@ -3887,7 +3946,7 @@ def start_scheduler():
             if settings.suppression_rspamd_sync and settings.is_rspamd_configured:
                 scheduler.add_job(
                     sync_suppressions_to_rspamd_job,
-                    trigger=IntervalTrigger(minutes=10),
+                    trigger=every(minutes=10),
                     id='sync_suppressions',
                     name='Sync Suppressions to Rspamd',
                     replace_existing=True,
@@ -3897,7 +3956,7 @@ def start_scheduler():
             # Expire old suppressions every hour
             scheduler.add_job(
                 expire_suppressions_job,
-                trigger=IntervalTrigger(hours=1),
+                trigger=every(hours=1),
                 id='expire_suppressions',
                 name='Expire Suppressions',
                 replace_existing=True,
@@ -3913,7 +3972,7 @@ def start_scheduler():
             if settings.queue_cleanup_enabled and mailcow_api.has_rw_key:
                 scheduler.add_job(
                     cleanup_deferred_queue_job,
-                    trigger=IntervalTrigger(minutes=5),
+                    trigger=every(minutes=5),
                     id='cleanup_deferred_queue',
                     name='Cleanup Deferred Queue',
                     replace_existing=True,
@@ -3925,7 +3984,7 @@ def start_scheduler():
         if settings.is_feature_enabled('quarantine') and mailcow_api.has_rw_key:
             scheduler.add_job(
                 process_quarantine_rules_job,
-                trigger=IntervalTrigger(minutes=settings.quarantine_rules_interval),
+                trigger=every(minutes=settings.quarantine_rules_interval),
                 id='process_quarantine_rules',
                 name='Process Quarantine Rules',
                 replace_existing=True,
@@ -3943,9 +4002,9 @@ def start_scheduler():
         logger.info(f"   [EXPIRE] Old correlations: every 60s (expire after {settings.max_correlation_age_minutes}min)")
         logger.info(f"   [VERSION] Check app version updates: every 6 hours")
         logger.info(f"   [DNS] Check all domains DNS: every 6 hours")
-        logger.info("   [GEOIP] Update GeoIP database: weekly (Sunday 3 AM)")
-        logger.info("   [BLACKLIST] Check IP blacklists: daily at 5:00 AM")
-        logger.info("   [REPORT] Weekly Summary: Monday at 9:00 AM")
+        logger.info(f"   [GEOIP] Update GeoIP database: {clock_schedule('update_geoip')}")
+        logger.info(f"   [BLACKLIST] Check IP blacklists: {clock_schedule('blacklist_check')}")
+        logger.info(f"   [REPORT] Weekly Summary: {clock_schedule('send_weekly_summary')}")
 
         
         if settings.dmarc_imap_enabled:
