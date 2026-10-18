@@ -26,6 +26,10 @@ Search matches the address, notes and last bounce message. **Expired** shows ent
 | **Bounces** | Total counted bounces, with hard (`H:`) and soft (`S:`) counts. |
 | **Rspamd** | **Synced**: written to the map; **Pending**: awaiting a write. Disabling marks the entry for the next sync; the row does not reliably show whether its old map entry remains. |
 
+### Block details
+
+**Block details** on a row shows why the address is blocked, newest first: each bounce that blocked it, extended its block or only counted toward the threshold, each stuck message the queue cleanup deleted, and each change by hand. A bounce keeps the server's reply, the sender, the subject, the Queue ID, the Message-ID and that message's Postfix lines for this address (at most 50, always with the line that decided it). The details are copied when they happen, so they stay after the logs and the message are deleted, for as long as the address is on the list. **Open message** opens the message while it is still on **Messages**. Addresses blocked before this version show only the reason their row kept.
+
 ### Automatic suppressions
 
 With **Handle undeliverable mail automatically** on (**Settings** > **Queue Management**), two jobs add entries every 5 minutes:

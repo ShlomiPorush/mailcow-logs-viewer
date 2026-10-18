@@ -1270,7 +1270,7 @@ Deletes all stored data of a feature that is already off (in `disabled_features`
 | `mailbox-stats` | `alias_statistics`, and `mailbox_statistics` unless Rate Limits is on (it reads each mailbox's limit from that table) |
 | `logs` | `raw_service_logs`, only the services nothing collects any more: `dovecot` always stays because message details read it, `ratelimited` stays while Rate Limits is on, `sogo` while Devices is on |
 | `blacklist` | `blacklist_checks`, `monitored_hosts` |
-| `spam-filter` | `spam_suppressions`. The body also needs `"rspamd": "remove"` or `"keep"` for the app's blocks in Rspamd, else 400. With `remove`, the list is deleted only after mailcow confirmed the blocks are gone; otherwise it answers 409 or 502 and deletes nothing |
+| `spam-filter` | `suppression_events`, `spam_suppressions`. The body also needs `"rspamd": "remove"` or `"keep"` for the app's blocks in Rspamd, else 400. With `remove`, the list is deleted only after mailcow confirmed the blocks are gone; otherwise it answers 409 or 502 and deletes nothing |
 | `quarantine` | `quarantine_rules`, `quarantine_rule_logs` |
 | `devices` | `eas_devices` |
 
@@ -2094,6 +2094,10 @@ An existing active entry returns 409; an unparsable `expires_at` 400; an invalid
 Updates the non-null fields sent and returns the entry; JSON `null` leaves a field unchanged. Sending `active` marks the entry for a new Rspamd sync. An unknown ID returns 404; an unparsable `expires_at` 400.
 
 ---
+
+#### GET /api/suppressions/{suppression_id}/events
+
+Block details: what happened to the address, newest first, 20 per `page`. Returns `suppression` (`id`, `email`, `type`, `active`), `total`, `page`, `page_size` and `events`. Each event has `kind` (`hard_bounce`, `soft_bounce`, `rejected`, `deferred_stuck`, `added`, `imported`, `enabled`, `disabled`, `expiry_changed`, `notes_changed`, `before_upgrade`), `outcome` (`created`, `activated`, `extended`, `counted`, `changed`), `recorded_at`, `message_time`, `reason`, `server_reply`, `dsn`, `sender`, `recipient`, `subject`, `queue_id`, `message_id`, `notes`, `expires_at`, `log_lines` (`time`, `program`, `message`), `logs_shortened`, `correlation_key` and `message_available` (the message is still on Messages). Fields the logs did not prove are null. An unknown id returns 404.
 
 #### DELETE /api/suppressions/{suppression_id}
 
