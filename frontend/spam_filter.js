@@ -527,6 +527,7 @@ function renderSuppressionItem(s) {
             <span class="ui-td">${syncBadge}</span>
             <span class="ui-td" title="${escapeHtml(formatTime(s.created_at))}"><small class="ui-sec-unit">Added </small>${formatAgo(s.created_at)}</span>
             <span class="ui-td ui-td-end ui-row-actions">
+                <button onclick="showBlockDetails(${Number(s.id)})" class="ui-btn ui-btn-sm">Block details</button>
                 <button onclick="showEditSuppressionModalById(${Number(s.id)})" class="ui-btn ui-btn-sm" title="Edit suppression">Edit</button>
                 <button onclick="toggleSuppression(${Number(s.id)}, ${!s.active})" class="ui-btn ui-btn-sm" title="${s.active ? 'Deactivate' : 'Reactivate'}">${s.active ? 'Disable' : 'Enable'}</button>
                 <button onclick="deleteSuppression(${Number(s.id)}, '${escapeJsArg(s.email)}')" class="ui-btn ui-btn-sm ui-btn-danger" title="Delete permanently">Delete</button>
@@ -572,6 +573,98 @@ async function loadSuppressionStats() {
 // =============================================================================
 
 // A small v3 dialog; clicking the backdrop leaves it open, like before
+// ── Block details: why an address is blocked, kept with it ──
+const BLOCK_EVENT_TITLES = {
+    hard_bounce: 'Delivery failed', soft_bounce: 'Delivery delayed', rejected: 'Delivery rejected',
+    deferred_stuck: 'Stuck in queue', added: 'Added manually', imported: 'Imported from CSV',
+    enabled: 'Enabled manually', disabled: 'Disabled manually', expiry_changed: 'Expiry changed',
+    notes_changed: 'Notes changed', before_upgrade: 'Last saved reason'
+};
+const BLOCK_OUTCOMES = { created: ['Blocked', 'fail'], activated: ['Blocked again', 'fail'], extended: ['Block extended', 'warn'],
+    counted: ['Counted, not blocked yet', ''] };
+let blockDetailsState = null;
+
+function blockEventHtml(e) {
+    const field = (label, value, mono) => value ? `<dt>${label}</dt><dd${mono ? ' class="ui-mono"' : ''}>${escapeHtml(String(value))}</dd>` : '';
+    const outcome = BLOCK_OUTCOMES[e.outcome];
+    const message = e.correlation_key
+        ? (e.message_available
+            ? `<button type="button" class="ui-btn ui-btn-sm" onclick="viewMessageDetails('${escapeJsArg(e.correlation_key)}')">Open message</button>`
+            : '<small class="ui-muted">No longer in Messages</small>')
+        : (['added', 'imported'].includes(e.kind) && !e.queue_id ? '<small class="ui-muted">No message was linked to this entry.</small>' : '');
+    const ids = field('Queue ID', e.queue_id, true) + field('Message-ID', e.message_id, true);
+    const lines = (e.log_lines || []).map(l => `${escapeHtml(formatTime(l.time))}  ${escapeHtml(l.program || '')}: ${escapeHtml(l.message || '')}`).join('\n');
+    const bounce = ['hard_bounce', 'soft_bounce', 'rejected', 'deferred_stuck'].includes(e.kind);
+    const logs = bounce || e.queue_id
+        ? `<details class="ui-block-logs"><summary>Saved logs</summary>
+            ${ids ? `<dl class="ui-block-fields">${ids}</dl>` : ''}
+            ${lines ? `<pre class="ui-block-pre">${lines}</pre>` : '<p class="ui-muted">No logs saved for this event.</p>'}
+            ${e.logs_shortened ? '<p class="ui-muted">Some log details were shortened.</p>' : ''}
+          </details>` : '';
+    return `<article class="ui-block-event">
+        <header><b>${BLOCK_EVENT_TITLES[e.kind] || escapeHtml(e.kind)}</b>${outcome ? ' ' + uiTag(outcome[0], outcome[1]) : ''}
+            <small class="ui-muted" title="Recorded">${escapeHtml(formatTime(e.recorded_at))}</small></header>
+        <dl class="ui-block-fields">
+            ${field('Message time', e.message_time ? formatTime(e.message_time) : null)}
+            ${field('Reason', e.kind === 'before_upgrade' || !bounce ? e.reason : null)}
+            ${field('Server reply', e.server_reply)}
+            ${field('From', e.sender)}${field('To', bounce ? e.recipient : null)}${field('Subject', e.subject)}
+            ${field('Notes', e.notes)}
+            ${['added', 'enabled', 'expiry_changed'].includes(e.kind) ? field('Expires', e.expires_at ? formatTime(e.expires_at) : 'Never') : ''}
+        </dl>
+        ${e.kind === 'before_upgrade' ? '<p class="ui-muted">Older details were not saved.</p>' : ''}
+        ${message}${logs}
+    </article>`;
+}
+
+async function showBlockDetails(id, more) {
+    const existing = document.getElementById('block-details-modal');
+    if (!more) {
+        if (existing) existing.remove();
+        blockDetailsState = { id, page: 0, events: [], total: 0, email: '' };
+        const modal = suppressionDialog('block-details-modal', 'Block details', '<div id="block-details-body"><div class="ui-loading"><div class="loading"></div></div></div>',
+            '<button type="button" class="ui-btn" onclick="document.getElementById(\'block-details-modal\').remove()">Close</button>');
+        modal.querySelector('.ui-dialog').classList.replace('ui-dialog-sm', 'ui-dialog-md');
+        modal.addEventListener('click', () => modal.remove());
+        // Escape closes the top dialog only: a message opened from here closes
+        // first. This runs in the capture phase, before that dialog's own handler
+        const onKey = e => {
+            if (e.key !== 'Escape') return;
+            if (!modal.isConnected) { document.removeEventListener('keydown', onKey, true); return; }
+            const above = [...document.querySelectorAll('.ui-dialog-backdrop')]
+                .some(d => d !== modal && getComputedStyle(d).display !== 'none');
+            if (above) return;
+            modal.remove();
+            document.removeEventListener('keydown', onKey, true);
+        };
+        document.addEventListener('keydown', onKey, true);
+    }
+    const body = document.getElementById('block-details-body');
+    if (!body) return;
+    const state = blockDetailsState;
+    if (state.loading) return;
+    state.loading = true;
+    try {
+        const res = await authenticatedFetch(`/api/suppressions/${Number(id)}/events?page=${state.page + 1}`);
+        if (!res.ok) throw new Error();
+        const data = await res.json();
+        state.page += 1;
+        state.events = state.events.concat(data.events);
+        state.total = data.total;
+        state.email = _cleanRegexDomain(data.suppression.email);
+    } catch (e) {
+        body.innerHTML = '<p class="ui-text-fail">Could not load block details. Try again.</p>';
+        return;
+    } finally {
+        state.loading = false;
+    }
+    const older = state.events.length < state.total
+        ? `<button type="button" class="ui-btn ui-btn-sm" onclick="showBlockDetails(${Number(id)}, true)">Show older</button>` : '';
+    body.innerHTML = `<p class="ui-block-who">${escapeHtml(state.email)}</p>`
+        + (state.events.length ? state.events.map(blockEventHtml).join('') : '<p class="ui-muted">No block details saved.</p>')
+        + older;
+}
+
 function suppressionDialog(id, title, body, actions) {
     const modal = document.createElement('div');
     modal.id = id;
@@ -589,7 +682,11 @@ function suppressionDialog(id, title, body, actions) {
     return modal;
 }
 
-function showAddSuppressionModal(prefillEmail) {
+// A block made from a queued message (Queue > Suppress) keeps that message in its Block details
+let suppressionFromQueue = null;
+
+function showAddSuppressionModal(prefillEmail, queueId) {
+    suppressionFromQueue = queueId && prefillEmail ? { email: String(prefillEmail).toLowerCase(), queueId } : null;
     suppressionDialog('add-suppression-modal', 'Add Suppression', `
         <label><span class="ui-label">Type</span>
             <select id="new-suppression-type" class="ui-select" onchange="updateSuppressionInputPlaceholder()">
@@ -705,7 +802,9 @@ async function createSuppression() {
         const response = await authenticatedFetch('/api/suppressions', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ email, type, reason, notes: notes || null, permanent, expires_at: expiresAt })
+            body: JSON.stringify({ email, type, reason, notes: notes || null, permanent, expires_at: expiresAt,
+                // Only while the address is still the queued message's recipient
+                queue_id: suppressionFromQueue && suppressionFromQueue.email === String(email).toLowerCase() ? suppressionFromQueue.queueId : null })
         });
         
         if (response.status === 409) {

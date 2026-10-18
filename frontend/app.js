@@ -2504,8 +2504,8 @@ function applyQueueFilters() {
                 const responses = recipients.filter(r => r.response);
                 const queued = new Date(item.arrival_time * 1000).toISOString();
                 const suppress = recipients.length === 1
-                    ? `<button onclick="showAddSuppressionModal('${escapeJsArg(recipients[0].email)}')" title="Suppress ${escapeHtml(recipients[0].email)}" class="ui-btn ui-btn-sm">Suppress</button>`
-                    : uiMenu('Suppress', recipients.map(r => `<button type="button" role="menuitem" onclick="showAddSuppressionModal('${escapeJsArg(r.email)}')">${escapeHtml(r.email)}</button>`).join(''));
+                    ? `<button onclick="showAddSuppressionModal('${escapeJsArg(recipients[0].email)}', '${escapeJsArg(qid)}')" title="Suppress ${escapeHtml(recipients[0].email)}" class="ui-btn ui-btn-sm">Suppress</button>`
+                    : uiMenu('Suppress', recipients.map(r => `<button type="button" role="menuitem" onclick="showAddSuppressionModal('${escapeJsArg(r.email)}', '${escapeJsArg(qid)}')">${escapeHtml(r.email)}</button>`).join(''));
                 return `
                 <div class="ui-tr ui-q-row" data-queue-id="${escapeHtml(qid)}">
                     ${canAct ? `<input type="checkbox" class="queue-checkbox ui-check" value="${escapeHtml(qid)}" onchange="queueUpdateSelection()" aria-label="Select ${escapeHtml(qid)}" />` : ''}
