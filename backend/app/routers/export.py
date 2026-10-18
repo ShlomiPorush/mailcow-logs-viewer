@@ -4,7 +4,7 @@ API endpoints for exporting logs to CSV
 import logging
 from fastapi import APIRouter, Depends, Query, HTTPException, Request
 from sqlalchemy.orm import Session, load_only
-from sqlalchemy import or_, and_, desc
+from sqlalchemy import or_, and_, desc, func
 from datetime import datetime
 from typing import Optional
 
@@ -337,9 +337,17 @@ def export_messages_csv(
             query = query.filter(RspamdLog.user.ilike(f"%{user}%"))
         if ip:
             query = query.filter(RspamdLog.ip.ilike(f"%{ip}%"))
-        
-        # Limit and order
-        messages = csv_query_rows(query.order_by(desc(MessageCorrelation.last_seen)).limit(settings.csv_export_limit))
+
+        # Addresses hidden with Blacklist Emails stay hidden here, as in the list.
+        # Rows stored before an address was added are left out too
+        hidden = settings.blacklist_emails_list
+        if hidden:
+            for column in (MessageCorrelation.sender, MessageCorrelation.recipient):
+                query = query.filter(or_(column.is_(None), func.lower(column).notin_(hidden)))
+
+        # Newest first, as the list orders them, so the row limit keeps the same messages
+        messages = csv_query_rows(query.order_by(desc(MessageCorrelation.first_seen), desc(MessageCorrelation.id))
+                                  .limit(settings.csv_export_limit))
         
         # Format one row at a time while the response is consumed.
         def rows():

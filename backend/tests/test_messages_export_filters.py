@@ -1,10 +1,11 @@
 """The Messages CSV export applies the filters as the Messages list does: the
 search also finds the client IP and the logged-in user, and the Spam outcome
-also takes the messages Rspamd marked as spam."""
+also takes the messages Rspamd marked as spam. Addresses hidden with Blacklist
+Emails stay hidden, and the rows come newest first as in the list."""
 import csv
 import io
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import pytest
 
@@ -18,6 +19,7 @@ MARK = uuid.uuid4().hex[:8]
 SENDER = f'export-{MARK}@example.com'
 LOGIN = f'login-{MARK}@example.com'
 IP = '203.0.113.77'
+ARCHIVE = f"archive-{MARK}@example.net"
 
 
 def _postgres_available() -> bool:
@@ -54,6 +56,14 @@ def client(monkeypatch):
         db.add(MessageCorrelation(correlation_key=uuid.uuid4().hex, sender=SENDER, recipient='rcpt@example.net',
                                   direction='outbound', subject=f'Report {MARK}', final_status='delivered',
                                   first_seen=now, last_seen=now, created_at=now, rspamd_log_id=scan.id))
+        # Older but updated last: the list orders by first seen, so it comes after Newer
+        for subject, recipient, first, last in ((f'Older {MARK}', 'a@example.net', 120, 0),
+                                                (f'Newer {MARK}', 'b@example.net', 60, 60),
+                                                (f'Archive {MARK}', ARCHIVE, 30, 30)):
+            db.add(MessageCorrelation(correlation_key=uuid.uuid4().hex, sender=SENDER, recipient=recipient,
+                                      direction='outbound', subject=subject, final_status='delivered',
+                                      first_seen=now - timedelta(minutes=first), last_seen=now - timedelta(minutes=last),
+                                      created_at=now))
         db.commit()
     from fastapi.testclient import TestClient
     from app.main import app
@@ -75,3 +85,14 @@ def test_the_export_has_the_messages_the_list_shows(client, query):
     assert _list_total(client, query) >= 1
     rows = _rows(client.get(f'/api/export/messages/csv?{query}'))
     assert [r['Subject'] for r in rows if r['Sender'] == SENDER] == [f'Report {MARK}']
+
+
+def test_the_export_orders_by_first_seen_as_the_list_does(client):
+    subjects = [r['Subject'] for r in _rows(client.get(f'/api/export/messages/csv?sender={SENDER}'))]
+    assert subjects == [f'Report {MARK}', f'Archive {MARK}', f'Newer {MARK}', f'Older {MARK}']
+
+
+def test_the_export_leaves_out_hidden_addresses(client, monkeypatch):
+    monkeypatch.setattr(settings._inner, 'blacklist_emails', ARCHIVE.upper())
+    subjects = [r['Subject'] for r in _rows(client.get(f'/api/export/messages/csv?sender={SENDER}'))]
+    assert f'Archive {MARK}' not in subjects and f'Newer {MARK}' in subjects
