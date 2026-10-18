@@ -3393,18 +3393,16 @@ async def cleanup_deferred_queue_job():
             if not queue_id:
                 continue
 
+            # Collect recipients for suppression
+            addresses = [r.split(' ')[0].strip('<>') for r in (item.get('recipients') or [])]
+            # Mail to a whitelisted domain stays in the queue for Postfix to retry
+            if any(a.split('@')[-1].lower() in whitelist for a in addresses):
+                continue
+            item_recipients = [e for e in map(auto_suppression_address, addresses) if e]
+
             # This item has been deferred longer than threshold - collect for deletion
             items_to_delete.append(queue_id)
-
-            # Collect recipients for suppression
-            for rcpt in (item.get('recipients') or []):
-                rcpt_email = auto_suppression_address(rcpt.split(' ')[0].strip('<>'))
-                if not rcpt_email:
-                    continue
-                domain = rcpt_email.split('@')[-1]
-                if domain in whitelist:
-                    continue
-                recipients_to_suppress.append(rcpt_email)
+            recipients_to_suppress.extend(item_recipients)
 
             age_min = int(age_seconds / 60)
             logger.info(
@@ -4178,17 +4176,19 @@ async def detect_suppressions_job():
                 queue = await mailcow_api.get_queue()
                 if queue:
                     cleanup_set = set(emails_for_queue_cleanup)
+                    whitelist = settings.suppression_whitelist_domains_list
                     items_to_delete = []
                     for item in queue:
                         recipients = item.get('recipients', [])
                         queue_id = item.get('queue_id')
                         if not queue_id or not recipients:
                             continue
-                        for rcpt in recipients:
-                            rcpt_email = rcpt.split(' ')[0].strip('<>').lower()
-                            if rcpt_email in cleanup_set:
-                                items_to_delete.append(queue_id)
-                                break
+                        addresses = [r.split(' ')[0].strip('<>').lower() for r in recipients]
+                        # A message that also goes to a whitelisted domain stays in the queue
+                        if any(a.split('@')[-1] in whitelist for a in addresses):
+                            continue
+                        if any(a in cleanup_set for a in addresses):
+                            items_to_delete.append(queue_id)
 
                     if items_to_delete:
                         await mailcow_api.delete_queue(items_to_delete)

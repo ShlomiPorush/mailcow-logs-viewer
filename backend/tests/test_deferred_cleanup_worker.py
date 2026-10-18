@@ -29,7 +29,9 @@ def state(monkeypatch):
     old = datetime.now(timezone.utc).timestamp() - 7200
     queue = [
         {"queue_id": "OLD", "queue_name": "deferred", "arrival_time": old,
-         "recipients": ["<user@example.com>", "user@example.com", "skip@safe.test"]},
+         "recipients": ["<user@example.com>", "user@example.com"]},
+        {"queue_id": "SAFE", "queue_name": "deferred", "arrival_time": old,
+         "recipients": ["skip@safe.test"]},
         {"queue_id": "NEW", "queue_name": "deferred", "arrival_time": old + 7200,
          "recipients": ["new@example.com"]},
         {"queue_id": "ACTIVE", "queue_name": "active", "arrival_time": old,
