@@ -424,13 +424,19 @@ function gsPageOpen(route) {
 
 async function gsOpenSetting(setting) {
     navigateTo('settings', { sub: setting.tab });
+    const row = el => el.closest('.ui-set-field, .ui-set-bool, .ui-set-wide');
     const find = () => {
         const el = gsEl('edit-' + setting.key) || gsEl('setting-' + setting.key);
-        return el && el.offsetParent ? el : null;
+        // A value kept in a hidden field (the Time Zone picker, Features) is seen through its row
+        const box = el && (el.type === 'hidden' || el.hidden) ? row(el) : el;
+        return box && box.offsetParent ? el : null;
     };
     const show = el => {
-        gsReveal(el.closest('.ui-set-field, .ui-set-bool, .ui-set-wide') || el);
-        if (el.type !== 'hidden') el.focus({ preventScroll: true });
+        gsReveal(row(el) || el);
+        // A hidden field takes the focus through the control that sets it
+        const target = el.type !== 'hidden' && !el.hidden ? el : row(el)
+            && row(el).querySelector('button:not([disabled]), select:not([disabled]), input:not([type="hidden"]):not([disabled])');
+        if (target) target.focus({ preventScroll: true });
     };
     let field = await gsWaitFor(find);
     if (!field) return;
