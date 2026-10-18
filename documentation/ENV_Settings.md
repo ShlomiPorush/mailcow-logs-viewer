@@ -224,7 +224,8 @@ Use a mailbox that only receives reports: the import reads its unread emails and
 | `RAW_LOGS_ENABLED` | `true` | Collect logs for the Logs page. Off: the page says collection is off; services needed by other enabled pages are still collected. |
 | `RAW_LOGS_FETCH_INTERVAL` | `30` | Seconds between reads. |
 | `RAW_LOGS_FETCH_COUNT` | `1000` | Entries per service per read. |
-| `RAW_LOGS_RETENTION_DAYS` | `2` | Days to keep raw logs. Also limits the history on Rate Limits. |
+| `RAW_LOGS_RETENTION_DAYS` | `2` | Days to keep raw logs. |
+| `RATE_LIMITS_RETENTION_DAYS` | `90` | Days to keep the rate limit log for Rate Limits, 1 to 3650. Never less than `RAW_LOGS_RETENTION_DAYS`. |
 | `RAW_LOGS_SERVICES` | `acme,api,autodiscover,dovecot,netfilter,postfix,ratelimited,rspamd-history,sogo,watchdog` | Services the Logs page shows, comma-separated, or `all`. Unknown names are ignored. |
 
 Some services are collected whatever this list says, because other pages read them: `dovecot` for message details and Security, `ratelimited` for Rate Limits and `sogo` for Devices.

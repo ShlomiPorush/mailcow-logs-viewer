@@ -584,7 +584,7 @@ def get_settings_info(db: Session = Depends(get_db)):
                 "cleanup_raw_logs": {
                     "schedule": clock_schedule('cleanup_raw_logs'),
                     "description": "Removes raw logs older than retention period",
-                    "retention": f"{settings.raw_logs_retention_days} days",
+                    "retention": f"{settings.raw_logs_retention_days} days, rate limit log {settings.rate_limits_retention_effective} days",
                     "enabled": True,
                     "status": _get_raw_logs_job_status('cleanup_raw_logs', 'status', True),
                     "last_run": _get_raw_logs_job_status('cleanup_raw_logs', 'last_run', True),

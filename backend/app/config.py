@@ -722,6 +722,11 @@ class Settings(BaseSettings):
         env='RAW_LOGS_RETENTION_DAYS',
         description='Days to keep raw logs before cleanup'
     )
+    rate_limits_retention_days: int = Field(
+        default=90, ge=1, le=3650,
+        env='RATE_LIMITS_RETENTION_DAYS',
+        description='Days to keep the rate limit log for the Rate Limits page (never less than raw log retention)'
+    )
     raw_logs_services: str = Field(
         default='acme,api,autodiscover,dovecot,netfilter,postfix,ratelimited,rspamd-history,sogo,watchdog',
         env='RAW_LOGS_SERVICES',
@@ -883,6 +888,12 @@ class Settings(BaseSettings):
             return []
         return _cached_active_domains
     
+    @property
+    def rate_limits_retention_effective(self) -> int:
+        """Days the rate limit log is kept: its own setting, but never less than
+        the other raw logs, so an install that kept them longer loses nothing"""
+        return max(self.rate_limits_retention_days, self.raw_logs_retention_days)
+
     @property
     def blacklist_emails_list(self) -> List[str]:
         """Parse blacklisted emails into a list"""

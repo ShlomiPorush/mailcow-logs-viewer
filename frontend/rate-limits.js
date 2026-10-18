@@ -89,6 +89,8 @@ async function loadRateLimits() {
         }
 
         rateLimitEventsData = await eventsResponse.json();
+        // The server narrows a window longer than the history it keeps; follow it
+        if (rateLimitEventsData.hours) rateLimitWindowHours = rateLimitEventsData.hours;
         rateLimitConfigData = await limitsResponse.json();
 
         loading.classList.add('hidden');
@@ -163,13 +165,15 @@ function renderRateLimitActivityCard() {
         : `${hits.toLocaleString()} blocked ${hits === 1 ? 'send' : 'sends'}`
             + ` from ${senders} ${senders === 1 ? 'sender' : 'senders'}`;
 
+    // Only the windows the kept history covers (Settings > Logs, Rate Limits Retention Days)
+    const offered = data.windows || [24, 168, 720, 2160, 8760];
     const options = [
         { hours: 24, label: 'Last 24 hours' },
         { hours: 168, label: 'Last 7 days' },
         { hours: 720, label: 'Last 30 days' },
         { hours: 2160, label: 'Last 90 days' },
         { hours: 8760, label: 'Last year' }
-    ].map(option => `
+    ].filter(option => offered.includes(option.hours)).map(option => `
         <option value="${option.hours}" ${option.hours === rateLimitWindowHours ? 'selected' : ''}>${option.label}</option>
     `).join('');
 
