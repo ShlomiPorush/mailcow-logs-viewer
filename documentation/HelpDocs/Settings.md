@@ -97,11 +97,13 @@ Saving a new license key opens **GeoIP Database Setup**, which checks the key, d
 
 Which addresses **Status** > **Blocklists** checks, and the DNS resolver it asks. Spamhaus refuses queries from public resolvers such as Google or Cloudflare, so use your own resolver. Switching on **Blacklist Source Transports** or **Blacklist Source Relayhosts** adds their addresses right away. See [Blocklist monitoring](IP_Blacklist_Monitor.md).
 
-## Spam Filter
+## Queue Management
 
-Automatic bounce handling for [Spam Filter](Spam_Filter.md) starts only when **Suppression Enabled** is on, even though the other switches start on; manual actions stay available. The soft-bounce settings apply only while **Queue Cleanup Enabled** is off.
+What happens when outgoing mail cannot be delivered. The blocked addresses are listed on [Spam Filter](Spam_Filter.md) > **Suppressions**. Nothing runs until **Handle undeliverable mail automatically** is on (off by default); actions on the Suppressions page work either way.
 
-<!-- VERIFY: owner's decision pending (finding 14): the soft-bounce settings work only while Queue Cleanup Enabled is off (on by default). Update this section and the two rows in ENV_Settings.md once decided. -->
+- **Permanent delivery failure** (5.x.x) and **Temporary delivery failure** (4.x.x) are one choice each. A temporary failure is deleted after its minutes in the queue (the default), or stays in the queue while the address is blocked after a number of failures, at the first one, or not at all.
+- The app reads the Postfix logs only when a choice needs them.
+- A value set in the environment closes only the options it rules out, and the choice names the variable.
 
 ## Quarantine
 

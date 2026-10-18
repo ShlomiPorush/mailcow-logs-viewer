@@ -30,8 +30,7 @@ Retry, hold, release and delete need a [read-write API key](../Using_the_App.md#
 
 ## Settings that change this page
 
-<!-- VERIFY: owner's decision pending (finding 6): queue cleanup deletes stuck mail to whitelisted domains too. Update the last sentence of the next item once decided. -->
-- **Settings** > **Spam Filter** > **Deferred Queue Cleanup**: when **Suppression Enabled**, **Queue Cleanup Enabled**, the Spam Filter feature and the read-write API key are all on, **Cleanup Deferred Queue** runs every 5 minutes. It deletes deferred messages whose age since arrival reaches **Queue Cleanup Threshold Minutes** (60 by default) and suppresses recipients outside the whitelist. Messages to whitelisted domains are still deleted. See [Spam Filter](Spam_Filter.md#automatic-suppressions).
+- **Settings** > **Queue Management** > **Temporary delivery failure**: with **Delete after N minutes in the queue**, **Handle undeliverable mail automatically**, the Spam Filter feature and the read-write API key, **Cleanup Deferred Queue** runs every 5 minutes. It deletes deferred messages whose age since arrival reaches those minutes (60 by default) and blocks their recipients. Messages to a domain under **Exclude these domains** are left in the queue. See [Spam Filter](Spam_Filter.md#automatic-suppressions).
 - Turning off **Queue** under **Settings** > **Features** removes the page and its counter.
 
 ## When something is missing
