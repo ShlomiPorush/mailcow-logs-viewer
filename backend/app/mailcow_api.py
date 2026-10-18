@@ -1676,11 +1676,18 @@ class MailcowAPI:
             "items": [map_filename],
             "attr": {"rspamd_map_data": map_data}
         }
-        return await self._make_rw_request(
+        result = await self._make_rw_request(
             "/api/v1/edit/rspamd-map",
             method="POST",
             json=payload
         )
+        # mailcow answers 200 even when it did not save: only a reply of
+        # success entries says the map was written
+        entries = mailcow_reply(result)
+        if not entries or any(entry.get("type") != "success" for entry in entries):
+            refused = next((entry.get("msg") for entry in entries if entry.get("type") != "success"), None)
+            raise MailcowAPIError(f"mailcow did not save the map {map_filename}: {refused or 'no confirmation in its reply'}")
+        return result
 
     @property
     def has_rw_key(self) -> bool:

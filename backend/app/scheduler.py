@@ -4281,9 +4281,14 @@ async def sync_suppressions_to_rspamd_job():
     
     try:
         from app.routers.suppressions import sync_suppressions_worker
+        # automatic: the worker checks the switches again once it holds the map
+        # lock, so a sync that was waiting does not write after they went off
         result = await asyncio.get_running_loop().run_in_executor(
-            get_thread_pool_executor(), sync_suppressions_worker
+            get_thread_pool_executor(), sync_suppressions_worker, True
         )
+        if result.get('skipped_off'):
+            update_job_status('sync_suppressions', 'success')
+            return
 
         logger.info(f"[SUPPRESSION] Rspamd sync complete: {result.get('synced', 0)} active entries")
         update_job_status('sync_suppressions', 'success')
