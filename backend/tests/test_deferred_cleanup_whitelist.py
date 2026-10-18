@@ -34,7 +34,8 @@ def test_whitelisted_domain_mail_stays_in_queue(monkeypatch):
     asyncio.run(scheduler.cleanup_deferred_queue_job())
 
     scheduler.mailcow_api.delete_queue.assert_awaited_once_with(["OTHER"])
-    assert stored == ["user@example.org"]
+    assert [r["email"] for r in stored] == ["user@example.org"]
+    assert stored[0]["queue_id"] == "OTHER", 'the queued message is handed over for the block details'
 
 
 def test_hard_bounce_keeps_messages_that_also_go_to_a_whitelisted_domain(monkeypatch):

@@ -22,6 +22,7 @@ def state(monkeypatch):
         monkeypatch.setattr(settings._inner,key,value)
     monkeypatch.setattr(scheduler.mailcow_api, "headers_rw", {"X-API-Key":"test-key"})
     monkeypatch.setattr(scheduler, "update_job_status", Mock())
+    monkeypatch.setattr(scheduler, "record_bounces", lambda db, captured: None)
     monkeypatch.setattr(scheduler.mailcow_api, "get_queue", AsyncMock(return_value=[]))
     monkeypatch.setattr(scheduler.mailcow_api, "delete_queue", AsyncMock())
 

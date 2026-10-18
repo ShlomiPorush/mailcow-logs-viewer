@@ -22,6 +22,7 @@ from .app_time import UTC, app_tz
 from .config import settings, set_cached_active_domains
 from .database import get_db_context, SessionLocal
 from .mailcow_api import mailcow_api, mailcow_handled_items
+from .services.suppression_events import record_bounces, record_stuck
 from .models import EasDevice, PostfixLog, RspamdLog, NetfilterLog, MessageCorrelation, DMARCSync, DomainDNSCheck, MailboxStatistics, AliasStatistics, MonitoredHost, BlacklistCheck, DMARCReport, DMARCRecord, TLSReport, TLSReportPolicy, SpamSuppression, RawServiceLog, SystemSetting
 from .correlation import (
     detect_direction,
@@ -3351,9 +3352,21 @@ async def send_weekly_summary_email_job():
         update_job_status('send_weekly_summary', 'failed', str(e))
 
 def _store_deferred_suppressions_worker(recipients_to_suppress):
-    """Persist deferred recipients within a worker-owned database session."""
-    unique_recipients = set(recipients_to_suppress)
+    """Persist deferred recipients within a worker-owned database session.
+
+    Each item is a recipient address, or a dict with the address ("email")
+    and the queue item it came from (queue_id, sender, arrived, reason), which
+    is kept as the block's details. An address counts once per run, however
+    many of its messages were stuck; each message is kept as its own event.
+    """
+    items = [r if isinstance(r, dict) else {'email': r} for r in recipients_to_suppress]
+    by_email = {}
+    for item in items:
+        by_email.setdefault(item['email'], []).append(item)
+    unique_recipients = list(by_email)
     suppress_count = 0
+    captured = []
+    note = f'Deferred in queue > {settings.queue_cleanup_threshold_minutes}m - auto-cleaned'
 
     with get_db_context() as db:
         for email in unique_recipients:
@@ -3368,7 +3381,9 @@ def _store_deferred_suppressions_worker(recipients_to_suppress):
                 existing.last_bounce_message = f'Deferred in queue > {settings.queue_cleanup_threshold_minutes}m - auto-cleaned'
                 existing.updated_at = datetime.utcnow()
 
+                outcome = 'extended'
                 if not existing.active or (existing.expires_at and existing.expires_at < datetime.utcnow()):
+                    outcome = 'activated'
                     existing.active = True
                     existing.synced_to_rspamd = False
 
@@ -3378,6 +3393,7 @@ def _store_deferred_suppressions_worker(recipients_to_suppress):
                     settings.suppression_max_expiry_days
                 )
                 existing.expires_at = datetime.utcnow() + timedelta(days=expiry_days)
+                entry = existing
             else:
                 new_entry = SpamSuppression(
                     email=email,
@@ -3395,8 +3411,11 @@ def _store_deferred_suppressions_worker(recipients_to_suppress):
                     correlation_key=None
                 )
                 db.add(new_entry)
+                entry, outcome = new_entry, 'created'
             suppress_count += 1
+            captured.extend((entry, {**item, 'note': note}, outcome, entry.expires_at) for item in by_email[email] if item.get('queue_id'))
 
+        record_stuck(db, captured)
         db.commit()
 
     return suppress_count
@@ -3454,7 +3473,16 @@ async def cleanup_deferred_queue_job():
             # Mail to a whitelisted domain stays in the queue for Postfix to retry
             if any(a.split('@')[-1].lower() in whitelist for a in addresses):
                 continue
-            item_recipients = [e for e in map(auto_suppression_address, addresses) if e]
+            item_recipients = []
+            arrived = datetime.fromtimestamp(arrival_time, tz=timezone.utc).replace(tzinfo=None)
+            for raw in (item.get('recipients') or []):
+                email = auto_suppression_address(raw.split(' ')[0].strip('<>'))
+                if not email:
+                    continue
+                # mailcow writes the deferral reason after the address: "a@b (connect to ...: timed out)"
+                reason = raw.split(' ', 1)[1].strip().strip('()') if ' ' in raw else None
+                item_recipients.append({'email': email, 'queue_id': queue_id, 'sender': item.get('sender'),
+                                        'arrived': arrived, 'reason': reason or None})
 
             # This item has been deferred longer than threshold - collect for deletion
             items_to_delete.append(queue_id)
@@ -4092,6 +4120,8 @@ def _detect_suppressions_worker():
         # bouncing several times in one batch must update the pending
         # entry, not insert a duplicate (unique index on email)
         pending_entries = {}
+        # (block, bounce line, what it did): kept with the block as Block details
+        captured = []
 
         for log in bounce_logs:
             # Skip DSN bounce notifications:
@@ -4148,8 +4178,10 @@ def _detect_suppressions_worker():
                 # Re-activate if expired; Count then suppress waits for the threshold
                 below_threshold = (is_soft and settings.suppression_soft_bounce_action == 'count'
                                    and existing.soft_bounce_count < settings.suppression_soft_bounce_threshold)
+                outcome = 'extended' if existing.active else 'counted'
                 if (not existing.active or (existing.expires_at and existing.expires_at < datetime.utcnow())) \
                         and not below_threshold:
+                    outcome = 'activated'
                     existing.active = True
                     existing.synced_to_rspamd = False
 
@@ -4161,6 +4193,7 @@ def _detect_suppressions_worker():
                 existing.expires_at = datetime.utcnow() + timedelta(days=expiry_days)
 
                 updated_count += 1
+                captured.append((existing, log, outcome, existing.expires_at))
             else:
                 # Determine if we should suppress
                 if is_soft and settings.suppression_soft_bounce_action == 'count':
@@ -4194,7 +4227,11 @@ def _detect_suppressions_worker():
                 db.add(new_entry)
                 pending_entries[recipient] = new_entry
                 new_count += 1
+                captured.append((new_entry, log, 'created' if is_active else 'counted', new_entry.expires_at))
 
+        # In the same transaction as the counts and the watermark: if keeping
+        # the details fails, nothing of this run is counted
+        record_bounces(db, captured)
         db.commit()
 
     return new_count, updated_count, emails_for_queue_cleanup

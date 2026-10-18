@@ -36,7 +36,9 @@ def _schema(*tables):
         conn.execute(text(f"CREATE SCHEMA {schema}"))
     isolated = create_engine(engine.url, connect_args={"options": f"-csearch_path={schema}"})
     try:
-        Base.metadata.create_all(isolated, tables=[t.__table__ for t in tables])
+        from app.models import SpamSuppression, SuppressionEvent
+        extra = [SuppressionEvent] if SpamSuppression in tables else []
+        Base.metadata.create_all(isolated, tables=[t.__table__ for t in (*tables, *extra)])
         yield isolated
     finally:
         isolated.dispose()

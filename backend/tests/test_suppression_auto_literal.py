@@ -227,4 +227,4 @@ def test_deferred_cleanup_does_not_suppress_a_recipient_with_a_slash_in_the_doma
                         lambda recipients: captured.extend(recipients) or len(recipients))
 
     asyncio.run(scheduler.cleanup_deferred_queue_job())
-    assert captured == ['stuck@example.net']
+    assert [r['email'] for r in captured] == ['stuck@example.net']
