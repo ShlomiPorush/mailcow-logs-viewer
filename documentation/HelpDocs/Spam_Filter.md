@@ -19,7 +19,6 @@ Search matches the address, notes and last bounce message. **Expired** shows ent
 
 ### The list
 
-<!-- VERIFY: owner's decision pending (finding 42): the Will unsync tag can never appear (it needs active=False with synced_to_rspamd=True, which no code path leaves). The Rspamd row below does not mention it; update that row once decided. -->
 | Value | Meaning |
 |---|---|
 | **Reason** | Hard Bounce: `5.x.x`; Soft Bounce: `4.x.x`; Deferred Stuck: queue cleanup; Rejected: another bounce status. |
@@ -70,7 +69,11 @@ The app replaces only the section between these markers; put your own entries ab
 # === END MANAGED SECTION ===
 ```
 
-The map is written only when managed entries change. If the existing map cannot be read, sync fails without writing and retries next time. Bare addresses in your own lines are anchored during sync so they cannot match longer addresses containing them.
+The map is written only when managed entries change. If the existing map cannot be read, sync fails without writing and retries next time. A write counts only when mailcow confirms it. Bare addresses in your own lines are anchored during sync so they cannot match longer addresses containing them.
+
+### When automatic updates stop or start
+
+Automatic updates run while Spam Filter, **Handle undeliverable mail automatically** and **Automatically update Rspamd blocks** are all on. Turning one off, or turning Spam Filter off with its list, asks whether to remove the app's blocks from Rspamd or keep them. Removing empties only the managed section; your lines above it stay. Turning updates back on says how many entries will be written, with **Start fresh** to empty both the list and the managed section. While updates are off, a note above the list says how many of the app's blocks remain in Rspamd, read from the map.
 
 ### Import and export
 

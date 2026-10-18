@@ -1270,7 +1270,7 @@ Deletes all stored data of a feature that is already off (in `disabled_features`
 | `mailbox-stats` | `alias_statistics`, and `mailbox_statistics` unless Rate Limits is on (it reads each mailbox's limit from that table) |
 | `logs` | `raw_service_logs`, only the services nothing collects any more: `dovecot` always stays because message details read it, `ratelimited` stays while Rate Limits is on, `sogo` while Devices is on |
 | `blacklist` | `blacklist_checks`, `monitored_hosts` |
-| `spam-filter` | `spam_suppressions` |
+| `spam-filter` | `spam_suppressions`. The body also needs `"rspamd": "remove"` or `"keep"` for the app's blocks in Rspamd, else 400. With `remove`, the list is deleted only after mailcow confirmed the blocks are gone; otherwise it answers 409 or 502 and deletes nothing |
 | `quarantine` | `quarantine_rules`, `quarantine_rule_logs` |
 | `devices` | `eas_devices` |
 
@@ -2123,7 +2123,19 @@ All entries as CSV, with the columns `email,type,reason,source,notes,bounce_coun
 
 #### POST /api/suppressions/sync
 
-Writes the active, unexpired entries to Rspamd's `global_rcpt_blacklist.map` now: `{ "success": true, "synced": 120, "message": "Synced 120 entries to Rspamd" }`. The managed entries sit between markers in the map; entries above the markers are kept. No read-write key returns 403; no `RSPAMD_PASSWORD` 400; a mailcow failure 502.
+Writes the active, unexpired entries to Rspamd's `global_rcpt_blacklist.map` now: `{ "success": true, "synced": 120, "message": "Synced 120 entries to Rspamd" }`. The managed entries sit between markers in the map; entries above the markers are kept. No read-write key returns 403; no `RSPAMD_PASSWORD` 400; another map write still running 409; a mailcow failure, or a reply that does not confirm the save, 502.
+
+#### GET /api/suppressions/rspamd/state
+
+What the app has in Rspamd, read from the map: `{ "automatic": false, "active_count": 15, "writable": true, "readable": true, "managed_count": 12, "reason": null, "reason_text": null }`. `managed_count` counts map lines in the managed section (a line can be a domain or a pattern), `null` when the map cannot be read. `reason` is `no_rw_key`, `no_password`, `no_rw_key_and_password`, `read_failed` or `map_not_found`.
+
+#### POST /api/suppressions/rspamd/clear
+
+Empties the managed section and leaves every other line of the map as it is; the list stays, marked as not in Rspamd. Returns `{ "removed_blocks": 12 }`. When it cannot read or write the map: 409 with `{ "detail": { "code": "no_rw_key", "message": "..." } }`; a refused Read-Write key 502 `rejected_rw_key`; a write mailcow did not confirm 502 `not_confirmed`.
+
+#### POST /api/suppressions/start-fresh
+
+Empties the managed section, then deletes every entry of the list. The list is deleted only after mailcow confirmed the map. Returns `{ "removed_blocks": 12, "deleted_entries": 15 }`; errors as for clear.
 
 ---
 
