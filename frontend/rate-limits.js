@@ -179,7 +179,7 @@ function renderRateLimitActivityCard() {
     container.innerHTML = `
         <section class="ui-panel">
             ${rateLimitCardHead('Rate limit activity', subtitle, `
-                <select id="rate-limit-window" onchange="changeRateLimitWindow(this.value)" class="ui-select ui-select-auto" aria-label="Window" data-picker-label="Window">
+                <select id="rate-limit-window" onchange="changeRateLimitWindow(this.value)" class="ui-select ui-select-auto" aria-label="Window" data-picker-label="Window" data-picker-host="ui-picker-end">
                     ${options}
                 </select>`)}
             ${hasHits

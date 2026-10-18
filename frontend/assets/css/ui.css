@@ -689,8 +689,11 @@
 .ui-sec-seg button { padding: 6px 12px; font-size: 13.5px; }
 .ui-sec-seg button b { margin-inline-start: 4px; font-variant-numeric: tabular-nums; }
 .ui-sec-days { display: inline-flex; align-items: center; gap: 8px; margin-inline-start: auto; }
-/* The period sits at the end of the row, so its choices open toward the start */
-.ui-sec-dhost .ui-popover { inset-inline-start: auto; inset-inline-end: 0; width: 220px; }
+/* The period sits at the end of the row, so its choices open toward the start.
+   The Rate Limits window (.ui-picker-end) is the same kind of picker and opens the same way */
+.ui-sec-dhost .ui-popover, .ui-picker-end .ui-popover { inset-inline-start: auto; inset-inline-end: 0; width: 220px; }
+/* Its choices read like the card head it sits in, as the Security period's do */
+.ui-rl-tools .ui-picker { font-weight: 650; }
 .ui-sec-days small { font-size: 12px; white-space: nowrap; }
 .ui-sec-filter, .ui-logs-filter { display: inline-flex; align-items: center; gap: 4px; padding: 2px 4px 2px 9px; border-radius: 999px; background: var(--ui-ink); color: var(--ui-bg); font-size: 12px; font-weight: 600; }
 .ui-sec-filter button, .ui-logs-filter button { border: 0; background: none; color: inherit; font-size: 14px; line-height: 1; cursor: pointer; padding: 0 4px; }
@@ -2758,8 +2761,8 @@ button.ui-dm-node:hover { border-color: var(--ui-ink); }
 .ui-picker.is-field { display: block; }
 .ui-picker.is-field .ui-select-btn { width: 100%; }
 .ui-picker.is-field .ui-picker-panel { width: 100%; min-width: min(280px, calc(100vw - 16px)); }
-/* A settings card does not cut the open list either */
-.ui-panel:has(.ui-picker.is-field > .ui-picker-panel:not(.hidden)) { overflow: visible; }
+/* No card cuts an open picker either (a settings field, the Rate Limits window) */
+.ui-panel:has(.ui-picker-panel:not(.hidden)) { overflow: visible; }
 .ui-picker-btn[aria-expanded="true"] .ui-select-arrow { transform: rotate(180deg); }
 .ui-picker-search { width: 100%; }
 .ui-picker-list { display: grid; gap: 1px; max-height: min(320px, 45vh); overflow-y: auto; }
