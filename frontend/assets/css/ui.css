@@ -1802,7 +1802,7 @@ button.ui-st-card:hover { outline: 1px solid var(--ui-line); }
 .ui-set-field > .ui-label, .ui-set-field > .ui-set-desc, .ui-set-field > .ui-set-env { grid-column: 1; }
 .ui-set-field > .ui-label { grid-row: 1; margin: 0; color: var(--ui-ink); font-size: 14px; }
 .ui-set-field > .ui-set-desc { grid-row: 2; }
-.ui-set-field > .ui-input, .ui-set-field > .ui-select, .ui-set-field > .ui-set-secret, .ui-set-field > .ui-set-checks, .ui-set-field > .ui-seg { grid-row: 1 / span 2; }
+.ui-set-field > .ui-input, .ui-set-field > .ui-select, .ui-set-field > .ui-set-secret, .ui-set-field > .ui-set-checks, .ui-set-field > .ui-seg, .ui-set-field > .ui-picker { grid-row: 1 / span 2; }
 /* Three-way choice: at the end edge of the row with Reset under the description, like the on/off toggles */
 .ui-set-field > .ui-seg { justify-self: end; }
 .ui-set-seg > .ui-set-clear { grid-column: 1; }
@@ -1811,6 +1811,7 @@ button.ui-st-card:hover { outline: 1px solid var(--ui-line); }
 .ui-set-desc { margin: 0; color: var(--ui-muted); font-size: 12.5px; line-height: 1.5; }
 .ui-set-env { display: flex; align-items: center; gap: 5px; margin: 0; color: var(--ui-muted); font-size: 12px; }
 .ui-set-field.is-locked > .ui-input, .ui-set-field.is-locked > .ui-select { opacity: .7; }
+.ui-set-field.is-locked > .ui-picker .ui-select-btn:disabled { opacity: .7; }
 .ui-set-clear { justify-self: start; padding: 0; border: 0; background: none; color: var(--ui-muted); font: inherit; font-size: 12px; cursor: pointer; }
 .ui-set-clear:hover { color: var(--ui-fail); }
 .ui-set-clear.is-reset { color: var(--ui-info); }
@@ -1899,7 +1900,7 @@ button.ui-st-card:hover { outline: 1px solid var(--ui-line); }
 @media (max-width: 760px) {
     .ui-set-field { grid-template-columns: minmax(0, 1fr); }
     .ui-set-field > *, .ui-set-field > .ui-label, .ui-set-field > .ui-set-desc { grid-column: 1; grid-row: auto; }
-    .ui-set-field > .ui-input, .ui-set-field > .ui-select, .ui-set-field > .ui-set-secret, .ui-set-field > .ui-set-checks, .ui-set-field > .ui-seg { grid-row: auto; }
+    .ui-set-field > .ui-input, .ui-set-field > .ui-select, .ui-set-field > .ui-set-secret, .ui-set-field > .ui-set-checks, .ui-set-field > .ui-seg, .ui-set-field > .ui-picker { grid-row: auto; }
     .settings-mobile-nav { top: 0; }
     .ui-savebar { inset: auto 10px calc(76px + env(safe-area-inset-bottom)) 10px; width: auto; }
     .ui-savebar .ui-savebar-count { flex: 1; }
@@ -2728,6 +2729,13 @@ button.ui-dm-node:hover { border-color: var(--ui-ink); }
 .ui-picker-panel[role="listbox"] { max-height: min(420px, 60vh); overflow-y: auto; }
 .ui-picker-panel [role="option"][hidden] { display: none; }
 .ui-picker-panel.has-search { width: min(320px, calc(100vw - 16px)); }
+/* A picker in a form: a select-like button as wide as the field, its panel too */
+.ui-picker.is-field { display: block; }
+.ui-picker.is-field .ui-select-btn { width: 100%; }
+.ui-picker.is-field .ui-picker-panel { width: 100%; min-width: min(280px, calc(100vw - 16px)); }
+/* A settings card does not cut the open list either */
+.ui-panel:has(.ui-picker.is-field > .ui-picker-panel:not(.hidden)) { overflow: visible; }
+.ui-picker-btn[aria-expanded="true"] .ui-select-arrow { transform: rotate(180deg); }
 .ui-picker-search { width: 100%; }
 .ui-picker-list { display: grid; gap: 1px; max-height: min(320px, 45vh); overflow-y: auto; }
 .ui-picker-none { padding: 4px 8px; font-size: 12.5px; }

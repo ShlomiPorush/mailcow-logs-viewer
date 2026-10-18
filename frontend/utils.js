@@ -1322,6 +1322,8 @@ if (typeof MutationObserver !== 'undefined' && document.body) new MutationObserv
 //     <button class="ui-msg-range ui-picker-btn" aria-haspopup aria-expanded aria-controls="ID-panel">
 //     <span id="ID-panel" class="ui-popover ui-picker-panel" role="listbox|dialog"> ...
 // A page that redraws an open picker keeps it open: uiPickerIsOpen(id).
+// In a form (field: true) the button looks like a select and shows only the
+// value; the form's label names it (labelledBy).
 
 // open: the picker shown; held: the picker whose button has the focus, so a
 // redraw of the page (new data) can give it back; query: what was typed in a search
@@ -1331,17 +1333,19 @@ function uiPickerIsOpen(id) {
     return uiPickers.open === id;
 }
 
+// "new york" finds America/New_York
 function uiPickerMatches(label, query) {
-    return !query || label.toLowerCase().includes(query.trim().toLowerCase());
+    const plain = text => text.toLowerCase().replace(/_/g, ' ');
+    return !query || plain(label).includes(plain(query.trim()));
 }
 
-// options: [{ label, hint, selected, onclick }] for a list; panel: HTML for a dialog;
-// search: the search field's label, for a long list
-function uiPicker({ id, label, value, set = false, options = null, panel = '', panelLabel = '', panelClass = '', hostClass = '', onOpen = '', search = '' }) {
+// options: [{ label, hint, value, selected, onclick }] for a list (value: the option's
+// data-value); panel: HTML for a dialog; search: the search field's label, for a long list
+function uiPicker({ id, label, value, set = false, options = null, panel = '', panelLabel = '', panelClass = '', hostClass = '', onOpen = '', search = '', field = false, labelledBy = '', disabled = false }) {
     const open = uiPickerIsOpen(id);
     const list = Array.isArray(options);
     const query = search ? (uiPickers.query[id] || '') : '';
-    const items = list ? options.map(o => `<button type="button" role="option" class="ui-fct" tabindex="-1" aria-selected="${o.selected ? 'true' : 'false'}"${uiPickerMatches(o.label, query) ? '' : ' hidden'} onclick="${o.onclick}"><span>${escapeHtml(o.label)}</span>${o.hint !== undefined ? `<small>${escapeHtml(String(o.hint))}</small>` : ''}</button>`).join('') : '';
+    const items = list ? options.map(o => `<button type="button" role="option" class="ui-fct" tabindex="-1" aria-selected="${o.selected ? 'true' : 'false'}"${o.value !== undefined ? ` data-value="${escapeHtml(String(o.value))}"` : ''}${uiPickerMatches(o.label, query) ? '' : ' hidden'} onclick="${o.onclick}"><span>${escapeHtml(o.label)}</span>${o.hint !== undefined ? `<small>${escapeHtml(String(o.hint))}</small>` : ''}</button>`).join('') : '';
     const anyShown = list && options.some(o => uiPickerMatches(o.label, query));
     let role = list ? 'listbox' : 'dialog';
     let body = list ? `<span class="ui-label" aria-hidden="true">${escapeHtml(label)}</span>${items}` : panel;
@@ -1351,8 +1355,11 @@ function uiPicker({ id, label, value, set = false, options = null, panel = '', p
             <span id="${escapeHtml(id)}-list" class="ui-fct-list ui-picker-list" role="listbox" aria-label="${escapeHtml(label)}">${items}</span>
             <span class="ui-picker-none ui-muted${anyShown ? ' hidden' : ''}" role="status">No matches</span>`;
     }
-    return `<span class="ui-popover-host ui-picker${hostClass ? ` ${hostClass}` : ''}" data-picker="${escapeHtml(id)}"${onOpen ? ` data-on-open="${escapeHtml(onOpen)}"` : ''}>
-        <button type="button" class="ui-msg-range ui-picker-btn${set ? ' is-set' : ''}" aria-haspopup="${role}" aria-expanded="${open}" aria-controls="${escapeHtml(id)}-panel"><span class="ui-picker-name">${escapeHtml(label)}:</span> ${value}</button>
+    const button = field
+        ? `<button type="button" class="ui-select ui-select-btn ui-picker-btn" aria-haspopup="${role}" aria-expanded="${open}" aria-controls="${escapeHtml(id)}-panel"${labelledBy ? ` aria-labelledby="${escapeHtml(labelledBy)}"` : ''}${disabled ? ' disabled' : ''}><span>${value}</span><svg class="ui-select-arrow" width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg></button>`
+        : `<button type="button" class="ui-msg-range ui-picker-btn${set ? ' is-set' : ''}" aria-haspopup="${role}" aria-expanded="${open}" aria-controls="${escapeHtml(id)}-panel"><span class="ui-picker-name">${escapeHtml(label)}:</span> ${value}</button>`;
+    return `<span class="ui-popover-host ui-picker${field ? ' is-field' : ''}${hostClass ? ` ${hostClass}` : ''}" data-picker="${escapeHtml(id)}"${onOpen ? ` data-on-open="${escapeHtml(onOpen)}"` : ''}>
+        ${button}
         <span id="${escapeHtml(id)}-panel" class="ui-popover ui-msg-time-panel ui-picker-panel${search ? ' has-search' : ''}${panelClass ? ` ${panelClass}` : ''}${open ? '' : ' hidden'}" role="${role}" aria-label="${escapeHtml(panelLabel || label)}">${body}</span>
     </span>`;
 }
@@ -1527,7 +1534,8 @@ if (typeof document !== 'undefined' && document.addEventListener) {
         const search = panel.querySelector('.ui-picker-search');
         if (search && event.target === search) {
             if (event.key === 'ArrowDown' && items.length) { event.preventDefault(); items[0].focus(); }
-            else if (event.key === 'Enter' && items.length) { event.preventDefault(); items[0].click(); }
+            // With no match, Enter does nothing (it would submit a form around the picker)
+            else if (event.key === 'Enter') { event.preventDefault(); if (items.length) items[0].click(); }
             return;
         }
         const list = uiPickerList(panel);

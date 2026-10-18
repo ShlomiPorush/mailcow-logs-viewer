@@ -243,7 +243,7 @@ var SETTINGS_FIELD_DESCRIPTIONS = {
     log_level: 'Log level: DEBUG, INFO, WARNING, ERROR, CRITICAL. Default: WARNING.',
     app_title: 'Application title (shown in browser tab).',
     app_logo_url: 'Logo URL (optional; leave empty to use the default project icon).',
-    tz: 'Every time and day in the app follows this zone: the pages, emails, CSV exports and when the daily and weekly jobs run. Pick the time zone of your mailcow server. Default: UTC.',
+    tz: "The app's time zone. Default: UTC.",
     debug: 'Enable debug mode (shows detailed errors). Use only for development. Never enable in production. Default: false.',
     max_search_results: 'Maximum records to return in search results. Default: 1000.',
     csv_export_limit: 'CSV export row limit. Default: 10000.',
@@ -371,6 +371,28 @@ function settingsTimeZoneNames() {
         return [];
     }
     return ['UTC', ...names.filter(name => name !== 'UTC')];
+}
+
+const SETTINGS_TZ_NOT_SET = 'Not set (UTC)';
+
+// The Time Zone picker writes its choice to the hidden field the form saves
+function settingsPickZone(option) {
+    const field = document.getElementById('edit-tz');
+    if (!field || field.disabled) return;
+    field.value = option.dataset.value;
+    settingsShowZone(field);
+    field.form && field.form.dispatchEvent(new Event('input', { bubbles: true }));
+}
+
+// The button and the chosen option follow the hidden field; the note about
+// the saved zone goes once another one is picked
+function settingsShowZone(field) {
+    const host = field.parentElement.querySelector('.ui-picker');
+    if (!host) return;
+    host.querySelector('.ui-picker-btn > span').textContent = field.value || SETTINGS_TZ_NOT_SET;
+    host.querySelectorAll('[role="option"]').forEach(o => o.setAttribute('aria-selected', String(o.dataset.value === field.value)));
+    const note = field.parentElement.querySelector('[data-zone-note]');
+    if (note) note.hidden = field.value !== field.dataset.saved;
 }
 
 function settingsTimeZoneKnown(name) {
@@ -789,18 +811,21 @@ function renderSettingsEditField(key, value, sensitiveKeys, description, envLock
         const unknown = current !== '' && (!settingsTimeZoneKnown(current)
             || (typeof appTimezoneStatus !== 'undefined' && appTimezoneStatus.valid === false && appTimezoneStatus.configured === current));
         const names = current && !zones.includes(current) ? [current, ...zones] : zones;
-        const optionsHtml = '<option value=""' + (current === '' ? ' selected' : '') + '>Not set (UTC)</option>' +
-            names.map(name => '<option value="' + escapeHtml(name) + '"' + (name === current ? ' selected' : '') + '>' +
-                escapeHtml(name + (name === current && unknown ? ' (unknown)' : '')) + '</option>').join('');
+        // A long list, so a picker with a search (utils.js, uiPicker); the hidden field holds the value
+        const options = [{ value: '', label: SETTINGS_TZ_NOT_SET }, ...names.map(name => ({ value: name, label: name + (name === current && unknown ? ' (unknown)' : '') }))]
+            .map(o => ({ ...o, selected: o.value === current, onclick: 'settingsPickZone(this)' }));
+        const picker = uiPicker({
+            id: 'settings-' + key, label, value: escapeHtml(current || SETTINGS_TZ_NOT_SET), options, search: 'Search time zones',
+            field: true, labelledBy: 'label-' + keyAttr, disabled: envLocked
+        });
+        // The description already says to pick the server's zone; only a name the app cannot use needs a word more
         const note = unknown
-            ? '<small class="ui-text-warn" role="status">' + escapeHtml(`"${current}" is not a known time zone, so the app uses UTC. `) +
+            ? '<small class="ui-text-warn" role="status" data-zone-note>' + escapeHtml(`"${current}" is not a known time zone, so the app uses UTC. `) +
                 (envLocked ? 'Fix TZ in the environment.' : 'Pick a time zone from the list.') + '</small>'
-            : (current === '' || current === 'UTC') && !envLocked
-                ? '<small class="ui-muted">Times are shown in UTC. Pick the time zone of your mailcow server so times and days match it.</small>'
-                : '';
-        return '<div class="ui-set-field' + (envLocked ? ' is-locked' : '') + '"><label for="edit-' + keyAttr + '" class="ui-label">' + escapeHtml(label) + labelLockIcon + changedPill + '</label>' +
-            descHtml +
-            '<select id="edit-' + keyAttr + '" name="' + keyAttr + '" ' + disabledAttr + ' class="ui-select' + changed + '">' + optionsHtml + '</select>' +
+            : '';
+        return '<div class="ui-set-field' + (envLocked ? ' is-locked' : '') + '"><span class="ui-label" id="label-' + keyAttr + '">' + escapeHtml(label) + labelLockIcon + changedPill + '</span>' +
+            descHtml + picker +
+            '<input type="hidden" id="edit-' + keyAttr + '" name="' + keyAttr + '" value="' + escapeHtml(current) + '" data-saved="' + escapeHtml(current) + '"' + (envLocked ? ' disabled' : '') + '>' +
             note + clearBtnHtml + '</div>';
     }
 
@@ -1319,6 +1344,8 @@ function renderSettings(content, data) {
                     // A segmented control shows the value with its pressed button
                     const seg = el.parentElement && el.parentElement.querySelector('.ui-seg');
                     if (seg) seg.querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', String(b.getAttribute('data-value') === el.value)));
+                    // So does the Time Zone picker
+                    if (key === 'tz') settingsShowZone(el);
                 }
                 // The field is back at its default, so it is no longer marked as changed
                 const parent = el.closest('.ui-set-bool, .ui-set-field');

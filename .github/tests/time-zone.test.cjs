@@ -326,36 +326,55 @@ function settingsField(value, { envLocked = false, status = { valid: true, confi
         SETTINGS_FIELD_DESCRIPTIONS.tz, ${envLocked}, 'UTC')`, c);
 }
 
-test('the Time Zone setting is a list of IANA zones under Application', () => {
+// One option of the Time Zone picker: chosen or not, its value, its text
+const literal = text => text.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&');
+const zoneOption = (selected, value, text) => new RegExp(literal(
+    `aria-selected="${selected}" data-value="${value}" onclick="settingsPickZone(this)"><span>${text}</span>`));
+
+test('the Time Zone setting is a searchable list of IANA zones under Application', () => {
     const html = settingsField('Europe/Berlin');
-    assert.match(html, /<label for="edit-tz" class="ui-label">Time Zone/);
-    assert.match(html, /<select id="edit-tz" name="tz"/);
-    assert.match(html, /<option value="Europe\/Berlin" selected>Europe\/Berlin<\/option>/);
-    assert.match(html, /<option value="UTC">UTC<\/option>/);
-    assert.match(html, /<option value="America\/New_York">/);
+    assert.match(html, /<span class="ui-label" id="label-tz">Time Zone/);
+    assert.match(html, /<button type="button" class="ui-select ui-select-btn ui-picker-btn" aria-haspopup="dialog" aria-expanded="false" aria-controls="settings-tz-panel" aria-labelledby="label-tz"><span>Europe\/Berlin<\/span>/);
+    assert.match(html, /<input type="search" class="ui-input ui-picker-search" placeholder="Search time zones"/);
+    assert.match(html, /<input type="hidden" id="edit-tz" name="tz" value="Europe\/Berlin" data-saved="Europe\/Berlin">/);
+    assert.match(html, zoneOption(true, 'Europe/Berlin', 'Europe/Berlin'));
+    assert.match(html, zoneOption(false, 'UTC', 'UTC'));
+    assert.match(html, zoneOption(false, 'America/New_York', 'America/New_York'));
     assert.doesNotMatch(html, /not a known time zone|Times are shown in UTC/);
     const c = load(['settings.js']);
     const app = vm.runInContext("SETTINGS_EDIT_TABS.find(t => t.id === 'application').groups.flatMap(g => g.keys)", c);
     assert.ok(app.includes('tz'));
 });
 
-test('with no zone set the Time Zone field says times are in UTC', () => {
+test('with no zone set the Time Zone field shows UTC, said once', () => {
     for (const value of ['', 'UTC']) {
         const html = settingsField(value);
-        assert.match(html, /Times are shown in UTC\. Pick the time zone of your mailcow server/);
+        // The description says it; no note under the field repeats it
+        assert.match(html, /The app&#039;s time zone\. Default: UTC\./);
+        assert.doesNotMatch(html, /data-zone-note/);
         // Empty is UTC, the default: not marked as changed
         assert.doesNotMatch(html, /Changed|Reset to default/);
     }
-    assert.match(settingsField(''), /<option value="" selected>Not set \(UTC\)<\/option>/);
+    assert.match(settingsField(''), zoneOption(true, '', 'Not set (UTC)'));
+    assert.match(settingsField(''), /<span>Not set \(UTC\)<\/span><svg/);
+});
+
+test('the time zone search finds a zone by its words', () => {
+    const c = load(['settings.js']);
+    assert.equal(c.uiPickerMatches('America/New_York', 'new york'), true);
+    assert.equal(c.uiPickerMatches('America/New_York', 'New_Y'), true);
+    assert.equal(c.uiPickerMatches('Europe/Berlin', ' berl '), true);
+    assert.equal(c.uiPickerMatches('Europe/Berlin', 'paris'), false);
 });
 
 test('an unknown zone is kept in the field and named as unknown', () => {
     const html = settingsField('Europe/Berlinn', { status: { valid: false, configured: 'Europe/Berlinn' } });
-    assert.match(html, /<option value="Europe\/Berlinn" selected>Europe\/Berlinn \(unknown\)<\/option>/);
+    assert.match(html, zoneOption(true, 'Europe/Berlinn', 'Europe/Berlinn (unknown)'));
     assert.match(html, /&quot;Europe\/Berlinn&quot; is not a known time zone, so the app uses UTC\. Pick a time zone from the list\./);
     const locked = settingsField('Europe/Berlinn', { envLocked: true, status: { valid: false, configured: 'Europe/Berlinn' } });
     assert.match(locked, /Set by ENV/);
-    assert.match(locked, /<select id="edit-tz" name="tz" disabled/);
+    assert.match(locked, /aria-labelledby="label-tz" disabled>/);
+    assert.match(locked, /<input type="hidden" id="edit-tz" name="tz" value="Europe\/Berlinn" data-saved="Europe\/Berlinn" disabled>/);
     assert.match(locked, /Fix TZ in the environment\./);
 });
 
