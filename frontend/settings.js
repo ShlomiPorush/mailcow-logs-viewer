@@ -542,6 +542,126 @@ function settingsResetChoice(btn) {
     if (form) form.dispatchEvent(new Event('input', { bubbles: true }));
 }
 
+// ── The app's blocks in Rspamd when automatic updates go off or on ──
+// Automatic updates (new blocks and expiries written to Rspamd by themselves)
+// run while Spam Filter, "Handle undeliverable mail automatically" and
+// "Automatically update Rspamd blocks" are all on. When they stop, or Spam
+// Filter is turned off with its list, the user says what happens to the
+// blocks already in Rspamd; when they start again, what is written there.
+const SETTINGS_RSPAMD_CONNECTION_KEYS = ['mailcow_url', 'mailcow_api_key_rw', 'rspamd_password', 'rspamd_url'];
+
+function settingsPlural(n, one, many) { return n === 1 ? one : many; }
+
+function settingsErrorText(body, fallback) {
+    const detail = body && body.detail;
+    if (detail && typeof detail === 'object') return detail.message || fallback;
+    return detail || fallback;
+}
+
+async function settingsRspamdState() {
+    const res = await authenticatedFetch('/api/suppressions/rspamd/state');
+    if (!res.ok) throw new Error('Could not read the Rspamd state');
+    return res.json();
+}
+
+// Returns null when the user cancels, else { action, feature_off } where action is
+// none, keep, remove (after the save), apply (after the save) or fresh (before it)
+async function settingsRspamdTransition(payload, data, newDisabled) {
+    const locked = new Set(data.env_locked_keys || []);
+    const before = data.editable_config || {};
+    const value = key => (key in payload && !locked.has(key)) ? payload[key] : before[key];
+    const wasDisabled = new Set((window.disabledFeatures || []).map(s => s.trim().toLowerCase()));
+    const featureWasOn = !wasDisabled.has('spam-filter'), featureOn = !newDisabled.has('spam-filter');
+    const wasOn = featureWasOn && before.suppression_enabled === true && before.suppression_rspamd_sync === true;
+    const nowOn = featureOn && value('suppression_enabled') === true && value('suppression_rspamd_sync') === true;
+    const featureOff = featureWasOn && !featureOn;
+    if (wasOn === nowOn && !featureOff) return { action: 'none' };
+    // Removing talks to the old connection, writing to the new one: never both in one save
+    const connectionChanged = SETTINGS_RSPAMD_CONNECTION_KEYS.some(key => key in payload && !locked.has(key)
+        && payload[key] !== '********' && String(payload[key] ?? '') !== String(before[key] ?? ''));
+    if (connectionChanged) {
+        showToast('Save the mailcow or Rspamd connection change first, then turn automatic updates on or off.', 'error');
+        return null;
+    }
+    let state;
+    try { state = await settingsRspamdState(); } catch (e) { state = { readable: false, writable: false, managed_count: null, active_count: null, reason_text: 'Rspamd cannot be reached.' }; }
+    const n = state.managed_count;
+    const blocks = count => `${count} ${settingsPlural(count, 'block', 'blocks')}`;
+
+    if (!nowOn || featureOff) {
+        // Going off. Nothing of ours in Rspamd: nothing to ask
+        if (n === 0) return { action: 'none', feature_off: featureOff, purge_rspamd: state.writable ? 'remove' : 'keep' };
+        const lead = featureOff ? 'Spam Filter will turn off and its saved list will be deleted.' : 'Automatic updates will stop.';
+        if (n === null || !state.writable) {
+            const why = state.reason_text || 'Rspamd cannot be reached.';
+            const message = n === null
+                ? `${lead} We cannot check or remove this app's Rspamd blocks now: ${why}`
+                : `${lead} ${blocks(n)} from this app remain in Rspamd. They cannot be removed now: ${why}`;
+            const keep = await showChoiceModal({ title: "Keep this app's Rspamd blocks?", message, choices: [{ value: 'keep', label: 'Keep blocks', kind: 'primary' }] });
+            return keep ? { action: 'keep', feature_off: featureOff } : null;
+        }
+        const picked = await showChoiceModal({
+            title: "Keep this app's Rspamd blocks?",
+            message: `${lead} ${blocks(n)} from this app remain in Rspamd. Remove them or keep them?`,
+            choices: [{ value: 'keep', label: 'Keep blocks' }, { value: 'remove', label: 'Remove blocks', kind: 'danger' }]
+        });
+        return picked ? { action: picked, feature_off: featureOff, count: n } : null;
+    }
+
+    // Coming back on
+    const active = state.active_count;
+    if (active === 0 && n === 0) return { action: 'none' };
+    if (active === null || n === null) {
+        // What is in Rspamd now cannot be checked: say so before anything is written there
+        const why = state.reason_text || 'Rspamd cannot be reached.';
+        const what = active === null ? 'the active list' : `the ${active} active ${settingsPlural(active, 'entry', 'entries')}`;
+        const ok = await showChoiceModal({
+            title: 'Turn on automatic updates?',
+            message: `We cannot check this app's Rspamd blocks now: ${why} Turning on updates replaces them with ${what}.`,
+            choices: [{ value: 'apply', label: 'Turn on', kind: 'primary' }]
+        });
+        return ok ? { action: 'apply', count: active } : null;
+    }
+    if (active === 0) {
+        const ok = await showChoiceModal({
+            title: 'Turn on automatic updates?',
+            message: `The list is empty, but ${blocks(n)} from this app remain in Rspamd. Turning on updates will remove them.`,
+            choices: [{ value: 'apply', label: 'Turn on', kind: 'primary' }]
+        });
+        return ok ? { action: 'apply', count: 0 } : null;
+    }
+    const entries = `${active} active ${settingsPlural(active, 'entry', 'entries')}`;
+    const picked = await showChoiceModal({
+        title: 'Turn on automatic updates?',
+        message: `Apply the ${entries}, or start fresh? Starting fresh deletes the whole list and removes this app's Rspamd blocks. Other Rspamd entries stay.`,
+        choices: [{ value: 'fresh', label: 'Start fresh', kind: 'danger' }, { value: 'apply', label: 'Apply blocks', kind: 'primary' }]
+    });
+    return picked ? { action: picked, count: active } : null;
+}
+
+// After the save: carry out the choice. Returns the toast to show, [text, kind]
+async function settingsRspamdAfterSave(plan) {
+    if (plan.action === 'remove' && !plan.feature_off) {
+        const res = await authenticatedFetch('/api/suppressions/rspamd/clear', { method: 'POST' });
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok) {
+            return [(body.detail && body.detail.code === 'not_confirmed')
+                ? 'Automatic updates are off. Block removal could not be confirmed. The saved list was kept. Check Rspamd before retrying.'
+                : `Automatic updates are off, but block removal failed. The saved list was kept. ${settingsErrorText(body, '')}`.trim(), 'error'];
+        }
+        return [`Automatic updates are off. Removed ${body.removed_blocks} app ${settingsPlural(body.removed_blocks, 'block', 'blocks')} from Rspamd.`, 'success'];
+    }
+    if (plan.action === 'keep' && !plan.feature_off) return ['Automatic updates are off. Existing Rspamd blocks were kept.', 'success'];
+    if (plan.action === 'apply') {
+        const res = await authenticatedFetch('/api/suppressions/sync', { method: 'POST' });
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok) return [`Automatic updates are on, but Rspamd was not updated yet: ${settingsErrorText(body, res.statusText)}`, 'error'];
+        return [`Automatic updates are on. Applied ${body.synced} active ${settingsPlural(body.synced, 'entry', 'entries')} to Rspamd.`, 'success'];
+    }
+    if (plan.action === 'fresh') return ['Started fresh. The list is empty and this app\'s Rspamd blocks are removed. Automatic updates are on.', 'success'];
+    return null;
+}
+
 // Predefined options for settings fields (renders as dropdown instead of text input)
 const SETTINGS_FIELD_OPTIONS = {
     webhook_type: [
@@ -1689,6 +1809,26 @@ function renderSettings(content, data) {
                 }
                 // ──────────────────────────────────────────────────────────
 
+                // The app's Rspamd blocks when automatic updates go off or on
+                const newDisabledSet = new Set('disabled_features' in payload
+                    ? (payload.disabled_features || '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean)
+                    : (window.disabledFeatures || []).map(s => s.trim().toLowerCase()));
+                const rspamdPlan = await settingsRspamdTransition(payload, data, newDisabledSet);
+                if (rspamdPlan === null) return;
+                if (rspamdPlan.action === 'fresh') {
+                    try {
+                        const res = await authenticatedFetch('/api/suppressions/start-fresh', { method: 'POST' });
+                        if (!res.ok) {
+                            const body = await res.json().catch(() => ({}));
+                            showToast(`Automatic updates are still off. ${settingsErrorText(body, res.statusText)}`, 'error');
+                            return;
+                        }
+                    } catch (freshErr) {
+                        showToast(`Automatic updates are still off. Rspamd could not be reached: ${freshErr.message || freshErr}`, 'error');
+                        return;
+                    }
+                }
+
                 try {
                     uiSaveBarBusy('settings-savebar', true);
                     const res = await authenticatedFetch('/api/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
@@ -1706,6 +1846,14 @@ function renderSettings(content, data) {
                         const toast = await validateCredential(name);
                         if (toast && !(checkToast && checkToast[1] === 'error')) checkToast = toast;
                     }
+                    // What happened to the app's Rspamd blocks is the answer to show for this save
+                    let rspamdToast;
+                    try {
+                        rspamdToast = await settingsRspamdAfterSave(rspamdPlan);
+                    } catch (rspamdErr) {
+                        rspamdToast = [`Settings saved, but Rspamd could not be reached: ${rspamdErr.message || rspamdErr}`, 'error'];
+                    }
+                    if (rspamdToast && !(checkToast && checkToast[1] === 'error')) checkToast = rspamdToast;
                     if (checkToast) showToast(...checkToast);
                     if (isEnablingBasicAuth) {
                         showToast('Basic Auth enabled successfully! You will need to log in on your next visit.', 'success');
@@ -1726,14 +1874,31 @@ function renderSettings(content, data) {
                         if (purgeableNewlyDisabled.length > 0) {
                             showToast(`Purging data for ${purgeableNewlyDisabled.length} disabled feature(s)...`, 'info');
                             for (const feature of purgeableNewlyDisabled) {
+                                // Spam Filter's list goes with what was chosen for its Rspamd blocks
+                                const body = feature === 'spam-filter'
+                                    ? { feature, rspamd: rspamdPlan.purge_rspamd || (rspamdPlan.action === 'remove' ? 'remove' : 'keep') } : { feature };
+                                let failed = null;
                                 try {
-                                    await authenticatedFetch('/api/settings/purge-feature-data', {
+                                    const res = await authenticatedFetch('/api/settings/purge-feature-data', {
                                         method: 'POST',
                                         headers: { 'Content-Type': 'application/json' },
-                                        body: JSON.stringify({ feature })
+                                        body: JSON.stringify(body)
                                     });
+                                    if (!res.ok) failed = settingsErrorText(await res.json().catch(() => ({})), res.statusText);
                                 } catch (purgeErr) {
-                                    console.warn(`Failed to purge data for feature '${feature}':`, purgeErr); // nosemgrep: javascript.lang.security.audit.unsafe-formatstring.unsafe-formatstring
+                                    failed = purgeErr.message || String(purgeErr);
+                                }
+                                if (feature === 'spam-filter') {
+                                    const toast = failed
+                                        ? [rspamdPlan.action === 'remove'
+                                            ? `Spam Filter is off, but block removal failed. The saved list was kept. ${failed}`
+                                            : 'Spam Filter is off, but its saved list could not be deleted. Try again.', 'error']
+                                        : [rspamdPlan.action === 'remove' ? 'Spam Filter is off. Its saved list and its Rspamd blocks were removed.'
+                                            : rspamdPlan.action === 'keep' ? 'Spam Filter is off. Its saved list was deleted. Existing Rspamd blocks were kept.'
+                                            : 'Spam Filter is off. Its saved list was deleted.', 'success'];
+                                    if (toast[1] === 'error' || !(checkToast && checkToast[1] === 'error')) checkToast = toast;
+                                } else if (failed) {
+                                    checkToast = [`The data of ${feature} could not be deleted. Try again.`, 'error'];
                                 }
                             }
                         }

@@ -399,6 +399,32 @@ function updateSuppressionSyncLock() {
     }
 }
 
+// While automatic updates are off, say what that leaves in Rspamd: read from
+// the map itself, so the note never guesses
+async function loadSuppressionSyncNote() {
+    const note = document.getElementById('suppression-sync-note');
+    if (!note) return;
+    let state;
+    try {
+        const res = await authenticatedFetch('/api/suppressions/rspamd/state');
+        if (!res.ok) throw new Error();
+        state = await res.json();
+    } catch (e) {
+        note.innerHTML = '';
+        return;
+    }
+    if (state.automatic) { note.innerHTML = ''; return; }
+    const n = state.managed_count;
+    const text = !state.writable
+        ? `Automatic updates are off. Changes here stay in this app until ${state.reason === 'no_rw_key_and_password' ? 'the Read-Write API key and Rspamd password are'
+            : state.reason === 'no_password' ? 'the Rspamd password is' : 'the Read-Write API key is'} set. Existing Rspamd blocks may remain.`
+        : n === null
+            ? "Automatic updates are off. We could not check this app's Rspamd blocks. New automatic blocks and expiries are not sent automatically. Changes here still try to sync the whole active list."
+            : `Automatic updates are off. ${n} ${n === 1 ? 'block' : 'blocks'} from this app remain in Rspamd. New automatic blocks and expiries do not update Rspamd automatically. Changes here still sync the whole active list.`;
+    note.innerHTML = `<div class="ui-list-note ui-flush">${uiLocked('Rspamd is not updated automatically', escapeHtml(text),
+        `<button type="button" class="ui-btn ui-btn-sm" onclick="navigateTo('settings', { sub: 'spam_filter' })">Settings</button>`)}</div>`;
+}
+
 // The suppression list is paged on the server, so its column headers sort there
 let suppressionSort = { by: 'created_at', dir: 'desc' };
 function suppressionSortAttr(key) {
@@ -416,6 +442,7 @@ async function loadSuppressions(page) {
     // The key status may not be loaded yet on the first page load
     if (typeof mailcowRwConfigured !== 'undefined' && !mailcowRwConfigured) await fetchRwStatus();
     updateSuppressionSyncLock();
+    loadSuppressionSyncNote();
 
     const search = document.getElementById('suppression-search')?.value || '';
     const reason = document.getElementById('suppression-filter-reason')?.value || '';
@@ -477,9 +504,6 @@ function renderSuppressionItem(s) {
         syncBadge = s.synced_to_rspamd
             ? '<span class="ui-text-ok" title="Synced to Rspamd">Synced</span>'
             : `<span class="ui-text-warn" title="${suppressionSyncLocked() ? 'Not synced: syncing to Rspamd needs the Read-Write API key' : 'Pending sync to Rspamd'}">⟳ Pending</span>`;
-    } else if (s.synced_to_rspamd) {
-        // Inactive entries: show "Removed" if was synced, nothing if never synced
-        syncBadge = '<span class="ui-muted" title="Will be removed from Rspamd on next sync">⊘ Will unsync</span>';
     }
 
     // For domain regex entries like /.+@example\.com/i, show clean domain
