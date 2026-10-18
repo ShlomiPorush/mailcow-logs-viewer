@@ -1477,9 +1477,9 @@ function renderSettings(content, data) {
             const select = content.querySelector('#settings-tab-select');
             if (select && select.value !== tabId) select.value = tabId;
 
-            // On mobile, bring the sticky picker back to the top of the
-            // viewport so the new category starts at its first field.
+            // A newly opened category starts at its top, not where the last one was scrolled to
             if (scrollToTop && window.matchMedia('(max-width: 1023px)').matches) {
+                // On mobile, bring the sticky picker back to the top of the viewport.
                 // Scroll the page's own area only: scrollIntoView also scrolled the
                 // app frame, which hid the top bar
                 const anchor = content.querySelector('.settings-mobile-nav');
@@ -1489,12 +1489,16 @@ function renderSettings(content, data) {
                     const target = panel.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop - anchor.offsetHeight - 8;
                     if (target < scroller.scrollTop) scroller.scrollTo({ top: Math.max(0, target), behavior: 'smooth' });
                 }
+            } else if (scrollToTop) {
+                // On a wide screen the categories scroll in their own column beside the sidebar
+                const column = content.querySelector('.settings-edit-content');
+                if (column && column.scrollTop > 0) column.scrollTo({ top: 0 });
             }
         };
 
         content.querySelectorAll('.settings-edit-tab').forEach(function (btn) {
             btn.addEventListener('click', function () {
-                switchSettingsTab(btn.getAttribute('data-tab'), false);
+                switchSettingsTab(btn.getAttribute('data-tab'), true);
             });
         });
 
