@@ -575,6 +575,10 @@ async function settingsRspamdTransition(payload, data, newDisabled) {
     const wasOn = featureWasOn && before.suppression_enabled === true && before.suppression_rspamd_sync === true;
     const nowOn = featureOn && value('suppression_enabled') === true && value('suppression_rspamd_sync') === true;
     const featureOff = featureWasOn && !featureOn;
+    // Spam Filter turned on again: its list was deleted while it was off, and
+    // the blocks this app left in Rspamd are loaded back into it, so nothing
+    // here is applied or removed
+    if (!featureWasOn && featureOn) return { action: 'import' };
     if (wasOn === nowOn && !featureOff) return { action: 'none' };
     // Removing talks to the old connection, writing to the new one: never both in one save
     const connectionChanged = SETTINGS_RSPAMD_CONNECTION_KEYS.some(key => key in payload && !locked.has(key)
@@ -657,6 +661,14 @@ async function settingsRspamdAfterSave(plan) {
         const body = await res.json().catch(() => ({}));
         if (!res.ok) return [`Automatic updates are on, but Rspamd was not updated yet: ${settingsErrorText(body, res.statusText)}`, 'error'];
         return [`Automatic updates are on. Applied ${body.synced} active ${settingsPlural(body.synced, 'entry', 'entries')} to Rspamd.`, 'success'];
+    }
+    if (plan.action === 'import') {
+        const res = await authenticatedFetch('/api/suppressions/rspamd/import', { method: 'POST' });
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok) return [`Spam Filter is on, but its Rspamd blocks could not be loaded yet: ${settingsErrorText(body, res.statusText)} They load on the next try.`, 'error'];
+        return body.imported
+            ? [`Spam Filter is on. Loaded ${body.imported} ${settingsPlural(body.imported, 'block', 'blocks')} from Rspamd.`, 'success']
+            : null;
     }
     if (plan.action === 'fresh') return ['Started fresh. The list is empty and this app\'s Rspamd blocks are removed. Automatic updates are on.', 'success'];
     return null;
@@ -1891,7 +1903,7 @@ function renderSettings(content, data) {
                                 if (feature === 'spam-filter') {
                                     const toast = failed
                                         ? [rspamdPlan.action === 'remove'
-                                            ? `Spam Filter is off, but block removal failed. The saved list was kept. ${failed}`
+                                            ? `Spam Filter is off. Its saved list was deleted, but its Rspamd blocks could not be removed: ${failed}`
                                             : 'Spam Filter is off, but its saved list could not be deleted. Try again.', 'error']
                                         : [rspamdPlan.action === 'remove' ? 'Spam Filter is off. Its saved list and its Rspamd blocks were removed.'
                                             : rspamdPlan.action === 'keep' ? 'Spam Filter is off. Its saved list was deleted. Existing Rspamd blocks were kept.'

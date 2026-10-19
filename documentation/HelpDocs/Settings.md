@@ -36,7 +36,7 @@ Every field is also an environment variable, for example **App Title** is `APP_T
 All features are on by default. A feature that is off disappears from the menu, stops the background jobs used only by it and hides its category here; shared jobs continue while another enabled page needs them. Its API routes remain available. The **Logs** category stays, because the logs other pages read are collected and kept by its settings: with the Logs page off, Dovecot still comes in for message details and Security, Ratelimited for Rate Limits and SOGo for Devices. The switches are saved in `DISABLED_FEATURES`; if that variable is set, the whole list is locked.
 
 > [!WARNING]
-> Turning a feature off deletes the data the viewer stored for it, such as DMARC reports, quarantine rules or device history. Saving asks first (**Disable & Delete Data**); only Queue, which stores nothing, switches off without asking. Turning a feature on again starts from scratch.
+> Turning a feature off deletes the data the viewer stored for it, such as DMARC reports, quarantine rules or device history. Saving asks first (**Disable & Delete Data**); only Queue, which stores nothing, switches off without asking. The same happens at startup to a feature listed in `DISABLED_FEATURES`. Turning a feature on again reloads only what is still on the server: Spam Filter loads back the blocks this app left in Rspamd (as **From Rspamd** entries), the others fetch or check again. Turning Security off takes out of Fail2ban only this app's temporary bans; permanent bans and bans added outside the app stay.
 
 ## Application
 

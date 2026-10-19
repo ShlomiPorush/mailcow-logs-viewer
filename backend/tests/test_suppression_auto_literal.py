@@ -217,6 +217,7 @@ def test_deferred_cleanup_does_not_suppress_a_recipient_with_a_slash_in_the_doma
         monkeypatch.setattr(settings._inner, key, value)
     monkeypatch.setattr(scheduler.mailcow_api, 'headers_rw', {'X-API-Key': 'test-key'})
     monkeypatch.setattr(scheduler, 'update_job_status', Mock())
+    monkeypatch.setattr(scheduler, '_spam_blocks_loaded', AsyncMock(return_value=True))
     old = datetime.now(timezone.utc).timestamp() - 7200
     monkeypatch.setattr(scheduler.mailcow_api, 'get_queue', AsyncMock(return_value=[
         {'queue_id': 'OLD', 'queue_name': 'deferred', 'arrival_time': old,
@@ -224,7 +225,7 @@ def test_deferred_cleanup_does_not_suppress_a_recipient_with_a_slash_in_the_doma
     monkeypatch.setattr(scheduler.mailcow_api, 'delete_queue', AsyncMock())
     captured = []
     monkeypatch.setattr(scheduler, '_store_deferred_suppressions_worker',
-                        lambda recipients: captured.extend(recipients) or len(recipients))
+                        lambda recipients, uncovered=None: captured.extend(recipients) or len(recipients))
 
     asyncio.run(scheduler.cleanup_deferred_queue_job())
     assert [r['email'] for r in captured] == ['stuck@example.net']

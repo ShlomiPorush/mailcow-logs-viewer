@@ -81,8 +81,7 @@ The `db` service in `docker-compose.yml` falls back to `mailcowlogs` and `change
 | --- | --- | --- |
 | `DISABLED_FEATURES` | Empty | Comma-separated features to turn off, for example `queue,quarantine`. Their pages disappear and jobs used only by those features stop; shared jobs continue while another enabled page needs them. API routes remain available. |
 
-<!-- VERIFY: owner's decision pending (finding 57): at startup DISABLED_FEATURES deletes only rebuildable data, while the Settings switch deletes all of it. Update the next paragraph once decided. -->
-The names are `netfilter` (Security), `queue`, `quarantine`, `spam-filter`, `domains`, `dmarc`, `mailbox-stats`, `rate-limits`, `logs`, `blacklist` (IP Blacklist Monitor) and `devices`. At startup the app deletes only part of the data of features that are off: the stored devices, the mailbox and alias details, the Rate Limits counter resets and the Logs page entries. Turning a feature off on the Settings page deletes all of its data; see [Settings](HelpDocs/Settings.md#features).
+The names are `netfilter` (Security), `queue`, `quarantine`, `spam-filter`, `domains`, `dmarc`, `mailbox-stats`, `rate-limits`, `logs`, `blacklist` (IP Blacklist Monitor) and `devices`. A feature listed here loses its stored data at startup, as when it is turned off in Settings, including DMARC history and quarantine rules; a feature removed from the list reloads only what the server still has. See [Settings](HelpDocs/Settings.md#features).
 
 ## Blacklist configuration
 

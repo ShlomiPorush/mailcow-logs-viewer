@@ -22,6 +22,8 @@ def state(monkeypatch):
         monkeypatch.setattr(settings._inner,key,value)
     monkeypatch.setattr(scheduler.mailcow_api, "headers_rw", {"X-API-Key":"test-key"})
     monkeypatch.setattr(scheduler, "update_job_status", Mock())
+    # Spam Filter's earlier Rspamd blocks are loaded (tested in test_feature_off_data.py)
+    monkeypatch.setattr(scheduler, "_spam_blocks_loaded", AsyncMock(return_value=True))
     monkeypatch.setattr(scheduler, "record_bounces", lambda db, captured: None)
     monkeypatch.setattr(scheduler.mailcow_api, "get_queue", AsyncMock(return_value=[]))
     monkeypatch.setattr(scheduler.mailcow_api, "delete_queue", AsyncMock())

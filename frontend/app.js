@@ -4618,7 +4618,8 @@ function statusJobCategories(jobs) {
                 ['Sync Active Domains', 'sync_local_domains', jobs.sync_local_domains],
                 ['Mailbox Statistics', 'mailbox_stats', jobs.mailbox_stats],
                 ['Alias Statistics', 'alias_stats', jobs.alias_stats],
-                ['Sync Transports & Relayhosts', 'sync_transports', jobs.sync_transports]
+                ['Sync Transports & Relayhosts', 'sync_transports', jobs.sync_transports],
+                ['Turned-Off Features', 'feature_data_sweep', jobs.feature_data_sweep]
             ]
         },
         {
