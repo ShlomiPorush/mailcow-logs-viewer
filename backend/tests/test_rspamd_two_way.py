@@ -29,9 +29,15 @@ def _postgres_available() -> bool:
         return False
 
 
-def _automatic(monkeypatch, on: bool):
-    monkeypatch.setattr(settings._inner, 'suppression_enabled', True)
+def _sync_setting(monkeypatch, on: bool):
+    """Sync with Rspamd on or off; automatic handling stays off: the sync does not need it."""
+    monkeypatch.setattr(settings._inner, 'suppression_enabled', False)
     monkeypatch.setattr(settings._inner, 'suppression_rspamd_sync', on)
+
+
+def _rw(monkeypatch, on: bool = True):
+    from app.routers import suppressions as sup
+    monkeypatch.setattr(sup.mailcow_api, 'headers_rw', {'X-API-Key': 'test-key'} if on else None)
 
 
 @pytest.fixture
@@ -43,7 +49,7 @@ def db(monkeypatch):
     init_db()
     monkeypatch.setattr(type(settings._inner), 'is_feature_enabled', lambda self, name: True)
     monkeypatch.setattr(type(settings._inner), 'is_rspamd_configured', property(lambda self: True))
-    _automatic(monkeypatch, False)
+    _sync_setting(monkeypatch, True)
 
     def wipe():
         with get_db_context() as s:
@@ -89,7 +95,8 @@ def rspamd(monkeypatch):
     monkeypatch.setattr(sup.mailcow_api, 'get_rspamd_map_content', read)
     monkeypatch.setattr(sup.mailcow_api, 'edit_rspamd_map', write)
     monkeypatch.setattr(sup.mailcow_api, 'aclose', AsyncMock())
-    monkeypatch.setattr(sup.mailcow_api, 'headers_rw', {'X-API-Key': 'test-key'})
+    # Without the read-write key an automatic sync only reads; tests that write set it (_rw)
+    monkeypatch.setattr(sup.mailcow_api, 'headers_rw', None)
     return state
 
 
@@ -207,18 +214,36 @@ def test_a_write_applies_only_the_lists_changes_to_what_mailcow_has(db, rspamd):
     assert (result['added'], result['removed'], result['list_added']) == (1, 1, 1)
 
 
-def test_page_changes_wait_while_automatic_updates_are_off(db, rspamd, monkeypatch):
-    from app.routers.suppressions import manual_sync_to_rspamd
-    add = f'add-{MARK}@example.test'
+def test_with_the_sync_off_nothing_is_read_or_written(db, rspamd, monkeypatch):
+    from app.routers.suppressions import MapUnavailable, manual_sync_to_rspamd, sync_suppressions_worker
+    add, gone = f'add-{MARK}@example.test', f'gone-{MARK}@example.test'
     _add(db, add, synced=False)
-    rspamd['content'] = _section()
-    monkeypatch.setattr(__import__('app.routers.suppressions', fromlist=['x']).mailcow_api, 'headers_rw', None)
+    _add(db, gone)
+    rspamd['content'] = _section(_line(f'theirs-{MARK}@example.test'))
+    _sync_setting(monkeypatch, False)
+    _rw(monkeypatch)
+    before = _rows(db)
+    assert asyncio.run(manual_sync_to_rspamd(after_change=True)) == {'success': True, 'written': False, 'skipped_off': True}
+    assert sync_suppressions_worker(True).get('skipped_off')
+    with pytest.raises(MapUnavailable) as error:
+        sync_suppressions_worker(False)
+    assert error.value.code == 'sync_off'
+    assert rspamd['reads'] == 0 and rspamd['writes'] == 0 and _rows(db) == before
+    # On again: what changed in mailcow comes in, then the page's change is written at once
+    _sync_setting(monkeypatch, True)
     result = asyncio.run(manual_sync_to_rspamd(after_change=True))
-    assert result['written'] is False and result['pending_count'] == 1 and rspamd['writes'] == 0
-    _automatic(monkeypatch, True)
-    monkeypatch.setattr(__import__('app.routers.suppressions', fromlist=['x']).mailcow_api, 'headers_rw', {'X-API-Key': 'k'})
-    result = asyncio.run(manual_sync_to_rspamd(after_change=True))
-    assert result['written'] is True and _managed(rspamd) == [_line(add)]
+    assert result['written'] is True and (result['list_added'], result['list_removed']) == (1, 1)
+    assert set(_managed(rspamd)) == {_line(add), _line(f'theirs-{MARK}@example.test')}
+
+
+def test_detection_does_not_wait_for_a_load_while_the_sync_is_off(db, monkeypatch):
+    from app import scheduler
+    from app.services.feature_data import SPAM_IMPORT_PENDING_KEY, _set_key
+    with db() as s:
+        _set_key(s, SPAM_IMPORT_PENDING_KEY, '1')
+        s.commit()
+    _sync_setting(monkeypatch, False)
+    assert asyncio.run(scheduler._spam_blocks_loaded('detect_suppressions')) is True
 
 
 def test_a_deleted_block_is_removed_from_rspamd_and_not_read_back(db, rspamd):
@@ -272,8 +297,9 @@ def test_a_write_without_an_answer_is_put_right_by_the_next_read(db, rspamd, lan
         assert rows[add][:2] == (True, False) and rows[off][:2] == (False, False)
 
 
-def test_clearing_whose_answer_was_lost_never_empties_the_list(db, rspamd):
+def test_clearing_whose_answer_was_lost_never_empties_the_list(db, rspamd, monkeypatch):
     from app.routers.suppressions import MailcowAPIError, clear_managed_worker
+    _rw(monkeypatch)
     kept = f'kept-{MARK}@example.test'
     _add(db, kept)
     rspamd['content'] = _section(_line(kept))
@@ -281,6 +307,7 @@ def test_clearing_whose_answer_was_lost_never_empties_the_list(db, rspamd):
     with pytest.raises(MailcowAPIError):
         clear_managed_worker()
     rspamd['fail_write'] = False
+    _rw(monkeypatch, False)  # the next sync only reads
     _sync(automatic=True)
     assert _rows(db)[kept][:2] == (True, False), 'waits to be added again, not deleted'
 
@@ -400,7 +427,8 @@ def test_an_automatic_write_stops_when_updates_go_off_before_the_save(db, rspamd
     add = f'add-{MARK}@example.test'
     _add(db, add, synced=False)
     rspamd['content'] = _section()
-    _automatic(monkeypatch, True)
+    _sync_setting(monkeypatch, True)
+    _rw(monkeypatch)
     plan = sup._section_after
 
     def plan_then_turn_off(*args):
@@ -411,7 +439,7 @@ def test_an_automatic_write_stops_when_updates_go_off_before_the_save(db, rspamd
     monkeypatch.setattr(sup, '_section_after', plan_then_turn_off)
     with pytest.raises(sup.MapUnavailable) as error:
         _sync(automatic=True)
-    assert error.value.code == 'updates_off' and rspamd['writes'] == 0
+    assert error.value.code == 'sync_off' and rspamd['writes'] == 0
 
 
 # ---- Another mailcow ----
@@ -460,6 +488,7 @@ def test_writers_of_the_rows_wait_for_the_row_lock(db, monkeypatch, writer):
     from app.routers import suppressions as sup
     monkeypatch.setattr(scheduler, 'update_job_status', lambda *a, **k: None)
     monkeypatch.setattr(scheduler, 'record_stuck', lambda s, captured: None)
+    monkeypatch.setattr(settings._inner, 'suppression_enabled', True)  # expiry runs only with it
     run = {
         'expiry': lambda: scheduler._expire_suppressions_sync(),
         'create': lambda: sup._create_suppression_worker(sup.SuppressionCreateRequest(email=f'new-{MARK}@example.test')),
@@ -573,13 +602,14 @@ def test_deleted_and_added_again_leaves_nothing_waiting(db, rspamd):
 
 # ---- Result review round 2 ----
 
-@pytest.mark.parametrize('change', ['connection', 'updates_off'])
+@pytest.mark.parametrize('change', ['connection', 'sync_off'])
 def test_settings_changed_during_the_last_read_stop_the_write(db, rspamd, monkeypatch, change):
     from app.routers import suppressions as sup
     add = f'add-{MARK}@example.test'
     _add(db, add, synced=False)
     first = _section()
-    _automatic(monkeypatch, True)
+    _sync_setting(monkeypatch, True)
+    _rw(monkeypatch)
     monkeypatch.setattr(settings._inner, 'rspamd_url', '')
 
     def read(n):
@@ -593,7 +623,7 @@ def test_settings_changed_during_the_last_read_stop_the_write(db, rspamd, monkey
     rspamd['read_hook'] = read
     with pytest.raises(sup.MapUnavailable) as error:
         _sync(automatic=True)
-    assert error.value.code == ('connection_changed' if change == 'connection' else 'updates_off')
+    assert error.value.code == ('connection_changed' if change == 'connection' else 'sync_off')
     assert rspamd['writes'] == 0
 
 
@@ -643,3 +673,53 @@ def test_tombstones_of_an_earlier_build_count_per_line(db, rspamd):
         s.commit()
     with db() as s:
         assert sup.pending_count(s) == 2
+
+
+# ---- The single switch, review round 1 ----
+
+def test_a_block_from_before_the_list_was_deleted_comes_back_protected(db, rspamd, monkeypatch):
+    """Spam Filter turned on again while the sync was off: a job made an
+    automatic row for an address still blocked in Rspamd. Turning the sync on
+    loads the block back as it was: permanent, From Rspamd."""
+    from app.services.feature_data import SPAM_IMPORT_PENDING_KEY, _set_key
+    kept = f'kept-{MARK}@example.test'
+    _add(db, kept, source='auto', expires_at=datetime.utcnow() + timedelta(days=3), synced=False)
+    _add(db, f'off-{MARK}@example.test', active=False, synced=False, source='auto')
+    with db() as s:
+        _set_key(s, SPAM_IMPORT_PENDING_KEY, '1')
+        s.commit()
+    rspamd['content'] = _section(_line(kept, 'auto'), _line(f'off-{MARK}@example.test', 'auto'))
+    _sync(automatic=True)
+    rows = _rows(db)
+    assert rows[kept] == (True, True, 'rspamd', None)
+    assert rows[f'off-{MARK}@example.test'] == (True, True, 'rspamd', None), 'not removed by the first write'
+    assert _key(db, SPAM_IMPORT_PENDING_KEY) is None
+
+
+def test_the_page_does_not_read_the_map_while_the_sync_is_off(db, rspamd, monkeypatch):
+    from app.routers.suppressions import rspamd_state
+    rspamd['content'] = _section()
+    _sync_setting(monkeypatch, False)
+    state = asyncio.run(rspamd_state())
+    assert state['sync_on'] is False and state['managed_count'] is None and rspamd['reads'] == 0
+    state = asyncio.run(rspamd_state(check_map=True))
+    assert state['managed_count'] == 0 and rspamd['reads'] == 1, 'Settings asks before turning the sync on'
+
+
+def test_a_block_the_user_disabled_meanwhile_stays_disabled(db, rspamd, monkeypatch):
+    """Same as above, but the user disabled the job's row before turning the
+    sync on: the removal goes through."""
+    from app.routers import suppressions as sup
+    from app.models import SpamSuppression
+    from app.services.feature_data import SPAM_IMPORT_PENDING_KEY, _set_key
+    off = f'off-{MARK}@example.test'
+    _add(db, off, source='auto', expires_at=datetime.utcnow() + timedelta(days=3), synced=False)
+    with db() as s:
+        row = s.query(SpamSuppression).filter(SpamSuppression.email == off).one()
+        sup.update_suppression(row.id, sup.SuppressionUpdateRequest(active=False), s)
+        _set_key(s, SPAM_IMPORT_PENDING_KEY, '1')
+        s.commit()
+    rspamd['content'] = _section(_line(off, 'auto'))
+    _rw(monkeypatch)
+    _sync(automatic=True)
+    assert _rows(db)[off][:3] == (False, True, 'auto') and _managed(rspamd) == [], 'removed from Rspamd as asked'

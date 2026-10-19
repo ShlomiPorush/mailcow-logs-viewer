@@ -50,8 +50,9 @@ def _job_off_reason(key: str):
         # Worded as the Queue Management settings name them
         'detect_suppressions': [(not settings.suppression_enabled, '"Handle undeliverable mail automatically" is off', 'spam_filter'),
                                 (not settings.suppression_auto_detect, 'No choice under Queue Management needs the mail logs', 'spam_filter')],
-        # It always reads the app's Rspamd blocks; it writes only with automatic updates on and the Read-Write key
-        'sync_suppressions': [(not settings.is_rspamd_configured, 'Needs the Rspamd password', 'mailcow')],
+        # It reads the app's Rspamd blocks; it writes them only with the Read-Write key
+        'sync_suppressions': [(not settings.suppression_rspamd_sync, '"Sync with Rspamd" is off', 'spam_filter'),
+                              (not settings.is_rspamd_configured, 'Needs the Rspamd password', 'mailcow')],
         'expire_suppressions': [(not settings.suppression_enabled, '"Handle undeliverable mail automatically" is off', 'spam_filter')],
         'process_quarantine_rules': [(not rw, 'Needs the Read-Write API key (MAILCOW_API_KEY_RW)', 'mailcow')],
         'cleanup_deferred_queue': [(not settings.suppression_enabled, '"Handle undeliverable mail automatically" is off', 'spam_filter'),
@@ -605,13 +606,13 @@ def get_settings_info(db: Session = Depends(get_db)):
                     "error": jobs_status.get('detect_suppressions', {}).get('error') if (settings.is_feature_enabled('spam-filter') and settings.suppression_enabled) else None
                 },
                 "sync_suppressions": {
-                    "interval": "10 minutes" if (settings.is_feature_enabled('spam-filter') and settings.is_rspamd_configured) else ("Disabled (feature off)" if not settings.is_feature_enabled('spam-filter') else "Disabled (no Rspamd password)"),
-                    "description": "Reads this app's Rspamd blocks into the list; writes the list to Rspamd while automatic updates are on",
-                    "enabled": settings.is_feature_enabled('spam-filter') and settings.is_rspamd_configured,
+                    "interval": "10 minutes" if (settings.is_feature_enabled('spam-filter') and settings.suppression_rspamd_sync and settings.is_rspamd_configured) else ("Disabled (feature off)" if not settings.is_feature_enabled('spam-filter') else ("Disabled (Rspamd sync off)" if not settings.suppression_rspamd_sync else "Disabled (no Rspamd password)")),
+                    "description": "Keeps the suppression list and this app's Rspamd blocks in step, both ways",
+                    "enabled": settings.is_feature_enabled('spam-filter') and settings.suppression_rspamd_sync and settings.is_rspamd_configured,
                     "feature_disabled": not settings.is_feature_enabled('spam-filter'),
-                    "status": jobs_status.get('sync_suppressions', {}).get('status', 'idle') if (settings.is_feature_enabled('spam-filter') and settings.is_rspamd_configured) else 'disabled',
-                    "last_run": format_datetime_utc(jobs_status.get('sync_suppressions', {}).get('last_run')) if (settings.is_feature_enabled('spam-filter') and settings.is_rspamd_configured) else None,
-                    "error": jobs_status.get('sync_suppressions', {}).get('error') if (settings.is_feature_enabled('spam-filter') and settings.is_rspamd_configured) else None
+                    "status": jobs_status.get('sync_suppressions', {}).get('status', 'idle') if (settings.is_feature_enabled('spam-filter') and settings.suppression_rspamd_sync and settings.is_rspamd_configured) else 'disabled',
+                    "last_run": format_datetime_utc(jobs_status.get('sync_suppressions', {}).get('last_run')) if (settings.is_feature_enabled('spam-filter') and settings.suppression_rspamd_sync and settings.is_rspamd_configured) else None,
+                    "error": jobs_status.get('sync_suppressions', {}).get('error') if (settings.is_feature_enabled('spam-filter') and settings.suppression_rspamd_sync and settings.is_rspamd_configured) else None
                 },
                 "expire_suppressions": {
                     "interval": "1 hour" if (settings.is_feature_enabled('spam-filter') and settings.suppression_enabled) else ("Disabled (feature off)" if not settings.is_feature_enabled('spam-filter') else "Disabled (suppression off)"),

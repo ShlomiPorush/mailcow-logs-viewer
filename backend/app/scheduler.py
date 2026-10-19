@@ -277,9 +277,9 @@ def _reschedule_suppression_jobs():
         except Exception:
             pass
 
-    # sync_suppressions: reads the app's Rspamd blocks into the list whenever
-    # it can; writes only while automatic updates are on
-    if settings.is_feature_enabled('spam-filter') and settings.is_rspamd_configured:
+    # sync_suppressions: keeps the list and the app's Rspamd blocks in step
+    # while "Sync with Rspamd" is on
+    if settings.is_feature_enabled('spam-filter') and settings.suppression_rspamd_sync and settings.is_rspamd_configured:
         scheduler.add_job(
             sync_suppressions_to_rspamd_job,
             trigger=every(minutes=10),
@@ -3486,7 +3486,11 @@ async def _spam_blocks_loaded(job: str) -> bool:
     place of the permanent one. While loading fails the job does not run,
     and Status says why.
     """
-    from .routers.suppressions import import_pending, import_managed_worker
+    from .routers.suppressions import import_pending, import_managed_worker, rspamd_sync_on
+
+    if not rspamd_sync_on():
+        # Nothing is read from Rspamd while the sync is off: nothing to wait for
+        return settings.is_feature_enabled('spam-filter')
 
     def pending():
         with get_db_context() as db:
@@ -4159,9 +4163,9 @@ def start_scheduler():
             replace_existing=True
         )
 
-        # Reads the app's Rspamd blocks into the list every 10 minutes, and
-        # writes the list while automatic updates are on
-        if settings.is_feature_enabled('spam-filter') and settings.is_rspamd_configured:
+        # Keeps the list and the app's Rspamd blocks in step every 10 minutes
+        # while "Sync with Rspamd" is on
+        if settings.is_feature_enabled('spam-filter') and settings.suppression_rspamd_sync and settings.is_rspamd_configured:
             scheduler.add_job(
                 sync_suppressions_to_rspamd_job,
                 trigger=every(minutes=10),
@@ -4527,12 +4531,12 @@ async def detect_suppressions_job():
 async def sync_suppressions_to_rspamd_job():
     """
     Bring the list and the app's section of global_rcpt_blacklist.map in
-    step: changes made in mailcow come into the list; the list's changes are
-    written while automatic updates are on (see sync_suppressions_worker).
+    step while "Sync with Rspamd" is on: changes made in mailcow come into the
+    list, the list's changes are written (see sync_suppressions_worker).
     """
     if not settings.is_feature_enabled('spam-filter'):
         return
-    if not settings.is_rspamd_configured:
+    if not settings.suppression_rspamd_sync or not settings.is_rspamd_configured:
         return
     
     update_job_status('sync_suppressions', 'running')

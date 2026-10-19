@@ -99,7 +99,7 @@ Which addresses **Status** > **Blocklists** checks, and the DNS resolver it asks
 
 ## Queue Management
 
-What happens when outgoing mail cannot be delivered. The blocked addresses are listed on [Spam Filter](Spam_Filter.md) > **Suppressions**. Nothing runs until **Handle undeliverable mail automatically** is on (off by default); actions on the Suppressions page work either way.
+What happens when outgoing mail cannot be delivered. The blocked addresses are listed on [Spam Filter](Spam_Filter.md) > **Suppressions**. **Sync with Rspamd** (on by default) keeps the list and this app's Rspamd blocks in step, both ways; off, the list does not change what Rspamd blocks. Nothing is blocked automatically until **Handle undeliverable mail automatically** is on (off by default).
 
 - **Permanent delivery failure** (5.x.x) and **Temporary delivery failure** (4.x.x) are one choice each. A temporary failure is deleted after its minutes in the queue (the default), or stays in the queue while the address is blocked after a number of failures, at the first one, or not at all.
 - The app reads the Postfix logs only when a choice needs them.

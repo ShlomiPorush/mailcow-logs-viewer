@@ -133,15 +133,17 @@ def test_a_confirmed_map_write_passes(monkeypatch):
     assert asyncio.run(mailcow_api.edit_rspamd_map('global_rcpt_blacklist.map', 'x')) == ok
 
 
-def test_an_automatic_sync_still_reads_once_updates_are_off(monkeypatch):
-    # It reads the app's section into the list; whether it writes is decided
-    # inside (test_rspamd_two_way.py)
+def test_the_sync_runs_only_while_it_is_on(monkeypatch):
+    # Sync with Rspamd off: nothing is read or written. It does not need the
+    # automatic handling (test_rspamd_two_way.py covers what it does)
     called = []
     monkeypatch.setattr(suppressions, "_run_on_worker_loop", lambda work: called.append(work) or {"synced": 1})
     monkeypatch.setattr(type(settings._inner), "is_feature_enabled", lambda self, name: True)
     monkeypatch.setattr(type(settings._inner), "is_rspamd_configured", property(lambda self: True))
-    monkeypatch.setattr(settings._inner, "suppression_enabled", True)
+    monkeypatch.setattr(settings._inner, "suppression_enabled", False)
     monkeypatch.setattr(settings._inner, "suppression_rspamd_sync", False)
+    assert suppressions.sync_suppressions_worker(True).get('skipped_off') and called == []
+    monkeypatch.setattr(settings._inner, "suppression_rspamd_sync", True)
     assert suppressions.sync_suppressions_worker(True) == {"synced": 1} and len(called) == 1
     monkeypatch.setattr(type(settings._inner), "is_rspamd_configured", property(lambda self: False))
     assert suppressions.sync_suppressions_worker(True).get('skipped_off') and len(called) == 1, 'nothing to read without the password'

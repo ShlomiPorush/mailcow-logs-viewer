@@ -43,7 +43,7 @@ Automatic entries start with **Base block length** (7 days by default). Each bou
 
 Earlier versions could double-count bounces. When temporary failures are set to block after N failures, the upgrade disables automatic soft-bounce suppressions and resets their counts to 0. The next sync removes them from Rspamd; new bounces must reach the threshold again. The application log reports how many were lifted. Other entries are unchanged.
 
-With **Automatically update Rspamd blocks** on, new and updated automatic entries are written to Rspamd right after detection. Automatic entries always match the exact address.
+With **Sync with Rspamd** on, new and updated automatic entries are written to Rspamd right after detection. Automatic entries always match the exact address.
 
 ### Add a suppression
 
@@ -60,11 +60,13 @@ With the read-write key, adding an entry deletes queued messages to that address
 
 **Disable** keeps the entry and removes its block from Rspamd with the next write. Re-enabling an expired entry requires a new expiry or **Permanent block**; otherwise the hourly expiry job disables it again. **Delete** removes the entry permanently; its block is removed from Rspamd with the next write.
 
-While automatic updates are on, adding, enabling, disabling, deleting or importing is written to Rspamd at once. While they are off, these changes wait for **Sync to Rspamd**, which shows how many wait.
+With **Sync with Rspamd** on, adding, enabling, disabling, deleting or importing is written to Rspamd at once.
 
-### Sync to Rspamd
+### Sync with Rspamd
 
-The list and the app's part of `global_rcpt_blacklist.map` are kept in step both ways. Every 10 minutes, and before every write, the app reads its part of the map: a block deleted there in mailcow is deleted from the list, and a block added there joins the list as **From Rspamd**. Then the list's waiting changes are written, by **Sync to Rspamd** or, while automatic updates are on, by themselves. Reading needs the Rspamd password; writing also needs the read-write key.
+With **Sync with Rspamd** on (**Settings** > **Queue Management**), the list and the app's part of `global_rcpt_blacklist.map` are kept in step both ways, by themselves. Every 10 minutes, and before every write, the app reads its part of the map: a block deleted there in mailcow is deleted from the list, and a block added there joins the list as **From Rspamd**. Then the list's changes are written. A change that could not be written waits, shown as **Pending**, and is written on the next try. Reading needs the Rspamd password; writing also needs the read-write key. It does not need **Handle undeliverable mail automatically**: a list kept by hand syncs too.
+
+With it off, the list is not synced: it does not change what Rspamd blocks, and changes made in mailcow do not come into it until the sync is on again. A note above the list says so.
 
 The app's part is the section between these markers; your own entries go above or below it:
 
@@ -75,9 +77,9 @@ The app's part is the section between these markers; your own entries go above o
 
 A write starts from the map as it is then and changes only the list's waiting entries, so changes made in mailcow stay; one made at the very moment of a write can still be lost. Nothing is written when nothing changes. If the map cannot be read, or the markers are missing or repeated, nothing is read in or written until that is fixed. A write counts only when mailcow confirms it; one whose answer was lost is checked on the next read. Connecting to another mailcow or Rspamd makes every active entry wait to be written there; none is deleted. An entry deleted from the list before this version while its block stayed in Rspamd comes back as **From Rspamd**. Your own lines, above and below the app's section, stay. Bare addresses among them are anchored during sync so they cannot match longer addresses containing them; a line with regex characters, such as `.*@example\.com`, is left as written.
 
-### When automatic updates stop or start
+### When the sync stops or starts
 
-Automatic updates run while Spam Filter, **Handle undeliverable mail automatically** and **Automatically update Rspamd blocks** are all on. Turning one off, or turning Spam Filter off with its list, asks whether to remove the app's blocks from Rspamd or keep them. Removing empties only the managed section; your lines above it stay. Turning updates back on says how many waiting changes will be written, with **Start fresh** to empty both the list and the managed section. While updates are off, a note above the list says that changes wait for **Sync to Rspamd**.
+Turning **Sync with Rspamd** off, or turning Spam Filter off with its list, asks whether to remove the app's blocks from Rspamd or keep them. Removing empties only the managed section; your lines above it stay. Turning the sync back on first reads in what changed in mailcow meanwhile, then says how many of the list's changes will be written, with **Start fresh** to empty both the list and the managed section.
 
 ### Import and export
 
@@ -118,12 +120,12 @@ The wizard's **Domain** pattern includes subdomains, unlike a domain suppression
 
 Under **Settings** > **Queue Management**:
 
-- **Handle undeliverable mail automatically** defaults off. **Automatically update Rspamd blocks** defaults on. With either off, page edits wait for **Sync to Rspamd**.
+- **Sync with Rspamd** defaults on. **Handle undeliverable mail automatically** defaults off; it decides only whether blocks are added automatically.
 - **Permanent delivery failure** defaults to blocking new mail to the address and deleting its queued mail; **Do nothing** skips permanent failures.
 - **Temporary delivery failure** defaults to **Delete after 60 minutes in the queue and block the recipients**. Keeping the message instead counts soft bounces on an inactive entry, which turns active after the set failures (3 by default), or at the first one; **Do nothing; keep retrying** skips them.
 - **Exclude these domains** accepts comma-separated exact domains.
 
-The jobs, including hourly expiry, require **Handle undeliverable mail automatically**, except reading the app's Rspamd blocks, which needs only the Rspamd password. With it off, entries reach Rspamd through **Sync to Rspamd**, and expiry does not run.
+The jobs, including hourly expiry, require **Handle undeliverable mail automatically**, except the sync with Rspamd. With it off, expiry does not run.
 
 Under **Settings** > **Mailcow**, set **Rspamd Password** to read or sync maps. Leave **Rspamd URL** empty to use mailcow's path; try a direct URL such as `http://rspamd-mailcow:11334` if that fails. See [Settings](Settings.md#queue-management).
 

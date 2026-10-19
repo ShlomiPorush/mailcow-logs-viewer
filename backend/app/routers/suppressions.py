@@ -833,10 +833,12 @@ async def manual_sync_to_rspamd(after_change: bool = False):
     """Bring the list and the app's section of the Rspamd map in step.
 
     Changes made in mailcow come into the list first. Then the list's own
-    changes are written. With after_change (sent after a change on the page),
-    they are written only while automatic updates are on; otherwise they wait
-    for Sync to Rspamd.
+    changes are written. Only while "Sync with Rspamd" is on: with it off,
+    after_change (sent after a change on the page) does nothing, and a sync
+    asked for otherwise is refused.
     """
+    if after_change and not rspamd_sync_on():
+        return {"success": True, "written": False, "skipped_off": True}
     if not settings.is_rspamd_configured:
         raise HTTPException(status_code=400, detail="Rspamd password not configured")
     if not after_change and not mailcow_api.has_rw_key:
@@ -851,11 +853,13 @@ async def manual_sync_to_rspamd(after_change: bool = False):
         raise internal_error(e)
 
 
-def automatic_updates_on() -> bool:
-    """Whether the app writes its blocks to Rspamd by itself: new blocks,
-    expiries and changes made on the Suppressions page."""
-    return (settings.is_feature_enabled('spam-filter') and settings.suppression_enabled
-            and settings.suppression_rspamd_sync)
+def rspamd_sync_on() -> bool:
+    """Whether the list is kept in step with the app's section of the Rspamd
+    map ("Sync with Rspamd"), both ways and by itself. Off, the app neither
+    reads nor writes the map, apart from what the user asks for in Settings
+    (removing its blocks, starting fresh). Automatic blocks are made only with
+    "Handle undeliverable mail automatically" on as well."""
+    return settings.is_feature_enabled('spam-filter') and bool(settings.suppression_rspamd_sync)
 
 
 def _run_on_worker_loop(work):
@@ -873,13 +877,12 @@ def _run_on_worker_loop(work):
 
 def sync_suppressions_worker(automatic: bool = False) -> dict:
     """Read the app's section into the list, then write the list's changes,
-    holding the map lock.
+    holding the map lock. Only while "Sync with Rspamd" is on.
 
     automatic (the scheduled job, a change on the page, after detection or
-    queue cleanup) writes only while automatic updates are on and the
-    Read-Write key is set, checked again right before the save; it still
-    reads. Without automatic (Sync to Rspamd, Settings turning updates on) it
-    always writes.
+    queue cleanup) writes only while the Read-Write key is set and the sync is
+    still on, checked again right before the save; without the key it still
+    reads. Without automatic (Settings turning the sync on) it always writes.
     """
     with map_write_lock():
         if not settings.is_feature_enabled('spam-filter'):
@@ -888,6 +891,10 @@ def sync_suppressions_worker(automatic: bool = False) -> dict:
             if automatic:
                 return {"success": True, "synced": 0, "skipped_off": True}
             raise MapUnavailable("feature_off")
+        if not rspamd_sync_on():
+            if automatic:
+                return {"success": True, "synced": 0, "skipped_off": True}
+            raise MapUnavailable("sync_off")
         if not settings.is_rspamd_configured:
             if automatic:
                 return {"success": True, "synced": 0, "skipped_off": True}
@@ -921,7 +928,7 @@ class MapUnavailable(Exception):
                             "Fix them in mailcow. Nothing was changed."),
         "map_changed": "The Rspamd map changed while syncing. Try again.",
         "connection_changed": "The mailcow or Rspamd connection changed while syncing. Try again.",
-        "updates_off": "Automatic updates were turned off while syncing. Nothing was written to Rspamd.",
+        "sync_off": "Sync with Rspamd is off. Nothing was read from or written to Rspamd.",
     }
 
     def __init__(self, code: str, detail: str = ""):
@@ -1158,6 +1165,18 @@ async def _pull_from_rspamd(db: Session, snapshot: dict) -> dict:
 
         marker = db.query(SystemSetting.key).filter(SystemSetting.key == SPAM_IMPORT_PENDING_KEY).first() is not None
         added_kind = 'loaded_from_rspamd' if marker else 'added_in_rspamd'
+        # Rows whose last change by hand was Disable: what the user asked stays
+        disabled_by_user = set()
+        if marker:
+            inactive_ids = [r.id for r in rows if not r.active]
+            if inactive_ids:
+                last = {}
+                for sid, kind in db.query(SuppressionEvent.suppression_id, SuppressionEvent.kind).filter(
+                        SuppressionEvent.suppression_id.in_(inactive_ids),
+                        SuppressionEvent.kind.in_(['enabled', 'disabled'])).order_by(
+                        SuppressionEvent.recorded_at, SuppressionEvent.id):
+                    last[sid] = kind
+                disabled_by_user = {sid for sid, kind in last.items() if kind == 'disabled'}
         added, removed = [], [r.email for r in gone]
         gone_ids = {r.id for r in gone}
         for r in rows:
@@ -1165,6 +1184,14 @@ async def _pull_from_rspamd(db: Session, snapshot: dict) -> dict:
                 continue
             hit = bool(hits[r.id])
             own = bool(hits[r.id] - active_owned)  # a line only this disabled row stands for
+            if (marker and hit and r.source in AUTOMATIC_SOURCES
+                    and (r.active or (own and r.id not in disabled_by_user))):
+                # Its line was in Rspamd from before the list was deleted: the
+                # block loads back, where a job made a row for it meanwhile (a
+                # row made or disabled by hand stays as the user left it)
+                _take_as_added_in_rspamd(db, r, added_kind)
+                added.append(r.email)
+                continue
             if r.active and not r.synced_to_rspamd and hit:
                 r.synced_to_rspamd = True          # its write landed
             elif not r.active and not r.synced_to_rspamd and not own:
@@ -1333,8 +1360,8 @@ async def _check_before_save(snapshot: dict, automatic: bool) -> None:
     def still_allowed():
         if _connection_target() != snapshot["target"]:
             raise MapUnavailable("connection_changed")
-        if automatic and not (automatic_updates_on() and mailcow_api.has_rw_key):
-            raise MapUnavailable("updates_off")
+        if automatic and not (rspamd_sync_on() and mailcow_api.has_rw_key):
+            raise MapUnavailable("sync_off")
 
     still_allowed()
     _, now = await _read_denylist_map()
@@ -1368,11 +1395,11 @@ def _mark_written(db: Session, active_ids, inactive_ids, used_tombs: set, writte
 
 async def sync_suppressions_to_rspamd(db: Session, automatic: bool = False) -> dict:
     """Read the app's section into the list, then write the list's changes
-    (for automatic, only while automatic updates are on and the Read-Write
-    key is set). The caller holds the map lock."""
+    (for automatic, only while the sync is on and the Read-Write key is
+    set). The caller holds the map lock."""
     snapshot = await _read_snapshot()
     pulled = await _pull_from_rspamd(db, snapshot)
-    may_write = (automatic_updates_on() and mailcow_api.has_rw_key) if automatic else True
+    may_write = (rspamd_sync_on() and mailcow_api.has_rw_key) if automatic else True
     if not may_write:
         return {"success": True, "written": False, "skipped_off": True, **_pull_counts(pulled),
                 "pending_count": pending_count(db)}
@@ -1466,6 +1493,9 @@ def import_managed_worker() -> dict:
     with map_write_lock():
         if not settings.is_feature_enabled('spam-filter'):
             return {"imported": 0, "pending": False, "feature_off": True}
+        if not rspamd_sync_on():
+            # Nothing is read while the sync is off: the first read once it is on loads them
+            return {"imported": 0, "pending": True, "sync_off": True}
 
         async def work(db):
             if not import_pending(db):
@@ -1510,10 +1540,12 @@ def _map_error(e: Exception) -> HTTPException:
 
 
 @router.get("/suppressions/rspamd/state")
-async def rspamd_state():
+async def rspamd_state(check_map: bool = False):
     """What the app has in Rspamd now, read from the map itself, whether it
     can change it, and how many changes wait to be written. Counts are blocks
-    (map lines), not addresses: a line can be a domain or a pattern."""
+    (map lines), not addresses: a line can be a domain or a pattern. While
+    the sync is off the map is read only with check_map (Settings asks before
+    turning the sync on or off)."""
     def counts():
         with get_db_context() as db:
             active = db.query(func.count(SpamSuppression.id)).filter(SpamSuppression.active == True).scalar() or 0  # noqa: E712
@@ -1521,10 +1553,10 @@ async def rspamd_state():
 
     active, pending = await asyncio.to_thread(counts)
     missing = _missing_credentials()
-    state = {"automatic": automatic_updates_on(), "active_count": active, "pending_count": pending,
+    state = {"sync_on": rspamd_sync_on(), "active_count": active, "pending_count": pending,
              "writable": missing is None, "readable": False, "managed_count": None, "reason": missing,
              "reason_text": MapUnavailable.REASONS.get(missing)}
-    if not settings.is_rspamd_configured:
+    if not settings.is_rspamd_configured or not (state["sync_on"] or check_map):
         return state
     try:
         _, content = await _read_denylist_map()

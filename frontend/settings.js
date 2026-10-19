@@ -20,7 +20,7 @@ const SETTINGS_LABEL_OVERRIDES = {
     // Spam Filter: what the setting does, in words; the search shows these names
     suppression_enabled: 'Handle undeliverable mail automatically',
     suppression_auto_detect: 'Read the mail logs for failures',
-    suppression_rspamd_sync: 'Automatically update Rspamd blocks',
+    suppression_rspamd_sync: 'Sync with Rspamd',
     suppression_hard_bounce_action: 'Permanent delivery failure',
     suppression_soft_bounce_action: 'Temporary delivery failure',
     queue_cleanup_enabled: 'Delete delayed mail and block recipients',
@@ -325,7 +325,7 @@ var SETTINGS_FIELD_DESCRIPTIONS = {
     rspamd_password: 'Rspamd UI/API password for reading Rspamd map data. Required to view and edit Rspamd maps.',
     suppression_enabled: 'Off pauses automatic handling and block expiry. Manual changes still work.',
     suppression_auto_detect: 'On when a choice below needs the mail logs. Set by those choices, not on its own.',
-    suppression_rspamd_sync: 'Applies blocks to new mail. Off leaves existing blocks in place. Needs the Rspamd password and a read-write API key.',
+    suppression_rspamd_sync: "Keeps the suppression list and this app's part of the Rspamd recipient denylist in step, both ways: changes on either side reach the other. Off, the list does not change what Rspamd blocks. Needs the Rspamd password and a read-write API key.",
     suppression_whitelist_domains: 'No automatic blocks or queue deletion. Separate exact domains with commas; subdomains are not included.',
     suppression_hard_bounce_action: 'What happens when the receiving server rejects a message permanently (5.x.x).',
     suppression_soft_bounce_action: 'What happens when delivery fails for now (4.x.x) and the queue is not cleaned.',
@@ -371,7 +371,7 @@ const SETTINGS_CHOICE_NOTES = {
 const SETTINGS_LOG_CHOICES = { hard: ['suppress'], soft: ['count', 'suppress'] };
 // Settings that do nothing while another switch is off: shown greyed out and
 // unclickable until it is on. Groups say it with needs:, single fields here.
-const SETTINGS_FIELD_NEEDS = { suppression_rspamd_sync: 'suppression_enabled' };
+const SETTINGS_FIELD_NEEDS = {};
 
 function settingsShowNeeds(root) {
     Object.entries(SETTINGS_FIELD_NEEDS).forEach(([key, parent]) => {
@@ -542,12 +542,11 @@ function settingsResetChoice(btn) {
     if (form) form.dispatchEvent(new Event('input', { bubbles: true }));
 }
 
-// ── The app's blocks in Rspamd when automatic updates go off or on ──
-// Automatic updates (new blocks and expiries written to Rspamd by themselves)
-// run while Spam Filter, "Handle undeliverable mail automatically" and
-// "Automatically update Rspamd blocks" are all on. When they stop, or Spam
-// Filter is turned off with its list, the user says what happens to the
-// blocks already in Rspamd; when they start again, what is written there.
+// ── The app's blocks in Rspamd when the sync goes off or on ──
+// The list is synced with Rspamd while Spam Filter and "Sync with Rspamd" are
+// on. When the sync stops, or Spam Filter is turned off with its list, the
+// user says what happens to the blocks already in Rspamd; when it starts
+// again, what is written there.
 const SETTINGS_RSPAMD_CONNECTION_KEYS = ['mailcow_url', 'mailcow_api_key_rw', 'rspamd_password', 'rspamd_url'];
 
 function settingsPlural(n, one, many) { return n === 1 ? one : many; }
@@ -559,7 +558,8 @@ function settingsErrorText(body, fallback) {
 }
 
 async function settingsRspamdState() {
-    const res = await authenticatedFetch('/api/suppressions/rspamd/state');
+    // The map is read even while the sync is off: the questions below need it
+    const res = await authenticatedFetch('/api/suppressions/rspamd/state?check_map=true');
     if (!res.ok) throw new Error('Could not read the Rspamd state');
     return res.json();
 }
@@ -572,8 +572,8 @@ async function settingsRspamdTransition(payload, data, newDisabled) {
     const value = key => (key in payload && !locked.has(key)) ? payload[key] : before[key];
     const wasDisabled = new Set((window.disabledFeatures || []).map(s => s.trim().toLowerCase()));
     const featureWasOn = !wasDisabled.has('spam-filter'), featureOn = !newDisabled.has('spam-filter');
-    const wasOn = featureWasOn && before.suppression_enabled === true && before.suppression_rspamd_sync === true;
-    const nowOn = featureOn && value('suppression_enabled') === true && value('suppression_rspamd_sync') === true;
+    const wasOn = featureWasOn && before.suppression_rspamd_sync === true;
+    const nowOn = featureOn && value('suppression_rspamd_sync') === true;
     const featureOff = featureWasOn && !featureOn;
     // Spam Filter turned on again: its list was deleted while it was off, and
     // the blocks this app left in Rspamd are loaded back into it, so nothing
@@ -584,7 +584,7 @@ async function settingsRspamdTransition(payload, data, newDisabled) {
     const connectionChanged = SETTINGS_RSPAMD_CONNECTION_KEYS.some(key => key in payload && !locked.has(key)
         && payload[key] !== '********' && String(payload[key] ?? '') !== String(before[key] ?? ''));
     if (connectionChanged) {
-        showToast('Save the mailcow or Rspamd connection change first, then turn automatic updates on or off.', 'error');
+        showToast('Save the mailcow or Rspamd connection change first, then turn Sync with Rspamd on or off.', 'error');
         return null;
     }
     let state;
@@ -595,7 +595,7 @@ async function settingsRspamdTransition(payload, data, newDisabled) {
     if (!nowOn || featureOff) {
         // Going off. Nothing of ours in Rspamd: nothing to ask
         if (n === 0) return { action: 'none', feature_off: featureOff, purge_rspamd: state.writable ? 'remove' : 'keep' };
-        const lead = featureOff ? 'Spam Filter will turn off and its saved list will be deleted.' : 'Automatic updates will stop.';
+        const lead = featureOff ? 'Spam Filter will turn off and its saved list will be deleted.' : 'Sync with Rspamd will stop.';
         if (n === null || !state.writable) {
             const why = state.reason_text || 'Rspamd cannot be reached.';
             const message = n === null
@@ -615,20 +615,21 @@ async function settingsRspamdTransition(payload, data, newDisabled) {
     // Coming back on: what mailcow changed in this app's section comes into the
     // list first, then the list's waiting changes are written
     const pending = state.pending_count;
-    if (pending === 0) return { action: 'none' };
+    // Nothing waits here: what changed in mailcow meanwhile is still read in at once
+    if (pending === 0) return { action: 'apply', count: 0 };
     if (!state.readable || pending === null || pending === undefined) {
         // What is in Rspamd now cannot be checked: say so before anything is written there
         const why = state.reason_text || 'Rspamd cannot be reached.';
         const ok = await showChoiceModal({
-            title: 'Turn on automatic updates?',
-            message: `We cannot check this app's Rspamd blocks now: ${why} Turning on updates writes the list's waiting changes once Rspamd can be reached.`,
+            title: 'Turn on Sync with Rspamd?',
+            message: `We cannot check this app's Rspamd blocks now: ${why} Turning on the sync writes the list's waiting changes once Rspamd can be reached.`,
             choices: [{ value: 'apply', label: 'Turn on', kind: 'primary' }]
         });
         return ok ? { action: 'apply', count: pending } : null;
     }
     const changes = `${pending} waiting ${settingsPlural(pending, 'change', 'changes')}`;
     const picked = await showChoiceModal({
-        title: 'Turn on automatic updates?',
+        title: 'Turn on Sync with Rspamd?',
         message: `Apply the ${changes} to Rspamd, or start fresh? Starting fresh deletes the whole list and removes this app's Rspamd blocks. Other Rspamd entries stay.`,
         choices: [{ value: 'fresh', label: 'Start fresh', kind: 'danger' }, { value: 'apply', label: 'Apply changes', kind: 'primary' }]
     });
@@ -642,19 +643,22 @@ async function settingsRspamdAfterSave(plan) {
         const body = await res.json().catch(() => ({}));
         if (!res.ok) {
             return [(body.detail && body.detail.code === 'not_confirmed')
-                ? 'Automatic updates are off. Block removal could not be confirmed. The saved list was kept. Check Rspamd before retrying.'
-                : `Automatic updates are off, but block removal failed. The saved list was kept. ${settingsErrorText(body, '')}`.trim(), 'error'];
+                ? 'Sync with Rspamd is off. Block removal could not be confirmed. The saved list was kept. Check Rspamd before retrying.'
+                : `Sync with Rspamd is off, but block removal failed. The saved list was kept. ${settingsErrorText(body, '')}`.trim(), 'error'];
         }
-        return [`Automatic updates are off. Removed ${body.removed_blocks} app ${settingsPlural(body.removed_blocks, 'block', 'blocks')} from Rspamd.`, 'success'];
+        return [`Sync with Rspamd is off. Removed ${body.removed_blocks} app ${settingsPlural(body.removed_blocks, 'block', 'blocks')} from Rspamd.`, 'success'];
     }
-    if (plan.action === 'keep' && !plan.feature_off) return ['Automatic updates are off. Existing Rspamd blocks were kept.', 'success'];
+    if (plan.action === 'keep' && !plan.feature_off) return ['Sync with Rspamd is off. Existing Rspamd blocks were kept.', 'success'];
     if (plan.action === 'apply') {
-        const res = await authenticatedFetch('/api/suppressions/sync', { method: 'POST' });
+        // What changed in mailcow comes in first, then the list's waiting changes are written
+        const res = await authenticatedFetch('/api/suppressions/sync?after_change=true', { method: 'POST' });
         const body = await res.json().catch(() => ({}));
-        if (!res.ok) return [`Automatic updates are on, but Rspamd was not updated yet: ${settingsErrorText(body, res.statusText)}`, 'error'];
-        return [body.written
-            ? `Automatic updates are on. Rspamd updated: ${body.added} added, ${body.removed} removed.`
-            : 'Automatic updates are on. Rspamd is already up to date.', 'success'];
+        if (!res.ok) return [`Sync with Rspamd is on, but Rspamd was not updated yet: ${settingsErrorText(body, res.statusText)}`, 'error'];
+        const list = (body.list_added || body.list_removed)
+            ? ` List updated from Rspamd: ${body.list_added || 0} added, ${body.list_removed || 0} deleted.` : '';
+        if (body.written) return [`Sync with Rspamd is on. Rspamd updated: ${body.added} added, ${body.removed} removed.${list}`, 'success'];
+        if (body.pending_count) return [`Sync with Rspamd is on, but ${body.pending_count} ${settingsPlural(body.pending_count, 'change waits', 'changes wait')}: the Read-Write API key is not set.${list}`, 'error'];
+        return [`Sync with Rspamd is on. Rspamd is already up to date.${list}`, 'success'];
     }
     if (plan.action === 'import') {
         const res = await authenticatedFetch('/api/suppressions/rspamd/import', { method: 'POST' });
@@ -664,7 +668,7 @@ async function settingsRspamdAfterSave(plan) {
             ? [`Spam Filter is on. Loaded ${body.imported} ${settingsPlural(body.imported, 'block', 'blocks')} from Rspamd.`, 'success']
             : null;
     }
-    if (plan.action === 'fresh') return ['Started fresh. The list is empty and this app\'s Rspamd blocks are removed. Automatic updates are on.', 'success'];
+    if (plan.action === 'fresh') return ['Started fresh. The list is empty and this app\'s Rspamd blocks are removed. Sync with Rspamd is on.', 'success'];
     return null;
 }
 
@@ -859,7 +863,9 @@ var SETTINGS_EDIT_TABS = [
     {
         // The id stays spam_filter: links, the search and Status > Jobs point to it, and the Spam Filter feature hides it
         id: 'spam_filter', label: 'Queue Management', description: 'Choose what happens when outgoing mail cannot be delivered. Blocked addresses are listed on Spam Filter > Suppressions.', groups: [
-            { label: 'Automatic handling', keys: ['suppression_enabled', 'suppression_rspamd_sync'] },
+            // The sync belongs to the list, not to the automatic handling: a list kept by hand syncs too
+            { label: 'Rspamd', keys: ['suppression_rspamd_sync'] },
+            { label: 'Automatic handling', keys: ['suppression_enabled'] },
             // Reading the logs is set by the choices (settingsSyncBounce)
             { label: 'Permanent delivery failure', choice: 'hard', needs: 'suppression_enabled', keys: ['suppression_hard_bounce_action', 'suppression_auto_detect'],
                 intro: 'The receiving server rejected the message permanently. (5.x.x)' },
@@ -1815,7 +1821,7 @@ function renderSettings(content, data) {
                 }
                 // ──────────────────────────────────────────────────────────
 
-                // The app's Rspamd blocks when automatic updates go off or on
+                // The app's Rspamd blocks when the sync goes off or on
                 const newDisabledSet = new Set('disabled_features' in payload
                     ? (payload.disabled_features || '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean)
                     : (window.disabledFeatures || []).map(s => s.trim().toLowerCase()));
@@ -1826,11 +1832,11 @@ function renderSettings(content, data) {
                         const res = await authenticatedFetch('/api/suppressions/start-fresh', { method: 'POST' });
                         if (!res.ok) {
                             const body = await res.json().catch(() => ({}));
-                            showToast(`Automatic updates are still off. ${settingsErrorText(body, res.statusText)}`, 'error');
+                            showToast(`Sync with Rspamd is still off. ${settingsErrorText(body, res.statusText)}`, 'error');
                             return;
                         }
                     } catch (freshErr) {
-                        showToast(`Automatic updates are still off. Rspamd could not be reached: ${freshErr.message || freshErr}`, 'error');
+                        showToast(`Sync with Rspamd is still off. Rspamd could not be reached: ${freshErr.message || freshErr}`, 'error');
                         return;
                     }
                 }

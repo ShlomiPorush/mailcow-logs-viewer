@@ -388,12 +388,8 @@ function suppressionSyncLocked() {
 }
 
 function updateSuppressionSyncLock() {
-    const locked = suppressionSyncLocked();
-    const btn = document.getElementById('suppression-sync-btn');
-    if (btn) {
-        btn.disabled = locked;
-        btn.title = locked ? 'Syncing to Rspamd needs the Read-Write API key' : 'Sync suppression list to Rspamd';
-    }
+    // Locked only matters while the list is synced with Rspamd
+    const locked = suppressionSyncLocked() && !(suppressionRspamdState && !suppressionRspamdState.sync_on);
     const note = document.getElementById('suppression-rw-note');
     if (note) {
         note.innerHTML = locked ? `<div class="ui-list-note ui-flush">${uiLocked('Syncing to Rspamd is locked',
@@ -401,23 +397,12 @@ function updateSuppressionSyncLock() {
     }
 }
 
-// What the app has in Rspamd, read from the map itself, and how many of the
-// list's changes wait to be written there
+// What the app has in Rspamd, read from the map itself, and whether the list
+// is synced with it ("Sync with Rspamd")
 let suppressionRspamdState = null;
 
-// The button says how many changes wait while nothing writes them by itself
-function renderSuppressionSyncButton(busy) {
-    const btn = document.getElementById('suppression-sync-btn');
-    if (!btn) return;
-    const state = suppressionRspamdState;
-    const n = state && !state.automatic ? state.pending_count : 0;
-    btn.disabled = busy || suppressionSyncLocked();
-    btn.innerHTML = `<svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg> ${busy ? 'Syncing...' : n > 0 ? `Sync to Rspamd (${Number(n)})` : 'Sync to Rspamd'}`;
-    if (!suppressionSyncLocked()) btn.title = 'Apply pending block additions and removals to Rspamd.';
-}
-
-// While automatic updates are off, say that the list's changes wait for the
-// button. A map the app cannot read its section from is said at any time
+// With the sync off, say that the list does not change what Rspamd blocks. A
+// map the app cannot read its section from is said while the sync is on
 async function loadSuppressionSyncNote() {
     const note = document.getElementById('suppression-sync-note');
     if (!note) return;
@@ -430,20 +415,26 @@ async function loadSuppressionSyncNote() {
         note.innerHTML = '';
         return;
     }
+    const wasOn = suppressionRspamdState ? suppressionRspamdState.sync_on : null;
     suppressionRspamdState = state;
-    renderSuppressionSyncButton(false);
+    updateSuppressionSyncLock();
+    // The Rspamd column reads differently with the sync off: rows drawn before
+    // this was known (the first load) or under the other setting draw again
+    if (wasOn !== state.sync_on && !(wasOn === null && state.sync_on)) loadSuppressions();
     const settingsButton = `<button type="button" class="ui-btn ui-btn-sm" onclick="navigateTo('settings', { sub: 'spam_filter' })">Settings</button>`;
+    if (!state.sync_on) {
+        note.innerHTML = `<div class="ui-list-note ui-flush">${uiLocked('Not synced with Rspamd',
+            "Sync with Rspamd is off. This list does not change what Rspamd blocks, and changes made in mailcow do not come into it.",
+            settingsButton)}</div>`;
+        return;
+    }
     if (state.reason === 'section_unclear') {
         note.innerHTML = `<div class="ui-list-note ui-flush">${uiLocked("This app's Rspamd section needs fixing", escapeHtml(state.reason_text))}</div>`;
         return;
     }
-    if (state.automatic) { note.innerHTML = ''; return; }
-    const text = !state.writable
-        ? `Automatic updates are off. Changes here stay in this app until ${state.reason === 'no_rw_key_and_password' ? 'the Read-Write API key and Rspamd password are'
-            : state.reason === 'no_password' ? 'the Rspamd password is' : 'the Read-Write API key is'} set. Existing Rspamd blocks may remain.`
-        : 'Automatic updates are off. Changes here wait until you click Sync to Rspamd. Existing Rspamd blocks stay in effect.'
-            + (state.readable ? '' : ' Rspamd could not be checked. The pending count may be out of date.');
-    note.innerHTML = `<div class="ui-list-note ui-flush">${uiLocked('Rspamd is not updated automatically', escapeHtml(text), settingsButton)}</div>`;
+    note.innerHTML = state.reason === 'no_password' || state.reason === 'no_rw_key_and_password'
+        ? `<div class="ui-list-note ui-flush">${uiLocked('Rspamd cannot be reached', 'Sync with Rspamd is on, but the Rspamd password is not set. Changes here stay in this app until it is.', settingsButton)}</div>`
+        : '';
 }
 
 // The suppression list is paged on the server, so its column headers sort there
@@ -616,10 +607,12 @@ function renderSuppressionItem(s) {
 
     // Fix #5: Show proper sync status based on active state
     let syncBadge = '<span class="ui-muted">-</span>';
-    if (s.active) {
+    if (suppressionRspamdState && !suppressionRspamdState.sync_on) {
+        syncBadge = '<span class="ui-muted" title="Sync with Rspamd is off">Off</span>';
+    } else if (s.active) {
         syncBadge = s.synced_to_rspamd
             ? '<span class="ui-text-ok" title="Synced to Rspamd">Synced</span>'
-            : `<span class="ui-text-warn" title="${suppressionSyncLocked() ? 'Not synced: syncing to Rspamd needs the Read-Write API key' : 'Waiting to be added to Rspamd'}">⟳ Pending</span>`;
+            : `<span class="ui-text-warn" title="${suppressionSyncLocked() ? 'Not synced: syncing to Rspamd needs the Read-Write API key' : 'Waiting to be written to Rspamd'}">⟳ Pending</span>`;
     } else if (!s.synced_to_rspamd) {
         // Disabled or expired, and still blocking in Rspamd until it is removed there
         syncBadge = '<span class="ui-text-warn" title="Waiting to be removed from Rspamd">⟳ Pending</span>';
@@ -1104,9 +1097,11 @@ function suppressionListChangeText(changed) {
     return `List updated from Rspamd: ${Number(changed.list_added || 0)} added, ${Number(changed.list_removed || 0)} deleted.`;
 }
 
-// After a change on the page: what mailcow changed comes in first; the change
-// is written only while automatic updates are on, else it waits for the button
+// After a change on the page, while the list is synced with Rspamd: what
+// mailcow changed comes in first, then the change is written
 async function autoSyncToRspamd() {
+    // Asked every time: the server skips it at once while the sync is off,
+    // and a state read before the sync was turned on may be out of date
     try {
         const response = await authenticatedFetch('/api/suppressions/sync?after_change=true', { method: 'POST' });
         const body = await response.json().catch(() => ({}));
@@ -1120,33 +1115,6 @@ async function autoSyncToRspamd() {
     loadSuppressions();
     loadSuppressionStats();
     loadSuppressionSyncNote();
-}
-
-async function syncSuppressionsToRspamd() {
-    renderSuppressionSyncButton(true);
-    try {
-        const response = await authenticatedFetch('/api/suppressions/sync', { method: 'POST' });
-        const body = await response.json().catch(() => ({}));
-        if (!response.ok) {
-            const detail = body.detail;
-            const listText = suppressionListChangeText(detail && detail.list_changed);
-            const message = typeof detail === 'string' ? detail : (detail && detail.message) || 'Sync failed';
-            showToast(`Sync failed: ${message}${listText ? ' ' + listText : ''}`, 'error');
-            return;
-        }
-        const written = body.written
-            ? `Rspamd updated: ${Number(body.added || 0)} added, ${Number(body.removed || 0)} removed.`
-            : 'Rspamd is already up to date.';
-        const listText = suppressionListChangeText(body);
-        showToast(listText ? `${written} ${listText}` : written, 'success');
-    } catch (error) {
-        showToast('Sync failed: ' + error.message, 'error');
-    } finally {
-        renderSuppressionSyncButton(false);
-        loadSuppressions();
-        loadSuppressionStats();
-        loadSuppressionSyncNote();
-    }
 }
 
 function exportSuppressions() {

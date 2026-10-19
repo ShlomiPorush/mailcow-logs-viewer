@@ -241,7 +241,7 @@ Some services are collected whatever this list says, because other pages read th
 | --- | --- | --- |
 | `SUPPRESSION_ENABLED` | `false` | Enables the suppression jobs: bounce detection, deferred queue cleanup, Rspamd sync and expiry. Manual API actions still work while it is off. |
 | `SUPPRESSION_AUTO_DETECT` | `true` | Read the Postfix logs for bounces. The Queue Management choices set it; set it here only to force it. |
-| `SUPPRESSION_RSPAMD_SYNC` | `true` | Copy active suppressions to Rspamd's `global_rcpt_blacklist.map`, so mail to them is rejected. Needs `RSPAMD_PASSWORD` and the read-write key. |
+| `SUPPRESSION_RSPAMD_SYNC` | `true` | Sync with Rspamd: keep the suppression list and the app's section of Rspamd's `global_rcpt_blacklist.map` in step, both ways, so mail to the listed addresses is rejected. Off, the list does not change what Rspamd blocks. Needs `RSPAMD_PASSWORD` and the read-write key. |
 | `SUPPRESSION_HARD_BOUNCE_ACTION` | `suppress` | For permanent failures (5.x.x): `suppress` or `ignore`. |
 | `SUPPRESSION_SOFT_BOUNCE_ACTION` | `count` | For temporary failures (4.x.x): `suppress`, `count` (suppress at the threshold) or `ignore`. Used only while `QUEUE_CLEANUP_ENABLED=false`. |
 | `SUPPRESSION_SOFT_BOUNCE_THRESHOLD` | `3` | Soft bounces before `count` suppresses. Used only while `QUEUE_CLEANUP_ENABLED=false`. |

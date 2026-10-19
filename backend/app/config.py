@@ -759,7 +759,7 @@ class Settings(BaseSettings):
     suppression_rspamd_sync: bool = Field(
         default=True,
         env='SUPPRESSION_RSPAMD_SYNC',
-        description='Auto-sync suppression list to Rspamd global_rcpt_blacklist.map'
+        description='Keep the suppression list and the app\'s section of Rspamd global_rcpt_blacklist.map in step, both ways'
     )
     suppression_whitelist_domains: str = Field(
         default='',

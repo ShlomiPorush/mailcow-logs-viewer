@@ -71,6 +71,7 @@ def test_suppression_sync_without_the_rw_key_still_reads(started, monkeypatch):
 
 
 def test_suppression_sync_without_the_rspamd_password_is_refused(started, monkeypatch):
+    monkeypatch.setattr(settings._inner, 'suppression_rspamd_sync', True)
     monkeypatch.setattr(settings._inner, 'rspamd_password', '')
     resp = TestClient(app).post("/api/settings/jobs/sync_suppressions/run")
     assert resp.status_code == 409
