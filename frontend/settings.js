@@ -612,35 +612,27 @@ async function settingsRspamdTransition(payload, data, newDisabled) {
         return picked ? { action: picked, feature_off: featureOff, count: n } : null;
     }
 
-    // Coming back on
-    const active = state.active_count;
-    if (active === 0 && n === 0) return { action: 'none' };
-    if (active === null || n === null) {
+    // Coming back on: what mailcow changed in this app's section comes into the
+    // list first, then the list's waiting changes are written
+    const pending = state.pending_count;
+    if (pending === 0) return { action: 'none' };
+    if (!state.readable || pending === null || pending === undefined) {
         // What is in Rspamd now cannot be checked: say so before anything is written there
         const why = state.reason_text || 'Rspamd cannot be reached.';
-        const what = active === null ? 'the active list' : `the ${active} active ${settingsPlural(active, 'entry', 'entries')}`;
         const ok = await showChoiceModal({
             title: 'Turn on automatic updates?',
-            message: `We cannot check this app's Rspamd blocks now: ${why} Turning on updates replaces them with ${what}.`,
+            message: `We cannot check this app's Rspamd blocks now: ${why} Turning on updates writes the list's waiting changes once Rspamd can be reached.`,
             choices: [{ value: 'apply', label: 'Turn on', kind: 'primary' }]
         });
-        return ok ? { action: 'apply', count: active } : null;
+        return ok ? { action: 'apply', count: pending } : null;
     }
-    if (active === 0) {
-        const ok = await showChoiceModal({
-            title: 'Turn on automatic updates?',
-            message: `The list is empty, but ${blocks(n)} from this app remain in Rspamd. Turning on updates will remove them.`,
-            choices: [{ value: 'apply', label: 'Turn on', kind: 'primary' }]
-        });
-        return ok ? { action: 'apply', count: 0 } : null;
-    }
-    const entries = `${active} active ${settingsPlural(active, 'entry', 'entries')}`;
+    const changes = `${pending} waiting ${settingsPlural(pending, 'change', 'changes')}`;
     const picked = await showChoiceModal({
         title: 'Turn on automatic updates?',
-        message: `Apply the ${entries}, or start fresh? Starting fresh deletes the whole list and removes this app's Rspamd blocks. Other Rspamd entries stay.`,
-        choices: [{ value: 'fresh', label: 'Start fresh', kind: 'danger' }, { value: 'apply', label: 'Apply blocks', kind: 'primary' }]
+        message: `Apply the ${changes} to Rspamd, or start fresh? Starting fresh deletes the whole list and removes this app's Rspamd blocks. Other Rspamd entries stay.`,
+        choices: [{ value: 'fresh', label: 'Start fresh', kind: 'danger' }, { value: 'apply', label: 'Apply changes', kind: 'primary' }]
     });
-    return picked ? { action: picked, count: active } : null;
+    return picked ? { action: picked, count: pending } : null;
 }
 
 // After the save: carry out the choice. Returns the toast to show, [text, kind]
@@ -660,7 +652,9 @@ async function settingsRspamdAfterSave(plan) {
         const res = await authenticatedFetch('/api/suppressions/sync', { method: 'POST' });
         const body = await res.json().catch(() => ({}));
         if (!res.ok) return [`Automatic updates are on, but Rspamd was not updated yet: ${settingsErrorText(body, res.statusText)}`, 'error'];
-        return [`Automatic updates are on. Applied ${body.synced} active ${settingsPlural(body.synced, 'entry', 'entries')} to Rspamd.`, 'success'];
+        return [body.written
+            ? `Automatic updates are on. Rspamd updated: ${body.added} added, ${body.removed} removed.`
+            : 'Automatic updates are on. Rspamd is already up to date.', 'success'];
     }
     if (plan.action === 'import') {
         const res = await authenticatedFetch('/api/suppressions/rspamd/import', { method: 'POST' });

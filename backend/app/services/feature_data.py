@@ -41,6 +41,8 @@ FEATURE_KEYS: Dict[str, List[str]] = {
     'netfilter': ['protection.%'],
     'blacklist': ['ignore.blocklists'],
     'domains': ['dns_last_full_check'],
+    # What the two-way sync with Rspamd keeps about the rows
+    'spam-filter': ['spam_filter.rspamd_%'],
 }
 
 # Spam Filter turned on again loads the blocks this app wrote to Rspamd while
@@ -80,6 +82,10 @@ def purge_feature(db: Session, feature: str) -> dict:
     from ..models import ProtectionHit, SystemSetting
     deleted: Dict[str, int] = {}
     try:
+        if feature == 'spam-filter':
+            # Before the tables: a detection run or the Rspamd sync holds it while it changes the rows
+            from .suppression_rows_lock import lock_suppression_rows
+            lock_suppression_rows(db)
         for table_name in FEATURE_TABLES[feature]:
             if not _TABLE_NAME_RE.match(table_name):
                 raise ValueError(f"Invalid table name: {table_name}")

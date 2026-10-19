@@ -23,6 +23,8 @@ from .config import settings, set_cached_active_domains
 from .database import get_db_context, SessionLocal
 from .mailcow_api import mailcow_api, mailcow_handled_items
 from .services.suppression_events import record_bounces, record_stuck
+from .services.suppression_rows_lock import lock_suppression_rows
+from .services.rspamd_map_lock import map_write_lock_async
 from .models import EasDevice, PostfixLog, RspamdLog, NetfilterLog, MessageCorrelation, DMARCSync, DomainDNSCheck, MailboxStatistics, AliasStatistics, MonitoredHost, BlacklistCheck, DMARCReport, DMARCRecord, TLSReport, TLSReportPolicy, SpamSuppression, SuppressionEvent, RawServiceLog, SystemSetting
 from .correlation import (
     detect_direction,
@@ -275,8 +277,9 @@ def _reschedule_suppression_jobs():
         except Exception:
             pass
 
-    # sync_suppressions
-    if spam_enabled and settings.suppression_rspamd_sync and settings.is_rspamd_configured:
+    # sync_suppressions: reads the app's Rspamd blocks into the list whenever
+    # it can; writes only while automatic updates are on
+    if settings.is_feature_enabled('spam-filter') and settings.is_rspamd_configured:
         scheduler.add_job(
             sync_suppressions_to_rspamd_job,
             trigger=every(minutes=10),
@@ -3355,8 +3358,6 @@ async def send_weekly_summary_email_job():
         logger.error(f"Weekly summary job failed: {e}")
         update_job_status('send_weekly_summary', 'failed', str(e))
 
-# PostgreSQL advisory lock key held while stuck messages are stored
-DEFERRED_STORE_LOCK = 0x4D4C5601
 
 
 def _blocks_now(suppression) -> bool:
@@ -3394,8 +3395,9 @@ def _store_deferred_suppressions_worker(recipients_to_suppress, uncovered: Optio
     note = f'Deferred in queue > {settings.queue_cleanup_threshold_minutes}m'
 
     with get_db_context() as db:
-        # One run stores at a time, so two cannot both find a message not yet kept
-        db.execute(text('SELECT pg_advisory_xact_lock(:key)'), {'key': DEFERRED_STORE_LOCK})
+        # One writer of the rows at a time: two runs cannot both find a message
+        # not yet kept, and the Rspamd sync never decides from rows changing here
+        lock_suppression_rows(db)
         existing_by_email = {s.email: s for s in db.query(SpamSuppression).filter(
             SpamSuppression.email.in_(list(by_email))).all()}
         kept = set()
@@ -3464,6 +3466,15 @@ def _store_deferred_suppressions_worker(recipients_to_suppress, uncovered: Optio
         db.commit()
 
     return suppress_count
+
+
+def _blocked_now(emails) -> set:
+    """The addresses among emails that a block covers now."""
+    if not emails:
+        return set()
+    with get_db_context() as db:
+        rows = db.query(SpamSuppression).filter(SpamSuppression.email.in_(list(emails))).all()
+        return {r.email for r in rows if _blocks_now(r)}
 
 
 async def _spam_blocks_loaded(job: str) -> bool:
@@ -3609,12 +3620,21 @@ async def cleanup_deferred_queue_job():
         delete_error = None
         try:
             if items_to_delete:
-                reply = await mailcow_api.delete_queue(items_to_delete)
-                entries = reply if isinstance(reply, list) else [reply]
-                if not entries or any(not isinstance(e, dict) or e.get('type') != 'success' for e in entries):
-                    refused = next((e.get('msg') for e in entries if isinstance(e, dict) and e.get('type') != 'success'), None)
-                    raise RuntimeError(f"mailcow did not confirm the deletion: {refused or reply}")
-                logger.info(f"[QUEUE CLEANUP] Deleted {len(items_to_delete)} stuck deferred item(s) from queue")
+                # A block deleted in mailcow or on the page since it was stored
+                # keeps its messages. The Rspamd sync, which can delete blocks,
+                # waits until the deletion is sent
+                async with map_write_lock_async():
+                    blocked = await asyncio.get_running_loop().run_in_executor(
+                        get_thread_pool_executor(), _blocked_now, {r['email'] for r in recipients_to_suppress})
+                    items_to_delete = [q for q in items_to_delete
+                                       if all(r['email'] in blocked for r in recipients_to_suppress if r['queue_id'] == q)]
+                    if items_to_delete:
+                        reply = await mailcow_api.delete_queue(items_to_delete)
+                        entries = reply if isinstance(reply, list) else [reply]
+                        if not entries or any(not isinstance(e, dict) or e.get('type') != 'success' for e in entries):
+                            refused = next((e.get('msg') for e in entries if isinstance(e, dict) and e.get('type') != 'success'), None)
+                            raise RuntimeError(f"mailcow did not confirm the deletion: {refused or reply}")
+                        logger.info(f"[QUEUE CLEANUP] Deleted {len(items_to_delete)} stuck deferred item(s) from queue")
         except Exception as e:
             delete_error = e
             logger.error(f"[QUEUE CLEANUP] Failed to delete queue items (the blocks are kept; retried next run): {e}")
@@ -4139,6 +4159,18 @@ def start_scheduler():
             replace_existing=True
         )
 
+        # Reads the app's Rspamd blocks into the list every 10 minutes, and
+        # writes the list while automatic updates are on
+        if settings.is_feature_enabled('spam-filter') and settings.is_rspamd_configured:
+            scheduler.add_job(
+                sync_suppressions_to_rspamd_job,
+                trigger=every(minutes=10),
+                id='sync_suppressions',
+                name='Sync Suppressions to Rspamd',
+                replace_existing=True,
+                max_instances=1
+            )
+
         # Job 16: Spam Suppression (if enabled)
         if settings.is_feature_enabled('spam-filter') and settings.suppression_enabled:
             # Detect bounces from postfix logs every 5 minutes
@@ -4150,17 +4182,6 @@ def start_scheduler():
                 replace_existing=True,
                 max_instances=1
             )
-            
-            # Sync suppressions to Rspamd every 10 minutes
-            if settings.suppression_rspamd_sync and settings.is_rspamd_configured:
-                scheduler.add_job(
-                    sync_suppressions_to_rspamd_job,
-                    trigger=every(minutes=10),
-                    id='sync_suppressions',
-                    name='Sync Suppressions to Rspamd',
-                    replace_existing=True,
-                    max_instances=1
-                )
             
             # Expire old suppressions every hour
             scheduler.add_job(
@@ -4254,6 +4275,8 @@ BOUNCE_WATERMARK_KEY = 'suppression_bounce_log_watermark'
 def _detect_suppressions_worker():
     """Scan and persist suppressions with a worker-owned database session."""
     with get_db_context() as db:
+        # Before the first read of the rows: the Rspamd sync never decides from rows changing here
+        lock_suppression_rows(db)
         db.execute(pg_insert(SystemSetting).values(
             key=BOUNCE_WATERMARK_KEY, value='0', updated_at=datetime.utcnow(),
         ).on_conflict_do_nothing(index_elements=['key']))
@@ -4463,25 +4486,34 @@ async def detect_suppressions_job():
                     cleanup_set = set(emails_for_queue_cleanup)
                     whitelist = settings.suppression_whitelist_domains_list
                     items_to_delete = []
+                    item_addresses = {}
                     for item in queue:
                         recipients = item.get('recipients', [])
                         queue_id = item.get('queue_id')
                         if not queue_id or not recipients:
                             continue
                         addresses = [r.split(' ')[0].strip('<>').lower() for r in recipients]
+                        item_addresses[queue_id] = addresses
                         # A message that also goes to a whitelisted domain stays in the queue
                         if any(a.split('@')[-1] in whitelist for a in addresses):
                             continue
                         if any(a in cleanup_set for a in addresses):
                             items_to_delete.append(queue_id)
 
-                    # Not after Spam Filter was turned off meanwhile: its list is gone
+                    # Not after Spam Filter was turned off meanwhile: its list is gone.
+                    # Only for addresses still blocked, with no Rspamd sync in between
                     if items_to_delete and settings.is_feature_enabled('spam-filter'):
-                        await mailcow_api.delete_queue(items_to_delete)
-                        logger.info(
-                            f"[SUPPRESSION] Cleaned up {len(items_to_delete)} queue item(s) "
-                            f"for {len(cleanup_set)} bounced address(es)"
-                        )
+                        async with map_write_lock_async():
+                            blocked = await asyncio.get_running_loop().run_in_executor(
+                                get_thread_pool_executor(), _blocked_now, cleanup_set)
+                            items_to_delete = [q for q in items_to_delete
+                                               if all(a in blocked for a in item_addresses[q] if a in cleanup_set)]
+                            if items_to_delete:
+                                await mailcow_api.delete_queue(items_to_delete)
+                                logger.info(
+                                    f"[SUPPRESSION] Cleaned up {len(items_to_delete)} queue item(s) "
+                                    f"for {len(cleanup_set)} bounced address(es)"
+                                )
             except Exception as e:
                 logger.warning(f"[SUPPRESSION] Queue cleanup failed: {e}")
 
@@ -4494,30 +4526,29 @@ async def detect_suppressions_job():
 
 async def sync_suppressions_to_rspamd_job():
     """
-    Sync active suppressions to Rspamd's global_rcpt_blacklist.map
-    using the shared sync function from the suppressions router.
+    Bring the list and the app's section of global_rcpt_blacklist.map in
+    step: changes made in mailcow come into the list; the list's changes are
+    written while automatic updates are on (see sync_suppressions_worker).
     """
     if not settings.is_feature_enabled('spam-filter'):
         return
-    if not settings.suppression_enabled or not settings.suppression_rspamd_sync:
-        return
-    if not settings.is_rspamd_configured or not settings.mailcow_api_key_rw:
+    if not settings.is_rspamd_configured:
         return
     
     update_job_status('sync_suppressions', 'running')
     
     try:
         from app.routers.suppressions import sync_suppressions_worker
-        # automatic: the worker checks the switches again once it holds the map
-        # lock, so a sync that was waiting does not write after they went off
+        # automatic: the worker checks the switches again right before it
+        # writes, so a sync that was waiting does not write after they went off
         result = await asyncio.get_running_loop().run_in_executor(
             get_thread_pool_executor(), sync_suppressions_worker, True
         )
-        if result.get('skipped_off'):
-            update_job_status('sync_suppressions', 'success')
-            return
-
-        logger.info(f"[SUPPRESSION] Rspamd sync complete: {result.get('synced', 0)} active entries")
+        if result.get('list_added') or result.get('list_removed'):
+            logger.info(f"[SUPPRESSION] List updated from Rspamd: {result.get('list_added', 0)} added, "
+                        f"{result.get('list_removed', 0)} deleted")
+        if result.get('written'):
+            logger.info(f"[SUPPRESSION] Rspamd sync complete: {result.get('synced', 0)} active entries")
         update_job_status('sync_suppressions', 'success')
     except Exception as e:
         logger.error(f"[SUPPRESSION] Sync error: {e}", exc_info=True)
@@ -4544,8 +4575,9 @@ def _expire_suppressions_sync():
     
     try:
         with get_db_context() as db:
+            lock_suppression_rows(db)
             now = datetime.utcnow()
-            
+
             expired_count = db.query(SpamSuppression).filter(
                 SpamSuppression.active == True,
                 SpamSuppression.expires_at.isnot(None),

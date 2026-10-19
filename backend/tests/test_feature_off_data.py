@@ -103,7 +103,13 @@ def test_a_line_the_app_wrote_reads_back_to_its_row(stored, kind, source):
     assert suppression_map_line(row) == line, 'written back unchanged'
 
 
-@pytest.mark.parametrize('line', ['/^weird\\d+@example\\.test$/i', '/sales@example\\.test/i', '/^UPPER@example\\.test$/i'])
+def test_an_exact_address_in_capitals_is_read_as_the_address():
+    # With the i flag and nothing a pattern reads differently, it blocks just that address
+    from app.routers.suppressions import parse_managed_line
+    assert parse_managed_line('/^UPPER@example\\.test$/i') == ('upper@example.test', 'email')
+
+
+@pytest.mark.parametrize('line', ['/^weird\\d+@example\\.test$/i', '/sales@example\\.test/i'])
 def test_a_line_the_app_did_not_write_is_kept_as_a_pattern_that_stays_the_same(line):
     from app.routers.suppressions import parse_managed_line, suppression_map_line
     value, kind = parse_managed_line(line)
@@ -145,13 +151,16 @@ def test_a_bare_address_below_the_section_is_anchored_like_one_above(db_ready, m
     assert '/^bare@example\\.test$/i' in state['content'].split('\n')
 
 
-def test_an_end_marker_without_its_start_keeps_the_lines_after_it(db_ready, monkeypatch):
-    from app.routers.suppressions import sync_suppressions_worker, MANAGED_MARKER_END
-    state = _fake_map(monkeypatch, '\n'.join(['/^a@example\\.test$/i', MANAGED_MARKER_END, '/^b@example\\.test$/i']))
-    sync_suppressions_worker()
-    lines = state['content'].split('\n')
-    assert '/^a@example\\.test$/i' in lines and '/^b@example\\.test$/i' in lines
-    assert lines.count(MANAGED_MARKER_END) == 1
+def test_an_end_marker_without_its_start_stops_the_sync(db_ready, monkeypatch):
+    """Which lines are the app's cannot be told: nothing is read in or
+    written, and the page says to fix the markers (test_rspamd_two_way.py)."""
+    from app.routers.suppressions import MapUnavailable, sync_suppressions_worker, MANAGED_MARKER_END
+    content = '\n'.join(['/^a@example\\.test$/i', MANAGED_MARKER_END, '/^b@example\\.test$/i'])
+    state = _fake_map(monkeypatch, content)
+    with pytest.raises(MapUnavailable) as error:
+        sync_suppressions_worker()
+    assert error.value.code == 'section_unclear'
+    assert state['content'] == content
 
 
 # ---- Turned off: everything goes ----
@@ -507,6 +516,7 @@ def test_the_queue_cleanup_keeps_messages_no_block_covers(monkeypatch):
         return 1
 
     monkeypatch.setattr(scheduler, '_store_deferred_suppressions_worker', store)
+    monkeypatch.setattr(scheduler, '_blocked_now', lambda emails: set(emails) - {'off@example.test'})
     asyncio.run(scheduler.cleanup_deferred_queue_job())
     scheduler.mailcow_api.delete_queue.assert_awaited_once_with(['GO'])
 

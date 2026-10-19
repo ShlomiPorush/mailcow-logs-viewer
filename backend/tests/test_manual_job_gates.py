@@ -59,14 +59,22 @@ def test_a_job_whose_setting_is_off_says_why(started, monkeypatch):
     assert started == []
 
 
-def test_suppression_sync_without_the_rw_key_is_refused(started, monkeypatch):
+def test_suppression_sync_without_the_rw_key_still_reads(started, monkeypatch):
+    # It reads the app's Rspamd blocks into the list; it writes only with the key
     _rw(monkeypatch, False)
     monkeypatch.setattr(settings._inner, 'suppression_enabled', True)
     monkeypatch.setattr(settings._inner, 'suppression_rspamd_sync', True)
     monkeypatch.setattr(settings._inner, 'rspamd_password', 'example-password')
     resp = TestClient(app).post("/api/settings/jobs/sync_suppressions/run")
+    assert resp.status_code == 200, resp.text
+    assert len(started) == 1
+
+
+def test_suppression_sync_without_the_rspamd_password_is_refused(started, monkeypatch):
+    monkeypatch.setattr(settings._inner, 'rspamd_password', '')
+    resp = TestClient(app).post("/api/settings/jobs/sync_suppressions/run")
     assert resp.status_code == 409
-    assert 'Read-Write' in resp.json()['detail']
+    assert 'Rspamd password' in resp.json()['detail']
 
 
 def test_mailbox_sync_still_runs_for_rate_limits(started, monkeypatch):

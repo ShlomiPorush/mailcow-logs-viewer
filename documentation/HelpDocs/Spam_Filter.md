@@ -22,9 +22,9 @@ Search matches the address, notes and last bounce message. **Expired** shows ent
 | Value | Meaning |
 |---|---|
 | **Reason** | Hard Bounce: `5.x.x`; Soft Bounce: `4.x.x`; Deferred Stuck: queue cleanup; Rejected: another bounce status. |
-| Source | `auto`: added by the app; `manual`: added in the dialog; `import`: CSV; **From Rspamd**: loaded back from this app's part of the Rspamd map when Spam Filter was turned on again. These are permanent and no automatic handling changes them; you can edit or delete them. |
+| Source | `auto`: added by the app; `manual`: added in the dialog; `import`: CSV; **From Rspamd**: added in mailcow to this app's part of the Rspamd map, or loaded back from it when Spam Filter was turned on again. These are permanent and no automatic handling changes them; you can edit or delete them. |
 | **Bounces** | Total counted bounces, with hard (`H:`) and soft (`S:`) counts. |
-| **Rspamd** | **Synced**: written to the map; **Pending**: awaiting a write. Disabling marks the entry for the next sync; the row does not reliably show whether its old map entry remains. |
+| **Rspamd** | **Synced**: in step with the map; **Pending**: waiting to be added, or, on a disabled or expired entry, to be removed. |
 
 ### Block details
 
@@ -54,30 +54,30 @@ A domain must be entered as a plain name. It matches that exact domain, excludin
 
 Entries are permanent by default. Temporary entries last 1 to 365 days, 7 by default. Adding an existing inactive address reactivates it as a permanent manual entry and ignores the expiry fields; an active duplicate is refused.
 
-With the read-write key, adding an entry deletes queued messages to that address, or every recipient at that domain, then writes the suppression list to Rspamd.
+With the read-write key, adding an entry deletes queued messages to that address, or every recipient at that domain.
 
 ### Edit, disable and delete
 
-**Disable** keeps the entry but removes its block on the next sync. Re-enabling an expired entry requires a new expiry or **Permanent block**; otherwise the hourly expiry job disables it again. **Delete** removes the entry permanently.
+**Disable** keeps the entry and removes its block from Rspamd with the next write. Re-enabling an expired entry requires a new expiry or **Permanent block**; otherwise the hourly expiry job disables it again. **Delete** removes the entry permanently; its block is removed from Rspamd with the next write.
 
-Adding, editing, enabling, disabling, deleting or importing triggers a background sync when the read-write key is configured.
+While automatic updates are on, adding, enabling, disabling, deleting or importing is written to Rspamd at once. While they are off, these changes wait for **Sync to Rspamd**, which shows how many wait.
 
 ### Sync to Rspamd
 
-Manual sync writes active entries to `global_rcpt_blacklist.map`. Automatic sync runs every 10 minutes with **Handle undeliverable mail automatically**, **Automatically update Rspamd blocks**, the Rspamd password and read-write key configured.
+The list and the app's part of `global_rcpt_blacklist.map` are kept in step both ways. Every 10 minutes, and before every write, the app reads its part of the map: a block deleted there in mailcow is deleted from the list, and a block added there joins the list as **From Rspamd**. Then the list's waiting changes are written, by **Sync to Rspamd** or, while automatic updates are on, by themselves. Reading needs the Rspamd password; writing also needs the read-write key.
 
-The app replaces only the section between these markers; put your own entries above it:
+The app's part is the section between these markers; your own entries go above or below it:
 
 ```
 # === MANAGED BY MAILCOW LOGS VIEWER - DO NOT EDIT BELOW ===
 # === END MANAGED SECTION ===
 ```
 
-The map is written only when managed entries change. If the existing map cannot be read, sync fails without writing and retries next time. A write counts only when mailcow confirms it. Your own lines, above and below the app's section, stay. Bare addresses among them are anchored during sync so they cannot match longer addresses containing them; a line with regex characters, such as `.*@example\.com`, is left as written.
+A write starts from the map as it is then and changes only the list's waiting entries, so changes made in mailcow stay; one made at the very moment of a write can still be lost. Nothing is written when nothing changes. If the map cannot be read, or the markers are missing or repeated, nothing is read in or written until that is fixed. A write counts only when mailcow confirms it; one whose answer was lost is checked on the next read. Connecting to another mailcow or Rspamd makes every active entry wait to be written there; none is deleted. An entry deleted from the list before this version while its block stayed in Rspamd comes back as **From Rspamd**. Your own lines, above and below the app's section, stay. Bare addresses among them are anchored during sync so they cannot match longer addresses containing them; a line with regex characters, such as `.*@example\.com`, is left as written.
 
 ### When automatic updates stop or start
 
-Automatic updates run while Spam Filter, **Handle undeliverable mail automatically** and **Automatically update Rspamd blocks** are all on. Turning one off, or turning Spam Filter off with its list, asks whether to remove the app's blocks from Rspamd or keep them. Removing empties only the managed section; your lines above it stay. Turning updates back on says how many entries will be written, with **Start fresh** to empty both the list and the managed section. While updates are off, a note above the list says how many of the app's blocks remain in Rspamd, read from the map.
+Automatic updates run while Spam Filter, **Handle undeliverable mail automatically** and **Automatically update Rspamd blocks** are all on. Turning one off, or turning Spam Filter off with its list, asks whether to remove the app's blocks from Rspamd or keep them. Removing empties only the managed section; your lines above it stay. Turning updates back on says how many waiting changes will be written, with **Start fresh** to empty both the list and the managed section. While updates are off, a note above the list says that changes wait for **Sync to Rspamd**.
 
 ### Import and export
 
@@ -107,8 +107,8 @@ Lines starting with `#` are comments; blank lines do not count as entries. Valid
 
 Saving refuses invalid patterns, anchors bare addresses and writes the whole map through mailcow. Rspamd reloads it. **Discard** reloads from Rspamd. The editor does not refresh automatically while you edit.
 
-> [!WARNING]
-> In **Recipient Denylist**, add your own entries only above the line `# === MANAGED BY MAILCOW LOGS VIEWER - DO NOT EDIT BELOW ===`. The suppression sync replaces everything between that line and `# === END MANAGED SECTION ===`, so entries you add there are lost on the next sync.
+> [!NOTE]
+> In **Recipient Denylist**, the lines between `# === MANAGED BY MAILCOW LOGS VIEWER - DO NOT EDIT BELOW ===` and `# === END MANAGED SECTION ===` are the suppression list. An entry you add or delete there is added to or deleted from the list on the next read. Keep each marker line once.
 
 ### Regex Wizard
 
@@ -118,12 +118,12 @@ The wizard's **Domain** pattern includes subdomains, unlike a domain suppression
 
 Under **Settings** > **Queue Management**:
 
-- **Handle undeliverable mail automatically** defaults off. **Automatically update Rspamd blocks** defaults on. Page edits can sync even when these switches are off.
+- **Handle undeliverable mail automatically** defaults off. **Automatically update Rspamd blocks** defaults on. With either off, page edits wait for **Sync to Rspamd**.
 - **Permanent delivery failure** defaults to blocking new mail to the address and deleting its queued mail; **Do nothing** skips permanent failures.
 - **Temporary delivery failure** defaults to **Delete after 60 minutes in the queue and block the recipients**. Keeping the message instead counts soft bounces on an inactive entry, which turns active after the set failures (3 by default), or at the first one; **Do nothing; keep retrying** skips them.
 - **Exclude these domains** accepts comma-separated exact domains.
 
-The jobs, including hourly expiry, require **Handle undeliverable mail automatically**. With it off, manual entries can still sync, but expiry does not run.
+The jobs, including hourly expiry, require **Handle undeliverable mail automatically**, except reading the app's Rspamd blocks, which needs only the Rspamd password. With it off, entries reach Rspamd through **Sync to Rspamd**, and expiry does not run.
 
 Under **Settings** > **Mailcow**, set **Rspamd Password** to read or sync maps. Leave **Rspamd URL** empty to use mailcow's path; try a direct URL such as `http://rspamd-mailcow:11334` if that fails. See [Settings](Settings.md#queue-management).
 

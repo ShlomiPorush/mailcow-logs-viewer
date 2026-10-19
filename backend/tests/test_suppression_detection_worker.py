@@ -25,6 +25,8 @@ def state(monkeypatch):
     # Spam Filter's earlier Rspamd blocks are loaded (tested in test_feature_off_data.py)
     monkeypatch.setattr(scheduler, "_spam_blocks_loaded", AsyncMock(return_value=True))
     monkeypatch.setattr(scheduler, "record_bounces", lambda db, captured: None)
+    # Every address is still blocked when its mail is deleted (checked in test_rspamd_two_way.py)
+    monkeypatch.setattr(scheduler, "_blocked_now", lambda emails: set(emails))
     monkeypatch.setattr(scheduler.mailcow_api, "get_queue", AsyncMock(return_value=[]))
     monkeypatch.setattr(scheduler.mailcow_api, "delete_queue", AsyncMock())
 

@@ -18,6 +18,7 @@ def test_whitelisted_domain_mail_stays_in_queue(monkeypatch):
     monkeypatch.setattr(scheduler.mailcow_api, "headers_rw", {"X-API-Key": "test-key"})
     monkeypatch.setattr(scheduler, "update_job_status", Mock())
     monkeypatch.setattr(scheduler, "_spam_blocks_loaded", AsyncMock(return_value=True))
+    monkeypatch.setattr(scheduler, "_blocked_now", lambda emails: set(emails))
     old = datetime.now(timezone.utc).timestamp() - 7200
     queue = [
         {"queue_id": "WHITE", "queue_name": "deferred", "arrival_time": old,
@@ -49,6 +50,7 @@ def test_hard_bounce_keeps_messages_that_also_go_to_a_whitelisted_domain(monkeyp
     monkeypatch.setattr(scheduler.mailcow_api, "headers_rw", {"X-API-Key": "test-key"})
     monkeypatch.setattr(scheduler, "update_job_status", Mock())
     monkeypatch.setattr(scheduler, "_spam_blocks_loaded", AsyncMock(return_value=True))
+    monkeypatch.setattr(scheduler, "_blocked_now", lambda emails: set(emails))
     monkeypatch.setattr(scheduler, "_detect_suppressions_worker", lambda: (1, 0, ["bad@example.org"]))
     queue = [
         {"queue_id": "ONLY", "recipients": ["bad@example.org"]},

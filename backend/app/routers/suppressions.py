@@ -7,6 +7,7 @@ and syncing to Rspamd's global_rcpt_blacklist.map.
 """
 import asyncio
 import csv
+import uuid
 import io
 import re
 import logging
@@ -24,6 +25,7 @@ from ..models import MessageCorrelation, SpamSuppression, SuppressionEvent
 from ..mailcow_api import mailcow_api, MailcowAPIError, MailcowRwKeyError
 from ..services.rspamd_map_lock import MapBusyError, map_write_lock
 from ..services.suppression_events import add_event, postfix_lines
+from ..services.suppression_rows_lock import lock_suppression_rows
 from ..utils import internal_error, format_datetime_for_api
 from ..app_time import to_local, utc_naive
 
@@ -127,6 +129,8 @@ _LITERAL_LINE_RE = re.compile(r'^/\^(.*)\$/i$')
 _PATTERN_LINE_RE = re.compile(r'^/\^\(\?:(.*)\)\$/(i?)$')
 _DOMAIN_BODY_RE = re.compile(r'^\.\+@((?:[A-Za-z0-9-]|\\\.)+)$')
 _ANY_PATTERN_RE = re.compile(r'^/(.*)/([A-Za-z]*)$', re.S)
+# A character a pattern reads as more than itself, outside a character class
+_REGEX_SPECIAL_RE = re.compile(r'[.^$*+?{}\[\]|()\\]')
 
 
 def suppression_map_line(s) -> str:
@@ -134,8 +138,8 @@ def suppression_map_line(s) -> str:
     return format_suppression_map_entry(s.email, allow_regex=suppression_allows_regex(s.source))
 
 
-def parse_managed_line(line: str):
-    """(value, type) of a row for one line of the app's section.
+def managed_line_entry(line: str):
+    """(value, type, literal) of a row for one line of the app's section.
 
     The app writes an address as /^escaped$/i and a pattern or domain as
     /^(?:body)$/flags. Either form is read back to the value the row held,
@@ -144,7 +148,8 @@ def parse_managed_line(line: str):
     section keeps its meaning as a pattern (the map is a regexp map; a bare
     address is blocked exactly, as above the section); it is written
     anchored, like every pattern the app writes, and reads back to the same
-    row after that.
+    row after that. literal says the value matches as written, not as a
+    pattern.
     Raises ValueError for a line no row can hold: longer than a row, or a
     pattern with flags other than i.
     """
@@ -155,25 +160,39 @@ def parse_managed_line(line: str):
         # With the anchors as the app stores them, or without when they would not fit
         for value in (f'/^{body}$/{flags}', f'/{body}/{flags}'):
             if len(value) <= _ROW_VALUE_MAX and format_suppression_map_entry(value, allow_regex=True) == line:
-                return value, ('domain' if _DOMAIN_BODY_RE.match(body) else 'email')
+                return value, ('domain' if _DOMAIN_BODY_RE.match(body) else 'email'), False
     literal = _LITERAL_LINE_RE.match(line)
     if literal and not pattern:
         # re.escape puts a backslash before single characters only
         value = re.sub(r'\\(.)', r'\1', literal.group(1), flags=re.S)
         if value == value.lower() and format_suppression_map_entry(value) == line and len(value) <= _ROW_VALUE_MAX:
-            return value, 'email'
+            return value, 'email', True
+        # Typed in mailcow without escaping every character (a hyphen, say),
+        # but with nothing a pattern would read differently: the exact address
+        body = literal.group(1)
+        if not re.search(r'\\[A-Za-z0-9]', body) and not _REGEX_SPECIAL_RE.search(re.sub(r'\\[^A-Za-z0-9]', '', body)):
+            value = value.lower()
+            if value and len(value) <= _ROW_VALUE_MAX:
+                return value, 'email', True
     other = _ANY_PATTERN_RE.match(line)
+    is_literal = False
     if other:
         if other.group(2) not in ('', 'i'):
             raise ValueError(f'A line of the Rspamd map uses flags this app cannot keep ({other.group(2)}): {line[:60]}')
         value = line
     elif len(line) <= _BARE_ADDRESS_MAX_LEN and _BARE_ADDRESS_RE.match(line):
-        value = line.lower()
+        value, is_literal = line.lower(), True
     else:
         value = f'/{line}/'
     if len(value) > _ROW_VALUE_MAX:
         raise ValueError(f'A line of the Rspamd map is longer than {_ROW_VALUE_MAX} characters: {line[:60]}...')
-    return value, 'email'
+    return value, 'email', is_literal
+
+
+def parse_managed_line(line: str):
+    """(value, type) of a row for one line of the app's section; see managed_line_entry."""
+    value, kind, _ = managed_line_entry(line)
+    return value, kind
 
 
 class SuppressionCreateRequest(BaseModel):
@@ -394,10 +413,8 @@ def get_suppression_stats(db: Session = Depends(get_db)):
         SpamSuppression.reason == 'manual', SpamSuppression.active == True
     ).scalar() or 0
     
-    pending_sync = db.query(func.count(SpamSuppression.id)).filter(
-        SpamSuppression.active == True,
-        SpamSuppression.synced_to_rspamd == False
-    ).scalar() or 0
+    # Changes that wait to be written to Rspamd: blocks to add and to remove
+    pending_sync = pending_count(db)
     
     expired = db.query(func.count(SpamSuppression.id)).filter(
         SpamSuppression.active == False,
@@ -486,6 +503,7 @@ def _manual_event(db, suppression, kind: str, outcome: str, body, queued: Option
 
 def _create_suppression_worker(body: SuppressionCreateRequest, queued: Optional[dict] = None) -> dict:
     with SessionLocal() as db:
+        lock_suppression_rows(db)
         # Check for duplicate
         existing = db.query(SpamSuppression).filter(
             SpamSuppression.email == body.email
@@ -547,6 +565,7 @@ def _create_suppression_worker(body: SuppressionCreateRequest, queued: Optional[
 @router.put("/suppressions/{suppression_id}")
 def update_suppression(suppression_id: int, body: SuppressionUpdateRequest, db: Session = Depends(get_db)):
     """Update a suppression entry (toggle active, edit notes, change expiry)."""
+    lock_suppression_rows(db)
     suppression = db.query(SpamSuppression).filter(SpamSuppression.id == suppression_id).first()
     if not suppression:
         raise HTTPException(status_code=404, detail="Suppression not found")
@@ -621,13 +640,16 @@ def get_suppression_events(suppression_id: int, page: int = Query(1, ge=1), db: 
 
 @router.delete("/suppressions/{suppression_id}")
 def delete_suppression(suppression_id: int, db: Session = Depends(get_db)):
-    """Permanently remove a suppression entry."""
+    """Permanently remove a suppression entry. While its block may still be in
+    Rspamd, its lines wait there to be removed."""
+    lock_suppression_rows(db)
     suppression = db.query(SpamSuppression).filter(SpamSuppression.id == suppression_id).first()
     if not suppression:
         raise HTTPException(status_code=404, detail="Suppression not found")
     
     email = suppression.email
     was_active = suppression.active
+    add_tombstone(db, suppression)
     db.delete(suppression)
     db.commit()
     
@@ -658,6 +680,7 @@ async def import_suppressions(file: UploadFile = File(...)):
 
 def _import_suppressions_worker(content: bytes):
     with SessionLocal() as db:
+        lock_suppression_rows(db)
         text = content.decode('utf-8-sig')  # handle BOM
         reader = csv.reader(io.StringIO(text))
 
@@ -778,41 +801,59 @@ def export_suppressions(db: Session = Depends(get_csv_db)):
 # =========================================================================
 # Rspamd Sync
 # =========================================================================
+#
+# The list and the app's section of global_rcpt_blacklist.map are kept in
+# step both ways. mailcow is the source: a block deleted there in the app's
+# section leaves the list, a block added there joins it as "From Rspamd".
+#
+# Each row says itself what Rspamd still has to learn about it:
+#   active, synced        in Rspamd
+#   active, not synced    waiting to be added
+#   inactive, not synced  waiting to be removed (disabled or expired)
+#   inactive, synced      not in Rspamd
+# A row deleted from the list while its block may still be in Rspamd leaves
+# its lines as a tombstone until a write removes them or a read finds them
+# gone. A read (pull) classifies every row against the section as it is now;
+# a write starts from a fresh read and applies only what waits. Applying the
+# same change twice changes nothing, so a write whose answer was lost is put
+# right by the next read, and an edit made in mailcow is never written over
+# (except one made between the last read and the save itself, which mailcow's
+# API gives no way to rule out).
+
+TOMBSTONES_KEY = 'spam_filter.rspamd_tombstones'
+# Lines of the section a row stands for although it would not write them so
+# itself (a bare address typed in mailcow, read in as an exact block)
+ALIASES_KEY = 'spam_filter.rspamd_aliases'
+# The mailcow and Rspamd the flags above refer to
+TARGET_KEY = 'spam_filter.rspamd_target'
+
 
 @router.post("/suppressions/sync")
-async def manual_sync_to_rspamd():
+async def manual_sync_to_rspamd(after_change: bool = False):
+    """Bring the list and the app's section of the Rspamd map in step.
+
+    Changes made in mailcow come into the list first. Then the list's own
+    changes are written. With after_change (sent after a change on the page),
+    they are written only while automatic updates are on; otherwise they wait
+    for Sync to Rspamd.
     """
-    Manually trigger sync of suppression list to Rspamd global_rcpt_blacklist.map.
-    
-    Strategy:
-    1. Read current map via Rspamd API
-    2. Preserve manual entries (above marker comment)
-    3. Replace managed section with active suppressions
-    4. Write via mailcow API
-    """
-    if not mailcow_api.has_rw_key:
-        raise HTTPException(status_code=403, detail="Read-Write API key not configured")
-    
     if not settings.is_rspamd_configured:
         raise HTTPException(status_code=400, detail="Rspamd password not configured")
-    
+    if not after_change and not mailcow_api.has_rw_key:
+        raise HTTPException(status_code=403, detail="Read-Write API key not configured")
+
     try:
-        result = await asyncio.to_thread(sync_suppressions_worker)
-        return result
-    except MapUnavailable as e:
+        return await asyncio.to_thread(sync_suppressions_worker, after_change)
+    except (MapUnavailable, MapBusyError, MailcowAPIError) as e:
         raise _map_error(e)
-    except MapBusyError as e:
-        raise HTTPException(status_code=409, detail=str(e))
-    except MailcowAPIError as e:
-        raise internal_error(e, status_code=502)
     except Exception as e:
         logger.error(f"Sync failed: {e}")
         raise internal_error(e)
 
 
 def automatic_updates_on() -> bool:
-    """Whether the app writes its blocks to Rspamd by itself: new blocks and
-    expiries. Changes made on the Suppressions page are written either way."""
+    """Whether the app writes its blocks to Rspamd by itself: new blocks,
+    expiries and changes made on the Suppressions page."""
     return (settings.is_feature_enabled('spam-filter') and settings.suppression_enabled
             and settings.suppression_rspamd_sync)
 
@@ -831,11 +872,14 @@ def _run_on_worker_loop(work):
 
 
 def sync_suppressions_worker(automatic: bool = False) -> dict:
-    """Write the active list to Rspamd, holding the map lock.
+    """Read the app's section into the list, then write the list's changes,
+    holding the map lock.
 
-    An automatic sync (the scheduled job, after detection or queue cleanup)
-    checks the switches again once it holds the lock: one that waited while
-    automatic updates were turned off does not write after all.
+    automatic (the scheduled job, a change on the page, after detection or
+    queue cleanup) writes only while automatic updates are on and the
+    Read-Write key is set, checked again right before the save; it still
+    reads. Without automatic (Sync to Rspamd, Settings turning updates on) it
+    always writes.
     """
     with map_write_lock():
         if not settings.is_feature_enabled('spam-filter'):
@@ -844,19 +888,22 @@ def sync_suppressions_worker(automatic: bool = False) -> dict:
             if automatic:
                 return {"success": True, "synced": 0, "skipped_off": True}
             raise MapUnavailable("feature_off")
-        if automatic and not automatic_updates_on():
-            return {"success": True, "synced": 0, "skipped_off": True}
+        if not settings.is_rspamd_configured:
+            if automatic:
+                return {"success": True, "synced": 0, "skipped_off": True}
+            raise MapUnavailable("no_password")
 
         async def work(db):
-            # The blocks of before go back into the list first; until they
-            # can, nothing is written
-            await _import_managed_blocks(db)
-            return await sync_suppressions_to_rspamd(db)
+            return await sync_suppressions_to_rspamd(db, automatic=automatic)
 
         return _run_on_worker_loop(work)
 
 
-# ---- The app's part of the map: state, clear, start fresh ----
+def _pull_counts(pulled: dict) -> dict:
+    return {"list_added": pulled["added"], "list_removed": pulled["removed"]}
+
+
+# ---- The app's part of the map: reading it ----
 
 class MapUnavailable(Exception):
     """The app's part of the Rspamd map cannot be read or written now."""
@@ -869,10 +916,17 @@ class MapUnavailable(Exception):
         "map_not_found": "Rspamd has no recipient denylist map.",
         "feature_off": "Spam Filter is off.",
         "import_failed": "This app's Rspamd blocks could not be loaded into the list.",
+        "section_missing": "The app's section is missing from the Rspamd map. Nothing was changed.",
+        "section_unclear": ("The app's section markers in the Rspamd map are missing or repeated. "
+                            "Fix them in mailcow. Nothing was changed."),
+        "map_changed": "The Rspamd map changed while syncing. Try again.",
+        "connection_changed": "The mailcow or Rspamd connection changed while syncing. Try again.",
+        "updates_off": "Automatic updates were turned off while syncing. Nothing was written to Rspamd.",
     }
 
     def __init__(self, code: str, detail: str = ""):
         self.code = code
+        self.list_changed = None
         super().__init__(self.REASONS.get(code, detail) if not detail else detail)
 
 
@@ -887,30 +941,35 @@ def _missing_credentials() -> Optional[str]:
     return None
 
 
+def _is_start_marker(line: str) -> bool:
+    return MANAGED_MARKER_START in line or '# === MANAGED BY MAILCOW LOGS VIEWER' in line
+
 
 def split_managed_section(content: str):
     """The map's lines before the app's section, the app's entries, and the
     lines after its end marker. A map the app never wrote has no section:
-    every line is before it."""
+    every line is before it. Raises MapUnavailable('section_unclear') for
+    markers that do not make one section: a start without its end, an end
+    without its start, or either one twice."""
     lines = content.split('\n') if content else []
-    start = next((i for i, line in enumerate(lines)
-                  if MANAGED_MARKER_START in line or '# === MANAGED BY MAILCOW LOGS VIEWER' in line), None)
-    if start is None:
-        # An end marker without its start (edited by hand): the lines around it
-        # are kept, the marker itself is written again
-        end = next((i for i, line in enumerate(lines) if MANAGED_MARKER_END in line), None)
-        if end is not None:
-            return lines[:end], [], lines[end + 1:]
+    starts = [i for i, line in enumerate(lines) if _is_start_marker(line)]
+    ends = [i for i, line in enumerate(lines) if MANAGED_MARKER_END in line]
+    if not starts and not ends:
         return lines, [], []
-    end = next((i for i in range(start + 1, len(lines)) if MANAGED_MARKER_END in lines[i]), len(lines))
+    if len(starts) != 1 or len(ends) != 1 or ends[0] <= starts[0]:
+        raise MapUnavailable("section_unclear")
+    start, end = starts[0], ends[0]
     entries = [line.strip() for line in lines[start + 1:end] if line.strip() and not line.strip().startswith('#')]
     return lines[:start], entries, lines[end + 1:]
 
 
+def _has_section(content: str) -> bool:
+    return any(_is_start_marker(line) for line in (content or '').split('\n'))
+
+
 async def _read_denylist_map():
-    """(map id, content) of the recipient denylist, or MapUnavailable."""
-    if not settings.is_rspamd_configured:
-        raise MapUnavailable("no_password")
+    """(map id, content) of the recipient denylist, or MapUnavailable. The
+    callers check the Rspamd password first."""
     try:
         map_id = await mailcow_api.find_rspamd_map_id(DENYLIST_MAP)
         if map_id is None:
@@ -921,22 +980,442 @@ async def _read_denylist_map():
         raise MapUnavailable("read_failed")
 
 
+def _connection_target() -> str:
+    """Where the map is read and written: mailcow, and Rspamd straight when set."""
+    return f"{(mailcow_api.base_url or '').rstrip('/')}|{(settings.rspamd_url or '').strip().rstrip('/')}"
+
+
+async def _read_snapshot() -> dict:
+    target = _connection_target()
+    _, content = await _read_denylist_map()
+    if _connection_target() != target:
+        raise MapUnavailable("connection_changed")
+    before, entries, after = split_managed_section(content)
+    return {"target": target, "content": content, "before": before, "entries": entries, "after": after,
+            "has_section": _has_section(content)}
+
+
+# ---- Which rows stand for which lines ----
+
+def row_map_lines(s, aliases: Optional[dict] = None) -> frozenset:
+    """Every line of the app's section the row stands for: as the app writes
+    it now, as earlier versions wrote it (a pattern with its anchors added
+    around the body; before that, the value itself), and any line read in for
+    it from mailcow (aliases)."""
+    value = (s.email or '').strip()
+    lines = {suppression_map_line(s), value}
+    pattern = re.match(r'^/(.*)/(i?)$', value)
+    if pattern:
+        body, flags = pattern.group(1), pattern.group(2)
+        lines.add(f"/{'' if body.startswith('^') else '^'}{body}{'' if body.endswith('$') else '$'}/{flags}")
+    if aliases:
+        lines.update(line for line, email in aliases.items() if email == s.email)
+    return frozenset(lines)
+
+
+def _load_json(db: Session, key: str, default):
+    import json
+    from ..models import SystemSetting
+    row = db.query(SystemSetting).filter(SystemSetting.key == key).first()
+    if row is None or not row.value:
+        return default
+    try:
+        return json.loads(row.value)
+    except ValueError:
+        logger.warning(f"[SUPPRESSION] Ignoring an unreadable {key}")
+        return default
+
+
+def _save_json(db: Session, key: str, value) -> None:
+    """Store a value; an empty one removes the key."""
+    import json
+    from ..models import SystemSetting
+    from ..services.feature_data import _set_key
+    if value:
+        _set_key(db, key, json.dumps(value, sort_keys=True))
+    else:
+        db.query(SystemSetting).filter(SystemSetting.key == key).delete(synchronize_session=False)
+
+
+def _load_tombs(db: Session) -> dict:
+    """Tombstones: {map line: one deletion}. A deletion is the address and a
+    token of its own, so the lines of one deletion count once, and a new
+    deletion of the same address is told apart from one a write settled."""
+    tombs = _load_json(db, TOMBSTONES_KEY, {})
+    # A plain list (an earlier build of this change): each line its own deletion
+    return {line: f'#{line}' for line in tombs} if isinstance(tombs, list) else tombs
+
+
+def add_tombstone(db: Session, suppression) -> None:
+    """A row deleted from the list: while its block may still be in Rspamd,
+    its lines wait to be removed there. The caller holds the row lock."""
+    if suppression.active or not suppression.synced_to_rspamd:
+        aliases = _load_json(db, ALIASES_KEY, {})
+        tombs = _load_tombs(db)
+        deletion = f'{suppression.email}#{uuid.uuid4().hex[:12]}'
+        tombs.update({line: deletion for line in row_map_lines(suppression, aliases)})
+        _save_json(db, TOMBSTONES_KEY, tombs)
+
+
+def pending_count(db: Session) -> int:
+    """Changes that wait to be written to Rspamd: blocks to add, blocks to
+    remove (disabled, expired or deleted)."""
+    adds = db.query(func.count(SpamSuppression.id)).filter(
+        SpamSuppression.active == True, SpamSuppression.synced_to_rspamd == False).scalar() or 0  # noqa: E712
+    removals = db.query(func.count(SpamSuppression.id)).filter(
+        SpamSuppression.active == False, SpamSuppression.synced_to_rspamd == False).scalar() or 0  # noqa: E712
+    # A deleted address counts once, however many line forms it may stand as
+    return int(adds) + int(removals) + len(set(_load_tombs(db).values()))
+
+
+def _apply_target(db: Session, target: str) -> None:
+    """The flags describe one mailcow. Moved to another, every active block
+    waits to be added there and nothing is taken for deleted; what that one
+    already has comes in as added there."""
+    from ..services.feature_data import _set_key
+    stored = _load_json(db, TARGET_KEY, None)
+    if stored == target:
+        return
+    if stored is not None:
+        db.query(SpamSuppression).filter(SpamSuppression.active == True).update(  # noqa: E712
+            {SpamSuppression.synced_to_rspamd: False}, synchronize_session=False)
+        db.query(SpamSuppression).filter(SpamSuppression.active == False).update(  # noqa: E712
+            {SpamSuppression.synced_to_rspamd: True}, synchronize_session=False)
+        _save_json(db, TOMBSTONES_KEY, {})
+        _save_json(db, ALIASES_KEY, {})
+        logger.info("[SUPPRESSION] The mailcow or Rspamd connection changed: every active block waits to be written there")
+    import json
+    _set_key(db, TARGET_KEY, json.dumps(target))
+
+
+# ---- Reading the section into the list ----
+
+async def _pull_from_rspamd(db: Session, snapshot: dict) -> dict:
+    """Bring the list in step with the app's section as read in snapshot.
+    The caller holds the map lock. One transaction under the row lock; a
+    round that cannot decide (unclear map, a line no row can hold, the map
+    changing before a deletion) changes nothing."""
+    from ..services.suppression_rows_lock import lock_suppression_rows
+    from ..services.feature_data import SPAM_IMPORT_PENDING_KEY
+    from ..models import SystemSetting
+    try:
+        lock_suppression_rows(db)
+        _apply_target(db, snapshot["target"])
+        db.flush()
+        rows = db.query(SpamSuppression).all()
+        entries = snapshot["entries"]
+        present = set(entries)
+        aliases = {line: email for line, email in _load_json(db, ALIASES_KEY, {}).items()}
+        tombs = _load_tombs(db)
+        if not snapshot["has_section"] and any(r.active and r.synced_to_rspamd for r in rows):
+            raise MapUnavailable("section_missing")
+
+        hits = {r.id: row_map_lines(r, aliases) & present for r in rows}
+        claimed = set().union(*hits.values()) if hits else set()
+        claimed |= set(tombs) & present
+        by_email = {r.email: r for r in rows}
+        by_address = {r.email.lower(): r for r in rows if not (r.email or '').startswith('/')}
+
+        # Lines no row stands for: added in mailcow. Every one must make a row
+        # before anything changes
+        added_lines = []
+        planned = {}  # a row this round makes, by its value: two forms of one address make one row
+        for line in dict.fromkeys(entries):
+            if line in claimed:
+                continue
+            try:
+                value, kind, literal = managed_line_entry(line)
+            except ValueError as e:
+                raise MapUnavailable("import_failed", f"A line of the app's Rspamd section cannot be kept as a block: {e}")
+            if literal and value.startswith('/'):
+                # Read back from this app's source it would match as a pattern, not as written
+                raise MapUnavailable("import_failed", f"A line of the app's Rspamd section cannot be kept as a block: {line[:60]}")
+            key = value if value.startswith('/') else value.lower()
+            owner = by_email.get(value) or (by_address.get(key) if not value.startswith('/') else None)
+            if owner is None and key in planned:
+                added_lines.append((line, planned[key], kind, 'planned'))
+                continue
+            if owner is None:
+                planned[key] = value
+            added_lines.append((line, value, kind, owner))
+            if owner is not None:
+                hits[owner.id] = hits[owner.id] | {line}
+
+        # A line an active row stands for stays in Rspamd for it: it is neither
+        # a disabled row's block added back in mailcow, nor one still to remove
+        active_owned = set()
+        for r in rows:
+            if r.active:
+                active_owned |= row_map_lines(r, aliases) | hits[r.id]
+
+        gone = [r for r in rows if r.active and r.synced_to_rspamd and not hits[r.id]]
+        if gone:
+            # Deleting on a read that was not whole would empty the list: the map
+            # must read the same twice
+            _, again = await _read_denylist_map()
+            if again != snapshot["content"]:
+                raise MapUnavailable("map_changed")
+
+        marker = db.query(SystemSetting.key).filter(SystemSetting.key == SPAM_IMPORT_PENDING_KEY).first() is not None
+        added_kind = 'loaded_from_rspamd' if marker else 'added_in_rspamd'
+        added, removed = [], [r.email for r in gone]
+        gone_ids = {r.id for r in gone}
+        for r in rows:
+            if r.id in gone_ids:
+                continue
+            hit = bool(hits[r.id])
+            own = bool(hits[r.id] - active_owned)  # a line only this disabled row stands for
+            if r.active and not r.synced_to_rspamd and hit:
+                r.synced_to_rspamd = True          # its write landed
+            elif not r.active and not r.synced_to_rspamd and not own:
+                r.synced_to_rspamd = True          # its removal landed, or an active row keeps the line
+            elif not r.active and r.synced_to_rspamd and own:
+                _take_as_added_in_rspamd(db, r, added_kind)
+                added.append(r.email)
+        if gone:
+            db.query(SpamSuppression).filter(SpamSuppression.id.in_([r.id for r in gone])).delete(
+                synchronize_session=False)
+            logger.info(f"[SUPPRESSION] Deleted in Rspamd, removed from the list: {', '.join(removed)}")
+        gone_emails = set(removed)
+        for line, value, kind, owner in added_lines:
+            if owner == 'planned':
+                aliases[line] = value  # another form of the row made just above
+                continue
+            if owner is not None:
+                if owner.email not in gone_emails:
+                    aliases[line] = owner.email
+                continue
+            row = SpamSuppression(email=value, type=kind, reason='manual', source=RSPAMD_SOURCE,
+                                  bounce_count=0, hard_bounce_count=0, soft_bounce_count=0,
+                                  active=True, synced_to_rspamd=True, expires_at=None)
+            db.add(row)
+            db.flush()
+            by_email[value] = row
+            if not value.startswith('/'):
+                by_address[value.lower()] = row
+            if line not in row_map_lines(row):
+                aliases[line] = value
+            add_event(db, row, kind=added_kind, outcome='created', recipient=value, expires_at=None)
+            added.append(value)
+        if added:
+            logger.info(f"[SUPPRESSION] Added in Rspamd, added to the list: {', '.join(added)}")
+
+        kept_emails = {r.email for r in rows if r.email not in gone_emails} | {v for _, v, _, o in added_lines if o is None}
+        _save_json(db, ALIASES_KEY, {line: email for line, email in aliases.items()
+                                     if line in present and email in kept_emails})
+        # A deleted row's line still there waits to be removed, unless an active row keeps it
+        _save_json(db, TOMBSTONES_KEY, {line: email for line, email in tombs.items()
+                                        if line in present and line not in active_owned})
+        db.query(SystemSetting).filter(SystemSetting.key == SPAM_IMPORT_PENDING_KEY).delete(synchronize_session=False)
+        # What was read came from the connection the flags describe: one changed
+        # meanwhile could make the other mailcow's blocks look deleted
+        if _connection_target() != snapshot["target"]:
+            raise MapUnavailable("connection_changed")
+        db.commit()
+        return {"added": len(added), "removed": len(removed)}
+    except Exception:
+        db.rollback()
+        raise
+
+
+def _take_as_added_in_rspamd(db: Session, row, kind: str) -> None:
+    """A row the list held as not in Rspamd is there again: someone added it in
+    mailcow. It becomes permanent and, unless that would change how its value
+    matches, From Rspamd, so no automatic path changes it."""
+    row.active = True
+    row.expires_at = None
+    row.synced_to_rspamd = True
+    if not (row.email or '').startswith('/') or suppression_allows_regex(row.source):
+        row.source = RSPAMD_SOURCE
+    row.updated_at = datetime.utcnow()
+    add_event(db, row, kind=kind, outcome='activated', recipient=row.email, expires_at=None)
+
+
+# ---- Writing the list's changes ----
+
+def _section_after(rows, entries: List[str], aliases: dict, tombs: set):
+    """The app's section with the list's changes applied to what mailcow has
+    now: lines of disabled, expired and deleted blocks out, lines of new
+    blocks in, every kept block in the form the app writes. Returns (lines,
+    added, removed)."""
+    owners = {}
+    for r in rows:
+        for line in row_map_lines(r, aliases):
+            owners.setdefault(line, []).append(r)
+    out, removed = [], 0
+    for line in entries:
+        mine = owners.get(line, [])
+        active = [r for r in mine if r.active]
+        if active:
+            out.extend(suppression_map_line(r) for r in active)
+        elif mine or line in tombs:
+            removed += 1
+        else:
+            out.append(line)
+    have = set(out)
+    added = 0
+    for r in rows:
+        if r.active and suppression_map_line(r) not in have:
+            out.append(suppression_map_line(r))
+            have.add(suppression_map_line(r))
+            added += 1
+    return list(dict.fromkeys(out)), added, removed
+
+
+async def _write_to_rspamd(db: Session, snapshot: dict, automatic: bool) -> dict:
+    """Write the list's changes to the section read in snapshot. The caller
+    holds the map lock and has just pulled. A row changed meanwhile keeps
+    what it waits for."""
+    from ..services.suppression_rows_lock import lock_suppression_rows
+    lock_suppression_rows(db)
+    rows = db.query(SpamSuppression).order_by(SpamSuppression.email).all()
+    aliases = _load_json(db, ALIASES_KEY, {})
+    tombs = _load_tombs(db)
+    lines, added, removed = _section_after(rows, snapshot["entries"], aliases, tombs)
+    active_ids = [r.id for r in rows if r.active]
+    inactive_ids = [r.id for r in rows if not r.active]
+    used_tombs = set(tombs.items())
+    active_count = len(active_ids)
+    db.commit()  # the row lock is not held across the network
+
+    manual_lines, after_lines = list(snapshot["before"]), list(snapshot["after"])
+    # Remove blank lines next to the section; one is written back on each side
+    while manual_lines and not manual_lines[-1].strip():
+        manual_lines.pop()
+    while after_lines and not after_lines[0].strip():
+        after_lines.pop(0)
+    while after_lines and not after_lines[-1].strip():
+        after_lines.pop()
+    # Auto-migrate dangerous bare addresses among the manual entries - they
+    # match as substrings in this regexp map. The operator never has to edit
+    # the map by hand for this.
+    migrated_manual = [migrate_manual_map_line(line) for line in manual_lines]
+    migrated_after = [migrate_manual_map_line(line) for line in after_lines]
+    manual_needs_migration = migrated_manual != manual_lines or migrated_after != after_lines
+    preserved = len([line for line in migrated_manual + migrated_after if line.strip() and not line.strip().startswith('#')])
+
+    # Skip the write when the section already is what would be written. Every
+    # save makes Rspamd truncate + rewrite the file and reload the map (its
+    # write is not atomic - see issue #80)
+    if (snapshot["content"] and (snapshot["has_section"] or not lines) and not manual_needs_migration
+            and lines == snapshot["entries"]):
+        _mark_written(db, active_ids, inactive_ids, used_tombs, set(lines))
+        logger.debug("[SUPPRESSION] Rspamd map already up to date - skipping write")
+        return {"written": False, "synced": active_count, "added": 0, "removed": 0,
+                "manual_entries_preserved": preserved, "sync_time": None, "skipped": True}
+
+    now_str = datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ')
+    parts = []
+    if migrated_manual:
+        parts.append('\n'.join(migrated_manual))
+        parts.append('')  # blank line before marker
+    parts.append(MANAGED_MARKER_START)
+    parts.append(f"# Last sync: {now_str} | Active: {len(lines)}")
+    parts.extend(lines)
+    parts.append(MANAGED_MARKER_END)
+    if migrated_after:
+        parts.append('')
+        parts.extend(migrated_after)
+    new_content = '\n'.join(parts)
+
+    await _check_before_save(snapshot, automatic)
+    result = await mailcow_api.edit_rspamd_map(DENYLIST_MAP, new_content)
+    _mark_written(db, active_ids, inactive_ids, used_tombs, set(lines))
+    logger.info(f"[SUPPRESSION] Wrote the list to Rspamd: {added} added, {removed} removed, {len(lines)} in the app's section")
+    return {"written": True, "synced": active_count, "added": added, "removed": removed,
+            "manual_entries_preserved": preserved, "sync_time": now_str, "api_response": result}
+
+
+async def _check_before_save(snapshot: dict, automatic: bool) -> None:
+    """Right before a save: the map is still what the plan was made from, the
+    connection is the same, and an automatic write is still allowed. The
+    settings are checked after the read too: they may change while it waits."""
+    def still_allowed():
+        if _connection_target() != snapshot["target"]:
+            raise MapUnavailable("connection_changed")
+        if automatic and not (automatic_updates_on() and mailcow_api.has_rw_key):
+            raise MapUnavailable("updates_off")
+
+    still_allowed()
+    _, now = await _read_denylist_map()
+    if now != snapshot["content"]:
+        raise MapUnavailable("map_changed")
+    still_allowed()
+
+
+def _mark_written(db: Session, active_ids, inactive_ids, used_tombs: set, written: set) -> None:
+    """After a confirmed save: the rows as they were planned are in step. A row
+    disabled, enabled or deleted since keeps waiting."""
+    from ..services.suppression_rows_lock import lock_suppression_rows
+    try:
+        lock_suppression_rows(db)
+        if active_ids:
+            db.query(SpamSuppression).filter(SpamSuppression.id.in_(active_ids), SpamSuppression.active == True).update(  # noqa: E712
+                {SpamSuppression.synced_to_rspamd: True}, synchronize_session=False)
+        if inactive_ids:
+            db.query(SpamSuppression).filter(SpamSuppression.id.in_(inactive_ids), SpamSuppression.active == False).update(  # noqa: E712
+                {SpamSuppression.synced_to_rspamd: True}, synchronize_session=False)
+        # Each tombstone the plan used is settled: its line removed, or kept for
+        # an active row. Tombstones added since (a row deleted meanwhile) stay
+        _save_json(db, TOMBSTONES_KEY, {line: deletion for line, deletion in _load_tombs(db).items()
+                                        if (line, deletion) not in used_tombs})
+        _save_json(db, ALIASES_KEY, {line: email for line, email in _load_json(db, ALIASES_KEY, {}).items() if line in written})
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+
+
+async def sync_suppressions_to_rspamd(db: Session, automatic: bool = False) -> dict:
+    """Read the app's section into the list, then write the list's changes
+    (for automatic, only while automatic updates are on and the Read-Write
+    key is set). The caller holds the map lock."""
+    snapshot = await _read_snapshot()
+    pulled = await _pull_from_rspamd(db, snapshot)
+    may_write = (automatic_updates_on() and mailcow_api.has_rw_key) if automatic else True
+    if not may_write:
+        return {"success": True, "written": False, "skipped_off": True, **_pull_counts(pulled),
+                "pending_count": pending_count(db)}
+    try:
+        written = await _write_to_rspamd(db, snapshot, automatic=automatic)
+    except (MapUnavailable, MailcowAPIError) as e:
+        # The list was brought in step before the write failed: the page shows it
+        e.list_changed = _pull_counts(pulled)
+        raise
+    return {"success": True, **written, **_pull_counts(pulled), "pending_count": pending_count(db)}
+
+
+# ---- Clear, start fresh, load back after Spam Filter was off ----
+
 async def _clear_managed_section(db: Session) -> int:
     """Empty the app's part of the map, leaving every other line exactly as it
-    is, and mark every row as not in Rspamd. Returns how many blocks went.
-    Raises when the map cannot be read or mailcow did not confirm the save."""
+    is. Every active row then waits to be added again. Returns how many
+    blocks went. Raises when the map cannot be read or mailcow did not
+    confirm the save."""
+    from ..services.suppression_rows_lock import lock_suppression_rows
     missing = _missing_credentials()
     if missing:
         raise MapUnavailable(missing)
-    _, content = await _read_denylist_map()
-    before, entries, after = split_managed_section(content)
+    snapshot = await _read_snapshot()
+    # First the list stops counting on the blocks: a save whose answer is lost
+    # must not make the next read take them for deleted in mailcow
+    lock_suppression_rows(db)
+    db.query(SpamSuppression).filter(SpamSuppression.active == True).update(  # noqa: E712
+        {SpamSuppression.synced_to_rspamd: False}, synchronize_session=False)
+    db.commit()
+    entries = snapshot["entries"]
     # An empty section needs no write: every save makes Rspamd reload the map
     if entries:
         now_str = datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ')
-        new_content = '\n'.join(before + [MANAGED_MARKER_START, f"# Cleared: {now_str}", MANAGED_MARKER_END] + after)
+        new_content = '\n'.join(snapshot["before"] + [MANAGED_MARKER_START, f"# Cleared: {now_str}", MANAGED_MARKER_END]
+                                + snapshot["after"])
+        await _check_before_save(snapshot, automatic=False)
         await mailcow_api.edit_rspamd_map(DENYLIST_MAP, new_content)
-    db.query(SpamSuppression).filter(SpamSuppression.synced_to_rspamd == True).update(  # noqa: E712
-        {SpamSuppression.synced_to_rspamd: False}, synchronize_session=False)
+    lock_suppression_rows(db)
+    db.query(SpamSuppression).filter(SpamSuppression.active == False).update(  # noqa: E712
+        {SpamSuppression.synced_to_rspamd: True}, synchronize_session=False)
+    _save_json(db, TOMBSTONES_KEY, {})
+    _save_json(db, ALIASES_KEY, {})
     db.commit()
     logger.info(f"[SUPPRESSION] Removed the app's {len(entries)} block(s) from Rspamd")
     return len(entries)
@@ -953,10 +1432,14 @@ def start_fresh_worker() -> dict:
     async def work(db):
         from ..models import SystemSetting
         from ..services.feature_data import SPAM_IMPORT_PENDING_KEY
+        from ..services.suppression_rows_lock import lock_suppression_rows
         removed = await _clear_managed_section(db)
+        lock_suppression_rows(db)
         deleted = db.query(SpamSuppression).delete(synchronize_session=False)
         # A fresh list loads nothing back from Rspamd
         db.query(SystemSetting).filter(SystemSetting.key == SPAM_IMPORT_PENDING_KEY).delete(synchronize_session=False)
+        _save_json(db, TOMBSTONES_KEY, {})
+        _save_json(db, ALIASES_KEY, {})
         db.commit()
         logger.info(f"[SUPPRESSION] Started fresh: {deleted} entr(ies) deleted, {removed} Rspamd block(s) removed")
         return {"removed_blocks": removed, "deleted_entries": deleted}
@@ -973,69 +1456,30 @@ def import_pending(db: Session) -> bool:
     return db.query(SystemSetting.key).filter(SystemSetting.key == SPAM_IMPORT_PENDING_KEY).first() is not None
 
 
-async def _import_managed_blocks(db: Session) -> dict:
-    """Load the blocks this app wrote to Rspamd back into the list, once,
-    after Spam Filter was off. The caller holds the map lock.
-
-    Every line of the app's section becomes a permanent row with source
-    'rspamd' unless the list already has that line (an entry added by hand
-    since wins). Lines outside the section are entries typed into Rspamd and
-    are never read in. When the map cannot be read, or a line cannot be held,
-    nothing is loaded and the import stays pending: until it is done no sync
-    writes the section, so a list emptied by the purge can never wipe it.
-    """
+def import_managed_worker() -> dict:
+    """Load the app's Rspamd blocks into the list if that is pending (Spam
+    Filter was off and is on again). A read only; nothing is written to
+    Rspamd. Only while Spam Filter is on; the purge of a Spam Filter that is
+    off holds the same lock. Until it is done, no job adds to the list."""
     from ..models import SystemSetting
     from ..services.feature_data import SPAM_IMPORT_PENDING_KEY
-    if not import_pending(db):
-        return {"imported": 0, "pending": False}
-    if not settings.is_rspamd_configured:
-        # Without the Rspamd password the app never wrote to Rspamd: nothing to load
-        db.query(SystemSetting).filter(SystemSetting.key == SPAM_IMPORT_PENDING_KEY).delete(synchronize_session=False)
-        db.commit()
-        return {"imported": 0, "pending": False}
-    _, content = await _read_denylist_map()
-    _, entries, _ = split_managed_section(content)
-    try:
-        parsed = [parse_managed_line(line) for line in entries]
-    except ValueError as e:
-        raise MapUnavailable("import_failed", str(e))
-    # The same block twice: the same map line, or the same address (addresses
-    # match whatever their case; a pattern is compared as written)
-    have_lines, have_addresses = set(), set()
-    for row in db.query(SpamSuppression).all():
-        have_lines.add(suppression_map_line(row))
-        if not (row.email or '').startswith('/'):
-            have_addresses.add(row.email.strip().lower())
-    imported = 0
-    for value, kind in parsed:
-        row = SpamSuppression(email=value, type=kind, reason='manual', source=RSPAMD_SOURCE,
-                              bounce_count=0, hard_bounce_count=0, soft_bounce_count=0,
-                              active=True, synced_to_rspamd=True, expires_at=None)
-        line = suppression_map_line(row)
-        address = None if value.startswith('/') else value.lower()
-        if line in have_lines or (address is not None and address in have_addresses):
-            continue
-        have_lines.add(line)
-        if address is not None:
-            have_addresses.add(address)
-        db.add(row)
-        db.flush()
-        add_event(db, row, kind='loaded_from_rspamd', outcome='created', recipient=value, expires_at=None)
-        imported += 1
-    db.query(SystemSetting).filter(SystemSetting.key == SPAM_IMPORT_PENDING_KEY).delete(synchronize_session=False)
-    db.commit()
-    logger.info(f"[SUPPRESSION] Loaded {imported} block(s) of this app back from Rspamd")
-    return {"imported": imported, "pending": False}
-
-
-def import_managed_worker() -> dict:
-    """Load the app's Rspamd blocks into the list if that is pending. Only
-    while Spam Filter is on; the purge of a Spam Filter that is off holds the
-    same lock."""
     with map_write_lock():
         if not settings.is_feature_enabled('spam-filter'):
             return {"imported": 0, "pending": False, "feature_off": True}
-        return _run_on_worker_loop(_import_managed_blocks)
+
+        async def work(db):
+            if not import_pending(db):
+                return {"imported": 0, "pending": False}
+            if not settings.is_rspamd_configured:
+                # Without the Rspamd password the app never wrote to Rspamd: nothing to load
+                db.query(SystemSetting).filter(SystemSetting.key == SPAM_IMPORT_PENDING_KEY).delete(synchronize_session=False)
+                db.commit()
+                return {"imported": 0, "pending": False}
+            pulled = await _pull_from_rspamd(db, await _read_snapshot())
+            logger.info(f"[SUPPRESSION] Loaded {pulled['added']} block(s) of this app back from Rspamd")
+            return {"imported": pulled["added"], "pending": False}
+
+        return _run_on_worker_loop(work)
 
 
 @router.post("/suppressions/rspamd/import")
@@ -1049,40 +1493,45 @@ async def import_rspamd_blocks():
 
 
 def _map_error(e: Exception) -> HTTPException:
-    """What a map operation tells the page when it could not finish."""
+    """What a map operation tells the page when it could not finish. A list
+    already brought in step with Rspamd before the failure says so."""
+    changed = getattr(e, 'list_changed', None)
+    extra = {"list_changed": changed} if changed else {}
     if isinstance(e, MapUnavailable):
-        return HTTPException(status_code=409, detail={"code": e.code, "message": str(e)})
+        return HTTPException(status_code=409, detail={"code": e.code, "message": str(e), **extra})
     if isinstance(e, MapBusyError):
         return HTTPException(status_code=409, detail={"code": "busy", "message": str(e)})
     if isinstance(e, MailcowRwKeyError):
-        return HTTPException(status_code=502, detail={"code": "rejected_rw_key", "message": str(e)})
+        return HTTPException(status_code=502, detail={"code": "rejected_rw_key", "message": str(e), **extra})
     # mailcow did not confirm, or the request failed: the outcome is not known
     logger.error(f"[SUPPRESSION] Rspamd map change not confirmed: {e}")
     return HTTPException(status_code=502, detail={
-        "code": "not_confirmed", "message": "mailcow did not confirm the change. Check the Rspamd map before trying again."})
+        "code": "not_confirmed", "message": "mailcow did not confirm the change. Check Rspamd before trying again.", **extra})
 
 
 @router.get("/suppressions/rspamd/state")
 async def rspamd_state():
-    """What the app has in Rspamd now, read from the map itself, and whether it
-    can change it. Counts are blocks (map lines), not addresses: a line can be
-    a domain or a pattern."""
-    def count_active():
+    """What the app has in Rspamd now, read from the map itself, whether it
+    can change it, and how many changes wait to be written. Counts are blocks
+    (map lines), not addresses: a line can be a domain or a pattern."""
+    def counts():
         with get_db_context() as db:
-            return db.query(func.count(SpamSuppression.id)).filter(SpamSuppression.active == True).scalar() or 0  # noqa: E712
+            active = db.query(func.count(SpamSuppression.id)).filter(SpamSuppression.active == True).scalar() or 0  # noqa: E712
+            return int(active), pending_count(db)
 
-    active = await asyncio.to_thread(count_active)
+    active, pending = await asyncio.to_thread(counts)
     missing = _missing_credentials()
-    state = {"automatic": automatic_updates_on(), "active_count": int(active), "writable": missing is None,
-             "readable": False, "managed_count": None, "reason": missing, "reason_text": MapUnavailable.REASONS.get(missing)}
+    state = {"automatic": automatic_updates_on(), "active_count": active, "pending_count": pending,
+             "writable": missing is None, "readable": False, "managed_count": None, "reason": missing,
+             "reason_text": MapUnavailable.REASONS.get(missing)}
     if not settings.is_rspamd_configured:
         return state
     try:
         _, content = await _read_denylist_map()
-        state["readable"] = True
         state["managed_count"] = len(split_managed_section(content)[1])
+        state["readable"] = True
     except MapUnavailable as e:
-        if not missing:
+        if not missing or e.code == "section_unclear":
             state["reason"], state["reason_text"] = e.code, str(e)
     return state
 
@@ -1104,127 +1553,6 @@ async def start_fresh():
         return await asyncio.to_thread(start_fresh_worker)
     except (MapUnavailable, MapBusyError, MailcowAPIError) as e:
         raise _map_error(e)
-
-
-async def sync_suppressions_to_rspamd(db: Session) -> dict:
-    """
-    Sync active suppressions to Rspamd global_rcpt_blacklist.map.
-    
-    Preserves manual entries above the managed marker,
-    replaces the managed section with current active suppressions.
-    
-    Returns sync result details.
-    """
-    MAP_FILENAME = DENYLIST_MAP
-    
-    # 1. Read current map content. A failed read stops the sync: writing
-    # without it would drop the manual entries above the managed section.
-    current_content = ""
-    try:
-        map_id = await mailcow_api.find_rspamd_map_id(MAP_FILENAME)
-        if map_id is not None:
-            current_content = await mailcow_api.get_rspamd_map_content(map_id)
-    except MailcowAPIError as e:
-        logger.warning(f"Could not read the current map, not writing it: {e}")
-        raise
-    
-    # 2. Parse: the entries typed into the map by hand, above and below the
-    # app's section, stay. Recognizes both current and legacy marker formats
-    # to prevent duplicate managed sections accumulating.
-    manual_lines, current_managed, after_lines = split_managed_section(current_content)
-    manual_lines, after_lines = list(manual_lines), list(after_lines)
-
-    # Remove blank lines next to the section; one is written back on each side
-    while manual_lines and not manual_lines[-1].strip():
-        manual_lines.pop()
-    while after_lines and not after_lines[0].strip():
-        after_lines.pop(0)
-    while after_lines and not after_lines[-1].strip():
-        after_lines.pop()
-
-    # Auto-migrate dangerous bare addresses among the manual entries - they
-    # match as substrings in this regexp map. The operator never has to edit
-    # the map by hand for this.
-    migrated_manual = [migrate_manual_map_line(l) for l in manual_lines]
-    migrated_after = [migrate_manual_map_line(l) for l in after_lines]
-    manual_needs_migration = migrated_manual != manual_lines or migrated_after != after_lines
-    manual_lines, after_lines = migrated_manual, migrated_after
-
-    # 3. Get active suppressions from DB
-    active_suppressions = db.query(SpamSuppression).filter(
-        SpamSuppression.active == True
-    ).order_by(SpamSuppression.email).all()
-
-    # Skip the write when the managed entries are already exactly what we
-    # would write. Every save makes Rspamd truncate + rewrite the file and
-    # reload the map (its write is not atomic - see issue #80), so identical
-    # content must not be pushed every sync just to refresh a timestamp.
-    desired_lines = [suppression_map_line(s) for s in active_suppressions]
-    if (current_content and not manual_needs_migration
-            and sorted(current_managed) == sorted(desired_lines)):
-        synced_count = 0
-        for s in active_suppressions:
-            if not s.synced_to_rspamd:
-                s.synced_to_rspamd = True
-                s.updated_at = datetime.utcnow()
-                synced_count += 1
-        db.commit()
-        logger.debug("[SUPPRESSION] Rspamd map already up to date - skipping write")
-        return {
-            "success": True,
-            "synced": len(active_suppressions),
-            "newly_synced": synced_count,
-            "manual_entries_preserved": len([l for l in manual_lines + after_lines if l.strip() and not l.strip().startswith('#')]),
-            "sync_time": None,
-            "skipped": True,
-        }
-
-    # 4. Build new map content
-    parts = []
-    
-    # Manual entries
-    if manual_lines:
-        parts.append('\n'.join(manual_lines))
-        parts.append('')  # blank line before marker
-    
-    # Managed section
-    now_str = datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ')
-    parts.append(MANAGED_MARKER_START)
-    parts.append(f"# Last sync: {now_str} | Active: {len(active_suppressions)}")
-    
-    parts.extend(desired_lines)
-
-    parts.append(MANAGED_MARKER_END)
-
-    # Entries typed below the section
-    if after_lines:
-        parts.append('')
-        parts.extend(after_lines)
-
-    new_content = '\n'.join(parts)
-    
-    # 5. Write via mailcow API
-    result = await mailcow_api.edit_rspamd_map(MAP_FILENAME, new_content)
-    
-    # 6. Mark all active as synced
-    synced_count = 0
-    for s in active_suppressions:
-        if not s.synced_to_rspamd:
-            s.synced_to_rspamd = True
-            s.updated_at = datetime.utcnow()
-            synced_count += 1
-    db.commit()
-    
-    logger.info(f"[SUPPRESSION] Synced {len(active_suppressions)} suppressions to Rspamd ({synced_count} newly synced)")
-    
-    return {
-        "success": True,
-        "synced": len(active_suppressions),
-        "newly_synced": synced_count,
-        "manual_entries_preserved": len([l for l in manual_lines + after_lines if l.strip() and not l.strip().startswith('#')]),
-        "sync_time": now_str,
-        "api_response": result,
-    }
 
 
 # =========================================================================

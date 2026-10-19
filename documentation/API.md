@@ -2051,7 +2051,7 @@ Checks map entries, including regular expression syntax, without saving. Unlike 
 
 #### GET /api/suppressions/stats
 
-Totals as top-level fields: `total`, `active`, `expired`, `hard_bounce`, `soft_bounce`, `rejected`, `manual`, `pending_sync` and `auto_detected`.
+Totals as top-level fields: `total`, `active`, `expired`, `hard_bounce`, `soft_bounce`, `rejected`, `manual`, `pending_sync` (changes waiting to be written to Rspamd, as `pending_count` in `/api/suppressions/rspamd/state`) and `auto_detected`.
 
 ---
 
@@ -2097,11 +2097,11 @@ Updates the non-null fields sent and returns the entry; JSON `null` leaves a fie
 
 #### GET /api/suppressions/{suppression_id}/events
 
-Block details: what happened to the address, newest first, 20 per `page`. Returns `suppression` (`id`, `email`, `type`, `active`), `total`, `page`, `page_size` and `events`. Each event has `kind` (`hard_bounce`, `soft_bounce`, `rejected`, `deferred_stuck`, `added`, `imported`, `enabled`, `disabled`, `expiry_changed`, `notes_changed`, `before_upgrade`), `outcome` (`created`, `activated`, `extended`, `counted`, `changed`), `recorded_at`, `message_time`, `reason`, `server_reply`, `dsn`, `sender`, `recipient`, `subject`, `queue_id`, `message_id`, `notes`, `expires_at`, `log_lines` (`time`, `program`, `message`), `logs_shortened`, `correlation_key` and `message_available` (the message is still on Messages). Fields the logs did not prove are null. An unknown id returns 404.
+Block details: what happened to the address, newest first, 20 per `page`. Returns `suppression` (`id`, `email`, `type`, `active`), `total`, `page`, `page_size` and `events`. Each event has `kind` (`hard_bounce`, `soft_bounce`, `rejected`, `deferred_stuck`, `added`, `imported`, `enabled`, `disabled`, `expiry_changed`, `notes_changed`, `before_upgrade`, `loaded_from_rspamd`, `added_in_rspamd`), `outcome` (`created`, `activated`, `extended`, `counted`, `changed`), `recorded_at`, `message_time`, `reason`, `server_reply`, `dsn`, `sender`, `recipient`, `subject`, `queue_id`, `message_id`, `notes`, `expires_at`, `log_lines` (`time`, `program`, `message`), `logs_shortened`, `correlation_key` and `message_available` (the message is still on Messages). Fields the logs did not prove are null. An unknown id returns 404.
 
 #### DELETE /api/suppressions/{suppression_id}
 
-Deletes the entry for good: `{ "deleted": true, "email": "user@example.com", "was_active": true, "needs_rspamd_sync": true }`. Deleting an active entry needs a later Rspamd sync to remove its block from the map; this request does not sync it. An unknown ID returns 404.
+Deletes the entry for good: `{ "deleted": true, "email": "user@example.com", "was_active": true, "needs_rspamd_sync": true }`. While its block may still be in Rspamd, its map lines wait to be removed by the next write; this request does not write. An unknown ID returns 404.
 
 ---
 
@@ -2127,15 +2127,15 @@ All entries as CSV, with the columns `email,type,reason,source,notes,bounce_coun
 
 #### POST /api/suppressions/sync
 
-Writes the active, unexpired entries to Rspamd's `global_rcpt_blacklist.map` now: `{ "success": true, "synced": 120, "message": "Synced 120 entries to Rspamd" }`. The managed entries sit between markers in the map; entries above the markers are kept. No read-write key returns 403; no `RSPAMD_PASSWORD` 400; another map write still running 409; a mailcow failure, or a reply that does not confirm the save, 502.
+Brings the list and the managed section of Rspamd's `global_rcpt_blacklist.map` in step. First the section is read into the list: a line deleted there deletes its entry, a line added there becomes a permanent entry with source `rspamd`. Then the list's waiting changes are applied to the map as it is now: `{ "success": true, "written": true, "added": 2, "removed": 1, "synced": 120, "list_added": 1, "list_removed": 0, "pending_count": 0 }`. `added` and `removed` count map lines the write changed; `list_added` and `list_removed` count entries the read changed. Lines outside the markers are kept. With `?after_change=true` (sent by the page after a change) the write happens only while automatic updates are on and the read-write key is set; otherwise the answer has `"written": false` and the changes wait. Without `after_change`, no read-write key returns 403; no `RSPAMD_PASSWORD` 400. Another map write still running 409; a map whose markers are missing or repeated, or that changed during the sync, 409 with `{ "detail": { "code": "section_unclear", "message": "..." } }` (`section_missing`, `map_changed`, `import_failed`, `updates_off`, `connection_changed`); a mailcow failure, or a reply that does not confirm the save, 502 `not_confirmed`. An error after the read changed the list adds `list_changed` (`list_added`, `list_removed`) to `detail`.
 
 #### GET /api/suppressions/rspamd/state
 
-What the app has in Rspamd, read from the map: `{ "automatic": false, "active_count": 15, "writable": true, "readable": true, "managed_count": 12, "reason": null, "reason_text": null }`. `managed_count` counts map lines in the managed section (a line can be a domain or a pattern), `null` when the map cannot be read. `reason` is `no_rw_key`, `no_password`, `no_rw_key_and_password`, `read_failed` or `map_not_found`.
+What the app has in Rspamd, read from the map: `{ "automatic": false, "active_count": 15, "pending_count": 3, "writable": true, "readable": true, "managed_count": 12, "reason": null, "reason_text": null }`. `managed_count` counts map lines in the managed section (a line can be a domain or a pattern), `null` when the map cannot be read. `pending_count` counts the list's changes waiting to be written: entries to add, disabled or expired entries to remove, and deleted entries whose lines are still to be removed. `reason` is `no_rw_key`, `no_password`, `no_rw_key_and_password`, `read_failed`, `map_not_found` or `section_unclear`.
 
 #### POST /api/suppressions/rspamd/clear
 
-Empties the managed section and leaves every other line of the map as it is; the list stays, marked as not in Rspamd. Returns `{ "removed_blocks": 12 }`. When it cannot read or write the map: 409 with `{ "detail": { "code": "no_rw_key", "message": "..." } }`; a refused Read-Write key 502 `rejected_rw_key`; a write mailcow did not confirm 502 `not_confirmed`.
+Empties the managed section and leaves every other line of the map as it is; the list stays, its active entries waiting to be written again. Returns `{ "removed_blocks": 12 }`. When it cannot read or write the map: 409 with `{ "detail": { "code": "no_rw_key", "message": "..." } }`; a refused Read-Write key 502 `rejected_rw_key`; a write mailcow did not confirm 502 `not_confirmed`.
 
 #### POST /api/suppressions/start-fresh
 
