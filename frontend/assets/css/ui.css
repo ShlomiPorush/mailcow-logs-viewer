@@ -763,6 +763,8 @@
 /* Settings before the first migration: read-only, with the reason by the button */
 .ui-set-fieldset { min-width: 0; margin: 0; padding: 0; border: 0; display: contents; }
 .ui-set-fieldset:disabled .ui-set-group { opacity: .6; }
+/* Settings that do nothing while their switch is off (settingsShowNeeds) */
+.ui-set-group.is-off, .ui-set-edit .is-off { opacity: .5; }
 .ui-set-migrate-note { margin: 0; font-size: 13px; color: var(--ui-muted); }
 .ui-sec-cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--ui-gap); align-items: start; }
 .ui-sec-card { display: grid; gap: 10px; padding: 14px var(--ui-pad-x); border-radius: var(--ui-radius); background: var(--ui-panel); cursor: pointer; min-width: 0; }

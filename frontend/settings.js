@@ -368,6 +368,22 @@ const SETTINGS_CHOICE_NOTES = {
     'rw-queue': 'Add a read-write API key in Settings > mailcow to delete queued mail.'
 };
 const SETTINGS_LOG_CHOICES = { hard: ['suppress'], soft: ['count', 'suppress'] };
+// Settings that do nothing while another switch is off: shown greyed out and
+// unclickable until it is on. Groups say it with needs:, single fields here.
+const SETTINGS_FIELD_NEEDS = { suppression_rspamd_sync: 'suppression_enabled' };
+
+function settingsShowNeeds(root) {
+    Object.entries(SETTINGS_FIELD_NEEDS).forEach(([key, parent]) => {
+        const row = root.querySelector('#edit-' + key)?.closest('.ui-set-field, .ui-set-bool, .ui-set-wide');
+        if (row) row.dataset.needs = parent;
+    });
+    root.querySelectorAll('[data-needs]').forEach(el => {
+        const parent = root.querySelector('#edit-' + el.dataset.needs);
+        const off = !!parent && !parent.checked;
+        el.inert = off;
+        el.classList.toggle('is-off', off);
+    });
+}
 
 function settingsBounceChoice(kind, config, lockedKeys, defaults) {
     const soft = kind === 'soft';
@@ -718,13 +734,13 @@ var SETTINGS_EDIT_TABS = [
         id: 'spam_filter', label: 'Queue Management', description: 'Choose what happens when outgoing mail cannot be delivered. Blocked addresses are listed on Spam Filter > Suppressions.', groups: [
             { label: 'Automatic handling', keys: ['suppression_enabled', 'suppression_rspamd_sync'] },
             // Reading the logs is set by the choices (settingsSyncBounce)
-            { label: 'Permanent delivery failure', choice: 'hard', keys: ['suppression_hard_bounce_action', 'suppression_auto_detect'],
+            { label: 'Permanent delivery failure', choice: 'hard', needs: 'suppression_enabled', keys: ['suppression_hard_bounce_action', 'suppression_auto_detect'],
                 intro: 'The receiving server rejected the message permanently. (5.x.x)' },
-            { label: 'Temporary delivery failure', choice: 'soft',
+            { label: 'Temporary delivery failure', choice: 'soft', needs: 'suppression_enabled',
                 keys: ['queue_cleanup_enabled', 'suppression_soft_bounce_action', 'queue_cleanup_threshold_minutes', 'suppression_soft_bounce_threshold'],
                 intro: 'Postfix keeps the message and retries. (4.x.x)' },
-            { label: 'How long to block', keys: ['suppression_base_expiry_days', 'suppression_max_expiry_days'] },
-            { label: 'Exceptions', keys: ['suppression_whitelist_domains'] }
+            { label: 'How long to block', needs: 'suppression_enabled', keys: ['suppression_base_expiry_days', 'suppression_max_expiry_days'] },
+            { label: 'Exceptions', needs: 'suppression_enabled', keys: ['suppression_whitelist_domains'] }
         ]
     },
     {
@@ -1394,7 +1410,7 @@ function renderSettings(content, data) {
                     const groupKeys = group.keys.filter(function (k) { return data.editable_config[k] !== undefined; });
                     if (groupKeys.length === 0) return;
                     renderedGroups++;
-                    tabsHtml += '<section class="ui-panel ui-set-group"><h3 class="ui-set-group-title">' + escapeHtml(group.label) + '</h3>' +
+                    tabsHtml += '<section class="ui-panel ui-set-group"' + (group.needs ? ' data-needs="' + escapeHtml(group.needs) + '"' : '') + '><h3 class="ui-set-group-title">' + escapeHtml(group.label) + '</h3>' +
                         (group.intro ? '<p class="ui-set-desc ui-set-group-intro">' + escapeHtml(group.intro) + '</p>' : '') + '<div class="ui-set-grid">';
                     if (group.choice) tabsHtml += settingsBounceChoice(group.choice, data.editable_config, envLockedKeys, defaults);
                     else groupKeys.forEach(function (key) {
@@ -1596,8 +1612,10 @@ function renderSettings(content, data) {
             const showChoices = () => content.querySelectorAll('.ui-set-choice').forEach(settingsShowChoice);
             showChoices();
             form.addEventListener('input', showChoices);
+            settingsShowNeeds(content);
+            form.addEventListener('change', () => settingsShowNeeds(content));
             // Clearing and resetting change a field without an input event
-            content.querySelectorAll('.settings-clear-btn').forEach(btn => btn.addEventListener('click', () => setTimeout(updateDirty)));
+            content.querySelectorAll('.settings-clear-btn').forEach(btn => btn.addEventListener('click', () => setTimeout(() => { updateDirty(); settingsShowNeeds(content); })));
         }
 
         if (form) {
