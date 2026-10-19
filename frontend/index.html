@@ -25,7 +25,7 @@
     <!-- Utility classes still used by the markup, compiled once
          (.github/scripts/build-utilities-css.sh); the design system comes last -->
     <link rel="stylesheet" href="/static/assets/css/utilities.css?v=1">
-    <link rel="stylesheet" href="/static/assets/css/ui.css?v=61">
+    <link rel="stylesheet" href="/static/assets/css/ui.css?v=62">
     <style>
         .tab-active {
             border-bottom: 2px solid #3b82f6;
@@ -1013,7 +1013,7 @@
                         <div class="ui-fbar-row">
                             <label class="ui-search ui-ms-search"><svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
                                 <input type="text" id="suppression-search" placeholder="Search email, notes..." aria-label="Search suppressions"
-                                    onkeypress="if(event.key==='Enter') loadSuppressions()">
+                                    onkeypress="if(event.key==='Enter') loadSuppressions(1)">
                             </label>
                             <span class="ui-toolbar-gap"></span>
                             <button onclick="showAddSuppressionModal()" class="ui-btn ui-btn-primary">Add Suppression</button>
@@ -1031,7 +1031,7 @@
                         </div>
                         <div class="ui-fbar-pickers">
                             <select id="suppression-filter-reason" class="ui-select" aria-label="Reason" data-picker-label="Reason"
-                                onchange="loadSuppressions()">
+                                onchange="loadSuppressions(1)">
                                 <option value="" data-short="All">All Reasons</option>
                                 <option value="hard_bounce">Hard Bounce</option>
                                 <option value="soft_bounce">Soft Bounce</option>
@@ -1040,7 +1040,7 @@
                                 <option value="manual">Manual</option>
                             </select>
                             <select id="suppression-filter-active" class="ui-select" aria-label="State" data-picker-label="State"
-                                onchange="loadSuppressions()">
+                                onchange="loadSuppressions(1)">
                                 <option value="true" data-short="Active">Active Only</option>
                                 <option value="">All</option>
                                 <option value="false">Inactive</option>
@@ -1596,7 +1596,7 @@
     <script src="/static/security.js?v=8"></script>
     <script src="/static/search.js?v=8"></script>
     <script src="/static/notifications.js?v=6"></script>
-    <script src="/static/spam_filter.js?v=11"></script>
+    <script src="/static/spam_filter.js?v=12"></script>
 
     <!-- DMARC fetch history -->
     <div id="dmarc-sync-history-modal" class="hidden ui-dialog-backdrop" role="dialog" aria-label="Fetch history">

@@ -9,7 +9,7 @@
 let spamFilterSubTab = 'suppressions'; // Fix #3: Suppressions first
 let rspamdMapsData = null;
 let rspamdMapsConfigured = false;
-let suppressionPage = 1;
+let suppressionPage = 1;        // the pages of the list shown so far
 
 // =============================================================================
 // TAB SWITCHING
@@ -62,7 +62,9 @@ async function smartRefreshSpamFilter() {
     if (modal && !modal.classList.contains('hidden')) return;
     const editModal = document.getElementById('edit-suppression-modal');
     if (editModal && !editModal.classList.contains('hidden')) return;
-    
+    // A slow server: the list still loading is not dropped for the next timer tick
+    if (suppressionListLoading || suppressionLoadingMore) return;
+
     await loadSuppressions();
     await loadSuppressionStats();
 }
@@ -435,38 +437,85 @@ function suppressionSortBy(key, dir) {
     loadSuppressions(1);
 }
 
+// The list loads its next page as its end comes near. A refresh (no page
+// given) reads again every page already shown, so the rows stay where they were.
+const SUPPRESSION_PER_PAGE = 50;
+let suppressionTotalPages = 1;
+let suppressionSeq = 0;             // an answer for a list no longer shown is dropped
+let suppressionListLoading = false; // no next page while the list itself loads
+let suppressionLoadingMore = false;
+let suppressionMoreObserver = null;
+let suppressionQuery = null;        // the filters and sort the list shown was asked with
+
+// The search, filters and sort as chosen now. A search typed but not yet
+// sent with Enter is not part of the list until it is.
+function suppressionQueryNow() {
+    return {
+        search: document.getElementById('suppression-search')?.value || '',
+        reason: document.getElementById('suppression-filter-reason')?.value || '',
+        active: document.getElementById('suppression-filter-active')?.value || '',
+        sortBy: suppressionSort.by,
+        sortDir: suppressionSort.dir,
+    };
+}
+
+function fetchSuppressionPage(page, query) {
+    const params = new URLSearchParams({
+        page,
+        per_page: SUPPRESSION_PER_PAGE,
+    });
+    if (query.search) params.append('search', query.search);
+    if (query.reason) params.append('reason_filter', query.reason);
+    if (query.active) params.append('active_filter', query.active);
+    params.append('sort_by', query.sortBy);
+    params.append('sort_dir', query.sortDir);
+
+    return authenticatedFetch(`/api/suppressions?${params}`).then(response => {
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        return response.json();
+    });
+}
+
 async function loadSuppressions(page) {
     uiFilterBarSync();
-    suppressionPage = page || suppressionPage || 1;
+    const seq = ++suppressionSeq;
+    // A next page asked for the list shown before must not join this one
+    suppressionWatchMore(false);
+    suppressionLoadingMore = false;
+    suppressionListLoading = true;
+    if (page || !suppressionQuery) {
+        suppressionQuery = suppressionQueryNow();
+        // Set at once, so a refresh that comes before the answer reads one page too
+        suppressionPage = 1;
+    }
+    const query = suppressionQuery;
+    const pages = Math.max(1, suppressionPage || 1);
     const container = document.getElementById('suppression-list');
     // The key status may not be loaded yet on the first page load
     if (typeof mailcowRwConfigured !== 'undefined' && !mailcowRwConfigured) await fetchRwStatus();
     updateSuppressionSyncLock();
     loadSuppressionSyncNote();
 
-    const search = document.getElementById('suppression-search')?.value || '';
-    const reason = document.getElementById('suppression-filter-reason')?.value || '';
-    const active = document.getElementById('suppression-filter-active')?.value || '';
-
-    const params = new URLSearchParams({
-        page: suppressionPage,
-        per_page: 50,
-    });
-    if (search) params.append('search', search);
-    if (reason) params.append('reason_filter', reason);
-    if (active) params.append('active_filter', active);
-    params.append('sort_by', suppressionSort.by);
-    params.append('sort_dir', suppressionSort.dir);
-
     try {
-        const response = await authenticatedFetch(`/api/suppressions?${params}`);
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-
-        const data = await response.json();
+        const results = await Promise.all(Array.from({ length: pages }, (_, i) => fetchSuppressionPage(i + 1, query)));
+        if (seq !== suppressionSeq) return;
+        suppressionListLoading = false;
+        const data = results[0];
         const countEl = document.getElementById('suppression-count');
         if (countEl) countEl.textContent = uiCountLabel(data.total || 0, 'suppression', 'suppressions');
 
-        if (!data.items || data.items.length === 0) {
+        suppressionItemsById.clear();
+        // A row added or removed meanwhile shifts the pages; never show one twice
+        const items = [];
+        results.forEach(r => (r.items || []).forEach(s => {
+            if (suppressionItemsById.has(s.id)) return;
+            suppressionItemsById.set(s.id, s);
+            items.push(s);
+        }));
+        suppressionTotalPages = data.total_pages || 1;
+        suppressionPage = Math.min(pages, suppressionTotalPages);
+
+        if (items.length === 0) {
             container.innerHTML = `
                 <div class="ui-empty ui-panel">
                     <p><b>No Suppressions</b></p>
@@ -476,22 +525,70 @@ async function loadSuppressions(page) {
             return;
         }
 
-        suppressionItemsById.clear();
-
-        data.items.forEach(s => suppressionItemsById.set(s.id, s));
-
         container.innerHTML = `
             <div class="ui-table ui-stack ui-supp-table" data-sort-handler="suppressionSortBy">
                 <div class="ui-tr ui-tr-head"><span data-sort-key="email"${suppressionSortAttr('email')}>Address</span><span data-sort-key="reason"${suppressionSortAttr('reason')}>Reason</span><span data-sort-key="bounce_count"${suppressionSortAttr('bounce_count')}>Bounces</span><span data-sort-key="expires_at"${suppressionSortAttr('expires_at')}>Expiry</span><span>Rspamd</span><span data-sort-key="created_at"${suppressionSortAttr('created_at')}>Added</span><span class="ui-td-end">Actions</span></div>
-                ${data.items.map(s => renderSuppressionItem(s)).join('')}
+                ${items.map(s => renderSuppressionItem(s)).join('')}
             </div>
-            ${data.total_pages > 1 ? renderSuppressionPagination(data.page, data.total_pages, data.total) : ''}
+            <p id="suppression-more" class="ui-msg-more" aria-live="polite"></p>
         `;
+        suppressionShowMore();
 
     } catch (error) {
+        if (seq !== suppressionSeq) return;
+        suppressionListLoading = false;
         console.error('Failed to load suppressions:', error);
         container.innerHTML = `<p class="ui-empty ui-text-fail">Failed to load: ${escapeHtml(error.message)}</p>`;
     }
+}
+
+async function loadMoreSuppressions() {
+    if (suppressionListLoading || suppressionLoadingMore || suppressionPage >= suppressionTotalPages) return;
+    const seq = suppressionSeq;
+    const next = suppressionPage + 1;
+    const more = document.getElementById('suppression-more');
+    suppressionLoadingMore = true;
+    if (more) more.textContent = 'Loading more...';
+    try {
+        const data = await fetchSuppressionPage(next, suppressionQuery);
+        if (seq !== suppressionSeq) return;
+        const fresh = (data.items || []).filter(s => !suppressionItemsById.has(s.id));
+        fresh.forEach(s => suppressionItemsById.set(s.id, s));
+        document.querySelector('#suppression-list .ui-supp-table')?.insertAdjacentHTML('beforeend', fresh.map(s => renderSuppressionItem(s)).join(''));
+        suppressionPage = next;
+        suppressionTotalPages = data.total_pages || suppressionTotalPages;
+        const countEl = document.getElementById('suppression-count');
+        if (countEl) countEl.textContent = uiCountLabel(data.total || 0, 'suppression', 'suppressions');
+        suppressionLoadingMore = false;
+        suppressionShowMore();
+    } catch (error) {
+        if (seq !== suppressionSeq) return;
+        suppressionLoadingMore = false;
+        if (more) more.innerHTML = 'Could not load more suppressions. <button type="button" class="ui-link-row ui-link" onclick="loadMoreSuppressions()">Try again</button>';
+    }
+}
+
+// The line under the list: more are coming, or all are shown
+function suppressionShowMore() {
+    const more = document.getElementById('suppression-more');
+    const left = suppressionPage < suppressionTotalPages;
+    if (more) more.textContent = left ? 'Loading more...'
+        : suppressionTotalPages > 1 ? `All ${uiCountLabel(suppressionItemsById.size, 'suppression', 'suppressions')} shown` : '';
+    suppressionWatchMore(left);
+}
+
+// When the end of the list comes near, the next page is asked for
+function suppressionWatchMore(left) {
+    if (suppressionMoreObserver) suppressionMoreObserver.disconnect();
+    suppressionMoreObserver = null;
+    const sentinel = document.getElementById('suppression-more');
+    if (!left || !sentinel || typeof IntersectionObserver === 'undefined') return;
+    suppressionMoreObserver = new IntersectionObserver(entries => {
+        if (!entries.some(e => e.isIntersecting)) return;
+        suppressionMoreObserver.disconnect();
+        loadMoreSuppressions();
+    }, { rootMargin: '0px 0px 400px 0px' });
+    suppressionMoreObserver.observe(sentinel);
 }
 
 function renderSuppressionItem(s) {
@@ -533,17 +630,6 @@ function renderSuppressionItem(s) {
                 <button onclick="deleteSuppression(${Number(s.id)}, '${escapeJsArg(s.email)}')" class="ui-btn ui-btn-sm ui-btn-danger" title="Delete permanently">Delete</button>
             </span>
         </div>
-    `;
-}
-
-function renderSuppressionPagination(page, totalPages, total) {
-    return `
-        <nav class="ui-pager" aria-label="Suppression pages">
-            <span class="ui-muted">${escapeHtml(String(total))} total</span>
-            ${page > 1 ? `<button onclick="loadSuppressions(${Number(page) - 1})" class="ui-btn ui-btn-sm">← Prev</button>` : ''}
-            <span class="ui-muted">Page ${Number(page)}/${Number(totalPages)}</span>
-            ${page < totalPages ? `<button onclick="loadSuppressions(${Number(page) + 1})" class="ui-btn ui-btn-sm">Next →</button>` : ''}
-        </nav>
     `;
 }
 
