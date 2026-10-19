@@ -35,7 +35,7 @@ Search matches the address, notes and last bounce message. **Expired** shows ent
 With **Handle undeliverable mail automatically** on (**Settings** > **Queue Management**), two jobs add entries every 5 minutes:
 
 - **Detect Suppressions** checks delivery-agent `bounced` lines imported in the last 10 minutes, and `deferred` lines when a temporary failure keeps retrying. It runs when a Queue Management choice needs the Postfix logs. Connection-time rejections (`NOQUEUE`) do not create suppressions. Empty senders and `MAILER-DAEMON` are skipped.
-- **Cleanup Deferred Queue**, when a temporary failure is set to **Delete after N minutes in the queue** and the read-write key is set, deletes deferred messages older than those minutes (60 by default) and suppresses their recipients as **Deferred Stuck**. The age counts from arrival, including time before a message became deferred.
+- **Cleanup Deferred Queue**, when a temporary failure is set to **Delete after N minutes in the queue** and the read-write key is set, deletes deferred messages older than those minutes (60 by default) and suppresses their recipients as **Deferred Stuck**. The age counts from arrival, including time before a message became deferred. The recipients are blocked before the message is deleted: if the deletion fails, the next run deletes it without counting it again. A message with no address that can be blocked stays in the queue.
 
 **Exclude these domains** lists exact domains, without subdomains. Their addresses are never blocked automatically, and a queued message to any of them is never deleted automatically, by cleanup or after a permanent failure. For a permanent failure, other queued messages to the blocked address are deleted when the read-write key is set.
 

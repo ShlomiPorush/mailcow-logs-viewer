@@ -127,6 +127,86 @@ def test_a_stuck_message_keeps_the_queue_details(db_ready):
     assert abs((e.message_time - arrived).total_seconds()) < 1
 
 
+def test_a_stuck_message_counts_once_when_its_deletion_is_retried(db_ready):
+    """The block is stored before the message is deleted; when the deletion
+    fails, the next run stores the same message again and must not count it."""
+    from app import scheduler
+    from app.database import get_db_context
+    from app.models import SpamSuppression
+    arrived = datetime.utcnow().replace(microsecond=0) - timedelta(hours=2)
+    stuck = {'email': RCPT, 'queue_id': f'R{MARK.upper()}', 'sender': SENDER, 'arrived': arrived, 'reason': None}
+    # The same recipient twice in one message is one event
+    assert scheduler._store_deferred_suppressions_worker([stuck, dict(stuck)]) == 1
+    assert scheduler._store_deferred_suppressions_worker([dict(stuck)]) == 0
+    block_id, events = _events(RCPT)
+    assert len(events) == 1
+    with get_db_context() as db:
+        row = db.get(SpamSuppression, block_id)
+        assert (row.bounce_count, row.soft_bounce_count) == (1, 1)
+        # Turned off by hand meanwhile: a retry of the same message leaves it off
+        row.active = False
+        db.commit()
+    assert scheduler._store_deferred_suppressions_worker([dict(stuck)]) == 0
+    with get_db_context() as db:
+        assert db.get(SpamSuppression, block_id).active is False
+
+    # Postfix may reuse a queue id: another arrival is another message, and so is another id
+    again = {**stuck, 'arrived': arrived + timedelta(hours=1)}
+    other = {**stuck, 'queue_id': f'S{MARK.upper()}'}
+    assert scheduler._store_deferred_suppressions_worker([again, other, dict(stuck)]) == 1
+    _, events = _events(RCPT)
+    assert sorted((e.queue_id, e.message_time) for e in events) == sorted(
+        [(stuck['queue_id'], arrived), (stuck['queue_id'], again['arrived']), (other['queue_id'], arrived)])
+    with get_db_context() as db:
+        row = db.get(SpamSuppression, block_id)
+        assert row.bounce_count == 2 and row.active is True
+
+
+def test_stuck_messages_say_only_that_they_were_stuck(db_ready):
+    """The deletion is not known yet when the block is stored."""
+    from app import scheduler
+    scheduler._store_deferred_suppressions_worker([{'email': RCPT, 'queue_id': f'T{MARK.upper()}', 'sender': SENDER,
+                                                    'arrived': datetime.utcnow() - timedelta(hours=2), 'reason': None}])
+    block_id, events = _events(RCPT)
+    assert 'auto-cleaned' not in (events[-1].reason or '')
+    from app.database import get_db_context
+    from app.models import SpamSuppression
+    with get_db_context() as db:
+        assert 'auto-cleaned' not in (db.get(SpamSuppression, block_id).last_bounce_message or '')
+
+
+def test_two_runs_at_once_count_a_message_once(db_ready, monkeypatch):
+    """Without the lock both runs would read 'not kept yet' before either commits."""
+    import threading
+    import time
+    from app import scheduler
+    from app.database import get_db_context
+    from app.models import SpamSuppression
+    arrived = datetime.utcnow().replace(microsecond=0) - timedelta(hours=2)
+    first = {'email': RCPT, 'queue_id': f'U{MARK.upper()}', 'sender': SENDER, 'arrived': arrived, 'reason': None}
+    scheduler._store_deferred_suppressions_worker([first])  # the block exists, as on a retry
+    record = scheduler.record_stuck
+
+    def slow_record(db, captured):
+        time.sleep(0.5)  # hold the transaction open after the reads
+        record(db, captured)
+
+    monkeypatch.setattr(scheduler, 'record_stuck', slow_record)
+    stuck = {**first, 'queue_id': f'V{MARK.upper()}'}
+    counts = []
+    runs = [threading.Thread(target=lambda: counts.append(scheduler._store_deferred_suppressions_worker([dict(stuck)])))
+            for _ in range(2)]
+    for run in runs:
+        run.start()
+    for run in runs:
+        run.join(10)
+    assert sorted(counts) == [0, 1]
+    block_id, events = _events(RCPT)
+    assert [e.queue_id for e in events].count(stuck['queue_id']) == 1
+    with get_db_context() as db:
+        assert db.get(SpamSuppression, block_id).bounce_count == 2
+
+
 @pytest.fixture
 def client(db_ready, monkeypatch):
     import starlette.staticfiles as sf
