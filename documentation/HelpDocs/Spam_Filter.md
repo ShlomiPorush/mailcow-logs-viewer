@@ -35,9 +35,9 @@ Search matches the address, notes and last bounce message. **Expired** shows ent
 With **Handle undeliverable mail automatically** on (**Settings** > **Queue Management**), two jobs add entries every 5 minutes:
 
 - **Detect Suppressions** checks delivery-agent `bounced` lines imported in the last 10 minutes, and `deferred` lines when a temporary failure keeps retrying. It runs when a Queue Management choice needs the Postfix logs. Connection-time rejections (`NOQUEUE`) do not create suppressions. Empty senders and `MAILER-DAEMON` are skipped.
-- **Cleanup Deferred Queue**, when a temporary failure is set to **Delete after N minutes in the queue** and the read-write key is set, deletes deferred messages older than those minutes (60 by default) and suppresses their recipients as **Deferred Stuck**. The age counts from arrival, including time before a message became deferred. The recipients are blocked before the message is deleted: if the deletion fails, the next run deletes it without counting it again. A message with no address that can be blocked stays in the queue.
+- **Cleanup Deferred Queue**, when a temporary failure is set to delete after N minutes in the queue and the read-write key is set, deletes deferred messages older than those minutes (60 by default) and, with **and block the recipients**, suppresses their recipients as **Deferred Stuck**. The age counts from arrival, including time before a message became deferred. The recipients are blocked before the message is deleted: if the deletion fails, the next run deletes it without counting it again. A message with a recipient that cannot be read stays in the queue, and so does one to an address whose **From Rspamd** entry was disabled by hand.
 
-**Exclude these domains** lists exact domains, without subdomains. Their addresses are never blocked automatically, and a queued message to any of them is never deleted automatically, by cleanup or after a permanent failure. For a permanent failure, other queued messages to the blocked address are deleted when the read-write key is set.
+**Exclude these domains** lists exact domains, without subdomains. Their addresses are never blocked automatically, and a queued message to any of them is never deleted automatically, by cleanup or after a permanent failure. For a permanent failure, with the read-write key set, the queued messages that go only to that address are deleted, blocked or not; a message that also goes to other recipients stays. A deletion counts only when mailcow confirms it, and the settings are checked again right before it. A deletion that fails shows on **Status** and is not tried again; the mail stays in the queue.
 
 Automatic entries start with **Base block length** (7 days by default). Each bounce sets expiry to base days times bounce count, capped at **Maximum block length** (90). Log lines are counted once across restarts and overlapping runs. Detection reactivates inactive entries, except soft bounces below the failures that **Keep retrying; block new mail after N failures** waits for.
 
@@ -120,10 +120,11 @@ The wizard's **Domain** pattern includes subdomains, unlike a domain suppression
 
 Under **Settings** > **Queue Management**:
 
-- **Sync with Rspamd** defaults on. **Handle undeliverable mail automatically** defaults off; it decides only whether blocks are added automatically.
-- **Permanent delivery failure** defaults to blocking new mail to the address and deleting its queued mail; **Do nothing** skips permanent failures.
-- **Temporary delivery failure** defaults to **Delete after 60 minutes in the queue and block the recipients**. Keeping the message instead counts soft bounces on an inactive entry, which turns active after the set failures (3 by default), or at the first one; **Do nothing; keep retrying** skips them.
+- **Sync with Rspamd** defaults on. **Handle undeliverable mail automatically** defaults off; with it off, nothing is blocked or deleted automatically.
+- **Permanent delivery failure** defaults to blocking new mail to the address and deleting its queued mail; **Delete its queued mail** deletes without blocking; **Do nothing** skips permanent failures.
+- **Temporary delivery failure** defaults to **Delete after 60 minutes in the queue and block the recipients**; **Delete after 60 minutes in the queue** deletes without blocking. Keeping the message instead counts soft bounces on an inactive entry, which turns active after the set failures (3 by default), or at the first one; **Do nothing; keep retrying** skips them.
 - **Exclude these domains** accepts comma-separated exact domains.
+- The options that block need **Sync with Rspamd**: with it off they are not available, and a picked one changes to the option that does the same without blocking. **How long to block** is greyed then.
 
 The jobs, including hourly expiry, require **Handle undeliverable mail automatically**, except the sync with Rspamd. With it off, expiry does not run.
 

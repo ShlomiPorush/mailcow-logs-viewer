@@ -31,6 +31,7 @@ def state(monkeypatch):
     monkeypatch.setattr(scheduler, "sync_suppressions_to_rspamd_job", AsyncMock())
     # Every address is still blocked when its mail is deleted (checked in test_rspamd_two_way.py)
     monkeypatch.setattr(scheduler, "_blocked_now", lambda emails: set(emails))
+    monkeypatch.setattr(scheduler, "_protected_now", lambda emails: set())
     old = datetime.now(timezone.utc).timestamp() - 7200
     queue = [
         {"queue_id": "OLD", "queue_name": "deferred", "arrival_time": old,

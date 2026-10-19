@@ -2057,7 +2057,7 @@ Totals as top-level fields: `total`, `active`, `expired`, `hard_bounce`, `soft_b
 
 #### GET /api/suppressions/config
 
-The suppression settings (`suppression_enabled`, `suppression_auto_detect`, `suppression_rspamd_sync`, `suppression_whitelist_domains` as the comma-separated string, `suppression_hard_bounce_action`, `suppression_soft_bounce_action`, `suppression_soft_bounce_threshold`, `suppression_base_expiry_days`, `suppression_max_expiry_days`) and `rspamd_configured`, `rw_key_configured` and `is_fully_configured`. `is_fully_configured` means suppression is on and a read-write key is set; Rspamd sync also needs `rspamd_configured`.
+The suppression settings (`suppression_enabled`, `suppression_auto_detect`, `suppression_rspamd_sync`, `suppression_whitelist_domains` as the comma-separated string, `suppression_hard_bounce_action` (`suppress`, `delete` or `ignore`), `suppression_soft_bounce_action`, `suppression_soft_bounce_threshold`, `queue_cleanup_enabled`, `queue_cleanup_block`, `queue_cleanup_threshold_minutes`, `suppression_base_expiry_days`, `suppression_max_expiry_days`) and `rspamd_configured`, `rw_key_configured` and `is_fully_configured`. `is_fully_configured` means suppression is on and a read-write key is set; Rspamd sync also needs `rspamd_configured`.
 
 ---
 

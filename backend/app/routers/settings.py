@@ -16,6 +16,7 @@ from typing import Dict, Any, Optional
 
 from ..database import get_db, get_db_context
 from ..models import PostfixLog, RspamdLog, NetfilterLog, MessageCorrelation
+from ..services.bounce_policy import cleanup_blocks
 from ..config import settings, EDITABLE_SETTING_KEYS, FEATURE_IDS, reload_settings, Settings
 from ..config import _get_field_annotations, get_env_locked_keys
 from ..app_time import app_tz, configured_zone_name, is_valid_zone
@@ -217,6 +218,23 @@ def _normalize_address_lists(allowed: Dict[str, Any]) -> None:
                 f"{label}: \"{bad[0]}\" is not an email address. "
                 f"Separate several addresses with commas."))
         allowed[key] = ", ".join(split_addresses(str(allowed[key])))
+
+
+def _validate_bounce_actions(allowed: Dict[str, Any]) -> None:
+    """Refuse a Queue Management action nobody knows: the jobs would block or
+    delete nothing for it. The value in effect sent back as it is never blocks
+    saving the other settings (the page posts every key)."""
+    from ..services.bounce_policy import HARD_ACTIONS, SOFT_ACTIONS
+    for key, known in (('suppression_hard_bounce_action', HARD_ACTIONS), ('suppression_soft_bounce_action', SOFT_ACTIONS)):
+        if key not in allowed:
+            continue
+        value = str(allowed[key] or '')
+        if value in known:
+            allowed[key] = value
+        elif value == str(getattr(settings, key) or ''):
+            allowed.pop(key)
+        else:
+            raise HTTPException(status_code=400, detail=f"{key} accepts only: {', '.join(known)}.")
 
 
 def _validate_time_zone(allowed: Dict[str, Any], db: Session) -> None:
@@ -598,7 +616,7 @@ def get_settings_info(db: Session = Depends(get_db)):
                 },
                 "detect_suppressions": {
                     "interval": "5 minutes" if (settings.is_feature_enabled('spam-filter') and settings.suppression_enabled) else ("Disabled (feature off)" if not settings.is_feature_enabled('spam-filter') else "Disabled (suppression off)"),
-                    "description": "Scans Postfix logs for bounces to auto-suppress recipients",
+                    "description": "Reads delivery failures and handles queued mail using Queue Management settings",
                     "enabled": settings.is_feature_enabled('spam-filter') and settings.suppression_enabled and settings.suppression_auto_detect,
                     "feature_disabled": not settings.is_feature_enabled('spam-filter'),
                     "status": jobs_status.get('detect_suppressions', {}).get('status', 'idle') if (settings.is_feature_enabled('spam-filter') and settings.suppression_enabled) else 'disabled',
@@ -634,7 +652,8 @@ def get_settings_info(db: Session = Depends(get_db)):
                 },
                 "cleanup_deferred_queue": {
                     "interval": "5 minutes" if (settings.is_feature_enabled('spam-filter') and settings.suppression_enabled and settings.queue_cleanup_enabled and mailcow_api.has_rw_key) else ("Disabled (feature off)" if not settings.is_feature_enabled('spam-filter') else ("Disabled (suppression off)" if not settings.suppression_enabled else ("Disabled (queue cleanup off)" if not settings.queue_cleanup_enabled else "Disabled (no RW API key)"))),
-                    "description": f"Deletes deferred emails stuck > {settings.queue_cleanup_threshold_minutes}m and suppresses recipients",
+                    "description": (f"Deletes deferred mail after {settings.queue_cleanup_threshold_minutes} minutes in the queue"
+                                    + (" and blocks its recipients" if cleanup_blocks() else "")),
                     "enabled": settings.is_feature_enabled('spam-filter') and settings.suppression_enabled and settings.queue_cleanup_enabled and mailcow_api.has_rw_key,
                     "feature_disabled": not settings.is_feature_enabled('spam-filter'),
                     "status": jobs_status.get('cleanup_deferred_queue', {}).get('status', 'idle') if (settings.is_feature_enabled('spam-filter') and settings.suppression_enabled and settings.queue_cleanup_enabled) else 'disabled',
@@ -775,6 +794,7 @@ def update_settings(body: Dict[str, Any], request: Request = None, response: Res
     _reject_moved_secrets(allowed)
     _normalize_address_lists(allowed)
     _validate_time_zone(allowed, db)
+    _validate_bounce_actions(allowed)
     # For sensitive keys, mask placeholder means "do not change" - omit from payload
     # Empty string means "clear this value" and should be kept
     for sk in _SENSITIVE_SETTING_KEYS:

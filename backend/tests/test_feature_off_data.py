@@ -500,7 +500,7 @@ def test_the_queue_cleanup_keeps_messages_no_block_covers(monkeypatch):
     from app import scheduler
     monkeypatch.setattr(type(settings._inner), 'is_feature_enabled', lambda self, name: True)
     for key, value in {'suppression_enabled': True, 'queue_cleanup_enabled': True, 'queue_cleanup_threshold_minutes': 30,
-                       'suppression_rspamd_sync': False, 'suppression_whitelist_domains': ''}.items():
+                       'suppression_rspamd_sync': True, 'suppression_whitelist_domains': ''}.items():
         monkeypatch.setattr(settings._inner, key, value)
     monkeypatch.setattr(scheduler.mailcow_api, 'headers_rw', {'X-API-Key': 'test-key'})
     monkeypatch.setattr(scheduler, 'update_job_status', Mock())
@@ -516,7 +516,9 @@ def test_the_queue_cleanup_keeps_messages_no_block_covers(monkeypatch):
         return 1
 
     monkeypatch.setattr(scheduler, '_store_deferred_suppressions_worker', store)
-    monkeypatch.setattr(scheduler, '_blocked_now', lambda emails: set(emails) - {'off@example.test'})
+    monkeypatch.setattr(scheduler, '_blocked_now', lambda emails: set(emails))
+    # A block From Rspamd disabled by hand keeps its mail
+    monkeypatch.setattr(scheduler, '_protected_now', lambda emails: set(emails) & {'off@example.test'})
     asyncio.run(scheduler.cleanup_deferred_queue_job())
     scheduler.mailcow_api.delete_queue.assert_awaited_once_with(['GO'])
 
@@ -535,8 +537,13 @@ def test_detection_leaves_a_block_from_rspamd_alone(db_ready, monkeypatch):
                           queue_id=f'D{MARK.upper()}', recipient=f'off-{MARK}@example.test', status='bounced', dsn='5.1.1'))
         db.commit()
     try:
-        _, _, cleanup = scheduler._detect_suppressions_worker()
-        assert f'off-{MARK}@example.test' not in cleanup, 'no block covers it: its queued mail stays'
+        _, _, cleanup, _ = scheduler._detect_suppressions_worker()
+        # No block covers it: its queued mail stays (checked right before a deletion)
+        monkeypatch.setattr(settings._inner, 'suppression_enabled', True)
+        monkeypatch.setattr(scheduler.mailcow_api, 'headers_rw', {'X-API-Key': 'test-key'})
+        address = f'off-{MARK}@example.test'
+        assert scheduler._hard_deletable({'Q1': [address]}, set(cleanup) | {address}, set()) == []
+        assert scheduler._hard_deletable({'Q1': [address]}, set(), {address}) == [], 'nor without a block'
         with db_ready() as db:
             row = db.query(SpamSuppression).filter(SpamSuppression.email == f'off-{MARK}@example.test').one()
             assert (row.bounce_count, row.active, row.reason) == (0, False, 'manual')

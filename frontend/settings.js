@@ -23,7 +23,8 @@ const SETTINGS_LABEL_OVERRIDES = {
     suppression_rspamd_sync: 'Sync with Rspamd',
     suppression_hard_bounce_action: 'Permanent delivery failure',
     suppression_soft_bounce_action: 'Temporary delivery failure',
-    queue_cleanup_enabled: 'Delete delayed mail and block recipients',
+    queue_cleanup_enabled: 'Delete delayed mail',
+    queue_cleanup_block: 'Block the recipients of deleted delayed mail',
     queue_cleanup_threshold_minutes: 'Queue age before deletion (minutes)',
     suppression_soft_bounce_threshold: 'Temporary failures before blocking',
     suppression_base_expiry_days: 'Base block length (days)',
@@ -335,7 +336,8 @@ var SETTINGS_FIELD_DESCRIPTIONS = {
     quarantine_rules_max_actions: 'Safety limit: maximum emails to release/delete per scheduler run. Prevents accidental mass-processing from overly broad rules. Default: 50.',
     quarantine_rules_interval: 'Minutes between quarantine rule processing runs. Lower = faster response to new quarantine items, higher = less API load on mailcow. Default: 5.',
     quarantine_rules_log_retention_days: 'Days to keep quarantine auto-rule action history. Older action logs are automatically cleaned up. Default: 30.',
-    queue_cleanup_enabled: 'Delete delayed mail after some time in the queue and block its recipients.',
+    queue_cleanup_enabled: 'Delete delayed mail after some time in the queue.',
+    queue_cleanup_block: 'Also block the recipients of the delayed mail deleted. Needs Sync with Rspamd.',
     queue_cleanup_threshold_minutes: 'Minutes in the queue before delayed mail is deleted.'
 };
 
@@ -357,18 +359,25 @@ function settingsPickSegment(btn) {
 
 // Queue Management: one choice per kind of delivery failure. The stored
 // settings and their ENV variables stay as they are: the radios only set the
-// hidden fields that the form saves. A temporary failure has two stored
-// settings behind its one choice: queue cleanup on, or else the action.
-// Reading the mail logs (suppression_auto_detect) has no switch of its own:
-// it is on exactly when a choice needs it, and a choice that has no effect
-// without it shows as what really happens.
-const SETTINGS_SOFT_BOUNCE_QUEUE = { value: 'queue', needs: 'rw',
+// hidden fields that the form saves. A temporary failure has three stored
+// settings behind its one choice: queue cleanup on (blocking its recipients
+// or not), or else the action. Reading the mail logs (suppression_auto_detect)
+// has no switch of its own: it is on exactly when a choice needs it, and a
+// choice that has no effect without it shows as what really happens.
+// A block reaches Rspamd only through Sync with Rspamd: while it is off, the
+// options that block are not available, and the one picked shows as its twin
+// that does not block, which is what the jobs do then.
+const SETTINGS_SOFT_BOUNCE_QUEUE = { value: 'queue', needs: 'rw sync',
     label: 'Delete after {minutes} minutes in the queue and block the recipients', hint: 'Checked every 5 minutes.' };
+const SETTINGS_SOFT_BOUNCE_QUEUE_DELETE = { value: 'queue_delete', needs: 'rw',
+    label: 'Delete after {minutes} minutes in the queue', hint: 'Does not block the recipients. Checked every 5 minutes.' };
 const SETTINGS_CHOICE_NOTES = {
     rw: 'Add a read-write API key in Settings > mailcow. Nothing happens without it.',
     'rw-queue': 'Add a read-write API key in Settings > mailcow to delete queued mail.'
 };
-const SETTINGS_LOG_CHOICES = { hard: ['suppress'], soft: ['count', 'suppress'] };
+const SETTINGS_LOG_CHOICES = { hard: ['suppress', 'delete'], soft: ['count', 'suppress'] };
+// What a choice that blocks does while Sync with Rspamd is off
+const SETTINGS_SYNC_TWINS = { hard: { suppress: 'delete' }, soft: { queue: 'queue_delete', count: 'ignore', suppress: 'ignore' } };
 // Settings that do nothing while another switch is off: shown greyed out and
 // unclickable until it is on. Groups say it with needs:, single fields here.
 const SETTINGS_FIELD_NEEDS = {};
@@ -378,9 +387,11 @@ function settingsShowNeeds(root) {
         const row = root.querySelector('#edit-' + key)?.closest('.ui-set-field, .ui-set-bool, .ui-set-wide');
         if (row) row.dataset.needs = parent;
     });
-    root.querySelectorAll('[data-needs]').forEach(el => {
-        const parent = root.querySelector('#edit-' + el.dataset.needs);
-        const off = !!parent && !parent.checked;
+    // A choice's options say what they need on their own (settingsApplySync)
+    root.querySelectorAll('[data-needs]:not(.ui-set-choice-opt)').forEach(el => {
+        // Every switch named must be on
+        const parents = el.dataset.needs.split(' ').map(id => root.querySelector('#edit-' + id)).filter(Boolean);
+        const off = parents.some(parent => !parent.checked);
         el.inert = off;
         el.classList.toggle('is-off', off);
     });
@@ -389,38 +400,52 @@ function settingsShowNeeds(root) {
 function settingsBounceChoice(kind, config, lockedKeys, defaults) {
     const soft = kind === 'soft';
     const actionKey = soft ? 'suppression_soft_bounce_action' : 'suppression_hard_bounce_action';
-    const keys = soft ? ['queue_cleanup_enabled', actionKey, 'queue_cleanup_threshold_minutes', 'suppression_soft_bounce_threshold']
+    const keys = soft ? ['queue_cleanup_enabled', 'queue_cleanup_block', actionKey, 'queue_cleanup_threshold_minutes', 'suppression_soft_bounce_threshold']
         : [actionKey, 'suppression_auto_detect'];
     const locked = key => lockedKeys.has(key);
     const action = String(config[actionKey] ?? '');
     const logsOn = config.suppression_auto_detect === true;
     const queueOn = soft && config.queue_cleanup_enabled === true;
+    const blockOn = config.queue_cleanup_block !== false;
     const needsLogs = value => SETTINGS_LOG_CHOICES[kind].includes(value);
     // What happens today: an action that needs the logs does nothing while they are not read
-    const picked = queueOn ? 'queue' : needsLogs(action) && !logsOn ? 'ignore' : action;
-    const options = soft ? [SETTINGS_SOFT_BOUNCE_QUEUE, ...SETTINGS_FIELD_OPTIONS[actionKey]] : SETTINGS_FIELD_OPTIONS[actionKey];
+    const picked = queueOn ? (blockOn ? 'queue' : 'queue_delete') : needsLogs(action) && !logsOn ? 'ignore' : action;
+    const options = soft ? [SETTINGS_SOFT_BOUNCE_QUEUE, SETTINGS_SOFT_BOUNCE_QUEUE_DELETE, ...SETTINGS_FIELD_OPTIONS[actionKey]]
+        : SETTINGS_FIELD_OPTIONS[actionKey];
+    const isQueue = value => value === 'queue' || value === 'queue_delete';
     // A value set by ENV rules out the options that would change it; the rest stay open
     const open = value => (soft
-        ? (!locked('queue_cleanup_enabled') || (value === 'queue') === queueOn) && (!locked(actionKey) || value === 'queue' || value === action)
-        : !locked(actionKey) || value === action)
+        ? (!locked('queue_cleanup_enabled') || isQueue(value) === queueOn)
+            && (!isQueue(value) || !locked('queue_cleanup_block') || (value === 'queue') === blockOn)
+            && (!locked(actionKey) || isQueue(value) || value === action)
+        : !locked(actionKey) || value === action || value === (SETTINGS_SYNC_TWINS.hard[action] || action))
         && !(locked('suppression_auto_detect') && !logsOn && needsLogs(value));
     const number = key => '<input type="number" min="1" class="ui-input ui-set-choice-num" id="edit-' + key + '" name="' + key + '" value="' +
         escapeHtml(String(config[key] ?? '')) + '" aria-label="' + escapeHtml(settingsFieldLabel(key)) + '"' + (locked(key) ? ' disabled' : '') + '>';
+    // The minutes show in both queue options; the one stored field is hidden below them
+    const minutes = '<input type="number" min="1" class="ui-input ui-set-choice-num" data-mirror="queue_cleanup_threshold_minutes" value="' +
+        escapeHtml(String(config.queue_cleanup_threshold_minutes ?? '')) + '" aria-label="' + escapeHtml(settingsFieldLabel('queue_cleanup_threshold_minutes')) + '"' +
+        (locked('queue_cleanup_threshold_minutes') ? ' disabled' : '') + ' oninput="settingsMirror(this)">';
     const group = 'choice-' + kind;
     const rows = options.map(o => {
         const id = group + '-' + o.value;
         const text = o.label.split(/(\{minutes\}|\{count\})/).filter(Boolean).map(part =>
-            part === '{minutes}' ? number('queue_cleanup_threshold_minutes')
+            part === '{minutes}' ? minutes
                 : part === '{count}' ? number('suppression_soft_bounce_threshold')
                 : '<label for="' + id + '">' + escapeHtml(part.trim()) + '</label>').join(' ');
         return '<div class="ui-set-choice-opt' + (o.value === picked ? ' is-picked' : '') + '" data-needs="' + escapeHtml(o.needs || '') + '" onclick="settingsPickCard(event, this)">' +
             '<input type="radio" id="' + id + '" name="' + group + '" value="' + escapeHtml(o.value) + '" data-choice' +
-            (o.value === picked ? ' checked' : '') + (open(o.value) ? '' : ' disabled') + ' onchange="settingsPickBounce(this)">' +
+            (o.value === picked ? ' checked' : '') + (open(o.value) ? '' : ' disabled data-locked="1"') + ' onchange="settingsPickBounce(this)">' +
             '<div class="ui-set-choice-text"><div>' + text + '</div>' + (o.hint ? '<small class="ui-set-desc">' + escapeHtml(o.hint) + '</small>' : '') +
+            ((o.needs || '').split(' ').includes('sync') ? '<small class="ui-set-desc" data-sync-need hidden>Needs Sync with Rspamd.</small>' : '') +
             '<small class="ui-set-choice-note" data-note hidden></small></div></div>';
     }).join('');
     const checkbox = (key, on) => '<input type="checkbox" hidden id="edit-' + key + '" name="' + key + '"' + (on ? ' checked' : '') + (locked(key) ? ' disabled' : '') + '>';
-    const carriers = soft ? checkbox('queue_cleanup_enabled', queueOn) : checkbox('suppression_auto_detect', logsOn);
+    const carriers = soft
+        ? checkbox('queue_cleanup_enabled', queueOn) + checkbox('queue_cleanup_block', blockOn) +
+          '<input type="hidden" id="edit-queue_cleanup_threshold_minutes" name="queue_cleanup_threshold_minutes" value="' +
+          escapeHtml(String(config.queue_cleanup_threshold_minutes ?? '')) + '"' + (locked('queue_cleanup_threshold_minutes') ? ' disabled' : '') + '>'
+        : checkbox('suppression_auto_detect', logsOn);
     const lockedNames = keys.concat(soft ? ['suppression_auto_detect'] : []).filter(locked).map(key => key.toUpperCase());
     // The defaults Reset returns to: every key of the choice that is not set by ENV
     const resetTo = Object.fromEntries(keys.filter(key => !locked(key) && defaults[key] !== undefined).map(key => [key, defaults[key]]));
@@ -428,14 +453,31 @@ function settingsBounceChoice(kind, config, lockedKeys, defaults) {
         : typeof resetTo[key] === 'number' ? Number(config[key]) !== resetTo[key] : String(config[key] ?? '') !== String(resetTo[key] ?? '');
     const changed = Object.keys(resetTo).some(differs);
     return '<div class="ui-set-field ui-set-wide ui-set-choice' + (changed ? ' is-changed' : '') + '" data-choice="' + kind + '" data-rw="' +
-            (config.mailcow_api_key_rw ? '1' : '0') + '" data-defaults="' + escapeHtml(JSON.stringify(resetTo)) + '">' +
+            (config.mailcow_api_key_rw ? '1' : '0') + '" data-defaults="' + escapeHtml(JSON.stringify(resetTo)) + '" data-loaded="' + escapeHtml(picked) + '">' +
         '<div class="ui-set-choice-head"><span class="ui-label" id="label-' + group + '">What should happen?</span>' +
             (lockedNames.length ? '<span class="ui-set-pill" title="Set by an environment variable, change it there">' + SETTINGS_LOCK_ICON + ' Set by ENV: ' + escapeHtml(lockedNames.join(', ')) + '</span>' : '') +
             '<span class="ui-set-pill is-changed" title="Differs from the default"' + (changed ? '' : ' hidden') + '>Changed</span></div>' +
+        '<small class="ui-set-choice-note" data-sync-changed hidden></small>' +
         '<div class="ui-set-choice-list" role="radiogroup" aria-labelledby="label-' + group + '">' + rows + '</div>' +
         carriers + '<input type="hidden" id="edit-' + actionKey + '" name="' + actionKey + '" value="' + escapeHtml(action) + '" data-saved="' + escapeHtml(action) + '"' + (locked(actionKey) ? ' disabled' : '') + '>' +
         (Object.keys(resetTo).length ? '<button type="button" class="ui-set-clear is-reset" onclick="settingsResetChoice(this)"' + (changed ? '' : ' hidden') + '>↺ Reset to default</button>' : '') +
         '</div>';
+}
+
+// The minutes typed in either queue option: the stored field and the other option follow
+function settingsMirror(input) {
+    const key = input.dataset.mirror;
+    const field = document.getElementById('edit-' + key);
+    if (field && !field.disabled) field.value = input.value;
+    document.querySelectorAll('[data-mirror="' + key + '"]').forEach(other => { if (other !== input) other.value = input.value; });
+}
+
+// The minutes shown from the stored field (after Reset or a restore)
+function settingsShowMirrors() {
+    document.querySelectorAll('[data-mirror]').forEach(input => {
+        const field = document.getElementById('edit-' + input.dataset.mirror);
+        if (field) input.value = field.value;
+    });
 }
 
 // The stored settings from the picked options of both choices. While the logs
@@ -452,8 +494,10 @@ function settingsSyncBounce() {
     const hardField = field('suppression_hard_bounce_action'), softField = field('suppression_soft_bounce_action');
     if (hard && hardField) set(hardField, reading ? hard : hardField.dataset.saved);
     if (soft && softField) {
-        set(field('queue_cleanup_enabled'), soft === 'queue');
-        set(softField, soft === 'queue' || !reading ? softField.dataset.saved : soft);
+        const queue = soft === 'queue' || soft === 'queue_delete';
+        set(field('queue_cleanup_enabled'), queue);
+        if (queue) set(field('queue_cleanup_block'), soft === 'queue');
+        set(softField, queue || !reading ? softField.dataset.saved : soft);
     }
     settingsShowEffective();
 }
@@ -468,20 +512,88 @@ function settingsSyncLogs() {
 }
 
 // Each choice shows what will really happen with the stored values: a value
-// set by ENV can make one choice act once the other turns reading the logs on
+// set by ENV can make one choice act once the other turns reading the logs
+// on, and with Sync with Rspamd off a choice that blocks acts as its twin
 function settingsShowEffective() {
     const field = key => document.getElementById('edit-' + key);
     const logsField = field('suppression_auto_detect');
     const reading = !logsField || logsField.checked;
-    const effective = (kind, value) => !reading && SETTINGS_LOG_CHOICES[kind].includes(value) ? 'ignore' : value;
+    const sync = field('suppression_rspamd_sync');
+    const syncOn = !sync || sync.checked;
+    const effective = (kind, value) => {
+        const shown = !reading && SETTINGS_LOG_CHOICES[kind].includes(value) ? 'ignore' : value;
+        return syncOn ? shown : (SETTINGS_SYNC_TWINS[kind][shown] || shown);
+    };
     const show = (kind, value) => {
         const radios = [...document.querySelectorAll('input[name="choice-' + kind + '"]')];
         if (radios.some(r => r.value === value)) radios.forEach(r => { r.checked = r.value === value; });
     };
     const hardField = field('suppression_hard_bounce_action');
     if (hardField) show('hard', effective('hard', hardField.value));
-    const queue = field('queue_cleanup_enabled'), softField = field('suppression_soft_bounce_action');
-    if (softField) show('soft', queue && queue.checked ? 'queue' : effective('soft', softField.value));
+    const queue = field('queue_cleanup_enabled'), block = field('queue_cleanup_block'), softField = field('suppression_soft_bounce_action');
+    if (softField) show('soft', queue && queue.checked ? effective('soft', block && !block.checked ? 'queue_delete' : 'queue') : effective('soft', softField.value));
+}
+
+// Sync with Rspamd turned off on the page: the options that block are not
+// available, and a picked one moves to its twin, saying so. Turned on again
+// before saving, the choices come back as they were.
+let settingsSyncSnapshot = null;
+const SETTINGS_SYNC_CARRIERS = ['suppression_hard_bounce_action', 'suppression_soft_bounce_action', 'queue_cleanup_enabled', 'queue_cleanup_block', 'suppression_auto_detect'];
+
+function settingsApplySync(toggled) {
+    const sync = document.getElementById('edit-suppression_rspamd_sync');
+    if (!sync || !document.querySelector('.ui-set-choice')) return;
+    const on = sync.checked;
+    // A page drawn again (after saving, or Reset) starts from what it shows
+    if (!toggled) settingsSyncSnapshot = null;
+    const field = key => document.getElementById('edit-' + key);
+    const picked = kind => { const r = document.querySelector('input[name="choice-' + kind + '"]:checked'); return r ? r.value : ''; };
+    if (toggled && !on) {
+        settingsSyncSnapshot = SETTINGS_SYNC_CARRIERS.map(key => {
+            const el = field(key);
+            return [key, el ? (el.type === 'checkbox' ? el.checked : el.value) : null];
+        });
+        ['hard', 'soft'].forEach(kind => {
+            const twin = SETTINGS_SYNC_TWINS[kind][picked(kind)];
+            const radio = twin && document.querySelector('input[name="choice-' + kind + '"][value="' + twin + '"]');
+            if (radio) radio.checked = true;
+        });
+        settingsSyncBounce();
+    } else if (toggled && on && settingsSyncSnapshot) {
+        settingsSyncSnapshot.forEach(([key, value]) => {
+            const el = field(key);
+            if (!el || el.disabled || value === null) return;
+            if (el.type === 'checkbox') el.checked = value; else el.value = value;
+        });
+        settingsSyncSnapshot = null;
+    }
+    document.querySelectorAll('.ui-set-choice-opt').forEach(opt => {
+        if (!(opt.dataset.needs || '').split(' ').includes('sync')) return;
+        const radio = opt.querySelector('input[type="radio"]');
+        opt.inert = !on;
+        radio.disabled = !on || radio.dataset.locked === '1';
+        const need = opt.querySelector('[data-sync-need]');
+        if (need) need.hidden = on;
+    });
+    settingsShowEffective();
+    // Each choice says what it changed to while the sync is off
+    const minutes = (field('queue_cleanup_threshold_minutes') || {}).value || '';
+    const notes = {
+        delete: 'Changed to "Delete its queued mail": Sync with Rspamd is off.',
+        queue_delete: `Changed to "Delete after ${minutes} minutes in the queue": Sync with Rspamd is off.`,
+        ignore: 'Changed to "Do nothing; keep retrying": Sync with Rspamd is off.'
+    };
+    document.querySelectorAll('.ui-set-choice').forEach(box => {
+        const kind = box.dataset.choice;
+        const twin = SETTINGS_SYNC_TWINS[kind][box.dataset.loaded];
+        const note = box.querySelector('[data-sync-changed]');
+        const show = !on && twin && picked(kind) === twin;
+        note.textContent = show ? notes[twin] : '';
+        note.hidden = !show;
+    });
+    document.querySelectorAll('.ui-set-choice').forEach(settingsShowChoice);
+    const form = sync.form;
+    if (toggled && form) form.dispatchEvent(new Event('input', { bubbles: true }));
 }
 
 function settingsPickBounce(radio) {
@@ -535,10 +647,11 @@ function settingsResetChoice(btn) {
     });
     // The choices show the defaults; reading the logs follows them. The actions
     // keep their defaults: settingsSyncBounce would put a saved action back
+    settingsShowMirrors();
     settingsShowEffective();
     settingsSyncLogs();
     settingsShowEffective();
-    document.querySelectorAll('.ui-set-choice').forEach(settingsShowChoice);
+    settingsApplySync(false);
     if (form) form.dispatchEvent(new Event('input', { bubbles: true }));
 }
 
@@ -684,13 +797,14 @@ const SETTINGS_FIELD_OPTIONS = {
     ],
     // The Spam Filter bounce choices (settingsBounceChoice): {count} is the number field
     suppression_hard_bounce_action: [
-        { value: 'suppress', label: 'Block new mail to the address and delete its queued mail', needs: 'logs rw-queue' },
+        { value: 'suppress', label: 'Block new mail to the address and delete its queued mail', needs: 'logs rw-queue sync' },
+        { value: 'delete', label: 'Delete its queued mail', needs: 'logs rw-queue', hint: 'Does not block new mail to the address.' },
         { value: 'ignore', label: 'Do nothing' }
     ],
     suppression_soft_bounce_action: [
-        { value: 'count', label: 'Keep retrying; block new mail after {count} failures', needs: 'logs',
+        { value: 'count', label: 'Keep retrying; block new mail after {count} failures', needs: 'logs sync',
             hint: 'Each failed retry counts, even for the same message.' },
-        { value: 'suppress', label: 'Keep retrying; block new mail at the first failure', needs: 'logs' },
+        { value: 'suppress', label: 'Keep retrying; block new mail at the first failure', needs: 'logs sync' },
         { value: 'ignore', label: 'Do nothing; keep retrying' }
     ]
 };
@@ -870,9 +984,10 @@ var SETTINGS_EDIT_TABS = [
             { label: 'Permanent delivery failure', choice: 'hard', needs: 'suppression_enabled', keys: ['suppression_hard_bounce_action', 'suppression_auto_detect'],
                 intro: 'The receiving server rejected the message permanently. (5.x.x)' },
             { label: 'Temporary delivery failure', choice: 'soft', needs: 'suppression_enabled',
-                keys: ['queue_cleanup_enabled', 'suppression_soft_bounce_action', 'queue_cleanup_threshold_minutes', 'suppression_soft_bounce_threshold'],
+                keys: ['queue_cleanup_enabled', 'queue_cleanup_block', 'suppression_soft_bounce_action', 'queue_cleanup_threshold_minutes', 'suppression_soft_bounce_threshold'],
                 intro: 'Postfix keeps the message and retries. (4.x.x)' },
-            { label: 'How long to block', needs: 'suppression_enabled', keys: ['suppression_base_expiry_days', 'suppression_max_expiry_days'] },
+            // A block reaches Rspamd only through the sync: without it nothing is blocked
+            { label: 'How long to block', needs: 'suppression_enabled suppression_rspamd_sync', keys: ['suppression_base_expiry_days', 'suppression_max_expiry_days'] },
             { label: 'Exceptions', needs: 'suppression_enabled', keys: ['suppression_whitelist_domains'] }
         ]
     },
@@ -1746,7 +1861,11 @@ function renderSettings(content, data) {
             showChoices();
             form.addEventListener('input', showChoices);
             settingsShowNeeds(content);
-            form.addEventListener('change', () => settingsShowNeeds(content));
+            settingsApplySync(false);
+            form.addEventListener('change', event => {
+                if (event.target && event.target.id === 'edit-suppression_rspamd_sync') settingsApplySync(true);
+                settingsShowNeeds(content);
+            });
             // Clearing and resetting change a field without an input event
             content.querySelectorAll('.settings-clear-btn').forEach(btn => btn.addEventListener('click', () => setTimeout(() => { updateDirty(); settingsShowNeeds(content); })));
         }

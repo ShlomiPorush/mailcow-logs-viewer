@@ -769,7 +769,7 @@ class Settings(BaseSettings):
     suppression_hard_bounce_action: str = Field(
         default='suppress',
         env='SUPPRESSION_HARD_BOUNCE_ACTION',
-        description='Action for hard bounces (DSN 5.x.x): suppress or ignore'
+        description='Action for hard bounces (DSN 5.x.x): suppress (block and delete queued mail), delete (only the queued mail) or ignore'
     )
     suppression_soft_bounce_action: str = Field(
         default='count',
@@ -796,7 +796,12 @@ class Settings(BaseSettings):
     queue_cleanup_enabled: bool = Field(
         default=True,
         env='QUEUE_CLEANUP_ENABLED',
-        description='Automatically delete deferred emails stuck longer than threshold and suppress their recipients'
+        description='Automatically delete deferred emails stuck longer than threshold'
+    )
+    queue_cleanup_block: bool = Field(
+        default=True,
+        env='QUEUE_CLEANUP_BLOCK',
+        description='Also block the recipients of the stuck emails the queue cleanup deletes (needs Sync with Rspamd)'
     )
     queue_cleanup_threshold_minutes: int = Field(
         default=60,
