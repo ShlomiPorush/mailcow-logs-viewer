@@ -10,7 +10,7 @@ import csv
 import io
 import re
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, HTTPException, Depends, Query, UploadFile, File
 from pydantic import BaseModel, field_validator
 from typing import Optional, List
@@ -20,11 +20,12 @@ from sqlalchemy import func, or_, desc
 from ..services.csv_export import CSV_ESCAPE_COLUMN, csv_download, csv_query_rows, get_csv_db, restore_csv_text
 from ..database import SessionLocal, get_db, get_db_context
 from ..config import settings
-from ..models import SpamSuppression
+from ..models import MessageCorrelation, SpamSuppression, SuppressionEvent
 from ..mailcow_api import mailcow_api, MailcowAPIError, MailcowRwKeyError
 from ..services.rspamd_map_lock import MapBusyError, map_write_lock
+from ..services.suppression_events import add_event, postfix_lines
 from ..utils import internal_error, format_datetime_for_api
-from ..app_time import to_local
+from ..app_time import to_local, utc_naive
 
 logger = logging.getLogger(__name__)
 
@@ -122,6 +123,9 @@ class SuppressionCreateRequest(BaseModel):
     notes: Optional[str] = None
     permanent: bool = True  # True = never expires, False = use expires_at or auto-calculate
     expires_at: Optional[str] = None  # ISO format datetime string
+    # Set when the block is made from a message on the Queue page: that message
+    # is kept with the block as its details
+    queue_id: Optional[str] = None
     
     @field_validator('email')
     @classmethod
@@ -378,12 +382,47 @@ def get_suppression_config():
 @router.post("/suppressions")
 async def create_suppression(body: SuppressionCreateRequest):
     """Save a manual suppression before cleaning up matching queue items."""
-    result = await asyncio.to_thread(_create_suppression_worker, body)
+    # A block made from a queued message keeps that message: read it before
+    # the cleanup below deletes it
+    queued = await _queued_message(body.queue_id, body.email) if body.queue_id else None
+    result = await asyncio.to_thread(_create_suppression_worker, body, queued)
     await _cleanup_queue_for_email(body.email)
     return result
 
 
-def _create_suppression_worker(body: SuppressionCreateRequest) -> dict:
+async def _queued_message(queue_id: str, email: str) -> Optional[dict]:
+    """The queue item a block is made from, for the block's details. A queue
+    that cannot be read leaves the details out; the block is still made."""
+    try:
+        queue = await mailcow_api.get_queue()
+    except MailcowAPIError:
+        return None
+    for item in queue or []:
+        if item.get('queue_id') != queue_id:
+            continue
+        recipients = [raw.split(' ')[0].strip('<>').lower() for raw in (item.get('recipients') or [])]
+        if email not in recipients:
+            return None
+        reason = next((raw.split(' ', 1)[1].strip().strip('()') for raw in (item.get('recipients') or [])
+                       if ' ' in raw and raw.split(' ')[0].strip('<>').lower() == email), None)
+        arrived = item.get('arrival_time')
+        return {'queue_id': queue_id, 'sender': item.get('sender'), 'reason': reason,
+                'arrived': datetime.fromtimestamp(arrived, tz=timezone.utc).replace(tzinfo=None) if arrived else None}
+    return None
+
+
+def _manual_event(db, suppression, kind: str, outcome: str, body, queued: Optional[dict]) -> None:
+    fields = dict(kind=kind, outcome=outcome, reason=body.reason, notes=body.notes,
+                  recipient=suppression.email, expires_at=suppression.expires_at)
+    if queued:
+        found, shortened = postfix_lines(db, [(queued['queue_id'], suppression.email,
+                                               queued['arrived'] or datetime.utcnow(), datetime.utcnow(), None)])[0]
+        fields.update(queue_id=queued['queue_id'], sender=queued['sender'], server_reply=queued['reason'],
+                      message_time=queued['arrived'], log_lines=found, logs_shortened=shortened)
+    add_event(db, suppression, **fields)
+
+
+def _create_suppression_worker(body: SuppressionCreateRequest, queued: Optional[dict] = None) -> dict:
     with SessionLocal() as db:
         # Check for duplicate
         existing = db.query(SpamSuppression).filter(
@@ -403,6 +442,7 @@ def _create_suppression_worker(body: SuppressionCreateRequest) -> dict:
                 existing.synced_to_rspamd = False
                 existing.expires_at = None  # Manual entries don't expire
                 existing.updated_at = datetime.utcnow()
+                _manual_event(db, existing, 'enabled', 'activated', body, queued)
                 db.commit()
                 db.refresh(existing)
 
@@ -413,7 +453,7 @@ def _create_suppression_worker(body: SuppressionCreateRequest) -> dict:
         if not body.permanent:
             if body.expires_at:
                 try:
-                    expires_at_val = datetime.fromisoformat(body.expires_at.replace('Z', '+00:00'))
+                    expires_at_val = utc_naive(datetime.fromisoformat(body.expires_at.replace('Z', '+00:00')))
                 except ValueError:
                     raise HTTPException(status_code=400, detail="Invalid date format for expires_at")
             else:
@@ -434,6 +474,8 @@ def _create_suppression_worker(body: SuppressionCreateRequest) -> dict:
             expires_at=expires_at_val,
         )
         db.add(suppression)
+        db.flush()
+        _manual_event(db, suppression, 'added', 'created', body, queued)
         db.commit()
         db.refresh(suppression)
 
@@ -447,6 +489,7 @@ def update_suppression(suppression_id: int, body: SuppressionUpdateRequest, db: 
     if not suppression:
         raise HTTPException(status_code=404, detail="Suppression not found")
     
+    was = (suppression.active, suppression.notes, suppression.expires_at)
     if body.active is not None:
         suppression.active = body.active
         suppression.synced_to_rspamd = False  # needs re-sync
@@ -459,15 +502,59 @@ def update_suppression(suppression_id: int, body: SuppressionUpdateRequest, db: 
             suppression.expires_at = None
         else:
             try:
-                suppression.expires_at = datetime.fromisoformat(body.expires_at.replace('Z', '+00:00'))
+                # Stored as naive UTC, so an unchanged expiry compares equal
+                suppression.expires_at = utc_naive(datetime.fromisoformat(body.expires_at.replace('Z', '+00:00')))
             except ValueError:
                 raise HTTPException(status_code=400, detail="Invalid date format for expires_at")
     
+    # What changed by hand is kept with the block, with the notes as they were then
+    if suppression.active != was[0]:
+        add_event(db, suppression, kind='enabled' if suppression.active else 'disabled', outcome='changed',
+                  notes=suppression.notes, expires_at=suppression.expires_at, recipient=suppression.email)
+    if suppression.expires_at != was[2]:
+        add_event(db, suppression, kind='expiry_changed', outcome='changed', notes=suppression.notes,
+                  expires_at=suppression.expires_at, recipient=suppression.email)
+    if (suppression.notes or '') != (was[1] or ''):
+        add_event(db, suppression, kind='notes_changed', outcome='changed', notes=suppression.notes,
+                  expires_at=suppression.expires_at, recipient=suppression.email)
     suppression.updated_at = datetime.utcnow()
     db.commit()
     db.refresh(suppression)
     
     return _serialize_suppression(suppression, datetime.utcnow())
+
+
+EVENTS_PAGE = 20
+
+
+@router.get("/suppressions/{suppression_id}/events")
+def get_suppression_events(suppression_id: int, page: int = Query(1, ge=1), db: Session = Depends(get_db)):
+    """Block details: what happened to this address, newest first, with the
+    evidence copied at the time. message_available says whether the linked
+    message is still on the Messages page right now."""
+    suppression = db.query(SpamSuppression).filter(SpamSuppression.id == suppression_id).first()
+    if not suppression:
+        raise HTTPException(status_code=404, detail="Suppression not found")
+    query = db.query(SuppressionEvent).filter(SuppressionEvent.suppression_id == suppression_id)
+    total = query.count()
+    events = query.order_by(SuppressionEvent.recorded_at.desc(), SuppressionEvent.id.desc())         .offset((page - 1) * EVENTS_PAGE).limit(EVENTS_PAGE).all()
+    keys = {e.correlation_key for e in events if e.correlation_key}
+    present = {k for (k,) in db.query(MessageCorrelation.correlation_key)
+               .filter(MessageCorrelation.correlation_key.in_(keys)).all()} if keys else set()
+    when = lambda value: format_datetime_for_api(value) if value else None  # noqa: E731
+    return {
+        "suppression": {"id": suppression.id, "email": suppression.email, "type": suppression.type,
+                        "active": suppression.active},
+        "total": total, "page": page, "page_size": EVENTS_PAGE,
+        "events": [{
+            "id": e.id, "kind": e.kind, "outcome": e.outcome, "recorded_at": when(e.recorded_at),
+            "message_time": when(e.message_time), "reason": e.reason, "server_reply": e.server_reply,
+            "dsn": e.dsn, "sender": e.sender, "recipient": e.recipient, "subject": e.subject,
+            "queue_id": e.queue_id, "message_id": e.message_id, "notes": e.notes,
+            "expires_at": when(e.expires_at), "log_lines": e.log_lines or [], "logs_shortened": bool(e.logs_shortened),
+            "correlation_key": e.correlation_key, "message_available": e.correlation_key in present,
+        } for e in events],
+    }
 
 
 @router.delete("/suppressions/{suppression_id}")
@@ -582,6 +669,9 @@ def _import_suppressions_worker(content: bytes):
                     expires_at=None,
                 )
                 db.add(suppression)
+                db.flush()
+                add_event(db, suppression, kind='imported', outcome='created', reason=reason, notes=notes,
+                          recipient=email)
                 accepted_emails.add(email)
                 imported += 1
             except Exception as e:

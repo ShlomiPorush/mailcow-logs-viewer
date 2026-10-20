@@ -1914,6 +1914,20 @@ html body .ui-main .ui-set-choice-opt > input[type="radio"] { accent-color: var(
 .ui-form-split { padding-top: 14px; border-top: 1px solid var(--ui-line); gap: 10px; }
 .ui-form-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .ui-dialog.ui-dialog-md { width: min(680px, 100%); }
+
+/* Block details (Spam Filter > Suppressions): one card per event, newest first */
+.ui-block-who { margin: 0 0 10px; font-weight: 650; overflow-wrap: anywhere; }
+.ui-block-event { display: grid; gap: 6px; padding: 12px 0; border-top: 1px solid var(--ui-line); }
+.ui-block-event > header { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; }
+.ui-block-event > header small { margin-inline-start: auto; }
+.ui-block-event > .ui-btn { justify-self: start; }
+.ui-block-fields { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 3px 12px; margin: 0; font-size: 13px; }
+.ui-block-fields dt { color: var(--ui-muted); }
+.ui-block-fields dd { margin: 0; overflow-wrap: anywhere; }
+.ui-block-logs summary { cursor: pointer; font-size: 13px; font-weight: 600; }
+.ui-block-logs > * + * { margin-top: 8px; }
+.ui-block-pre { max-height: 260px; margin: 0; padding: 8px 10px; overflow: auto; border-radius: var(--ui-radius-sm); background: var(--ui-bg);
+    font-family: var(--ui-mono); font-size: 11.5px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
 .ui-set-log { padding: 12px 14px; border-radius: var(--ui-radius-sm); background: #0f1512; color: #d7ddd9; font-family: var(--ui-mono);
     font-size: 12px; line-height: 1.6; overflow-x: auto; }
 .ui-set-log .is-ok { color: #3fcf7f; }

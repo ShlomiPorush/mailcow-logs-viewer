@@ -101,7 +101,8 @@ test('a direct load of the Queue waits for the Read-Write status instead of show
 
 test('Suppress stays on queue rows without the Read-Write key', () => {
     const html = drawQueue(loadApp(), false);
-    assert.match(html, /showAddSuppressionModal\('user@example\.org'\)/);
+    // With the row's queue id, so the block keeps that message in its Block details
+    assert.match(html, /showAddSuppressionModal\('user@example\.org', 'ABC123'\)/);
     assert.doesNotMatch(html, /queue-action-btn|queue-checkbox/);
     assert.match(html, /Actions<\/span>/);
 });

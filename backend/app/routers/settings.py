@@ -922,7 +922,8 @@ _FEATURE_TABLES = {
     'mailbox-stats': ['alias_statistics', 'mailbox_statistics'],
     'logs': ['raw_service_logs'],
     'blacklist': ['blacklist_checks', 'monitored_hosts'],
-    'spam-filter': ['spam_suppressions'],
+    # The block details go with their blocks (the foreign key cascades too); listed first to count them
+    'spam-filter': ['suppression_events', 'spam_suppressions'],
     'quarantine': ['quarantine_rule_logs', 'quarantine_rules'],
     'devices': ['eas_devices'],
 }

@@ -97,7 +97,8 @@ def test_expiry_boundaries_and_bulk_query(monkeypatch, extra_rows):
     def capture(conn, cursor, statement, parameters, context, executemany):
         statements.append(statement)
     try:
-        Base.metadata.create_all(isolated, tables=[SpamSuppression.__table__])
+        from app.models import SuppressionEvent
+        Base.metadata.create_all(isolated, tables=[SpamSuppression.__table__, SuppressionEvent.__table__])
         expected = {}
         cases = list(product((None, -1, 0, 1), (False, True), (False, True)))
         cases += [(-1, True, True)] * extra_rows

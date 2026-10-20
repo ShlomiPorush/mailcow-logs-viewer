@@ -210,7 +210,7 @@ def test_suppression_export_import_preserves_addresses_and_notes(export_client, 
     result = client.post("/api/suppressions/import", files={"file": ("roundtrip.csv", response.content)})
     assert result.status_code == 200
     assert result.json() == {"imported": 1, "skipped": 0, "errors": []}
-    saved = db.add.call_args.args[0]
+    saved = next(call.args[0] for call in db.add.call_args_list if type(call.args[0]).__name__ == "SpamSuppression")
     assert saved.email == email
     assert saved.notes == notes
     assert saved.type == "email"

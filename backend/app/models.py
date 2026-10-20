@@ -6,7 +6,7 @@ SIMPLIFIED VERSION:
 - Removed old generate_correlation_key function
 - Correlation key is now SHA256 of Message-ID
 """
-from sqlalchemy import Column, Integer, BigInteger, String, Float, DateTime, Boolean, Text, Index, JSON, UniqueConstraint, func
+from sqlalchemy import Column, Integer, BigInteger, String, Float, DateTime, Boolean, Text, Index, JSON, UniqueConstraint, ForeignKey, func
 from sqlalchemy.dialects.postgresql import JSONB
 from datetime import datetime
 
@@ -679,6 +679,45 @@ class SpamSuppression(Base):
     
     def __repr__(self):
         return f"<SpamSuppression(email={self.email}, reason={self.reason}, active={self.active}, bounces={self.bounce_count})>"
+
+
+class SuppressionEvent(Base):
+    """What happened to a blocked address, kept with it for as long as it is on
+    the list (Spam Filter > Suppressions > Block details).
+
+    Postfix logs and messages are deleted after RETENTION_DAYS, but a block can
+    last up to months, so each event keeps its own copy of the evidence: the
+    server's answer, the message's sender, subject and ids, and the Postfix
+    lines of that message. Deleting the address deletes its events.
+    """
+    __tablename__ = "suppression_events"
+
+    id = Column(Integer, primary_key=True)
+    suppression_id = Column(Integer, ForeignKey('spam_suppressions.id', ondelete='CASCADE'), nullable=False)
+    # hard_bounce, soft_bounce, rejected, deferred_stuck, added, imported,
+    # enabled, disabled, expiry_changed, notes_changed, before_upgrade
+    kind = Column(String(30), nullable=False)
+    # What the event did to the block: created, activated, extended, counted, changed
+    outcome = Column(String(20))
+    recorded_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    message_time = Column(DateTime)
+    reason = Column(Text)
+    server_reply = Column(Text)
+    dsn = Column(String(20))
+    sender = Column(String(255))
+    recipient = Column(String(255))
+    subject = Column(Text)
+    queue_id = Column(String(50))
+    message_id = Column(String(255))
+    correlation_key = Column(String(64))
+    notes = Column(Text)
+    expires_at = Column(DateTime)
+    log_lines = Column(JSONB)
+    logs_shortened = Column(Boolean, default=False)
+
+    __table_args__ = (
+        Index('idx_suppression_event_owner', 'suppression_id', 'recorded_at'),
+    )
 
 
 class QuarantineRule(Base):
