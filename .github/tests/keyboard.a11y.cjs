@@ -19,6 +19,8 @@ function page(body) {
         { runScripts: 'dangerously', pretendToBeVisual: true });
     const w = dom.window;
     w.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {} });
+    // jsdom does no layout: an element counts as shown when nothing hides it
+    w.Element.prototype.getClientRects = function () { return this.isConnected && !this.closest('.hidden') ? [{}] : []; };
     const script = w.document.createElement('script');
     script.textContent = utils;
     w.document.head.appendChild(script);
@@ -100,6 +102,34 @@ test('a stacked list gets a Sort picker: a column sorts, the same column again t
     select.value = '0';
     w.uiPhoneSortPick(select);
     assert.deepEqual(names(w), ['beta', 'alpha'], 'picked again: turned around');
+});
+
+test('a list sorted on the server gets the focus back on the same header once it is drawn again', async () => {
+    const list = dir => `<div class="ui-table ui-stack" data-sort-handler="sortServer">
+        <div class="ui-tr ui-tr-head"><span data-sort-key="name" aria-sort="${dir}">Name</span><span data-sort-key="n" aria-sort="none">Count</span></div>
+        <div class="ui-tr"><span>a</span><span>1</span></div></div>`;
+    const w = page(`<section id="srv">${list('none')}</section>`);
+    w.sortServer = (key, dir) => { setTimeout(() => { w.document.getElementById('srv').innerHTML = list(dir === 'asc' ? 'ascending' : 'descending'); }, 20); };
+    w.uiRefreshTableSorts();
+    const button = w.document.querySelector('#srv .ui-sort-btn');
+    button.focus();
+    button.click();
+    await new Promise(resolve => setTimeout(resolve, 40));
+    w.uiRefreshTableSorts();   // what the page's observer does once the new list is there
+    const active = w.document.activeElement;
+    assert.ok(active.matches('.ui-sort-btn'), `focus is on a header button again, not ${active.tagName}.${active.className}`);
+    assert.equal(active.closest('[data-sort-key]').dataset.sortKey, 'name');
+    assert.equal(active.closest('[data-sort-key]').dataset.sortState, 'ascending');
+});
+
+test('the phone Sort picker keeps its id when its list is drawn again', () => {
+    const w = page(LIST);
+    w.uiRefreshTableSorts();
+    const id = w.document.querySelector('#list .ui-phone-sort select').id;
+    assert.equal(id, 'ui-phone-sort-list');
+    w.document.getElementById('list').innerHTML = w.document.getElementById('list').innerHTML.replace(/<div class="ui-phone-sort">[\s\S]*?<\/select><\/div>/, '');
+    w.uiRefreshTableSorts();
+    assert.equal(w.document.querySelector('#list .ui-phone-sort select').id, 'ui-phone-sort-list');
 });
 
 test('a list with a sort control of its own gets no second one', () => {

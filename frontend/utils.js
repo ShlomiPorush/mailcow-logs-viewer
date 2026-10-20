@@ -1055,7 +1055,20 @@ function uiClearTableSort(owner) {
 // One way to sort, for a header's click or keys and for the phone's Sort picker:
 // the sorted column turns around, another column starts high to low for numbers
 // and A to Z for text
+// A list sorted on the server is drawn again: the focus goes back to the same
+// header, or to the phone's Sort picker, once the new list is there
+let uiSortFocus = null;   // { owner, label, phone, until }
+function uiSortOwner(table) {
+    const owner = table.id ? table : table.closest('[id]');
+    return owner ? owner.id : '';
+}
 function uiSortBy(table, cell) {
+    const active = document.activeElement;
+    const box = table.previousElementSibling;
+    if (active && (cell.contains(active) || (box && box.classList.contains('ui-phone-sort') && box.contains(active)))) {
+        uiSortFocus = { owner: uiSortOwner(table), label: uiSortLabel(cell), phone: !cell.contains(active),
+            server: table.hasAttribute('data-sort-handler'), until: Date.now() + 5000 };
+    }
     const index = uiSortHeads(table).indexOf(cell);
     const current = uiSortState(cell);
     const numeric = uiSortUnits(table).some(seg => seg.units.some(u => uiSortValue(u[0].children[index]).n !== null));
@@ -1102,7 +1115,10 @@ function uiPhoneSortSync(table, heads) {
     if (!box || !box.classList.contains('ui-phone-sort')) {
         box = document.createElement('div');
         box.className = 'ui-phone-sort';
-        box.innerHTML = `<select id="ui-phone-sort-${++uiPhoneSortSeq}" class="hidden" data-picker-label="Sort" data-no-filter onchange="uiPhoneSortPick(this)"></select>`;
+        // Named after the list's owner, so the picker keeps its id when the list is drawn again
+        const owner = uiSortOwner(table);
+        const id = owner && !document.getElementById(`ui-phone-sort-${owner}`) ? `ui-phone-sort-${owner}` : `ui-phone-sort-${++uiPhoneSortSeq}`;
+        box.innerHTML = `<select id="${id}" class="hidden" data-picker-label="Sort" data-no-filter onchange="uiPhoneSortPick(this)"></select>`;
         table.before(box);
     }
     const select = box.querySelector('select');
@@ -1142,6 +1158,30 @@ function uiRefreshTableSorts() {
         if (uiPhoneSortSync(table, heads)) pickers = true;
     });
     if (pickers && typeof uiFilterBarSync === 'function') uiFilterBarSync();
+    uiSortFocusBack();
+}
+function uiSortFocusBack() {
+    const want = uiSortFocus;
+    if (!want) return;
+    if (Date.now() > want.until) { uiSortFocus = null; return; }
+    const active = document.activeElement;
+    if (active && active !== document.body) {
+        // A list sorted in place keeps its header: nothing to do. One sorted on the
+        // server waits for its new rows, and the user may have moved on meanwhile
+        if (!want.server && active.closest('.ui-sort-btn, .ui-phone-sort')) uiSortFocus = null;
+        return;
+    }
+    for (const table of document.querySelectorAll('.ui-table, table')) {
+        if (uiSortOwner(table) !== want.owner) continue;
+        const target = want.phone
+            ? table.previousElementSibling?.querySelector?.('.ui-phone-sort .ui-picker-btn, .ui-picker-btn')
+            : uiSortHeads(table).find(h => uiSortLabel(h) === want.label)?.querySelector('.ui-sort-btn');
+        if (target && target.getClientRects().length) {
+            target.focus({ preventScroll: true });
+            uiSortFocus = null;
+            return;
+        }
+    }
 }
 document.addEventListener('DOMContentLoaded', () => {
     new MutationObserver(() => {

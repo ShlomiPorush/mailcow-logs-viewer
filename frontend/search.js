@@ -282,6 +282,7 @@ function gsRender() {
     gsShown = [];
     if (!gsQuery) {
         panel.innerHTML = '';
+        gsEl('ui-gs-input').removeAttribute('aria-activedescendant');
         return;
     }
     const q = gsQuery.toLowerCase();
