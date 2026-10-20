@@ -509,19 +509,27 @@ async def cleanup_raw_service_logs():
 
 def _cleanup_raw_service_logs_worker():
     """
-    Daily cleanup job - removes raw logs older than RAW_LOGS_RETENTION_DAYS.
-    Runs at 3:00 AM (offset from main cleanup at 2:00 AM).
+    Daily cleanup job - removes raw logs older than RAW_LOGS_RETENTION_DAYS,
+    and the rate limit log (the Rate Limits page's history) older than
+    rate_limits_retention_effective. Runs at 3:00 AM (offset from main cleanup at 2:00 AM).
     """
     raw_logs_job_status['cleanup_raw_logs']['status'] = 'running'
     raw_logs_job_status['cleanup_raw_logs']['last_run'] = datetime.now(timezone.utc)
     
     try:
         retention_days = settings.raw_logs_retention_days
-        cutoff_date = datetime.now(timezone.utc) - timedelta(days=retention_days)
+        now = datetime.now(timezone.utc)
+        cutoff_date = now - timedelta(days=retention_days)
+        rate_limit_cutoff = now - timedelta(days=settings.rate_limits_retention_effective)
         
         with get_db_context() as db:
             deleted = db.query(RawServiceLog).filter(
+                RawServiceLog.service != 'ratelimited',
                 RawServiceLog.time < cutoff_date
+            ).delete()
+            deleted += db.query(RawServiceLog).filter(
+                RawServiceLog.service == 'ratelimited',
+                RawServiceLog.time < rate_limit_cutoff
             ).delete()
             uncollected = delete_uncollected_raw_logs(db)
             
@@ -591,7 +599,7 @@ def start_raw_logs_scheduler():
         logger.info(f"[RAW LOGS] Scheduler started")
         logger.info(f"   [FETCH] Every {settings.raw_logs_fetch_interval}s, {settings.raw_logs_fetch_count} logs/service")
         logger.info(f"   [SERVICES] {', '.join(services)} ({len(services)} enabled)")
-        logger.info(f"   [RETENTION] {settings.raw_logs_retention_days} days")
+        logger.info(f"   [RETENTION] {settings.raw_logs_retention_days} days, rate limit log {settings.rate_limits_retention_effective} days")
         logger.info(f"   [CLEANUP] {clock_schedule('cleanup_raw_logs')}")
         
     except Exception as e:

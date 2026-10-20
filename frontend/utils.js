@@ -1126,7 +1126,8 @@ document.addEventListener('keydown', event => {
 //   <p class="ui-list-summary"><span id="...-count"></span><button class="ui-clear-filters">
 // A select with data-picker-label keeps its value, its options and its onchange,
 // so the page's own code reads it as before; the picker only shows it. A select
-// with data-no-filter (sort order) is not counted as a filter.
+// with data-no-filter (sort order) is not counted as a filter, and data-picker-host
+// adds a class to the picker (ui-picker-end: it opens toward the start).
 function uiToggleFilters(button) {
     const bar = button.closest('.ui-filters');
     const open = bar.classList.toggle('is-open');
@@ -1177,7 +1178,7 @@ function uiFilterBarSync() {
         const chosen = select.selectedOptions[0] || options[0];
         const short = o => (o && (o.dataset.short || o.textContent.trim())) || '';
         slot.innerHTML = uiPicker({
-            id: `${select.id}-picker`, label: select.dataset.pickerLabel,
+            id: `${select.id}-picker`, label: select.dataset.pickerLabel, hostClass: select.dataset.pickerHost || '',
             value: escapeHtml(short(chosen)), set: uiFilterChanged(select),
             // A long list gets a search field
             search: select.dataset.pickerSearch || (options.length > 10 ? `Search ${select.dataset.pickerLabel.toLowerCase()}` : ''),

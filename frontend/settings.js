@@ -319,6 +319,7 @@ var SETTINGS_FIELD_DESCRIPTIONS = {
     raw_logs_fetch_interval: 'Seconds between raw log fetch cycles. Lower = more frequent updates. Default: 30.',
     raw_logs_fetch_count: 'Number of log entries to fetch per service per cycle. Higher values catch more logs but increase API load. Default: 1000.',
     raw_logs_retention_days: 'Days to keep raw logs in the database. Older logs are automatically deleted at 3:00 AM daily. Default: 2.',
+    rate_limits_retention_days: 'Days to keep the senders that hit a rate limit, for the Rate Limits page. Never less than Raw Logs Retention Days. Default: 90.',
     eas_devices_retention_days: 'Days to keep a device that stopped syncing before it is removed from the Devices page. 0 keeps every device. Default: 90.',
     raw_logs_services: 'The services the Logs page shows. A service marked Always collected keeps coming in when switched off here, because another page reads it; the Logs page then just does not show it.',
     rspamd_password: 'Rspamd UI/API password for reading Rspamd map data. Required to view and edit Rspamd maps.',
@@ -720,7 +721,7 @@ var SETTINGS_EDIT_TABS = [
         id: 'logs', label: 'Logs', description: 'Live log viewer settings. Controls background collection of raw logs from mailcow services. Logs are stored in a separate database table and streamed via WebSocket to the Logs page. Adjust fetch interval and retention to balance freshness vs. storage usage.', groups: [
             { label: 'Enable', keys: ['raw_logs_enabled'] },
             { label: 'Fetch Settings', keys: ['raw_logs_fetch_interval', 'raw_logs_fetch_count'] },
-            { label: 'Retention', keys: ['raw_logs_retention_days'] },
+            { label: 'Retention', keys: ['raw_logs_retention_days', 'rate_limits_retention_days'] },
             { label: 'Services', keys: ['raw_logs_services'] }
         ]
     },

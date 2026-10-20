@@ -270,7 +270,7 @@ Times of day follow the container's clock.
 | **SMTP Abuse** | Every minute | Disables SMTP for mailboxes over the sending threshold. Needs SMTP abuse protection on and a read-write key. Shown on **Status** > **Jobs** as **Outgoing Spam**. |
 | **Protection Rules** | After each log fetch | Evaluates the protection rules on new Netfilter lines and writes bans when a read-write key is set. Security feature only. |
 | **Fetch Raw Logs** | Every `RAW_LOGS_FETCH_INTERVAL` seconds (default 30) | Collects raw service logs for the Logs page and the pages that read them |
-| **Cleanup Raw Logs** | Daily at 3 AM | Removes raw logs older than `RAW_LOGS_RETENTION_DAYS` (default 2) |
+| **Cleanup Raw Logs** | Daily at 3 AM | Removes raw logs older than `RAW_LOGS_RETENTION_DAYS` (default 2), and the rate limit log older than `RATE_LIMITS_RETENTION_DAYS` (default 90, never less than the first) |
 | **Detect Suppressions** | Every 5 minutes | Suppresses recipients of bounced messages found in Postfix logs, and of deferred messages too while deferred queue cleanup is off. Runs while the Spam Filter feature, suppressions and automatic detection are on. |
 | **Cleanup Deferred Queue** | Every 5 minutes | Deletes deferred messages stuck longer than `QUEUE_CLEANUP_THRESHOLD_MINUTES` (default 60) and suppresses their recipients. Needs suppressions, queue cleanup and a read-write key. |
 | **Sync Suppressions** | Every 10 minutes | Syncs active suppressions to the Rspamd recipient denylist. Needs the Rspamd password, Rspamd sync turned on and a read-write key. |
@@ -507,11 +507,11 @@ mailcow rate-limits senders through Rspamd, which counts every send against a Re
 
 | Parameter | Type | Default | Constraints and purpose |
 | --- | --- | --- | --- |
-| `hours` | integer | `168` | Chart window in hours, 1 to 8760 |
+| `hours` | integer | `168` | Chart window in hours, 1 to 8760; narrowed to the longest window in `windows` |
 
-Sender history and an activity chart from the collected `ratelimited` log. Reads the newest 5,000 rows; does not call mailcow.
+Sender history and an activity chart from the collected `ratelimited` log, counted in the database; does not call mailcow.
 
-The response has `hours`, `total_events`, `window_senders`, `by_sender`, `events`, `bucket` and `by_bucket`. The window applies to the chart totals and buckets only; `by_sender` covers every sender in the rows read, by hit count. Each sender has `user`, `events`, `last_seen`, `last_rl_hash`, `current_limit` (`{value, frame}` from the synced mailbox, or null), `recent` (up to 5 events) and optional `last_reset`. The flat `events` feed holds up to 50. Event fields are `time`, `rcpt`, `subject`, `qid` and `rl_hash` (plus `user` in the flat feed). Buckets are `{bucket, count}`, hourly for windows up to 24 hours, else daily.
+The response has `hours` (the window used), `windows` (the windows the kept history covers, from 24, 168, 720, 2160 and 8760), `retention_days`, `total_events`, `window_senders`, `by_sender`, `events`, `bucket` and `by_bucket`. The window applies to the chart totals and buckets only; `by_sender` covers every sender in the kept history, by hit count. Each sender has `user`, `events`, `last_seen`, `last_rl_hash`, `current_limit` (`{value, frame}` from the synced mailbox, or null), `recent` (up to 5 events) and optional `last_reset`. The flat `events` feed holds up to 50. Event fields are `time`, `rcpt`, `subject`, `qid` and `rl_hash` (plus `user` in the flat feed). Buckets are `{bucket, count}`, hourly for windows up to 24 hours, else daily.
 
 ---
 
