@@ -1379,7 +1379,7 @@ async function unbanIP(ip, btnEl) {
 
 async function banIP(ip, btnEl) {
     const ipWithMask = fail2banEntry(ip);
-    if (!await showConfirmModal({ title: 'Ban IP', message: `Are you sure you want to permanently ban ${ipWithMask}?\n\nThis will add the IP to the Fail2Ban blacklist.`, confirmText: 'Ban', isDangerous: true })) return;
+    if (!await showConfirmModal({ title: 'Ban IP', message: `Are you sure you want to permanently ban ${ipWithMask}?\n\nThis will add the IP to the Fail2Ban denylist.`, confirmText: 'Ban', isDangerous: true })) return;
 
     if (btnEl) {
         btnEl.disabled = true;
@@ -1396,7 +1396,7 @@ async function banIP(ip, btnEl) {
         const result = await response.json();
 
         if (result.status === 'success') {
-            showToast(result.already ? result.msg : `IP ${ip} added to blacklist`, 'success');
+            showToast(result.already ? result.msg : `IP ${ip} added to the denylist`, 'success');
             // Refresh fail2ban data and netfilter logs
             fail2banSettingsLoaded = false;
             fail2banActiveBans = null;

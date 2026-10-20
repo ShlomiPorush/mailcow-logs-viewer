@@ -226,8 +226,8 @@ var SETTINGS_FIELD_DESCRIPTIONS = {
     domain_spf_source_dmarc_history: 'Also validate source IPs observed with a passing SPF result in the last 30 days of imported DMARC aggregate reports for each domain. Caution: with relaxed SPF alignment, an IP sending from an ESP subdomain can appear as an aligned pass without being listed in the domain own SPF record, which then shows up as a false warning here. Default: false.',
 
     mailcow_url: 'Your mailcow instance URL (without trailing slash).',
-    mailcow_api_key: 'mailcow API key (Read-Only). Generate from System → API in mailcow admin. Required permissions: Read access to logs. In mailcow the key must be active, and its allowed IPs must include the address this app connects from.',
-    mailcow_api_key_rw: 'mailcow API key (Read-Write). Optional. Generate a separate key from System → API with write permissions. Used for actions such as quarantine, queue, Fail2Ban, rate limits and Rspamd maps. In mailcow the key must be active, and its allowed IPs must include the address this app connects from.',
+    mailcow_api_key: 'mailcow API key (Read-Only). Generate from System → Configuration → Access → Administrators → API in mailcow admin. Required permissions: Read access to logs. In mailcow the key must be active, and its allowed IPs must include the address this app connects from.',
+    mailcow_api_key_rw: 'mailcow API key (Read-Write). Optional. Generate a separate key from System → Configuration → Access → Administrators → API with write permissions. Used for actions such as quarantine, queue, Fail2Ban, rate limits and Rspamd maps. In mailcow the key must be active, and its allowed IPs must include the address this app connects from.',
     mailcow_api_timeout: 'API request timeout in seconds.',
     mailcow_api_verify_ssl: 'Verify SSL certificates when connecting to mailcow API. Set to false for development with self-signed certificates. Default: true.',
     fetch_interval: 'Seconds between log fetches from mailcow. Lower = more frequent updates, higher load. Default: 60.',
@@ -363,7 +363,7 @@ const SETTINGS_FIELD_OPTIONS = {
 // Keys grouped logically within each tab
 var SETTINGS_EDIT_TABS = [
     {
-        id: 'mailcow', label: 'Mailcow', description: 'Your mailcow instance URL and API credentials. API key needs read access to logs (generate from System → API in mailcow admin). Set verify SSL to false only for development with self-signed certificates.', groups: [
+        id: 'mailcow', label: 'Mailcow', description: 'Your mailcow instance URL and API credentials. API key needs read access to logs (generate from System → Configuration → Access → Administrators → API in mailcow admin). Set verify SSL to false only for development with self-signed certificates.', groups: [
             { label: 'Connection', keys: ['mailcow_url', 'mailcow_api_key', 'mailcow_api_key_rw'] },
             { label: 'Rspamd', keys: ['rspamd_password', 'rspamd_url'] },
             { label: 'Advanced', keys: ['mailcow_api_timeout', 'mailcow_api_verify_ssl'] }
@@ -1418,18 +1418,13 @@ function renderSettings(content, data) {
                     const _maxmindChanged = ('maxmind_account_id' in payload || 'maxmind_license_key' in payload);
                     if (_maxmindChanged) _cachedMaxMindStatus = null; // Clear stale validation cache
                     const _maxmindHasValues = (payload.maxmind_license_key && payload.maxmind_license_key !== '' && payload.maxmind_license_key !== '********');
-                    if (_maxmindChanged && _maxmindHasValues) {
-                        // Modal handles loadSettings on close
-                        showGeoIPSetupModal();
-                        return;
-                    }
-                    
                     // The rest of the app reads features, title, logo, sign-in and the mailcow
                     // address once, when the page loads: a change to one of them reloads it.
                     // Any other save refreshes Settings in place.
                     const shellChanged = SETTINGS_READ_AT_PAGE_LOAD.some(key =>
                         key in payload && String(payload[key] ?? '') !== String(data.editable_config[key] ?? ''));
-                    if (featuresChanged || shellChanged) {
+                    const needsReload = featuresChanged || shellChanged;
+                    if (needsReload) {
                         const purgeableNewlyDisabled = newlyDisabledFeatures.filter(f => PURGEABLE_FEATURES.includes(f));
                         if (purgeableNewlyDisabled.length > 0) {
                             showToast(`Purging data for ${purgeableNewlyDisabled.length} disabled feature(s)...`, 'info');
@@ -1450,6 +1445,18 @@ function renderSettings(content, data) {
                         if (checkToast) {
                             try { sessionStorage.setItem(SETTINGS_TOAST_AFTER_RELOAD, JSON.stringify(checkToast)); } catch (e) { /* private mode: the status tag still shows it */ }
                         }
+                    }
+
+                    if (_maxmindChanged && _maxmindHasValues) {
+                        // The form reloads now, so the save bar clears behind the window. On
+                        // close the window shows the new GeoIP status, or reloads the page when
+                        // the same save changed what the page reads at load.
+                        showGeoIPSetupModal(needsReload);
+                        await loadSettings();
+                        return;
+                    }
+
+                    if (needsReload) {
                         showToast(featuresChanged ? 'Features updated - reloading...' : 'Settings saved - reloading...', 'success');
                         setTimeout(() => location.reload(), 600);
                         return;
@@ -1485,7 +1492,8 @@ function renderSettings(content, data) {
     }
 }
 
-async function showGeoIPSetupModal() {
+// reloadPage: reload the whole page on close instead of only Settings
+async function showGeoIPSetupModal(reloadPage = false) {
     // Create modal overlay
     const overlay = document.createElement('div');
     overlay.id = 'geoip-setup-overlay';
@@ -1550,6 +1558,10 @@ async function showGeoIPSetupModal() {
     const closeBtn = document.getElementById('geoip-setup-close-btn');
     closeBtn.addEventListener('click', async () => {
         overlay.remove();
+        if (reloadPage) {
+            location.reload();
+            return;
+        }
         await loadSettings();
     });
     
@@ -1822,8 +1834,8 @@ const CREDENTIAL_CHECKS = {
         missing: 'Add a Read-Write API key first',
         accepted: 'mailcow accepted the Read-Write API key',
         errors: {
-            rejected: ['Rejected', 'mailcow rejected the Read-Write API key. Check in mailcow under System → API that the key is correct and active, and that the IP address of this server is allowed.'],
-            read_only: ['Read-only key', 'This is a read-only API key. Paste the Read-Write key from System → API in mailcow.'],
+            rejected: ['Rejected', 'mailcow rejected the Read-Write API key. Check in mailcow under System → Configuration → Access → Administrators → API that the key is correct and active, and that the IP address of this server is allowed.'],
+            read_only: ['Read-only key', 'This is a read-only API key. Paste the Read-Write key from System → Configuration → Access → Administrators → API in mailcow.'],
             connection: ['Connection error', 'Could not reach mailcow to check the Read-Write API key. Check the mailcow URL and try again.'],
             unexpected: ['Unexpected answer', 'mailcow gave an unexpected answer when checking the Read-Write API key. Check the mailcow URL and the application logs.']
         }

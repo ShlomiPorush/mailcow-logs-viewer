@@ -119,10 +119,24 @@ def test_an_edit_keeps_the_external_firewall_switch(monkeypatch):
 def test_an_address_already_on_a_list_is_not_added_again(mailcow, listed, added):
     mailcow['f2b'].update(blacklist=f'203.0.113.99\n{listed}', whitelist=listed)
     client = _client()
-    for path, label in (('/api/fail2ban/ban', 'blacklist'), ('/api/fail2ban/allow', 'allowlist')):
+    for path, label in (('/api/fail2ban/ban', 'denylist'), ('/api/fail2ban/allow', 'allowlist')):
         res = client.post(path, json={'ip': added}).json()
         assert res['status'] == 'success' and res['already'] and f'already in the {label}' in res['msg'], res
     assert mailcow['calls'] == []
+
+
+def test_the_answers_call_the_lists_denylist_and_allowlist(mailcow):
+    """Every screen calls them the denylist and the allowlist, so the answers do too."""
+    client = _client()
+    answers = [client.post('/api/fail2ban/ban', json={'ip': '198.51.100.7/32'}).json()['msg']]
+    mailcow['f2b']['blacklist'] = '198.51.100.7/32'
+    answers.append(client.post('/api/fail2ban/ban', json={'ip': '198.51.100.7/32'}).json()['msg'])
+    answers.append(client.post('/api/fail2ban/remove', json={'ip': '198.51.100.7/32', 'list': 'blacklist'}).json()['msg'])
+    answers.append(client.post('/api/fail2ban/remove', json={'ip': '203.0.113.5/32', 'list': 'blacklist'}).json()['msg'])
+    assert answers == ['IP 198.51.100.7/32 added to denylist', 'IP 198.51.100.7/32 is already in the denylist',
+                       'IP 198.51.100.7/32 removed from denylist', 'IP 203.0.113.5/32 is not in the denylist']
+    allow = client.post('/api/fail2ban/allow', json={'ip': '192.0.2.10/32'}).json()['msg']
+    assert allow == 'IP 192.0.2.10/32 added to allowlist'
 
 
 def test_a_single_ipv6_address_is_not_the_slash_32_network_on_the_list(mailcow):

@@ -57,11 +57,13 @@ class MailcowRwKeyError(MailcowAPIError):
     Final, so never retried; the API answers it with a message that says what to fix.
     """
     MESSAGES = {
-        "rejected": "mailcow rejected the Read-Write API key. Check in mailcow under System → API "
+        "rejected": "mailcow rejected the Read-Write API key. Check in mailcow under "
+                    "System → Configuration → Access → Administrators → API "
                     "that the key is correct and active, and that the IP address of this server is allowed. "
                     "Settings → Mailcow can check the key.",
         "read_only": "The Read-Write API key is a read-only key in mailcow. "
-                     "Put the Read-Write key from System → API in Settings → Mailcow.",
+                     "Put the Read-Write key from System → Configuration → Access → Administrators → API "
+                     "in Settings → Mailcow.",
     }
 
     def __init__(self, code: str):

@@ -72,6 +72,24 @@ test('an SMTP block whose window is not known says so instead of using today\'s 
     assert.match(html, /from 60 minutes before it to an hour after/);
 });
 
+test('a spike or a burst whose window is not known says so instead of showing null', () => {
+    const at = AT.getTime();
+    const around = { total: 0, from: new Date(at - 3600000).toISOString(), to: new Date(at + 3600000).toISOString() };
+    const spike = harness().render(activity({ alert_type: 'volume_spike', subject: 'user@example.com', metric_value: 40, baseline_value: 0.5 },
+        { window: null, around: { ...around, recipient_domains: [], results: [], subjects: [] } }));
+    assert.equal(figure(spike, 'Counted for the alert'), '40');
+    assert.equal(figure(spike, 'The window'), 'Unknown');
+    assert.equal(figure(spike, 'Usual, an hour \\(7 days\\)'), '0.50');
+    assert.doesNotMatch(spike, /null|NaN|for the block|is-alert"/);
+    const burst = harness().render(activity({ alert_type: 'auth_failure_burst', subject: 'user@example.com', metric_value: 12, baseline_value: 10 },
+        { window: null, around: { ...around, addresses: [], countries: [], networks: [] } }));
+    assert.equal(figure(burst, 'Counted for the alert'), '12');
+    assert.equal(figure(burst, 'The window'), 'Unknown');
+    assert.equal(figure(burst, 'The alert starts at'), '10');
+    assert.doesNotMatch(burst, /null|NaN|is-alert"/);
+    assert.match(burst, /from 60 minutes before it to an hour after/);
+});
+
 test('a volume spike keeps its usual rate and opens Messages on the mailbox that logged in', () => {
     const html = harness().render(activity({ alert_type: 'volume_spike', subject: 'user@example.com', metric_value: 40, baseline_value: 0.5 }));
     assert.equal(figure(html, 'Usual, an hour \\(7 days\\)'), '0.50');

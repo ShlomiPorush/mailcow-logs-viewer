@@ -895,7 +895,7 @@ async def _change_fail2ban_list(ip: str, list_name: str, remove: bool) -> dict:
         raise HTTPException(status_code=503, detail="Could not fetch current Fail2Ban settings")
 
     lists = {name: _split_ip_list(current.get(name, "")) for name in ("blacklist", "whitelist")}
-    label = "blacklist" if list_name == "blacklist" else "allowlist"
+    label = "denylist" if list_name == "blacklist" else "allowlist"
     if remove:
         kept = [entry for entry in lists[list_name] if not _same_entry(entry, ip)]
         if len(kept) == len(lists[list_name]):

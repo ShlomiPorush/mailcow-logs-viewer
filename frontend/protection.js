@@ -251,7 +251,7 @@ async function protectionHitAction(id, action, button, done) {
 }
 
 function banProtectionHit(id, button) {
-    protectionHitAction(id, 'ban', button, hit => `${hit.ip} is on the Fail2ban blacklist`);
+    protectionHitAction(id, 'ban', button, hit => `${hit.ip} is on the Fail2ban denylist`);
 }
 
 function undoProtectionHit(id, button) {

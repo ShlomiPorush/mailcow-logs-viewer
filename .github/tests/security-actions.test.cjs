@@ -204,11 +204,26 @@ test('Ban and Allow say so when the address is already on the list', async () =>
     const toasts = [];
     context.showToast = message => toasts.push(message);
     context.authenticatedFetch = async (url, options = {}) => {
-        const label = url.endsWith('/allow') ? 'allowlist' : 'blacklist';
+        const label = url.endsWith('/allow') ? 'allowlist' : 'denylist';
         const msg = `IP ${JSON.parse(options.body).ip} is already in the ${label}`;
         return { ok: true, json: async () => ({ status: 'success', msg, already: true }) };
     };
     await context.banIP('198.51.100.7');
     await context.allowIP('192.0.2.10');
-    assert.deepEqual(toasts, ['IP 198.51.100.7/32 is already in the blacklist', 'IP 192.0.2.10/32 is already in the allowlist']);
+    assert.deepEqual(toasts, ['IP 198.51.100.7/32 is already in the denylist', 'IP 192.0.2.10/32 is already in the allowlist']);
+});
+
+test('a ban says denylist, the name every screen gives the list', async () => {
+    const context = load();
+    const { asked } = recordRequests(context);
+    const toasts = [];
+    context.showToast = message => toasts.push(message);
+    await context.banIP('198.51.100.7');
+    context.authenticatedFetch = async () => ({ ok: true, json: async () => ({ ip: '203.0.113.5' }) });
+    context.refreshProtectionHits = () => {};
+    context.banProtectionHit(1, null);
+    await new Promise(resolve => setImmediate(resolve));
+    assert.match(asked[0], /to the Fail2ban denylist/i);
+    assert.deepEqual(toasts, ['IP 198.51.100.7 added to the denylist', '203.0.113.5 is on the Fail2ban denylist']);
+    for (const text of [...asked, ...toasts]) assert.doesNotMatch(text, /blacklist/i);
 });

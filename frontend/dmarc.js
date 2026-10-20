@@ -469,7 +469,7 @@ function dmarcDomainTasks(x) {
             text: advice ? advice.message : 'Mail that fails is still delivered.' });
     }
     x.groups.filter(g => g.passPct >= 95 && g.spfPct < 50).forEach(g => tasks.push({ w: 200, tone: 'warn', title: `${g.name} passes on DKIM only`, label: 'Look at it',
-        action: `loadSourceDetails('${name}', '${escapeJsArg(g.ips[0].source_ip)}')`, text: 'SPF does not include it. Fine for a newsletter service; add it to SPF if it should be there.' }));
+        action: `loadSourceDetails('${name}', '${escapeJsArg(g.ips[0].source_ip)}')`, text: 'Its mail does not pass SPF for your domain. Fine for a newsletter service that uses its own bounce address; otherwise add it to your SPF record.' }));
     if (!x.tlsRecord.record) tasks.push({ w: 100, tone: 'warn', title: 'Publish a TLS-RPT record', label: 'Show the record', action: `openDmarcRecord('tls', '${name}')`,
         text: 'Receivers then tell you when mail to you could not be encrypted.' });
     return tasks.sort((a, b) => b.w - a.w);
@@ -713,7 +713,7 @@ function dmarcAuthRecord(x, kind) {
     const name = escapeJsArg(x.name);
     const lead = kind === 'spf' ? `${dmarcPct(pct)} of your mail passed SPF` : `${dmarcPct(pct)} of your mail was signed with DKIM`;
     const note = kind === 'spf'
-        ? `SPF lists the servers allowed to send as ${escapeHtml(x.name)}. A sender of yours under 95% is missing from the SPF record; a sender that is not yours should fail.`
+        ? `SPF lists the servers allowed to send as ${escapeHtml(x.name)}. A sender of yours under 95% is missing from the SPF record or sends with its own bounce address; a sender that is not yours should fail.`
         : `DKIM signs mail with a key published in DNS. A sender of yours under 95% does not sign as ${escapeHtml(x.name)}: turn DKIM on in that service; a sender that is not yours should fail.`;
     const groups = [...x.groups].sort((a, b) => a[field] - b[field] || b.total - a.total);
     return `<p class="ui-dm-lead"><b class="ui-text-${dmarcTone(pct)}">${lead}</b> in the last 30 days.</p>
