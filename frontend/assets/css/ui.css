@@ -1724,7 +1724,7 @@ button.ui-st-card:hover { outline: 1px solid var(--ui-line); }
     .ui-rl-tools { width: 100%; margin-inline-start: 0; }
 }
 
-/* ---------- Outbound > Suppressions and Quarantine > Rspamd Maps (v3 language) ---------- */
+/* ---------- Outbound > Suppressions and the Rspamd maps (v3 language) ---------- */
 /* The four row buttons fit one line */
 .ui-supp-table { --ui-cols: minmax(184px, 2fr) minmax(150px, 1.2fr) 86px minmax(120px, 1fr) 80px 80px 288px; --ui-table-min: 1076px; }
 @media (min-width: 761px) { .ui-supp-table .ui-row-actions { flex-wrap: nowrap; } }

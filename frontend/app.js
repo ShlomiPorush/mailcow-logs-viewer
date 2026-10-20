@@ -242,6 +242,14 @@ function pageAllOff(page) {
     return !Object.keys(TAB_FEATURES[page]).some(tab => tabFeatureOn(page, tab));
 }
 
+// A page shows "is disabled" while its features are off. The Mailbox Stats
+// page also hosts Rate Limits, so it stays open while that feature is on.
+function pageIsOff(page) {
+    if (TAB_FEATURES[page]) return pageAllOff(page);
+    if (page === 'mailbox-stats' && !isFeatureDisabled('rate-limits')) return false;
+    return isFeatureDisabled(page);
+}
+
 // Hide the tabs of features that are off; a page with one tab left shows no tab bar
 function applyTabFeatures(page) {
     const prefix = `${page}-tab-btn-`;
@@ -1087,6 +1095,8 @@ function stopAutoRefresh() {
 
 // Smart refresh - fetches data silently and only updates if changed
 async function smartRefreshCurrentTab() {
+    // A page that says it is disabled asks for nothing
+    if (pageIsOff(currentTab)) return;
     // Don't refresh if modal is open
     const modal = document.getElementById('message-modal');
     if (modal && !modal.classList.contains('hidden') && !modal.classList.contains('ui-docked')) {
@@ -1701,11 +1711,7 @@ function switchTab(tab, params = {}) {
     // Block disabled features - show a "Feature Disabled" page.
     // Exception: the Mailbox Stats page also hosts Rate Limits, so it stays
     // open while that feature is on, even with Mailbox Stats itself off.
-    const hostsEnabledRateLimits = tab === 'mailbox-stats'
-        && !window.disabledFeatures.includes('rate-limits');
-    const pageOff = TAB_FEATURES[tab] ? pageAllOff(tab)
-        : window.disabledFeatures.includes(tab) && !hostsEnabledRateLimits;
-    if (pageOff) {
+    if (pageIsOff(tab)) {
         const feature = TOGGLEABLE_FEATURES.find(f => f.id === tab);
         const featureLabel = feature ? feature.label : (TAB_LABELS[tab] || tab);
         console.warn(`Feature '${tab}' is disabled`);

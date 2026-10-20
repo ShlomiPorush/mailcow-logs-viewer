@@ -269,3 +269,21 @@ test('Suppressions open the map they are written to on the Rspamd page', async (
     await a.context.loadRspamdMaps();
     assert.deepEqual(opened, ['global_rcpt_blacklist.map']);
 });
+
+test('a page that says it is disabled is not refreshed on the timer', async () => {
+    const a = loadApp(['quarantine']);
+    let asked = 0;
+    a.context.smartRefreshQuarantine = async () => { asked++; };
+    a.context.document.getElementById('message-modal').classList.add('hidden');
+    a.context.switchTab('quarantine', { sub: 'messages' });
+    await a.context.smartRefreshCurrentTab();
+    assert.equal(asked, 0);
+    const b = loadApp([]);
+    b.context.smartRefreshQuarantine = async () => { asked++; };
+    b.context.loadQuarantine = () => {};
+    b.context.initQuarantineRules = () => {};
+    b.context.document.getElementById('message-modal').classList.add('hidden');
+    b.context.switchTab('quarantine', { sub: 'messages' });
+    await b.context.smartRefreshCurrentTab();
+    assert.equal(asked, 1);
+});
