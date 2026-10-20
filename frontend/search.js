@@ -184,7 +184,8 @@ async function gsSearchSuppressions(q, signal) {
             title: shown(s.email),
             sub: [state(s), String(s.reason || '').replace('_', ' '), s.notes].filter(Boolean).join(' · '),
             at: formatAgo(s.created_at),
-            open: () => gsOpenSuppressions(s.email)
+            // By the value shown: a domain block opens by its domain, which the list finds
+            open: () => gsOpenSuppressions(shown(s.email))
         })),
         more: { label: 'Open in Suppressions', open: () => gsOpenSuppressions(q) }
     };
@@ -402,7 +403,8 @@ function gsSetTab(id) {
 }
 
 function gsStepTab(step) {
-    const ids = ['all', ...GS_CATEGORIES.filter(c => !gsOff(c)).map(c => c.id)];
+    // The same kinds as the tabs drawn: one with nothing to search is left out
+    const ids = ['all', ...GS_CATEGORIES.filter(c => !gsOff(c) && !gsResults[c.id]?.hidden).map(c => c.id)];
     gsSetTab(ids[(ids.indexOf(gsTab) + step + ids.length) % ids.length]);
 }
 
