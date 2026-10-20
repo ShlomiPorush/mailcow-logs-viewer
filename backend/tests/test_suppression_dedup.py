@@ -46,6 +46,8 @@ def test_repeated_bounces_in_one_batch_create_single_suppression(monkeypatch):
 
     monkeypatch.setattr(settings._inner, 'suppression_auto_detect', True)
     monkeypatch.setattr(settings._inner, 'suppression_rspamd_sync', False)
+    from unittest.mock import AsyncMock
+    monkeypatch.setattr(sch, '_spam_blocks_loaded', AsyncMock(return_value=True))
     asyncio.run(sch.detect_suppressions_job())
 
     with get_db_context() as db:

@@ -496,7 +496,7 @@ async function loadSuppressions(page) {
 
 function renderSuppressionItem(s) {
     const REASON_TONE = { hard_bounce: 'fail', soft_bounce: 'warn', deferred_stuck: 'warn', rejected: 'warn', manual: '' };
-    const SOURCE_TONE = { auto: 'info', manual: '', import: 'spam' };
+    const SOURCE_TONE = { auto: 'info', manual: '', import: 'spam', rspamd: 'spam' };
 
     // Fix #5: Show proper sync status based on active state
     let syncBadge = '<span class="ui-muted">-</span>';
@@ -521,7 +521,7 @@ function renderSuppressionItem(s) {
                     ${s.is_expired ? uiTag('Expired', 'fail') : ''}</div>
                 ${s.notes ? `<small title="${escapeHtml(s.notes)}">${escapeHtml(s.notes)}</small>` : ''}
             </div>
-            <span class="ui-td ui-td-wrap">${uiTag(s.reason.replace('_', ' '), REASON_TONE[s.reason] || '')} ${uiTag(s.source || 'manual', SOURCE_TONE[s.source] || '')}</span>
+            <span class="ui-td ui-td-wrap">${uiTag(s.reason.replace('_', ' '), REASON_TONE[s.reason] || '')} ${suppressionSourceTag(s.source, SOURCE_TONE)}</span>
             <span class="ui-td"><small class="ui-sec-unit">Bounces </small>${s.bounce_count > 0 ? `${escapeHtml(String(s.bounce_count))} <small class="ui-muted">(H:${escapeHtml(String(s.hard_bounce_count))} S:${escapeHtml(String(s.soft_bounce_count))})</small>` : '<span class="ui-muted">-</span>'}</span>
             <span class="ui-td">${expiry}</span>
             <span class="ui-td">${syncBadge}</span>
@@ -578,8 +578,18 @@ const BLOCK_EVENT_TITLES = {
     hard_bounce: 'Delivery failed', soft_bounce: 'Delivery delayed', rejected: 'Delivery rejected',
     deferred_stuck: 'Stuck in queue', added: 'Added manually', imported: 'Imported from CSV',
     enabled: 'Enabled manually', disabled: 'Disabled manually', expiry_changed: 'Expiry changed',
-    notes_changed: 'Notes changed', before_upgrade: 'Last saved reason'
+    notes_changed: 'Notes changed', before_upgrade: 'Last saved reason', loaded_from_rspamd: 'Loaded from Rspamd'
 };
+
+// Rows loaded back from this app's part of the Rspamd map after Spam Filter was off
+const SUPPRESSION_SOURCE_LABELS = { rspamd: 'From Rspamd' };
+const SUPPRESSION_SOURCE_TIPS = { rspamd: "Loaded from this app's managed Rspamd section. Permanent. Automatic processing does not change this entry; you can edit or delete it." };
+
+function suppressionSourceTag(source, tones) {
+    const tag = uiTag(SUPPRESSION_SOURCE_LABELS[source] || source || 'manual', tones[source] || '');
+    const tip = SUPPRESSION_SOURCE_TIPS[source];
+    return tip ? tag.replace('<span class="ui-tag', `<span title="${escapeHtml(tip)}" class="ui-tag`) : tag;
+}
 const BLOCK_OUTCOMES = { created: ['Blocked', 'fail'], activated: ['Blocked again', 'fail'], extended: ['Block extended', 'warn'],
     counted: ['Counted, not blocked yet', ''] };
 let blockDetailsState = null;
@@ -847,7 +857,7 @@ function showEditSuppressionModal(s) {
         <p class="ui-mono ui-muted">${escapeHtml(s.email)}</p>
         <div class="ui-md-ids ui-form-facts">
             <div class="ui-md-fact"><span>Reason</span><div>${escapeHtml(s.reason.replace('_', ' '))}</div></div>
-            <div class="ui-md-fact"><span>Source</span><div>${escapeHtml(s.source || 'manual')}</div></div>
+            <div class="ui-md-fact"><span>Source</span><div>${escapeHtml(SUPPRESSION_SOURCE_LABELS[s.source] || s.source || 'manual')}</div></div>
             ${s.bounce_count > 0 ? `<div class="ui-md-fact"><span>Bounces</span><div>${escapeHtml(String(s.bounce_count))}</div></div>` : ''}
             <div class="ui-md-fact"><span>Created</span><div>${formatTime(s.created_at)}</div></div>
         </div>

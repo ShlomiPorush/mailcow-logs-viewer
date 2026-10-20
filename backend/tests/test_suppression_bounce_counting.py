@@ -39,6 +39,9 @@ def env(monkeypatch):
     }.items():
         monkeypatch.setattr(settings._inner, key, value)
     monkeypatch.setattr(sch.mailcow_api, 'headers_rw', None)   # no queue calls
+    # Spam Filter's earlier Rspamd blocks are loaded (tested in test_feature_off_data.py)
+    from unittest.mock import AsyncMock
+    monkeypatch.setattr(sch, '_spam_blocks_loaded', AsyncMock(return_value=True))
 
     emails = []
 

@@ -19,7 +19,7 @@ from ..models import PostfixLog, RspamdLog, NetfilterLog, MessageCorrelation
 from ..config import settings, EDITABLE_SETTING_KEYS, FEATURE_IDS, reload_settings, Settings
 from ..config import _get_field_annotations, get_env_locked_keys
 from ..app_time import app_tz, configured_zone_name, is_valid_zone
-from ..scheduler import last_fetch_run_time, get_job_status, update_job_status, JOB_SKIPPED, reschedule_interval_jobs, clock_schedule, dovecot_correlation_available, cleanup_disabled_feature_data, _mailbox_sync_needed
+from ..scheduler import last_fetch_run_time, get_job_status, update_job_status, JOB_SKIPPED, JOB_STATUS_SET, reschedule_interval_jobs, clock_schedule, dovecot_correlation_available, cleanup_disabled_feature_data, run_feature_data_sweep_soon, _mailbox_sync_needed
 from ..services.settings_store import get_config_overrides_from_db, save_config_overrides_to_db, has_config_overrides_in_db, get_maxmind_validation_status, save_maxmind_validation_status, clear_maxmind_validation_status
 from ..services.settings_store import credential_fingerprint, get_credential_check_status, save_credential_check_status
 from ..services.connection_test import test_smtp_connection, test_imap_connection
@@ -441,6 +441,13 @@ def get_settings_info(db: Session = Depends(get_db)):
                     "last_run": format_datetime_utc(jobs_status.get('update_final_status', {}).get('last_run')),
                     "error": jobs_status.get('update_final_status', {}).get('error'),
                     "pending_items": correlations_needing_status or 0
+                },
+                "feature_data_sweep": {
+                    "interval": "10 minutes",
+                    "description": "Deletes the data of turned-off features and reloads Spam Filter's Rspamd blocks when it is turned back on",
+                    "status": jobs_status.get('feature_data_sweep', {}).get('status', 'unknown'),
+                    "last_run": format_datetime_utc(jobs_status.get('feature_data_sweep', {}).get('last_run')),
+                    "error": jobs_status.get('feature_data_sweep', {}).get('error')
                 },
                 "expire_correlations": {
                     "interval": "60 seconds (1 minute)",
@@ -880,8 +887,10 @@ def update_settings(body: Dict[str, Any], request: Request = None, response: Res
         # Keep the operator who saved signed in, with a session issued under the new settings
         if operator_session and settings.is_authentication_enabled and response is not None:
             set_session_cookie(response, create_session(operator_session["user_info"]), request)
-    # A feature switched off here should drop its data now, not at the next restart
+    # A feature switched off here should drop its data now, not at the next restart;
+    # the sweep then takes Security's temporary bans out, or loads Spam Filter's blocks back
     cleanup_disabled_feature_data(db)
+    run_feature_data_sweep_soon()
     mailcow_api.reload_config()
     oauth2_client.reload_config()
     reschedule_interval_jobs()
@@ -914,19 +923,8 @@ def update_settings(body: Dict[str, Any], request: Request = None, response: Res
             **changed}
 
 
-# Feature → tables mapping for data purge
-_FEATURE_TABLES = {
-    'netfilter': ['netfilter_logs'],
-    'domains': ['domain_dns_checks'],
-    'dmarc': ['dmarc_records', 'tls_report_policies', 'dmarc_reports', 'dmarc_syncs', 'tls_reports'],
-    'mailbox-stats': ['alias_statistics', 'mailbox_statistics'],
-    'logs': ['raw_service_logs'],
-    'blacklist': ['blacklist_checks', 'monitored_hosts'],
-    # The block details go with their blocks (the foreign key cascades too); listed first to count them
-    'spam-filter': ['suppression_events', 'spam_suppressions'],
-    'quarantine': ['quarantine_rule_logs', 'quarantine_rules'],
-    'devices': ['eas_devices'],
-}
+# Feature -> tables, shared with the cleanup of features that are off
+from ..services.feature_data import FEATURE_TABLES as _FEATURE_TABLES  # noqa: E402
 
 
 @router.post("/settings/purge-feature-data")
@@ -969,47 +967,17 @@ def purge_feature_data(body: Dict[str, Any], db: Session = Depends(get_db)):
 
 
 def _purge_tables(feature: str, db: Session):
-    """Empty the tables of a feature that is off."""
-    tables = _FEATURE_TABLES[feature]
-    deleted_counts = {}
-    # Allowed table name pattern (alphanumeric + underscores only) to satisfy static analysis
-    import re
-    _TABLE_NAME_RE = re.compile(r'^[a-z_][a-z0-9_]*$')
+    """Empty the tables and keys of a feature that is off (services/feature_data.py)."""
+    from ..services.feature_data import purge_feature
     try:
-        for table_name in tables:
-            if not _TABLE_NAME_RE.match(table_name):
-                raise ValueError(f"Invalid table name: {table_name}")
-            if table_name == 'raw_service_logs':
-                # Other pages read some services from this table; only the rows
-                # nothing collects any more go
-                from ..raw_logs_worker import delete_uncollected_raw_logs
-                deleted_counts[table_name] = delete_uncollected_raw_logs(db)
-                continue
-            if table_name == 'mailbox_statistics' and settings.is_feature_enabled('rate-limits'):
-                # Rate Limits reads each mailbox's configured limit from it
-                continue
-            # nosemgrep: python.sqlalchemy.security.audit.avoid-sqlalchemy-text.avoid-sqlalchemy-text
-            count = db.execute(text(f"SELECT COUNT(*) FROM {table_name}")).scalar() or 0
-            if count > 0:
-                # nosemgrep: python.sqlalchemy.security.audit.avoid-sqlalchemy-text.avoid-sqlalchemy-text
-                db.execute(text(f"TRUNCATE TABLE {table_name} CASCADE"))
-            deleted_counts[table_name] = count
-        if feature == 'domains':
-            from .domains import DNS_FULL_CHECK_KEY
-            from ..models import SystemSetting
-            db.query(SystemSetting).filter(SystemSetting.key == DNS_FULL_CHECK_KEY).delete(synchronize_session=False)
-        db.commit()
-        total = sum(deleted_counts.values())
-        logger.info(f"Purged data for feature '{feature}': {deleted_counts} (total {total} rows)")
-        return {
-            "feature": feature,
-            "tables_purged": deleted_counts,
-            "total_rows_deleted": total,
-        }
+        deleted = purge_feature(db, feature)
     except Exception as e:
-        db.rollback()
         logger.error(f"Failed to purge data for feature '{feature}': {e}")
         raise HTTPException(status_code=500, detail="Purge failed. Check the application logs.")
+    tables = {k: v for k, v in deleted.items() if not k.startswith('system_settings:')}
+    total = sum(tables.values())
+    logger.info(f"Purged data for feature '{feature}': {deleted} (total {total} rows)")
+    return {"feature": feature, "tables_purged": tables, "total_rows_deleted": total}
 
 
 @router.post("/settings/import-from-env")
@@ -1327,6 +1295,7 @@ def trigger_job(job_name: str, background_tasks: BackgroundTasks):
         complete_incomplete_correlations,
         update_final_status_for_correlations,
         expire_old_correlations,
+        feature_data_sweep_job,
         correlate_dovecot_logs,
         cleanup_old_logs,
         cleanup_old_dmarc_reports,
@@ -1361,6 +1330,7 @@ def trigger_job(job_name: str, background_tasks: BackgroundTasks):
         'complete_correlations': ('complete_correlations', complete_incomplete_correlations, False),
         'update_final_status': ('update_final_status', update_final_status_for_correlations, False),
         'expire_correlations': ('expire_correlations', expire_old_correlations, False),
+        'feature_data_sweep': ('feature_data_sweep', feature_data_sweep_job, False),
         'correlate_dovecot': ('correlate_dovecot', correlate_dovecot_logs, False),
         'cleanup_logs': ('cleanup_logs', cleanup_old_logs, False),
         'cleanup_dmarc_reports': ('cleanup_dmarc_reports', cleanup_old_dmarc_reports, False),
@@ -1422,7 +1392,7 @@ def trigger_job(job_name: str, background_tasks: BackgroundTasks):
                 result = await run_in_threadpool(job_func)
             # Self-managing jobs update their own status internally, and a run
             # that skipped leaves it to the run that holds the job
-            if not self_managing and result != JOB_SKIPPED:
+            if not self_managing and result not in (JOB_SKIPPED, JOB_STATUS_SET):
                 update_job_status(status_key, 'success')
         except Exception as e:
             logger.error(f"Manual job {job_name} failed: {e}")

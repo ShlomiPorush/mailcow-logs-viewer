@@ -38,7 +38,7 @@ from .services.dovecot_parser import (
     resolve_session_verdicts,
 )
 from .routers.domains import check_domain_dns, store_dns_check_worker
-from .routers.suppressions import auto_suppression_address
+from .routers.suppressions import auto_suppression_address, RSPAMD_SOURCE
 from .services.dmarc_imap_service import sync_dmarc_reports_from_imap
 from .services.dmarc_notifications import send_dmarc_error_notification
 from .services import geoip_service, correlation_jobs
@@ -332,6 +332,7 @@ job_status = {
     'complete_correlations': {'last_run': None, 'status': 'idle', 'error': None},
     'update_final_status': {'last_run': None, 'status': 'idle', 'error': None},
     'expire_correlations': {'last_run': None, 'status': 'idle', 'error': None},
+    'feature_data_sweep': {'last_run': None, 'status': 'idle', 'error': None},
     'correlate_dovecot': {'last_run': None, 'status': 'idle', 'error': None},
     'cleanup_logs': {'last_run': None, 'status': 'idle', 'error': None},
     'cleanup_dmarc_reports': {'last_run': None, 'status': 'idle', 'error': None},
@@ -365,6 +366,9 @@ _blacklist_check_lock = asyncio.Lock()
 # Returned by a job that skipped because another run of it holds its lock; that
 # run sets the job status when it ends, so a manual run must not mark it done
 JOB_SKIPPED = "skipped"
+# Returned by a job that sets its own final status, failures included: a
+# manual run must not overwrite it
+JOB_STATUS_SET = "status_set"
 
 def update_job_status(job_name: str, status: str, error: str = None):
     """Update job execution status"""
@@ -3355,7 +3359,12 @@ async def send_weekly_summary_email_job():
 DEFERRED_STORE_LOCK = 0x4D4C5601
 
 
-def _store_deferred_suppressions_worker(recipients_to_suppress):
+def _blocks_now(suppression) -> bool:
+    """Whether a block is in force now: active and not past its expiry."""
+    return bool(suppression.active) and (suppression.expires_at is None or suppression.expires_at > datetime.utcnow())
+
+
+def _store_deferred_suppressions_worker(recipients_to_suppress, uncovered: Optional[set] = None):
     """Persist deferred recipients within a worker-owned database session.
 
     Each item is a recipient address, or a dict with the address ("email")
@@ -3366,6 +3375,10 @@ def _store_deferred_suppressions_worker(recipients_to_suppress):
     Runs before the messages are deleted, and again for the same messages when
     that deletion failed: a message already kept for the address (same queue
     id and arrival time) is not counted again. Returns the addresses counted.
+
+    A block loaded from Rspamd is not changed. When it does not block the
+    address now (disabled by hand), the address is added to uncovered: its
+    messages stay in the queue, since no block was stored for them.
     """
     items = [r if isinstance(r, dict) else {'email': r} for r in recipients_to_suppress]
     by_email = {}
@@ -3401,6 +3414,11 @@ def _store_deferred_suppressions_worker(recipients_to_suppress):
                          if not item.get('queue_id') or (existing.id, item['queue_id'], item.get('arrived')) not in kept]
                 if not group:
                     continue  # every message of it was kept by an earlier run
+            if existing is not None and existing.source == RSPAMD_SOURCE:
+                # Loaded from Rspamd: permanent, no automatic path changes it
+                if uncovered is not None and not _blocks_now(existing):
+                    uncovered.add(email)
+                continue
             if existing:
                 existing.bounce_count = (existing.bounce_count or 0) + 1
                 existing.soft_bounce_count = (existing.soft_bounce_count or 0) + 1
@@ -3448,6 +3466,34 @@ def _store_deferred_suppressions_worker(recipients_to_suppress):
     return suppress_count
 
 
+async def _spam_blocks_loaded(job: str) -> bool:
+    """Whether the list holds the blocks this app wrote to Rspamd before Spam
+    Filter was off, loading them first when it was just turned on again.
+
+    A job that adds to the list or counts toward its blocks waits for that:
+    a row it made for an address still waiting in Rspamd would take the
+    place of the permanent one. While loading fails the job does not run,
+    and Status says why.
+    """
+    from .routers.suppressions import import_pending, import_managed_worker
+
+    def pending():
+        with get_db_context() as db:
+            return import_pending(db)
+
+    loop = asyncio.get_running_loop()
+    try:
+        if not await loop.run_in_executor(get_thread_pool_executor(), pending):
+            return settings.is_feature_enabled('spam-filter')
+        result = await loop.run_in_executor(get_thread_pool_executor(), import_managed_worker)
+        # Spam Filter turned off while this waited: the job stops
+        return not result.get('feature_off') and settings.is_feature_enabled('spam-filter')
+    except Exception as e:
+        logger.warning(f"[SUPPRESSION] This app's Rspamd blocks could not be loaded into the list yet: {e}")
+        update_job_status(job, 'failed', f"Waiting to load this app's Rspamd blocks into the list: {e}")
+        return False
+
+
 async def cleanup_deferred_queue_job():
     """
     Periodically scan the mail queue for deferred items stuck longer than
@@ -3465,6 +3511,8 @@ async def cleanup_deferred_queue_job():
     if not settings.suppression_enabled or not settings.queue_cleanup_enabled:
         return
     if not mailcow_api.has_rw_key:
+        return
+    if not await _spam_blocks_loaded('cleanup_deferred_queue'):
         return
 
     update_job_status('cleanup_deferred_queue', 'running')
@@ -3536,25 +3584,37 @@ async def cleanup_deferred_queue_job():
             return
 
         # Block the recipients first: if this fails, nothing is deleted
+        uncovered = set()
         suppress_count = await asyncio.get_running_loop().run_in_executor(
             get_thread_pool_executor(),
             _store_deferred_suppressions_worker,
             recipients_to_suppress,
+            uncovered,
         )
+        if uncovered:
+            # No block covers these addresses: their messages stay
+            keep = {r['queue_id'] for r in recipients_to_suppress if r['email'] in uncovered}
+            items_to_delete = [q for q in items_to_delete if q not in keep]
         logger.info(
             f"[QUEUE CLEANUP] Suppressed {suppress_count} recipient(s) for "
             f"{settings.suppression_base_expiry_days} day(s)"
         )
 
+        # Spam Filter turned off meanwhile: its list goes, and nothing is deleted
+        if not settings.is_feature_enabled('spam-filter'):
+            update_job_status('cleanup_deferred_queue', 'success')
+            return
+
         # Then delete the stuck items. mailcow can answer 200 with a failure in the body.
         delete_error = None
         try:
-            reply = await mailcow_api.delete_queue(items_to_delete)
-            entries = reply if isinstance(reply, list) else [reply]
-            if not entries or any(not isinstance(e, dict) or e.get('type') != 'success' for e in entries):
-                refused = next((e.get('msg') for e in entries if isinstance(e, dict) and e.get('type') != 'success'), None)
-                raise RuntimeError(f"mailcow did not confirm the deletion: {refused or reply}")
-            logger.info(f"[QUEUE CLEANUP] Deleted {len(items_to_delete)} stuck deferred item(s) from queue")
+            if items_to_delete:
+                reply = await mailcow_api.delete_queue(items_to_delete)
+                entries = reply if isinstance(reply, list) else [reply]
+                if not entries or any(not isinstance(e, dict) or e.get('type') != 'success' for e in entries):
+                    refused = next((e.get('msg') for e in entries if isinstance(e, dict) and e.get('type') != 'success'), None)
+                    raise RuntimeError(f"mailcow did not confirm the deletion: {refused or reply}")
+                logger.info(f"[QUEUE CLEANUP] Deleted {len(items_to_delete)} stuck deferred item(s) from queue")
         except Exception as e:
             delete_error = e
             logger.error(f"[QUEUE CLEANUP] Failed to delete queue items (the blocks are kept; retried next run): {e}")
@@ -3630,7 +3690,7 @@ def _run_disabled_feature_cleanup(db: Session) -> None:
                     + ", ".join(f"{table}={rows}" for table, rows in deleted.items()))
 
 
-def cleanup_disabled_feature_data(db: Optional[Session] = None) -> None:
+def cleanup_disabled_feature_data(db: Optional[Session] = None) -> Dict[str, str]:
     """Drop the data of features that are currently switched off.
 
     Turning a feature off should take its data with it instead of leaving rows
@@ -3638,9 +3698,17 @@ def cleanup_disabled_feature_data(db: Optional[Session] = None) -> None:
     than from a transition, so this is idempotent and safe to run on every
     startup and after every settings save.
 
+    A feature that is off keeps no data at all (services/feature_data.py):
+    the rebuildable data goes here, then every table and key of each feature
+    that is off, each feature in its own transaction. The sweep job runs this
+    again every few minutes, so what a job or an API call wrote after the
+    feature went off goes too.
+
     Never raises: a failure here must not stop the app from starting or a
-    settings save from succeeding.
+    settings save from succeeding. Returns what failed, {part: error}, for
+    the sweep to report.
     """
+    failed: Dict[str, str] = {}
     try:
         if db is not None:
             _run_disabled_feature_cleanup(db)
@@ -3649,11 +3717,71 @@ def cleanup_disabled_feature_data(db: Optional[Session] = None) -> None:
                 _run_disabled_feature_cleanup(own_db)
     except Exception as e:
         logger.warning(f"[FEATURES] Could not clean up disabled feature data: {e}")
+        failed['rebuildable data'] = str(e) or type(e).__name__
         if db is not None:
             try:
                 db.rollback()
             except Exception:
                 pass
+    try:
+        from .services.feature_data import purge_disabled_features
+        failed.update({feature: error for feature, error in purge_disabled_features().items() if error})
+    except Exception as e:
+        logger.warning(f"[FEATURES] Could not delete the data of disabled features: {e}")
+        failed['features'] = str(e) or type(e).__name__
+    return failed
+
+
+FEATURE_DATA_SWEEP_MINUTES = 10
+
+
+async def feature_data_sweep_job(load_spam_blocks: bool = True):
+    """Keep features that are off without data, and load Spam Filter's blocks
+    back once it is on again.
+
+    Security off: this app's temporary bans leave Fail2ban first (only then
+    can its ban history go). Then the data of every feature that is off is
+    deleted again, which also takes what a job or an API call wrote after the
+    feature went off. Spam Filter on, with its list deleted while it was off:
+    the blocks this app wrote to Rspamd are loaded back into the list.
+    """
+    update_job_status('feature_data_sweep', 'running')
+    loop = asyncio.get_running_loop()
+    errors = []
+    try:
+        if not settings.is_feature_enabled('netfilter'):
+            from .services import protection_rules
+            try:
+                await protection_rules.release_temporary_bans(mailcow_api)
+            except Exception as e:
+                errors.append(f"Security's temporary bans could not be taken out of Fail2ban: {e}")
+        failed = await loop.run_in_executor(get_thread_pool_executor(), cleanup_disabled_feature_data)
+        errors.extend(f"The data of {part} could not be deleted: {error}" for part, error in failed.items())
+        if load_spam_blocks and settings.is_feature_enabled('spam-filter') \
+                and not await _spam_blocks_loaded('feature_data_sweep') and settings.is_feature_enabled('spam-filter'):
+            return JOB_STATUS_SET  # _spam_blocks_loaded reported why
+        if errors:
+            update_job_status('feature_data_sweep', 'failed', '; '.join(errors))
+        else:
+            update_job_status('feature_data_sweep', 'success')
+    except Exception as e:
+        logger.error(f"[FEATURES] Sweep failed: {e}", exc_info=True)
+        update_job_status('feature_data_sweep', 'failed', str(e))
+    return JOB_STATUS_SET
+
+
+def run_feature_data_sweep_soon() -> None:
+    """After a settings save: sweep now instead of in up to
+    FEATURE_DATA_SWEEP_MINUTES. Spam Filter's blocks are not loaded by this
+    run: the Settings page loads them itself and says how many came back
+    (the next regular sweep loads them if it could not)."""
+    try:
+        if scheduler.running:
+            scheduler.add_job(feature_data_sweep_job, kwargs={'load_spam_blocks': False},
+                              id='feature_data_sweep_now', name='Turned-Off Features (after a save)',
+                              replace_existing=True, max_instances=1)
+    except Exception as e:
+        logger.warning(f"[FEATURES] Could not start the sweep now: {e}")
 
 
 def start_scheduler():
@@ -3678,6 +3806,18 @@ def start_scheduler():
             max_instances=1
         )
         
+        # Features that are off keep no data; Spam Filter on again loads its
+        # Rspamd blocks back. First run right after startup.
+        scheduler.add_job(
+            feature_data_sweep_job,
+            trigger=every(minutes=FEATURE_DATA_SWEEP_MINUTES),
+            id='feature_data_sweep',
+            name='Turned-Off Features',
+            replace_existing=True,
+            max_instances=1,
+            next_run_time=datetime.now(timezone.utc)
+        )
+
         # Job 2: Run correlation (every 30 seconds, after logs are imported)
         scheduler.add_job(
             run_correlation,
@@ -4202,6 +4342,12 @@ def _detect_suppressions_worker():
             ).first()
             if existing is None:
                 existing = pending_entries.get(recipient)
+            if existing is not None and existing.source == RSPAMD_SOURCE:
+                # Loaded from Rspamd: permanent, no automatic path changes it. Its
+                # queued mail goes only while it blocks the address
+                if is_hard and not _blocks_now(existing):
+                    emails_for_queue_cleanup.remove(recipient)
+                continue
 
             if existing:
                 # Update bounce counts
@@ -4287,6 +4433,8 @@ async def detect_suppressions_job():
         return
     if not settings.suppression_enabled or not settings.suppression_auto_detect:
         return
+    if not await _spam_blocks_loaded('detect_suppressions'):
+        return
 
     update_job_status('detect_suppressions', 'running')
 
@@ -4327,7 +4475,8 @@ async def detect_suppressions_job():
                         if any(a in cleanup_set for a in addresses):
                             items_to_delete.append(queue_id)
 
-                    if items_to_delete:
+                    # Not after Spam Filter was turned off meanwhile: its list is gone
+                    if items_to_delete and settings.is_feature_enabled('spam-filter'):
                         await mailcow_api.delete_queue(items_to_delete)
                         logger.info(
                             f"[SUPPRESSION] Cleaned up {len(items_to_delete)} queue item(s) "
@@ -4505,6 +4654,11 @@ async def _process_quarantine_rules_in_worker():
             # The item ids mailcow confirmed, per action
             done = {'release': set(), 'delete': set()}
 
+            # Quarantine turned off while the queue was read: its rules are deleted, nothing is done
+            if not settings.is_feature_enabled('quarantine'):
+                update_job_status('process_quarantine_rules', 'success')
+                return
+
             # Execute releases
             if release_items:
                 release_ids = [str(item.get('id', '')) for item, _ in release_items]
@@ -4517,8 +4671,8 @@ async def _process_quarantine_rules_in_worker():
                 except Exception as e:
                     logger.error(f"[QUARANTINE RULES] Release failed: {e}")
 
-            # Execute deletes
-            if delete_items:
+            # Execute deletes (not after Quarantine was turned off during the releases)
+            if delete_items and settings.is_feature_enabled('quarantine'):
                 delete_ids = [str(item.get('id', '')) for item, _ in delete_items]
                 try:
                     reply = await mailcow_api.delete_quarantine(delete_ids)

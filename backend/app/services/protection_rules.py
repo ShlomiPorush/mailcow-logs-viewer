@@ -719,8 +719,73 @@ async def enforce(mailcow_api, now: Optional[datetime] = None) -> Dict[str, list
     Returns {'banned': [...], 'lifted': [...], 'failed': [...]} as (target, rule, reason, notify) tuples
     for the caller to notify about.
     """
+    from ..config import settings
     async with fail2ban_lock:
+        # Security turned off while this run waited: nothing is written, and
+        # release_temporary_bans takes this app's temporary bans out
+        if not settings.is_feature_enabled('netfilter'):
+            return {"banned": [], "lifted": [], "failed": []}
         return await _enforce(mailcow_api, now)
+
+
+def _confirmed(response) -> bool:
+    """mailcow answers a list of {type, msg}; every entry must say success."""
+    entries = response if isinstance(response, list) else [response]
+    return bool(entries) and all(isinstance(e, dict) and e.get("type") == "success" for e in entries)
+
+
+async def release_temporary_bans(mailcow_api) -> Optional[int]:
+    """While Security is off: take out of Fail2ban the bans this app wrote that
+    would have ended on their own, since nothing lifts them while it is off.
+
+    An address is taken out only when every ban on it is temporary and one of
+    them wrote the entry: a permanent ban on the same address keeps it, as do
+    entries added outside this app. Permanent bans stay as plain Fail2ban
+    entries. The hits are closed only after mailcow confirmed the change, so
+    the purge of Security's data (services/feature_data.py) waits for that.
+    Returns the addresses taken out, or None while Security is on.
+    """
+    from ..config import settings
+    from ..database import get_db_context
+    async with fail2ban_lock:
+        if settings.is_feature_enabled('netfilter'):
+            return None
+        with get_db_context() as db:
+            # Holding the lock, no enforce run is writing: a ban still pending was never written
+            for hit in db.query(ProtectionHit).filter(ProtectionHit.status == "pending").all():
+                hit.status, hit.ended_at = "dismissed", datetime.utcnow()
+                hit.error = "Security was turned off before the ban was written"
+            db.commit()
+            banned = db.query(ProtectionHit).filter(ProtectionHit.status == "banned").all()
+            by_target: Dict[str, list] = {}
+            for hit in banned:
+                by_target.setdefault(hit.ip, []).append(hit)
+            targets = [target for target, hits in by_target.items()
+                       if any(h.owned for h in hits) and all(h.expires_at is not None for h in hits)]
+            # Temporary hits on an address a permanent ban keeps are closed without a change
+            close_ids = [h.id for h in banned if h.expires_at is not None]
+        if targets:
+            current = await mailcow_api.get_fail2ban()
+            if not current:
+                raise RuntimeError("Could not read the Fail2ban settings from mailcow")
+            blacklist = split_ip_list(current.get("blacklist"))
+            new_black = blacklist
+            for target in targets:
+                new_black = _without(target, new_black)
+            if new_black != blacklist:
+                response = await mailcow_api.edit_fail2ban(
+                    fail2ban_attrs(current, new_black, split_ip_list(current.get("whitelist"))))
+                if not _confirmed(response):
+                    raise RuntimeError("mailcow did not confirm the Fail2ban change")
+        if close_ids:
+            now = datetime.utcnow()
+            with get_db_context() as db:
+                for hit in db.query(ProtectionHit).filter(ProtectionHit.id.in_(close_ids)).all():
+                    if hit.status == "banned":
+                        hit.status, hit.ended_at = "expired", now
+                db.commit()
+            logger.info("Security is off: took %d temporary ban(s) of this app out of Fail2ban", len(targets))
+        return len(targets)
 
 
 async def _enforce(mailcow_api, now: Optional[datetime]) -> Dict[str, list]:
