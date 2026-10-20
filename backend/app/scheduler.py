@@ -15,11 +15,12 @@ from apscheduler.triggers.interval import IntervalTrigger
 from apscheduler.triggers.cron import CronTrigger
 from sqlalchemy.orm import Session
 from sqlalchemy import desc, or_
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 
 from .config import settings, set_cached_active_domains
 from .database import get_db_context, SessionLocal
-from .mailcow_api import mailcow_api
+from .mailcow_api import mailcow_api, mailcow_handled_items
 from .models import EasDevice, PostfixLog, RspamdLog, NetfilterLog, MessageCorrelation, DMARCSync, DomainDNSCheck, MailboxStatistics, AliasStatistics, MonitoredHost, BlacklistCheck, DMARCReport, DMARCRecord, TLSReport, TLSReportPolicy, SpamSuppression, RawServiceLog, SystemSetting
 from .correlation import (
     detect_direction,
@@ -129,6 +130,7 @@ def reschedule_interval_jobs():
         _reschedule_anomaly_job()
         _reschedule_dovecot_correlation_job()
         _reschedule_geoip_job()
+        _reschedule_quarantine_rules_job()
 
     except Exception as e:
         logger.warning("Failed to reschedule interval jobs: %s", e)
@@ -194,6 +196,27 @@ def _reschedule_geoip_job():
     else:
         try:
             scheduler.remove_job('update_geoip')
+        except Exception:
+            pass
+
+
+def _reschedule_quarantine_rules_job():
+    """Add, move or remove the quarantine rules job when settings are reloaded
+    (interval, the Read-Write key and the Quarantine feature can all change)."""
+    if not scheduler.running:
+        return
+    if settings.is_feature_enabled('quarantine') and mailcow_api.has_rw_key:
+        scheduler.add_job(
+            process_quarantine_rules_job,
+            trigger=IntervalTrigger(minutes=settings.quarantine_rules_interval),
+            id='process_quarantine_rules',
+            name='Process Quarantine Rules',
+            replace_existing=True,
+            max_instances=1
+        )
+    else:
+        try:
+            scheduler.remove_job('process_quarantine_rules')
         except Exception:
             pass
 
@@ -3370,18 +3393,16 @@ async def cleanup_deferred_queue_job():
             if not queue_id:
                 continue
 
+            # Collect recipients for suppression
+            addresses = [r.split(' ')[0].strip('<>') for r in (item.get('recipients') or [])]
+            # Mail to a whitelisted domain stays in the queue for Postfix to retry
+            if any(a.split('@')[-1].lower() in whitelist for a in addresses):
+                continue
+            item_recipients = [e for e in map(auto_suppression_address, addresses) if e]
+
             # This item has been deferred longer than threshold - collect for deletion
             items_to_delete.append(queue_id)
-
-            # Collect recipients for suppression
-            for rcpt in (item.get('recipients') or []):
-                rcpt_email = auto_suppression_address(rcpt.split(' ')[0].strip('<>'))
-                if not rcpt_email:
-                    continue
-                domain = rcpt_email.split('@')[-1]
-                if domain in whitelist:
-                    continue
-                recipients_to_suppress.append(rcpt_email)
+            recipients_to_suppress.extend(item_recipients)
 
             age_min = int(age_seconds / 60)
             logger.info(
@@ -3952,9 +3973,26 @@ def start_scheduler():
 # SPAM SUPPRESSION SCHEDULER JOBS
 # =============================================================================
 
+# The highest PostfixLog id bounce detection has counted. The 10-minute window
+# below is wider than the 5-minute run interval, so every line is in two runs;
+# only lines above this mark are counted. It is stored, and locked, in the
+# same transaction as the suppressions, so a restart or two runs at once
+# cannot count a line twice. Postfix lines are inserted under
+# _postfix_ingest_lock by the single app process, so a line never becomes
+# visible after a line with a higher id.
+BOUNCE_WATERMARK_KEY = 'suppression_bounce_log_watermark'
+
+
 def _detect_suppressions_worker():
     """Scan and persist suppressions with a worker-owned database session."""
     with get_db_context() as db:
+        db.execute(pg_insert(SystemSetting).values(
+            key=BOUNCE_WATERMARK_KEY, value='0', updated_at=datetime.utcnow(),
+        ).on_conflict_do_nothing(index_elements=['key']))
+        mark = db.query(SystemSetting).filter(
+            SystemSetting.key == BOUNCE_WATERMARK_KEY).with_for_update().one()
+        counted_up_to = int(mark.value or 0)
+
         # Look for recently imported bounced emails (last 10 minutes by import time)
         # Uses created_at (DB insert time) instead of time (original mailcow timestamp)
         # so that historical bounces imported via paginated fetch are still detected
@@ -3973,6 +4011,7 @@ def _detect_suppressions_worker():
         # covers rows stored before the parser stopped reading status= and
         # dsn= out of those fields.
         bounce_logs = db.query(PostfixLog).filter(
+            PostfixLog.id > counted_up_to,
             PostfixLog.created_at >= cutoff,
             PostfixLog.status.in_(statuses_to_check),
             PostfixLog.recipient.isnot(None),
@@ -3983,6 +4022,7 @@ def _detect_suppressions_worker():
 
         if not bounce_logs:
             return 0, 0, []
+        mark.value = str(max(log.id for log in bounce_logs))
 
         whitelist = settings.suppression_whitelist_domains_list
         new_count = 0
@@ -4046,8 +4086,11 @@ def _detect_suppressions_worker():
                 existing.last_bounce_message = log.message[:500] if log.message else None
                 existing.updated_at = datetime.utcnow()
 
-                # Re-activate if expired
-                if not existing.active or (existing.expires_at and existing.expires_at < datetime.utcnow()):
+                # Re-activate if expired; Count then suppress waits for the threshold
+                below_threshold = (is_soft and settings.suppression_soft_bounce_action == 'count'
+                                   and existing.soft_bounce_count < settings.suppression_soft_bounce_threshold)
+                if (not existing.active or (existing.expires_at and existing.expires_at < datetime.utcnow())) \
+                        and not below_threshold:
                     existing.active = True
                     existing.synced_to_rspamd = False
 
@@ -4071,7 +4114,7 @@ def _detect_suppressions_worker():
                 is_active = True
                 # For soft bounces with count action, only activate if threshold reached
                 if is_soft and settings.suppression_soft_bounce_action == 'count':
-                    is_active = False
+                    is_active = settings.suppression_soft_bounce_threshold <= 1
 
                 new_entry = SpamSuppression(
                     email=recipient,
@@ -4133,17 +4176,19 @@ async def detect_suppressions_job():
                 queue = await mailcow_api.get_queue()
                 if queue:
                     cleanup_set = set(emails_for_queue_cleanup)
+                    whitelist = settings.suppression_whitelist_domains_list
                     items_to_delete = []
                     for item in queue:
                         recipients = item.get('recipients', [])
                         queue_id = item.get('queue_id')
                         if not queue_id or not recipients:
                             continue
-                        for rcpt in recipients:
-                            rcpt_email = rcpt.split(' ')[0].strip('<>').lower()
-                            if rcpt_email in cleanup_set:
-                                items_to_delete.append(queue_id)
-                                break
+                        addresses = [r.split(' ')[0].strip('<>').lower() for r in recipients]
+                        # A message that also goes to a whitelisted domain stays in the queue
+                        if any(a.split('@')[-1] in whitelist for a in addresses):
+                            continue
+                        if any(a in cleanup_set for a in addresses):
+                            items_to_delete.append(queue_id)
 
                     if items_to_delete:
                         await mailcow_api.delete_queue(items_to_delete)
@@ -4315,30 +4360,41 @@ async def _process_quarantine_rules_in_worker():
             release_items = [(item, rule) for item, rule in actions_to_take if rule.action == 'release']
             delete_items = [(item, rule) for item, rule in actions_to_take if rule.action == 'delete']
             
-            released_count = 0
-            deleted_count = 0
-            
+            # The item ids mailcow confirmed, per action
+            done = {'release': set(), 'delete': set()}
+
             # Execute releases
             if release_items:
                 release_ids = [str(item.get('id', '')) for item, _ in release_items]
                 try:
-                    await mailcow_api.release_quarantine(release_ids)
-                    released_count = len(release_ids)
+                    reply = await mailcow_api.release_quarantine(release_ids)
+                    done['release'] = mailcow_handled_items(reply, release_ids)
+                    if len(done['release']) < len(release_ids):
+                        logger.warning(f"[QUARANTINE RULES] mailcow did not release "
+                                       f"{len(release_ids) - len(done['release'])} item(s): {reply}")
                 except Exception as e:
                     logger.error(f"[QUARANTINE RULES] Release failed: {e}")
-            
+
             # Execute deletes
             if delete_items:
                 delete_ids = [str(item.get('id', '')) for item, _ in delete_items]
                 try:
-                    await mailcow_api.delete_quarantine(delete_ids)
-                    deleted_count = len(delete_ids)
+                    reply = await mailcow_api.delete_quarantine(delete_ids)
+                    done['delete'] = mailcow_handled_items(reply, delete_ids)
+                    if len(done['delete']) < len(delete_ids):
+                        logger.warning(f"[QUARANTINE RULES] mailcow did not delete "
+                                       f"{len(delete_ids) - len(done['delete'])} item(s): {reply}")
                 except Exception as e:
                     logger.error(f"[QUARANTINE RULES] Delete failed: {e}")
-            
-            # Log actions and update hit counts
+            released_count = len(done['release'])
+            deleted_count = len(done['delete'])
+
+            # Log actions and update hit counts (an item mailcow did not
+            # confirm is retried next run)
             rule_hit_counts = {}  # rule_id -> count
             for item, rule in actions_to_take:
+                if str(item.get('id', '')) not in done.get(rule.action, ()):
+                    continue
                 log_entry = QuarantineRuleLog(
                     rule_id=rule.id,
                     rule_name=rule.name,

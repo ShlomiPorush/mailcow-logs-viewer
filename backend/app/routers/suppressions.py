@@ -148,7 +148,7 @@ class SuppressionCreateRequest(BaseModel):
     @field_validator('reason')
     @classmethod
     def validate_reason(cls, v):
-        valid = ('hard_bounce', 'soft_bounce', 'rejected', 'manual')
+        valid = ('hard_bounce', 'soft_bounce', 'deferred_stuck', 'rejected', 'manual')
         if v not in valid:
             raise ValueError(f"Reason must be one of: {', '.join(valid)}")
         return v

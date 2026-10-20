@@ -31,8 +31,9 @@ def test_detection_keeps_loop_responsive_and_closes_before_queue(monkeypatch, st
     threads,api_threads = [],[]
     db=Mock()
     db.query.return_value.filter.return_value.all.return_value=[
-        SimpleNamespace(sender=None,recipient="user@example.com",dsn="5.1.1",message="No mailbox")]
+        SimpleNamespace(id=1,sender=None,recipient="user@example.com",dsn="5.1.1",message="No mailbox")]
     db.query.return_value.filter.return_value.first.return_value=None
+    db.query.return_value.filter.return_value.with_for_update.return_value.one.return_value=SimpleNamespace(value="0")
     db.commit.side_effect=lambda:threads.append(threading.get_ident())
 
     @contextmanager
@@ -76,8 +77,9 @@ def test_detection_keeps_loop_responsive_and_closes_before_queue(monkeypatch, st
 def test_failed_commit_prevents_queue_cleanup(monkeypatch,state):
     db=Mock()
     db.query.return_value.filter.return_value.all.return_value=[
-        SimpleNamespace(sender=None,recipient="user@example.com",dsn="5.1.1",message="No mailbox")]
+        SimpleNamespace(id=1,sender=None,recipient="user@example.com",dsn="5.1.1",message="No mailbox")]
     db.query.return_value.filter.return_value.first.return_value=None
+    db.query.return_value.filter.return_value.with_for_update.return_value.one.return_value=SimpleNamespace(value="0")
     db.commit.side_effect=RuntimeError("Database unavailable")
 
     @contextmanager

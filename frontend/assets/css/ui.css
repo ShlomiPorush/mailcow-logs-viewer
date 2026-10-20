@@ -1314,6 +1314,7 @@ body { font-family: var(--ui-font); background: var(--ui-bg); color: var(--ui-in
 .ui-q-who { display: grid; }
 .ui-q-who > div, .ui-q-who > .ui-link-row { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ui-q-who small { overflow: hidden; text-overflow: ellipsis; color: var(--ui-muted); font-size: 12px; }
+.ui-q-who small.ui-text-warn { color: var(--ui-warn); }
 .ui-q-resp { font-size: 12.5px; line-height: 1.45; }
 /* Compact lines copy on click too; the icon would open gaps in the text */
 /* ...but it shows while the pointer is on the value, so the value says it copies */

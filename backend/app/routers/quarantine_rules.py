@@ -208,7 +208,7 @@ def _find_matching_rule(rules, sender: str, sender_domain: str, rcpt: str, subje
                 continue
         else:
             # Case-insensitive exact match
-            if target == value.lower():
+            if (target or '').lower() == value.lower():
                 return rule
     
     return None

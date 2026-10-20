@@ -190,6 +190,8 @@ let currentFilters = {
 
 // Global RW API key status (shared across all features)
 let mailcowRwConfigured = false;
+// The first RW status check; Queue and Quarantine wait for it before drawing their rows
+let rwStatusReady = Promise.resolve();
 
 // Feature toggles - features in this list are disabled (hidden from UI, jobs stopped)
 window.disabledFeatures = [];
@@ -365,6 +367,9 @@ async function fetchRwStatus() {
         renderSecurityLists();
         renderSecuritySettings();
     }
+    // Same for the Queue and Quarantine rows and their actions
+    if (currentTab === 'queue' && allQueueData.length) applyQueueFilters();
+    if (currentTab === 'quarantine' && quarantineLastData) renderQuarantineData(quarantineLastData);
 }
 
 // Auto-Rules release and delete held mail in mailcow, so they need the Read-Write key.
@@ -418,7 +423,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     await loadAppInfo();
     loadMailcowVersionStatus();
-    fetchRwStatus();
+    rwStatusReady = fetchRwStatus().catch(() => {});
 
     // Initialize router and get initial route from URL
     const routeInfo = typeof initRouter === 'function' ? initRouter() : { baseRoute: 'dashboard', params: {} };
@@ -1497,6 +1502,7 @@ async function smartRefreshQueue() {
     if (!response.ok) return;
 
     const data = await response.json();
+    await rwStatusReady;
 
     if (hasDataChanged(data, 'queue')) {
         console.log('[REFRESH] Queue data changed, updating UI');
@@ -1513,6 +1519,7 @@ async function smartRefreshQuarantine() {
     if (!response.ok) return;
 
     const data = await response.json();
+    await rwStatusReady;
 
     if (hasDataChanged(data, 'quarantine')) {
         console.log('[REFRESH] Quarantine data changed, updating UI');
@@ -2356,6 +2363,7 @@ async function loadQueue() {
 
         const data = await response.json();
         console.log('Queue data:', data);
+        await rwStatusReady;
 
         allQueueData = data.data || [];
         updateQueueSummary();
@@ -2422,7 +2430,7 @@ function applyQueueFilters() {
     const lockedNote = canAct ? '' : `<div class="ui-list-note">${uiLocked('Queue actions are locked', `Retry, hold, release, delete and flush ${UI_RW_KEY_TEXT}`)}</div>`;
     const cols = canAct
         ? '--ui-cols: 20px minmax(200px, 1.6fr) 84px minmax(240px, 2.8fr) 70px 318px; --ui-table-min: 1000px'
-        : '--ui-cols: minmax(200px, 1.6fr) 84px minmax(240px, 2.8fr) 70px; --ui-table-min: 640px';
+        : '--ui-cols: minmax(200px, 1.6fr) 84px minmax(240px, 2.8fr) 70px 104px; --ui-table-min: 740px';
 
     container.innerHTML = `
         ${lockedNote}
@@ -2441,7 +2449,7 @@ function applyQueueFilters() {
                 <button onclick="queueDeleteAll()" id="queue-delete-all-btn" class="ui-btn ui-btn-sm ui-btn-danger-solid">Delete All</button>
             </div>
         ` : ''}
-            <div class="ui-tr ui-tr-head">${canAct ? '<span></span>' : ''}<span>Recipient</span><span>State</span><span>Last response</span><span class="ui-td-end">Size</span>${canAct ? '<span class="ui-td-end">Actions</span>' : ''}</div>
+            <div class="ui-tr ui-tr-head">${canAct ? '<span></span>' : ''}<span>Recipient</span><span>State</span><span>Last response</span><span class="ui-td-end">Size</span><span class="ui-td-end">Actions</span></div>
             ${filteredData.map(item => {
                 const qid = item.queue_id || '';
                 const queueName = (item.queue_name || '').toLowerCase();
@@ -2471,15 +2479,15 @@ function applyQueueFilters() {
                         ? responses.map(r => `<div>${recipients.length > 1 ? `<span class="ui-muted">${escapeHtml(r.email)}:</span> ` : ''}${escapeHtml(r.response)}</div>`).join('')
                         : `<span class="ui-muted">${isHold ? 'Put on hold' : '-'}</span>`}</div>
                     <span class="ui-td ui-td-end">${formatSize(item.message_size)}</span>
-                    ${canAct ? `
                     <span class="ui-td ui-td-end ui-row-actions">
+                    ${canAct ? `
                         <button onclick="queueRetry('${escapeJsArg(qid)}')" title="Retry delivery" class="queue-action-btn ui-btn ui-btn-sm">Retry</button>
                         ${isHold
                             ? `<button onclick="queueUnhold('${escapeJsArg(qid)}')" title="Release from hold" class="queue-action-btn ui-btn ui-btn-sm">Unhold</button>`
                             : `<button onclick="queueHold('${escapeJsArg(qid)}')" title="Hold message" class="queue-action-btn ui-btn ui-btn-sm">Hold</button>`}
-                        <button onclick="queueDeleteItem('${escapeJsArg(qid)}')" title="Delete from queue" class="queue-action-btn ui-btn ui-btn-sm ui-btn-danger">Delete</button>
+                        <button onclick="queueDeleteItem('${escapeJsArg(qid)}')" title="Delete from queue" class="queue-action-btn ui-btn ui-btn-sm ui-btn-danger">Delete</button>` : ''}
                         ${suppress}
-                    </span>` : ''}
+                    </span>
                 </div>`;
             }).join('')}
         </div>
@@ -2687,6 +2695,7 @@ async function loadQuarantine() {
 
         const data = await response.json();
         console.log('Quarantine data:', data);
+        await rwStatusReady;
 
         renderQuarantineData(data);
     } catch (error) {
@@ -3102,16 +3111,19 @@ async function loadQuarantineRules() {
         container.innerHTML = `<div class="ui-table ui-stack ui-qr-table">${data.data.map(rule => {
             const matchLabels = { sender: 'Sender', sender_domain: 'Sender Domain', recipient: 'Recipient', subject: 'Subject' };
             const actionLabel = rule.action === 'delete' ? 'Delete' : 'Release';
+            const repair = quarantineRuleRepair(rule);
 
             return `
             <div class="ui-tr${rule.enabled ? '' : ' ui-row-off'}">
                 <div class="ui-td ui-q-who">
                     <div><b dir="auto">${escapeHtml(rule.name)}</b> ${uiTag(actionLabel, rule.action === 'delete' ? 'fail' : 'ok')}
-                        ${rule.is_regex ? uiTag('Regex', 'info') : ''} ${!rule.enabled ? uiTag('Disabled', '') : ''}</div>
+                        ${rule.is_regex ? uiTag('Regex', 'info') : ''} ${!rule.enabled ? uiTag('Disabled', '') : ''} ${repair ? uiTag('Check', 'warn') : ''}</div>
                     <small>${escapeHtml(matchLabels[rule.match_type] || rule.match_type)}: <code class="ui-mono" dir="auto">${escapeHtml(rule.match_value)}</code></small>
+                    ${repair ? '<small class="ui-text-warn">Looks for a backslash. An earlier version may have changed this rule when it was edited.</small>' : ''}
                     <small>Hits: ${escapeHtml(String(rule.hit_count))}${rule.last_hit_at ? ' · Last: ' + formatTime(rule.last_hit_at) : ''}${rule.notes ? ' · ' + escapeHtml(rule.notes) : ''}</small>
                 </div>
                 <span class="ui-td ui-td-end ui-row-actions">
+                    ${repair ? `<button onclick="repairQuarantineRule(${Number(rule.id)})" title="${escapeHtml(`Look for "${repair.text}" instead`)}" class="ui-btn ui-btn-sm">Repair</button>` : ''}
                     <button onclick="toggleQuarantineRule(${Number(rule.id)})" title="${rule.enabled ? 'Click to disable this rule' : 'Click to enable this rule'}"
                         class="ui-btn ui-btn-sm${rule.enabled ? ' ui-btn-on' : ''}">${rule.enabled ? 'Enabled' : 'Disabled'}</button>
                     <button onclick="showEditQuarantineRuleModal(${Number(rule.id)})" title="Edit" class="ui-btn ui-btn-sm">Edit</button>
@@ -3142,16 +3154,47 @@ function showAddRuleFromQuarantine(sender, recipient, subject) {
     _showQuarantineRuleModal(null, prefill);
 }
 
+// A Contains rule is saved as a regex that only escapes its text. Read such a
+// rule back as Contains with the plain text, so saving it again does not escape
+// it twice; any other regex is Regex, with or without a leading ^.
+const QRULE_REGEX_SPECIAL = '.*+?^${}()|[]\\';
+function quarantineRuleMatchMode(rule) {
+    const value = rule.match_value || '';
+    if (!rule.is_regex) return { mode: 'exact', value };
+    let text = '';
+    for (let i = 0; i < value.length; i++) {
+        if (value[i] === '\\' && i + 1 < value.length && QRULE_REGEX_SPECIAL.includes(value[i + 1])) {
+            text += value[++i];
+        } else if (QRULE_REGEX_SPECIAL.includes(value[i])) {
+            return { mode: 'regex', value };
+        } else {
+            text += value[i];
+        }
+    }
+    return { mode: 'contains', value: text };
+}
+
+// Earlier versions escaped a Contains rule's text again when it was edited, so
+// the rule came to look for backslashes. A Contains rule whose text is itself
+// only escaped text may be one of those: its Repair saves that text as the
+// pattern, which removes one level of escaping. Null for any other rule.
+function quarantineRuleRepair(rule) {
+    const ruleMode = quarantineRuleMatchMode(rule);
+    if (ruleMode.mode !== 'contains' || !ruleMode.value.includes('\\')) return null;
+    const once = quarantineRuleMatchMode({ is_regex: true, match_value: ruleMode.value });
+    return once.mode === 'contains' ? { pattern: ruleMode.value, text: once.value } : null;
+}
+
 function _showQuarantineRuleModal(rule, prefill) {
     const isEdit = !!rule;
     const title = isEdit ? 'Edit Rule' : 'Add Quarantine Rule';
-    
+    const ruleMode = isEdit ? quarantineRuleMatchMode(rule) : { mode: 'exact', value: '' };
+
     // Determine default values: edit mode uses rule data, prefill uses quarantine data
     const defaultName = isEdit ? escapeHtml(rule.name) : (prefill ? escapeHtml(`Rule for ${prefill.sender}`) : '');
     const defaultMatchType = isEdit ? rule.match_type : (prefill ? 'sender' : 'sender');
-    const defaultMatchValue = isEdit ? escapeHtml(rule.match_value) : (prefill ? escapeHtml(prefill.sender) : '');
+    const defaultMatchValue = isEdit ? escapeHtml(ruleMode.value) : (prefill ? escapeHtml(prefill.sender) : '');
     const defaultAction = isEdit ? rule.action : 'release';
-    const defaultIsRegex = isEdit ? rule.is_regex : false;
     const defaultNotes = isEdit && rule.notes ? escapeHtml(rule.notes) : '';
     
     // For pre-fill mode, provide quick-fill buttons for sender/domain/recipient
@@ -3201,9 +3244,9 @@ function _showQuarantineRuleModal(rule, prefill) {
                 </label>
                 <label><span class="ui-label">Match Mode</span>
                     <select id="qrule-match-mode" onchange="updateQRuleMatchHelp()" class="ui-select">
-                        <option value="exact" ${!defaultIsRegex ? 'selected' : ''}>Exact Match - matches the full value exactly</option>
-                        <option value="contains" ${defaultIsRegex && !(isEdit && rule.match_value.startsWith('^')) ? 'selected' : ''}>Contains - matches if value appears anywhere</option>
-                        <option value="regex" ${defaultIsRegex && isEdit && rule.match_value.startsWith('^') ? 'selected' : ''}>Regex (advanced) - custom regular expression</option>
+                        <option value="exact" ${ruleMode.mode === 'exact' ? 'selected' : ''}>Exact Match - matches the full value exactly</option>
+                        <option value="contains" ${ruleMode.mode === 'contains' ? 'selected' : ''}>Contains - matches if value appears anywhere</option>
+                        <option value="regex" ${ruleMode.mode === 'regex' ? 'selected' : ''}>Regex (advanced) - custom regular expression</option>
                     </select>
                     <small id="qrule-match-help" class="ui-muted"></small>
                 </label>
@@ -3279,7 +3322,11 @@ async function saveQuarantineRule(ruleId) {
     }
     
     const body = { name, match_type: matchType, match_value: matchValue, is_regex: isRegex, action, notes };
-    
+    await _submitQuarantineRule(ruleId, body);
+}
+
+// Create (ruleId null) or update a rule, then draw the list again
+async function _submitQuarantineRule(ruleId, body, doneMessage) {
     try {
         const isEdit = ruleId !== null;
         const url = isEdit ? `/api/quarantine/rules/${ruleId}` : '/api/quarantine/rules';
@@ -3297,11 +3344,21 @@ async function saveQuarantineRule(ruleId) {
         }
         
         closeQuarantineRuleModal();
-        showToast(isEdit ? 'Rule updated' : 'Rule created', 'success');
+        showToast(doneMessage || (isEdit ? 'Rule updated' : 'Rule created'), 'success');
         await loadQuarantineRules();
     } catch (err) {
         showToast('Failed to save rule: ' + err.message, 'error');
     }
+}
+
+async function repairQuarantineRule(ruleId) {
+    const rule = _quarantineRulesCache?.data?.find(r => r.id === ruleId);
+    const repair = rule && quarantineRuleRepair(rule);
+    if (!repair) { showToast('Rule not found', 'error'); return; }
+    await _submitQuarantineRule(ruleId, {
+        name: rule.name, match_type: rule.match_type, match_value: repair.pattern,
+        is_regex: true, action: rule.action, notes: rule.notes || null,
+    }, 'Rule repaired');
 }
 
 async function deleteQuarantineRule(ruleId, ruleName) {
