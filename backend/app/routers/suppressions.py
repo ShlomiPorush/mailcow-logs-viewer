@@ -1639,7 +1639,9 @@ async def rspamd_state(check_map: bool = False):
         state["readable"] = True
     except MapUnavailable as e:
         if not missing or e.code == "section_unclear":
-            state["reason"], state["reason_text"] = e.code, str(e)
+            # The fixed text of its code, never the exception's own message
+            state["reason"] = e.code
+            state["reason_text"] = MapUnavailable.REASONS.get(e.code, MapUnavailable.REASONS["read_failed"])
     return state
 
 
