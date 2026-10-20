@@ -468,7 +468,7 @@ function renderMailboxStatsAccordion(mailboxes, page = 1, totalPages = 1, total 
         const aliases = (mb.aliases || []).filter(a => !hideZero || (a.sent_total || 0) + (a.received_total || 0) > 0);
         const email = mb.username;
         return `
-            <div class="ui-tr ui-ms-row" onclick="toggleMailboxAccordion('${escapeJsArg(mb.username)}')">
+            <div class="ui-tr ui-ms-row" onclick="if (!uiRowHeld(event)) toggleMailboxAccordion('${escapeJsArg(mb.username)}')">
                 <div class="ui-td ui-q-who">
                     <div><button type="button" class="ui-row-chev" aria-expanded="${isExpanded}" aria-controls="accordion-content-${index}" aria-label="Details of ${escapeHtml(email)}" onclick="event.stopPropagation(); toggleMailboxAccordion('${escapeJsArg(mb.username)}')"><svg id="accordion-icon-${index}" class="ui-domain-chevron" width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"${isExpanded ? ' style="transform: rotate(90deg)"' : ''}><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg></button>${copyableText(mb.username)} ${mb.active ? '' : uiTag('Inactive', 'fail')}</div>
                     ${mb.name ? `<small class="ui-ms-name">${escapeHtml(mb.name)}</small>` : ''}
@@ -513,7 +513,7 @@ function renderMailboxStatsAccordion(mailboxes, page = 1, totalPages = 1, total 
             const go = (filter, value, label, tone) => `<button type="button" class="ui-td ui-td-end ui-link-cell ui-ms-count${!value ? ' is-zero ui-zero' : tone ? ` ui-text-${tone}` : ''}" onclick="event.stopPropagation(); navigateToMessagesWithFilter({ email: '${escapeJsArg(alias.alias_address)}', filterType: 'search', ${filter} })"><small class="ui-sec-unit">${label} </small>${value || 0}</button>`;
             const open = mailboxStatsCache.openAliases.has(alias.alias_address);
             return `
-                            <div class="ui-tr ui-ms-alias${open ? ' is-open' : ''}" onclick="toggleMailboxAlias(this, '${escapeJsArg(alias.alias_address)}')">
+                            <div class="ui-tr ui-ms-alias${open ? ' is-open' : ''}" onclick="if (!uiRowHeld(event)) toggleMailboxAlias(this, '${escapeJsArg(alias.alias_address)}')">
                                 <span class="ui-td ui-ms-alias-name"><button type="button" class="ui-ms-alias-chev" aria-expanded="${open}" aria-label="All counts of ${escapeHtml(alias.alias_address)}"><svg class="ui-domain-chevron" width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg></button>${copyableText(alias.alias_address)}
                                     ${alias.is_catch_all ? uiTag('catch-all', 'warn') : ''}
                                     ${alias.is_domain_alias ? '<span class="ui-tag ui-tag-info" title="Address on a mailcow alias domain that points at this mailbox">domain alias</span>' : ''}

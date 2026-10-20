@@ -180,29 +180,53 @@ test('a row that opens on click opens on Enter and Space, and its own button kee
 
 test('selecting text in a row leaves it closed; a plain click, a control inside and Enter still work', () => {
     const w = page(`<p id="elsewhere">Other text</p>
-        <table><tbody><tr id="row" class="is-go" onclick="window.opened = (window.opened || 0) + 1"><td id="cell">mail.example.com</td><td><button type="button" id="inner" onclick="event.stopPropagation(); window.pressed = (window.pressed || 0) + 1">Edit</button></td></tr></tbody></table>
-        <div id="msg" class="ui-mrow" role="button" tabindex="0" data-row-open onclick="window.shown = (window.shown || 0) + 1"><span id="subject">Subject</span></div>`);
+        <table><tbody><tr id="row" class="is-go" onclick="if (!uiRowHeld(event)) window.opened = (window.opened || 0) + 1"><td id="cell">mail.example.com</td><td><button type="button" id="inner" onclick="event.stopPropagation(); window.pressed = (window.pressed || 0) + 1">Edit</button></td></tr></tbody></table>
+        <div id="msg" class="ui-mrow" role="button" tabindex="0" data-row-open onclick="if (!uiRowHeld(event)) window.shown = (window.shown || 0) + 1"><span id="subject">Subject</span></div>`);
     const d = w.document;
-    const click = el => el.dispatchEvent(new w.MouseEvent('click', { bubbles: true, cancelable: true, detail: 1 }));
+    let pageClicks = 0;
+    d.addEventListener('click', () => { pageClicks++; });   // an outside-click closer, like a picker's
+    // A press at x, then the click at x2 (a drag when they differ); detail 2 is a double click
+    const gesture = (el, x, x2 = x, detail = 1) => {
+        el.dispatchEvent(new w.MouseEvent('mousedown', { bubbles: true, clientX: x, clientY: 5, detail }));
+        el.dispatchEvent(new w.MouseEvent('click', { bubbles: true, cancelable: true, clientX: x2, clientY: 5, detail }));
+    };
     const select = el => { const range = d.createRange(); range.selectNodeContents(el); w.getSelection().removeAllRanges(); w.getSelection().addRange(range); };
-    click(d.getElementById('cell'));
+    const cell = d.getElementById('cell');
+    gesture(cell, 10);
     assert.equal(w.opened, 1, 'a plain click opens the row');
-    select(d.getElementById('cell'));
-    click(d.getElementById('cell'));
-    assert.equal(w.opened, 1, 'a click that ends a text selection in the row opens nothing');
+    select(cell);
+    gesture(cell, 10, 80);
+    assert.equal(w.opened, 1, 'a drag that selects text in the row opens nothing');
     assert.equal(String(w.getSelection()), 'mail.example.com', 'the selection stays for copying');
-    d.getElementById('cell').dispatchEvent(new w.MouseEvent('mousedown', { bubbles: true, detail: 1 }));
-    click(d.getElementById('cell'));
-    assert.equal(w.opened, 2, 'a click on text already selected opens the row');
-    select(d.getElementById('cell'));
-    click(d.getElementById('inner'));
+    assert.equal(pageClicks, 2, 'the held click still reaches the rest of the page');
+    gesture(cell, 20);
+    assert.equal(w.opened, 2, 'a plain click on text already selected opens the row');
+    gesture(cell, 10, 80);
+    assert.equal(w.opened, 2, 'dragging over the same text again opens nothing');
+    gesture(cell, 20, 20, 2);
+    assert.equal(w.opened, 2, 'a double click that selects a word opens nothing more');
+    gesture(d.getElementById('inner'), 30, 90);
     assert.equal(w.pressed, 1, 'a button inside keeps its click');
     select(d.getElementById('subject'));
-    click(d.getElementById('subject'));
-    assert.equal(w.shown, undefined, 'a div row that opens on click is guarded too');
+    gesture(d.getElementById('subject'), 10, 80);
+    assert.equal(w.shown, undefined, 'a div row that opens on click is held too');
     key(w, d.getElementById('msg'), 'Enter');
     assert.equal(w.shown, 1, 'Enter opens the row even with text selected in it');
     select(d.getElementById('elsewhere'));
-    click(d.getElementById('cell'));
+    gesture(cell, 10, 80);
     assert.equal(w.opened, 3, 'a selection outside the row does not hold it');
+});
+
+test('every row that opens on click asks uiRowHeld first', () => {
+    const dir = path.join(__dirname, '../../frontend');
+    const rows = /data-row-open|class="(?:ui-tr|is-go)\b|ui-dm-mrow|ui-sec-card/;
+    const missing = [];
+    for (const file of fs.readdirSync(dir).filter(f => f.endsWith('.js'))) {
+        const lines = fs.readFileSync(path.join(dir, file), 'utf8').split('\n');
+        lines.forEach((line, i) => {
+            const opener = rows.test(line) ? line : rows.test(lines[i - 1] || '') && /^\s*onclick=/.test(line) ? line : '';
+            if (/onclick="/.test(opener) && !/uiRowHeld|RowClick\(event/.test(opener)) missing.push(`${file}:${i + 1}`);
+        });
+    }
+    assert.deepEqual(missing, []);
 });

@@ -464,7 +464,7 @@ function securityDetail(a) {
 
 // A click on the row opens it; a click on a button, a link or copyable text inside does not
 function securityRowClick(event, ip) {
-    if (event.target.closest('button, a, input, .copyable, .ui-sec-detail')) return;
+    if (event.target.closest('button, a, input, .copyable, .ui-sec-detail') || uiRowHeld(event)) return;
     securityToggleRow(ip);
 }
 
@@ -1305,7 +1305,7 @@ function securityToggle(name, on, disabled, action, why) {
 
 function securityCardShell(key, name, open, status, toggle, locked, sentence, body, on = true) {
     return `
-        <article class="ui-sec-card${open ? ' is-open' : ''}${on ? '' : ' is-off'}" id="security-card-${key}" tabindex="-1" aria-label="${escapeHtml(name)}" ${open ? '' : `onclick="securityOpenCard('${key}')"`}>
+        <article class="ui-sec-card${open ? ' is-open' : ''}${on ? '' : ' is-off'}" id="security-card-${key}" tabindex="-1" aria-label="${escapeHtml(name)}" ${open ? '' : `onclick="if (!uiRowHeld(event)) securityOpenCard('${key}')"`}>
             <div class="ui-sec-card-head">${toggle || '<span class="ui-sec-switch-space"></span>'}<span class="ui-sec-card-name"><h3>${escapeHtml(name)}</h3>${status}</span>
                 <span class="ui-sec-card-act">${open
                     ? `<button type="button" class="ui-btn ui-btn-sm" onclick="event.stopPropagation(); securityOpenCard(null)">Done</button>`

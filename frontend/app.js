@@ -1210,7 +1210,7 @@ async function smartRefreshMessages() {
 function renderMessageRow(msg) {
     const tone = messageRowTone(msg);
     return `
-        <div class="ui-msg-item${tone ? ` ui-msg-${tone}` : ''}" data-key="${escapeHtml(msg.correlation_key || '')}" role="button" tabindex="0" data-row-open onclick="viewMessageDetails('${escapeJsArg(msg.correlation_key)}')">
+        <div class="ui-msg-item${tone ? ` ui-msg-${tone}` : ''}" data-key="${escapeHtml(msg.correlation_key || '')}" role="button" tabindex="0" data-row-open onclick="if (!uiRowHeld(event)) viewMessageDetails('${escapeJsArg(msg.correlation_key)}')">
             <div class="ui-msg-l1">
                 <b class="ui-msg-from">${escapeHtml(msg.sender || 'Unknown')}</b>
                 <time title="${escapeHtml(formatTime(msg.first_seen))}">${formatListTime(msg.first_seen)}</time>
@@ -1972,7 +1972,7 @@ async function loadDashboardSecurityAlerts() {
 // A Needs attention row whose action opens a popup opens it from anywhere on
 // the row; its buttons keep their own actions, and selecting text opens nothing
 function uiAlertRowClick(event) {
-    return !event.target.closest('button, a');
+    return !event.target.closest('button, a') && !uiRowHeld(event);
 }
 
 // The count and the "all clear" line of Needs attention follow what is in it
@@ -2352,7 +2352,7 @@ async function loadRecentActivity() {
             const tone = UI_STATUS_TONE[msg.status] || '';
             const state = `${msg.status || 'unknown'}${msg.direction ? `, ${msg.direction}` : ''}`;
             return `
-            <div class="ui-mrow" role="button" tabindex="0" data-row-open onclick="viewMessageDetails('${escapeJsArg(msg.correlation_key)}')">
+            <div class="ui-mrow" role="button" tabindex="0" data-row-open onclick="if (!uiRowHeld(event)) viewMessageDetails('${escapeJsArg(msg.correlation_key)}')">
                 <time title="${escapeHtml(formatTime(msg.time))}">${formatListTime(msg.time)}</time>
                 <i class="ui-mdot${tone ? ` ui-mdot-${tone}` : ''}" title="${escapeHtml(state)}" role="img" aria-label="${escapeHtml(state)}"></i>
                 <span class="ui-mrow-who">${escapeHtml(msg.sender || 'Unknown')} → ${escapeHtml(msg.recipient || 'Unknown')}</span>
@@ -2954,7 +2954,7 @@ function renderQuarantineData(data) {
 // A click on the row opens the message, like the Messages list; its buttons,
 // checkbox and copyable values keep their own click
 function quarantineRowClick(event, itemId) {
-    if (event.target.closest('button, a, input, select, label, .copyable, [role="menu"]')) return;
+    if (event.target.closest('button, a, input, select, label, .copyable, [role="menu"]') || uiRowHeld(event)) return;
     showQuarantineDetails(itemId);
 }
 

@@ -996,28 +996,6 @@ function renderDeliveriesChip(msg) {
     return `<span>Deliveries: ${escapeHtml(String(deliveries))}</span>`;
 }
 
-// Releasing the mouse after selecting text in a row that opens on click leaves
-// it closed, so the text can be copied; a control inside keeps its own click, and
-// Enter or Space (a click with no mouse, detail 0) still opens the row. A click on
-// text that was already selected still sees that selection, so only a selection
-// the press made holds the row.
-const UI_ROW_CONTROLS = 'button, a, input, select, textarea, label, summary, .copyable, [role="menu"]';
-let uiRowPressRange = null;
-function uiSelectedRange() {
-    const selection = window.getSelection && window.getSelection();
-    return selection && selection.rangeCount && String(selection) ? selection.getRangeAt(0).cloneRange() : null;
-}
-document.addEventListener('mousedown', () => { uiRowPressRange = uiSelectedRange(); }, true);
-document.addEventListener('click', event => {
-    if (!event.detail || !(event.target instanceof Element)) return;
-    const row = event.target.closest(`${UI_ROW_CONTROLS}, [onclick], [data-row-open]`);
-    if (!row || row.matches(UI_ROW_CONTROLS)) return;
-    const range = uiSelectedRange(), before = uiRowPressRange;
-    if (!range || !range.intersectsNode(row)) return;
-    if (before && range.compareBoundaryPoints(Range.START_TO_START, before) === 0 && range.compareBoundaryPoints(Range.END_TO_END, before) === 0) return;
-    event.stopPropagation();
-}, true);
-
 // =============================================================================
 // Sortable table headers. A click on a column header sorts the rows: numbers
 // high to low first, text A to Z first, and a second click turns it around.
@@ -1223,6 +1201,20 @@ document.addEventListener('keydown', event => {
     event.preventDefault();
     row.click();
 });
+
+// A click that ends selecting text in a row (a drag, or a double or triple click
+// on a word) leaves the row closed so the text can be copied: a row's click
+// handler asks uiRowHeld(event) first. A plain click, also on text already
+// selected, and Enter or Space (a click with no mouse, detail 0) still open it.
+let uiRowPress = null;
+document.addEventListener('mousedown', event => { uiRowPress = { x: event.clientX, y: event.clientY }; }, true);
+function uiRowHeld(event) {
+    if (!event || !event.detail || !(event.currentTarget instanceof Element)) return false;
+    const selection = window.getSelection && window.getSelection();
+    if (!selection || !selection.rangeCount || !String(selection) || !selection.getRangeAt(0).intersectsNode(event.currentTarget)) return false;
+    const dragged = uiRowPress && Math.hypot(event.clientX - uiRowPress.x, event.clientY - uiRowPress.y) > 3;
+    return Boolean(dragged) || event.detail > 1;
+}
 
 // Phones hide a list's header row, so a list without a sort control of its own
 // gets a Sort picker above it (data-phone-sort="off": the page has its own)

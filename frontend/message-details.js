@@ -345,7 +345,7 @@ function renderRelatedDeliveries(data) {
         <section class="ui-md-card">
             <!-- Collapsed by default so several legs do not push the rest of
                  the overview down; the summary line already tells the story -->
-            <div class="ui-md-toggle" role="button" tabindex="0" data-row-open aria-expanded="false" aria-controls="delivery-journey-legs" onclick="toggleDeliveryJourney()">
+            <div class="ui-md-toggle" role="button" tabindex="0" data-row-open aria-expanded="false" aria-controls="delivery-journey-legs" onclick="if (!uiRowHeld(event)) toggleDeliveryJourney()">
                 <div>
                     <h4 class="ui-md-h">Delivery journey</h4>
                     <p class="ui-muted">This message passed through the server ${legs.length} times: ${statusSummary}.</p>
@@ -357,7 +357,7 @@ function renderRelatedDeliveries(data) {
             <div class="ui-md-legs hidden" id="delivery-journey-legs">
                 ${legs.map((leg, i) => `
                     <div class="ui-md-leg${leg.current ? ' is-current' : ''}"
-                        ${leg.current ? 'aria-current="true"' : `role="button" tabindex="0" data-row-open onclick="viewMessageDetails('${escapeJsArg(leg.correlation_key)}')"`}>
+                        ${leg.current ? 'aria-current="true"' : `role="button" tabindex="0" data-row-open onclick="if (!uiRowHeld(event)) viewMessageDetails('${escapeJsArg(leg.correlation_key)}')"`}>
                         <span class="ui-muted">${i + 1}.</span>
                         <span class="ui-md-leg-who">${escapeHtml(leg.sender || '-')} =&gt; ${escapeHtml(leg.recipient || '-')}</span>
                         ${leg.current ? '<span class="ui-tag ui-tag-info">viewing</span>' : ''}

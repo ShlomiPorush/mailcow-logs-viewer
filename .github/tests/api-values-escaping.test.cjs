@@ -51,7 +51,7 @@ function decodeEntities(value) {
 // Run every onclick in ``html`` in a sandbox that records the calls it makes
 function runHandlers(html, functions) {
     const calls = [];
-    const sandbox = { window: {}, setTimeout() {} };
+    const sandbox = { window: {}, setTimeout() {}, event: {}, uiRowHeld: () => false };   // a plain click on a row
     for (const name of functions) sandbox[name] = (...args) => calls.push([name, ...args]);
     vm.createContext(sandbox);
     const handlers = [...html.matchAll(/onclick=(["'])(.*?)\1/g)].map(m => decodeEntities(m[2]));

@@ -69,6 +69,8 @@ function calledNames(expr) {
 // A stable name for one user action: the function plus its first argument
 // when that argument is a plain literal, e.g. navigateTo:queue.
 function actionKey(expr) {
+    // A row's handler starts with its text-selection check (utils.js, uiRowHeld); the action follows it
+    expr = expr.replace(/^\s*if \(!uiRowHeld\(event\)\)\s*\{?\s*/, '');
     const m = expr.match(/(?:^|[^.\w$])([A-Za-z_$][\w$]*)\s*\(\s*(['"])([^'"$\\{}]*)\2/);
     if (m && !BUILTINS.has(m[1])) return `${m[1]}:${m[3]}`;
     const names = calledNames(expr);
