@@ -734,6 +734,58 @@ function showConfirmModal({ title = 'Confirm', message = 'Are you sure?', confir
     });
 }
 
+// A dialog with several answers: resolves to the picked choice's value, or
+// null for Cancel, Escape or a click outside. Focus starts on Cancel, so
+// Enter never picks a destructive choice by itself.
+// choices: [{ value, label, kind: 'primary' | 'danger' | '' }]
+// A second dialog closes the first as cancelled, listener and all.
+let choiceModalClose = null;
+function showChoiceModal({ title, message, choices, cancelText = 'Cancel' }) {
+    if (choiceModalClose) choiceModalClose(null);
+    return new Promise((resolve) => {
+        const overlay = document.createElement('div');
+        overlay.id = 'app-choice-modal';
+        overlay.className = 'ui-dialog-backdrop ui-confirm';
+        overlay.setAttribute('role', 'alertdialog');
+        overlay.setAttribute('aria-modal', 'true');
+        overlay.setAttribute('aria-label', title);
+        overlay.setAttribute('aria-describedby', 'app-choice-text');
+        const opener = document.activeElement;
+        const buttons = choices.map((c, i) => `<button type="button" class="ui-btn${c.kind === 'danger' ? ' ui-btn-danger-solid' : c.kind === 'primary' ? ' ui-btn-primary' : ''}" data-choice="${i}">${escapeHtml(c.label)}</button>`).join('');
+        overlay.innerHTML = `
+            <div class="ui-dialog ui-dialog-fit ui-dialog-sm">
+                <div class="ui-dialog-head"><h3>${escapeHtml(title)}</h3></div>
+                <div class="ui-dialog-body"><p class="ui-confirm-text" id="app-choice-text">${escapeHtml(message).replace(/\n/g, '<br>')}</p></div>
+                <div class="ui-dialog-foot"><button type="button" class="ui-btn" data-cancel>${escapeHtml(cancelText)}</button>${buttons}</div>
+            </div>`;
+        document.body.appendChild(overlay);
+        document.body.style.overflow = 'hidden';
+        function done(result) {
+            if (choiceModalClose === done) choiceModalClose = null;
+            overlay.remove();
+            document.removeEventListener('keydown', onKey, true);
+            document.body.style.overflow = '';
+            if (opener && opener.isConnected && typeof opener.focus === 'function') opener.focus({ preventScroll: true });
+            resolve(result);
+        }
+        // Escape cancels; Tab goes round the dialog's buttons and never behind it
+        function onKey(event) {
+            if (event.key === 'Escape') { event.stopPropagation(); done(null); return; }
+            if (event.key !== 'Tab') return;
+            const items = [...overlay.querySelectorAll('button')];
+            const at = items.indexOf(document.activeElement);
+            event.preventDefault();
+            items[(at + (event.shiftKey ? -1 : 1) + items.length) % items.length].focus();
+        }
+        document.addEventListener('keydown', onKey, true);
+        choiceModalClose = done;
+        overlay.addEventListener('click', (e) => { if (e.target === overlay) done(null); });
+        overlay.querySelector('[data-cancel]').addEventListener('click', () => done(null));
+        overlay.querySelectorAll('[data-choice]').forEach(btn => btn.addEventListener('click', () => done(choices[Number(btn.dataset.choice)].value)));
+        setTimeout(() => overlay.querySelector('[data-cancel]').focus(), 50);
+    });
+}
+
 function renderJobCard(name, jobKey, job) {
     if (!job) {
         return '';

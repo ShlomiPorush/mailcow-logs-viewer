@@ -25,7 +25,7 @@ from ..services.settings_store import credential_fingerprint, get_credential_che
 from ..services.connection_test import test_smtp_connection, test_imap_connection
 from ..services.geoip_downloader import is_license_configured, get_geoip_status
 from .domains import get_cached_server_ip
-from ..mailcow_api import mailcow_api
+from ..mailcow_api import mailcow_api, MailcowAPIError
 from ..services.oauth2_client import oauth2_client
 from ..session import get_session_from_request, create_session, set_session_cookie, revoke_all_sessions
 
@@ -932,7 +932,9 @@ _FEATURE_TABLES = {
 def purge_feature_data(body: Dict[str, Any], db: Session = Depends(get_db)):
     """
     Delete all database data associated with a disabled feature.
-    Body: { "feature": "<feature-id>" }
+    Body: { "feature": "<feature-id>" }, and for spam-filter "rspamd": "remove" or
+    "keep": what happens to the blocks the app wrote to Rspamd. The list is
+    never deleted without that choice, so no block stays in Rspamd unseen.
     Only allowed when SETTINGS_EDIT_VIA_UI_ENABLED is true and the feature is currently disabled.
     """
     if not settings.edit_settings_via_ui_enabled:
@@ -945,6 +947,28 @@ def purge_feature_data(body: Dict[str, Any], db: Session = Depends(get_db)):
     if settings.is_feature_enabled(feature):
         raise HTTPException(status_code=400, detail=f"Feature '{feature}' is currently enabled. Disable it first.")
 
+    if feature != 'spam-filter':
+        return _purge_tables(feature, db)
+
+    rspamd = str(body.get("rspamd", "")).strip().lower()
+    if rspamd not in ("remove", "keep"):
+        raise HTTPException(status_code=400, detail='Say what happens to the Rspamd blocks: "rspamd": "remove" or "keep".')
+    from .suppressions import _run_on_worker_loop, _clear_managed_section, MapUnavailable, _map_error
+    from ..services.rspamd_map_lock import MapBusyError, map_write_lock
+    # The map lock is held until the list is gone: a sync waiting for it would
+    # otherwise write the list back between the removal and the delete. With
+    # "remove", the list goes only after mailcow confirmed the blocks are gone.
+    try:
+        with map_write_lock():
+            if rspamd == "remove":
+                _run_on_worker_loop(_clear_managed_section)
+            return _purge_tables(feature, db)
+    except (MapUnavailable, MapBusyError, MailcowAPIError) as e:
+        raise _map_error(e)
+
+
+def _purge_tables(feature: str, db: Session):
+    """Empty the tables of a feature that is off."""
     tables = _FEATURE_TABLES[feature]
     deleted_counts = {}
     # Allowed table name pattern (alphanumeric + underscores only) to satisfy static analysis

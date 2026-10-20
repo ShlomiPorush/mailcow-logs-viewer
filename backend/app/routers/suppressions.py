@@ -21,7 +21,8 @@ from ..services.csv_export import CSV_ESCAPE_COLUMN, csv_download, csv_query_row
 from ..database import SessionLocal, get_db, get_db_context
 from ..config import settings
 from ..models import SpamSuppression
-from ..mailcow_api import mailcow_api, MailcowAPIError
+from ..mailcow_api import mailcow_api, MailcowAPIError, MailcowRwKeyError
+from ..services.rspamd_map_lock import MapBusyError, map_write_lock
 from ..utils import internal_error, format_datetime_for_api
 from ..app_time import to_local
 
@@ -32,6 +33,7 @@ router = APIRouter()
 # Marker comment used to separate manual entries from managed ones in the Rspamd map
 MANAGED_MARKER_START = "# === MANAGED BY MAILCOW LOGS VIEWER - DO NOT EDIT BELOW ==="
 MANAGED_MARKER_END = "# === END MANAGED SECTION ==="
+DENYLIST_MAP = "global_rcpt_blacklist.map"
 
 
 # Sources whose rows hold addresses read from Postfix logs or the mail queue.
@@ -645,6 +647,8 @@ async def manual_sync_to_rspamd():
     try:
         result = await asyncio.to_thread(sync_suppressions_worker)
         return result
+    except MapBusyError as e:
+        raise HTTPException(status_code=409, detail=str(e))
     except MailcowAPIError as e:
         raise internal_error(e, status_code=502)
     except Exception as e:
@@ -652,16 +656,193 @@ async def manual_sync_to_rspamd():
         raise internal_error(e)
 
 
-def sync_suppressions_worker() -> dict:
-    """Own the sync session and HTTP client on a short-lived worker loop."""
+def automatic_updates_on() -> bool:
+    """Whether the app writes its blocks to Rspamd by itself: new blocks and
+    expiries. Changes made on the Suppressions page are written either way."""
+    return (settings.is_feature_enabled('spam-filter') and settings.suppression_enabled
+            and settings.suppression_rspamd_sync)
+
+
+def _run_on_worker_loop(work):
+    """Run an async map operation on a short-lived loop of this worker
+    thread, with its own database session and HTTP client."""
     async def run():
         try:
             with get_db_context() as db:
-                return await sync_suppressions_to_rspamd(db)
+                return await work(db)
         finally:
             await mailcow_api.aclose()
 
     return asyncio.run(run())
+
+
+def sync_suppressions_worker(automatic: bool = False) -> dict:
+    """Write the active list to Rspamd, holding the map lock.
+
+    An automatic sync (the scheduled job, after detection or queue cleanup)
+    checks the switches again once it holds the lock: one that waited while
+    automatic updates were turned off does not write after all.
+    """
+    with map_write_lock():
+        if automatic and not automatic_updates_on():
+            return {"success": True, "synced": 0, "skipped_off": True}
+        return _run_on_worker_loop(sync_suppressions_to_rspamd)
+
+
+# ---- The app's part of the map: state, clear, start fresh ----
+
+class MapUnavailable(Exception):
+    """The app's part of the Rspamd map cannot be read or written now."""
+
+    REASONS = {
+        "no_rw_key": "The Read-Write API key is not set.",
+        "no_password": "The Rspamd password is not set.",
+        "no_rw_key_and_password": "The Read-Write API key and Rspamd password are not set.",
+        "read_failed": "The Rspamd map could not be read. Check the connection and try again.",
+        "map_not_found": "Rspamd has no recipient denylist map.",
+    }
+
+    def __init__(self, code: str, detail: str = ""):
+        self.code = code
+        super().__init__(self.REASONS.get(code, detail) if not detail else detail)
+
+
+def _missing_credentials() -> Optional[str]:
+    rw, pw = mailcow_api.has_rw_key, settings.is_rspamd_configured
+    if not rw and not pw:
+        return "no_rw_key_and_password"
+    if not rw:
+        return "no_rw_key"
+    if not pw:
+        return "no_password"
+    return None
+
+
+
+def split_managed_section(content: str):
+    """The map's lines before the app's section, the app's entries, and the
+    lines after its end marker. A map the app never wrote has no section:
+    every line is before it."""
+    lines = content.split('\n') if content else []
+    start = next((i for i, line in enumerate(lines)
+                  if MANAGED_MARKER_START in line or '# === MANAGED BY MAILCOW LOGS VIEWER' in line), None)
+    if start is None:
+        return lines, [], []
+    end = next((i for i in range(start + 1, len(lines)) if MANAGED_MARKER_END in lines[i]), len(lines))
+    entries = [line.strip() for line in lines[start + 1:end] if line.strip() and not line.strip().startswith('#')]
+    return lines[:start], entries, lines[end + 1:]
+
+
+async def _read_denylist_map():
+    """(map id, content) of the recipient denylist, or MapUnavailable."""
+    if not settings.is_rspamd_configured:
+        raise MapUnavailable("no_password")
+    try:
+        map_id = await mailcow_api.find_rspamd_map_id(DENYLIST_MAP)
+        if map_id is None:
+            raise MapUnavailable("map_not_found")
+        return map_id, await mailcow_api.get_rspamd_map_content(map_id)
+    except MailcowAPIError as e:
+        logger.warning(f"[SUPPRESSION] Could not read the Rspamd denylist map: {e}")
+        raise MapUnavailable("read_failed")
+
+
+async def _clear_managed_section(db: Session) -> int:
+    """Empty the app's part of the map, leaving every other line exactly as it
+    is, and mark every row as not in Rspamd. Returns how many blocks went.
+    Raises when the map cannot be read or mailcow did not confirm the save."""
+    missing = _missing_credentials()
+    if missing:
+        raise MapUnavailable(missing)
+    _, content = await _read_denylist_map()
+    before, entries, after = split_managed_section(content)
+    # An empty section needs no write: every save makes Rspamd reload the map
+    if entries:
+        now_str = datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ')
+        new_content = '\n'.join(before + [MANAGED_MARKER_START, f"# Cleared: {now_str}", MANAGED_MARKER_END] + after)
+        await mailcow_api.edit_rspamd_map(DENYLIST_MAP, new_content)
+    db.query(SpamSuppression).filter(SpamSuppression.synced_to_rspamd == True).update(  # noqa: E712
+        {SpamSuppression.synced_to_rspamd: False}, synchronize_session=False)
+    db.commit()
+    logger.info(f"[SUPPRESSION] Removed the app's {len(entries)} block(s) from Rspamd")
+    return len(entries)
+
+
+def clear_managed_worker() -> int:
+    with map_write_lock():
+        return _run_on_worker_loop(_clear_managed_section)
+
+
+def start_fresh_worker() -> dict:
+    """Clear the app's part of the map, then delete the whole list. The list
+    goes only after mailcow confirmed the map, so nothing stays blocked unseen."""
+    async def work(db):
+        removed = await _clear_managed_section(db)
+        deleted = db.query(SpamSuppression).delete(synchronize_session=False)
+        db.commit()
+        logger.info(f"[SUPPRESSION] Started fresh: {deleted} entr(ies) deleted, {removed} Rspamd block(s) removed")
+        return {"removed_blocks": removed, "deleted_entries": deleted}
+
+    with map_write_lock():
+        return _run_on_worker_loop(work)
+
+
+def _map_error(e: Exception) -> HTTPException:
+    """What a map operation tells the page when it could not finish."""
+    if isinstance(e, MapUnavailable):
+        return HTTPException(status_code=409, detail={"code": e.code, "message": str(e)})
+    if isinstance(e, MapBusyError):
+        return HTTPException(status_code=409, detail={"code": "busy", "message": str(e)})
+    if isinstance(e, MailcowRwKeyError):
+        return HTTPException(status_code=502, detail={"code": "rejected_rw_key", "message": str(e)})
+    # mailcow did not confirm, or the request failed: the outcome is not known
+    logger.error(f"[SUPPRESSION] Rspamd map change not confirmed: {e}")
+    return HTTPException(status_code=502, detail={
+        "code": "not_confirmed", "message": "mailcow did not confirm the change. Check the Rspamd map before trying again."})
+
+
+@router.get("/suppressions/rspamd/state")
+async def rspamd_state():
+    """What the app has in Rspamd now, read from the map itself, and whether it
+    can change it. Counts are blocks (map lines), not addresses: a line can be
+    a domain or a pattern."""
+    def count_active():
+        with get_db_context() as db:
+            return db.query(func.count(SpamSuppression.id)).filter(SpamSuppression.active == True).scalar() or 0  # noqa: E712
+
+    active = await asyncio.to_thread(count_active)
+    missing = _missing_credentials()
+    state = {"automatic": automatic_updates_on(), "active_count": int(active), "writable": missing is None,
+             "readable": False, "managed_count": None, "reason": missing, "reason_text": MapUnavailable.REASONS.get(missing)}
+    if not settings.is_rspamd_configured:
+        return state
+    try:
+        _, content = await _read_denylist_map()
+        state["readable"] = True
+        state["managed_count"] = len(split_managed_section(content)[1])
+    except MapUnavailable as e:
+        if not missing:
+            state["reason"], state["reason_text"] = e.code, str(e)
+    return state
+
+
+@router.post("/suppressions/rspamd/clear")
+async def clear_rspamd_blocks():
+    """Remove the app's blocks from Rspamd. Lines above its section stay."""
+    try:
+        removed = await asyncio.to_thread(clear_managed_worker)
+    except (MapUnavailable, MapBusyError, MailcowAPIError) as e:
+        raise _map_error(e)
+    return {"removed_blocks": removed}
+
+
+@router.post("/suppressions/start-fresh")
+async def start_fresh():
+    """Remove the app's blocks from Rspamd, then delete the whole list."""
+    try:
+        return await asyncio.to_thread(start_fresh_worker)
+    except (MapUnavailable, MapBusyError, MailcowAPIError) as e:
+        raise _map_error(e)
 
 
 async def sync_suppressions_to_rspamd(db: Session) -> dict:
@@ -673,7 +854,7 @@ async def sync_suppressions_to_rspamd(db: Session) -> dict:
     
     Returns sync result details.
     """
-    MAP_FILENAME = "global_rcpt_blacklist.map"
+    MAP_FILENAME = DENYLIST_MAP
     
     # 1. Read current map content. A failed read stops the sync: writing
     # without it would drop the manual entries above the managed section.
