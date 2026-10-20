@@ -1338,11 +1338,18 @@ function settingsCheckFields(form, initialValues, fieldValue) {
         const name = el.name || el.dataset.mirror;
         if (name && initialValues.has(name) && initialValues.get(name) === fieldValue(el)) return false;
         return !el.checkValidity();
-    }).filter((el, i, all) => {
-        // A value shown twice (a mirror of one setting) is named once
-        const key = el.name || el.dataset.mirror;
-        return !key || all.findIndex(other => (other.name || other.dataset.mirror) === key) === i;
     });
+    // A value shown twice (a mirror of one setting) is named once, where it can be edited
+    const usable = el => !el.closest('[inert]') && el.getClientRects().length > 0;
+    const keyOf = el => el.name || el.dataset.mirror;
+    const named = bad.filter((el, i) => {
+        const key = keyOf(el);
+        if (!key) return true;
+        const same = bad.filter(other => keyOf(other) === key);
+        return el === (same.find(usable) || same[0]);
+    });
+    bad.length = 0;
+    bad.push(...named);
     if (!bad.length) return true;
     bad.forEach(el => {
         el.setAttribute('aria-invalid', 'true');
@@ -2145,7 +2152,7 @@ function renderSettings(content, data) {
 
                     if (needsReload) {
                         showToast(featuresChanged ? 'Features updated - reloading...' : 'Settings saved - reloading...', 'success');
-                        uiUnsavedClear();
+                        uiUnsavedUnregister('settings');
                         setTimeout(() => location.reload(), 600);
                         return;
                     }
@@ -2249,7 +2256,7 @@ async function showGeoIPSetupModal(reloadPage = false) {
     closeBtn.addEventListener('click', async () => {
         overlay.remove();
         if (reloadPage) {
-            uiUnsavedClear();
+            uiUnsavedUnregister('settings');
             location.reload();
             return;
         }

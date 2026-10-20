@@ -114,9 +114,18 @@ async function loadRateLimits() {
 }
 
 
-function changeRateLimitWindow(value) {
+async function changeRateLimitWindow(value) {
     const hours = parseInt(value, 10);
     if (!Number.isFinite(hours)) return;
+    if (!(await rateLimitsConfirmDrop())) {
+        // Stay: the picker goes back to the window that is shown
+        const select = document.getElementById('rate-limit-window');
+        if (select) {
+            select.value = String(rateLimitWindowHours);
+            if (typeof uiFilterBarSync === 'function') uiFilterBarSync();
+        }
+        return;
+    }
     rateLimitWindowHours = hours;
     loadRateLimits();
 }
@@ -836,13 +845,19 @@ uiUnsavedRegister('rate-limits', {
         let n = 0;
         const value = document.getElementById('rate-limit-value');
         const frame = document.getElementById('rate-limit-frame');
-        if (value && value.getClientRects().length
+        // The open form counts even while a search or a filter hides its row
+        if (rateLimitEditing && value && value.isConnected
             && (value.value !== value.defaultValue || (frame && frame.selectedIndex >= 0 && !frame.options[frame.selectedIndex].defaultSelected))) n++;
         const bulk = document.getElementById('rate-limit-bulk-value');
-        if (bulk && bulk.getClientRects().length && bulk.value.trim() !== '') n++;
+        if (rateLimitBulkOpen && bulk && bulk.isConnected && bulk.value.trim() !== '') n++;
         return n;
     },
-    drop: () => { rateLimitEditing = null; rateLimitBulkOpen = false; rateLimitBulkValue = ''; },
+    drop: () => {
+        rateLimitEditing = null;
+        rateLimitBulkOpen = false;
+        rateLimitBulkValue = '';
+        if (document.getElementById('rate-limit-value') || document.getElementById('rate-limit-bulk-value')) renderRateLimitConfigCard();
+    },
 });
 function rateLimitsConfirmDrop() {
     return uiConfirmLeave({ route: 'mailbox-stats', params: { sub: 'rate-limits' }, reload: true });

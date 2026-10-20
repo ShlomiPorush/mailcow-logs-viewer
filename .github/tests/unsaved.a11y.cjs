@@ -104,6 +104,24 @@ test('Back with Leave takes the same step again and opens the page', async () =>
     assert.equal(w.eval('currentTab'), 'dashboard');
 });
 
+test('Back to an entry an older version wrote (no place in the history) asks too', async () => {
+    const w = app();
+    w.history.replaceState({ route: 'dashboard', params: {} }, '', '/dashboard');   // as the old version wrote it
+    await w.navigateTo('domains');
+    w.uiUnsavedRegister('form', { count: () => 1, keeps: t => t.route === 'domains' });
+    w.history.back();
+    await popped(w);
+    await answer(w, false);
+    await settle(w);
+    assert.equal(w.location.pathname, '/domains', 'Stay: the page is written back');
+    assert.equal(w.eval('currentTab'), 'domains');
+    w.history.back();
+    await popped(w);   // asked again: the page was written back over the entry
+    await answer(w, true);
+    await settle(w);
+    assert.equal(w.eval('currentTab'), 'dashboard', 'Leave goes where Back pointed');
+});
+
 test('the question asked during Back writes no history entry of its own', async () => {
     const w = app();
     w.showConfirmModal({ title: 'Leave without saving?', message: 'x', noHistory: true });

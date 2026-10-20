@@ -81,6 +81,7 @@ function isSubpage(route, name) {
 // Every history entry the app writes carries its place in the history (idx), so
 // Back and Forward know how far they went and can be undone exactly
 let historyIdx = 0;
+let routerHere = { route: 'dashboard', params: {} };   // the page the app shows
 function routerPush(state, url) {
     routerSaveScroll();
     historyIdx += 1;
@@ -281,6 +282,7 @@ function navigateTo(route, params = {}, updateHistory = true, confirmed = false)
     }
 
     // Always switch to the tab (even if URL is same, to handle returning to main view)
+    routerHere = { route, params };
     if (typeof switchTab === 'function') {
         switchTab(route, params);
     } else {
@@ -579,10 +581,13 @@ function routerRestoreScroll(idx) {
             if (!el) { left++; continue; }
             const max = el.scrollHeight - el.clientHeight;
             // Further down than the list reaches yet: to its end, where it loads more
-            el.scrollTop = Math.min(top, max);
+            const want = Math.min(top, max);
+            if (Math.abs(el.scrollTop - want) > 1) el.scrollTop = want;
             if (max < top) left++;
         }
-        if (left && Date.now() < until) setTimeout(step, 150);
+        // The page may draw its list again once fresh data comes: the place is held
+        // until the time is up, or until the user scrolls
+        if (Date.now() < until) setTimeout(step, left ? 150 : 250);
         else stop();
     };
     requestAnimationFrame(step);
@@ -664,6 +669,16 @@ function initRouter() {
         // A history entry an older version wrote, for a page that moved since
         const moved = canonicalRoute(route, params);
 
+        // An entry an older version of the app wrote has no place in the history,
+        // so the step cannot be undone exactly: the page the user was on is written
+        // back as a new entry, then the question is asked
+        const target = { route: (moved || { route }).route, params: (moved || { params }).params };
+        if (!routerPopConfirmed && delta === null && typeof uiUnsavedCount === 'function' && uiUnsavedCount(target)) {
+            const here = routerHere;
+            routerPush({ route: here.route, params: here.params }, buildPath(here.route, here.params));
+            uiConfirmLeave(target).then(ok => { if (ok) navigateTo(target.route, target.params, true, true); });
+            return;
+        }
         // Unsaved changes this step would drop: step back to where the user was,
         // ask, and take the same step again on Leave (the history stays as it was)
         if (!routerPopConfirmed && delta && typeof uiUnsavedCount === 'function'
@@ -694,6 +709,7 @@ function initRouter() {
         console.log('Popstate event, navigating to:', route, params);
 
         // Use switchTab directly to avoid pushing duplicate history entries
+        routerHere = { route, params };
         if (typeof switchTab === 'function') {
             switchTab(route, params);
         }
@@ -702,6 +718,7 @@ function initRouter() {
 
     // Get initial route from URL. A reload keeps the entry's place in the history
     const routeInfo = parseRoute();
+    routerHere = { route: routeInfo.baseRoute, params: routeInfo.params };
     if (history.state && Number.isInteger(history.state.idx)) historyIdx = history.state.idx;
 
     // Replace current history state with route info; a moved page gets its new address
@@ -773,14 +790,13 @@ function navigateToMobile(route) {
     // Close the mobile menu first
     closeMobileMenu();
 
-    // Update mobile menu active state
-    updateMobileMenuActiveState(route);
-
-    // Update the current tab label
-    updateCurrentTabLabel(route);
-
-    // Navigate to the route
-    navigateTo(route);
+    // Navigate to the route; the menu and the label follow only when it went
+    // (the user may stay with unsaved changes)
+    navigateTo(route).then(moved => {
+        if (!moved) return;
+        updateMobileMenuActiveState(route);
+        updateCurrentTabLabel(route);
+    });
 }
 
 /**

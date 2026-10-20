@@ -124,6 +124,11 @@ async function responseError(response) {
 // the same server-side session. POST only: a GET that logs out could be
 // triggered by any other site.
 async function handleLogout() {
+    // Changes not saved yet: ask now, while Stay still leaves a working session
+    if (typeof uiConfirmLeave === 'function') {
+        if (!(await uiConfirmLeave())) return;
+        uiUnsavedClear();
+    }
     try {
         await authenticatedFetch('/api/auth/logout', { method: 'POST' });
     } catch (e) {
