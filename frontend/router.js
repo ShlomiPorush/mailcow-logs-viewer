@@ -85,10 +85,15 @@ let routerHere = { route: 'dashboard', params: {} };   // the page the app shows
 function routerPush(state, url) {
     routerSaveScroll();
     historyIdx += 1;
+    routerNoteHere(state);
     history.pushState({ ...(state || {}), idx: historyIdx }, '', url);
 }
 function routerReplace(state, url) {
+    routerNoteHere(state);
     history.replaceState({ ...(state || {}), idx: historyIdx }, '', url);
+}
+function routerNoteHere(state) {
+    if (state && state.route && !state.overlay) routerHere = { route: state.route, params: state.params || {} };
 }
 
 function routerSyncSubpage(route, name, replace = false) {

@@ -2055,6 +2055,8 @@ function renderSettings(content, data) {
                         throw new Error(uiApiErrorText(err, res.statusText));
                     }
                     const saved = await res.json().catch(() => ({}));
+                    // Saved: these values are the new start, so a reload asks nothing about them
+                    form.querySelectorAll('[name]:not([data-choice])').forEach(el => initialValues.set(el.name, fieldValue(el)));
                     uiSaveBarBusy('settings-savebar', false);
                     // A new or changed Read-Write key or Rspamd password is checked right away;
                     // a failure is the answer to show, so it wins over a success
@@ -2152,7 +2154,6 @@ function renderSettings(content, data) {
 
                     if (needsReload) {
                         showToast(featuresChanged ? 'Features updated - reloading...' : 'Settings saved - reloading...', 'success');
-                        uiUnsavedUnregister('settings');
                         setTimeout(() => location.reload(), 600);
                         return;
                     }
@@ -2256,7 +2257,6 @@ async function showGeoIPSetupModal(reloadPage = false) {
     closeBtn.addEventListener('click', async () => {
         overlay.remove();
         if (reloadPage) {
-            uiUnsavedUnregister('settings');
             location.reload();
             return;
         }

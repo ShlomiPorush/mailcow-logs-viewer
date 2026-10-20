@@ -125,17 +125,16 @@ async function responseError(response) {
 // triggered by any other site.
 async function handleLogout() {
     // Changes not saved yet: ask now, while Stay still leaves a working session
-    if (typeof uiConfirmLeave === 'function') {
-        if (!(await uiConfirmLeave())) return;
-        uiUnsavedClear();
-    }
+    if (typeof uiConfirmLeave === 'function' && !(await uiConfirmLeave())) return;
     try {
         await authenticatedFetch('/api/auth/logout', { method: 'POST' });
     } catch (e) {
         // A 401 means the session is already gone; authenticatedFetch has
-        // sent the browser to the login page.
+        // sent the browser to the login page. Otherwise nothing changed, and
+        // the changes are still guarded.
         return;
     }
+    if (typeof uiUnsavedClear === 'function') uiUnsavedClear();
     window.location.href = '/login';
 }
 

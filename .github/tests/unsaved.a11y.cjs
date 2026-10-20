@@ -39,7 +39,15 @@ function app() {
 }
 const frame = w => new Promise(resolve => w.requestAnimationFrame(() => setTimeout(resolve, 0)));
 const settle = async w => { await frame(w); await frame(w); };
-const popped = w => new Promise(resolve => w.addEventListener('popstate', () => setTimeout(resolve, 0), { once: true }));
+const popped = (w, count = 1) => new Promise(resolve => {
+    let seen = 0;
+    const on = () => {
+        if (++seen < count) return;
+        w.removeEventListener('popstate', on);
+        setTimeout(resolve, 0);
+    };
+    w.addEventListener('popstate', on);
+});
 const answer = async (w, leave) => {
     await settle(w);
     const modal = w.document.getElementById('app-confirm-modal');
@@ -77,9 +85,9 @@ test('Back that would drop changes is undone while asking; Stay leaves the histo
     await w.navigateTo('domains');
     const length = w.history.length;
     w.uiUnsavedRegister('form', { count: () => 1, keeps: t => t.route === 'domains' });
+    const backAndUndo = popped(w, 2);   // the Back, then its undo
     w.history.back();
-    await popped(w);          // the Back
-    await popped(w);          // undone
+    await backAndUndo;
     assert.equal(w.location.pathname, '/domains', 'the address is the page the user is on');
     await answer(w, false);
     await settle(w);
@@ -93,9 +101,9 @@ test('Back with Leave takes the same step again and opens the page', async () =>
     const w = app();
     await w.navigateTo('domains');
     w.uiUnsavedRegister('form', { count: () => 1, keeps: t => t.route === 'domains' });
+    const backAndUndo = popped(w, 2);
     w.history.back();
-    await popped(w);
-    await popped(w);
+    await backAndUndo;
     const going = popped(w);
     await answer(w, true);
     await going;
@@ -109,17 +117,33 @@ test('Back to an entry an older version wrote (no place in the history) asks too
     w.history.replaceState({ route: 'dashboard', params: {} }, '', '/dashboard');   // as the old version wrote it
     await w.navigateTo('domains');
     w.uiUnsavedRegister('form', { count: () => 1, keeps: t => t.route === 'domains' });
+    const back = popped(w);
     w.history.back();
-    await popped(w);
+    await back;
     await answer(w, false);
     await settle(w);
     assert.equal(w.location.pathname, '/domains', 'Stay: the page is written back');
     assert.equal(w.eval('currentTab'), 'domains');
+    const again = popped(w);
     w.history.back();
-    await popped(w);   // asked again: the page was written back over the entry
+    await again;   // asked again: the page was written back over the entry
     await answer(w, true);
     await settle(w);
     assert.equal(w.eval('currentTab'), 'dashboard', 'Leave goes where Back pointed');
+});
+
+test('the page written back over an old entry is the level that was open', async () => {
+    const w = app();
+    w.history.replaceState({ route: 'dashboard', params: {} }, '', '/dashboard');
+    await w.navigateTo('dmarc');
+    w.routerPush({ route: 'dmarc', params: { domain: 'example.com' } }, '/dmarc/example.com');   // a level of the page
+    w.uiUnsavedRegister('form', { count: () => 1, keeps: t => t.route === 'dmarc' });
+    const back = popped(w);
+    w.history.go(-2);
+    await back;
+    await answer(w, false);
+    await settle(w);
+    assert.equal(w.location.pathname, '/dmarc/example.com');
 });
 
 test('the question asked during Back writes no history entry of its own', async () => {
