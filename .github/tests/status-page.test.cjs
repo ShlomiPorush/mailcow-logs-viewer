@@ -59,8 +59,8 @@ test('About does not call a failed version check Up to Date', () => {
     vm.runInContext(slice(utils, 'function uiTag(', 'function uiDirectionTag'), context);
     vm.runInContext(slice(utils, 'function escapeHtml(', '\n}\n') + '\n}', context);
     vm.runInContext(slice(settingsJs, 'function renderLatestVersionState', 'function renderUpdateNote'), context);
-    // The text without its tags; no angle bracket is left at all
-    const render = info => context.renderLatestVersionState(info).replace(/<[^>]*>/g, '').replace(/[<>]/g, '').trim();
+    // The text between the tags
+    const render = info => context.renderLatestVersionState(info).split(/<[^>]*>/).join('').trim();
 
     // GitHub could not be reached: the server answers "unknown"
     const failed = render({ latest_version: 'unknown', update_available: false });
