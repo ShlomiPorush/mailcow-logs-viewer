@@ -130,8 +130,45 @@ def attempt_sources(db: Session, hours: int, now: Optional[datetime] = None) -> 
 # ---------------------------------------------------------------- the lists
 
 def _bare(entry: str) -> str:
+    """The address a single-address entry holds: /32 for IPv4, /128 for IPv6. An
+    IPv6 address with /32 is a network, as mailcow's netfilter reads it."""
     entry = (entry or "").strip()
-    return entry[:-3] if entry.endswith("/32") else entry[:-4] if entry.endswith("/128") else entry
+    suffix = "/128" if ":" in entry else "/32"
+    return entry[:-len(suffix)] if entry.endswith(suffix) else entry
+
+
+def legacy_ipv6_entry(entry: str) -> Optional[str]:
+    """The address an earlier version wrote as a /32 network, or None.
+
+    The app used to write a single IPv6 address as 2001:db8::1/32. mailcow stores
+    the entry as sent and its netfilter reads it as all of 2001:db8::/32. A network
+    written on purpose has no host bits set (2001:db8::/32); this one does.
+    """
+    entry = (entry or "").strip()
+    if ":" not in entry or not entry.endswith("/32"):
+        return None
+    try:
+        ipaddress.ip_network(entry)
+        return None
+    except ValueError:
+        pass
+    try:
+        ipaddress.ip_network(entry, strict=False)
+    except ValueError:
+        return None
+    return entry[:-3]
+
+
+def legacy_entries(f2b: Optional[dict]) -> List[dict]:
+    """The allowlist and denylist entries an earlier version wrote as a /32 network."""
+    found = []
+    for list_name in ("whitelist", "blacklist"):
+        for entry in protection_rules.split_ip_list((f2b or {}).get(list_name)):
+            address = legacy_ipv6_entry(entry)
+            if address:
+                found.append({"list": list_name, "entry": entry, "address": address,
+                              "network": str(ipaddress.ip_network(entry, strict=False))})
+    return found
 
 
 def _entry_for(entries: List[str], ip: str) -> Optional[str]:

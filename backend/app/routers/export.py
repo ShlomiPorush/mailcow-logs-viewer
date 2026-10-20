@@ -199,12 +199,14 @@ def export_netfilter_csv(
     search: Optional[str] = Query(None),
     ip: Optional[str] = Query(None),
     username: Optional[str] = Query(None),
+    action: Optional[str] = Query(None),
+    country_code: Optional[str] = Query(None),
     start_date: Optional[datetime] = Query(None),
     end_date: Optional[datetime] = Query(None),
     db: Session = Depends(get_csv_db)
 ):
     """
-    Export Netfilter logs to CSV
+    Export Netfilter logs to CSV, with the filters of the Events list
     """
     try:
         query = db.query(NetfilterLog).options(load_only(
@@ -230,6 +232,16 @@ def export_netfilter_csv(
         if username:
             query = query.filter(NetfilterLog.username.ilike(f"%{username}%"))
         
+        if action:
+            # As in the list: 'ban' also matches the older 'banned' lines
+            if action == 'ban':
+                query = query.filter(or_(NetfilterLog.action == 'ban', NetfilterLog.action == 'banned'))
+            else:
+                query = query.filter(NetfilterLog.action == action)
+
+        if country_code:
+            query = query.filter(NetfilterLog.country_code == country_code.upper())
+
         if start_date:
             query = query.filter(NetfilterLog.time >= start_date)
         

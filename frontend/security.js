@@ -118,7 +118,7 @@ async function loadSecurityHistory() {
 
 // ----------------------------------------------------------------- the addresses
 
-const securityBare = entry => String(entry || '').replace(/\/(32|128)$/, '');
+const securityBare = entry => fail2banBare(entry);
 
 // The country's flag, before its name; nothing when the code is unknown
 function securityFlag(code) {
@@ -221,8 +221,10 @@ function securityProtectionItems() {
         const bans = r.mode === 'enforce' && caps.can_ban;
         return item(bans ? 'on' : 'watch', SECURITY_RULE_NAMES[key], bans ? 'bans' : 'watching', key);
     };
+    // Without the Read-Write key the check does not run, even when it is switched on
     const abuse = typeof smtpAbuseStatus !== 'undefined' && smtpAbuseStatus
-        ? item(smtpAbuseStatus.enabled ? 'on' : 'off', 'Outgoing spam', '', 'abuse') : '';
+        ? smtpAbuseStatus.enabled && !smtpAbuseStatus.rw_key_configured ? item('off', 'Outgoing spam', 'needs a Read-Write key', 'abuse')
+        : item(smtpAbuseStatus.enabled ? 'on' : 'off', 'Outgoing spam', '', 'abuse') : '';
     return [f2b, ...SECURITY_RULE_ORDER.map(rule), abuse].filter(Boolean);
 }
 
@@ -305,7 +307,8 @@ function securityDescribe(a) {
         return {
             tag: `${uiTag('Banned', 'fail')}<span class="ui-sec-by">by ${escapeHtml(securityRuleName(hit.rule))}</span>`,
             why: `${escapeHtml(hit.reason || '')}. Banned ${formatAgo(hit.banned_at || hit.last_seen)}, <b>${hit.expires_at ? `until ${escapeHtml(formatTime(hit.expires_at))}` : 'until removed'}</b>.`,
-            acts: undo
+            // Lifting a ban the rules wrote takes it off mailcow's denylist: that needs the key
+            acts: rw || !hit.owned ? undo : ''
         };
     }
     if (a.state === 'banned') {
@@ -313,7 +316,7 @@ function securityDescribe(a) {
         return {
             tag: `${uiTag('Banned', 'fail')}<span class="ui-sec-by">by Fail2ban</span>`,
             why: `${tries}<b>${a.f2b.banned_until ? `${escapeHtml(a.f2b.banned_until)} left` : 'Banned now'}</b>, then Fail2ban lets it try again.${a.f2b.queued_for_unban ? ' Unbanning...' : ''}`,
-            acts: rw && !a.f2b.queued_for_unban ? `<button ${B} onclick="unbanIP('${ipArg}', this)" title="Unban ${escapeHtml(a.ip)}/32">Unban</button>
+            acts: rw && !a.f2b.queued_for_unban ? `<button ${B} onclick="unbanIP('${ipArg}', this)" title="Unban ${escapeHtml(fail2banEntry(a.ip))}">Unban</button>
                 <button type="button" class="ui-btn ui-btn-sm ui-btn-danger" onclick="banIP('${ipArg}', this)" title="Put it on the denylist">Ban permanently</button>` : ''
         };
     }
@@ -344,8 +347,8 @@ function securityDescribe(a) {
     return {
         tag: '',
         why: `${attemptsText}.${policy}`,
-        acts: rw && known ? `<button type="button" class="ui-btn ui-btn-sm ui-btn-danger" onclick="banIP('${ipArg}', this)" title="Put ${escapeHtml(a.ip)}/32 on the denylist; it stays until removed">Ban permanently</button>
-            <button ${B} onclick="allowIP('${ipArg}', this)" title="Never ban ${escapeHtml(a.ip)}/32">Allow</button>` : ''
+        acts: rw && known ? `<button type="button" class="ui-btn ui-btn-sm ui-btn-danger" onclick="banIP('${ipArg}', this)" title="Put ${escapeHtml(fail2banEntry(a.ip))} on the denylist; it stays until removed">Ban permanently</button>
+            <button ${B} onclick="allowIP('${ipArg}', this)" title="Never ban ${escapeHtml(fail2banEntry(a.ip))}">Allow</button>` : ''
     };
 }
 
@@ -432,11 +435,11 @@ function securityRowClick(event, ip) {
     securityToggleRow(ip);
 }
 
-// Failed logins in the last 24 hours. The overview counts them for its busiest
-// addresses only; for any other one they are counted in its own log lines.
+// Failed logins in the chosen period, as the list counts them. An address without
+// any there has the last 24 hours counted in its own log lines.
 function securityFailedText(a, lines) {
     const services = a.services.length ? ` <span class="ui-muted">(${escapeHtml(a.services.join(', '))})</span>` : '';
-    if (a.tries) return `${Number(a.tries).toLocaleString()} in the last 24 hours${services}`;
+    if (a.tries) return `${Number(a.tries).toLocaleString()} ${securityWindowText()}${services}`;
     if (!Array.isArray(lines)) return '<span class="ui-muted">Counting...</span>';
     const tries = lines.filter(e => e.rule_id !== null && e.rule_id !== undefined);
     const recent = tries.filter(e => Date.now() - new Date(e.time).getTime() < 24 * 3600 * 1000);
@@ -768,16 +771,29 @@ function renderSecurityLists() {
         </form>` : '';
     const row = (entry, note, action) => `
         <div class="ui-sec-lrow"><b class="ui-mono">${copyableText(entry)}</b><span class="ui-sec-why">${note}</span><span class="ui-sec-acts">${action}</span></div>`;
+    // A single IPv6 address an earlier version wrote as a /32 network covers all of it
+    const legacyRow = (list, entry) => {
+        const old = fail2banLegacy.find(l => l.list === list && l.entry === entry);
+        if (!old) return '';
+        const effect = list === 'whitelist' ? `Exempts the whole ${escapeHtml(old.network)} network from Fail2ban.` : `Blocks the whole ${escapeHtml(old.network)} network.`;
+        return row(entry, `${uiTag('Whole network', 'warn')} ${effect} An earlier version wrote this single address as a network.`,
+            rw ? `<button type="button" class="ui-btn ui-btn-sm" onclick="securityRepairListEntry('${list}', '${escapeJsArg(entry)}', this)" title="Replace it with ${escapeHtml(old.address)}/128">Repair</button>
+                <button type="button" class="ui-btn ui-btn-sm" onclick="securityRemoveFromList('${list}', '${escapeJsArg(entry)}', this)">Remove</button>` : '');
+    };
     const allowRows = fail2banWhitelist.map(entry => {
+        const legacy = legacyRow('whitelist', entry);
+        if (legacy) return legacy;
         const n = tried(entry);
         return row(entry, n ? `Failed ${Number(n).toLocaleString()} login${n === 1 ? '' : 's'} today, never banned` : '',
             rw ? `<button type="button" class="ui-btn ui-btn-sm" onclick="securityRemoveFromList('whitelist', '${escapeJsArg(entry)}', this)">Remove</button>` : '');
     }).join('');
     const denyRows = fail2banBlacklist.map(entry => {
+        const legacy = legacyRow('blacklist', entry);
+        if (legacy) return legacy;
         const hit = ruleBans.get(securityBare(entry));
         if (hit) {
             return row(entry, `Added by ${escapeHtml(securityRuleName(hit.rule))}, ${hit.expires_at ? `until ${escapeHtml(formatTime(hit.expires_at))}` : 'until removed'}`,
-                `<button type="button" class="ui-btn ui-btn-sm" onclick="undoProtectionHit(${Number(hit.id)}, this)" title="Lift the ban; the rule leaves it alone for a week">Remove</button>`);
+                rw ? `<button type="button" class="ui-btn ui-btn-sm" onclick="undoProtectionHit(${Number(hit.id)}, this)" title="Lift the ban; the rule leaves it alone for a week">Remove</button>` : '');
         }
         const n = tried(entry);
         return row(entry, `Added by hand${n ? `, still tried ${Number(n).toLocaleString()} time${n === 1 ? '' : 's'} today` : ''}`,
@@ -827,6 +843,34 @@ async function securityRemoveFromList(list, entry, button) {
         showToast(`Could not remove ${entry}: ${error.message}`, 'error');
         if (button) button.disabled = false;
     }
+}
+
+// Replaces an entry an earlier version wrote as a /32 network with the single
+// address it was meant to be, in one edit of mailcow's list
+async function securityRepairListEntry(list, entry, button) {
+    const old = fail2banLegacy.find(l => l.list === list && l.entry === entry);
+    if (!old) return;
+    const single = `${old.address}/128`;
+    const label = list === 'whitelist' ? 'allowlist' : 'denylist';
+    const effect = list === 'whitelist'
+        ? `Only ${old.address} stays exempt from Fail2ban; the rest of ${old.network} can be banned again.`
+        : `Only ${old.address} stays banned; the rest of ${old.network} is no longer blocked.`;
+    if (!await showConfirmModal({ title: 'Repair the entry', message: `Replace ${entry} with ${single} on the ${label}?\n\n${effect}`, confirmText: 'Repair' })) return;
+    if (button) button.disabled = true;
+    try {
+        const res = await authenticatedFetch('/api/fail2ban/repair', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ entry, list })
+        });
+        const result = await res.json().catch(() => ({}));
+        if (!res.ok || result.status !== 'success') throw new Error(result.msg || result.detail || `HTTP ${res.status}`);
+        showToast(`${entry} replaced with ${single} on the ${label}`, 'success');
+    } catch (error) {
+        showToast(`Could not repair ${entry}: ${error.message}`, 'error');
+        if (button) button.disabled = false;
+    }
+    // The list is read again either way, so it shows what mailcow holds now
+    fail2banSettingsLoaded = false;
+    loadFail2BanSettings();
 }
 
 // =============================================================================
@@ -1198,7 +1242,7 @@ function securityCardHtml(key) {
         on = !!enabled;
         toggle = securityToggle(name, on, !editable, `setSecurityAbuse('smtp_abuse_enabled', this.checked)`, editable ? ''
             : securityAppSettings && securityAppSettings.settings_edit_via_ui_enabled && !securityAppSettings.settings_migrated ? 'Settings are not migrated yet' : 'Editing settings is off');
-        status = `${on ? uiTag('Stops mailboxes', 'fail') : ''}<span class="ui-tag ui-tag-warn ui-tab-tag" title="This feature is new - please report any issues on GitHub">Beta</span>
+        status = `${!on ? '' : mailcowRwConfigured ? uiTag('Stops mailboxes', 'fail') : uiTag('Needs a Read-Write key', '')}<span class="ui-tag ui-tag-warn ui-tab-tag" title="This feature is new - please report any issues on GitHub">Beta</span>
             <button type="button" onclick="event.stopPropagation(); showHelpModal('Abuse_Protection')" class="ui-icon-btn ui-help-btn" title="Help - Abuse Protection" aria-label="Help - Abuse Protection"><svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg></button>`;
         sentence = securityAbuseSentence(open);
     } else {

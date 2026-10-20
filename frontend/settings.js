@@ -193,7 +193,7 @@ var SETTINGS_FIELD_DESCRIPTIONS = {
     anomaly_alert_cooldown_hours: 'After an alert for a mailbox, stay quiet about the same problem for this many hours. Prevents alert storms during an ongoing incident.',
 
     // SMTP abuse protection
-    smtp_abuse_enabled: 'Automatically disable sending (SMTP) for a mailbox that crosses the limit below. Receiving over IMAP is never affected. Requires a Read-Write mailcow API key.',
+    smtp_abuse_enabled: 'Automatically disable sending (SMTP) for a mailbox that crosses the limit below. The mailbox still receives mail; if its app passwords are revoked too, mail apps that sign in with one stop working. Requires a Read-Write mailcow API key.',
     smtp_abuse_threshold: 'Maximum messages a single mailbox may send within the time window. Above this, sending is disabled for that mailbox. Set it comfortably above your busiest legitimate sender.',
     smtp_abuse_window_minutes: 'The rolling time window used to count messages. Example: 100 messages / 60 minutes.',
     smtp_abuse_revoke_app_passwords: 'Also delete the mailbox app passwords when blocking. Recommended: a compromised account usually sends through an app password, so revoking cuts the attacker off even if they know the password.',
@@ -433,7 +433,7 @@ var SETTINGS_EDIT_TABS = [
         ]
     },
     {
-        id: 'smtp_abuse', label: 'SMTP Abuse (Beta)', description: 'Beta - please report issues on GitHub. Enforcement layer: automatically disables SMTP (sending) for a mailbox that exceeds a hard outbound limit - the usual signature of a compromised account. Receiving over IMAP is never affected. Requires a Read-Write mailcow API key. Manage blocked mailboxes and the whitelist under Security → Abuse Protection.', groups: [
+        id: 'smtp_abuse', label: 'SMTP Abuse (Beta)', description: 'Beta - please report issues on GitHub. Enforcement layer: automatically disables SMTP (sending) for a mailbox that exceeds a hard outbound limit - the usual signature of a compromised account. The mailbox still receives mail; if its app passwords are revoked too, mail apps that sign in with one stop working. Requires a Read-Write mailcow API key. Manage blocked mailboxes and the whitelist under Security → Settings → Outgoing spam.', groups: [
             { label: 'Enable', keys: ['smtp_abuse_enabled'] },
             { label: 'Limit', keys: ['smtp_abuse_threshold', 'smtp_abuse_window_minutes'] },
             { label: 'Response', keys: ['smtp_abuse_revoke_app_passwords', 'smtp_abuse_unblock_grace_minutes', 'smtp_abuse_help_address'] }

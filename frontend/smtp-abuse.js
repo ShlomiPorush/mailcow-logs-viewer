@@ -81,7 +81,9 @@ function renderSmtpAbusePanel() {
             <div class="ui-list-head">
                 <p class="ui-set-desc ui-sa-intro">
                     ${status.enabled
-                        ? 'Mailboxes stopped automatically and the outbound activity of the last window. Receiving (IMAP) is never affected.'
+                        ? `Mailboxes stopped automatically and the outbound activity of the last window. ${status.revoke_app_passwords
+                            ? 'A stopped mailbox still receives mail, but its app passwords are revoked, so mail apps that sign in with one stop working.'
+                            : 'A stopped mailbox still receives mail, and IMAP keeps working.'}`
                         : 'Automatic protection is off. Outbound activity of the last window:'}
                 </p>
                 <button type="button" onclick="loadSmtpAbusePanel()" class="ui-btn ui-btn-sm ui-head-actions">Refresh</button>
@@ -155,9 +157,10 @@ async function smtpAbuseAction(email, action) {
     const verb = action === 'block' ? 'Disable SMTP for' : 'Re-enable SMTP for';
     const confirmed = await showConfirmModal({
         title: action === 'block' ? 'Disable SMTP' : 'Re-enable SMTP',
-        message: `${verb} ${email}?` + (action === 'block'
-            ? ' The mailbox can still receive mail, and its app passwords will be revoked.'
-            : ''),
+        message: `${verb} ${email}?` + (action !== 'block' ? ''
+            : smtpAbuseStatus && smtpAbuseStatus.revoke_app_passwords
+                ? ' The mailbox can still receive mail. Its app passwords will be revoked, so mail apps that sign in with one stop working.'
+                : ' The mailbox can still receive mail.'),
         confirmText: action === 'block' ? 'Disable SMTP' : 'Re-enable',
         isDangerous: action === 'block'
     });

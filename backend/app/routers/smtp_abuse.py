@@ -125,6 +125,7 @@ async def get_status(limit: int = Query(200, ge=1, le=1000)):
             "threshold": settings.smtp_abuse_threshold,
             "window_minutes": settings.smtp_abuse_window_minutes,
             "unblock_grace_minutes": settings.smtp_abuse_unblock_grace_minutes,
+            "revoke_app_passwords": settings.smtp_abuse_revoke_app_passwords,
             "mailboxes": mailboxes,
             "whitelist": sorted(whitelist),
         }

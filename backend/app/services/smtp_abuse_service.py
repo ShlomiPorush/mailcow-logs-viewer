@@ -294,8 +294,9 @@ async def _notify_operator_blocked(email: str, count: int, revoked: int) -> None
         f"{settings.smtp_abuse_window_minutes} minutes "
         f"(limit: {settings.smtp_abuse_threshold}).\n\n"
         f"SMTP has been disabled for this mailbox. App passwords revoked: {revoked}.\n"
-        "IMAP access is unchanged. Re-enable from Security → Abuse Protection "
-        "after securing the account."
+        + ("The mailbox still receives mail; mail apps that signed in with a revoked app password stop working. "
+           if revoked else "The mailbox still receives mail, and IMAP access is unchanged. ")
+        + "Re-enable from Security → Settings → Outgoing spam after securing the account."
     )
     from . import email_layout as e
     html = e.render(
