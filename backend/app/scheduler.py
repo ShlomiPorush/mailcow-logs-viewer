@@ -24,7 +24,7 @@ from .database import get_db_context, SessionLocal
 from .mailcow_api import mailcow_api, mailcow_handled_items
 from .services.suppression_events import record_bounces, record_stuck
 from .services.suppression_rows_lock import lock_suppression_rows
-from .services.bounce_policy import cleanup_blocks, handling_on, hard_action, soft_action
+from .services.bounce_policy import cleanup_blocks, handling_on, hard_action, soft_action, rspamd_sync_on
 from .services.rspamd_map_lock import map_write_lock_async
 from .models import EasDevice, PostfixLog, RspamdLog, NetfilterLog, MessageCorrelation, DMARCSync, DomainDNSCheck, MailboxStatistics, AliasStatistics, MonitoredHost, BlacklistCheck, DMARCReport, DMARCRecord, TLSReport, TLSReportPolicy, SpamSuppression, SuppressionEvent, RawServiceLog, SystemSetting
 from .correlation import (
@@ -3366,6 +3366,14 @@ def _blocks_now(suppression) -> bool:
     return bool(suppression.active) and (suppression.expires_at is None or suppression.expires_at > datetime.utcnow())
 
 
+def _list_writable(db) -> bool:
+    """Whether a job may add to the list now: it is kept (Spam Filter and Sync
+    with Rspamd on) and no load of this app's blocks from Rspamd is owed.
+    Asked under the row lock, so a purge or a load does not run in between."""
+    from .routers.suppressions import import_pending
+    return rspamd_sync_on() and not import_pending(db)
+
+
 def _store_deferred_suppressions_worker(recipients_to_suppress, uncovered: Optional[set] = None):
     """Persist deferred recipients within a worker-owned database session.
 
@@ -3399,6 +3407,11 @@ def _store_deferred_suppressions_worker(recipients_to_suppress, uncovered: Optio
         # One writer of the rows at a time: two runs cannot both find a message
         # not yet kept, and the Rspamd sync never decides from rows changing here
         lock_suppression_rows(db)
+        if not _list_writable(db):
+            # The sync went off (the list is deleted) or a load from Rspamd is
+            # still owed since this run started: no block is stored, so its
+            # messages stay in the queue for the next run to decide
+            return 0
         existing_by_email = {s.email: s for s in db.query(SpamSuppression).filter(
             SpamSuppression.email.in_(list(by_email))).all()}
         kept = set()
@@ -3608,8 +3621,15 @@ async def _spam_blocks_loaded(job: str) -> bool:
         if not await loop.run_in_executor(get_thread_pool_executor(), pending):
             return settings.is_feature_enabled('spam-filter')
         result = await loop.run_in_executor(get_thread_pool_executor(), import_managed_worker)
+        if result.get('reason') == 'no_password':
+            update_job_status(job, 'failed', "Waiting to load this app's Rspamd blocks into the list: "
+                                             "the Rspamd password is not set.")
+            return False
+        if result.get('sync_off'):
+            # The sync went off while this waited: nothing to wait for, as above
+            return settings.is_feature_enabled('spam-filter')
         # Spam Filter turned off while this waited: the job stops
-        return not result.get('feature_off') and settings.is_feature_enabled('spam-filter')
+        return not result.get('pending') and not result.get('feature_off') and settings.is_feature_enabled('spam-filter')
     except Exception as e:
         logger.warning(f"[SUPPRESSION] This app's Rspamd blocks could not be loaded into the list yet: {e}")
         update_job_status(job, 'failed', f"Waiting to load this app's Rspamd blocks into the list: {e}")
@@ -3846,8 +3866,9 @@ async def feature_data_sweep_job(load_spam_blocks: bool = True):
     Security off: this app's temporary bans leave Fail2ban first (only then
     can its ban history go). Then the data of every feature that is off is
     deleted again, which also takes what a job or an API call wrote after the
-    feature went off. Spam Filter on, with its list deleted while it was off:
-    the blocks this app wrote to Rspamd are loaded back into the list.
+    feature went off; Spam Filter's list also while Sync with Rspamd is off.
+    Spam Filter and the sync on, with the list deleted while one was off: the
+    blocks this app wrote to Rspamd are loaded back into the list.
     """
     update_job_status('feature_data_sweep', 'running')
     loop = asyncio.get_running_loop()
@@ -4362,6 +4383,13 @@ def _detect_suppressions_worker():
     with get_db_context() as db:
         # Before the first read of the rows: the Rspamd sync never decides from rows changing here
         lock_suppression_rows(db)
+        # Read under the lock, so a purge or a load does not come between this and the rows
+        sync_on = rspamd_sync_on()
+        if sync_on and not _list_writable(db):
+            # The list is kept but this app's blocks are still to be loaded from
+            # Rspamd: nothing is read now (the watermark stays), the logs are
+            # read once they are loaded
+            return 0, 0, [], []
         db.execute(pg_insert(SystemSetting).values(
             key=BOUNCE_WATERMARK_KEY, value='0', updated_at=datetime.utcnow(),
         ).on_conflict_do_nothing(index_elements=['key']))
@@ -4401,7 +4429,7 @@ def _detect_suppressions_worker():
         mark.value = str(max(log.id for log in bounce_logs))
         # What the choices do now (a choice that blocks acts as its twin while
         # Sync with Rspamd is off)
-        hard, soft = hard_action(), soft_action()
+        hard, soft = hard_action(sync_on), soft_action(sync_on)
 
         whitelist = settings.suppression_whitelist_domains_list
         new_count = 0

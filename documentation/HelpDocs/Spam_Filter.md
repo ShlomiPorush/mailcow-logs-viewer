@@ -66,7 +66,7 @@ With **Sync with Rspamd** on, adding, enabling, disabling, deleting or importing
 
 With **Sync with Rspamd** on (**Settings** > **Queue Management**), the list and the app's part of `global_rcpt_blacklist.map` are kept in step both ways, by themselves. Every 10 minutes, and before every write, the app reads its part of the map: a block deleted there in mailcow is deleted from the list, and a block added there joins the list as **From Rspamd**. Then the list's changes are written. A change that could not be written waits, shown as **Pending**, and is written on the next try. Reading needs the Rspamd password; writing also needs the read-write key. It does not need **Handle undeliverable mail automatically**: a list kept by hand syncs too.
 
-With it off, the list is not synced: it does not change what Rspamd blocks, and changes made in mailcow do not come into it until the sync is on again. A note above the list says so.
+With it off, the app keeps no suppression list, like a feature that is off: **Suppressions** shows only a note, entries cannot be added, imported or changed, and the Queue page has no **Suppress**. Choices that delete queued mail without blocking keep working.
 
 The app's part is the section between these markers; your own entries go above or below it:
 
@@ -79,7 +79,9 @@ A write starts from the map as it is then and changes only the list's waiting en
 
 ### When the sync stops or starts
 
-Turning **Sync with Rspamd** off, or turning Spam Filter off with its list, asks whether to remove the app's blocks from Rspamd or keep them. Removing empties only the managed section; your lines above it stay. Turning the sync back on first reads in what changed in mailcow meanwhile, then says how many of the list's changes will be written, with **Start fresh** to empty both the list and the managed section.
+Turning **Sync with Rspamd** off, or turning Spam Filter off, deletes the list from the app and asks whether to remove the app's blocks from Rspamd or keep them. Removing empties only the managed section; your lines above it stay. With nothing of the app in Rspamd, it asks only before deleting a list that has entries.
+
+Turning it on again loads the list from the managed section, without writing to Rspamd, and says how many blocks loaded. Loaded blocks are permanent **From Rspamd** entries: an automatic block loses its expiry and counts. Without the Rspamd password the blocks load once it is set; until then nothing is blocked automatically.
 
 ### Import and export
 

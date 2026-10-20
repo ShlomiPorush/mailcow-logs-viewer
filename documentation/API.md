@@ -1226,6 +1226,8 @@ After saving, the app reloads the settings, the mailcow client and the OAuth2 cl
 
 Returns `settings_edit_via_ui_enabled`, `settings_migrated`, `configuration`, `mailcow_rw_key_changed` and `rspamd_password_changed`. Each `*_changed` is `true` when that credential is set after the save and it, or the address it is sent to, changed. A body with no editable change saves nothing and returns the configuration without these two keys.
 
+`rspamd_off_transition` is a token when this save turned Spam Filter or Sync with Rspamd off, else `null` (also when it was already off); pass it to `POST /api/suppressions/rspamd/clear` or `purge-feature-data` so a late removal is refused once another save switched again. The Settings page removes nothing without it. `feature_data_errors`, `{part: error}`, is present when deleting the data of a feature that is off failed; the sweep the save starts tries again.
+
 #### Basic Auth Lockout Prevention
 
 When the body sends `basic_auth_enabled` as JSON `true` while Basic is off, it must also confirm the credentials (a string such as `"true"` skips this check):
@@ -1270,7 +1272,7 @@ Deletes all stored data of a feature that is already off (in `disabled_features`
 | `mailbox-stats` | `alias_statistics`, and `mailbox_statistics` unless Rate Limits is on (it reads each mailbox's limit from that table) |
 | `logs` | `raw_service_logs`, only the services nothing collects any more: `dovecot` always stays because message details read it, `ratelimited` stays while Rate Limits is on, `sogo` while Devices is on |
 | `blacklist` | `blacklist_checks`, `monitored_hosts` |
-| `spam-filter` | `suppression_events`, `spam_suppressions`. The body also needs `"rspamd": "remove"` or `"keep"` for the app's blocks in Rspamd, else 400. With `remove`, the list is deleted only after mailcow confirmed the blocks are gone; otherwise it answers 409 or 502 and deletes nothing |
+| `spam-filter` | `suppression_events`, `spam_suppressions`. The body also needs `"rspamd": "remove"` or `"keep"` for the app's blocks in Rspamd, else 400, and may carry `"transition"` (see `PUT /api/settings`). With `remove`, the list is deleted only after mailcow confirmed the blocks are gone; otherwise it answers 409 or 502 and deletes nothing |
 | `quarantine` | `quarantine_rules`, `quarantine_rule_logs` |
 | `devices` | `eas_devices` |
 
@@ -2019,6 +2021,8 @@ Checks map entries, including regular expression syntax, without saving. Unlike 
 
 ### Suppressions
 
+The app keeps the list only while Spam Filter and **Sync with Rspamd** (`suppression_rspamd_sync`) are on. Otherwise the reads return an empty list, and `POST /api/suppressions`, `PUT` and `DELETE /api/suppressions/{suppression_id}` and `POST /api/suppressions/import` return 409 with `{ "detail": { "code": "sync_off", "message": "Sync with Rspamd is off. Turn it on in Settings to manage suppressions." } }`.
+
 #### GET /api/suppressions
 
 | Parameter | Type | Default | Constraints and purpose |
@@ -2057,7 +2061,7 @@ Totals as top-level fields: `total`, `active`, `expired`, `hard_bounce`, `soft_b
 
 #### GET /api/suppressions/config
 
-The suppression settings (`suppression_enabled`, `suppression_auto_detect`, `suppression_rspamd_sync`, `suppression_whitelist_domains` as the comma-separated string, `suppression_hard_bounce_action` (`suppress`, `delete` or `ignore`), `suppression_soft_bounce_action`, `suppression_soft_bounce_threshold`, `queue_cleanup_enabled`, `queue_cleanup_block`, `queue_cleanup_threshold_minutes`, `suppression_base_expiry_days`, `suppression_max_expiry_days`) and `rspamd_configured`, `rw_key_configured` and `is_fully_configured`. `is_fully_configured` means suppression is on and a read-write key is set; Rspamd sync also needs `rspamd_configured`.
+The suppression settings (`suppression_enabled`, `suppression_auto_detect`, `suppression_rspamd_sync`, `list_kept` (the app keeps a list now: Spam Filter and the sync on), `suppression_whitelist_domains` as the comma-separated string, `suppression_hard_bounce_action` (`suppress`, `delete` or `ignore`), `suppression_soft_bounce_action`, `suppression_soft_bounce_threshold`, `queue_cleanup_enabled`, `queue_cleanup_block`, `queue_cleanup_threshold_minutes`, `suppression_base_expiry_days`, `suppression_max_expiry_days`) and `rspamd_configured`, `rw_key_configured` and `is_fully_configured`. `is_fully_configured` means suppression is on and a read-write key is set; Rspamd sync also needs `rspamd_configured`.
 
 ---
 
@@ -2079,7 +2083,7 @@ Creates an entry and returns it in the list format, even while automatic suppres
 - With `permanent: false` and no `expires_at`, the entry expires after `SUPPRESSION_BASE_EXPIRY_DAYS`.
 - Re-adding an inactive entry reactivates it as a permanent manual entry.
 
-An existing active entry returns 409; an unparsable `expires_at` 400; an invalid address, type or reason 422.
+An existing active entry returns 409 with a plain `detail` string; an unparsable `expires_at` 400; an invalid address, type or reason 422.
 
 ---
 
@@ -2131,15 +2135,19 @@ Brings the list and the managed section of Rspamd's `global_rcpt_blacklist.map` 
 
 #### GET /api/suppressions/rspamd/state
 
-What the app has in Rspamd, read from the map: `{ "sync_on": true, "active_count": 15, "pending_count": 3, "writable": true, "readable": true, "managed_count": 12, "reason": null, "reason_text": null }`. `managed_count` counts map lines in the managed section (a line can be a domain or a pattern), `null` when the map cannot be read. `pending_count` counts the list's changes waiting to be written: entries to add, disabled or expired entries to remove, and deleted entries whose lines are still to be removed. `reason` is `no_rw_key`, `no_password`, `no_rw_key_and_password`, `read_failed`, `map_not_found` or `section_unclear`. While the sync is off, the map is read only with `?check_map=true` (`managed_count` is `null` otherwise).
+What the app has in Rspamd, read from the map: `{ "sync_on": true, "active_count": 15, "list_count": 18, "pending_count": 3, "writable": true, "readable": true, "managed_count": 12, "reason": null, "reason_text": null }`. `managed_count` counts map lines in the managed section (a line can be a domain or a pattern), `null` when the map cannot be read. `pending_count` counts the list's changes waiting to be written: entries to add, disabled or expired entries to remove, and deleted entries whose lines are still to be removed. `reason` is `no_rw_key`, `no_password`, `no_rw_key_and_password`, `read_failed`, `map_not_found` or `section_unclear`. While the sync is off, the map is read only with `?check_map=true` (`managed_count` is `null` otherwise).
 
 #### POST /api/suppressions/rspamd/clear
 
-Empties the managed section and leaves every other line of the map as it is; the list stays, its active entries waiting to be written again. Returns `{ "removed_blocks": 12 }`. When it cannot read or write the map: 409 with `{ "detail": { "code": "no_rw_key", "message": "..." } }`; a refused Read-Write key 502 `rejected_rw_key`; a write mailcow did not confirm 502 `not_confirmed`.
+Removes the app's blocks after the list stopped being kept (Spam Filter or Sync with Rspamd off): empties the managed section and leaves every other line of the map as it is. Optional body `{ "transition": "..." }`, the `rspamd_off_transition` of the save that turned it off. Returns `{ "removed_blocks": 12 }`. While the list is kept again: 409 `sync_on`; with a transition another save replaced: 409 `transition_changed`; both are checked again right before the save, and nothing is removed. When it cannot read or write the map: 409 with `{ "detail": { "code": "no_rw_key", "message": "..." } }`; a refused Read-Write key 502 `rejected_rw_key`; a write mailcow did not confirm 502 `not_confirmed`.
+
+#### POST /api/suppressions/rspamd/import
+
+Loads the app's blocks from the managed section into the list after the list was deleted (Spam Filter or Sync with Rspamd turned on again). A read only; nothing is written to Rspamd. Returns `{ "imported": 12, "pending": false, "loaded": true }`; `loaded` is `true` only for the request that did the load, so `imported` is its count. With nothing to load, `{ "imported": 0, "pending": false, "loaded": false }`. Without the Rspamd password, when the app may have blocks there: `"pending": true, "reason": "no_password"`, and automatic blocking waits until they load. Map errors as for clear.
 
 #### POST /api/suppressions/start-fresh
 
-Empties the managed section, then deletes every entry of the list. The list is deleted only after mailcow confirmed the map. Returns `{ "removed_blocks": 12, "deleted_entries": 15 }`; errors as for clear.
+Empties the managed section, then deletes every entry of the list, while the sync is still off (a step before the save that turns it on; 409 `sync_on` once it is on). The list is deleted only after mailcow confirmed the map. Returns `{ "removed_blocks": 12, "deleted_entries": 15 }`; errors as for clear.
 
 ---
 

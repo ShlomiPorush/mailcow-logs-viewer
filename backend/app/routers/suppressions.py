@@ -45,6 +45,18 @@ DENYLIST_MAP = "global_rcpt_blacklist.map"
 AUTOMATIC_SOURCES = frozenset({'auto'})
 
 
+SYNC_OFF_TEXT = "Sync with Rspamd is off. Turn it on in Settings to manage suppressions."
+
+
+def refuse_unless_list_kept() -> None:
+    """The list is kept only while "Sync with Rspamd" is on (rspamd_sync_on):
+    with it off the app keeps none, and a change to it is refused. A writer
+    asks after it holds the row lock, so a purge never runs between its check
+    and its change."""
+    if not rspamd_sync_on():
+        raise HTTPException(status_code=409, detail={"code": "sync_off", "message": SYNC_OFF_TEXT})
+
+
 def suppression_allows_regex(source: Optional[str]) -> bool:
     """Only an administrator's entry may be a /regex/; automatic ones are literal."""
     return source not in AUTOMATIC_SOURCES
@@ -446,6 +458,8 @@ def get_suppression_config():
         "suppression_enabled": settings.suppression_enabled,
         "suppression_auto_detect": settings.suppression_auto_detect,
         "suppression_rspamd_sync": settings.suppression_rspamd_sync,
+        # The app keeps a list (Spam Filter and Sync with Rspamd on): the Queue page offers Suppress
+        "list_kept": rspamd_sync_on(),
         "suppression_whitelist_domains": settings.suppression_whitelist_domains,
         "suppression_hard_bounce_action": settings.suppression_hard_bounce_action,
         "suppression_soft_bounce_action": settings.suppression_soft_bounce_action,
@@ -464,6 +478,7 @@ def get_suppression_config():
 @router.post("/suppressions")
 async def create_suppression(body: SuppressionCreateRequest):
     """Save a manual suppression before cleaning up matching queue items."""
+    refuse_unless_list_kept()
     # A block made from a queued message keeps that message: read it before
     # the cleanup below deletes it
     queued = await _queued_message(body.queue_id, body.email) if body.queue_id else None
@@ -507,6 +522,8 @@ def _manual_event(db, suppression, kind: str, outcome: str, body, queued: Option
 def _create_suppression_worker(body: SuppressionCreateRequest, queued: Optional[dict] = None) -> dict:
     with SessionLocal() as db:
         lock_suppression_rows(db)
+        # Again under the lock: the sync may have gone off during the queue read
+        refuse_unless_list_kept()
         # Check for duplicate
         existing = db.query(SpamSuppression).filter(
             SpamSuppression.email == body.email
@@ -569,6 +586,7 @@ def _create_suppression_worker(body: SuppressionCreateRequest, queued: Optional[
 def update_suppression(suppression_id: int, body: SuppressionUpdateRequest, db: Session = Depends(get_db)):
     """Update a suppression entry (toggle active, edit notes, change expiry)."""
     lock_suppression_rows(db)
+    refuse_unless_list_kept()
     suppression = db.query(SpamSuppression).filter(SpamSuppression.id == suppression_id).first()
     if not suppression:
         raise HTTPException(status_code=404, detail="Suppression not found")
@@ -646,6 +664,7 @@ def delete_suppression(suppression_id: int, db: Session = Depends(get_db)):
     """Permanently remove a suppression entry. While its block may still be in
     Rspamd, its lines wait there to be removed."""
     lock_suppression_rows(db)
+    refuse_unless_list_kept()
     suppression = db.query(SpamSuppression).filter(SpamSuppression.id == suppression_id).first()
     if not suppression:
         raise HTTPException(status_code=404, detail="Suppression not found")
@@ -684,6 +703,7 @@ async def import_suppressions(file: UploadFile = File(...)):
 def _import_suppressions_worker(content: bytes):
     with SessionLocal() as db:
         lock_suppression_rows(db)
+        refuse_unless_list_kept()
         text = content.decode('utf-8-sig')  # handle BOM
         reader = csv.reader(io.StringIO(text))
 
@@ -829,6 +849,9 @@ TOMBSTONES_KEY = 'spam_filter.rspamd_tombstones'
 ALIASES_KEY = 'spam_filter.rspamd_aliases'
 # The mailcow and Rspamd the flags above refer to
 TARGET_KEY = 'spam_filter.rspamd_target'
+# The save that last stopped the list being kept (see off_transition). Outside
+# spam_filter.rspamd_%: the purge of the list keeps it
+OFF_TRANSITION_KEY = 'spam_filter.off_transition'
 
 
 @router.post("/suppressions/sync")
@@ -858,10 +881,12 @@ async def manual_sync_to_rspamd(after_change: bool = False):
 
 def rspamd_sync_on() -> bool:
     """Whether the list is kept in step with the app's section of the Rspamd
-    map ("Sync with Rspamd"), both ways and by itself. Off, the app neither
-    reads nor writes the map, apart from what the user asks for in Settings
-    (removing its blocks, starting fresh). Automatic blocks are made only with
-    "Handle undeliverable mail automatically" on as well."""
+    map ("Sync with Rspamd"), both ways and by itself. Off, the app keeps no
+    list (services/feature_data deletes it; turned on, it loads back from the
+    app's section) and neither reads nor writes the map, apart from what the
+    user asks for in Settings (removing its blocks, starting fresh).
+    Automatic blocks are made only with "Handle undeliverable mail
+    automatically" on as well."""
     return settings.is_feature_enabled('spam-filter') and bool(settings.suppression_rspamd_sync)
 
 
@@ -932,6 +957,8 @@ class MapUnavailable(Exception):
         "map_changed": "The Rspamd map changed while syncing. Try again.",
         "connection_changed": "The mailcow or Rspamd connection changed while syncing. Try again.",
         "sync_off": "Sync with Rspamd is off. Nothing was read from or written to Rspamd.",
+        "sync_on": "Sync with Rspamd is on again. Nothing was removed from Rspamd.",
+        "transition_changed": "Sync with Rspamd was turned on or off again since this was asked. Nothing was removed from Rspamd.",
     }
 
     def __init__(self, code: str, detail: str = ""):
@@ -1348,7 +1375,7 @@ async def _write_to_rspamd(db: Session, snapshot: dict, automatic: bool) -> dict
         parts.extend(migrated_after)
     new_content = '\n'.join(parts)
 
-    await _check_before_save(snapshot, automatic)
+    await _check_before_save(snapshot, 'sync', automatic=automatic)
     result = await mailcow_api.edit_rspamd_map(DENYLIST_MAP, new_content)
     _mark_written(db, active_ids, inactive_ids, used_tombs, set(lines))
     logger.info(f"[SUPPRESSION] Wrote the list to Rspamd: {added} added, {removed} removed, {len(lines)} in the app's section")
@@ -1356,15 +1383,44 @@ async def _write_to_rspamd(db: Session, snapshot: dict, automatic: bool) -> dict
             "manual_entries_preserved": preserved, "sync_time": now_str, "api_response": result}
 
 
-async def _check_before_save(snapshot: dict, automatic: bool) -> None:
+def off_transition(db: Session) -> Optional[str]:
+    """The token of the save that last stopped the list being kept (Sync with
+    Rspamd or Spam Filter turned off), which a Remove of the app's blocks
+    asked with that save names."""
+    from ..models import SystemSetting
+    row = db.query(SystemSetting.value).filter(SystemSetting.key == OFF_TRANSITION_KEY).first()
+    return row[0] if row else None
+
+
+def _check_state(purpose: str, automatic: bool = False, transition: Optional[str] = None) -> None:
+    """Whether a map write for purpose may go on with the settings as they are
+    now. 'sync' writes the list, so it needs the list kept (and, automatic,
+    the Read-Write key). 'remove' and 'fresh' empty the app's section while
+    the list is not kept (turned off; for fresh, not yet on): with it on
+    again, emptying would take away what the list holds now. 'remove' with a
+    transition belongs to the save that stopped the list, not to a later one."""
+    if purpose == 'sync':
+        if not rspamd_sync_on() or (automatic and not mailcow_api.has_rw_key):
+            raise MapUnavailable("sync_off")
+        return
+    if rspamd_sync_on():
+        raise MapUnavailable("sync_on")
+    if purpose == 'remove' and transition is not None:
+        with get_db_context() as db:
+            if off_transition(db) != transition:
+                raise MapUnavailable("transition_changed")
+
+
+async def _check_before_save(snapshot: dict, purpose: str, automatic: bool = False,
+                             transition: Optional[str] = None) -> None:
     """Right before a save: the map is still what the plan was made from, the
-    connection is the same, and an automatic write is still allowed. The
-    settings are checked after the read too: they may change while it waits."""
+    connection is the same, and the write is still allowed (_check_state).
+    The settings are checked after the read too: they may change while it
+    waits."""
     def still_allowed():
         if _connection_target() != snapshot["target"]:
             raise MapUnavailable("connection_changed")
-        if automatic and not (rspamd_sync_on() and mailcow_api.has_rw_key):
-            raise MapUnavailable("sync_off")
+        _check_state(purpose, automatic, transition)
 
     still_allowed()
     _, now = await _read_denylist_map()
@@ -1417,12 +1473,15 @@ async def sync_suppressions_to_rspamd(db: Session, automatic: bool = False) -> d
 
 # ---- Clear, start fresh, load back after Spam Filter was off ----
 
-async def _clear_managed_section(db: Session) -> int:
+async def _clear_managed_section(db: Session, purpose: str = 'remove', transition: Optional[str] = None) -> int:
     """Empty the app's part of the map, leaving every other line exactly as it
     is. Every active row then waits to be added again. Returns how many
-    blocks went. Raises when the map cannot be read or mailcow did not
-    confirm the save."""
+    blocks went. Only while the list is not kept, checked first and again
+    right before the save (_check_state; the caller holds the map lock).
+    Raises when that no longer holds, the map cannot be read or mailcow did
+    not confirm the save."""
     from ..services.suppression_rows_lock import lock_suppression_rows
+    _check_state(purpose, transition=transition)
     missing = _missing_credentials()
     if missing:
         raise MapUnavailable(missing)
@@ -1439,7 +1498,7 @@ async def _clear_managed_section(db: Session) -> int:
         now_str = datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ')
         new_content = '\n'.join(snapshot["before"] + [MANAGED_MARKER_START, f"# Cleared: {now_str}", MANAGED_MARKER_END]
                                 + snapshot["after"])
-        await _check_before_save(snapshot, automatic=False)
+        await _check_before_save(snapshot, purpose, transition=transition)
         await mailcow_api.edit_rspamd_map(DENYLIST_MAP, new_content)
     lock_suppression_rows(db)
     db.query(SpamSuppression).filter(SpamSuppression.active == False).update(  # noqa: E712
@@ -1451,20 +1510,26 @@ async def _clear_managed_section(db: Session) -> int:
     return len(entries)
 
 
-def clear_managed_worker() -> int:
+def clear_managed_worker(transition: Optional[str] = None) -> int:
+    """Remove the app's blocks from Rspamd after the list stopped being kept
+    (transition: the save that stopped it, when known)."""
     with map_write_lock():
-        return _run_on_worker_loop(_clear_managed_section)
+        return _run_on_worker_loop(lambda db: _clear_managed_section(db, 'remove', transition))
 
 
 def start_fresh_worker() -> dict:
     """Clear the app's part of the map, then delete the whole list. The list
-    goes only after mailcow confirmed the map, so nothing stays blocked unseen."""
+    goes only after mailcow confirmed the map, so nothing stays blocked unseen.
+    Asked before the save that turns the sync on: refused once it is on (a
+    list kept since is not emptied)."""
     async def work(db):
         from ..models import SystemSetting
         from ..services.feature_data import SPAM_IMPORT_PENDING_KEY
         from ..services.suppression_rows_lock import lock_suppression_rows
-        removed = await _clear_managed_section(db)
+        removed = await _clear_managed_section(db, 'fresh')
         lock_suppression_rows(db)
+        # On since the save: the list stays, its blocks wait to be written again
+        _check_state('fresh')
         deleted = db.query(SpamSuppression).delete(synchronize_session=False)
         # A fresh list loads nothing back from Rspamd
         db.query(SystemSetting).filter(SystemSetting.key == SPAM_IMPORT_PENDING_KEY).delete(synchronize_session=False)
@@ -1488,29 +1553,35 @@ def import_pending(db: Session) -> bool:
 
 def import_managed_worker() -> dict:
     """Load the app's Rspamd blocks into the list if that is pending (Spam
-    Filter was off and is on again). A read only; nothing is written to
-    Rspamd. Only while Spam Filter is on; the purge of a Spam Filter that is
-    off holds the same lock. Until it is done, no job adds to the list."""
+    Filter or Sync with Rspamd was off and is on again). A read only; nothing
+    is written to Rspamd. Only while the list is kept; its purge holds the
+    same lock. Until it is done, no job adds to the list. loaded says this
+    call did the load, so imported is its count."""
     from ..models import SystemSetting
-    from ..services.feature_data import SPAM_IMPORT_PENDING_KEY
+    from ..services.feature_data import SPAM_IMPORT_PENDING_KEY, SPAM_IMPORT_RESTORE
     with map_write_lock():
         if not settings.is_feature_enabled('spam-filter'):
-            return {"imported": 0, "pending": False, "feature_off": True}
+            return {"imported": 0, "pending": False, "loaded": False, "feature_off": True}
         if not rspamd_sync_on():
             # Nothing is read while the sync is off: the first read once it is on loads them
-            return {"imported": 0, "pending": True, "sync_off": True}
+            return {"imported": 0, "pending": True, "loaded": False, "sync_off": True}
 
         async def work(db):
-            if not import_pending(db):
-                return {"imported": 0, "pending": False}
+            row = db.query(SystemSetting.value).filter(SystemSetting.key == SPAM_IMPORT_PENDING_KEY).first()
+            if row is None:
+                return {"imported": 0, "pending": False, "loaded": False}
             if not settings.is_rspamd_configured:
-                # Without the Rspamd password the app never wrote to Rspamd: nothing to load
+                if row[0] == SPAM_IMPORT_RESTORE:
+                    # The app may have blocks there: they wait for the password,
+                    # and so does every job that adds to the list
+                    return {"imported": 0, "pending": True, "loaded": False, "reason": "no_password"}
+                # Nothing says the app ever wrote to Rspamd: nothing to load
                 db.query(SystemSetting).filter(SystemSetting.key == SPAM_IMPORT_PENDING_KEY).delete(synchronize_session=False)
                 db.commit()
-                return {"imported": 0, "pending": False}
+                return {"imported": 0, "pending": False, "loaded": False}
             pulled = await _pull_from_rspamd(db, await _read_snapshot())
             logger.info(f"[SUPPRESSION] Loaded {pulled['added']} block(s) of this app back from Rspamd")
-            return {"imported": pulled["added"], "pending": False}
+            return {"imported": pulled["added"], "pending": False, "loaded": True}
 
         return _run_on_worker_loop(work)
 
@@ -1552,11 +1623,12 @@ async def rspamd_state(check_map: bool = False):
     def counts():
         with get_db_context() as db:
             active = db.query(func.count(SpamSuppression.id)).filter(SpamSuppression.active == True).scalar() or 0  # noqa: E712
-            return int(active), pending_count(db)
+            rows = db.query(func.count(SpamSuppression.id)).scalar() or 0
+            return int(active), int(rows), pending_count(db)
 
-    active, pending = await asyncio.to_thread(counts)
+    active, rows, pending = await asyncio.to_thread(counts)
     missing = _missing_credentials()
-    state = {"sync_on": rspamd_sync_on(), "active_count": active, "pending_count": pending,
+    state = {"sync_on": rspamd_sync_on(), "active_count": active, "list_count": rows, "pending_count": pending,
              "writable": missing is None, "readable": False, "managed_count": None, "reason": missing,
              "reason_text": MapUnavailable.REASONS.get(missing)}
     if not settings.is_rspamd_configured or not (state["sync_on"] or check_map):
@@ -1571,11 +1643,18 @@ async def rspamd_state(check_map: bool = False):
     return state
 
 
+class ClearRequest(BaseModel):
+    # The rspamd_off_transition of the settings save that asked for this
+    transition: Optional[str] = None
+
+
 @router.post("/suppressions/rspamd/clear")
-async def clear_rspamd_blocks():
-    """Remove the app's blocks from Rspamd. Lines above its section stay."""
+async def clear_rspamd_blocks(body: Optional[ClearRequest] = None):
+    """Remove the app's blocks from Rspamd after the list stopped being kept.
+    Lines outside its section stay. Refused while the list is kept, and, with
+    a transition, once another save turned it on or off since."""
     try:
-        removed = await asyncio.to_thread(clear_managed_worker)
+        removed = await asyncio.to_thread(clear_managed_worker, body.transition if body else None)
     except (MapUnavailable, MapBusyError, MailcowAPIError) as e:
         raise _map_error(e)
     return {"removed_blocks": removed}

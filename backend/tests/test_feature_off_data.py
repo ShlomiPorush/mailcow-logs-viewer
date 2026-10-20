@@ -236,7 +236,7 @@ def test_the_blocks_the_app_wrote_come_back_as_permanent_rows(db_ready, monkeypa
                format_suppression_map_entry('back@example.test')]  # twice in the map, once in the list
     state = _fake_map(monkeypatch, _map(['/^typed-by-hand@example\\.test$/i'], managed))
     _pending(db_ready)
-    assert import_managed_worker() == {'imported': 3, 'pending': False}
+    assert import_managed_worker() == {'imported': 3, 'pending': False, 'loaded': True}
     with db_ready() as db:
         rows = {r.email: r for r in db.query(SpamSuppression).all()}
         assert set(rows) == {'back@example.test', '/^.+@blocked\\.test$/i', '/^weird\\d+@example\\.test$/i'}
@@ -566,11 +566,16 @@ def test_the_sweep_reports_a_feature_it_could_not_clean(monkeypatch):
 
 def test_without_the_rspamd_password_there_is_nothing_to_load(db_ready, monkeypatch):
     """A new install (no Rspamd password) never wrote to Rspamd: the marker of
-    the first start must not hold the jobs back."""
+    the first start must not hold the jobs back. A marker that says the app
+    may have blocks there waits for the password instead
+    (test_rspamd_sync_off_keeps_no_list.py)."""
     from app.routers.suppressions import import_managed_worker, import_pending
+    from app.services.feature_data import _set_key, SPAM_IMPORT_PENDING_KEY
     monkeypatch.setattr(type(settings._inner), 'is_rspamd_configured', property(lambda self: False))
-    _pending(db_ready)
-    assert import_managed_worker() == {'imported': 0, 'pending': False}
+    with db_ready() as db:
+        _set_key(db, SPAM_IMPORT_PENDING_KEY, 'bootstrap')
+        db.commit()
+    assert import_managed_worker() == {'imported': 0, 'pending': False, 'loaded': False}
     with db_ready() as db:
         assert not import_pending(db)
 

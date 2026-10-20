@@ -10,6 +10,7 @@ settings, and an unknown stored value (set by hand in the database, say)
 blocks and deletes nothing.
 """
 import logging
+from typing import Optional
 
 from ..config import settings
 
@@ -36,18 +37,21 @@ def _known(name: str, value, allowed) -> str:
     return 'ignore'
 
 
-def hard_action() -> str:
+def hard_action(sync_on: Optional[bool] = None) -> str:
     """suppress (block and delete the address's queued mail), delete (only the
-    queued mail) or ignore, for a permanent failure (5.x.x)."""
+    queued mail) or ignore, for a permanent failure (5.x.x). sync_on: the
+    sync as the caller read it under the row lock."""
     action = _known('SUPPRESSION_HARD_BOUNCE_ACTION', settings.suppression_hard_bounce_action, HARD_ACTIONS)
-    return 'delete' if action == 'suppress' and not rspamd_sync_on() else action
+    on = rspamd_sync_on() if sync_on is None else sync_on
+    return 'delete' if action == 'suppress' and not on else action
 
 
-def soft_action() -> str:
+def soft_action(sync_on: Optional[bool] = None) -> str:
     """suppress, count or ignore, for a temporary failure (4.x.x) read from the
     logs. Both that block do nothing while the sync is off."""
     action = _known('SUPPRESSION_SOFT_BOUNCE_ACTION', settings.suppression_soft_bounce_action, SOFT_ACTIONS)
-    return 'ignore' if action != 'ignore' and not rspamd_sync_on() else action
+    on = rspamd_sync_on() if sync_on is None else sync_on
+    return 'ignore' if action != 'ignore' and not on else action
 
 
 def cleanup_blocks() -> bool:

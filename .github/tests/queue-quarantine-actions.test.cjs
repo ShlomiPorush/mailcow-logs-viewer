@@ -1,6 +1,7 @@
 // Queue and Quarantine: the row actions follow the Read-Write key even when its
-// status arrives after the rows were drawn, Suppress stays without the key, and
-// editing a quarantine rule saves it back unchanged.
+// status arrives after the rows were drawn, Suppress stays without the key and
+// shows only while the app keeps a suppression list, and editing a quarantine
+// rule saves it back unchanged.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -53,8 +54,8 @@ const QUEUE = [{
     message_size: 2048, recipients: ['user@example.org (connect to mx.example.org: Connection timed out)'],
 }];
 
-function drawQueue(app, rw) {
-    vm.runInContext(`currentTab = 'queue'; mailcowRwConfigured = ${rw}; allQueueData = ${JSON.stringify(QUEUE)};`, app.context);
+function drawQueue(app, rw, listKept = true) {
+    vm.runInContext(`currentTab = 'queue'; mailcowRwConfigured = ${rw}; queueSuppressOn = ${listKept}; allQueueData = ${JSON.stringify(QUEUE)};`, app.context);
     app.context.applyQueueFilters();
     return app.elements['queue-logs'].innerHTML;
 }
@@ -105,6 +106,61 @@ test('Suppress stays on queue rows without the Read-Write key', () => {
     assert.match(html, /showAddSuppressionModal\('user@example\.org', 'ABC123'\)/);
     assert.doesNotMatch(html, /queue-action-btn|queue-checkbox/);
     assert.match(html, /Actions<\/span>/);
+});
+
+test('Suppress shows only while the app keeps a suppression list', () => {
+    const html = drawQueue(loadApp(), true, false);
+    assert.doesNotMatch(html, /showAddSuppressionModal\(/);
+    assert.match(html, /queueDeleteItem\(/);
+});
+
+test('each Queue load reads whether the list is kept, and an older answer is dropped', async () => {
+    const app = loadApp();
+    const answers = [];
+    app.context.authenticatedFetch = url => url === '/api/suppressions/config'
+        ? new Promise(resolve => answers.push(kept => resolve({ ok: true, json: async () => ({ list_kept: kept }) })))
+        : Promise.resolve({ ok: true, json: async () => ({ data: QUEUE }) });
+    vm.runInContext(`currentTab = 'queue'; mailcowRwConfigured = true; rwStatusReady = Promise.resolve();`, app.context);
+    const older = app.context.loadQueue();
+    const newer = app.context.loadQueue();
+    answers[1](false);   // the newer load: the sync was turned off
+    await newer;
+    answers[0](true);    // the older answer arrives last
+    await older;
+    assert.doesNotMatch(app.elements['queue-logs'].innerHTML, /showAddSuppressionModal\(/);
+    assert.equal(vm.runInContext('queueSuppressOn', app.context), false);
+});
+
+test('an auto refresh with the same rows never leaves a load showing Loading', async () => {
+    const app = loadApp();
+    app.context.authenticatedFetch = async url => ({ ok: true, json: async () => (url === '/api/suppressions/config' ? { list_kept: true } : { data: QUEUE }) });
+    vm.runInContext(`currentTab = 'queue'; mailcowRwConfigured = true; queueSuppressOn = true; rwStatusReady = Promise.resolve(); lastDataCache.queue = { data: ${JSON.stringify(QUEUE)} };`, app.context);
+    const load = app.context.loadQueue();
+    const refresh = app.context.smartRefreshQueue();
+    await Promise.all([load, refresh]);
+    const html = app.elements['queue-logs'].innerHTML;
+    assert.doesNotMatch(html, /ui-loading/);
+    assert.match(html, /showAddSuppressionModal\('user@example\.org', 'ABC123'\)/);
+});
+
+test('an older auto refresh never draws over a newer load', async () => {
+    const app = loadApp();
+    const NEWER = [{ ...QUEUE[0], queue_id: 'NEW456' }];
+    const queueAnswers = [];
+    app.context.authenticatedFetch = url => url === '/api/suppressions/config'
+        ? Promise.resolve({ ok: true, json: async () => ({ list_kept: true }) })
+        : new Promise(resolve => queueAnswers.push(rows => resolve({ ok: true, json: async () => ({ data: rows }) })));
+    vm.runInContext(`currentTab = 'queue'; mailcowRwConfigured = true; rwStatusReady = Promise.resolve();`, app.context);
+    const refresh = app.context.smartRefreshQueue();   // started first
+    const load = app.context.loadQueue();
+    await new Promise(resolve => setImmediate(resolve));
+    queueAnswers[1](NEWER);   // the load answers first
+    await load;
+    queueAnswers[0](QUEUE);   // then the older refresh
+    await refresh;
+    const html = app.elements['queue-logs'].innerHTML;
+    assert.match(html, /NEW456/);
+    assert.doesNotMatch(html, /ABC123/);
 });
 
 test('with the key, queue rows keep every action', () => {

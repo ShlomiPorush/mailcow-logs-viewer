@@ -304,8 +304,10 @@ def test_clearing_whose_answer_was_lost_never_empties_the_list(db, rspamd, monke
     _add(db, kept)
     rspamd['content'] = _section(_line(kept))
     rspamd.update(fail_write=True, land_then_fail=True)
+    _sync_setting(monkeypatch, False)  # Remove runs once the sync is off
     with pytest.raises(MailcowAPIError):
         clear_managed_worker()
+    _sync_setting(monkeypatch, True)
     rspamd['fail_write'] = False
     _rw(monkeypatch, False)  # the next sync only reads
     _sync(automatic=True)

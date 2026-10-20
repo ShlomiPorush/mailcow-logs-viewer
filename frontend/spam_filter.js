@@ -401,31 +401,54 @@ function updateSuppressionSyncLock() {
 // is synced with it ("Sync with Rspamd")
 let suppressionRspamdState = null;
 
-// With the sync off, say that the list does not change what Rspamd blocks. A
-// map the app cannot read its section from is said while the sync is on
+// What the server said went wrong: a message ({code, message}) or a plain detail
+function suppressionErrorText(body, fallback) {
+    const detail = body && body.detail;
+    if (detail && typeof detail === 'object' && !Array.isArray(detail)) return detail.message || fallback;
+    return typeof detail === 'string' && detail ? detail : fallback;
+}
+
+async function suppressionFailure(response, fallback) {
+    return new Error(suppressionErrorText(await response.json().catch(() => ({})), fallback));
+}
+
+// With the sync off the app keeps no list: the page shows only a note that
+// says so. A map the app cannot read its section from is said while the sync is on
+let suppressionStateSeq = 0;        // an older answer than the one shown is dropped
+
+function suppressionShowOff(off) {
+    const offNote = document.getElementById('suppression-off-note');
+    ['suppression-stats', 'suppression-list-card'].forEach(id => document.getElementById(id)?.classList.toggle('hidden', off));
+    if (!offNote) return;
+    offNote.classList.toggle('hidden', !off);
+    offNote.innerHTML = off ? `<div class="ui-list-note ui-flush">${uiLocked('No suppression list',
+        "Sync with Rspamd is off. Turn it on in Settings to load and manage this app's blocks.",
+        `<button type="button" class="ui-btn ui-btn-sm" onclick="navigateTo('settings', { sub: 'spam_filter' })">Settings</button>`)}</div>` : '';
+}
+
 async function loadSuppressionSyncNote() {
     const note = document.getElementById('suppression-sync-note');
     if (!note) return;
+    const seq = ++suppressionStateSeq;
     let state;
     try {
         const res = await authenticatedFetch('/api/suppressions/rspamd/state');
         if (!res.ok) throw new Error();
         state = await res.json();
     } catch (e) {
-        note.innerHTML = '';
+        if (seq === suppressionStateSeq) note.innerHTML = '';
         return;
     }
+    if (seq !== suppressionStateSeq) return;
     const wasOn = suppressionRspamdState ? suppressionRspamdState.sync_on : null;
     suppressionRspamdState = state;
     updateSuppressionSyncLock();
-    // The Rspamd column reads differently with the sync off: rows drawn before
-    // this was known (the first load) or under the other setting draw again
-    if (wasOn !== state.sync_on && !(wasOn === null && state.sync_on)) loadSuppressions();
+    suppressionShowOff(!state.sync_on);
+    // Turned on since the list was last asked for (or not known then): it loads now
+    if (state.sync_on && wasOn === false) loadSuppressions();
     const settingsButton = `<button type="button" class="ui-btn ui-btn-sm" onclick="navigateTo('settings', { sub: 'spam_filter' })">Settings</button>`;
     if (!state.sync_on) {
-        note.innerHTML = `<div class="ui-list-note ui-flush">${uiLocked('Not synced with Rspamd',
-            "Sync with Rspamd is off. This list does not change what Rspamd blocks, and changes made in mailcow do not come into it.",
-            settingsButton)}</div>`;
+        note.innerHTML = '';
         return;
     }
     if (state.reason === 'section_unclear') {
@@ -505,6 +528,12 @@ async function loadSuppressions(page) {
     if (typeof mailcowRwConfigured !== 'undefined' && !mailcowRwConfigured) await fetchRwStatus();
     updateSuppressionSyncLock();
     loadSuppressionSyncNote();
+    if (suppressionRspamdState && !suppressionRspamdState.sync_on) {
+        // The app keeps no list while the sync is off: nothing to ask for (the
+        // note above loads the list once it is on)
+        suppressionListLoading = false;
+        return;
+    }
 
     try {
         const results = await Promise.all(Array.from({ length: pages }, (_, i) => fetchSuppressionPage(i + 1, query)));
@@ -607,9 +636,7 @@ function renderSuppressionItem(s) {
 
     // Fix #5: Show proper sync status based on active state
     let syncBadge = '<span class="ui-muted">-</span>';
-    if (suppressionRspamdState && !suppressionRspamdState.sync_on) {
-        syncBadge = '<span class="ui-muted" title="Sync with Rspamd is off">Off</span>';
-    } else if (s.active) {
+    if (s.active) {
         syncBadge = s.synced_to_rspamd
             ? '<span class="ui-text-ok" title="Synced to Rspamd">Synced</span>'
             : `<span class="ui-text-warn" title="${suppressionSyncLocked() ? 'Not synced: syncing to Rspamd needs the Read-Write API key' : 'Waiting to be written to Rspamd'}">⟳ Pending</span>`;
@@ -919,14 +946,14 @@ async function createSuppression() {
                 queue_id: suppressionFromQueue && suppressionFromQueue.email === String(email).toLowerCase() ? suppressionFromQueue.queueId : null })
         });
         
-        if (response.status === 409) {
-            showToast('This address is already suppressed', 'error');
-            return;
-        }
-        
         if (!response.ok) {
-            const err = await response.json();
-            throw new Error(err.detail || 'Failed to create suppression');
+            const err = await response.json().catch(() => ({}));
+            // A 409 is a duplicate, unless the server says the sync is off
+            if (response.status === 409 && !(err.detail && err.detail.code)) {
+                showToast('This address is already suppressed', 'error');
+                return;
+            }
+            throw new Error(suppressionErrorText(err, 'Failed to create suppression'));
         }
         
         showToast(`Suppression added: ${email}`, 'success');
@@ -1038,7 +1065,7 @@ async function saveEditSuppression(id) {
             body: JSON.stringify({ notes, expires_at: expiresAt })
         });
         
-        if (!response.ok) throw new Error('Failed to update');
+        if (!response.ok) throw await suppressionFailure(response, 'Failed to update');
         
         showToast('Suppression updated', 'success');
         document.getElementById('edit-suppression-modal')?.remove();
@@ -1058,7 +1085,7 @@ async function toggleSuppression(id, newActive) {
             body: JSON.stringify({ active: newActive })
         });
         
-        if (!response.ok) throw new Error('Failed to update');
+        if (!response.ok) throw await suppressionFailure(response, 'Failed to update');
         
         showToast(`Suppression ${newActive ? 'activated' : 'deactivated'}`, 'success');
         loadSuppressions();
@@ -1075,7 +1102,7 @@ async function deleteSuppression(id, email) {
     
     try {
         const response = await authenticatedFetch(`/api/suppressions/${id}`, { method: 'DELETE' });
-        if (!response.ok) throw new Error('Failed to delete');
+        if (!response.ok) throw await suppressionFailure(response, 'Failed to delete');
         
         showToast(`Suppression deleted: ${email}`, 'success');
         loadSuppressions();
@@ -1135,7 +1162,7 @@ async function importSuppressions(event) {
             body: formData
         });
         
-        if (!response.ok) throw new Error('Import failed');
+        if (!response.ok) throw await suppressionFailure(response, 'The file could not be imported');
         
         const result = await response.json();
         showToast(`Imported ${result.imported} suppressions (${result.skipped} skipped)`, 'success');

@@ -1527,13 +1527,21 @@ async function smartRefreshNetfilter() {
 
 // Smart refresh for Queue
 async function smartRefreshQueue() {
+    const id = ++queueAsked;
+    const kept = queueListKept();
     const response = await authenticatedFetch('/api/queue');
     if (!response.ok) return;
 
     const data = await response.json();
     await rwStatusReady;
+    const listKept = await kept;
+    if (!queueTakeTurn(id)) return;
+    const suppressChanged = listKept !== queueSuppressOn;
+    queueSuppressOn = listKept;
 
-    if (hasDataChanged(data, 'queue')) {
+    // Drawn also when a load still shows Loading: that older load's answer is dropped now
+    if (hasDataChanged(data, 'queue') || suppressChanged || queueLoading) {
+        queueLoading = false;
         console.log('[REFRESH] Queue data changed, updating UI');
         lastDataCache.queue = data;
         allQueueData = data.data || [];
@@ -2385,16 +2393,41 @@ async function loadFail2BanSettings() {
 // =============================================================================
 
 let allQueueData = [];
+// Suppress shows only while the app keeps a suppression list (Sync with Rspamd
+// on), read again with each load; unknown (an error, Spam Filter off) shows none
+let queueSuppressOn = false;
+// Loads and auto refreshes share one order: an answer older than the one
+// drawn is dropped, so neither undoes a newer one
+let queueAsked = 0;
+let queueApplied = 0;
+let queueLoading = false;  // the list shows Loading until an answer draws it
+
+function queueListKept() {
+    return authenticatedFetch('/api/suppressions/config')
+        .then(r => (r.ok ? r.json() : null))
+        .then(config => !!(config && config.list_kept === true))
+        .catch(() => false);
+}
+
+// Whether the answer of request id may be drawn (no newer one was); takes its turn
+function queueTakeTurn(id) {
+    if (id < queueApplied) return false;
+    queueApplied = id;
+    return true;
+}
 
 async function loadQueue() {
     const container = document.getElementById('queue-logs');
     uiFilterBarSync();
+    const id = ++queueAsked;
 
     try {
         container.innerHTML = '<div class="ui-loading"><div class="loading"></div><p>Loading...</p></div>';
+        queueLoading = true;
 
         console.log('Loading Queue...');
 
+        const kept = queueListKept();
         const response = await authenticatedFetch('/api/queue');
         if (!response.ok) {
             throw await responseError(response);
@@ -2403,11 +2436,17 @@ async function loadQueue() {
         const data = await response.json();
         console.log('Queue data:', data);
         await rwStatusReady;
+        const listKept = await kept;
+        if (!queueTakeTurn(id)) return;
 
+        queueLoading = false;
+        queueSuppressOn = listKept;
         allQueueData = data.data || [];
         updateQueueSummary();
         applyQueueFilters();
     } catch (error) {
+        if (!queueTakeTurn(id)) return;
+        queueLoading = false;
         console.error('Failed to load queue:', error);
         document.getElementById('queue-logs').innerHTML = `<p class="ui-empty ui-text-fail">Failed to load queue: ${escapeHtml(error.message)}</p>`;
         const countEl = document.getElementById('queue-count');
@@ -2503,7 +2542,7 @@ function applyQueueFilters() {
                 });
                 const responses = recipients.filter(r => r.response);
                 const queued = new Date(item.arrival_time * 1000).toISOString();
-                const suppress = recipients.length === 1
+                const suppress = !queueSuppressOn ? '' : recipients.length === 1
                     ? `<button onclick="showAddSuppressionModal('${escapeJsArg(recipients[0].email)}', '${escapeJsArg(qid)}')" title="Suppress ${escapeHtml(recipients[0].email)}" class="ui-btn ui-btn-sm">Suppress</button>`
                     : uiMenu('Suppress', recipients.map(r => `<button type="button" role="menuitem" onclick="showAddSuppressionModal('${escapeJsArg(r.email)}', '${escapeJsArg(qid)}')">${escapeHtml(r.email)}</button>`).join(''));
                 return `
@@ -4671,7 +4710,7 @@ function statusJobCategories(jobs) {
             icon: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z"></path>',
             jobs: [
                 ['Detect Suppressions', 'detect_suppressions', jobs.detect_suppressions],
-                ['Sync to Rspamd', 'sync_suppressions', jobs.sync_suppressions],
+                ['Sync with Rspamd', 'sync_suppressions', jobs.sync_suppressions],
                 ['Expire Suppressions', 'expire_suppressions', jobs.expire_suppressions],
                 ['Cleanup Deferred Queue', 'cleanup_deferred_queue', jobs.cleanup_deferred_queue]
             ]
