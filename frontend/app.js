@@ -125,9 +125,13 @@ async function responseError(response) {
 // triggered by any other site.
 async function handleLogout() {
     // Changes not saved yet: ask now, while Stay still leaves a working session
-    if (typeof uiConfirmLeave === 'function' && !(await uiConfirmLeave())) return;
+    if (typeof uiConfirmLeave === 'function' && !(await uiConfirmLeave(undefined, { keep: true }))) return;
     try {
-        await authenticatedFetch('/api/auth/logout', { method: 'POST' });
+        const response = await authenticatedFetch('/api/auth/logout', { method: 'POST' });
+        if (!response.ok) {
+            showToast('Could not sign out. Try again in a moment.', 'error');
+            return;
+        }
     } catch (e) {
         // A 401 means the session is already gone; authenticatedFetch has
         // sent the browser to the login page. Otherwise nothing changed, and

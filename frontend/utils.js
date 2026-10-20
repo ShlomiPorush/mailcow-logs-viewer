@@ -895,7 +895,8 @@ function uiUnsavedCount(target) {
     return n;
 }
 let uiUnsavedAsking = null;   // the open question, so one move asks once
-function uiConfirmLeave(target) {
+// keep: Leave does not drop the changes yet (signing out drops them only once it worked)
+function uiConfirmLeave(target, { keep = false } = {}) {
     const n = uiUnsavedCount(target);
     if (!n) return Promise.resolve(true);
     if (uiUnsavedAsking) return uiUnsavedAsking;
@@ -905,7 +906,7 @@ function uiConfirmLeave(target) {
         message: `You have ${changes}. Leaving drops ${n === 1 ? 'it' : 'them'}.`,
         confirmText: 'Leave', cancelText: 'Stay', isDangerous: true, focusCancel: true, noHistory: true,
     }).then(leave => {
-        if (leave) uiUnsavedDrop(target);
+        if (leave && !keep) uiUnsavedDrop(target);
         return leave;
     }).finally(() => { uiUnsavedAsking = null; });
     return uiUnsavedAsking;

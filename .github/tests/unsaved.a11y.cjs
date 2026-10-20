@@ -154,6 +154,17 @@ test('the question asked during Back writes no history entry of its own', async 
     w.document.getElementById('app-confirm-cancel').click();
 });
 
+test('signing out keeps the changes until the sign-out worked', async () => {
+    const w = app();
+    let dropped = 0;
+    w.uiUnsavedRegister('form', { count: () => 1, drop: () => { dropped++; } });
+    const leaving = w.uiConfirmLeave(undefined, { keep: true });
+    await answer(w, true);
+    assert.equal(await leaving, true);
+    assert.equal(dropped, 0, 'nothing dropped yet');
+    assert.equal(w.uiUnsavedCount(), 1, 'still guarded, should the sign-out fail');
+});
+
 test('closing the browser tab with unsaved changes asks through the browser', () => {
     const w = app();
     const quiet = new w.Event('beforeunload', { cancelable: true });
