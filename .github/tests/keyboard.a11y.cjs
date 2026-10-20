@@ -205,6 +205,10 @@ test('selecting text in a row leaves it closed; a plain click, a control inside 
     assert.equal(w.opened, 2, 'dragging over the same text again opens nothing');
     gesture(cell, 20, 20, 2);
     assert.equal(w.opened, 2, 'a double click that selects a word opens nothing more');
+    select(cell);
+    cell.dispatchEvent(new w.MouseEvent('mousedown', { bubbles: true, clientX: 40, clientY: 5, detail: 1, shiftKey: true }));
+    cell.dispatchEvent(new w.MouseEvent('click', { bubbles: true, cancelable: true, clientX: 40, clientY: 5, detail: 1, shiftKey: true }));
+    assert.equal(w.opened, 2, 'Shift+click that extends a selection in the row opens nothing');
     gesture(d.getElementById('inner'), 30, 90);
     assert.equal(w.pressed, 1, 'a button inside keeps its click');
     select(d.getElementById('subject'));
@@ -217,16 +221,29 @@ test('selecting text in a row leaves it closed; a plain click, a control inside 
     assert.equal(w.opened, 3, 'a selection outside the row does not hold it');
 });
 
-test('every row that opens on click asks uiRowHeld first', () => {
+test('every element that is not a control and opens on click asks uiRowHeld first', () => {
     const dir = path.join(__dirname, '../../frontend');
-    const rows = /data-row-open|class="(?:ui-tr|is-go)\b|ui-dm-mrow|ui-sec-card/;
+    const files = fs.readdirSync(dir).filter(f => f.endsWith('.js') || f.endsWith('.html'))
+        .map(f => ({ f, text: fs.readFileSync(path.join(dir, f), 'utf8') }));
+    const all = files.map(x => x.text).join('\n');
+    // Helpers a row hands its click to must ask too
+    const asks = name => {
+        const at = all.indexOf(`function ${name}(`);
+        return at >= 0 && all.slice(at, all.indexOf('\n}', at)).includes('uiRowHeld(event)');
+    };
+    // Handlers that only keep the click inside, or close a backdrop clicked itself, open nothing
+    const inert = /^(?:event\.stopPropagation\(\)|if \(event\.target === this\) \w+\(\)|if \(event\.target\.closest\('button'\)\) this\.hidePopover\(\))$/;
+    // Not rows: a Settings choice card is the control that picks, and a sheet's backdrop holds no text
+    const notRows = /^(?:settingsPickCard|uiSheetDismiss)\(/;
     const missing = [];
-    for (const file of fs.readdirSync(dir).filter(f => f.endsWith('.js'))) {
-        const lines = fs.readFileSync(path.join(dir, file), 'utf8').split('\n');
-        lines.forEach((line, i) => {
-            const opener = rows.test(line) ? line : rows.test(lines[i - 1] || '') && /^\s*onclick=/.test(line) ? line : '';
-            if (/onclick="/.test(opener) && !/uiRowHeld|RowClick\(event/.test(opener)) missing.push(`${file}:${i + 1}`);
-        });
+    for (const { f, text } of files) {
+        for (const m of text.matchAll(/<(div|tr|td|li|article|section|span)\b([^<>]*?)\bonclick="([^"]*)"/g)) {
+            const handler = m[3].trim();
+            if (/\bcopyable\b/.test(m[2]) || inert.test(handler) || notRows.test(handler) || handler.startsWith('if (!uiRowHeld(event))')) continue;
+            const helper = handler.match(/(\w+)\(event\b/);
+            if (helper && asks(helper[1])) continue;
+            missing.push(`${f}:${text.slice(0, m.index).split('\n').length} ${handler.slice(0, 60)}`);
+        }
     }
     assert.deepEqual(missing, []);
 });
