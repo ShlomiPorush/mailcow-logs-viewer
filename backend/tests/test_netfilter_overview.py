@@ -226,6 +226,11 @@ def test_the_policy_keeps_the_lists_read_right_before_writing(client, monkeypatc
     assert saved == {}
 
 
+async def _banned():
+    """mailcow's Fail2ban answer with 198.51.100.7 banned on its own."""
+    return {'active_bans': [{'network': '198.51.100.7/32', 'ip': '198.51.100.7'}]}
+
+
 def test_unban_is_the_edit_mailcow_takes(client, monkeypatch):
     """mailcow has no delete/fail2ban; an unban is edit/fail2ban with action unban
     and the networks as items, which mailcow handles before touching any setting."""
@@ -236,6 +241,7 @@ def test_unban_is_the_edit_mailcow_takes(client, monkeypatch):
         calls.append((endpoint, kwargs.get('json')))
         return [{'type': 'success', 'msg': ['object_modified', '198.51.100.7/32']}]
 
+    monkeypatch.setattr(mailcow_api, 'get_fail2ban', _banned)
     monkeypatch.setattr(mailcow_api, '_make_rw_request', fake_rw)
     assert client.post('/api/fail2ban/unban', json={'ip': '198.51.100.7'}).json()['status'] == 'success'
     assert calls == [('/api/v1/edit/fail2ban', {'items': ['198.51.100.7/32'], 'attr': {'action': 'unban'}})]
@@ -247,6 +253,7 @@ def test_an_unban_mailcow_refuses_says_so(client, monkeypatch):
     async def refused(ip):
         raise MailcowAPIError('RW API request failed with status 404')
 
+    monkeypatch.setattr(mailcow_api, 'get_fail2ban', _banned)
     monkeypatch.setattr(mailcow_api, 'unban_fail2ban', refused)
     res = client.post('/api/fail2ban/unban', json={'ip': '198.51.100.7'})
     assert res.status_code == 502 and 'unban' in res.json()['detail']

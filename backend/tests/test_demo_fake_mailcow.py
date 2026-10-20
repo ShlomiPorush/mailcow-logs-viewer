@@ -156,11 +156,11 @@ def test_fail2ban_ban_allow_and_unban(api):
         assert result[0]["type"] == "success"
         f2b = await client.get_fail2ban()
         assert {"network": "192.0.2.201/32", "ip": "192.0.2.201"} in f2b["perm_bans"]
-        result = await client.unban_fail2ban("203.0.113.5")
+        result = await client.unban_fail2ban(["203.0.113.5/32"])
         assert result[0]["type"] == "success"
         assert "203.0.113.5" not in {b["ip"] for b in (await client.get_fail2ban())["active_bans"]}
         # Like mailcow, an unban of an address that is not banned is still accepted
-        result = await client.unban_fail2ban("203.0.113.5")
+        result = await client.unban_fail2ban(["203.0.113.5/32"])
         assert result[0]["type"] == "success"
 
     run(flow())

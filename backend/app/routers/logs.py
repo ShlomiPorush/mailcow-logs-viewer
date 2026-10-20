@@ -1,6 +1,7 @@
 """
 API endpoints for log retrieval and search
 """
+import ipaddress
 import logging
 from fastapi import APIRouter, Depends, Query, HTTPException, Request
 from starlette.concurrency import run_in_threadpool
@@ -730,8 +731,9 @@ async def edit_fail2ban(request: Request):
     try:
         body = await request.json()
         attrs = body.get("attr", body)
-        
-        result = await mailcow_api.edit_fail2ban(attrs)
+
+        async with protection_rules.fail2ban_lock:
+            result = await mailcow_api.edit_fail2ban(attrs)
         
         # mailcow returns a list with status objects
         if isinstance(result, list) and len(result) > 0:
@@ -780,14 +782,15 @@ async def edit_fail2ban_policy(request: Request):
             raise HTTPException(status_code=400, detail="The longest ban cannot be shorter than the first ban")
         policy["ban_time_increment"] = "1" if body.get("ban_time_increment") in (True, 1, "1") else "0"
 
-        current = await mailcow_api.get_fail2ban()
-        if current is None:
-            raise HTTPException(status_code=503, detail="Could not fetch current Fail2Ban settings")
-        attrs = {**policy,
-                 "blacklist": ",".join(_split_ip_list(current.get("blacklist", ""))),
-                 "whitelist": ",".join(_split_ip_list(current.get("whitelist", ""))),
-                 "manage_external": _manage_external(current)}
-        result = await mailcow_api.edit_fail2ban(attrs)
+        async with protection_rules.fail2ban_lock:
+            current = await mailcow_api.get_fail2ban()
+            if current is None:
+                raise HTTPException(status_code=503, detail="Could not fetch current Fail2Ban settings")
+            attrs = {**policy,
+                     "blacklist": ",".join(_split_ip_list(current.get("blacklist", ""))),
+                     "whitelist": ",".join(_split_ip_list(current.get("whitelist", ""))),
+                     "manage_external": _manage_external(current)}
+            result = await mailcow_api.edit_fail2ban(attrs)
         if isinstance(result, list) and result and result[0].get("type") != "success":
             return {"status": "error", "msg": result[0].get("msg", "Update failed")}
         logger.info("Fail2ban policy changed: %s", policy)
@@ -809,17 +812,26 @@ async def unban_fail2ban(request: Request):
         if not ip:
             raise HTTPException(status_code=400, detail="Missing 'ip' field")
         
-        result = await mailcow_api.unban_fail2ban(ip)
+        current = await mailcow_api.get_fail2ban()
+        if current is None:
+            raise HTTPException(status_code=503, detail="Could not fetch current Fail2Ban settings")
+        # mailcow answers success to any unban and its netfilter skips one it has no
+        # ban for, so only an address Fail2ban banned now is sent, as the ban it is
+        networks = _bans_covering(ip, current.get("active_bans"))
+        if not networks:
+            if any(_same_entry(entry, ip) for entry in _split_ip_list(current.get("blacklist", ""))):
+                return {"status": "error", "msg": f"{security_addresses._bare(ip)} is on the denylist. Remove it from the denylist to lift the ban."}
+            return {"status": "error", "msg": f"{security_addresses._bare(ip)} is not banned by Fail2ban now"}
+
+        result = await mailcow_api.unban_fail2ban(networks)
         
         # mailcow returns a list with status objects
         if isinstance(result, list) and len(result) > 0:
             first = result[0]
-            if first.get("type") == "success":
-                return {"status": "success", "msg": first.get("msg", f"IP {ip} unbanned")}
-            else:
+            if first.get("type") != "success":
                 return {"status": "error", "msg": first.get("msg", "Unban failed")}
         
-        return {"status": "success", "msg": f"IP {ip} unbanned", "raw": result}
+        return {"status": "success", "msg": f"{', '.join(networks)} unbanned", "networks": networks}
         
     except HTTPException:
         raise
@@ -828,6 +840,25 @@ async def unban_fail2ban(request: Request):
         if isinstance(e, MailcowRwKeyError):
             raise internal_error(e)
         raise HTTPException(status_code=502, detail="mailcow did not accept the unban. Check the Read-Write API key and try again.")
+
+
+def _bans_covering(ip: str, active_bans) -> List[str]:
+    """The Fail2ban bans that hold the address, by the network mailcow keys them
+    with: with netban_ipv4 24, 198.51.100.7 is banned as 198.51.100.0/24."""
+    try:
+        target = ipaddress.ip_network(ip.strip(), strict=False)
+    except ValueError:
+        return []
+    networks = []
+    for ban in active_bans or []:
+        key = ban.get("network") if isinstance(ban, dict) else None
+        try:
+            net = ipaddress.ip_network(key or "", strict=False)
+        except ValueError:
+            continue
+        if net.version == target.version and target.subnet_of(net) and key not in networks:
+            networks.append(key)
+    return networks
 
 
 def _split_ip_list(value) -> List[str]:
@@ -842,14 +873,23 @@ def _manage_external(current: dict) -> str:
 
 def _same_entry(a: str, b: str) -> bool:
     """1.2.3.4 and 1.2.3.4/32 (or 2001:db8::1 and 2001:db8::1/128) are the same list
-    entry; an IPv6 address with /32 is a whole network."""
-    return security_addresses._bare(a) == security_addresses._bare(b)
+    entry; an IPv6 address with /32 is a whole network. Entries are compared as the
+    networks mailcow reads them; a hostname by its text."""
+    try:
+        return ipaddress.ip_network(a.strip(), strict=False) == ipaddress.ip_network(b.strip(), strict=False)
+    except ValueError:
+        return security_addresses._bare(a) == security_addresses._bare(b)
 
 
 async def _add_to_fail2ban_list(ip: str, list_name: str, remove: bool = False) -> dict:
     """Add an address to the Fail2ban blacklist or whitelist, or remove it, keeping every
     other setting. The lists are read fresh right before writing, so a change made in
     mailcow meanwhile is not overwritten."""
+    async with protection_rules.fail2ban_lock:
+        return await _change_fail2ban_list(ip, list_name, remove)
+
+
+async def _change_fail2ban_list(ip: str, list_name: str, remove: bool) -> dict:
     current = await mailcow_api.get_fail2ban()
     if current is None:
         raise HTTPException(status_code=503, detail="Could not fetch current Fail2Ban settings")
@@ -861,8 +901,8 @@ async def _add_to_fail2ban_list(ip: str, list_name: str, remove: bool = False) -
         if len(kept) == len(lists[list_name]):
             return {"status": "success", "msg": f"IP {ip} is not in the {label}"}
         lists[list_name] = kept
-    elif ip in lists[list_name]:
-        return {"status": "success", "msg": f"IP {ip} is already in the {label}"}
+    elif any(_same_entry(entry, ip) for entry in lists[list_name]):
+        return {"status": "success", "msg": f"IP {ip} is already in the {label}", "already": True}
     else:
         lists[list_name].append(ip)
 
@@ -968,23 +1008,24 @@ async def repair_fail2ban_entry(request: Request):
             raise HTTPException(status_code=400, detail=f"{entry} is not a single address written as a /32 network")
         single = f"{address}/128"
 
-        current = await mailcow_api.get_fail2ban()
-        if current is None:
-            raise HTTPException(status_code=503, detail="Could not fetch current Fail2Ban settings")
-        lists = {name: _split_ip_list(current.get(name, "")) for name in ("blacklist", "whitelist")}
-        if entry not in lists[list_name]:
-            return {"status": "error", "msg": f"{entry} is no longer on the list"}
-        # The address takes the old entry's place, once if the list holds it already
-        lists[list_name] = list(dict.fromkeys(single if e == entry else e for e in lists[list_name]))
+        async with protection_rules.fail2ban_lock:
+            current = await mailcow_api.get_fail2ban()
+            if current is None:
+                raise HTTPException(status_code=503, detail="Could not fetch current Fail2Ban settings")
+            lists = {name: _split_ip_list(current.get(name, "")) for name in ("blacklist", "whitelist")}
+            if entry not in lists[list_name]:
+                return {"status": "error", "msg": f"{entry} is no longer on the list"}
+            # The address takes the old entry's place, once if the list holds it already
+            lists[list_name] = list(dict.fromkeys(single if e == entry else e for e in lists[list_name]))
 
-        logger.info(f"Replacing {entry} with {single} on the Fail2Ban {list_name}")
-        result = await mailcow_api.edit_fail2ban(
-            protection_rules.fail2ban_attrs(current, lists["blacklist"], lists["whitelist"]))
-        failed = [m for m in result if isinstance(m, dict) and m.get("type") != "success"] if isinstance(result, list) else []
-        if failed:
-            return {"status": "error", "msg": failed[0].get("msg", "Update failed")}
+            logger.info(f"Replacing {entry} with {single} on the Fail2Ban {list_name}")
+            result = await mailcow_api.edit_fail2ban(
+                protection_rules.fail2ban_attrs(current, lists["blacklist"], lists["whitelist"]))
+            failed = [m for m in result if isinstance(m, dict) and m.get("type") != "success"] if isinstance(result, list) else []
+            if failed:
+                return {"status": "error", "msg": failed[0].get("msg", "Update failed")}
 
-        after = await mailcow_api.get_fail2ban()
+            after = await mailcow_api.get_fail2ban()
         written = _split_ip_list((after or {}).get(list_name, ""))
         if after is None or entry in written or single not in written:
             return {"status": "error", "msg": "mailcow took the change, but the list did not show it when checked. Refresh to see what it holds."}

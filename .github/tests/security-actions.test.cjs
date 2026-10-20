@@ -172,3 +172,43 @@ test('the Outgoing spam card and its setting do not say IMAP is never affected',
     assert.doesNotMatch(tab, /IMAP is never affected|Abuse Protection/);
     assert.match(tab, /Security → Settings → Outgoing spam/);
 });
+
+test('Unban names and drops the network Fail2ban banned around the address', async () => {
+    const context = load();
+    const { sent, asked } = recordRequests(context);
+    const toasts = [];
+    context.showToast = (message, kind) => toasts.push([message, kind]);
+    context.authenticatedFetch = async (url, options = {}) => {
+        sent.push([url, JSON.parse(options.body)]);
+        return { ok: true, json: async () => ({ status: 'success', networks: ['198.51.100.0/24'] }) };
+    };
+    vm.runInContext(`mailcowRwConfigured = true; fail2banActiveBans = [
+        { network: '198.51.100.0/24', ip: '198.51.100.0', banned_until: '00h 20m 00s', queued_for_unban: 0 },
+        { network: '203.0.113.5/32', ip: '203.0.113.5', banned_until: '00h 20m 00s', queued_for_unban: 0 }]`, context);
+    // The Security page row of a network ban unbans, and names, the network
+    const { acts } = context.securityDescribe(address({ ip: '198.51.100.0', state: 'banned',
+        f2b: { network: '198.51.100.0/24', ip: '198.51.100.0', banned_until: '00h 20m 00s', queued_for_unban: 0 } }));
+    assert.match(acts, /unbanIP\('198\.51\.100\.0\/24'/);
+    assert.match(acts, /title="Unban 198\.51\.100\.0\/24"/);
+    // The Events list unbans the address that tried; the answer says what was lifted
+    await context.unbanIP('198.51.100.7');
+    assert.deepEqual(sent, [['/api/fail2ban/unban', { ip: '198.51.100.7/32' }]]);
+    assert.doesNotMatch(asked[0], /\/32/);
+    assert.deepEqual(toasts, [['198.51.100.0/24 unbanned successfully', 'success']]);
+    assert.equal(vm.runInContext('JSON.stringify(fail2banActiveBans.map(b => b.network))', context), '["203.0.113.5/32"]');
+});
+
+test('Ban and Allow say so when the address is already on the list', async () => {
+    const context = load();
+    recordRequests(context);
+    const toasts = [];
+    context.showToast = message => toasts.push(message);
+    context.authenticatedFetch = async (url, options = {}) => {
+        const label = url.endsWith('/allow') ? 'allowlist' : 'blacklist';
+        const msg = `IP ${JSON.parse(options.body).ip} is already in the ${label}`;
+        return { ok: true, json: async () => ({ status: 'success', msg, already: true }) };
+    };
+    await context.banIP('198.51.100.7');
+    await context.allowIP('192.0.2.10');
+    assert.deepEqual(toasts, ['IP 198.51.100.7/32 is already in the blacklist', 'IP 192.0.2.10/32 is already in the allowlist']);
+});

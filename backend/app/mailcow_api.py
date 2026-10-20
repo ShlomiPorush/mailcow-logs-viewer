@@ -1394,12 +1394,12 @@ class MailcowAPI:
         _forget_security_addresses()
         return data
 
-    async def unban_fail2ban(self, ip: str) -> Dict[str, Any]:
+    async def unban_fail2ban(self, networks: List[str]) -> Dict[str, Any]:
         """
-        Unban an IP address in Fail2Ban on mailcow using the Read-Write API key.
+        Unban networks in Fail2Ban on mailcow using the Read-Write API key.
         
         Args:
-            ip: IP address to unban
+            networks: the bans to lift, as mailcow keys them in its active bans
         
         Returns:
             Response from mailcow API
@@ -1407,12 +1407,11 @@ class MailcowAPI:
         Raises:
             MailcowAPIError: If request fails or RW key is not configured
         """
-        logger.info(f"Unbanning IP {ip} from Fail2Ban")
+        logger.info(f"Unbanning {', '.join(networks)} from Fail2Ban")
         # mailcow has no delete/fail2ban: an unban is an edit with action "unban"
         # and the networks as items. mailcow handles it before its settings code,
         # so nothing else is sent or changed.
-        network = ip if "/" in ip else f"{ip}/128" if ":" in ip else f"{ip}/32"
-        payload = {"items": [network], "attr": {"action": "unban"}}
+        payload = {"items": list(networks), "attr": {"action": "unban"}}
         data = await self._make_rw_request(
             "/api/v1/edit/fail2ban",
             method="POST",

@@ -1302,7 +1302,7 @@ function renderNetfilterData(data) {
                     <span>${uiActionTag(log.action)}</span>
                     <span class="ui-ev-where" title="${escapeHtml(place + org)}">${flagUrl ? `<img src="${flagUrl}" alt="" width="16" height="12" onerror="this.style.display='none'">` : ''}${escapeHtml(place || '-')}</span>
                     <span class="ui-st-acts">
-                        ${showUnban ? `<button onclick="unbanIP('${escapeJsArg(log.ip)}', this)" class="ui-btn ui-btn-sm" title="Unban ${escapeHtml(fail2banEntry(log.ip))}">Unban</button>` : ''}
+                        ${showUnban ? `<button onclick="unbanIP('${escapeJsArg(log.ip)}', this)" class="ui-btn ui-btn-sm" title="Unban ${escapeHtml(log.ip)}">Unban</button>` : ''}
                         ${showBan ? `<button onclick="banIP('${escapeJsArg(log.ip)}', this)" class="ui-btn ui-btn-sm ui-btn-danger" title="Put ${escapeHtml(fail2banEntry(log.ip))} on the denylist; it stays until removed">Ban permanently</button>` : ''}
                         <button type="button" class="ui-icon-btn ui-icon-btn-sm ui-ev-toggle" aria-expanded="false" aria-controls="ev-detail-${index}" title="Show the log line" onclick="toggleEventDetail(this)"><svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg></button>
                     </span>
@@ -1338,7 +1338,7 @@ function fail2banBare(entry) {
 
 async function unbanIP(ip, btnEl) {
     const ipWithMask = fail2banEntry(ip);
-    if (!await showConfirmModal({ title: 'Unban IP', message: 'Unban IP ' + ipWithMask + '?', confirmText: 'Unban' })) return;
+    if (!await showConfirmModal({ title: 'Unban IP', message: 'Unban ' + ip + '?', confirmText: 'Unban' })) return;
     try {
         if (btnEl) {
             btnEl.disabled = true;
@@ -1351,10 +1351,12 @@ async function unbanIP(ip, btnEl) {
         });
         const result = await res.json();
         if (res.ok && result.status === 'success') {
-            showToast('IP ' + ip + ' unbanned successfully', 'success');
+            // Fail2ban may have banned the whole network around the address: name what was lifted
+            const lifted = result.networks || [ipWithMask];
+            showToast(lifted.map(fail2banBare).join(', ') + ' unbanned successfully', 'success');
             // mailcow queues the unban and lifts it a few seconds later: the address
             // leaves the lists now, and Fail2ban is asked again once it has acted
-            if (fail2banActiveBans) fail2banActiveBans = fail2banActiveBans.filter(b => fail2banBare(b.ip || b.network) !== fail2banBare(ip));
+            if (fail2banActiveBans) fail2banActiveBans = fail2banActiveBans.filter(b => !lifted.includes(b.network) && fail2banBare(b.ip || b.network) !== fail2banBare(ip));
             renderSecurityOverview();
             refreshSecurityAddresses();
             setTimeout(() => { fail2banSettingsLoaded = false; loadFail2BanSettings(); }, 5000);
@@ -1394,7 +1396,7 @@ async function banIP(ip, btnEl) {
         const result = await response.json();
 
         if (result.status === 'success') {
-            showToast(`IP ${ip} added to blacklist`, 'success');
+            showToast(result.already ? result.msg : `IP ${ip} added to blacklist`, 'success');
             // Refresh fail2ban data and netfilter logs
             fail2banSettingsLoaded = false;
             fail2banActiveBans = null;
@@ -1432,7 +1434,7 @@ async function allowIP(ip, btnEl) {
         });
         const result = await res.json();
         if (res.ok && result.status === 'success') {
-            showToast(`IP ${ip} added to the allowlist`, 'success');
+            showToast(result.already ? result.msg : `IP ${ip} added to the allowlist`, 'success');
             fail2banSettingsLoaded = false;
             fail2banActiveBans = null;
             loadFail2BanSettings();

@@ -36,6 +36,7 @@ can be managed on the Security page even when editing settings from the UI is
 off. Reading moves forward by log id, so a restart never reads a line twice
 and a rule switched on later never reaches back into lines already read.
 """
+import asyncio
 import copy
 import ipaddress
 import json
@@ -639,6 +640,12 @@ def split_ip_list(value) -> List[str]:
     return [e.strip() for e in (value or "").replace("\n", ",").split(",") if e.strip()]
 
 
+# mailcow's Fail2ban edit replaces both lists and every setting, so each change
+# reads them fresh and writes them back holding this lock: two changes at once
+# would otherwise undo each other. Every caller runs on the app's one event loop.
+fail2ban_lock = asyncio.Lock()
+
+
 def fail2ban_attrs(current: dict, blacklist: List[str], whitelist: List[str]) -> dict:
     """Every Fail2ban setting mailcow expects on an edit, with the given lists."""
     bti = current.get("ban_time_increment", 1)
@@ -712,6 +719,11 @@ async def enforce(mailcow_api, now: Optional[datetime] = None) -> Dict[str, list
     Returns {'banned': [...], 'lifted': [...], 'failed': [...]} as (target, rule, reason, notify) tuples
     for the caller to notify about.
     """
+    async with fail2ban_lock:
+        return await _enforce(mailcow_api, now)
+
+
+async def _enforce(mailcow_api, now: Optional[datetime]) -> Dict[str, list]:
     from ..database import get_db_context
     now = now or datetime.utcnow()
     with get_db_context() as db:
@@ -797,6 +809,11 @@ async def enforce(mailcow_api, now: Optional[datetime] = None) -> Dict[str, list
 
 async def undo(mailcow_api, hit_id: int) -> Optional[ProtectionHit]:
     """Lift a ban (or cancel a pending one) and leave the address alone for a week."""
+    async with fail2ban_lock:
+        return await _undo(mailcow_api, hit_id)
+
+
+async def _undo(mailcow_api, hit_id: int) -> Optional[ProtectionHit]:
     from ..database import get_db_context
     now = datetime.utcnow()
     with get_db_context() as db:

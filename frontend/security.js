@@ -316,7 +316,7 @@ function securityDescribe(a) {
         return {
             tag: `${uiTag('Banned', 'fail')}<span class="ui-sec-by">by Fail2ban</span>`,
             why: `${tries}<b>${a.f2b.banned_until ? `${escapeHtml(a.f2b.banned_until)} left` : 'Banned now'}</b>, then Fail2ban lets it try again.${a.f2b.queued_for_unban ? ' Unbanning...' : ''}`,
-            acts: rw && !a.f2b.queued_for_unban ? `<button ${B} onclick="unbanIP('${ipArg}', this)" title="Unban ${escapeHtml(fail2banEntry(a.ip))}">Unban</button>
+            acts: rw && !a.f2b.queued_for_unban ? `<button ${B} onclick="unbanIP('${escapeJsArg(fail2banBare(a.f2b.network || a.ip))}', this)" title="Unban ${escapeHtml(fail2banBare(a.f2b.network || a.ip))}">Unban</button>
                 <button type="button" class="ui-btn ui-btn-sm ui-btn-danger" onclick="banIP('${ipArg}', this)" title="Put it on the denylist">Ban permanently</button>` : ''
         };
     }
