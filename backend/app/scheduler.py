@@ -14,7 +14,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 from apscheduler.triggers.cron import CronTrigger
 from sqlalchemy.orm import Session
-from sqlalchemy import desc, or_
+from sqlalchemy import desc, or_, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 
@@ -23,7 +23,7 @@ from .config import settings, set_cached_active_domains
 from .database import get_db_context, SessionLocal
 from .mailcow_api import mailcow_api, mailcow_handled_items
 from .services.suppression_events import record_bounces, record_stuck
-from .models import EasDevice, PostfixLog, RspamdLog, NetfilterLog, MessageCorrelation, DMARCSync, DomainDNSCheck, MailboxStatistics, AliasStatistics, MonitoredHost, BlacklistCheck, DMARCReport, DMARCRecord, TLSReport, TLSReportPolicy, SpamSuppression, RawServiceLog, SystemSetting
+from .models import EasDevice, PostfixLog, RspamdLog, NetfilterLog, MessageCorrelation, DMARCSync, DomainDNSCheck, MailboxStatistics, AliasStatistics, MonitoredHost, BlacklistCheck, DMARCReport, DMARCRecord, TLSReport, TLSReportPolicy, SpamSuppression, SuppressionEvent, RawServiceLog, SystemSetting
 from .correlation import (
     detect_direction,
     ensure_leg,
@@ -3351,6 +3351,10 @@ async def send_weekly_summary_email_job():
         logger.error(f"Weekly summary job failed: {e}")
         update_job_status('send_weekly_summary', 'failed', str(e))
 
+# PostgreSQL advisory lock key held while stuck messages are stored
+DEFERRED_STORE_LOCK = 0x4D4C5601
+
+
 def _store_deferred_suppressions_worker(recipients_to_suppress):
     """Persist deferred recipients within a worker-owned database session.
 
@@ -3358,27 +3362,50 @@ def _store_deferred_suppressions_worker(recipients_to_suppress):
     and the queue item it came from (queue_id, sender, arrived, reason), which
     is kept as the block's details. An address counts once per run, however
     many of its messages were stuck; each message is kept as its own event.
+
+    Runs before the messages are deleted, and again for the same messages when
+    that deletion failed: a message already kept for the address (same queue
+    id and arrival time) is not counted again. Returns the addresses counted.
     """
     items = [r if isinstance(r, dict) else {'email': r} for r in recipients_to_suppress]
     by_email = {}
+    seen = set()
     for item in items:
+        key = (item['email'], item.get('queue_id'), item.get('arrived'))
+        if item.get('queue_id') and key in seen:
+            continue  # the same recipient listed twice in one message
+        seen.add(key)
         by_email.setdefault(item['email'], []).append(item)
-    unique_recipients = list(by_email)
     suppress_count = 0
     captured = []
-    note = f'Deferred in queue > {settings.queue_cleanup_threshold_minutes}m - auto-cleaned'
+    note = f'Deferred in queue > {settings.queue_cleanup_threshold_minutes}m'
 
     with get_db_context() as db:
-        for email in unique_recipients:
-            existing = db.query(SpamSuppression).filter(
-                SpamSuppression.email == email
-            ).first()
+        # One run stores at a time, so two cannot both find a message not yet kept
+        db.execute(text('SELECT pg_advisory_xact_lock(:key)'), {'key': DEFERRED_STORE_LOCK})
+        existing_by_email = {s.email: s for s in db.query(SpamSuppression).filter(
+            SpamSuppression.email.in_(list(by_email))).all()}
+        kept = set()
+        queue_ids = {item['queue_id'] for group in by_email.values() for item in group if item.get('queue_id')}
+        if existing_by_email and queue_ids:
+            kept = {(e.suppression_id, e.queue_id, e.message_time) for e in db.query(
+                SuppressionEvent.suppression_id, SuppressionEvent.queue_id, SuppressionEvent.message_time).filter(
+                SuppressionEvent.suppression_id.in_([s.id for s in existing_by_email.values()]),
+                SuppressionEvent.kind == 'deferred_stuck',
+                SuppressionEvent.queue_id.in_(queue_ids)).all()}
 
+        for email, group in by_email.items():
+            existing = existing_by_email.get(email)
+            if existing and kept:
+                group = [item for item in group
+                         if not item.get('queue_id') or (existing.id, item['queue_id'], item.get('arrived')) not in kept]
+                if not group:
+                    continue  # every message of it was kept by an earlier run
             if existing:
                 existing.bounce_count = (existing.bounce_count or 0) + 1
                 existing.soft_bounce_count = (existing.soft_bounce_count or 0) + 1
                 existing.reason = 'deferred_stuck'
-                existing.last_bounce_message = f'Deferred in queue > {settings.queue_cleanup_threshold_minutes}m - auto-cleaned'
+                existing.last_bounce_message = note
                 existing.updated_at = datetime.utcnow()
 
                 outcome = 'extended'
@@ -3404,7 +3431,7 @@ def _store_deferred_suppressions_worker(recipients_to_suppress):
                     hard_bounce_count=0,
                     soft_bounce_count=1,
                     last_bounce_dsn='4.x.x',
-                    last_bounce_message=f'Deferred in queue > {settings.queue_cleanup_threshold_minutes}m - auto-cleaned',
+                    last_bounce_message=note,
                     active=True,
                     synced_to_rspamd=False,
                     expires_at=datetime.utcnow() + timedelta(days=settings.suppression_base_expiry_days),
@@ -3413,7 +3440,7 @@ def _store_deferred_suppressions_worker(recipients_to_suppress):
                 db.add(new_entry)
                 entry, outcome = new_entry, 'created'
             suppress_count += 1
-            captured.extend((entry, {**item, 'note': note}, outcome, entry.expires_at) for item in by_email[email] if item.get('queue_id'))
+            captured.extend((entry, {**item, 'note': note}, outcome, entry.expires_at) for item in group if item.get('queue_id'))
 
         record_stuck(db, captured)
         db.commit()
@@ -3425,8 +3452,12 @@ async def cleanup_deferred_queue_job():
     """
     Periodically scan the mail queue for deferred items stuck longer than
     QUEUE_CLEANUP_THRESHOLD_MINUTES.  For each stuck item:
-      1. Delete from queue via mailcow API
-      2. Suppress the recipient(s) using suppression_base_expiry_days
+      1. Suppress the recipient(s) using suppression_base_expiry_days
+      2. Delete from queue via mailcow API
+    The block is stored first: a message is never deleted without it. When
+    the deletion fails, the next run finds the message again and deletes it
+    without counting it twice. An item with no address that may be blocked
+    stays in the queue.
     Completely stateless - only looks at arrival_time vs now.
     """
     if not settings.is_feature_enabled('spam-filter'):
@@ -3484,6 +3515,11 @@ async def cleanup_deferred_queue_job():
                 item_recipients.append({'email': email, 'queue_id': queue_id, 'sender': item.get('sender'),
                                         'arrived': arrived, 'reason': reason or None})
 
+            if not item_recipients:
+                # Nothing to block and keep for it, so it is not deleted either
+                logger.info(f"[QUEUE CLEANUP] Deferred item {queue_id} has no recipient to block - left in the queue")
+                continue
+
             # This item has been deferred longer than threshold - collect for deletion
             items_to_delete.append(queue_id)
             recipients_to_suppress.extend(item_recipients)
@@ -3499,36 +3535,41 @@ async def cleanup_deferred_queue_job():
             update_job_status('cleanup_deferred_queue', 'success')
             return
 
-        # Delete stuck items from queue
+        # Block the recipients first: if this fails, nothing is deleted
+        suppress_count = await asyncio.get_running_loop().run_in_executor(
+            get_thread_pool_executor(),
+            _store_deferred_suppressions_worker,
+            recipients_to_suppress,
+        )
+        logger.info(
+            f"[QUEUE CLEANUP] Suppressed {suppress_count} recipient(s) for "
+            f"{settings.suppression_base_expiry_days} day(s)"
+        )
+
+        # Then delete the stuck items. mailcow can answer 200 with a failure in the body.
+        delete_error = None
         try:
-            await mailcow_api.delete_queue(items_to_delete)
+            reply = await mailcow_api.delete_queue(items_to_delete)
+            entries = reply if isinstance(reply, list) else [reply]
+            if not entries or any(not isinstance(e, dict) or e.get('type') != 'success' for e in entries):
+                refused = next((e.get('msg') for e in entries if isinstance(e, dict) and e.get('type') != 'success'), None)
+                raise RuntimeError(f"mailcow did not confirm the deletion: {refused or reply}")
             logger.info(f"[QUEUE CLEANUP] Deleted {len(items_to_delete)} stuck deferred item(s) from queue")
         except Exception as e:
-            logger.error(f"[QUEUE CLEANUP] Failed to delete queue items: {e}")
-            update_job_status('cleanup_deferred_queue', 'failed', f"Queue delete failed: {e}")
+            delete_error = e
+            logger.error(f"[QUEUE CLEANUP] Failed to delete queue items (the blocks are kept; retried next run): {e}")
+
+        # Trigger immediate Rspamd sync so the block takes effect now
+        if settings.suppression_rspamd_sync and settings.is_rspamd_configured:
+            try:
+                await sync_suppressions_to_rspamd_job()
+                logger.info("[QUEUE CLEANUP] Triggered immediate Rspamd sync")
+            except Exception as e:
+                logger.warning(f"[QUEUE CLEANUP] Rspamd sync failed (will retry on schedule): {e}")
+
+        if delete_error is not None:
+            update_job_status('cleanup_deferred_queue', 'failed', f"Queue delete failed: {delete_error}")
             return
-
-        # Suppress recipients
-        if recipients_to_suppress:
-            suppress_count = await asyncio.get_running_loop().run_in_executor(
-                get_thread_pool_executor(),
-                _store_deferred_suppressions_worker,
-                recipients_to_suppress,
-            )
-
-            logger.info(
-                f"[QUEUE CLEANUP] Suppressed {suppress_count} recipient(s) for "
-                f"{settings.suppression_base_expiry_days} day(s)"
-            )
-
-            # Trigger immediate Rspamd sync so the block takes effect now
-            if settings.suppression_rspamd_sync and settings.is_rspamd_configured:
-                try:
-                    await sync_suppressions_to_rspamd_job()
-                    logger.info("[QUEUE CLEANUP] Triggered immediate Rspamd sync")
-                except Exception as e:
-                    logger.warning(f"[QUEUE CLEANUP] Rspamd sync failed (will retry on schedule): {e}")
-
         update_job_status('cleanup_deferred_queue', 'success')
 
     except asyncio.CancelledError:
