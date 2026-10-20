@@ -227,3 +227,29 @@ test('a ban says denylist, the name every screen gives the list', async () => {
     assert.deepEqual(toasts, ['IP 198.51.100.7 added to the denylist', '203.0.113.5 is on the Fail2ban denylist']);
     for (const text of [...asked, ...toasts]) assert.doesNotMatch(text, /blacklist/i);
 });
+
+test('a Fail2ban network ban is a row named by the network, and its attackers are banned through it', async () => {
+    const context = load();
+    vm.runInContext('mailcowRwConfigured = true; fail2banActiveBans = []', context);
+    const ban = { network: '198.51.96.0/20', ip: '198.51.96.0', banned_until: '24m 10s', queued_for_unban: 0 };
+    const net = context.securityDescribe(address({ ip: '198.51.96.0/20', state: 'banned', tries: 0, attempts: 0, f2b: ban,
+        networkSize: 4096, networkRange: ['198.51.96.0', '198.51.111.255'] }));
+    assert.match(net.tag, /Whole network, 4,096 addresses/);
+    assert.match(net.why, /Every address from 198\.51\.96\.0 to 198\.51\.111\.255 is blocked/);
+    assert.match(net.acts, /unbanIP\('198\.51\.96\.0\/20'/);
+    assert.doesNotMatch(net.acts, /Ban permanently/, 'a whole network is not banned for good in one click');
+
+    const attacker = context.securityDescribe(address({ ip: '198.51.100.23', state: 'banned', tries: 25, f2b: ban, bannedThrough: '198.51.96.0/20' }));
+    assert.match(attacker.tag, /through 198\.51\.96\.0\/20/);
+    assert.match(attacker.why, /Unban lifts the whole network/);
+    assert.match(attacker.acts, /unbanIP\('198\.51\.96\.0\/20'/);
+
+    const v6 = context.securityDescribe(address({ ip: '2001:db8::/64', state: 'banned', f2b: { ...ban, network: '2001:db8::/64' },
+        networkSize: 2 ** 64, networkRange: ['2001:db8::', '2001:db8::ffff:ffff:ffff:ffff'] }));
+    assert.match(v6.tag, /Whole network</);
+
+    // Unban sends the network itself
+    const { sent } = recordRequests(context);
+    await context.unbanIP('198.51.96.0/20');
+    assert.deepEqual(sent.map(([url, body]) => [url, body.ip]), [['/api/fail2ban/unban', '198.51.96.0/20']]);
+});

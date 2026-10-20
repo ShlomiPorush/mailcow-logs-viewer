@@ -194,6 +194,14 @@ def _truthy(value) -> bool:
     return value in (True, 1, "1")
 
 
+def _ban_network(ban: dict):
+    """The network a Fail2ban ban covers, as mailcow keys it (198.51.96.0/20), or None."""
+    try:
+        return ipaddress.ip_network((ban.get("network") or ban.get("ip") or "").strip(), strict=False)
+    except ValueError:
+        return None
+
+
 def _state(a: dict, known: bool, whitelist: List[str], blacklist: List[str]) -> str:
     """Where an address stands; the same order the page used to apply. listed_as
     is the allowlist or denylist entry that holds it."""
@@ -266,7 +274,7 @@ def collect(db: Session, f2b: Optional[dict], now: Optional[datetime] = None, ho
         if ip not in addresses:
             addresses[ip] = {"ip": ip, "tries": 0, "attempts": 0, "users": [], "services": [], "hits": [],
                              "country": "", "country_code": "", "city": "", "org": "", "last": None, "f2b": None,
-                             "listed_as": None}
+                             "listed_as": None, "network_size": None, "network_range": None, "banned_through": None}
         return addresses[ip]
 
     def seen(a: dict, when: Optional[datetime]) -> None:
@@ -299,12 +307,34 @@ def collect(db: Session, f2b: Optional[dict], now: Optional[datetime] = None, ho
         whitelist = protection_rules.split_ip_list(f2b.get("whitelist"))
         blacklist = protection_rules.split_ip_list(f2b.get("blacklist"))
         permanent = {b.get("network") or b.get("ip") for b in f2b.get("perm_bans") or [] if isinstance(b, dict)}
+        network_bans = []
         for ban in f2b.get("active_bans") or []:
             if not isinstance(ban, dict) or ban.get("network") in permanent or _truthy(ban.get("queued_for_unban")):
+                continue
+            network = _ban_network(ban)
+            if network is not None and network.num_addresses > 1:
+                # Fail2ban's netban blocked the whole network around an attacker:
+                # the row is the network, and its addresses on the lists are banned through it
+                row = get(str(network))
+                row["f2b"], row["network_size"] = ban, network.num_addresses
+                row["network_range"] = [str(network.network_address), str(network[-1])]
+                network_bans.append((network, ban))
                 continue
             ip = _bare(ban.get("ip") or ban.get("network") or "")
             if ip:
                 get(ip)["f2b"] = ban
+        for a in list(addresses.values()):
+            if a["f2b"] or a["network_size"]:
+                continue
+            try:
+                address = ipaddress.ip_address(a["ip"])
+            except ValueError:
+                continue
+            for network, ban in network_bans:
+                if address.version == network.version and address in network:
+                    a["f2b"], a["banned_through"] = ban, str(network)
+                    seen(get(str(network)), a["last"])
+                    break
 
     # An address with no line in the last day (a long Fail2ban ban) has its place in its older lines
     missing = [ip for ip, a in addresses.items() if not a["country"]]

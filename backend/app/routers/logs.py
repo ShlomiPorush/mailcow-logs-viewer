@@ -648,6 +648,9 @@ def _security_item(a: dict) -> dict:
         "users": a["users"], "services": a["services"], "hits": a["hits"],
         "country": a["country"], "country_code": a["country_code"], "city": a["city"], "org": a["org"],
         "last_seen": format_datetime_utc(a["last"]), "f2b": a["f2b"], "listed_as": a["listed_as"],
+        # A Fail2ban network ban: its size on the network's row, the network on an address's
+        "network_size": a.get("network_size"), "network_range": a.get("network_range"),
+        "banned_through": a.get("banned_through"),
     }
 
 

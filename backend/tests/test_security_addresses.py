@@ -289,3 +289,32 @@ def test_the_panels_count_the_rows_a_click_shows(client, fail2ban):
     assert (network['addresses'], network['attempts'], network['review'], network['banned']) == (3, 5, 4, 1)
     picked = _get(client, list='review', network='Test Network', country='')
     assert picked['counts']['review'] + picked['counts']['banned'] == network['addresses']
+
+
+def test_a_network_ban_is_its_own_row_and_its_attackers_are_banned_through_it(client, fail2ban):
+    """mailcow's netban bans the whole network around an attacker (here a /20):
+    the row is named by that network, not by its first address."""
+    attacker, other = IPS[0], IPS[1]
+    _failed(attacker, times=3)
+    _failed(other)
+    fail2ban['answer']['active_bans'] = [
+        {'ip': '192.0.0.0', 'network': '192.0.0.0/20', 'banned_until': '24m', 'queued_for_unban': 0},
+    ]
+    # Every country: the network itself has none
+    banned = _get(client, list='banned', country='')
+    by_ip = {a['ip']: a for a in banned['items']}
+    assert '192.0.0.0' not in by_ip
+    net = by_ip['192.0.0.0/20']
+    assert net['state'] == 'banned' and net['network_size'] == 4096
+    assert net['network_range'] == ['192.0.0.0', '192.0.15.255']
+    for ip in (attacker, other):
+        assert by_ip[ip]['banned_through'] == '192.0.0.0/20' and by_ip[ip]['state'] == 'banned'
+    assert attacker not in _ips(_get(client, list='review'))
+
+
+def test_a_single_address_ban_stays_on_its_address(client, fail2ban):
+    ip = IPS[0]
+    _failed(ip)
+    fail2ban['answer']['active_bans'] = [{'ip': ip, 'network': f'{ip}/32', 'banned_until': '20m', 'queued_for_unban': 0}]
+    item = _get(client, list='banned')['items'][0]
+    assert item['ip'] == ip and item['network_size'] is None and item['banned_through'] is None
