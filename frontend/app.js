@@ -1972,7 +1972,7 @@ async function loadDashboardSecurityAlerts() {
 // A Needs attention row whose action opens a popup opens it from anywhere on
 // the row; its buttons keep their own actions, and selecting text opens nothing
 function uiAlertRowClick(event) {
-    return !event.target.closest('button, a') && !String(window.getSelection() || '');
+    return !event.target.closest('button, a');
 }
 
 // The count and the "all clear" line of Needs attention follow what is in it
@@ -2955,7 +2955,6 @@ function renderQuarantineData(data) {
 // checkbox and copyable values keep their own click
 function quarantineRowClick(event, itemId) {
     if (event.target.closest('button, a, input, select, label, .copyable, [role="menu"]')) return;
-    if (window.getSelection && String(window.getSelection())) return;
     showQuarantineDetails(itemId);
 }
 

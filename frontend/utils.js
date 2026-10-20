@@ -996,6 +996,28 @@ function renderDeliveriesChip(msg) {
     return `<span>Deliveries: ${escapeHtml(String(deliveries))}</span>`;
 }
 
+// Releasing the mouse after selecting text in a row that opens on click leaves
+// it closed, so the text can be copied; a control inside keeps its own click, and
+// Enter or Space (a click with no mouse, detail 0) still opens the row. A click on
+// text that was already selected still sees that selection, so only a selection
+// the press made holds the row.
+const UI_ROW_CONTROLS = 'button, a, input, select, textarea, label, summary, .copyable, [role="menu"]';
+let uiRowPressRange = null;
+function uiSelectedRange() {
+    const selection = window.getSelection && window.getSelection();
+    return selection && selection.rangeCount && String(selection) ? selection.getRangeAt(0).cloneRange() : null;
+}
+document.addEventListener('mousedown', () => { uiRowPressRange = uiSelectedRange(); }, true);
+document.addEventListener('click', event => {
+    if (!event.detail || !(event.target instanceof Element)) return;
+    const row = event.target.closest(`${UI_ROW_CONTROLS}, [onclick], [data-row-open]`);
+    if (!row || row.matches(UI_ROW_CONTROLS)) return;
+    const range = uiSelectedRange(), before = uiRowPressRange;
+    if (!range || !range.intersectsNode(row)) return;
+    if (before && range.compareBoundaryPoints(Range.START_TO_START, before) === 0 && range.compareBoundaryPoints(Range.END_TO_END, before) === 0) return;
+    event.stopPropagation();
+}, true);
+
 // =============================================================================
 // Sortable table headers. A click on a column header sorts the rows: numbers
 // high to low first, text A to Z first, and a second click turns it around.
