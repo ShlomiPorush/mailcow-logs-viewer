@@ -1,6 +1,6 @@
-// Outbound (Queue and Suppressions) and the Rspamd Maps tab of Quarantine:
-// old addresses and old history entries open the new place, and each tab
-// follows its own feature switch, the page going only when all are off.
+// Outbound (Queue and Suppressions) and the Rspamd page (the maps): old
+// addresses and old history entries open the new place, and each Outbound tab
+// follows its own feature switch, the page going only when both are off.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -82,7 +82,8 @@ test('the old addresses open the new places', () => {
         ['/queue', 'outbound', 'queue', '/outbound'],
         ['/spam-filter', 'outbound', 'suppressions', '/outbound/suppressions'],
         ['/spam-filter/suppressions', 'outbound', 'suppressions', '/outbound/suppressions'],
-        ['/spam-filter/maps', 'quarantine', 'maps', '/quarantine/maps'],
+        ['/spam-filter/maps', 'rspamd', undefined, '/rspamd'],
+        ['/quarantine/maps', 'rspamd', undefined, '/rspamd'],
         ['/settings/spam_filter', 'settings', 'outbound', '/settings/outbound'],
     ];
     for (const [pathname, route, sub, canonical] of cases) {
@@ -98,7 +99,7 @@ test('the old addresses open the new places', () => {
 
 test('the new addresses stay as they are', () => {
     for (const [pathname, route, sub] of [['/outbound', 'outbound', 'queue'], ['/outbound/suppressions', 'outbound', 'suppressions'],
-        ['/quarantine/maps', 'quarantine', 'maps'], ['/quarantine/rules', 'quarantine', 'rules']]) {
+        ['/rspamd', 'rspamd', undefined], ['/quarantine/rules', 'quarantine', 'rules']]) {
         const r = loadRouter(pathname);
         const info = r.context.initRouter();
         assert.deepEqual([info.baseRoute, info.params.sub, info.moved], [route, sub, undefined], pathname);
@@ -107,15 +108,15 @@ test('the new addresses stay as they are', () => {
     const r = loadRouter('/');
     assert.equal(r.context.buildPath('outbound', { sub: 'queue' }), '/outbound');
     assert.equal(r.context.buildPath('outbound', { sub: 'suppressions' }), '/outbound/suppressions');
-    assert.equal(r.context.buildPath('quarantine', { sub: 'maps' }), '/quarantine/maps');
+    assert.equal(r.context.buildPath('rspamd', {}), '/rspamd');
 });
 
 test('Back into a history entry of the old version opens the new place', () => {
     const r = loadRouter('/dashboard');
     r.context.initRouter();
     r.listeners.popstate({ state: { route: 'spam-filter', params: { sub: 'maps' } } });
-    assert.deepEqual(plain(r.calls.switchTab.at(-1)), { route: 'quarantine', params: { sub: 'maps' } });
-    assert.equal(r.calls.replaceState.at(-1).url, '/quarantine/maps');
+    assert.deepEqual(plain(r.calls.switchTab.at(-1)), { route: 'rspamd', params: {} });
+    assert.equal(r.calls.replaceState.at(-1).url, '/rspamd');
     r.listeners.popstate({ state: { route: 'queue', params: {} } });
     assert.deepEqual(plain(r.calls.switchTab.at(-1)), { route: 'outbound', params: { sub: 'queue' } });
     assert.equal(r.calls.replaceState.at(-1).url, '/outbound');
@@ -156,25 +157,24 @@ test('each Outbound tab follows its own switch', () => {
     }
 });
 
-test('Quarantine stays while only Rspamd Maps is on, and Maps go with their own switch', () => {
-    let a = loadApp(['quarantine']);
+test('the Rspamd page has its own switch, and Quarantine keeps its two tabs', () => {
+    let a = loadApp(['rspamd']);
     a.context.applyFeatureToggles();
+    assert.equal(a.elements['tab-rspamd'].style.display, 'none');
+    assert.equal(a.elements['mobile-tab-rspamd'].style.display, 'none');
     assert.equal(a.elements['tab-quarantine'].style.display, '');
-    assert.equal(hidden(a, 'quarantine-tab-btn-messages'), true);
-    assert.equal(hidden(a, 'quarantine-tab-btn-rules'), true);
-    assert.equal(hidden(a, 'quarantine-tab-btn-maps'), false);
-    assert.equal(a.context.pageTabOn('quarantine', 'messages'), 'maps');
+    // Suppressions no longer offer to open the map
+    assert.equal(a.elements['suppression-open-map'].style.display, 'none');
 
-    a = loadApp(['rspamd-maps']);
-    a.context.applyFeatureToggles();
-    assert.equal(a.elements['tab-quarantine'].style.display, '');
-    assert.equal(hidden(a, 'quarantine-tab-btn-maps'), true);
-    assert.equal(hidden(a, 'quarantine-tabs'), false);
-    assert.equal(a.context.pageTabOn('quarantine', 'maps'), 'messages');
-
-    a = loadApp(['quarantine', 'rspamd-maps']);
+    a = loadApp(['quarantine']);
     a.context.applyFeatureToggles();
     assert.equal(a.elements['tab-quarantine'].style.display, 'none');
+    assert.equal(a.elements['tab-rspamd'].style.display, '');
+    assert.equal(a.elements['suppression-open-map'].style.display, '');
+
+    a = loadApp(['suppressions', 'rspamd']);
+    a.context.switchTab('rspamd', {});
+    assert.match(a.elements['content-rspamd'].innerHTML, /Rspamd is disabled/);
 });
 
 test('a tab whose switch is off opens the first tab that is on', () => {
@@ -203,13 +203,11 @@ test('a page goes only when all of its switches are off', () => {
     assert.equal(hidden(a, 'outbound-tab-suppressions'), false);
     assert.equal(hidden(a, 'outbound-tab-queue'), true);
 
-    a = loadApp(['quarantine']);
+    a = loadApp([]);
     loaded = [];
-    a.context.loadQuarantine = () => loaded.push('quarantine');
-    a.context.initQuarantineRules = () => loaded.push('rules');
     a.context.loadRspamdMaps = () => loaded.push('maps');
-    a.context.switchTab('quarantine', { sub: 'messages' });
-    assert.deepEqual(loaded, ['maps'], 'Quarantine off: its messages are not asked, the maps load once');
+    a.context.switchTab('rspamd', {});
+    assert.deepEqual(loaded, ['maps'], 'the Rspamd page loads its maps once');
 });
 
 test('the old feature name is not used in the code any more', () => {
@@ -240,14 +238,6 @@ test('falling back from a tab that is off replaces the history entry instead of 
     a.synced.length = 0;
     a.context.outboundShowTab('suppressions');
     assert.deepEqual(plain(a.synced), [{ route: 'outbound', sub: 'suppressions', replace: false }]);
-
-    // Quarantine off: the Messages tab falls back to the maps the same way
-    a = loadApp(['quarantine']);
-    a.context.loadRspamdMaps = () => {};
-    a.context.switchTab('quarantine', { sub: 'maps' });
-    a.synced.length = 0;
-    a.context.switchTab('quarantine', { sub: 'messages' });
-    assert.deepEqual(plain(a.synced), [{ route: 'quarantine', sub: 'maps', replace: true }]);
 });
 
 test('opening the Queue tab loads the queue again, as opening the page did', () => {
@@ -261,4 +251,21 @@ test('opening the Queue tab loads the queue again, as opening the page did', () 
     loaded.length = 0;
     a.context.outboundShowTab('queue');
     assert.deepEqual(loaded, ['queue']);
+});
+
+test('Suppressions open the map they are written to on the Rspamd page', async () => {
+    const a = load(['utils.js', 'router.js', 'app.js', 'spam_filter.js'], { disabled: [] });
+    const opened = [], went = [];
+    a.context.navigateTo = route => went.push(route);
+    a.context.openMapEditor = name => opened.push(name);
+    a.context.renderRspamdMapsList = () => {};
+    a.context.authenticatedFetch = async () => ({ ok: true, json: async () => ({
+        configured: true, rw_key_configured: true, maps: [{ filename: 'global_rcpt_blacklist.map', name: 'Recipient Denylist' }] }) });
+    a.context.openRspamdMap('global_rcpt_blacklist.map');
+    assert.deepEqual(went, ['rspamd']);
+    await a.context.loadRspamdMaps();
+    assert.deepEqual(opened, ['global_rcpt_blacklist.map']);
+    // Only once: the next visit shows the list
+    await a.context.loadRspamdMaps();
+    assert.deepEqual(opened, ['global_rcpt_blacklist.map']);
 });

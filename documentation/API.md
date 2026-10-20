@@ -37,7 +37,7 @@ What applies to every endpoint:
 - [Reporting](#reporting)
 - [System Status](#system-status)
 - [Raw Logs (Live Log Viewer)](#raw-logs-live-log-viewer)
-- [Suppressions and Rspamd Maps](#suppressions-and-rspamd-maps)
+- [Suppressions and Rspamd maps](#suppressions-and-rspamd-maps)
 - [Quarantine Auto-Rules](#quarantine-auto-rules)
 - [Security Alerts (Anomaly Detection)](#security-alerts-anomaly-detection)
 - [SMTP Abuse Protection](#smtp-abuse-protection)
@@ -1279,7 +1279,7 @@ Deletes all stored data of a feature that is already off (in `disabled_features`
 
 Tables are truncated with `CASCADE`. Returns `{ "feature": "dmarc", "tables_purged": {"dmarc_records": 1523, "...": 0}, "total_rows_deleted": 1679 }`.
 
-An unknown feature returns 400 (`Unknown feature: ...`), and so do features without tables, such as `queue`, `rspamd-maps` and `rate-limits`. A feature that is still on returns 400 (`Feature 'dmarc' is currently enabled. Disable it first.`). A failure returns 500 (`Purge failed. Check the application logs.`) and deletes nothing.
+An unknown feature returns 400 (`Unknown feature: ...`), and so do features without tables, such as `queue`, `rspamd` and `rate-limits`. A feature that is still on returns 400 (`Feature 'dmarc' is currently enabled. Disable it first.`). A failure returns 500 (`Purge failed. Check the application logs.`) and deletes nothing.
 
 `PUT /api/settings` already deletes some data of features that are off: alias statistics, mailbox statistics (when Mailbox Stats and Rate Limits are both off), ActiveSync devices, raw log rows nothing collects and the Rate Limits reset history. The Settings page then calls this endpoint for each newly disabled feature, after confirming that data will be deleted.
 
@@ -1963,9 +1963,9 @@ The web interface reconnects after 3 seconds, except after 4401.
 
 ---
 
-## Suppressions and Rspamd Maps
+## Suppressions and Rspamd maps
 
-Two parts: a recipient suppression list with automatic bounce detection (Outbound > Suppressions, feature `suppressions`), and an editor for Rspamd map files (Quarantine > Rspamd Maps, feature `rspamd-maps`).
+Two parts: a recipient suppression list with automatic bounce detection (Outbound > Suppressions, feature `suppressions`), and an editor for Rspamd map files (the Rspamd page, feature `rspamd`).
 
 ### Rspamd Maps
 
@@ -2525,6 +2525,6 @@ Tests settings before saving them (the test button in the editor), with the valu
 
 ### GET /api/docs/{doc_name}
 
-A help page as plain-text Markdown, fetched from `documentation/HelpDocs` on the `main` branch on GitHub (10-second timeout). Only these names are accepted: `Domains`, `DMARC`, `Mailbox_Stats`, `IP_Blacklist_Monitor`, `Quarantine`, `Abuse_Protection`, `Rate_Limits`, `Devices`, `Dashboard`, `Messages`, `Security`, `Outbound`, `Status`, `Logs`, `Settings` and `About`.
+A help page as plain-text Markdown, fetched from `documentation/HelpDocs` on the `main` branch on GitHub (10-second timeout). Only these names are accepted: `Domains`, `DMARC`, `Mailbox_Stats`, `IP_Blacklist_Monitor`, `Quarantine`, `Abuse_Protection`, `Rate_Limits`, `Devices`, `Dashboard`, `Messages`, `Security`, `Outbound`, `Rspamd`, `Status`, `Logs`, `Settings` and `About`.
 
 Other names return 404, and so does an HTTP error from GitHub (including a missing file); a network failure returns 503.

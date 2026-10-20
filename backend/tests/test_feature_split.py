@@ -1,5 +1,5 @@
 """Spam Filter's one switch became two: Suppressions (Outbound) and Rspamd
-Maps (Quarantine). The old name spam-filter, in ENV, in a stored value or in
+(the maps, a page of its own). The old name spam-filter, in ENV, in a stored value or in
 a save, still means both, so a switch that was off never turns on by itself.
 """
 from types import SimpleNamespace
@@ -10,25 +10,25 @@ from app.config import settings, normalize_disabled_features, FEATURE_IDS
 
 
 def test_the_old_name_stands_for_both_features():
-    assert normalize_disabled_features('spam-filter') == ['suppressions', 'rspamd-maps']
+    assert normalize_disabled_features('spam-filter') == ['suppressions', 'rspamd']
     assert normalize_disabled_features(' Spam-Filter , queue,spam-filter,suppressions') == \
-        ['suppressions', 'rspamd-maps', 'queue']
-    assert normalize_disabled_features(['queue', 'SPAM-FILTER']) == ['queue', 'suppressions', 'rspamd-maps']
+        ['suppressions', 'rspamd', 'queue']
+    assert normalize_disabled_features(['queue', 'SPAM-FILTER']) == ['queue', 'suppressions', 'rspamd']
     assert normalize_disabled_features('') == [] and normalize_disabled_features(None) == []
-    assert normalize_disabled_features('rspamd-maps') == ['rspamd-maps']
+    assert normalize_disabled_features('rspamd') == ['rspamd']
     assert 'spam-filter' not in FEATURE_IDS
 
 
 @pytest.mark.parametrize('value, suppressions_on, maps_on', [
     ('spam-filter', False, False),
     ('suppressions', False, True),
-    ('rspamd-maps', True, False),
+    ('rspamd', True, False),
     ('', True, True),
 ])
 def test_what_each_value_turns_off(monkeypatch, value, suppressions_on, maps_on):
     monkeypatch.setattr(settings._inner, 'disabled_features', value)
     assert settings.is_feature_enabled('suppressions') is suppressions_on
-    assert settings.is_feature_enabled('rspamd-maps') is maps_on
+    assert settings.is_feature_enabled('rspamd') is maps_on
     assert settings.is_feature_enabled('queue') and settings.is_feature_enabled('quarantine')
 
 
@@ -48,14 +48,14 @@ def test_info_lists_the_features_an_old_name_stands_for(monkeypatch):
     from fastapi.testclient import TestClient
     from app.main import app
     body = TestClient(app).get('/api/info').json()
-    assert body['disabled_features'] == ['devices', 'rspamd-maps', 'suppressions']
+    assert body['disabled_features'] == ['devices', 'rspamd', 'suppressions']
 
 
 def test_the_settings_form_shows_the_features_an_old_name_stands_for(monkeypatch):
     from app.routers.settings import _effective_config_for_editable
     monkeypatch.setattr(settings._inner, 'disabled_features', 'spam-filter, queue')
     config = _effective_config_for_editable(settings._inner)
-    assert config['disabled_features'] == 'suppressions,rspamd-maps,queue'
+    assert config['disabled_features'] == 'suppressions,rspamd,queue'
 
 
 def _save(monkeypatch, body, stored=None):
@@ -86,7 +86,7 @@ def _save(monkeypatch, body, stored=None):
     cfg.reload_settings(object())
     try:
         result = rs.update_settings(body, db=object())
-        state = (settings.is_feature_enabled('suppressions'), settings.is_feature_enabled('rspamd-maps'))
+        state = (settings.is_feature_enabled('suppressions'), settings.is_feature_enabled('rspamd'))
     finally:
         monkeypatch.undo()
         cfg.reload_settings()
@@ -95,7 +95,7 @@ def _save(monkeypatch, body, stored=None):
 
 def test_a_save_stores_the_new_names_only(monkeypatch):
     data, _, result, state = _save(monkeypatch, {'disabled_features': 'spam-filter,queue'})
-    assert data['disabled_features'] == 'suppressions,rspamd-maps,queue'
+    assert data['disabled_features'] == 'suppressions,rspamd,queue'
     assert state == (False, False)
 
 
@@ -109,9 +109,9 @@ def test_a_save_rejects_a_name_no_switch_has(monkeypatch):
 def test_an_old_stored_value_rewritten_to_its_new_names_is_no_transition(monkeypatch):
     """The form of a stored spam-filter shows both switches off; saving it
     unchanged stores the new names and changes nothing for the list."""
-    data, seen, _, state = _save(monkeypatch, {'disabled_features': 'suppressions,rspamd-maps'},
+    data, seen, _, state = _save(monkeypatch, {'disabled_features': 'suppressions,rspamd'},
                                  stored={'disabled_features': 'spam-filter'})
-    assert data['disabled_features'] == 'suppressions,rspamd-maps'
+    assert data['disabled_features'] == 'suppressions,rspamd'
     assert state == (False, False)
     assert seen == [(False, False, False)]
 
@@ -125,7 +125,7 @@ def test_turning_the_maps_on_leaves_the_list_alone(monkeypatch):
 
 
 def test_turning_the_maps_off_leaves_the_list_alone(monkeypatch):
-    data, seen, _, state = _save(monkeypatch, {'disabled_features': 'rspamd-maps'})
+    data, seen, _, state = _save(monkeypatch, {'disabled_features': 'rspamd'})
     assert state == (True, False)
     assert len(seen) == 1 and seen[0][2] is False and seen[0][0] == seen[0][1]
 

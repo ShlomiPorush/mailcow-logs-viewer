@@ -462,6 +462,7 @@
             <div class="ui-nav-group" data-nav-group>
                 <div class="ui-nav-group-label">Protection</div>
                 <button onclick="navigateTo('netfilter')" id="tab-netfilter" class="ui-nav-item" title="Security"><svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"> <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"> </path> </svg><span class="ui-nav-label">Security</span><span id="nav-count-netfilter" class="ui-nav-count hidden"></span></button>
+                <button onclick="navigateTo('rspamd')" id="tab-rspamd" class="ui-nav-item" title="Rspamd"><svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"> <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z"> </path> </svg><span class="ui-nav-label">Rspamd</span></button>
                 <button onclick="navigateTo('dmarc')" id="tab-dmarc" class="ui-nav-item" title="DMARC &amp; TLS"><svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"> <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path> </svg><span class="ui-nav-label">DMARC &amp; TLS</span><span id="nav-count-dmarc" class="ui-nav-count hidden"></span></button>
             </div>
             <div class="ui-nav-group" data-nav-group>
@@ -549,6 +550,7 @@
             <div class="ui-nav-group" data-nav-group>
                 <div class="ui-nav-group-label">Protection</div>
                 <button onclick="navigateToMobile('netfilter')" id="mobile-tab-netfilter" class="mobile-menu-item"><svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"> <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"> </path> </svg><span class="ui-nav-label">Security</span><span id="mobile-nav-count-netfilter" class="ui-nav-count hidden"></span></button>
+                <button onclick="navigateToMobile('rspamd')" id="mobile-tab-rspamd" class="mobile-menu-item"><svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"> <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z"> </path> </svg><span class="ui-nav-label">Rspamd</span></button>
                 <button onclick="navigateToMobile('dmarc')" id="mobile-tab-dmarc" class="mobile-menu-item"><svg aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"> <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path> </svg><span class="ui-nav-label">DMARC &amp; TLS</span><span id="mobile-nav-count-dmarc" class="ui-nav-count hidden"></span></button>
             </div>
             <div class="ui-nav-group" data-nav-group>
@@ -918,6 +920,8 @@
                                 <button onclick="toggleSuppressionMoreMenu()" class="ui-btn" title="More" aria-label="More">⋯</button>
                                 <div id="suppression-more-menu" class="ui-menu-panel hidden">
                                     <button onclick="exportSuppressions()">Export CSV</button>
+                                    <!-- The map the list is written to; gone while the Rspamd page is off -->
+                                    <button id="suppression-open-map" onclick="openRspamdMap('global_rcpt_blacklist.map')">Open in Rspamd</button>
                                     <label>
                                         Import CSV
                                         <input type="file" accept=".csv" class="hidden" onchange="importSuppressions(event)">
@@ -967,13 +971,10 @@
                         <p class="ui-muted" id="quarantine-summary">Messages held by the spam filter, and the rules that handle them</p>
                     </div>
                 </div>
-                <!-- Messages and Auto-Rules (feature quarantine) and Rspamd Maps (feature rspamd-maps):
-                     a tab whose feature is off is hidden. Without the read-write key Auto-Rules
-                     shows a locked notice and the maps are read only -->
+                <!-- Both tabs always show; without the read-write key Auto-Rules shows a locked notice -->
                 <div id="quarantine-tabs" class="ui-tabs ui-page-tabs" role="tablist" aria-label="Quarantine sections">
                     <button type="button" class="modal-tab active" role="tab" aria-selected="true" id="quarantine-tab-btn-messages" onclick="quarantineShowTab('messages')">Messages</button>
                     <button type="button" class="modal-tab" role="tab" aria-selected="false" id="quarantine-tab-btn-rules" onclick="quarantineShowTab('rules')">Auto-Rules <span id="quarantine-tab-n-rules" class="ui-tab-n hidden"></span></button>
-                    <button type="button" class="modal-tab" role="tab" aria-selected="false" id="quarantine-tab-btn-maps" onclick="quarantineShowTab('maps')">Rspamd Maps</button>
                 </div>
                 <div class="ui-scroll" id="quarantine-tab-messages" role="tabpanel">
                 <section class="ui-sec-block">
@@ -1035,8 +1036,21 @@
                     </div>
                 </section>
                 </div>
-                <!-- Rspamd Maps tab: the maps as rows that open the editor (spam_filter.js) -->
-                <div class="ui-scroll hidden" id="quarantine-tab-maps" role="tabpanel">
+            </div>
+
+            <!-- Rspamd: the maps that allow or block mail, incoming and outgoing (spam_filter.js) -->
+            <div id="content-rspamd" class="tab-content hidden ui-page">
+                <div class="ui-page-head">
+                    <div>
+                        <h1 class="ui-h1">Rspamd <button onclick="showHelpModal('Rspamd')" class="ui-icon-btn ui-help-btn" title="Help - Rspamd">
+                                <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                                </svg>
+                            </button></h1>
+                        <p class="ui-muted">The Rspamd maps that allow or block mail, incoming and outgoing</p>
+                    </div>
+                </div>
+                <div class="ui-scroll">
                     <div id="rspamd-maps-list" class="ui-sec-block">
                         <div class="ui-loading"><div class="loading"></div><p>Loading Rspamd maps...</p></div>
                     </div>

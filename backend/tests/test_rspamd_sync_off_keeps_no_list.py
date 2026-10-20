@@ -408,7 +408,7 @@ def test_only_a_save_that_turned_a_switch_off_names_a_transition(db):
     assert _transition(db, False, True) is None and _key(db, 'spam_filter.off_transition') is None
 
 
-# ---- Rspamd Maps has its own switch since the list moved to Outbound ----
+# ---- The Rspamd page has its own switch since the list moved to Outbound ----
 
 def test_turning_only_the_maps_off_keeps_the_list_and_its_state(db, monkeypatch):
     from app.services.feature_data import _set_key
@@ -418,7 +418,7 @@ def test_turning_only_the_maps_off_keeps_the_list_and_its_state(db, monkeypatch)
         _set_key(s, 'spam_filter.off_transition', 'T-kept')
         _set_key(s, 'spam_filter.rspamd_target', 'mail.example.test')
         s.commit()
-    monkeypatch.setattr(type(settings._inner), 'is_feature_enabled', lambda self, name: name != 'rspamd-maps')
+    monkeypatch.setattr(type(settings._inner), 'is_feature_enabled', lambda self, name: name != 'rspamd')
     assert 'suppressions' not in _purge()
     assert blocked in _rows(db)
     assert _key(db, 'spam_filter.off_transition') == 'T-kept'

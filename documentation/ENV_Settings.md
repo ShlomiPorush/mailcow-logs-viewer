@@ -81,7 +81,7 @@ The `db` service in `docker-compose.yml` falls back to `mailcowlogs` and `change
 | --- | --- | --- |
 | `DISABLED_FEATURES` | Empty | Comma-separated features to turn off, for example `queue,quarantine`. Their pages disappear and jobs used only by those features stop; shared jobs continue while another enabled page needs them. API routes remain available. |
 
-The names are `netfilter` (Security), `queue`, `quarantine`, `suppressions`, `rspamd-maps`, `domains`, `dmarc`, `mailbox-stats`, `rate-limits`, `logs`, `blacklist` (IP Blacklist Monitor) and `devices`. The old name `spam-filter` turns off both `suppressions` and `rspamd-maps`. A feature listed here loses its stored data at startup, as when it is turned off in Settings, including DMARC history and quarantine rules; a feature removed from the list reloads only what the server still has. See [Settings](HelpDocs/Settings.md#features).
+The names are `netfilter` (Security), `queue`, `quarantine`, `suppressions`, `rspamd` (the Rspamd page), `domains`, `dmarc`, `mailbox-stats`, `rate-limits`, `logs`, `blacklist` (IP Blacklist Monitor) and `devices`. The old name `spam-filter` turns off both `suppressions` and `rspamd`. A feature listed here loses its stored data at startup, as when it is turned off in Settings, including DMARC history and quarantine rules; a feature removed from the list reloads only what the server still has. See [Settings](HelpDocs/Settings.md#features).
 
 ## Blacklist configuration
 

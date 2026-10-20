@@ -199,7 +199,7 @@ class Settings(BaseSettings):
     app_logo_url: str = Field(default="", description="Application logo URL (optional)")
     disabled_features: str = Field(
         default="",
-        description="Comma-separated list of features to disable (hides page and stops related jobs). Valid: netfilter, queue, quarantine, suppressions, rspamd-maps, domains, dmarc, mailbox-stats, rate-limits, logs, blacklist, devices (spam-filter: both suppressions and rspamd-maps)"
+        description="Comma-separated list of features to disable (hides page and stops related jobs). Valid: netfilter, queue, quarantine, suppressions, rspamd, domains, dmarc, mailbox-stats, rate-limits, logs, blacklist, devices (spam-filter: both suppressions and rspamd)"
     )
     
     # Settings UI: allow editing config from web UI (overrides stored in DB). ENV only; default False.
@@ -1067,7 +1067,7 @@ EDITABLE_SETTING_KEYS = _get_editable_setting_keys()
 
 # Every feature DISABLED_FEATURES can switch off (TOGGLEABLE_FEATURES in app.js)
 FEATURE_IDS = frozenset({
-    "netfilter", "queue", "quarantine", "suppressions", "rspamd-maps", "domains", "dmarc",
+    "netfilter", "queue", "quarantine", "suppressions", "rspamd", "domains", "dmarc",
     "mailbox-stats", "rate-limits", "logs", "blacklist", "devices",
 })
 
@@ -1075,7 +1075,7 @@ FEATURE_IDS = frozenset({
 # spam-filter was one switch for the suppression list and the Rspamd maps, so
 # it stays off as both.
 FEATURE_ALIASES = {
-    "spam-filter": ("suppressions", "rspamd-maps"),
+    "spam-filter": ("suppressions", "rspamd"),
 }
 
 

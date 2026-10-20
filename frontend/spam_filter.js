@@ -1,6 +1,6 @@
 /**
- * The suppression list (Outbound > Suppressions) and the Rspamd maps editor
- * (Quarantine > Rspamd Maps). The tabs themselves are in app.js.
+ * The suppression list (Outbound > Suppressions; its tabs are in app.js) and
+ * the Rspamd maps editor (the Rspamd page).
  */
 
 // =============================================================================
@@ -37,9 +37,22 @@ async function smartRefreshSuppressions() {
 // RSPAMD MAPS
 // =============================================================================
 
+// A map to open once the list has loaded (from Outbound > Suppressions)
+let rspamdMapToOpen = null;
+
+// Open one map on the Rspamd page, such as the recipient denylist the suppression list writes to
+function openRspamdMap(filename) {
+    const menu = document.getElementById('suppression-more-menu');
+    if (menu) menu.classList.add('hidden');
+    rspamdMapToOpen = filename;
+    navigateTo('rspamd');
+}
+
 async function loadRspamdMaps() {
-    if (typeof setPageCrumbs === 'function') setPageCrumbs('quarantine', null);
+    if (typeof setPageCrumbs === 'function') setPageCrumbs('rspamd', '', null, null);
     const container = document.getElementById('rspamd-maps-list');
+    const open = rspamdMapToOpen;
+    rspamdMapToOpen = null;
     
     try {
         const response = await authenticatedFetch('/api/rspamd/maps');
@@ -63,6 +76,7 @@ async function loadRspamdMaps() {
         
         rspamdMapsCanSave = data.rw_key_configured !== false;
         renderRspamdMapsList(data.maps, data.rw_key_configured);
+        if (open && rspamdMapsData.some(m => m.filename === open)) openMapEditor(open);
         
     } catch (error) {
         console.error('Failed to load Rspamd maps:', error);
@@ -130,9 +144,9 @@ function renderRspamdMapsList(maps, rwKeyConfigured) {
 // The way back to the maps list. With the top bar the map joins its breadcrumbs, and
 // this one is hidden; on a phone, which has no top bar, it is the way back.
 function rspamdMapCrumbs(name) {
-    if (typeof setPageCrumbs === 'function') setPageCrumbs('quarantine', 'Rspamd Maps', 'loadRspamdMaps()', [name]);
+    if (typeof setPageCrumbs === 'function') setPageCrumbs('rspamd', '', 'loadRspamdMaps()', [name]);
     return `<nav class="ui-crumbs ui-crumbs-local" aria-label="Breadcrumb">
-        <button type="button" class="ui-crumb" onclick="loadRspamdMaps()">Rspamd Maps</button>
+        <button type="button" class="ui-crumb" onclick="loadRspamdMaps()">Rspamd</button>
         <span class="ui-crumb-sep" aria-hidden="true">/</span>
         <span class="ui-crumb-current">${escapeHtml(name)}</span>
     </nav>`;

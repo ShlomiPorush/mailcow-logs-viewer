@@ -22,6 +22,7 @@ ALLOWED_DOCS = {
     "Messages": "Messages.md",
     "Security": "Security.md",
     "Outbound": "Outbound.md",
+    "Rspamd": "Rspamd.md",
     "Status": "Status.md",
     "Logs": "Logs.md",
     "Settings": "Settings.md",

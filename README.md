@@ -50,9 +50,9 @@ A self-hosted dashboard for mailcow mail servers. It collects mailcow's logs and
 ![Status](images/docs/status-server-light.webp#gh-light-mode-only)
 ![Status](images/docs/status-server-dark.webp#gh-dark-mode-only)
 
-**Rspamd Maps**
-![Rspamd Maps](images/docs/quarantine-rspamd-maps-light.webp#gh-light-mode-only)
-![Rspamd Maps](images/docs/quarantine-rspamd-maps-dark.webp#gh-dark-mode-only)
+**Rspamd**
+![Rspamd](images/docs/rspamd-maps-light.webp#gh-light-mode-only)
+![Rspamd](images/docs/rspamd-maps-dark.webp#gh-dark-mode-only)
 
 **Mailbox Stats**
 ![Mailbox Stats](images/docs/mailbox-stats-statistics-light.webp#gh-light-mode-only)

@@ -207,7 +207,7 @@ const TOGGLEABLE_FEATURES = [
     { id: 'queue', label: 'Queue', description: 'Outbound > Queue: mail waiting in the Postfix queue' },
     { id: 'suppressions', label: 'Suppressions', description: 'Outbound > Suppressions: recipients blocked after failed delivery' },
     { id: 'quarantine', label: 'Quarantine', description: 'Quarantined emails and auto-rules' },
-    { id: 'rspamd-maps', label: 'Rspamd Maps', description: 'Quarantine > Rspamd Maps: the Rspamd allow and deny lists' },
+    { id: 'rspamd', label: 'Rspamd', description: 'The Rspamd maps that allow or block mail, incoming and outgoing' },
     { id: 'domains', label: 'Domains', description: 'Domain DNS analysis and transports' },
     { id: 'dmarc', label: 'DMARC & TLS', description: 'DMARC/TLS reports and IMAP sync' },
     { id: 'mailbox-stats', label: 'Mailbox Stats', description: 'Mailbox and alias statistics' },
@@ -224,8 +224,7 @@ function isFeatureDisabled(featureId) {
 // Pages whose tabs belong to different features: tab -> feature. A tab whose
 // feature is off is hidden, and the page goes only when all of them are off.
 const TAB_FEATURES = {
-    outbound: { queue: 'queue', suppressions: 'suppressions' },
-    quarantine: { messages: 'quarantine', rules: 'quarantine', maps: 'rspamd-maps' }
+    outbound: { queue: 'queue', suppressions: 'suppressions' }
 };
 
 function tabFeatureOn(page, tab) {
@@ -245,7 +244,7 @@ function pageAllOff(page) {
 
 // Hide the tabs of features that are off; a page with one tab left shows no tab bar
 function applyTabFeatures(page) {
-    const prefix = { outbound: 'outbound-tab-btn-', quarantine: 'quarantine-tab-btn-' }[page];
+    const prefix = `${page}-tab-btn-`;
     let shown = 0;
     for (const tab of Object.keys(TAB_FEATURES[page])) {
         const btn = document.getElementById(prefix + tab);
@@ -275,7 +274,11 @@ function applyFeatureToggles() {
             }
         }
     }
-    // Outbound and Quarantine stay while one of their features is on
+    // Suppressions can open the map they are written to while the Rspamd page is on
+    const openMap = document.getElementById('suppression-open-map');
+    if (openMap) openMap.style.display = isFeatureDisabled('rspamd') ? 'none' : '';
+
+    // Outbound stays while one of its features is on
     for (const page of Object.keys(TAB_FEATURES)) {
         for (const id of [`tab-${page}`, `mobile-tab-${page}`, `tabbar-${page}`]) {
             const el = document.getElementById(id);
@@ -287,10 +290,6 @@ function applyFeatureToggles() {
     if (typeof outboundTab !== 'undefined' && outboundTab !== pageTabOn('outbound', outboundTab)) {
         if (currentTab === 'outbound' && !pageAllOff('outbound')) outboundShowTab(outboundTab);
         else outboundTab = pageTabOn('outbound', outboundTab);
-    }
-    if (typeof quarantineTab !== 'undefined' && quarantineTab !== pageTabOn('quarantine', quarantineTab)) {
-        if (currentTab === 'quarantine' && !pageAllOff('quarantine')) quarantineShowTab(quarantineTab);
-        else quarantineTab = pageTabOn('quarantine', quarantineTab);
     }
 
     // A navigation group whose pages are all off loses its heading too
@@ -1118,8 +1117,7 @@ async function smartRefreshCurrentTab() {
                 }
                 break;
             case 'quarantine':
-                // The map editor is never refreshed: it would drop unsaved changes
-                if (!isFeatureDisabled('quarantine')) await smartRefreshQuarantine();
+                await smartRefreshQuarantine();
                 break;
             case 'status':
                 await loadStatus(); // Status is fast, just reload
@@ -1813,16 +1811,12 @@ function switchTab(tab, params = {}) {
             loadOutbound();
             break;
         case 'quarantine':
-            if (!isFeatureDisabled('quarantine')) {
-                loadQuarantine();
-                initQuarantineRules();
-            } else {
-                // Only the maps are on: the subtitle speaks of them, not of held mail
-                const summary = document.getElementById('quarantine-summary');
-                if (summary) summary.textContent = 'The Rspamd maps that allow or block mail';
-            }
-            // The maps load when their tab shows
-            if (quarantineTab === 'maps') loadRspamdMaps();
+            loadQuarantine();
+            initQuarantineRules();
+            break;
+        case 'rspamd':
+            // Not refreshed on the timer: the map editor would drop unsaved changes
+            loadRspamdMaps();
             break;
         case 'status':
             loadStatus();
@@ -3227,18 +3221,17 @@ function showPageTab(page, tab) {
     });
 }
 
-// Quarantine tabs: the held messages, the Auto-Rules that handle them, and the
-// Rspamd maps that allow or block mail (spam_filter.js)
+// Quarantine tabs: the held messages, and the Auto-Rules that handle them
 let quarantineTab = 'messages';
-function quarantineShowTab(tab, load = true) {
-    const asked = tab;
-    tab = pageTabOn('quarantine', tab);
+function quarantineShowTab(tab) {
     quarantineTab = tab;
-    // A tab whose feature is off is corrected in place, not added to the history
-    routerSyncSubpage('quarantine', tab, tab !== asked);
-    showPageTab('quarantine', tab);
-    // Opening the maps loads their list; the open page loads it itself
-    if (load && tab === 'maps' && currentTab === 'quarantine') loadRspamdMaps();
+    routerSyncSubpage('quarantine', tab);
+    ['messages', 'rules'].forEach(name => {
+        const btn = document.getElementById(`quarantine-tab-btn-${name}`);
+        if (btn) { btn.classList.toggle('active', name === tab); btn.setAttribute('aria-selected', name === tab); }
+        const panel = document.getElementById(`quarantine-tab-${name}`);
+        if (panel) panel.classList.toggle('hidden', name !== tab);
+    });
 }
 
 // Outbound tabs: the mail waiting to leave, and the recipients it is no

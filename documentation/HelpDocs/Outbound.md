@@ -109,7 +109,7 @@ The app's part is the section between these markers; your own entries go above o
 
 A write starts from the map as it is then and changes only the list's waiting entries, so changes made in mailcow stay; one made at the very moment of a write can still be lost. Nothing is written when nothing changes. If the map cannot be read, or the markers are missing or repeated, nothing is read in or written until that is fixed. A write counts only when mailcow confirms it; one whose answer was lost is checked on the next read. Connecting to another mailcow or Rspamd makes every active entry wait to be written there; none is deleted. An entry deleted from the list before this version while its block stayed in Rspamd comes back as **From Rspamd**. Your own lines, above and below the app's section, stay. Bare addresses among them are anchored during sync so they cannot match longer addresses containing them; a line with regex characters, such as `.*@example\.com`, is left as written.
 
-The map itself can also be edited under [Quarantine > Rspamd Maps](Quarantine.md#rspamd-maps).
+The map itself can also be edited on [Rspamd](Rspamd.md): **Open in Rspamd**, in the **⋯** menu, opens it.
 
 ### When the sync stops or starts
 
@@ -141,7 +141,7 @@ The jobs, including hourly expiry, require **Handle undeliverable mail automatic
 
 Under **Settings** > **Mailcow**, set **Rspamd Password** to sync the list. Leave **Rspamd URL** empty to use mailcow's path; try a direct URL such as `http://rspamd-mailcow:11334` if that fails. See [Settings](Settings.md#outbound).
 
-Under **Settings** > **Features**, **Queue** turns off the Queue tab and the sidebar counter, and **Suppressions** turns off the Suppressions tab, its jobs and the Outbound settings, and deletes the list as described in [When the sync stops or starts](#when-the-sync-stops-or-starts). The old name `spam-filter` in `DISABLED_FEATURES` turns off both Suppressions and [Rspamd Maps](Quarantine.md#rspamd-maps).
+Under **Settings** > **Features**, **Queue** turns off the Queue tab and the sidebar counter, and **Suppressions** turns off the Suppressions tab, its jobs and the Outbound settings, and deletes the list as described in [When the sync stops or starts](#when-the-sync-stops-or-starts). The old name `spam-filter` in `DISABLED_FEATURES` turns off both Suppressions and [Rspamd](Rspamd.md).
 
 ## When something is missing
 

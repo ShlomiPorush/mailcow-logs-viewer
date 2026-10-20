@@ -87,6 +87,7 @@ nav:
       - Outbound: HelpDocs/Outbound.md
       - Quarantine: HelpDocs/Quarantine.md
       - Security: HelpDocs/Security.md
+      - Rspamd: HelpDocs/Rspamd.md
       - Outgoing Spam: HelpDocs/Abuse_Protection.md
       - DMARC & TLS: HelpDocs/DMARC.md
       - Status: HelpDocs/Status.md

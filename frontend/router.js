@@ -10,6 +10,7 @@ const VALID_ROUTES = [
     'netfilter',
     'outbound',
     'quarantine',
+    'rspamd',
     'status',
     'domains',
     'dmarc',
@@ -36,9 +37,10 @@ function canonicalRoute(route, params = {}) {
     const sub = (params && params.sub) || '';
     if (route === 'queue') return { route: 'outbound', params: { sub: 'queue' } };
     if (route === 'spam-filter') {
-        return sub === 'maps' ? { route: 'quarantine', params: { sub: 'maps' } }
+        return sub === 'maps' ? { route: 'rspamd', params: {} }
             : { route: 'outbound', params: { sub: 'suppressions' } };
     }
+    if (route === 'quarantine' && sub === 'maps') return { route: 'rspamd', params: {} };
     if (route === 'settings' && sub === 'spam_filter') return { route, params: { ...params, sub: 'outbound' } };
     return null;
 }
@@ -51,8 +53,8 @@ const SUBPAGES = {
     // protection, fail2ban and abuse are the old addresses of what is now the Settings tab
     netfilter: { tabs: ['overview', 'lists', 'settings', 'events', 'protection', 'fail2ban', 'abuse'], current: () => securityTab,
         select: t => securityShowTab(t), show: t => securityShowTab(t) },
-    quarantine: { tabs: ['messages', 'rules', 'maps'], current: () => quarantineTab,
-        select: t => quarantineShowTab(t, false), show: t => quarantineShowTab(t) },
+    quarantine: { tabs: ['messages', 'rules'], current: () => quarantineTab,
+        select: t => quarantineShowTab(t), show: t => quarantineShowTab(t) },
     outbound: { tabs: ['queue', 'suppressions'], current: () => outboundTab,
         select: t => outboundShowTab(t, false), show: t => outboundShowTab(t) },
     status: { tabs: ['server', 'blocklists', 'jobs'], current: () => statusTab,
@@ -419,6 +421,7 @@ const TAB_LABELS = {
     'netfilter': 'Security',
     'outbound': 'Outbound',
     'quarantine': 'Quarantine',
+    'rspamd': 'Rspamd',
     'status': 'Status',
     'domains': 'Domains',
     'dmarc': 'DMARC & TLS',
