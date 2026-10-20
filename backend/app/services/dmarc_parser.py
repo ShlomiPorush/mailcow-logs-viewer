@@ -1,6 +1,6 @@
 """
 DMARC Report Parser
-Handles parsing of DMARC aggregate reports in XML format (GZ or ZIP compressed)
+Handles parsing of DMARC aggregate reports in XML format (plain, GZ or ZIP compressed)
 """
 import ipaddress
 import re
@@ -42,11 +42,12 @@ def is_valid_domain_name(value) -> bool:
 
 def parse_dmarc_file(file_content: bytes, filename: str) -> Optional[Dict[str, Any]]:
     """
-    Parse DMARC report from compressed file (GZ or ZIP)
+    Parse DMARC report from a file: plain XML, GZ or ZIP
     
     Args:
-        file_content: Raw bytes of the compressed file
-        filename: Original filename (to determine compression type)
+        file_content: Raw bytes of the file
+        filename: Original filename (for logging; the content decides the
+            format, since senders name their files freely)
         
     Returns:
         Parsed DMARC data or None if parsing failed
@@ -59,20 +60,23 @@ def parse_dmarc_file(file_content: bytes, filename: str) -> Optional[Dict[str, A
         # Determine file type and extract XML
         xml_content = None
 
-        if filename.endswith('.gz'):
+        if file_content[:2] == b'\x1f\x8b':
             # Gzip compressed
             xml_content = gzip_decompress_limited(file_content, source=filename)
 
-        elif filename.endswith('.zip'):
+        elif file_content[:4] == b'PK\x03\x04':
             # ZIP compressed (Google uses this)
             with zipfile.ZipFile(BytesIO(file_content)) as z:
                 # Get first XML file in zip
-                xml_files = [name for name in z.namelist() if name.endswith('.xml')]
+                xml_files = [name for name in z.namelist() if name.lower().endswith('.xml')]
                 if xml_files:
                     xml_content = zip_read_limited(z, xml_files[0], source=filename)
                 else:
                     logger.error(f"No XML file found in ZIP: {filename}")
                     return None
+        elif file_content.lstrip(b'\xef\xbb\xbf \t\r\n')[:1] == b'<':
+            # Plain XML, within the size limit checked above
+            xml_content = file_content
         else:
             logger.error(f"Unsupported file format: {filename}")
             return None
@@ -82,7 +86,7 @@ def parse_dmarc_file(file_content: bytes, filename: str) -> Optional[Dict[str, A
             return None
         
         # Parse XML
-        return parse_dmarc_xml(xml_content.decode('utf-8'))
+        return parse_dmarc_xml(xml_content.decode('utf-8-sig'))
 
     except DecompressionLimitError as e:
         logger.error(f"Rejected oversized DMARC file {filename}: {e}")

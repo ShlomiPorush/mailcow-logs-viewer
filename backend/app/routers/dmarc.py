@@ -5,6 +5,8 @@ import asyncio
 import logging
 import hashlib
 import json
+import zipfile
+from io import BytesIO
 from typing import Annotated, List, Optional
 from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, BackgroundTasks, Query
@@ -15,7 +17,7 @@ from ..database import SessionLocal, get_db
 from ..models import DMARCReport, DMARCRecord, DMARCSync, DomainDNSCheck, TLSReport, TLSReportPolicy
 from ..services.dmarc_parser import parse_dmarc_file
 from ..services.geoip_service import enrich_dmarc_record
-from ..services.dmarc_imap_service import sync_dmarc_reports_from_imap
+from ..services.dmarc_imap_service import sync_dmarc_reports_from_imap, is_sync_running
 from ..services.dmarc_cache import (
     get_dmarc_cache_key, 
     get_dmarc_cached, 
@@ -1087,6 +1089,8 @@ def get_report_details(
             'sources': sources_list
         }
         
+    except HTTPException:
+        raise
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD")
     except Exception as e:
@@ -1306,6 +1310,8 @@ def get_source_details(
             'envelope_from_groups': envelope_list
         }
         
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error fetching source details: {e}")
         raise internal_error(e)
@@ -1597,6 +1603,8 @@ def get_tls_report_details(
         
     except HTTPException:
         raise
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD")
     except Exception as e:
         logger.error(f"Error fetching TLS report details for {domain}/{report_date}: {e}")
         raise internal_error(e)
@@ -1669,7 +1677,7 @@ def get_imap_status(db: Session = Depends(get_db)):
 # =============================================================================
 
 @router.post("/dmarc/imap/sync")
-def trigger_manual_sync(background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+def trigger_manual_sync(background_tasks: BackgroundTasks):
     """
     Manually trigger IMAP sync and update global job status for UI visibility
     """
@@ -1678,15 +1686,15 @@ def trigger_manual_sync(background_tasks: BackgroundTasks, db: Session = Depends
             status_code=400,
             detail="The IMAP import of DMARC and TLS reports is not set up."
         )
-    
-    try:
-        # Cleanup any stuck 'running' status in the specific sync table
-        db.query(DMARCSync).filter(DMARCSync.status == 'running').update({
-            "status": "failed",
-            "error_message": "Interrupted by manual restart"
-        })
-        db.commit()
 
+    # An import already runs (scheduled, or started before): leave it be
+    if is_sync_running():
+        return {
+            'status': 'already_running',
+            'message': 'Reports are already being fetched'
+        }
+
+    try:
         # Update the global job status that the UI monitors
         # This ensures the UI shows "Running" immediately
         update_job_status('dmarc_imap_sync', 'running')
@@ -1697,6 +1705,9 @@ def trigger_manual_sync(background_tasks: BackgroundTasks, db: Session = Depends
                 # Perform the actual sync
                 result = sync_dmarc_reports_from_imap(sync_type='manual')
                 
+                if result.get('status') == 'already_running':
+                    # Another import started first; it sets the job status when it ends
+                    return
                 if result.get('status') == 'error':
                     update_job_status('dmarc_imap_sync', 'failed', result.get('error_message'))
                 else:
@@ -1714,7 +1725,6 @@ def trigger_manual_sync(background_tasks: BackgroundTasks, db: Session = Depends
         }
         
     except Exception as e:
-        db.rollback()
         logger.error(f"Error triggering manual sync: {e}")
         # If triggering fails, mark job as failed
         update_job_status('dmarc_imap_sync', 'failed', str(e))
@@ -1785,7 +1795,7 @@ async def upload_report(
     
     Supported formats:
     - DMARC: .xml, .xml.gz, .zip (XML content)
-    - TLS-RPT: .json, .json.gz
+    - TLS-RPT: .json, .json.gz, .zip (JSON content)
     """
     if not settings.dmarc_manual_upload_enabled:
         raise HTTPException(
@@ -1812,12 +1822,26 @@ async def upload_report(
         raise internal_error(e)
 
 
+def _is_tls_rpt_upload(file_content: bytes, filename: str) -> bool:
+    """TLS-RPT by its name (.json, .json.gz, RFC 8460), or a ZIP by any name
+    that holds JSON and no XML: senders name their ZIPs freely."""
+    if filename.lower().endswith(('.json', '.json.gz', '.json.zip')):
+        return True
+    if file_content[:4] != b'PK\x03\x04':
+        return False
+    try:
+        with zipfile.ZipFile(BytesIO(file_content)) as z:
+            names = [n.lower() for n in z.namelist()]
+    except zipfile.BadZipFile:
+        return False
+    return any(n.endswith('.json') for n in names) and not any(n.endswith('.xml') for n in names)
+
+
 def _upload_report_worker(file_content: bytes, filename: str):
     """Own parsing, persistence, rollback, and response construction in one worker."""
     with SessionLocal() as db:
         try:
-            name = filename.lower()
-            if name.endswith(('.json', '.json.gz', '.json.zip')):
+            if _is_tls_rpt_upload(file_content, filename):
                 return _upload_tls_rpt_report(file_content, filename, db)
             return _upload_dmarc_report(file_content, filename, db)
         except Exception:

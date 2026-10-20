@@ -166,3 +166,29 @@ def test_disabled_upload_does_not_open_session(monkeypatch, upload):
     asyncio.run(run())
     assert events == [] and not active
     db.query.assert_not_called()
+
+
+def _zip(member):
+    import io
+    import zipfile
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr(member, "{}" if member.lower().endswith(".json") else "<feedback/>")
+    return buf.getvalue()
+
+
+@pytest.mark.parametrize("name,member,kind", [
+    ("example.net!example.com!1790000000!1790086399.zip", "report.json", "tls-rpt"),
+    ("tls-report.ZIP", "report.JSON", "tls-rpt"),
+    ("report.json.zip", "report.json", "tls-rpt"),
+    ("example.net!example.com!1790000000!1790086399.zip", "report.xml", "dmarc"),
+])
+def test_a_zip_is_routed_by_what_it_holds(upload, name, member, kind):
+    app, db, active, events = upload
+
+    async def run():
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as api:
+            response = await api.post("/dmarc/upload", files={"file": (name, _zip(member))})
+        assert response.status_code == 200, response.text
+        assert response.json()["report_type"] == kind
+    asyncio.run(run())

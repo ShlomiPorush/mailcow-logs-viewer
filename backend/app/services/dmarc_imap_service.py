@@ -10,6 +10,7 @@ import zipfile
 import io
 import json
 import re
+import threading
 from datetime import datetime, timezone
 from typing import List, Dict, Optional, Tuple
 from email.message import EmailMessage
@@ -836,6 +837,31 @@ class DMARCImapService:
         }
 
 
+# One import at a time: the scheduled run, Fetch reports and Status > Run now
+# all start it, and two at once would read the same mailbox. The app runs in
+# one process, so this lock sees every import.
+_sync_lock = threading.Lock()
+
+
+def is_sync_running() -> bool:
+    """True while an IMAP import runs."""
+    return _sync_lock.locked()
+
+
+def _fail_interrupted_syncs():
+    """Mark imports still 'running' as failed. Called under the lock, so
+    none of them runs: the app stopped during them. Best effort."""
+    try:
+        with SessionLocal() as db:
+            db.query(DMARCSync).filter(DMARCSync.status == 'running').update({
+                "status": "failed",
+                "error_message": "Interrupted: the app stopped during the import"
+            })
+            db.commit()
+    except Exception as e:
+        logger.warning(f"Could not mark interrupted DMARC imports as failed: {e}")
+
+
 def sync_dmarc_reports_from_imap(sync_type: str = 'auto') -> Dict:
     """
     Convenience function to sync DMARC reports
@@ -847,6 +873,16 @@ def sync_dmarc_reports_from_imap(sync_type: str = 'auto') -> Dict:
             'status': 'disabled',
             'message': 'DMARC IMAP sync is not enabled'
         }
-    
-    service = DMARCImapService()
-    return service.sync_reports(sync_type=sync_type)
+
+    if not _sync_lock.acquire(blocking=False):
+        logger.info("DMARC IMAP import already running, not starting another")
+        return {
+            'status': 'already_running',
+            'message': 'Reports are already being fetched'
+        }
+    try:
+        _fail_interrupted_syncs()
+        service = DMARCImapService()
+        return service.sync_reports(sync_type=sync_type)
+    finally:
+        _sync_lock.release()
