@@ -116,3 +116,11 @@ body { -webkit-font-smoothing: antialiased; }
 /* Footer */
 .md-footer { border-top: 1px solid var(--ui-line); }
 .md-footer-meta { background: var(--ui-panel); }
+
+/* Home page screenshots: a grid of tiles, each a title over its light and dark image */
+.md-typeset .gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(14rem, 1fr)); gap: 1.2rem; margin: 1em 0; }
+.md-typeset .gallery > p { margin: 0; }
+.md-typeset .gallery strong { display: block; margin-bottom: .4em; font-size: .75rem; }
+.md-typeset .gallery img { width: 100%; aspect-ratio: 16 / 10; object-fit: cover; object-position: top; border: 1px solid var(--ui-line); }
+/* Leave room for the caption under a tall screenshot in the full-size view */
+@media (min-width: 769px) { .glightbox-container .gslide-image img { max-height: calc(100vh - 5rem); } }

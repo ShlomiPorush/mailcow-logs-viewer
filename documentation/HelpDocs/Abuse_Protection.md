@@ -1,95 +1,67 @@
-# Abuse Protection - User Guide
+# Outgoing spam
 
-## Overview
-Abuse Protection watches how much mail each of your mailboxes **sends**. When a mailbox suddenly sends far more than it should - the classic sign of a compromised account being used for spam - the system disables **sending (SMTP)** for that mailbox.
+Outgoing spam protection disables a mailbox's SMTP access when it exceeds a sending threshold. Incoming delivery and IMAP stay enabled, but revoking app passwords also disconnects clients using them. The feature is **Beta**, off by default, and needs a read-write API key.
 
-**Receiving is never affected.** The user keeps full access to their mail over IMAP/webmail; they simply cannot send until the account is secured and you re-enable it.
+Configure it on [Security](Security.md) > **Settings** > **Outgoing spam**, or under **Settings** > **SMTP Abuse (Beta)**.
 
-> [!NOTE]
-> Abuse Protection is a new feature and is currently in **Beta**. If you run into unexpected behavior or false positives, please open an issue on the project's GitHub page so it can be improved.
+## The Outgoing spam card
 
-> [!WARNING]
-> **Requires:** a Read-Write API key (**Settings → Mailcow → Connection**) and Abuse Protection switched on under **Settings → SMTP Abuse (Beta) → Enable**. Without both, this panel is read-only.
+![Security, Settings, the Outgoing spam card open](../../images/docs/abuse-card-light.webp#gh-light-mode-only)
+![Security, Settings, the Outgoing spam card open](../../images/docs/abuse-card-dark.webp#gh-dark-mode-only)
 
-> [!NOTE]
-> Settings are edited on the **Settings** page (requires `SETTINGS_EDIT_VIA_UI_ENABLED=true`). Every setting can also be provided as an environment variable - see [ENV_Settings.md](../ENV_Settings.md).
+The time window rolls back from each check. The pause after re-enabling prevents messages still in that window from immediately stopping the mailbox again; `0` disables the pause.
 
-## Why is this important?
-A single compromised mailbox can send thousands of spam messages in minutes. That traffic gets your server IP listed on blacklists, damages your sending reputation, and hurts deliverability for every user on the server. Stopping outbound abuse quickly limits the damage - while keeping the owner's mailbox readable so they are not locked out of their own mail.
+**Revoke its app passwords** deletes all app passwords when stopping a mailbox. Clients using them, including IMAP clients, need replacements. **Who users should contact** sets the address in the owner's email; if empty, it uses the admin email address or "your administrator".
 
-## Features
+### Blocked by abuse protection
 
-### 🔍 Two Layers of Protection
+Only mailboxes stopped by this app appear here. Mailboxes whose SMTP access was disabled elsewhere do not appear here or in outbound activity. **Re-enable SMTP** starts the configured pause before automatic blocking can resume.
 
-| Layer | What it does | Configure under |
-|-------|--------------|-----------------|
-| **Anomaly Detection** | *Alerts only.* Compares each mailbox to **its own** recent sending pattern, so it catches a takeover even at modest volumes. Also alerts on bursts of failed logins. | Settings → Anomaly Detection (Beta) |
-| **Abuse Protection** | *Acts.* Applies a **hard** limit (e.g. more than 100 messages per hour) and disables SMTP for that mailbox. | Settings → SMTP Abuse (Beta) |
+### Outbound activity
 
-Both appear in the same alert feed: a banner on the Dashboard, plus email and webhook notifications.
+Activity covers the 200 busiest mailboxes in the window. **Over limit** means the next check can stop the mailbox unless it is whitelisted or in its pause.
 
-**How Anomaly Detection decides:**
-- Each mailbox is compared against its **own** baseline sending rate over the past days - there is no global threshold, so a takeover of a normally quiet mailbox is caught even at modest volumes.
-- **Daily-pattern learning:** a mailbox that bursts at the same time of day on past days (scheduled newsletters, digests, automated reports) is recognized as following its own routine and does not trigger an alert. A burst at an unusual hour, or one much larger than the usual daily batch (roughly double or more), still alerts.
-- Bursts of failed logins are also detected, as a sign of brute-force or credential-stuffing attacks against an account.
+**Disable SMTP** stops a mailbox immediately, with the same app-password revocation, emails and Dashboard alert as an automatic stop.
 
-### 🚫 What Happens When a Mailbox Is Blocked
+### Whitelist
 
-1. **SMTP is disabled** for that mailbox in mailcow - it can no longer send.
-2. **App passwords are revoked** (optional but recommended). A compromised account is usually abused through an app password, so revoking them cuts off the attacker even if they still have the password.
-3. **You are notified** by email and/or webhook.
-4. **The mailbox owner is notified**, explaining that sending is paused, that they can still read mail, and who to contact. Set the help address under **Settings → SMTP Abuse (Beta) → Response** to put your support address in that message.
-5. **A security alert** appears on the Dashboard and the action is written to the audit trail.
+Enter the mailbox that logs in to send, not an alias it sends from. Up to 5000 addresses, one per line. Whitelisting prevents automatic stops; **Disable SMTP** can still stop it by hand.
 
-### 📋 Blocked by Abuse Protection
-Mailboxes this system has blocked. Click **Re-enable SMTP** once you have secured the account (password reset, app passwords reviewed).
+## What is counted
 
-> [!NOTE]
-> Only mailboxes blocked *by this feature* are listed here. A mailbox that simply has SMTP switched off in mailcow - for example an incoming-only address such as a DMARC report mailbox - is not treated as an abuse case.
+The protection checks every minute and counts authenticated messages, not recipients. A message to many recipients counts once. It counts against the mailbox that logged in, even when sent from an alias or another permitted From address. Outside mail that merely claims your address does not count.
 
-### 📈 Outbound Activity
-Every mailbox that sent mail during the current window, with its message count and status. Only mail the mailbox sent after logging in counts, here, for the limit and for anomaly detection; mail from outside that only claims one of your addresses as its sender does not. Mail sent from an alias, or from another address the mailbox may send as, counts for the mailbox that logged in, so that is the mailbox that gets blocked.
+The mailbox is stopped only when its count is above the threshold, unless whitelisted, already stopped or in its pause.
 
-- **Normal** - under the limit
-- **Over limit** - above the limit; it will be blocked on the next run unless whitelisted
-- **Whitelisted** - exempt from automatic blocking
-- **SMTP disabled** - currently blocked
+## What happens when a mailbox is stopped
 
-Use **Disable SMTP** to block a mailbox immediately without waiting for the threshold.
+1. The app turns off SMTP access in mailcow. Incoming delivery continues and IMAP stays enabled. If mailcow refuses the change, nothing is recorded and the next check retries.
+2. With **Revoke its app passwords** on, all its app passwords are deleted.
+3. The app records the count, threshold and number of revoked passwords, and adds a critical alert under [Dashboard > Needs attention](Dashboard.md).
+4. The admin email address and destinations receiving the Security topic get an email with the count, threshold and revoked-password count. See [Notifications](../Notifications.md).
+5. If the app's SMTP settings are configured, the mailbox owner gets an email explaining the pause and any revoked passwords. It asks them to change their password, remove unused app passwords and contact the configured help address.
 
-### ✅ Whitelist
-Mailboxes that legitimately send in bursts and must never be blocked automatically - newsletters, ticketing systems, monitoring, backup reports. Click **Edit whitelist**, enter one address per line, and save. Enter the mailbox that logs in to send, not an alias it sends from.
+## Letting a mailbox send again
 
-## After Re-enabling a Mailbox
+Change its password in mailcow and check its app passwords. Revoked passwords are deleted; create replacements where needed. Then use **Re-enable SMTP** under **Blocked by abuse protection**. The pause starts, lasting 60 minutes by default. Afterward, exceeding the threshold can stop it again.
 
-When you re-enable SMTP, automatic blocking is paused for that mailbox for a grace period (configurable under **Settings → SMTP Abuse (Beta) → Response**, default 60 minutes).
+Re-enable it from this card. Turning SMTP back on in mailcow leaves the app's stopped state in place, so it does not check that mailbox again.
 
-> [!NOTE]
-> This matters: the messages the compromised account already sent stay inside the rolling window for a while. Without the grace period, the very next check would immediately block the mailbox again and your action would appear to do nothing.
+## Choosing the limit
 
-## Choosing a Threshold
+Check activity over normal sending cycles. Set the threshold above legitimate bursts and whitelist known bulk senders.
 
-Start high and tighten later:
+Anomaly detection counts mail the same way but only alerts, comparing each mailbox with its usual sending. See [Dashboard](Dashboard.md) and **Settings** > **Anomaly Detection (Beta)**.
 
-1. Look at the **Outbound Activity** list over a few normal days and note your busiest legitimate mailbox.
-2. Set the threshold (**Settings → SMTP Abuse (Beta) → Limit**) comfortably above that number.
-3. Whitelist any bulk senders.
-4. Once you are confident there are no false positives, lower the threshold.
+## Settings that change this page
 
-> [!TIP]
-> A threshold that is too low blocks real users; a threshold that is too high lets a compromised account send more spam before it is stopped. Anomaly Detection (alerts only) is a safe way to watch for takeovers while you tune the hard limit.
+Defaults under **Settings** > **SMTP Abuse (Beta)**: protection off, more than 100 messages within 60 minutes, a 60-minute pause after re-enabling, app-password revocation on and help address empty. The card edits the same settings. Environment variables are listed in [environment variables](../ENV_Settings.md).
 
-## Related Settings
+## When something is missing
 
-All of these live under **Settings → SMTP Abuse (Beta)**:
-
-| Setting | Purpose |
-|---------|---------|
-| Enable → **SMTP Abuse Enabled** | Master switch |
-| Limit → **SMTP Abuse Threshold** | Messages allowed within the window |
-| Limit → **SMTP Abuse Window Minutes** | Length of the rolling window |
-| Response → **SMTP Abuse Revoke App Passwords** | Also revoke app passwords when blocking |
-| Response → **SMTP Abuse Unblock Grace Minutes** | Pause auto-blocking after a manual re-enable |
-| Response → **SMTP Abuse Help Address** | Support address shown to the blocked user |
-
-See [ENV_Settings.md](../ENV_Settings.md) for the equivalent environment variables.
+- **No read-write API key**: protection does not run even if enabled. Activity stays readable, but stopping, re-enabling and whitelist changes are locked.
+- **Protection off**: activity stays readable, but stopping, re-enabling and whitelist changes require turning protection on.
+- **Editing settings is off**: set `SETTINGS_EDIT_VIA_UI_ENABLED=true` in `.env` and run `docker compose up -d`. A restart does not reread `.env`.
+- **Settings are not migrated yet**: use **Migrate Settings from ENV** on [Settings](Settings.md).
+- **A value is set by an environment variable**: change it in the environment.
+- **Security page off**: outgoing protection keeps running if enabled. Its settings remain under **Settings** > **SMTP Abuse (Beta)**.

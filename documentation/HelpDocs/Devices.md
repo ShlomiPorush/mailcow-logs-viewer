@@ -1,38 +1,44 @@
-# Devices - User Guide
+# Devices
 
-## Overview
+**Devices** lists the phones, tablets and Outlook clients that sync with your mailcow server over ActiveSync. The app finds them in the SOGo log, which it reads through the mailcow API, and updates the list every minute. **Not checked yet** next to the title appears for about a minute after the app starts.
 
-The Devices page lists the phones, tablets and Outlook clients that sync mail, calendars and contacts with your server over **ActiveSync** (Exchange ActiveSync, served by SOGo in mailcow).
+![Devices](../../images/docs/devices-list-light.webp#gh-light-mode-only)
+![Devices](../../images/docs/devices-list-dark.webp#gh-dark-mode-only)
 
-The list is built from the SOGo log, which the app reads through the mailcow API once a minute. Nothing is installed on the devices and nothing is changed in mailcow.
+## Find a device
 
-> **Note**: A device that syncs over IMAP, CalDAV or CardDAV does not use ActiveSync and is not listed here.
+Search matches the user, device ID, device type and IP address. **New this week** in the **Last seen** filter means first recorded by this app in the last 7 days. The list starts with the most recent **Last seen** first.
 
-### Search & Filtering
-1.  **Search**: User, device ID, device type or IP address.
-2.  **Device type**: The type the device reports, such as `iPhone`, `iPad`, `Outlook` or a phone model.
-3.  **Last seen**: Seen in 24 hours, new this week (first seen in the last 7 days), or not seen for 30 days, for example a replaced phone.
+## Read the list
 
-Click a column heading to sort by it.
+| Column | What it means |
+| --- | --- |
+| **Device** | The reported type (for Samsung, the model, such as `SM-S918B`) and the mail app, when recognized. Hover for the device ID. **New**: first seen in the last 7 days. |
+| **Last IP** | The address of the latest request, with country and city when GeoIP is set up. Hover the place for the network. |
+| **Last request** | The latest ActiveSync command, such as `Ping`, `Sync`, `FolderSync` or `SendMail`, with a tag when it failed. |
+| **First seen** | The earliest request this app recorded, which can be later than the day the device was set up. |
+| **Last seen** | The latest recorded request, grayed out after 30 days. |
 
-## The List
+The app recognizes Outlook, Windows Mail, Apple Mail, Samsung Email and Gmail by the way they name the device. **Gmail** can also be another Android mail app that names devices the same way. Other apps get no label.
 
-*   **User**: The account the device signs in with.
-*   **Device**: The device type (a Samsung model code such as `SM-S918B` when the phone reports one) and the mail app when it can be recognised. A **New** tag marks a device first seen in the last 7 days. Hover the device to see its ActiveSync device ID; the search finds devices by it too.
-    *   The app is recognised from how it names the device: Apple Mail, Samsung Email, Outlook, Windows Mail or Gmail. A few phone makers' mail apps name devices the way Gmail does, so they show as Gmail. An app that is not recognised shows no name.
-    *   The log has no operating system version or phone name: the phone sends those inside the request, and SOGo does not write them to the log the app can read.
-*   **Last IP**: The address of the newest request, with its country and city. Hover the location to see the network (provider) it belongs to. The location needs the MaxMind GeoIP databases (Settings → MaxMind).
-*   **Last request**: The newest ActiveSync command (`Ping`, `Sync`, `FolderSync`, `SendMail` ...). **Sign-in failed** means SOGo refused the password, which usually means the device still has an old password.
-*   **First seen / Last seen**: Hover to see the exact time.
+**Sign-in failed** means SOGo answered the last request with HTTP 401, **Refused** with 403, and **Error** plus the code for any other error. For a failed sign-in, check the password stored on the device and the SOGo log.
 
-## Good to Know
+## Settings that change this page
 
-*   **Last seen can be up to an hour old on a connected phone.** A phone waits for new mail with a long `Ping` request, and SOGo writes it to the log only when it ends. In mailcow that can take up to 59 minutes.
-*   **First seen** is the first request this app saw, not the day the device was set up. Devices that synced before the app was installed show the day the app first read their requests.
-*   A request in the older, encoded form of the protocol does not include the user name, so it cannot be listed. Current iOS, Android and Outlook clients use the plain form.
-*   On a very busy server a single request can be missed. The device appears with its next request.
+**Retention Days** under **Settings** > **Devices** removes a device when its last request is older than that many days. The default is 90; `0` keeps devices forever. The cleanup runs daily at 03:30.
 
-## Settings
+Country, city and network need the MaxMind keys under **Settings** > **MaxMind**. Without the GeoIP databases, **Location needs GeoIP** appears above the list.
 
-*   **Settings → Devices → Retention Days** (`EAS_DEVICES_RETENTION_DAYS`): how long a device that stopped syncing is kept. Default 90 days. `0` keeps every device.
-*   **Settings → Features**: turn the Devices page off. Its data is deleted when you do.
+Turning off **Devices** under **Settings** > **Features** hides the page, stops the updates and deletes the list. When you turn it on again, the app rebuilds the list from the SOGo log lines it still has; those are kept for **Raw Logs Retention Days** under **Settings** > **Logs**, 2 days by default. While Devices is on, the app collects the SOGo log even if the Logs page is off or SOGo is unticked there.
+
+## When something is missing
+
+**No ActiveSync devices yet** means no ActiveSync request has been recorded. Devices that use only IMAP, CalDAV or CardDAV never appear. Clients that send their requests in ActiveSync's encoded form have no user name in the log line and cannot be listed.
+
+**The last check failed** next to the title means the update job failed: open [Status](Status.md#jobs) > **Jobs** and look at **ActiveSync Devices**.
+
+## How ActiveSync works
+
+Exchange ActiveSync is the protocol phones and Outlook use to sync mail, calendars and contacts. In mailcow, SOGo answers it at `/Microsoft-Server-ActiveSync`. This page only reads the log; it cannot remove or wipe a device.
+
+A device keeps a `Ping` request open and waits for changes, in mailcow for up to almost an hour. SOGo writes the log line when the request ends, so a connected device can show a **Last seen** close to an hour old. The log has no device name or operating system version.

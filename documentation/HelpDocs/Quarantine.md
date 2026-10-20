@@ -1,123 +1,119 @@
-# Quarantine - User Guide
+# Quarantine
 
-## Overview
-The Quarantine page displays emails that mailcow has intercepted based on spam score, virus detection, or other filtering rules. You can manually release or delete quarantined messages, and set up **Auto-Rules** to automate this process.
+Quarantine is read live from mailcow, rather than from imported message history. The sidebar count is the number of held messages.
 
-## Quarantined Messages
-Each quarantined email shows:
-- **Sender → Recipient** - who sent the email and who it was intended for
-- **Subject** - the email subject line
-- **Score** - the spam score assigned by Rspamd (higher = more likely spam)
-- **Action** - why it was quarantined (e.g., reject, virus)
+## Messages
 
-### Manual Actions
-If a Read-Write API key (**Settings → Mailcow → Connection**) is configured, you can:
-- **Release** - deliver the email to the recipient's inbox
-- **Delete** - permanently remove the email from quarantine
-- **Not Spam** - release the email AND train Rspamd that it is legitimate (improves future filtering)
-- **Spam** - delete the email AND train Rspamd that it is spam (improves future filtering)
-- **Rule** - create an auto-rule pre-filled with this email's data
-- **Select All / Bulk Actions** - release, delete, mark as not spam, or mark as spam for multiple items at once
+![Quarantine, Messages](../../images/docs/quarantine-messages-light.webp#gh-light-mode-only)
+![Quarantine, Messages](../../images/docs/quarantine-messages-dark.webp#gh-dark-mode-only)
 
-### Email Details
-Click **Details** or the email subject to open a detail modal showing:
-- **Subject, From, Envelope From, Recipients** - full header info with click-to-copy
-- **Score & Action** - the spam score and the action that was taken
-- **Rspamd Symbols** - a table of all Rspamd rules that matched, sorted by score impact. Symbols with a score of 0 (informational only) are collapsed in an accordion
-- **Email Content** - preview of the email body (plain text or HTML)
-- **Action Buttons** - Release, Delete, Not Spam, Spam buttons in a sticky footer at the bottom of the modal
+Messages without a spam score sort last. **Why** is the Rspamd action that sent the message to quarantine; **Virus** means mailcow flagged a virus. List scores turn red at 15.
 
-## Quarantine Auto-Rules
+### Actions on one message
 
-> **Requires:** a Read-Write API key (**Settings → Mailcow → Connection**)
+All actions are carried out by mailcow and need the read-write API key:
 
-Auto-Rules let you define matching patterns to automatically release or delete quarantined emails - no manual intervention needed. The feature is always active when a Read-Write API key is configured; if you don't want automation, simply don't create any rules.
+| Action | Effect |
+|---|---|
+| **Release** | Delivers the held message to its recipient. |
+| **Not spam** | Releases it and trains Rspamd that it is legitimate mail. |
+| **Spam** | Deletes it and trains Rspamd that it is spam. |
+| **Delete** | Permanently deletes it. |
 
-### How It Works
-1. A background job runs at a configurable interval (default: every 5 minutes)
-2. It fetches all current quarantine items from mailcow
-3. Each item is checked against your **enabled** rules
-4. Matching items are automatically released or deleted
-5. All actions are logged for auditing
+**Rule** opens a new auto-rule filled in from the message; it does not act on the message immediately.
 
-### Creating Rules
+### Actions on several messages
 
-#### From the Rules Panel
-Click **Add Rule** in the Auto-Rules section to open the rule creation modal.
+Selected messages support release, deletion and spam learning with the same effects. **Release All** and **Delete All** act on every message in the list.
 
-#### From a Quarantine Email (Quick-Fill)
-Click the **Rule** button next to any quarantine email. The modal opens pre-filled with the email's data and shows a **Quick-fill bar** with clickable buttons:
-- **Sender** - sets match type to "Sender" with the full email address
-- **Domain** - sets match type to "Sender Domain" with just the domain part
-- **Recipient** - sets match type to "Recipient" with the recipient address
+### Message details
 
-### Rule Configuration
+![Quarantine Item Details window](../../images/docs/quarantine-details-light.webp#gh-light-mode-only)
+![Quarantine Item Details window](../../images/docs/quarantine-details-dark.webp#gh-dark-mode-only)
 
-| Field | Description | Example |
-|-------|-------------|---------|
-| **Name** | A friendly name for the rule | "Allow billing notifications" |
-| **Match Type** | Which email field to match against | Sender, Sender Domain, Recipient, Subject |
-| **Match Value** | The value or pattern to match | `noreply@billing.com` |
-| **Match Mode** | How to match the value | Exact Match, Contains, Regex |
-| **Action** | What to do with matched emails | Release or Delete |
+Detail scores are green below 6, amber from 6 and red from 15. Rspamd symbols are sorted by their positive or negative effect on the score; zero-score symbols are folded away. See [How Rspamd decides](#how-rspamd-decides).
 
-### Match Modes
+If the message has no plain-text part, its HTML part is displayed as text. Fuzzy hashes appear only when mailcow returns them.
 
-| Mode | Description | Example |
-|------|-------------|---------|
-| **Exact Match** | Value must match exactly (case-insensitive) | `alerts@monitoring.com` matches only that address |
-| **Contains** | Value is found anywhere in the field (case-insensitive) | `invoice` matches "Your invoice is ready" |
-| **Regex** | Full regular expression pattern (advanced) | `.*\.(ru|cn)$` matches Russian/Chinese domains |
+## Auto-Rules
 
-Contains and Regex rules look at the first 1000 characters of the field. A regex that repeats a group which itself repeats (nested repetition, such as `(a+)+`) is refused when you save it, because it can take a very long time on some messages; rewrite it without the nested repetition.
+![Quarantine, Auto-Rules](../../images/docs/quarantine-auto-rules-light.webp#gh-light-mode-only)
+![Quarantine, Auto-Rules](../../images/docs/quarantine-auto-rules-dark.webp#gh-dark-mode-only)
 
-### Match Types
+Auto-rules compare a message field with a value, then request release or deletion. The panel counts all rules; the tab counts only enabled rules. **Hits** counts confirmed actions, not every match.
 
-| Type | Description | Example |
-|------|-------------|---------|
-| **Sender** | Full sender email address | `alerts@monitoring.com` |
-| **Sender Domain** | Domain part of sender address | `trusted-service.com` |
-| **Recipient** | Full recipient email address | `admin@mydomain.com` |
-| **Subject** | Email subject line | `invoice` or `.*payment.*` |
+### Create a rule
 
-### Priority: Delete Always Wins
-If both a Release rule and a Delete rule match the same email, the **Delete rule always takes priority**. This ensures that deny rules (delete) can never be overridden by allow rules (release), similar to firewall deny/allow logic.
+![Add Quarantine Rule dialog](../../images/docs/quarantine-rule-dialog-light.webp#gh-light-mode-only)
+![Add Quarantine Rule dialog](../../images/docs/quarantine-rule-dialog-dark.webp#gh-dark-mode-only)
 
-### Safety Features
-- **Max Actions Per Run** - configurable limit (default: 50) prevents accidental mass-processing from overly broad rules
-- **Enable/Disable** - toggle individual rules on or off without deleting them
-- **Dry-Run Test** - the "Test Rules" button shows what would match without taking any action
-- **Action History** - every automated action is logged with sender, recipient, subject, matched rule, and timestamp
+Rule names are required and limited to 255 characters; match values to 500. New rules start with **Release** and are enabled when saved, ready for the next run.
 
-### Test Rules (Dry-Run)
-Click **Test Rules** to preview which currently quarantined emails would be affected. The results are:
-- **Grouped by rule** - each rule shows as a section header with its matched emails listed below
-- **Shows disabled rules** - matches from disabled rules appear faded with a "Disabled - will not execute" badge, so you can preview a rule's effect before enabling it
-- **Summary counters** - large matched/total count at the top with breakdown of active vs disabled matches
+**Sender** and **Recipient** compare addresses, **Sender Domain** compares the part after `@`, and **Subject** compares the subject line. All match modes ignore case:
 
-### Action History
-Click the **History** button to view recent automated actions. Each entry shows:
-- The action taken (Release / Delete)
-- Sender and recipient
-- Which rule matched
-- When the action occurred
+| Mode | What matches |
+|---|---|
+| **Exact Match** | The whole field equals the value. |
+| **Contains** | The value occurs anywhere in the field. `example.com` also matches `user@mail.example.com`. |
+| **Regex (advanced)** | The pattern matches anywhere. Use `^` and `$` for the whole field: `^news[0-9]*@example\.com$` matches `news@example.com` and `news42@example.com`. |
 
-Logs are retained for a configurable period (default: 30 days).
+**Contains** escapes special characters and stores the result as a pattern, so it also gets a **Regex** tag in the list.
 
-## Configuration
+### Limits on patterns
 
-These settings live under **Settings → Quarantine → Auto-Rules Scheduler**:
+Contains and regex rules inspect only the first 1000 field characters; exact matches compare the whole field. A regex match exceeding 0.1 seconds is skipped, with the rule named in the application log.
 
-| Setting | Default | Description |
-|---------|---------|-------------|
-| **Quarantine Rules Max Actions** | `50` | Safety limit: maximum emails to release/delete per scheduler run |
-| **Quarantine Rules Interval** | `5` | Minutes between rule processing runs (lower = faster, higher = less load) |
-| **Quarantine Rules Log Retention Days** | `30` | Days to keep action history |
+Invalid patterns and nested repetition such as `(a+)+` are refused on save. Older saved patterns with nested repetition are skipped with a log warning until edited.
 
-> [!NOTE]
-> Settings are edited on the **Settings** page (requires `SETTINGS_EDIT_VIA_UI_ENABLED=true`). Every setting can also be provided as an environment variable - see [ENV_Settings.md](../ENV_Settings.md).
+### Create a rule from a message
 
-> **Note:** The auto-rules feature requires a valid Read-Write API key (**Settings → Mailcow → Connection**). Without it, the scheduler will not process rules. If no rules are defined, the background job simply does nothing.
+**Rule** starts a release rule matching the sender. Quick fill can replace this with the sender's domain or recipient and updates generated names. Change the action to **Delete** to remove matching mail.
 
-## Background Job
-The **Process Quarantine Rules** job appears in **Status → Background Jobs** under the "Quarantine" category, showing its interval, status, and last run time. You can also manually trigger it with the "Run Now" button.
+### Edit a rule
+
+A saved Contains rule reopens with its plain text. Other patterns open as Regex (advanced), so saving preserves their match mode.
+
+Earlier versions could escape Contains text twice during editing and stop it matching. Upgrades automatically repair affected Sender Domain rules and name them in the application log. Sender, Recipient and Subject rules are left alone because their values can contain real backslashes.
+
+A **Check** tag marks a Contains rule that looks for a backslash. **Repair** removes one level of escaping and saves it; like any rule change, it needs the read-write API key. Leave it unchanged if the backslash is intentional.
+
+### Which rule wins
+
+Each message is handled by at most one rule. Delete rules are checked before release rules, and the first match wins. If both actions match, the message is deleted.
+
+### How the rules run
+
+**Process Quarantine Rules** checks current quarantine every **Quarantine Rules Interval** (5 minutes by default). It uses enabled rules and handles at most **Quarantine Rules Max Actions** messages (50 by default) per run; the rest wait.
+
+Only actions confirmed by mailcow enter history and increase Hits. Failed actions stay unrecorded, are logged as errors and leave the messages for the next run. Other messages in the same run still count. History is kept for **Quarantine Rules Log Retention Days** (30 by default).
+
+Use **Run** under **Status** > **Jobs** > **Quarantine** to process immediately. Interval changes apply on save without a restart. The job runs only when the Quarantine feature and read-write API key are both enabled.
+
+### Test Rules
+
+**Test Rules** checks current quarantine without acting or applying the action limit. It includes disabled rules and checks delete rules first, assigning each message to its first match.
+
+Disabled rules can claim matches before enabled rules. Results mark them **Disabled - will not execute**, so a preview may differ from the scheduled run.
+
+### History
+
+History shows the last 20 confirmed actions. Deleting a rule does not remove these records.
+
+## Settings that change this page
+
+Set the action limit, interval and history retention under **Settings** > **Quarantine** > **Auto-Rules Scheduler**. The action limit bounds the damage from a rule matching more messages than intended.
+
+Configure **mailcow API Key (read-write)** under **Settings** > **Mailcow** > **Connection**. See [Environment settings](../ENV_Settings.md) for environment-variable configuration.
+
+## When something is missing
+
+- With Quarantine off under **Settings** > **Features**, the page is disabled.
+- The read-only key can list messages and open details. Release, deletion, spam learning and every rule operation require the read-write key. Without it, auto-rules are locked and their job does not run. See [Getting started](../GETTING_STARTED.md) for creating the keys.
+- **Failed to load quarantine** or **Failed to load details** means mailcow did not answer; the message includes the reason.
+- **Failed to load rules** gives the server's reason for the failure.
+
+## How Rspamd decides
+
+Rspamd adds scores from matching rules. Positive scores point toward spam; negative scores toward legitimate mail. Mailcow's thresholds turn the total into an action such as `add header` or `reject`. Zero-score symbols are informational. The symbols in message details explain the score.
+
+**Not spam** and **Spam** train Rspamd with the message as legitimate mail or spam, respectively.

@@ -1,158 +1,140 @@
-# Spam Filter - User Guide
+# Spam Filter
 
-## Overview
-The Spam Filter page provides two key features for managing email delivery and spam protection through your mailcow server's Rspamd integration.
+Suppressions are kept in the app's database and written to Rspamd's recipient denylist. Other Rspamd maps are read from Rspamd and saved through mailcow's API.
 
-## Features
+## Suppressions
 
-### 1. Suppressions (Email Suppression List)
-Manage a list of email addresses that should be blocked from receiving outbound emails. This prevents wasted sending to addresses that consistently bounce.
+![Spam Filter, Suppressions](../../images/docs/spam-filter-suppressions-light.webp#gh-light-mode-only)
+![Spam Filter, Suppressions](../../images/docs/spam-filter-suppressions-dark.webp#gh-dark-mode-only)
 
-#### How It Works
-- **Automatic Detection**: The system monitors your Postfix logs for bounced and rejected emails
-- **Smart Filtering**: Only real outbound messages are processed - bounce notifications (DSN messages from MAILER-DAEMON) are automatically skipped to prevent your own sender addresses from being suppressed
-- **Progressive Blocking**: Each repeated bounce extends the suppression duration:
-  - 1st bounce → 7 days (configurable)
-  - 2nd bounce → 14 days
-  - 3rd bounce → 21 days
-  - Capped at the configured maximum (default: 90 days)
-- **Accurate Counting**: If the same recipient bounces several times within a single scan, all of those bounces are consolidated into **one** suppression entry with an accurate bounce count - no duplicate entries are created, and the progressive expiry is based on the real total
-- **Rspamd Sync**: Active suppressions are automatically synced to Rspamd's recipient denylist. The sync **only writes when the managed entries actually changed** - in steady state nothing is rewritten, so Rspamd is not forced to truncate and reload the map on every run
-- **Auto-Refresh**: The suppressions list refreshes automatically to show real-time changes
+Active suppressions go into `global_rcpt_blacklist.map` (**Recipient Denylist**), where Rspamd rejects new mail to matching recipients.
 
-#### Bounce Types & Queue Behavior
-| Type | DSN Code | Detection Method | Queue Cleanup |
-|------|----------|------------------|---------------|
-| **Hard Bounce** | 5.x.x | Postfix logs (every 5 min) | ✅ Stuck queue items deleted immediately |
-| **Soft Bounce / Deferred** | 4.x.x | Live queue scan (every 5 min) | ✅ Deleted after threshold (default: 60 min) |
+### Key figures
 
-> **How it works:** Hard bounces are detected from Postfix log entries. Deferred emails are detected by scanning the live mail queue - if an email has been stuck longer than the configurable threshold, it is automatically deleted from the queue and the recipient is suppressed. This is more reliable than log-based detection on busy servers.
+**Active** counts enabled entries. **Hard Bounces** and **Soft Bounces** count active entries with those reasons, not individual bounces. **Pending Sync** counts active entries not yet written to Rspamd.
 
-#### Managing Suppressions
-- **Add Manually**: Click "Add Suppression" to manually block an email address or domain
-- **Toggle Active/Inactive**: Use the Enable/Disable button to temporarily deactivate
-- **Delete**: Permanently remove a suppression entry
-- **Search & Filter**: Filter by reason (hard bounce, soft bounce, rejected, manual) or status
-- **Import/Export**: Bulk import from CSV or export the full list
-- **Suppress from Queue**: Use the "Suppress" button on queue items to quickly add the recipient to the suppression list
+### Find a suppression
 
-#### Domain Suppressions
-When a domain-based suppression is created (e.g., blocking all emails to `@example.com`), the system stores it as a regex pattern for Rspamd compatibility. In the UI, these entries display the **clean domain name** instead of the raw regex, with a "Domain" badge. Hover over the badge to see the actual regex pattern.
+Search matches the address, notes and last bounce message. **Expired** shows entries turned off after their expiry date passed.
 
-Only entries you add or import can be patterns. Addresses the app suppresses on its own, from bounces and the mail queue, are always written to Rspamd as the exact address, so an odd-looking address can never block other recipients.
+### The list
 
-#### Sync Status
-- ✓ **Synced**: Entry is active in Rspamd's denylist
-- ⟳ **Pending**: Entry needs to be synced to Rspamd
-- ⊘ **Will Unsync**: Entry was deactivated and will be removed from Rspamd on next sync
+<!-- VERIFY: owner's decision pending (finding 42): the Will unsync tag can never appear (it needs active=False with synced_to_rspamd=True, which no code path leaves). The Rspamd row below does not mention it; update that row once decided. -->
+| Value | Meaning |
+|---|---|
+| **Reason** | Hard Bounce: `5.x.x`; Soft Bounce: `4.x.x`; Deferred Stuck: queue cleanup; Rejected: another bounce status. |
+| Source | `auto`: added by the app; `manual`: added in the dialog; `import`: CSV. |
+| **Bounces** | Total counted bounces, with hard (`H:`) and soft (`S:`) counts. |
+| **Rspamd** | **Synced**: written to the map; **Pending**: awaiting a write. Disabling marks the entry for the next sync; the row does not reliably show whether its old map entry remains. |
 
-#### Manual Job Triggers
-All suppression background jobs can be manually triggered from the **Status page → Background Jobs**:
-- **detect_suppressions**: Scan recent Postfix logs for hard bounce emails
-- **cleanup_deferred_queue**: Scan live queue for stuck deferred emails
-- **sync_suppressions**: Sync active suppressions to Rspamd
-- **expire_suppressions**: Deactivate expired suppression entries
+### Automatic suppressions
 
----
+With **Suppression Enabled** on, two jobs add entries every 5 minutes:
 
-### 2. Rspamd Maps
-Direct editor for all 13 Rspamd map files available in mailcow. These maps control email filtering rules at the Rspamd level. All maps support both plain text entries and regex patterns.
+- **Detect Suppressions**, with **Suppression Auto Detect** on, checks delivery-agent `bounced` lines imported in the last 10 minutes. It also checks `deferred` lines when **Queue Cleanup Enabled** is off. Connection-time rejections (`NOQUEUE`) do not create suppressions. Empty senders and `MAILER-DAEMON` are skipped.
+- **Cleanup Deferred Queue**, with **Queue Cleanup Enabled** on and the read-write key, deletes deferred messages older than **Queue Cleanup Threshold Minutes** (60 by default) and suppresses their recipients as **Deferred Stuck**.
 
-#### Map Categories
+Log detection skips recipients in **Suppression Whitelist Domains**, matching exact domains without subdomains. Hard and soft bounces follow their configured actions. For a hard bounce, matching queued messages are also deleted when the read-write key is available.
 
-**Sender Rules**
-- **Header-From Denylist**: Block emails by From header address
-- **Header-From Allowlist**: Allow emails by From header address
-- **Envelope Sender Denylist**: Block by envelope sender address
-- **Envelope Sender Allowlist**: Allow by envelope sender address
+<!-- VERIFY: owner's decision pending (finding 6): cleanup_deferred_queue_job deletes stuck mail to whitelisted domains too and only skips the suppression. Update the next paragraph and the Suppression Whitelist Domains item below once decided. -->
+The whitelist prevents recipient suppression, but it does not protect queued messages from deletion. Cleanup uses age since arrival, including time before a message became deferred.
 
-**Recipient Rules**
-- **Recipient Denylist**: Block sending to specific recipients (auto-managed by Suppressions)
-- **Recipient Allowlist**: Allow sending to specific recipients
+Automatic entries start with **Suppression Base Expiry Days** (7 by default). Each bounce sets expiry to base days times bounce count, capped at **Suppression Max Expiry Days** (90). Log lines are counted once across restarts and overlapping runs. Detection reactivates inactive entries, except soft bounces below the **Count then suppress** threshold.
 
-**Content Rules**
-- **Bad Words / Bad Words DE**: Word patterns that trigger spam scoring (fired with fishy TLDs)
-- **Fishy TLDs**: Suspicious top-level domains (fired with bad words)
-- **Bad Languages**: Blocked language codes
-- **Bulk Mail Headers / Bad Mail Headers**: Header patterns for junk detection
+Earlier versions could double-count bounces. When **Suppression Soft Bounce Action** is **Count then suppress**, the upgrade disables automatic soft-bounce suppressions and resets their counts to 0. The next sync removes them from Rspamd; new bounces must reach the threshold again. The application log reports how many were lifted. Other entries are unchanged.
 
-**System**
-- **Monitoring Hosts**: Hosts excluded from Rspamd logging
+With **Suppression Rspamd Sync** on, new and updated automatic entries are written to Rspamd right after detection. Automatic entries always match the exact address.
 
-#### Regex Wizard
-The map editor includes a built-in **Regex Pattern Generator** that lets you create regex patterns without knowing regex syntax:
+### Add a suppression
 
-1. Click the **"Regex Wizard"** button above the editor
-2. Select a pattern type:
-   | Type | Input | Generated Pattern |
-   |------|-------|-------------------|
-   | **Exact Email** | `user@example.com` | `user@example.com` |
-   | **Domain** | `example.com` | `/.+example\.com/i` |
-   | **TLD** | `xyz` | `/.+\.xyz$/i` |
-   | **Keyword** | `sale` | `/.*sale.*/i` |
-3. Type your value - the regex pattern is generated live with an explanation
-4. Click **"Add"** to insert it into the editor
+![Add Suppression dialog](../../images/docs/spam-filter-add-suppression-light.webp#gh-light-mode-only)
+![Add Suppression dialog](../../images/docs/spam-filter-add-suppression-dark.webp#gh-dark-mode-only)
 
-> The "Domain" type follows mailcow's standard regex format (`/.+example\.com/i`) which matches the domain and all its subdomains.
+A domain must be entered as a plain name. It matches that exact domain, excluding subdomains. **Email Address** also accepts patterns such as `/^.+@example\.(net|org)$/i`; the app anchors the whole pattern when writing it to Rspamd.
 
-#### Important Notes
-- The Recipient Denylist is partially auto-managed by the Suppression feature
-- Manual entries above the managed section marker are preserved during sync
-- Changes require a Read-Write API key (**Settings → Mailcow → Connection**)
-- Lines starting with `#` are comments, empty lines are ignored
+Entries are permanent by default. Temporary entries last 1 to 365 days, 7 by default. Adding an existing inactive address reactivates it as a permanent manual entry and ignores the expiry fields; an active duplicate is refused.
 
----
+With the read-write key, adding an entry deletes queued messages to that address, or every recipient at that domain, then writes the suppression list to Rspamd.
 
-## Configuration
+### Edit, disable and delete
 
-Configure these settings in **Settings → Spam Filter** (the Rspamd connection itself - password and address - is configured under **Settings → Mailcow → Rspamd**):
+**Disable** keeps the entry but removes its block on the next sync. Re-enabling an expired entry requires a new expiry or **Permanent block**; otherwise the hourly expiry job disables it again. **Delete** removes the entry permanently.
 
-| Setting | Default | Description |
-|---------|---------|-------------|
-| Suppression → **Suppression Enabled** | `false` | Master switch for the suppression system |
-| Suppression → **Suppression Auto Detect** | `true` | Auto-detect hard bounces from Postfix logs |
-| Suppression → **Suppression Rspamd Sync** | `true` | Auto-sync suppression list to Rspamd |
-| Whitelist → **Suppression Whitelist Domains** | - | Domains that should never be suppressed |
-| Hard Bounces (5.x.x) → **Suppression Hard Bounce Action** | `suppress` | Hard bounces (5.x.x): `suppress` or `ignore` |
-| Soft Bounces (4.x.x) - Log Detection → **Suppression Soft Bounce Action** | `count` | Soft bounces in logs (4.x.x): `suppress`, `count`, or `ignore` |
-| Soft Bounces (4.x.x) - Log Detection → **Suppression Soft Bounce Threshold** | `3` | Soft bounces before suppression (when action=`count`) |
-| Block Duration → **Suppression Base Expiry Days** | `7` | Block duration in days (× bounce count for repeats) |
-| Block Duration → **Suppression Max Expiry Days** | `90` | Maximum block duration cap |
-| Deferred Queue Cleanup → **Queue Cleanup Enabled** | `true` | Auto-delete stuck deferred emails from queue |
-| Deferred Queue Cleanup → **Queue Cleanup Threshold Minutes** | `60` | Minutes before a stuck deferred email is deleted |
+Adding, editing, enabling, disabling, deleting or importing triggers a background sync when the read-write key is configured.
 
-> [!NOTE]
-> Settings are edited on the **Settings** page (requires `SETTINGS_EDIT_VIA_UI_ENABLED=true`). Every setting can also be provided as an environment variable - see [ENV_Settings.md](../ENV_Settings.md).
+### Sync to Rspamd
 
----
+Manual sync writes active entries to `global_rcpt_blacklist.map`. Automatic sync runs every 10 minutes with **Suppression Enabled**, **Suppression Rspamd Sync**, the Rspamd password and read-write key configured.
 
-## Prerequisites
+The app replaces only the section between these markers; put your own entries above it:
 
-1. **Rspamd Password**: Set it under **Settings → Mailcow → Rspamd** to enable map reading
-2. **Read-Write API Key**: Set it under **Settings → Mailcow → Connection** to enable map editing, queue management, and sync
-3. **Suppression Enabled**: Switch it on under **Settings → Spam Filter → Suppression** to activate auto-detection
+```
+# === MANAGED BY MAILCOW LOGS VIEWER - DO NOT EDIT BELOW ===
+# === END MANAGED SECTION ===
+```
 
-## Troubleshooting
+The map is written only when managed entries change. If the existing map cannot be read, sync fails without writing and retries next time. Bare addresses in your own lines are anchored during sync so they cannot match longer addresses containing them.
 
-### "Rspamd Not Configured"
-- Set the Rspamd password under **Settings → Mailcow → Rspamd**
-- This is the Rspamd web UI password, not the mailcow admin password
+### Import and export
 
-### Suppressions Not Syncing
-- Verify both the Rspamd password (**Settings → Mailcow → Rspamd**) and the Read-Write API key (**Settings → Mailcow → Connection**) are configured
-- Check the Status page → Background Jobs → Spam Filter for job errors
-- Use the manual "Sync to Rspamd" button to trigger an immediate sync
+Export includes every suppression and its state, counts and expiry. Import reads `email`, `type`, `reason` and `notes`:
 
-### Own Sender Addresses Being Suppressed
-- This was a known issue that has been fixed. The system now filters out bounce notification (DSN) entries by checking the sender field - bounce notifications always have an empty sender or `MAILER-DAEMON`
-- Only recipients of real outbound messages are considered for suppression
+- Headers are optional. If the first cell is `email` or `address`, columns are read by name; otherwise use the order above.
+- Existing addresses and repeats are skipped.
+- Unknown types become `email`. Reasons other than `hard_bounce`, `soft_bounce`, `rejected` or `manual` become `manual`.
+- Domain entries need pattern form, such as `/^.+@example\.net$/i`, as in the export.
+- Imported entries are active and permanent, with source `import`. Re-importing an export does not restore state or expiry, and `deferred_stuck` becomes `manual`.
 
-### Deferred Emails Stay in Queue Too Long
-- Check that both **Queue Cleanup Enabled** (Settings → Spam Filter → Deferred Queue Cleanup) and **Suppression Enabled** (Settings → Spam Filter → Suppression) are switched on
-- The default threshold is 60 minutes - adjust **Queue Cleanup Threshold Minutes** in the same group
-- Requires a Read-Write API key (**Settings → Mailcow → Connection**) to delete queue items
-- Check the Status page → Background Jobs → Spam Filter for the "Cleanup Deferred Queue" job status
+## Rspamd Maps
 
-### Map Save Errors
-- Ensure a Read-Write API key with write permissions is configured (**Settings → Mailcow → Connection**)
-- Check regex patterns for syntax errors using the "Validate" button
+![Spam Filter, Rspamd Maps](../../images/docs/spam-filter-maps-light.webp#gh-light-mode-only)
+![Spam Filter, Rspamd Maps](../../images/docs/spam-filter-maps-dark.webp#gh-dark-mode-only)
+
+Header-From and envelope-sender denylists add 2050 to the spam score; their allowlists subtract 2050. Recipient Denylist rejects matching recipients; Recipient Allowlist accepts them. Fishy TLDs and bad-word rules fire only together. Monitoring Hosts excludes matching hosts from logging.
+
+**Auto-managed** on Recipient Denylist means the suppression list writes to it.
+
+### Edit a map
+
+![Map editor for Recipient Denylist](../../images/docs/spam-filter-map-editor-light.webp#gh-light-mode-only)
+![Map editor for Recipient Denylist](../../images/docs/spam-filter-map-editor-dark.webp#gh-dark-mode-only)
+
+Lines starting with `#` are comments; blank lines do not count as entries. Validation checks slash-delimited regular expressions and warns about bare addresses. Other lines, including words, domains, header patterns and language codes, are accepted as entered.
+
+Saving refuses invalid patterns, anchors bare addresses and writes the whole map through mailcow. Rspamd reloads it. **Discard** reloads from Rspamd. The editor does not refresh automatically while you edit.
+
+> [!WARNING]
+> In **Recipient Denylist**, add your own entries only above the line `# === MANAGED BY MAILCOW LOGS VIEWER - DO NOT EDIT BELOW ===`. The suppression sync replaces everything between that line and `# === END MANAGED SECTION ===`, so entries you add there are lost on the next sync.
+
+### Regex Wizard
+
+The wizard's **Domain** pattern includes subdomains, unlike a domain suppression. Its explanation says "Blocks", but the map determines the effect: the same pattern in an allowlist allows matching mail.
+
+## Settings that change this page
+
+Under **Settings** > **Spam Filter**:
+
+- **Suppression Enabled** defaults off. **Suppression Auto Detect** and **Suppression Rspamd Sync** default on. Page edits can sync even when these automatic switches are off.
+- **Suppression Hard Bounce Action** defaults to **Suppress**; **Ignore** skips hard bounces.
+<!-- VERIFY: owner's decision pending (finding 14): the soft-bounce settings apply only to log detection, which runs only while Queue Cleanup Enabled is off (on by default). Keep or change the note below once decided. -->
+- **Suppression Soft Bounce Action** defaults to **Count then suppress**: soft bounces are counted on an inactive entry, which turns active at **Suppression Soft Bounce Threshold** (3 by default). **Suppress** activates at the first bounce; **Ignore** skips them. These actions apply to deferred log detection only when **Queue Cleanup Enabled** is off.
+- **Queue Cleanup Enabled** defaults on.
+- **Suppression Whitelist Domains** accepts comma-separated exact domains and prevents suppression, but does not protect queued mail from deletion.
+
+The jobs, including hourly expiry, require **Suppression Enabled**. With it off, manual entries can still sync, but expiry does not run.
+
+Under **Settings** > **Mailcow**, set **Rspamd Password** to read or sync maps. Leave **Rspamd URL** empty to use mailcow's path; try a direct URL such as `http://rspamd-mailcow:11334` if that fails. See [Settings](Settings.md#spam-filter).
+
+## When something is missing
+
+- **No read-write API key**: suppressions can be added, edited and deleted locally, but cannot sync. Maps are read-only and queue cleanup does not run. See [Getting started](../GETTING_STARTED.md).
+- **No Rspamd password**: maps cannot load and sync does not run.
+- **Rspamd cannot be reached**: check the application logs, password and **Rspamd URL**.
+
+## How suppressions work
+
+A delivery status starting with `5`, such as `5.1.1` (unknown user), is a permanent failure or hard bounce. A `4` status, such as `4.2.2` (mailbox full), is temporary; Postfix keeps retrying from the deferred queue. Suppressions reject new mail to failing recipients before it is sent. Automatic entries expire so recovered recipients are not blocked forever.
+
+## How Rspamd maps work
+
+Maps provide values for mail-filtering rules. In a regular-expression map, each line matches anywhere in the value: bare `ann@example.com` also matches `joann@example.com`. The app writes `/^ann@example\.com$/i` instead: `^` and `$` anchor the full value, and `i` ignores case.

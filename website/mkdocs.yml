@@ -36,6 +36,14 @@ theme:
     - content.code.copy
     - toc.follow
 
+plugins:
+  - search
+  # Click a screenshot to see it full size; auto_themed keeps the light and
+  # dark copies of an image in separate galleries
+  - glightbox:
+      auto_themed: true
+      auto_caption: false
+
 extra_css:
   - assets/ui-tokens.css
   - assets/v3.css
@@ -66,22 +74,31 @@ nav:
   - Home: index.md
   - Setup:
       - Getting Started: GETTING_STARTED.md
-      - Environment Variables: ENV_Settings.md
-      - Settings in the Web UI: Settings_UI.md
+      - Sign-in: OAuth2_Configuration.md
       - Reverse Proxy: Reverse_Proxy.md
-      - OAuth2 / OIDC: OAuth2_Configuration.md
-      - Upgrade to v2: UpdateV2.md
+      - Settings: HelpDocs/Settings.md
+      - Notifications: Notifications.md
+  # In the order of the app's sidebar
   - Pages:
-      - Domains: HelpDocs/Domains.md
-      - DMARC: HelpDocs/DMARC.md
-      - Mailbox Statistics: HelpDocs/Mailbox_Stats.md
-      - Rate Limits: HelpDocs/Rate_Limits.md
-      - Spam Filter: HelpDocs/Spam_Filter.md
+      - Using the App: Using_the_App.md
+      - Dashboard: HelpDocs/Dashboard.md
+      - Search: HelpDocs/Search.md
+      - Messages: HelpDocs/Messages.md
+      - Queue: HelpDocs/Queue.md
       - Quarantine: HelpDocs/Quarantine.md
-      - Abuse Protection: HelpDocs/Abuse_Protection.md
+      - Security: HelpDocs/Security.md
+      - Outgoing Spam: HelpDocs/Abuse_Protection.md
+      - Spam Filter: HelpDocs/Spam_Filter.md
+      - DMARC & TLS: HelpDocs/DMARC.md
+      - Status: HelpDocs/Status.md
+      - Blocklists: HelpDocs/IP_Blacklist_Monitor.md
+      - Domains: HelpDocs/Domains.md
+      - Mailbox Stats: HelpDocs/Mailbox_Stats.md
+      - Rate Limits: HelpDocs/Rate_Limits.md
       - Devices: HelpDocs/Devices.md
-      - IP Blacklist Monitor: HelpDocs/IP_Blacklist_Monitor.md
+      - Logs: HelpDocs/Logs.md
+      - About: HelpDocs/About.md
   - Reference:
-      - Email Authentication: Email_Authentication_Monitoring.md
+      - Environment Variables: ENV_Settings.md
       - API: API.md
       - Changelog: changelog.md
