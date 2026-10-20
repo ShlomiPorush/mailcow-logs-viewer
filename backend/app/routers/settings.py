@@ -1284,6 +1284,10 @@ async def _validate_credential(name: str) -> Dict[str, Any]:
     check = _CREDENTIAL_CHECKS[name]
     fingerprint = check["fingerprint"]()
     result = await check["check"]()
+    if check["fingerprint"]() != fingerprint:
+        # The key or password changed while this check ran: its answer is about
+        # the old one, and is not kept over the check of the new one
+        return {**result, "stale": True}
     if result["configured"]:
         await asyncio.to_thread(_persist_credential_status_worker, name, result, fingerprint)
     return result

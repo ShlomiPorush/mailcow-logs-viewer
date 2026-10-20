@@ -80,3 +80,26 @@ def test_status_and_a_manual_run_know_the_job(monkeypatch):
     monkeypatch.setattr(type(rs.settings._inner), 'is_rspamd_configured', property(lambda self: True))
     assert rs._job_off_reason('check_credentials') is None
     assert 'check_credentials' in scheduler.job_status
+
+
+def test_a_manual_run_keeps_a_rejection_on_status(monkeypatch):
+    persisted, status = _checks(monkeypatch, rw={'configured': True, 'valid': False, 'error': 'rejected'})
+    # The manual run wrapper writes success over any job that does not say it set its status
+    assert asyncio.run(scheduler.check_credentials_job()) == scheduler.JOB_STATUS_SET
+    assert status.call_args.args[1] == 'failed'
+
+
+def test_a_check_of_a_key_changed_meanwhile_is_not_kept(monkeypatch):
+    """The key is changed (and its own check saved) while the scheduled check
+    still waits for mailcow: the late answer is about the old key."""
+    current = {'fp': 'old'}
+
+    async def slow_reject():
+        current['fp'] = 'new'  # saved in Settings while this check waited
+        return {'configured': True, 'valid': False, 'error': 'rejected'}
+
+    persisted, status = _checks(monkeypatch, rw=ACCEPTED)
+    rs._CREDENTIAL_CHECKS['mailcow_rw_key'].update(fingerprint=lambda: current['fp'], check=slow_reject)
+    asyncio.run(scheduler.check_credentials_job())
+    assert persisted == [], 'the result of the new key stays'
+    status.assert_called_with('check_credentials', 'success')

@@ -1980,6 +1980,8 @@ async def check_credentials_job():
             logger.warning(f"[CREDENTIALS] Could not check the {_CREDENTIAL_LABELS[name]}: {e}")
             failed.append(f"the {_CREDENTIAL_LABELS[name]} could not be checked")
             continue
+        if result.get("stale"):
+            continue  # changed meanwhile: the check of the new value says it
         if result.get("configured") and not result.get("valid"):
             reason = {'connection': 'could not be reached', 'rejected': 'was rejected',
                       'read_only': 'has no write access'}.get(result.get("error"), 'was not accepted')
@@ -1989,6 +1991,8 @@ async def check_credentials_job():
         update_job_status('check_credentials', 'failed', message[0].upper() + message[1:] + '. See Settings > Mailcow.')
     else:
         update_job_status('check_credentials', 'success')
+    # A manual run keeps this status (a rejected key stays failed)
+    return JOB_STATUS_SET
 
 
 async def update_geoip_database():
