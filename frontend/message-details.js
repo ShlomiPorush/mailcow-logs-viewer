@@ -31,7 +31,10 @@ function placeMessageModal(modal) {
         modal.classList.add('ui-docked');
         return true;
     }
-    if (modal.parentNode !== messageModalHome.parent) messageModalHome.parent.insertBefore(modal, messageModalHome.next);
+    // A dialog opens over every dialog already open (Block details opens a
+    // message from its own dialog): the last one on the page is on top
+    if (document.body && typeof document.body.appendChild === 'function') document.body.appendChild(modal);
+    else if (modal.parentNode !== messageModalHome.parent) messageModalHome.parent.insertBefore(modal, messageModalHome.next);
     modal.classList.remove('ui-docked');
     return false;
 }
