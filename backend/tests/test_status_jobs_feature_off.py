@@ -72,7 +72,7 @@ def test_suppression_sync_off_says_why(jobs, monkeypatch):
     monkeypatch.setattr(settings._inner, 'rspamd_password', 'example-password')
     job = jobs()['sync_suppressions']
     assert job['enabled'] is False
-    assert 'Sync with Rspamd' in job['disabled_reason'] and job['settings_section'] == 'spam_filter'
+    assert 'Sync with Rspamd' in job['disabled_reason'] and job['settings_section'] == 'outbound'
 
 
 def test_suppression_sync_without_the_rspamd_password_is_off_and_says_why(jobs, monkeypatch):

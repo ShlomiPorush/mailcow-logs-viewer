@@ -1816,6 +1816,10 @@ function switchTab(tab, params = {}) {
             if (!isFeatureDisabled('quarantine')) {
                 loadQuarantine();
                 initQuarantineRules();
+            } else {
+                // Only the maps are on: the subtitle speaks of them, not of held mail
+                const summary = document.getElementById('quarantine-summary');
+                if (summary) summary.textContent = 'The Rspamd maps that allow or block mail';
             }
             // The maps load when their tab shows
             if (quarantineTab === 'maps') loadRspamdMaps();
