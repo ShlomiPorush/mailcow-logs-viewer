@@ -463,7 +463,7 @@ function gsPageOpen(route) {
 }
 
 async function gsOpenSetting(setting) {
-    navigateTo('settings', { sub: setting.tab });
+    if (!(await navigateTo('settings', { sub: setting.tab }))) return;
     const row = el => el.closest('.ui-set-field, .ui-set-bool, .ui-set-wide');
     const find = () => {
         const el = gsEl('edit-' + setting.key) || gsEl('setting-' + setting.key);
@@ -496,7 +496,7 @@ async function gsOpenSetting(setting) {
 }
 
 async function gsOpenDomain(name) {
-    navigateTo('domains');
+    if (!(await navigateTo('domains'))) return;
     const id = domainRowId(name);
     const details = await gsWaitFor(() => gsEl(id + '-details'));
     if (!details) return;
@@ -509,7 +509,7 @@ async function gsOpenMailbox(username, text) {
     const field = gsEl('mailbox-stats-search');
     if (field) field.value = username || text;
     const already = gsPageOpen('mailbox-stats') && mailboxStatsView === 'statistics';
-    navigateTo('mailbox-stats', { sub: 'statistics' });
+    if (!(await navigateTo('mailbox-stats', { sub: 'statistics' }))) return;
     if (already) applyMailboxStatsFilters();
     if (!username) return;
     const found = await gsWaitFor(() => (mailboxStatsCache.mailboxes || []).some(m => m.username === username));
@@ -521,7 +521,7 @@ async function gsOpenMailbox(username, text) {
 }
 
 // Outbound > Suppressions, listing what the search found in every state
-function gsOpenSuppressions(text) {
+async function gsOpenSuppressions(text) {
     const search = gsEl('suppression-search');
     if (search) search.value = text;
     const reason = gsEl('suppression-filter-reason');
@@ -531,7 +531,7 @@ function gsOpenSuppressions(text) {
     // The list keeps the filters it was last asked with: it reads them again from the fields
     suppressionQuery = null;
     const already = gsPageOpen('outbound') && outboundTab === 'suppressions';
-    navigateTo('outbound', { sub: 'suppressions' });
+    if (!(await navigateTo('outbound', { sub: 'suppressions' }))) return;
     if (already) loadSuppressions(1);
 }
 
@@ -544,7 +544,7 @@ function gsOpenBannedNetwork() {
 }
 
 // The Security page's events for the address
-function gsOpenAddress(ip) {
+async function gsOpenAddress(ip) {
     ['netfilter-filter-username', 'netfilter-filter-action', 'netfilter-filter-country'].forEach(id => {
         const field = gsEl(id);
         if (field) field.value = '';
@@ -554,7 +554,7 @@ function gsOpenAddress(ip) {
     currentFilters.netfilter = { ip, username: '', action: '', country_code: '' };
     currentPage.netfilter = 1;
     const already = gsPageOpen('netfilter');
-    navigateTo('netfilter', { sub: 'events' });
+    if (!(await navigateTo('netfilter', { sub: 'events' }))) return;
     if (already) applyNetfilterFilters();
 }
 

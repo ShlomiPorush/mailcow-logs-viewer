@@ -25,7 +25,7 @@
     <!-- Utility classes still used by the markup, compiled once
          (.github/scripts/build-utilities-css.sh); the design system comes last -->
     <link rel="stylesheet" href="/static/assets/css/utilities.css?v=2">
-    <link rel="stylesheet" href="/static/assets/css/ui.css?v=67">
+    <link rel="stylesheet" href="/static/assets/css/ui.css?v=68">
     <style>
         .tab-active {
             border-bottom: 2px solid #3b82f6;
@@ -482,7 +482,7 @@
         
             <footer id="app-footer" class="ui-side-foot">
                 <div class="ui-side-line"><span id="app-name-footer" class="hidden">mailcow Logs Viewer</span><span id="app-version-footer">v1.4.2</span>
-                    <button id="update-badge" onclick="switchTab('settings')" class="hidden ui-side-link">Update Available</button></div>
+                    <button id="update-badge" onclick="navigateTo('settings')" class="hidden ui-side-link">Update Available</button></div>
                 <div class="ui-side-line"><span id="mailcow-version-footer"></span>
                     <button id="mailcow-update-badge" class="hidden ui-side-link">Update Available</button><button id="mailcow-update-icon"
                             class="ui-icon-btn ui-icon-btn-sm hidden ui-text-info"
@@ -1578,26 +1578,26 @@
     </div>
 
     <!-- JavaScript -->
-    <script src="/static/utils.js?v=22"></script>
-    <script src="/static/router.js?v=8"></script>
-    <script src="/static/app.js?v=75"></script>
-    <script src="/static/alert-activity.js?v=4"></script>
+    <script src="/static/utils.js?v=23"></script>
+    <script src="/static/router.js?v=9"></script>
+    <script src="/static/app.js?v=76"></script>
+    <script src="/static/alert-activity.js?v=5"></script>
     <script src="/static/export.js?v=1"></script>
     <script src="/static/message-details.js?v=10"></script>
-    <script src="/static/dmarc.js?v=21"></script>
+    <script src="/static/dmarc.js?v=22"></script>
     <script src="/static/logs-viewer.js?v=6"></script>
-    <script src="/static/settings.js?v=45"></script>
+    <script src="/static/settings.js?v=47"></script>
     <script src="/static/about.js?v=4"></script>
     <script src="/static/domains.js?v=10"></script>
-    <script src="/static/mailbox-stats.js?v=9"></script>
+    <script src="/static/mailbox-stats.js?v=10"></script>
     <script src="/static/devices.js?v=7"></script>
-    <script src="/static/rate-limits.js?v=27"></script>
+    <script src="/static/rate-limits.js?v=28"></script>
     <script src="/static/smtp-abuse.js?v=5"></script>
     <script src="/static/protection.js?v=2"></script>
-    <script src="/static/security.js?v=10"></script>
-    <script src="/static/search.js?v=13"></script>
-    <script src="/static/notifications.js?v=8"></script>
-    <script src="/static/spam_filter.js?v=19"></script>
+    <script src="/static/security.js?v=11"></script>
+    <script src="/static/search.js?v=14"></script>
+    <script src="/static/notifications.js?v=9"></script>
+    <script src="/static/spam_filter.js?v=20"></script>
 
     <!-- DMARC fetch history -->
     <div id="dmarc-sync-history-modal" class="hidden ui-dialog-backdrop" role="dialog" aria-label="Fetch history">

@@ -144,9 +144,9 @@ function renderRspamdMapsList(maps, rwKeyConfigured) {
 // The way back to the maps list. With the top bar the map joins its breadcrumbs, and
 // this one is hidden; on a phone, which has no top bar, it is the way back.
 function rspamdMapCrumbs(name) {
-    if (typeof setPageCrumbs === 'function') setPageCrumbs('rspamd', '', 'loadRspamdMaps()', [name]);
+    if (typeof setPageCrumbs === 'function') setPageCrumbs('rspamd', '', 'rspamdLeaveMap()', [name]);
     return `<nav class="ui-crumbs ui-crumbs-local" aria-label="Breadcrumb">
-        <button type="button" class="ui-crumb" onclick="loadRspamdMaps()">Rspamd</button>
+        <button type="button" class="ui-crumb" onclick="rspamdLeaveMap()">Rspamd</button>
         <span class="ui-crumb-sep" aria-hidden="true">/</span>
         <span class="ui-crumb-current">${escapeHtml(name)}</span>
     </nav>`;
@@ -241,6 +241,20 @@ async function openMapEditor(filename) {
 }
 
 let mapEditorSaved = null;  // the map text as stored, to tell whether there is anything to save
+
+// An edited map is lost by going back to the list, leaving the page or the app
+uiUnsavedRegister('rspamd-map', {
+    count: () => {
+        const textarea = document.getElementById('map-editor-content');
+        return textarea && textarea.getClientRects().length && mapEditorSaved !== null && textarea.value !== mapEditorSaved ? 1 : 0;
+    },
+    drop: () => { mapEditorSaved = null; },
+});
+
+// Back to the maps list, after asking about an edited map
+async function rspamdLeaveMap() {
+    if (await uiConfirmLeave({ route: 'rspamd', reload: true })) loadRspamdMaps();
+}
 
 function onMapContentChange(filename) {
     const textarea = document.getElementById('map-editor-content');
@@ -1120,7 +1134,12 @@ async function autoSyncToRspamd() {
 }
 
 function exportSuppressions() {
-    window.location.href = '/api/suppressions/export';
+    const link = document.createElement('a');
+    link.href = '/api/suppressions/export';
+    link.download = '';
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
     toggleSuppressionMoreMenu();
 }
 

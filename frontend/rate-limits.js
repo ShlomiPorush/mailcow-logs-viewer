@@ -829,6 +829,25 @@ function refreshRateLimitBulkPanel() {
 }
 
 
+// A limit being edited (or a bulk value typed) is lost by opening another, by the
+// page loading again, or by leaving it
+uiUnsavedRegister('rate-limits', {
+    count: () => {
+        let n = 0;
+        const value = document.getElementById('rate-limit-value');
+        const frame = document.getElementById('rate-limit-frame');
+        if (value && value.getClientRects().length
+            && (value.value !== value.defaultValue || (frame && frame.selectedIndex >= 0 && !frame.options[frame.selectedIndex].defaultSelected))) n++;
+        const bulk = document.getElementById('rate-limit-bulk-value');
+        if (bulk && bulk.getClientRects().length && bulk.value.trim() !== '') n++;
+        return n;
+    },
+    drop: () => { rateLimitEditing = null; rateLimitBulkOpen = false; rateLimitBulkValue = ''; },
+});
+function rateLimitsConfirmDrop() {
+    return uiConfirmLeave({ route: 'mailbox-stats', params: { sub: 'rate-limits' }, reload: true });
+}
+
 function setRateLimitBulkValue(value) {
     rateLimitBulkValue = value || '';
 }
@@ -839,7 +858,9 @@ function setRateLimitBulkFrame(frame) {
 }
 
 
-function toggleRateLimitBulkPanel() {
+async function toggleRateLimitBulkPanel() {
+    // Opening the bulk form closes a limit being edited
+    if (!rateLimitBulkOpen && rateLimitEditing && !(await rateLimitsConfirmDrop())) return;
     rateLimitBulkOpen = !rateLimitBulkOpen;
     // One open form at a time: a row being edited and a bulk apply above it
     // are two answers to the same question
@@ -1011,7 +1032,8 @@ function renderRateLimitEditForm(kind, name, value, frame) {
 }
 
 
-function openRateLimitEdit(kind, name) {
+async function openRateLimitEdit(kind, name) {
+    if (!(await rateLimitsConfirmDrop())) return;
     rateLimitEditing = { kind: kind, name: name };
     // One open form at a time, in both directions
     rateLimitBulkOpen = false;
