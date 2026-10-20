@@ -122,6 +122,34 @@ test('a list sorted on the server gets the focus back on the same header once it
     assert.equal(active.closest('[data-sort-key]').dataset.sortState, 'ascending');
 });
 
+test('moving on before the sorted list comes back keeps the focus where the user put it', async () => {
+    const list = dir => `<div class="ui-table ui-stack" data-sort-handler="sortServer">
+        <div class="ui-tr ui-tr-head"><span data-sort-key="name" aria-sort="${dir}">Name</span></div>
+        <div class="ui-tr"><span>a</span></div></div>`;
+    const w = page(`<section id="srv">${list('none')}</section><button id="elsewhere">Elsewhere</button>`);
+    w.sortServer = () => { setTimeout(() => { w.document.getElementById('srv').innerHTML = list('ascending'); }, 20); };
+    w.uiRefreshTableSorts();
+    const button = w.document.querySelector('#srv .ui-sort-btn');
+    button.focus();
+    button.click();
+    w.document.getElementById('elsewhere').focus();
+    await new Promise(resolve => setTimeout(resolve, 40));
+    w.uiRefreshTableSorts();
+    assert.equal(w.document.activeElement.id, 'elsewhere');
+});
+
+test('an answer with no list ends the wait for it', async () => {
+    const w = page(`<section id="srv"><div class="ui-table ui-stack" data-sort-handler="sortServer">
+        <div class="ui-tr ui-tr-head"><span data-sort-key="name" aria-sort="none">Name</span></div><div class="ui-tr"><span>a</span></div></div></section>`);
+    w.sortServer = () => { w.document.getElementById('srv').innerHTML = '<p>Nothing found</p>'; };
+    w.uiRefreshTableSorts();
+    const button = w.document.querySelector('#srv .ui-sort-btn');
+    button.focus();
+    button.click();
+    w.uiRefreshTableSorts();
+    assert.equal(w.eval('uiSortFocus'), null);
+});
+
 test('the phone Sort picker keeps its id when its list is drawn again', () => {
     const w = page(LIST);
     w.uiRefreshTableSorts();

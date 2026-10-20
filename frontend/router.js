@@ -476,7 +476,7 @@ function syncLayerFocus(open) {
         layerFocusBack(closedOpeners[closedOpeners.length - 1], top);
     } else if (top && layerFocused && !layerFocused.isConnected && (!document.activeElement || document.activeElement === document.body)
         // A list sorted on the server puts the focus back on its header itself (utils.js)
-        && !(typeof uiSortFocus !== 'undefined' && uiSortFocus)) {
+        && !(typeof uiSortFocus !== 'undefined' && uiSortFocus && uiSortFocus.from.isConnected)) {
         // The top layer drew its content again and the focused control went with it
         layerFocusIn(top);
     }

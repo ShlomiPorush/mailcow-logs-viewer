@@ -1057,17 +1057,22 @@ function uiClearTableSort(owner) {
 // and A to Z for text
 // A list sorted on the server is drawn again: the focus goes back to the same
 // header, or to the phone's Sort picker, once the new list is there
-let uiSortFocus = null;   // { owner, label, phone, until }
+let uiSortFocus = null;   // { owner, nth, label, phone, server, from, until }
 function uiSortOwner(table) {
     const owner = table.id ? table : table.closest('[id]');
     return owner ? owner.id : '';
+}
+// Which of the lists under one owner this is (a mailbox and its aliases)
+function uiSortNth(table) {
+    const owner = uiSortOwner(table);
+    return [...document.querySelectorAll('.ui-table, table')].filter(t => uiSortOwner(t) === owner).indexOf(table);
 }
 function uiSortBy(table, cell) {
     const active = document.activeElement;
     const box = table.previousElementSibling;
     if (active && (cell.contains(active) || (box && box.classList.contains('ui-phone-sort') && box.contains(active)))) {
-        uiSortFocus = { owner: uiSortOwner(table), label: uiSortLabel(cell), phone: !cell.contains(active),
-            server: table.hasAttribute('data-sort-handler'), until: Date.now() + 5000 };
+        uiSortFocus = { owner: uiSortOwner(table), nth: uiSortNth(table), label: uiSortLabel(cell), phone: !cell.contains(active),
+            server: table.hasAttribute('data-sort-handler'), from: active, until: Date.now() + 5000 };
     }
     const index = uiSortHeads(table).indexOf(cell);
     const current = uiSortState(cell);
@@ -1117,7 +1122,9 @@ function uiPhoneSortSync(table, heads) {
         box.className = 'ui-phone-sort';
         // Named after the list's owner, so the picker keeps its id when the list is drawn again
         const owner = uiSortOwner(table);
-        const id = owner && !document.getElementById(`ui-phone-sort-${owner}`) ? `ui-phone-sort-${owner}` : `ui-phone-sort-${++uiPhoneSortSeq}`;
+        const nth = uiSortNth(table);
+        const name = owner ? `ui-phone-sort-${owner}${nth > 0 ? `-${nth}` : ''}` : '';
+        const id = name && !document.getElementById(name) ? name : `ui-phone-sort-${++uiPhoneSortSeq}`;
         box.innerHTML = `<select id="${id}" class="hidden" data-picker-label="Sort" data-no-filter onchange="uiPhoneSortPick(this)"></select>`;
         table.before(box);
     }
@@ -1164,25 +1171,24 @@ function uiSortFocusBack() {
     const want = uiSortFocus;
     if (!want) return;
     if (Date.now() > want.until) { uiSortFocus = null; return; }
+    // The list was not drawn again yet: the control that sorted is still there
+    if (want.from.isConnected) return;
+    uiSortFocus = null;
     const active = document.activeElement;
-    if (active && active !== document.body) {
-        // A list sorted in place keeps its header: nothing to do. One sorted on the
-        // server waits for its new rows, and the user may have moved on meanwhile
-        if (!want.server && active.closest('.ui-sort-btn, .ui-phone-sort')) uiSortFocus = null;
-        return;
-    }
-    for (const table of document.querySelectorAll('.ui-table, table')) {
-        if (uiSortOwner(table) !== want.owner) continue;
-        const target = want.phone
-            ? table.previousElementSibling?.querySelector?.('.ui-phone-sort .ui-picker-btn, .ui-picker-btn')
-            : uiSortHeads(table).find(h => uiSortLabel(h) === want.label)?.querySelector('.ui-sort-btn');
-        if (target && target.getClientRects().length) {
-            target.focus({ preventScroll: true });
-            uiSortFocus = null;
-            return;
-        }
-    }
+    // The focus went somewhere already (the user moved on, or the picker took it back)
+    if (active && active !== document.body) return;
+    const table = [...document.querySelectorAll('.ui-table, table')].filter(t => uiSortOwner(t) === want.owner)[want.nth];
+    if (!table) return;   // the answer is no list (nothing found, an error): the layers place the focus
+    const target = want.phone
+        ? table.previousElementSibling?.querySelector?.('.ui-picker-btn')
+        : uiSortHeads(table).find(h => uiSortLabel(h) === want.label)?.querySelector('.ui-sort-btn');
+    if (target && target.getClientRects().length) target.focus({ preventScroll: true });
 }
+// Moving on to anything else ends the wait for the list
+document.addEventListener('focusin', event => {
+    if (uiSortFocus && event.target !== uiSortFocus.from && event.target instanceof Element
+        && !event.target.closest('.ui-tr-head, thead, .ui-phone-sort')) uiSortFocus = null;
+}, true);
 document.addEventListener('DOMContentLoaded', () => {
     new MutationObserver(() => {
         if (uiTableSortQueued) return;
