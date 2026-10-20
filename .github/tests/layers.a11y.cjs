@@ -199,6 +199,47 @@ test('Back closes the top layer through its Close button', async () => {
     assert.equal(w.closeTopOverlay(), false, 'nothing left to close');
 });
 
+test('a dialog is aria-modal only while open, so the docked reading pane is not', async () => {
+    const w = page(DIALOG);
+    await openDialog(w);
+    const dlg = w.document.getElementById('dlg');
+    assert.equal(dlg.getAttribute('aria-modal'), 'true');
+    escape(w);
+    await settle(w);
+    assert.equal(dlg.hasAttribute('aria-modal'), false);
+});
+
+test('a sheet drawn again in place keeps the focus inside it', async () => {
+    const w = page(DIALOG);
+    w.uiSheetShow('s', { label: 'Address', head: '<h3>Address</h3>', body: '<p>Loading</p>' });
+    await settle(w);
+    w.document.querySelector('#s .ui-sheet-x').focus();
+    w.uiSheetShow('s', { label: 'Address', head: '<h3>Address</h3>', body: '<p>Loaded</p>' });
+    await settle(w);
+    assert.ok(w.document.getElementById('s').contains(w.document.activeElement), 'focus is back in the sheet');
+});
+
+test('the phone search gets the focus back when the result that opened a message is gone', async () => {
+    const w = page('<main class="ui-shell"><div class="ui-gs is-sheet"><input id="q"><div class="ui-gs-panel"></div></div></main>');
+    w.layerFocusIn(w.document.querySelector('.ui-gs'));
+    assert.equal(w.document.activeElement.id, 'q');
+});
+
+test('a save closes the dialog and drops a discard question still open for it', async () => {
+    const w = page(`<main class="ui-shell"></main>
+        <div id="form-dlg" class="ui-dialog-backdrop" role="dialog" aria-label="Edit"><div class="ui-dialog"><input id="f-name" value="a"></div></div>`);
+    const dlg = w.document.getElementById('form-dlg');
+    w.uiGuardDialog(dlg);
+    w.document.getElementById('f-name').value = 'b';
+    const closing = w.uiCloseGuarded(dlg, () => dlg.remove());
+    await settle(w);
+    assert.ok(w.document.getElementById('app-confirm-modal'), 'the question is open');
+    w.uiDialogSaved(dlg);
+    dlg.remove();
+    await closing;
+    assert.equal(w.document.getElementById('app-confirm-modal'), null, 'the question went with the saved dialog');
+});
+
 test('a connection test reply for a closed or older window is dropped', async () => {
     const w = page('<main class="ui-shell"></main>', [read('settings.js')]);
     const first = w.showConnectionTestModal('SMTP Connection Test', 'Testing...');

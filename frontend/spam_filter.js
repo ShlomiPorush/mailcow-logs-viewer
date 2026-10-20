@@ -931,7 +931,7 @@ async function createSuppression() {
         }
         
         showToast(`Suppression added: ${email}`, 'success');
-        document.getElementById('add-suppression-modal')?.remove();
+        uiCloseSavedDialog('add-suppression-modal');
         loadSuppressions();
         loadSuppressionStats();
         // Fix #4: Auto-sync to Rspamd after changes
@@ -1043,7 +1043,7 @@ async function saveEditSuppression(id) {
         if (!response.ok) throw await suppressionFailure(response, 'Failed to update');
         
         showToast('Suppression updated', 'success');
-        document.getElementById('edit-suppression-modal')?.remove();
+        uiCloseSavedDialog('edit-suppression-modal');
         loadSuppressions();
         loadSuppressionStats();
         autoSyncToRspamd();

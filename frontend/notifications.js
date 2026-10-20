@@ -214,8 +214,10 @@ function closeNotificationChannelModal(saved = false) {
         modal?.remove();
         notificationEditing = null;
     };
-    if (saved || !modal) close();
-    else uiCloseGuarded(modal, close);
+    if (saved || !modal) {
+        uiDialogSaved(modal);
+        close();
+    } else uiCloseGuarded(modal, close);
 }
 
 async function saveNotificationChannel(event) {

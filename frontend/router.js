@@ -357,6 +357,9 @@ function layerControl(el) {
     return el instanceof Element ? el.closest('button, a[href], input, select, textarea, summary, [tabindex]') : null;
 }
 document.addEventListener('pointerdown', event => { layerLastAction = layerControl(event.target); }, true);
+// What had the focus, to notice when a redraw takes it away
+let layerFocused = null;
+document.addEventListener('focusin', event => { layerFocused = event.target; }, true);
 document.addEventListener('keydown', event => { layerLastAction = layerControl(event.target) || layerLastAction; }, true);
 function uiLayerOpener(el) {
     layerNamedOpener = layerControl(el);
@@ -374,9 +377,17 @@ function layerPanel(layer) {
 // would raise the keyboard over the dialog), else its main button, else the panel.
 // A layer that already put the focus somewhere inside keeps it
 function layerFocusIn(layer) {
-    if (layer.contains(document.activeElement) || layer.matches('.ui-gs')) return;
+    if (layer.contains(document.activeElement)) return;
     const usable = el => el.getClientRects().length > 0 && !el.disabled;
     const touch = window.matchMedia('(pointer: coarse)').matches;
+    // The phone search: its field, or its results on a touch screen (no keyboard popping up)
+    if (layer.matches('.ui-gs')) {
+        const results = layer.querySelector('.ui-gs-panel');
+        const target = touch && results ? results : layer.querySelector('input');
+        if (target === results && !results.hasAttribute('tabindex')) results.setAttribute('tabindex', '-1');
+        if (target) target.focus({ preventScroll: true });
+        return;
+    }
     const field = touch ? null : [...layer.querySelectorAll('[autofocus], input:not([type="hidden"]), select, textarea')].find(usable);
     let target = field || [...layer.querySelectorAll('.ui-btn-primary')].find(usable);
     if (!target) {
@@ -441,11 +452,19 @@ function syncLayerFocus(open) {
     const closed = [...layerOpeners.keys()].filter(el => !open.includes(el));
     const opened = open.filter(el => !layerOpeners.has(el));
     const closedOpeners = closed.map(el => layerOpeners.get(el));
-    closed.forEach(el => layerOpeners.delete(el));
+    closed.forEach(el => {
+        layerOpeners.delete(el);
+        // The message dialog becomes the docked reading pane, which is not modal
+        const marked = el.matches('[data-layer-modal]') ? el : el.querySelector('[data-layer-modal]');
+        if (marked) { marked.removeAttribute('aria-modal'); delete marked.dataset.layerModal; }
+    });
     opened.forEach(el => {
         // A screen reader treats the dialog as the whole page while it is open
         const dialog = el.matches('[role="dialog"], [role="alertdialog"]') ? el : el.querySelector('[role="dialog"], [role="alertdialog"]');
-        if (dialog && !el.matches('.ui-gs') && !dialog.hasAttribute('aria-modal')) dialog.setAttribute('aria-modal', 'true');
+        if (dialog && !el.matches('.ui-gs') && !dialog.hasAttribute('aria-modal')) {
+            dialog.setAttribute('aria-modal', 'true');
+            dialog.dataset.layerModal = '';
+        }
         let opener = layerNamedOpener || layerLastAction;
         if (opener && el.contains(opener)) opener = null;
         layerOpeners.set(el, opener);
@@ -455,6 +474,9 @@ function syncLayerFocus(open) {
     if (top && opened.includes(top)) layerFocusIn(top);
     else if (closed.length && !(top && top.contains(document.activeElement))) {
         layerFocusBack(closedOpeners[closedOpeners.length - 1], top);
+    } else if (top && layerFocused && !layerFocused.isConnected && (!document.activeElement || document.activeElement === document.body)) {
+        // The top layer drew its content again and the focused control went with it
+        layerFocusIn(top);
     }
 }
 

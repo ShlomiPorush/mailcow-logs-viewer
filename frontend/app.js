@@ -3482,8 +3482,10 @@ function updateQRuleMatchHelp() {
 function closeQuarantineRuleModal(saved = false) {
     const overlay = document.getElementById('quarantine-rule-modal-overlay');
     if (!overlay) return;
-    if (saved) overlay.remove();
-    else uiCloseGuarded(overlay, () => overlay.remove());
+    if (saved) {
+        uiDialogSaved(overlay);
+        overlay.remove();
+    } else uiCloseGuarded(overlay, () => overlay.remove());
 }
 
 async function saveQuarantineRule(ruleId) {
@@ -3576,6 +3578,7 @@ async function toggleQuarantineRule(ruleId) {
 }
 
 async function testQuarantineRules() {
+    const opener = layerLastAction || document.activeElement;
     try {
         showToast('Testing rules against quarantine...', 'info');
         const res = await authenticatedFetch('/api/quarantine/rules/test', { method: 'POST' });
@@ -3623,6 +3626,7 @@ async function testQuarantineRules() {
         const noMatches = data.total_matches === 0;
 
         document.getElementById('qrule-test-modal')?.remove();
+        uiLayerOpener(opener);
         const html = `
         <div class="ui-dialog-backdrop" id="qrule-test-modal" role="dialog" aria-label="Test Results">
             <div class="ui-dialog ui-dialog-fit ui-dialog-sm">

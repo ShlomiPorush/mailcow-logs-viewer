@@ -785,18 +785,18 @@ function uiFormValues(root) {
 function uiGuardDialog(modal) {
     if (modal) uiDialogStarts.set(modal, uiFormValues(modal));
 }
-let uiDiscardAsking = false;
+let uiDiscardAsking = null;   // the dialog whose discard question is open
 async function uiCloseGuarded(modal, close) {
     if (!modal || !modal.isConnected || uiDiscardAsking) return;
     const start = uiDialogStarts.get(modal);
     if (start !== undefined && start !== uiFormValues(modal)) {
-        uiDiscardAsking = true;
+        uiDiscardAsking = modal;
         let discard = false;
         try {
             discard = await showConfirmModal({ title: 'Discard your changes?', message: 'What you changed in this window is not saved.',
                 confirmText: 'Discard', cancelText: 'Keep editing', isDangerous: true, focusCancel: true });
         } finally {
-            uiDiscardAsking = false;
+            uiDiscardAsking = null;
         }
         if (!discard || !modal.isConnected) return;
     }
@@ -805,6 +805,15 @@ async function uiCloseGuarded(modal, close) {
 function uiCancelDialog(id) {
     const modal = document.getElementById(id);
     uiCloseGuarded(modal, () => modal.remove());
+}
+// A save closes its dialog at once; a discard question still open for it goes too
+function uiDialogSaved(modal) {
+    if (modal && uiDiscardAsking === modal) document.getElementById('app-confirm-cancel')?.click();
+}
+function uiCloseSavedDialog(id) {
+    const modal = document.getElementById(id);
+    uiDialogSaved(modal);
+    modal?.remove();
 }
 
 function renderJobCard(name, jobKey, job) {
