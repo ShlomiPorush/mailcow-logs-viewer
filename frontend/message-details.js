@@ -903,12 +903,14 @@ document.addEventListener('DOMContentLoaded', function () {
         }
     }
 
+    // As a dialog the layers in router.js close it; docked beside the list,
+    // Escape still closes it when no dialog is open
     document.addEventListener('keydown', function (e) {
-        if (e.key === 'Escape') {
-            const modal = document.getElementById('message-modal');
-            if (modal && !modal.classList.contains('hidden')) {
-                closeMessageModal();
-            }
+        if (e.key !== 'Escape' || e.defaultPrevented) return;
+        const modal = document.getElementById('message-modal');
+        if (modal && modal.classList.contains('ui-docked') && !modal.classList.contains('hidden')
+            && !(typeof openOverlays === 'function' && openOverlays().length)) {
+            closeMessageModal();
         }
     });
 });

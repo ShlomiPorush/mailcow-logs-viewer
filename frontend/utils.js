@@ -683,7 +683,7 @@ function showToast(message, type = 'info') {
  * Show a styled confirmation modal (replaces native confirm()).
  * Returns a Promise<boolean>: true if confirmed, false if cancelled.
  */
-function showConfirmModal({ title = 'Confirm', message = 'Are you sure?', confirmText = 'Confirm', cancelText = 'Cancel', confirmColor, isDangerous = false } = {}) {
+function showConfirmModal({ title = 'Confirm', message = 'Are you sure?', confirmText = 'Confirm', cancelText = 'Cancel', confirmColor, isDangerous = false, focusCancel = false } = {}) {
     return new Promise((resolve) => {
         const existing = document.getElementById('app-confirm-modal');
         if (existing) existing.remove();
@@ -718,19 +718,14 @@ function showConfirmModal({ title = 'Confirm', message = 'Are you sure?', confir
 
         function cleanup(result) {
             overlay.remove();
-            document.removeEventListener('keydown', onKey);
             document.body.style.overflow = '';
             resolve(result);
         }
-        // Escape cancels, like the other dialogs
-        function onKey(event) {
-            if (event.key === 'Escape') cleanup(false);
-        }
-        document.addEventListener('keydown', onKey);
-
+        // Escape (through the layers in router.js) and a click outside cancel
+        overlay.addEventListener('click', (e) => { if (e.target === overlay) cleanup(false); });
         cancelBtn.addEventListener('click', () => cleanup(false));
         okBtn.addEventListener('click', () => cleanup(true));
-        setTimeout(() => okBtn.focus(), 100);
+        setTimeout(() => (focusCancel ? cancelBtn : okBtn).focus(), 100);
     });
 }
 
@@ -750,7 +745,6 @@ function showChoiceModal({ title, message, choices, cancelText = 'Cancel' }) {
         overlay.setAttribute('aria-modal', 'true');
         overlay.setAttribute('aria-label', title);
         overlay.setAttribute('aria-describedby', 'app-choice-text');
-        const opener = document.activeElement;
         const buttons = choices.map((c, i) => `<button type="button" class="ui-btn${c.kind === 'danger' ? ' ui-btn-danger-solid' : c.kind === 'primary' ? ' ui-btn-primary' : ''}" data-choice="${i}">${escapeHtml(c.label)}</button>`).join('');
         overlay.innerHTML = `
             <div class="ui-dialog ui-dialog-fit ui-dialog-sm">
@@ -760,30 +754,57 @@ function showChoiceModal({ title, message, choices, cancelText = 'Cancel' }) {
             </div>`;
         document.body.appendChild(overlay);
         document.body.style.overflow = 'hidden';
+        // Escape cancels and the page behind is inert, both through the layers
+        // (router.js), which also give the focus back to the opener
         function done(result) {
             if (choiceModalClose === done) choiceModalClose = null;
             overlay.remove();
-            document.removeEventListener('keydown', onKey, true);
             document.body.style.overflow = '';
-            if (opener && opener.isConnected && typeof opener.focus === 'function') opener.focus({ preventScroll: true });
             resolve(result);
         }
-        // Escape cancels; Tab goes round the dialog's buttons and never behind it
-        function onKey(event) {
-            if (event.key === 'Escape') { event.stopPropagation(); done(null); return; }
-            if (event.key !== 'Tab') return;
-            const items = [...overlay.querySelectorAll('button')];
-            const at = items.indexOf(document.activeElement);
-            event.preventDefault();
-            items[(at + (event.shiftKey ? -1 : 1) + items.length) % items.length].focus();
-        }
-        document.addEventListener('keydown', onKey, true);
         choiceModalClose = done;
         overlay.addEventListener('click', (e) => { if (e.target === overlay) done(null); });
         overlay.querySelector('[data-cancel]').addEventListener('click', () => done(null));
         overlay.querySelectorAll('[data-choice]').forEach(btn => btn.addEventListener('click', () => done(choices[Number(btn.dataset.choice)].value)));
         setTimeout(() => overlay.querySelector('[data-cancel]').focus(), 50);
     });
+}
+
+// A dialog where something is typed asks before it drops what was changed:
+// Cancel, Close, Escape and Back all close it through uiCancelDialog. The
+// starting point is taken once the dialog shows its first values; a save closes
+// the dialog directly and asks nothing
+const uiDialogStarts = new WeakMap();
+function uiFormValues(root) {
+    return JSON.stringify([...root.querySelectorAll('input, select, textarea')].map(el => {
+        if (el.type === 'checkbox' || el.type === 'radio') return el.checked;
+        if (el.tagName === 'SELECT') return [...el.options].map(o => o.selected);
+        return el.value;
+    }));
+}
+function uiGuardDialog(modal) {
+    if (modal) uiDialogStarts.set(modal, uiFormValues(modal));
+}
+let uiDiscardAsking = false;
+async function uiCloseGuarded(modal, close) {
+    if (!modal || !modal.isConnected || uiDiscardAsking) return;
+    const start = uiDialogStarts.get(modal);
+    if (start !== undefined && start !== uiFormValues(modal)) {
+        uiDiscardAsking = true;
+        let discard = false;
+        try {
+            discard = await showConfirmModal({ title: 'Discard your changes?', message: 'What you changed in this window is not saved.',
+                confirmText: 'Discard', cancelText: 'Keep editing', isDangerous: true, focusCancel: true });
+        } finally {
+            uiDiscardAsking = false;
+        }
+        if (!discard || !modal.isConnected) return;
+    }
+    close();
+}
+function uiCancelDialog(id) {
+    const modal = document.getElementById(id);
+    uiCloseGuarded(modal, () => modal.remove());
 }
 
 function renderJobCard(name, jobKey, job) {
@@ -1160,13 +1181,6 @@ function uiSheetSwipe(sheet, body, id) {
     panel.addEventListener('touchend', end);
     panel.addEventListener('touchcancel', end);
 }
-
-// Escape closes the sheet on top
-document.addEventListener('keydown', event => {
-    if (event.key !== 'Escape') return;
-    const sheets = document.querySelectorAll('.ui-sheet');
-    if (sheets.length) uiSheetDismiss(sheets[sheets.length - 1].id);
-});
 
 // Filter bars: a search, the common filters as pickers, the rarer ones behind
 // "Filters", and under the bar one line with the count and "Clear filters".

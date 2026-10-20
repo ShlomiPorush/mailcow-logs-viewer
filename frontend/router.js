@@ -269,25 +269,42 @@ function navigateTo(route, params = {}, updateHistory = true) {
 }
 
 // =============================================================================
-// Dialogs and the phone More sheet own one history entry while open, so the
-// Back button (a phone's back gesture above all) closes them instead of
-// leaving the page. The entry has the same address as the page.
+// Layers: dialogs, sheets, the phone More sheet and the phone search. One owner
+// for what every layer needs:
+// - Back closes the top layer (one history entry while anything is open, at the
+//   page's address), so a phone's back gesture never leaves the page
+// - Escape closes the top layer only
+// - focus moves into a layer when it opens and back to what opened it when it
+//   closes, and what lies under the top layer is inert: Tab, clicks and a
+//   screen reader reach only the top layer
 // =============================================================================
 
 // The docked message pane on the desktop Messages page is part of the page, not a dialog.
 // The search over a phone's screen (search.js) is one too
-const OVERLAY_SELECTOR = '.ui-dialog-backdrop:not(.hidden):not(.ui-docked), #container-logs-modal:not(.hidden), #mobile-menu.active, .ui-gs.is-sheet';
+const OVERLAY_SELECTOR = '.ui-dialog-backdrop:not(.hidden):not(.ui-docked), #container-logs-modal:not(.hidden), #mobile-menu.active, .ui-gs.is-sheet, .ui-sheet';
 let overlayHistoryEntry = false;
 let overlayIgnorePop = false;
 let overlaySyncQueued = false;
 
-// The phone search is under a message it opened, though it comes later in the page
+function layerShown(el) {
+    return el.getClientRects().length > 0;
+}
+
+function layerLevel(el) {
+    const z = parseInt(getComputedStyle(el).zIndex, 10);
+    return Number.isNaN(z) ? 0 : z;
+}
+
+// The open layers, lowest first: by stacking level, then by page order. So the
+// phone search is under a message it opened, though it comes earlier in the page
 function openOverlays() {
-    const open = [...document.querySelectorAll(OVERLAY_SELECTOR)].filter(el => el.getClientRects().length > 0);
-    return [...open.filter(el => el.matches('.ui-gs')), ...open.filter(el => !el.matches('.ui-gs'))];
+    return [...document.querySelectorAll(OVERLAY_SELECTOR)].filter(layerShown)
+        .sort((a, b) => layerLevel(a) - layerLevel(b)
+            || (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1));
 }
 
 // Close the dialog on top the way a user would: its Close or Cancel button
+let layerOwnEscape = false;
 function closeTopOverlay() {
     const open = openOverlays();
     const top = open[open.length - 1];
@@ -296,18 +313,157 @@ function closeTopOverlay() {
         closeMobileMenu();
         return true;
     }
-    const button = top.querySelector('[aria-label="Close"], [id$="-cancel"]')
+    const button = top.querySelector('[aria-label="Close"], [id$="-cancel"], [data-cancel]')
         || [...top.querySelectorAll('button')].find(b => /^(cancel|close)$/i.test(b.textContent.trim())
             || /^close/i.test(b.getAttribute('onclick') || ''));
     if (button) button.click();
-    else top.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    else {
+        // A layer without a Close button (the phone search) closes on its own Escape
+        layerOwnEscape = true;
+        try { top.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); } finally { layerOwnEscape = false; }
+    }
     return true;
+}
+
+// A picker or a menu open inside the top layer closes first, on its own Escape;
+// so does the phone search, which has no Close button
+function layerChildOwnsEscape(top) {
+    if (top.matches('.ui-gs')) return true;
+    const picker = typeof uiPickers !== 'undefined' && uiPickers.open ? document.getElementById(`${uiPickers.open}-panel`) : null;
+    if (picker && top.contains(picker)) return true;
+    try { return !!top.querySelector(':popover-open'); } catch (e) { return false; }
+}
+
+// Capture on the window runs before every other listener, so no dialog under
+// the top one sees this Escape as well
+window.addEventListener('keydown', event => {
+    if (event.key !== 'Escape' || event.isComposing || layerOwnEscape) return;
+    const open = openOverlays();
+    const top = open[open.length - 1];
+    if (!top || layerChildOwnsEscape(top)) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    closeTopOverlay();
+}, true);
+
+// What the user acted on last: the control that opened a layer gets the focus
+// back when the layer closes. A layer that opens after a request (help) names
+// its opener up front with uiLayerOpener, since the user may act on something
+// else while it loads
+let layerLastAction = null;
+let layerNamedOpener = null;
+const layerOpeners = new Map();   // layer -> the control that opened it
+function layerControl(el) {
+    return el instanceof Element ? el.closest('button, a[href], input, select, textarea, summary, [tabindex]') : null;
+}
+document.addEventListener('pointerdown', event => { layerLastAction = layerControl(event.target); }, true);
+document.addEventListener('keydown', event => { layerLastAction = layerControl(event.target) || layerLastAction; }, true);
+function uiLayerOpener(el) {
+    layerNamedOpener = layerControl(el);
+}
+
+function layerUsable(el) {
+    return !!el && el.isConnected && layerShown(el) && !el.closest('[inert]') && !el.disabled;
+}
+
+function layerPanel(layer) {
+    return layer.querySelector('[role="dialog"], [role="alertdialog"], .ui-sheet-panel, .ui-dialog, .mobile-menu-content') || layer;
+}
+
+// Into a layer that just opened: its first field (not on a touch screen, where it
+// would raise the keyboard over the dialog), else its main button, else the panel.
+// A layer that already put the focus somewhere inside keeps it
+function layerFocusIn(layer) {
+    if (layer.contains(document.activeElement) || layer.matches('.ui-gs')) return;
+    const usable = el => el.getClientRects().length > 0 && !el.disabled;
+    const touch = window.matchMedia('(pointer: coarse)').matches;
+    const field = touch ? null : [...layer.querySelectorAll('[autofocus], input:not([type="hidden"]), select, textarea')].find(usable);
+    let target = field || [...layer.querySelectorAll('.ui-btn-primary')].find(usable);
+    if (!target) {
+        target = layerPanel(layer);
+        if (!target.hasAttribute('tabindex')) target.setAttribute('tabindex', '-1');
+        target.dataset.layerPanel = '';
+    }
+    target.focus({ preventScroll: true });
+}
+
+// Back to what opened the layer; when that is gone, into the layer below, else
+// to the page's heading
+function layerFocusBack(opener, below) {
+    if (layerUsable(opener)) { opener.focus({ preventScroll: true }); return; }
+    if (below) { layerFocusIn(below); return; }
+    const page = [...document.querySelectorAll('.ui-page:not(.hidden)')].find(layerShown);
+    const heading = page && page.querySelector('h1, h2');
+    if (heading) {
+        if (!heading.hasAttribute('tabindex')) heading.setAttribute('tabindex', '-1');
+        heading.focus({ preventScroll: true });
+    }
+}
+
+// Everything beside the path from the page to the top layer is inert. What stays
+// usable: toasts, and the phone tab bar beside the More sheet it opens and closes
+const layerInert = new Set();
+function layerKeeps(top) {
+    const keep = [...document.querySelectorAll('.ui-toast')];
+    if (top && top.id === 'mobile-menu') keep.push(...document.querySelectorAll('.ui-tabbar'));
+    return keep;
+}
+function layerInertTargets(top) {
+    const targets = new Set();
+    if (!top) return targets;
+    const keep = layerKeeps(top);
+    const mark = el => {
+        if (el === top || el.contains(top) || ['SCRIPT', 'STYLE', 'TEMPLATE'].includes(el.tagName)) return;
+        if (keep.includes(el)) return;
+        // A branch holding something that stays usable: go into it instead
+        if (keep.some(k => el.contains(k))) { [...el.children].forEach(mark); return; }
+        targets.add(el);
+    };
+    for (let node = top; node.parentElement && node !== document.body; node = node.parentElement) {
+        [...node.parentElement.children].forEach(child => { if (child !== node) mark(child); });
+    }
+    return targets;
+}
+function layerApplyInert(top) {
+    const targets = layerInertTargets(top);
+    for (const el of layerInert) {
+        if (!targets.has(el)) { el.inert = false; layerInert.delete(el); }
+    }
+    // Only what this code made inert is released again; the page's own inert parts stay
+    for (const el of targets) {
+        if (!layerInert.has(el) && !el.inert) { el.inert = true; layerInert.add(el); }
+    }
+}
+
+// Focus and inert follow the open layers
+function syncLayerFocus(open) {
+    const top = open[open.length - 1] || null;
+    const closed = [...layerOpeners.keys()].filter(el => !open.includes(el));
+    const opened = open.filter(el => !layerOpeners.has(el));
+    const closedOpeners = closed.map(el => layerOpeners.get(el));
+    closed.forEach(el => layerOpeners.delete(el));
+    opened.forEach(el => {
+        // A screen reader treats the dialog as the whole page while it is open
+        const dialog = el.matches('[role="dialog"], [role="alertdialog"]') ? el : el.querySelector('[role="dialog"], [role="alertdialog"]');
+        if (dialog && !el.matches('.ui-gs') && !dialog.hasAttribute('aria-modal')) dialog.setAttribute('aria-modal', 'true');
+        let opener = layerNamedOpener || layerLastAction;
+        if (opener && el.contains(opener)) opener = null;
+        layerOpeners.set(el, opener);
+    });
+    if (opened.length) layerNamedOpener = null;
+    layerApplyInert(top);
+    if (top && opened.includes(top)) layerFocusIn(top);
+    else if (closed.length && !(top && top.contains(document.activeElement))) {
+        layerFocusBack(closedOpeners[closedOpeners.length - 1], top);
+    }
 }
 
 // Keep one history entry while anything is open, and drop it when all is closed
 function syncOverlayHistory() {
     overlaySyncQueued = false;
-    const open = openOverlays().length > 0;
+    const layers = openOverlays();
+    syncLayerFocus(layers);
+    const open = layers.length > 0;
     if (open && !overlayHistoryEntry) {
         history.pushState({ ...(history.state || {}), overlay: true }, '', window.location.href);
         overlayHistoryEntry = true;

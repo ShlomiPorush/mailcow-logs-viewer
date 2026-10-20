@@ -206,10 +206,3 @@ function openAlertSecurityEvents(username) {
     navigateTo('netfilter', { sub: 'events' });
     setTimeout(() => { if (typeof applyNetfilterFilters === 'function') applyNetfilterFilters(); }, 100);
 }
-
-// Esc closes the window, like the other dialogs
-document.addEventListener('keydown', event => {
-    if (event.key !== 'Escape') return;
-    const modal = document.getElementById('alert-activity-modal');
-    if (modal && !modal.classList.contains('hidden')) closeAlertActivity();
-});

@@ -429,10 +429,6 @@ function closeMailboxActivity() {
     document.getElementById('mailbox-activity-modal').classList.add('hidden');
 }
 
-document.addEventListener('keydown', event => {
-    if (event.key === 'Escape' && !document.getElementById('mailbox-activity-modal')?.classList.contains('hidden')) closeMailboxActivity();
-});
-
 function mailboxRateLimitLabel(mb) {
     if (!mb.rl_value) return 'None';
     const frame = { s: 'sec', m: 'min', h: 'hour', d: 'day' }[mb.rl_frame] || mb.rl_frame || 'min';

@@ -173,6 +173,7 @@ test('with the key, queue rows keep every action', () => {
 async function editAndSave(rule) {
     const app = loadApp();
     app.context.closeQuarantineRuleModal = () => {};
+    app.context.uiGuardDialog = () => {};   // the discard question has its own test (layers.a11y.cjs)
     app.context.loadQuarantineRules = async () => {};
     app.context._showQuarantineRuleModal(rule, null);
     const html = app.inserted.pop();
@@ -222,6 +223,7 @@ test('a regex with a leading ^ and an Exact Match rule save unchanged', async ()
 async function saveFields(fields, ruleId) {
     const app = loadApp();
     app.context.closeQuarantineRuleModal = () => {};
+    app.context.uiGuardDialog = () => {};   // the discard question has its own test (layers.a11y.cjs)
     app.context.loadQuarantineRules = async () => {};
     for (const [id, value] of Object.entries(fields)) app.elements[id] = { value };
     let sent = null;
