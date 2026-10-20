@@ -4420,7 +4420,7 @@ async function checkBlacklists(force = false, host = null) {
         if (blacklistCheckBtnIdle === null) blacklistCheckBtnIdle = btn.innerHTML;
         btn.disabled = true;
         btn.innerHTML = `
-            <svg class="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+            <svg class="animate-spin -ms-1 me-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                 <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
                 <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
             </svg>
@@ -5369,7 +5369,9 @@ function showNavFlyout(item, page) {
             const i = items.indexOf(document.activeElement);
             if (e.key === 'ArrowDown') { e.preventDefault(); items[(i + 1) % items.length].focus(); }
             if (e.key === 'ArrowUp') { e.preventDefault(); items[(i - 1 + items.length) % items.length].focus(); }
-            if (e.key === 'Escape' || e.key === 'ArrowLeft') { e.preventDefault(); hideNavFlyout(); navFlyout.owner && navFlyout.owner.focus(); }
+            // Back toward the sidebar: Left, or Right when the page reads right to left
+            const back = getComputedStyle(navFlyout).direction === 'rtl' ? 'ArrowRight' : 'ArrowLeft';
+            if (e.key === 'Escape' || e.key === back) { e.preventDefault(); hideNavFlyout(); navFlyout.owner && navFlyout.owner.focus(); }
         });
         navFlyout.addEventListener('focusout', e => { if (!navFlyout.contains(e.relatedTarget)) hideNavFlyout(); });
         document.body.appendChild(navFlyout);
@@ -5394,7 +5396,9 @@ function showNavFlyout(item, page) {
     }));
     const rect = item.getBoundingClientRect();
     navFlyout.style.top = `${Math.max(8, Math.min(rect.top - 6, window.innerHeight - navFlyout.offsetHeight - 8))}px`;
-    navFlyout.style.left = `${rect.right + 8}px`;
+    // Beside the sidebar: to its right, or to its left when the page reads right to left
+    const rtl = getComputedStyle(item).direction === 'rtl';
+    navFlyout.style.left = `${rtl ? rect.left - navFlyout.offsetWidth - 8 : rect.right + 8}px`;
     navFlyout.classList.add('is-open');
     navFlyout.style.top = `${Math.max(8, Math.min(rect.top - 6, window.innerHeight - navFlyout.offsetHeight - 8))}px`;
 }

@@ -5,6 +5,9 @@
 // bg-${color}-100) cannot be found by scanning, so they are listed below.
 module.exports = {
     darkMode: 'class',
+    // A hover style applies only where a pointer can hover, so a tapped control
+    // does not stay highlighted on a touch screen (as in ui.css)
+    future: { hoverOnlyWhenSupported: true },
     content: ['./frontend/*.html', './frontend/*.js'],
     theme: { extend: {} },
     safelist: [
