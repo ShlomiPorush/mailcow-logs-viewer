@@ -318,3 +318,22 @@ def test_a_single_address_ban_stays_on_its_address(client, fail2ban):
     fail2ban['answer']['active_bans'] = [{'ip': ip, 'network': f'{ip}/32', 'banned_until': '20m', 'queued_for_unban': 0}]
     item = _get(client, list='banned')['items'][0]
     assert item['ip'] == ip and item['network_size'] is None and item['banned_through'] is None
+
+
+def test_a_denylisted_address_inside_a_banned_network_stays_denylisted(client, fail2ban):
+    ip = IPS[0]
+    _failed(ip)
+    fail2ban['answer'].update(
+        active_bans=[{'ip': '192.0.0.0', 'network': '192.0.0.0/20', 'banned_until': '24m', 'queued_for_unban': 0}],
+        blacklist=f'{ip}/32')
+    by_ip = {a['ip']: a for a in _get(client, list='banned', country='')['items']}
+    assert by_ip[ip]['state'] == 'deny' and by_ip[ip]['banned_through'] is None
+
+
+def test_unbanning_a_network_lifts_that_ban_and_not_a_wider_one():
+    from app.routers.logs import _bans_covering
+    bans = [{'network': '198.51.100.0/24'}, {'network': '198.51.96.0/20'}, {'network': '198.51.100.7/32'}]
+    assert _bans_covering('198.51.100.0/24', bans) == ['198.51.100.0/24']
+    assert _bans_covering('198.51.96.0/20', bans) == ['198.51.96.0/20']
+    # A single address is lifted from every ban that holds it, as before
+    assert _bans_covering('198.51.100.7', bans) == ['198.51.100.0/24', '198.51.96.0/20', '198.51.100.7/32']

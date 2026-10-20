@@ -392,7 +392,7 @@ function securityRow(a) {
     // A network has no log lines of its own: its row does not open
     if (a.networkSize) {
         return `
-        <div class="ui-sec-row is-static">
+        <div class="ui-sec-row is-static is-net">
             <div class="ui-sec-main">
                 <div class="ui-sec-top">${securityPlaceFlag('', '')}<b class="ui-mono">${copyableText(a.ip)}</b>${d.tag}</div>
                 <p class="ui-sec-why">${d.why}</p>

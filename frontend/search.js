@@ -193,7 +193,7 @@ async function gsSearchSuppressions(q, signal) {
 
 async function gsSearchAddresses(q, signal) {
     // Only what can be part of an address: the list is read from the logs
-    if (!/^[0-9a-f.:]+$/i.test(q)) return { count: 0, items: [] };
+    if (!/^[0-9a-f.:/]+$/i.test(q)) return { count: 0, items: [] };
     const url = list => `/api/security/addresses?list=${list}&q=${encodeURIComponent(q)}&limit=${GS_LIMIT}`;
     const [review, banned] = await Promise.all([gsJson(url('review'), signal), gsJson(url('banned'), signal)]);
     const rows = [...(banned.items || []), ...(review.items || [])]
@@ -205,7 +205,8 @@ async function gsSearchAddresses(q, signal) {
             title: a.ip,
             sub: [a.state === 'banned' ? 'Banned' : 'To review', a.country, uiCountLabel(a.attempts || 0, 'attempt', 'attempts')].filter(Boolean).join(' · '),
             at: formatAgo(a.last_seen),
-            open: () => gsOpenAddress(a.ip)
+            // A banned network has no events of its own: it opens on the Banned list
+            open: () => a.network_size ? openSecurityList('banned') : gsOpenAddress(a.ip)
         }))
     };
 }

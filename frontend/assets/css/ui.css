@@ -892,6 +892,7 @@ body.ui-sheet-on { overflow: hidden; }
     /* One line per address; its details open in a sheet */
     .ui-sec-row { padding-block: 9px; }
     .ui-sec-row .ui-sec-acts { display: none; }
+    .ui-sec-row.is-net .ui-sec-acts { display: flex; }
     .ui-sec-row .ui-sec-top { flex-wrap: nowrap; min-width: 0; }
     /* The top line is the flag, the address and the tag; where and when are in the sentence */
     .ui-sec-row .ui-sec-top > small { display: none; }

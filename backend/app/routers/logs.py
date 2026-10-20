@@ -862,6 +862,12 @@ def _bans_covering(ip: str, active_bans) -> List[str]:
             continue
         if net.version == target.version and target.subnet_of(net) and key not in networks:
             networks.append(key)
+    # A network named by its own ban lifts that ban only: a wider one around it
+    # holds addresses outside it
+    if target.num_addresses > 1:
+        exact = [key for key in networks if ipaddress.ip_network(key, strict=False) == target]
+        if exact:
+            return exact
     return networks
 
 

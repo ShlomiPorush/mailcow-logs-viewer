@@ -324,7 +324,8 @@ def collect(db: Session, f2b: Optional[dict], now: Optional[datetime] = None, ho
             if ip:
                 get(ip)["f2b"] = ban
         for a in list(addresses.values()):
-            if a["f2b"] or a["network_size"]:
+            # An address on the denylist stays denylisted: the network's ban ends, its entry does not
+            if a["f2b"] or a["network_size"] or _entry_for(blacklist, a["ip"]):
                 continue
             try:
                 address = ipaddress.ip_address(a["ip"])
