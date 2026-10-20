@@ -37,7 +37,7 @@ What applies to every endpoint:
 - [Reporting](#reporting)
 - [System Status](#system-status)
 - [Raw Logs (Live Log Viewer)](#raw-logs-live-log-viewer)
-- [Spam Filter](#spam-filter)
+- [Suppressions and Rspamd Maps](#suppressions-and-rspamd-maps)
 - [Quarantine Auto-Rules](#quarantine-auto-rules)
 - [Security Alerts (Anomaly Detection)](#security-alerts-anomaly-detection)
 - [SMTP Abuse Protection](#smtp-abuse-protection)
@@ -272,7 +272,7 @@ Times of day follow the container's clock.
 | **Protection Rules** | After each log fetch | Evaluates the protection rules on new Netfilter lines and writes bans when a read-write key is set. Security feature only. |
 | **Fetch Raw Logs** | Every `RAW_LOGS_FETCH_INTERVAL` seconds (default 30) | Collects raw service logs for the Logs page and the pages that read them |
 | **Cleanup Raw Logs** | Daily at 3 AM | Removes raw logs older than `RAW_LOGS_RETENTION_DAYS` (default 2), and the rate limit log older than `RATE_LIMITS_RETENTION_DAYS` (default 90, never less than the first) |
-| **Detect Suppressions** | Every 5 minutes | Suppresses recipients of bounced messages found in Postfix logs, and of deferred messages too while deferred queue cleanup is off. Runs while the Spam Filter feature, suppressions and automatic detection are on. |
+| **Detect Suppressions** | Every 5 minutes | Suppresses recipients of bounced messages found in Postfix logs, and of deferred messages too while deferred queue cleanup is off. Runs while the Suppressions feature, suppressions and automatic detection are on. |
 | **Cleanup Deferred Queue** | Every 5 minutes | Deletes deferred messages stuck longer than `QUEUE_CLEANUP_THRESHOLD_MINUTES` (default 60) and suppresses their recipients. Needs suppressions, queue cleanup and a read-write key. |
 | **Sync Suppressions** | Every 10 minutes | Syncs active suppressions to the Rspamd recipient denylist. Needs the Rspamd password, Rspamd sync turned on and a read-write key. |
 | **Expire Suppressions** | Every hour | Deactivates expired suppression entries |
@@ -1227,7 +1227,7 @@ After saving, the app reloads the settings, the mailcow client and the OAuth2 cl
 
 Returns `settings_edit_via_ui_enabled`, `settings_migrated`, `configuration`, `mailcow_rw_key_changed` and `rspamd_password_changed`. Each `*_changed` is `true` when that credential is set after the save and it, or the address it is sent to, changed. A body with no editable change saves nothing and returns the configuration without these two keys.
 
-`rspamd_off_transition` is a token when this save turned Spam Filter or Sync with Rspamd off, else `null` (also when it was already off); pass it to `POST /api/suppressions/rspamd/clear` or `purge-feature-data` so a late removal is refused once another save switched again. The Settings page removes nothing without it. `feature_data_errors`, `{part: error}`, is present when deleting the data of a feature that is off failed; the sweep the save starts tries again.
+`rspamd_off_transition` is a token when this save turned Suppressions or Sync with Rspamd off, else `null` (also when it was already off); pass it to `POST /api/suppressions/rspamd/clear` or `purge-feature-data` so a late removal is refused once another save switched again. The Settings page removes nothing without it. `feature_data_errors`, `{part: error}`, is present when deleting the data of a feature that is off failed; the sweep the save starts tries again.
 
 #### Basic Auth Lockout Prevention
 
@@ -1273,13 +1273,13 @@ Deletes all stored data of a feature that is already off (in `disabled_features`
 | `mailbox-stats` | `alias_statistics`, and `mailbox_statistics` unless Rate Limits is on (it reads each mailbox's limit from that table) |
 | `logs` | `raw_service_logs`, only the services nothing collects any more: `dovecot` always stays because message details read it, `ratelimited` stays while Rate Limits is on, `sogo` while Devices is on |
 | `blacklist` | `blacklist_checks`, `monitored_hosts` |
-| `spam-filter` | `suppression_events`, `spam_suppressions`. The body also needs `"rspamd": "remove"` or `"keep"` for the app's blocks in Rspamd, else 400, and may carry `"transition"` (see `PUT /api/settings`). With `remove`, the list is deleted only after mailcow confirmed the blocks are gone; otherwise it answers 409 or 502 and deletes nothing |
+| `suppressions` (also its old name `spam-filter`) | `suppression_events`, `spam_suppressions`. The body also needs `"rspamd": "remove"` or `"keep"` for the app's blocks in Rspamd, else 400, and may carry `"transition"` (see `PUT /api/settings`). With `remove`, the list is deleted only after mailcow confirmed the blocks are gone; otherwise it answers 409 or 502 and deletes nothing |
 | `quarantine` | `quarantine_rules`, `quarantine_rule_logs` |
 | `devices` | `eas_devices` |
 
 Tables are truncated with `CASCADE`. Returns `{ "feature": "dmarc", "tables_purged": {"dmarc_records": 1523, "...": 0}, "total_rows_deleted": 1679 }`.
 
-An unknown feature returns 400 (`Unknown feature: ...`), and so do features without tables, such as `queue` and `rate-limits`. A feature that is still on returns 400 (`Feature 'dmarc' is currently enabled. Disable it first.`). A failure returns 500 (`Purge failed. Check the application logs.`) and deletes nothing.
+An unknown feature returns 400 (`Unknown feature: ...`), and so do features without tables, such as `queue`, `rspamd-maps` and `rate-limits`. A feature that is still on returns 400 (`Feature 'dmarc' is currently enabled. Disable it first.`). A failure returns 500 (`Purge failed. Check the application logs.`) and deletes nothing.
 
 `PUT /api/settings` already deletes some data of features that are off: alias statistics, mailbox statistics (when Mailbox Stats and Rate Limits are both off), ActiveSync devices, raw log rows nothing collects and the Rate Limits reset history. The Settings page then calls this endpoint for each newly disabled feature, after confirming that data will be deleted.
 
@@ -1963,9 +1963,9 @@ The web interface reconnects after 3 seconds, except after 4401.
 
 ---
 
-## Spam Filter
+## Suppressions and Rspamd Maps
 
-Two parts: an editor for Rspamd map files, and a recipient suppression list with automatic bounce detection.
+Two parts: a recipient suppression list with automatic bounce detection (Outbound > Suppressions, feature `suppressions`), and an editor for Rspamd map files (Quarantine > Rspamd Maps, feature `rspamd-maps`).
 
 ### Rspamd Maps
 
@@ -2022,7 +2022,7 @@ Checks map entries, including regular expression syntax, without saving. Unlike 
 
 ### Suppressions
 
-The app keeps the list only while Spam Filter and **Sync with Rspamd** (`suppression_rspamd_sync`) are on. Otherwise the reads return an empty list, and `POST /api/suppressions`, `PUT` and `DELETE /api/suppressions/{suppression_id}` and `POST /api/suppressions/import` return 409 with `{ "detail": { "code": "sync_off", "message": "Sync with Rspamd is off. Turn it on in Settings to manage suppressions." } }`.
+The app keeps the list only while Suppressions and **Sync with Rspamd** (`suppression_rspamd_sync`) are on. Otherwise the reads return an empty list, and `POST /api/suppressions`, `PUT` and `DELETE /api/suppressions/{suppression_id}` and `POST /api/suppressions/import` return 409 with `{ "detail": { "code": "sync_off", "message": "Sync with Rspamd is off. Turn it on in Settings to manage suppressions." } }`.
 
 #### GET /api/suppressions
 
@@ -2062,7 +2062,7 @@ Totals as top-level fields: `total`, `active`, `expired`, `hard_bounce`, `soft_b
 
 #### GET /api/suppressions/config
 
-The suppression settings (`suppression_enabled`, `suppression_auto_detect`, `suppression_rspamd_sync`, `list_kept` (the app keeps a list now: Spam Filter and the sync on), `suppression_whitelist_domains` as the comma-separated string, `suppression_hard_bounce_action` (`suppress`, `delete` or `ignore`), `suppression_soft_bounce_action`, `suppression_soft_bounce_threshold`, `queue_cleanup_enabled`, `queue_cleanup_block`, `queue_cleanup_threshold_minutes`, `suppression_base_expiry_days`, `suppression_max_expiry_days`) and `rspamd_configured`, `rw_key_configured` and `is_fully_configured`. `is_fully_configured` means suppression is on and a read-write key is set; Rspamd sync also needs `rspamd_configured`.
+The suppression settings (`suppression_enabled`, `suppression_auto_detect`, `suppression_rspamd_sync`, `list_kept` (the app keeps a list now: Suppressions and the sync on), `suppression_whitelist_domains` as the comma-separated string, `suppression_hard_bounce_action` (`suppress`, `delete` or `ignore`), `suppression_soft_bounce_action`, `suppression_soft_bounce_threshold`, `queue_cleanup_enabled`, `queue_cleanup_block`, `queue_cleanup_threshold_minutes`, `suppression_base_expiry_days`, `suppression_max_expiry_days`) and `rspamd_configured`, `rw_key_configured` and `is_fully_configured`. `is_fully_configured` means suppression is on and a read-write key is set; Rspamd sync also needs `rspamd_configured`.
 
 ---
 
@@ -2140,11 +2140,11 @@ What the app has in Rspamd, read from the map: `{ "sync_on": true, "active_count
 
 #### POST /api/suppressions/rspamd/clear
 
-Removes the app's blocks after the list stopped being kept (Spam Filter or Sync with Rspamd off): empties the managed section and leaves every other line of the map as it is. Optional body `{ "transition": "..." }`, the `rspamd_off_transition` of the save that turned it off. Returns `{ "removed_blocks": 12 }`. While the list is kept again: 409 `sync_on`; with a transition another save replaced: 409 `transition_changed`; both are checked again right before the save, and nothing is removed. When it cannot read or write the map: 409 with `{ "detail": { "code": "no_rw_key", "message": "..." } }`; a refused Read-Write key 502 `rejected_rw_key`; a write mailcow did not confirm 502 `not_confirmed`.
+Removes the app's blocks after the list stopped being kept (Suppressions or Sync with Rspamd off): empties the managed section and leaves every other line of the map as it is. Optional body `{ "transition": "..." }`, the `rspamd_off_transition` of the save that turned it off. Returns `{ "removed_blocks": 12 }`. While the list is kept again: 409 `sync_on`; with a transition another save replaced: 409 `transition_changed`; both are checked again right before the save, and nothing is removed. When it cannot read or write the map: 409 with `{ "detail": { "code": "no_rw_key", "message": "..." } }`; a refused Read-Write key 502 `rejected_rw_key`; a write mailcow did not confirm 502 `not_confirmed`.
 
 #### POST /api/suppressions/rspamd/import
 
-Loads the app's blocks from the managed section into the list after the list was deleted (Spam Filter or Sync with Rspamd turned on again). A read only; nothing is written to Rspamd. Returns `{ "imported": 12, "pending": false, "loaded": true }`; `loaded` is `true` only for the request that did the load, so `imported` is its count. With nothing to load, `{ "imported": 0, "pending": false, "loaded": false }`. Without the Rspamd password, when the app may have blocks there: `"pending": true, "reason": "no_password"`, and automatic blocking waits until they load. Map errors as for clear.
+Loads the app's blocks from the managed section into the list after the list was deleted (Suppressions or Sync with Rspamd turned on again). A read only; nothing is written to Rspamd. Returns `{ "imported": 12, "pending": false, "loaded": true }`; `loaded` is `true` only for the request that did the load, so `imported` is its count. With nothing to load, `{ "imported": 0, "pending": false, "loaded": false }`. Without the Rspamd password, when the app may have blocks there: `"pending": true, "reason": "no_password"`, and automatic blocking waits until they load. Map errors as for clear.
 
 #### POST /api/suppressions/start-fresh
 
@@ -2525,6 +2525,6 @@ Tests settings before saving them (the test button in the editor), with the valu
 
 ### GET /api/docs/{doc_name}
 
-A help page as plain-text Markdown, fetched from `documentation/HelpDocs` on the `main` branch on GitHub (10-second timeout). Only these names are accepted: `Domains`, `DMARC`, `Mailbox_Stats`, `IP_Blacklist_Monitor`, `Spam_Filter`, `Quarantine`, `Abuse_Protection`, `Rate_Limits` and `Devices`.
+A help page as plain-text Markdown, fetched from `documentation/HelpDocs` on the `main` branch on GitHub (10-second timeout). Only these names are accepted: `Domains`, `DMARC`, `Mailbox_Stats`, `IP_Blacklist_Monitor`, `Quarantine`, `Abuse_Protection`, `Rate_Limits`, `Devices`, `Dashboard`, `Messages`, `Security`, `Outbound`, `Status`, `Logs`, `Settings` and `About`.
 
 Other names return 404, and so does an HTTP error from GitHub (including a missing file); a network failure returns 503.

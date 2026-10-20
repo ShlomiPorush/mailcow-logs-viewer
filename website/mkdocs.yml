@@ -84,11 +84,10 @@ nav:
       - Dashboard: HelpDocs/Dashboard.md
       - Search: HelpDocs/Search.md
       - Messages: HelpDocs/Messages.md
-      - Queue: HelpDocs/Queue.md
+      - Outbound: HelpDocs/Outbound.md
       - Quarantine: HelpDocs/Quarantine.md
       - Security: HelpDocs/Security.md
       - Outgoing Spam: HelpDocs/Abuse_Protection.md
-      - Spam Filter: HelpDocs/Spam_Filter.md
       - DMARC & TLS: HelpDocs/DMARC.md
       - Status: HelpDocs/Status.md
       - Blocklists: HelpDocs/IP_Blacklist_Monitor.md

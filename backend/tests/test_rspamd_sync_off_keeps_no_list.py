@@ -53,10 +53,10 @@ def _code(error):
 def test_the_list_goes_while_the_sync_is_off_and_stays_while_it_is_on(db, monkeypatch):
     blocked = f'blocked-{MARK}@example.test'
     _add(db, blocked)
-    assert _purge().get('spam-filter') is None and blocked in _rows(db), 'on: nothing is deleted'
+    assert _purge().get('suppressions') is None and blocked in _rows(db), 'on: nothing is deleted'
     assert _key(db, PENDING) is None
     _sync_setting(monkeypatch, False)  # as SUPPRESSION_RSPAMD_SYNC=false would set it
-    assert _purge()['spam-filter'] is None
+    assert _purge()['suppressions'] is None
     assert _rows(db) == {}
     assert _key(db, PENDING) == '1', 'a block was in Rspamd: it loads back'
 
@@ -318,7 +318,7 @@ def test_the_save_names_the_transition_and_reports_a_purge_that_failed(monkeypat
     monkeypatch.setattr(rs, 'get_config_overrides_from_db', overrides)
     monkeypatch.setattr(rs, 'save_config_overrides_to_db', lambda db, ov: data.update(ov))
     monkeypatch.setattr(rs, 'has_config_overrides_in_db', lambda db: bool(data))
-    monkeypatch.setattr(rs, 'cleanup_disabled_feature_data', lambda db: {'spam-filter': 'the database is busy'})
+    monkeypatch.setattr(rs, 'cleanup_disabled_feature_data', lambda db: {'suppressions': 'the database is busy'})
     monkeypatch.setattr(rs, 'run_feature_data_sweep_soon', lambda: None)
     monkeypatch.setattr(rs, 'reschedule_interval_jobs', lambda: None)
     monkeypatch.setattr(rs, 'mailcow_api', SimpleNamespace(reload_config=lambda: None, has_rw_key=False))
@@ -333,7 +333,7 @@ def test_the_save_names_the_transition_and_reports_a_purge_that_failed(monkeypat
     finally:
         monkeypatch.undo()
         cfg.reload_settings()
-    assert result['feature_data_errors'] == {'spam-filter': 'the database is busy'}
+    assert result['feature_data_errors'] == {'suppressions': 'the database is busy'}
     assert result['rspamd_off_transition'] == 'T'
     assert seen and seen[0][1] is False
 

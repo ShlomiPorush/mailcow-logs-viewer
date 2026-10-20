@@ -1,4 +1,4 @@
-"""What Queue Management does with mail that could not be delivered, as it
+"""What the Outbound settings do with mail that could not be delivered, as it
 really happens.
 
 The stored choices say what the user picked; a block reaches Rspamd only
@@ -24,7 +24,7 @@ _warned = set()
 def rspamd_sync_on() -> bool:
     """Whether the list is kept in step with the app's section of the Rspamd
     map ("Sync with Rspamd"), both ways and by itself."""
-    return settings.is_feature_enabled('spam-filter') and bool(settings.suppression_rspamd_sync)
+    return settings.is_feature_enabled('suppressions') and bool(settings.suppression_rspamd_sync)
 
 
 def _known(name: str, value, allowed) -> str:
@@ -61,5 +61,5 @@ def cleanup_blocks() -> bool:
 
 
 def handling_on() -> bool:
-    """Spam Filter on and "Handle undeliverable mail automatically" on."""
-    return settings.is_feature_enabled('spam-filter') and bool(settings.suppression_enabled)
+    """Suppressions on and "Handle undeliverable mail automatically" on."""
+    return settings.is_feature_enabled('suppressions') and bool(settings.suppression_enabled)

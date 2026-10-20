@@ -81,7 +81,7 @@ The `db` service in `docker-compose.yml` falls back to `mailcowlogs` and `change
 | --- | --- | --- |
 | `DISABLED_FEATURES` | Empty | Comma-separated features to turn off, for example `queue,quarantine`. Their pages disappear and jobs used only by those features stop; shared jobs continue while another enabled page needs them. API routes remain available. |
 
-The names are `netfilter` (Security), `queue`, `quarantine`, `spam-filter`, `domains`, `dmarc`, `mailbox-stats`, `rate-limits`, `logs`, `blacklist` (IP Blacklist Monitor) and `devices`. A feature listed here loses its stored data at startup, as when it is turned off in Settings, including DMARC history and quarantine rules; a feature removed from the list reloads only what the server still has. See [Settings](HelpDocs/Settings.md#features).
+The names are `netfilter` (Security), `queue`, `quarantine`, `suppressions`, `rspamd-maps`, `domains`, `dmarc`, `mailbox-stats`, `rate-limits`, `logs`, `blacklist` (IP Blacklist Monitor) and `devices`. The old name `spam-filter` turns off both `suppressions` and `rspamd-maps`. A feature listed here loses its stored data at startup, as when it is turned off in Settings, including DMARC history and quarantine rules; a feature removed from the list reloads only what the server still has. See [Settings](HelpDocs/Settings.md#features).
 
 ## Blacklist configuration
 
@@ -240,7 +240,7 @@ Some services are collected whatever this list says, because other pages read th
 | Variable | Default | Effect |
 | --- | --- | --- |
 | `SUPPRESSION_ENABLED` | `false` | Enables the suppression jobs: bounce detection, deferred queue cleanup, Rspamd sync and expiry. Manual API actions still work while it is off. |
-| `SUPPRESSION_AUTO_DETECT` | `true` | Read the Postfix logs for bounces. The Queue Management choices set it; set it here only to force it. |
+| `SUPPRESSION_AUTO_DETECT` | `true` | Read the Postfix logs for bounces. The Outbound choices set it; set it here only to force it. |
 | `SUPPRESSION_RSPAMD_SYNC` | `true` | Sync with Rspamd: keep the suppression list and the app's section of Rspamd's `global_rcpt_blacklist.map` in step, both ways, so mail to the listed addresses is rejected. `false` keeps no list: the app deletes it (Rspamd is not touched), and `true` again loads the app's blocks back from Rspamd. Needs `RSPAMD_PASSWORD` and the read-write key. |
 | `SUPPRESSION_HARD_BOUNCE_ACTION` | `suppress` | For permanent failures (5.x.x): `suppress` (block the address and delete its queued mail), `delete` (only delete its queued mail) or `ignore`. With `SUPPRESSION_RSPAMD_SYNC=false`, `suppress` acts as `delete`. |
 | `SUPPRESSION_SOFT_BOUNCE_ACTION` | `count` | For temporary failures (4.x.x): `suppress`, `count` (suppress at the threshold) or `ignore`. Used only while `QUEUE_CLEANUP_ENABLED=false`. With `SUPPRESSION_RSPAMD_SYNC=false`, both that block act as `ignore`. |

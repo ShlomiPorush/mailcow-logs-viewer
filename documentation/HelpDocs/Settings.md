@@ -36,7 +36,7 @@ Every field is also an environment variable, for example **App Title** is `APP_T
 All features are on by default. A feature that is off disappears from the menu, stops the background jobs used only by it and hides its category here; shared jobs continue while another enabled page needs them. Its API routes remain available. The **Logs** category stays, because the logs other pages read are collected and kept by its settings: with the Logs page off, Dovecot still comes in for message details and Security, Ratelimited for Rate Limits and SOGo for Devices. The switches are saved in `DISABLED_FEATURES`; if that variable is set, the whole list is locked.
 
 > [!WARNING]
-> Turning a feature off deletes the data the viewer stored for it, such as DMARC reports, quarantine rules or device history. Saving asks first (**Disable & Delete Data**); only Queue, which stores nothing, switches off without asking. The same happens at startup to a feature listed in `DISABLED_FEATURES`. Turning a feature on again reloads only what is still on the server: Spam Filter loads back the blocks this app left in Rspamd (as **From Rspamd** entries), the others fetch or check again. Turning Security off takes out of Fail2ban only this app's temporary bans; permanent bans and bans added outside the app stay.
+> Turning a feature off deletes the data the viewer stored for it, such as DMARC reports, quarantine rules or device history. Saving asks first (**Disable & Delete Data**); only Queue and Rspamd Maps, which store nothing, switch off without asking. The same happens at startup to a feature listed in `DISABLED_FEATURES`. Turning a feature on again reloads only what is still on the server: Suppressions loads back the blocks this app left in Rspamd (as **From Rspamd** entries), the others fetch or check again. Turning Security off takes out of Fail2ban only this app's temporary bans; permanent bans and bans added outside the app stay.
 
 ## Application
 
@@ -97,9 +97,9 @@ Saving a new license key opens **GeoIP Database Setup**, which checks the key, d
 
 Which addresses **Status** > **Blocklists** checks, and the DNS resolver it asks. Spamhaus refuses queries from public resolvers such as Google or Cloudflare, so use your own resolver. Switching on **Blacklist Source Transports** or **Blacklist Source Relayhosts** adds their addresses right away. See [Blocklist monitoring](IP_Blacklist_Monitor.md).
 
-## Queue Management
+## Outbound
 
-What happens when outgoing mail cannot be delivered. The blocked addresses are listed on [Spam Filter](Spam_Filter.md) > **Suppressions**. **Sync with Rspamd** (on by default) keeps the list and this app's Rspamd blocks in step, both ways; off, the app keeps no list (turning it off deletes the list, turning it on loads this app's blocks back from Rspamd). Nothing is blocked automatically until **Handle undeliverable mail automatically** is on (off by default).
+What happens when outgoing mail cannot be delivered. The blocked addresses are listed on [Outbound](Outbound.md#suppressions) > **Suppressions**. **Sync with Rspamd** (on by default) keeps the list and this app's Rspamd blocks in step, both ways; off, the app keeps no list (turning it off deletes the list, turning it on loads this app's blocks back from Rspamd). Nothing is blocked automatically until **Handle undeliverable mail automatically** is on (off by default).
 
 - **Permanent delivery failure** (5.x.x) and **Temporary delivery failure** (4.x.x) are one choice each. A permanent failure blocks the address and deletes its queued mail (the default), only deletes its queued mail, or does nothing. A temporary failure is deleted after its minutes in the queue, with its recipients blocked (the default) or not, or stays in the queue while the address is blocked after a number of failures, at the first one, or not at all.
 - The options that block need **Sync with Rspamd**. With it off they are not available, and a picked one changes to the option that does the same without blocking.

@@ -19,6 +19,7 @@ from ..database import get_db, get_db_context
 from ..models import PostfixLog, RspamdLog, NetfilterLog, MessageCorrelation
 from ..services.bounce_policy import cleanup_blocks
 from ..config import settings, EDITABLE_SETTING_KEYS, FEATURE_IDS, reload_settings, Settings
+from ..config import normalize_disabled_features
 from ..config import _get_field_annotations, get_env_locked_keys
 from ..app_time import app_tz, configured_zone_name, is_valid_zone
 from ..scheduler import last_fetch_run_time, get_job_status, update_job_status, JOB_SKIPPED, JOB_STATUS_SET, reschedule_interval_jobs, clock_schedule, dovecot_correlation_available, cleanup_disabled_feature_data, run_feature_data_sweep_soon, _mailbox_sync_needed
@@ -51,16 +52,16 @@ def _job_off_reason(key: str):
         'check_credentials': [(not rw and not settings.is_rspamd_configured,
                                'Needs the Read-Write API key or the Rspamd password', 'mailcow')],
         'send_weekly_summary': [(not settings.enable_weekly_summary, 'The weekly summary is turned off', 'notifications')],
-        # Worded as the Queue Management settings name them
-        'detect_suppressions': [(not settings.suppression_enabled, '"Handle undeliverable mail automatically" is off', 'spam_filter'),
-                                (not settings.suppression_auto_detect, 'No choice under Queue Management needs the mail logs', 'spam_filter')],
+        # Worded as the Outbound settings name them
+        'detect_suppressions': [(not settings.suppression_enabled, '"Handle undeliverable mail automatically" is off', 'outbound'),
+                                (not settings.suppression_auto_detect, 'No choice under Outbound needs the mail logs', 'outbound')],
         # It reads the app's Rspamd blocks; it writes them only with the Read-Write key
-        'sync_suppressions': [(not settings.suppression_rspamd_sync, '"Sync with Rspamd" is off', 'spam_filter'),
+        'sync_suppressions': [(not settings.suppression_rspamd_sync, '"Sync with Rspamd" is off', 'outbound'),
                               (not settings.is_rspamd_configured, 'Needs the Rspamd password', 'mailcow')],
-        'expire_suppressions': [(not settings.suppression_enabled, '"Handle undeliverable mail automatically" is off', 'spam_filter')],
+        'expire_suppressions': [(not settings.suppression_enabled, '"Handle undeliverable mail automatically" is off', 'outbound')],
         'process_quarantine_rules': [(not rw, 'Needs the Read-Write API key (MAILCOW_API_KEY_RW)', 'mailcow')],
-        'cleanup_deferred_queue': [(not settings.suppression_enabled, '"Handle undeliverable mail automatically" is off', 'spam_filter'),
-                                   (not settings.queue_cleanup_enabled, 'Temporary delivery failure is set to keep retrying', 'spam_filter'),
+        'cleanup_deferred_queue': [(not settings.suppression_enabled, '"Handle undeliverable mail automatically" is off', 'outbound'),
+                                   (not settings.queue_cleanup_enabled, 'Temporary delivery failure is set to keep retrying', 'outbound'),
                                    (not rw, 'Needs the Read-Write API key (MAILCOW_API_KEY_RW)', 'mailcow')],
         'anomaly_detection': [(not settings.anomaly_detection_enabled, 'Anomaly detection is turned off', 'anomaly')],
         'smtp_abuse': [(not settings.smtp_abuse_enabled, 'SMTP abuse protection is turned off', 'smtp_abuse'),
@@ -79,8 +80,8 @@ _JOB_FEATURES = {
     'alias_stats': 'mailbox-stats',
     'eas_devices': 'devices', 'cleanup_eas_devices': 'devices',
     'blacklist_check': 'blacklist', 'sync_transports': 'blacklist',
-    'detect_suppressions': 'spam-filter', 'sync_suppressions': 'spam-filter',
-    'expire_suppressions': 'spam-filter', 'cleanup_deferred_queue': 'spam-filter',
+    'detect_suppressions': 'suppressions', 'sync_suppressions': 'suppressions',
+    'expire_suppressions': 'suppressions', 'cleanup_deferred_queue': 'suppressions',
     'process_quarantine_rules': 'quarantine',
     'protection_rules': 'netfilter',
 }
@@ -224,7 +225,7 @@ def _normalize_address_lists(allowed: Dict[str, Any]) -> None:
 
 
 def _validate_bounce_actions(allowed: Dict[str, Any]) -> None:
-    """Refuse a Queue Management action nobody knows: the jobs would block or
+    """Refuse an Outbound action nobody knows: the jobs would block or
     delete nothing for it. The value in effect sent back as it is never blocks
     saving the other settings (the page posts every key)."""
     from ..services.bounce_policy import HARD_ACTIONS, SOFT_ACTIONS
@@ -287,6 +288,9 @@ def _effective_config_for_editable(settings_obj: Settings) -> Dict[str, Any]:
         val = getattr(settings_obj, key)
         if key in _SENSITIVE_SETTING_KEYS:
             out[key] = MASK_PLACEHOLDER if (val is not None and str(val).strip() != "") else ""
+        elif key == "disabled_features":
+            # The switches show the features an old name stands for
+            out[key] = ",".join(normalize_disabled_features(val))
         else:
             out[key] = val
     return out
@@ -625,31 +629,31 @@ def get_settings_info(db: Session = Depends(get_db)):
                     "error": _get_raw_logs_job_status('cleanup_raw_logs', 'error', True)
                 },
                 "detect_suppressions": {
-                    "interval": "5 minutes" if (settings.is_feature_enabled('spam-filter') and settings.suppression_enabled) else ("Disabled (feature off)" if not settings.is_feature_enabled('spam-filter') else "Disabled (suppression off)"),
-                    "description": "Reads delivery failures and handles queued mail using Queue Management settings",
-                    "enabled": settings.is_feature_enabled('spam-filter') and settings.suppression_enabled and settings.suppression_auto_detect,
-                    "feature_disabled": not settings.is_feature_enabled('spam-filter'),
-                    "status": jobs_status.get('detect_suppressions', {}).get('status', 'idle') if (settings.is_feature_enabled('spam-filter') and settings.suppression_enabled) else 'disabled',
-                    "last_run": format_datetime_utc(jobs_status.get('detect_suppressions', {}).get('last_run')) if (settings.is_feature_enabled('spam-filter') and settings.suppression_enabled) else None,
-                    "error": jobs_status.get('detect_suppressions', {}).get('error') if (settings.is_feature_enabled('spam-filter') and settings.suppression_enabled) else None
+                    "interval": "5 minutes" if (settings.is_feature_enabled('suppressions') and settings.suppression_enabled) else ("Disabled (feature off)" if not settings.is_feature_enabled('suppressions') else "Disabled (suppression off)"),
+                    "description": "Reads delivery failures and handles queued mail using the Outbound settings",
+                    "enabled": settings.is_feature_enabled('suppressions') and settings.suppression_enabled and settings.suppression_auto_detect,
+                    "feature_disabled": not settings.is_feature_enabled('suppressions'),
+                    "status": jobs_status.get('detect_suppressions', {}).get('status', 'idle') if (settings.is_feature_enabled('suppressions') and settings.suppression_enabled) else 'disabled',
+                    "last_run": format_datetime_utc(jobs_status.get('detect_suppressions', {}).get('last_run')) if (settings.is_feature_enabled('suppressions') and settings.suppression_enabled) else None,
+                    "error": jobs_status.get('detect_suppressions', {}).get('error') if (settings.is_feature_enabled('suppressions') and settings.suppression_enabled) else None
                 },
                 "sync_suppressions": {
-                    "interval": "10 minutes" if (settings.is_feature_enabled('spam-filter') and settings.suppression_rspamd_sync and settings.is_rspamd_configured) else ("Disabled (feature off)" if not settings.is_feature_enabled('spam-filter') else ("Disabled (Rspamd sync off)" if not settings.suppression_rspamd_sync else "Disabled (no Rspamd password)")),
+                    "interval": "10 minutes" if (settings.is_feature_enabled('suppressions') and settings.suppression_rspamd_sync and settings.is_rspamd_configured) else ("Disabled (feature off)" if not settings.is_feature_enabled('suppressions') else ("Disabled (Rspamd sync off)" if not settings.suppression_rspamd_sync else "Disabled (no Rspamd password)")),
                     "description": "Keeps the suppression list and this app's Rspamd blocks in step, both ways",
-                    "enabled": settings.is_feature_enabled('spam-filter') and settings.suppression_rspamd_sync and settings.is_rspamd_configured,
-                    "feature_disabled": not settings.is_feature_enabled('spam-filter'),
-                    "status": jobs_status.get('sync_suppressions', {}).get('status', 'idle') if (settings.is_feature_enabled('spam-filter') and settings.suppression_rspamd_sync and settings.is_rspamd_configured) else 'disabled',
-                    "last_run": format_datetime_utc(jobs_status.get('sync_suppressions', {}).get('last_run')) if (settings.is_feature_enabled('spam-filter') and settings.suppression_rspamd_sync and settings.is_rspamd_configured) else None,
-                    "error": jobs_status.get('sync_suppressions', {}).get('error') if (settings.is_feature_enabled('spam-filter') and settings.suppression_rspamd_sync and settings.is_rspamd_configured) else None
+                    "enabled": settings.is_feature_enabled('suppressions') and settings.suppression_rspamd_sync and settings.is_rspamd_configured,
+                    "feature_disabled": not settings.is_feature_enabled('suppressions'),
+                    "status": jobs_status.get('sync_suppressions', {}).get('status', 'idle') if (settings.is_feature_enabled('suppressions') and settings.suppression_rspamd_sync and settings.is_rspamd_configured) else 'disabled',
+                    "last_run": format_datetime_utc(jobs_status.get('sync_suppressions', {}).get('last_run')) if (settings.is_feature_enabled('suppressions') and settings.suppression_rspamd_sync and settings.is_rspamd_configured) else None,
+                    "error": jobs_status.get('sync_suppressions', {}).get('error') if (settings.is_feature_enabled('suppressions') and settings.suppression_rspamd_sync and settings.is_rspamd_configured) else None
                 },
                 "expire_suppressions": {
-                    "interval": "1 hour" if (settings.is_feature_enabled('spam-filter') and settings.suppression_enabled) else ("Disabled (feature off)" if not settings.is_feature_enabled('spam-filter') else "Disabled (suppression off)"),
+                    "interval": "1 hour" if (settings.is_feature_enabled('suppressions') and settings.suppression_enabled) else ("Disabled (feature off)" if not settings.is_feature_enabled('suppressions') else "Disabled (suppression off)"),
                     "description": "Deactivates expired suppression entries",
-                    "enabled": settings.is_feature_enabled('spam-filter') and settings.suppression_enabled,
-                    "feature_disabled": not settings.is_feature_enabled('spam-filter'),
-                    "status": jobs_status.get('expire_suppressions', {}).get('status', 'idle') if (settings.is_feature_enabled('spam-filter') and settings.suppression_enabled) else 'disabled',
-                    "last_run": format_datetime_utc(jobs_status.get('expire_suppressions', {}).get('last_run')) if (settings.is_feature_enabled('spam-filter') and settings.suppression_enabled) else None,
-                    "error": jobs_status.get('expire_suppressions', {}).get('error') if (settings.is_feature_enabled('spam-filter') and settings.suppression_enabled) else None
+                    "enabled": settings.is_feature_enabled('suppressions') and settings.suppression_enabled,
+                    "feature_disabled": not settings.is_feature_enabled('suppressions'),
+                    "status": jobs_status.get('expire_suppressions', {}).get('status', 'idle') if (settings.is_feature_enabled('suppressions') and settings.suppression_enabled) else 'disabled',
+                    "last_run": format_datetime_utc(jobs_status.get('expire_suppressions', {}).get('last_run')) if (settings.is_feature_enabled('suppressions') and settings.suppression_enabled) else None,
+                    "error": jobs_status.get('expire_suppressions', {}).get('error') if (settings.is_feature_enabled('suppressions') and settings.suppression_enabled) else None
                 },
                 "process_quarantine_rules": {
                     "interval": f"{settings.quarantine_rules_interval} minutes" if (settings.is_feature_enabled('quarantine') and mailcow_api.has_rw_key) else ("Disabled (feature off)" if not settings.is_feature_enabled('quarantine') else "Disabled (no RW API key)"),
@@ -661,14 +665,14 @@ def get_settings_info(db: Session = Depends(get_db)):
                     "error": jobs_status.get('process_quarantine_rules', {}).get('error') if (settings.is_feature_enabled('quarantine') and mailcow_api.has_rw_key) else None
                 },
                 "cleanup_deferred_queue": {
-                    "interval": "5 minutes" if (settings.is_feature_enabled('spam-filter') and settings.suppression_enabled and settings.queue_cleanup_enabled and mailcow_api.has_rw_key) else ("Disabled (feature off)" if not settings.is_feature_enabled('spam-filter') else ("Disabled (suppression off)" if not settings.suppression_enabled else ("Disabled (queue cleanup off)" if not settings.queue_cleanup_enabled else "Disabled (no RW API key)"))),
+                    "interval": "5 minutes" if (settings.is_feature_enabled('suppressions') and settings.suppression_enabled and settings.queue_cleanup_enabled and mailcow_api.has_rw_key) else ("Disabled (feature off)" if not settings.is_feature_enabled('suppressions') else ("Disabled (suppression off)" if not settings.suppression_enabled else ("Disabled (queue cleanup off)" if not settings.queue_cleanup_enabled else "Disabled (no RW API key)"))),
                     "description": (f"Deletes deferred mail after {settings.queue_cleanup_threshold_minutes} minutes in the queue"
                                     + (" and blocks its recipients" if cleanup_blocks() else "")),
-                    "enabled": settings.is_feature_enabled('spam-filter') and settings.suppression_enabled and settings.queue_cleanup_enabled and mailcow_api.has_rw_key,
-                    "feature_disabled": not settings.is_feature_enabled('spam-filter'),
-                    "status": jobs_status.get('cleanup_deferred_queue', {}).get('status', 'idle') if (settings.is_feature_enabled('spam-filter') and settings.suppression_enabled and settings.queue_cleanup_enabled) else 'disabled',
-                    "last_run": format_datetime_utc(jobs_status.get('cleanup_deferred_queue', {}).get('last_run')) if (settings.is_feature_enabled('spam-filter') and settings.suppression_enabled and settings.queue_cleanup_enabled) else None,
-                    "error": jobs_status.get('cleanup_deferred_queue', {}).get('error') if (settings.is_feature_enabled('spam-filter') and settings.suppression_enabled and settings.queue_cleanup_enabled) else None
+                    "enabled": settings.is_feature_enabled('suppressions') and settings.suppression_enabled and settings.queue_cleanup_enabled and mailcow_api.has_rw_key,
+                    "feature_disabled": not settings.is_feature_enabled('suppressions'),
+                    "status": jobs_status.get('cleanup_deferred_queue', {}).get('status', 'idle') if (settings.is_feature_enabled('suppressions') and settings.suppression_enabled and settings.queue_cleanup_enabled) else 'disabled',
+                    "last_run": format_datetime_utc(jobs_status.get('cleanup_deferred_queue', {}).get('last_run')) if (settings.is_feature_enabled('suppressions') and settings.suppression_enabled and settings.queue_cleanup_enabled) else None,
+                    "error": jobs_status.get('cleanup_deferred_queue', {}).get('error') if (settings.is_feature_enabled('suppressions') and settings.suppression_enabled and settings.queue_cleanup_enabled) else None
                 },
                 "anomaly_detection": {
                     "interval": f"{settings.anomaly_check_interval} minutes" if settings.anomaly_detection_enabled else "Disabled (anomaly detection off)",
@@ -797,7 +801,8 @@ def update_settings(body: Dict[str, Any], request: Request = None, response: Res
         raise HTTPException(status_code=403, detail="Editing settings from UI is disabled. Set SETTINGS_EDIT_VIA_UI_ENABLED=true to enable.")
     allowed = {k: v for k, v in body.items() if k in EDITABLE_SETTING_KEYS}
     if "disabled_features" in allowed:
-        features = [f.strip().lower() for f in str(allowed["disabled_features"] or "").split(",") if f.strip()]
+        # An old name is saved as the features it stands for
+        features = normalize_disabled_features(str(allowed["disabled_features"] or ""))
         if any(f not in FEATURE_IDS for f in features):
             raise HTTPException(status_code=400, detail="disabled_features accepts only known feature names.")
         allowed["disabled_features"] = ",".join(features)
@@ -925,7 +930,7 @@ def update_settings(body: Dict[str, Any], request: Request = None, response: Res
         if operator_session and settings.is_authentication_enabled and response is not None:
             set_session_cookie(response, create_session(operator_session["user_info"]), request)
     # A feature switched off here should drop its data now, not at the next restart;
-    # the sweep then takes Security's temporary bans out, or loads Spam Filter's blocks back
+    # the sweep then takes Security's temporary bans out, or loads the Suppressions feature's blocks back
     feature_data_errors = cleanup_disabled_feature_data(db)
     run_feature_data_sweep_soon()
     mailcow_api.reload_config()
@@ -966,13 +971,13 @@ _LIST_TRANSITION_LOCK = threading.Lock()
 
 
 def _spam_list_switches():
-    """The two switches the list is kept by: Spam Filter and Sync with Rspamd."""
-    return settings.is_feature_enabled('spam-filter'), bool(settings.suppression_rspamd_sync)
+    """The two switches the list is kept by: Suppressions and Sync with Rspamd."""
+    return settings.is_feature_enabled('suppressions'), bool(settings.suppression_rspamd_sync)
 
 
 def _record_list_transition(db: Session, was_kept: bool, now_kept: bool, switched: bool = False) -> Optional[str]:
-    """This save turned Spam Filter or Sync with Rspamd off (the list stopped
-    being kept, or Spam Filter went off while the sync already was): a new
+    """This save turned Suppressions or Sync with Rspamd off (the list stopped
+    being kept, or Suppressions went off while the sync already was): a new
     token names this save, and a Remove of the app's Rspamd blocks asked with
     it is refused once a later save turned the list on or off again. A save
     that changed neither switch gets none: the Remove it asked belongs to
@@ -1001,7 +1006,7 @@ from ..services.feature_data import FEATURE_TABLES as _FEATURE_TABLES  # noqa: E
 def purge_feature_data(body: Dict[str, Any], db: Session = Depends(get_db)):
     """
     Delete all database data associated with a disabled feature.
-    Body: { "feature": "<feature-id>" }, and for spam-filter "rspamd": "remove" or
+    Body: { "feature": "<feature-id>" }, and for suppressions (or its old name spam-filter) "rspamd": "remove" or
     "keep": what happens to the blocks the app wrote to Rspamd. The list is
     never deleted without that choice, so no block stays in Rspamd unseen.
     Only allowed when SETTINGS_EDIT_VIA_UI_ENABLED is true and the feature is currently disabled.
@@ -1010,13 +1015,16 @@ def purge_feature_data(body: Dict[str, Any], db: Session = Depends(get_db)):
         raise HTTPException(status_code=403, detail="Editing settings from UI is disabled.")
 
     feature = body.get("feature", "").strip().lower()
+    # The old name of the suppression list's switch; the maps have no data here
+    if feature == 'spam-filter':
+        feature = 'suppressions'
     if feature not in _FEATURE_TABLES:
         raise HTTPException(status_code=400, detail=f"Unknown feature: {feature}")
 
     if settings.is_feature_enabled(feature):
         raise HTTPException(status_code=400, detail=f"Feature '{feature}' is currently enabled. Disable it first.")
 
-    if feature != 'spam-filter':
+    if feature != 'suppressions':
         return _purge_tables(feature, db)
 
     rspamd = str(body.get("rspamd", "")).strip().lower()

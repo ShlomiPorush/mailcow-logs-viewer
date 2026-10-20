@@ -190,7 +190,7 @@ def test_spam_filter_off_deletes_its_list_and_marks_it_to_come_back(db_ready, mo
     with db_ready() as db:
         db.add(SpamSuppression(email=f'gone-{MARK}@example.test', type='email', reason='manual', source='manual', active=True))
         db.commit()
-    _off(monkeypatch, 'spam-filter')
+    _off(monkeypatch, 'suppressions')
     purge_disabled_features()
     with db_ready() as db:
         assert db.query(SpamSuppression).count() == 0
@@ -281,7 +281,7 @@ def test_until_the_blocks_load_no_sync_writes_the_section(db_ready, monkeypatch)
 def test_no_sync_while_spam_filter_is_off(db_ready, monkeypatch):
     from app.routers.suppressions import MapUnavailable, sync_suppressions_worker
     state = _fake_map(monkeypatch, _map([], ['/^x@example\\.test$/i']))
-    _off(monkeypatch, 'spam-filter')
+    _off(monkeypatch, 'suppressions')
     with pytest.raises(MapUnavailable) as e:
         sync_suppressions_worker()
     assert e.value.code == 'feature_off'
@@ -609,13 +609,13 @@ def test_a_purge_that_waited_for_spam_filter_to_come_back_on_deletes_nothing(db_
     with db_ready() as db:
         db.add(SpamSuppression(email=f'new-{MARK}@example.test', type='email', reason='manual', source='manual', active=True))
         db.commit()
-    asked = {'spam-filter': 0}
+    asked = {'suppressions': 0}
 
     def enabled(self, name):
-        if name != 'spam-filter':
+        if name != 'suppressions':
             return True
-        asked['spam-filter'] += 1
-        return asked['spam-filter'] > 2    # off at the first start check and the sweep, on again once it holds the lock
+        asked['suppressions'] += 1
+        return asked['suppressions'] > 2    # off at the first start check and the sweep, on again once it holds the lock
 
     monkeypatch.setattr(type(settings._inner), 'is_feature_enabled', enabled)
     purge_disabled_features()

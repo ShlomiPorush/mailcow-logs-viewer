@@ -1,62 +1,26 @@
 /**
- * Spam Filter module
- * Handles Rspamd Maps editor and Suppression list management
+ * The suppression list (Outbound > Suppressions) and the Rspamd maps editor
+ * (Quarantine > Rspamd Maps). The tabs themselves are in app.js.
  */
 
 // =============================================================================
 // STATE
 // =============================================================================
-let spamFilterSubTab = 'suppressions'; // Fix #3: Suppressions first
 let rspamdMapsData = null;
 let rspamdMapsConfigured = false;
 let suppressionPage = 1;        // the pages of the list shown so far
 
-// =============================================================================
-// TAB SWITCHING
-// =============================================================================
-
-function loadSpamFilter() {
-    console.log('Loading Spam Filter...');
-    // Fix #2: Always ensure the correct sub-tab is visible before loading data
-    spamFilterSwitchSubTab(spamFilterSubTab);
-}
-
-function spamFilterSwitchSubTab(tab) {
-    spamFilterSubTab = tab;
-    routerSyncSubpage('spam-filter', tab);
-    
-    // Update sub-tab buttons
-    document.querySelectorAll('[id^="spam-subtab-"]').forEach(btn => {
-        btn.classList.remove('active');
-    });
-    const activeBtn = document.getElementById(`spam-subtab-${tab}`);
-    if (activeBtn) activeBtn.classList.add('active');
-    
-    // Toggle content
-    const mapsContent = document.getElementById('spam-filter-maps-content');
-    const suppressionsContent = document.getElementById('spam-filter-suppressions-content');
-    
-    if (tab === 'maps') {
-        if (mapsContent) mapsContent.classList.remove('hidden');
-        if (suppressionsContent) suppressionsContent.classList.add('hidden');
-        loadRspamdMaps();
-    } else {
-        if (mapsContent) mapsContent.classList.add('hidden');
-        if (suppressionsContent) suppressionsContent.classList.remove('hidden');
-        loadSuppressions();
-        loadSuppressionStats();
-    }
+// The Suppressions tab opened
+function loadSuppressionsTab() {
+    loadSuppressions();
+    loadSuppressionStats();
 }
 
 /**
- * Smart refresh for Spam Filter page (called by auto-refresh timer).
- * Only refreshes the suppressions sub-tab silently;
- * does NOT refresh maps editor (would discard user edits).
+ * The Suppressions tab on the auto-refresh timer, silently. The maps editor
+ * is never refreshed: it would discard unsaved changes.
  */
-async function smartRefreshSpamFilter() {
-    // Only auto-refresh the suppressions tab, not the maps editor
-    if (spamFilterSubTab !== 'suppressions') return;
-    
+async function smartRefreshSuppressions() {
     // Don't refresh if a modal is open (add/edit suppression)
     const modal = document.getElementById('add-suppression-modal');
     if (modal && !modal.classList.contains('hidden')) return;
@@ -74,7 +38,7 @@ async function smartRefreshSpamFilter() {
 // =============================================================================
 
 async function loadRspamdMaps() {
-    if (typeof setPageCrumbs === 'function') setPageCrumbs('spam-filter', null);
+    if (typeof setPageCrumbs === 'function') setPageCrumbs('quarantine', null);
     const container = document.getElementById('rspamd-maps-list');
     
     try {
@@ -166,7 +130,7 @@ function renderRspamdMapsList(maps, rwKeyConfigured) {
 // The way back to the maps list. With the top bar the map joins its breadcrumbs, and
 // this one is hidden; on a phone, which has no top bar, it is the way back.
 function rspamdMapCrumbs(name) {
-    if (typeof setPageCrumbs === 'function') setPageCrumbs('spam-filter', 'Rspamd Maps', 'loadRspamdMaps()', [name]);
+    if (typeof setPageCrumbs === 'function') setPageCrumbs('quarantine', 'Rspamd Maps', 'loadRspamdMaps()', [name]);
     return `<nav class="ui-crumbs ui-crumbs-local" aria-label="Breadcrumb">
         <button type="button" class="ui-crumb" onclick="loadRspamdMaps()">Rspamd Maps</button>
         <span class="ui-crumb-sep" aria-hidden="true">/</span>
@@ -423,7 +387,7 @@ function suppressionShowOff(off) {
     offNote.classList.toggle('hidden', !off);
     offNote.innerHTML = off ? `<div class="ui-list-note ui-flush">${uiLocked('No suppression list',
         "Sync with Rspamd is off. Turn it on in Settings to load and manage this app's blocks.",
-        `<button type="button" class="ui-btn ui-btn-sm" onclick="navigateTo('settings', { sub: 'spam_filter' })">Settings</button>`)}</div>` : '';
+        `<button type="button" class="ui-btn ui-btn-sm" onclick="navigateTo('settings', { sub: 'outbound' })">Settings</button>`)}</div>` : '';
 }
 
 async function loadSuppressionSyncNote() {
@@ -446,7 +410,7 @@ async function loadSuppressionSyncNote() {
     suppressionShowOff(!state.sync_on);
     // Turned on since the list was last asked for (or not known then): it loads now
     if (state.sync_on && wasOn === false) loadSuppressions();
-    const settingsButton = `<button type="button" class="ui-btn ui-btn-sm" onclick="navigateTo('settings', { sub: 'spam_filter' })">Settings</button>`;
+    const settingsButton = `<button type="button" class="ui-btn ui-btn-sm" onclick="navigateTo('settings', { sub: 'outbound' })">Settings</button>`;
     if (!state.sync_on) {
         note.innerHTML = '';
         return;
@@ -684,6 +648,12 @@ async function loadSuppressionStats() {
         if (!response.ok) return;
 
         const stats = await response.json();
+        // The Outbound summary, under the page title on both tabs
+        const summary = document.getElementById('suppression-summary');
+        if (summary) {
+            const n = Number(stats.active) || 0;
+            summary.textContent = n ? `${n.toLocaleString()} ${n === 1 ? 'recipient' : 'recipients'} blocked.` : 'No recipients blocked.';
+        }
 
         container.innerHTML = `
             <div class="ui-kpi"><b>${escapeHtml(String(stats.active))}</b>Active</div>
@@ -710,7 +680,7 @@ const BLOCK_EVENT_TITLES = {
     added_in_rspamd: 'Added in Rspamd'
 };
 
-// Rows loaded back from this app's part of the Rspamd map after Spam Filter was off
+// Rows loaded back from this app's part of the Rspamd map after Suppressions was off
 const SUPPRESSION_SOURCE_LABELS = { rspamd: 'From Rspamd' };
 const SUPPRESSION_SOURCE_TIPS = { rspamd: "Added in mailcow to this app's Rspamd section, or loaded back from it. Permanent. Automatic processing does not change this entry; you can edit or delete it." };
 

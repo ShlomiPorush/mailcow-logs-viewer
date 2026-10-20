@@ -1,11 +1,43 @@
-# Spam Filter
+# Outbound
 
-Suppressions are kept in the app's database and written to Rspamd's recipient denylist. Other Rspamd maps are read from Rspamd and saved through mailcow's API.
+Outbound has the mail waiting to leave (**Queue**) and the recipients it is no longer sent to (**Suppressions**). Each tab has its own switch under **Settings** > **Features**; the page goes when both are off. The summary under the title counts queued messages and blocked recipients.
+
+## Queue
+
+The queue is read live from mailcow, rather than from imported message history.
+
+![Outbound, Queue](../../images/docs/outbound-queue-light.webp#gh-light-mode-only)
+![Outbound, Queue](../../images/docs/outbound-queue-dark.webp#gh-dark-mode-only)
+
+### Counts
+
+The summary counts messages waiting for retry, on hold and being delivered. The sidebar shows the total of all queued messages.
+
+### Mail Queue
+
+Search matches part of the sender or any recipient. Search and the queue ID filter use the loaded queue without asking mailcow again.
+
+**Last response** is Postfix's last result for each recipient, usually the remote server's reason for delaying or refusing delivery. See [How the Postfix queue works](#how-the-postfix-queue-works) for queue states.
+
+### Actions
+
+Retry, hold, release and delete need a [read-write API key](../Using_the_App.md#the-read-write-api-key). Reading the queue and adding a suppression do not.
+
+**Retry** requests an immediate delivery attempt; **Flush All** retries the entire queue. Neither fixes the cause of a failure. **Hold** prevents delivery until **Unhold** returns the message to the delivery queue.
+
+**Suppress** opens the **Add Suppression** dialog for the recipient, to block future mail to that address. With the read-write key, saving it also deletes the queued messages to that address. With multiple recipients, choose the address to suppress. See [Suppressions](#suppressions).
+
+**Retry Selected** and **Delete Selected** affect selected messages. **Delete All** affects the entire queue.
+
+> [!WARNING]
+> Deletion is permanent. Postfix removes the message without delivering it or telling the sender. Use **Delete All** only when every queued message is unwanted, such as spam from a hijacked mailbox.
 
 ## Suppressions
 
-![Spam Filter, Suppressions](../../images/docs/spam-filter-suppressions-light.webp#gh-light-mode-only)
-![Spam Filter, Suppressions](../../images/docs/spam-filter-suppressions-dark.webp#gh-dark-mode-only)
+Suppressions are kept in the app's database and written to Rspamd's recipient denylist.
+
+![Outbound, Suppressions](../../images/docs/outbound-suppressions-light.webp#gh-light-mode-only)
+![Outbound, Suppressions](../../images/docs/outbound-suppressions-dark.webp#gh-dark-mode-only)
 
 Active suppressions go into `global_rcpt_blacklist.map` (**Recipient Denylist**), where Rspamd rejects new mail to matching recipients.
 
@@ -22,7 +54,7 @@ Search matches the address, notes and last bounce message. **Expired** shows ent
 | Value | Meaning |
 |---|---|
 | **Reason** | Hard Bounce: `5.x.x`; Soft Bounce: `4.x.x`; Deferred Stuck: queue cleanup; Rejected: another bounce status. |
-| Source | `auto`: added by the app; `manual`: added in the dialog; `import`: CSV; **From Rspamd**: added in mailcow to this app's part of the Rspamd map, or loaded back from it when Spam Filter was turned on again. These are permanent and no automatic handling changes them; you can edit or delete them. |
+| Source | `auto`: added by the app; `manual`: added in the dialog; `import`: CSV; **From Rspamd**: added in mailcow to this app's part of the Rspamd map, or loaded back from it when Suppressions was turned on again. These are permanent and no automatic handling changes them; you can edit or delete them. |
 | **Bounces** | Total counted bounces, with hard (`H:`) and soft (`S:`) counts. |
 | **Rspamd** | **Synced**: in step with the map; **Pending**: waiting to be added, or, on a disabled or expired entry, to be removed. |
 
@@ -32,9 +64,9 @@ Search matches the address, notes and last bounce message. **Expired** shows ent
 
 ### Automatic suppressions
 
-With **Handle undeliverable mail automatically** on (**Settings** > **Queue Management**), two jobs add entries every 5 minutes:
+With **Handle undeliverable mail automatically** on (**Settings** > **Outbound**), two jobs add entries every 5 minutes:
 
-- **Detect Suppressions** checks delivery-agent `bounced` lines imported in the last 10 minutes, and `deferred` lines when a temporary failure keeps retrying. It runs when a Queue Management choice needs the Postfix logs. Connection-time rejections (`NOQUEUE`) do not create suppressions. Empty senders and `MAILER-DAEMON` are skipped.
+- **Detect Suppressions** checks delivery-agent `bounced` lines imported in the last 10 minutes, and `deferred` lines when a temporary failure keeps retrying. It runs when an Outbound choice needs the Postfix logs. Connection-time rejections (`NOQUEUE`) do not create suppressions. Empty senders and `MAILER-DAEMON` are skipped.
 - **Cleanup Deferred Queue**, when a temporary failure is set to delete after N minutes in the queue and the read-write key is set, deletes deferred messages older than those minutes (60 by default) and, with **and block the recipients**, suppresses their recipients as **Deferred Stuck**. The age counts from arrival, including time before a message became deferred. The recipients are blocked before the message is deleted: if the deletion fails, the next run deletes it without counting it again. A message with a recipient that cannot be read stays in the queue, and so does one to an address whose **From Rspamd** entry was disabled by hand.
 
 **Exclude these domains** lists exact domains, without subdomains. Their addresses are never blocked automatically, and a queued message to any of them is never deleted automatically, by cleanup or after a permanent failure. For a permanent failure, with the read-write key set, the queued messages that go only to that address are deleted, blocked or not; a message that also goes to other recipients stays. A deletion counts only when mailcow confirms it, and the settings are checked again right before it. A deletion that fails shows on **Status** and is not tried again; the mail stays in the queue.
@@ -47,8 +79,8 @@ With **Sync with Rspamd** on, new and updated automatic entries are written to R
 
 ### Add a suppression
 
-![Add Suppression dialog](../../images/docs/spam-filter-add-suppression-light.webp#gh-light-mode-only)
-![Add Suppression dialog](../../images/docs/spam-filter-add-suppression-dark.webp#gh-dark-mode-only)
+![Add Suppression dialog](../../images/docs/outbound-add-suppression-light.webp#gh-light-mode-only)
+![Add Suppression dialog](../../images/docs/outbound-add-suppression-dark.webp#gh-dark-mode-only)
 
 A domain must be entered as a plain name. It matches that exact domain, excluding subdomains. **Email Address** also accepts patterns such as `/^.+@example\.(net|org)$/i`; the app anchors the whole pattern when writing it to Rspamd.
 
@@ -64,9 +96,9 @@ With **Sync with Rspamd** on, adding, enabling, disabling, deleting or importing
 
 ### Sync with Rspamd
 
-With **Sync with Rspamd** on (**Settings** > **Queue Management**), the list and the app's part of `global_rcpt_blacklist.map` are kept in step both ways, by themselves. Every 10 minutes, and before every write, the app reads its part of the map: a block deleted there in mailcow is deleted from the list, and a block added there joins the list as **From Rspamd**. Then the list's changes are written. A change that could not be written waits, shown as **Pending**, and is written on the next try. Reading needs the Rspamd password; writing also needs the read-write key. It does not need **Handle undeliverable mail automatically**: a list kept by hand syncs too.
+With **Sync with Rspamd** on (**Settings** > **Outbound**), the list and the app's part of `global_rcpt_blacklist.map` are kept in step both ways, by themselves. Every 10 minutes, and before every write, the app reads its part of the map: a block deleted there in mailcow is deleted from the list, and a block added there joins the list as **From Rspamd**. Then the list's changes are written. A change that could not be written waits, shown as **Pending**, and is written on the next try. Reading needs the Rspamd password; writing also needs the read-write key. It does not need **Handle undeliverable mail automatically**: a list kept by hand syncs too.
 
-With it off, the app keeps no suppression list, like a feature that is off: **Suppressions** shows only a note, entries cannot be added, imported or changed, and the Queue page has no **Suppress**. Choices that delete queued mail without blocking keep working.
+With it off, the app keeps no suppression list, like a feature that is off: **Suppressions** shows only a note, entries cannot be added, imported or changed, and the Queue tab has no **Suppress**. Choices that delete queued mail without blocking keep working.
 
 The app's part is the section between these markers; your own entries go above or below it:
 
@@ -77,9 +109,11 @@ The app's part is the section between these markers; your own entries go above o
 
 A write starts from the map as it is then and changes only the list's waiting entries, so changes made in mailcow stay; one made at the very moment of a write can still be lost. Nothing is written when nothing changes. If the map cannot be read, or the markers are missing or repeated, nothing is read in or written until that is fixed. A write counts only when mailcow confirms it; one whose answer was lost is checked on the next read. Connecting to another mailcow or Rspamd makes every active entry wait to be written there; none is deleted. An entry deleted from the list before this version while its block stayed in Rspamd comes back as **From Rspamd**. Your own lines, above and below the app's section, stay. Bare addresses among them are anchored during sync so they cannot match longer addresses containing them; a line with regex characters, such as `.*@example\.com`, is left as written.
 
+The map itself can also be edited under [Quarantine > Rspamd Maps](Quarantine.md#rspamd-maps).
+
 ### When the sync stops or starts
 
-Turning **Sync with Rspamd** off, or turning Spam Filter off, deletes the list from the app and asks whether to remove the app's blocks from Rspamd or keep them. Removing empties only the managed section; your lines above it stay. With nothing of the app in Rspamd, it asks only before deleting a list that has entries.
+Turning **Sync with Rspamd** off, or turning Suppressions off, deletes the list from the app and asks whether to remove the app's blocks from Rspamd or keep them. Removing empties only the managed section; your lines above it stay. With nothing of the app in Rspamd, it asks only before deleting a list that has entries.
 
 Turning it on again loads the list from the managed section, without writing to Rspamd, and says how many blocks loaded. Loaded blocks are permanent **From Rspamd** entries: an automatic block loses its expiry and counts. Without the Rspamd password the blocks load once it is set; until then nothing is blocked automatically.
 
@@ -93,55 +127,38 @@ Export includes every suppression and its state, counts and expiry. Import reads
 - Domain entries need pattern form, such as `/^.+@example\.net$/i`, as in the export.
 - Imported entries are active and permanent, with source `import`. Re-importing an export does not restore state or expiry, and `deferred_stuck` becomes `manual`.
 
-## Rspamd Maps
-
-![Spam Filter, Rspamd Maps](../../images/docs/spam-filter-maps-light.webp#gh-light-mode-only)
-![Spam Filter, Rspamd Maps](../../images/docs/spam-filter-maps-dark.webp#gh-dark-mode-only)
-
-Header-From and envelope-sender denylists add 2050 to the spam score; their allowlists subtract 2050. Recipient Denylist rejects matching recipients; Recipient Allowlist accepts them. Fishy TLDs and bad-word rules fire only together. Monitoring Hosts excludes matching hosts from logging.
-
-**Auto-managed** on Recipient Denylist means the suppression list writes to it.
-
-### Edit a map
-
-![Map editor for Recipient Denylist](../../images/docs/spam-filter-map-editor-light.webp#gh-light-mode-only)
-![Map editor for Recipient Denylist](../../images/docs/spam-filter-map-editor-dark.webp#gh-dark-mode-only)
-
-Lines starting with `#` are comments; blank lines do not count as entries. Validation checks slash-delimited regular expressions and warns about bare addresses. Other lines, including words, domains, header patterns and language codes, are accepted as entered.
-
-Saving refuses invalid patterns, anchors bare addresses and writes the whole map through mailcow. Rspamd reloads it. **Discard** reloads from Rspamd. The editor does not refresh automatically while you edit.
-
-> [!NOTE]
-> In **Recipient Denylist**, the lines between `# === MANAGED BY MAILCOW LOGS VIEWER - DO NOT EDIT BELOW ===` and `# === END MANAGED SECTION ===` are the suppression list. An entry you add or delete there is added to or deleted from the list on the next read. Keep each marker line once.
-
-### Regex Wizard
-
-The wizard's **Domain** pattern includes subdomains, unlike a domain suppression. Its explanation says "Blocks", but the map determines the effect: the same pattern in an allowlist allows matching mail.
-
 ## Settings that change this page
 
-Under **Settings** > **Queue Management**:
+Under **Settings** > **Outbound**:
 
 - **Sync with Rspamd** defaults on. **Handle undeliverable mail automatically** defaults off; with it off, nothing is blocked or deleted automatically.
 - **Permanent delivery failure** defaults to blocking new mail to the address and deleting its queued mail; **Delete its queued mail** deletes without blocking; **Do nothing** skips permanent failures.
-- **Temporary delivery failure** defaults to **Delete after 60 minutes in the queue and block the recipients**; **Delete after 60 minutes in the queue** deletes without blocking. Keeping the message instead counts soft bounces on an inactive entry, which turns active after the set failures (3 by default), or at the first one; **Do nothing; keep retrying** skips them.
+- **Temporary delivery failure** defaults to **Delete after 60 minutes in the queue and block the recipients**; **Delete after 60 minutes in the queue** deletes without blocking. With either, **Handle undeliverable mail automatically**, Suppressions and the read-write API key, **Cleanup Deferred Queue** runs every 5 minutes; see [Automatic suppressions](#automatic-suppressions). Keeping the message instead counts soft bounces on an inactive entry, which turns active after the set failures (3 by default), or at the first one; **Do nothing; keep retrying** skips them.
 - **Exclude these domains** accepts comma-separated exact domains.
 - The options that block need **Sync with Rspamd**: with it off they are not available, and a picked one changes to the option that does the same without blocking. **How long to block** is greyed then.
 
 The jobs, including hourly expiry, require **Handle undeliverable mail automatically**, except the sync with Rspamd. With it off, expiry does not run.
 
-Under **Settings** > **Mailcow**, set **Rspamd Password** to read or sync maps. Leave **Rspamd URL** empty to use mailcow's path; try a direct URL such as `http://rspamd-mailcow:11334` if that fails. See [Settings](Settings.md#queue-management).
+Under **Settings** > **Mailcow**, set **Rspamd Password** to sync the list. Leave **Rspamd URL** empty to use mailcow's path; try a direct URL such as `http://rspamd-mailcow:11334` if that fails. See [Settings](Settings.md#outbound).
+
+Under **Settings** > **Features**, **Queue** turns off the Queue tab and the sidebar counter, and **Suppressions** turns off the Suppressions tab, its jobs and the Outbound settings, and deletes the list as described in [When the sync stops or starts](#when-the-sync-stops-or-starts). The old name `spam-filter` in `DISABLED_FEATURES` turns off both Suppressions and [Rspamd Maps](Quarantine.md#rspamd-maps).
 
 ## When something is missing
 
-- **No read-write API key**: suppressions can be added, edited and deleted locally, but cannot sync. Maps are read-only and queue cleanup does not run. See [Getting started](../GETTING_STARTED.md).
-- **No Rspamd password**: maps cannot load and sync does not run.
+- **Failed to load queue** means the app could not read it from mailcow. Check the mailcow connection on [Status](Status.md).
+- **No read-write API key**: suppressions can be added, edited and deleted locally, but cannot sync, and queue cleanup does not run. See [Getting started](../GETTING_STARTED.md).
+- **No Rspamd password**: the sync does not run.
 - **Rspamd cannot be reached**: check the application logs, password and **Rspamd URL**.
+
+## How the Postfix queue works
+
+- **Incoming** messages are newly arrived and being prepared.
+- **Active** messages are being delivered.
+- **Deferred** means a temporary delivery failure, such as a timeout or a remote 4xx response. Postfix retries at growing intervals. After `maximal_queue_lifetime` (5 days in default Postfix), it gives up and bounces the message to the sender.
+- **Hold** prevents delivery until an administrator releases the message.
+
+A failed manual retry returns the message to the deferred queue. Check **Last response** for the cause, such as a full mailbox, a blocklisting of your server or a remote refusal.
 
 ## How suppressions work
 
 A delivery status starting with `5`, such as `5.1.1` (unknown user), is a permanent failure or hard bounce. A `4` status, such as `4.2.2` (mailbox full), is temporary; Postfix keeps retrying from the deferred queue. Suppressions reject new mail to failing recipients before it is sent. Automatic entries expire so recovered recipients are not blocked forever.
-
-## How Rspamd maps work
-
-Maps provide values for mail-filtering rules. In a regular-expression map, each line matches anywhere in the value: bare `ann@example.com` also matches `joann@example.com`. The app writes `/^ann@example\.com$/i` instead: `^` and `$` anchor the full value, and `i` ignores case.

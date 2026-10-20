@@ -17,7 +17,7 @@ const SETTINGS_LABEL_OVERRIDES = {
     dmarc_error_email: 'Report Import Error Email',
     eas_devices_retention_days: 'Retention Days',
     tz: 'Time Zone',
-    // Spam Filter: what the setting does, in words; the search shows these names
+    // Outbound: what the setting does, in words; the search shows these names
     suppression_enabled: 'Handle undeliverable mail automatically',
     suppression_auto_detect: 'Read the mail logs for failures',
     suppression_rspamd_sync: 'Sync with Rspamd',
@@ -357,7 +357,7 @@ function settingsPickSegment(btn) {
     field.form && field.form.dispatchEvent(new Event('input', { bubbles: true }));
 }
 
-// Queue Management: one choice per kind of delivery failure. The stored
+// Outbound: one choice per kind of delivery failure. The stored
 // settings and their ENV variables stay as they are: the radios only set the
 // hidden fields that the form saves. A temporary failure has three stored
 // settings behind its one choice: queue cleanup on (blocking its recipients
@@ -656,8 +656,8 @@ function settingsResetChoice(btn) {
 }
 
 // ── The app's blocks in Rspamd when the sync goes off or on ──
-// The list is synced with Rspamd while Spam Filter and "Sync with Rspamd" are
-// on. When the sync stops, or Spam Filter is turned off with its list, the
+// The list is synced with Rspamd while Suppressions and "Sync with Rspamd" are
+// on. When the sync stops, or Suppressions is turned off with its list, the
 // user says what happens to the blocks already in Rspamd; when it starts
 // again, what is written there.
 const SETTINGS_RSPAMD_CONNECTION_KEYS = ['mailcow_url', 'mailcow_api_key_rw', 'rspamd_password', 'rspamd_url'];
@@ -684,11 +684,11 @@ async function settingsRspamdTransition(payload, data, newDisabled) {
     const before = data.editable_config || {};
     const value = key => (key in payload && !locked.has(key)) ? payload[key] : before[key];
     const wasDisabled = new Set((window.disabledFeatures || []).map(s => s.trim().toLowerCase()));
-    const featureWasOn = !wasDisabled.has('spam-filter'), featureOn = !newDisabled.has('spam-filter');
+    const featureWasOn = !wasDisabled.has('suppressions'), featureOn = !newDisabled.has('suppressions');
     const wasOn = featureWasOn && before.suppression_rspamd_sync === true;
     const nowOn = featureOn && value('suppression_rspamd_sync') === true;
     const featureOff = featureWasOn && !featureOn;
-    // Spam Filter turned on again with the sync: its list was deleted while it
+    // Suppressions turned on again with the sync: its list was deleted while it
     // was off, and the blocks this app left in Rspamd are loaded back into it
     // (a read only), so nothing here is applied or removed. With the sync off
     // the app keeps no list, so there is nothing to load.
@@ -709,8 +709,8 @@ async function settingsRspamdTransition(payload, data, newDisabled) {
     if (!nowOn || featureOff) {
         // Going off: the list is deleted, like the list of a feature that is off
         if (n === 0) {
-            // Nothing of ours in Rspamd: only the list to confirm (turning Spam
-            // Filter off has its own confirmation)
+            // Nothing of ours in Rspamd: only the list to confirm (turning
+            // Suppressions off has its own confirmation)
             const rows = state.list_count || 0;
             if (!featureOff && rows > 0) {
                 const ok = await showChoiceModal({
@@ -722,7 +722,7 @@ async function settingsRspamdTransition(payload, data, newDisabled) {
             }
             return { action: 'none', feature_off: featureOff, purge_rspamd: state.writable ? 'remove' : 'keep' };
         }
-        const lead = featureOff ? 'Spam Filter will turn off and its saved list will be deleted.' : "Sync with Rspamd will stop and this app's saved list will be deleted.";
+        const lead = featureOff ? 'Suppressions will turn off and the saved list will be deleted.' : "Sync with Rspamd will stop and this app's saved list will be deleted.";
         if (n === null || !state.writable) {
             const why = state.reason_text || 'Rspamd cannot be reached.';
             const message = n === null
@@ -796,7 +796,7 @@ async function settingsRspamdAfterSave(plan, saved) {
         return [`Sync with Rspamd is on. Rspamd is already up to date.${list}`, 'success'];
     }
     if (plan.action === 'import') {
-        const what = plan.feature_on ? 'Spam Filter is on' : 'Sync with Rspamd is on';
+        const what = plan.feature_on ? 'Suppressions are on' : 'Sync with Rspamd is on';
         const res = await authenticatedFetch('/api/suppressions/rspamd/import', { method: 'POST' });
         const body = await res.json().catch(() => ({}));
         if (!res.ok) return [`${what}, but this app's Rspamd blocks could not be loaded yet: ${settingsErrorText(body, res.statusText)} They load on the next try.`, 'error'];
@@ -821,7 +821,7 @@ const SETTINGS_FIELD_OPTIONS = {
         { value: 'ntfy', label: 'ntfy - topic URL' },
         { value: 'gotify', label: 'Gotify - /message?token=...' }
     ],
-    // The Spam Filter bounce choices (settingsBounceChoice): {count} is the number field
+    // The Outbound bounce choices (settingsBounceChoice): {count} is the number field
     suppression_hard_bounce_action: [
         { value: 'suppress', label: 'Block new mail to the address and delete its queued mail', needs: 'logs rw-queue sync' },
         { value: 'delete', label: 'Delete its queued mail', needs: 'logs rw-queue', hint: 'Does not block new mail to the address.' },
@@ -1001,8 +1001,8 @@ var SETTINGS_EDIT_TABS = [
         ]
     },
     {
-        // The id stays spam_filter: links, the search and Status > Jobs point to it, and the Spam Filter feature hides it
-        id: 'spam_filter', label: 'Queue Management', description: 'Choose what happens when outgoing mail cannot be delivered. Blocked addresses are listed on Spam Filter > Suppressions.', groups: [
+        // Was spam_filter (Queue Management); the old address opens this one (router.js). Hidden while Suppressions is off
+        id: 'outbound', label: 'Outbound', description: 'Choose what happens when outgoing mail cannot be delivered. Blocked addresses are listed on Outbound > Suppressions.', groups: [
             // The sync belongs to the list, not to the automatic handling: a list kept by hand syncs too
             { label: 'Rspamd', keys: ['suppression_rspamd_sync'] },
             { label: 'Automatic handling', keys: ['suppression_enabled'] },
@@ -1033,7 +1033,7 @@ var SETTINGS_TAB_GROUPS = [
     { label: 'mailcow', tabs: ['mailcow', 'fetch', 'correlation', 'logs'] },
     { label: 'Alerts', tabs: ['notifications', 'smtp'] },
     { label: 'Security', tabs: ['auth', 'anomaly', 'smtp_abuse'] },
-    { label: 'Data', tabs: ['domains', 'dmarc', 'dmarc_imap', 'maxmind', 'blacklist', 'spam_filter', 'quarantine', 'devices', 'other'] }
+    { label: 'Data', tabs: ['domains', 'dmarc', 'dmarc_imap', 'maxmind', 'blacklist', 'outbound', 'quarantine', 'devices', 'other'] }
 ];
 
 // A stored secret shows as Stored with Replace and Remove; the hidden field
@@ -1092,7 +1092,7 @@ const SETTINGS_TAB_FEATURE_MAP = {
     'dmarc': 'dmarc',
     'dmarc_imap': 'dmarc',
     // Not 'logs': the raw logs other pages read are fetched and kept by its settings either way
-    'spam_filter': 'spam-filter',
+    'outbound': 'suppressions',
     'quarantine': 'quarantine',
     'devices': 'devices'
 };
@@ -1881,7 +1881,7 @@ function renderSettings(content, data) {
         if (form) {
             form.addEventListener('input', updateDirty);
             form.addEventListener('change', updateDirty);
-            // A Queue Management choice says when it needs the read-write key, and
+            // An Outbound choice says when it needs the read-write key, and
             // whether it differs from the default, also after typing in its number fields
             const showChoices = () => content.querySelectorAll('.ui-set-choice').forEach(settingsShowChoice);
             showChoices();
@@ -1942,7 +1942,7 @@ function renderSettings(content, data) {
 
                 // ── Feature disable confirmation ─────────────────────────
                 // Detect if any features are being newly disabled
-                const PURGEABLE_FEATURES = ['netfilter', 'domains', 'dmarc', 'mailbox-stats', 'logs', 'blacklist', 'spam-filter', 'quarantine', 'devices'];
+                const PURGEABLE_FEATURES = ['netfilter', 'domains', 'dmarc', 'mailbox-stats', 'logs', 'blacklist', 'suppressions', 'quarantine', 'devices'];
                 // Rate Limits has no purge call, but the save itself deletes its reset history
                 const CONFIRM_FEATURES = [...PURGEABLE_FEATURES, 'rate-limits'];
                 let newlyDisabledFeatures = [];
@@ -2011,9 +2011,9 @@ function renderSettings(content, data) {
                         rspamdToast = [`Settings saved, but Rspamd could not be reached: ${rspamdErr.message || rspamdErr}`, 'error'];
                     }
                     if (rspamdToast && !(checkToast && checkToast[1] === 'error')) checkToast = rspamdToast;
-                    // The list of a Spam Filter (or a sync) turned off could not be deleted yet:
+                    // The list of Suppressions (or a sync) turned off could not be deleted yet:
                     // the sweep the save started tries again
-                    if (saved.feature_data_errors && saved.feature_data_errors['spam-filter']) {
+                    if (saved.feature_data_errors && saved.feature_data_errors['suppressions']) {
                         const listText = 'The saved suppression list could not be deleted yet. It is tried again in a few minutes.';
                         checkToast = checkToast && checkToast[1] === 'error'
                             ? [`${checkToast[0]} ${listText}`, 'error'] : [`Settings saved, but the saved suppression list could not be deleted yet. It is tried again in a few minutes.`, 'error'];
@@ -2038,13 +2038,13 @@ function renderSettings(content, data) {
                         if (purgeableNewlyDisabled.length > 0) {
                             showToast(`Purging data for ${purgeableNewlyDisabled.length} disabled feature(s)...`, 'info');
                             for (const feature of purgeableNewlyDisabled) {
-                                // Spam Filter's list goes with what was chosen for its Rspamd blocks.
-                                // Removing belongs to this save: one that did not turn Spam Filter
+                                // The suppression list goes with what was chosen for its Rspamd blocks.
+                                // Removing belongs to this save: one that did not turn Suppressions
                                 // off (another window did first) removes nothing
                                 const wanted = rspamdPlan.purge_rspamd || (rspamdPlan.action === 'remove' ? 'remove' : 'keep');
                                 const transition = saved.rspamd_off_transition || null;
                                 const notOurs = wanted === 'remove' && !transition;
-                                const body = feature === 'spam-filter'
+                                const body = feature === 'suppressions'
                                     ? { feature, rspamd: notOurs ? 'keep' : wanted, transition } : { feature };
                                 let failed = null;
                                 try {
@@ -2057,16 +2057,16 @@ function renderSettings(content, data) {
                                 } catch (purgeErr) {
                                     failed = purgeErr.message || String(purgeErr);
                                 }
-                                if (feature === 'spam-filter') {
+                                if (feature === 'suppressions') {
                                     const toast = notOurs && rspamdPlan.action === 'remove' && !failed
-                                        ? ['Spam Filter was already off (changed in another window). Its saved list was deleted; nothing was removed from Rspamd.', 'error']
+                                        ? ['Suppressions were already off (changed in another window). The saved list was deleted; nothing was removed from Rspamd.', 'error']
                                         : failed
                                         ? [rspamdPlan.action === 'remove'
-                                            ? `Spam Filter is off. Its saved list was deleted, but its Rspamd blocks could not be removed: ${failed}`
-                                            : 'Spam Filter is off, but its saved list could not be deleted. Try again.', 'error']
-                                        : [rspamdPlan.action === 'remove' ? 'Spam Filter is off. Its saved list and its Rspamd blocks were removed.'
-                                            : rspamdPlan.action === 'keep' ? 'Spam Filter is off. Its saved list was deleted. Existing Rspamd blocks were kept.'
-                                            : 'Spam Filter is off. Its saved list was deleted.', 'success'];
+                                            ? `Suppressions are off. The saved list was deleted, but this app's Rspamd blocks could not be removed: ${failed}`
+                                            : 'Suppressions are off, but the saved list could not be deleted. Try again.', 'error']
+                                        : [rspamdPlan.action === 'remove' ? "Suppressions are off. The saved list and this app's Rspamd blocks were removed."
+                                            : rspamdPlan.action === 'keep' ? 'Suppressions are off. The saved list was deleted. Existing Rspamd blocks were kept.'
+                                            : 'Suppressions are off. The saved list was deleted.', 'success'];
                                     if (toast[1] === 'error' || !(checkToast && checkToast[1] === 'error')) checkToast = toast;
                                 } else if (failed) {
                                     checkToast = [`The data of ${feature} could not be deleted. Try again.`, 'error'];

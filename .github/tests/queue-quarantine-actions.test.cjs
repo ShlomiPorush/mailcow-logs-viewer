@@ -55,7 +55,7 @@ const QUEUE = [{
 }];
 
 function drawQueue(app, rw, listKept = true) {
-    vm.runInContext(`currentTab = 'queue'; mailcowRwConfigured = ${rw}; queueSuppressOn = ${listKept}; allQueueData = ${JSON.stringify(QUEUE)};`, app.context);
+    vm.runInContext(`currentTab = 'outbound'; mailcowRwConfigured = ${rw}; queueSuppressOn = ${listKept}; allQueueData = ${JSON.stringify(QUEUE)};`, app.context);
     app.context.applyQueueFilters();
     return app.elements['queue-logs'].innerHTML;
 }
@@ -89,7 +89,7 @@ test('a direct load of the Queue waits for the Read-Write status instead of show
     app.context.authenticatedFetch = async url => url === '/api/rw-status'
         ? rw.then(() => ({ ok: true, json: async () => ({ rw_configured: true }) }))
         : { ok: true, json: async () => ({ data: QUEUE }) };
-    vm.runInContext(`currentTab = 'queue'; rwStatusReady = fetchRwStatus();`, app.context);
+    vm.runInContext(`currentTab = 'outbound'; rwStatusReady = fetchRwStatus();`, app.context);
     const loading = app.context.loadQueue();
     await new Promise(resolve => setImmediate(resolve));
     assert.doesNotMatch(app.elements['queue-logs'].innerHTML, /actions are locked/);
@@ -120,7 +120,7 @@ test('each Queue load reads whether the list is kept, and an older answer is dro
     app.context.authenticatedFetch = url => url === '/api/suppressions/config'
         ? new Promise(resolve => answers.push(kept => resolve({ ok: true, json: async () => ({ list_kept: kept }) })))
         : Promise.resolve({ ok: true, json: async () => ({ data: QUEUE }) });
-    vm.runInContext(`currentTab = 'queue'; mailcowRwConfigured = true; rwStatusReady = Promise.resolve();`, app.context);
+    vm.runInContext(`currentTab = 'outbound'; mailcowRwConfigured = true; rwStatusReady = Promise.resolve();`, app.context);
     const older = app.context.loadQueue();
     const newer = app.context.loadQueue();
     answers[1](false);   // the newer load: the sync was turned off
@@ -134,7 +134,7 @@ test('each Queue load reads whether the list is kept, and an older answer is dro
 test('an auto refresh with the same rows never leaves a load showing Loading', async () => {
     const app = loadApp();
     app.context.authenticatedFetch = async url => ({ ok: true, json: async () => (url === '/api/suppressions/config' ? { list_kept: true } : { data: QUEUE }) });
-    vm.runInContext(`currentTab = 'queue'; mailcowRwConfigured = true; queueSuppressOn = true; rwStatusReady = Promise.resolve(); lastDataCache.queue = { data: ${JSON.stringify(QUEUE)} };`, app.context);
+    vm.runInContext(`currentTab = 'outbound'; mailcowRwConfigured = true; queueSuppressOn = true; rwStatusReady = Promise.resolve(); lastDataCache.queue = { data: ${JSON.stringify(QUEUE)} };`, app.context);
     const load = app.context.loadQueue();
     const refresh = app.context.smartRefreshQueue();
     await Promise.all([load, refresh]);
@@ -150,7 +150,7 @@ test('an older auto refresh never draws over a newer load', async () => {
     app.context.authenticatedFetch = url => url === '/api/suppressions/config'
         ? Promise.resolve({ ok: true, json: async () => ({ list_kept: true }) })
         : new Promise(resolve => queueAnswers.push(rows => resolve({ ok: true, json: async () => ({ data: rows }) })));
-    vm.runInContext(`currentTab = 'queue'; mailcowRwConfigured = true; rwStatusReady = Promise.resolve();`, app.context);
+    vm.runInContext(`currentTab = 'outbound'; mailcowRwConfigured = true; rwStatusReady = Promise.resolve();`, app.context);
     const refresh = app.context.smartRefreshQueue();   // started first
     const load = app.context.loadQueue();
     await new Promise(resolve => setImmediate(resolve));

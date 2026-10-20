@@ -8,9 +8,8 @@ const VALID_ROUTES = [
     'dashboard',
     'messages',
     'netfilter',
-    'queue',
+    'outbound',
     'quarantine',
-    'spam-filter',
     'status',
     'domains',
     'dmarc',
@@ -31,6 +30,19 @@ const ROUTE_DISPLAY = {
     'netfilter': 'security'
 };
 
+// Pages and tabs that moved: an old address, a bookmark or a Back into the
+// history of an older version opens the new place. Null when nothing moved.
+function canonicalRoute(route, params = {}) {
+    const sub = (params && params.sub) || '';
+    if (route === 'queue') return { route: 'outbound', params: { sub: 'queue' } };
+    if (route === 'spam-filter') {
+        return sub === 'maps' ? { route: 'quarantine', params: { sub: 'maps' } }
+            : { route: 'outbound', params: { sub: 'suppressions' } };
+    }
+    if (route === 'settings' && sub === 'spam_filter') return { route, params: { ...params, sub: 'outbound' } };
+    return null;
+}
+
 // Pages with tabs: every tab has its own address (/security/protection), so a
 // tab can be reloaded, shared and reached with Back. The first tab is the
 // page's own address. select() picks the tab before the page loads; show()
@@ -39,12 +51,12 @@ const SUBPAGES = {
     // protection, fail2ban and abuse are the old addresses of what is now the Settings tab
     netfilter: { tabs: ['overview', 'lists', 'settings', 'events', 'protection', 'fail2ban', 'abuse'], current: () => securityTab,
         select: t => securityShowTab(t), show: t => securityShowTab(t) },
-    quarantine: { tabs: ['messages', 'rules'], current: () => quarantineTab,
-        select: t => quarantineShowTab(t), show: t => quarantineShowTab(t) },
+    quarantine: { tabs: ['messages', 'rules', 'maps'], current: () => quarantineTab,
+        select: t => quarantineShowTab(t, false), show: t => quarantineShowTab(t) },
+    outbound: { tabs: ['queue', 'suppressions'], current: () => outboundTab,
+        select: t => outboundShowTab(t, false), show: t => outboundShowTab(t) },
     status: { tabs: ['server', 'blocklists', 'jobs'], current: () => statusTab,
         select: t => statusShowTab(t), show: t => statusShowTab(t) },
-    'spam-filter': { tabs: ['suppressions', 'maps'], current: () => spamFilterSubTab,
-        select: t => { spamFilterSubTab = t; }, show: t => spamFilterSwitchSubTab(t) },
     'mailbox-stats': { tabs: ['statistics', 'rate-limits'], current: () => mailboxStatsView,
         select: t => { mailboxStatsView = t; }, show: t => mailboxStatsSwitchView(t) },
     settings: { tabs: null, get first() { return settingsFirstTab || 'features'; }, current: () => settingsTab,
@@ -94,6 +106,10 @@ function parseRoute() {
 
     // Resolve URL aliases (e.g., /security -> netfilter)
     const baseRoute = ROUTE_ALIASES[segments[0]] || segments[0];
+
+    // An address of a page or tab that moved
+    const moved = canonicalRoute(baseRoute, { sub: decodeURIComponent(segments[1] || '') });
+    if (moved) return { baseRoute: moved.route, params: moved.params, moved: true };
 
     // Special handling for DMARC nested routes
     if (baseRoute === 'dmarc' && segments.length > 1) {
@@ -210,6 +226,9 @@ function navigateTo(route, params = {}, updateHistory = true) {
         updateHistory = params;
         params = {};
     }
+
+    const moved = canonicalRoute(route, params);
+    if (moved) ({ route, params } = moved);
 
     // Validate base route
     if (!VALID_ROUTES.includes(route)) {
@@ -365,8 +384,14 @@ function initRouter() {
         }
 
         const routeInfo = event.state || parseRoute();
-        const route = routeInfo.route || routeInfo.baseRoute || getCurrentRoute();
-        const params = routeInfo.params || {};
+        let route = routeInfo.route || routeInfo.baseRoute || getCurrentRoute();
+        let params = routeInfo.params || {};
+        // A history entry an older version wrote, for a page that moved since
+        const moved = canonicalRoute(route, params);
+        if (moved) {
+            ({ route, params } = moved);
+            history.replaceState({ route, params }, '', buildPath(route, params));
+        }
 
         console.log('Popstate event, navigating to:', route, params);
 
@@ -379,8 +404,9 @@ function initRouter() {
     // Get initial route from URL
     const routeInfo = parseRoute();
 
-    // Replace current history state with route info
-    history.replaceState({ route: routeInfo.baseRoute, params: routeInfo.params }, '', window.location.pathname);
+    // Replace current history state with route info; a moved page gets its new address
+    history.replaceState({ route: routeInfo.baseRoute, params: routeInfo.params }, '',
+        routeInfo.moved ? buildPath(routeInfo.baseRoute, routeInfo.params) : window.location.pathname);
 
     console.log('Router initialized, initial route:', routeInfo);
     return routeInfo;
@@ -391,7 +417,7 @@ const TAB_LABELS = {
     'dashboard': 'Dashboard',
     'messages': 'Messages',
     'netfilter': 'Security',
-    'queue': 'Queue',
+    'outbound': 'Outbound',
     'quarantine': 'Quarantine',
     'status': 'Status',
     'domains': 'Domains',
@@ -400,7 +426,6 @@ const TAB_LABELS = {
     'devices': 'Devices',
     'logs': 'Logs',
     'settings': 'Settings',
-    'spam-filter': 'Spam Filter',
     'about': 'About'
 };
 
