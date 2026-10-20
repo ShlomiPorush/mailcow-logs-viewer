@@ -763,6 +763,8 @@
 /* Settings before the first migration: read-only, with the reason by the button */
 .ui-set-fieldset { min-width: 0; margin: 0; padding: 0; border: 0; display: contents; }
 .ui-set-fieldset:disabled .ui-set-group { opacity: .6; }
+/* Settings that do nothing while their switch is off (settingsShowNeeds) */
+.ui-set-group.is-off, .ui-set-edit .is-off { opacity: .5; }
 .ui-set-migrate-note { margin: 0; font-size: 13px; color: var(--ui-muted); }
 .ui-sec-cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--ui-gap); align-items: start; }
 .ui-sec-card { display: grid; gap: 10px; padding: 14px var(--ui-pad-x); border-radius: var(--ui-radius); background: var(--ui-panel); cursor: pointer; min-width: 0; }
@@ -1863,6 +1865,29 @@ button.ui-st-card:hover { outline: 1px solid var(--ui-line); }
 .ui-feature.is-off > span:has(.ui-set-also) { opacity: 1; }
 .ui-feature.is-locked { cursor: not-allowed; }
 .ui-set-featurelist > .ui-set-env, .ui-set-featurelist > .ui-set-desc { padding: 12px var(--ui-pad-x) 0; }
+
+/* A group's opening line, under its title: what the group is about */
+.ui-set-group-intro { padding: 0 var(--ui-pad-x) 4px; }
+
+/* Queue Management choices (settingsBounceChoice): one card per option, marked like the DMARC policy cards (.ui-dm-pol) */
+.ui-set-choice { gap: 10px; }
+.ui-set-choice-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.ui-set-choice-head > .ui-label { margin: 0; color: var(--ui-ink); font-size: 14px; }
+.ui-set-choice-list { display: grid; gap: 8px; }
+.ui-set-choice-opt { display: flex; align-items: flex-start; gap: 10px; padding: 12px; border: 1px solid color-mix(in srgb, var(--ui-ink) 13%, transparent); border-radius: 10px; cursor: pointer; }
+.ui-set-choice-opt:hover { border-color: color-mix(in srgb, var(--ui-focus) 50%, color-mix(in srgb, var(--ui-ink) 13%, transparent)); }
+.ui-set-choice-opt.is-picked { padding: 11px; border: 2px solid var(--ui-focus); background: color-mix(in srgb, var(--ui-focus) 6%, transparent); }
+.ui-set-choice-opt > input[type="radio"] { flex: none; width: 16px; height: 16px; margin: 4px 0 0; cursor: pointer; }
+/* The dot takes the card's colour, over the page-wide accent for inputs */
+html body .ui-main .ui-set-choice-opt > input[type="radio"] { accent-color: var(--ui-focus); }
+.ui-set-choice-opt:has(> input:disabled) { opacity: .55; cursor: not-allowed; }
+.ui-set-choice-opt:has(> input:disabled) label { cursor: not-allowed; }
+.ui-set-choice-opt > input:disabled { cursor: not-allowed; }
+.ui-set-choice-text { display: grid; gap: 3px; min-width: 0; line-height: 1.7; }
+.ui-set-choice-text label { cursor: pointer; }
+.ui-set-choice-num { display: inline-block; width: 5.5em; height: 28px; padding: 0 8px; }
+.ui-set-choice-note { color: var(--ui-warn); font-size: 12.5px; font-weight: 600; }
+.ui-set-choice [hidden] { display: none; }
 
 /* Floating save bar (uiSaveBar), shown only with unsaved changes, on every editable page */
 .ui-savebar { position: fixed; inset: auto 0 18px 0; z-index: 60; display: flex; align-items: center; gap: 12px; width: fit-content; margin: 0 auto;

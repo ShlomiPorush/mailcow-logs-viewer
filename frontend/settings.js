@@ -16,8 +16,22 @@ let settingsFirstTab = null;
 const SETTINGS_LABEL_OVERRIDES = {
     dmarc_error_email: 'Report Import Error Email',
     eas_devices_retention_days: 'Retention Days',
-    tz: 'Time Zone'
+    tz: 'Time Zone',
+    // Spam Filter: what the setting does, in words; the search shows these names
+    suppression_enabled: 'Handle undeliverable mail automatically',
+    suppression_auto_detect: 'Read the mail logs for failures',
+    suppression_rspamd_sync: 'Automatically update Rspamd blocks',
+    suppression_hard_bounce_action: 'Permanent delivery failure',
+    suppression_soft_bounce_action: 'Temporary delivery failure',
+    queue_cleanup_enabled: 'Delete delayed mail and block recipients',
+    queue_cleanup_threshold_minutes: 'Queue age before deletion (minutes)',
+    suppression_soft_bounce_threshold: 'Temporary failures before blocking',
+    suppression_base_expiry_days: 'Base block length (days)',
+    suppression_max_expiry_days: 'Maximum block length (days)',
+    suppression_whitelist_domains: 'Exclude these domains'
 };
+
+const SETTINGS_LOCK_ICON = '<svg width="12" height="12" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true"><path fill-rule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clip-rule="evenodd"></path></svg>';
 
 // Settings the API returns masked as ******** (same list as the backend)
 const SETTINGS_SENSITIVE_KEYS = ['mailcow_api_key', 'mailcow_api_key_rw', 'auth_password', 'oauth2_client_secret', 'smtp_password',
@@ -308,20 +322,20 @@ var SETTINGS_FIELD_DESCRIPTIONS = {
     eas_devices_retention_days: 'Days to keep a device that stopped syncing before it is removed from the Devices page. 0 keeps every device. Default: 90.',
     raw_logs_services: 'The services the Logs page shows. A service marked Always collected keeps coming in when switched off here, because another page reads it; the Logs page then just does not show it.',
     rspamd_password: 'Rspamd UI/API password for reading Rspamd map data. Required to view and edit Rspamd maps.',
-    suppression_enabled: 'Master switch for the spam suppression system. When enabled, bounced/rejected recipients are automatically blocked from receiving future emails.',
-    suppression_auto_detect: 'Automatically scan Postfix logs to detect hard bounce (5.x.x) errors and add recipients to the suppression list.',
-    suppression_rspamd_sync: 'Sync the suppression list to Rspamd\'s global_rcpt_blacklist.map so blocked emails are rejected at SMTP level. Requires Rspamd password.',
-    suppression_whitelist_domains: 'Domains listed here will never be suppressed, even if they bounce. Comma-separated (e.g., gmail.com, outlook.com).',
-    suppression_hard_bounce_action: 'What to do when a permanent delivery failure (5.x.x) is detected.',
-    suppression_soft_bounce_action: 'What to do when a temporary delivery failure (4.x.x) is detected in Postfix logs. Note: deferred emails stuck in the queue are handled separately by Queue Cleanup below.',
-    suppression_soft_bounce_threshold: 'How many soft bounces from Postfix logs before the recipient is suppressed (only applies when action is "Count then suppress").',
-    suppression_base_expiry_days: 'How long to block a recipient. Multiplied by bounce count for repeat offenders (e.g., 7 days × 3 bounces = 21 days). Used by all suppression types. Default: 7.',
-    suppression_max_expiry_days: 'Maximum block duration cap, regardless of bounce count. Default: 90.',
+    suppression_enabled: 'Off pauses automatic handling and block expiry. Manual changes still work.',
+    suppression_auto_detect: 'On when a choice below needs the mail logs. Set by those choices, not on its own.',
+    suppression_rspamd_sync: 'Applies blocks to new mail. Off leaves existing blocks in place. Needs the Rspamd password and a read-write API key.',
+    suppression_whitelist_domains: 'No automatic blocks or queue deletion. Separate exact domains with commas; subdomains are not included.',
+    suppression_hard_bounce_action: 'What happens when the receiving server rejects a message permanently (5.x.x).',
+    suppression_soft_bounce_action: 'What happens when delivery fails for now (4.x.x) and the queue is not cleaned.',
+    suppression_soft_bounce_threshold: 'Failures before the address is blocked. Each failed retry counts, even for the same message.',
+    suppression_base_expiry_days: 'Repeated failures increase the block length.',
+    suppression_max_expiry_days: 'The longest a block grows with repeated failures.',
     quarantine_rules_max_actions: 'Safety limit: maximum emails to release/delete per scheduler run. Prevents accidental mass-processing from overly broad rules. Default: 50.',
     quarantine_rules_interval: 'Minutes between quarantine rule processing runs. Lower = faster response to new quarantine items, higher = less API load on mailcow. Default: 5.',
     quarantine_rules_log_retention_days: 'Days to keep quarantine auto-rule action history. Older action logs are automatically cleaned up. Default: 30.',
-    queue_cleanup_enabled: 'Automatically monitor the mail queue for deferred emails. If an email has been stuck longer than the threshold, it is deleted from the queue and the recipient is suppressed.',
-    queue_cleanup_threshold_minutes: 'How long (in minutes) a deferred email must be stuck in the queue before it is automatically deleted and the recipient suppressed. Default: 60 (1 hour).'
+    queue_cleanup_enabled: 'Delete delayed mail after some time in the queue and block its recipients.',
+    queue_cleanup_threshold_minutes: 'Minutes in the queue before delayed mail is deleted.'
 };
 
 // Settings with a few short choices, shown as a segmented control (.ui-seg, as on the Security page).
@@ -340,6 +354,193 @@ function settingsPickSegment(btn) {
     field.form && field.form.dispatchEvent(new Event('input', { bubbles: true }));
 }
 
+// Queue Management: one choice per kind of delivery failure. The stored
+// settings and their ENV variables stay as they are: the radios only set the
+// hidden fields that the form saves. A temporary failure has two stored
+// settings behind its one choice: queue cleanup on, or else the action.
+// Reading the mail logs (suppression_auto_detect) has no switch of its own:
+// it is on exactly when a choice needs it, and a choice that has no effect
+// without it shows as what really happens.
+const SETTINGS_SOFT_BOUNCE_QUEUE = { value: 'queue', needs: 'rw',
+    label: 'Delete after {minutes} minutes in the queue and block the recipients', hint: 'Checked every 5 minutes.' };
+const SETTINGS_CHOICE_NOTES = {
+    rw: 'Add a read-write API key in Settings > mailcow. Nothing happens without it.',
+    'rw-queue': 'Add a read-write API key in Settings > mailcow to delete queued mail.'
+};
+const SETTINGS_LOG_CHOICES = { hard: ['suppress'], soft: ['count', 'suppress'] };
+// Settings that do nothing while another switch is off: shown greyed out and
+// unclickable until it is on. Groups say it with needs:, single fields here.
+const SETTINGS_FIELD_NEEDS = { suppression_rspamd_sync: 'suppression_enabled' };
+
+function settingsShowNeeds(root) {
+    Object.entries(SETTINGS_FIELD_NEEDS).forEach(([key, parent]) => {
+        const row = root.querySelector('#edit-' + key)?.closest('.ui-set-field, .ui-set-bool, .ui-set-wide');
+        if (row) row.dataset.needs = parent;
+    });
+    root.querySelectorAll('[data-needs]').forEach(el => {
+        const parent = root.querySelector('#edit-' + el.dataset.needs);
+        const off = !!parent && !parent.checked;
+        el.inert = off;
+        el.classList.toggle('is-off', off);
+    });
+}
+
+function settingsBounceChoice(kind, config, lockedKeys, defaults) {
+    const soft = kind === 'soft';
+    const actionKey = soft ? 'suppression_soft_bounce_action' : 'suppression_hard_bounce_action';
+    const keys = soft ? ['queue_cleanup_enabled', actionKey, 'queue_cleanup_threshold_minutes', 'suppression_soft_bounce_threshold']
+        : [actionKey, 'suppression_auto_detect'];
+    const locked = key => lockedKeys.has(key);
+    const action = String(config[actionKey] ?? '');
+    const logsOn = config.suppression_auto_detect === true;
+    const queueOn = soft && config.queue_cleanup_enabled === true;
+    const needsLogs = value => SETTINGS_LOG_CHOICES[kind].includes(value);
+    // What happens today: an action that needs the logs does nothing while they are not read
+    const picked = queueOn ? 'queue' : needsLogs(action) && !logsOn ? 'ignore' : action;
+    const options = soft ? [SETTINGS_SOFT_BOUNCE_QUEUE, ...SETTINGS_FIELD_OPTIONS[actionKey]] : SETTINGS_FIELD_OPTIONS[actionKey];
+    // A value set by ENV rules out the options that would change it; the rest stay open
+    const open = value => (soft
+        ? (!locked('queue_cleanup_enabled') || (value === 'queue') === queueOn) && (!locked(actionKey) || value === 'queue' || value === action)
+        : !locked(actionKey) || value === action)
+        && !(locked('suppression_auto_detect') && !logsOn && needsLogs(value));
+    const number = key => '<input type="number" min="1" class="ui-input ui-set-choice-num" id="edit-' + key + '" name="' + key + '" value="' +
+        escapeHtml(String(config[key] ?? '')) + '" aria-label="' + escapeHtml(settingsFieldLabel(key)) + '"' + (locked(key) ? ' disabled' : '') + '>';
+    const group = 'choice-' + kind;
+    const rows = options.map(o => {
+        const id = group + '-' + o.value;
+        const text = o.label.split(/(\{minutes\}|\{count\})/).filter(Boolean).map(part =>
+            part === '{minutes}' ? number('queue_cleanup_threshold_minutes')
+                : part === '{count}' ? number('suppression_soft_bounce_threshold')
+                : '<label for="' + id + '">' + escapeHtml(part.trim()) + '</label>').join(' ');
+        return '<div class="ui-set-choice-opt' + (o.value === picked ? ' is-picked' : '') + '" data-needs="' + escapeHtml(o.needs || '') + '" onclick="settingsPickCard(event, this)">' +
+            '<input type="radio" id="' + id + '" name="' + group + '" value="' + escapeHtml(o.value) + '" data-choice' +
+            (o.value === picked ? ' checked' : '') + (open(o.value) ? '' : ' disabled') + ' onchange="settingsPickBounce(this)">' +
+            '<div class="ui-set-choice-text"><div>' + text + '</div>' + (o.hint ? '<small class="ui-set-desc">' + escapeHtml(o.hint) + '</small>' : '') +
+            '<small class="ui-set-choice-note" data-note hidden></small></div></div>';
+    }).join('');
+    const checkbox = (key, on) => '<input type="checkbox" hidden id="edit-' + key + '" name="' + key + '"' + (on ? ' checked' : '') + (locked(key) ? ' disabled' : '') + '>';
+    const carriers = soft ? checkbox('queue_cleanup_enabled', queueOn) : checkbox('suppression_auto_detect', logsOn);
+    const lockedNames = keys.concat(soft ? ['suppression_auto_detect'] : []).filter(locked).map(key => key.toUpperCase());
+    // The defaults Reset returns to: every key of the choice that is not set by ENV
+    const resetTo = Object.fromEntries(keys.filter(key => !locked(key) && defaults[key] !== undefined).map(key => [key, defaults[key]]));
+    const differs = key => typeof resetTo[key] === 'boolean' ? config[key] !== resetTo[key]
+        : typeof resetTo[key] === 'number' ? Number(config[key]) !== resetTo[key] : String(config[key] ?? '') !== String(resetTo[key] ?? '');
+    const changed = Object.keys(resetTo).some(differs);
+    return '<div class="ui-set-field ui-set-wide ui-set-choice' + (changed ? ' is-changed' : '') + '" data-choice="' + kind + '" data-rw="' +
+            (config.mailcow_api_key_rw ? '1' : '0') + '" data-defaults="' + escapeHtml(JSON.stringify(resetTo)) + '">' +
+        '<div class="ui-set-choice-head"><span class="ui-label" id="label-' + group + '">What should happen?</span>' +
+            (lockedNames.length ? '<span class="ui-set-pill" title="Set by an environment variable, change it there">' + SETTINGS_LOCK_ICON + ' Set by ENV: ' + escapeHtml(lockedNames.join(', ')) + '</span>' : '') +
+            '<span class="ui-set-pill is-changed" title="Differs from the default"' + (changed ? '' : ' hidden') + '>Changed</span></div>' +
+        '<div class="ui-set-choice-list" role="radiogroup" aria-labelledby="label-' + group + '">' + rows + '</div>' +
+        carriers + '<input type="hidden" id="edit-' + actionKey + '" name="' + actionKey + '" value="' + escapeHtml(action) + '" data-saved="' + escapeHtml(action) + '"' + (locked(actionKey) ? ' disabled' : '') + '>' +
+        (Object.keys(resetTo).length ? '<button type="button" class="ui-set-clear is-reset" onclick="settingsResetChoice(this)"' + (changed ? '' : ' hidden') + '>↺ Reset to default</button>' : '') +
+        '</div>';
+}
+
+// The stored settings from the picked options of both choices. While the logs
+// are not read the actions do nothing, so they stay as saved: going back to
+// what the page loaded with leaves nothing to save
+function settingsSyncBounce() {
+    const picked = kind => { const r = document.querySelector('input[name="choice-' + kind + '"]:checked'); return r ? r.value : ''; };
+    const field = key => document.getElementById('edit-' + key);
+    const set = (el, value) => { if (!el || el.disabled) return; if (el.type === 'checkbox') el.checked = value; else el.value = value; };
+    const hard = picked('hard'), soft = picked('soft');
+    const logs = settingsSyncLogs();
+    const logsField = field('suppression_auto_detect');
+    const reading = logsField ? logsField.checked : logs;
+    const hardField = field('suppression_hard_bounce_action'), softField = field('suppression_soft_bounce_action');
+    if (hard && hardField) set(hardField, reading ? hard : hardField.dataset.saved);
+    if (soft && softField) {
+        set(field('queue_cleanup_enabled'), soft === 'queue');
+        set(softField, soft === 'queue' || !reading ? softField.dataset.saved : soft);
+    }
+    settingsShowEffective();
+}
+
+// Reading the logs: on exactly when a picked option needs it (unless ENV sets it)
+function settingsSyncLogs() {
+    const picked = kind => { const r = document.querySelector('input[name="choice-' + kind + '"]:checked'); return r ? r.value : ''; };
+    const logs = SETTINGS_LOG_CHOICES.hard.includes(picked('hard')) || SETTINGS_LOG_CHOICES.soft.includes(picked('soft'));
+    const logsField = document.getElementById('edit-suppression_auto_detect');
+    if (logsField && !logsField.disabled) logsField.checked = logs;
+    return logs;
+}
+
+// Each choice shows what will really happen with the stored values: a value
+// set by ENV can make one choice act once the other turns reading the logs on
+function settingsShowEffective() {
+    const field = key => document.getElementById('edit-' + key);
+    const logsField = field('suppression_auto_detect');
+    const reading = !logsField || logsField.checked;
+    const effective = (kind, value) => !reading && SETTINGS_LOG_CHOICES[kind].includes(value) ? 'ignore' : value;
+    const show = (kind, value) => {
+        const radios = [...document.querySelectorAll('input[name="choice-' + kind + '"]')];
+        if (radios.some(r => r.value === value)) radios.forEach(r => { r.checked = r.value === value; });
+    };
+    const hardField = field('suppression_hard_bounce_action');
+    if (hardField) show('hard', effective('hard', hardField.value));
+    const queue = field('queue_cleanup_enabled'), softField = field('suppression_soft_bounce_action');
+    if (softField) show('soft', queue && queue.checked ? 'queue' : effective('soft', softField.value));
+}
+
+function settingsPickBounce(radio) {
+    const box = radio.closest('.ui-set-choice');
+    if (!box || radio.matches(':disabled')) return;
+    settingsSyncBounce();
+    document.querySelectorAll('.ui-set-choice').forEach(settingsShowChoice);
+}
+
+// The whole card picks its option. The radio, its labels and the number field handle their own clicks
+function settingsPickCard(event, card) {
+    if (event.target.closest('input, label')) return;
+    const radio = card.querySelector('input[type="radio"]');
+    if (!radio || radio.matches(':disabled') || radio.checked) return;
+    radio.checked = true;
+    radio.focus({ preventScroll: true });
+    radio.dispatchEvent(new Event('change', { bubbles: true }));
+}
+
+// The picked option stands out and says what it still needs to work, and the
+// choice is marked Changed, with Reset, while any of its settings is not the default
+function settingsShowChoice(box) {
+    const rw = box.dataset.rw === '1';
+    box.querySelectorAll('.ui-set-choice-opt').forEach(opt => {
+        const radio = opt.querySelector('input[type="radio"]');
+        const needs = (opt.dataset.needs || '').split(' ');
+        const missing = !radio.checked || rw ? null : needs.includes('rw') ? 'rw' : needs.includes('rw-queue') ? 'rw-queue' : null;
+        const note = opt.querySelector('[data-note]');
+        opt.classList.toggle('is-picked', radio.checked);
+        note.textContent = missing ? SETTINGS_CHOICE_NOTES[missing] : '';
+        note.hidden = !missing;
+    });
+    const changed = Object.entries(JSON.parse(box.dataset.defaults || '{}')).some(([key, value]) => {
+        const el = document.getElementById('edit-' + key);
+        if (!el) return false;
+        if (el.type === 'checkbox') return el.checked !== (value === true);
+        return typeof value === 'number' ? Number(el.value) !== value : el.value !== String(value);
+    });
+    box.classList.toggle('is-changed', changed);
+    box.querySelectorAll('.ui-set-pill.is-changed, .is-reset').forEach(el => { el.hidden = !changed; });
+}
+
+function settingsResetChoice(btn) {
+    const box = btn.closest('.ui-set-choice');
+    const form = box.closest('form');
+    Object.entries(JSON.parse(box.dataset.defaults || '{}')).forEach(([key, value]) => {
+        const el = document.getElementById('edit-' + key);
+        if (!el || el.disabled) return;
+        if (el.type === 'checkbox') el.checked = value === true;
+        else el.value = String(value);
+    });
+    // The choices show the defaults; reading the logs follows them. The actions
+    // keep their defaults: settingsSyncBounce would put a saved action back
+    settingsShowEffective();
+    settingsSyncLogs();
+    settingsShowEffective();
+    document.querySelectorAll('.ui-set-choice').forEach(settingsShowChoice);
+    if (form) form.dispatchEvent(new Event('input', { bubbles: true }));
+}
+
 // Predefined options for settings fields (renders as dropdown instead of text input)
 const SETTINGS_FIELD_OPTIONS = {
     webhook_type: [
@@ -350,14 +551,16 @@ const SETTINGS_FIELD_OPTIONS = {
         { value: 'ntfy', label: 'ntfy - topic URL' },
         { value: 'gotify', label: 'Gotify - /message?token=...' }
     ],
+    // The Spam Filter bounce choices (settingsBounceChoice): {count} is the number field
     suppression_hard_bounce_action: [
-        { value: 'suppress', label: 'Suppress - block the recipient immediately' },
-        { value: 'ignore', label: 'Ignore - do nothing' }
+        { value: 'suppress', label: 'Block new mail to the address and delete its queued mail', needs: 'logs rw-queue' },
+        { value: 'ignore', label: 'Do nothing' }
     ],
     suppression_soft_bounce_action: [
-        { value: 'suppress', label: 'Suppress - block immediately on first soft bounce' },
-        { value: 'count', label: 'Count then suppress - block after reaching threshold' },
-        { value: 'ignore', label: 'Ignore - do nothing (let Postfix retry)' }
+        { value: 'count', label: 'Keep retrying; block new mail after {count} failures', needs: 'logs',
+            hint: 'Each failed retry counts, even for the same message.' },
+        { value: 'suppress', label: 'Keep retrying; block new mail at the first failure', needs: 'logs' },
+        { value: 'ignore', label: 'Do nothing; keep retrying' }
     ]
 };
 
@@ -527,13 +730,17 @@ var SETTINGS_EDIT_TABS = [
         ]
     },
     {
-        id: 'spam_filter', label: 'Spam Filter', description: 'Automatic bounce handling. Hard bounces are detected from Postfix logs, deferred (soft bounce) emails directly in the mail queue, and the block duration grows with each repeat bounce. The Rspamd connection itself (password and address) is configured under Mailcow.', groups: [
-            { label: 'Suppression', keys: ['suppression_enabled', 'suppression_auto_detect', 'suppression_rspamd_sync'] },
-            { label: 'Hard Bounces (5.x.x)', keys: ['suppression_hard_bounce_action'] },
-            { label: 'Soft Bounces (4.x.x) - Log Detection', keys: ['suppression_soft_bounce_action', 'suppression_soft_bounce_threshold'] },
-            { label: 'Deferred Queue Cleanup', keys: ['queue_cleanup_enabled', 'queue_cleanup_threshold_minutes'] },
-            { label: 'Block Duration', keys: ['suppression_base_expiry_days', 'suppression_max_expiry_days'] },
-            { label: 'Whitelist', keys: ['suppression_whitelist_domains'] }
+        // The id stays spam_filter: links, the search and Status > Jobs point to it, and the Spam Filter feature hides it
+        id: 'spam_filter', label: 'Queue Management', description: 'Choose what happens when outgoing mail cannot be delivered. Blocked addresses are listed on Spam Filter > Suppressions.', groups: [
+            { label: 'Automatic handling', keys: ['suppression_enabled', 'suppression_rspamd_sync'] },
+            // Reading the logs is set by the choices (settingsSyncBounce)
+            { label: 'Permanent delivery failure', choice: 'hard', needs: 'suppression_enabled', keys: ['suppression_hard_bounce_action', 'suppression_auto_detect'],
+                intro: 'The receiving server rejected the message permanently. (5.x.x)' },
+            { label: 'Temporary delivery failure', choice: 'soft', needs: 'suppression_enabled',
+                keys: ['queue_cleanup_enabled', 'suppression_soft_bounce_action', 'queue_cleanup_threshold_minutes', 'suppression_soft_bounce_threshold'],
+                intro: 'Postfix keeps the message and retries. (4.x.x)' },
+            { label: 'How long to block', needs: 'suppression_enabled', keys: ['suppression_base_expiry_days', 'suppression_max_expiry_days'] },
+            { label: 'Exceptions', needs: 'suppression_enabled', keys: ['suppression_whitelist_domains'] }
         ]
     },
     {
@@ -638,7 +845,7 @@ function settingsSearchIndex() {
 
 function renderSettingsEditField(key, value, sensitiveKeys, description, envLocked, defaultValue) {
     const keyAttr = escapeHtml(key); // setting names go into ids, names and data attributes
-    const LOCK = '<svg width="12" height="12" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true"><path fill-rule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clip-rule="evenodd"></path></svg>';
+    const LOCK = SETTINGS_LOCK_ICON;
     // Special renderer for disabled_features - checkboxes for feature toggles
     if (key === 'disabled_features') {
         const disabledSet = new Set(
@@ -1203,8 +1410,10 @@ function renderSettings(content, data) {
                     const groupKeys = group.keys.filter(function (k) { return data.editable_config[k] !== undefined; });
                     if (groupKeys.length === 0) return;
                     renderedGroups++;
-                    tabsHtml += '<section class="ui-panel ui-set-group"><h3 class="ui-set-group-title">' + escapeHtml(group.label) + '</h3><div class="ui-set-grid">';
-                    groupKeys.forEach(function (key) {
+                    tabsHtml += '<section class="ui-panel ui-set-group"' + (group.needs ? ' data-needs="' + escapeHtml(group.needs) + '"' : '') + '><h3 class="ui-set-group-title">' + escapeHtml(group.label) + '</h3>' +
+                        (group.intro ? '<p class="ui-set-desc ui-set-group-intro">' + escapeHtml(group.intro) + '</p>' : '') + '<div class="ui-set-grid">';
+                    if (group.choice) tabsHtml += settingsBounceChoice(group.choice, data.editable_config, envLockedKeys, defaults);
+                    else groupKeys.forEach(function (key) {
                         tabsHtml += renderSettingsEditField(key, data.editable_config[key], sensitiveKeys, SETTINGS_FIELD_DESCRIPTIONS[key] || '', envLockedKeys.has(key), defaults[key]);
                     });
                     tabsHtml += '</div></section>';
@@ -1284,9 +1493,9 @@ function renderSettings(content, data) {
             const select = content.querySelector('#settings-tab-select');
             if (select && select.value !== tabId) select.value = tabId;
 
-            // On mobile, bring the sticky picker back to the top of the
-            // viewport so the new category starts at its first field.
+            // A newly opened category starts at its top, not where the last one was scrolled to
             if (scrollToTop && window.matchMedia('(max-width: 1023px)').matches) {
+                // On mobile, bring the sticky picker back to the top of the viewport.
                 // Scroll the page's own area only: scrollIntoView also scrolled the
                 // app frame, which hid the top bar
                 const anchor = content.querySelector('.settings-mobile-nav');
@@ -1296,12 +1505,16 @@ function renderSettings(content, data) {
                     const target = panel.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop - anchor.offsetHeight - 8;
                     if (target < scroller.scrollTop) scroller.scrollTo({ top: Math.max(0, target), behavior: 'smooth' });
                 }
+            } else if (scrollToTop) {
+                // On a wide screen the categories scroll in their own column beside the sidebar
+                const column = content.querySelector('.settings-edit-content');
+                if (column && column.scrollTop > 0) column.scrollTo({ top: 0 });
             }
         };
 
         content.querySelectorAll('.settings-edit-tab').forEach(function (btn) {
             btn.addEventListener('click', function () {
-                switchSettingsTab(btn.getAttribute('data-tab'), false);
+                switchSettingsTab(btn.getAttribute('data-tab'), true);
             });
         });
 
@@ -1372,14 +1585,15 @@ function renderSettings(content, data) {
         const form = content.querySelector('#settings-edit-form');
         const importBtn = content.querySelector('#settings-import-env-btn');
 
-        // Unsaved changes: compare every field with the value it loaded with
+        // Unsaved changes: compare every field with the value it loaded with. The
+        // bounce choices' radios (data-choice) only set other fields, so they are not counted
         const fieldValue = el => el.type === 'checkbox' ? String(el.checked) : el.value;
         const initialValues = new Map();
-        if (form) form.querySelectorAll('[name]').forEach(el => initialValues.set(el.name, fieldValue(el)));
+        if (form) form.querySelectorAll('[name]:not([data-choice])').forEach(el => initialValues.set(el.name, fieldValue(el)));
         const updateDirty = () => {
             if (!form) return;
             const dirty = new Set();
-            form.querySelectorAll('[name]').forEach(el => {
+            form.querySelectorAll('[name]:not([data-choice])').forEach(el => {
                 if (initialValues.has(el.name) && initialValues.get(el.name) !== fieldValue(el)) dirty.add(el.name);
             });
             uiSaveBarUpdate('settings-savebar', dirty.size);
@@ -1393,8 +1607,15 @@ function renderSettings(content, data) {
         if (form) {
             form.addEventListener('input', updateDirty);
             form.addEventListener('change', updateDirty);
+            // A Queue Management choice says when it needs the read-write key, and
+            // whether it differs from the default, also after typing in its number fields
+            const showChoices = () => content.querySelectorAll('.ui-set-choice').forEach(settingsShowChoice);
+            showChoices();
+            form.addEventListener('input', showChoices);
+            settingsShowNeeds(content);
+            form.addEventListener('change', () => settingsShowNeeds(content));
             // Clearing and resetting change a field without an input event
-            content.querySelectorAll('.settings-clear-btn').forEach(btn => btn.addEventListener('click', () => setTimeout(updateDirty)));
+            content.querySelectorAll('.settings-clear-btn').forEach(btn => btn.addEventListener('click', () => setTimeout(() => { updateDirty(); settingsShowNeeds(content); })));
         }
 
         if (form) {

@@ -240,7 +240,7 @@ Some services are collected whatever this list says, because other pages read th
 | Variable | Default | Effect |
 | --- | --- | --- |
 | `SUPPRESSION_ENABLED` | `false` | Enables the suppression jobs: bounce detection, deferred queue cleanup, Rspamd sync and expiry. Manual API actions still work while it is off. |
-| `SUPPRESSION_AUTO_DETECT` | `true` | Find bounces in the Postfix logs and suppress their recipients. |
+| `SUPPRESSION_AUTO_DETECT` | `true` | Read the Postfix logs for bounces. The Queue Management choices set it; set it here only to force it. |
 | `SUPPRESSION_RSPAMD_SYNC` | `true` | Copy active suppressions to Rspamd's `global_rcpt_blacklist.map`, so mail to them is rejected. Needs `RSPAMD_PASSWORD` and the read-write key. |
 | `SUPPRESSION_HARD_BOUNCE_ACTION` | `suppress` | For permanent failures (5.x.x): `suppress` or `ignore`. |
 | `SUPPRESSION_SOFT_BOUNCE_ACTION` | `count` | For temporary failures (4.x.x): `suppress`, `count` (suppress at the threshold) or `ignore`. Used only while `QUEUE_CLEANUP_ENABLED=false`. |
@@ -249,7 +249,7 @@ Some services are collected whatever this list says, because other pages read th
 | `QUEUE_CLEANUP_THRESHOLD_MINUTES` | `60` | Minutes a deferred message waits before it is deleted. |
 | `SUPPRESSION_BASE_EXPIRY_DAYS` | `7` | Block time in days, multiplied by the number of bounces. |
 | `SUPPRESSION_MAX_EXPIRY_DAYS` | `90` | Longest block in days. |
-| `SUPPRESSION_WHITELIST_DOMAINS` | Empty | Domains never suppressed, such as `example.org`. |
+| `SUPPRESSION_WHITELIST_DOMAINS` | Empty | Domains never blocked automatically, and whose queued mail is never deleted automatically, such as `example.org`. |
 
 ## Quarantine auto-rules configuration
 

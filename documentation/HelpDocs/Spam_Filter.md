@@ -29,21 +29,18 @@ Search matches the address, notes and last bounce message. **Expired** shows ent
 
 ### Automatic suppressions
 
-With **Suppression Enabled** on, two jobs add entries every 5 minutes:
+With **Handle undeliverable mail automatically** on (**Settings** > **Queue Management**), two jobs add entries every 5 minutes:
 
-- **Detect Suppressions**, with **Suppression Auto Detect** on, checks delivery-agent `bounced` lines imported in the last 10 minutes. It also checks `deferred` lines when **Queue Cleanup Enabled** is off. Connection-time rejections (`NOQUEUE`) do not create suppressions. Empty senders and `MAILER-DAEMON` are skipped.
-- **Cleanup Deferred Queue**, with **Queue Cleanup Enabled** on and the read-write key, deletes deferred messages older than **Queue Cleanup Threshold Minutes** (60 by default) and suppresses their recipients as **Deferred Stuck**.
+- **Detect Suppressions** checks delivery-agent `bounced` lines imported in the last 10 minutes, and `deferred` lines when a temporary failure keeps retrying. It runs when a Queue Management choice needs the Postfix logs. Connection-time rejections (`NOQUEUE`) do not create suppressions. Empty senders and `MAILER-DAEMON` are skipped.
+- **Cleanup Deferred Queue**, when a temporary failure is set to **Delete after N minutes in the queue** and the read-write key is set, deletes deferred messages older than those minutes (60 by default) and suppresses their recipients as **Deferred Stuck**. The age counts from arrival, including time before a message became deferred.
 
-Log detection skips recipients in **Suppression Whitelist Domains**, matching exact domains without subdomains. Hard and soft bounces follow their configured actions. For a hard bounce, matching queued messages are also deleted when the read-write key is available.
+**Exclude these domains** lists exact domains, without subdomains. Their addresses are never blocked automatically, and a queued message to any of them is never deleted automatically, by cleanup or after a permanent failure. For a permanent failure, other queued messages to the blocked address are deleted when the read-write key is set.
 
-<!-- VERIFY: owner's decision pending (finding 6): cleanup_deferred_queue_job deletes stuck mail to whitelisted domains too and only skips the suppression. Update the next paragraph and the Suppression Whitelist Domains item below once decided. -->
-The whitelist prevents recipient suppression, but it does not protect queued messages from deletion. Cleanup uses age since arrival, including time before a message became deferred.
+Automatic entries start with **Base block length** (7 days by default). Each bounce sets expiry to base days times bounce count, capped at **Maximum block length** (90). Log lines are counted once across restarts and overlapping runs. Detection reactivates inactive entries, except soft bounces below the failures that **Keep retrying; block new mail after N failures** waits for.
 
-Automatic entries start with **Suppression Base Expiry Days** (7 by default). Each bounce sets expiry to base days times bounce count, capped at **Suppression Max Expiry Days** (90). Log lines are counted once across restarts and overlapping runs. Detection reactivates inactive entries, except soft bounces below the **Count then suppress** threshold.
+Earlier versions could double-count bounces. When temporary failures are set to block after N failures, the upgrade disables automatic soft-bounce suppressions and resets their counts to 0. The next sync removes them from Rspamd; new bounces must reach the threshold again. The application log reports how many were lifted. Other entries are unchanged.
 
-Earlier versions could double-count bounces. When **Suppression Soft Bounce Action** is **Count then suppress**, the upgrade disables automatic soft-bounce suppressions and resets their counts to 0. The next sync removes them from Rspamd; new bounces must reach the threshold again. The application log reports how many were lifted. Other entries are unchanged.
-
-With **Suppression Rspamd Sync** on, new and updated automatic entries are written to Rspamd right after detection. Automatic entries always match the exact address.
+With **Automatically update Rspamd blocks** on, new and updated automatic entries are written to Rspamd right after detection. Automatic entries always match the exact address.
 
 ### Add a suppression
 
@@ -64,7 +61,7 @@ Adding, editing, enabling, disabling, deleting or importing triggers a backgroun
 
 ### Sync to Rspamd
 
-Manual sync writes active entries to `global_rcpt_blacklist.map`. Automatic sync runs every 10 minutes with **Suppression Enabled**, **Suppression Rspamd Sync**, the Rspamd password and read-write key configured.
+Manual sync writes active entries to `global_rcpt_blacklist.map`. Automatic sync runs every 10 minutes with **Handle undeliverable mail automatically**, **Automatically update Rspamd blocks**, the Rspamd password and read-write key configured.
 
 The app replaces only the section between these markers; put your own entries above it:
 
@@ -112,18 +109,16 @@ The wizard's **Domain** pattern includes subdomains, unlike a domain suppression
 
 ## Settings that change this page
 
-Under **Settings** > **Spam Filter**:
+Under **Settings** > **Queue Management**:
 
-- **Suppression Enabled** defaults off. **Suppression Auto Detect** and **Suppression Rspamd Sync** default on. Page edits can sync even when these automatic switches are off.
-- **Suppression Hard Bounce Action** defaults to **Suppress**; **Ignore** skips hard bounces.
-<!-- VERIFY: owner's decision pending (finding 14): the soft-bounce settings apply only to log detection, which runs only while Queue Cleanup Enabled is off (on by default). Keep or change the note below once decided. -->
-- **Suppression Soft Bounce Action** defaults to **Count then suppress**: soft bounces are counted on an inactive entry, which turns active at **Suppression Soft Bounce Threshold** (3 by default). **Suppress** activates at the first bounce; **Ignore** skips them. These actions apply to deferred log detection only when **Queue Cleanup Enabled** is off.
-- **Queue Cleanup Enabled** defaults on.
-- **Suppression Whitelist Domains** accepts comma-separated exact domains and prevents suppression, but does not protect queued mail from deletion.
+- **Handle undeliverable mail automatically** defaults off. **Automatically update Rspamd blocks** defaults on. Page edits can sync even when these switches are off.
+- **Permanent delivery failure** defaults to blocking new mail to the address and deleting its queued mail; **Do nothing** skips permanent failures.
+- **Temporary delivery failure** defaults to **Delete after 60 minutes in the queue and block the recipients**. Keeping the message instead counts soft bounces on an inactive entry, which turns active after the set failures (3 by default), or at the first one; **Do nothing; keep retrying** skips them.
+- **Exclude these domains** accepts comma-separated exact domains.
 
-The jobs, including hourly expiry, require **Suppression Enabled**. With it off, manual entries can still sync, but expiry does not run.
+The jobs, including hourly expiry, require **Handle undeliverable mail automatically**. With it off, manual entries can still sync, but expiry does not run.
 
-Under **Settings** > **Mailcow**, set **Rspamd Password** to read or sync maps. Leave **Rspamd URL** empty to use mailcow's path; try a direct URL such as `http://rspamd-mailcow:11334` if that fails. See [Settings](Settings.md#spam-filter).
+Under **Settings** > **Mailcow**, set **Rspamd Password** to read or sync maps. Leave **Rspamd URL** empty to use mailcow's path; try a direct URL such as `http://rspamd-mailcow:11334` if that fails. See [Settings](Settings.md#queue-management).
 
 ## When something is missing
 
