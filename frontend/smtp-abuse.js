@@ -36,7 +36,7 @@ async function loadSmtpAbusePanel() {
 function renderSmtpAbusePanel() {
     const panel = document.getElementById('smtp-abuse-panel');
     if (!panel) return;
-    if (!smtpAbuseStatus) { panel.innerHTML = '<div class="ui-loading"><div class="loading"></div><p>Loading...</p></div>'; return; }
+    if (!smtpAbuseStatus) { panel.innerHTML = '<div class="ui-loading" role="status"><div class="loading"></div><p>Loading...</p></div>'; return; }
 
     const status = smtpAbuseStatus;
     const locked = !status.enabled || !status.rw_key_configured;

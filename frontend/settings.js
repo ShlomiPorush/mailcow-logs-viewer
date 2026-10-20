@@ -2679,7 +2679,7 @@ function showConnectionTestModal(title, message) {
             </div>
             <div class="ui-dialog-body">
                 <div id="connection-test-content">
-                    <div class="ui-loading"><div class="loading"></div><p>${escapeHtml(message)}</p></div>
+                    <div class="ui-loading" role="status"><div class="loading"></div><p>${escapeHtml(message)}</p></div>
                 </div>
             </div>
             <div class="ui-dialog-foot">

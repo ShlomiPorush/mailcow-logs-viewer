@@ -13,7 +13,9 @@ function harness(data, ok = true) {
     const element = id => {
         if (!elements.has(id)) {
             const classes = new Set(id === 'message-modal' ? ['hidden'] : []);
-            elements.set(id, { id, innerHTML: '', style: {}, dataset: {},
+            const attrs = {};
+            elements.set(id, { id, innerHTML: '', style: {}, dataset: {}, attrs,
+                setAttribute: (name, value) => { attrs[name] = String(value); }, getAttribute: name => attrs[name] ?? null,
                 classList: { add: value => classes.add(value), remove: value => classes.delete(value), contains: value => classes.has(value) },
                 addEventListener: (name, handler) => { listeners[id + ':' + name] = handler; },
                 querySelector: () => null,

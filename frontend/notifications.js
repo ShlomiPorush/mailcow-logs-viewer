@@ -64,10 +64,10 @@ function renderNotificationChannels() {
 
     const rows = notificationChannels.map(ch => {
         const statusDot = ch.last_status === 'success'
-            ? '<i class="ui-mdot ui-mdot-ok" title="Last delivery succeeded"></i>'
+            ? '<i class="ui-mdot ui-mdot-ok" title="Last delivery succeeded" role="img" aria-label="Last delivery succeeded"></i>'
             : ch.last_status === 'failed'
-                ? '<i class="ui-mdot ui-mdot-fail" title="Last delivery failed"></i>'
-                : '<i class="ui-mdot" title="Not used yet"></i>';
+                ? '<i class="ui-mdot ui-mdot-fail" title="Last delivery failed" role="img" aria-label="Last delivery failed"></i>'
+                : '<i class="ui-mdot" title="Not used yet" role="img" aria-label="Not used yet"></i>';
         const icon = CHANNEL_ICONS[ch.channel_type] || CHANNEL_ICONS.webhook;
         return `
         <div class="ui-channel${ch.enabled ? '' : ' is-off'}">

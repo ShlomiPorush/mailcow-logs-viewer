@@ -58,10 +58,12 @@ function switchModalTab(tab) {
     // Update tab buttons
     document.querySelectorAll('[id^="modal-tab-"]').forEach(btn => {
         btn.classList.remove('active');
+        btn.setAttribute('aria-selected', 'false');
     });
     const activeTab = document.getElementById(`modal-tab-${tab}`);
     if (activeTab) {
         activeTab.classList.add('active');
+        activeTab.setAttribute('aria-selected', 'true');
     } else {
         console.error('Modal tab button not found:', `modal-tab-${tab}`);
     }
@@ -99,7 +101,7 @@ async function viewMessageDetails(correlationKey) {
     window.openMessageKey = correlationKey;
     const header = document.getElementById('message-modal-header');
     if (header) header.innerHTML = '';
-    content.innerHTML = '<div class="ui-loading"><div class="loading"></div><p>Loading...</p></div>';
+    content.innerHTML = '<div class="ui-loading" role="status"><div class="loading"></div><p>Loading...</p></div>';
 
     try {
         const response = await authenticatedFetch(`/api/message/${encodeURIComponent(correlationKey)}/details`);
@@ -126,10 +128,12 @@ async function viewMessageDetails(correlationKey) {
 
         document.querySelectorAll('[id^="modal-tab-"]').forEach(btn => {
             btn.classList.remove('active');
+            btn.setAttribute('aria-selected', 'false');
         });
         const overviewTab = document.getElementById('modal-tab-overview');
         if (overviewTab) {
             overviewTab.classList.add('active');
+            overviewTab.setAttribute('aria-selected', 'true');
         }
 
         renderModalTab('overview', data);
@@ -341,7 +345,7 @@ function renderRelatedDeliveries(data) {
         <section class="ui-md-card">
             <!-- Collapsed by default so several legs do not push the rest of
                  the overview down; the summary line already tells the story -->
-            <div class="ui-md-toggle" onclick="toggleDeliveryJourney()">
+            <div class="ui-md-toggle" role="button" tabindex="0" data-row-open aria-expanded="false" aria-controls="delivery-journey-legs" onclick="toggleDeliveryJourney()">
                 <div>
                     <h4 class="ui-md-h">Delivery journey</h4>
                     <p class="ui-muted">This message passed through the server ${legs.length} times: ${statusSummary}.</p>
@@ -353,7 +357,7 @@ function renderRelatedDeliveries(data) {
             <div class="ui-md-legs hidden" id="delivery-journey-legs">
                 ${legs.map((leg, i) => `
                     <div class="ui-md-leg${leg.current ? ' is-current' : ''}"
-                        ${leg.current ? '' : `onclick="viewMessageDetails('${escapeJsArg(leg.correlation_key)}')"`}>
+                        ${leg.current ? 'aria-current="true"' : `role="button" tabindex="0" data-row-open onclick="viewMessageDetails('${escapeJsArg(leg.correlation_key)}')"`}>
                         <span class="ui-muted">${i + 1}.</span>
                         <span class="ui-md-leg-who">${escapeHtml(leg.sender || '-')} =&gt; ${escapeHtml(leg.recipient || '-')}</span>
                         ${leg.current ? '<span class="ui-tag ui-tag-info">viewing</span>' : ''}
@@ -400,6 +404,7 @@ function toggleDeliveryJourney() {
     const chevron = document.getElementById('delivery-journey-chevron');
     const open = legs.classList.toggle('hidden');
     if (chevron) chevron.style.transform = open ? '' : 'rotate(180deg)';
+    document.querySelector('.ui-md-toggle[aria-controls="delivery-journey-legs"]')?.setAttribute('aria-expanded', String(!open));
 }
 
 // =============================================================================

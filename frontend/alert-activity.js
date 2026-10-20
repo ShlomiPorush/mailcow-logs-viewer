@@ -14,7 +14,7 @@ async function openAlertActivity(alertId) {
     const content = document.getElementById('alert-activity-content');
     alertActivity = null;
     alertActivityRange = '24h';
-    content.innerHTML = '<div class="ui-loading"><div class="loading"></div><p>Loading...</p></div>';
+    content.innerHTML = '<div class="ui-loading" role="status"><div class="loading"></div><p>Loading...</p></div>';
     document.getElementById('alert-activity-title').textContent = 'Activity';
     modal.classList.remove('hidden');
     try {

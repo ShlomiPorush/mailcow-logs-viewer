@@ -67,9 +67,13 @@ function mailboxStatsSwitchView(view) {
 
     document.querySelectorAll('[id^="mailbox-stats-view-"]').forEach(btn => {
         btn.classList.remove('active');
+        btn.setAttribute('aria-selected', 'false');
     });
     const activeBtn = document.getElementById(`mailbox-stats-view-${view}`);
-    if (activeBtn) activeBtn.classList.add('active');
+    if (activeBtn) {
+        activeBtn.classList.add('active');
+        activeBtn.setAttribute('aria-selected', 'true');
+    }
 
     const headings = MAILBOX_STATS_VIEW_HEADINGS[view] || MAILBOX_STATS_VIEW_HEADINGS['statistics'];
     const title = document.getElementById('mailbox-stats-page-title');
@@ -450,7 +454,7 @@ function renderMailboxStatsAccordion(mailboxes, page = 1, totalPages = 1, total 
     const lastLogin = (label, last) => `<div class="ui-md-fact"><span>Last ${label} login</span><div>${last ? formatTime(last) : 'Never'}</div></div>`;
 
     let html = `
-        <div class="ui-table ui-stack ui-ms-table" data-sort-handler="mailboxStatsSortBy">
+        <div class="ui-table ui-stack ui-ms-table" data-sort-handler="mailboxStatsSortBy" data-phone-sort="off">
             <div class="ui-tr ui-tr-head"><span data-sort-key="username"${mailboxStatsSortAttr('username')}>Mailbox</span><span>Activity</span><span class="ui-td-end" data-sort-key="sent_total"${mailboxStatsSortAttr('sent_total')}>Sent</span><span class="ui-td-end" data-sort-key="received_total"${mailboxStatsSortAttr('received_total')}>Received</span><span class="ui-td-end">Delivered</span><span class="ui-td-end" data-sort-key="failure_rate"${mailboxStatsSortAttr('failure_rate')}>Failed</span><span class="ui-td-end">Aliases</span><span class="ui-td-end" data-sort-key="quota_used"${mailboxStatsSortAttr('quota_used')}>Storage</span></div>
             ${mailboxes.map((mb, index) => {
         const isExpanded = mailboxStatsCache.expandedMailboxes.has(mb.username);
@@ -460,7 +464,7 @@ function renderMailboxStatsAccordion(mailboxes, page = 1, totalPages = 1, total 
         return `
             <div class="ui-tr ui-ms-row" onclick="toggleMailboxAccordion('${escapeJsArg(mb.username)}')">
                 <div class="ui-td ui-q-who">
-                    <div><svg id="accordion-icon-${index}" class="ui-domain-chevron" width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"${isExpanded ? ' style="transform: rotate(90deg)"' : ''}><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg>${copyableText(mb.username)} ${mb.active ? '' : uiTag('Inactive', 'fail')}</div>
+                    <div><button type="button" class="ui-row-chev" aria-expanded="${isExpanded}" aria-controls="accordion-content-${index}" aria-label="Details of ${escapeHtml(email)}" onclick="event.stopPropagation(); toggleMailboxAccordion('${escapeJsArg(mb.username)}')"><svg id="accordion-icon-${index}" class="ui-domain-chevron" width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"${isExpanded ? ' style="transform: rotate(90deg)"' : ''}><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg></button>${copyableText(mb.username)} ${mb.active ? '' : uiTag('Inactive', 'fail')}</div>
                     ${mb.name ? `<small class="ui-ms-name">${escapeHtml(mb.name)}</small>` : ''}
                     <small class="ui-ms-sub">${escapeHtml(mb.quota_used_formatted)} · ${uiCountLabel(mb.alias_count || 0, 'alias', 'aliases')}</small>
                     ${mailboxServices(mb)}
@@ -497,7 +501,7 @@ function renderMailboxStatsAccordion(mailboxes, page = 1, totalPages = 1, total 
 
                     ${mb.aliases && mb.aliases.length > 0 ? `
                         <h4 class="ui-md-h">Aliases (${mb.aliases.length})</h4>
-                        <div class="ui-table ui-stack ui-ms-aliases">
+                        <div class="ui-table ui-stack ui-ms-aliases" data-phone-sort="off">
                             <div class="ui-tr ui-tr-head"><span>Alias</span><span class="ui-td-end">Sent</span><span class="ui-td-end">Received</span><span class="ui-td-end">Internal</span><span class="ui-td-end">Delivered</span><span class="ui-td-end">Deferred</span><span class="ui-td-end">Bounced</span><span class="ui-td-end">Rejected</span><span class="ui-td-end">Fail %</span></div>
                             ${aliases.map(alias => {
             const go = (filter, value, label, tone) => `<button type="button" class="ui-td ui-td-end ui-link-cell ui-ms-count${!value ? ' is-zero ui-zero' : tone ? ` ui-text-${tone}` : ''}" onclick="event.stopPropagation(); navigateToMessagesWithFilter({ email: '${escapeJsArg(alias.alias_address)}', filterType: 'search', ${filter} })"><small class="ui-sec-unit">${label} </small>${value || 0}</button>`;
@@ -555,6 +559,7 @@ function toggleMailboxAccordion(username) {
             mailboxStatsCache.expandedMailboxes.delete(username);
         }
         if (icon) icon.style.transform = isHidden ? 'rotate(90deg)' : '';
+        icon?.closest('.ui-row-chev')?.setAttribute('aria-expanded', String(isHidden));
     }
 }
 

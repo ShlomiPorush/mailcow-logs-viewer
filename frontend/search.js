@@ -263,7 +263,7 @@ function gsIcon(id) {
 
 function gsItem(category, item, q) {
     const index = gsShown.push(item) - 1;
-    return `<button type="button" class="ui-gs-item${index === gsActive ? ' is-active' : ''}" data-gs-index="${index}" role="option" aria-selected="${index === gsActive}">
+    return `<button type="button" class="ui-gs-item${index === gsActive ? ' is-active' : ''}" id="ui-gs-opt-${index}" data-gs-index="${index}" role="option" aria-selected="${index === gsActive}">
         <span class="ui-gs-ic">${gsIcon(category)}</span><b>${gsMark(item.title, q)}</b><small>${gsMark(item.sub, q)}</small>${item.at ? `<span class="ui-gs-at">${escapeHtml(item.at)}</span>` : ''}</button>`;
 }
 
@@ -314,7 +314,7 @@ function gsRender() {
         const r = gsResults[gsTab] || { count: 0, items: [] };
         if (r.more && r.count) {
             const index = gsShown.push(r.more) - 1;
-            body += `<button type="button" class="ui-gs-more${index === gsActive ? ' is-active' : ''}" data-gs-index="${index}"><span><b>${Number(r.count).toLocaleString()}</b> found</span><span class="ui-link">${escapeHtml(r.more.label)}</span></button>`;
+            body += `<button type="button" class="ui-gs-more${index === gsActive ? ' is-active' : ''}" id="ui-gs-opt-${index}" data-gs-index="${index}" role="option" aria-selected="${index === gsActive}"><span><b>${Number(r.count).toLocaleString()}</b> found</span><span class="ui-link">${escapeHtml(r.more.label)}</span></button>`;
         }
         body += r.items.map(item => gsItem(gsTab, item, q)).join('');
         if (r.count > r.items.length && !r.more) body += `<p class="ui-gs-wait">The first ${r.items.length} of ${Number(r.count).toLocaleString()}</p>`;
@@ -328,7 +328,12 @@ function gsRender() {
     panel.innerHTML = `<nav class="ui-gs-tabs" role="tablist" aria-label="Result types">${tabs}</nav>
         <div class="ui-gs-body" role="listbox" aria-label="Results">${body}</div>
         <div class="ui-gs-keys" aria-hidden="true"><span><kbd>↑</kbd><kbd>↓</kbd> move</span><span><kbd>Tab</kbd> type</span><span><kbd>Enter</kbd> open</span><span><kbd>Esc</kbd> close</span></div>`;
-    panel.querySelector('.ui-gs-item.is-active, .ui-gs-more.is-active')?.scrollIntoView({ block: 'nearest' });
+    const active = panel.querySelector('.ui-gs-item.is-active, .ui-gs-more.is-active');
+    active?.scrollIntoView({ block: 'nearest' });
+    // The field keeps the focus while Up and Down move: a screen reader reads the active result
+    const input = gsEl('ui-gs-input');
+    if (active && gsEl('ui-gs').classList.contains('is-open')) input.setAttribute('aria-activedescendant', active.id);
+    else input.removeAttribute('aria-activedescendant');
 }
 
 // ----------------------------------------------------------------- opening and closing
@@ -364,6 +369,7 @@ function gsClose(clear) {
     }
     root.classList.remove('is-open');
     input.setAttribute('aria-expanded', 'false');
+    input.removeAttribute('aria-activedescendant');
     if (root.classList.contains('is-sheet')) {
         root.classList.remove('is-sheet');
         document.documentElement.classList.remove('ui-gs-locked');

@@ -69,7 +69,7 @@ function dmarcView() {
 
 function dmarcLoading(text) {
     const view = dmarcView();
-    if (view) view.innerHTML = `<div class="ui-loading"><div class="loading"></div><p>${escapeHtml(text)}</p></div>`;
+    if (view) view.innerHTML = `<div class="ui-loading" role="status"><div class="loading"></div><p>${escapeHtml(text)}</p></div>`;
 }
 
 function dmarcFailed(error) {
@@ -570,7 +570,7 @@ async function openDmarcRecord(kind, domain) {
     const content = document.getElementById('dmarc-record-content');
     const titles = { dmarc: 'DMARC record', tls: 'TLS-RPT record', spf: 'SPF', dkim: 'DKIM' };
     document.getElementById('dmarc-record-title').textContent = `${titles[kind]} · ${domain}`;
-    content.innerHTML = '<div class="ui-loading"><div class="loading"></div><p>Loading...</p></div>';
+    content.innerHTML = '<div class="ui-loading" role="status"><div class="loading"></div><p>Loading...</p></div>';
     modal.classList.remove('hidden');
     try {
         const x = await dmarcLoadDomain(domain);
@@ -1125,7 +1125,7 @@ async function showReportsManagementModal() {
     reportsManagementState.sort = { ...REPORTS_DEFAULT_SORT };
     document.getElementById('dmarc-reports-search').value = '';
     // Opening is the one time the list shows a loading state
-    document.getElementById('dmarc-reports-management-content').innerHTML = '<div class="ui-loading"><div class="loading"></div><p>Loading reports...</p></div>';
+    document.getElementById('dmarc-reports-management-content').innerHTML = '<div class="ui-loading" role="status"><div class="loading"></div><p>Loading reports...</p></div>';
     document.getElementById('dmarc-reports-total').innerHTML = '';
     loadReportsDomains();
     await loadReportsManagementPage(1);
@@ -1147,7 +1147,7 @@ async function loadReportsDomains() {
     const request = ++reportsManagementState.domainsRequest;
     const content = document.getElementById('dmarc-reports-domains');
     if (!reportsManagementState.domains.length) {
-        content.innerHTML = '<div class="ui-loading"><div class="loading"></div><p>Loading domains...</p></div>';
+        content.innerHTML = '<div class="ui-loading" role="status"><div class="loading"></div><p>Loading domains...</p></div>';
     }
     try {
         const response = await authenticatedFetch('/api/dmarc/reports/domains');

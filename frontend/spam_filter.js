@@ -117,7 +117,7 @@ function renderRspamdMapsList(maps, rwKeyConfigured) {
                         // Use our metadata description, not the rspamd technical description
                         const displayDesc = _getMapMetaDescription(m.filename) || m.description || '';
                         return `
-                        <div class="ui-tr" onclick="openMapEditor('${escapeJsArg(m.filename)}')">
+                        <div class="ui-tr" role="button" tabindex="0" data-row-open onclick="openMapEditor('${escapeJsArg(m.filename)}')">
                             <div class="ui-td ui-q-who">
                                 <div>${escapeHtml(m.name)} ${m.managed_by_suppression ? uiTag('Auto-managed', 'info') : ''}</div>
                                 <small title="${escapeHtml(displayDesc)}">${escapeHtml(displayDesc)}</small>
@@ -155,7 +155,7 @@ function rspamdMapCrumbs(name) {
 async function openMapEditor(filename) {
     const container = document.getElementById('rspamd-maps-list');
 
-    container.innerHTML = '<div class="ui-loading"><div class="loading"></div><p>Loading map content...</p></div>';
+    container.innerHTML = '<div class="ui-loading" role="status"><div class="loading"></div><p>Loading map content...</p></div>';
 
     try {
         const response = await authenticatedFetch(`/api/rspamd/maps/${encodeURIComponent(filename)}`);
@@ -745,7 +745,7 @@ async function showBlockDetails(id, more) {
     if (!more) {
         if (existing) existing.remove();
         blockDetailsState = { id, page: 0, events: [], total: 0, email: '' };
-        const modal = suppressionDialog('block-details-modal', 'Block details', '<div id="block-details-body"><div class="ui-loading"><div class="loading"></div></div></div>',
+        const modal = suppressionDialog('block-details-modal', 'Block details', '<div id="block-details-body"><div class="ui-loading" role="status"><div class="loading"></div></div></div>',
             '<button type="button" class="ui-btn" onclick="document.getElementById(\'block-details-modal\').remove()">Close</button>');
         modal.querySelector('.ui-dialog').classList.replace('ui-dialog-sm', 'ui-dialog-md');
         // Escape closes the top dialog only (router.js): a message opened from here closes first

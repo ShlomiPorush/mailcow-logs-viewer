@@ -402,7 +402,7 @@ function securityRow(a) {
     }
     return `
         <div class="ui-sec-row${open ? ' is-open' : ''}" onclick="securityRowClick(event, '${escapeJsArg(a.ip)}')" role="button" tabindex="0"
-             onkeydown="if (event.key === 'Enter' && event.target === this) securityToggleRow('${escapeJsArg(a.ip)}')" aria-expanded="${open}">
+             onkeydown="if ((event.key === 'Enter' || event.key === ' ') && event.target === this) { event.preventDefault(); securityToggleRow('${escapeJsArg(a.ip)}'); }" aria-expanded="${open}">
             <div class="ui-sec-main">
                 <div class="ui-sec-top">${securityPlaceFlag(a.countryCode, a.country)}<b class="ui-mono">${copyableText(a.ip)}</b>${securityAttempts(a)}${d.tag}${where ? `<small class="ui-muted ui-sec-where">${where}</small>` : ''}</div>
                 <p class="ui-sec-why">${d.why}</p>
@@ -590,7 +590,7 @@ function securityNetworkRows() {
 }
 
 function securityHistoryRows() {
-    if (securityHistory === null) return '<div class="ui-loading"><div class="loading"></div><p>Loading...</p></div>';
+    if (securityHistory === null) return '<div class="ui-loading" role="status"><div class="loading"></div><p>Loading...</p></div>';
     const rows = securityHistory.filter(h => !securityCountry || h.country_name === securityCountry);
     if (!rows.length) return '<p class="ui-empty">Nothing here yet. Ended, undone and dismissed catches are kept here, and the watched ones with no new activity for a week.</p>';
     return rows.map(h => `
@@ -642,7 +642,7 @@ function renderSecurityOverview() {
     }[securityFilter];
     const rows = securityFilter === 'history' ? securityHistoryRows()
         : !page && securityPageError ? `<p class="ui-empty ui-text-fail">Failed to load: ${escapeHtml(securityPageError)}</p>`
-        : !page ? '<div class="ui-loading"><div class="loading"></div><p>Loading...</p></div>'
+        : !page ? '<div class="ui-loading" role="status"><div class="loading"></div><p>Loading...</p></div>'
         : list.map(securityRow).join('') || `<p class="ui-empty">${escapeHtml(empty)}</p>`;
     const footer = securityFilter === 'history' || !page ? ''
         : page.next ? `<p id="security-more" class="ui-msg-more" aria-live="polite">${securityPageError ? `Could not load more: ${escapeHtml(securityPageError)}` : 'Loading more...'}</p>`
@@ -755,7 +755,7 @@ function renderSecurityCountries() {
     box.innerHTML = `
         <section class="ui-panel">
             <div class="ui-panel-head">Where attacks come from <span class="ui-count">${period}</span></div>
-            ${rows === null ? '<div class="ui-loading"><div class="loading"></div><p>Loading...</p></div>'
+            ${rows === null ? '<div class="ui-loading" role="status"><div class="loading"></div><p>Loading...</p></div>'
                 : !rows.length ? '<p id="country-chart-empty" class="ui-empty">No country for these addresses. Configure MaxMind to see where they come from.</p>'
                 : `<div class="ui-sec-bars">${securityCountryBars()}</div>
                    <p class="ui-sec-legend"><span><i class="is-warn"></i>To review</span><span><i class="is-ban"></i>Banned</span>${watched.size ? '<span><i class="ui-sec-watch"></i>Watched by the Countries rule</span>' : ''}</p>
@@ -787,7 +787,7 @@ function renderSecurityLists() {
         return;
     }
     if (fail2banActiveBans === null) {
-        box.innerHTML = '<div class="ui-loading"><div class="loading"></div><p>Loading...</p></div>';
+        box.innerHTML = '<div class="ui-loading" role="status"><div class="loading"></div><p>Loading...</p></div>';
         return;
     }
     const rw = mailcowRwConfigured;
