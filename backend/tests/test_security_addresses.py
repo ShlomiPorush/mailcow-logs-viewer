@@ -337,3 +337,9 @@ def test_unbanning_a_network_lifts_that_ban_and_not_a_wider_one():
     assert _bans_covering('198.51.96.0/20', bans) == ['198.51.96.0/20']
     # A single address is lifted from every ban that holds it, as before
     assert _bans_covering('198.51.100.7', bans) == ['198.51.100.0/24', '198.51.96.0/20', '198.51.100.7/32']
+
+
+def test_a_network_whose_ban_ended_lifts_nothing_wider():
+    """The /24 row was shown, its ban ended meanwhile: Unban must not lift the /20 around it."""
+    from app.routers.logs import _bans_covering
+    assert _bans_covering('198.51.100.0/24', [{'network': '198.51.96.0/20'}]) == []

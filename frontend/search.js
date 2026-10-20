@@ -206,7 +206,7 @@ async function gsSearchAddresses(q, signal) {
             sub: [a.state === 'banned' ? 'Banned' : 'To review', a.country, uiCountLabel(a.attempts || 0, 'attempt', 'attempts')].filter(Boolean).join(' · '),
             at: formatAgo(a.last_seen),
             // A banned network has no events of its own: it opens on the Banned list
-            open: () => a.network_size ? openSecurityList('banned') : gsOpenAddress(a.ip)
+            open: () => a.network_size ? gsOpenBannedNetwork() : gsOpenAddress(a.ip)
         }))
     };
 }
@@ -526,6 +526,14 @@ function gsOpenSuppressions(text) {
     const already = gsPageOpen('outbound') && outboundTab === 'suppressions';
     navigateTo('outbound', { sub: 'suppressions' });
     if (already) loadSuppressions(1);
+}
+
+// Security > Banned with every country and network, since a network row has neither
+function gsOpenBannedNetwork() {
+    securityCountry = null;
+    securityNetwork = null;
+    if (gsPageOpen('netfilter') && securityTab === 'overview') setSecurityFilter('banned');
+    else openSecurityList('banned');
 }
 
 // The Security page's events for the address
