@@ -1374,8 +1374,8 @@ function settingsCheckFields(form, initialValues, fieldValue) {
         const tab = form.closest('#settings-content')?.querySelector(`.settings-edit-tab[data-tab="${panel.id.replace('settings-tab-panel-', '')}"]`);
         if (tab) tab.click();
     }
-    first.focus();
-    first.scrollIntoView({ block: 'center' });
+    first.focus({ preventScroll: true });   // Settings' own area scrolls, not the app frame (scrollIntoView can pan a phone's window)
+    { let area = first.parentElement; while (area && !(area.scrollHeight > area.clientHeight && /auto|scroll/.test(getComputedStyle(area).overflowY))) area = area.parentElement; if (area) area.scrollTop += first.getBoundingClientRect().top - area.getBoundingClientRect().top - area.clientHeight / 2; }
     const label = first.closest('.ui-set-field, .ui-set-bool, .ui-set-wide')?.querySelector('.ui-label');
     const name = label ? label.textContent.replace(/\s+/g, ' ').trim() : 'A field';
     showToast(bad.length === 1 ? `${name}: ${first.validationMessage}` : `${bad.length} fields need a valid value, starting with ${name}`, 'error');
