@@ -801,7 +801,8 @@ async function connectLogWebSocket(serviceId) {
                 const data = JSON.parse(event.data);
                 
                 if (data.type === 'new_logs' && data.entries && data.entries.length > 0) {
-                    if (!logsState.isPaused) {
+                    // A loaded time range shows only its own lines, until Live
+                    if (!logsState.isPaused && !logsState.dateRange) {
                         renderLogEntries(data.entries, data.service, false);
                         logsState.entryCount += data.entries.length;
                         logsState.totalEntries = logsState.entryCount;
@@ -814,11 +815,12 @@ async function connectLogWebSocket(serviceId) {
                     for (const [svcId, count] of Object.entries(data.counts)) {
                         const btn = document.getElementById(`log-svc-${svcId}`);
                         if (!btn) continue;
-                        const badge = btn.querySelector('.font-mono');
+                        const badge = btn.querySelector('small');
                         if (badge) badge.textContent = fmtNum(count);
                     }
-                    // Keep active service's totalEntries in sync
-                    if (logsState.activeService && data.counts[logsState.activeService] !== undefined) {
+                    updateLogServiceToggle();
+                    // Keep active service's totalEntries in sync (a loaded range keeps its own count)
+                    if (logsState.activeService && !logsState.dateRange && data.counts[logsState.activeService] !== undefined) {
                         logsState.totalEntries = data.counts[logsState.activeService];
                         logsState.entryCount = data.counts[logsState.activeService];
                         updateLogStatusBar();

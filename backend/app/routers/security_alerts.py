@@ -12,7 +12,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from ..database import get_db
-from ..models import SecurityAlert, MessageCorrelation, NetfilterLog
+from ..models import SecurityAlert, MessageCorrelation, NetfilterLog, SMTPAbuseAction
 from ..config import settings
 from ..correlation import authenticated_submissions, submitting_mailbox
 from ..utils import internal_error, format_datetime_for_api as format_datetime_utc
@@ -97,16 +97,22 @@ def acknowledge_all_alerts(db: Session = Depends(get_db)):
         raise internal_error(e)
 
 
-# What an alert is about, over time: the mailbox's sent mail for a volume spike,
-# the username's failed logins for an auth failure burst. Counted per 15 minutes
-# from the baseline period before the alert to two hours after it.
+# What an alert is about, over time: the mailbox's sent mail for a volume spike
+# or an SMTP block by abuse protection, the username's failed logins for an
+# auth failure burst. Counted per 15 minutes from the baseline period before
+# the alert to two hours after it.
 BUCKET_MINUTES = 15
 AFTER_HOURS = 2
+SENT_MAIL_ALERTS = ('volume_spike', 'smtp_abuse_block')
+# An SMTP block is recorded twice at once: its abuse action, then its alert
+BLOCK_ACTION_MATCH = timedelta(minutes=5)
+# How far before an SMTP block "Around the alert" starts when its window is not known
+UNKNOWN_WINDOW_MINUTES = 60
 
 
 def _events(db: Session, alert: SecurityAlert, start, end):
     subject = (alert.subject or '').lower()
-    if alert.alert_type == 'volume_spike':
+    if alert.alert_type in SENT_MAIL_ALERTS:
         # The same messages the volume-spike alert counted
         return authenticated_submissions(
             db.query(MessageCorrelation.first_seen, MessageCorrelation.recipient,
@@ -121,6 +127,20 @@ def _events(db: Session, alert: SecurityAlert, start, end):
     ).all()
 
 
+def _block_window(db: Session, alert: SecurityAlert) -> Optional[int]:
+    """The window an SMTP block counted in, from its own abuse action; None when that action is gone."""
+    at = alert.created_at
+    actions = db.query(SMTPAbuseAction.created_at, SMTPAbuseAction.window_minutes).filter(
+        SMTPAbuseAction.email == (alert.subject or '').lower(),
+        SMTPAbuseAction.action == 'blocked',
+        SMTPAbuseAction.created_at >= at - BLOCK_ACTION_MATCH,
+        SMTPAbuseAction.created_at <= at + BLOCK_ACTION_MATCH,
+    ).all()
+    if not actions:
+        return None
+    return max(min(actions, key=lambda r: abs(r[0] - at))[1], 1)
+
+
 def _top(counter: Counter, limit: int = 6) -> list:
     return [{'name': name, 'count': count} for name, count in counter.most_common(limit)]
 
@@ -131,7 +151,7 @@ def alert_activity(alert_id: int, db: Session = Depends(get_db)):
     The history behind an alert: counts per 15 minutes from the baseline period
     before it to two hours after, and what happened around it (from the check
     window before the alert to an hour after): recipient domains, delivery
-    results and subjects for a volume spike; source addresses, countries and
+    results and subjects for a volume spike or an SMTP block; source addresses, countries and
     networks for an auth failure burst.
     """
     try:
@@ -139,7 +159,12 @@ def alert_activity(alert_id: int, db: Session = Depends(get_db)):
         if not alert:
             raise HTTPException(status_code=404, detail="Alert not found")
         at = alert.created_at
-        window = max(int(settings.anomaly_check_interval or 15), 1)
+        # The window the alert counted in: an SMTP block keeps the one it was
+        # blocked with, even after the setting changed; None when not known
+        if alert.alert_type == 'smtp_abuse_block':
+            window = _block_window(db, alert)
+        else:
+            window = max(int(settings.anomaly_check_interval or 15), 1)
         start = (at - timedelta(days=max(int(settings.anomaly_baseline_days or 7), 1))).replace(minute=0, second=0, microsecond=0)
         end = at + timedelta(hours=AFTER_HOURS)
         rows = _events(db, alert, start, end)
@@ -153,9 +178,9 @@ def alert_activity(alert_id: int, db: Session = Depends(get_db)):
             t += step
             i += 1
 
-        around_from, around_to = at - timedelta(minutes=window), at + timedelta(hours=1)
+        around_from, around_to = at - timedelta(minutes=window or UNKNOWN_WINDOW_MINUTES), at + timedelta(hours=1)
         near = [row for row in rows if row[0] and around_from <= row[0] <= around_to]
-        if alert.alert_type == 'volume_spike':
+        if alert.alert_type in SENT_MAIL_ALERTS:
             around = {
                 'recipient_domains': _top(Counter((r[1] or '?').split('@')[-1].lower() for r in near)),
                 'results': _top(Counter((r[2] or 'unknown') for r in near)),
@@ -164,6 +189,8 @@ def alert_activity(alert_id: int, db: Session = Depends(get_db)):
         else:
             around = {
                 'addresses': _top(Counter(r[1] or '?' for r in near)),
+                # Every address, not only the top ones listed
+                'address_count': len({r[1] or '?' for r in near}),
                 'countries': _top(Counter(r[2] or 'Unknown' for r in near)),
                 'networks': _top(Counter(r[3] or 'Unknown' for r in near)),
             }

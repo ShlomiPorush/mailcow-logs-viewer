@@ -43,6 +43,9 @@ function navigateToMessagesWithFilter(options) {
             if (filterSender) filterSender.value = options.email;
         } else if (options.filterType === 'recipient') {
             if (filterRecipient) filterRecipient.value = options.email;
+        } else if (options.filterType === 'user') {
+            // The mailbox that logged in, whichever address or alias it sent from
+            if (filterUser) filterUser.value = options.email;
         } else {
             // Default: use search field
             if (filterSearch) filterSearch.value = options.email;
@@ -1074,18 +1077,8 @@ async function smartRefreshMessages() {
         return; // Skip refresh to avoid disrupting user's view
     }
 
-    const params = new URLSearchParams({
-        page: currentPage.messages,
-        limit: 50
-    });
-
-    if (filters.search) params.append('search', filters.search);
-    if (filters.sender) params.append('sender', filters.sender);
-    if (filters.recipient) params.append('recipient', filters.recipient);
-    if (filters.direction) params.append('direction', filters.direction);
-    if (filters.status) params.append('status', filters.status);
-    if (filters.user) params.append('user', filters.user);
-    if (filters.ip) params.append('ip', filters.ip);
+    // The same query as the list, so a time range stays applied
+    const params = messagesQueryParams(currentPage.messages);
 
     const response = await authenticatedFetch(`/api/messages?${params}`);
     if (!response.ok) return;
@@ -3677,9 +3670,9 @@ function applyMessagesCustomDateRange() {
         return;
     }
 
-    const startDate = new Date(startInput);
-    const endDate = new Date(endInput);
-    endDate.setHours(23, 59, 59, 999);
+    // A date alone would be read as UTC midnight; the range is the browser's days
+    const startDate = new Date(`${startInput}T00:00:00`);
+    const endDate = new Date(`${endInput}T23:59:59.999`);
 
     if (startDate > endDate) {
         showToast('Start date must be before end date', 'warning');

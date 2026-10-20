@@ -14,6 +14,7 @@ from app.config import settings
 
 SENDER = f'spike-{uuid.uuid4().hex[:6]}@activity.example'
 USER = f'burst-{uuid.uuid4().hex[:6]}@activity.example'
+WIDE = f'wide-{uuid.uuid4().hex[:6]}@activity.example'
 MARKER = f'activity-{uuid.uuid4().hex[:8]}'
 
 
@@ -31,10 +32,11 @@ def env(monkeypatch):
     if not _postgres_available():
         pytest.skip('PostgreSQL not available')
     from app.database import init_db, get_db_context
-    from app.models import MessageCorrelation, NetfilterLog, RspamdLog, SecurityAlert
+    from app.models import MessageCorrelation, NetfilterLog, RspamdLog, SecurityAlert, SMTPAbuseAction
     init_db()
     monkeypatch.setattr(settings._inner, 'anomaly_check_interval', 15)
     monkeypatch.setattr(settings._inner, 'anomaly_baseline_days', 7)
+    monkeypatch.setattr(settings._inner, 'smtp_abuse_window_minutes', 60)
     now = datetime.utcnow().replace(second=0, microsecond=0)
 
     def cleanup():
@@ -42,7 +44,8 @@ def env(monkeypatch):
             db.query(MessageCorrelation).filter(MessageCorrelation.sender == SENDER).delete(synchronize_session=False)
             db.query(RspamdLog).filter(RspamdLog.sender_smtp == SENDER).delete(synchronize_session=False)
             db.query(NetfilterLog).filter(NetfilterLog.priority == MARKER).delete(synchronize_session=False)
-            db.query(SecurityAlert).filter(SecurityAlert.subject.in_([SENDER, USER])).delete(synchronize_session=False)
+            db.query(SecurityAlert).filter(SecurityAlert.subject.in_([SENDER, USER, WIDE])).delete(synchronize_session=False)
+            db.query(SMTPAbuseAction).filter(SMTPAbuseAction.email == SENDER).delete(synchronize_session=False)
             db.commit()
     cleanup()
     with get_db_context() as db:
@@ -72,11 +75,23 @@ def env(monkeypatch):
         for i in range(12):
             db.add(NetfilterLog(time=now - timedelta(minutes=5, seconds=i), priority=MARKER, ip=f'192.0.2.{i % 3 + 1}', username=USER,
                                 rule_id=3, country_name='Testland', asn_org='Test Net', message='failed'))
+        # Failed logins for another username from nine addresses
+        for i in range(18):
+            db.add(NetfilterLog(time=now - timedelta(minutes=5, seconds=i), priority=MARKER, ip=f'198.51.100.{i % 9 + 1}', username=WIDE,
+                                rule_id=3, country_name='Testland', asn_org='Test Net', message='failed'))
         spike = SecurityAlert(alert_type='volume_spike', severity='critical', subject=SENDER, title='spike', metric_value=30, baseline_value=0.01, created_at=now)
         burst = SecurityAlert(alert_type='auth_failure_burst', severity='warning', subject=USER, title='burst', metric_value=12, baseline_value=10, created_at=now)
-        db.add_all([spike, burst])
+        # Abuse protection disabled SMTP for the same mailbox, counting in 60 minutes
+        db.add(SMTPAbuseAction(email=SENDER, message_count=30, threshold=25, window_minutes=60, action='blocked',
+                               automatic=True, operator='system', created_at=now - timedelta(seconds=1)))
+        block = SecurityAlert(alert_type='smtp_abuse_block', severity='critical', subject=SENDER, title='block', metric_value=30, baseline_value=25, created_at=now)
+        # An older block whose action is no longer kept
+        orphan = SecurityAlert(alert_type='smtp_abuse_block', severity='critical', subject=SENDER, title='old block', metric_value=30, baseline_value=25,
+                               created_at=now - timedelta(days=2))
+        wide = SecurityAlert(alert_type='auth_failure_burst', severity='warning', subject=WIDE, title='wide', metric_value=18, baseline_value=10, created_at=now)
+        db.add_all([spike, burst, block, wide, orphan])
         db.commit()
-        ids = (spike.id, burst.id)
+        ids = (spike.id, burst.id, block.id, wide.id, orphan.id)
     yield ids
     cleanup()
 
@@ -106,8 +121,60 @@ def test_a_burst_opens_on_the_usernames_failed_logins(env):
     assert sum(b['count'] for b in data['buckets']) == 12
     around = data['around']
     assert around['total'] == 12
-    assert len(around['addresses']) == 3 and around['countries'] == [{'name': 'Testland', 'count': 12}]
+    assert len(around['addresses']) == 3 and around['address_count'] == 3 and around['countries'] == [{'name': 'Testland', 'count': 12}]
     assert around['networks'] == [{'name': 'Test Net', 'count': 12}]
+
+
+def test_a_burst_counts_every_address_not_only_the_top_ones(env):
+    around = _client().get(f'/api/security-alerts/{env[3]}/activity').json()['around']
+    assert around['total'] == 18
+    assert len(around['addresses']) == 6 and around['address_count'] == 9
+
+
+def test_an_smtp_block_opens_on_the_mailboxs_sent_mail(env):
+    # The block counted the mailbox's sent mail in the abuse window, not failed logins
+    data = _client().get(f'/api/security-alerts/{env[2]}/activity').json()
+    assert data['window_minutes'] == 60
+    assert sum(b['count'] for b in data['buckets']) == 32
+    around = data['around']
+    assert around['total'] == 30
+    assert around['recipient_domains'][0] == {'name': 'a.example', 'count': 20}
+    assert around['subjects'] == [{'name': 'Win a prize', 'count': 30}]
+
+
+def _minutes_around(around):
+    parse = lambda value: datetime.fromisoformat(value.replace('Z', '+00:00'))
+    return (parse(around['to']) - parse(around['from'])) / timedelta(minutes=1)
+
+
+def test_an_smtp_block_keeps_its_own_window_after_the_setting_changes(env, monkeypatch):
+    from app.database import get_db_context
+    from app.models import SecurityAlert
+    from app.services import smtp_abuse_service
+    # Abuse protection blocks the mailbox while it counts in 60 minutes
+    monkeypatch.setattr(settings._inner, 'smtp_abuse_threshold', 25)
+    smtp_abuse_service.record_action(SENDER, 30, 'blocked', True, 'system')
+    smtp_abuse_service.record_security_alert(SENDER, 30, 0, True)
+    with get_db_context() as db:
+        alert_id = db.query(SecurityAlert.id).filter(SecurityAlert.subject == SENDER, SecurityAlert.alert_type == 'smtp_abuse_block') \
+            .order_by(SecurityAlert.id.desc()).first()[0]
+    # Later the window is set to 15 minutes, and the alert is opened again
+    monkeypatch.setattr(settings._inner, 'smtp_abuse_window_minutes', 15)
+    data = _client().get(f'/api/security-alerts/{alert_id}/activity').json()
+    # The block counted in 60 minutes; today's 15 does not relabel it
+    assert data['window_minutes'] == 60
+    # Its 60 minutes before it, to an hour after
+    assert _minutes_around(data['around']) == 120
+    assert data['around']['total'] == 30
+
+
+def test_an_smtp_block_without_its_action_has_an_unknown_window(env, monkeypatch):
+    monkeypatch.setattr(settings._inner, 'smtp_abuse_window_minutes', 15)
+    data = _client().get(f'/api/security-alerts/{env[4]}/activity').json()
+    # Not today's setting, and not the window of the block two days later
+    assert data['window_minutes'] is None
+    # An hour before it, to an hour after
+    assert _minutes_around(data['around']) == 120
 
 
 def test_an_unknown_alert_is_not_found(env):

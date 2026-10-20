@@ -6012,8 +6012,8 @@ List security alerts, newest first.
 The history behind an alert, for its Show activity window. For a `volume_spike` it counts the mailbox's outbound messages; for an `auth_failure_burst` the username's failed logins.
 
 - `buckets`: `[{start, count}]` per `bucket_minutes` (15) from `baseline_days` before the alert to two hours after it
-- `window_minutes`, `baseline_days`: the detector's check window and baseline period
-- `around`: from the check window before the alert to an hour after it: `total`, and for a volume spike `recipient_domains`, `results` and `subjects`, for a burst `addresses`, `countries` and `networks`, each `[{name, count}]`, most first
+- `window_minutes`, `baseline_days`: the detector's check window and baseline period. For an `smtp_abuse_block`, the window the block was made with, or `null` when its abuse action is no longer kept
+- `around`: from the check window (an hour when it is `null`) before the alert to an hour after it: `total`, and for a volume spike `recipient_domains`, `results` and `subjects`, for a burst `addresses`, `countries` and `networks`, each `[{name, count}]`, most first
 - `alert`: the alert itself
 
 Returns 404 for an unknown alert.
