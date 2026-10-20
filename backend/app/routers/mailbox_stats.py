@@ -96,25 +96,36 @@ def format_unix_timestamp(timestamp: Optional[int]) -> Optional[str]:
         return None
 
 
+def _app_zone() -> tuple:
+    """The app's time zone (TZ) and its name; UTC when TZ is not a known zone."""
+    try:
+        zone_name = settings.tz or 'UTC'
+        return zone_name, ZoneInfo(zone_name)
+    except Exception:
+        return 'UTC', timezone.utc
+
+
 def parse_date_range(date_range: str, start_date: Optional[str] = None, end_date: Optional[str] = None) -> tuple[datetime, datetime]:
     """Parse date range string into start and end datetimes
-    
-    For custom date ranges, start_date and end_date should be ISO format strings (YYYY-MM-DD)
+
+    For custom date ranges, start_date and end_date should be ISO format strings (YYYY-MM-DD).
+    A day is a day in the app's time zone, like the activity chart; both ends return in UTC.
     """
     now = datetime.now(timezone.utc)
-    
+    _, zone = _app_zone()
+
     if date_range == "custom" and start_date and end_date:
         # Parse custom date range
         try:
             start = datetime.fromisoformat(start_date.replace('Z', '+00:00'))
             if start.tzinfo is None:
-                start = start.replace(hour=0, minute=0, second=0, microsecond=0, tzinfo=timezone.utc)
-            
+                start = start.replace(hour=0, minute=0, second=0, microsecond=0, tzinfo=zone).astimezone(timezone.utc)
+
             end = datetime.fromisoformat(end_date.replace('Z', '+00:00'))
             if end.tzinfo is None:
                 # Set end time to end of day
-                end = end.replace(hour=23, minute=59, second=59, microsecond=999999, tzinfo=timezone.utc)
-            
+                end = end.replace(hour=23, minute=59, second=59, microsecond=999999, tzinfo=zone).astimezone(timezone.utc)
+
             return start, end
         except ValueError:
             # If parsing fails, fall back to 30 days
@@ -122,7 +133,7 @@ def parse_date_range(date_range: str, start_date: Optional[str] = None, end_date
             start = now - timedelta(days=30)
             end = now
     elif date_range == "today":
-        start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        start = now.astimezone(zone).replace(hour=0, minute=0, second=0, microsecond=0).astimezone(timezone.utc)
         end = now
     elif date_range == "7days":
         start = now - timedelta(days=7)
@@ -307,11 +318,7 @@ def _activity_buckets(start_date: datetime, end_date: datetime) -> tuple:
     The time slots a mailbox's activity is drawn in: hours for a range of up
     to two days, days beyond it, in the app's time zone (naive local times).
     """
-    try:
-        zone_name = settings.tz or 'UTC'
-        zone = ZoneInfo(zone_name)
-    except Exception:
-        zone_name, zone = 'UTC', timezone.utc
+    zone_name, zone = _app_zone()
     unit = 'hour' if end_date - start_date <= timedelta(days=2) else 'day'
     first = start_date.astimezone(zone).replace(tzinfo=None, minute=0, second=0, microsecond=0)
     if unit == 'day':

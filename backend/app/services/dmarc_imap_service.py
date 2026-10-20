@@ -792,12 +792,12 @@ class DMARCImapService:
             if sync_record.reports_created > 0:
                 clear_dmarc_cache(db)
             
-            # Send email notification if there were failures
-            if failed_emails and settings.notification_smtp_configured:
+            # Report the failures; the notification goes to the channels even without SMTP
+            if failed_emails:
                 logger.info(f"Sending error notification for {len(failed_emails)} failed emails")
                 try:
-                    send_dmarc_error_notification(failed_emails, sync_record.id)
-                    logger.info("Error notification sent successfully")
+                    if send_dmarc_error_notification(failed_emails, sync_record.id):
+                        logger.info("Error notification sent successfully")
                 except Exception as email_error:
                     logger.error(f"Failed to send error notification: {email_error}")
             

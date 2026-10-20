@@ -128,6 +128,7 @@ def reschedule_interval_jobs():
         _reschedule_smtp_abuse_job()
         _reschedule_anomaly_job()
         _reschedule_dovecot_correlation_job()
+        _reschedule_geoip_job()
 
     except Exception as e:
         logger.warning("Failed to reschedule interval jobs: %s", e)
@@ -174,6 +175,25 @@ def _reschedule_anomaly_job():
     else:
         try:
             scheduler.remove_job('anomaly_detection')
+        except Exception:
+            pass
+
+
+def _reschedule_geoip_job():
+    """Add or remove the weekly GeoIP update when the MaxMind license is saved or removed."""
+    if not scheduler.running:
+        return
+    if is_license_configured():
+        scheduler.add_job(
+            update_geoip_database,
+            trigger=CronTrigger(day_of_week='sun', hour=3, minute=0),
+            id='update_geoip',
+            name='Update GeoIP',
+            replace_existing=True
+        )
+    else:
+        try:
+            scheduler.remove_job('update_geoip')
         except Exception:
             pass
 
@@ -313,6 +333,10 @@ job_status = {
 # Number of hosts that were listed on actionable blacklists in the previous blacklist check run (for "cleared" notification)
 _blacklist_last_listed_actionable_count = 0
 _blacklist_check_lock = asyncio.Lock()
+
+# Returned by a job that skipped because another run of it holds its lock; that
+# run sets the job status when it ends, so a manual run must not mark it done
+JOB_SKIPPED = "skipped"
 
 def update_job_status(job_name: str, status: str, error: str = None):
     """Update job execution status"""
@@ -1932,7 +1956,7 @@ async def check_monitored_hosts_job(force: bool = False, send_notification: bool
     # listed-count used for cleared/improved notifications - never overlap.
     if _blacklist_check_lock.locked():
         logger.info("[BLACKLIST] Check already in progress, skipping this trigger")
-        return
+        return JOB_SKIPPED
     async with _blacklist_check_lock:
         await _run_check_monitored_hosts(force, send_notification)
 
@@ -2068,9 +2092,10 @@ async def _run_check_monitored_hosts(force: bool, send_notification: bool):
 
                 # Notification destinations must fire even with no email configured
                 if notification_email or any_channel_configured():
-                    # Build aggregated email content
-                    many = len(listed_hosts) != 1
-                    title = f"{len(listed_hosts)} host{'s are' if many else ' is'} on a blacklist"
+                    # Build aggregated email content. A host listed only on
+                    # lists that never alert is neither counted nor shown.
+                    many = actionable_count != 1
+                    title = f"{actionable_count} host{'s are' if many else ' is'} on a blacklist"
                     subject = f"Blacklist: {title}"
                     intro = f"Servers that use these blacklists may reject or junk mail from {'these hosts' if many else 'this host'}."
 
@@ -2078,7 +2103,7 @@ async def _run_check_monitored_hosts(force: bool, send_notification: bool):
                     
                     html_rows = ""
                     
-                    for host_data in listed_hosts:
+                    for host_data in actionable_listed_hosts:
                         hostname = host_data['hostname']
                         ip = host_data['ip']
                         source = host_data.get('source', '')
@@ -2244,9 +2269,9 @@ async def dmarc_imap_sync_job():
             logger.error(f"DMARC IMAP sync failed: {error_msg}")
             update_job_status('dmarc_imap_sync', 'failed', error_msg)
             
-            # Send notification if needed
+            # Report the failures; the notification goes to the channels even without SMTP
             failed_emails = result.get('failed_emails')
-            if failed_emails and settings.notification_smtp_configured:
+            if failed_emails:
                 try:
                     await asyncio.get_running_loop().run_in_executor(
                         _thread_pool_executor,
@@ -2260,6 +2285,7 @@ async def dmarc_imap_sync_job():
         elif result.get('status') == 'already_running':
             # Another import runs (Fetch reports, or an earlier run); it sets the status when it ends
             logger.info("DMARC IMAP sync already running, skipped this run")
+            return JOB_SKIPPED
         else:
             # Sync finished successfully
             logger.info(f"DMARC IMAP sync completed: {result.get('reports_created', 0)} created")

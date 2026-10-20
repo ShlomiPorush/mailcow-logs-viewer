@@ -18,7 +18,7 @@ def test_a_job_that_needs_the_rw_key_says_so(monkeypatch):
 
 
 def test_imap_and_maxmind_point_to_their_own_sections(monkeypatch):
-    monkeypatch.setattr(settings_router.settings, 'dmarc_imap_enabled', False)
+    monkeypatch.setattr(settings_router.settings._inner, 'dmarc_imap_enabled', False)
     monkeypatch.setattr(settings_router, 'is_license_configured', lambda: False)
     assert settings_router._job_off_reason('dmarc_imap_sync')[1] == 'dmarc_imap'
     assert settings_router._job_off_reason('update_geoip') == ('Needs a MaxMind Account ID and License Key', 'maxmind')
@@ -26,14 +26,14 @@ def test_imap_and_maxmind_point_to_their_own_sections(monkeypatch):
 
 def test_the_first_missing_condition_is_the_reason(monkeypatch):
     _rw(monkeypatch, False)
-    monkeypatch.setattr(settings_router.settings, 'smtp_abuse_enabled', False)
+    monkeypatch.setattr(settings_router.settings._inner, 'smtp_abuse_enabled', False)
     assert settings_router._job_off_reason('smtp_abuse')[0] == 'SMTP abuse protection is turned off'
-    monkeypatch.setattr(settings_router.settings, 'smtp_abuse_enabled', True)
+    monkeypatch.setattr(settings_router.settings._inner, 'smtp_abuse_enabled', True)
     assert 'Read-Write' in settings_router._job_off_reason('smtp_abuse')[0]
 
 
 def test_a_job_that_can_run_has_no_reason(monkeypatch):
     _rw(monkeypatch, True)
-    monkeypatch.setattr(settings_router.settings, 'smtp_abuse_enabled', True)
+    monkeypatch.setattr(settings_router.settings._inner, 'smtp_abuse_enabled', True)
     assert settings_router._job_off_reason('smtp_abuse') is None
     assert settings_router._job_off_reason('complete_correlations') is None

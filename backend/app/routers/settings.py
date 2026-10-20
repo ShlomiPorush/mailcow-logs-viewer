@@ -18,7 +18,7 @@ from ..database import get_db, get_db_context
 from ..models import PostfixLog, RspamdLog, NetfilterLog, MessageCorrelation
 from ..config import settings, EDITABLE_SETTING_KEYS, FEATURE_IDS, reload_settings, Settings
 from ..config import _get_field_annotations, get_env_locked_keys
-from ..scheduler import last_fetch_run_time, get_job_status, update_job_status, reschedule_interval_jobs, dovecot_correlation_available, cleanup_disabled_feature_data
+from ..scheduler import last_fetch_run_time, get_job_status, update_job_status, JOB_SKIPPED, reschedule_interval_jobs, dovecot_correlation_available, cleanup_disabled_feature_data, _mailbox_sync_needed
 from ..services.settings_store import get_config_overrides_from_db, save_config_overrides_to_db, has_config_overrides_in_db, get_maxmind_validation_status, save_maxmind_validation_status, clear_maxmind_validation_status
 from ..services.settings_store import credential_fingerprint, get_credential_check_status, save_credential_check_status
 from ..services.connection_test import test_smtp_connection, test_imap_connection
@@ -50,7 +50,8 @@ def _job_off_reason(key: str):
                                 (not settings.suppression_auto_detect, 'Automatic bounce detection is turned off', 'spam_filter')],
         'sync_suppressions': [(not settings.suppression_enabled, 'Suppressions are turned off', 'spam_filter'),
                               (not settings.suppression_rspamd_sync, 'Syncing suppressions to Rspamd is turned off', 'spam_filter'),
-                              (not settings.is_rspamd_configured, 'Needs the Rspamd password', 'mailcow')],
+                              (not settings.is_rspamd_configured, 'Needs the Rspamd password', 'mailcow'),
+                              (not rw, 'Needs the Read-Write API key (MAILCOW_API_KEY_RW)', 'mailcow')],
         'expire_suppressions': [(not settings.suppression_enabled, 'Suppressions are turned off', 'spam_filter')],
         'process_quarantine_rules': [(not rw, 'Needs the Read-Write API key (MAILCOW_API_KEY_RW)', 'mailcow')],
         'cleanup_deferred_queue': [(not settings.suppression_enabled, 'Suppressions are turned off', 'spam_filter'),
@@ -64,6 +65,32 @@ def _job_off_reason(key: str):
         if off:
             return reason, section
     return None
+
+
+# The feature each job belongs to; while it is off the job does nothing
+_JOB_FEATURES = {
+    'cleanup_dmarc_reports': 'dmarc', 'dmarc_imap_sync': 'dmarc',
+    'dns_check': 'domains',
+    'alias_stats': 'mailbox-stats',
+    'eas_devices': 'devices', 'cleanup_eas_devices': 'devices',
+    'blacklist_check': 'blacklist', 'sync_transports': 'blacklist',
+    'detect_suppressions': 'spam-filter', 'sync_suppressions': 'spam-filter',
+    'expire_suppressions': 'spam-filter', 'cleanup_deferred_queue': 'spam-filter',
+    'process_quarantine_rules': 'quarantine',
+    'protection_rules': 'netfilter',
+}
+
+
+def _job_cannot_run(key: str):
+    """Why a manual run of a job would do nothing, or None while it can run."""
+    if key == 'mailbox_stats':
+        # The mailbox sync also feeds Rate Limits
+        return None if _mailbox_sync_needed() else 'Mailbox Stats and Rate Limits are both turned off'
+    feature = _JOB_FEATURES.get(key)
+    if feature and not settings.is_feature_enabled(feature):
+        return 'The feature this job belongs to is turned off'
+    off = _job_off_reason(key)
+    return off[0] if off else None
 
 
 def _get_raw_logs_job_status(job_key: str, field: str, enabled: bool):
@@ -548,7 +575,7 @@ def get_settings_info(db: Session = Depends(get_db)):
                 "sync_suppressions": {
                     "interval": "10 minutes" if (settings.is_feature_enabled('spam-filter') and settings.suppression_enabled and settings.suppression_rspamd_sync) else ("Disabled (feature off)" if not settings.is_feature_enabled('spam-filter') else ("Disabled (suppression off)" if not settings.suppression_enabled else "Disabled (Rspamd sync off)")),
                     "description": "Syncs active suppressions to Rspamd recipient denylist",
-                    "enabled": settings.is_feature_enabled('spam-filter') and settings.suppression_enabled and settings.suppression_rspamd_sync and settings.is_rspamd_configured,
+                    "enabled": settings.is_feature_enabled('spam-filter') and settings.suppression_enabled and settings.suppression_rspamd_sync and settings.is_rspamd_configured and mailcow_api.has_rw_key,
                     "feature_disabled": not settings.is_feature_enabled('spam-filter'),
                     "status": jobs_status.get('sync_suppressions', {}).get('status', 'idle') if (settings.is_feature_enabled('spam-filter') and settings.suppression_enabled and settings.suppression_rspamd_sync) else 'disabled',
                     "last_run": format_datetime_utc(jobs_status.get('sync_suppressions', {}).get('last_run')) if (settings.is_feature_enabled('spam-filter') and settings.suppression_enabled and settings.suppression_rspamd_sync) else None,
@@ -601,6 +628,7 @@ def get_settings_info(db: Session = Depends(get_db)):
                     "interval": "After each log fetch" if settings.is_feature_enabled('netfilter') else "Disabled (Security feature off)",
                     "description": "Notes the addresses the protection rules would ban (watch mode)",
                     "enabled": settings.is_feature_enabled('netfilter'),
+                    "feature_disabled": not settings.is_feature_enabled('netfilter'),
                     "status": jobs_status.get('protection_rules', {}).get('status', 'idle') if settings.is_feature_enabled('netfilter') else 'disabled',
                     "last_run": format_datetime_utc(jobs_status.get('protection_rules', {}).get('last_run')) if settings.is_feature_enabled('netfilter') else None,
                     "error": jobs_status.get('protection_rules', {}).get('error') if settings.is_feature_enabled('netfilter') else None
@@ -904,6 +932,9 @@ def purge_feature_data(body: Dict[str, Any], db: Session = Depends(get_db)):
                 from ..raw_logs_worker import delete_uncollected_raw_logs
                 deleted_counts[table_name] = delete_uncollected_raw_logs(db)
                 continue
+            if table_name == 'mailbox_statistics' and settings.is_feature_enabled('rate-limits'):
+                # Rate Limits reads each mailbox's configured limit from it
+                continue
             # nosemgrep: python.sqlalchemy.security.audit.avoid-sqlalchemy-text.avoid-sqlalchemy-text
             count = db.execute(text(f"SELECT COUNT(*) FROM {table_name}")).scalar() or 0
             if count > 0:
@@ -1194,11 +1225,13 @@ def validate_geoip_db():
     
     # Reload readers to pick up any new files
     reload_geoip_readers()
-    
+    # The test lookups once more, for the result of each database
+    checked = validate_geoip_database()
+
     return {
         "valid": get_geoip_db_valid() is True,
-        "city_ok": get_geoip_db_valid() is True,
-        "asn_ok": get_geoip_db_valid() is True,
+        "city_ok": checked['city_ok'],
+        "asn_ok": checked['asn_ok'],
         "db_valid": get_geoip_db_valid(),
     }
 
@@ -1300,7 +1333,12 @@ def trigger_job(job_name: str, background_tasks: BackgroundTasks):
     
     if job_name not in job_mapping:
         raise HTTPException(status_code=404, detail=f"Unknown job: {job_name}")
-    
+
+    # A job that cannot run would return at once and be marked a success
+    reason = _job_cannot_run(job_name)
+    if reason:
+        raise HTTPException(status_code=409, detail=f"The job cannot run. {reason}.")
+
     status_key, job_func, self_managing = job_mapping[job_name]
     
     # Check if job is already running - check both main and raw logs status
@@ -1322,11 +1360,12 @@ def trigger_job(job_name: str, background_tasks: BackgroundTasks):
     async def run_job_wrapper():
         try:
             if asyncio.iscoroutinefunction(job_func):
-                await job_func()
+                result = await job_func()
             else:
-                await run_in_threadpool(job_func)
-            # Self-managing jobs update their own status internally
-            if not self_managing:
+                result = await run_in_threadpool(job_func)
+            # Self-managing jobs update their own status internally, and a run
+            # that skipped leaves it to the run that holds the job
+            if not self_managing and result != JOB_SKIPPED:
                 update_job_status(status_key, 'success')
         except Exception as e:
             logger.error(f"Manual job {job_name} failed: {e}")

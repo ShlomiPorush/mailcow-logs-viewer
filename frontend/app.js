@@ -2143,7 +2143,8 @@ async function loadDashboardHealth() {
         }
         if (versionRes.ok) {
             const v = await versionRes.json();
-            setDashKpi('dash-kpi-version', v.current_version || '-', '', v.update_available ? `${v.latest_version} available` : 'Up to date');
+            setDashKpi('dash-kpi-version', v.current_version || '-', '', v.update_available ? `${v.latest_version} available`
+                : v.latest_version === 'unknown' ? 'Update check failed' : 'Up to date');
         }
     } catch (error) {
         console.error('Failed to load dashboard health:', error);
@@ -4180,11 +4181,15 @@ function checkHost(hostname) {
     return checkBlacklists(true, hostname);
 }
 
+// The Check all now button as the page has it, put back when a check ends
+let blacklistCheckBtnIdle = null;
+
 async function checkBlacklists(force = false, host = null) {
     const btn = document.getElementById('blacklist-check-btn');
     const container = document.getElementById('status-blacklist');
 
     if (btn) {
+        if (blacklistCheckBtnIdle === null) blacklistCheckBtnIdle = btn.innerHTML;
         btn.disabled = true;
         btn.innerHTML = `
             <svg class="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
@@ -4280,13 +4285,7 @@ async function checkBlacklists(force = false, host = null) {
     } finally {
         if (btn) {
             btn.disabled = false;
-            btn.innerHTML = `
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                        d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
-                </svg>
-                Check Now
-            `;
+            btn.innerHTML = blacklistCheckBtnIdle;
         }
     }
 }
@@ -4565,7 +4564,9 @@ function statusJobCategories(jobs) {
             jobs: [
                 ['DNS Check (All Domains)', 'dns_check', jobs.dns_check],
                 ['IP Blacklist Check (All Hosts)', 'blacklist_check', jobs.blacklist_check],
-                ['Protection Rules', 'protection_rules', jobs.protection_rules]
+                ['Protection Rules', 'protection_rules', jobs.protection_rules],
+                ['Anomaly Detection', 'anomaly_detection', jobs.anomaly_detection],
+                ['Outgoing Spam', 'smtp_abuse', jobs.smtp_abuse]
             ]
         },
         {

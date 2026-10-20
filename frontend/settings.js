@@ -565,7 +565,7 @@ const SETTINGS_TAB_FEATURE_MAP = {
     'blacklist': 'blacklist',
     'dmarc': 'dmarc',
     'dmarc_imap': 'dmarc',
-    'logs': 'logs',
+    // Not 'logs': the raw logs other pages read are fetched and kept by its settings either way
     'spam_filter': 'spam-filter',
     'quarantine': 'quarantine',
     'devices': 'devices'
@@ -885,6 +885,8 @@ async function loadSettings() {
 
 // The latest version, its state and the update note, by id
 function renderLatestVersionState(versionInfo) {
+    // The server answers "unknown" when GitHub could not be reached
+    if (versionInfo.latest_version === 'unknown') return `Not known ${uiTag('Check failed', 'warn')}`;
     const tag = versionInfo.update_available ? uiTag('Update Available', 'ok')
         : versionInfo.latest_version ? uiTag('Up to Date', 'info') : '';
     return `${versionInfo.latest_version ? `v${escapeHtml(versionInfo.latest_version)}` : 'Checking...'} ${tag}`;
@@ -1368,6 +1370,8 @@ function renderSettings(content, data) {
                 // ── Feature disable confirmation ─────────────────────────
                 // Detect if any features are being newly disabled
                 const PURGEABLE_FEATURES = ['netfilter', 'domains', 'dmarc', 'mailbox-stats', 'logs', 'blacklist', 'spam-filter', 'quarantine', 'devices'];
+                // Rate Limits has no purge call, but the save itself deletes its reset history
+                const CONFIRM_FEATURES = [...PURGEABLE_FEATURES, 'rate-limits'];
                 let newlyDisabledFeatures = [];
                 let featuresChanged = false;
                 if ('disabled_features' in payload) {
@@ -1380,10 +1384,10 @@ function renderSettings(content, data) {
                     newlyDisabledFeatures = [...newDisabled].filter(f => !oldDisabled.has(f));
                     featuresChanged = newlyDisabledFeatures.length > 0 || [...oldDisabled].some(f => !newDisabled.has(f));
 
-                    // Show confirmation modal if any purgeable features are being disabled
-                    const purgeableNewlyDisabled = newlyDisabledFeatures.filter(f => PURGEABLE_FEATURES.includes(f));
-                    if (purgeableNewlyDisabled.length > 0) {
-                        const confirmed = await showFeatureDisableConfirmModal(purgeableNewlyDisabled);
+                    // Show confirmation modal if any feature with stored data is being disabled
+                    const confirmNewlyDisabled = newlyDisabledFeatures.filter(f => CONFIRM_FEATURES.includes(f));
+                    if (confirmNewlyDisabled.length > 0) {
+                        const confirmed = await showFeatureDisableConfirmModal(confirmNewlyDisabled);
                         if (!confirmed) return; // User cancelled
                     }
                 }
