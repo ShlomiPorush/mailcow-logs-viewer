@@ -126,8 +126,8 @@ def test_delete_all_removes_only_that_domain(db_client, deletion, caplog):
     assert response.json() == {"status": "success", "domain": "example.com", "dmarc_reports": 2,
                                "dmarc_records": 3, "tls_reports": 1, "tls_policies": 2}
     # The deletion is on record in the log
-    assert any("example.com" in r.message and "2 DMARC reports" in r.message and "1 TLS reports" in r.message
-               for r in caplog.records if r.name == "app.routers.dmarc")
+    assert ("Deleted all reports of example.com: 2 DMARC reports (3 records), 1 TLS reports (2 policies)"
+            in [r.message for r in caplog.records if r.name == "app.routers.dmarc"])
     assert counts(isolated) == {"dmarc": ["example.net"], "records": 3,
                                 "tls": ["example.org", "example.org"], "policies": 2}
     # Other processes are told their cached DMARC figures are stale
@@ -354,7 +354,8 @@ def test_sort_works_with_the_search(db_client):
     client, isolated = db_client
     expected = seed_sort(isolated)
     first, rows = all_pages(client, search="example.com", sort_by="records", sort_dir="asc")
-    matching = [r for r in expected if r["domain"].endswith("example.com")]
+    # The seeded domains that contain the search
+    matching = [r for r in expected if r["domain"] in ("a.example.com", "b.example.com", "d.example.com")]
     assert first["total"] == 4
     assert rows == [(r["type"], r["id"]) for r in python_order(matching, "records", "asc")]
 
