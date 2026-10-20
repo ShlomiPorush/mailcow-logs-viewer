@@ -1,6 +1,7 @@
 // =============================================================================
 // SEARCH - the search in the top bar: pages, settings, messages, domains,
-// mailboxes and addresses, each in its own tab with the first few under All
+// mailboxes, suppressions and addresses, each in its own tab with the first
+// few under All
 // =============================================================================
 // Classic script sharing the global scope; loaded after the page scripts, whose
 // functions open what a result points to.
@@ -11,6 +12,7 @@ const GS_CATEGORIES = [
     { id: 'messages', label: 'Messages', feature: null },
     { id: 'domains', label: 'Domains', feature: 'domains' },
     { id: 'mailboxes', label: 'Mailboxes', feature: 'mailbox-stats' },
+    { id: 'suppressions', label: 'Suppressions', feature: 'spam-filter' },
     { id: 'addresses', label: 'IP addresses', feature: 'netfilter' }
 ];
 // Results a category's tab lists, and how many of them All shows
@@ -18,7 +20,7 @@ const GS_LIMIT = 10;
 const GS_SUMMARY = 3;
 // The server is asked from this many characters; pages and settings answer from the first
 const GS_SERVER_FROM = 2;
-const GS_SHORT = 'Type one more character to search the messages, domains, mailboxes and addresses too.';
+const GS_SHORT = 'Type one more character to search the messages, domains, mailboxes, suppressions and addresses too.';
 
 const GS_ICONS = {
     pages: '<path d="M7 3h7l5 5v13H7zM14 3v5h5M10 13h6M10 17h6"/>',
@@ -26,6 +28,7 @@ const GS_ICONS = {
     messages: '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/>',
     domains: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 010 18M12 3a14 14 0 000 18"/>',
     mailboxes: '<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0116 0"/>',
+    suppressions: '<circle cx="12" cy="12" r="9"/><path d="M5.6 5.6l12.8 12.8"/>',
     addresses: '<path d="M12 3l8 3v6c0 4.5-3.4 8.3-8 9-4.6-.7-8-4.5-8-9V6z"/>'
 };
 
@@ -47,6 +50,8 @@ let gsTimer = null;
 let gsController = null;
 let gsDomains = null;
 let gsDomainsAt = 0;
+let gsListKept = null;
+let gsListKeptAt = 0;
 
 function gsEl(id) { return document.getElementById(id); }
 
@@ -162,6 +167,29 @@ async function gsSearchMailboxes(q, signal) {
     };
 }
 
+// The app keeps a suppression list only while Sync with Rspamd is on: with it
+// off the category is not shown at all
+async function gsSearchSuppressions(q, signal) {
+    if (gsListKept === null || Date.now() - gsListKeptAt > 60000) {
+        gsListKept = (await gsJson('/api/suppressions/config', signal)).list_kept === true;
+        gsListKeptAt = Date.now();
+    }
+    if (!gsListKept) return { hidden: true, count: 0, items: [] };
+    const data = await gsJson(`/api/suppressions?search=${encodeURIComponent(q)}&active_filter=&page=1&per_page=${GS_LIMIT}`, signal);
+    const shown = value => (typeof _cleanRegexDomain === 'function' ? _cleanRegexDomain(value) : value);
+    const state = s => (s.is_expired ? 'Expired' : s.active ? 'Active' : 'Inactive');
+    return {
+        count: data.total || 0,
+        items: (data.items || []).map(s => ({
+            title: shown(s.email),
+            sub: [state(s), String(s.reason || '').replace('_', ' '), s.notes].filter(Boolean).join(' · '),
+            at: formatAgo(s.created_at),
+            open: () => gsOpenSuppressions(s.email)
+        })),
+        more: { label: 'Open in Suppressions', open: () => gsOpenSuppressions(q) }
+    };
+}
+
 async function gsSearchAddresses(q, signal) {
     // Only what can be part of an address: the list is read from the logs
     if (!/^[0-9a-f.:]+$/i.test(q)) return { count: 0, items: [] };
@@ -181,7 +209,8 @@ async function gsSearchAddresses(q, signal) {
     };
 }
 
-const GS_REMOTE = { messages: gsSearchMessages, domains: gsSearchDomains, mailboxes: gsSearchMailboxes, addresses: gsSearchAddresses };
+const GS_REMOTE = { messages: gsSearchMessages, domains: gsSearchDomains, mailboxes: gsSearchMailboxes,
+    suppressions: gsSearchSuppressions, addresses: gsSearchAddresses };
 
 // ----------------------------------------------------------------- searching
 
@@ -254,7 +283,8 @@ function gsRender() {
         return;
     }
     const q = gsQuery.toLowerCase();
-    const categories = GS_CATEGORIES.filter(c => !gsOff(c));
+    // A category that has nothing to search right now (no suppression list) is left out
+    const categories = GS_CATEGORIES.filter(c => !gsOff(c) && !gsResults[c.id]?.hidden);
     const loading = categories.some(c => gsResults[c.id]?.loading);
     const short = categories.some(c => gsResults[c.id]?.short);
     const total = categories.reduce((n, c) => n + (gsResults[c.id]?.count || 0), 0);
@@ -478,6 +508,21 @@ async function gsOpenMailbox(username, text) {
     const content = gsEl('accordion-content-' + index);
     if (content && content.classList.contains('hidden')) toggleMailboxAccordion(username);
     gsReveal(content ? content.parentElement : null, 'start');
+}
+
+// Spam Filter > Suppressions, listing what the search found in every state
+function gsOpenSuppressions(text) {
+    const search = gsEl('suppression-search');
+    if (search) search.value = text;
+    const reason = gsEl('suppression-filter-reason');
+    if (reason) reason.value = '';
+    const active = gsEl('suppression-filter-active');
+    if (active) active.value = '';
+    // The list keeps the filters it was last asked with: it reads them again from the fields
+    suppressionQuery = null;
+    const already = gsPageOpen('spam-filter') && spamFilterSubTab === 'suppressions';
+    navigateTo('spam-filter', { sub: 'suppressions' });
+    if (already) loadSuppressions(1);
 }
 
 // The Security page's events for the address
