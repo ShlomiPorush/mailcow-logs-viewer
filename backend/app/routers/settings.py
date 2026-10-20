@@ -48,6 +48,8 @@ def _job_off_reason(key: str):
     checks = {
         'dmarc_imap_sync': [(not settings.dmarc_imap_enabled, 'IMAP import of DMARC and TLS reports is not set up', 'dmarc_imap')],
         'update_geoip': [(not is_license_configured(), 'Needs a MaxMind Account ID and License Key', 'maxmind')],
+        'check_credentials': [(not rw and not settings.is_rspamd_configured,
+                               'Needs the Read-Write API key or the Rspamd password', 'mailcow')],
         'send_weekly_summary': [(not settings.enable_weekly_summary, 'The weekly summary is turned off', 'notifications')],
         # Worded as the Queue Management settings name them
         'detect_suppressions': [(not settings.suppression_enabled, '"Handle undeliverable mail automatically" is off', 'spam_filter'),
@@ -500,6 +502,13 @@ def get_settings_info(db: Session = Depends(get_db)):
                     "status": jobs_status.get('cleanup_dmarc_reports', {}).get('status', 'unknown') if settings.is_feature_enabled('dmarc') else 'disabled',
                     "last_run": format_datetime_utc(jobs_status.get('cleanup_dmarc_reports', {}).get('last_run')) if settings.is_feature_enabled('dmarc') else None,
                     "error": jobs_status.get('cleanup_dmarc_reports', {}).get('error') if settings.is_feature_enabled('dmarc') else None
+                },
+                "check_credentials": {
+                    "interval": "6 hours, and after a start",
+                    "description": "Checks that mailcow accepts the Read-Write API key and Rspamd the password, as Validate does; changes nothing",
+                    "status": jobs_status.get('check_credentials', {}).get('status', 'idle') if (mailcow_api.has_rw_key or settings.is_rspamd_configured) else 'disabled',
+                    "last_run": format_datetime_utc(jobs_status.get('check_credentials', {}).get('last_run')),
+                    "error": jobs_status.get('check_credentials', {}).get('error')
                 },
                 "check_app_version": {
                     "interval": "6 hours",
@@ -1349,6 +1358,7 @@ def trigger_job(job_name: str, background_tasks: BackgroundTasks):
     - cleanup_logs: Remove old logs
     - cleanup_dmarc_reports: Remove old DMARC/TLS reports
     - check_app_version: Check for app updates
+    - check_credentials: Check the Read-Write API key and the Rspamd password
     - dns_check: Validate DNS records for all domains
     - sync_local_domains: Sync domains from mailcow API
     - dmarc_imap_sync: Import DMARC reports from the IMAP mailbox
@@ -1370,6 +1380,7 @@ def trigger_job(job_name: str, background_tasks: BackgroundTasks):
         cleanup_old_logs,
         cleanup_old_dmarc_reports,
         check_app_version_update,
+        check_credentials_job,
         check_all_domains_dns_background,
         sync_local_domains,
         dmarc_imap_sync_job,
@@ -1405,6 +1416,7 @@ def trigger_job(job_name: str, background_tasks: BackgroundTasks):
         'cleanup_logs': ('cleanup_logs', cleanup_old_logs, False),
         'cleanup_dmarc_reports': ('cleanup_dmarc_reports', cleanup_old_dmarc_reports, False),
         'check_app_version': ('check_app_version', check_app_version_update, False),
+        'check_credentials': ('check_credentials', check_credentials_job, False),
         'dns_check': ('dns_check', check_all_domains_dns_background, False),
         'sync_local_domains': ('sync_local_domains', sync_local_domains, False),
         'dmarc_imap_sync': ('dmarc_imap_sync', dmarc_imap_sync_job, False),

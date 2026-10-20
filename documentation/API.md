@@ -226,7 +226,7 @@ With Basic authentication off, the handler returns 400; when only OAuth2 is on, 
 
 ### Job Status Data Structure
 
-Each job starts as `{"last_run": null, "status": "idle", "error": null}`. The IDs are `fetch_logs`, `complete_correlations`, `update_final_status`, `expire_correlations`, `correlate_dovecot`, `cleanup_logs`, `cleanup_dmarc_reports`, `check_app_version`, `dns_check`, `update_geoip`, `dmarc_imap_sync`, `mailbox_stats`, `alias_stats`, `blacklist_check`, `send_weekly_summary`, `sync_transports`, `fetch_raw_logs`, `cleanup_raw_logs`, `detect_suppressions`, `sync_suppressions`, `expire_suppressions`, `process_quarantine_rules`, `cleanup_deferred_queue`, `anomaly_detection`, `smtp_abuse`, `protection_rules`, `eas_devices` and `cleanup_eas_devices`. `sync_local_domains` is added on its first run. `fetch_raw_logs` and `cleanup_raw_logs` keep their status in the raw log worker.
+Each job starts as `{"last_run": null, "status": "idle", "error": null}`. The IDs are `fetch_logs`, `complete_correlations`, `update_final_status`, `expire_correlations`, `correlate_dovecot`, `cleanup_logs`, `cleanup_dmarc_reports`, `check_app_version`, `check_credentials`, `dns_check`, `update_geoip`, `dmarc_imap_sync`, `mailbox_stats`, `alias_stats`, `blacklist_check`, `send_weekly_summary`, `sync_transports`, `fetch_raw_logs`, `cleanup_raw_logs`, `detect_suppressions`, `sync_suppressions`, `expire_suppressions`, `process_quarantine_rules`, `cleanup_deferred_queue`, `anomaly_detection`, `smtp_abuse`, `protection_rules`, `eas_devices` and `cleanup_eas_devices`. `sync_local_domains` is added on its first run. `fetch_raw_logs` and `cleanup_raw_logs` keep their status in the raw log worker.
 
 ### Status Values
 
@@ -255,6 +255,7 @@ Times of day follow the container's clock.
 | **Cleanup Logs** | Daily at 2 AM | Removes logs older than the retention period |
 | **Cleanup DMARC Reports** | Daily at 2:15 AM | Removes DMARC and TLS reports older than `DMARC_RETENTION_DAYS`. DMARC feature only. |
 | **Check App Version** | Every 6 hours, first run at startup | Checks GitHub for application updates |
+| **Credential Checks** | Every 6 hours, and 30 seconds after startup | Checks that mailcow accepts the Read-Write API key and Rspamd the password, as **Validate** does; changes nothing. Off when neither is set. A rejected or unreachable one fails the job. |
 | **DNS Check** | Every 6 hours, and 60 seconds after startup | Checks SPF, DKIM, DMARC, DNSSEC, TLSA, MTA-STS and TLS-RPT for all active domains. Domains feature only. |
 | **Sync Local Domains** | Every 6 hours, first run at startup | Refreshes the active domain list from mailcow |
 | **Update GeoIP** | Weekly (Sunday 3 AM), and 60 seconds after startup | Downloads the MaxMind GeoLite2 City and ASN databases when a file is missing or 7 or more days old. Runs only when the MaxMind Account ID and License Key are set; saving or removing the license in Settings adds or removes the weekly run. |

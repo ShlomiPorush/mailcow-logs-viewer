@@ -5,7 +5,7 @@
 
 ## What the app relies on
 
-**Configured** on **Read-write API key** and **Rspamd** only means a key or password is saved; use **Validate** beside each credential under [Settings > Mailcow](Settings.md#mailcow) to check whether mailcow or Rspamd accepts it. **Unknown** on a card means the app could not check it.
+**Read-write API key** and **Rspamd** show the last check of the saved key or password: **Accepted**, or what went wrong (rejected, read only, not reachable). The app checks them soon after it starts and every 6 hours (the **Credential Checks** job on [Status](Status.md)); until the first check they show **Configured**. **Validate** beside each one under [Settings > Mailcow](Settings.md#mailcow) checks it again at once. **Unknown** on a card means the app could not check it.
 
 **Open** on **Sign-in** means anyone who can reach the app can see everything in it and use its actions. Set up sign-in before you make the app reachable from outside; see [Sign-in configuration](../OAuth2_Configuration.md).
 
