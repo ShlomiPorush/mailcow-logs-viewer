@@ -25,7 +25,7 @@
     <!-- Utility classes still used by the markup, compiled once
          (.github/scripts/build-utilities-css.sh); the design system comes last -->
     <link rel="stylesheet" href="/static/assets/css/utilities.css?v=2">
-    <link rel="stylesheet" href="/static/assets/css/ui.css?v=66">
+    <link rel="stylesheet" href="/static/assets/css/ui.css?v=67">
     <style>
         .tab-active {
             border-bottom: 2px solid #3b82f6;
@@ -44,9 +44,9 @@
             white-space: nowrap;
         }
 
-        .modal-tab-sm:hover {
+        @media (hover: hover) { .modal-tab-sm:hover {
             color: var(--ui-ink);
-        }
+        } }
 
         .modal-tab-sm.active {
             border-bottom-color: var(--ui-accent);
@@ -113,17 +113,17 @@
             background-clip: content-box;
         }
 
-        ::-webkit-scrollbar-thumb:hover {
+        @media (hover: hover) { ::-webkit-scrollbar-thumb:hover {
             background-color: rgb(156 163 175 / 0.9);
-        }
+        } }
 
         .dark ::-webkit-scrollbar-thumb {
             background-color: rgb(75 85 99 / 0.8);
         }
 
-        .dark ::-webkit-scrollbar-thumb:hover {
+        @media (hover: hover) { .dark ::-webkit-scrollbar-thumb:hover {
             background-color: rgb(107 114 128 / 0.9);
-        }
+        } }
 
         ::-webkit-scrollbar-corner {
             background: transparent;
@@ -232,7 +232,7 @@
         #changelog-content.markdown-body ul,
         #changelog-content.markdown-body ol {
             margin: 0.5em 0;
-            padding-left: 2em;
+            padding-inline-start: 2em;
             list-style-type: disc;
             display: block;
         }
@@ -312,22 +312,21 @@
             color: #58a6ff;
         }
 
-        .update-changelog-content.markdown-body a:hover,
-        #changelog-content.markdown-body a:hover {
+        @media (hover: hover) { .update-changelog-content.markdown-body a:hover, #changelog-content.markdown-body a:hover {
             text-decoration: underline;
-        }
+        } }
 
         .update-changelog-content.markdown-body blockquote,
         #changelog-content.markdown-body blockquote {
-            border-left: 4px solid #d0d7de;
-            padding-left: 16px;
+            border-inline-start: 4px solid #d0d7de;
+            padding-inline-start: 16px;
             margin: 0.5em 0;
             color: #656d76;
         }
 
         .dark .update-changelog-content.markdown-body blockquote,
         .dark #changelog-content.markdown-body blockquote {
-            border-left-color: #30363d;
+            border-inline-start-color: #30363d;
             color: #8b949e;
         }
 
@@ -364,13 +363,13 @@
             transition: background-color 0.15s ease;
         }
 
-        .copyable:hover {
+        @media (hover: hover) { .copyable:hover {
             background-color: rgba(59, 130, 246, 0.08);
-        }
+        } }
 
-        .dark .copyable:hover {
+        @media (hover: hover) { .dark .copyable:hover {
             background-color: rgba(59, 130, 246, 0.15);
-        }
+        } }
 
         .copyable .copy-icon {
             opacity: 0;
@@ -378,9 +377,9 @@
             flex-shrink: 0;
         }
 
-        .copyable:hover .copy-icon {
+        @media (hover: hover) { .copyable:hover .copy-icon {
             opacity: 0.5;
-        }
+        } }
 
         .copyable .copy-icon.copied {
             opacity: 1;
@@ -390,6 +389,9 @@
            dir="auto" but stays aligned with its label in the LTR layout */
         [dir="auto"] {
             text-align: left;
+        }
+        [dir="rtl"] [dir="auto"] {
+            text-align: right;
         }
     </style>
 </head>
@@ -1578,7 +1580,7 @@
     <!-- JavaScript -->
     <script src="/static/utils.js?v=22"></script>
     <script src="/static/router.js?v=8"></script>
-    <script src="/static/app.js?v=74"></script>
+    <script src="/static/app.js?v=75"></script>
     <script src="/static/alert-activity.js?v=4"></script>
     <script src="/static/export.js?v=1"></script>
     <script src="/static/message-details.js?v=10"></script>

@@ -5072,7 +5072,7 @@ function renderGeoIPForDMARC(record, size = '24x18') {
 
     // Return flag + location inline
     if (flagUrl && locationText) {
-        return `<img src="${flagUrl}" alt="${escapeHtml(record.country_name || '')}" style="width:${width}px; height:${height}px; vertical-align:middle; margin-right:4px;" onerror="this.style.display='none'">${locationText}`;
+        return `<img src="${flagUrl}" alt="${escapeHtml(record.country_name || '')}" style="width:${width}px; height:${height}px; vertical-align:middle; margin-inline-end:4px;" onerror="this.style.display='none'">${locationText}`;
     }
 
     return locationText || escapeHtml(ip);
