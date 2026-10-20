@@ -897,6 +897,14 @@ function showMarkdownModal(title, markdownContent) {
                 gfm: true
             });
             htmlContent = renderMarkdown(markdownContent);
+            // A link to another site opens in a new tab, so the app stays where it was
+            const tpl = document.createElement('template');
+            tpl.innerHTML = htmlContent;
+            tpl.content.querySelectorAll('a[href^="http"]').forEach(a => {
+                a.target = '_blank';
+                a.rel = 'noopener noreferrer';
+            });
+            htmlContent = tpl.innerHTML;
         }
     } catch (e) {
         console.error('Failed to parse markdown:', e);
@@ -5011,6 +5019,38 @@ document.addEventListener('DOMContentLoaded', function () {
 // HELP DOCUMENTATION MODAL
 // =============================================================================
 
+const DOCS_SITE_URL = 'https://shlomiporush.github.io/mailcow-logs-viewer/';
+const DOCS_REPO_URL = 'https://github.com/ShlomiPorush/mailcow-logs-viewer/blob/main/';
+
+// A help page is also a page of the documentation site (documentation/HelpDocs).
+// In the app its screenshots are left out, since the page itself is on screen,
+// and its relative links, which work on the site, point to the site instead.
+// A link to a section of the same page goes there too: the window's headings
+// have no anchors. docName is the file's name, such as Spam_Filter.
+function helpDocMarkdown(markdown, docName) {
+    return markdown
+        .replace(/^[ \t]*!\[[^\]]*\]\([^)\s]*\)[ \t]*$/gm, '')
+        .replace(/(\]\()([^)\s]+)(\))/g, (match, open, target, close) => {
+            if (/^[a-z][a-z0-9+.-]*:/i.test(target)) return match;
+            if (target.startsWith('#')) return `${open}${DOCS_SITE_URL}HelpDocs/${docName}/${target}${close}`;
+            const [path, anchor] = target.split('#');
+            const hash = anchor ? `#${anchor}` : '';
+            const parts = ['documentation', 'HelpDocs'];
+            for (const segment of path.split('/')) {
+                if (segment === '..') parts.pop();
+                else if (segment && segment !== '.') parts.push(segment);
+            }
+            const file = parts.join('/');
+            let url;
+            if (file === 'README.md') url = DOCS_SITE_URL;
+            else if (file === 'CHANGELOG.md') url = `${DOCS_SITE_URL}changelog/`;
+            else if (file.startsWith('documentation/') && file.endsWith('.md')) {
+                url = `${DOCS_SITE_URL}${file.slice('documentation/'.length, -'.md'.length)}/`;
+            } else url = DOCS_REPO_URL + file;
+            return `${open}${url}${hash}${close}`;
+        });
+}
+
 // title: the name the page shows, when it is not the document's file name
 async function showHelpModal(docName, title) {
     try {
@@ -5020,7 +5060,7 @@ async function showHelpModal(docName, title) {
             throw new Error(`Failed to load documentation: ${response.statusText}`);
         }
 
-        const markdown = await response.text();
+        const markdown = helpDocMarkdown(await response.text(), docName);
         // Else the document's file name, read as words: Spam_Filter is Spam Filter
         showMarkdownModal(`Help - ${title || docName.replace(/_/g, ' ')}`, markdown);
 
