@@ -175,7 +175,7 @@ function pageOf(file, idx, files) {
     if (PAGE_BY_FILE[file.name] && file.name !== 'app.js') {
         // spam_filter.js holds the Rspamd maps editor too, a tab of Quarantine
         const fnName = (containingFunction(file.text, idx) || {}).name || '';
-        if (file.name === 'spam_filter.js' && /rspamd|map|regex/i.test(fnName)) return 'Quarantine';
+        if (file.name === 'spam_filter.js' && /rspamdmap|map(editor|content|crumb|meta)|regex/i.test(fnName)) return 'Quarantine';
         return PAGE_BY_FILE[file.name];
     }
     // Inside a function: its whole body. Top-level code: the statement around idx.

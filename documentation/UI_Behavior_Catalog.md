@@ -553,6 +553,7 @@ Transient notifications from `showToast(message, type)` (utils.js). Type default
 | Outbound | dynamic: `error.message` [error] | `frontend/spam_filter.js:1066` (toggleSuppression) |
 | Outbound | dynamic: ``Suppression deleted: ${email}`` [success] | `frontend/spam_filter.js:1077` (deleteSuppression) |
 | Outbound | dynamic: `error.message` [error] | `frontend/spam_filter.js:1083` (deleteSuppression) |
+| Outbound | dynamic: `text` [info] | `frontend/spam_filter.js:1107` (autoSyncToRspamd) |
 | Outbound | dynamic: ``Imported ${result.imported} suppressions (${result.skipped} skipped)`` [success] | `frontend/spam_filter.js:1138` (importSuppressions) |
 | Outbound | dynamic: `'Import failed: ' + error.message` [error] | `frontend/spam_filter.js:1144` (importSuppressions) |
 | Quarantine | dynamic: `result.msg \|\| `Message(s) ${actionLabels[action] \|\| action} successfully`` [success] | `frontend/app.js:3048` (quarantineAction) |
@@ -576,7 +577,6 @@ Transient notifications from `showToast(message, type)` (utils.js). Type default
 | Quarantine | dynamic: ``Map saved (${uiCountLabel(result.entry_count, 'entry', 'entries')}). ${resul...` [success] | `frontend/spam_filter.js:326` (saveMapContent) |
 | Quarantine | dynamic: ``Map saved successfully (${uiCountLabel(result.entry_count, 'entry', 'entries...` [success] | `frontend/spam_filter.js:328` (saveMapContent) |
 | Quarantine | dynamic: `'Failed to save map: ' + error.message` [error] | `frontend/spam_filter.js:338` (saveMapContent) |
-| Quarantine | dynamic: `text` [info] | `frontend/spam_filter.js:1107` (autoSyncToRspamd) |
 | Quarantine | dynamic: ``Pattern added: ${pattern}`` [success] | `frontend/spam_filter.js:1327` (regexWizardAdd) |
 | Status | dynamic: `ignored ? `${container.replace('-mailcow', '')} is ignored. It no longer coun...` [success] | `frontend/app.js:4180` (setContainerIgnored) |
 | Status | dynamic: ``Could not change the container: ${e.message}`` [error] | `frontend/app.js:4184` (setContainerIgnored) |
