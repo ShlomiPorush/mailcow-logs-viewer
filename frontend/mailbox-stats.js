@@ -379,12 +379,13 @@ function mailboxSparkline(mb) {
         <svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" aria-hidden="true">${n ? `<polygon points="0,${h} ${pts} ${w},${h}"></polygon><polyline points="${pts}"></polyline>` : ''}</svg></button>`;
 }
 
-// A slot is a local date and time without a zone, already in the app's time zone
+// A day slot is a day in the app's zone, named as it is; an hour slot is the UTC
+// instant the hour starts, named in the app's zone (so the hour a daylight saving
+// change repeats shows twice, not as one)
 function mailboxActivityLabel(bucket, unit) {
-    const [date, time] = bucket.split('T');
-    const [y, m, d] = date.split('-').map(Number);
-    const day = new Date(y, m - 1, d).toLocaleDateString('en-US', { weekday: 'short', day: 'numeric', month: 'short' });
-    return unit === 'hour' ? `${day}, ${time.slice(0, 5)}` : day;
+    const options = { weekday: 'short', day: 'numeric', month: 'short' };
+    if (unit !== 'hour') return formatDayKey(bucket, options);
+    return `${formatInZone(bucket, options, 'en-US')}, ${formatInZone(bucket, { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }, 'en-US')}`;
 }
 
 function openMailboxActivity(username) {
@@ -480,7 +481,7 @@ function renderMailboxStatsAccordion(mailboxes, page = 1, totalPages = 1, total 
                     <div class="ui-md-ids">
                         <div class="ui-md-fact ui-md-fact-inline"><span>Quota<span class="ui-ms-wide-only"> Used</span></span><div>${mb.quota_used_formatted} / ${mb.quota_formatted}</div><small class="ui-muted">${mb.percent_in_use || 0}%<span class="ui-ms-wide-only"> used</span></small><small class="ui-muted ui-ms-msgs">${(mb.messages_in_mailbox || 0).toLocaleString()} messages</small></div>
                         <div class="ui-md-fact ui-ms-msgs-fact"><span>Messages in Mailbox</span><div>${(mb.messages_in_mailbox || 0).toLocaleString()}</div></div>
-                        <div class="ui-md-fact"><span>Created / Modified</span><div>${mb.created ? formatTime(mb.created) : 'N/A'}</div><small class="ui-muted">${mb.modified ? formatTime(mb.modified) : 'N/A'}</small></div>
+                        <div class="ui-md-fact"><span>First seen / Last synced</span><div title="When this app first read the mailbox from mailcow">${mb.created ? formatTime(mb.created) : 'N/A'}</div><small class="ui-muted" title="When this app last read the mailbox from mailcow">${mb.modified ? formatTime(mb.modified) : 'N/A'}</small></div>
                         <div class="ui-md-fact"><span>Rate Limit</span><div>${escapeHtml(mailboxRateLimitLabel(mb))}</div></div>
                         ${lastLogin('IMAP', mb.last_imap_login)}
                         ${lastLogin('POP3', mb.last_pop3_login)}
@@ -566,15 +567,13 @@ function toggleMailboxAccordion(username) {
 // =============================================================================
 
 // The period is a picker (utils.js, uiPicker); opening it fills the custom range
-// with the last 30 days when it is empty
-function mailboxStatsPeriodOpened() {
-    const today = new Date();
-    const thirtyDaysAgo = new Date(today);
-    thirtyDaysAgo.setDate(today.getDate() - 30);
+// with the last 30 days when it is empty, days in the app's zone like the server reads them
+function mailboxStatsPeriodOpened(now = new Date()) {
+    const today = zonedDateString(now);
     const startInput = document.getElementById('date-range-start');
     const endInput = document.getElementById('date-range-end');
-    if (startInput && !startInput.value) startInput.value = thirtyDaysAgo.toISOString().split('T')[0];
-    if (endInput && !endInput.value) endInput.value = today.toISOString().split('T')[0];
+    if (startInput && !startInput.value) startInput.value = addDaysToDateString(today, -30);
+    if (endInput && !endInput.value) endInput.value = today;
 }
 
 function closeDateRangePicker() {

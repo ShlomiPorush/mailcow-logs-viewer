@@ -4,7 +4,7 @@ A domain removed from mailcow keeps its stored DMARC and TLS reports, so it stay
 on the DMARC & TLS page (#412). Deleting them one report at a time is not practical.
 """
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from fastapi import FastAPI
@@ -107,8 +107,8 @@ def test_summary_counts_each_domain_once(db_client, deletion):
     assert (rows["example.org"]["dmarc_reports"], rows["example.org"]["tls_reports"]) == (0, 2)
     # The latest report period end, whichever report type it came from
     assert rows["example.net"]["last_report"] == 1_767_398_400
-    assert rows["example.org"]["last_report"] == int(datetime(2026, 1, 5).timestamp())
-    assert rows["example.com"]["last_report"] == int(datetime(2026, 1, 3).timestamp())
+    assert rows["example.org"]["last_report"] == int(datetime(2026, 1, 5, tzinfo=timezone.utc).timestamp())
+    assert rows["example.com"]["last_report"] == int(datetime(2026, 1, 3, tzinfo=timezone.utc).timestamp())
 
 
 def test_summary_of_no_reports(db_client):

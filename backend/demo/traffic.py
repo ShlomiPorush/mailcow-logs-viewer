@@ -15,8 +15,17 @@ built by the same code as on a real installation.
 import random
 import time
 from dataclasses import dataclass, field
+from datetime import datetime
 
 from . import world
+
+
+def _local(t):
+    """A unix time as a wall time in the app's time zone (app_time.py), not
+    the container's: working hours and the nightly certificate check follow it."""
+    from app.app_time import app_tz
+    return datetime.fromtimestamp(t, app_tz())
+
 
 DOVECOT_RELAY = "dovecot[172.22.1.250]:24"
 
@@ -347,7 +356,7 @@ class Traffic:
         if self.rng.random() < 0.2:
             batch.add("autodiscover", {"time": str(int(t + self.rng.randint(0, 3599))), "program": "autodiscover",
                                        "priority": "info", "message": f"{self._active_mailbox()} autodiscover request (activesync)"})
-        if time.localtime(t).tm_hour == 3:
+        if _local(t).hour == 3:
             batch.add("acme", {"time": str(int(t + 60)), "program": "acme", "priority": "info",
                                "message": f"Certificate {world.MAIL_HOST} is valid for 57 more days, not renewing"})
 
@@ -372,11 +381,11 @@ class Traffic:
 
     @staticmethod
     def _hour_weight(t):
-        tm = time.localtime(t)
-        workday = tm.tm_wday < 5
+        local = _local(t)
+        workday = local.weekday() < 5
         curve = [0.2, 0.15, 0.1, 0.1, 0.15, 0.3, 0.6, 1.0, 1.5, 1.9, 2.0, 1.9,
                  1.6, 1.8, 1.9, 1.8, 1.5, 1.2, 0.9, 0.7, 0.6, 0.5, 0.4, 0.3]
-        return curve[tm.tm_hour] * (1.0 if workday else 0.45)
+        return curve[local.hour] * (1.0 if workday else 0.45)
 
     def generate(self, start, end, per_hour=6.0, min_weight=0.0, noise_per_minute=0.0):
         """Traffic that happens in [start, end).

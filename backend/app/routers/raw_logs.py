@@ -31,7 +31,8 @@ from ..raw_logs_worker import (
     set_ws_broadcast_fn,
     set_ws_broadcast_all_fn,
 )
-from ..utils import internal_error
+from ..app_time import range_bound
+from ..utils import internal_error, format_datetime_for_api
 
 logger = logging.getLogger(__name__)
 
@@ -170,7 +171,7 @@ class LogStreamManager:
             "type": "new_logs",
             "service": service,
             "entries": entries,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": format_datetime_for_api(datetime.now(timezone.utc)),
         })
         await self._broadcast_text(clients, text)
 
@@ -354,7 +355,11 @@ def get_services():
 @router.get("/raw-logs/worker-status")
 def get_worker_status():
     """Worker health check - last fetch time, stats, errors"""
-    status = get_raw_logs_job_status()
+    # A copy with the run times as UTC with Z; the worker's own record stays as it is
+    status = {
+        name: {**job, "last_run": format_datetime_for_api(job.get("last_run"))}
+        for name, job in get_raw_logs_job_status().items()
+    }
     return {
         "enabled": settings.raw_logs_enabled,
         "fetch_interval": settings.raw_logs_fetch_interval,
@@ -364,6 +369,17 @@ def get_worker_status():
         "jobs": status,
         "ws_connections": log_stream_manager.get_connection_count(),
     }
+
+
+def _range_bound(value: Optional[str], end: bool) -> Optional[datetime]:
+    """A range bound as stored times are kept (naive UTC): see app_time.range_bound.
+    None when empty or unreadable."""
+    if not value:
+        return None
+    try:
+        return range_bound(value, end)
+    except ValueError:
+        return None
 
 
 @router.get("/raw-logs/{service}")
@@ -390,20 +406,15 @@ def get_raw_logs(
         with get_db_context() as db:
             query = db.query(RawServiceLog).filter(RawServiceLog.service == service)
 
-            # Date range filter
-            if start_date:
-                try:
-                    start_dt = datetime.fromisoformat(start_date.replace('Z', '+00:00'))
-                    query = query.filter(RawServiceLog.time >= start_dt)
-                except ValueError:
-                    pass
-            
-            if end_date:
-                try:
-                    end_dt = datetime.fromisoformat(end_date.replace('Z', '+00:00'))
-                    query = query.filter(RawServiceLog.time <= end_dt)
-                except ValueError:
-                    pass
+            # Date range filter: instants (UTC unless they say otherwise), or
+            # whole days (YYYY-MM-DD) in the app's time zone
+            start_bound = _range_bound(start_date, end=False)
+            if start_bound is not None:
+                query = query.filter(RawServiceLog.time >= start_bound)
+
+            end_bound = _range_bound(end_date, end=True)
+            if end_bound is not None:
+                query = query.filter(RawServiceLog.time <= end_bound)
             
             # Text search in raw_data JSONB
             if search:
@@ -456,7 +467,7 @@ def get_raw_logs(
                 entry = log.raw_data.copy() if log.raw_data else {}
                 entry['_id'] = log.id
                 entry['_service'] = log.service
-                entry['_stored_at'] = log.created_at.isoformat() if log.created_at else None
+                entry['_stored_at'] = format_datetime_for_api(log.created_at)
                 data.append(entry)
             
             return {

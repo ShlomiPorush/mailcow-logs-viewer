@@ -180,7 +180,9 @@ async function checkAuthentication() {
 
 // Global state
 let currentTab = 'dashboard';
-let appTimezone = 'UTC'; // Default timezone, will be updated from API
+let appTimezone = 'UTC'; // The app's time zone (utils.js appTz), from /api/info
+// Whether the configured TZ is a known zone, and the name as configured ('' when unset)
+let appTimezoneStatus = { valid: true, configured: '' };
 let currentPage = {
     netfilter: 1,
     messages: 1
@@ -461,6 +463,23 @@ function dismissAuthOffBanner() {
     if (banner) banner.classList.add('hidden');
 }
 
+// The zone every time follows (/api/info `timezone`). The server sends only a
+// known zone; one this browser cannot use would make every time throw, so UTC.
+function setAppTimezone(info) {
+    let zone = (info && info.timezone) || 'UTC';
+    try {
+        new Intl.DateTimeFormat('en-US', { timeZone: zone });
+    } catch (e) {
+        console.warn('Unknown time zone from the server, using UTC:', zone);
+        zone = 'UTC';
+    }
+    appTimezone = zone;
+    appTimezoneStatus = {
+        valid: !info || info.timezone_valid !== false,
+        configured: (info && typeof info.timezone_configured === 'string') ? info.timezone_configured : '',
+    };
+}
+
 async function loadAppInfo() {
     try {
         // Use regular fetch since this is called after authentication check
@@ -511,13 +530,7 @@ async function loadAppInfo() {
         const authOffBanner = document.getElementById('auth-off-banner');
         if (authOffBanner) authOffBanner.classList.toggle('hidden', data.auth_enabled !== false || authOffBannerDismissed());
 
-        // Store timezone for date formatting
-        if (data.timezone) {
-            appTimezone = data.timezone;
-            console.log('Timezone loaded from API:', appTimezone);
-        } else {
-            console.warn('No timezone in API response, using default:', appTimezone);
-        }
+        setAppTimezone(data);
 
         // Load disabled features and apply tab hiding
         if (data.disabled_features && Array.isArray(data.disabled_features)) {
@@ -1951,8 +1964,7 @@ let mailFlowSlots = [];
 let mailFlowPicked = null; // start of the picked hour (ms), or null for all 24 hours
 
 function mailFlowHour(t) {
-    return new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit', hour12: false,
-        timeZone: appTimezone && appTimezone !== 'UTC' ? appTimezone : undefined }).format(new Date(t));
+    return formatInZone(t, { hour: '2-digit', minute: '2-digit', hour12: false });
 }
 
 // A click on a bar shows that hour's numbers; the same bar again, or All 24 hours, goes back
@@ -2012,13 +2024,11 @@ function openMailFlowHourMessages() {
     document.getElementById('messages-date-range').value = 'custom';
     document.getElementById('messages-start-date').value = start;
     document.getElementById('messages-end-date').value = end;
-    // The custom range picker shows the day the hour is on
-    const day = new Intl.DateTimeFormat('en-CA', { year: 'numeric', month: '2-digit', day: '2-digit',
-        timeZone: appTimezone && appTimezone !== 'UTC' ? appTimezone : undefined }).format(new Date(slot.t));
+    // The custom range picker shows the day the hour is on, a day in the app's zone like its Apply reads
+    const day = zonedDateString(slot.t);
     document.getElementById('messages-date-range-start').value = day;
     document.getElementById('messages-date-range-end').value = day;
-    const dayLabel = new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric',
-        timeZone: appTimezone && appTimezone !== 'UTC' ? appTimezone : undefined }).format(new Date(slot.t));
+    const dayLabel = formatInZone(slot.t, { month: 'short', day: 'numeric' }, 'en-US');
     document.getElementById('messages-date-range-label').textContent = `${dayLabel}, ${mailFlowHour(slot.t)} to ${mailFlowHour(slot.t + 3600000)}`;
     setMessagesDatePresetActive(null);
     currentFilters.messages = { start_date: start, end_date: end };
@@ -3635,50 +3645,25 @@ function toggleMessagesDateRangePicker() {
     arrow.style.transform = isHidden ? 'rotate(180deg)' : '';
 }
 
-// Where a Messages time preset starts ('' for all time)
+// Where a Messages time preset starts ('' for all time): today is the day in the
+// app's zone, and "Last 7 Days" is the last 7 x 24 hours, the same window as
+// Mailbox Stats and the Dashboard, also across a daylight saving change
 function messagesPresetStart(preset, now = new Date()) {
-    const d = new Date(now);
-    if (preset === 'today') { d.setHours(0, 0, 0, 0); return d.toISOString(); }
+    if (preset === 'today') return zonedDayStart(zonedDateString(now)).toISOString();
     const days = { '7days': 7, '30days': 30, '90days': 90 }[preset];
     if (!days) return '';
-    d.setDate(d.getDate() - days);
-    return d.toISOString();
+    return new Date(new Date(now).getTime() - days * 86400000).toISOString();
 }
 
-function selectMessagesDatePreset(preset) {
+function selectMessagesDatePreset(preset, now = new Date()) {
     const labels = { '': 'All Time', 'today': 'Today', '7days': 'Last 7 Days', '30days': 'Last 30 Days', '90days': 'Last 90 Days' };
     document.getElementById('messages-date-range-label').textContent = labels[preset] || 'All Time';
     document.getElementById('messages-date-range').value = preset;
 
-    // Calculate actual dates for the API
-    const now = new Date();
-    let startDate = '';
-    let endDate = now.toISOString();
-
-    if (preset === 'today') {
-        const todayStart = new Date(now);
-        todayStart.setHours(0, 0, 0, 0);
-        startDate = todayStart.toISOString();
-    } else if (preset === '7days') {
-        const d = new Date(now);
-        d.setDate(d.getDate() - 7);
-        startDate = d.toISOString();
-    } else if (preset === '30days') {
-        const d = new Date(now);
-        d.setDate(d.getDate() - 30);
-        startDate = d.toISOString();
-    } else if (preset === '90days') {
-        const d = new Date(now);
-        d.setDate(d.getDate() - 90);
-        startDate = d.toISOString();
-    } else {
-        // All Time
-        startDate = '';
-        endDate = '';
-    }
-
+    // The range the API reads; All Time has none
+    const startDate = messagesPresetStart(preset, now);
     document.getElementById('messages-start-date').value = startDate;
-    document.getElementById('messages-end-date').value = endDate;
+    document.getElementById('messages-end-date').value = startDate ? new Date(now).toISOString() : '';
 
     setMessagesDatePresetActive(preset);
 
@@ -3698,9 +3683,10 @@ function applyMessagesCustomDateRange() {
         return;
     }
 
-    // A date alone would be read as UTC midnight; the range is the browser's days
-    const startDate = new Date(`${startInput}T00:00:00`);
-    const endDate = new Date(`${endInput}T23:59:59.999`);
+    // The range is whole days in the app's zone: from the first day's start to the
+    // last moment before the day after the last one (23 or 25 hours on a DST change)
+    const startDate = zonedDayStart(startInput);
+    const endDate = new Date(zonedDayStart(addDaysToDateString(endInput, 1)).getTime() - 1);
 
     if (startDate > endDate) {
         showToast('Start date must be before end date', 'warning');
@@ -3711,9 +3697,9 @@ function applyMessagesCustomDateRange() {
     document.getElementById('messages-start-date').value = startDate.toISOString();
     document.getElementById('messages-end-date').value = endDate.toISOString();
 
-    // Format label
-    const fmt = (d) => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-    document.getElementById('messages-date-range-label').textContent = `${fmt(startDate)} - ${fmt(endDate)}`;
+    // The label names the days as picked
+    const fmt = day => formatDayKey(day, { month: 'short', day: 'numeric' });
+    document.getElementById('messages-date-range-label').textContent = `${fmt(startInput)} - ${fmt(endInput)}`;
 
     setMessagesDatePresetActive(null);
 

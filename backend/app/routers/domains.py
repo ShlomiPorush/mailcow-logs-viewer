@@ -18,6 +18,7 @@ from app.database import get_db, get_db_context
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from app.models import DomainDNSCheck, DMARCReport, DMARCRecord, SystemSetting
 from app.services.alias_domains import get_alias_domain_map, aliases_of_domain
+from app.app_time import local_wall_time_to_utc_naive
 from app.utils import format_datetime_for_api
 from app.config import settings
 from app.mailcow_api import mailcow_api
@@ -1898,6 +1899,19 @@ def _last_full_dns_check(db: Session) -> Optional[datetime]:
     return last[0] if last else None
 
 
+def _mailcow_created(value):
+    """mailcow's own 'created' date ('YYYY-MM-DD HH:MM:SS', no zone, in mailcow's
+    clock) as UTC with Z. Admins set the app to the same time zone as mailcow,
+    so the wall time is read in the app's zone. Unreadable values pass as they came."""
+    if not value or not isinstance(value, str):
+        return value
+    try:
+        wall = datetime.strptime(value.strip(), '%Y-%m-%d %H:%M:%S')
+    except ValueError:
+        return value
+    return format_datetime_for_api(local_wall_time_to_utc_naive(wall))
+
+
 def _build_domain_list_worker(domains):
     """Build detached domain and DNS results in a worker-owned session."""
     with get_db_context() as db:
@@ -1941,7 +1955,7 @@ def _build_domain_list_worker(domains):
                 'aliases_in_domain': domain_data.get('aliases_in_domain', 0),
                 'aliases_left': domain_data.get('aliases_left', 0),
                 'max_num_aliases_for_domain': domain_data.get('max_num_aliases_for_domain', 0),
-                'created': domain_data.get('created'),
+                'created': _mailcow_created(domain_data.get('created')),
                 'bytes_total': domain_data.get('bytes_total', 0),
                 'msgs_total': domain_data.get('msgs_total', 0),
                 'quota_used_in_domain': domain_data.get('quota_used_in_domain', '0'),

@@ -45,22 +45,45 @@ function setAlertActivityRange(range) {
 // The columns of the chosen range: quarters of an hour for a day or two, hours
 // for the baseline period ('7d', named for the default of 7 days). A baseline
 // longer than a week gets columns of several hours, so the bars stay visible.
+// Every column is a span of time the data covers: from its start to the next
+// column's start, the first from where the data starts, the last to where it ends.
 function alertActivityColumns(data) {
+    const quarter = data.bucket_minutes * 60000;
     const quarters = data.buckets.map(b => ({ start: new Date(b.start), count: b.count }));
     const days = Math.max(1, Number(data.baseline_days) || 7);
     const hours = { '24h': 24, '48h': 48, '7d': 24 * days }[alertActivityRange];
     const keep = quarters.slice(-Math.min(quarters.length, hours * (60 / data.bucket_minutes) + 8));
-    if (alertActivityRange !== '7d') return { cols: keep, minutes: data.bucket_minutes };
-    const step = Math.ceil(days / 7) * 3600000;
+    if (alertActivityRange !== '7d') {
+        return { cols: keep.map(q => ({ ...q, end: new Date(q.start.getTime() + quarter) })), minutes: data.bucket_minutes };
+    }
+    const stepHours = Math.ceil(days / 7);
     const cols = [];
+    if (!keep.length) return { cols, minutes: stepHours * 60 };
+    // A column starts where the app's zone shows a whole hour (every few hours
+    // from midnight for longer ones). On the night the clocks go back both 02:00
+    // start one, an hour apart; a skipped hour starts none. Every zone is a whole
+    // number of quarters off UTC, so these hours fall on the quarters' grid.
+    const end = keep[keep.length - 1].start.getTime() + quarter;
+    for (let t = keep[0].start.getTime(); t < end; t += quarter) {
+        const p = zonedParts(t);
+        if (!cols.length || (p.minute === 0 && p.second === 0 && p.hour % stepHours === 0)) {
+            if (cols.length) cols[cols.length - 1].end = new Date(t);
+            cols.push({ start: new Date(t), count: 0 });
+        }
+    }
+    cols[cols.length - 1].end = new Date(end);
+    // Each quarter counts in the column whose span holds it
+    let i = 0;
     keep.forEach(q => {
-        const hour = new Date(q.start); hour.setMinutes(0, 0, 0);
-        const start = step > 3600000 ? new Date(Math.floor(hour.getTime() / step) * step) : hour;
-        const last = cols[cols.length - 1];
-        if (last && last.start.getTime() === start.getTime()) last.count += q.count;
-        else cols.push({ start, count: q.count });
+        while (i < cols.length - 1 && q.start >= cols[i].end) i++;
+        cols[i].count += q.count;
     });
-    return { cols, minutes: step / 60000 };
+    return { cols, minutes: stepHours * 60 };
+}
+
+// A column's length, when it is not the usual one: "3 hours", "45 minutes"
+function alertActivitySpan(minutes) {
+    return minutes % 60 ? uiCountLabel(minutes, 'minute', 'minutes') : uiCountLabel(minutes / 60, 'hour', 'hours');
 }
 
 function alertActivityChart(data) {
@@ -73,11 +96,15 @@ function alertActivityChart(data) {
     const from = data.window_minutes ? new Date(at.getTime() - data.window_minutes * 60000) : null;
     const max = Math.max(4, ...cols.map(c => c.count));
     const top = Math.ceil(max / 4) * 4;
-    // A spike's usual rate, per column; a burst or a block has no usual rate, only a threshold
+    // A spike's usual rate, for the real length of each column (a clock change or
+    // the ends of the data make some longer or shorter); a burst or a block has
+    // no usual rate, only a threshold
+    const usualIn = c => (a.baseline_value || 0) * (c.end - c.start) / 3600000;
     const usual = spike ? (a.baseline_value || 0) * minutes / 60 : null;
-    const fmt = d => d.toLocaleString(undefined, { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+    // Written like the other chart labels, in English on a 24-hour clock
+    const fmt = d => formatInZone(d, { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }, 'en-US');
     const what = sent ? 'sent' : 'failed logins';
-    const markAt = cols.findIndex(c => at >= c.start && at < new Date(c.start.getTime() + minutes * 60000));
+    const markAt = cols.findIndex(c => at >= c.start && at < c.end);
     const ranges = [['24h', '24 hours'], ['48h', '2 days'], ['7d', `${escapeHtml(String(data.baseline_days))} days`]];
     const per = minutes === 60 ? 'hour' : minutes > 60 ? `${minutes / 60} hours` : `${minutes} minutes`;
     return `<div class="ui-aa-head"><b>${sent ? 'What it sent' : 'Failed logins'}</b><span class="ui-muted">${sent ? 'this mailbox only' : 'this username only'}</span>
@@ -85,12 +112,15 @@ function alertActivityChart(data) {
         <div class="ui-aa-chart">
             <div class="ui-aa-grid">${[top, top * .75, top * .5, top * .25, 0].map(v => `<i><span>${Math.round(v)}</span></i>`).join('')}</div>
             <div class="ui-aa-cols">${cols.map(c => {
-                const inAlert = from && new Date(c.start.getTime() + minutes * 60000) > from && c.start <= at;
-                const tip = `${fmt(c.start)}: ${c.count} ${what}`;
-                return `<span class="ui-aa-col${inAlert ? ' is-alert' : ''}" data-tip="${escapeHtml(tip)}" title="${escapeHtml(tip)}"><i style="height:${c.count / top * 100}%"></i></span>`;
+                const inAlert = from && c.end > from && c.start <= at;
+                // A column made shorter or longer by a clock change or the ends of the data says how long it is
+                const span = (c.end - c.start) / 60000;
+                const tip = `${fmt(c.start)}: ${c.count} ${what}${span !== minutes ? ` in ${alertActivitySpan(span)}` : ''}`;
+                const norm = usual !== null ? `<b class="ui-aa-norm" style="bottom:${Math.max(usualIn(c) / top * 100, .6)}%"></b>` : '';
+                return `<span class="ui-aa-col${inAlert ? ' is-alert' : ''}" data-tip="${escapeHtml(tip)}" title="${escapeHtml(tip)}"><i style="height:${c.count / top * 100}%"></i>${norm}</span>`;
             }).join('')}</div>
             ${usual !== null ? `<div class="ui-aa-usual" style="bottom:${Math.max(usual / top * 100, .6)}%"><span>usual: ${(a.baseline_value || 0).toFixed(2)} an hour</span></div>` : ''}
-            ${markAt >= 0 ? `<div class="ui-aa-mark" style="left:${(markAt + .5) / cols.length * 100}%"><span>Alert ${at.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}</span></div>` : ''}
+            ${markAt >= 0 ? `<div class="ui-aa-mark" style="left:${(markAt + .5) / cols.length * 100}%"><span>Alert ${formatInZone(at, { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }, 'en-US')}</span></div>` : ''}
         </div>
         <div class="ui-aa-x"><span>${escapeHtml(fmt(cols[0].start))}</span><span>${escapeHtml(fmt(cols[cols.length - 1].start))}</span></div>
         <p class="ui-aa-legend"><span><i></i>${sent ? 'Sent' : 'Failed logins'}, per ${escapeHtml(per)}</span>${from ? `<span><i class="is-alert"></i>The alert's ${escapeHtml(String(data.window_minutes))} minutes</span>` : ''}${usual !== null ? `<span><i class="is-usual"></i>Its usual rate over ${escapeHtml(String(data.baseline_days))} days</span>` : ''}</p>`;

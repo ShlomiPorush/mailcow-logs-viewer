@@ -30,6 +30,7 @@ from ..database import SessionLocal, get_db
 from ..mailcow_api import MailcowAPIError, MailcowRwKeyError, mailcow_api
 from ..models import MailboxStatistics, RawServiceLog
 from ..utils import format_datetime_for_api, internal_error
+from ..app_time import day_key, to_local
 
 logger = logging.getLogger(__name__)
 
@@ -134,11 +135,12 @@ def _limit_value(raw: Any) -> Optional[int]:
 
 
 def _bucket_key(when: datetime, kind: str) -> str:
-    """The key one event is counted under. Keys stay UTC, like every other
-    timestamp this API returns - the frontend localises them."""
+    """The key one event (a stored naive UTC time) is counted under. An hour
+    is the UTC instant it starts at, with Z, which the frontend shows in the
+    app time zone; a day is a day in the app time zone, shown as it is."""
     if kind == 'hour':
-        return when.strftime('%Y-%m-%dT%H:00')
-    return when.strftime('%Y-%m-%d')
+        return format_datetime_for_api(when.replace(minute=0, second=0, microsecond=0))
+    return day_key(when)
 
 
 def _bucket_series(since: datetime, until: datetime, kind: str,
@@ -148,19 +150,25 @@ def _bucket_series(since: datetime, until: datetime, kind: str,
     A quiet stretch has to show as a gap in the chart, not disappear from it,
     so buckets with no events are returned with a count of 0.
     """
-    step = timedelta(hours=1) if kind == 'hour' else timedelta(days=1)
     if kind == 'hour':
         cursor = since.replace(minute=0, second=0, microsecond=0)
+        keys = []
+        while cursor <= until:
+            keys.append(_bucket_key(cursor, kind))
+            cursor += timedelta(hours=1)
     else:
-        cursor = since.replace(hour=0, minute=0, second=0, microsecond=0)
+        # Calendar days of the app time zone, so a 23 or 25 hour day is one bucket
+        day, last = to_local(since).date(), to_local(until).date()
+        keys = []
+        while day <= last:
+            keys.append(day.isoformat())
+            day += timedelta(days=1)
 
     series: List[Dict[str, Any]] = []
     covered = set()
-    while cursor <= until:
-        key = _bucket_key(cursor, kind)
+    for key in keys:
         covered.add(key)
         series.append({'bucket': key, 'count': counts.get(key, 0)})
-        cursor += step
 
     # A row can sit just outside the generated range (a log written while the
     # request was running). Keep its count rather than losing it.

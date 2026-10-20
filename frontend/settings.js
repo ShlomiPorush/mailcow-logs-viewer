@@ -15,7 +15,8 @@ let settingsFirstTab = null;
 // Labels the key cannot spell well. Next to the other addresses, "Error Email" alone would not say whose errors
 const SETTINGS_LABEL_OVERRIDES = {
     dmarc_error_email: 'Report Import Error Email',
-    eas_devices_retention_days: 'Retention Days'
+    eas_devices_retention_days: 'Retention Days',
+    tz: 'Time Zone'
 };
 
 // Settings the API returns masked as ******** (same list as the backend)
@@ -242,6 +243,7 @@ var SETTINGS_FIELD_DESCRIPTIONS = {
     log_level: 'Log level: DEBUG, INFO, WARNING, ERROR, CRITICAL. Default: WARNING.',
     app_title: 'Application title (shown in browser tab).',
     app_logo_url: 'Logo URL (optional; leave empty to use the default project icon).',
+    tz: "The app's time zone. Default: UTC.",
     debug: 'Enable debug mode (shows detailed errors). Use only for development. Never enable in production. Default: false.',
     max_search_results: 'Maximum records to return in search results. Default: 1000.',
     csv_export_limit: 'CSV export row limit. Default: 10000.',
@@ -359,6 +361,49 @@ const SETTINGS_FIELD_OPTIONS = {
     ]
 };
 
+// The IANA time zones this browser knows, UTC first; none where the browser
+// cannot list them (the field is then a text box)
+function settingsTimeZoneNames() {
+    let names = [];
+    try {
+        names = Intl.supportedValuesOf('timeZone');
+    } catch (e) {
+        return [];
+    }
+    return ['UTC', ...names.filter(name => name !== 'UTC')];
+}
+
+const SETTINGS_TZ_NOT_SET = 'Not set (UTC)';
+
+// The Time Zone picker writes its choice to the hidden field the form saves
+function settingsPickZone(option) {
+    const field = document.getElementById('edit-tz');
+    if (!field || field.disabled) return;
+    field.value = option.dataset.value;
+    settingsShowZone(field);
+    field.form && field.form.dispatchEvent(new Event('input', { bubbles: true }));
+}
+
+// The button and the chosen option follow the hidden field; the note about
+// the saved zone goes once another one is picked
+function settingsShowZone(field) {
+    const host = field.parentElement.querySelector('.ui-picker');
+    if (!host) return;
+    host.querySelector('.ui-picker-btn > span').textContent = field.value || SETTINGS_TZ_NOT_SET;
+    host.querySelectorAll('[role="option"]').forEach(o => o.setAttribute('aria-selected', String(o.dataset.value === field.value)));
+    const note = field.parentElement.querySelector('[data-zone-note]');
+    if (note) note.hidden = field.value !== field.dataset.saved;
+}
+
+function settingsTimeZoneKnown(name) {
+    try {
+        new Intl.DateTimeFormat('en-US', { timeZone: name });
+        return true;
+    } catch (e) {
+        return false;
+    }
+}
+
 // Edit form tabs (same order as env.example sections) with descriptions from env.example
 // Keys grouped logically within each tab
 var SETTINGS_EDIT_TABS = [
@@ -384,8 +429,9 @@ var SETTINGS_EDIT_TABS = [
         ]
     },
     {
-        id: 'application', label: 'Application', description: 'Web app port, title and logo. Log level: DEBUG, INFO, WARNING, ERROR, CRITICAL. Debug mode shows detailed errors (do not enable in production). Search/CSV limits and scheduler worker count.', groups: [
+        id: 'application', label: 'Application', description: 'Web app port, title, logo and time zone. Log level: DEBUG, INFO, WARNING, ERROR, CRITICAL. Debug mode shows detailed errors (do not enable in production). Search/CSV limits and scheduler worker count.', groups: [
             { label: 'Basic', keys: ['app_port', 'app_title', 'app_logo_url'] },
+            { label: 'Time', keys: ['tz'] },
             { label: 'Logging', keys: ['log_level', 'debug'] },
             { label: 'Limits', keys: ['max_search_results', 'csv_export_limit', 'scheduler_workers'] }
         ]
@@ -695,6 +741,8 @@ function renderSettingsEditField(key, value, sensitiveKeys, description, envLock
     ]);
     const isUserSpecific = USER_SPECIFIC_KEYS.has(key);
     const isChanged = hasDefault && !sensitive && !isUserSpecific && (function() {
+        // An empty time zone is UTC, the default
+        if (key === 'tz') return (String(value || '').trim() || 'UTC') !== (String(defaultValue || '').trim() || 'UTC');
         if (isBool) return value !== defaultValue;
         if (isNum) return Number(value) !== Number(defaultValue);
         return String(value || '') !== String(defaultValue || '');
@@ -754,6 +802,31 @@ function renderSettingsEditField(key, value, sensitiveKeys, description, envLock
             '<input type="checkbox" id="edit-' + keyAttr + '" name="' + keyAttr + '" ' + (displayVal ? 'checked' : '') + ' ' + disabledAttr + ' class="ui-check">' +
             '<span class="ui-set-bool-text"><span class="ui-set-bool-label">' + escapeHtml(label) + labelLockIcon + (envLocked ? '' : (isChanged ? ' <span class="ui-set-pill is-changed" title="Differs from the default">Changed</span>' : '')) + '</span>' + asSpan(descHtml) + asSpan(envLockedHtml) + '</span></label>' +
             clearBtnHtml + '</div>';
+    }
+
+    const zones = key === 'tz' ? settingsTimeZoneNames() : [];
+    if (zones.length) {
+        const current = String(displayVal).trim();
+        // A name the server or this browser does not know: the app runs in UTC until it is fixed
+        const unknown = current !== '' && (!settingsTimeZoneKnown(current)
+            || (typeof appTimezoneStatus !== 'undefined' && appTimezoneStatus.valid === false && appTimezoneStatus.configured === current));
+        const names = current && !zones.includes(current) ? [current, ...zones] : zones;
+        // A long list, so a picker with a search (utils.js, uiPicker); the hidden field holds the value
+        const options = [{ value: '', label: SETTINGS_TZ_NOT_SET }, ...names.map(name => ({ value: name, label: name + (name === current && unknown ? ' (unknown)' : '') }))]
+            .map(o => ({ ...o, selected: o.value === current, onclick: 'settingsPickZone(this)' }));
+        const picker = uiPicker({
+            id: 'settings-' + key, label, value: escapeHtml(current || SETTINGS_TZ_NOT_SET), options, search: 'Search time zones',
+            field: true, labelledBy: 'label-' + keyAttr, disabled: envLocked
+        });
+        // The description already says to pick the server's zone; only a name the app cannot use needs a word more
+        const note = unknown
+            ? '<small class="ui-text-warn" role="status" data-zone-note>' + escapeHtml(`"${current}" is not a known time zone, so the app uses UTC. `) +
+                (envLocked ? 'Fix TZ in the environment.' : 'Pick a time zone from the list.') + '</small>'
+            : '';
+        return '<div class="ui-set-field' + (envLocked ? ' is-locked' : '') + '"><span class="ui-label" id="label-' + keyAttr + '">' + escapeHtml(label) + labelLockIcon + changedPill + '</span>' +
+            descHtml + picker +
+            '<input type="hidden" id="edit-' + keyAttr + '" name="' + keyAttr + '" value="' + escapeHtml(current) + '" data-saved="' + escapeHtml(current) + '"' + (envLocked ? ' disabled' : '') + '>' +
+            note + clearBtnHtml + '</div>';
     }
 
     // Dropdown for fields with predefined options
@@ -1271,6 +1344,8 @@ function renderSettings(content, data) {
                     // A segmented control shows the value with its pressed button
                     const seg = el.parentElement && el.parentElement.querySelector('.ui-seg');
                     if (seg) seg.querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', String(b.getAttribute('data-value') === el.value)));
+                    // So does the Time Zone picker
+                    if (key === 'tz') settingsShowZone(el);
                 }
                 // The field is back at its default, so it is no longer marked as changed
                 const parent = el.closest('.ui-set-bool, .ui-set-field');
@@ -1911,9 +1986,9 @@ async function validateCredential(name, toastNow) {
     return toast;
 }
 
-// Settings the rest of the app reads once, when the page loads (from /api/info);
-// saving a change to one reloads the page so it takes effect everywhere
-const SETTINGS_READ_AT_PAGE_LOAD = ['app_title', 'app_logo_url', 'basic_auth_enabled', 'oauth2_enabled', 'mailcow_url'];
+// Settings the rest of the app reads once, when the page loads (from /api/info; the
+// time zone is one of them); saving a change to one reloads the page so it takes effect everywhere
+const SETTINGS_READ_AT_PAGE_LOAD = ['app_title', 'app_logo_url', 'basic_auth_enabled', 'oauth2_enabled', 'mailcow_url', 'tz'];
 
 // A toast that has to outlive the reload after saving (a credential check)
 const SETTINGS_TOAST_AFTER_RELOAD = 'settingsToastAfterReload';

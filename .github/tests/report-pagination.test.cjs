@@ -8,6 +8,9 @@ const source = fs.readFileSync(path.join(__dirname, '../../frontend/dmarc.js'), 
 const start = source.indexOf('const REPORTS_DEFAULT_SORT =');
 const end = source.length;
 assert.ok(start > 0 && end > start);
+// The time helpers the page formats dates with (the app's zone is UTC here)
+const utilsSource = fs.readFileSync(path.join(__dirname, '../../frontend/utils.js'), 'utf8');
+const zoneHelpers = utilsSource.slice(utilsSource.indexOf('function appTz()'), utilsSource.indexOf('function formatSeconds('));
 
 // What GET /api/dmarc/reports/domains answers in these tests
 const DOMAINS = [
@@ -45,7 +48,9 @@ function harness({ allowDelete = true, confirm = true } = {}) {
         dmarcGet: async () => ({ domains: [] }),
         dmarcUpdateManageButton: () => { calls.manageButton++; },
         loadDmarcDomains: async () => { calls.domainsList++; },
+        appTimezone: 'UTC',
     });
+    vm.runInContext(zoneHelpers, context);
     vm.runInContext(source.slice(start, end), context);
     const run = expression => vm.runInContext(expression, context);
     function resolve(index, page = 1, status = 200, total = 101) {

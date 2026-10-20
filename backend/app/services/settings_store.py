@@ -11,6 +11,7 @@ from typing import Dict, Any
 from sqlalchemy.orm import Session
 
 from ..models import SystemSetting
+from ..utils import format_datetime_for_api
 
 logger = logging.getLogger(__name__)
 
@@ -118,6 +119,19 @@ def delete_all_config_overrides_from_db(db: Session) -> None:
 
 _MAXMIND_PREFIX = "maxmind."
 
+
+def _utc_z(stored: str):
+    """A stored check time as the API sends every time: UTC with Z. Results
+    saved by earlier versions hold +00:00 and microseconds."""
+    if not stored:
+        return None
+    from datetime import datetime
+    try:
+        return format_datetime_for_api(datetime.fromisoformat(stored.replace("Z", "+00:00")))
+    except ValueError:
+        return None
+
+
 def get_maxmind_validation_status(db: Session) -> dict:
     """Read the last MaxMind license validation result from DB.
     Returns None if never checked, or a dict with configured/valid/error/checked_at."""
@@ -134,7 +148,7 @@ def get_maxmind_validation_status(db: Session) -> dict:
         "configured": configured,
         "valid": valid,
         "error": error,
-        "checked_at": checked_at or None
+        "checked_at": _utc_z(checked_at)
     }
 
 
@@ -145,7 +159,7 @@ def save_maxmind_validation_status(db: Session, result: dict) -> None:
         "license_configured": "true" if result.get("configured") else "false",
         "license_valid": "true" if result.get("valid") else "false",
         "license_error": result.get("error") or "",
-        "license_checked_at": datetime.now(timezone.utc).isoformat(),
+        "license_checked_at": format_datetime_for_api(datetime.now(timezone.utc)),
     }
     for suffix, value in pairs.items():
         key = _MAXMIND_PREFIX + suffix
@@ -197,13 +211,15 @@ def get_credential_check_status(db: Session, name: str, fingerprint: str) -> dic
     if data.get("fingerprint") != fingerprint:
         return None
     data.pop("fingerprint", None)
+    if "checked_at" in data:
+        data["checked_at"] = _utc_z(data["checked_at"])
     return data
 
 
 def save_credential_check_status(db: Session, name: str, result: dict, fingerprint: str) -> None:
     """Persist a credential check result with the address and secret it ran against."""
     from datetime import datetime, timezone
-    data = {**result, "fingerprint": fingerprint, "checked_at": datetime.now(timezone.utc).isoformat()}
+    data = {**result, "fingerprint": fingerprint, "checked_at": format_datetime_for_api(datetime.now(timezone.utc))}
     key = _CREDENTIAL_CHECK_PREFIX + name
     row = db.query(SystemSetting).filter(SystemSetting.key == key).first()
     if row:

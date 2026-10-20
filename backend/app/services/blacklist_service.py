@@ -11,6 +11,8 @@ from datetime import datetime, timezone, timedelta
 from typing import Dict, Any, List, Optional, Set
 from sqlalchemy import desc
 
+from app.utils import format_datetime_for_api
+
 logger = logging.getLogger(__name__)
 
 # Blacklist zones to check
@@ -351,11 +353,7 @@ def reconcile_monitored_hosts(db) -> bool:
 
 def _format_checked_at(dt: Optional[datetime]) -> Optional[str]:
     """Format a (possibly naive UTC) datetime as an ISO string with Z suffix"""
-    if not dt:
-        return None
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
-    return dt.astimezone(timezone.utc).isoformat().replace('+00:00', '') + 'Z'
+    return format_datetime_for_api(dt) if dt else None
 
 
 def aggregate_blacklist_summary(host_rows: List[Dict[str, Any]],
@@ -486,7 +484,7 @@ def get_cached_blacklist_check(ip: str) -> Optional[Dict[str, Any]]:
             from .ignore_lists import load_ignored, IGNORED_BLOCKLISTS_KEY
             return apply_ignored_lists({
                 "server_ip": check.server_ip,
-                "checked_at": check.checked_at.isoformat() + 'Z',
+                "checked_at": format_datetime_for_api(check.checked_at),
                 "total_blacklists": check.total_blacklists,
                 "listed_count": check.listed_count,
                 "clean_count": check.clean_count,
@@ -757,7 +755,7 @@ async def check_all_blacklists(ip: str) -> Dict[str, Any]:
 
         data = {
             "server_ip": ip,
-            "checked_at": datetime.now(timezone.utc).isoformat() + 'Z',
+            "checked_at": format_datetime_for_api(datetime.now(timezone.utc)),
             "total_blacklists": len(blacklists),
             "listed_count": listed_count,
             "clean_count": clean_count,
@@ -814,7 +812,7 @@ async def get_blacklist_check_results(force: bool = False, ip: Optional[str] = N
     if not ip:
         return {
             "server_ip": None,
-            "checked_at": datetime.now(timezone.utc).isoformat() + 'Z',
+            "checked_at": format_datetime_for_api(datetime.now(timezone.utc)),
             "total_blacklists": len(BLACKLISTS),
             "listed_count": 0,
             "clean_count": 0,

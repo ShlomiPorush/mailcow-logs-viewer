@@ -54,6 +54,7 @@ from .origin_guard import SameOriginGuardMiddleware
 from .session import get_session_from_request
 from .services.auth_cleanup import auth_store_maintenance
 from .version import __version__
+from .app_time import app_tz, tz_status
 
 from .services.geoip_downloader import (
     is_license_configured,
@@ -161,6 +162,9 @@ async def lifespan(app: FastAPI):
         logger.info(f"Blacklist enabled with {len(settings.blacklist_emails_list)} email(s)")
     
     log_authentication_state()
+
+    # Every clock in the app follows this zone; an unknown TZ is logged here, by name, and UTC is used
+    logger.info(f"Time zone: {app_tz().key}")
     
     # GeoIP initialization
     try:
@@ -481,7 +485,8 @@ async def app_info(request: Request):
             "local_domains": settings.local_domains_list,
             "fetch_interval": settings.fetch_interval,
             "retention_days": settings.retention_days,
-            "timezone": settings.tz,
+            # The zone every time on screen follows (app_time.py)
+            **tz_status(),
             "blacklist_count": len(settings.blacklist_emails_list),
             "disabled_features": sorted(settings.disabled_features_set),
             # The search offers settings only while the edit form exists

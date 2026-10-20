@@ -192,8 +192,8 @@ class Settings(BaseSettings):
         description="Logging level: DEBUG, INFO, WARNING, ERROR, CRITICAL"
     )
     tz: str = Field(
-        default="UTC",
-        description="Timezone"
+        default="",
+        description="The app time zone, an IANA name such as Europe/Berlin (UTC when empty or unknown, see app_time.py)"
     )
     app_title: str = Field(default="mailcow Logs Viewer", description="Application title")
     app_logo_url: str = Field(default="", description="Application logo URL (optional)")
@@ -1028,12 +1028,12 @@ class Settings(BaseSettings):
 
 def _get_editable_setting_keys() -> frozenset:
     """All Settings field names that are editable from UI (excludes DB keys, UI-edit flag, and deprecated/legacy fields)."""
-    # auth_enabled deprecated, tz legacy, app_port is Docker-level.
+    # auth_enabled deprecated, app_port is Docker-level.
     # cors_allowed_origins is applied once at startup, so it lives in ENV only.
     # webhook_* are legacy single-webhook settings, superseded by the
     # notification channels UI (they are migrated into a channel on upgrade).
     excluded = _DB_ONLY_KEYS | {
-        _EDIT_VIA_UI_FLAG_KEY, "auth_enabled", "tz", "app_port", "cors_allowed_origins",
+        _EDIT_VIA_UI_FLAG_KEY, "auth_enabled", "app_port", "cors_allowed_origins",
         "webhook_enabled", "webhook_type", "webhook_url", "webhook_telegram_chat_id",
     }
     keys = set(Settings.model_fields.keys()) - excluded
@@ -1186,20 +1186,35 @@ def reload_settings(db: Optional[Any] = None) -> None:
     root.setLevel(getattr(logging, _settings_wrapper.log_level, logging.WARNING))
 
 
+class AppZoneFormatter(logging.Formatter):
+    """Log lines with their time in the app's time zone and its offset, for
+    example 2026-01-15 13:30:05+01:00, whatever the container clock says. The
+    zone is read for every line, so a new zone in Settings applies at once."""
+
+    def formatTime(self, record, datefmt=None):
+        from datetime import datetime
+        from .app_time import UTC, configured_zone_name, zone_for
+        try:
+            # Not app_tz(): it may log a warning, and this runs inside a handler
+            zone = zone_for(configured_zone_name()) or UTC
+        except Exception:
+            zone = UTC
+        return datetime.fromtimestamp(record.created, zone).isoformat(sep=' ', timespec='seconds')
+
+
 def setup_logging():
     """Configure application logging"""
     root = logging.getLogger()
-    
+
     # Remove ALL existing handlers
     for handler in root.handlers[:]:
         root.removeHandler(handler)
-    
+
     log_format = '%(asctime)s - %(levelname)s - %(message)s'
-    date_format = '%Y-%m-%d %H:%M:%S'
-    
+
     # Console Handler
     console_handler = logging.StreamHandler()
-    console_handler.setFormatter(logging.Formatter(log_format, datefmt=date_format))
+    console_handler.setFormatter(AppZoneFormatter(log_format))
     root.addHandler(console_handler)
     
     # File Handler (logs to /app/data/container.log)
@@ -1221,7 +1236,7 @@ def setup_logging():
             backupCount=3,
             encoding='utf-8'
         )
-        file_handler.setFormatter(logging.Formatter(log_format, datefmt=date_format))
+        file_handler.setFormatter(AppZoneFormatter(log_format))
         root.addHandler(file_handler)
         
     except Exception as e:

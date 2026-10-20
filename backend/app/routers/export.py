@@ -9,13 +9,20 @@ from datetime import datetime
 from typing import Optional
 
 from ..models import PostfixLog, RspamdLog, NetfilterLog, MessageCorrelation
+from ..app_time import local_now, to_local
 from ..config import settings
-from ..utils import internal_error
+from ..utils import internal_error, RangeStart, RangeEnd
 from ..services.csv_export import csv_download, csv_query_rows, get_csv_db
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+def _csv_time(value: Optional[datetime]) -> str:
+    """A stored (naive UTC) time in the app's time zone with its offset, for
+    example 2026-01-15 13:00:00+01:00, so a spreadsheet cannot misread it."""
+    return to_local(value).isoformat(sep=' ', timespec='seconds') if value else ""
 
 
 @router.head("/export/postfix/csv", include_in_schema=False)
@@ -26,8 +33,8 @@ def export_postfix_csv(
     sender: Optional[str] = Query(None),
     recipient: Optional[str] = Query(None),
     status: Optional[str] = Query(None),
-    start_date: Optional[datetime] = Query(None),
-    end_date: Optional[datetime] = Query(None),
+    start_date: Optional[RangeStart] = Query(None),
+    end_date: Optional[RangeEnd] = Query(None),
     db: Session = Depends(get_csv_db)
 ):
     """
@@ -73,7 +80,7 @@ def export_postfix_csv(
         # Format one row at a time while the response is consumed.
         data = (
             {
-                "Time": log.time.isoformat(),
+                "Time": _csv_time(log.time),
                 "Program": log.program,
                 "Priority": log.priority,
                 "Queue ID": log.queue_id,
@@ -90,7 +97,7 @@ def export_postfix_csv(
         )
         
         return csv_download(
-            data, f"postfix_logs_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+            data, f"postfix_logs_{local_now().strftime('%Y%m%d_%H%M%S')}.csv",
             head_only=request.method == "HEAD",
         )
     except HTTPException:
@@ -110,8 +117,8 @@ def export_rspamd_csv(
     min_score: Optional[float] = Query(None),
     max_score: Optional[float] = Query(None),
     is_spam: Optional[bool] = Query(None),
-    start_date: Optional[datetime] = Query(None),
-    end_date: Optional[datetime] = Query(None),
+    start_date: Optional[RangeStart] = Query(None),
+    end_date: Optional[RangeEnd] = Query(None),
     db: Session = Depends(get_csv_db)
 ):
     """
@@ -162,7 +169,7 @@ def export_rspamd_csv(
         # Format one row at a time while the response is consumed.
         data = (
             {
-                "Time": log.time.isoformat(),
+                "Time": _csv_time(log.time),
                 "Message ID": log.message_id,
                 "Subject": log.subject,
                 "Sender": log.sender_smtp,
@@ -182,7 +189,7 @@ def export_rspamd_csv(
         )
         
         return csv_download(
-            data, f"rspamd_logs_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+            data, f"rspamd_logs_{local_now().strftime('%Y%m%d_%H%M%S')}.csv",
             head_only=request.method == "HEAD",
         )
     except HTTPException:
@@ -201,8 +208,8 @@ def export_netfilter_csv(
     username: Optional[str] = Query(None),
     action: Optional[str] = Query(None),
     country_code: Optional[str] = Query(None),
-    start_date: Optional[datetime] = Query(None),
-    end_date: Optional[datetime] = Query(None),
+    start_date: Optional[RangeStart] = Query(None),
+    end_date: Optional[RangeEnd] = Query(None),
     db: Session = Depends(get_csv_db)
 ):
     """
@@ -253,7 +260,7 @@ def export_netfilter_csv(
         # Format one row at a time while the response is consumed.
         data = (
             {
-                "Time": log.time.isoformat(),
+                "Time": _csv_time(log.time),
                 "IP": log.ip,
                 "Username": log.username,
                 "Auth Method": log.auth_method,
@@ -267,7 +274,7 @@ def export_netfilter_csv(
         )
         
         return csv_download(
-            data, f"netfilter_logs_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+            data, f"netfilter_logs_{local_now().strftime('%Y%m%d_%H%M%S')}.csv",
             head_only=request.method == "HEAD",
         )
     except HTTPException:
@@ -288,8 +295,8 @@ def export_messages_csv(
     status: Optional[str] = Query(None),
     user: Optional[str] = Query(None),
     ip: Optional[str] = Query(None),
-    start_date: Optional[datetime] = Query(None),
-    end_date: Optional[datetime] = Query(None),
+    start_date: Optional[RangeStart] = Query(None),
+    end_date: Optional[RangeEnd] = Query(None),
     db: Session = Depends(get_csv_db)
 ):
     """
@@ -365,7 +372,7 @@ def export_messages_csv(
         def rows():
             for msg, rspamd in messages:
                 yield {
-                    "Time": msg.first_seen.isoformat() if msg.first_seen else "",
+                    "Time": _csv_time(msg.first_seen),
                     "Sender": msg.sender,
                     "Recipient": msg.recipient,
                     "Subject": msg.subject,
@@ -381,7 +388,7 @@ def export_messages_csv(
                 }
 
         return csv_download(
-            rows(), f"messages_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+            rows(), f"messages_{local_now().strftime('%Y%m%d_%H%M%S')}.csv",
             head_only=request.method == "HEAD",
         )
     except HTTPException:

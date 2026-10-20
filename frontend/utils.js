@@ -377,16 +377,10 @@ function renderMarkdown(markdownText) {
 function formatListTime(isoString) {
     if (!isoString) return '-';
     const date = new Date(isoString);
-    const tz = appTimezone && appTimezone !== 'UTC' ? appTimezone : undefined;
-    try {
-        const day = d => new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
-        if (day(date) === day(new Date())) {
-            return new Intl.DateTimeFormat(undefined, { timeZone: tz, hour: '2-digit', minute: '2-digit', hour12: false }).format(date);
-        }
-        return new Intl.DateTimeFormat(undefined, { timeZone: tz, day: 'numeric', month: 'short' }).format(date);
-    } catch (e) {
-        return formatTime(isoString);
+    if (zonedDateString(date) === zonedDateString(new Date())) {
+        return formatInZone(date, { hour: '2-digit', minute: '2-digit', hour12: false });
     }
+    return formatInZone(date, { day: 'numeric', month: 'short' });
 }
 
 // A "More" menu for a table row. It opens as a popover, so the table's own
@@ -447,50 +441,116 @@ function uiAgo(el, iso, prefix = '') {
     }
 }
 
+// ---------------------------------------------------------------------------
+// The app's time zone. Every time on screen, every "day" and every time a user
+// types or picks follows the zone the server works in (/api/info `timezone`:
+// TZ or Settings > Application, UTC when unset), never the browser's zone.
+// ---------------------------------------------------------------------------
+
+function appTz() {
+    return (typeof appTimezone === 'string' && appTimezone) || 'UTC';
+}
+
+const tzPartFormats = new Map();
+function tzPartFormat(tz) {
+    if (!tzPartFormats.has(tz)) {
+        tzPartFormats.set(tz, new Intl.DateTimeFormat('en-US', {
+            timeZone: tz, hourCycle: 'h23', weekday: 'short',
+            year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit'
+        }));
+    }
+    return tzPartFormats.get(tz);
+}
+
+// The wall-clock parts of an instant in the app's zone (month is 1-12)
+function zonedParts(value, tz = appTz()) {
+    const date = value instanceof Date ? value : new Date(value);
+    const parts = {};
+    for (const p of tzPartFormat(tz).formatToParts(date)) parts[p.type] = p.value;
+    return {
+        year: +parts.year, month: +parts.month, day: +parts.day,
+        hour: +parts.hour, minute: +parts.minute, second: +parts.second, weekday: parts.weekday
+    };
+}
+
+// The instant whose wall-clock time in the app's zone is the one given. A time
+// skipped by a daylight saving change moves forward; a repeated one takes the
+// first of the two.
+function zonedTimeToDate(year, month, day, hour = 0, minute = 0, second = 0, tz = appTz()) {
+    const wall = Date.UTC(year, month - 1, day, hour, minute, second);
+    const offsetAt = t => {
+        const p = zonedParts(new Date(t), tz);
+        return Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second) - t;
+    };
+    const wallOf = t => t + offsetAt(t);
+    // The offsets a day before and after cover both sides of any change
+    const early = wall - offsetAt(wall - 86400000);
+    const late = wall - offsetAt(wall + 86400000);
+    const fits = [early, late].filter(t => wallOf(t) === wall);
+    return new Date(fits.length ? Math.min(...fits) : early);
+}
+
+const pad2 = n => String(n).padStart(2, '0');
+
+// YYYY-MM-DD of an instant in the app's zone
+function zonedDateString(value = new Date(), tz = appTz()) {
+    const p = zonedParts(value, tz);
+    return `${p.year}-${pad2(p.month)}-${pad2(p.day)}`;
+}
+
+// YYYY-MM-DD n days after another one (calendar days, no zone involved)
+function addDaysToDateString(dateStr, days) {
+    const [y, m, d] = dateStr.split('-').map(Number);
+    const next = new Date(Date.UTC(y, m - 1, d + days));
+    return `${next.getUTCFullYear()}-${pad2(next.getUTCMonth() + 1)}-${pad2(next.getUTCDate())}`;
+}
+
+// The instant a day (YYYY-MM-DD) starts in the app's zone
+function zonedDayStart(dateStr, tz = appTz()) {
+    const [y, m, d] = dateStr.split('-').map(Number);
+    return zonedTimeToDate(y, m, d, 0, 0, 0, tz);
+}
+
+// The same wall-clock time n days later (or earlier) in the app's zone, so a
+// daylight saving change in between does not move the hour
+function addDaysInZone(value, days, tz = appTz()) {
+    const p = zonedParts(value, tz);
+    return zonedTimeToDate(p.year, p.month, p.day + days, p.hour, p.minute, p.second, tz);
+}
+
+// A day (YYYY-MM-DD) written as it is, with Intl options; no zone moves it
+function formatDayKey(dateStr, options, locale = 'en-US') {
+    const [y, m, d] = String(dateStr).slice(0, 10).split('-').map(Number);
+    if (!y || !m || !d) return '-';
+    return new Intl.DateTimeFormat(locale, { ...options, timeZone: 'UTC' }).format(new Date(Date.UTC(y, m - 1, d)));
+}
+
+// The value of an <input type="datetime-local"> for an instant, in the app's zone
+function toZonedInputValue(value, tz = appTz()) {
+    const p = zonedParts(value, tz);
+    return `${p.year}-${pad2(p.month)}-${pad2(p.day)}T${pad2(p.hour)}:${pad2(p.minute)}`;
+}
+
+// The instant an <input type="datetime-local"> value means, read in the app's zone
+function fromZonedInputValue(text, tz = appTz()) {
+    const m = /^(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}):(\d{2})(?::(\d{2}))?)?$/.exec(text || '');
+    if (!m) return null;
+    return zonedTimeToDate(+m[1], +m[2], +m[3], +(m[4] || 0), +(m[5] || 0), +(m[6] || 0), tz);
+}
+
+// Intl formatting in the app's zone
+function formatInZone(value, options, locale = undefined) {
+    const date = value instanceof Date ? value : new Date(value);
+    if (isNaN(date)) return '-';
+    return new Intl.DateTimeFormat(locale, { ...options, timeZone: appTz() }).format(date);
+}
+
 function formatTime(isoString) {
     if (!isoString) return '-';
-    const date = new Date(isoString);
-    // Use timezone from app configuration if set, otherwise use browser's local timezone
-    // The date is already in UTC (with 'Z' suffix), so browser will convert it correctly
-    try {
-        if (appTimezone && appTimezone !== 'UTC') {
-            // Use Intl.DateTimeFormat with app timezone
-            const formatter = new Intl.DateTimeFormat(undefined, {
-                day: '2-digit',
-                month: '2-digit',
-                year: 'numeric',
-                hour: '2-digit',
-                minute: '2-digit',
-                second: '2-digit',
-                hour12: false,
-                timeZone: appTimezone
-            });
-            return formatter.format(date);
-        } else {
-            // Use browser's local timezone and locale
-            return date.toLocaleString(undefined, {
-                day: '2-digit',
-                month: '2-digit',
-                year: 'numeric',
-                hour: '2-digit',
-                minute: '2-digit',
-                second: '2-digit',
-                hour12: false
-            });
-        }
-    } catch (e) {
-        // Fallback to browser's local timezone if timezone is invalid
-        console.warn('Invalid timezone, using browser local timezone:', appTimezone, e);
-        return date.toLocaleString(undefined, {
-            day: '2-digit',
-            month: '2-digit',
-            year: 'numeric',
-            hour: '2-digit',
-            minute: '2-digit',
-            second: '2-digit',
-            hour12: false
-        });
-    }
+    return formatInZone(isoString, {
+        day: '2-digit', month: '2-digit', year: 'numeric',
+        hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false
+    });
 }
 
 function formatDate(isoString) {
@@ -499,11 +559,11 @@ function formatDate(isoString) {
     return formatTime(isoString);
 }
 
+// DD/MM of a day (YYYY-MM-DD) as written, or of an instant in the app's zone
 function formatDateShort(dateStr) {
-    const date = new Date(dateStr);
-    const month = (date.getMonth() + 1).toString().padStart(2, '0');
-    const day = date.getDate().toString().padStart(2, '0');
-    return `${day}/${month}`;
+    const day = /^\d{4}-\d{2}-\d{2}$/.test(dateStr) ? dateStr : zonedDateString(dateStr);
+    const [, month, date] = day.split('-');
+    return `${date}/${month}`;
 }
 
 function formatSeconds(seconds) {
@@ -816,7 +876,8 @@ function uiSortValue(cell) {
         const dotted = /\d\.\d/.test(text);
         const y = String(c).length === 4 ? c : a;
         const mo = dotted ? b : a, da = dotted ? a : b;
-        const time = Date.parse(`${y}-${String(mo).padStart(2, '0')}-${String(da).padStart(2, '0')}T${(text.match(/\d{1,2}:\d{2}(:\d{2})?/) || ['00:00'])[0].padStart(5, '0')}`);
+        // Read as UTC: only the order counts, and the browser's zone would fold the hour it skips
+        const time = Date.parse(`${y}-${String(mo).padStart(2, '0')}-${String(da).padStart(2, '0')}T${(text.match(/\d{1,2}:\d{2}(:\d{2})?/) || ['00:00'])[0].padStart(5, '0')}Z`);
         if (!isNaN(time)) return { n: time, t };
     }
     return { n: null, t };
@@ -1261,6 +1322,8 @@ if (typeof MutationObserver !== 'undefined' && document.body) new MutationObserv
 //     <button class="ui-msg-range ui-picker-btn" aria-haspopup aria-expanded aria-controls="ID-panel">
 //     <span id="ID-panel" class="ui-popover ui-picker-panel" role="listbox|dialog"> ...
 // A page that redraws an open picker keeps it open: uiPickerIsOpen(id).
+// In a form (field: true) the button looks like a select and shows only the
+// value; the form's label names it (labelledBy).
 
 // open: the picker shown; held: the picker whose button has the focus, so a
 // redraw of the page (new data) can give it back; query: what was typed in a search
@@ -1270,17 +1333,19 @@ function uiPickerIsOpen(id) {
     return uiPickers.open === id;
 }
 
+// "new york" finds America/New_York
 function uiPickerMatches(label, query) {
-    return !query || label.toLowerCase().includes(query.trim().toLowerCase());
+    const plain = text => text.toLowerCase().replace(/_/g, ' ');
+    return !query || plain(label).includes(plain(query.trim()));
 }
 
-// options: [{ label, hint, selected, onclick }] for a list; panel: HTML for a dialog;
-// search: the search field's label, for a long list
-function uiPicker({ id, label, value, set = false, options = null, panel = '', panelLabel = '', panelClass = '', hostClass = '', onOpen = '', search = '' }) {
+// options: [{ label, hint, value, selected, onclick }] for a list (value: the option's
+// data-value); panel: HTML for a dialog; search: the search field's label, for a long list
+function uiPicker({ id, label, value, set = false, options = null, panel = '', panelLabel = '', panelClass = '', hostClass = '', onOpen = '', search = '', field = false, labelledBy = '', disabled = false }) {
     const open = uiPickerIsOpen(id);
     const list = Array.isArray(options);
     const query = search ? (uiPickers.query[id] || '') : '';
-    const items = list ? options.map(o => `<button type="button" role="option" class="ui-fct" tabindex="-1" aria-selected="${o.selected ? 'true' : 'false'}"${uiPickerMatches(o.label, query) ? '' : ' hidden'} onclick="${o.onclick}"><span>${escapeHtml(o.label)}</span>${o.hint !== undefined ? `<small>${escapeHtml(String(o.hint))}</small>` : ''}</button>`).join('') : '';
+    const items = list ? options.map(o => `<button type="button" role="option" class="ui-fct" tabindex="-1" aria-selected="${o.selected ? 'true' : 'false'}"${o.value !== undefined ? ` data-value="${escapeHtml(String(o.value))}"` : ''}${uiPickerMatches(o.label, query) ? '' : ' hidden'} onclick="${o.onclick}"><span>${escapeHtml(o.label)}</span>${o.hint !== undefined ? `<small>${escapeHtml(String(o.hint))}</small>` : ''}</button>`).join('') : '';
     const anyShown = list && options.some(o => uiPickerMatches(o.label, query));
     let role = list ? 'listbox' : 'dialog';
     let body = list ? `<span class="ui-label" aria-hidden="true">${escapeHtml(label)}</span>${items}` : panel;
@@ -1290,8 +1355,11 @@ function uiPicker({ id, label, value, set = false, options = null, panel = '', p
             <span id="${escapeHtml(id)}-list" class="ui-fct-list ui-picker-list" role="listbox" aria-label="${escapeHtml(label)}">${items}</span>
             <span class="ui-picker-none ui-muted${anyShown ? ' hidden' : ''}" role="status">No matches</span>`;
     }
-    return `<span class="ui-popover-host ui-picker${hostClass ? ` ${hostClass}` : ''}" data-picker="${escapeHtml(id)}"${onOpen ? ` data-on-open="${escapeHtml(onOpen)}"` : ''}>
-        <button type="button" class="ui-msg-range ui-picker-btn${set ? ' is-set' : ''}" aria-haspopup="${role}" aria-expanded="${open}" aria-controls="${escapeHtml(id)}-panel"><span class="ui-picker-name">${escapeHtml(label)}:</span> ${value}</button>
+    const button = field
+        ? `<button type="button" class="ui-select ui-select-btn ui-picker-btn" aria-haspopup="${role}" aria-expanded="${open}" aria-controls="${escapeHtml(id)}-panel"${labelledBy ? ` aria-labelledby="${escapeHtml(labelledBy)}"` : ''}${disabled ? ' disabled' : ''}><span>${value}</span><svg class="ui-select-arrow" width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg></button>`
+        : `<button type="button" class="ui-msg-range ui-picker-btn${set ? ' is-set' : ''}" aria-haspopup="${role}" aria-expanded="${open}" aria-controls="${escapeHtml(id)}-panel"><span class="ui-picker-name">${escapeHtml(label)}:</span> ${value}</button>`;
+    return `<span class="ui-popover-host ui-picker${field ? ' is-field' : ''}${hostClass ? ` ${hostClass}` : ''}" data-picker="${escapeHtml(id)}"${onOpen ? ` data-on-open="${escapeHtml(onOpen)}"` : ''}>
+        ${button}
         <span id="${escapeHtml(id)}-panel" class="ui-popover ui-msg-time-panel ui-picker-panel${search ? ' has-search' : ''}${panelClass ? ` ${panelClass}` : ''}${open ? '' : ' hidden'}" role="${role}" aria-label="${escapeHtml(panelLabel || label)}">${body}</span>
     </span>`;
 }
@@ -1466,7 +1534,8 @@ if (typeof document !== 'undefined' && document.addEventListener) {
         const search = panel.querySelector('.ui-picker-search');
         if (search && event.target === search) {
             if (event.key === 'ArrowDown' && items.length) { event.preventDefault(); items[0].focus(); }
-            else if (event.key === 'Enter' && items.length) { event.preventDefault(); items[0].click(); }
+            // With no match, Enter does nothing (it would submit a form around the picker)
+            else if (event.key === 'Enter') { event.preventDefault(); if (items.length) items[0].click(); }
             return;
         }
         const list = uiPickerList(panel);

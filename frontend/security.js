@@ -648,7 +648,7 @@ function renderSecurityOverview() {
 // The period as it really is: the logs may start after the chosen one
 function securityPeriodSince() {
     const since = securityPage && securityPage.days === securityDays ? securityPage.since : null;
-    return since ? new Date(since).toLocaleDateString('en-US', { day: 'numeric', month: 'short' }) : null;
+    return since ? formatInZone(since, { day: 'numeric', month: 'short' }, 'en-US') : null;
 }
 
 // A period as the picker names it
@@ -784,7 +784,7 @@ function renderSecurityLists() {
         const legacy = legacyRow('whitelist', entry);
         if (legacy) return legacy;
         const n = tried(entry);
-        return row(entry, n ? `Failed ${Number(n).toLocaleString()} login${n === 1 ? '' : 's'} today, never banned` : '',
+        return row(entry, n ? `Failed ${Number(n).toLocaleString()} login${n === 1 ? '' : 's'} in the last 24 hours, never banned` : '',
             rw ? `<button type="button" class="ui-btn ui-btn-sm" onclick="securityRemoveFromList('whitelist', '${escapeJsArg(entry)}', this)">Remove</button>` : '');
     }).join('');
     const denyRows = fail2banBlacklist.map(entry => {
@@ -796,7 +796,7 @@ function renderSecurityLists() {
                 rw ? `<button type="button" class="ui-btn ui-btn-sm" onclick="undoProtectionHit(${Number(hit.id)}, this)" title="Lift the ban; the rule leaves it alone for a week">Remove</button>` : '');
         }
         const n = tried(entry);
-        return row(entry, `Added by hand${n ? `, still tried ${Number(n).toLocaleString()} time${n === 1 ? '' : 's'} today` : ''}`,
+        return row(entry, `Added by hand${n ? `, still tried ${Number(n).toLocaleString()} time${n === 1 ? '' : 's'} in the last 24 hours` : ''}`,
             rw ? `<button type="button" class="ui-btn ui-btn-sm" onclick="securityRemoveFromList('blacklist', '${escapeJsArg(entry)}', this)">Remove</button>` : '');
     }).join('');
     box.innerHTML = `

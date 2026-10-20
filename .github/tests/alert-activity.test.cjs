@@ -1,3 +1,6 @@
+// The browser is in New York; the chart follows the app's zone, not the browser's
+process.env.TZ = 'America/New_York';
+
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -7,22 +10,26 @@ const { test } = require('node:test');
 const source = fs.readFileSync(path.join(__dirname, '../../frontend/alert-activity.js'), 'utf8');
 const app = fs.readFileSync(path.join(__dirname, '../../frontend/app.js'), 'utf8');
 const AT = new Date('2026-10-13T12:00:00Z');
+// The time helpers the chart formats and groups with, in the app's zone
+const utils = fs.readFileSync(path.join(__dirname, '../../frontend/utils.js'), 'utf8');
+const zoneHelpers = utils.slice(utils.indexOf('function appTz()'), utils.indexOf('function formatSeconds('));
 
 // What GET /api/security-alerts/{id}/activity answers: quarters of an hour
 // from the baseline period before the alert to two hours after it
-function activity(alert, { baselineDays = 7, window = 15, around = {} } = {}) {
+function activity(alert, { baselineDays = 7, window = 15, around = {}, at = AT } = {}) {
     const buckets = [];
-    for (let t = AT.getTime() - baselineDays * 86400000; t < AT.getTime() + 2 * 3600000; t += 15 * 60000) {
+    for (let t = at.getTime() - baselineDays * 86400000; t < at.getTime() + 2 * 3600000; t += 15 * 60000) {
         buckets.push({ start: new Date(t).toISOString(), count: 1 });
     }
     return {
-        alert: { id: 1, severity: 'critical', title: 'title', created_at: AT.toISOString(), acknowledged: false, ...alert },
+        alert: { id: 1, severity: 'critical', title: 'title', created_at: at.toISOString(), acknowledged: false, ...alert },
         bucket_minutes: 15, window_minutes: window, baseline_days: baselineDays, buckets,
         around: { total: 0, ...around },
     };
 }
 
-function harness() {
+// browserLocale: the language of the browser, for formats that name no locale
+function harness(appTimezone = 'UTC', { browserLocale } = {}) {
     const elements = {};
     const element = id => elements[id] || (elements[id] = { innerHTML: '', textContent: '', classList: { add() {}, remove() {}, contains: () => false } });
     const context = vm.createContext({
@@ -32,7 +39,14 @@ function harness() {
         uiCountLabel: (n, one, many) => `${n} ${n === 1 ? one : many}`,
         formatTime: value => value,
         authenticatedFetch: async () => ({ ok: false, status: 500 }),
+        appTimezone,
     });
+    if (browserLocale) {
+        context.__locale = browserLocale;
+        vm.runInContext(`{ const Format = Intl.DateTimeFormat;
+            Intl.DateTimeFormat = function (locale, options) { return new Format(locale ?? __locale, options); }; }`, context);
+    }
+    vm.runInContext(zoneHelpers, context);
     vm.runInContext(source, context);
     const run = expression => vm.runInContext(expression, context);
     return {
@@ -131,4 +145,128 @@ test('Messages can be opened filtered by the authenticated user', () => {
     assert.equal(fields['messages-filter-user'].value, 'user@example.com');
     assert.equal(fields['messages-filter-sender'].value, '');
     assert.equal(fields['messages-filter-search'].value, '');
+});
+
+// ---------- times in the app's zone ----------
+
+test('the alert mark and the time axis are in the app zone, written like every other label in any browser language', () => {
+    // 12:00 UTC is 14:00 in Berlin (08:00 in New York); the last quarter starts at 13:45 UTC
+    for (const browserLocale of [undefined, 'de-DE', 'he-IL']) {
+        const html = harness('Europe/Berlin', { browserLocale }).render(activity({ alert_type: 'volume_spike', subject: 'user@example.com', metric_value: 40, baseline_value: 0.5 }));
+        assert.match(html, /<span>Alert 14:00<\/span>/, browserLocale);
+        assert.match(html, /<div class="ui-aa-x"><span>[^<]*<\/span><span>Tue, Oct 13, 15:45<\/span><\/div>/, browserLocale);
+    }
+});
+
+test('on the night the clocks go back, columns are spans of time that do not overlap, and the mark sits on the alert', () => {
+    // 01:30 UTC on 2026-10-25 is the second 02:30 in Berlin; the alert's quarter holds 50 messages
+    const at = new Date('2026-10-25T01:30:00Z');
+    const data = activity({ alert_type: 'volume_spike', subject: 'user@example.com', metric_value: 50, baseline_value: 0.5 }, { baselineDays: 14, at });
+    data.buckets.find(b => b.start === at.toISOString()).count = 50;
+    const h = harness('Europe/Berlin');
+    const { cols, minutes } = h.columns(data, '7d');
+    assert.equal(minutes, 120);
+    for (const [i, c] of cols.entries()) {
+        assert.ok(c.start < c.end, `${c.start.toISOString()} has a length`);
+        if (cols[i + 1]) assert.equal(c.end.getTime(), cols[i + 1].start.getTime(), `${c.start.toISOString()} ends where the next starts`);
+        // A column counts exactly the quarters inside its span
+        const inside = data.buckets.filter(b => Date.parse(b.start) >= c.start && Date.parse(b.start) < c.end);
+        assert.equal(c.count, inside.reduce((n, b) => n + b.count, 0), c.start.toISOString());
+    }
+    // 02:00 CEST, 02:00 CET and 04:00 CET start columns: the two 02:00 are an hour apart
+    const starts = cols.map(c => c.start.toISOString());
+    for (const s of ['2026-10-24T22:00:00.000Z', '2026-10-25T00:00:00.000Z', '2026-10-25T01:00:00.000Z', '2026-10-25T03:00:00.000Z']) assert.ok(starts.includes(s), s);
+    // The mark sits on the column that counted the alert's 50
+    const html = h.render(data, '7d');
+    const tips = [...html.matchAll(/<span class="ui-aa-col[^"]*" data-tip="([^"]*)"/g)].map(m => m[1]);
+    const left = Number(html.match(/<div class="ui-aa-mark" style="left:([\d.]+)%"/)[1]);
+    const marked = Math.floor(left / 100 * tips.length);
+    // [01:00Z, 03:00Z) is 02:00 to 04:00 CET: seven quarters of 1 and the alert's 50
+    assert.match(tips[marked], /^Sun, Oct 25, 02:00: 57 sent/);
+    assert.match(html, /<span>Alert 02:30<\/span>/);
+});
+
+test('hour columns start on whole hours of the app zone, also in a zone half an hour off', () => {
+    const zoned = (zone, t) => Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone: zone, hour: 'numeric', minute: 'numeric', hourCycle: 'h23' })
+        .formatToParts(t.getTime()).map(p => [p.type, Number(p.value)]));
+    for (const [zone, at] of [['Asia/Kolkata', AT], ['Europe/Berlin', new Date('2026-11-10T12:00:00Z')]]) {
+        const h = harness(zone);
+        for (const days of [7, 14]) {
+            const { cols, minutes } = h.columns(activity({ alert_type: 'volume_spike' }, { baselineDays: days, at }), '7d');
+            for (const c of cols.slice(1)) {
+                const p = zoned(zone, c.start);
+                assert.equal(p.minute, 0, `${zone}, ${days} days: ${c.start.toISOString()}`);
+                // Two-hour columns start on even hours there (in winter Berlin is UTC+1, so not on even UTC hours)
+                assert.equal(p.hour % (minutes / 60), 0, `${zone}, ${days} days: ${c.start.toISOString()}`);
+            }
+        }
+    }
+});
+
+// A steady 4 messages an hour (1 a quarter) and a usual rate of 4 an hour: in
+// every column, whatever its real length, the bar sits on the usual level
+const steadyCases = [
+    // The clocks go forward: 00:00 CET to 04:00 CEST is three real hours
+    ['Europe/Berlin', '2026-03-29T12:00:00Z', 14],
+    // The data ends 2 hours after the alert, in the middle of a column
+    ['Europe/Berlin', '2026-03-28T23:30:00Z', 14],
+    ['Europe/Berlin', '2026-10-25T01:30:00Z', 14],
+    // Half an hour off UTC, so the data starts in the middle of a column
+    ['Asia/Kolkata', '2026-10-13T12:00:00Z', 14],
+    // Five-hour columns do not divide a day: 20:00 to 00:00 is four hours
+    ['Europe/Berlin', '2026-03-29T12:00:00Z', 35],
+];
+
+function steadyChart(zone, at, baselineDays) {
+    const data = activity({ alert_type: 'volume_spike', subject: 'user@example.com', metric_value: 1, baseline_value: 4 },
+        { baselineDays, at: new Date(at) });
+    const h = harness(zone);
+    return { data, h, ...h.columns(data, '7d') };
+}
+
+test('each column counts only what falls in its own span, from the first quarter to the last', () => {
+    // The alert at 23:30 UTC on 2026-03-28: the last column runs from 00:00 CET to
+    // the end of the data at 01:30 UTC (03:30 CEST), two and a half real hours
+    const { cols: lastDay } = steadyChart(...steadyCases[1]);
+    const last = lastDay[lastDay.length - 1];
+    assert.equal(last.start.toISOString(), '2026-03-28T23:00:00.000Z');
+    assert.equal(last.end.toISOString(), '2026-03-29T01:30:00.000Z');
+    assert.equal(last.count, 10);
+    for (const [zone, at, days] of steadyCases) {
+        const { data, cols } = steadyChart(zone, at, days);
+        const label = `${zone}, ${at}, ${days} days`;
+        assert.equal(cols[0].start.toISOString(), new Date(data.buckets[0].start).toISOString(), `${label}: the first column starts with the data`);
+        const lastQuarter = Date.parse(data.buckets[data.buckets.length - 1].start) + data.bucket_minutes * 60000;
+        assert.equal(cols[cols.length - 1].end.getTime(), lastQuarter, `${label}: the last column ends with the data`);
+        for (const [i, c] of cols.entries()) {
+            if (cols[i + 1]) assert.equal(c.end.getTime(), cols[i + 1].start.getTime(), `${label}: ${c.start.toISOString()} ends where the next starts`);
+            const inside = data.buckets.filter(b => Date.parse(b.start) >= c.start && Date.parse(b.start) < c.end);
+            assert.equal(c.count, inside.reduce((n, b) => n + b.count, 0), `${label}: ${c.start.toISOString()}`);
+        }
+    }
+});
+
+const drawnColumns = html => [...html.matchAll(/<span class="ui-aa-col[^"]*" data-tip="([^"]*)"[^>]*><i style="height:([\d.]+)%"><\/i>(?:<b class="ui-aa-norm" style="bottom:([\d.]+)%"><\/b>)?<\/span>/g)];
+
+test('normal traffic sits on the usual level of every column, also one a clock change made longer or shorter', () => {
+    // 00:00 CET to 04:00 CEST on 2026-03-29 is three real hours: 12 messages are usual there, not a rise
+    {
+        const { data, h } = steadyChart(...steadyCases[0]);
+        const html = h.render(data, '7d');
+        const line = html.match(/<div class="ui-aa-usual" style="bottom:([\d.]+)%"/);
+        const [tip, bar, own] = drawnColumns(html).find(c => c[1].startsWith('Sun, Mar 29, 00:00')).slice(1);
+        assert.match(tip, /^Sun, Mar 29, 00:00: 12 sent in 3 hours$/);
+        assert.equal(Number(own ?? line?.[1]), Number(bar));
+    }
+    for (const [zone, at, days] of steadyCases) {
+        const { data, h } = steadyChart(zone, at, days);
+        const html = h.render(data, '7d');
+        const line = html.match(/<div class="ui-aa-usual" style="bottom:([\d.]+)%"/);
+        const cols = drawnColumns(html);
+        assert.ok(cols.length > 100, `${zone}, ${at}: the columns are drawn`);
+        for (const [, tip, bar, own] of cols) {
+            const usual = Number(own ?? line?.[1]);
+            assert.ok(Math.abs(Number(bar) - usual) < 1e-9, `${zone}, ${at}, ${days} days: "${tip}" is at ${bar}%, its usual level at ${usual}%`);
+        }
+    }
 });

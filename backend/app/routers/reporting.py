@@ -8,8 +8,10 @@ from datetime import datetime, timedelta, timezone
 from typing import Dict, Any, List, Tuple
 
 from ..database import get_db_context
+from ..app_time import as_utc, zone_label
 from ..config import settings
 from ..services.smtp_service import send_notification_email
+from ..utils import format_datetime_for_api
 
 # Import existing API functions
 from .mailbox_stats import get_mailbox_stats_summary, get_all_mailbox_stats
@@ -128,7 +130,7 @@ async def get_system_summary_data() -> Dict[str, Any]:
         quarantine_count = 0
 
     return {
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": format_datetime_for_api(datetime.now(timezone.utc)),
         "traffic": traffic_data,
         "system": system_data,
         "storage": storage_data,
@@ -170,6 +172,17 @@ def _listed_on(host) -> List[str]:
     return [str(r.get('name', 'Unknown')) for r in host.get('results', []) if r.get('listed')]
 
 
+def _summary_window(traffic: Dict[str, Any], now: datetime) -> Tuple[datetime, datetime]:
+    """The window the traffic counts cover, as the statistics reported it;
+    the 7 days up to now when they did not."""
+    try:
+        return tuple(datetime.fromisoformat(traffic[key].replace('Z', '+00:00'))
+                     for key in ('start_date', 'end_date'))
+    except (KeyError, AttributeError, TypeError, ValueError):
+        moment = as_utc(now)
+        return moment - timedelta(days=7), moment
+
+
 def build_summary_email(data: Dict[str, Any], now: datetime = None) -> Tuple[str, str, str]:
     """Subject, plain text and HTML of the weekly summary."""
     from ..services import email_layout as e
@@ -184,8 +197,11 @@ def build_summary_email(data: Dict[str, Any], now: datetime = None) -> Tuple[str
     queue = data['queue']['count']
     quarantine = data['quarantine']['count']
 
-    start = now - timedelta(days=6)
-    period = f"{e.format_date(start)} to {e.format_date(now)}"
+    start, end = _summary_window(traffic, now)
+    # The exact window the counts cover: a rolling 7 days up to when they were read.
+    # The zone is named once, or at both ends when daylight saving changed in between.
+    same_zone = zone_label(start) == zone_label(end)
+    period = f"{e.format_date(start, time=True, zone=not same_zone)} to {e.format_date(end, time=True)}"
     listed = [h for h in hosts if h.get('status') == 'listed']
     rate = traffic.get('failure_rate', 0) or 0
     rate_high = rate > 5

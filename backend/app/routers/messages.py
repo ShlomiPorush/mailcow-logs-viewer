@@ -14,8 +14,9 @@ from typing import List, Optional
 from ..database import get_db
 from ..models import MessageCorrelation, PostfixLog, RspamdLog, NetfilterLog, RawServiceLog
 from ..config import settings
+from ..app_time import range_bound
 from ..services.dovecot_parser import parse_dovecot_message
-from ..utils import internal_error, format_datetime_for_api as format_datetime_utc
+from ..utils import internal_error, format_datetime_for_api as format_datetime_utc, RangeStart, RangeEnd
 
 logger = logging.getLogger(__name__)
 
@@ -270,9 +271,9 @@ def get_message_facets(
     status: Optional[str] = Query(None),
     user: Optional[str] = Query(None),
     ip: Optional[str] = Query(None),
-    start_date: Optional[datetime] = Query(None),
-    end_date: Optional[datetime] = Query(None),
-    since: List[str] = Query([], description="Time ranges to count, as name:ISO-start (e.g. today:2026-09-27T00:00:00Z)"),
+    start_date: Optional[RangeStart] = Query(None),
+    end_date: Optional[RangeEnd] = Query(None),
+    since: List[str] = Query([], description="Time ranges to count, as name:start, an ISO instant or a YYYY-MM-DD day (e.g. today:2026-09-27T00:00:00Z)"),
     db: Session = Depends(get_db)
 ):
     """
@@ -307,7 +308,8 @@ def get_message_facets(
                 if not re.fullmatch(r'[a-z0-9]{1,16}', name):
                     continue
                 try:
-                    start = datetime.fromisoformat(iso.replace('Z', '+00:00'))
+                    # An instant, or a date: the start of that day in the app's time zone
+                    start = range_bound(iso, end=False)
                 except ValueError:
                     continue
                 by_time[name] = _count_messages(_filtered_messages_query(db, direction=direction, status=status, start_date=start, **undated))
@@ -329,8 +331,8 @@ def get_unified_messages(
     status: Optional[str] = Query(None, description="Filter by status"),
     user: Optional[str] = Query(None, description="Filter by authenticated user"),
     ip: Optional[str] = Query(None, description="Filter by source IP"),
-    start_date: Optional[datetime] = Query(None, description="Start date"),
-    end_date: Optional[datetime] = Query(None, description="End date"),
+    start_date: Optional[RangeStart] = Query(None, description="Start date"),
+    end_date: Optional[RangeEnd] = Query(None, description="End date"),
     db: Session = Depends(get_db)
 ):
     """

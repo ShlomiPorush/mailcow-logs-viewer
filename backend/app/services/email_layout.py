@@ -28,6 +28,8 @@ from html import escape
 from pathlib import Path
 from typing import Iterable, Optional, Sequence, Tuple, Union
 
+from .. import app_time
+
 
 class Safe(str):
     """Markup produced by this module; inserted without escaping."""
@@ -76,18 +78,19 @@ def _e(value, cls: str = 'm-ink') -> str:
 
 
 def local_now() -> datetime:
-    """Now, in the timezone set in TZ, like the dates in the app."""
-    from zoneinfo import ZoneInfo
-    try:
-        from ..config import settings
-        return datetime.now(ZoneInfo(settings.tz or 'UTC'))
-    except Exception:
-        return datetime.now(ZoneInfo('UTC'))
+    """Now, in the app's time zone, like the dates in the app."""
+    return app_time.local_now()
 
 
-def format_date(when: datetime, time: bool = False) -> str:
-    """Day/month/year, as the old emails and the numeric dates in the app."""
-    return when.strftime('%d/%m/%Y %H:%M' if time else '%d/%m/%Y')
+def format_date(when: datetime, time: bool = False, zone: bool = True) -> str:
+    """Day/month/year in the app's time zone, as the numeric dates in the app.
+    With the time, the zone follows it (13:00 CET) unless zone is False.
+    A naive value is a stored one, so it is UTC."""
+    local = app_time.to_local(when)
+    if not time:
+        return local.strftime('%d/%m/%Y')
+    text = local.strftime('%d/%m/%Y %H:%M')
+    return f"{text} {app_time.zone_label(local)}" if zone else text
 
 
 def _lines(value, cls: str = 'm-ink') -> str:

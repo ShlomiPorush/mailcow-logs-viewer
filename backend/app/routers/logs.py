@@ -16,7 +16,8 @@ from ..mailcow_api import MailcowRwKeyError, mailcow_api
 from ..config import settings
 from ..services import geoip_service, protection_rules, security_addresses
 from ..services.security_addresses import netfilter_service  # noqa: F401  (tests import it from here)
-from ..utils import internal_error, format_datetime_for_api as format_datetime_utc
+from ..app_time import as_utc
+from ..utils import internal_error, format_datetime_for_api as format_datetime_utc, RangeStart, RangeEnd
 
 logger = logging.getLogger(__name__)
 
@@ -72,7 +73,7 @@ def get_postfix_logs_by_queue(
             "logs": [
                 {
                     "id": log.id,
-                    "time": log.time.isoformat(),
+                    "time": format_datetime_utc(log.time),
                     "program": log.program,
                     "priority": log.priority,
                     "message": log.message,
@@ -104,8 +105,8 @@ def get_postfix_logs(
     recipient: Optional[str] = Query(None, description="Filter by recipient"),
     status: Optional[str] = Query(None, description="Filter by status"),
     queue_id: Optional[str] = Query(None, description="Filter by queue ID"),
-    start_date: Optional[datetime] = Query(None, description="Start date"),
-    end_date: Optional[datetime] = Query(None, description="End date"),
+    start_date: Optional[RangeStart] = Query(None, description="Start date"),
+    end_date: Optional[RangeEnd] = Query(None, description="End date"),
     db: Session = Depends(get_db)
 ):
     """
@@ -227,7 +228,7 @@ def get_postfix_logs(
 
         # Convert time to ISO format
         for result in results:
-            result["time"] = result["time"].isoformat()
+            result["time"] = format_datetime_utc(result["time"])
 
         return {
             "total": total,
@@ -252,8 +253,8 @@ def get_rspamd_logs(
     max_score: Optional[float] = Query(None),
     action: Optional[str] = Query(None),
     is_spam: Optional[bool] = Query(None),
-    start_date: Optional[datetime] = Query(None),
-    end_date: Optional[datetime] = Query(None),
+    start_date: Optional[RangeStart] = Query(None),
+    end_date: Optional[RangeEnd] = Query(None),
     db: Session = Depends(get_db)
 ):
     """
@@ -312,7 +313,7 @@ def get_rspamd_logs(
             "data": [
                 {
                     "id": log.id,
-                    "time": log.time.isoformat(),
+                    "time": format_datetime_utc(log.time),
                     "message_id": log.message_id,
                     "subject": log.subject,
                     "size": log.size,
@@ -512,8 +513,8 @@ def get_netfilter_logs(
     username: Optional[str] = Query(None),
     action: Optional[str] = Query(None),
     country_code: Optional[str] = Query(None, description="Filter by country code (e.g., US, IL)"),
-    start_date: Optional[datetime] = Query(None),
-    end_date: Optional[datetime] = Query(None),
+    start_date: Optional[RangeStart] = Query(None),
+    end_date: Optional[RangeEnd] = Query(None),
     db: Session = Depends(get_db)
 ):
     """
@@ -1161,18 +1162,14 @@ async def get_quarantine():
                 if isinstance(item['created'], (int, float)):
                     # Convert Unix timestamp to ISO format with 'Z' suffix
                     dt = datetime.fromtimestamp(item['created'], tz=timezone.utc)
-                    item['created'] = dt.replace(microsecond=0).isoformat().replace('+00:00', 'Z')
-                    # Store the numeric value for sorting
-                    item['_created_timestamp'] = item['created']
+                    item['created'] = format_datetime_utc(dt)
+                    # Sort on the number, like the ISO branch (not on the string)
+                    item['_created_timestamp'] = dt.timestamp()
                 elif isinstance(item['created'], str):
                     # Parse ISO string and ensure it has 'Z' suffix for UTC
                     try:
-                        dt = datetime.fromisoformat(item['created'].replace('Z', '+00:00'))
-                        if dt.tzinfo is None:
-                            dt = dt.replace(tzinfo=timezone.utc)
-                        else:
-                            dt = dt.astimezone(timezone.utc)
-                        item['created'] = dt.replace(microsecond=0).isoformat().replace('+00:00', 'Z')
+                        dt = as_utc(datetime.fromisoformat(item['created'].replace('Z', '+00:00')))
+                        item['created'] = format_datetime_utc(dt)
                         # Store the datetime object for sorting
                         item['_created_timestamp'] = dt.timestamp()
                     except (ValueError, AttributeError):
@@ -1397,8 +1394,8 @@ def get_message_details(
             "subject": correlation.subject,
             "direction": correlation.direction,
             "final_status": correlation.final_status,
-            "first_seen": correlation.first_seen.isoformat() if correlation.first_seen else None,
-            "last_seen": correlation.last_seen.isoformat() if correlation.last_seen else None,
+            "first_seen": format_datetime_utc(correlation.first_seen),
+            "last_seen": format_datetime_utc(correlation.last_seen),
             "rspamd": {
                 "score": rspamd_log.score,
                 "required_score": rspamd_log.required_score,
@@ -1410,7 +1407,7 @@ def get_message_details(
             } if rspamd_log else None,
             "postfix": [
                 {
-                    "time": log.time.isoformat(),
+                    "time": format_datetime_utc(log.time),
                     "program": log.program,
                     "message": log.message,
                     "status": log.status,
@@ -1419,11 +1416,15 @@ def get_message_details(
                 }
                 for log in postfix_logs
             ],
-            "timeline": sorted([
-                {"time": correlation.first_seen, "event": "Message received"},
-                *[{"time": log.time, "event": f"Postfix: {log.status}"} for log in postfix_logs if log.status],
-                {"time": rspamd_log.time, "event": f"Rspamd: {rspamd_log.action}"} if rspamd_log else None
-            ], key=lambda x: x["time"] if x else datetime.min) if correlation.first_seen else []
+            # Sorted on the stored times, then sent as UTC with Z like every other time
+            "timeline": [
+                dict(event, time=format_datetime_utc(event["time"])) if event else None
+                for event in sorted([
+                    {"time": correlation.first_seen, "event": "Message received"},
+                    *[{"time": log.time, "event": f"Postfix: {log.status}"} for log in postfix_logs if log.status],
+                    {"time": rspamd_log.time, "event": f"Rspamd: {rspamd_log.action}"} if rspamd_log else None
+                ], key=lambda x: x["time"] if x else datetime.min)
+            ] if correlation.first_seen else []
         }
     except HTTPException:
         raise

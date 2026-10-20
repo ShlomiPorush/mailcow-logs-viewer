@@ -48,9 +48,9 @@ function dmarcNum(value) {
     return (Number(value) || 0).toLocaleString();
 }
 
+// A report day from the server, already a day in the app's zone, named as it is
 function dmarcDay(date, long = false) {
-    const d = new Date(`${date}T00:00:00`);
-    return d.toLocaleDateString('en-US', long ? { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' } : { month: 'short', day: 'numeric' });
+    return formatDayKey(date, long ? { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' } : { month: 'short', day: 'numeric' });
 }
 
 function dmarcTag(tone, label, solid = false) {
@@ -1181,7 +1181,7 @@ function renderReportsDomains() {
         content.innerHTML = '';
         return;
     }
-    const day = ts => ts ? new Date(ts * 1000).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '-';
+    const day = ts => ts ? formatInZone(ts * 1000, { month: 'short', day: 'numeric', year: 'numeric' }, 'en-US') : '-';
     content.innerHTML = `
         <h4 class="ui-md-h">Reports by domain</h4>
         ${allowDelete ? '' : `<div class="ui-list-note ui-flush">${uiLocked('Deleting reports is off', 'Turn on report deletion in Settings, DMARC.',
@@ -1315,8 +1315,9 @@ function renderReportsManagementTable(reports, allowDelete, { total, page, total
         ${pageButton('Next', page + 1, page === totalPages)}
         ${pageButton('Last', totalPages, page === totalPages)}
     </nav>` : '';
-    const dateTime = value => value ? new Date(value).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '-';
-    const day = ts => ts ? new Date(ts * 1000).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '-';
+    // Import Date is an instant, the period two epochs: all shown in the app's zone
+    const dateTime = value => value ? formatInZone(value, { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' }, 'en-US') : '-';
+    const day = ts => ts ? formatInZone(ts * 1000, { month: 'short', day: 'numeric' }, 'en-US') : '-';
     const cols = allowDelete
         ? '--ui-cols: minmax(150px, 1.2fr) 70px minmax(140px, 1.2fr) minmax(120px, 1fr) 70px minmax(110px, .9fr) 80px'
         : '--ui-cols: minmax(150px, 1.2fr) 70px minmax(140px, 1.2fr) minmax(120px, 1fr) 70px minmax(110px, .9fr)';

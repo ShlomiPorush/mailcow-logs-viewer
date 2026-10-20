@@ -9,13 +9,15 @@ Usage (from smoke.sh): docker exec -i -w /app <app> python - < smoke_seed.py
 """
 import hashlib
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from app.database import SessionLocal
 from app import models as m
 
 NOW = datetime.utcnow()
 ago = lambda **kw: NOW - timedelta(**kw)
+# Unix seconds of a naive UTC time (timestamp() alone would read it as the container's local time)
+epoch = lambda dt: int(dt.replace(tzinfo=timezone.utc).timestamp())
 sha = lambda s: hashlib.sha256(s.encode()).hexdigest()
 
 # (sender, recipient, subject, direction, final status, score, rspamd action, postfix status, dsn)
@@ -97,7 +99,7 @@ def seed_security(db):
 
 def seed_dmarc(db):
     for i, (org, fail) in enumerate([('reporter-a.example.net', False), ('reporter-b.example.net', True)]):
-        begin = int(ago(days=2 + i).timestamp())
+        begin = epoch(ago(days=2 + i))
         rep = m.DMARCReport(
             report_id=f'smoke-dmarc-{i}', domain='example.com', org_name=org, email=f'noreply-dmarc@{org}',
             begin_date=begin, end_date=begin + 86400,
@@ -135,8 +137,8 @@ def seed_mailboxes(db):
         db.add(m.MailboxStatistics(
             username=user, domain=user.split('@')[1], name=user.split('@')[0].title(),
             quota=5 * 1024 ** 3, quota_used=(i + 1) * 700 * 1024 ** 2, percent_in_use=(i + 1) * 13.7,
-            messages=1200 * (i + 1), active=True, last_imap_login=int(ago(hours=i + 1).timestamp()),
-            last_smtp_login=int(ago(hours=i + 2).timestamp()), attributes={}))
+            messages=1200 * (i + 1), active=True, last_imap_login=epoch(ago(hours=i + 1)),
+            last_smtp_login=epoch(ago(hours=i + 2)), attributes={}))
     db.add(m.AliasStatistics(alias_address='info@example.com', goto='dana@example.com', domain='example.com',
                              primary_mailbox='dana@example.com'))
     db.add(m.AliasStatistics(alias_address='@example.org', goto='noa@example.org', domain='example.org',
@@ -187,7 +189,7 @@ def seed_status_and_lists(db):
             'postfix/smtpd[311]: disconnect from unknown[198.51.100.23]']):
         db.add(m.RawServiceLog(service='postfix', time=ago(minutes=3 + i), message_hash=sha(line),
                                raw_data={'message': line, 'priority': 'info', 'program': 'postfix/smtpd',
-                                         'time': str(int(ago(minutes=3 + i).timestamp()))}))
+                                         'time': str(epoch(ago(minutes=3 + i)))}))
 
 
 def main():

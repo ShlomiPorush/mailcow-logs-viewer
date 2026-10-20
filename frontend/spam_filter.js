@@ -674,9 +674,7 @@ async function createSuppression() {
     let expiresAt = null;
     if (!permanent) {
         const days = parseInt(document.getElementById('new-suppression-expiry-days')?.value) || 7;
-        const d = new Date();
-        d.setDate(d.getDate() + days);
-        expiresAt = d.toISOString();
+        expiresAt = addDaysInZone(new Date(), days).toISOString();
     }
     
     try {
@@ -719,7 +717,8 @@ function showEditSuppressionModalById(id) {
 
 function showEditSuppressionModal(s) {
     const isPermanent = !s.expires_at;
-    const currentExpiry = s.expires_at ? new Date(s.expires_at).toISOString().slice(0, 16) : '';
+    // The expiry field holds a wall time in the app's zone; saving reads it back the same way
+    const currentExpiry = s.expires_at ? toZonedInputValue(s.expires_at) : '';
 
     suppressionDialog('edit-suppression-modal', 'Edit Suppression', `
         <p class="ui-mono ui-muted">${escapeHtml(s.email)}</p>
@@ -739,7 +738,7 @@ function showEditSuppressionModal(s) {
             </label>
             <div id="edit-suppression-expiry-row" class="ui-form-sub ${isPermanent ? 'hidden' : ''}">
                 <label><span class="ui-label">Expiry date & time</span>
-                    <input type="datetime-local" id="edit-suppression-expiry" value="${currentExpiry}" class="ui-input">
+                    <input type="datetime-local" id="edit-suppression-expiry" value="${currentExpiry}" data-shown="${currentExpiry}" class="ui-input">
                 </label>
                 <div class="ui-chip-row">
                     <button onclick="extendExpiryBy(7)" class="ui-chip">+7 days</button>
@@ -765,11 +764,7 @@ function toggleEditExpiryField() {
             row.classList.remove('hidden');
             // If no date set, default to 7 days from now
             const input = document.getElementById('edit-suppression-expiry');
-            if (input && !input.value) {
-                const d = new Date();
-                d.setDate(d.getDate() + 7);
-                input.value = d.toISOString().slice(0, 16);
-            }
+            if (input && !input.value) input.value = toZonedInputValue(addDaysInZone(new Date(), 7));
         }
     }
 }
@@ -777,9 +772,8 @@ function toggleEditExpiryField() {
 function extendExpiryBy(days) {
     const input = document.getElementById('edit-suppression-expiry');
     if (!input) return;
-    const base = input.value ? new Date(input.value) : new Date();
-    base.setDate(base.getDate() + days);
-    input.value = base.toISOString().slice(0, 16);
+    const base = fromZonedInputValue(input.value) || new Date();
+    input.value = toZonedInputValue(addDaysInZone(base, days));
 }
 
 async function saveEditSuppression(id) {
@@ -790,12 +784,16 @@ async function saveEditSuppression(id) {
     if (permanent) {
         expiresAt = 'null';  // clear expiry = permanent
     } else {
-        const val = document.getElementById('edit-suppression-expiry')?.value;
-        if (!val) {
+        const input = document.getElementById('edit-suppression-expiry');
+        const expiry = fromZonedInputValue(input?.value);
+        if (!expiry) {
             showToast('Please set an expiry date', 'error');
             return;
         }
-        expiresAt = new Date(val).toISOString();
+        // The field holds whole minutes: an expiry nobody touched is not sent,
+        // so it keeps its seconds
+        const wasPermanent = !(suppressionItemsById.get(id) || {}).expires_at;
+        expiresAt = !wasPermanent && input.value === input.dataset.shown ? undefined : expiry.toISOString();
     }
     
     try {
