@@ -172,7 +172,12 @@ function idPages(files) {
 // touches (majority vote), then from its name, then from the file.
 function pageOf(file, idx, files) {
     if (file.name === 'index.html') return htmlPageAt(file.text, idx);
-    if (PAGE_BY_FILE[file.name] && file.name !== 'app.js') return PAGE_BY_FILE[file.name];
+    if (PAGE_BY_FILE[file.name] && file.name !== 'app.js') {
+        // spam_filter.js holds the Rspamd maps editor too, a tab of Quarantine
+        const fnName = (containingFunction(file.text, idx) || {}).name || '';
+        if (file.name === 'spam_filter.js' && /rspamd|map|regex/i.test(fnName)) return 'Quarantine';
+        return PAGE_BY_FILE[file.name];
+    }
     // Inside a function: its whole body. Top-level code: the statement around idx.
     const fn = containingFunction(file.text, idx) || { name: '', start: idx, end: Math.min(file.text.length, idx + 800) };
     {

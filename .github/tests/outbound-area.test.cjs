@@ -249,3 +249,16 @@ test('falling back from a tab that is off replaces the history entry instead of 
     a.context.switchTab('quarantine', { sub: 'messages' });
     assert.deepEqual(plain(a.synced), [{ route: 'quarantine', sub: 'maps', replace: true }]);
 });
+
+test('opening the Queue tab loads the queue again, as opening the page did', () => {
+    const a = loadApp([]);
+    const loaded = [];
+    a.context.loadQueue = () => loaded.push('queue');
+    a.context.loadSuppressionsTab = () => loaded.push('suppressions');
+    a.context.loadSuppressionStats = () => loaded.push('stats');
+    a.context.switchTab('outbound', { sub: 'suppressions' });
+    assert.deepEqual(loaded, ['queue', 'suppressions'], 'the page: the queue for its summary, the list of its tab');
+    loaded.length = 0;
+    a.context.outboundShowTab('queue');
+    assert.deepEqual(loaded, ['queue']);
+});

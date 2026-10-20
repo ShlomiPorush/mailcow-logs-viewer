@@ -3250,7 +3250,10 @@ function outboundShowTab(tab, load = true) {
     outboundTab = tab;
     routerSyncSubpage('outbound', tab, tab !== asked);
     showPageTab('outbound', tab);
-    if (load && tab === 'suppressions' && currentTab === 'outbound') loadSuppressionsTab();
+    if (!load || currentTab !== 'outbound') return;
+    // An opened tab shows what is there now, as the page did on its own
+    if (tab === 'suppressions') loadSuppressionsTab();
+    else if (!isFeatureDisabled('queue')) loadQueue();
 }
 
 // The page opened: the queue (also for the summary and the sidebar counter),

@@ -252,3 +252,23 @@ def test_the_old_name_of_the_switch_still_deletes_the_list(purge_client, creds):
     resp = purge_client.post('/api/settings/purge-feature-data', json={'feature': 'spam-filter', 'rspamd': 'keep'})
     assert resp.status_code == 200 and resp.json()['feature'] == 'suppressions'
     assert _mine() == [] and creds == []
+
+
+def test_the_old_name_refuses_a_remove_whose_save_was_switched_again(purge_client, creds):
+    """A Remove carries the token of the save that turned the list off; once
+    another save turned it off again, that token is stale, also under the old name."""
+    from app.database import get_db_context
+    from app.services.feature_data import _set_key
+    from app.models import SystemSetting
+    with get_db_context() as db:
+        _set_key(db, 'spam_filter.off_transition', 'the-newer-save')
+        db.commit()
+    try:
+        resp = purge_client.post('/api/settings/purge-feature-data',
+                                 json={'feature': 'spam-filter', 'rspamd': 'remove', 'transition': 'an-older-save'})
+        assert resp.status_code == 409 and resp.json()['detail']['code'] == 'transition_changed'
+        assert len(_mine()) == 2 and creds == [], 'nothing removed from Rspamd, nothing deleted'
+    finally:
+        with get_db_context() as db:
+            db.query(SystemSetting).filter(SystemSetting.key == 'spam_filter.off_transition').delete()
+            db.commit()
