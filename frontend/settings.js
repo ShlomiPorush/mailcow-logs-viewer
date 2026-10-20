@@ -240,7 +240,6 @@ var SETTINGS_FIELD_DESCRIPTIONS = {
     correlation_check_interval: 'Seconds between correlation completion checks. Default: 120.',
     app_port: 'Application port (internal container port). Default: 8080.',
     log_level: 'Log level: DEBUG, INFO, WARNING, ERROR, CRITICAL. Default: WARNING.',
-    tz: 'Timezone for log display (e.g. Europe/London, America/New_York). Default: UTC.',
     app_title: 'Application title (shown in browser tab).',
     app_logo_url: 'Logo URL (optional; leave empty to use the default project icon).',
     debug: 'Enable debug mode (shows detailed errors). Use only for development. Never enable in production. Default: false.',
@@ -300,8 +299,8 @@ var SETTINGS_FIELD_DESCRIPTIONS = {
     maxmind_account_id: 'MaxMind Account ID for GeoIP database downloads. Required to download GeoLite2 databases.',
     maxmind_license_key: 'MaxMind License Key for GeoIP database downloads. Required to download GeoLite2 databases. Keep this secret.',
     disabled_features: 'Disable features to hide their pages and stop their background jobs. Core features (Dashboard, Messages, Settings, Status) are always enabled.',
-    raw_logs_enabled: 'Collect the services ticked below for the Logs page. When disabled, the Logs page shows historical data only. The services other pages read (listed under Services) are collected either way.',
-    raw_logs_fetch_interval: 'Seconds between raw log fetch cycles. Lower = more frequent updates. Default: 20.',
+    raw_logs_enabled: 'Collect the services ticked below for the Logs page. When off, the Logs page says collection is off and shows no logs. The services other pages read (listed under Services) are collected either way.',
+    raw_logs_fetch_interval: 'Seconds between raw log fetch cycles. Lower = more frequent updates. Default: 30.',
     raw_logs_fetch_count: 'Number of log entries to fetch per service per cycle. Higher values catch more logs but increase API load. Default: 1000.',
     raw_logs_retention_days: 'Days to keep raw logs in the database. Older logs are automatically deleted at 3:00 AM daily. Default: 2.',
     eas_devices_retention_days: 'Days to keep a device that stopped syncing before it is removed from the Devices page. 0 keeps every device. Default: 90.',
@@ -956,7 +955,7 @@ function renderSettings(content, data) {
     const editing = !!(data.settings_edit_via_ui_enabled && data.editable_config);
     content.innerHTML = `
         ${!data.settings_edit_via_ui_enabled ? `<div class="ui-list-note ui-flush">${uiLocked('Editing settings is off',
-            'These values come from the environment and are shown read-only. To change them here, set <code>SETTINGS_EDIT_VIA_UI_ENABLED=true</code> and restart the container.', '')}</div>` : ''}
+            'These values come from the environment and are shown read-only. To change them here, set <code>SETTINGS_EDIT_VIA_UI_ENABLED=true</code> in <code>.env</code> and run <code>docker compose up -d</code>. A restart does not read <code>.env</code> again.', '')}</div>` : ''}
 
         ${!data.settings_edit_via_ui_enabled ? `
         <section class="ui-panel">
@@ -2056,7 +2055,7 @@ function updateConnectionTestModal(status, logs) {
 
     const ok = status === 'success';
     content.innerHTML = `
-        <div class="ui-md-verdict-bar ${ok ? 'ui-md-verdict-ok' : 'ui-md-verdict-fail'}">${ok ? '✓ Connection Successful' : '✗ Connection Failed'}</div>
+        <div class="ui-md-verdict-bar ${ok ? 'ui-md-verdict-ok' : 'ui-md-verdict-fail'}">${ok ? 'Connection Successful' : 'Connection Failed'}</div>
         <div class="ui-set-log">
             ${logs.map(log => {
         let tone = '';

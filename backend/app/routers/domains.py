@@ -858,8 +858,8 @@ async def check_dkim_record(domain: str) -> Dict[str, Any]:
 
             dkim_params = parse_dkim_parameters(actual_record)
 
-            warnings = [f"❌ {m}" for m in comparison['mismatches']]
-            warnings += [f"⚠️ {d}" for d in comparison['differences']]
+            warnings = [f"Error: {m}" for m in comparison['mismatches']]
+            warnings += list(comparison['differences'])
             info_messages = []
             critical_issues = []
 
@@ -867,9 +867,9 @@ async def check_dkim_record(domain: str) -> Dict[str, Any]:
                 if issue['level'] == 'critical':
                     critical_issues.append(f"{issue['message']} - {issue['description']}")
                 elif issue['level'] == 'error':
-                    warnings.append(f"❌ {issue['message']}")
+                    warnings.append(f"Error: {issue['message']}")
                 elif issue['level'] == 'warning':
-                    warnings.append(f"⚠️ {issue['message']}")
+                    warnings.append(issue['message'])
             
             for item in dkim_params['info']:
                 info_messages.append(item['message'])

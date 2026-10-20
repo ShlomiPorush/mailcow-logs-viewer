@@ -1163,7 +1163,7 @@ function securityCardBody(key) {
         const envLocked = k => securityAppSettings && (securityAppSettings.env_locked_keys || []).includes(k);
         const revoke = securityAbuseValue('smtp_abuse_revoke_app_passwords');
         return `
-            ${securityAppSettings && !securityAppSettings.settings_edit_via_ui_enabled ? uiLocked('Editing settings is off', 'These values come from the environment and are shown read-only. To change them here, set <code>SETTINGS_EDIT_VIA_UI_ENABLED=true</code> and restart the container.') : ''}
+            ${securityAppSettings && !securityAppSettings.settings_edit_via_ui_enabled ? uiLocked('Editing settings is off', 'These values come from the environment and are shown read-only. To change them here, set <code>SETTINGS_EDIT_VIA_UI_ENABLED=true</code> in <code>.env</code> and run <code>docker compose up -d</code>. A restart does not read <code>.env</code> again.') : ''}
             ${securityAppSettings && securityAppSettings.settings_edit_via_ui_enabled && !securityAppSettings.settings_migrated
                 ? uiLocked('Settings are not migrated yet', 'These values are read-only until the configuration is copied into the database: click <strong>Migrate Settings from ENV</strong> on the Settings page.', `<button type="button" class="ui-btn ui-btn-sm" onclick="navigateTo('settings')">Open Settings</button>`) : ''}
             <div class="ui-sec-fields">
@@ -1243,7 +1243,7 @@ function securityCardHtml(key) {
         toggle = securityToggle(name, on, !editable, `setSecurityAbuse('smtp_abuse_enabled', this.checked)`, editable ? ''
             : securityAppSettings && securityAppSettings.settings_edit_via_ui_enabled && !securityAppSettings.settings_migrated ? 'Settings are not migrated yet' : 'Editing settings is off');
         status = `${!on ? '' : mailcowRwConfigured ? uiTag('Stops mailboxes', 'fail') : uiTag('Needs a Read-Write key', '')}<span class="ui-tag ui-tag-warn ui-tab-tag" title="This feature is new - please report any issues on GitHub">Beta</span>
-            <button type="button" onclick="event.stopPropagation(); showHelpModal('Abuse_Protection')" class="ui-icon-btn ui-help-btn" title="Help - Abuse Protection" aria-label="Help - Abuse Protection"><svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg></button>`;
+            <button type="button" onclick="event.stopPropagation(); showHelpModal('Abuse_Protection', 'Outgoing spam')" class="ui-icon-btn ui-help-btn" title="Help - Outgoing spam" aria-label="Help - Outgoing spam"><svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg></button>`;
         sentence = securityAbuseSentence(open);
     } else {
         if (protectionLoadError) return securityCardShell(key, name, open, '', '', '', `<p class="ui-text-fail">Failed to load the protection rules: ${escapeHtml(protectionLoadError)}</p>`, '');

@@ -127,9 +127,11 @@ def record_security_alert(email: str, count: int, revoked: int, automatic: bool)
         f"SMTP sending was disabled for {email} after {count} outbound messages "
         f"in {settings.smtp_abuse_window_minutes} minutes "
         f"(limit: {settings.smtp_abuse_threshold}).\n\n"
-        f"IMAP access is unchanged. App passwords revoked: {revoked}.\n"
+        + ("Its app passwords were revoked, so mail apps that signed in with one stop working. "
+           if revoked else "IMAP access is unchanged. ")
+        + f"App passwords revoked: {revoked}.\n"
         "Review the mailbox, reset its password, then re-enable SMTP from "
-        "Security → Abuse Protection."
+        "Security → Settings → Outgoing spam."
     )
     with get_db_context() as db:
         db.add(SecurityAlert(
@@ -236,7 +238,7 @@ async def _revoke_app_passwords(email: str) -> int:
     return len(ids)
 
 
-async def _notify_user_blocked(email: str, count: int) -> None:
+async def _notify_user_blocked(email: str, count: int, revoked: int = 0) -> None:
     """Tell the mailbox owner their SMTP was disabled (best effort)."""
     if not settings.notification_smtp_configured:
         logger.info("SMTP not configured - skipping user notification for %s", email)
@@ -251,8 +253,10 @@ async def _notify_user_blocked(email: str, count: int) -> None:
         f"{settings.smtp_abuse_window_minutes} minutes, above the limit of "
         f"{settings.smtp_abuse_threshold}. This usually means the account is "
         "compromised.\n\n"
-        "You can still receive and read mail (IMAP is unaffected).\n\n"
-        "Please change your password and revoke any app passwords you no "
+        + ("You can still receive mail. Your app passwords were removed, so a mail app "
+           "that used one needs a new one.\n\n"
+           if revoked else "You can still receive and read mail.\n\n")
+        + "Please change your password and revoke any app passwords you no "
         f"longer use, then contact {contact} to restore sending."
     )
     # The address and the help contact are mailbox names and settings, not
@@ -264,7 +268,9 @@ async def _notify_user_blocked(email: str, count: int) -> None:
               f"above the limit of {settings.smtp_abuse_threshold}. This usually means someone else "
               "is using the account.",
         blocks=[
-            e.banner('ok', 'You can still receive and read mail', 'Only sending is paused.'),
+            e.banner('ok', 'You can still receive and read mail',
+                     'Only sending is paused. Your app passwords were removed, so a mail app that '
+                     'used one needs a new one.' if revoked else 'Only sending is paused.'),
             e.panel('What to do', e.panel_text(
                 "1. Change your password.\n"
                 "2. Remove any app passwords you no longer use.\n"
@@ -310,8 +316,9 @@ async def _notify_operator_blocked(email: str, count: int, revoked: int) -> None
                 ('App passwords revoked', revoked),
             ]),
             e.banner('warn', 'What to do',
-                     "Secure the account, then turn sending back on from Security, Abuse Protection. "
-                     "Receiving mail (IMAP) still works."),
+                     "Secure the account, then turn sending back on from Security, Settings, Outgoing spam. "
+                     + ("Its app passwords were revoked, so mail apps that used one need a new one."
+                        if revoked else "Receiving mail (IMAP) still works.")),
         ],
         footer="SMTP abuse protection is on in Settings, SMTP Abuse.")
     await asyncio.to_thread(notify, subject, text, html, None, "security")
@@ -347,7 +354,7 @@ async def block_mailbox(email: str, count: int, automatic: bool = False,
     except Exception as e:
         logger.error("Could not notify operator about %s: %s", email, e)
     try:
-        await _notify_user_blocked(email, count)
+        await _notify_user_blocked(email, count, revoked)
     except Exception as e:
         logger.error("Could not notify %s: %s", email, e)
 

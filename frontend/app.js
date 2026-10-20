@@ -525,6 +525,8 @@ async function loadAppInfo() {
             console.log('Disabled features:', window.disabledFeatures);
             applyFeatureToggles();
         }
+        // With editing off the Settings page has no fields for the search to open
+        window.settingsEditable = data.settings_edit_via_ui_enabled !== false;
 
         // Load app version status for update check
         await loadAppVersionStatus();
@@ -1630,7 +1632,7 @@ function switchTab(tab, params = {}) {
             tabContent.classList.remove('hidden');
             tabContent.innerHTML = `
                 <div class="ui-disabled-page">
-                    ${uiLocked(`${featureLabel} is disabled`, 'This feature has been turned off by the administrator in Settings → Application → Features.',
+                    ${uiLocked(`${featureLabel} is disabled`, 'This feature has been turned off by the administrator in Settings → Features.',
                         `<button onclick="navigateTo('dashboard')" class="ui-btn ui-btn-primary">Go to Dashboard</button>`)}
                 </div>`;
         }
@@ -3251,8 +3253,8 @@ function _showQuarantineRuleModal(rule, prefill) {
                     </label>
                     <label><span class="ui-label">Action</span>
                         <select id="qrule-action" class="ui-select">
-                            <option value="release" ${defaultAction === 'release' ? 'selected' : ''}>✅ Release</option>
-                            <option value="delete" ${defaultAction === 'delete' ? 'selected' : ''}>🗑️ Delete</option>
+                            <option value="release" ${defaultAction === 'release' ? 'selected' : ''}>Release</option>
+                            <option value="delete" ${defaultAction === 'delete' ? 'selected' : ''}>Delete</option>
                         </select>
                     </label>
                 </div>
@@ -3466,7 +3468,7 @@ async function testQuarantineRules() {
                         <div class="ui-kpi"><b>${escapeHtml(String(data.total_matches))}</b>matched</div>
                         <div class="ui-kpi"><b class="ui-muted">${escapeHtml(String(data.total_quarantine))}</b>total</div>
                     </div>
-                    ${disabledCount > 0 ? `<p class="ui-text-warn">⚠ ${disabledCount} from disabled rules</p>` : ''}
+                    ${disabledCount > 0 ? `<p class="ui-text-warn">${disabledCount} from disabled rules</p>` : ''}
                     ${noMatches ? '<p class="ui-empty">No quarantine items matched any rules.</p>' : groupsHtml}
                     <p class="ui-kv-note ui-list-foot">This is a dry-run preview. No actions were taken.</p>
                 </div>
@@ -4235,7 +4237,7 @@ async function loadStatusExtended() {
         renderStatusImport(data.import_status || {});
 
         // Render Correlation Status
-        renderStatusCorrelation(data.correlation_status || {}, data.recent_incomplete_correlations || []);
+        renderStatusCorrelation(data.correlation_status || {}, data.recent_incomplete_correlations || [], (data.configuration || {}).max_correlation_age_minutes);
 
         // Render Background Jobs
         renderStatusJobs(data.background_jobs || {});
@@ -4560,7 +4562,7 @@ function renderStatusImport(imports) {
     `;
 }
 
-function renderStatusCorrelation(correlation, incompleteList) {
+function renderStatusCorrelation(correlation, incompleteList, maxAgeMinutes) {
     const container = document.getElementById('status-correlation');
     setStatusKpi('status-kpi-linking', `${correlation.completion_rate || 0}%`, correlation.incomplete ? 'warn' : '');
     const linkingNote = document.getElementById('status-kpi-linking-note');
@@ -4583,7 +4585,7 @@ function renderStatusCorrelation(correlation, incompleteList) {
                         <span class="ui-td ui-td-end ui-text-warn">${escapeHtml(String(item.age_minutes))}m ago</span>
                     </div>`).join('')}
             </div>
-            <p class="ui-kv-note ui-list-foot">These will be automatically completed or expired within 1-2 minutes</p>
+            <p class="ui-kv-note ui-list-foot">Each is linked when its delivery logs arrive, or marked expired once it is ${escapeHtml(String(maxAgeMinutes || 10))} minutes old.</p>
         </section>` : '';
 }
 
@@ -5021,7 +5023,8 @@ document.addEventListener('DOMContentLoaded', function () {
 // HELP DOCUMENTATION MODAL
 // =============================================================================
 
-async function showHelpModal(docName) {
+// title: the name the page shows, when it is not the document's file name
+async function showHelpModal(docName, title) {
     try {
         const response = await authenticatedFetch(`/api/docs/${docName}`);
 
@@ -5030,8 +5033,8 @@ async function showHelpModal(docName) {
         }
 
         const markdown = await response.text();
-        // The document's file name, read as words: Abuse_Protection is Abuse Protection
-        showMarkdownModal(`Help - ${docName.replace(/_/g, ' ')}`, markdown);
+        // Else the document's file name, read as words: Spam_Filter is Spam Filter
+        showMarkdownModal(`Help - ${title || docName.replace(/_/g, ' ')}`, markdown);
 
     } catch (error) {
         console.error('Failed to load help documentation:', error);

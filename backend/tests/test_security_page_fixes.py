@@ -144,3 +144,44 @@ def test_the_operator_alert_says_imap_is_unchanged_only_when_no_app_password_was
     asyncio.run(smtp_abuse_service._notify_operator_blocked('user@example.com', 500, revoked))
     assert ('IMAP access is unchanged' in sent['text']) is (revoked == 0)
     assert 'Abuse Protection' not in sent['text'] and 'Security → Settings → Outgoing spam' in sent['text']
+
+
+@pytest.mark.parametrize('revoked', [0, 2])
+def test_the_mailbox_owner_is_told_about_removed_app_passwords_only_when_they_were(monkeypatch, revoked):
+    from types import SimpleNamespace
+    from app.services import smtp_abuse_service, smtp_service
+    sent = {}
+    monkeypatch.setattr(smtp_abuse_service, 'settings', SimpleNamespace(
+        notification_smtp_configured=True, smtp_abuse_help_address='help@example.com', admin_email='',
+        smtp_abuse_window_minutes=60, smtp_abuse_threshold=100))
+    monkeypatch.setattr(smtp_service, 'send_notification_email',
+                        lambda to, subject, text, html: sent.update(text=text, html=html))
+    asyncio.run(smtp_abuse_service._notify_user_blocked('user@example.com', 500, revoked))
+    assert ('app passwords were removed' in sent['text']) is (revoked > 0)
+    assert ('app passwords were removed' in sent['html']) is (revoked > 0)
+    assert 'IMAP is unaffected' not in sent['text']
+
+
+@pytest.mark.parametrize('revoked', [0, 2])
+def test_the_dashboard_alert_says_imap_is_unchanged_only_when_no_app_password_was_revoked(monkeypatch, revoked):
+    from app.services import smtp_abuse_service
+    added = []
+
+    class FakeDb:
+        def add(self, row):
+            added.append(row)
+
+        def commit(self):
+            pass
+
+    class FakeContext:
+        def __enter__(self):
+            return FakeDb()
+
+        def __exit__(self, *exc):
+            return False
+
+    monkeypatch.setattr(smtp_abuse_service, 'get_db_context', FakeContext)
+    smtp_abuse_service.record_security_alert('user@example.com', 500, revoked, True)
+    detail = added[0].detail
+    assert ('IMAP access is unchanged' in detail) is (revoked == 0)

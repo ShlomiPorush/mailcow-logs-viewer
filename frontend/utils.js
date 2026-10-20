@@ -544,6 +544,11 @@ function copyToClipboard(text, event) {
         event.stopPropagation();
         event.preventDefault();
     }
+    // Browsers offer the clipboard only over HTTPS (and on localhost)
+    if (!navigator.clipboard) {
+        showToast('Copying needs HTTPS. Select the text and copy it yourself.', 'error');
+        return;
+    }
     navigator.clipboard.writeText(text).then(() => {
         showToast('Copied: ' + text, 'success');
         // Brief visual feedback on the icon

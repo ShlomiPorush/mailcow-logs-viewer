@@ -51,6 +51,8 @@ let gsDomainsAt = 0;
 function gsEl(id) { return document.getElementById(id); }
 
 function gsOff(category) {
+    // A setting result opens its field, which only the edit form has
+    if (category.id === 'settings' && window.settingsEditable === false) return true;
     return !!(category.feature && window.disabledFeatures && window.disabledFeatures.includes(category.feature));
 }
 

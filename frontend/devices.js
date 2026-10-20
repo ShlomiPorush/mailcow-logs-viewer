@@ -62,7 +62,7 @@ async function loadDevices(page) {
 function renderDevicesSummary(data) {
     const note = document.getElementById('devices-last-update');
     if (data.last_status === 'failed') {
-        note.innerHTML = '<span class="ui-text-warn">The last check failed. See Status → Background Jobs.</span>';
+        note.innerHTML = '<span class="ui-text-warn">The last check failed. See Status → Jobs.</span>';
     } else {
         note.textContent = data.last_run ? `Checked ${formatAgo(data.last_run)}` : 'Not checked yet';
         note.title = data.last_run ? formatTime(data.last_run) : '';

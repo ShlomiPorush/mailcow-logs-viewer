@@ -383,7 +383,7 @@ async function checkAllDomainsDNS() {
         const result = await response.json();
 
         if (result.status === 'success') {
-            showToast(`✓ Checked ${result.domains_checked} domains`, 'success');
+            showToast(`Checked ${result.domains_checked} domains`, 'success');
             setTimeout(() => loadDomains(), 1000);
         } else {
             showToast('DNS check failed', 'error');
@@ -416,7 +416,7 @@ async function checkSingleDomainDNS(domainName) {
         const result = await response.json();
 
         if (result.status === 'success') {
-            showToast(`✓ DNS checked for ${domainName}`, 'success');
+            showToast(`DNS checked for ${domainName}`, 'success');
 
             // Re-render only this domain's row, still open, with the new results
             const domainsResponse = await authenticatedFetch('/api/domains/all');
