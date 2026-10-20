@@ -1725,7 +1725,9 @@ button.ui-st-card:hover { outline: 1px solid var(--ui-line); }
 }
 
 /* ---------- Spam Filter (v3 language) ---------- */
-.ui-supp-table { --ui-cols: minmax(220px, 2fr) minmax(150px, 1.2fr) 110px minmax(120px, 1fr) 100px 90px 210px; --ui-table-min: 1040px; }
+/* The four row buttons fit one line */
+.ui-supp-table { --ui-cols: minmax(184px, 2fr) minmax(150px, 1.2fr) 86px minmax(120px, 1fr) 80px 80px 288px; --ui-table-min: 1076px; }
+@media (min-width: 761px) { .ui-supp-table .ui-row-actions { flex-wrap: nowrap; } }
 .ui-row-off > .ui-td { opacity: .6; }
 .ui-more-wrap { position: relative; }
 .ui-menu-panel { position: absolute; top: calc(100% + 4px); inset-inline-end: 0; z-index: 40; min-width: 170px; padding: 4px;

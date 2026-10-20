@@ -349,10 +349,12 @@ def list_suppressions(
     
     # Sort
     sort_col = getattr(SpamSuppression, sort_by, SpamSuppression.created_at)
+    # The id breaks ties, so the pages the list loads one after another
+    # neither repeat nor miss a row among rows that sort equal
     if sort_dir == "desc":
-        query = query.order_by(desc(sort_col))
+        query = query.order_by(desc(sort_col), desc(SpamSuppression.id))
     else:
-        query = query.order_by(sort_col)
+        query = query.order_by(sort_col, SpamSuppression.id)
     
     # Paginate
     offset = (page - 1) * per_page
