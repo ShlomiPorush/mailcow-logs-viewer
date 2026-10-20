@@ -30,7 +30,7 @@ def env(monkeypatch):
     init_db()
     monkeypatch.setattr(type(settings._inner), 'is_feature_enabled', lambda self, name: True)
     for key, value in {
-        'suppression_enabled': True, 'suppression_auto_detect': True, 'suppression_rspamd_sync': False,
+        'suppression_enabled': True, 'suppression_auto_detect': True, 'suppression_rspamd_sync': True,
         'suppression_whitelist_domains': '', 'suppression_hard_bounce_action': 'suppress',
         'suppression_soft_bounce_action': 'count', 'suppression_soft_bounce_threshold': 3,
         'suppression_base_expiry_days': 7, 'suppression_max_expiry_days': 90,

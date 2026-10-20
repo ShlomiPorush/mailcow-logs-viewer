@@ -241,11 +241,12 @@ Some services are collected whatever this list says, because other pages read th
 | --- | --- | --- |
 | `SUPPRESSION_ENABLED` | `false` | Enables the suppression jobs: bounce detection, deferred queue cleanup, Rspamd sync and expiry. Manual API actions still work while it is off. |
 | `SUPPRESSION_AUTO_DETECT` | `true` | Read the Postfix logs for bounces. The Queue Management choices set it; set it here only to force it. |
-| `SUPPRESSION_RSPAMD_SYNC` | `true` | Copy active suppressions to Rspamd's `global_rcpt_blacklist.map`, so mail to them is rejected. Needs `RSPAMD_PASSWORD` and the read-write key. |
-| `SUPPRESSION_HARD_BOUNCE_ACTION` | `suppress` | For permanent failures (5.x.x): `suppress` or `ignore`. |
-| `SUPPRESSION_SOFT_BOUNCE_ACTION` | `count` | For temporary failures (4.x.x): `suppress`, `count` (suppress at the threshold) or `ignore`. Used only while `QUEUE_CLEANUP_ENABLED=false`. |
+| `SUPPRESSION_RSPAMD_SYNC` | `true` | Sync with Rspamd: keep the suppression list and the app's section of Rspamd's `global_rcpt_blacklist.map` in step, both ways, so mail to the listed addresses is rejected. `false` keeps no list: the app deletes it (Rspamd is not touched), and `true` again loads the app's blocks back from Rspamd. Needs `RSPAMD_PASSWORD` and the read-write key. |
+| `SUPPRESSION_HARD_BOUNCE_ACTION` | `suppress` | For permanent failures (5.x.x): `suppress` (block the address and delete its queued mail), `delete` (only delete its queued mail) or `ignore`. With `SUPPRESSION_RSPAMD_SYNC=false`, `suppress` acts as `delete`. |
+| `SUPPRESSION_SOFT_BOUNCE_ACTION` | `count` | For temporary failures (4.x.x): `suppress`, `count` (suppress at the threshold) or `ignore`. Used only while `QUEUE_CLEANUP_ENABLED=false`. With `SUPPRESSION_RSPAMD_SYNC=false`, both that block act as `ignore`. |
 | `SUPPRESSION_SOFT_BOUNCE_THRESHOLD` | `3` | Soft bounces before `count` suppresses. Used only while `QUEUE_CLEANUP_ENABLED=false`. |
-| `QUEUE_CLEANUP_ENABLED` | `true` | Delete messages stuck in the deferred queue longer than the threshold and suppress their recipients. Needs the read-write key and `SUPPRESSION_ENABLED=true`. |
+| `QUEUE_CLEANUP_ENABLED` | `true` | Delete messages stuck in the deferred queue longer than the threshold. Needs the read-write key and `SUPPRESSION_ENABLED=true`. |
+| `QUEUE_CLEANUP_BLOCK` | `true` | Also block the recipients of the messages `QUEUE_CLEANUP_ENABLED` deletes. Needs `SUPPRESSION_RSPAMD_SYNC=true`; without it the cleanup only deletes. |
 | `QUEUE_CLEANUP_THRESHOLD_MINUTES` | `60` | Minutes a deferred message waits before it is deleted. |
 | `SUPPRESSION_BASE_EXPIRY_DAYS` | `7` | Block time in days, multiplied by the number of bounces. |
 | `SUPPRESSION_MAX_EXPIRY_DAYS` | `90` | Longest block in days. |

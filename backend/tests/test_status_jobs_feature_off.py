@@ -55,12 +55,30 @@ def test_protection_rules_runs_with_security_on(jobs, monkeypatch):
     assert job['enabled'] is True
 
 
-def test_suppression_sync_without_the_rw_key_is_off_and_says_why(jobs, monkeypatch):
+def test_suppression_sync_without_the_rw_key_still_reads(jobs, monkeypatch):
+    # It reads the app's Rspamd blocks into the list; it writes only with the key
     monkeypatch.setattr(type(settings_router.mailcow_api), 'has_rw_key', property(lambda self: False))
     monkeypatch.setattr(settings._inner, 'disabled_features', '')
-    monkeypatch.setattr(settings._inner, 'suppression_enabled', True)
+    monkeypatch.setattr(settings._inner, 'suppression_enabled', False)
     monkeypatch.setattr(settings._inner, 'suppression_rspamd_sync', True)
     monkeypatch.setattr(settings._inner, 'rspamd_password', 'example-password')
     job = jobs()['sync_suppressions']
+    assert job['enabled'] is True and not job.get('disabled_reason'), 'the automatic handling is not needed'
+
+
+def test_suppression_sync_off_says_why(jobs, monkeypatch):
+    monkeypatch.setattr(settings._inner, 'disabled_features', '')
+    monkeypatch.setattr(settings._inner, 'suppression_rspamd_sync', False)
+    monkeypatch.setattr(settings._inner, 'rspamd_password', 'example-password')
+    job = jobs()['sync_suppressions']
     assert job['enabled'] is False
-    assert 'Read-Write' in job['disabled_reason'] and job['settings_section'] == 'mailcow'
+    assert 'Sync with Rspamd' in job['disabled_reason'] and job['settings_section'] == 'spam_filter'
+
+
+def test_suppression_sync_without_the_rspamd_password_is_off_and_says_why(jobs, monkeypatch):
+    monkeypatch.setattr(settings._inner, 'disabled_features', '')
+    monkeypatch.setattr(settings._inner, 'suppression_rspamd_sync', True)
+    monkeypatch.setattr(settings._inner, 'rspamd_password', '')
+    job = jobs()['sync_suppressions']
+    assert job['enabled'] is False
+    assert 'Rspamd password' in job['disabled_reason'] and job['settings_section'] == 'mailcow'

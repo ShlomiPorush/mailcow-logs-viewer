@@ -5,6 +5,7 @@ Shows configuration, last import times, and background job status
 import asyncio
 import logging
 import os
+import threading
 import httpx
 from pydantic import ValidationError
 from fastapi import APIRouter, Depends, BackgroundTasks, HTTPException, Request, Response
@@ -16,6 +17,7 @@ from typing import Dict, Any, Optional
 
 from ..database import get_db, get_db_context
 from ..models import PostfixLog, RspamdLog, NetfilterLog, MessageCorrelation
+from ..services.bounce_policy import cleanup_blocks
 from ..config import settings, EDITABLE_SETTING_KEYS, FEATURE_IDS, reload_settings, Settings
 from ..config import _get_field_annotations, get_env_locked_keys
 from ..app_time import app_tz, configured_zone_name, is_valid_zone
@@ -50,10 +52,9 @@ def _job_off_reason(key: str):
         # Worded as the Queue Management settings name them
         'detect_suppressions': [(not settings.suppression_enabled, '"Handle undeliverable mail automatically" is off', 'spam_filter'),
                                 (not settings.suppression_auto_detect, 'No choice under Queue Management needs the mail logs', 'spam_filter')],
-        'sync_suppressions': [(not settings.suppression_enabled, '"Handle undeliverable mail automatically" is off', 'spam_filter'),
-                              (not settings.suppression_rspamd_sync, '"Automatically update Rspamd blocks" is off', 'spam_filter'),
-                              (not settings.is_rspamd_configured, 'Needs the Rspamd password', 'mailcow'),
-                              (not rw, 'Needs the Read-Write API key (MAILCOW_API_KEY_RW)', 'mailcow')],
+        # It reads the app's Rspamd blocks; it writes them only with the Read-Write key
+        'sync_suppressions': [(not settings.suppression_rspamd_sync, '"Sync with Rspamd" is off', 'spam_filter'),
+                              (not settings.is_rspamd_configured, 'Needs the Rspamd password', 'mailcow')],
         'expire_suppressions': [(not settings.suppression_enabled, '"Handle undeliverable mail automatically" is off', 'spam_filter')],
         'process_quarantine_rules': [(not rw, 'Needs the Read-Write API key (MAILCOW_API_KEY_RW)', 'mailcow')],
         'cleanup_deferred_queue': [(not settings.suppression_enabled, '"Handle undeliverable mail automatically" is off', 'spam_filter'),
@@ -218,6 +219,23 @@ def _normalize_address_lists(allowed: Dict[str, Any]) -> None:
                 f"{label}: \"{bad[0]}\" is not an email address. "
                 f"Separate several addresses with commas."))
         allowed[key] = ", ".join(split_addresses(str(allowed[key])))
+
+
+def _validate_bounce_actions(allowed: Dict[str, Any]) -> None:
+    """Refuse a Queue Management action nobody knows: the jobs would block or
+    delete nothing for it. The value in effect sent back as it is never blocks
+    saving the other settings (the page posts every key)."""
+    from ..services.bounce_policy import HARD_ACTIONS, SOFT_ACTIONS
+    for key, known in (('suppression_hard_bounce_action', HARD_ACTIONS), ('suppression_soft_bounce_action', SOFT_ACTIONS)):
+        if key not in allowed:
+            continue
+        value = str(allowed[key] or '')
+        if value in known:
+            allowed[key] = value
+        elif value == str(getattr(settings, key) or ''):
+            allowed.pop(key)
+        else:
+            raise HTTPException(status_code=400, detail=f"{key} accepts only: {', '.join(known)}.")
 
 
 def _validate_time_zone(allowed: Dict[str, Any], db: Session) -> None:
@@ -444,7 +462,7 @@ def get_settings_info(db: Session = Depends(get_db)):
                 },
                 "feature_data_sweep": {
                     "interval": "10 minutes",
-                    "description": "Deletes the data of turned-off features and reloads Spam Filter's Rspamd blocks when it is turned back on",
+                    "description": "Deletes the data of turned-off features (and the suppression list while Sync with Rspamd is off), and loads this app's Rspamd blocks back when they are turned on again",
                     "status": jobs_status.get('feature_data_sweep', {}).get('status', 'unknown'),
                     "last_run": format_datetime_utc(jobs_status.get('feature_data_sweep', {}).get('last_run')),
                     "error": jobs_status.get('feature_data_sweep', {}).get('error')
@@ -599,7 +617,7 @@ def get_settings_info(db: Session = Depends(get_db)):
                 },
                 "detect_suppressions": {
                     "interval": "5 minutes" if (settings.is_feature_enabled('spam-filter') and settings.suppression_enabled) else ("Disabled (feature off)" if not settings.is_feature_enabled('spam-filter') else "Disabled (suppression off)"),
-                    "description": "Scans Postfix logs for bounces to auto-suppress recipients",
+                    "description": "Reads delivery failures and handles queued mail using Queue Management settings",
                     "enabled": settings.is_feature_enabled('spam-filter') and settings.suppression_enabled and settings.suppression_auto_detect,
                     "feature_disabled": not settings.is_feature_enabled('spam-filter'),
                     "status": jobs_status.get('detect_suppressions', {}).get('status', 'idle') if (settings.is_feature_enabled('spam-filter') and settings.suppression_enabled) else 'disabled',
@@ -607,13 +625,13 @@ def get_settings_info(db: Session = Depends(get_db)):
                     "error": jobs_status.get('detect_suppressions', {}).get('error') if (settings.is_feature_enabled('spam-filter') and settings.suppression_enabled) else None
                 },
                 "sync_suppressions": {
-                    "interval": "10 minutes" if (settings.is_feature_enabled('spam-filter') and settings.suppression_enabled and settings.suppression_rspamd_sync) else ("Disabled (feature off)" if not settings.is_feature_enabled('spam-filter') else ("Disabled (suppression off)" if not settings.suppression_enabled else "Disabled (Rspamd sync off)")),
-                    "description": "Syncs active suppressions to Rspamd recipient denylist",
-                    "enabled": settings.is_feature_enabled('spam-filter') and settings.suppression_enabled and settings.suppression_rspamd_sync and settings.is_rspamd_configured and mailcow_api.has_rw_key,
+                    "interval": "10 minutes" if (settings.is_feature_enabled('spam-filter') and settings.suppression_rspamd_sync and settings.is_rspamd_configured) else ("Disabled (feature off)" if not settings.is_feature_enabled('spam-filter') else ("Disabled (Rspamd sync off)" if not settings.suppression_rspamd_sync else "Disabled (no Rspamd password)")),
+                    "description": "Keeps the suppression list and this app's Rspamd blocks in step, both ways",
+                    "enabled": settings.is_feature_enabled('spam-filter') and settings.suppression_rspamd_sync and settings.is_rspamd_configured,
                     "feature_disabled": not settings.is_feature_enabled('spam-filter'),
-                    "status": jobs_status.get('sync_suppressions', {}).get('status', 'idle') if (settings.is_feature_enabled('spam-filter') and settings.suppression_enabled and settings.suppression_rspamd_sync) else 'disabled',
-                    "last_run": format_datetime_utc(jobs_status.get('sync_suppressions', {}).get('last_run')) if (settings.is_feature_enabled('spam-filter') and settings.suppression_enabled and settings.suppression_rspamd_sync) else None,
-                    "error": jobs_status.get('sync_suppressions', {}).get('error') if (settings.is_feature_enabled('spam-filter') and settings.suppression_enabled and settings.suppression_rspamd_sync) else None
+                    "status": jobs_status.get('sync_suppressions', {}).get('status', 'idle') if (settings.is_feature_enabled('spam-filter') and settings.suppression_rspamd_sync and settings.is_rspamd_configured) else 'disabled',
+                    "last_run": format_datetime_utc(jobs_status.get('sync_suppressions', {}).get('last_run')) if (settings.is_feature_enabled('spam-filter') and settings.suppression_rspamd_sync and settings.is_rspamd_configured) else None,
+                    "error": jobs_status.get('sync_suppressions', {}).get('error') if (settings.is_feature_enabled('spam-filter') and settings.suppression_rspamd_sync and settings.is_rspamd_configured) else None
                 },
                 "expire_suppressions": {
                     "interval": "1 hour" if (settings.is_feature_enabled('spam-filter') and settings.suppression_enabled) else ("Disabled (feature off)" if not settings.is_feature_enabled('spam-filter') else "Disabled (suppression off)"),
@@ -635,7 +653,8 @@ def get_settings_info(db: Session = Depends(get_db)):
                 },
                 "cleanup_deferred_queue": {
                     "interval": "5 minutes" if (settings.is_feature_enabled('spam-filter') and settings.suppression_enabled and settings.queue_cleanup_enabled and mailcow_api.has_rw_key) else ("Disabled (feature off)" if not settings.is_feature_enabled('spam-filter') else ("Disabled (suppression off)" if not settings.suppression_enabled else ("Disabled (queue cleanup off)" if not settings.queue_cleanup_enabled else "Disabled (no RW API key)"))),
-                    "description": f"Deletes deferred emails stuck > {settings.queue_cleanup_threshold_minutes}m and suppresses recipients",
+                    "description": (f"Deletes deferred mail after {settings.queue_cleanup_threshold_minutes} minutes in the queue"
+                                    + (" and blocks its recipients" if cleanup_blocks() else "")),
                     "enabled": settings.is_feature_enabled('spam-filter') and settings.suppression_enabled and settings.queue_cleanup_enabled and mailcow_api.has_rw_key,
                     "feature_disabled": not settings.is_feature_enabled('spam-filter'),
                     "status": jobs_status.get('cleanup_deferred_queue', {}).get('status', 'idle') if (settings.is_feature_enabled('spam-filter') and settings.suppression_enabled and settings.queue_cleanup_enabled) else 'disabled',
@@ -776,6 +795,7 @@ def update_settings(body: Dict[str, Any], request: Request = None, response: Res
     _reject_moved_secrets(allowed)
     _normalize_address_lists(allowed)
     _validate_time_zone(allowed, db)
+    _validate_bounce_actions(allowed)
     # For sensitive keys, mask placeholder means "do not change" - omit from payload
     # Empty string means "clear this value" and should be kept
     for sk in _SENSITIVE_SETTING_KEYS:
@@ -880,8 +900,16 @@ def update_settings(body: Dict[str, Any], request: Request = None, response: Res
     prev_credentials = {name: check["fingerprint"]() for name, check in _CREDENTIAL_CHECKS.items()}
     prev_sign_in = _session_bound_values()
     operator_session = get_session_from_request(request) if request is not None else None
-    save_config_overrides_to_db(db, allowed)
-    reload_settings(db)
+    from ..services.feature_data import spam_list_kept
+    # One save at a time from the state it starts from to its transition token:
+    # two saves at once must not each take the list for kept and one leave its
+    # token over the other's
+    with _LIST_TRANSITION_LOCK:
+        list_was_kept, switches_before = spam_list_kept(), _spam_list_switches()
+        save_config_overrides_to_db(db, allowed)
+        reload_settings(db)
+        rspamd_off_transition = _record_list_transition(
+            db, list_was_kept, spam_list_kept(), switched=_spam_list_switches() != switches_before)
     if _session_bound_values() != prev_sign_in:
         revoke_all_sessions()
         # Keep the operator who saved signed in, with a session issued under the new settings
@@ -889,7 +917,7 @@ def update_settings(body: Dict[str, Any], request: Request = None, response: Res
             set_session_cookie(response, create_session(operator_session["user_info"]), request)
     # A feature switched off here should drop its data now, not at the next restart;
     # the sweep then takes Security's temporary bans out, or loads Spam Filter's blocks back
-    cleanup_disabled_feature_data(db)
+    feature_data_errors = cleanup_disabled_feature_data(db)
     run_feature_data_sweep_soon()
     mailcow_api.reload_config()
     oauth2_client.reload_config()
@@ -919,8 +947,41 @@ def update_settings(body: Dict[str, Any], request: Request = None, response: Res
     # The page checks a new or changed Read-Write key or Rspamd password right after saving
     changed = {f"{name}_changed": check["configured"]() and prev_credentials[name] != check["fingerprint"]()
                for name, check in _CREDENTIAL_CHECKS.items()}
+    # A failed deletion is tried again by the sweep the save just started
+    errors = {"feature_data_errors": feature_data_errors} if feature_data_errors else {}
     return {"settings_edit_via_ui_enabled": True, "settings_migrated": True, "configuration": _effective_config_for_editable(settings),
-            **changed}
+            "rspamd_off_transition": rspamd_off_transition, **errors, **changed}
+
+
+_LIST_TRANSITION_LOCK = threading.Lock()
+
+
+def _spam_list_switches():
+    """The two switches the list is kept by: Spam Filter and Sync with Rspamd."""
+    return settings.is_feature_enabled('spam-filter'), bool(settings.suppression_rspamd_sync)
+
+
+def _record_list_transition(db: Session, was_kept: bool, now_kept: bool, switched: bool = False) -> Optional[str]:
+    """This save turned Spam Filter or Sync with Rspamd off (the list stopped
+    being kept, or Spam Filter went off while the sync already was): a new
+    token names this save, and a Remove of the app's Rspamd blocks asked with
+    it is refused once a later save turned the list on or off again. A save
+    that changed neither switch gets none: the Remove it asked belongs to
+    another save. Returns the token, or None."""
+    import secrets
+    from ..models import SystemSetting
+    from ..services.feature_data import _set_key
+    from .suppressions import OFF_TRANSITION_KEY
+    token = None
+    if not now_kept and (was_kept or switched):
+        token = secrets.token_hex(12)
+        _set_key(db, OFF_TRANSITION_KEY, token)
+    elif now_kept and not was_kept:
+        db.query(SystemSetting).filter(SystemSetting.key == OFF_TRANSITION_KEY).delete(synchronize_session=False)
+    else:
+        return None
+    db.commit()
+    return token
 
 
 # Feature -> tables, shared with the cleanup of features that are off
@@ -954,23 +1015,32 @@ def purge_feature_data(body: Dict[str, Any], db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail='Say what happens to the Rspamd blocks: "rspamd": "remove" or "keep".')
     from .suppressions import _run_on_worker_loop, _clear_managed_section, MapUnavailable, _map_error
     from ..services.rspamd_map_lock import MapBusyError, map_write_lock
+    transition = body.get("transition") or None
+
+    def still_off():
+        return not settings.is_feature_enabled(feature)
+
     # The map lock is held until the list is gone: a sync waiting for it would
     # otherwise write the list back between the removal and the delete. With
     # "remove", the list goes only after mailcow confirmed the blocks are gone.
+    # Turned on again meanwhile, nothing is removed or deleted.
     try:
         with map_write_lock():
+            if not still_off():
+                raise HTTPException(status_code=400, detail=f"Feature '{feature}' is currently enabled. Disable it first.")
             if rspamd == "remove":
-                _run_on_worker_loop(_clear_managed_section)
-            return _purge_tables(feature, db)
+                _run_on_worker_loop(lambda worker_db: _clear_managed_section(
+                    worker_db, 'remove', str(transition) if transition else None))
+            return _purge_tables(feature, db, still_off)
     except (MapUnavailable, MapBusyError, MailcowAPIError) as e:
         raise _map_error(e)
 
 
-def _purge_tables(feature: str, db: Session):
+def _purge_tables(feature: str, db: Session, still_off=None):
     """Empty the tables and keys of a feature that is off (services/feature_data.py)."""
     from ..services.feature_data import purge_feature
     try:
-        deleted = purge_feature(db, feature)
+        deleted = purge_feature(db, feature, still_off=still_off)
     except Exception as e:
         logger.error(f"Failed to purge data for feature '{feature}': {e}")
         raise HTTPException(status_code=500, detail="Purge failed. Check the application logs.")

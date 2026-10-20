@@ -75,6 +75,11 @@ def rows():
     cleanup()
 
 
+def _off(monkeypatch):
+    """Remove and Start fresh run while the list is not kept (Sync with Rspamd off)."""
+    monkeypatch.setattr(settings._inner, "suppression_rspamd_sync", False)
+
+
 def _mine():
     from app.database import get_db_context
     from app.models import SpamSuppression
@@ -83,7 +88,8 @@ def _mine():
                 db.query(SpamSuppression).filter(SpamSuppression.email.like(f'%{MARK}%')).order_by(SpamSuppression.email)]
 
 
-def test_clearing_removes_only_the_apps_part(creds, rows):
+def test_clearing_removes_only_the_apps_part(creds, rows, monkeypatch):
+    _off(monkeypatch)
     assert suppressions.clear_managed_worker() == 2
     before, entries, after = split_managed_section(creds[0])
     assert before == BEFORE, 'lines above the section stay exactly as they were, bare address and blank lines too'
@@ -92,6 +98,7 @@ def test_clearing_removes_only_the_apps_part(creds, rows):
 
 
 def test_clearing_needs_the_read_write_key_and_writes_nothing_without_it(creds, monkeypatch):
+    _off(monkeypatch)
     monkeypatch.setattr(suppressions.mailcow_api, "headers_rw", None)
     with pytest.raises(suppressions.MapUnavailable) as exc:
         suppressions.clear_managed_worker()
@@ -99,6 +106,7 @@ def test_clearing_needs_the_read_write_key_and_writes_nothing_without_it(creds, 
 
 
 def test_a_map_that_cannot_be_read_is_never_written(creds, monkeypatch):
+    _off(monkeypatch)
     monkeypatch.setattr(suppressions.mailcow_api, "get_rspamd_map_content", AsyncMock(side_effect=MailcowAPIError('down')))
     with pytest.raises(suppressions.MapUnavailable) as exc:
         suppressions.clear_managed_worker()
@@ -106,13 +114,15 @@ def test_a_map_that_cannot_be_read_is_never_written(creds, monkeypatch):
 
 
 def test_start_fresh_keeps_the_list_when_mailcow_did_not_confirm(creds, rows, monkeypatch):
+    _off(monkeypatch)
     monkeypatch.setattr(suppressions.mailcow_api, "edit_rspamd_map", AsyncMock(side_effect=MailcowAPIError('not saved')))
     with pytest.raises(MailcowAPIError):
         suppressions.start_fresh_worker()
     assert len(_mine()) == 2
 
 
-def test_start_fresh_empties_both_sides(creds, rows):
+def test_start_fresh_empties_both_sides(creds, rows, monkeypatch):
+    _off(monkeypatch)
     result = suppressions.start_fresh_worker()
     assert result['removed_blocks'] == 2 and result['deleted_entries'] >= 2
     assert _mine() == [] and split_managed_section(creds[0])[1] == []
@@ -133,14 +143,20 @@ def test_a_confirmed_map_write_passes(monkeypatch):
     assert asyncio.run(mailcow_api.edit_rspamd_map('global_rcpt_blacklist.map', 'x')) == ok
 
 
-def test_an_automatic_sync_does_not_write_once_updates_are_off(monkeypatch):
+def test_the_sync_runs_only_while_it_is_on(monkeypatch):
+    # Sync with Rspamd off: nothing is read or written. It does not need the
+    # automatic handling (test_rspamd_two_way.py covers what it does)
     called = []
     monkeypatch.setattr(suppressions, "_run_on_worker_loop", lambda work: called.append(work) or {"synced": 1})
     monkeypatch.setattr(type(settings._inner), "is_feature_enabled", lambda self, name: True)
-    monkeypatch.setattr(settings._inner, "suppression_enabled", True)
+    monkeypatch.setattr(type(settings._inner), "is_rspamd_configured", property(lambda self: True))
+    monkeypatch.setattr(settings._inner, "suppression_enabled", False)
     monkeypatch.setattr(settings._inner, "suppression_rspamd_sync", False)
     assert suppressions.sync_suppressions_worker(True).get('skipped_off') and called == []
-    assert suppressions.sync_suppressions_worker(False) == {"synced": 1}, 'a change made on the page is written either way'
+    monkeypatch.setattr(settings._inner, "suppression_rspamd_sync", True)
+    assert suppressions.sync_suppressions_worker(True) == {"synced": 1} and len(called) == 1
+    monkeypatch.setattr(type(settings._inner), "is_rspamd_configured", property(lambda self: False))
+    assert suppressions.sync_suppressions_worker(True).get('skipped_off') and len(called) == 1, 'nothing to read without the password'
 
 
 def test_the_state_counts_the_apps_blocks_in_the_map(creds, rows):
@@ -157,6 +173,7 @@ def test_without_the_rspamd_password_the_state_says_so(rows, monkeypatch):
 
 
 def test_an_empty_section_is_not_written_again(creds, rows, monkeypatch):
+    _off(monkeypatch)
     empty = '\n'.join(BEFORE + [MANAGED_MARKER_START, '# Cleared: x', MANAGED_MARKER_END])
     monkeypatch.setattr(suppressions.mailcow_api, "get_rspamd_map_content", AsyncMock(return_value=empty))
     assert suppressions.clear_managed_worker() == 0 and creds == []
@@ -215,9 +232,9 @@ def test_remove_then_delete(purge_client, creds, monkeypatch):
     held = []
     real = suppressions._clear_managed_section
 
-    async def clear(db):
+    async def clear(db, *args):
         held.append(lock._LOCK.locked())
-        return await real(db)
+        return await real(db, *args)
     monkeypatch.setattr(suppressions, "_clear_managed_section", clear)
     resp = purge_client.post('/api/settings/purge-feature-data', json={'feature': 'spam-filter', 'rspamd': 'remove'})
     assert held == [True] and not lock._LOCK.locked(), 'the map lock is held from the removal until the list is gone'

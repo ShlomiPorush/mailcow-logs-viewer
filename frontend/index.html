@@ -1006,9 +1006,11 @@
 
                 <!-- Suppressions sub-tab content (visible by default) -->
                 <div id="spam-filter-suppressions-content" class="ui-sec-block ui-scroll">
+                    <!-- Sync with Rspamd off: the app keeps no list, and only this note shows -->
+                    <div id="suppression-off-note" class="hidden"></div>
                     <div id="suppression-stats" class="ui-kpis"></div>
 
-                    <div class="ui-panel ui-table-card">
+                    <div id="suppression-list-card" class="ui-panel ui-table-card">
                     <section class="ui-panel ui-filters ui-fbar">
                         <div class="ui-fbar-row">
                             <label class="ui-search ui-ms-search"><svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
@@ -1017,7 +1019,6 @@
                             </label>
                             <span class="ui-toolbar-gap"></span>
                             <button onclick="showAddSuppressionModal()" class="ui-btn ui-btn-primary">Add Suppression</button>
-                            <button onclick="syncSuppressionsToRspamd()" id="suppression-sync-btn" class="ui-btn" title="Sync suppression list to Rspamd"><svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg> Sync to Rspamd</button>
                             <div class="ui-more-wrap">
                                 <button onclick="toggleSuppressionMoreMenu()" class="ui-btn" title="More" aria-label="More">⋯</button>
                                 <div id="suppression-more-menu" class="ui-menu-panel hidden">
@@ -1579,13 +1580,13 @@
     <!-- JavaScript -->
     <script src="/static/utils.js?v=20"></script>
     <script src="/static/router.js?v=6"></script>
-    <script src="/static/app.js?v=68"></script>
+    <script src="/static/app.js?v=69"></script>
     <script src="/static/alert-activity.js?v=2"></script>
     <script src="/static/export.js?v=1"></script>
     <script src="/static/message-details.js?v=7"></script>
     <script src="/static/dmarc.js?v=19"></script>
     <script src="/static/logs-viewer.js?v=6"></script>
-    <script src="/static/settings.js?v=36"></script>
+    <script src="/static/settings.js?v=41"></script>
     <script src="/static/about.js?v=2"></script>
     <script src="/static/domains.js?v=9"></script>
     <script src="/static/mailbox-stats.js?v=7"></script>
@@ -1596,7 +1597,7 @@
     <script src="/static/security.js?v=8"></script>
     <script src="/static/search.js?v=8"></script>
     <script src="/static/notifications.js?v=6"></script>
-    <script src="/static/spam_filter.js?v=12"></script>
+    <script src="/static/spam_filter.js?v=16"></script>
 
     <!-- DMARC fetch history -->
     <div id="dmarc-sync-history-modal" class="hidden ui-dialog-backdrop" role="dialog" aria-label="Fetch history">

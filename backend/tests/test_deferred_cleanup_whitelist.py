@@ -11,13 +11,15 @@ def test_whitelisted_domain_mail_stays_in_queue(monkeypatch):
     monkeypatch.setattr(type(settings._inner), "is_feature_enabled", lambda self, name: True)
     for key, value in {
         "suppression_enabled": True, "queue_cleanup_enabled": True,
-        "queue_cleanup_threshold_minutes": 30, "suppression_rspamd_sync": False,
+        "queue_cleanup_threshold_minutes": 30, "suppression_rspamd_sync": True,
         "suppression_whitelist_domains": "example.net",
     }.items():
         monkeypatch.setattr(settings._inner, key, value)
     monkeypatch.setattr(scheduler.mailcow_api, "headers_rw", {"X-API-Key": "test-key"})
     monkeypatch.setattr(scheduler, "update_job_status", Mock())
     monkeypatch.setattr(scheduler, "_spam_blocks_loaded", AsyncMock(return_value=True))
+    monkeypatch.setattr(scheduler, "_blocked_now", lambda emails: set(emails))
+    monkeypatch.setattr(scheduler, "_protected_now", lambda emails: set())
     old = datetime.now(timezone.utc).timestamp() - 7200
     queue = [
         {"queue_id": "WHITE", "queue_name": "deferred", "arrival_time": old,
@@ -42,14 +44,16 @@ def test_whitelisted_domain_mail_stays_in_queue(monkeypatch):
 def test_hard_bounce_keeps_messages_that_also_go_to_a_whitelisted_domain(monkeypatch):
     monkeypatch.setattr(type(settings._inner), "is_feature_enabled", lambda self, name: True)
     for key, value in {
-        "suppression_enabled": True, "suppression_auto_detect": True, "suppression_rspamd_sync": False,
+        "suppression_enabled": True, "suppression_auto_detect": True, "suppression_rspamd_sync": True,
         "suppression_whitelist_domains": "example.net",
     }.items():
         monkeypatch.setattr(settings._inner, key, value)
     monkeypatch.setattr(scheduler.mailcow_api, "headers_rw", {"X-API-Key": "test-key"})
     monkeypatch.setattr(scheduler, "update_job_status", Mock())
     monkeypatch.setattr(scheduler, "_spam_blocks_loaded", AsyncMock(return_value=True))
-    monkeypatch.setattr(scheduler, "_detect_suppressions_worker", lambda: (1, 0, ["bad@example.org"]))
+    monkeypatch.setattr(scheduler, "_blocked_now", lambda emails: set(emails))
+    monkeypatch.setattr(scheduler, "_protected_now", lambda emails: set())
+    monkeypatch.setattr(scheduler, "_detect_suppressions_worker", lambda: (1, 0, ["bad@example.org"], []))
     queue = [
         {"queue_id": "ONLY", "recipients": ["bad@example.org"]},
         {"queue_id": "MIXED", "recipients": ["bad@example.org", "user@example.net"]},

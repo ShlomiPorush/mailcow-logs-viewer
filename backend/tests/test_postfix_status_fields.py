@@ -207,7 +207,7 @@ def test_forged_noqueue_bounce_creates_no_suppression(db_env, monkeypatch):
     monkeypatch.setattr(type(settings._inner), 'is_feature_enabled', lambda self, name: True)
     monkeypatch.setattr(settings._inner, 'suppression_enabled', True)
     monkeypatch.setattr(settings._inner, 'suppression_auto_detect', True)
-    monkeypatch.setattr(settings._inner, 'suppression_rspamd_sync', False)
+    monkeypatch.setattr(settings._inner, 'suppression_rspamd_sync', True)
     monkeypatch.setattr(settings._inner, 'suppression_whitelist_domains', '')
     asyncio.run(scheduler.detect_suppressions_job())
 

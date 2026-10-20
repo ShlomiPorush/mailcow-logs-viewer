@@ -20,10 +20,11 @@ const SETTINGS_LABEL_OVERRIDES = {
     // Spam Filter: what the setting does, in words; the search shows these names
     suppression_enabled: 'Handle undeliverable mail automatically',
     suppression_auto_detect: 'Read the mail logs for failures',
-    suppression_rspamd_sync: 'Automatically update Rspamd blocks',
+    suppression_rspamd_sync: 'Sync with Rspamd',
     suppression_hard_bounce_action: 'Permanent delivery failure',
     suppression_soft_bounce_action: 'Temporary delivery failure',
-    queue_cleanup_enabled: 'Delete delayed mail and block recipients',
+    queue_cleanup_enabled: 'Delete delayed mail',
+    queue_cleanup_block: 'Block the recipients of deleted delayed mail',
     queue_cleanup_threshold_minutes: 'Queue age before deletion (minutes)',
     suppression_soft_bounce_threshold: 'Temporary failures before blocking',
     suppression_base_expiry_days: 'Base block length (days)',
@@ -325,7 +326,7 @@ var SETTINGS_FIELD_DESCRIPTIONS = {
     rspamd_password: 'Rspamd UI/API password for reading Rspamd map data. Required to view and edit Rspamd maps.',
     suppression_enabled: 'Off pauses automatic handling and block expiry. Manual changes still work.',
     suppression_auto_detect: 'On when a choice below needs the mail logs. Set by those choices, not on its own.',
-    suppression_rspamd_sync: 'Applies blocks to new mail. Off leaves existing blocks in place. Needs the Rspamd password and a read-write API key.',
+    suppression_rspamd_sync: "Keeps the suppression list and this app's part of the Rspamd recipient denylist in step, both ways: changes on either side reach the other. Off, this app keeps no suppression list: turning it off deletes the list, turning it on loads this app's blocks back from Rspamd. Needs the Rspamd password and a read-write API key.",
     suppression_whitelist_domains: 'No automatic blocks or queue deletion. Separate exact domains with commas; subdomains are not included.',
     suppression_hard_bounce_action: 'What happens when the receiving server rejects a message permanently (5.x.x).',
     suppression_soft_bounce_action: 'What happens when delivery fails for now (4.x.x) and the queue is not cleaned.',
@@ -335,7 +336,8 @@ var SETTINGS_FIELD_DESCRIPTIONS = {
     quarantine_rules_max_actions: 'Safety limit: maximum emails to release/delete per scheduler run. Prevents accidental mass-processing from overly broad rules. Default: 50.',
     quarantine_rules_interval: 'Minutes between quarantine rule processing runs. Lower = faster response to new quarantine items, higher = less API load on mailcow. Default: 5.',
     quarantine_rules_log_retention_days: 'Days to keep quarantine auto-rule action history. Older action logs are automatically cleaned up. Default: 30.',
-    queue_cleanup_enabled: 'Delete delayed mail after some time in the queue and block its recipients.',
+    queue_cleanup_enabled: 'Delete delayed mail after some time in the queue.',
+    queue_cleanup_block: 'Also block the recipients of the delayed mail deleted. Needs Sync with Rspamd.',
     queue_cleanup_threshold_minutes: 'Minutes in the queue before delayed mail is deleted.'
 };
 
@@ -357,30 +359,39 @@ function settingsPickSegment(btn) {
 
 // Queue Management: one choice per kind of delivery failure. The stored
 // settings and their ENV variables stay as they are: the radios only set the
-// hidden fields that the form saves. A temporary failure has two stored
-// settings behind its one choice: queue cleanup on, or else the action.
-// Reading the mail logs (suppression_auto_detect) has no switch of its own:
-// it is on exactly when a choice needs it, and a choice that has no effect
-// without it shows as what really happens.
-const SETTINGS_SOFT_BOUNCE_QUEUE = { value: 'queue', needs: 'rw',
+// hidden fields that the form saves. A temporary failure has three stored
+// settings behind its one choice: queue cleanup on (blocking its recipients
+// or not), or else the action. Reading the mail logs (suppression_auto_detect)
+// has no switch of its own: it is on exactly when a choice needs it, and a
+// choice that has no effect without it shows as what really happens.
+// A block reaches Rspamd only through Sync with Rspamd: while it is off, the
+// options that block are not available, and the one picked shows as its twin
+// that does not block, which is what the jobs do then.
+const SETTINGS_SOFT_BOUNCE_QUEUE = { value: 'queue', needs: 'rw sync',
     label: 'Delete after {minutes} minutes in the queue and block the recipients', hint: 'Checked every 5 minutes.' };
+const SETTINGS_SOFT_BOUNCE_QUEUE_DELETE = { value: 'queue_delete', needs: 'rw',
+    label: 'Delete after {minutes} minutes in the queue', hint: 'Does not block the recipients. Checked every 5 minutes.' };
 const SETTINGS_CHOICE_NOTES = {
     rw: 'Add a read-write API key in Settings > mailcow. Nothing happens without it.',
     'rw-queue': 'Add a read-write API key in Settings > mailcow to delete queued mail.'
 };
-const SETTINGS_LOG_CHOICES = { hard: ['suppress'], soft: ['count', 'suppress'] };
+const SETTINGS_LOG_CHOICES = { hard: ['suppress', 'delete'], soft: ['count', 'suppress'] };
+// What a choice that blocks does while Sync with Rspamd is off
+const SETTINGS_SYNC_TWINS = { hard: { suppress: 'delete' }, soft: { queue: 'queue_delete', count: 'ignore', suppress: 'ignore' } };
 // Settings that do nothing while another switch is off: shown greyed out and
 // unclickable until it is on. Groups say it with needs:, single fields here.
-const SETTINGS_FIELD_NEEDS = { suppression_rspamd_sync: 'suppression_enabled' };
+const SETTINGS_FIELD_NEEDS = {};
 
 function settingsShowNeeds(root) {
     Object.entries(SETTINGS_FIELD_NEEDS).forEach(([key, parent]) => {
         const row = root.querySelector('#edit-' + key)?.closest('.ui-set-field, .ui-set-bool, .ui-set-wide');
         if (row) row.dataset.needs = parent;
     });
-    root.querySelectorAll('[data-needs]').forEach(el => {
-        const parent = root.querySelector('#edit-' + el.dataset.needs);
-        const off = !!parent && !parent.checked;
+    // A choice's options say what they need on their own (settingsApplySync)
+    root.querySelectorAll('[data-needs]:not(.ui-set-choice-opt)').forEach(el => {
+        // Every switch named must be on
+        const parents = el.dataset.needs.split(' ').map(id => root.querySelector('#edit-' + id)).filter(Boolean);
+        const off = parents.some(parent => !parent.checked);
         el.inert = off;
         el.classList.toggle('is-off', off);
     });
@@ -389,38 +400,52 @@ function settingsShowNeeds(root) {
 function settingsBounceChoice(kind, config, lockedKeys, defaults) {
     const soft = kind === 'soft';
     const actionKey = soft ? 'suppression_soft_bounce_action' : 'suppression_hard_bounce_action';
-    const keys = soft ? ['queue_cleanup_enabled', actionKey, 'queue_cleanup_threshold_minutes', 'suppression_soft_bounce_threshold']
+    const keys = soft ? ['queue_cleanup_enabled', 'queue_cleanup_block', actionKey, 'queue_cleanup_threshold_minutes', 'suppression_soft_bounce_threshold']
         : [actionKey, 'suppression_auto_detect'];
     const locked = key => lockedKeys.has(key);
     const action = String(config[actionKey] ?? '');
     const logsOn = config.suppression_auto_detect === true;
     const queueOn = soft && config.queue_cleanup_enabled === true;
+    const blockOn = config.queue_cleanup_block !== false;
     const needsLogs = value => SETTINGS_LOG_CHOICES[kind].includes(value);
     // What happens today: an action that needs the logs does nothing while they are not read
-    const picked = queueOn ? 'queue' : needsLogs(action) && !logsOn ? 'ignore' : action;
-    const options = soft ? [SETTINGS_SOFT_BOUNCE_QUEUE, ...SETTINGS_FIELD_OPTIONS[actionKey]] : SETTINGS_FIELD_OPTIONS[actionKey];
+    const picked = queueOn ? (blockOn ? 'queue' : 'queue_delete') : needsLogs(action) && !logsOn ? 'ignore' : action;
+    const options = soft ? [SETTINGS_SOFT_BOUNCE_QUEUE, SETTINGS_SOFT_BOUNCE_QUEUE_DELETE, ...SETTINGS_FIELD_OPTIONS[actionKey]]
+        : SETTINGS_FIELD_OPTIONS[actionKey];
+    const isQueue = value => value === 'queue' || value === 'queue_delete';
     // A value set by ENV rules out the options that would change it; the rest stay open
     const open = value => (soft
-        ? (!locked('queue_cleanup_enabled') || (value === 'queue') === queueOn) && (!locked(actionKey) || value === 'queue' || value === action)
-        : !locked(actionKey) || value === action)
+        ? (!locked('queue_cleanup_enabled') || isQueue(value) === queueOn)
+            && (!isQueue(value) || !locked('queue_cleanup_block') || (value === 'queue') === blockOn)
+            && (!locked(actionKey) || isQueue(value) || value === action)
+        : !locked(actionKey) || value === action || value === (SETTINGS_SYNC_TWINS.hard[action] || action))
         && !(locked('suppression_auto_detect') && !logsOn && needsLogs(value));
     const number = key => '<input type="number" min="1" class="ui-input ui-set-choice-num" id="edit-' + key + '" name="' + key + '" value="' +
         escapeHtml(String(config[key] ?? '')) + '" aria-label="' + escapeHtml(settingsFieldLabel(key)) + '"' + (locked(key) ? ' disabled' : '') + '>';
+    // The minutes show in both queue options; the one stored field is hidden below them
+    const minutes = '<input type="number" min="1" class="ui-input ui-set-choice-num" data-mirror="queue_cleanup_threshold_minutes" value="' +
+        escapeHtml(String(config.queue_cleanup_threshold_minutes ?? '')) + '" aria-label="' + escapeHtml(settingsFieldLabel('queue_cleanup_threshold_minutes')) + '"' +
+        (locked('queue_cleanup_threshold_minutes') ? ' disabled' : '') + ' oninput="settingsMirror(this)">';
     const group = 'choice-' + kind;
     const rows = options.map(o => {
         const id = group + '-' + o.value;
         const text = o.label.split(/(\{minutes\}|\{count\})/).filter(Boolean).map(part =>
-            part === '{minutes}' ? number('queue_cleanup_threshold_minutes')
+            part === '{minutes}' ? minutes
                 : part === '{count}' ? number('suppression_soft_bounce_threshold')
                 : '<label for="' + id + '">' + escapeHtml(part.trim()) + '</label>').join(' ');
         return '<div class="ui-set-choice-opt' + (o.value === picked ? ' is-picked' : '') + '" data-needs="' + escapeHtml(o.needs || '') + '" onclick="settingsPickCard(event, this)">' +
             '<input type="radio" id="' + id + '" name="' + group + '" value="' + escapeHtml(o.value) + '" data-choice' +
-            (o.value === picked ? ' checked' : '') + (open(o.value) ? '' : ' disabled') + ' onchange="settingsPickBounce(this)">' +
+            (o.value === picked ? ' checked' : '') + (open(o.value) ? '' : ' disabled data-locked="1"') + ' onchange="settingsPickBounce(this)">' +
             '<div class="ui-set-choice-text"><div>' + text + '</div>' + (o.hint ? '<small class="ui-set-desc">' + escapeHtml(o.hint) + '</small>' : '') +
+            ((o.needs || '').split(' ').includes('sync') ? '<small class="ui-set-desc" data-sync-need hidden>Needs Sync with Rspamd.</small>' : '') +
             '<small class="ui-set-choice-note" data-note hidden></small></div></div>';
     }).join('');
     const checkbox = (key, on) => '<input type="checkbox" hidden id="edit-' + key + '" name="' + key + '"' + (on ? ' checked' : '') + (locked(key) ? ' disabled' : '') + '>';
-    const carriers = soft ? checkbox('queue_cleanup_enabled', queueOn) : checkbox('suppression_auto_detect', logsOn);
+    const carriers = soft
+        ? checkbox('queue_cleanup_enabled', queueOn) + checkbox('queue_cleanup_block', blockOn) +
+          '<input type="hidden" id="edit-queue_cleanup_threshold_minutes" name="queue_cleanup_threshold_minutes" value="' +
+          escapeHtml(String(config.queue_cleanup_threshold_minutes ?? '')) + '"' + (locked('queue_cleanup_threshold_minutes') ? ' disabled' : '') + '>'
+        : checkbox('suppression_auto_detect', logsOn);
     const lockedNames = keys.concat(soft ? ['suppression_auto_detect'] : []).filter(locked).map(key => key.toUpperCase());
     // The defaults Reset returns to: every key of the choice that is not set by ENV
     const resetTo = Object.fromEntries(keys.filter(key => !locked(key) && defaults[key] !== undefined).map(key => [key, defaults[key]]));
@@ -428,14 +453,31 @@ function settingsBounceChoice(kind, config, lockedKeys, defaults) {
         : typeof resetTo[key] === 'number' ? Number(config[key]) !== resetTo[key] : String(config[key] ?? '') !== String(resetTo[key] ?? '');
     const changed = Object.keys(resetTo).some(differs);
     return '<div class="ui-set-field ui-set-wide ui-set-choice' + (changed ? ' is-changed' : '') + '" data-choice="' + kind + '" data-rw="' +
-            (config.mailcow_api_key_rw ? '1' : '0') + '" data-defaults="' + escapeHtml(JSON.stringify(resetTo)) + '">' +
+            (config.mailcow_api_key_rw ? '1' : '0') + '" data-defaults="' + escapeHtml(JSON.stringify(resetTo)) + '" data-loaded="' + escapeHtml(picked) + '">' +
         '<div class="ui-set-choice-head"><span class="ui-label" id="label-' + group + '">What should happen?</span>' +
             (lockedNames.length ? '<span class="ui-set-pill" title="Set by an environment variable, change it there">' + SETTINGS_LOCK_ICON + ' Set by ENV: ' + escapeHtml(lockedNames.join(', ')) + '</span>' : '') +
             '<span class="ui-set-pill is-changed" title="Differs from the default"' + (changed ? '' : ' hidden') + '>Changed</span></div>' +
+        '<small class="ui-set-choice-note" data-sync-changed hidden></small>' +
         '<div class="ui-set-choice-list" role="radiogroup" aria-labelledby="label-' + group + '">' + rows + '</div>' +
         carriers + '<input type="hidden" id="edit-' + actionKey + '" name="' + actionKey + '" value="' + escapeHtml(action) + '" data-saved="' + escapeHtml(action) + '"' + (locked(actionKey) ? ' disabled' : '') + '>' +
         (Object.keys(resetTo).length ? '<button type="button" class="ui-set-clear is-reset" onclick="settingsResetChoice(this)"' + (changed ? '' : ' hidden') + '>↺ Reset to default</button>' : '') +
         '</div>';
+}
+
+// The minutes typed in either queue option: the stored field and the other option follow
+function settingsMirror(input) {
+    const key = input.dataset.mirror;
+    const field = document.getElementById('edit-' + key);
+    if (field && !field.disabled) field.value = input.value;
+    document.querySelectorAll('[data-mirror="' + key + '"]').forEach(other => { if (other !== input) other.value = input.value; });
+}
+
+// The minutes shown from the stored field (after Reset or a restore)
+function settingsShowMirrors() {
+    document.querySelectorAll('[data-mirror]').forEach(input => {
+        const field = document.getElementById('edit-' + input.dataset.mirror);
+        if (field) input.value = field.value;
+    });
 }
 
 // The stored settings from the picked options of both choices. While the logs
@@ -452,8 +494,10 @@ function settingsSyncBounce() {
     const hardField = field('suppression_hard_bounce_action'), softField = field('suppression_soft_bounce_action');
     if (hard && hardField) set(hardField, reading ? hard : hardField.dataset.saved);
     if (soft && softField) {
-        set(field('queue_cleanup_enabled'), soft === 'queue');
-        set(softField, soft === 'queue' || !reading ? softField.dataset.saved : soft);
+        const queue = soft === 'queue' || soft === 'queue_delete';
+        set(field('queue_cleanup_enabled'), queue);
+        if (queue) set(field('queue_cleanup_block'), soft === 'queue');
+        set(softField, queue || !reading ? softField.dataset.saved : soft);
     }
     settingsShowEffective();
 }
@@ -468,20 +512,88 @@ function settingsSyncLogs() {
 }
 
 // Each choice shows what will really happen with the stored values: a value
-// set by ENV can make one choice act once the other turns reading the logs on
+// set by ENV can make one choice act once the other turns reading the logs
+// on, and with Sync with Rspamd off a choice that blocks acts as its twin
 function settingsShowEffective() {
     const field = key => document.getElementById('edit-' + key);
     const logsField = field('suppression_auto_detect');
     const reading = !logsField || logsField.checked;
-    const effective = (kind, value) => !reading && SETTINGS_LOG_CHOICES[kind].includes(value) ? 'ignore' : value;
+    const sync = field('suppression_rspamd_sync');
+    const syncOn = !sync || sync.checked;
+    const effective = (kind, value) => {
+        const shown = !reading && SETTINGS_LOG_CHOICES[kind].includes(value) ? 'ignore' : value;
+        return syncOn ? shown : (SETTINGS_SYNC_TWINS[kind][shown] || shown);
+    };
     const show = (kind, value) => {
         const radios = [...document.querySelectorAll('input[name="choice-' + kind + '"]')];
         if (radios.some(r => r.value === value)) radios.forEach(r => { r.checked = r.value === value; });
     };
     const hardField = field('suppression_hard_bounce_action');
     if (hardField) show('hard', effective('hard', hardField.value));
-    const queue = field('queue_cleanup_enabled'), softField = field('suppression_soft_bounce_action');
-    if (softField) show('soft', queue && queue.checked ? 'queue' : effective('soft', softField.value));
+    const queue = field('queue_cleanup_enabled'), block = field('queue_cleanup_block'), softField = field('suppression_soft_bounce_action');
+    if (softField) show('soft', queue && queue.checked ? effective('soft', block && !block.checked ? 'queue_delete' : 'queue') : effective('soft', softField.value));
+}
+
+// Sync with Rspamd turned off on the page: the options that block are not
+// available, and a picked one moves to its twin, saying so. Turned on again
+// before saving, the choices come back as they were.
+let settingsSyncSnapshot = null;
+const SETTINGS_SYNC_CARRIERS = ['suppression_hard_bounce_action', 'suppression_soft_bounce_action', 'queue_cleanup_enabled', 'queue_cleanup_block', 'suppression_auto_detect'];
+
+function settingsApplySync(toggled) {
+    const sync = document.getElementById('edit-suppression_rspamd_sync');
+    if (!sync || !document.querySelector('.ui-set-choice')) return;
+    const on = sync.checked;
+    // A page drawn again (after saving, or Reset) starts from what it shows
+    if (!toggled) settingsSyncSnapshot = null;
+    const field = key => document.getElementById('edit-' + key);
+    const picked = kind => { const r = document.querySelector('input[name="choice-' + kind + '"]:checked'); return r ? r.value : ''; };
+    if (toggled && !on) {
+        settingsSyncSnapshot = SETTINGS_SYNC_CARRIERS.map(key => {
+            const el = field(key);
+            return [key, el ? (el.type === 'checkbox' ? el.checked : el.value) : null];
+        });
+        ['hard', 'soft'].forEach(kind => {
+            const twin = SETTINGS_SYNC_TWINS[kind][picked(kind)];
+            const radio = twin && document.querySelector('input[name="choice-' + kind + '"][value="' + twin + '"]');
+            if (radio) radio.checked = true;
+        });
+        settingsSyncBounce();
+    } else if (toggled && on && settingsSyncSnapshot) {
+        settingsSyncSnapshot.forEach(([key, value]) => {
+            const el = field(key);
+            if (!el || el.disabled || value === null) return;
+            if (el.type === 'checkbox') el.checked = value; else el.value = value;
+        });
+        settingsSyncSnapshot = null;
+    }
+    document.querySelectorAll('.ui-set-choice-opt').forEach(opt => {
+        if (!(opt.dataset.needs || '').split(' ').includes('sync')) return;
+        const radio = opt.querySelector('input[type="radio"]');
+        opt.inert = !on;
+        radio.disabled = !on || radio.dataset.locked === '1';
+        const need = opt.querySelector('[data-sync-need]');
+        if (need) need.hidden = on;
+    });
+    settingsShowEffective();
+    // Each choice says what it changed to while the sync is off
+    const minutes = (field('queue_cleanup_threshold_minutes') || {}).value || '';
+    const notes = {
+        delete: 'Changed to "Delete its queued mail": Sync with Rspamd is off.',
+        queue_delete: `Changed to "Delete after ${minutes} minutes in the queue": Sync with Rspamd is off.`,
+        ignore: 'Changed to "Do nothing; keep retrying": Sync with Rspamd is off.'
+    };
+    document.querySelectorAll('.ui-set-choice').forEach(box => {
+        const kind = box.dataset.choice;
+        const twin = SETTINGS_SYNC_TWINS[kind][box.dataset.loaded];
+        const note = box.querySelector('[data-sync-changed]');
+        const show = !on && twin && picked(kind) === twin;
+        note.textContent = show ? notes[twin] : '';
+        note.hidden = !show;
+    });
+    document.querySelectorAll('.ui-set-choice').forEach(settingsShowChoice);
+    const form = sync.form;
+    if (toggled && form) form.dispatchEvent(new Event('input', { bubbles: true }));
 }
 
 function settingsPickBounce(radio) {
@@ -535,19 +647,19 @@ function settingsResetChoice(btn) {
     });
     // The choices show the defaults; reading the logs follows them. The actions
     // keep their defaults: settingsSyncBounce would put a saved action back
+    settingsShowMirrors();
     settingsShowEffective();
     settingsSyncLogs();
     settingsShowEffective();
-    document.querySelectorAll('.ui-set-choice').forEach(settingsShowChoice);
+    settingsApplySync(false);
     if (form) form.dispatchEvent(new Event('input', { bubbles: true }));
 }
 
-// ── The app's blocks in Rspamd when automatic updates go off or on ──
-// Automatic updates (new blocks and expiries written to Rspamd by themselves)
-// run while Spam Filter, "Handle undeliverable mail automatically" and
-// "Automatically update Rspamd blocks" are all on. When they stop, or Spam
-// Filter is turned off with its list, the user says what happens to the
-// blocks already in Rspamd; when they start again, what is written there.
+// ── The app's blocks in Rspamd when the sync goes off or on ──
+// The list is synced with Rspamd while Spam Filter and "Sync with Rspamd" are
+// on. When the sync stops, or Spam Filter is turned off with its list, the
+// user says what happens to the blocks already in Rspamd; when it starts
+// again, what is written there.
 const SETTINGS_RSPAMD_CONNECTION_KEYS = ['mailcow_url', 'mailcow_api_key_rw', 'rspamd_password', 'rspamd_url'];
 
 function settingsPlural(n, one, many) { return n === 1 ? one : many; }
@@ -559,7 +671,8 @@ function settingsErrorText(body, fallback) {
 }
 
 async function settingsRspamdState() {
-    const res = await authenticatedFetch('/api/suppressions/rspamd/state');
+    // The map is read even while the sync is off: the questions below need it
+    const res = await authenticatedFetch('/api/suppressions/rspamd/state?check_map=true');
     if (!res.ok) throw new Error('Could not read the Rspamd state');
     return res.json();
 }
@@ -572,19 +685,20 @@ async function settingsRspamdTransition(payload, data, newDisabled) {
     const value = key => (key in payload && !locked.has(key)) ? payload[key] : before[key];
     const wasDisabled = new Set((window.disabledFeatures || []).map(s => s.trim().toLowerCase()));
     const featureWasOn = !wasDisabled.has('spam-filter'), featureOn = !newDisabled.has('spam-filter');
-    const wasOn = featureWasOn && before.suppression_enabled === true && before.suppression_rspamd_sync === true;
-    const nowOn = featureOn && value('suppression_enabled') === true && value('suppression_rspamd_sync') === true;
+    const wasOn = featureWasOn && before.suppression_rspamd_sync === true;
+    const nowOn = featureOn && value('suppression_rspamd_sync') === true;
     const featureOff = featureWasOn && !featureOn;
-    // Spam Filter turned on again: its list was deleted while it was off, and
-    // the blocks this app left in Rspamd are loaded back into it, so nothing
-    // here is applied or removed
-    if (!featureWasOn && featureOn) return { action: 'import' };
+    // Spam Filter turned on again with the sync: its list was deleted while it
+    // was off, and the blocks this app left in Rspamd are loaded back into it
+    // (a read only), so nothing here is applied or removed. With the sync off
+    // the app keeps no list, so there is nothing to load.
+    if (!featureWasOn && featureOn) return { action: nowOn ? 'import' : 'none', feature_on: true };
     if (wasOn === nowOn && !featureOff) return { action: 'none' };
     // Removing talks to the old connection, writing to the new one: never both in one save
     const connectionChanged = SETTINGS_RSPAMD_CONNECTION_KEYS.some(key => key in payload && !locked.has(key)
         && payload[key] !== '********' && String(payload[key] ?? '') !== String(before[key] ?? ''));
     if (connectionChanged) {
-        showToast('Save the mailcow or Rspamd connection change first, then turn automatic updates on or off.', 'error');
+        showToast('Save the mailcow or Rspamd connection change first, then turn Sync with Rspamd on or off.', 'error');
         return null;
     }
     let state;
@@ -593,9 +707,22 @@ async function settingsRspamdTransition(payload, data, newDisabled) {
     const blocks = count => `${count} ${settingsPlural(count, 'block', 'blocks')}`;
 
     if (!nowOn || featureOff) {
-        // Going off. Nothing of ours in Rspamd: nothing to ask
-        if (n === 0) return { action: 'none', feature_off: featureOff, purge_rspamd: state.writable ? 'remove' : 'keep' };
-        const lead = featureOff ? 'Spam Filter will turn off and its saved list will be deleted.' : 'Automatic updates will stop.';
+        // Going off: the list is deleted, like the list of a feature that is off
+        if (n === 0) {
+            // Nothing of ours in Rspamd: only the list to confirm (turning Spam
+            // Filter off has its own confirmation)
+            const rows = state.list_count || 0;
+            if (!featureOff && rows > 0) {
+                const ok = await showChoiceModal({
+                    title: 'Turn off Sync with Rspamd?',
+                    message: `This app's saved list (${rows} ${settingsPlural(rows, 'entry', 'entries')}) will be deleted. None of its blocks is in Rspamd, so turning the sync on again does not bring them back.`,
+                    choices: [{ value: 'off', label: 'Turn off', kind: 'danger' }]
+                });
+                if (!ok) return null;
+            }
+            return { action: 'none', feature_off: featureOff, purge_rspamd: state.writable ? 'remove' : 'keep' };
+        }
+        const lead = featureOff ? 'Spam Filter will turn off and its saved list will be deleted.' : "Sync with Rspamd will stop and this app's saved list will be deleted.";
         if (n === null || !state.writable) {
             const why = state.reason_text || 'Rspamd cannot be reached.';
             const message = n === null
@@ -612,65 +739,75 @@ async function settingsRspamdTransition(payload, data, newDisabled) {
         return picked ? { action: picked, feature_off: featureOff, count: n } : null;
     }
 
-    // Coming back on
-    const active = state.active_count;
-    if (active === 0 && n === 0) return { action: 'none' };
-    if (active === null || n === null) {
+    // Coming back on: the list was deleted while the sync was off, and this
+    // app's blocks load back from Rspamd (a read only)
+    const pending = state.pending_count;
+    if (!pending) return { action: 'import' };
+    // Changes still wait only when deleting the list failed: what mailcow
+    // changed comes into the list first, then they are written
+    if (!state.readable) {
         // What is in Rspamd now cannot be checked: say so before anything is written there
         const why = state.reason_text || 'Rspamd cannot be reached.';
-        const what = active === null ? 'the active list' : `the ${active} active ${settingsPlural(active, 'entry', 'entries')}`;
         const ok = await showChoiceModal({
-            title: 'Turn on automatic updates?',
-            message: `We cannot check this app's Rspamd blocks now: ${why} Turning on updates replaces them with ${what}.`,
+            title: 'Turn on Sync with Rspamd?',
+            message: `We cannot check this app's Rspamd blocks now: ${why} Turning on the sync writes the list's waiting changes once Rspamd can be reached.`,
             choices: [{ value: 'apply', label: 'Turn on', kind: 'primary' }]
         });
-        return ok ? { action: 'apply', count: active } : null;
+        return ok ? { action: 'apply', count: pending } : null;
     }
-    if (active === 0) {
-        const ok = await showChoiceModal({
-            title: 'Turn on automatic updates?',
-            message: `The list is empty, but ${blocks(n)} from this app remain in Rspamd. Turning on updates will remove them.`,
-            choices: [{ value: 'apply', label: 'Turn on', kind: 'primary' }]
-        });
-        return ok ? { action: 'apply', count: 0 } : null;
-    }
-    const entries = `${active} active ${settingsPlural(active, 'entry', 'entries')}`;
+    const changes = `${pending} waiting ${settingsPlural(pending, 'change', 'changes')}`;
     const picked = await showChoiceModal({
-        title: 'Turn on automatic updates?',
-        message: `Apply the ${entries}, or start fresh? Starting fresh deletes the whole list and removes this app's Rspamd blocks. Other Rspamd entries stay.`,
-        choices: [{ value: 'fresh', label: 'Start fresh', kind: 'danger' }, { value: 'apply', label: 'Apply blocks', kind: 'primary' }]
+        title: 'Turn on Sync with Rspamd?',
+        message: `Apply the ${changes} to Rspamd, or start fresh? Starting fresh deletes the whole list and removes this app's Rspamd blocks. Other Rspamd entries stay.`,
+        choices: [{ value: 'fresh', label: 'Start fresh', kind: 'danger' }, { value: 'apply', label: 'Apply changes', kind: 'primary' }]
     });
-    return picked ? { action: picked, count: active } : null;
+    return picked ? { action: picked, count: pending } : null;
 }
 
 // After the save: carry out the choice. Returns the toast to show, [text, kind]
-async function settingsRspamdAfterSave(plan) {
+async function settingsRspamdAfterSave(plan, saved) {
     if (plan.action === 'remove' && !plan.feature_off) {
-        const res = await authenticatedFetch('/api/suppressions/rspamd/clear', { method: 'POST' });
+        // Bound to this save: refused once another save turned the sync on or off
+        // again. A save that did not turn it off (another window did first) has none
+        const transition = saved && saved.rspamd_off_transition;
+        if (!transition) return ["Sync with Rspamd was already off (changed in another window). Nothing was removed from Rspamd.", 'error'];
+        const res = await authenticatedFetch('/api/suppressions/rspamd/clear', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ transition })
+        });
         const body = await res.json().catch(() => ({}));
         if (!res.ok) {
             return [(body.detail && body.detail.code === 'not_confirmed')
-                ? 'Automatic updates are off. Block removal could not be confirmed. The saved list was kept. Check Rspamd before retrying.'
-                : `Automatic updates are off, but block removal failed. The saved list was kept. ${settingsErrorText(body, '')}`.trim(), 'error'];
+                ? 'Sync with Rspamd is off. Block removal could not be confirmed. Check Rspamd before retrying.'
+                : `Sync with Rspamd is off, but this app's Rspamd blocks could not be removed: ${settingsErrorText(body, res.statusText)}`, 'error'];
         }
-        return [`Automatic updates are off. Removed ${body.removed_blocks} app ${settingsPlural(body.removed_blocks, 'block', 'blocks')} from Rspamd.`, 'success'];
+        return [`Sync with Rspamd is off. Removed ${body.removed_blocks} app ${settingsPlural(body.removed_blocks, 'block', 'blocks')} from Rspamd.`, 'success'];
     }
-    if (plan.action === 'keep' && !plan.feature_off) return ['Automatic updates are off. Existing Rspamd blocks were kept.', 'success'];
+    if (plan.action === 'keep' && !plan.feature_off) return ['Sync with Rspamd is off. Existing Rspamd blocks were kept.', 'success'];
     if (plan.action === 'apply') {
-        const res = await authenticatedFetch('/api/suppressions/sync', { method: 'POST' });
+        // What changed in mailcow comes in first, then the list's waiting changes are written
+        const res = await authenticatedFetch('/api/suppressions/sync?after_change=true', { method: 'POST' });
         const body = await res.json().catch(() => ({}));
-        if (!res.ok) return [`Automatic updates are on, but Rspamd was not updated yet: ${settingsErrorText(body, res.statusText)}`, 'error'];
-        return [`Automatic updates are on. Applied ${body.synced} active ${settingsPlural(body.synced, 'entry', 'entries')} to Rspamd.`, 'success'];
+        if (!res.ok) return [`Sync with Rspamd is on, but Rspamd was not updated yet: ${settingsErrorText(body, res.statusText)}`, 'error'];
+        const list = (body.list_added || body.list_removed)
+            ? ` List updated from Rspamd: ${body.list_added || 0} added, ${body.list_removed || 0} deleted.` : '';
+        if (body.written) return [`Sync with Rspamd is on. Rspamd updated: ${body.added} added, ${body.removed} removed.${list}`, 'success'];
+        if (body.pending_count) return [`Sync with Rspamd is on, but ${body.pending_count} ${settingsPlural(body.pending_count, 'change waits', 'changes wait')}: the Read-Write API key is not set.${list}`, 'error'];
+        return [`Sync with Rspamd is on. Rspamd is already up to date.${list}`, 'success'];
     }
     if (plan.action === 'import') {
+        const what = plan.feature_on ? 'Spam Filter is on' : 'Sync with Rspamd is on';
         const res = await authenticatedFetch('/api/suppressions/rspamd/import', { method: 'POST' });
         const body = await res.json().catch(() => ({}));
-        if (!res.ok) return [`Spam Filter is on, but its Rspamd blocks could not be loaded yet: ${settingsErrorText(body, res.statusText)} They load on the next try.`, 'error'];
+        if (!res.ok) return [`${what}, but this app's Rspamd blocks could not be loaded yet: ${settingsErrorText(body, res.statusText)} They load on the next try.`, 'error'];
+        if (body.reason === 'no_password') return [`${what}, but this app's Rspamd blocks load only once the Rspamd password is set.`, 'error'];
+        // The count belongs to this request only when it did the load
+        if (!body.loaded) return [`${what}.`, 'success'];
         return body.imported
-            ? [`Spam Filter is on. Loaded ${body.imported} ${settingsPlural(body.imported, 'block', 'blocks')} from Rspamd.`, 'success']
-            : null;
+            ? [`${what}. Loaded ${body.imported} ${settingsPlural(body.imported, 'block', 'blocks')} from Rspamd.`, 'success']
+            : [`${what}. No blocks of this app were in Rspamd.`, 'success'];
     }
-    if (plan.action === 'fresh') return ['Started fresh. The list is empty and this app\'s Rspamd blocks are removed. Automatic updates are on.', 'success'];
+    if (plan.action === 'fresh') return ['Started fresh. The list is empty and this app\'s Rspamd blocks are removed. Sync with Rspamd is on.', 'success'];
     return null;
 }
 
@@ -686,13 +823,14 @@ const SETTINGS_FIELD_OPTIONS = {
     ],
     // The Spam Filter bounce choices (settingsBounceChoice): {count} is the number field
     suppression_hard_bounce_action: [
-        { value: 'suppress', label: 'Block new mail to the address and delete its queued mail', needs: 'logs rw-queue' },
+        { value: 'suppress', label: 'Block new mail to the address and delete its queued mail', needs: 'logs rw-queue sync' },
+        { value: 'delete', label: 'Delete its queued mail', needs: 'logs rw-queue', hint: 'Does not block new mail to the address.' },
         { value: 'ignore', label: 'Do nothing' }
     ],
     suppression_soft_bounce_action: [
-        { value: 'count', label: 'Keep retrying; block new mail after {count} failures', needs: 'logs',
+        { value: 'count', label: 'Keep retrying; block new mail after {count} failures', needs: 'logs sync',
             hint: 'Each failed retry counts, even for the same message.' },
-        { value: 'suppress', label: 'Keep retrying; block new mail at the first failure', needs: 'logs' },
+        { value: 'suppress', label: 'Keep retrying; block new mail at the first failure', needs: 'logs sync' },
         { value: 'ignore', label: 'Do nothing; keep retrying' }
     ]
 };
@@ -865,14 +1003,17 @@ var SETTINGS_EDIT_TABS = [
     {
         // The id stays spam_filter: links, the search and Status > Jobs point to it, and the Spam Filter feature hides it
         id: 'spam_filter', label: 'Queue Management', description: 'Choose what happens when outgoing mail cannot be delivered. Blocked addresses are listed on Spam Filter > Suppressions.', groups: [
-            { label: 'Automatic handling', keys: ['suppression_enabled', 'suppression_rspamd_sync'] },
+            // The sync belongs to the list, not to the automatic handling: a list kept by hand syncs too
+            { label: 'Rspamd', keys: ['suppression_rspamd_sync'] },
+            { label: 'Automatic handling', keys: ['suppression_enabled'] },
             // Reading the logs is set by the choices (settingsSyncBounce)
             { label: 'Permanent delivery failure', choice: 'hard', needs: 'suppression_enabled', keys: ['suppression_hard_bounce_action', 'suppression_auto_detect'],
                 intro: 'The receiving server rejected the message permanently. (5.x.x)' },
             { label: 'Temporary delivery failure', choice: 'soft', needs: 'suppression_enabled',
-                keys: ['queue_cleanup_enabled', 'suppression_soft_bounce_action', 'queue_cleanup_threshold_minutes', 'suppression_soft_bounce_threshold'],
+                keys: ['queue_cleanup_enabled', 'queue_cleanup_block', 'suppression_soft_bounce_action', 'queue_cleanup_threshold_minutes', 'suppression_soft_bounce_threshold'],
                 intro: 'Postfix keeps the message and retries. (4.x.x)' },
-            { label: 'How long to block', needs: 'suppression_enabled', keys: ['suppression_base_expiry_days', 'suppression_max_expiry_days'] },
+            // A block reaches Rspamd only through the sync: without it nothing is blocked
+            { label: 'How long to block', needs: 'suppression_enabled suppression_rspamd_sync', keys: ['suppression_base_expiry_days', 'suppression_max_expiry_days'] },
             { label: 'Exceptions', needs: 'suppression_enabled', keys: ['suppression_whitelist_domains'] }
         ]
     },
@@ -1746,7 +1887,11 @@ function renderSettings(content, data) {
             showChoices();
             form.addEventListener('input', showChoices);
             settingsShowNeeds(content);
-            form.addEventListener('change', () => settingsShowNeeds(content));
+            settingsApplySync(false);
+            form.addEventListener('change', event => {
+                if (event.target && event.target.id === 'edit-suppression_rspamd_sync') settingsApplySync(true);
+                settingsShowNeeds(content);
+            });
             // Clearing and resetting change a field without an input event
             content.querySelectorAll('.settings-clear-btn').forEach(btn => btn.addEventListener('click', () => setTimeout(() => { updateDirty(); settingsShowNeeds(content); })));
         }
@@ -1821,7 +1966,7 @@ function renderSettings(content, data) {
                 }
                 // ──────────────────────────────────────────────────────────
 
-                // The app's Rspamd blocks when automatic updates go off or on
+                // The app's Rspamd blocks when the sync goes off or on
                 const newDisabledSet = new Set('disabled_features' in payload
                     ? (payload.disabled_features || '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean)
                     : (window.disabledFeatures || []).map(s => s.trim().toLowerCase()));
@@ -1832,11 +1977,11 @@ function renderSettings(content, data) {
                         const res = await authenticatedFetch('/api/suppressions/start-fresh', { method: 'POST' });
                         if (!res.ok) {
                             const body = await res.json().catch(() => ({}));
-                            showToast(`Automatic updates are still off. ${settingsErrorText(body, res.statusText)}`, 'error');
+                            showToast(`Sync with Rspamd is still off. ${settingsErrorText(body, res.statusText)}`, 'error');
                             return;
                         }
                     } catch (freshErr) {
-                        showToast(`Automatic updates are still off. Rspamd could not be reached: ${freshErr.message || freshErr}`, 'error');
+                        showToast(`Sync with Rspamd is still off. Rspamd could not be reached: ${freshErr.message || freshErr}`, 'error');
                         return;
                     }
                 }
@@ -1861,11 +2006,18 @@ function renderSettings(content, data) {
                     // What happened to the app's Rspamd blocks is the answer to show for this save
                     let rspamdToast;
                     try {
-                        rspamdToast = await settingsRspamdAfterSave(rspamdPlan);
+                        rspamdToast = await settingsRspamdAfterSave(rspamdPlan, saved);
                     } catch (rspamdErr) {
                         rspamdToast = [`Settings saved, but Rspamd could not be reached: ${rspamdErr.message || rspamdErr}`, 'error'];
                     }
                     if (rspamdToast && !(checkToast && checkToast[1] === 'error')) checkToast = rspamdToast;
+                    // The list of a Spam Filter (or a sync) turned off could not be deleted yet:
+                    // the sweep the save started tries again
+                    if (saved.feature_data_errors && saved.feature_data_errors['spam-filter']) {
+                        const listText = 'The saved suppression list could not be deleted yet. It is tried again in a few minutes.';
+                        checkToast = checkToast && checkToast[1] === 'error'
+                            ? [`${checkToast[0]} ${listText}`, 'error'] : [`Settings saved, but the saved suppression list could not be deleted yet. It is tried again in a few minutes.`, 'error'];
+                    }
                     if (checkToast) showToast(...checkToast);
                     if (isEnablingBasicAuth) {
                         showToast('Basic Auth enabled successfully! You will need to log in on your next visit.', 'success');
@@ -1886,9 +2038,14 @@ function renderSettings(content, data) {
                         if (purgeableNewlyDisabled.length > 0) {
                             showToast(`Purging data for ${purgeableNewlyDisabled.length} disabled feature(s)...`, 'info');
                             for (const feature of purgeableNewlyDisabled) {
-                                // Spam Filter's list goes with what was chosen for its Rspamd blocks
+                                // Spam Filter's list goes with what was chosen for its Rspamd blocks.
+                                // Removing belongs to this save: one that did not turn Spam Filter
+                                // off (another window did first) removes nothing
+                                const wanted = rspamdPlan.purge_rspamd || (rspamdPlan.action === 'remove' ? 'remove' : 'keep');
+                                const transition = saved.rspamd_off_transition || null;
+                                const notOurs = wanted === 'remove' && !transition;
                                 const body = feature === 'spam-filter'
-                                    ? { feature, rspamd: rspamdPlan.purge_rspamd || (rspamdPlan.action === 'remove' ? 'remove' : 'keep') } : { feature };
+                                    ? { feature, rspamd: notOurs ? 'keep' : wanted, transition } : { feature };
                                 let failed = null;
                                 try {
                                     const res = await authenticatedFetch('/api/settings/purge-feature-data', {
@@ -1901,7 +2058,9 @@ function renderSettings(content, data) {
                                     failed = purgeErr.message || String(purgeErr);
                                 }
                                 if (feature === 'spam-filter') {
-                                    const toast = failed
+                                    const toast = notOurs && rspamdPlan.action === 'remove' && !failed
+                                        ? ['Spam Filter was already off (changed in another window). Its saved list was deleted; nothing was removed from Rspamd.', 'error']
+                                        : failed
                                         ? [rspamdPlan.action === 'remove'
                                             ? `Spam Filter is off. Its saved list was deleted, but its Rspamd blocks could not be removed: ${failed}`
                                             : 'Spam Filter is off, but its saved list could not be deleted. Try again.', 'error']

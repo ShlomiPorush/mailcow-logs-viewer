@@ -212,7 +212,7 @@ def test_deferred_cleanup_does_not_suppress_a_recipient_with_a_slash_in_the_doma
 
     monkeypatch.setattr(type(settings._inner), 'is_feature_enabled', lambda self, name: True)
     for key, value in {'suppression_enabled': True, 'queue_cleanup_enabled': True,
-                       'queue_cleanup_threshold_minutes': 30, 'suppression_rspamd_sync': False,
+                       'queue_cleanup_threshold_minutes': 30, 'suppression_rspamd_sync': True,
                        'suppression_whitelist_domains': ''}.items():
         monkeypatch.setattr(settings._inner, key, value)
     monkeypatch.setattr(scheduler.mailcow_api, 'headers_rw', {'X-API-Key': 'test-key'})
@@ -228,4 +228,7 @@ def test_deferred_cleanup_does_not_suppress_a_recipient_with_a_slash_in_the_doma
                         lambda recipients, uncovered=None: captured.extend(recipients) or len(recipients))
 
     asyncio.run(scheduler.cleanup_deferred_queue_job())
-    assert [r['email'] for r in captured] == ['stuck@example.net']
+    # A recipient that cannot be read keeps the whole message in the queue:
+    # nothing is blocked or deleted for it
+    assert captured == []
+    scheduler.mailcow_api.delete_queue.assert_not_awaited()

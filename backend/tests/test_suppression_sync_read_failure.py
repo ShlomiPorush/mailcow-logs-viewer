@@ -35,6 +35,8 @@ def test_a_map_that_could_not_be_read_is_not_written(monkeypatch, failing):
     monkeypatch.setattr(sup.mailcow_api, "get_rspamd_map_content", fake_get)
     monkeypatch.setattr(sup.mailcow_api, "edit_rspamd_map", fake_edit)
 
-    with pytest.raises(MailcowAPIError):
+    # Read through the app's map reader, which says the map could not be read
+    with pytest.raises(sup.MapUnavailable) as error:
         asyncio.run(sup.sync_suppressions_to_rspamd(db=None))
+    assert error.value.code == "read_failed"
     assert writes == []

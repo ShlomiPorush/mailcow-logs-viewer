@@ -103,7 +103,13 @@ def test_a_line_the_app_wrote_reads_back_to_its_row(stored, kind, source):
     assert suppression_map_line(row) == line, 'written back unchanged'
 
 
-@pytest.mark.parametrize('line', ['/^weird\\d+@example\\.test$/i', '/sales@example\\.test/i', '/^UPPER@example\\.test$/i'])
+def test_an_exact_address_in_capitals_is_read_as_the_address():
+    # With the i flag and nothing a pattern reads differently, it blocks just that address
+    from app.routers.suppressions import parse_managed_line
+    assert parse_managed_line('/^UPPER@example\\.test$/i') == ('upper@example.test', 'email')
+
+
+@pytest.mark.parametrize('line', ['/^weird\\d+@example\\.test$/i', '/sales@example\\.test/i'])
 def test_a_line_the_app_did_not_write_is_kept_as_a_pattern_that_stays_the_same(line):
     from app.routers.suppressions import parse_managed_line, suppression_map_line
     value, kind = parse_managed_line(line)
@@ -145,13 +151,16 @@ def test_a_bare_address_below_the_section_is_anchored_like_one_above(db_ready, m
     assert '/^bare@example\\.test$/i' in state['content'].split('\n')
 
 
-def test_an_end_marker_without_its_start_keeps_the_lines_after_it(db_ready, monkeypatch):
-    from app.routers.suppressions import sync_suppressions_worker, MANAGED_MARKER_END
-    state = _fake_map(monkeypatch, '\n'.join(['/^a@example\\.test$/i', MANAGED_MARKER_END, '/^b@example\\.test$/i']))
-    sync_suppressions_worker()
-    lines = state['content'].split('\n')
-    assert '/^a@example\\.test$/i' in lines and '/^b@example\\.test$/i' in lines
-    assert lines.count(MANAGED_MARKER_END) == 1
+def test_an_end_marker_without_its_start_stops_the_sync(db_ready, monkeypatch):
+    """Which lines are the app's cannot be told: nothing is read in or
+    written, and the page says to fix the markers (test_rspamd_two_way.py)."""
+    from app.routers.suppressions import MapUnavailable, sync_suppressions_worker, MANAGED_MARKER_END
+    content = '\n'.join(['/^a@example\\.test$/i', MANAGED_MARKER_END, '/^b@example\\.test$/i'])
+    state = _fake_map(monkeypatch, content)
+    with pytest.raises(MapUnavailable) as error:
+        sync_suppressions_worker()
+    assert error.value.code == 'section_unclear'
+    assert state['content'] == content
 
 
 # ---- Turned off: everything goes ----
@@ -227,7 +236,7 @@ def test_the_blocks_the_app_wrote_come_back_as_permanent_rows(db_ready, monkeypa
                format_suppression_map_entry('back@example.test')]  # twice in the map, once in the list
     state = _fake_map(monkeypatch, _map(['/^typed-by-hand@example\\.test$/i'], managed))
     _pending(db_ready)
-    assert import_managed_worker() == {'imported': 3, 'pending': False}
+    assert import_managed_worker() == {'imported': 3, 'pending': False, 'loaded': True}
     with db_ready() as db:
         rows = {r.email: r for r in db.query(SpamSuppression).all()}
         assert set(rows) == {'back@example.test', '/^.+@blocked\\.test$/i', '/^weird\\d+@example\\.test$/i'}
@@ -491,7 +500,7 @@ def test_the_queue_cleanup_keeps_messages_no_block_covers(monkeypatch):
     from app import scheduler
     monkeypatch.setattr(type(settings._inner), 'is_feature_enabled', lambda self, name: True)
     for key, value in {'suppression_enabled': True, 'queue_cleanup_enabled': True, 'queue_cleanup_threshold_minutes': 30,
-                       'suppression_rspamd_sync': False, 'suppression_whitelist_domains': ''}.items():
+                       'suppression_rspamd_sync': True, 'suppression_whitelist_domains': ''}.items():
         monkeypatch.setattr(settings._inner, key, value)
     monkeypatch.setattr(scheduler.mailcow_api, 'headers_rw', {'X-API-Key': 'test-key'})
     monkeypatch.setattr(scheduler, 'update_job_status', Mock())
@@ -507,6 +516,9 @@ def test_the_queue_cleanup_keeps_messages_no_block_covers(monkeypatch):
         return 1
 
     monkeypatch.setattr(scheduler, '_store_deferred_suppressions_worker', store)
+    monkeypatch.setattr(scheduler, '_blocked_now', lambda emails: set(emails))
+    # A block From Rspamd disabled by hand keeps its mail
+    monkeypatch.setattr(scheduler, '_protected_now', lambda emails: set(emails) & {'off@example.test'})
     asyncio.run(scheduler.cleanup_deferred_queue_job())
     scheduler.mailcow_api.delete_queue.assert_awaited_once_with(['GO'])
 
@@ -525,8 +537,13 @@ def test_detection_leaves_a_block_from_rspamd_alone(db_ready, monkeypatch):
                           queue_id=f'D{MARK.upper()}', recipient=f'off-{MARK}@example.test', status='bounced', dsn='5.1.1'))
         db.commit()
     try:
-        _, _, cleanup = scheduler._detect_suppressions_worker()
-        assert f'off-{MARK}@example.test' not in cleanup, 'no block covers it: its queued mail stays'
+        _, _, cleanup, _ = scheduler._detect_suppressions_worker()
+        # No block covers it: its queued mail stays (checked right before a deletion)
+        monkeypatch.setattr(settings._inner, 'suppression_enabled', True)
+        monkeypatch.setattr(scheduler.mailcow_api, 'headers_rw', {'X-API-Key': 'test-key'})
+        address = f'off-{MARK}@example.test'
+        assert scheduler._hard_deletable({'Q1': [address]}, set(cleanup) | {address}, set()) == []
+        assert scheduler._hard_deletable({'Q1': [address]}, set(), {address}) == [], 'nor without a block'
         with db_ready() as db:
             row = db.query(SpamSuppression).filter(SpamSuppression.email == f'off-{MARK}@example.test').one()
             assert (row.bounce_count, row.active, row.reason) == (0, False, 'manual')
@@ -549,11 +566,16 @@ def test_the_sweep_reports_a_feature_it_could_not_clean(monkeypatch):
 
 def test_without_the_rspamd_password_there_is_nothing_to_load(db_ready, monkeypatch):
     """A new install (no Rspamd password) never wrote to Rspamd: the marker of
-    the first start must not hold the jobs back."""
+    the first start must not hold the jobs back. A marker that says the app
+    may have blocks there waits for the password instead
+    (test_rspamd_sync_off_keeps_no_list.py)."""
     from app.routers.suppressions import import_managed_worker, import_pending
+    from app.services.feature_data import _set_key, SPAM_IMPORT_PENDING_KEY
     monkeypatch.setattr(type(settings._inner), 'is_rspamd_configured', property(lambda self: False))
-    _pending(db_ready)
-    assert import_managed_worker() == {'imported': 0, 'pending': False}
+    with db_ready() as db:
+        _set_key(db, SPAM_IMPORT_PENDING_KEY, 'bootstrap')
+        db.commit()
+    assert import_managed_worker() == {'imported': 0, 'pending': False, 'loaded': False}
     with db_ready() as db:
         assert not import_pending(db)
 

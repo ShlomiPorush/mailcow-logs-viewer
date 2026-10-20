@@ -22,8 +22,6 @@ def state(monkeypatch):
     monkeypatch.setattr(suppressions.mailcow_api, "headers_rw", {"X-API-Key": "test-key"})
     monkeypatch.setattr(suppressions.mailcow_api, "aclose", AsyncMock())
     monkeypatch.setattr(scheduler, "update_job_status", Mock())
-    # Spam Filter's earlier Rspamd blocks are loaded (tested in test_feature_off_data.py)
-    monkeypatch.setattr(suppressions, "_import_managed_blocks", AsyncMock(return_value={"imported": 0}))
 
 
 @pytest.mark.parametrize("manual", [False, True])
@@ -41,7 +39,7 @@ def test_sync_entry_point_uses_worker_and_closes_client(monkeypatch, state, manu
         finally:
             session_threads.append(threading.get_ident())
 
-    async def sync(session_db):
+    async def sync(session_db, automatic=False):
         sync_threads.append(threading.get_ident())
         started.set()
         release.wait(2)
