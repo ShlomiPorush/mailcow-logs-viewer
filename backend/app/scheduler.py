@@ -1956,6 +1956,7 @@ def _persist_geoip_license_status():
 
 
 CREDENTIAL_CHECK_HOURS = 6
+_credential_check_runs = 0  # the latest run reports the status, not an older one finishing late
 # What a failed check says on Status, by credential
 _CREDENTIAL_LABELS = {'mailcow_rw_key': 'Read-Write API key', 'rspamd_password': 'Rspamd password'}
 
@@ -1968,9 +1969,12 @@ async def check_credentials_job():
     revoked in mailcow shows as a problem on Status within hours. Changes
     nothing in mailcow."""
     from .routers.settings import _CREDENTIAL_CHECKS, _validate_credential
+    global _credential_check_runs
     names = [name for name, check in _CREDENTIAL_CHECKS.items() if check["configured"]()]
     if not names:
         return
+    _credential_check_runs += 1
+    run = _credential_check_runs
     update_job_status('check_credentials', 'running')
     failed = []
     for name in names:
@@ -1986,6 +1990,9 @@ async def check_credentials_job():
             reason = {'connection': 'could not be reached', 'rejected': 'was rejected',
                       'read_only': 'has no write access'}.get(result.get("error"), 'was not accepted')
             failed.append(f"the {_CREDENTIAL_LABELS[name]} {reason}")
+    if run != _credential_check_runs:
+        # A newer run (a manual one, say) started meanwhile: its result is the one to show
+        return JOB_STATUS_SET
     if failed:
         message = '; '.join(failed)
         update_job_status('check_credentials', 'failed', message[0].upper() + message[1:] + '. See Settings > Mailcow.')

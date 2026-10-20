@@ -103,3 +103,51 @@ def test_a_check_of_a_key_changed_meanwhile_is_not_kept(monkeypatch):
     asyncio.run(scheduler.check_credentials_job())
     assert persisted == [], 'the result of the new key stays'
     status.assert_called_with('check_credentials', 'success')
+
+
+def test_the_compare_and_the_save_are_one_step(monkeypatch):
+    """The key changes after the check answered, while its save waits: the
+    old answer is not written over the check of the new key."""
+    import threading
+    current = {'fp': 'old'}
+    persisted, status = _checks(monkeypatch, rw=ACCEPTED)
+    rs._CREDENTIAL_CHECKS['mailcow_rw_key']['fingerprint'] = lambda: current['fp']
+    out = {}
+    rs._CREDENTIAL_SAVE_LOCK.acquire()
+    try:
+        worker = threading.Thread(target=lambda: out.update(result=asyncio.run(rs._validate_credential('mailcow_rw_key'))))
+        worker.start()
+        worker.join(0.5)
+        assert worker.is_alive(), 'the save waits for the lock'
+        current['fp'] = 'new'  # saved in Settings, and its own check saved, meanwhile
+    finally:
+        rs._CREDENTIAL_SAVE_LOCK.release()
+    worker.join(5)
+    assert out['result'].get('stale') is True and persisted == []
+
+
+def test_an_older_run_finishing_late_leaves_the_newer_runs_status(monkeypatch):
+    """A scheduled run still waits for mailcow when a manual run starts and
+    finds the key rejected: the late run does not write success over it."""
+    gate = {}
+    persisted, status = _checks(monkeypatch, rw=ACCEPTED)
+    answers = iter(['slow', 'rejected'])
+
+    async def check():
+        if next(answers) == 'slow':
+            await gate['release'].wait()
+            return ACCEPTED
+        return {'configured': True, 'valid': False, 'error': 'rejected'}
+
+    rs._CREDENTIAL_CHECKS['mailcow_rw_key']['check'] = check
+
+    async def run():
+        gate['release'] = asyncio.Event()
+        older = asyncio.create_task(scheduler.check_credentials_job())
+        await asyncio.sleep(0)
+        await scheduler.check_credentials_job()   # the newer run, finished first
+        gate['release'].set()
+        await older
+
+    asyncio.run(run())
+    assert [c.args[1] for c in status.call_args_list] == ['running', 'running', 'failed']
