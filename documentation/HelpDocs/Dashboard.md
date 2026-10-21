@@ -34,17 +34,17 @@ The check window comes from the alert, or from the outgoing spam block, rather t
 
 The hourly rate is the alert-window count converted to an hour, not a separate count. For SMTP blocks it is compared with the sending limit; for volume spikes, with the mailbox's usual rate. Login bursts show the threshold and the number of distinct source addresses.
 
-Short chart views use 15-minute bars. The baseline view uses hours, or several hours per bar for baselines longer than 7 days. The chart extends 2 hours after the alert and highlights its window when known.
+Sending alerts open on the baseline view, login alerts on 24 hours. Views up to 2 days use 15-minute bars. Longer views use hours, or several hours per bar for baselines longer than 7 days. The chart extends 2 hours after the alert, or up to now for a recent one, and highlights its window when known. The chart zooms like [Mail flow](#mail-flow). Selecting a bar shows its count.
 
 **Around the alert** covers one check window before the alert to an hour after it, or 60 minutes before when the window is unknown. Sending alerts group recipient domains, delivery results and subjects; login alerts group source addresses, countries and networks. Missing logs may have expired under retention settings.
 
 Compare recipients, subjects and results with the user's normal sending. Failed logins from one address may be a device with an old password; many addresses can indicate a distributed attack.
 
-**Open in Messages** filters by **Authenticated User**, including mail sent from aliases. **Open in Security** filters Events by username. Dismissing an SMTP block alert does not restore sending; use [Outgoing spam](Abuse_Protection.md).
+**Open in Messages** filters by **Authenticated User**, including mail sent from aliases, and by the time of **Around the alert**, or of the selected bar. **Open in Security** filters Events by username. Dismissing an SMTP block alert does not restore sending; use [Outgoing spam](Abuse_Protection.md).
 
 ## Mail flow
 
-The figures cover the last 24 hours:
+The figures cover the chosen period: 24 hours in hourly bars, 7 days in 6-hour bars, or 30 days in daily bars. The current bar is still running.
 
 | Figure | What it counts |
 |---|---|
@@ -53,13 +53,11 @@ The figures cover the last 24 hours:
 | **Deferred** | Deliveries still waiting to be retried. |
 | **Auth Fails** | Failed mail logins recorded as SASL authentication failures in Netfilter. |
 
-The smaller figures give 7-day totals, plus the 24-hour delivery count under Messages. Hourly bars count Rspamd scans, split into clean and spam.
+The smaller figures give the period before, for comparison, plus the delivery count under Messages. **(partial)** means that period starts before the log retention period, so its older logs may be deleted. The bars count Rspamd scans, split into clean and spam.
 
-Selecting a bar changes the figures to that hour and the smaller figures to 24-hour totals. **View these messages** applies that hour to Messages and clears its other filters. Selecting the same bar again restores the full day.
+Selecting a bar changes the figures to that bar. **View these messages** applies its time to Messages and clears its other filters. Messages lists every message with a delivery in that time, so it can show more than the bar, which counts each message once, at its earliest delivery. Selecting the same bar again restores the period.
 
-## Latest messages
-
-This list counts deliveries, unlike the Messages figure. It shows the 11 deliveries with the most recent log activity. See [message details](Messages.md#message-details).
+To zoom in time, drag across bars, use Ctrl and the mouse wheel or a trackpad pinch, or pinch on a phone. On a zoomed chart, drag sideways to move it. The buttons under the chart do the same, and **Reset zoom** returns to the period. **View these messages** with no bar selected opens the zoomed time.
 
 ## Security
 
@@ -90,7 +88,6 @@ See [Status](Status.md) and [About](About.md) for details.
 - **All figures are 0 with no recent activity.** Logs have not been imported, or mailcow is unreachable. Check **Settings** > **Mailcow**.
 - **No security alerts appear.** Anomaly detection is off by default.
 - **A card shows "-".** Data has not loaded, or mailcow did not answer.
-- **Latest messages says "Failed to load activity".** The app's database did not answer. Check **View Container Logs**.
 - **Show activity says "Could not load the activity".** Try again; the message includes the server's answer.
 
 ## How the security alerts are decided

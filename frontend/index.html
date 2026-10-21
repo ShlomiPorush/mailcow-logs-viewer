@@ -82,10 +82,6 @@
             -webkit-overflow-scrolling: touch;
         }
 
-        #recent-activity::-webkit-scrollbar {
-            display: none;
-        }
-
         /* Slim, rounded scrollbars matching both themes instead of the
            browser default */
         * {
@@ -604,13 +600,18 @@
                         <section class="ui-panel" id="dashboard-attention-panel">
                             <div class="ui-panel-head">Needs attention <span id="dashboard-attention-count" class="ui-count"></span>
                                 <button type="button" id="dashboard-dismiss-all" onclick="acknowledgeAllSecurityAlerts()" class="hidden ui-btn ui-btn-sm ui-head-actions">Dismiss all alerts</button></div>
-                            <div id="dashboard-attention"></div>
-                            <div id="dashboard-security-alerts" class="hidden"></div>
+                            <!-- A fixed height; the items scroll inside it -->
+                            <div id="dashboard-attention-scroll" class="ui-attn-scroll" role="region" aria-label="Needs attention" tabindex="0">
+                                <div id="dashboard-attention"></div>
+                                <div id="dashboard-security-alerts" class="hidden"></div>
+                            </div>
+                            <p id="dashboard-attention-more" class="ui-attn-more hidden"></p>
                             <p id="dashboard-attention-clear" class="hidden ui-dash-clear">Nothing needs attention right now.</p>
                         </section>
 
                         <section class="ui-panel">
-                            <div class="ui-panel-head"><span id="dashboard-flow-title">Mail flow, last 24 hours</span>
+                            <div class="ui-panel-head"><span id="dashboard-flow-title" aria-live="polite">Mail flow, last 24 hours</span>
+                                <span id="dashboard-flow-period" class="ui-seg" role="group" aria-label="Period"><button type="button" data-period="24h" aria-pressed="true" onclick="setDashFlowPeriod('24h')">24 hours</button><button type="button" data-period="7d" aria-pressed="false" onclick="setDashFlowPeriod('7d')">7 days</button><button type="button" data-period="30d" aria-pressed="false" onclick="setDashFlowPeriod('30d')">30 days</button></span>
                                 <span class="ui-head-actions ui-flow-actions">
                                     <button type="button" id="dashboard-flow-view" class="ui-btn ui-btn-sm hidden" onclick="openMailFlowHourMessages()">View these messages</button>
                                     <button type="button" id="dashboard-flow-reset" class="ui-more hidden" onclick="pickMailFlowHour(null)">All 24 hours</button>
@@ -624,11 +625,6 @@
                             <div id="dashboard-flow-chart" class="ui-flow"></div>
                         </section>
 
-                        <section class="ui-panel">
-                            <div class="ui-panel-head">Latest messages
-                                <button type="button" class="ui-more" onclick="navigateTo('messages')">View all</button></div>
-                            <div id="recent-activity"><div class="ui-loading" role="status"><div class="loading"></div><p>Loading...</p></div></div>
-                        </section>
                     </div>
 
                     <div class="ui-col">
@@ -1612,6 +1608,7 @@
         <div class="ui-dialog ui-dialog-fit ui-aa-dialog">
             <div class="ui-dialog-head">
                 <h3 id="alert-activity-title">Activity</h3>
+                <button type="button" id="alert-activity-dismiss" class="hidden ui-btn ui-btn-sm ui-aa-dismiss" title="Dismiss the alert">Dismiss</button>
                 <button onclick="closeAlertActivity()" class="ui-icon-btn" title="Close" aria-label="Close"><svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg></button>
             </div>
             <div id="alert-activity-content" class="ui-dialog-body"></div>

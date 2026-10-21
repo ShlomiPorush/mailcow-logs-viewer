@@ -159,6 +159,12 @@ def _group_postfix_by_recipient(postfix_logs) -> dict:
 BLANKS = "".join(chr(c) for c in range(0x110000) if chr(c).isspace())
 
 
+def message_group_key():
+    """What makes deliveries one message: the Message-ID, else (none, or empty)
+    the delivery's own key, so it is never merged with another"""
+    return func.coalesce(func.nullif(MessageCorrelation.message_id, ""), MessageCorrelation.correlation_key)
+
+
 def message_sort_time():
     """The time the Messages list sorts by: first seen, else when stored (a
     delivery may lack it), else the epoch. The list, its cursor, the leg that
@@ -377,9 +383,7 @@ def get_unified_messages(
         # earliest matching leg represents its message in the list, so a search
         # always shows the leg that matched it. A correlation without a
         # Message-ID falls back to its own key and is never merged with another.
-        group_key = func.coalesce(
-            func.nullif(MessageCorrelation.message_id, ""), MessageCorrelation.correlation_key
-        )
+        group_key = message_group_key()
         legs = query.with_entities(
             MessageCorrelation.id.label("leg_id"),
             MessageCorrelation.first_seen.label("first_seen"),

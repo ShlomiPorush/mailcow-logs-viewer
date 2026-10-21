@@ -13,6 +13,8 @@ const AT = new Date('2026-10-13T12:00:00Z');
 // The time helpers the chart formats and groups with, in the app's zone
 const utils = fs.readFileSync(path.join(__dirname, '../../frontend/utils.js'), 'utf8');
 const zoneHelpers = utils.slice(utils.indexOf('function appTz()'), utils.indexOf('function formatSeconds('));
+// The zoom steps the buttons take
+const zoomSteps = utils.slice(utils.indexOf('function uiTimeZoomClamp('), utils.indexOf('function uiTimeZoom('));
 
 // What GET /api/security-alerts/{id}/activity answers: quarters of an hour
 // from the baseline period before the alert to two hours after it
@@ -31,7 +33,9 @@ function activity(alert, { baselineDays = 7, window = 15, around = {}, at = AT }
 // browserLocale: the language of the browser, for formats that name no locale
 function harness(appTimezone = 'UTC', { browserLocale } = {}) {
     const elements = {};
-    const element = id => elements[id] || (elements[id] = { innerHTML: '', textContent: '', classList: { add() {}, remove() {}, contains: () => false } });
+    const element = id => elements[id] || (elements[id] = { innerHTML: '', textContent: '', value: '',
+        classList: { add() {}, remove() {}, toggle() {}, contains: () => false }, querySelector: () => null });
+    const opened = [];
     const context = vm.createContext({
         document: { getElementById: element, addEventListener() {} },
         escapeHtml: value => String(value ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;'),
@@ -39,6 +43,10 @@ function harness(appTimezone = 'UTC', { browserLocale } = {}) {
         uiCountLabel: (n, one, many) => `${n} ${n === 1 ? one : many}`,
         formatTime: value => value,
         authenticatedFetch: async () => ({ ok: false, status: 500 }),
+        // The dashboard's helpers the window uses (app.js, utils.js)
+        mailFlowSpan: (from, to) => `${new Date(from).toISOString()} to ${new Date(to).toISOString()}`,
+        openMessagesRange: options => opened.push(options),
+        uiTimeZoom: () => ({ destroy() {}, busy: () => false }),
         appTimezone,
     });
     if (browserLocale) {
@@ -47,18 +55,22 @@ function harness(appTimezone = 'UTC', { browserLocale } = {}) {
             Intl.DateTimeFormat = function (locale, options) { return new Format(locale ?? __locale, options); }; }`, context);
     }
     vm.runInContext(zoneHelpers, context);
+    vm.runInContext(zoomSteps, context);
     vm.runInContext(source, context);
     const run = expression => vm.runInContext(expression, context);
     return {
         render(data, range = '24h') {
             context.__data = data;
-            run(`alertActivity = __data; alertActivityRange = '${range}'; renderAlertActivity();`);
+            run(`alertActivity = __data; alertActivityRange = '${range}'; alertActivityZoom = null; alertActivityPick = null; renderAlertActivity();`);
             return element('alert-activity-content').innerHTML;
         },
+        // The columns the range buttons show
         columns(data, range) {
             context.__data = data;
-            return run(`alertActivityRange = '${range}'; alertActivityColumns(__data)`);
+            return run(`alertActivityRange = '${range}'; alertActivityColumns(__data, alertActivityRangeSpan(__data))`);
         },
+        run,
+        opened,
     };
 }
 
@@ -71,7 +83,7 @@ test('an SMTP block shows the mailbox sent mail, its limit and Open in Messages'
     assert.equal(figure(html, "Sent in the alert's 60 minutes"), '40');
     assert.equal(figure(html, 'The limit, in 60 minutes'), '30');
     assert.doesNotMatch(html, /Failed logins|Open in Security|ui-aa-usual/);
-    assert.match(html, /navigateToMessagesWithFilter\(\{ email: 'user@example\.com', filterType: 'user' \}\)/);
+    assert.match(html, /onclick="openAlertActivityMessages\(\)">Open in Messages</);
 });
 
 test('an SMTP block whose window is not known says so instead of using today\'s window', () => {
@@ -108,7 +120,40 @@ test('a volume spike keeps its usual rate and opens Messages on the mailbox that
     const html = harness().render(activity({ alert_type: 'volume_spike', subject: 'user@example.com', metric_value: 40, baseline_value: 0.5 }));
     assert.equal(figure(html, 'Usual, an hour \\(7 days\\)'), '0.50');
     assert.match(html, /ui-aa-usual/);
-    assert.match(html, /filterType: 'user'/);
+    assert.match(html, /onclick="openAlertActivityMessages\(\)"/);
+});
+
+test('Open in Messages asks for the mailbox around the alert, or in the picked column', () => {
+    const at = AT.getTime();
+    const around = { total: 3, from: new Date(at - 3600000).toISOString(), to: new Date(at + 3600000).toISOString(), recipient_domains: [], results: [], subjects: [] };
+    const h = harness();
+    h.render(activity({ alert_type: 'volume_spike', subject: 'user@example.com', metric_value: 40, baseline_value: 0.5 }, { around }));
+    h.run('openAlertActivityMessages()');
+    assert.deepEqual(JSON.parse(JSON.stringify(h.opened.pop())), { start: around.from, endInclusive: around.to, user: 'user@example.com' });
+    // A picked quarter of an hour: that quarter only, to its last millisecond
+    const html = h.render(activity({ alert_type: 'volume_spike', subject: 'user@example.com', metric_value: 40, baseline_value: 0.5 }, { around }));
+    assert.match(html, /aria-pressed="false"[^>]*onclick="pickAlertActivityColumn\(\d+\)"/);
+    h.run(`pickAlertActivityColumn(${at})`);
+    assert.match(h.run("document.getElementById('alert-activity-content').innerHTML"), /Open this time in Messages/);
+    h.run('openAlertActivityMessages()');
+    assert.deepEqual(JSON.parse(JSON.stringify(h.opened.pop())),
+        { start: new Date(at).toISOString(), endInclusive: new Date(at + 15 * 60000 - 1).toISOString(), user: 'user@example.com' });
+});
+
+test('the columns stop where the data ends, and a zoom shows a span inside it', () => {
+    const h = harness();
+    const data = activity({ alert_type: 'volume_spike', baseline_value: 0.5 });
+    // The data ends five minutes into its last quarter (now, for a recent alert)
+    const last = Date.parse(data.buckets[data.buckets.length - 1].start);
+    data.data_end = new Date(last + 5 * 60000).toISOString();
+    const { cols } = h.columns(data, '24h');
+    assert.equal(cols[cols.length - 1].end.getTime(), last + 5 * 60000);
+    h.render(data, '24h');
+    h.run('alertActivityStep("in")');
+    const zoom = h.run('alertActivityZoom');
+    assert.ok(zoom && zoom.to - zoom.from < 26 * 3600000 / 2 + 1, JSON.stringify(zoom));
+    h.run('alertActivityStep("reset")');
+    assert.equal(h.run('alertActivityZoom'), null);
 });
 
 test('From addresses counts every address, not only the six listed', () => {
@@ -178,7 +223,7 @@ test('on the night the clocks go back, columns are spans of time that do not ove
     for (const s of ['2026-10-24T22:00:00.000Z', '2026-10-25T00:00:00.000Z', '2026-10-25T01:00:00.000Z', '2026-10-25T03:00:00.000Z']) assert.ok(starts.includes(s), s);
     // The mark sits on the column that counted the alert's 50
     const html = h.render(data, '7d');
-    const tips = [...html.matchAll(/<span class="ui-aa-col[^"]*" data-tip="([^"]*)"/g)].map(m => m[1]);
+    const tips = [...html.matchAll(/<button type="button" class="ui-aa-col[^"]*"[^>]*? aria-label="([^"]*)"/g)].map(m => m[1]);
     const left = Number(html.match(/<div class="ui-aa-mark" style="left:([\d.]+)%"/)[1]);
     const marked = Math.floor(left / 100 * tips.length);
     // [01:00Z, 03:00Z) is 02:00 to 04:00 CET: seven quarters of 1 and the alert's 50
@@ -246,7 +291,7 @@ test('each column counts only what falls in its own span, from the first quarter
     }
 });
 
-const drawnColumns = html => [...html.matchAll(/<span class="ui-aa-col[^"]*" data-tip="([^"]*)"[^>]*><i style="height:([\d.]+)%"><\/i>(?:<b class="ui-aa-norm" style="bottom:([\d.]+)%"><\/b>)?<\/span>/g)];
+const drawnColumns = html => [...html.matchAll(/<button type="button" class="ui-aa-col[^"]*"[^>]*? aria-label="([^"]*)"[^>]*><i style="height:([\d.]+)%"><\/i>(?:<b class="ui-aa-norm" style="bottom:([\d.]+)%"><\/b>)?<\/button>/g)];
 
 test('normal traffic sits on the usual level of every column, also one a clock change made longer or shorter', () => {
     // 00:00 CET to 04:00 CEST on 2026-03-29 is three real hours: 12 messages are usual there, not a rise

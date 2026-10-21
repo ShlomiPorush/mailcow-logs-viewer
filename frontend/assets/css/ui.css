@@ -1265,6 +1265,26 @@ body { font-family: var(--ui-font); background: var(--ui-bg); color: var(--ui-in
 .ui-dash-clear { margin: 0; padding: var(--ui-pad-y) var(--ui-pad-x); border-top: 1px solid var(--ui-line); color: var(--ui-muted); }
 
 .ui-flow { padding: 0 var(--ui-pad-x) 14px; }
+/* Needs attention: a fixed height, its items scroll inside; a fade while more is below (not over a focused item) */
+.ui-attn-scroll { max-height: 380px; overflow-y: auto; overscroll-behavior: contain; }
+.ui-attn-scroll.has-more:not(:focus-within) { mask-image: linear-gradient(to bottom, #000 calc(100% - 40px), transparent); }
+.ui-attn-scroll:focus-visible { outline: 2px solid var(--ui-focus); outline-offset: -2px; }
+.ui-attn-more { margin: 0; padding: 8px var(--ui-pad-x); border-top: 1px solid var(--ui-line); color: var(--ui-muted); font-size: 12.5px; }
+.ui-attn-more.hidden { display: none; }
+@media (max-width: 760px) { .ui-attn-scroll { max-height: 340px; } }
+/* The mail flow: a period picker, bars that zoom in time (utils.js uiTimeZoom) */
+#dashboard-flow-period { margin-inline-start: auto; }
+.ui-flow-view { position: relative; overflow: hidden; }
+.ui-flow-bars { touch-action: pan-y; user-select: none; }
+.ui-flow-bar.is-partial i { opacity: .55; }
+.ui-flow-band { position: absolute; top: 0; bottom: 0; background: color-mix(in srgb, var(--ui-accent) 14%, transparent); border-inline: 1px solid var(--ui-accent); pointer-events: none; }
+.ui-flow-band.hidden { display: none; }
+.ui-flow-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; margin-top: 10px; }
+.ui-flow-foot .ui-flow-legend { margin-top: 0; }
+.ui-flow-zoom { display: inline-flex; align-items: center; gap: 4px; }
+.ui-flow-zoom .ui-icon-btn { border: 1px solid var(--ui-line); font-size: 16px; line-height: 1; color: var(--ui-ink); }
+.ui-flow-zoom .ui-icon-btn:disabled { opacity: .35; cursor: default; }
+.ui-flow-note { margin: 8px 0 0; color: var(--ui-muted); font-size: 12px; }
 .ui-flow-actions { display: inline-flex; align-items: center; gap: 12px; }
 .ui-flow:empty { display: none; }
 .ui-flow-bars { display: flex; align-items: flex-end; gap: 3px; height: 120px; }
@@ -2776,6 +2796,14 @@ button.ui-dm-node { cursor: pointer; }
 .ui-aa-grid i span { position: absolute; inset-inline-start: -34px; top: -8px; width: 28px; text-align: end; font-size: 11px; color: var(--ui-muted); }
 .ui-aa-cols { position: absolute; inset: 0; display: flex; align-items: flex-end; gap: 1px; }
 .ui-aa-col { position: relative; flex: 1; height: 100%; display: flex; align-items: flex-end; }
+/* The alert's columns are buttons: a click picks one; the chart zooms (uiTimeZoom) */
+button.ui-aa-col { min-width: 0; padding: 0; border: 0; background: none; font: inherit; cursor: pointer; }
+button.ui-aa-col:focus-visible { outline: 2px solid var(--ui-focus); outline-offset: 1px; }
+.ui-aa-cols { touch-action: pan-y; user-select: none; }
+.ui-aa-cols.has-pick .ui-aa-col[aria-pressed="false"] i { opacity: .3; }
+.ui-aa-picked { margin: 8px 0 0; font-size: 13px; }
+.ui-dialog-head > .ui-aa-dismiss { margin-inline-start: auto; }
+.ui-dialog-head > .ui-aa-dismiss + .ui-icon-btn { margin-inline-start: 0; }
 .ui-aa-col i { display: block; width: 100%; background: color-mix(in srgb, var(--ui-ink) 55%, transparent); border-radius: 1px 1px 0 0; }
 .ui-aa-col.is-alert i { background: var(--ui-fail); }
 @media (hover: hover) { .ui-aa-col:hover i { filter: brightness(1.3); } }
