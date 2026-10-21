@@ -1131,14 +1131,31 @@ function uiSortUnits(table) {
 
 // Each row keeps the place it was drawn in, so the list's own order can come
 // back (Default order). Rows drawn anew come in that order; it tells whether
-// any row is new since the list was last sorted.
+// any row is new since the list was last sorted. A row drawn again on its own
+// (one domain checked again) finds its place by its data-sort-id, else by its
+// first cell's text.
+function uiSortRowId(row) {
+    if (row.dataset.sortId !== undefined) return row.dataset.sortId;
+    const first = uiSortCell(row, 0);
+    return first ? first.textContent.replace(/\s+/g, ' ').trim() : '';
+}
 function uiSortPositions(table) {
     const units = uiSortUnits(table).flatMap(seg => seg.units);
     const fresh = units.filter(u => u[0].dataset.sortPos === undefined);
     if (!fresh.length) return false;
-    let next = fresh.length === units.length ? 0
-        : Math.max(...units.filter(u => u[0].dataset.sortPos !== undefined).map(u => Number(u[0].dataset.sortPos))) + 1;
-    for (const u of fresh) u[0].dataset.sortPos = String(next++);
+    if (fresh.length === units.length || !table._sortPlaces) table._sortPlaces = new Map();
+    const places = table._sortPlaces;
+    if (fresh.length === units.length) {
+        units.forEach((u, i) => { u[0].dataset.sortPos = String(i); places.set(uiSortRowId(u[0]), i); });
+        return true;
+    }
+    let next = Math.max(...units.filter(u => u[0].dataset.sortPos !== undefined).map(u => Number(u[0].dataset.sortPos))) + 1;
+    for (const u of fresh) {
+        const known = places.get(uiSortRowId(u[0]));
+        const pos = known !== undefined ? known : next++;
+        u[0].dataset.sortPos = String(pos);
+        places.set(uiSortRowId(u[0]), pos);
+    }
     return true;
 }
 
@@ -1176,7 +1193,6 @@ const UI_SORT_KINDS = {
     text: { asc: 'A to Z', desc: 'Z to A', first: 1 },
     number: { asc: 'Low to high', desc: 'High to low', first: -1 },
     date: { asc: 'Oldest first', desc: 'Newest first', first: -1 },
-    age: { asc: 'Newest first', desc: 'Oldest first', first: 1 },
 };
 function uiSortWords(cell) {
     return UI_SORT_KINDS[cell && cell.dataset.sortKind] || { asc: 'Ascending', desc: 'Descending' };
@@ -1209,7 +1225,14 @@ function uiSortNth(table) {
 }
 function uiSortBy(table, cell) {
     const current = uiSortState(cell);
-    uiSortSet(table, cell, current === 'descending' ? 1 : current === 'ascending' ? -1 : uiSortFirstDir(table, cell));
+    let dir = current === 'descending' ? 1 : current === 'ascending' ? -1 : uiSortFirstDir(table, cell);
+    // A list shown in the order it arrives in (data-sort-default): its column turns around too
+    if (current === 'none' && !table.hasAttribute('data-sort-handler') && table.dataset.sortDefault) {
+        const heads = uiSortHeads(table);
+        const fallback = uiSortDefault(table, heads);
+        if (fallback && fallback.cell === cell && heads.every(h => uiSortState(h) === 'none')) dir = -fallback.dir;
+    }
+    uiSortSet(table, cell, dir);
 }
 
 // Sort by a column in an order (1 low to high, -1 high to low), from a header or
@@ -1223,17 +1246,33 @@ function uiSortSet(table, cell, dir) {
     }
     const heads = uiSortHeads(table);
     const index = heads.indexOf(cell);
+    const handler = table.getAttribute('data-sort-handler');
+    // The order a list sorted in the page arrives in is its own order, exactly
+    // (rows equal in that column keep their places)
+    const fallback = !handler && table.dataset.sortDefault ? uiSortDefault(table, heads) : null;
+    if (fallback && fallback.cell === cell && fallback.dir === dir) { uiSortReset(table); return; }
+    const before = heads.map(uiSortState);
     heads.forEach(h => { if (uiSortable(table, h)) uiSetSortState(h, h === cell ? (dir > 0 ? 'ascending' : 'descending') : 'none'); });
     // The Sort button shows it too, before a list sorted on the server comes back
     if (typeof requestAnimationFrame === 'function' && !uiTableSortQueued) { uiTableSortQueued = true; requestAnimationFrame(uiRefreshTableSorts); }
-    const handler = table.getAttribute('data-sort-handler');
     if (handler) {
+        // A list sorted on the server comes back drawn anew; when it does not
+        // (the request failed), its headers go back to the order still shown
+        table._sortUndo = before;
+        if (typeof setTimeout === 'function') setTimeout(() => {
+            if (!table.isConnected || table._sortUndo !== before) return;
+            delete table._sortUndo;
+            heads.forEach((h, i) => { if (uiSortable(table, h)) uiSetSortState(h, before[i]); });
+            if (typeof uiRefreshTableSorts === 'function') uiRefreshTableSorts();
+        }, uiSortWait);
         if (typeof window[handler] === 'function') window[handler](cell.getAttribute('data-sort-key'), dir > 0 ? 'asc' : 'desc');
         return;
     }
     uiTableSorts.set(uiTableKey(table), { index, dir });
     uiApplyTableSort(table, index, dir);
 }
+// How long a list sorted on the server has to come back before its headers go back
+let uiSortWait = 8000;
 
 // Default order: the list's own order again, and no remembered order
 function uiSortReset(table) {
@@ -1960,15 +1999,32 @@ function uiPickerFocusables(panel) {
 
 // An open panel stays on the screen: it moves back from an edge it would run
 // past, and opens upward when there is no room under its button but there is above
+// The screen a panel may use: under a fixed top bar and above a fixed tab bar (phones)
+function uiPickerBounds() {
+    const shown = el => el && el.getClientRects().length && ['fixed', 'sticky'].includes(getComputedStyle(el).position);
+    const top = document.querySelector('.ui-mtop');
+    const bar = document.querySelector('.ui-tabbar');
+    return { top: (shown(top) ? top.getBoundingClientRect().bottom : 0) + 8, bottom: (shown(bar) ? bar.getBoundingClientRect().top : window.innerHeight) - 8 };
+}
 function uiPickerPlace(panel) {
     panel.style.transform = '';
+    panel.style.maxHeight = '';
     panel.classList.remove('is-up');
-    const below = panel.getBoundingClientRect();
     const button = panel.parentElement && panel.parentElement.querySelector('.ui-picker-btn');
-    if (button && below.bottom > window.innerHeight - 8) {
-        const room = button.getBoundingClientRect().top;
-        if (room > below.height + 16) panel.classList.add('is-up');
-        else panel.scrollIntoView({ block: 'nearest' });
+    const bounds = uiPickerBounds();
+    // A button under a bar (reached with the keyboard) comes into view first
+    if (button) {
+        const at = button.getBoundingClientRect();
+        if (at.height && (at.bottom > bounds.bottom || at.top < bounds.top) && button.scrollIntoView) button.scrollIntoView({ block: 'center', behavior: 'instant' });
+    }
+    const below = panel.getBoundingClientRect();
+    if (button && below.bottom > bounds.bottom) {
+        const at = button.getBoundingClientRect();
+        const roomBelow = bounds.bottom - at.bottom - 6, roomAbove = at.top - 6 - bounds.top;
+        if (roomAbove > roomBelow) panel.classList.add('is-up');
+        // Too tall for either side: it scrolls within the room it has
+        const room = Math.max(roomAbove, roomBelow);
+        if (below.height > room && room > 80) { panel.style.maxHeight = `${Math.floor(room)}px`; panel.style.overflowY = 'auto'; }
     }
     const rect = panel.getBoundingClientRect();
     const width = document.documentElement.clientWidth;
@@ -1992,18 +2048,20 @@ function uiPickerOpen(id) {
 }
 
 // The search field, else the chosen option or the first one; in a dialog its first control
+// The panel is already placed on the screen, so the focus does not scroll the page
 function uiPickerFocusInside(panel) {
+    const still = { preventScroll: true };
     const search = panel.querySelector('.ui-picker-search');
-    if (search) { search.focus(); return; }
+    if (search) { search.focus(still); return; }
     if (panel.getAttribute('role') === 'listbox') {
         const items = uiPickerItems(panel);
         const target = items.find(o => o.getAttribute('aria-selected') === 'true') || items[0];
-        if (target) target.focus();
+        if (target) target.focus(still);
         return;
     }
     const first = panel.querySelector('input[type="radio"]:checked:not(:disabled)') || uiPickerFocusables(panel)[0];
-    if (first) first.focus();
-    else { panel.setAttribute('tabindex', '-1'); panel.focus(); }
+    if (first) first.focus(still);
+    else { panel.setAttribute('tabindex', '-1'); panel.focus(still); }
 }
 
 // Narrow a long list to the options that hold the typed text
@@ -2026,6 +2084,8 @@ function uiPickerClose(id, { returnFocus = false } = {}) {
     if (panel) {
         panel.classList.add('hidden');
         panel.style.transform = '';
+        panel.style.maxHeight = '';
+        panel.style.overflowY = '';
         // The next opening shows every choice again
         const search = panel.querySelector('.ui-picker-search');
         if (search && search.value) { search.value = ''; uiPickerFilter(panel, ''); }

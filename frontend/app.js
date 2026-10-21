@@ -4721,7 +4721,7 @@ function renderStatusCorrelation(correlation, incompleteList, maxAgeMinutes) {
         <section class="ui-sec-block">
             <div class="ui-list-head" id="status-pending-head"><h2 class="ui-h2">Waiting to be linked</h2> <span class="ui-count">${incompleteList.length}</span></div>
             <div class="ui-table ui-stack" data-sort-at="status-pending-head" data-sort-name="messages waiting to be linked" style="--ui-cols: minmax(180px, 1.4fr) minmax(220px, 2fr) 90px; --ui-table-min: 560px">
-                <div class="ui-tr ui-tr-head"><span data-sort-kind="text">Message ID</span><span data-sort-kind="text">From and to</span><span class="ui-td-end" data-sort-kind="age">Age</span></div>
+                <div class="ui-tr ui-tr-head"><span data-sort-kind="text">Message ID</span><span data-sort-kind="text">From and to</span><span class="ui-td-end" data-sort-kind="date">Age</span></div>
                 ${incompleteList.map(item => `
                     <div class="ui-tr">
                         <span class="ui-td ui-mono">${copyableText(item.message_id || 'N/A')}</span>

@@ -271,6 +271,60 @@ test('an answer with no list ends the wait for it', async () => {
     assert.equal(w.eval('uiSortFocus'), null);
 });
 
+test('an age written as a time ago sorts newest first when it says so', () => {
+    const w = page(`<section id="a"><p id="ah"></p><div class="ui-table ui-stack" data-sort-at="ah">
+        <div class="ui-tr ui-tr-head"><span data-sort-kind="text">Message</span><span data-sort-kind="date">Age</span></div>
+        <div class="ui-tr"><span>m8</span><span>8m ago</span></div><div class="ui-tr"><span>m1</span><span>1m ago</span></div><div class="ui-tr"><span>m3</span><span>3m ago</span></div></div></section>`);
+    w.uiRefreshTableSorts();
+    w.document.querySelector('.ui-sort-slot input[name$="-by"][value="1"]').click();
+    w.uiRefreshTableSorts();
+    assert.deepEqual([...w.document.querySelectorAll('#a .ui-tr:not(.ui-tr-head) > span:first-child')].map(x => x.textContent), ['m1', 'm3', 'm8']);
+    assert.equal(w.document.querySelector('.ui-sort-slot .ui-picker-btn').getAttribute('aria-label'), 'Sort: Age, Newest first');
+});
+
+test('a list sorted on the server that does not come back shows the order still on screen again', async () => {
+    const w = page(`<section id="srv"><label class="ui-search"><input id="sq" aria-label="Search"></label><div class="ui-table ui-stack" data-sort-handler="sortServer" data-sort-at="sq" data-sort-default="Sent:desc">
+        <div class="ui-tr ui-tr-head"><span data-sort-key="name" data-sort-kind="text" aria-sort="none">Name</span><span data-sort-key="sent" data-sort-kind="number" aria-sort="descending">Sent</span></div>
+        <div class="ui-tr"><span>a</span><span>1</span></div></div></section>`);
+    w.eval('uiSortWait = 30');
+    w.sortServer = () => {};   // the request fails: no new list
+    w.uiRefreshTableSorts();
+    w.document.querySelector('.ui-sort-slot input[name$="-by"][value="0"]').click();
+    w.uiRefreshTableSorts();
+    assert.equal(w.document.querySelector('.ui-sort-slot .ui-picker-btn').getAttribute('aria-label'), 'Sort: Name, A to Z', 'shown at once');
+    await new Promise(resolve => setTimeout(resolve, 60));
+    assert.equal(w.document.querySelector('.ui-sort-slot .ui-picker-btn').getAttribute('aria-label'), 'Sort: Sent, High to low', 'back to what the list shows');
+    assert.equal(w.document.querySelectorAll('#srv .ui-tr-head > span')[1].dataset.sortState, 'descending');
+});
+
+test('the order a list arrives in comes back exactly, also where its column holds equal values', () => {
+    const w = page(`<section id="q"><p id="qh"></p><div class="ui-table ui-stack" data-sort-at="qh" data-sort-default="Held:desc">
+        <div class="ui-tr ui-tr-head"><span data-sort-kind="text">Message</span><span data-sort-kind="number">Score</span><span data-sort-kind="date">Held</span></div>
+        <div class="ui-tr"><span>a</span><span data-sort="3">3</span><span data-sort="100">x</span></div>
+        <div class="ui-tr"><span>b</span><span data-sort="9">9</span><span data-sort="100">x</span></div>
+        <div class="ui-tr"><span>c</span><span data-sort="5">5</span><span data-sort="50">x</span></div></div></section>`);
+    const order = () => [...w.document.querySelectorAll('#q .ui-tr:not(.ui-tr-head) > span:first-child')].map(x => x.textContent);
+    w.uiRefreshTableSorts();
+    const radio = v => w.document.querySelector(`.ui-sort-slot input[name$="-by"][value="${v}"]`);
+    radio('1').click();
+    assert.deepEqual(order(), ['b', 'c', 'a']);
+    radio('2').click();
+    assert.deepEqual(order(), ['a', 'b', 'c'], 'Held, newest first is the order it came in');
+    w.document.querySelectorAll('#q .ui-tr-head .ui-sort-btn')[2].click();
+    assert.deepEqual(order(), ['c', 'a', 'b'], 'its header turns it around');
+});
+
+test('a row drawn again on its own keeps its place in the list\'s own order', () => {
+    const w = page(SORTED().replace(/<div class="ui-tr"><span>(\w+)<\/span>/g, '<div class="ui-tr" data-sort-id="$1"><span>$1</span>'));
+    w.uiRefreshTableSorts();
+    sortParts(w).radio('by', '0').click();
+    const beta = w.document.querySelector('[data-sort-id="beta"]');
+    beta.outerHTML = '<div class="ui-tr" data-sort-id="beta"><span>beta</span><span>3</span><span></span></div>';   // checked again
+    w.uiRefreshTableSorts();
+    sortParts(w).radio('by', '').click();
+    assert.deepEqual(names(w), ['beta', 'gamma', 'alpha']);
+});
+
 test('every stacked list with a header row says where its Sort button goes, or that it has none', () => {
     const dir = path.join(__dirname, '../../frontend');
     const missing = [];

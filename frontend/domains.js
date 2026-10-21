@@ -207,7 +207,7 @@ function renderDomainAccordionRow(domain, open = false) {
     const fact = (label, value, note) => `<div class="ui-md-fact${note ? ' ui-md-fact-inline' : ''}"><span>${label}</span><div>${escapeHtml(value)}</div>${note ? `<small class="ui-muted">${escapeHtml(note)}</small>` : ''}</div>`;
 
     return `
-        <div class="ui-tr ui-domain-row" data-domain-row="${escapeHtml(domain.domain_name)}" onclick="if (!uiRowHeld(event)) toggleDomainDetails('${escapeJsArg(domainId)}')">
+        <div class="ui-tr ui-domain-row" data-domain-row="${escapeHtml(domain.domain_name)}" data-sort-id="${escapeHtml(domain.domain_name)}" onclick="if (!uiRowHeld(event)) toggleDomainDetails('${escapeJsArg(domainId)}')">
             <div class="ui-td ui-q-who">
                 <div>
                     <button type="button" class="ui-row-chev" aria-expanded="${open}" aria-controls="${domainId}-details" aria-label="Details of ${escapeHtml(domain.domain_name)}" onclick="event.stopPropagation(); toggleDomainDetails('${escapeJsArg(domainId)}')"><svg id="${domainId}-icon-desktop" class="ui-domain-chevron" width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"${open ? ' style="transform: rotate(90deg)"' : ''}><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg></button>
