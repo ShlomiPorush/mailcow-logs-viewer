@@ -749,7 +749,7 @@ function showConfirmModal({ title = 'Confirm', message = 'Are you sure?', confir
             resolve(result);
         }
         // Escape (through the layers in router.js) and a click outside cancel
-        overlay.addEventListener('click', (e) => { if (e.target === overlay) cleanup(false); });
+        overlay.addEventListener('click', (e) => { if (uiBackdropClick(e)) cleanup(false); });
         cancelBtn.addEventListener('click', () => cleanup(false));
         okBtn.addEventListener('click', () => cleanup(true));
         setTimeout(() => (focusCancel ? cancelBtn : okBtn).focus(), 100);
@@ -790,7 +790,7 @@ function showChoiceModal({ title, message, choices, cancelText = 'Cancel' }) {
             resolve(result);
         }
         choiceModalClose = done;
-        overlay.addEventListener('click', (e) => { if (e.target === overlay) done(null); });
+        overlay.addEventListener('click', (e) => { if (uiBackdropClick(e)) done(null); });
         overlay.querySelector('[data-cancel]').addEventListener('click', () => done(null));
         overlay.querySelectorAll('[data-choice]').forEach(btn => btn.addEventListener('click', () => done(choices[Number(btn.dataset.choice)].value)));
         setTimeout(() => overlay.querySelector('[data-cancel]').focus(), 50);
@@ -1207,14 +1207,25 @@ document.addEventListener('keydown', event => {
 // row's click handler asks uiRowHeld(event) first. A plain click, also on text
 // already selected, and Enter or Space (a click with no mouse, detail 0) still
 // open it.
-let uiRowPress = null;
-document.addEventListener('mousedown', event => { uiRowPress = { x: event.clientX, y: event.clientY }; }, true);
+let uiPress = null;
+document.addEventListener('mousedown', event => { uiPress = { x: event.clientX, y: event.clientY, target: event.target }; }, true);
+function uiPressMoved(event) {
+    return Boolean(uiPress) && Math.hypot(event.clientX - uiPress.x, event.clientY - uiPress.y) > 3;
+}
 function uiRowHeld(event) {
     if (!event || !event.detail || !(event.currentTarget instanceof Element)) return false;
     const selection = window.getSelection && window.getSelection();
     if (!selection || !selection.rangeCount || !String(selection) || !selection.getRangeAt(0).intersectsNode(event.currentTarget)) return false;
-    const dragged = uiRowPress && Math.hypot(event.clientX - uiRowPress.x, event.clientY - uiRowPress.y) > 3;
-    return Boolean(dragged) || event.detail > 1 || event.shiftKey;
+    return uiPressMoved(event) || event.detail > 1 || event.shiftKey;
+}
+
+// A click on a dialog's backdrop closes it only when the press started on the
+// backdrop too. A drag that selects text in the dialog and ends outside it reaches
+// the backdrop as a click, and leaves the dialog open. A click with no mouse
+// (detail 0) is taken as it is.
+function uiBackdropClick(event, backdrop = event.currentTarget) {
+    if (event.target !== backdrop) return false;
+    return !event.detail || !uiPress || uiPress.target === backdrop;
 }
 
 // Phones hide a list's header row, so a list without a sort control of its own

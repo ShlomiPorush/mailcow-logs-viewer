@@ -182,7 +182,7 @@ function showFeatureDisableConfirmModal(featureIds) {
         });
 
         overlay.addEventListener('click', (e) => {
-            if (e.target === overlay) { cleanup(); resolve(false); }
+            if (uiBackdropClick(e)) { cleanup(); resolve(false); }
         });
 
         // Focus confirm button
@@ -2760,7 +2760,7 @@ function showConnectionTestModal(title, message) {
 
     // Close on backdrop click
     modal.addEventListener('click', (e) => {
-        if (e.target === modal) {
+        if (uiBackdropClick(e)) {
             closeConnectionTestModal();
         }
     });

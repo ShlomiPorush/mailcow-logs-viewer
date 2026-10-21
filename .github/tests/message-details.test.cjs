@@ -113,9 +113,10 @@ test('message listeners close on backdrop, and on Escape when docked', async () 
     const h = harness(message());
     h.listeners.DOMContentLoaded();
     await h.context.viewMessageDetails('example-key');
-    h.listeners['message-modal:click']({ target: { id: 'message-modal-content' } });
+    const modal = h.element('message-modal');
+    h.listeners['message-modal:click']({ target: h.element('message-modal-content'), currentTarget: modal });
     assert.equal(h.element('message-modal').classList.contains('hidden'), false);
-    h.listeners['message-modal:click']({ target: { id: 'message-modal' } });
+    h.listeners['message-modal:click']({ target: modal, currentTarget: modal });
     assert.equal(h.element('message-modal').classList.contains('hidden'), true);
     // As a dialog, Escape belongs to the layers (router.js, layers.a11y.cjs)
     await h.context.viewMessageDetails('example-key');

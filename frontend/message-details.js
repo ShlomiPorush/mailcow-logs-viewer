@@ -894,7 +894,7 @@ document.addEventListener('DOMContentLoaded', function () {
     if (messageModal) {
         messageModal.addEventListener('click', function (e) {
             // Close modal if clicking on the backdrop (not the content)
-            if (e.target.id === 'message-modal') {
+            if (uiBackdropClick(e)) {
                 closeMessageModal();
             }
         });

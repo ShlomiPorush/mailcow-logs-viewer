@@ -232,7 +232,7 @@ test('every element that is not a control and opens on click asks uiRowHeld firs
         return at >= 0 && all.slice(at, all.indexOf('\n}', at)).includes('uiRowHeld(event)');
     };
     // Handlers that only keep the click inside, or close a backdrop clicked itself, open nothing
-    const inert = /^(?:event\.stopPropagation\(\)|if \(event\.target === this\) \w+\(\)|if \(event\.target\.closest\('button'\)\) this\.hidePopover\(\))$/;
+    const inert = /^(?:event\.stopPropagation\(\)|if \(uiBackdropClick\(event\)\) \w+\(\)|if \(event\.target\.closest\('button'\)\) this\.hidePopover\(\))$/;
     // Not rows: a Settings choice card is the control that picks, and a sheet's backdrop holds no text
     const notRows = /^(?:settingsPickCard|uiSheetDismiss)\(/;
     const missing = [];
@@ -246,4 +246,36 @@ test('every element that is not a control and opens on click asks uiRowHeld firs
         }
     }
     assert.deepEqual(missing, []);
+});
+
+test('a drag that selects text in a dialog and ends on the backdrop leaves it open; a click on the backdrop closes it', () => {
+    const w = page(`<div id="back" class="ui-dialog-backdrop" onclick="if (uiBackdropClick(event)) window.closed = (window.closed || 0) + 1">
+        <div class="ui-dialog"><p id="text">Message-ID: abc@example.com</p></div></div>`);
+    const d = w.document;
+    const back = d.getElementById('back');
+    const gesture = (from, to, x, x2) => {
+        from.dispatchEvent(new w.MouseEvent('mousedown', { bubbles: true, clientX: x, clientY: 5, detail: 1 }));
+        to.dispatchEvent(new w.MouseEvent('click', { bubbles: true, cancelable: true, clientX: x2, clientY: 5, detail: 1 }));
+    };
+    // The browser sends the click of a drag to the element that holds both ends
+    gesture(d.getElementById('text'), back, 10, 400);
+    assert.equal(w.closed, undefined, 'a drag from the text onto the backdrop leaves the dialog open');
+    gesture(d.getElementById('text'), d.getElementById('text'), 10, 10);
+    assert.equal(w.closed, undefined, 'a click in the dialog leaves it open');
+    gesture(back, back, 400, 400);
+    assert.equal(w.closed, 1, 'a click on the backdrop closes it');
+    back.click();
+    assert.equal(w.closed, 2, 'a click with no mouse on the backdrop closes it');
+});
+
+test('every dialog that closes on a backdrop click asks uiBackdropClick', () => {
+    const dir = path.join(__dirname, '../../frontend');
+    const found = [];
+    for (const f of fs.readdirSync(dir).filter(n => n.endsWith('.js') || n.endsWith('.html'))) {
+        fs.readFileSync(path.join(dir, f), 'utf8').split('\n').forEach((line, i) => {
+            // A key handler on a row may compare the target with itself; that is not a backdrop
+            if (/\.target(?:\.id)? === (?:this\b|\w*(?:modal|overlay|Modal|Overlay)\b|'[\w-]*-modal')/.test(line) && !/onkeydown|\.key ===/.test(line)) found.push(`${f}:${i + 1}`);
+        });
+    }
+    assert.deepEqual(found, []);
 });

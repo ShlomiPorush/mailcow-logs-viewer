@@ -3093,7 +3093,7 @@ async function showQuarantineDetails(itemId) {
     modal.className = 'ui-dialog-backdrop';
     modal.setAttribute('role', 'dialog');
     modal.setAttribute('aria-label', 'Quarantine Item Details');
-    modal.onclick = event => { if (event.target === modal) closeQuarantineDetails(); };
+    modal.onclick = event => { if (uiBackdropClick(event)) closeQuarantineDetails(); };
     modal.innerHTML = `
         <div class="ui-dialog ui-dialog-fit">
             <div class="ui-dialog-head">
@@ -3674,7 +3674,7 @@ async function testQuarantineRules() {
         document.body.insertAdjacentHTML('beforeend', html);
         // Results only, nothing typed: a click outside closes it
         const testModal = document.getElementById('qrule-test-modal');
-        testModal.addEventListener('click', e => { if (e.target === testModal) testModal.remove(); });
+        testModal.addEventListener('click', e => { if (uiBackdropClick(e)) testModal.remove(); });
     } catch (err) {
         showToast('Test failed: ' + err.message, 'error');
     }
@@ -5173,7 +5173,7 @@ document.addEventListener('DOMContentLoaded', function () {
     const changelogModal = document.getElementById('changelog-modal');
     if (changelogModal) {
         changelogModal.addEventListener('click', function (e) {
-            if (e.target.id === 'changelog-modal') {
+            if (uiBackdropClick(e)) {
                 closeChangelogModal();
             }
         });
@@ -5275,8 +5275,38 @@ console.log('UI: Dark mode, Modals with tabs, Responsive design');
 
 let containerLogsInterval = null;
 
+// True while the user is selecting or has selected text in the log, so the
+// refresh every 2 seconds does not replace the text under the selection.
+let containerLogsPressed = false;
+document.addEventListener('mousedown', event => {
+    containerLogsPressed = event.target instanceof Element && Boolean(event.target.closest('#container-logs-content'));
+    // The first click of a double click selected the line; clear it so the
+    // browser selects the word
+    if (containerLogsPressed && event.detail > 1) window.getSelection().removeAllRanges();
+});
+document.addEventListener('mouseup', () => { containerLogsPressed = false; });
+function containerLogsHeld(content) {
+    if (containerLogsPressed) return true;
+    const selection = window.getSelection();
+    return Boolean(selection && selection.rangeCount && String(selection) && selection.getRangeAt(0).intersectsNode(content));
+}
+
+// A plain click on a log line selects the whole line, ready to copy. A drag,
+// a double click on a word or Shift+click selects as usual.
+function containerLogsLineClick(event) {
+    const line = event.target instanceof Element && event.target.closest('.ui-log-line');
+    if (!line || event.detail !== 1 || event.shiftKey || uiPressMoved(event)) return;
+    const range = document.createRange();
+    range.selectNodeContents(line);
+    const selection = window.getSelection();
+    selection.removeAllRanges();
+    selection.addRange(range);
+}
+
 async function fetchContainerLogs(silent = false) {
     const content = document.getElementById('container-logs-content');
+
+    if (content && silent && containerLogsHeld(content)) return;
 
     if (content && !silent) {
         content.textContent = 'Loading logs...';
@@ -5291,6 +5321,7 @@ async function fetchContainerLogs(silent = false) {
         const data = await response.json();
 
         if (content && data.logs) {
+            if (silent && containerLogsHeld(content)) return;
             const isScrolledToBottom = content.parentElement
                 ? (content.parentElement.scrollHeight - content.parentElement.scrollTop === content.parentElement.clientHeight)
                 : true;
@@ -5298,7 +5329,12 @@ async function fetchContainerLogs(silent = false) {
             if (data.logs.length === 0) {
                 if (!silent) content.textContent = 'No logs available.';
             } else {
-                content.textContent = data.logs.join('');
+                content.replaceChildren(...data.logs.join('').replace(/\r?\n$/, '').split(/\r?\n/).map(text => {
+                    const line = document.createElement('span');
+                    line.className = 'ui-log-line';
+                    line.textContent = text;
+                    return line;
+                }));
             }
 
             // Auto-scroll to bottom if it was already at bottom or if it's the first load

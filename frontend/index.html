@@ -1538,7 +1538,7 @@
 
     <!-- Container log dialog: in the body, so no sidebar stacking context can put page content above it -->
     <div id="container-logs-modal" role="dialog" aria-modal="true" aria-labelledby="container-logs-title"
-        onclick="if (event.target === this) closeContainerLogsModal()"
+        onclick="if (uiBackdropClick(event)) closeContainerLogsModal()"
         class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
         <div
             class="bg-gray-900 rounded-lg max-w-5xl w-full max-h-[85vh] flex flex-col shadow-2xl border border-gray-700">
@@ -1572,7 +1572,7 @@
                 </div>
             </div>
             <div class="flex-1 overflow-y-auto p-4 bg-black font-mono text-xs sm:text-sm text-gray-300">
-                <pre id="container-logs-content" class="whitespace-pre-wrap break-all"></pre>
+                <pre id="container-logs-content" class="whitespace-pre-wrap break-all" onclick="containerLogsLineClick(event)"></pre>
             </div>
         </div>
     </div>
@@ -1614,7 +1614,7 @@
 
     <!-- DMARC Reports Management Modal -->
     <!-- A security alert's history: what was sent or tried before and around it (alert-activity.js) -->
-    <div id="alert-activity-modal" class="hidden ui-dialog-backdrop" role="dialog" aria-labelledby="alert-activity-title" onclick="if (event.target === this) closeAlertActivity()">
+    <div id="alert-activity-modal" class="hidden ui-dialog-backdrop" role="dialog" aria-labelledby="alert-activity-title" onclick="if (uiBackdropClick(event)) closeAlertActivity()">
         <div class="ui-dialog ui-dialog-fit ui-aa-dialog">
             <div class="ui-dialog-head">
                 <h3 id="alert-activity-title">Activity</h3>
@@ -1624,7 +1624,7 @@
         </div>
     </div>
 
-    <div id="mailbox-activity-modal" class="hidden ui-dialog-backdrop" role="dialog" aria-labelledby="mailbox-activity-title" onclick="if (event.target === this) closeMailboxActivity()">
+    <div id="mailbox-activity-modal" class="hidden ui-dialog-backdrop" role="dialog" aria-labelledby="mailbox-activity-title" onclick="if (uiBackdropClick(event)) closeMailboxActivity()">
         <div class="ui-dialog ui-dialog-fit ui-aa-dialog">
             <div class="ui-dialog-head">
                 <h3 id="mailbox-activity-title">Activity</h3>
@@ -1659,7 +1659,7 @@
         </div>
     </div>
     <!-- A DMARC or TLS-RPT record: what is in DNS, what it means, what to publish -->
-    <div id="dmarc-record-modal" class="hidden ui-dialog-backdrop" role="dialog" aria-labelledby="dmarc-record-title" onclick="if (event.target === this) closeDmarcRecordModal()">
+    <div id="dmarc-record-modal" class="hidden ui-dialog-backdrop" role="dialog" aria-labelledby="dmarc-record-title" onclick="if (uiBackdropClick(event)) closeDmarcRecordModal()">
         <div class="ui-dialog ui-dialog-fit ui-dm-dialog">
             <div class="ui-dialog-head">
                 <h3 id="dmarc-record-title">Record</h3>
