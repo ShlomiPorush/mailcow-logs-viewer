@@ -102,3 +102,36 @@ def test_a_message_removed_between_pages_skips_nothing(client):
 
 def test_a_bad_cursor_is_refused(client):
     assert client.get('/api/messages?cursor=yesterday').status_code == 422
+
+
+def test_an_address_stored_with_whitespace_around_it_stays_hidden(client):
+    from app.database import get_db_context
+    from app.models import MessageCorrelation
+    now = datetime.utcnow().replace(microsecond=0)
+    with get_db_context() as db:
+        db.add(MessageCorrelation(correlation_key=uuid.uuid4().hex, sender=SENDER, recipient=f'\t{HIDDEN}\r\n',
+                                  direction='outbound', subject=f'padded {MARK}', final_status='delivered',
+                                  first_seen=now, last_seen=now, created_at=now))
+        db.commit()
+    page = _page(client, 'limit=50')
+    assert 'padded' not in _subjects(page) and page['total'] == 10
+
+
+def test_a_message_without_a_first_seen_time_has_its_place(client):
+    from app.database import get_db_context
+    from app.models import MessageCorrelation
+    now = datetime.utcnow().replace(microsecond=0)
+    with get_db_context() as db:
+        db.add(MessageCorrelation(correlation_key=uuid.uuid4().hex, sender=SENDER, recipient='late@example.org',
+                                  direction='outbound', subject=f'unseen {MARK}', final_status='delivered',
+                                  first_seen=None, last_seen=now, created_at=now - timedelta(seconds=390)))
+        db.commit()
+    for order, expected in (('desc', ['m05', 'm06', 'unseen', 'm07']), ('asc', ['m14', 'm13', 'm12', 'm11'])):
+        seen, cursor = [], None
+        while True:
+            page = _page(client, f'order={order}&limit=1' + (f'&cursor={cursor}' if cursor else ''))
+            seen += _subjects(page)
+            cursor = page['next_cursor']
+            if not cursor:
+                break
+        assert seen[:4] == expected and len(seen) == 11 and 'unseen' in seen, (order, seen)

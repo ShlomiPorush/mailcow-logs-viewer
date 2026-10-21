@@ -1216,7 +1216,7 @@ async function smartRefreshMessages() {
 function renderMessageRow(msg) {
     const tone = messageRowTone(msg);
     return `
-        <div class="ui-msg-item${tone ? ` ui-msg-${tone}` : ''}" data-key="${escapeHtml(msg.correlation_key || '')}" role="button" tabindex="0" data-row-open onclick="if (!uiRowHeld(event)) viewMessageDetails('${escapeJsArg(msg.correlation_key)}')">
+        <div class="ui-msg-item${tone ? ` ui-msg-${tone}` : ''}" data-key="${escapeHtml(msg.correlation_key || '')}"${msg.message_id ? ` data-mid="${escapeHtml(msg.message_id)}"` : ''} role="button" tabindex="0" data-row-open onclick="if (!uiRowHeld(event)) viewMessageDetails('${escapeJsArg(msg.correlation_key)}')">
             <div class="ui-msg-l1">
                 <b class="ui-msg-from">${escapeHtml(msg.sender || 'Unknown')}</b>
                 <time title="${escapeHtml(formatTime(msg.first_seen))}">${formatListTime(msg.first_seen)}</time>
@@ -1291,12 +1291,15 @@ function messagesNewGeneration() {
     return messagesGen;
 }
 
-// A request of the list's, aborted when a new generation starts
+// A request of the list's and its answer, read in full while it can still be
+// aborted (a new generation aborts it, also while its body is coming in)
 async function messagesFetch(url) {
     const control = typeof AbortController === 'function' ? new AbortController() : null;
     if (control) messagesRequests.add(control);
     try {
-        return await authenticatedFetch(url, control ? { signal: control.signal } : {});
+        const response = await authenticatedFetch(url, control ? { signal: control.signal } : {});
+        const data = response.ok ? await response.json() : null;
+        return { ok: response.ok, status: response.status, statusText: response.statusText, json: async () => data };
     } finally {
         if (control) messagesRequests.delete(control);
     }
@@ -1381,9 +1384,11 @@ async function loadMoreMessages(retry = false) {
         const data = await response.json();
         // The list was loaded again meanwhile: this page is not part of it
         if (gen !== messagesGen) return;
-        // New mail can shift a page; never show the same message twice
+        // Never show a message twice: by its row, and by its Message-ID (another of
+        // its deliveries may stand for it now, when the first one was cleaned up)
         const seen = new Set([...list.querySelectorAll('.ui-msg-item[data-key]')].map(row => row.dataset.key));
-        list.insertAdjacentHTML('beforeend', (data.data || []).filter(msg => !seen.has(msg.correlation_key || '')).map(renderMessageRow).join(''));
+        const ids = new Set([...list.querySelectorAll('.ui-msg-item[data-mid]')].map(row => row.dataset.mid));
+        list.insertAdjacentHTML('beforeend', (data.data || []).filter(msg => !seen.has(msg.correlation_key || '') && !(msg.message_id && ids.has(msg.message_id))).map(renderMessageRow).join(''));
         messagesPaging.page += 1;
         currentPage.messages = messagesPaging.page;
         messagesPaging.cursor = data.next_cursor || null;
@@ -1403,10 +1408,10 @@ async function loadMoreMessages(retry = false) {
         if (gen === messagesGen) messagesPaging.loading = false;
     }
     if (gen !== messagesGen || messagesPaging.failed) return;
-    // A short page may leave the end still in view
+    // A short page may leave the end still in view (only while the list is on the screen)
     const sentinel = document.getElementById('messages-more');
     const container = document.getElementById('messages-logs');
-    if (sentinel && container && messagesPaging.cursor) {
+    if (sentinel && container && messagesPaging.cursor && sentinel.getClientRects().length) {
         const r = sentinel.getBoundingClientRect();
         const box = container.getBoundingClientRect();
         if (r.top < Math.max(box.bottom, window.innerHeight) + 600) loadMoreMessages();

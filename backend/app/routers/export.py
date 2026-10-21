@@ -363,7 +363,7 @@ def export_messages_csv(
         hidden = settings.blacklist_emails_list
         if hidden:
             for column in (MessageCorrelation.sender, MessageCorrelation.recipient):
-                query = query.filter(or_(column.is_(None), func.lower(column).notin_(hidden)))
+                query = query.filter(or_(column.is_(None), func.lower(func.btrim(column, " \t\n\r\x0b\x0c")).notin_(hidden)))
 
         # In the list's order (newest first, or oldest first), so the row limit keeps the same messages
         by = (MessageCorrelation.first_seen.asc(), MessageCorrelation.id.asc()) if order == "asc" \

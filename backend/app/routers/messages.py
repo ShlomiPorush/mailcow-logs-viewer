@@ -6,7 +6,7 @@ FIXED: All timestamps now sent with proper UTC timezone ('Z' suffix)
 import logging
 from fastapi import APIRouter, Depends, Query, HTTPException
 from sqlalchemy.orm import Session
-from sqlalchemy import or_, and_, desc, func, select, tuple_
+from sqlalchemy import or_, and_, desc, func, select, tuple_, literal
 from datetime import datetime, timedelta, timezone
 import re
 from typing import List, Optional
@@ -154,6 +154,10 @@ def _group_postfix_by_recipient(postfix_logs) -> dict:
     return grouped
 
 
+# The whitespace Python's str.strip() removes around an address, for the same match in SQL
+BLANKS = " \t\n\r\x0b\x0c"
+
+
 def _filtered_messages_query(db, search=None, sender=None, recipient=None, direction=None, status=None,
                              user=None, ip=None, start_date=None, end_date=None):
     """The message legs matching the Messages filters. Shared by the list and
@@ -167,7 +171,7 @@ def _filtered_messages_query(db, search=None, sender=None, recipient=None, direc
     hidden = settings.blacklist_emails_list
     if hidden:
         for column in (MessageCorrelation.sender, MessageCorrelation.recipient):
-            query = query.filter(or_(column.is_(None), func.lower(func.trim(column)).notin_(hidden)))
+            query = query.filter(or_(column.is_(None), func.lower(func.btrim(column, BLANKS)).notin_(hidden)))
     
     # Apply filters
     if search:
@@ -370,6 +374,8 @@ def get_unified_messages(
         legs = query.with_entities(
             MessageCorrelation.id.label("leg_id"),
             MessageCorrelation.first_seen.label("first_seen"),
+            # The time the list sorts by: first seen, else stored (a leg may lack it)
+            func.coalesce(MessageCorrelation.first_seen, MessageCorrelation.created_at, literal(datetime(1970, 1, 1))).label("sort_time"),
             func.row_number().over(
                 partition_by=group_key,
                 order_by=(
@@ -386,20 +392,21 @@ def get_unified_messages(
 
         # A page: after the cursor when there is one, else by its number. One
         # row more than the page says whether another page follows
-        rows = db.query(MessageCorrelation).join(
+        rows = db.query(MessageCorrelation, legs.c.sort_time).join(
             legs, MessageCorrelation.id == legs.c.leg_id
         ).filter(
             legs.c.leg_rank == 1
         )
         if after:
-            mark = tuple_(legs.c.first_seen, legs.c.leg_id)
+            mark = tuple_(legs.c.sort_time, legs.c.leg_id)
             rows = rows.filter(mark > tuple_(*after) if order == "asc" else mark < tuple_(*after))
-        messages = rows.order_by(
+        found = rows.order_by(
             # The leg's id settles messages first seen at the same moment, so pages never overlap or skip
-            *((legs.c.first_seen.asc(), legs.c.leg_id.asc()) if order == "asc" else (desc(legs.c.first_seen), desc(legs.c.leg_id)))
+            *((legs.c.sort_time.asc(), legs.c.leg_id.asc()) if order == "asc" else (desc(legs.c.sort_time), desc(legs.c.leg_id)))
         ).offset(0 if after else (page - 1) * limit).limit(limit + 1).all()
-        more = len(messages) > limit
-        messages = messages[:limit]
+        more = len(found) > limit
+        found = found[:limit]
+        messages = [msg for msg, _ in found]
 
         # How many deliveries the message has in total, which is what the row
         # reports - not only the legs the current filters matched
@@ -453,7 +460,7 @@ def get_unified_messages(
             "pages": (total_before_filter + limit - 1) // limit if total_before_filter > 0 else 0,
             "data": result_messages,
             # Where the next page starts, or null at the end
-            "next_cursor": f"{messages[-1].first_seen.isoformat()}|{messages[-1].id}" if more and messages else None,
+            "next_cursor": f"{found[-1][1].isoformat()}|{found[-1][0].id}" if more and found else None,
         }
     except Exception as e:
         logger.error(f"Error fetching unified messages: {e}")
