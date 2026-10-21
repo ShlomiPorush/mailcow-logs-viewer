@@ -1332,19 +1332,60 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 // A log box with data-line-select="<line selector>": a plain click on a line
-// selects the whole line, ready to copy. A drag, a double or triple click and
-// Shift+click select as usual.
+// selects the whole line and puts a Copy button at its end. A drag, a double or
+// triple click and Shift+click select as usual.
+const UI_COPY_PATH = '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path>';
 document.addEventListener('click', event => {
     const box = event.target instanceof Element && event.target.closest('[data-line-select]');
-    if (!box || event.detail !== 1 || event.shiftKey || uiPressMoved(event)) return;
+    if (!box || event.target.closest('button, a') || event.detail !== 1 || event.shiftKey || uiPressMoved(event)) return;
     const line = event.target.closest(box.dataset.lineSelect);
     if (!line || !box.contains(line)) return;
+    uiLineCopyRemove();
     const range = document.createRange();
     range.selectNodeContents(line);
     const selection = window.getSelection();
     selection.removeAllRanges();
     selection.addRange(range);
+    // After the range, so the button is not part of the selection
+    const copy = document.createElement('button');
+    copy.type = 'button';
+    copy.className = 'ui-line-copy';
+    copy.title = 'Copy line';
+    copy.setAttribute('aria-label', 'Copy line');
+    copy.innerHTML = `<svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">${UI_COPY_PATH}</svg>`;
+    // A press on the button keeps the line selected
+    copy.addEventListener('mousedown', e => e.preventDefault());
+    copy.addEventListener('click', e => { e.stopPropagation(); uiLineCopy(line, copy); });
+    line.appendChild(copy);
 });
+
+function uiLineCopyRemove() {
+    document.querySelectorAll('.ui-line-copy').forEach(button => button.remove());
+}
+
+// The Copy button goes once its line is no longer the selection
+document.addEventListener('selectionchange', () => {
+    const copy = document.querySelector('.ui-line-copy');
+    if (!copy) return;
+    const line = copy.parentElement;
+    if (!line || String(window.getSelection()).trim() !== line.textContent.trim()) copy.remove();
+});
+
+async function uiLineCopy(line, button) {
+    const text = line.textContent;
+    let copied = false;
+    try {
+        if (navigator.clipboard) { await navigator.clipboard.writeText(text); copied = true; }
+    } catch (e) { /* falls back to the selection below */ }
+    // Without HTTPS the browser offers no clipboard API; the line is selected, so copy the selection
+    if (!copied) {
+        try { copied = document.execCommand('copy'); } catch (e) { copied = false; }
+    }
+    if (!copied) { showToast('Could not copy. Press Ctrl+C to copy the selected line.', 'error'); return; }
+    showToast('Line copied', 'success');
+    button.classList.add('is-copied');
+    button.querySelector('svg').innerHTML = '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>';
+}
 
 // True while the user selects or has selected text in box, so live updates
 // leave that text where it is

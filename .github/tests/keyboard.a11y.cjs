@@ -277,6 +277,10 @@ test('a click on a log line selects the line, and the log knows while text is he
     const release = el => el.dispatchEvent(new w.MouseEvent('mouseup', { bubbles: true }));
     press(d.getElementById('t1'), 10); release(d.getElementById('t1')); click(d.getElementById('t1'), 10);
     assert.equal(String(w.getSelection()), '10:00 first line', 'a plain click selects the whole line');
+    const copy = d.querySelector('#one > .ui-line-copy');
+    assert.ok(copy, 'the line gets a Copy button');
+    assert.equal(copy.getAttribute('aria-label'), 'Copy line');
+    assert.equal(w.getSelection().containsNode(copy, true), false, 'the button is not part of the selection');
     assert.equal(w.uiTextHeld(log), true, 'a selection in the log holds it');
     w.getSelection().removeAllRanges();
     press(d.getElementById('two'), 10); release(d.getElementById('two')); click(d.getElementById('two'), 80);

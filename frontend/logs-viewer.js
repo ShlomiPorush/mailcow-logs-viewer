@@ -12,6 +12,8 @@ let logsState = {
     activeService: 'postfix',
     isPaused: false,
     autoScroll: true,
+    // Live lines that came while auto-scroll was off, for the New lines button
+    newLines: 0,
     // Display order (issue #69): false = newest at the bottom (classic tail -f),
     // true = newest at the top. allEntries stays chronological either way.
     newestFirst: localStorage.getItem('logsNewestFirst') === 'true',
@@ -402,6 +404,13 @@ function setupTerminalScrollHandler() {
     if (!terminal || terminal._scrollHandlerAttached) return;
     
     terminal.addEventListener('scroll', () => {
+        // Reaching the newest lines by hand clears the New lines button
+        if (logsState.newLines) {
+            const atNewest = logsState.newestFirst
+                ? terminal.scrollTop < 4
+                : terminal.scrollTop + terminal.clientHeight > terminal.scrollHeight - 4;
+            if (atNewest) { logsState.newLines = 0; updateLogNewLines(); }
+        }
         // Load older entries when scrolled near the history edge (within
         // 50px): the top normally, the bottom in newest-first mode
         if (logsState.isLoadingMore || logsState.oldestPageLoaded <= 1) return;
@@ -476,8 +485,10 @@ function renderLogEntries(entries, serviceId, replace = false, prepend = false) 
     }
     
     // While the user selects or has selected text, new lines neither scroll
-    // it away nor trim the lines it is in
+    // it away nor trim the lines it is in, and auto-scroll turns off
     const held = !replace && !prepend && uiTextHeld(output);
+    if (held && logsState.autoScroll) setLogAutoScroll(false);
+    if (replace) { logsState.newLines = 0; updateLogNewLines(); }
     const fragment = document.createDocumentFragment();
     const hasFilters = logsState.searchQuery || logsState.activeSmartFilters.length > 0;
 
@@ -536,7 +547,7 @@ function renderLogEntries(entries, serviceId, replace = false, prepend = false) 
 
     // Auto-scroll to the newest entry (only for new entries, not when
     // loading older) - bottom normally, top in newest-first mode
-    if (logsState.autoScroll && !prepend && !held) {
+    if (logsState.autoScroll && !prepend) {
         const terminal = document.getElementById('logs-terminal');
         if (terminal) {
             terminal.scrollTop = logsState.newestFirst ? 0 : terminal.scrollHeight;
@@ -791,6 +802,11 @@ async function connectLogWebSocket(serviceId) {
                     // A loaded time range shows only its own lines, until Live
                     if (!logsState.isPaused && !logsState.dateRange) {
                         renderLogEntries(data.entries, data.service, false);
+                        if (!logsState.autoScroll) {
+                            const hasFilters = logsState.searchQuery || logsState.activeSmartFilters.length > 0;
+                            logsState.newLines += hasFilters ? data.entries.filter(entryMatchesFilters).length : data.entries.length;
+                            updateLogNewLines();
+                        }
                         logsState.entryCount += data.entries.length;
                         logsState.totalEntries = logsState.entryCount;
                         logsState.lastUpdateTime = new Date();
@@ -933,15 +949,55 @@ function toggleLogPause() {
 }
 
 function toggleAutoScroll() {
-    logsState.autoScroll = !logsState.autoScroll;
-    
+    setLogAutoScroll(!logsState.autoScroll);
+}
+
+// Auto-scroll on goes to the newest line (the bottom, or the top when newest
+// come first) and drops a selection in the log, which would turn it off again
+function setLogAutoScroll(on) {
+    logsState.autoScroll = on;
     const btn = document.getElementById('logs-autoscroll-btn');
-    if (btn) btn.setAttribute('aria-pressed', logsState.autoScroll ? 'true' : 'false');
-    
-    if (logsState.autoScroll) {
-        const terminal = document.getElementById('logs-terminal');
-        if (terminal) terminal.scrollTop = terminal.scrollHeight;
+    if (btn) btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+    if (!on) return;
+    const output = document.getElementById('logs-output');
+    const selection = window.getSelection();
+    if (output && selection && selection.rangeCount && selection.getRangeAt(0).intersectsNode(output)) selection.removeAllRanges();
+    logsState.newLines = 0;
+    updateLogNewLines();
+    const terminal = document.getElementById('logs-terminal');
+    if (terminal) terminal.scrollTop = logsState.newestFirst ? 0 : terminal.scrollHeight;
+}
+
+// Selecting text in the log (a click on a line, or a drag) stops auto-scroll,
+// and the Auto-scroll button shows it
+document.addEventListener('selectionchange', () => {
+    if (!logsState.autoScroll) return;
+    const output = document.getElementById('logs-output');
+    if (output && output.offsetParent && uiTextHeld(output)) setLogAutoScroll(false);
+});
+
+// The New lines button: shown while auto-scroll is off and live lines came in,
+// at the edge where the newest lines are; a click goes to them
+function updateLogNewLines() {
+    const wrap = document.getElementById('logs-new-wrap');
+    const terminal = document.getElementById('logs-terminal');
+    if (!wrap || !terminal) return;
+    const count = logsState.newLines;
+    wrap.hidden = !count;
+    if (!count) return;
+    const top = logsState.newestFirst;
+    wrap.classList.toggle('is-top', top);
+    if (top ? terminal.firstElementChild !== wrap : terminal.lastElementChild !== wrap) {
+        if (top) terminal.prepend(wrap); else terminal.append(wrap);
     }
+    const label = document.getElementById('logs-new-text');
+    if (label) label.textContent = `${count.toLocaleString()} new ${count === 1 ? 'line' : 'lines'}`;
+    const arrow = document.getElementById('logs-new-arrow');
+    if (arrow) arrow.setAttribute('d', top ? 'M5 15l7-7 7 7' : 'M19 9l-7 7-7-7');
+}
+
+function jumpToNewestLogs() {
+    setLogAutoScroll(true);
 }
 
 function setLogFontSize(size) {

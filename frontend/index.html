@@ -1436,6 +1436,12 @@
                             <div id="logs-output" data-line-select=".log-line" style="font-size: 12px; word-wrap: break-word; white-space: pre-wrap;">
                                 <span class="text-gray-500">Connecting to log stream...</span>
                             </div>
+                            <div id="logs-new-wrap" class="ui-logs-new-wrap" hidden>
+                                <button type="button" class="ui-logs-new" onclick="jumpToNewestLogs()" title="Go to the newest line and turn auto-scroll on">
+                                    <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path id="logs-new-arrow" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
+                                    <span id="logs-new-text"></span>
+                                </button>
+                            </div>
                         </div>
 
                         <!-- Status Bar -->
