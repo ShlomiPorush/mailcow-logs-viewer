@@ -1183,8 +1183,8 @@ async function smartRefreshMessages() {
     const hasActiveFilters = filters.search || filters.sender || filters.recipient ||
         filters.direction || filters.status || filters.user || filters.ip;
 
-    // Don't refresh if user is not on first page
-    if (hasActiveFilters || currentPage.messages > 1) {
+    // Don't refresh if user is not on first page, or while the next page is on its way
+    if (hasActiveFilters || currentPage.messages > 1 || messagesPaging.loading) {
         return; // Skip refresh to avoid disrupting user's view
     }
 
@@ -1201,6 +1201,8 @@ async function smartRefreshMessages() {
     if (hasDataChanged(data, 'messages')) {
         console.log('[REFRESH] Messages data changed, updating UI');
         lastDataCache.messages = data;
+        // A list drawn again is a new one: a page still on its way for the old one is dropped
+        messagesGen++;
         renderMessagesData(data);
     }
 }

@@ -42,6 +42,7 @@ function harness(filters, appTimezone = 'Europe/Berlin') {
         console: { log() {} },
         messagesOrder: 'desc',   // the list's order as it opens: newest first
         messagesGen: 0,   // the list's load generation (an older answer is dropped)
+        messagesPaging: { loading: false },   // no next page on its way
     });
     vm.runInContext(zoneHelpers, context);
     vm.runInContext([
