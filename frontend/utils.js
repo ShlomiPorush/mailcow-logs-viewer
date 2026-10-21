@@ -1219,7 +1219,7 @@ document.addEventListener('mouseup', uiPressEnd, true);
 // A release outside the window never reaches the page: moving back with no
 // button down, or leaving the window, ends the press too
 document.addEventListener('mousemove', event => { if (!event.buttons) uiPressEnd(); }, true);
-window.addEventListener('blur', uiPressEnd);
+if (typeof window.addEventListener === 'function') window.addEventListener('blur', uiPressEnd);
 function uiPressMoved(event) {
     return Boolean(uiPress) && Math.hypot(event.clientX - uiPress.x, event.clientY - uiPress.y) > 3;
 }
@@ -1237,30 +1237,6 @@ function uiRowHeld(event) {
 function uiBackdropClick(event, backdrop = event.currentTarget) {
     if (event.target !== backdrop) return false;
     return !event.detail || !uiPress || uiPress.target === backdrop;
-}
-
-// A log box with data-line-select="<line selector>": a plain click on a line
-// selects the whole line, ready to copy. A drag, a double or triple click and
-// Shift+click select as usual.
-document.addEventListener('click', event => {
-    const box = event.target instanceof Element && event.target.closest('[data-line-select]');
-    if (!box || event.detail !== 1 || event.shiftKey || uiPressMoved(event)) return;
-    const line = event.target.closest(box.dataset.lineSelect);
-    if (!line || !box.contains(line)) return;
-    const range = document.createRange();
-    range.selectNodeContents(line);
-    const selection = window.getSelection();
-    selection.removeAllRanges();
-    selection.addRange(range);
-});
-
-// True while the user selects or has selected text in box, so live updates
-// leave that text where it is
-function uiTextHeld(box) {
-    if (!box) return false;
-    if (uiPress && uiPress.down && uiPress.target instanceof Node && box.contains(uiPress.target)) return true;
-    const selection = window.getSelection();
-    return Boolean(selection && selection.rangeCount && String(selection) && selection.getRangeAt(0).intersectsNode(box));
 }
 
 // Phones hide a list's header row, so a list without a sort control of its own
@@ -1354,6 +1330,30 @@ document.addEventListener('DOMContentLoaded', () => {
     }).observe(document.body, { subtree: true, childList: true });
     uiRefreshTableSorts();
 });
+
+// A log box with data-line-select="<line selector>": a plain click on a line
+// selects the whole line, ready to copy. A drag, a double or triple click and
+// Shift+click select as usual.
+document.addEventListener('click', event => {
+    const box = event.target instanceof Element && event.target.closest('[data-line-select]');
+    if (!box || event.detail !== 1 || event.shiftKey || uiPressMoved(event)) return;
+    const line = event.target.closest(box.dataset.lineSelect);
+    if (!line || !box.contains(line)) return;
+    const range = document.createRange();
+    range.selectNodeContents(line);
+    const selection = window.getSelection();
+    selection.removeAllRanges();
+    selection.addRange(range);
+});
+
+// True while the user selects or has selected text in box, so live updates
+// leave that text where it is
+function uiTextHeld(box) {
+    if (!box) return false;
+    if (uiPress && uiPress.down && uiPress.target instanceof Node && box.contains(uiPress.target)) return true;
+    const selection = window.getSelection();
+    return Boolean(selection && selection.rangeCount && String(selection) && selection.getRangeAt(0).intersectsNode(box));
+}
 
 // =============================================================================
 // SHEET - a panel from the bottom of the screen on phones. Its handle and head
