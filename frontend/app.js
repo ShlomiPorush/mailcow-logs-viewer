@@ -1190,11 +1190,13 @@ async function smartRefreshMessages() {
 
     // The same query as the list, so a time range stays applied
     const params = messagesQueryParams(currentPage.messages);
+    const gen = messagesGen;
 
     const response = await authenticatedFetch(`/api/messages?${params}`);
     if (!response.ok) return;
 
     const data = await response.json();
+    if (gen !== messagesGen) return;
 
     if (hasDataChanged(data, 'messages')) {
         console.log('[REFRESH] Messages data changed, updating UI');
@@ -1249,6 +1251,9 @@ function renderMessagesData(data) {
 
 // ---------- Messages list: the next page loads as the end scrolls into view ----------
 const messagesPaging = { page: 1, pages: 1, total: 0, loading: false, observer: null };
+// Each new load of the Messages list (new filters, a new order) starts a new
+// generation; an answer that comes back for an older one is dropped
+let messagesGen = 0;
 
 function messagesQueryParams(page) {
     const filters = currentFilters.messages || {};
@@ -1322,10 +1327,13 @@ async function loadMoreMessages() {
     if (!list) return;
     messagesPaging.loading = true;
     const next = messagesPaging.page + 1;
+    const gen = messagesGen;
     try {
         const response = await authenticatedFetch(`/api/messages?${messagesQueryParams(next)}`);
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const data = await response.json();
+        // The list was loaded again meanwhile (other filters or order): this page is not part of it
+        if (gen !== messagesGen) return;
         // New mail can shift a page; never show the same message twice
         const seen = new Set([...list.querySelectorAll('.ui-msg-item[data-key]')].map(row => row.dataset.key));
         list.insertAdjacentHTML('beforeend', (data.data || []).filter(msg => !seen.has(msg.correlation_key || '')).map(renderMessageRow).join(''));
@@ -3755,6 +3763,8 @@ function updateMessagesFilterState() {
     const any = advanced || f.search || f.status || f.direction || f.start_date || f.end_date || f.date_range;
     const badge = document.getElementById('messages-filters-n');
     if (badge) { badge.textContent = advanced || ''; badge.classList.toggle('hidden', !advanced); }
+    const button = document.getElementById('messages-filters-btn');
+    if (button) button.setAttribute('aria-label', advanced ? `Filters, ${advanced} in use` : 'Filters');
     const clear = document.getElementById('messages-clear-filters');
     if (clear) clear.classList.toggle('hidden', !any);
 }
@@ -3998,6 +4008,7 @@ function afterMessagesRendered(data) {
 async function loadMessages(page = 1) {
     const container = document.getElementById('messages-logs');
     renderMessagesSort();
+    const gen = ++messagesGen;
 
     try {
         container.innerHTML = '<div class="ui-loading" role="status"><div class="loading"></div><p>Loading...</p></div>';
@@ -4018,6 +4029,7 @@ async function loadMessages(page = 1) {
         }
 
         const data = await response.json();
+        if (gen !== messagesGen) return;
         console.log('Messages data:', data);
 
         // Update count display

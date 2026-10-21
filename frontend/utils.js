@@ -1811,6 +1811,10 @@ function uiFilterBarSync() {
             const changed = [...more.querySelectorAll('input, select')].filter(uiFilterChanged).length;
             badge.textContent = changed ? String(changed) : '';
             badge.classList.toggle('hidden', !changed);
+            // The count is in the button's name too, not only on the screen
+            const name = changed ? `Filters, ${changed} in use` : 'Filters';
+            const toggle = badge.closest('.ui-filters-toggle');
+            if (toggle.getAttribute('aria-label') !== name) { toggle.setAttribute('aria-label', name); toggle.title = name; }
         }
         const summary = bar.nextElementSibling;
         const clear = summary && summary.classList.contains('ui-list-summary') && summary.querySelector('.ui-clear-filters');
@@ -2048,7 +2052,7 @@ function uiPickerPlace(panel) {
     const placed = panel.getBoundingClientRect();
     if (placed.height && (placed.top < bounds.top || placed.bottom > bounds.bottom)) {
         const room = panel.classList.contains('is-up') ? placed.bottom - bounds.top : bounds.bottom - placed.top;
-        if (room > 80) { panel.style.maxHeight = `${Math.floor(room)}px`; panel.style.overflowY = 'auto'; }
+        if (room > 0) { panel.style.maxHeight = `${Math.floor(room)}px`; panel.style.overflowY = 'auto'; }
     }
     const rect = panel.getBoundingClientRect();
     const width = document.documentElement.clientWidth;

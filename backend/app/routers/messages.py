@@ -373,7 +373,10 @@ def get_unified_messages(
             legs, MessageCorrelation.id == legs.c.leg_id
         ).filter(
             legs.c.leg_rank == 1
-        ).order_by(legs.c.first_seen.asc() if order == "asc" else desc(legs.c.first_seen)).offset(offset).limit(limit * 2).all()
+        ).order_by(
+            # The leg's id settles messages first seen at the same moment, so pages never overlap or skip
+            *((legs.c.first_seen.asc(), legs.c.leg_id.asc()) if order == "asc" else (desc(legs.c.first_seen), desc(legs.c.leg_id)))
+        ).offset(offset).limit(limit * 2).all()
 
         # How many deliveries the message has in total, which is what the row
         # reports - not only the legs the current filters matched

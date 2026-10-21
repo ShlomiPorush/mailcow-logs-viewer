@@ -10,6 +10,8 @@ async function exportCSV(type) {
             if (value == null || (typeof value === 'string' && !value.trim())) continue;
             params.set(key, value);
         }
+        // Messages in the order the list shows them
+        if (type === 'messages' && typeof messagesOrder !== 'undefined' && messagesOrder === 'asc') params.set('order', 'asc');
 
         const response = await authenticatedFetch(`/api/export/${type}/csv?${params}`, { method: 'HEAD' });
         if (!response.ok) {

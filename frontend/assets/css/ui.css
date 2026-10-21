@@ -1643,7 +1643,6 @@ button.ui-st-card { cursor: pointer; }
 .ui-dialog-head > .ui-muted { font-size: var(--ui-fs-sm); }
 @media (max-width: 760px) {
     .ui-dialog-head:has(> .ui-muted) { flex-wrap: wrap; row-gap: 2px; }
-    .ui-dialog-head > h3 { white-space: nowrap; }
     .ui-dialog-head > .ui-muted { order: 3; flex-basis: 100%; }
 }
 

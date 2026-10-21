@@ -70,3 +70,30 @@ def test_oldest_first_on_every_page(client):
 
 def test_another_order_is_refused(client):
     assert client.get('/api/messages?order=sideways').status_code == 422
+
+
+def test_messages_seen_at_one_moment_keep_their_place_across_pages(client):
+    from app.database import get_db_context
+    from app.models import MessageCorrelation
+    same = datetime.utcnow().replace(microsecond=0) - timedelta(minutes=5)
+    with get_db_context() as db:
+        for n in range(5):
+            db.add(MessageCorrelation(correlation_key=uuid.uuid4().hex, sender=SENDER, recipient='rcpt@example.net',
+                                      direction='outbound', subject=f'same{n} {MARK}', final_status='delivered',
+                                      first_seen=same, last_seen=same, created_at=same))
+        db.commit()
+    for order in ('desc', 'asc'):
+        pages = [_subjects(client, f'order={order}&limit=3&page={page}') for page in (1, 2, 3, 4)]
+        seen = [s for page in pages for s in page]
+        assert len(seen) == 10 and len(set(seen)) == 10, (order, pages)
+
+
+def test_the_csv_export_follows_the_order(client):
+    import csv
+    import io
+    for order, first in (('desc', 'm10'), ('asc', 'm50')):
+        response = client.get(f'/api/export/messages/csv?search={SENDER}&order={order}')
+        assert response.status_code == 200, response.text
+        rows = list(csv.DictReader(io.StringIO(response.content.decode('utf-8-sig'))))
+        assert rows[0]['Subject'].split()[0] == first, (order, [r['Subject'] for r in rows])
+    assert client.get('/api/export/messages/csv?order=sideways').status_code == 422
