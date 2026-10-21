@@ -12,6 +12,7 @@ from ..models import PostfixLog, RspamdLog, NetfilterLog, MessageCorrelation
 from ..app_time import local_now, to_local
 from ..config import settings
 from ..utils import internal_error, RangeStart, RangeEnd
+from .messages import BLANKS, message_sort_time
 from ..services.csv_export import csv_download, csv_query_rows, get_csv_db
 
 logger = logging.getLogger(__name__)
@@ -363,11 +364,12 @@ def export_messages_csv(
         hidden = settings.blacklist_emails_list
         if hidden:
             for column in (MessageCorrelation.sender, MessageCorrelation.recipient):
-                query = query.filter(or_(column.is_(None), func.lower(func.btrim(column, " \t\n\r\x0b\x0c")).notin_(hidden)))
+                query = query.filter(or_(column.is_(None), func.lower(func.btrim(column, BLANKS)).notin_(hidden)))
 
         # In the list's order (newest first, or oldest first), so the row limit keeps the same messages
-        by = (MessageCorrelation.first_seen.asc(), MessageCorrelation.id.asc()) if order == "asc" \
-            else (desc(MessageCorrelation.first_seen), desc(MessageCorrelation.id))
+        # By the same time the list sorts by (a delivery with no first-seen time by when it was stored)
+        by = (message_sort_time().asc(), MessageCorrelation.id.asc()) if order == "asc" \
+            else (desc(message_sort_time()), desc(MessageCorrelation.id))
         messages = csv_query_rows(query.order_by(*by).limit(settings.csv_export_limit))
         
         # Format one row at a time while the response is consumed.

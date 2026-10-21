@@ -154,8 +154,16 @@ def _group_postfix_by_recipient(postfix_logs) -> dict:
     return grouped
 
 
-# The whitespace Python's str.strip() removes around an address, for the same match in SQL
-BLANKS = " \t\n\r\x0b\x0c"
+# Every character Python's str.strip() removes around an address (str.isspace),
+# so the SQL match hides exactly what is_blacklisted hid
+BLANKS = "".join(chr(c) for c in range(0x110000) if chr(c).isspace())
+
+
+def message_sort_time():
+    """The time the Messages list sorts by: first seen, else when stored (a
+    delivery may lack it), else the epoch. The list, its cursor, the leg that
+    stands for a message and the CSV export all use it."""
+    return func.coalesce(MessageCorrelation.first_seen, MessageCorrelation.created_at, literal(datetime(1970, 1, 1)))
 
 
 def _filtered_messages_query(db, search=None, sender=None, recipient=None, direction=None, status=None,
@@ -258,7 +266,8 @@ def _filtered_messages_query(db, search=None, sender=None, recipient=None, direc
 
 def _count_messages(query):
     """Messages, not legs, in a filtered leg query (the rule of the list)."""
-    group_key = func.coalesce(MessageCorrelation.message_id, MessageCorrelation.correlation_key)
+    # As the list groups them: an empty Message-ID is none
+    group_key = func.coalesce(func.nullif(MessageCorrelation.message_id, ""), MessageCorrelation.correlation_key)
     legs = query.with_entities(
         func.row_number().over(
             partition_by=group_key,
@@ -369,17 +378,17 @@ def get_unified_messages(
         # always shows the leg that matched it. A correlation without a
         # Message-ID falls back to its own key and is never merged with another.
         group_key = func.coalesce(
-            MessageCorrelation.message_id, MessageCorrelation.correlation_key
+            func.nullif(MessageCorrelation.message_id, ""), MessageCorrelation.correlation_key
         )
         legs = query.with_entities(
             MessageCorrelation.id.label("leg_id"),
             MessageCorrelation.first_seen.label("first_seen"),
             # The time the list sorts by: first seen, else stored (a leg may lack it)
-            func.coalesce(MessageCorrelation.first_seen, MessageCorrelation.created_at, literal(datetime(1970, 1, 1))).label("sort_time"),
+            message_sort_time().label("sort_time"),
             func.row_number().over(
                 partition_by=group_key,
                 order_by=(
-                    MessageCorrelation.first_seen.asc(),
+                    message_sort_time().asc(),
                     MessageCorrelation.id.asc()
                 )
             ).label("leg_rank")

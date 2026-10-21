@@ -135,3 +135,67 @@ def test_a_message_without_a_first_seen_time_has_its_place(client):
             if not cursor:
                 break
         assert seen[:4] == expected and len(seen) == 11 and 'unseen' in seen, (order, seen)
+
+
+def test_a_hidden_address_padded_with_unicode_spaces_stays_hidden(client):
+    from app.database import get_db_context
+    from app.models import MessageCorrelation
+    now = datetime.utcnow().replace(microsecond=0)
+    with get_db_context() as db:
+        db.add(MessageCorrelation(correlation_key=uuid.uuid4().hex, sender=SENDER, recipient=f'\u00a0{HIDDEN}\u2003',
+                                  direction='outbound', subject=f'nbsp {MARK}', final_status='delivered',
+                                  first_seen=now, last_seen=now, created_at=now))
+        db.commit()
+    page = _page(client, 'limit=50')
+    assert 'nbsp' not in _subjects(page) and page['total'] == 10
+    export = client.get(f'/api/export/messages/csv?search={SENDER}')
+    assert 'nbsp' not in export.content.decode('utf-8-sig')
+
+
+def test_messages_with_an_empty_message_id_are_not_merged(client):
+    from app.database import get_db_context
+    from app.models import MessageCorrelation
+    now = datetime.utcnow().replace(microsecond=0)
+    with get_db_context() as db:
+        for n in (1, 2):
+            db.add(MessageCorrelation(correlation_key=uuid.uuid4().hex, sender=SENDER, recipient=f'e{n}@example.org', message_id='',
+                                      direction='outbound', subject=f'empty{n} {MARK}', final_status='delivered',
+                                      first_seen=now - timedelta(seconds=n), last_seen=now, created_at=now))
+        db.commit()
+    page = _page(client, 'limit=50')
+    assert {'empty1', 'empty2'} <= set(_subjects(page)) and page['total'] == 12
+
+
+def test_the_delivery_that_stands_for_a_message_is_the_earliest_by_the_list_time(client):
+    from app.database import get_db_context
+    from app.models import MessageCorrelation
+    now = datetime.utcnow().replace(microsecond=0)
+    mid = f'<two-legs-{MARK}@example.com>'
+    with get_db_context() as db:
+        # Stored 30 seconds into the list with no first-seen time, delivered again later
+        db.add(MessageCorrelation(correlation_key=uuid.uuid4().hex, sender=SENDER, recipient='a@example.org', message_id=mid,
+                                  direction='outbound', subject=f'legA {MARK}', final_status='delivered',
+                                  first_seen=None, last_seen=now, created_at=now - timedelta(seconds=330)))
+        db.add(MessageCorrelation(correlation_key=uuid.uuid4().hex, sender=SENDER, recipient='b@example.org', message_id=mid,
+                                  direction='outbound', subject=f'legB {MARK}', final_status='delivered',
+                                  first_seen=now - timedelta(seconds=30), last_seen=now, created_at=now))
+        db.commit()
+    subjects = _subjects(_page(client, 'limit=50'))
+    assert 'legA' in subjects and 'legB' not in subjects
+    assert subjects.index('legA') == subjects.index('m05') + 1, subjects
+
+
+def test_the_csv_export_sorts_a_timeless_delivery_by_when_it_was_stored(client):
+    import csv
+    import io
+    from app.database import get_db_context
+    from app.models import MessageCorrelation
+    now = datetime.utcnow().replace(microsecond=0)
+    with get_db_context() as db:
+        db.add(MessageCorrelation(correlation_key=uuid.uuid4().hex, sender=SENDER, recipient='late@example.org',
+                                  direction='outbound', subject=f'unseen {MARK}', final_status='delivered',
+                                  first_seen=None, last_seen=now, created_at=now - timedelta(seconds=390)))
+        db.commit()
+    rows = list(csv.DictReader(io.StringIO(client.get(f'/api/export/messages/csv?search={SENDER}').content.decode('utf-8-sig'))))
+    subjects = [r['Subject'].split()[0] for r in rows]
+    assert subjects[:4] == ['m05', 'm06', 'unseen', 'm07'], subjects

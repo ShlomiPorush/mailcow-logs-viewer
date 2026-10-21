@@ -1216,7 +1216,7 @@ async function smartRefreshMessages() {
 function renderMessageRow(msg) {
     const tone = messageRowTone(msg);
     return `
-        <div class="ui-msg-item${tone ? ` ui-msg-${tone}` : ''}" data-key="${escapeHtml(msg.correlation_key || '')}"${msg.message_id ? ` data-mid="${escapeHtml(msg.message_id)}"` : ''} role="button" tabindex="0" data-row-open onclick="if (!uiRowHeld(event)) viewMessageDetails('${escapeJsArg(msg.correlation_key)}')">
+        <div class="ui-msg-item${tone ? ` ui-msg-${tone}` : ''}" data-key="${escapeHtml(msg.correlation_key || '')}"${msg.message_id ? ` data-mid="${encodeURIComponent(msg.message_id)}"` : ''} role="button" tabindex="0" data-row-open onclick="if (!uiRowHeld(event)) viewMessageDetails('${escapeJsArg(msg.correlation_key)}')">
             <div class="ui-msg-l1">
                 <b class="ui-msg-from">${escapeHtml(msg.sender || 'Unknown')}</b>
                 <time title="${escapeHtml(formatTime(msg.first_seen))}">${formatListTime(msg.first_seen)}</time>
@@ -1388,7 +1388,7 @@ async function loadMoreMessages(retry = false) {
         // its deliveries may stand for it now, when the first one was cleaned up)
         const seen = new Set([...list.querySelectorAll('.ui-msg-item[data-key]')].map(row => row.dataset.key));
         const ids = new Set([...list.querySelectorAll('.ui-msg-item[data-mid]')].map(row => row.dataset.mid));
-        list.insertAdjacentHTML('beforeend', (data.data || []).filter(msg => !seen.has(msg.correlation_key || '') && !(msg.message_id && ids.has(msg.message_id))).map(renderMessageRow).join(''));
+        list.insertAdjacentHTML('beforeend', (data.data || []).filter(msg => !seen.has(msg.correlation_key || '') && !(msg.message_id && ids.has(encodeURIComponent(msg.message_id)))).map(renderMessageRow).join(''));
         messagesPaging.page += 1;
         currentPage.messages = messagesPaging.page;
         messagesPaging.cursor = data.next_cursor || null;
