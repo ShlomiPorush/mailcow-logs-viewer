@@ -97,13 +97,13 @@ def client(monkeypatch):
     cleanup()
 
 
-def _add(subject, at, message_id=None, recipient='r@example.org', status='delivered'):
+def _add(subject, at, message_id=None, recipient='r@example.org', status='delivered', first_seen=True):
     from app.database import get_db_context
     from app.models import MessageCorrelation
     with get_db_context() as db:
         db.add(MessageCorrelation(correlation_key=uuid.uuid4().hex, sender=SENDER, recipient=recipient, message_id=message_id,
                                   direction='outbound', subject=f'{subject} {MARK}', final_status=status,
-                                  first_seen=at, last_seen=at, created_at=at))
+                                  first_seen=at if first_seen else None, last_seen=at, created_at=at))
         db.commit()
 
 
@@ -133,6 +133,14 @@ def test_a_message_counts_once_hidden_addresses_not_and_the_bars_add_up(client):
     assert data['to_inclusive'] == '2025-01-10T12:59:59.999999Z'
 
 
+def test_a_delivery_without_first_seen_is_not_counted_as_messages_leaves_it_out_of_a_range(client):
+    base = datetime(2025, 1, 12, 10, 0)
+    _add('seen', base + timedelta(minutes=5))
+    _add('stored only', base + timedelta(minutes=15), first_seen=False)
+    data = _flow(f'from={base.isoformat()}Z&to={(base + timedelta(hours=1)).isoformat()}Z&bucket=hour').json()
+    assert data['totals']['messages'] == 1 and data['totals']['deliveries'] == 1
+
+
 def test_periods_have_their_bars_and_the_one_before(client):
     for period, count, bucket in (('24h', 24, 'hour'), ('7d', 28, '6h'), ('30d', 30, 'day')):
         data = _flow(f'period={period}').json()
@@ -146,6 +154,20 @@ def test_bad_ranges_are_refused(client):
     assert _flow('').status_code == 422
     assert _flow('period=1y').status_code == 422
     assert _flow('from=2030-01-02T00:00:00Z&to=2030-01-01T00:00:00Z&bucket=hour').status_code == 422
-    assert _flow('from=2029-01-01T00:00:00Z&to=2029-06-01T00:00:00Z&bucket=day').status_code == 422
+    # Longer than 62 days, all in the past: refused for its length, not for the future
+    assert _flow('from=2025-01-01T00:00:00Z&to=2025-03-05T00:00:00Z&bucket=day').status_code == 422
+    assert _flow('from=2025-01-01T00:00:00Z&to=2025-03-03T00:00:00Z&bucket=day').status_code == 200
     assert _flow('from=yesterday&to=2030-01-01T00:00:00Z&bucket=hour').status_code == 422
     assert _flow('from=2030-01-01T00:00:00Z&to=2030-01-02T00:00:00Z&bucket=week').status_code == 422
+
+
+def test_a_range_snaps_to_the_nearest_bars_at_least_one(client):
+    def span(a, b):
+        data = _flow(f'from=2025-01-10T{a}Z&to=2025-01-10T{b}Z&bucket=hour').json()
+        return data['from'], data['to'], len(data['buckets'])
+    # A pinch from 10:45 to 12:15 shows 11:00 to 12:00, not 10:00 to 13:00
+    assert span('10:45:00', '12:15:00') == ('2025-01-10T11:00:00.000000Z', '2025-01-10T12:00:00.000000Z', 1)
+    # Less than half a bar still shows the bar it is in
+    assert span('10:10:00', '10:20:00') == ('2025-01-10T10:00:00.000000Z', '2025-01-10T11:00:00.000000Z', 1)
+    # Whole bars stay as they are
+    assert span('08:00:00', '11:00:00') == ('2025-01-10T08:00:00.000000Z', '2025-01-10T11:00:00.000000Z', 3)

@@ -174,7 +174,7 @@ function alertActivityChart(data, span) {
             <div class="ui-flow-zoom" role="group" aria-label="Zoom the chart">
                 <button type="button" class="ui-icon-btn ui-icon-btn-sm" onclick="alertActivityStep('earlier')" aria-label="Earlier" title="Earlier"${span.from > limits.from ? '' : ' disabled'}>&lsaquo;</button>
                 <button type="button" class="ui-icon-btn ui-icon-btn-sm" onclick="alertActivityStep('out')" aria-label="Zoom out" title="Zoom out"${span.to - span.from < limits.to - limits.from ? '' : ' disabled'}>&minus;</button>
-                <button type="button" class="ui-icon-btn ui-icon-btn-sm" onclick="alertActivityStep('in')" aria-label="Zoom in" title="Zoom in (or pinch, drag across columns, Ctrl+wheel)"${span.to - span.from > limits.min * 2 ? '' : ' disabled'}>+</button>
+                <button type="button" class="ui-icon-btn ui-icon-btn-sm" onclick="alertActivityStep('in')" aria-label="Zoom in" title="Zoom in (or pinch, drag across columns, Ctrl+wheel)"${span.to - span.from > limits.min ? '' : ' disabled'}>+</button>
                 <button type="button" class="ui-icon-btn ui-icon-btn-sm" onclick="alertActivityStep('later')" aria-label="Later" title="Later"${span.to < limits.to ? '' : ' disabled'}>&rsaquo;</button>
                 ${zoomed ? '<button type="button" class="ui-more" onclick="alertActivityStep(\'reset\')">Reset zoom</button>' : ''}
             </div>
@@ -257,7 +257,7 @@ function renderAlertActivity() {
     if (!picked) alertActivityPick = null;
     const pickedLine = picked ? `<p class="ui-aa-picked">${escapeHtml(mailFlowSpan(picked.start.getTime(), picked.end.getTime()))}: <b>${picked.count.toLocaleString()}</b> ${sent ? 'sent' : 'failed logins'} <button type="button" class="ui-more" onclick="pickAlertActivityColumn(null)">Clear</button></p>` : '';
     if (alertActivityZoomer) { alertActivityZoomer.destroy(); alertActivityZoomer = null; }
-    content.innerHTML = `
+    uiRedrawKeepingFocus(content, () => { content.innerHTML = `
         <p class="ui-muted ui-aa-sub">${escapeHtml(a.title)} · ${escapeHtml(formatTime(a.created_at))}</p>
         <div class="ui-aa-strip">${figures.map(([label, value, bad]) => `<div><small>${escapeHtml(label)}</small><b${bad ? ' class="ui-text-fail"' : ''}>${escapeHtml(value)}</b></div>`).join('')}</div>
         <section>${alertActivityChart(data, span)}${pickedLine}</section>
@@ -273,7 +273,7 @@ function renderAlertActivity() {
         <div class="ui-aa-acts">
             ${sent ? `<button type="button" class="ui-btn" onclick="openAlertActivityMessages()">${picked ? 'Open this time in Messages' : 'Open in Messages'}</button>`
                 : `<button type="button" class="ui-btn" onclick="closeAlertActivity(); openAlertSecurityEvents('${escapeJsArg(a.subject)}')">Open in Security</button>`}
-        </div>`;
+        </div>`; });
     // Zoom by gesture over the columns (a preview stretches them; the end draws the span)
     const box = content.querySelector('.ui-aa-cols');
     const chart = content.querySelector('.ui-aa-chart');
@@ -318,7 +318,8 @@ function openAlertActivityMessages() {
     const span = alertActivityZoom || alertActivityRangeSpan(data);
     const picked = alertActivityPick === null || !span ? null : alertActivityColumns(data, span).cols.find(c => c.start.getTime() === alertActivityPick);
     const start = picked ? picked.start.toISOString() : data.around.from;
-    const endInclusive = picked ? new Date(picked.end.getTime() - 1).toISOString() : data.around.to;
+    // The column's last microsecond (the database keeps microseconds; a column ends on a whole millisecond)
+    const endInclusive = picked ? new Date(picked.end.getTime() - 1).toISOString().replace('Z', '999Z') : data.around.to;
     closeAlertActivity();
     openMessagesRange({ start, endInclusive, user: a.subject || '' });
 }

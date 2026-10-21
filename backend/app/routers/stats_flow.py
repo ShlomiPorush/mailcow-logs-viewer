@@ -23,7 +23,7 @@ from ..app_time import app_tz
 from ..config import settings
 from ..database import get_db
 from ..models import MessageCorrelation, NetfilterLog, RspamdLog
-from .messages import _filtered_messages_query, message_group_key, message_sort_time
+from .messages import _filtered_messages_query, message_group_key
 
 logger = logging.getLogger(__name__)
 
@@ -105,8 +105,10 @@ def flow(db: Session, start: datetime, end: datetime, bucket: str, edges: List[d
     out = {i: {"clean": 0, "spam": 0, "messages": 0, "deliveries": 0, "blocked": 0, "deferred": 0, "auth_failures": 0} for i, _, _ in bars}
 
     # Messages as the list counts them: the deliveries in the range (hidden
-    # addresses left out), each message once, by its earliest delivery there
-    when = message_sort_time()
+    # addresses left out), each message once, by its earliest delivery there.
+    # The time is first_seen, as the Messages page filters a range by it, so
+    # a bar's messages are all in the list its "View these messages" opens.
+    when = MessageCorrelation.first_seen
     legs = _filtered_messages_query(db).filter(when >= lo, when < hi).with_entities(
         MessageCorrelation.final_status.label("status"),
         when.label("t"),
@@ -189,8 +191,14 @@ def get_flow(
     hi = min(hi, now)
     if lo >= hi or hi - lo > MAX_SPAN:
         raise HTTPException(status_code=422, detail="The range must be after from and at most 62 days long")
-    # The range snaps out to whole bars (the last one up to now)
-    bars = bucket_edges(lo, hi, bucket, zone)
-    last = bucket_edges(hi, hi + BUCKETS[bucket] + timedelta(hours=2), bucket, zone)
-    to = min(next((e for e in last if e >= hi), hi), now)
-    return flow(db, bars[0], to, bucket, bars, now)
+    # The range snaps to the nearest bar edges, at least one bar: a zoom by
+    # pinch or wheel ends on whole bars without growing a bar at each end. A
+    # range up to now keeps its last bar, still running, up to now.
+    edges = bucket_edges(lo, hi + BUCKETS[bucket] + timedelta(hours=2), bucket, zone)
+    nearest = lambda moment, among: min(among, key=lambda e: abs(e - moment))
+    first = nearest(lo, [e for e in edges if e < now])
+    to = now if hi >= now else min(nearest(hi, edges), now)
+    if to <= first:
+        to = min(next(e for e in edges if e > first), now)
+    bars = [e for e in edges if first <= e < to]
+    return flow(db, first, to, bucket, bars, now)

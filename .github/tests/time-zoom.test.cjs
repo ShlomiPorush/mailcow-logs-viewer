@@ -121,6 +121,37 @@ test('two fingers apart zoom in around them; lifting one goes on as a move witho
     assert.equal(seen.changes.length, 1);
 });
 
+test('a pinch keeps its frame while the preview stretches the chart', () => {
+    const { fire, seen, box } = chart();
+    // Laid out at 0..240 in its frame; the stretch a preview puts on it moves its drawn rectangle
+    box.offsetParent = { getBoundingClientRect: () => ({ left: 0 }), clientLeft: 0 };
+    box.offsetLeft = 0;
+    box.offsetWidth = 240;
+    let stretched = false;
+    box.getBoundingClientRect = () => (stretched ? { left: 0, width: 480 } : { left: 0, width: 240 });   // stretched from its left edge, as the preview does
+    fire('pointerdown', { pointerId: 1, clientX: 100, clientY: 50 });
+    fire('pointerdown', { pointerId: 2, clientX: 140, clientY: 50 });
+    fire('pointermove', { pointerId: 1, clientX: 80, clientY: 50 });
+    stretched = true;
+    fire('pointermove', { pointerId: 2, clientX: 160, clientY: 50 });
+    // Twice as far apart around 12:00: 06:00 to 18:00
+    assert.deepEqual(JSON.parse(JSON.stringify(seen.previews.at(-1)[1])), { from: 6 * H, to: 18 * H });
+});
+
+test('the browser taking one finger of a pinch calls the pinch off', () => {
+    const { fire, seen, zoom } = chart();
+    fire('pointerdown', { pointerId: 1, clientX: 100, clientY: 50 });
+    fire('pointerdown', { pointerId: 2, clientX: 140, clientY: 50 });
+    fire('pointermove', { pointerId: 2, clientX: 180, clientY: 50 });
+    fire('pointercancel', { pointerId: 2 });
+    assert.equal(seen.cancels, 1);
+    assert.equal(zoom.busy(), false);
+    // The finger left lifts as a plain lift: no zoom from the old preview
+    fire('pointermove', { pointerId: 1, clientX: 60, clientY: 50 });
+    fire('pointerup', { pointerId: 1, clientX: 60, clientY: 50 });
+    assert.equal(seen.changes.length, 0);
+});
+
 test('the click that ends a gesture does not pick a bar', () => {
     const { fire } = chart();
     fire('pointerdown', { pointerId: 1, pointerType: 'mouse', clientX: 45, clientY: 50 });

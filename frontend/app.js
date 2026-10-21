@@ -2202,6 +2202,7 @@ const dashFlow = {
     zoom: null,      // { from, to } (ms), a span inside the period
     pick: null,      // a bar's start (ms)
     gen: 0, control: null, loadedAt: 0, zoomer: null, previewing: false,
+    failed: false,   // the last load failed: the next refresh tries again, zoomed or not
 };
 
 function mailFlowHour(t) {
@@ -2237,11 +2238,31 @@ function pickMailFlowHour(t) {
     renderMailFlowStats();
 }
 
+// The buttons step by whole bars, so the server shows the span asked for:
+// in keeps the middle half of the bars, earlier and later move by half of them
 function dashFlowStep(step) {
-    if (!dashFlow.limits) return;
-    const span = dashFlow.zoom || dashFlow.limits;
-    if (step === 'reset') dashFlowZoom(null);
-    else dashFlowZoom(uiTimeZoomStep(span, dashFlow.limits, step));
+    const l = dashFlow.limits, d = dashFlow.data;
+    if (!l || !d) return;
+    if (step === 'reset') { dashFlowZoom(null); return; }
+    const bars = d.buckets.map(b => ({ s: Date.parse(b.start), e: Date.parse(b.end) }));
+    const n = bars.length;
+    if (!n) return;
+    const shown = { from: bars[0].s, to: bars[n - 1].e };
+    const len = shown.to - shown.from;
+    const k = Math.max(1, Math.floor(n / 2));
+    if (step === 'in') {
+        if (n < 2) return;
+        const i = Math.floor((n - k) / 2);
+        dashFlowZoom({ from: bars[i].s, to: bars[i + k - 1].e });
+    } else if (step === 'earlier') {
+        const from = Math.max(l.from, shown.from - (k < n ? bars[k].s - bars[0].s : len));
+        dashFlowZoom({ from, to: from + len });
+    } else if (step === 'later') {
+        const to = Math.min(l.to, shown.to + (k < n ? bars[n - 1].e - bars[n - 1 - k].e : len));
+        dashFlowZoom({ from: to - len, to });
+    } else {
+        dashFlowZoom(uiTimeZoomStep(shown, l, step));
+    }
 }
 
 function dashFlowZoom(span) {
@@ -2276,18 +2297,28 @@ async function loadMailFlowChart() {
         dashFlow.data = data;
         dashFlow.prev = prev;
         dashFlow.loadedAt = Date.now();
+        dashFlow.failed = false;
         if (!z) dashFlow.limits = { from: Date.parse(data.from), to: Date.parse(data.to), min: 3600000 };
+        else {
+            // The server widens a span to whole bars: the zoom is what it shows,
+            // so the buttons and the next gesture start from there
+            dashFlow.zoom = { from: Date.parse(data.from), to: Date.parse(data.to) };
+            if (dashFlow.limits) dashFlow.limits = { ...dashFlow.limits, to: Math.max(dashFlow.limits.to, dashFlow.zoom.to) };
+        }
         renderMailFlowChart();
     } catch (error) {
         if (gen !== dashFlow.gen || (error && error.name === 'AbortError')) return;
+        dashFlow.failed = true;
         chart.innerHTML = '<p class="ui-empty ui-text-fail">Could not load the mail flow. It tries again on the next refresh.</p>';
     }
 }
 
 // The auto refresh: the current period every minute for 24 hours, every five
-// minutes for longer ones; a zoomed or picked chart is left as it is
+// minutes for longer ones; a zoomed chart is left as it is, unless it failed to load
 function refreshMailFlowChart() {
-    if (dashFlow.zoom || dashFlow.previewing) return;
+    if (dashFlow.previewing) return;
+    if (dashFlow.failed) { loadMailFlowChart(); return; }
+    if (dashFlow.zoom) return;
     const every = dashFlow.period === '24h' ? 60000 : 300000;
     if (Date.now() - dashFlow.loadedAt >= every) loadMailFlowChart();
 }
@@ -2311,7 +2342,7 @@ function renderMailFlowChart() {
     const zoomed = !!dashFlow.zoom;
     const shown = { from: Date.parse(d.from), to: Date.parse(d.to) };
     if (dashFlow.zoomer) { dashFlow.zoomer.destroy(); dashFlow.zoomer = null; }
-    chart.innerHTML = `
+    uiRedrawKeepingFocus(chart, () => { chart.innerHTML = `
         <div class="ui-flow-view">
             <div class="ui-flow-bars" role="group" aria-label="Messages per ${d.bucket === 'day' ? 'day' : d.bucket === '6h' ? 'six hours' : 'hour'}" data-zoom>${bars.map(b => `
                 <button type="button" class="ui-flow-bar${b.partial ? ' is-partial' : ''}" data-t="${b.s}" data-start="${b.s}" data-end="${b.e}" aria-pressed="false" onclick="pickMailFlowHour(${b.s})"
@@ -2327,12 +2358,12 @@ function renderMailFlowChart() {
             <div class="ui-flow-zoom" role="group" aria-label="Zoom the chart">
                 <button type="button" class="ui-icon-btn ui-icon-btn-sm" onclick="dashFlowStep('earlier')" aria-label="Earlier" title="Earlier"${zoomed && shown.from > dashFlow.limits.from ? '' : ' disabled'}>&lsaquo;</button>
                 <button type="button" class="ui-icon-btn ui-icon-btn-sm" onclick="dashFlowStep('out')" aria-label="Zoom out" title="Zoom out"${zoomed ? '' : ' disabled'}>&minus;</button>
-                <button type="button" class="ui-icon-btn ui-icon-btn-sm" onclick="dashFlowStep('in')" aria-label="Zoom in" title="Zoom in (or pinch, drag across bars, Ctrl+wheel)"${shown.to - shown.from > 3600000 * 2 ? '' : ' disabled'}>+</button>
+                <button type="button" class="ui-icon-btn ui-icon-btn-sm" onclick="dashFlowStep('in')" aria-label="Zoom in" title="Zoom in (or pinch, drag across bars, Ctrl+wheel)"${shown.to - shown.from > dashFlow.limits.min ? '' : ' disabled'}>+</button>
                 <button type="button" class="ui-icon-btn ui-icon-btn-sm" onclick="dashFlowStep('later')" aria-label="Later" title="Later"${zoomed && shown.to < dashFlow.limits.to ? '' : ' disabled'}>&rsaquo;</button>
                 ${zoomed ? '<button type="button" class="ui-more" onclick="dashFlowStep(\'reset\')">Reset zoom</button>' : ''}
             </div>
         </div>
-        ${d.older_may_be_gone || (dashFlow.prev && dashFlow.prev.older_may_be_gone) ? '<p class="ui-flow-note">Logs older than the retention days are cleaned up, so the oldest bars and the period before may be missing some.</p>' : ''}`;
+        ${d.older_may_be_gone || (dashFlow.prev && dashFlow.prev.older_may_be_gone) ? '<p class="ui-flow-note">Logs older than the retention days are cleaned up, so the oldest bars and the period before may be missing some.</p>' : ''}`; });
     const box = chart.querySelector('.ui-flow-bars');
     const view = chart.querySelector('.ui-flow-view');
     const band = chart.querySelector('.ui-flow-band');

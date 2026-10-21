@@ -1864,7 +1864,14 @@ function uiTimeZoom(box, opts) {
     let shown = null;             // the span previewed so far
     let swallow = false;          // the click that ends a gesture is not a pick
     let wheelTimer = null;
-    const rect = () => box.getBoundingClientRect();
+    // Where the chart sits in the page, without the stretch a preview puts on
+    // it (offsets ignore transforms): a pinch or a wheel keeps one frame
+    const rect = () => {
+        const parent = box.offsetParent;
+        if (!parent || !box.offsetWidth) return box.getBoundingClientRect();
+        const p = parent.getBoundingClientRect();
+        return { left: p.left + parent.clientLeft + box.offsetLeft, width: box.offsetWidth };
+    };
     const timeAt = (x, span) => {
         const r = rect();
         return span.from + Math.max(0, Math.min(1, (x - r.left) / (r.width || 1))) * (span.to - span.from);
@@ -1967,9 +1974,11 @@ function uiTimeZoom(box, opts) {
         if (state === 'panning') { finish(); return; }
         state = 'idle';   // a press without a move: a click picks the bar
     };
+    // The browser took a finger away: the gesture is called off, a pinch too
+    // when only one of its fingers goes (the other ends it as a plain lift)
     const onCancel = event => {
         pointers.delete(event.pointerId);
-        if (!pointers.size) cancel();
+        if (!pointers.size || state === 'pinching') cancel();
     };
     // A finger lifted lets go of its capture: that is expected and ends nothing.
     // A bar handing a touch's own capture over to the box bubbles up here too:
@@ -2015,6 +2024,32 @@ function uiTimeZoom(box, opts) {
             box.removeEventListener('wheel', onWheel);
         },
     };
+}
+
+// Redraw a chart without losing the keyboard's place: focus goes back to the
+// same bar or column (by its start), else the button of the same name in the
+// same group, else the bar that was picked, else the first button of that
+// group. A focus outside the container is left alone.
+function uiRedrawKeepingFocus(container, draw) {
+    const active = document.activeElement;
+    const inside = !!active && active !== container && container.contains(active);
+    const name = el => el.getAttribute('aria-label') || el.textContent.trim();
+    const was = inside ? {
+        start: active.dataset ? active.dataset.start : undefined,
+        name: name(active),
+        group: active.closest('[role="group"]')?.getAttribute('aria-label') || null,
+        picked: container.querySelector('[data-start][aria-pressed="true"]')?.dataset.start,
+    } : null;
+    draw();
+    if (!was) return;
+    const enabled = sel => [...container.querySelectorAll(sel)].filter(b => !b.disabled);
+    const inGroup = was.group ? [...container.querySelectorAll('[role="group"]')].find(g => g.getAttribute('aria-label') === was.group) : null;
+    const target = (was.start !== undefined && container.querySelector(`[data-start="${CSS.escape(was.start)}"]`))
+        || enabled(inGroup ? '[role="group"] button' : 'button').find(b => name(b) === was.name && (!inGroup || inGroup.contains(b)))
+        || (was.picked !== undefined && container.querySelector(`[data-start="${CSS.escape(was.picked)}"]`))
+        || (inGroup && enabled('button').find(b => inGroup.contains(b)))
+        || null;
+    if (target) target.focus({ preventScroll: true });
 }
 
 // Phones: every dialog opens like the help sheet, at four fifths of the

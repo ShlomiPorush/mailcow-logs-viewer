@@ -1018,7 +1018,7 @@ The Dashboard's mail flow: counts per bar, in the app's time zone. Give either `
 | --- | --- | --- | --- |
 | `period` | string | none | `24h` (24 hourly bars), `7d` (28 bars of 6 hours) or `30d` (30 daily bars), the last one up to now |
 | `previous` | boolean | `false` | With `period`: the same number of bars right before it |
-| `from`, `to` | string | none | A range of instants (ISO 8601), at most 62 days; it widens to whole bars and stops at now |
+| `from`, `to` | string | none | A range of instants (ISO 8601), at most 62 days; it snaps to the nearest bar edges, at least one bar, and stops at now |
 | `bucket` | string | none | With `from` and `to`: `hour`, `6h` or `day` |
 
 Bars follow the app zone's clock, so a day can be 23 or 25 hours long. Each bar in `buckets` has `start`, `end`, `end_inclusive` (its last microsecond), `partial` (still running), `messages` (each message once, in the bar of its earliest delivery in the range), `deliveries`, `blocked` (bounced, rejected or spam), `deferred`, `auth_failures`, and Rspamd `clean` and `spam`. The answer also has `totals`, `from`, `to`, `to_inclusive`, `bucket`, `zone`, `as_of`, and `older_may_be_gone` (the range starts before the retention period, so older logs may be deleted). A bad parameter returns 422.

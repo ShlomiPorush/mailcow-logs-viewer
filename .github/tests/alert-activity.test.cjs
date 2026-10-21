@@ -47,6 +47,7 @@ function harness(appTimezone = 'UTC', { browserLocale } = {}) {
         mailFlowSpan: (from, to) => `${new Date(from).toISOString()} to ${new Date(to).toISOString()}`,
         openMessagesRange: options => opened.push(options),
         uiTimeZoom: () => ({ destroy() {}, busy: () => false }),
+        uiRedrawKeepingFocus: (container, draw) => draw(),
         appTimezone,
     });
     if (browserLocale) {
@@ -130,14 +131,14 @@ test('Open in Messages asks for the mailbox around the alert, or in the picked c
     h.render(activity({ alert_type: 'volume_spike', subject: 'user@example.com', metric_value: 40, baseline_value: 0.5 }, { around }));
     h.run('openAlertActivityMessages()');
     assert.deepEqual(JSON.parse(JSON.stringify(h.opened.pop())), { start: around.from, endInclusive: around.to, user: 'user@example.com' });
-    // A picked quarter of an hour: that quarter only, to its last millisecond
+    // A picked quarter of an hour: that quarter only, to its last microsecond
     const html = h.render(activity({ alert_type: 'volume_spike', subject: 'user@example.com', metric_value: 40, baseline_value: 0.5 }, { around }));
     assert.match(html, /aria-pressed="false"[^>]*onclick="pickAlertActivityColumn\(\d+\)"/);
     h.run(`pickAlertActivityColumn(${at})`);
     assert.match(h.run("document.getElementById('alert-activity-content').innerHTML"), /Open this time in Messages/);
     h.run('openAlertActivityMessages()');
     assert.deepEqual(JSON.parse(JSON.stringify(h.opened.pop())),
-        { start: new Date(at).toISOString(), endInclusive: new Date(at + 15 * 60000 - 1).toISOString(), user: 'user@example.com' });
+        { start: new Date(at).toISOString(), endInclusive: new Date(at + 15 * 60000 - 1).toISOString().replace('Z', '999Z'), user: 'user@example.com' });
 });
 
 test('the columns stop where the data ends, and a zoom shows a span inside it', () => {

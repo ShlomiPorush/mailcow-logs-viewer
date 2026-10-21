@@ -219,7 +219,9 @@ def alert_activity(alert_id: int, db: Session = Depends(get_db)):
             'buckets': buckets,
             # The exact end of the data (now, for a recent alert)
             'data_end': seen_to.isoformat(timespec='microseconds') + 'Z',
-            'around': {'from': format_datetime_utc(around_from), 'to': format_datetime_utc(around_to), 'total': len(near), **around},
+            # To the microsecond, as the database keeps them: Open in Messages asks for exactly this span
+            'around': {'from': around_from.isoformat(timespec='microseconds') + 'Z', 'to': around_to.isoformat(timespec='microseconds') + 'Z',
+                       'total': len(near), **around},
         }
     except HTTPException:
         raise
