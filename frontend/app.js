@@ -1197,6 +1197,8 @@ async function smartRefreshMessages() {
 
     const data = await response.json();
     if (gen !== messagesGen) return;
+    // Meanwhile the user may have loaded more of the list: a first page would take it away
+    if (currentPage.messages > 1 || messagesPaging.page > 1 || messagesPaging.loading) return;
 
     if (hasDataChanged(data, 'messages')) {
         console.log('[REFRESH] Messages data changed, updating UI');
