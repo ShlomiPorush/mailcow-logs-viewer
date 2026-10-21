@@ -1806,7 +1806,7 @@ function uiFilterBarSync() {
         });
         const fields = [...bar.querySelectorAll('input, select')].filter(el => !el.closest('.ui-picker-panel') || el.matches('[data-filter-default]'));
         const more = bar.querySelector('.ui-fbar-more');
-        const badge = bar.querySelector('.ui-filters-toggle .ui-tab-n');
+        const badge = bar.querySelector('.ui-filters-toggle .ui-msg-filter-n');
         if (more && badge) {
             const changed = [...more.querySelectorAll('input, select')].filter(uiFilterChanged).length;
             badge.textContent = changed ? String(changed) : '';

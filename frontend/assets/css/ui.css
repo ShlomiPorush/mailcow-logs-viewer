@@ -373,7 +373,6 @@
     /* Phones: search, Apply and Clear stay; the other filters open with "Filters" */
     .ui-filters:not(.is-open) .ui-filter-extra { display: none; }
     .ui-filters-toggle { display: inline-flex; }
-    .ui-filters.is-open .ui-filters-toggle { background: var(--ui-accent); border-color: var(--ui-accent); color: var(--ui-on-accent); }
     .ui-msg-l1 { flex-wrap: wrap; }
     .ui-alert > .ui-btn { margin-inline-start: 18px; }
 }
@@ -516,8 +515,10 @@
 .ui-msg-col { display: flex; flex-direction: column; min-height: 0; background: var(--ui-panel); border-inline-end: 1px solid var(--ui-line); }
 .ui-msg-searchbar { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 0 8px; padding: 14px; border-bottom: 1px solid var(--ui-line); background: var(--ui-panel); }
 .ui-msg-searchbar > :not(.ui-search):not(.ui-msg-filter-btn):not(.ui-msg-sort) { grid-column: 1 / -1; }
-.ui-msg-filter-btn { position: relative; width: var(--ui-ctl-h); height: var(--ui-ctl-h); border: 1px solid var(--ui-line); border-radius: var(--ui-radius-sm); background: var(--ui-bg); }
-.ui-msg-filter-btn[aria-expanded="true"] { border-color: var(--ui-ink); color: var(--ui-ink); }
+/* The tool icons beside a search (Filters, Sort) look alike: a light frame, the icon in the muted ink */
+:is(.ui-msg-filter-btn, .ui-sort-btn-icon) { position: relative; width: var(--ui-ctl-h); height: var(--ui-ctl-h); border: 1px solid var(--ui-line); border-radius: var(--ui-radius-sm); background: var(--ui-bg); }
+:is(.ui-msg-filter-btn, .ui-sort-btn-icon)[aria-expanded="true"] { border-color: var(--ui-ink); color: var(--ui-ink); }
+:is(.ui-msg-filter-btn, .ui-sort-btn-icon) svg { width: 16px; height: 16px; }
 .ui-msg-filter-n { position: absolute; top: -6px; inset-inline-end: -6px; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px;
     background: var(--ui-accent); color: var(--ui-on-accent); font-size: 11px; font-weight: 700; line-height: 18px; text-align: center; }
 .ui-msg-filter-n.hidden { display: none; }
@@ -2340,11 +2341,10 @@ html .markdown-body .markdown-alert-caution .markdown-alert-title { color: var(-
    beside it, or at the end of the list's header row; its menu holds two groups */
 .ui-sort-slot, .ui-msg-sort { display: inline-flex; flex: none; }
 .ui-list-summary > .ui-sort-slot, .ui-list-head > .ui-sort-slot, .ui-dm-card > header > .ui-sort-slot { margin-inline-start: auto; }
-.ui-sort-btn-icon { width: var(--ui-ctl-h); height: var(--ui-ctl-h); border: 1px solid var(--ui-line); background: var(--ui-bg); color: var(--ui-ink); }
-.ui-sort-btn-icon svg { width: 16px; height: 16px; }
-.ui-sort-btn-icon[aria-expanded="true"] { border-color: var(--ui-ink); }
 /* A list in an order of its own choosing stands out, as a filter in use does */
-.ui-sort-btn-icon.is-set { border-color: var(--ui-ink); background: var(--ui-ink); color: var(--ui-bg); }
+.ui-sort-btn-icon.is-set { color: var(--ui-ink); }
+.ui-sort-btn-icon.is-set::after { content: ""; position: absolute; top: -4px; inset-inline-end: -4px; width: 10px; height: 10px; border-radius: 50%;
+    background: var(--ui-accent); box-shadow: 0 0 0 2px var(--ui-panel); }
 :is(.ui-list-summary, .ui-dm-card > header) .ui-sort-btn-icon { width: 30px; height: 30px; }
 :is(.ui-sort-slot, .ui-msg-sort) .ui-popover { inset-inline-start: auto; inset-inline-end: 0; width: 240px; }
 .ui-sort-panel { display: grid; gap: 12px; padding: 12px; max-height: min(460px, 70vh); overflow-y: auto; font-weight: 400; }
@@ -2850,8 +2850,7 @@ button.ui-dm-node { cursor: pointer; }
 .ui-fbar-row > .ui-toolbar-gap { flex: 1 1 0; }
 .ui-fbar-pickers { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .ui-fbar-pickers > .ui-picker-slot { display: contents; }
-.ui-fbar .ui-filters-toggle { display: inline-flex; align-items: center; gap: 6px; }
-.ui-fbar.is-open .ui-filters-toggle { background: var(--ui-accent); border-color: var(--ui-accent); color: var(--ui-on-accent); }
+.ui-fbar .ui-filters-toggle { display: inline-grid; }
 .ui-fbar-more { display: none; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 8px 14px; align-items: center; }
 .ui-fbar.is-open .ui-fbar-more { display: grid; }
 .ui-list-summary { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; margin: 0; padding: 8px var(--ui-pad-x);
