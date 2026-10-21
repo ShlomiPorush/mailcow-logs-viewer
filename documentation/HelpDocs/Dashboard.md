@@ -55,9 +55,9 @@ The figures cover the chosen period: 24 hours in hourly bars, 7 days in 6-hour b
 
 The smaller figures give the period before, for comparison, plus the delivery count under Messages. **(partial)** means that period starts before the log retention period, so its older logs may be deleted. The bars count Rspamd scans, split into clean and spam.
 
-Selecting a bar changes the figures to that bar. **View these messages** applies its time to Messages and clears its other filters. Messages lists every message with a delivery in that time, so it can show more than the bar, which counts each message once, at its earliest delivery. Selecting the same bar again restores the period.
+Selecting a bar changes the figures to that bar. **View these messages** applies its time to Messages and clears its other filters. Messages lists every message with a delivery in that time, so it can show more than the bar, which counts each message once, at its earliest delivery. Selecting the same bar again, or **Clear**, restores the period. A shaded part of the chart is older than the log retention period.
 
-To zoom in time, drag across bars, use Ctrl and the mouse wheel or a trackpad pinch, or pinch on a phone. On a zoomed chart, drag sideways to move it. The buttons under the chart do the same, and **Reset zoom** returns to the period. **View these messages** with no bar selected opens the zoomed time.
+To zoom in time, drag across bars, use Ctrl and the mouse wheel or a trackpad pinch, or pinch on a phone. On a zoomed chart, drag sideways to move it. The buttons under the chart do the same, and **Reset zoom** returns to the period. **View these messages** with no bar selected opens all the time shown.
 
 ## Security
 

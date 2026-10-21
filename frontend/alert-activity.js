@@ -176,7 +176,7 @@ function alertActivityChart(data, span) {
                 <button type="button" class="ui-icon-btn ui-icon-btn-sm" onclick="alertActivityStep('out')" aria-label="Zoom out" title="Zoom out"${span.to - span.from < limits.to - limits.from ? '' : ' disabled'}>&minus;</button>
                 <button type="button" class="ui-icon-btn ui-icon-btn-sm" onclick="alertActivityStep('in')" aria-label="Zoom in" title="Zoom in (or pinch, drag across columns, Ctrl+wheel)"${span.to - span.from > limits.min ? '' : ' disabled'}>+</button>
                 <button type="button" class="ui-icon-btn ui-icon-btn-sm" onclick="alertActivityStep('later')" aria-label="Later" title="Later"${span.to < limits.to ? '' : ' disabled'}>&rsaquo;</button>
-                ${zoomed ? '<button type="button" class="ui-more" onclick="alertActivityStep(\'reset\')">Reset zoom</button>' : ''}
+                <button type="button" class="ui-icon-btn ui-icon-btn-sm${zoomed ? '' : ' is-off'}" onclick="alertActivityStep('reset')" aria-label="Reset zoom" title="Reset zoom"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg></button>
             </div>
         </div>`;
 }

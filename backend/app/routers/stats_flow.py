@@ -158,6 +158,7 @@ def flow(db: Session, start: datetime, end: datetime, bucket: str, edges: List[d
         "bucket": bucket,
         "zone": getattr(zone, "key", "UTC"),
         "older_may_be_gone": start < kept_from,
+        "kept_from": _iso(kept_from),
         "buckets": result,
         "totals": totals,
     }

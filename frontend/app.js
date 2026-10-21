@@ -2061,12 +2061,12 @@ function updateAttentionState() {
     const more = document.getElementById('dashboard-attention-more');
     if (!scroll) return;
     const overflows = scroll.scrollHeight > scroll.clientHeight + 1;
-    scroll.classList.toggle('hidden', !rows);
     scroll.classList.toggle('has-more', overflows && scroll.scrollTop + scroll.clientHeight < scroll.scrollHeight - 2);
     scroll.tabIndex = overflows ? 0 : -1;
     if (more) {
-        more.classList.toggle('hidden', !overflows);
-        more.textContent = overflows ? `${uiCountLabel(rows, 'item', 'items')}. Scroll the list for the rest` : '';
+        // Always in its place, so the panel keeps its size; seen only when more is below
+        more.classList.toggle('is-off', !overflows);
+        more.textContent = overflows ? `${uiCountLabel(rows, 'item', 'items')}. Scroll the list for the rest` : '\u00a0';
     }
 }
 if (typeof document !== 'undefined' && document.addEventListener) {
@@ -2312,7 +2312,13 @@ async function loadMailFlowChart() {
     } catch (error) {
         if (gen !== dashFlow.gen || (error && error.name === 'AbortError')) return;
         dashFlow.failed = true;
-        chart.innerHTML = '<p class="ui-empty ui-text-fail">Could not load the mail flow. It tries again on the next refresh.</p>';
+        const failed = '<p class="ui-empty ui-text-fail ui-flow-failed">Could not load the mail flow. It tries again on the next refresh.</p>';
+        // In the chart's own frame, so the panel keeps its size
+        const view = chart.querySelector('.ui-flow-view');
+        if (view) {
+            if (dashFlow.zoomer) { dashFlow.zoomer.destroy(); dashFlow.zoomer = null; }
+            view.innerHTML = failed;
+        } else chart.innerHTML = failed;
     }
 }
 
@@ -2344,6 +2350,9 @@ function renderMailFlowChart() {
     };
     const zoomed = !!dashFlow.zoom;
     const shown = { from: Date.parse(d.from), to: Date.parse(d.to) };
+    // The part older than the logs kept (retention): shaded, so empty bars there do not read as quiet
+    const kept = d.kept_from ? Date.parse(d.kept_from) : null;
+    const gone = kept !== null && kept > shown.from ? Math.min(1, (kept - shown.from) / (shown.to - shown.from)) : 0;
     if (dashFlow.zoomer) { dashFlow.zoomer.destroy(); dashFlow.zoomer = null; }
     uiRedrawKeepingFocus(chart, () => { chart.innerHTML = `
         <div class="ui-flow-view">
@@ -2353,6 +2362,7 @@ function renderMailFlowChart() {
                     <i class="ui-flow-spam" style="height: ${(b.spam / max) * 100}%"></i>
                     <i class="ui-flow-clean" style="height: ${(b.clean / max) * 100}%"></i>
                 </button>`).join('')}</div>
+            ${gone ? `<div class="ui-flow-gone" style="width:${gone * 100}%" title="Logs older than the retention days are cleaned up">${gone > .2 ? '<span>Logs cleaned up</span>' : ''}</div>` : ''}
             <div class="ui-flow-band hidden" aria-hidden="true"></div>
         </div>
         <div class="ui-flow-axis" aria-hidden="true">${bars.map(label).join('')}</div>
@@ -2363,10 +2373,13 @@ function renderMailFlowChart() {
                 <button type="button" class="ui-icon-btn ui-icon-btn-sm" onclick="dashFlowStep('out')" aria-label="Zoom out" title="Zoom out"${zoomed ? '' : ' disabled'}>&minus;</button>
                 <button type="button" class="ui-icon-btn ui-icon-btn-sm" onclick="dashFlowStep('in')" aria-label="Zoom in" title="Zoom in (or pinch, drag across bars, Ctrl+wheel)"${shown.to - shown.from > dashFlow.limits.min ? '' : ' disabled'}>+</button>
                 <button type="button" class="ui-icon-btn ui-icon-btn-sm" onclick="dashFlowStep('later')" aria-label="Later" title="Later"${zoomed && shown.to < dashFlow.limits.to ? '' : ' disabled'}>&rsaquo;</button>
-                ${zoomed ? '<button type="button" class="ui-more" onclick="dashFlowStep(\'reset\')">Reset zoom</button>' : ''}
+                <button type="button" class="ui-icon-btn ui-icon-btn-sm${zoomed ? '' : ' is-off'}" onclick="dashFlowStep('reset')" aria-label="Reset zoom" title="Reset zoom"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg></button>
             </div>
-        </div>
-        ${d.older_may_be_gone || (dashFlow.prev && dashFlow.prev.older_may_be_gone) ? '<p class="ui-flow-note">Logs older than the retention days are cleaned up, so the oldest bars and the period before may be missing some.</p>' : ''}`; });
+            <span class="ui-flow-actions">
+                <button type="button" id="dashboard-flow-view" class="ui-btn ui-btn-sm" onclick="openMailFlowHourMessages()">View these messages</button>
+                <button type="button" id="dashboard-flow-reset" class="ui-more is-off" onclick="pickMailFlowHour(null)">Clear</button>
+            </span>
+        </div>`; });
     const box = chart.querySelector('.ui-flow-bars');
     const view = chart.querySelector('.ui-flow-view');
     const band = chart.querySelector('.ui-flow-band');
@@ -2412,7 +2425,8 @@ function renderMailFlowStats() {
     const period = DASH_PERIODS[dashFlow.period];
     const bar = dashFlow.pick === null ? null : d.buckets.find(b => Date.parse(b.start) === dashFlow.pick);
     if (!bar) dashFlow.pick = null;
-    const set = (id, text) => { const el = document.getElementById(id); if (el) el.textContent = text; };
+    // A line cut short on a narrow screen shows in full on hover
+    const set = (id, text) => { const el = document.getElementById(id); if (el) { el.textContent = text; if (el.tagName === 'SMALL') el.title = text; } };
     const n = v => (v || 0).toLocaleString();
     const src = bar || d.totals;
     set('stat-messages-24h', n(src.messages));
@@ -2425,7 +2439,7 @@ function renderMailFlowStats() {
         if (bar) return `${dashFlow.zoom ? 'Shown' : period.name}: ${n(d.totals[key])}`;
         if (dashFlow.zoom || !p) return '';
         // A period before the oldest logs kept may hold only part of its mail (the note under the chart says why)
-        return `Previous ${period.name}: ${n(p[key])}${dashFlow.prev.older_may_be_gone ? ' (partial)' : ''}`;
+        return `Previous: ${n(p[key])}${dashFlow.prev.older_may_be_gone ? ' (partial)' : ''}`;
     };
     set('stat-messages-note', [`${n(src.deliveries)} deliveries`, before('messages')].filter(Boolean).join(' · '));
     set('stat-blocked-note', before('blocked'));
@@ -2434,10 +2448,8 @@ function renderMailFlowStats() {
     const span = bar ? mailFlowSpan(Date.parse(bar.start), Date.parse(bar.end))
         : dashFlow.zoom ? mailFlowSpan(Date.parse(d.from), Date.parse(d.to)) : period.last;
     set('dashboard-flow-title', `Mail flow, ${span}${(bar ? bar.partial : false) ? ', so far' : ''}`);
-    set('dashboard-subtitle', `The ${period.last}, with the ${period.name} before for comparison`);
-    const reset = document.getElementById('dashboard-flow-reset');
-    if (reset) { reset.classList.toggle('hidden', !bar); reset.textContent = dashFlow.zoom ? 'All shown' : period.all; }
-    document.getElementById('dashboard-flow-view')?.classList.toggle('hidden', !bar && !dashFlow.zoom);
+    // Clear keeps its place when nothing is picked, so the row does not move
+    document.getElementById('dashboard-flow-reset')?.classList.toggle('is-off', !bar);
     const bars = document.querySelector('#dashboard-flow-chart .ui-flow-bars');
     if (bars) {
         bars.classList.toggle('has-pick', !!bar);
@@ -2471,7 +2483,7 @@ function openMessagesRange({ start, endInclusive, user = '', label = '' }) {
     navigateTo('messages');
 }
 
-// The picked bar's messages, else the zoomed span's, on the Messages page.
+// The picked bar's messages, else those of all the bars shown, on the Messages page.
 // It shows the messages with a delivery in that time: a message counted in an
 // earlier bar (its first delivery) shows there too.
 function openMailFlowHourMessages() {
@@ -2479,7 +2491,7 @@ function openMailFlowHourMessages() {
     if (!d) return;
     const bar = dashFlow.pick === null ? null : d.buckets.find(b => Date.parse(b.start) === dashFlow.pick);
     if (bar) openMessagesRange({ start: bar.start, endInclusive: bar.end_inclusive });
-    else if (dashFlow.zoom) openMessagesRange({ start: d.from, endInclusive: d.to_inclusive });
+    else openMessagesRange({ start: d.from, endInclusive: d.to_inclusive });
 }
 
 async function acknowledgeSecurityAlert(alertId) {

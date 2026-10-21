@@ -170,7 +170,7 @@ test('the Dashboard hour opens Messages on that hour, with its day in the app zo
     }
 });
 
-test('a zoomed Dashboard chart with no bar picked opens Messages on the zoomed span', () => {
+test('the Dashboard chart with no bar picked opens Messages on the span shown', () => {
     const h = harness({}, 'Europe/Berlin');
     h.run(`dashFlow.data = { buckets: [], from: '2026-10-21T04:00:00.000000Z', to_inclusive: '2026-10-21T09:59:59.999999Z' };
         dashFlow.zoom = { from: 1, to: 2 }; dashFlow.pick = null; openMailFlowHourMessages()`);
@@ -178,8 +178,10 @@ test('a zoomed Dashboard chart with no bar picked opens Messages on the zoomed s
     assert.equal(h.element('messages-end-date').value, '2026-10-21T09:59:59.999999Z');
     assert.equal(h.element('messages-date-range-label').textContent, 'Wed, Oct 21, 06:00 to 12:00');
     assert.deepEqual(h.calls.navigated, [['messages']]);
-    // Not zoomed and nothing picked: the button has nothing of its own to open
+    // Not zoomed and nothing picked: the whole period shown
     const plain = harness({}, 'UTC');
-    plain.run(`dashFlow.data = { buckets: [], from: 'x', to_inclusive: 'y' }; openMailFlowHourMessages()`);
-    assert.deepEqual(plain.calls.navigated, []);
+    plain.run(`dashFlow.data = { buckets: [], from: '2026-10-20T12:00:00.000000Z', to_inclusive: '2026-10-21T11:59:59.999999Z' }; openMailFlowHourMessages()`);
+    assert.equal(plain.element('messages-start-date').value, '2026-10-20T12:00:00.000000Z');
+    assert.equal(plain.element('messages-end-date').value, '2026-10-21T11:59:59.999999Z');
+    assert.deepEqual(plain.calls.navigated, [['messages']]);
 });
