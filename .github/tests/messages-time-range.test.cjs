@@ -22,7 +22,8 @@ function harness(filters, appTimezone = 'Europe/Berlin') {
     const elements = {};
     const element = id => elements[id] || (elements[id] = { value: '', textContent: '', style: {}, classList: { add() {} } });
     const calls = { urls: [], rendered: 0, applied: 0, toasts: [], navigated: [] };
-    const context = vm.createContext({
+    let context;
+    context = vm.createContext({
         URLSearchParams,
         appTimezone,
         currentFilters: { messages: filters },
@@ -43,6 +44,11 @@ function harness(filters, appTimezone = 'Europe/Berlin') {
         messagesOrder: 'desc',   // the list's order as it opens: newest first
         messagesGen: 0,   // the list's load generation (an older answer is dropped)
         messagesPaging: { loading: false, page: 1 },   // the first page shown, no next page on its way
+        messagesFullLoad: false,   // no full load on its way
+        messagesRefreshing: false,
+        messagesFetch: url => context.authenticatedFetch(url),   // the list's requests, as the page makes them
+        messagesNewGeneration: () => ++context.messagesGen,
+        loadMessageFacets() {},
     });
     vm.runInContext(zoneHelpers, context);
     vm.runInContext([

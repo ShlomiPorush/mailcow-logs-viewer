@@ -1175,37 +1175,37 @@ function hasDataChanged(newData, cacheKey) {
 }
 
 // Smart refresh for Messages - only update if new messages arrived
-// Only refreshes if there are no active filters/search (to avoid disrupting user's view)
+// Only refreshes if there are no active filters/search (to avoid disrupting user's view),
+// while nothing else loads the list, and only the first page: it would take away more
 async function smartRefreshMessages() {
     const filters = currentFilters.messages || {};
 
     // Don't refresh if user has active search or filters
     const hasActiveFilters = filters.search || filters.sender || filters.recipient ||
         filters.direction || filters.status || filters.user || filters.ip;
-
-    // Don't refresh if user is not on first page, or while the next page is on its way
-    if (hasActiveFilters || currentPage.messages > 1 || messagesPaging.loading) {
-        return; // Skip refresh to avoid disrupting user's view
-    }
+    const busy = () => messagesFullLoad || messagesPaging.loading || currentPage.messages > 1;
+    if (hasActiveFilters || messagesRefreshing || busy()) return;
 
     // The same query as the list, so a time range stays applied
-    const params = messagesQueryParams(currentPage.messages);
     const gen = messagesGen;
-
-    const response = await authenticatedFetch(`/api/messages?${params}`);
-    if (!response.ok) return;
-
-    const data = await response.json();
-    if (gen !== messagesGen) return;
-    // Meanwhile the user may have loaded more of the list: a first page would take it away
-    if (currentPage.messages > 1 || messagesPaging.page > 1 || messagesPaging.loading) return;
-
-    if (hasDataChanged(data, 'messages')) {
-        console.log('[REFRESH] Messages data changed, updating UI');
-        lastDataCache.messages = data;
-        // A list drawn again is a new one: a page still on its way for the old one is dropped
-        messagesGen++;
-        renderMessagesData(data);
+    messagesRefreshing = true;
+    try {
+        const response = await messagesFetch(`/api/messages?${messagesQueryParams()}`);
+        if (!response.ok) return;
+        const data = await response.json();
+        // Meanwhile the list was loaded again, or more of it is shown
+        if (gen !== messagesGen || busy()) return;
+        if (hasDataChanged(data, 'messages')) {
+            console.log('[REFRESH] Messages data changed, updating UI');
+            // A list drawn again is a new one, and its counts with it
+            const now = messagesNewGeneration();
+            renderMessagesData(data);
+            loadMessageFacets(filters, now);
+        }
+    } catch (error) {
+        if (error.name !== 'AbortError') console.error('Messages refresh failed:', error);
+    } finally {
+        messagesRefreshing = false;
     }
 }
 
@@ -1243,29 +1243,74 @@ function messageRowTone(msg) {
 function renderMessagesData(data) {
     const container = document.getElementById('messages-logs');
     if (!container) return;
-
-    if (!data.data || data.data.length === 0) {
-        container.innerHTML = '<p class="ui-empty">No messages found</p>';
-        return;
-    }
-
-    renderMessagesList(container, data);
+    showMessagesFirstPage(container, data);
     if (typeof markSelectedMessageRow === 'function' && window.openMessageKey) markSelectedMessageRow(window.openMessageKey);
 }
 
-// ---------- Messages list: the next page loads as the end scrolls into view ----------
-const messagesPaging = { page: 1, pages: 1, total: 0, loading: false, observer: null };
-// Each new load of the Messages list (new filters, a new order) starts a new
-// generation; an answer that comes back for an older one is dropped
-let messagesGen = 0;
+// A first page of the list, from a full load or the auto refresh: the rows (or
+// "No messages found"), the count, where the next page starts, and the answer
+// the refresh compares the next one with
+function showMessagesFirstPage(container, data) {
+    lastDataCache.messages = data;
+    const rows = data.data || [];
+    messagesPaging.page = 1;
+    messagesPaging.total = data.total || rows.length;
+    messagesPaging.cursor = rows.length ? data.next_cursor || null : null;
+    currentPage.messages = 1;
+    setMessagesCount(messagesPaging.total);
+    if (!rows.length) {
+        container.innerHTML = '<p class="ui-empty">No messages found</p>';
+        return;
+    }
+    renderMessagesList(container, data);
+}
 
-function messagesQueryParams(page) {
+function setMessagesCount(total) {
+    const countEl = document.getElementById('messages-count');
+    if (countEl) countEl.textContent = total === null ? '' : uiCountLabel(total || 0, 'message', 'messages');
+}
+
+// ---------- Messages list: the next page loads as the end scrolls into view ----------
+// page: pages shown; cursor: where the next page starts (null at the end);
+// failed: the last page could not load, until Try again
+const messagesPaging = { page: 1, pages: 1, total: 0, cursor: null, loading: false, failed: false, observer: null };
+// One list at a time. Every full load, and every redraw by the auto refresh,
+// starts a new generation: the requests of the older one are aborted (so none
+// of them holds up the new list), and their answers and errors are dropped.
+let messagesGen = 0;
+let messagesFullLoad = false;      // a full load is on its way
+let messagesRefreshing = false;    // an auto refresh is on its way
+const messagesRequests = new Set();
+
+function messagesNewGeneration() {
+    messagesGen++;
+    messagesRequests.forEach(control => control.abort());
+    messagesRequests.clear();
+    messagesPaging.loading = false;
+    messagesPaging.failed = false;
+    return messagesGen;
+}
+
+// A request of the list's, aborted when a new generation starts
+async function messagesFetch(url) {
+    const control = typeof AbortController === 'function' ? new AbortController() : null;
+    if (control) messagesRequests.add(control);
+    try {
+        return await authenticatedFetch(url, control ? { signal: control.signal } : {});
+    } finally {
+        if (control) messagesRequests.delete(control);
+    }
+}
+
+// The list's query; with a cursor, the page that starts after it
+function messagesQueryParams(cursor = null) {
     const filters = currentFilters.messages || {};
-    const params = new URLSearchParams({ page: page, limit: 50 });
+    const params = new URLSearchParams({ page: 1, limit: 50 });
     for (const key of ['search', 'sender', 'recipient', 'direction', 'user', 'status', 'ip', 'start_date', 'end_date']) {
         if (filters[key]) params.append(key, filters[key]);
     }
     if (messagesOrder === 'asc') params.append('order', 'asc');
+    if (cursor) params.append('cursor', cursor);
     return params;
 }
 
@@ -1297,14 +1342,11 @@ function setMessagesOrder(order) {
 }
 
 function messagesMoreText() {
-    if (messagesPaging.page < messagesPaging.pages) return 'Loading more...';
+    if (messagesPaging.cursor) return 'Loading more...';
     return messagesPaging.total ? `All ${messagesPaging.total} messages shown` : '';
 }
 
 function renderMessagesList(container, data) {
-    messagesPaging.page = data.page || 1;
-    messagesPaging.pages = data.pages || 1;
-    messagesPaging.total = data.total || data.data.length;
     container.innerHTML = `
         <div class="ui-msg-list">${data.data.map(renderMessageRow).join('')}</div>
         <p id="messages-more" class="ui-msg-more" aria-live="polite">${messagesMoreText()}</p>
@@ -1324,40 +1366,47 @@ function watchMessagesEnd(container) {
     messagesPaging.observer.observe(sentinel);
 }
 
-async function loadMoreMessages() {
-    if (messagesPaging.loading || messagesPaging.page >= messagesPaging.pages) return;
+// The next page, after the last message shown. A page that fails says so with
+// Try again and waits for it; it does not ask again by itself.
+async function loadMoreMessages(retry = false) {
+    if (retry) messagesPaging.failed = false;
+    if (messagesPaging.loading || messagesPaging.failed || !messagesPaging.cursor) return;
     const list = document.querySelector('#messages-logs .ui-msg-list');
-    const more = document.getElementById('messages-more');
     if (!list) return;
     messagesPaging.loading = true;
-    const next = messagesPaging.page + 1;
     const gen = messagesGen;
     try {
-        const response = await authenticatedFetch(`/api/messages?${messagesQueryParams(next)}`);
+        const response = await messagesFetch(`/api/messages?${messagesQueryParams(messagesPaging.cursor)}`);
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const data = await response.json();
-        // The list was loaded again meanwhile (other filters or order): this page
-        // is not part of it. The new list's own end is checked below as usual
-        if (gen === messagesGen) {
-            // New mail can shift a page; never show the same message twice
-            const seen = new Set([...list.querySelectorAll('.ui-msg-item[data-key]')].map(row => row.dataset.key));
-            list.insertAdjacentHTML('beforeend', (data.data || []).filter(msg => !seen.has(msg.correlation_key || '')).map(renderMessageRow).join(''));
-            messagesPaging.page = next;
-            messagesPaging.pages = data.pages || messagesPaging.pages;
-            currentPage.messages = next;
-            if (more) more.textContent = messagesMoreText();
-            if (typeof markSelectedMessageRow === 'function' && window.openMessageKey) markSelectedMessageRow(window.openMessageKey);
-        }
+        // The list was loaded again meanwhile: this page is not part of it
+        if (gen !== messagesGen) return;
+        // New mail can shift a page; never show the same message twice
+        const seen = new Set([...list.querySelectorAll('.ui-msg-item[data-key]')].map(row => row.dataset.key));
+        list.insertAdjacentHTML('beforeend', (data.data || []).filter(msg => !seen.has(msg.correlation_key || '')).map(renderMessageRow).join(''));
+        messagesPaging.page += 1;
+        currentPage.messages = messagesPaging.page;
+        messagesPaging.cursor = data.next_cursor || null;
+        // The count as it is now, not as it was when the list was drawn
+        messagesPaging.total = data.total ?? messagesPaging.total;
+        setMessagesCount(messagesPaging.total);
+        const more = document.getElementById('messages-more');
+        if (more) more.textContent = messagesMoreText();
+        if (typeof markSelectedMessageRow === 'function' && window.openMessageKey) markSelectedMessageRow(window.openMessageKey);
     } catch (error) {
-        // An error for an older list says nothing about the one shown
-        if (gen === messagesGen && more) more.innerHTML = `Could not load more messages. <button type="button" class="ui-link-row ui-link" onclick="loadMoreMessages()">Try again</button>`;
+        // An error for an older list, or its request aborted, says nothing about the one shown
+        if (gen !== messagesGen) return;
+        messagesPaging.failed = true;
+        const more = document.getElementById('messages-more');
+        if (more) more.innerHTML = `Could not load more messages. <button type="button" class="ui-link-row ui-link" onclick="loadMoreMessages(true)">Try again</button>`;
     } finally {
-        messagesPaging.loading = false;
+        if (gen === messagesGen) messagesPaging.loading = false;
     }
+    if (gen !== messagesGen || messagesPaging.failed) return;
     // A short page may leave the end still in view
     const sentinel = document.getElementById('messages-more');
     const container = document.getElementById('messages-logs');
-    if (sentinel && container && messagesPaging.page < messagesPaging.pages) {
+    if (sentinel && container && messagesPaging.cursor) {
         const r = sentinel.getBoundingClientRect();
         const box = container.getBoundingClientRect();
         if (r.top < Math.max(box.bottom, window.innerHeight) + 600) loadMoreMessages();
@@ -3960,18 +4009,20 @@ function renderFacetList(kind, entries, counts, current, asOptions = false) {
     }).join('');
 }
 
-async function loadMessageFacets(filters) {
+// gen: the list these counts belong to; counts for an older list are dropped
+async function loadMessageFacets(filters, gen = messagesGen) {
     const statusList = document.getElementById('messages-facet-status');
     const directionList = document.getElementById('messages-facet-direction');
     let data = null;
     try {
         const params = messagesFilterParams(filters);
         for (const preset of ['today', '7days', '30days', '90days']) params.append('since', `${preset}:${messagesPresetStart(preset)}`);
-        const response = await authenticatedFetch(`/api/messages/facets?${params}`);
+        const response = await messagesFetch(`/api/messages/facets?${params}`);
         if (response.ok) data = await response.json();
     } catch (e) {
-        console.warn('Failed to load message facets:', e);
+        if (e.name !== 'AbortError') console.warn('Failed to load message facets:', e);
     }
+    if (gen !== messagesGen) return;
     const status = filters.status || '';
     const direction = filters.direction || '';
     if (statusList) statusList.innerHTML = renderFacetList('status', MESSAGE_STATUS_FACETS, data && data.status, status);
@@ -4012,55 +4063,41 @@ function afterMessagesRendered(data) {
     }
 }
 
-async function loadMessages(page = 1) {
+async function loadMessages() {
     const container = document.getElementById('messages-logs');
     renderMessagesSort();
-    const gen = ++messagesGen;
-
+    // A new list: whatever the older one still has on its way is aborted
+    const gen = messagesNewGeneration();
+    messagesFullLoad = true;
+    container.innerHTML = '<div class="ui-loading" role="status"><div class="loading"></div><p>Loading...</p></div>';
+    const filters = currentFilters.messages || {};
+    loadMessageFacets(filters, gen);
+    updateMessagesFilterState();
+    // The list grows as it scrolls, so a new load always starts at the top
+    container.scrollTop = 0;
     try {
-        container.innerHTML = '<div class="ui-loading" role="status"><div class="loading"></div><p>Loading...</p></div>';
-
-        const filters = currentFilters.messages || {};
-        loadMessageFacets(filters);
-        updateMessagesFilterState();
-        // The list grows as it scrolls, so a new load always starts at the top
-        page = 1;
-        const params = messagesQueryParams(page);
-        container.scrollTop = 0;
-
-        console.log('Loading Messages:', `/api/messages?${params}`);
-
-        const response = await authenticatedFetch(`/api/messages?${params}`);
+        const response = await messagesFetch(`/api/messages?${messagesQueryParams()}`);
         if (!response.ok) {
             throw new Error(`HTTP ${response.status}: ${response.statusText}`);
         }
-
         const data = await response.json();
         if (gen !== messagesGen) return;
-        console.log('Messages data:', data);
-
-        // Update count display
-        const countEl = document.getElementById('messages-count');
-        if (countEl) {
-            countEl.textContent = uiCountLabel(data.total || 0, 'message', 'messages');
-        }
-
-        if (!data.data || data.data.length === 0) {
-            container.innerHTML = '<p class="ui-empty">No messages found</p>';
-            return;
-        }
-
-        renderMessagesList(container, data);
+        showMessagesFirstPage(container, data);
         afterMessagesRendered(data);
-
-        currentPage.messages = page;
     } catch (error) {
-        console.error('Failed to load messages:', error);
-        // A newer load is on its way or shown: this old one's error does not replace it
+        // A newer load is on its way or shown (this one may have been aborted for it)
         if (gen !== messagesGen) return;
-        document.getElementById('messages-logs').innerHTML = `<p class="ui-empty ui-text-fail">Failed to load messages: ${escapeHtml(error.message)}</p>`;
-        const countEl = document.getElementById('messages-count');
-        if (countEl) countEl.textContent = '';
+        console.error('Failed to load messages:', error);
+        container.innerHTML = `<p class="ui-empty ui-text-fail">Failed to load messages: ${escapeHtml(error.message)}</p>`;
+        setMessagesCount(null);
+        // Nothing is shown: no next page, and the next refresh draws what it gets
+        messagesPaging.page = 1;
+        messagesPaging.cursor = null;
+        messagesPaging.total = 0;
+        currentPage.messages = 1;
+        lastDataCache.messages = null;
+    } finally {
+        if (gen === messagesGen) messagesFullLoad = false;
     }
 }
 
