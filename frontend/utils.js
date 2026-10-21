@@ -2044,9 +2044,16 @@ function uiRedrawKeepingFocus(container, draw) {
     if (!was) return;
     const enabled = sel => [...container.querySelectorAll(sel)].filter(b => !b.disabled);
     const inGroup = was.group ? [...container.querySelectorAll('[role="group"]')].find(g => g.getAttribute('aria-label') === was.group) : null;
+    // A bar that is gone (zoomed past, or bars of another length): the one holding its time, else the nearest
+    const nearestBar = t => {
+        const bars = [...container.querySelectorAll('[data-start][data-end]')];
+        return bars.find(b => Number(b.dataset.start) <= t && t < Number(b.dataset.end))
+            || bars.reduce((best, b) => (!best || Math.abs(b.dataset.start - t) < Math.abs(best.dataset.start - t) ? b : best), null);
+    };
     const target = (was.start !== undefined && container.querySelector(`[data-start="${CSS.escape(was.start)}"]`))
         || enabled(inGroup ? '[role="group"] button' : 'button').find(b => name(b) === was.name && (!inGroup || inGroup.contains(b)))
         || (was.picked !== undefined && container.querySelector(`[data-start="${CSS.escape(was.picked)}"]`))
+        || (was.start !== undefined && nearestBar(Number(was.start)))
         || (inGroup && enabled('button').find(b => inGroup.contains(b)))
         || null;
     if (target) target.focus({ preventScroll: true });

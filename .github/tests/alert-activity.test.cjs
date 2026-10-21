@@ -146,9 +146,17 @@ test('the columns stop where the data ends, and a zoom shows a span inside it', 
     const data = activity({ alert_type: 'volume_spike', baseline_value: 0.5 });
     // The data ends five minutes into its last quarter (now, for a recent alert)
     const last = Date.parse(data.buckets[data.buckets.length - 1].start);
-    data.data_end = new Date(last + 5 * 60000).toISOString();
+    // ...to the microsecond, as the server sends it
+    data.data_end = new Date(last + 5 * 60000 + 123).toISOString().replace('Z', '456Z');
     const { cols } = h.columns(data, '24h');
-    assert.equal(cols[cols.length - 1].end.getTime(), last + 5 * 60000);
+    assert.equal(cols[cols.length - 1].end.getTime(), last + 5 * 60000 + 123);
+    h.render(data, '24h');
+    // Its messages in Messages: up to that exact moment, not a millisecond short of it
+    data.alert.subject = 'user@example.com';
+    data.around = { ...data.around, from: data.buckets[0].start, to: data.data_end };
+    h.run(`pickAlertActivityColumn(${last})`);
+    h.run('openAlertActivityMessages()');
+    assert.equal(h.opened.pop().endInclusive, data.data_end);
     h.render(data, '24h');
     h.run('alertActivityStep("in")');
     const zoom = h.run('alertActivityZoom');

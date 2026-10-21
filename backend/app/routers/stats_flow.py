@@ -199,6 +199,9 @@ def get_flow(
     first = nearest(lo, [e for e in edges if e < now])
     to = now if hi >= now else min(nearest(hi, edges), now)
     if to <= first:
+        # Less than a bar: the bar its middle falls in
+        middle = lo + (hi - lo) / 2
+        first = max(e for e in edges if e <= middle and e < now)
         to = min(next(e for e in edges if e > first), now)
     bars = [e for e in edges if first <= e < to]
     return flow(db, first, to, bucket, bars, now)

@@ -2303,7 +2303,10 @@ async function loadMailFlowChart() {
             // The server widens a span to whole bars: the zoom is what it shows,
             // so the buttons and the next gesture start from there
             dashFlow.zoom = { from: Date.parse(data.from), to: Date.parse(data.to) };
-            if (dashFlow.limits) dashFlow.limits = { ...dashFlow.limits, to: Math.max(dashFlow.limits.to, dashFlow.zoom.to) };
+            const l = dashFlow.limits;
+            if (l) dashFlow.limits = { ...l, to: Math.max(l.to, dashFlow.zoom.to) };
+            // Snapped out to the whole period: that is no zoom (the period before and the refresh come back)
+            if (l && dashFlow.zoom.from <= l.from + 1 && dashFlow.zoom.to >= l.to - 1) dashFlow.zoom = null;
         }
         renderMailFlowChart();
     } catch (error) {

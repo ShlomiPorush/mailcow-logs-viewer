@@ -171,3 +171,9 @@ def test_a_range_snaps_to_the_nearest_bars_at_least_one(client):
     assert span('10:10:00', '10:20:00') == ('2025-01-10T10:00:00.000000Z', '2025-01-10T11:00:00.000000Z', 1)
     # Whole bars stay as they are
     assert span('08:00:00', '11:00:00') == ('2025-01-10T08:00:00.000000Z', '2025-01-10T11:00:00.000000Z', 3)
+
+
+def test_a_range_shorter_than_a_bar_shows_the_bar_it_is_in(client):
+    # 10:40 to 10:50 rounds both ends to 11:00: it shows 10:00 to 11:00, not the hour after
+    data = _flow('from=2025-01-10T10:40:00Z&to=2025-01-10T10:50:00Z&bucket=hour').json()
+    assert (data['from'], data['to'], len(data['buckets'])) == ('2025-01-10T10:00:00.000000Z', '2025-01-10T11:00:00.000000Z', 1)
