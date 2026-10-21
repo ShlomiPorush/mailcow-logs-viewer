@@ -5285,6 +5285,10 @@ document.addEventListener('mousedown', event => {
     if (containerLogsPressed && event.detail > 1) window.getSelection().removeAllRanges();
 });
 document.addEventListener('mouseup', () => { containerLogsPressed = false; });
+// A release outside the window never reaches the page: moving back with no
+// button down, or leaving the window, ends the press too
+document.addEventListener('mousemove', event => { if (containerLogsPressed && !event.buttons) containerLogsPressed = false; });
+window.addEventListener('blur', () => { containerLogsPressed = false; });
 function containerLogsHeld(content) {
     if (containerLogsPressed) return true;
     const selection = window.getSelection();
