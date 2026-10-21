@@ -288,6 +288,10 @@ test('a click on a log line selects the line, and the log knows while text is he
     press(d.getElementById('two'), 10); click(d.getElementById('two'), 10);
     press(d.getElementById('two'), 10, 2);
     assert.equal(String(w.getSelection()), '', 'the second press of a double click clears the line so the browser selects the word');
+    press(d.getElementById('two'), 10); release(d.getElementById('two')); click(d.getElementById('two'), 10);
+    press(d.getElementById('one'), 10, 2, { shiftKey: true });
+    assert.equal(String(w.getSelection()), 'second line', 'Shift with a repeated press keeps the selection it extends');
+    w.getSelection().removeAllRanges();
     assert.equal(w.uiTextHeld(log), true, 'a press held in the log holds it');
     d.dispatchEvent(new w.MouseEvent('mousemove', { buttons: 0 }));
     assert.equal(w.uiTextHeld(log), false, 'moving with no button down ends a press whose release was lost');

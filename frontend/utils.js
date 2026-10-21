@@ -1211,8 +1211,8 @@ let uiPress = null;
 document.addEventListener('mousedown', event => {
     uiPress = { x: event.clientX, y: event.clientY, target: event.target, down: true };
     // The first click of a double click selected a whole log line; clear it so
-    // the browser selects the word
-    if (event.detail > 1 && event.target instanceof Element && event.target.closest('[data-line-select]')) window.getSelection().removeAllRanges();
+    // the browser selects the word (Shift keeps the selection it extends)
+    if (event.detail > 1 && !event.shiftKey && event.target instanceof Element && event.target.closest('[data-line-select]')) window.getSelection().removeAllRanges();
 }, true);
 const uiPressEnd = () => { if (uiPress) uiPress.down = false; };
 document.addEventListener('mouseup', uiPressEnd, true);
