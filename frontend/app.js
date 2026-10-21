@@ -2372,8 +2372,8 @@ function renderMailFlowChart() {
         if (i === n - 1 && b.partial) return '<span class="is-major">Now</span>';
         if (d.bucket === 'hour') return p.hour % 6 === 0 ? `<span class="is-major">${mailFlowHour(b.s)}</span>` : p.hour % 3 === 0 ? `<span class="is-minor">${mailFlowHour(b.s)}</span>` : '<span></span>';
         if (d.bucket === '6h') return p.hour < 6 ? `<span class="is-major">${escapeHtml(formatInZone(b.s, { weekday: 'short' }, 'en-US'))}</span>` : '<span></span>';
-        // Every fifth day, not next to Now
-        return (n <= 10 || (i % 5 === 0 && i < n - 2)) ? `<span class="is-major">${escapeHtml(formatInZone(b.s, { day: 'numeric', month: 'short' }, 'en-US'))}</span>` : '<span></span>';
+        // Every fifth day, not near Now
+        return (n <= 10 || (i % 5 === 0 && i < n - 5)) ? `<span class="is-major">${escapeHtml(formatInZone(b.s, { day: 'numeric', month: 'short' }, 'en-US'))}</span>` : '<span></span>';
     };
     const zoomed = !!dashFlow.zoom;
     const shown = { from: Date.parse(d.from), to: Date.parse(d.to) };
@@ -2459,7 +2459,13 @@ function renderMailFlowStats() {
         // A period before the oldest logs kept may hold only part of its mail (the note under the chart says why)
         return `Previous: ${n(p[key])}${dashFlow.prev.older_may_be_gone ? ' (partial)' : ''}`;
     };
-    set('stat-messages-note', [`${n(src.deliveries)} deliveries`, before('messages')].filter(Boolean).join(' · '));
+    // Two lines under Messages, always both: the deliveries, and the span before or shown
+    const note = document.getElementById('stat-messages-note');
+    if (note) {
+        const lines = [`${n(src.deliveries)} deliveries`, before('messages')];
+        note.innerHTML = lines.map(line => `<span>${escapeHtml(line) || '&nbsp;'}</span>`).join('');
+        note.title = lines.filter(Boolean).join(', ');
+    }
     set('stat-blocked-note', before('blocked'));
     set('stat-deferred-note', before('deferred'));
     set('stat-auth-failures-note', before('auth_failures'));

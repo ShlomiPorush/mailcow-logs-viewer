@@ -1299,6 +1299,8 @@ body { font-family: var(--ui-font); background: var(--ui-bg); color: var(--ui-in
     #dashboard-flow-title { flex-basis: 100%; white-space: normal; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-height: 1.3; height: 2.6em; }
 }
 #dashboard-flow-panel .ui-stat small { line-height: 1.45; min-height: 1.45em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#dashboard-flow-panel #stat-messages-note { min-height: 2.9em; }
+#stat-messages-note span { display: block; overflow: hidden; text-overflow: ellipsis; }
 #dashboard-flow-panel .is-off, #dashboard-attention-panel .is-off { visibility: hidden; }
 .ui-flow-view { height: 120px; }
 .ui-flow-axis { height: 17px; }
