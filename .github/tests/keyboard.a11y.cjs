@@ -280,7 +280,8 @@ test('a click on a log line selects the line, and the log knows while text is he
     const copy = d.querySelector('#one > .ui-line-copy');
     assert.ok(copy, 'the line gets a Copy button');
     assert.equal(copy.getAttribute('aria-label'), 'Copy line');
-    assert.equal(w.getSelection().containsNode(copy, true), false, 'the button is not part of the selection');
+    const range = w.getSelection().getRangeAt(0);
+    assert.ok(range.endContainer === copy.parentNode && range.endOffset <= [...copy.parentNode.childNodes].indexOf(copy), 'the button is not part of the selection');
     assert.equal(w.uiTextHeld(log), true, 'a selection in the log holds it');
     w.getSelection().removeAllRanges();
     press(d.getElementById('two'), 10); release(d.getElementById('two')); click(d.getElementById('two'), 80);
