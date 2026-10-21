@@ -2042,7 +2042,9 @@ function uiRedrawKeepingFocus(container, draw) {
     } : null;
     draw();
     if (!was) return;
-    const enabled = sel => [...container.querySelectorAll(sel)].filter(b => !b.disabled);
+    // A button kept in its place but hidden (visibility) takes no focus
+    const shown = b => (typeof b.checkVisibility === 'function' ? b.checkVisibility({ visibilityProperty: true }) : getComputedStyle(b).visibility !== 'hidden');
+    const enabled = sel => [...container.querySelectorAll(sel)].filter(b => !b.disabled && shown(b));
     const inGroup = was.group ? [...container.querySelectorAll('[role="group"]')].find(g => g.getAttribute('aria-label') === was.group) : null;
     // A bar that is gone (zoomed past, or bars of another length): the one holding its time, else the nearest
     const nearestBar = t => {

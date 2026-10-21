@@ -2007,7 +2007,7 @@ async function loadDashboardSecurityAlerts() {
         if (alerts.length === 0) {
             container.classList.add('hidden');
             uiReplaceKeepingFocus(container, '');
-            if (dismissAll) dismissAll.classList.add('hidden');
+            if (dismissAll) dismissAll.classList.add('is-off');
             updateAttentionState();
             return;
         }
@@ -2032,7 +2032,7 @@ async function loadDashboardSecurityAlerts() {
                 </div>`;
         }).join(''));
         container.classList.remove('hidden');
-        if (dismissAll) dismissAll.classList.remove('hidden');
+        if (dismissAll) dismissAll.classList.remove('is-off');
     } catch (e) {
         console.warn('Failed to load security alerts:', e);
         container.classList.add('hidden');
@@ -2215,7 +2215,8 @@ function mailFlowSpan(from, to) {
     const end = to - 1;
     if (zonedDateString(from) === zonedDateString(end)) return `${day(from)}, ${mailFlowHour(from)} to ${mailFlowHour(to)}`;
     const whole = mailFlowHour(from) === '00:00' && mailFlowHour(to) === '00:00';
-    return whole ? `${day(from)} to ${day(end)}` : `${day(from)}, ${mailFlowHour(from)} to ${day(end)}, ${mailFlowHour(to)}`;
+    const date = t => formatInZone(t, { day: 'numeric', month: 'short' }, 'en-US');
+    return whole ? `${day(from)} to ${day(end)}` : `${date(from)}, ${mailFlowHour(from)} to ${date(end)}, ${mailFlowHour(to)}`;
 }
 
 // The bar length for a span: an hour up to two days, six hours up to ten, else a day
@@ -2278,6 +2279,8 @@ async function loadMailFlowChart() {
     if (!chart) return;
     // A gesture is on: it asks again when it ends
     if (dashFlow.previewing) return;
+    // Before the first answer: the chart's whole frame, so the panel has its size from the start
+    if (!chart.querySelector('.ui-flow-view')) chart.innerHTML = mailFlowFrame('<p class="ui-empty ui-flow-failed" role="status">Loading...</p>');
     const gen = ++dashFlow.gen;
     if (dashFlow.control) dashFlow.control.abort();
     const control = typeof AbortController === 'function' ? new AbortController() : null;
@@ -2314,11 +2317,10 @@ async function loadMailFlowChart() {
         dashFlow.failed = true;
         const failed = '<p class="ui-empty ui-text-fail ui-flow-failed">Could not load the mail flow. It tries again on the next refresh.</p>';
         // In the chart's own frame, so the panel keeps its size
+        if (dashFlow.zoomer) { dashFlow.zoomer.destroy(); dashFlow.zoomer = null; }
         const view = chart.querySelector('.ui-flow-view');
-        if (view) {
-            if (dashFlow.zoomer) { dashFlow.zoomer.destroy(); dashFlow.zoomer = null; }
-            view.innerHTML = failed;
-        } else chart.innerHTML = failed;
+        if (view) view.innerHTML = failed;
+        else chart.innerHTML = mailFlowFrame(failed);
     }
 }
 
@@ -2330,6 +2332,31 @@ function refreshMailFlowChart() {
     if (dashFlow.zoom) return;
     const every = dashFlow.period === '24h' ? 60000 : 300000;
     if (Date.now() - dashFlow.loadedAt >= every) loadMailFlowChart();
+}
+
+// The foot under the chart: the legend, the zoom buttons and the actions, all
+// always there (what is not in use keeps its place), so the panel keeps its size
+function mailFlowFoot(can) {
+    const off = on => (on ? '' : ' disabled');
+    return `<div class="ui-flow-foot">
+            <div class="ui-flow-legend"><span><i class="ui-flow-clean"></i>Clean</span><span><i class="ui-flow-spam"></i>Spam</span></div>
+            <div class="ui-flow-zoom" role="group" aria-label="Zoom the chart">
+                <button type="button" class="ui-icon-btn ui-icon-btn-sm" onclick="dashFlowStep('earlier')" aria-label="Earlier" title="Earlier"${off(can.earlier)}>&lsaquo;</button>
+                <button type="button" class="ui-icon-btn ui-icon-btn-sm" onclick="dashFlowStep('out')" aria-label="Zoom out" title="Zoom out"${off(can.out)}>&minus;</button>
+                <button type="button" class="ui-icon-btn ui-icon-btn-sm" onclick="dashFlowStep('in')" aria-label="Zoom in" title="Zoom in (or pinch, drag across bars, Ctrl+wheel)"${off(can.in)}>+</button>
+                <button type="button" class="ui-icon-btn ui-icon-btn-sm" onclick="dashFlowStep('later')" aria-label="Later" title="Later"${off(can.later)}>&rsaquo;</button>
+                <button type="button" class="ui-icon-btn ui-icon-btn-sm${can.zoomed ? '' : ' is-off'}" onclick="dashFlowStep('reset')" aria-label="Reset zoom" title="Reset zoom"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg></button>
+            </div>
+            <span class="ui-flow-actions">
+                <button type="button" id="dashboard-flow-view" class="ui-btn ui-btn-sm" onclick="openMailFlowHourMessages()"${off(can.view)}>View these messages</button>
+                <button type="button" id="dashboard-flow-reset" class="ui-more is-off" onclick="pickMailFlowHour(null)">Clear</button>
+            </span>
+        </div>`;
+}
+
+// The chart's frame with a line in place of the bars (loading, or a first load that failed)
+function mailFlowFrame(inner) {
+    return `<div class="ui-flow-view">${inner}</div><div class="ui-flow-axis" aria-hidden="true"></div>${mailFlowFoot({})}`;
 }
 
 function renderMailFlowChart() {
@@ -2352,7 +2379,11 @@ function renderMailFlowChart() {
     const shown = { from: Date.parse(d.from), to: Date.parse(d.to) };
     // The part older than the logs kept (retention): shaded, so empty bars there do not read as quiet
     const kept = d.kept_from ? Date.parse(d.kept_from) : null;
-    const gone = kept !== null && kept > shown.from ? Math.min(1, (kept - shown.from) / (shown.to - shown.from)) : 0;
+    let gone = 0;
+    if (kept !== null && kept > shown.from) {
+        const i = bars.findIndex(b => kept < b.e);
+        gone = i < 0 ? 1 : (i + Math.max(0, kept - bars[i].s) / (bars[i].e - bars[i].s)) / n;
+    }
     if (dashFlow.zoomer) { dashFlow.zoomer.destroy(); dashFlow.zoomer = null; }
     uiRedrawKeepingFocus(chart, () => { chart.innerHTML = `
         <div class="ui-flow-view">
@@ -2366,20 +2397,7 @@ function renderMailFlowChart() {
             <div class="ui-flow-band hidden" aria-hidden="true"></div>
         </div>
         <div class="ui-flow-axis" aria-hidden="true">${bars.map(label).join('')}</div>
-        <div class="ui-flow-foot">
-            <div class="ui-flow-legend"><span><i class="ui-flow-clean"></i>Clean</span><span><i class="ui-flow-spam"></i>Spam</span></div>
-            <div class="ui-flow-zoom" role="group" aria-label="Zoom the chart">
-                <button type="button" class="ui-icon-btn ui-icon-btn-sm" onclick="dashFlowStep('earlier')" aria-label="Earlier" title="Earlier"${zoomed && shown.from > dashFlow.limits.from ? '' : ' disabled'}>&lsaquo;</button>
-                <button type="button" class="ui-icon-btn ui-icon-btn-sm" onclick="dashFlowStep('out')" aria-label="Zoom out" title="Zoom out"${zoomed ? '' : ' disabled'}>&minus;</button>
-                <button type="button" class="ui-icon-btn ui-icon-btn-sm" onclick="dashFlowStep('in')" aria-label="Zoom in" title="Zoom in (or pinch, drag across bars, Ctrl+wheel)"${shown.to - shown.from > dashFlow.limits.min ? '' : ' disabled'}>+</button>
-                <button type="button" class="ui-icon-btn ui-icon-btn-sm" onclick="dashFlowStep('later')" aria-label="Later" title="Later"${zoomed && shown.to < dashFlow.limits.to ? '' : ' disabled'}>&rsaquo;</button>
-                <button type="button" class="ui-icon-btn ui-icon-btn-sm${zoomed ? '' : ' is-off'}" onclick="dashFlowStep('reset')" aria-label="Reset zoom" title="Reset zoom"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg></button>
-            </div>
-            <span class="ui-flow-actions">
-                <button type="button" id="dashboard-flow-view" class="ui-btn ui-btn-sm" onclick="openMailFlowHourMessages()">View these messages</button>
-                <button type="button" id="dashboard-flow-reset" class="ui-more is-off" onclick="pickMailFlowHour(null)">Clear</button>
-            </span>
-        </div>`; });
+        ${mailFlowFoot({ zoomed, earlier: zoomed && shown.from > dashFlow.limits.from, out: zoomed, in: shown.to - shown.from > dashFlow.limits.min, later: zoomed && shown.to < dashFlow.limits.to, view: true })}`; });
     const box = chart.querySelector('.ui-flow-bars');
     const view = chart.querySelector('.ui-flow-view');
     const band = chart.querySelector('.ui-flow-band');

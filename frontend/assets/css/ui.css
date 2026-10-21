@@ -1269,6 +1269,11 @@ body { font-family: var(--ui-font); background: var(--ui-bg); color: var(--ui-in
 /* One height whatever it holds: a new item goes inside, "all clear" too */
 .ui-attn-scroll { height: 380px; overflow-y: auto; overscroll-behavior: contain; }
 .ui-attn-scroll .ui-dash-clear { border-top: 0; }
+/* The head stays one line: in a narrow panel the button says Dismiss all (its name keeps alerts) */
+#dashboard-attention-panel { container-type: inline-size; }
+#dashboard-attention-panel > .ui-panel-head { flex-wrap: nowrap; }
+#dashboard-attention-panel > .ui-panel-head > button { flex: none; }
+@container (max-width: 360px) { .ui-attn-wide { display: none; } }
 .ui-attn-scroll.has-more:not(:focus-within) { mask-image: linear-gradient(to bottom, #000 calc(100% - 40px), transparent); }
 .ui-attn-scroll:focus-visible { outline: 2px solid var(--ui-focus); outline-offset: -2px; }
 .ui-attn-more { margin: 0; padding: 8px var(--ui-pad-x); border-top: 1px solid var(--ui-line); color: var(--ui-muted); font-size: 12.5px; }
@@ -1288,19 +1293,23 @@ body { font-family: var(--ui-font); background: var(--ui-bg); color: var(--ui-in
 .ui-flow-zoom .ui-icon-btn:disabled { opacity: .35; cursor: default; }
 /* One size in every state: the title and the lines under the figures stay on one line,
    what is not in use keeps its place (is-off), the chart's frame holds a failure too */
+#dashboard-flow-panel { container-type: inline-size; }
 #dashboard-flow-title { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@container (max-width: 680px) {
+    #dashboard-flow-title { flex-basis: 100%; white-space: normal; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-height: 1.3; height: 2.6em; }
+}
 #dashboard-flow-panel .ui-stat small { line-height: 1.45; min-height: 1.45em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-#dashboard-flow-panel .is-off { visibility: hidden; }
+#dashboard-flow-panel .is-off, #dashboard-attention-panel .is-off { visibility: hidden; }
 .ui-flow-view { height: 120px; }
+.ui-flow-axis { height: 17px; }
 .ui-flow-failed { display: grid; place-items: center; height: 100%; margin: 0; }
 .ui-flow-gone { position: absolute; top: 0; bottom: 0; left: 0; display: grid; place-items: center; overflow: hidden; pointer-events: none;
-    background: repeating-linear-gradient(135deg, color-mix(in srgb, var(--ui-ink) 7%, transparent) 0 6px, transparent 6px 12px); border-inline-end: 1px dashed var(--ui-line); }
+    background: repeating-linear-gradient(135deg, color-mix(in srgb, var(--ui-ink) 7%, transparent) 0 6px, transparent 6px 12px); border-right: 1px dashed var(--ui-line); }
 .ui-flow-gone span { padding: 2px 6px; border-radius: 4px; background: var(--ui-bg); color: var(--ui-muted); font-size: 11.5px; white-space: nowrap; }
 .ui-flow-actions { display: inline-flex; align-items: center; gap: 12px; margin-inline-start: auto; }
 .ui-flow-actions .ui-more { border: 0; background: none; padding: 0; color: inherit; font: inherit; font-size: 13px; font-weight: 600; text-decoration: underline; cursor: pointer; }
 .ui-flow-foot .ui-flow-zoom { margin-inline-start: auto; }
 .ui-aa-chart ~ .ui-flow-foot .is-off { visibility: hidden; }
-#dashboard-flow-chart:empty { min-height: 202px; }
 .ui-flow-bars { display: flex; align-items: flex-end; gap: 3px; height: 120px; }
 .ui-flow-bar { flex: 1; display: flex; flex-direction: column; justify-content: flex-end; gap: 2px; height: 100%; min-width: 0;
     padding: 0; border: 0; border-radius: 3px; background: none; cursor: pointer; }
@@ -1337,8 +1346,6 @@ body { font-family: var(--ui-font); background: var(--ui-bg); color: var(--ui-in
     .ui-mrow-sub { grid-column: 3; }
     .ui-flow-bars { height: 90px; gap: 2px; }
     .ui-flow-view { height: 90px; }
-    #dashboard-flow-title { flex-basis: 100%; }
-    #dashboard-flow-chart:empty { min-height: 214px; }
     .ui-flow-axis { gap: 2px; }
     .ui-flow-axis .is-minor { visibility: hidden; }
 }
