@@ -82,10 +82,12 @@ def test_messages_seen_at_one_moment_keep_their_place_across_pages(client):
                                       direction='outbound', subject=f'same{n} {MARK}', final_status='delivered',
                                       first_seen=same, last_seen=same, created_at=same))
         db.commit()
+    # Added in this order, so their ids rise: the id settles them, the last added first when newest first
+    same = ['same4', 'same3', 'same2', 'same1', 'same0']
+    want = {'desc': same + ['m10', 'm20', 'm30', 'm40', 'm50'], 'asc': ['m50', 'm40', 'm30', 'm20', 'm10'] + same[::-1]}
     for order in ('desc', 'asc'):
         pages = [_subjects(client, f'order={order}&limit=3&page={page}') for page in (1, 2, 3, 4)]
-        seen = [s for page in pages for s in page]
-        assert len(seen) == 10 and len(set(seen)) == 10, (order, pages)
+        assert [s for page in pages for s in page] == want[order], (order, pages)
 
 
 def test_the_csv_export_follows_the_order(client):

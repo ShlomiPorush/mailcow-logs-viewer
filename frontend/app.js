@@ -1332,18 +1332,21 @@ async function loadMoreMessages() {
         const response = await authenticatedFetch(`/api/messages?${messagesQueryParams(next)}`);
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const data = await response.json();
-        // The list was loaded again meanwhile (other filters or order): this page is not part of it
-        if (gen !== messagesGen) return;
-        // New mail can shift a page; never show the same message twice
-        const seen = new Set([...list.querySelectorAll('.ui-msg-item[data-key]')].map(row => row.dataset.key));
-        list.insertAdjacentHTML('beforeend', (data.data || []).filter(msg => !seen.has(msg.correlation_key || '')).map(renderMessageRow).join(''));
-        messagesPaging.page = next;
-        messagesPaging.pages = data.pages || messagesPaging.pages;
-        currentPage.messages = next;
-        if (more) more.textContent = messagesMoreText();
-        if (typeof markSelectedMessageRow === 'function' && window.openMessageKey) markSelectedMessageRow(window.openMessageKey);
+        // The list was loaded again meanwhile (other filters or order): this page
+        // is not part of it. The new list's own end is checked below as usual
+        if (gen === messagesGen) {
+            // New mail can shift a page; never show the same message twice
+            const seen = new Set([...list.querySelectorAll('.ui-msg-item[data-key]')].map(row => row.dataset.key));
+            list.insertAdjacentHTML('beforeend', (data.data || []).filter(msg => !seen.has(msg.correlation_key || '')).map(renderMessageRow).join(''));
+            messagesPaging.page = next;
+            messagesPaging.pages = data.pages || messagesPaging.pages;
+            currentPage.messages = next;
+            if (more) more.textContent = messagesMoreText();
+            if (typeof markSelectedMessageRow === 'function' && window.openMessageKey) markSelectedMessageRow(window.openMessageKey);
+        }
     } catch (error) {
-        if (more) more.innerHTML = `Could not load more messages. <button type="button" class="ui-link-row ui-link" onclick="loadMoreMessages()">Try again</button>`;
+        // An error for an older list says nothing about the one shown
+        if (gen === messagesGen && more) more.innerHTML = `Could not load more messages. <button type="button" class="ui-link-row ui-link" onclick="loadMoreMessages()">Try again</button>`;
     } finally {
         messagesPaging.loading = false;
     }
@@ -4049,6 +4052,8 @@ async function loadMessages(page = 1) {
         currentPage.messages = page;
     } catch (error) {
         console.error('Failed to load messages:', error);
+        // A newer load is on its way or shown: this old one's error does not replace it
+        if (gen !== messagesGen) return;
         document.getElementById('messages-logs').innerHTML = `<p class="ui-empty ui-text-fail">Failed to load messages: ${escapeHtml(error.message)}</p>`;
         const countEl = document.getElementById('messages-count');
         if (countEl) countEl.textContent = '';
