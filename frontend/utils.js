@@ -2084,12 +2084,16 @@ function uiPickerReveal(el, panel) {
         if (box === panel) break;
     }
 }
+// A screen used by touch only (a phone): a field that takes the focus brings up the keyboard
+function uiTouchOnly() {
+    return typeof window.matchMedia === 'function' && window.matchMedia('(hover: none) and (pointer: coarse)').matches;
+}
 function uiPickerFocusInside(panel) {
     const still = { preventScroll: true };
     const show = el => { el.focus(still); uiPickerReveal(el, panel); };
     const search = panel.querySelector('.ui-picker-search');
-    if (search) { show(search); return; }
-    if (panel.getAttribute('role') === 'listbox') {
+    if (search && !uiTouchOnly()) { show(search); return; }
+    if (search || panel.getAttribute('role') === 'listbox') {
         const items = uiPickerItems(panel);
         const target = items.find(o => o.getAttribute('aria-selected') === 'true') || items[0];
         if (target) show(target);

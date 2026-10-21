@@ -1256,7 +1256,35 @@ function messagesQueryParams(page) {
     for (const key of ['search', 'sender', 'recipient', 'direction', 'user', 'status', 'ip', 'start_date', 'end_date']) {
         if (filters[key]) params.append(key, filters[key]);
     }
+    if (messagesOrder === 'asc') params.append('order', 'asc');
     return params;
+}
+
+// The Messages list's order, by the time each message was first seen: its Sort
+// button beside the search offers newest first (as it arrives) or oldest first.
+// An order is not a filter: clearing the filters keeps it.
+let messagesOrder = 'desc';
+function renderMessagesSort() {
+    const slot = document.getElementById('messages-sort');
+    if (!slot) return;
+    if (!slot.querySelector('.ui-picker')) {
+        const choice = (value, text) => `<label class="ui-sort-opt"><input type="radio" name="messages-order" value="${value}" onchange="setMessagesOrder(this.value)"><span>${text}</span></label>`;
+        slot.innerHTML = uiPicker({ id: 'messages-sort-menu', label: 'Sort', icon: true, panelLabel: 'Sort messages', panelClass: 'ui-sort-panel',
+            panel: `<fieldset class="ui-sort-group"><legend>Time</legend>${choice('desc', 'Newest first')}${choice('asc', 'Oldest first')}</fieldset>` });
+    }
+    const said = `Sort: ${messagesOrder === 'asc' ? 'Oldest first' : 'Newest first'}`;
+    const button = slot.querySelector('.ui-picker-btn');
+    button.setAttribute('aria-label', said);
+    button.title = said;
+    button.classList.toggle('is-set', messagesOrder === 'asc');
+    slot.querySelectorAll('input[name="messages-order"]').forEach(r => { r.checked = r.value === messagesOrder; });
+}
+// Shown with the page, before its list arrives
+document.addEventListener('DOMContentLoaded', renderMessagesSort);
+function setMessagesOrder(order) {
+    messagesOrder = order === 'asc' ? 'asc' : 'desc';
+    renderMessagesSort();
+    loadMessages();
 }
 
 function messagesMoreText() {
@@ -3969,6 +3997,7 @@ function afterMessagesRendered(data) {
 
 async function loadMessages(page = 1) {
     const container = document.getElementById('messages-logs');
+    renderMessagesSort();
 
     try {
         container.innerHTML = '<div class="ui-loading" role="status"><div class="loading"></div><p>Loading...</p></div>';

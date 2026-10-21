@@ -344,6 +344,19 @@ test('two server sorts in a row that both fail go back to the order the rows sho
     assert.equal(heads[1].dataset.sortState, 'descending');
 });
 
+test('on a touch screen a long picker opens on its chosen option, not its search field (no keyboard)', () => {
+    for (const touch of [true, false]) {
+        const w = page('<div id="host"></div>');
+        w.matchMedia = query => ({ matches: touch && /pointer: coarse/.test(query), addEventListener() {}, removeEventListener() {} });
+        w.document.getElementById('host').innerHTML = w.uiPicker({ id: 'dom', label: 'Domain', value: 'b.example', search: 'Search domain',
+            options: Array.from({ length: 12 }, (_, i) => ({ label: `d${i}.example`, selected: i === 5, onclick: '' })) });
+        w.uiPickerOpen('dom');
+        const active = w.document.activeElement;
+        if (touch) assert.equal(active.textContent.trim(), 'd5.example', 'the chosen option takes the focus');
+        else assert.ok(active.matches('.ui-picker-search'), 'with a mouse the search field takes it');
+    }
+});
+
 test('every stacked list with a header row says where its Sort button goes, or that it has none', () => {
     const dir = path.join(__dirname, '../../frontend');
     const missing = [];

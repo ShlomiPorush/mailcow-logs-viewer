@@ -1174,10 +1174,10 @@ function renderReportsDomains() {
     }
     const day = ts => ts ? formatInZone(ts * 1000, { month: 'short', day: 'numeric', year: 'numeric' }, 'en-US') : '-';
     content.innerHTML = `
-        <div class="ui-sort-head" id="dmarc-reports-domains-head"><h4 class="ui-md-h">Reports by domain</h4></div>
+        <h4 class="ui-md-h">Reports by domain</h4>
         ${allowDelete ? '' : `<div class="ui-list-note ui-flush">${uiLocked('Deleting reports is off', 'Turn on report deletion in Settings, DMARC.',
             `<button type="button" class="ui-btn ui-btn-sm" onclick="closeReportsManagementModal(); navigateTo('settings', { sub: 'dmarc' })">Open Settings</button>`)}</div>`}
-        <div id="dmarc-reports-domains-table" class="ui-table ui-stack" data-sort-at="dmarc-reports-domains-head" data-sort-name="reports by domain" style="--ui-cols: minmax(180px, 2fr) 110px 110px minmax(110px, 1fr)${allowDelete ? ' 100px' : ''}; --ui-table-min: ${allowDelete ? 640 : 540}px">
+        <div id="dmarc-reports-domains-table" class="ui-table ui-stack" data-sort-icon="off" style="--ui-cols: minmax(180px, 2fr) 110px 110px minmax(110px, 1fr)${allowDelete ? ' 100px' : ''}; --ui-table-min: ${allowDelete ? 640 : 540}px">
             <div class="ui-tr ui-tr-head"><span data-sort-kind="text">Domain</span><span class="ui-td-end" data-sort-kind="number">DMARC reports</span><span class="ui-td-end" data-sort-kind="number">TLS reports</span><span data-sort-kind="date">Last report</span>${allowDelete ? '<span class="ui-td-end">Actions</span>' : ''}</div>
             ${domains.map(d => `
             <div class="ui-tr">
@@ -1314,7 +1314,7 @@ function renderReportsManagementTable(reports, allowDelete, { total, page, total
         : '--ui-cols: minmax(150px, 1.2fr) 70px minmax(140px, 1.2fr) minmax(120px, 1fr) 70px minmax(110px, .9fr)';
 
     content.innerHTML = `
-        <div class="ui-table ui-stack" data-sort-handler="sortReportsManagement" data-sort-at="dmarc-reports-search" data-sort-name="reports" data-sort-default="Import Date:desc" style="${cols}; --ui-table-min: 780px">
+        <div class="ui-table ui-stack" data-sort-handler="sortReportsManagement" data-sort-icon="off" style="${cols}; --ui-table-min: 780px">
             <div class="ui-tr ui-tr-head"><span data-sort-kind="date"${reportsSortAttr('created_at')}>Import Date</span><span data-sort-kind="text"${reportsSortAttr('type')}>Type</span><span data-sort-kind="text"${reportsSortAttr('domain')}>Domain</span><span data-sort-kind="text"${reportsSortAttr('reporter')}>Reporter</span><span class="ui-td-end" data-sort-kind="number"${reportsSortAttr('records')}>Records</span><span data-sort-kind="date"${reportsSortAttr('period')}>Period</span>${allowDelete ? '<span class="ui-td-end">Actions</span>' : ''}</div>
             ${reports.map(report => `
             <div class="ui-tr">

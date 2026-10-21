@@ -40,6 +40,7 @@ function harness(filters, appTimezone = 'Europe/Berlin') {
         applyMessagesFilters: () => { calls.applied++; },
         navigateTo: (...args) => calls.navigated.push(args),
         console: { log() {} },
+        messagesOrder: 'desc',   // the list's order as it opens: newest first
     });
     vm.runInContext(zoneHelpers, context);
     vm.runInContext([
