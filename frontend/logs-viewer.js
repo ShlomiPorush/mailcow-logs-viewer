@@ -12,8 +12,9 @@ let logsState = {
     activeService: 'postfix',
     isPaused: false,
     autoScroll: true,
-    // Live lines that came while auto-scroll was off, for the New lines button
-    newLines: 0,
+    // Live entries that came while auto-scroll was off, for the New lines
+    // button (counted against the filter shown at the time)
+    newEntries: [],
     // Display order (issue #69): false = newest at the bottom (classic tail -f),
     // true = newest at the top. allEntries stays chronological either way.
     newestFirst: localStorage.getItem('logsNewestFirst') === 'true',
@@ -403,13 +404,20 @@ function setupTerminalScrollHandler() {
     const terminal = document.getElementById('logs-terminal');
     if (!terminal || terminal._scrollHandlerAttached) return;
     
+    // Scrolling by hand (wheel, touch, keys, the scroll bar), as opposed to the
+    // log growing or a filter shrinking it
+    let byHandAt = 0;
+    const byHand = () => { byHandAt = Date.now(); };
+    ['wheel', 'touchmove', 'keydown'].forEach(type => terminal.addEventListener(type, byHand, { passive: true }));
     terminal.addEventListener('scroll', () => {
-        // Reaching the newest lines by hand clears the New lines button
-        if (logsState.newLines) {
+        // Reaching the newest lines by hand clears the New lines button (a
+        // press on the terminal itself, not on a line, is on its scroll bar)
+        const onBar = uiPress && uiPress.down && uiPress.target === terminal;
+        if (logsState.newEntries.length && (onBar || Date.now() - byHandAt < 1000)) {
             const atNewest = logsState.newestFirst
                 ? terminal.scrollTop < 4
                 : terminal.scrollTop + terminal.clientHeight > terminal.scrollHeight - 4;
-            if (atNewest) { logsState.newLines = 0; updateLogNewLines(); }
+            if (atNewest) { logsState.newEntries = []; updateLogNewLines(); }
         }
         // Load older entries when scrolled near the history edge (within
         // 50px): the top normally, the bottom in newest-first mode
@@ -467,6 +475,8 @@ function renderLogEntries(entries, serviceId, replace = false, prepend = false) 
     if (replace) {
         output.innerHTML = '';
         logsState.allEntries = [];
+        logsState.newEntries = [];
+        updateLogNewLines();
     } else if (entries.length) {
         // New lines after a Clear replace its note
         output.querySelectorAll('.logs-placeholder').forEach(el => el.remove());
@@ -488,7 +498,6 @@ function renderLogEntries(entries, serviceId, replace = false, prepend = false) 
     // it away nor trim the lines it is in, and auto-scroll turns off
     const held = !replace && !prepend && uiTextHeld(output);
     if (held && logsState.autoScroll) setLogAutoScroll(false);
-    if (replace) { logsState.newLines = 0; updateLogNewLines(); }
     const fragment = document.createDocumentFragment();
     const hasFilters = logsState.searchQuery || logsState.activeSmartFilters.length > 0;
 
@@ -803,8 +812,7 @@ async function connectLogWebSocket(serviceId) {
                     if (!logsState.isPaused && !logsState.dateRange) {
                         renderLogEntries(data.entries, data.service, false);
                         if (!logsState.autoScroll) {
-                            const hasFilters = logsState.searchQuery || logsState.activeSmartFilters.length > 0;
-                            logsState.newLines += hasFilters ? data.entries.filter(entryMatchesFilters).length : data.entries.length;
+                            logsState.newEntries = logsState.newEntries.concat(data.entries).slice(-MAX_LIVE_LOG_ENTRIES);
                             updateLogNewLines();
                         }
                         logsState.entryCount += data.entries.length;
@@ -962,7 +970,7 @@ function setLogAutoScroll(on) {
     const output = document.getElementById('logs-output');
     const selection = window.getSelection();
     if (output && selection && selection.rangeCount && selection.getRangeAt(0).intersectsNode(output)) selection.removeAllRanges();
-    logsState.newLines = 0;
+    logsState.newEntries = [];
     updateLogNewLines();
     const terminal = document.getElementById('logs-terminal');
     if (terminal) terminal.scrollTop = logsState.newestFirst ? 0 : terminal.scrollHeight;
@@ -982,7 +990,8 @@ function updateLogNewLines() {
     const wrap = document.getElementById('logs-new-wrap');
     const terminal = document.getElementById('logs-terminal');
     if (!wrap || !terminal) return;
-    const count = logsState.newLines;
+    const hasFilters = logsState.searchQuery || logsState.activeSmartFilters.length > 0;
+    const count = hasFilters ? logsState.newEntries.filter(entryMatchesFilters).length : logsState.newEntries.length;
     wrap.hidden = !count;
     if (!count) return;
     const top = logsState.newestFirst;
@@ -1224,8 +1233,9 @@ function applyLogFilter() {
         }
     });
     
-    // Update the filter badge
+    // Update the filter badge, and the New lines count for the new filter
     updateFilterBadge(hasFilters, visibleCount, lines.length);
+    updateLogNewLines();
 }
 
 function updateFilterBadge(hasFilters, visible, total) {
@@ -1266,6 +1276,8 @@ function clearLogDisplay() {
     }
     logsState.entryCount = 0;
     logsState.allEntries = [];
+    logsState.newEntries = [];
+    updateLogNewLines();
     // A cleared screen does not refill with history: no older pages, and a
     // history request already on its way is dropped
     logsState.oldestPageLoaded = 1;

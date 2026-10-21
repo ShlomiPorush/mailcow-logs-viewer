@@ -1377,9 +1377,25 @@ async function uiLineCopy(line, button) {
     try {
         if (navigator.clipboard) { await navigator.clipboard.writeText(text); copied = true; }
     } catch (e) { /* falls back to the selection below */ }
-    // Without HTTPS the browser offers no clipboard API; the line is selected, so copy the selection
+    // Without HTTPS the browser offers no clipboard API: copy the line's text
+    // through a hidden field, then put the line selection back
     if (!copied) {
+        const field = document.createElement('textarea');
+        field.value = text;
+        field.setAttribute('readonly', '');
+        field.style.cssText = 'position:fixed;top:0;left:0;opacity:0;pointer-events:none';
+        document.body.appendChild(field);
+        field.select();
         try { copied = document.execCommand('copy'); } catch (e) { copied = false; }
+        field.remove();
+        if (line.isConnected) {
+            const range = document.createRange();
+            range.selectNodeContents(line);
+            range.setEndBefore(button);
+            const selection = window.getSelection();
+            selection.removeAllRanges();
+            selection.addRange(range);
+        }
     }
     if (!copied) { showToast('Could not copy. Press Ctrl+C to copy the selected line.', 'error'); return; }
     showToast('Line copied', 'success');
