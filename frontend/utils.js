@@ -1258,10 +1258,14 @@ function uiSortSet(table, cell, dir) {
     if (handler) {
         // A list sorted on the server comes back drawn anew; when it does not
         // (the request failed), its headers go back to the order still shown
+        // Choices in a row before any answer keep the order the rows still show
+        if (table._sortUndo) before.splice(0, before.length, ...table._sortUndo);
         table._sortUndo = before;
+        const token = table._sortToken = {};
         if (typeof setTimeout === 'function') setTimeout(() => {
-            if (!table.isConnected || table._sortUndo !== before) return;
+            if (!table.isConnected || table._sortToken !== token) return;
             delete table._sortUndo;
+            delete table._sortToken;
             heads.forEach((h, i) => { if (uiSortable(table, h)) uiSetSortState(h, before[i]); });
             if (typeof uiRefreshTableSorts === 'function') uiRefreshTableSorts();
         }, uiSortWait);
@@ -1998,33 +2002,53 @@ function uiPickerFocusables(panel) {
 }
 
 // An open panel stays on the screen: it moves back from an edge it would run
-// past, and opens upward when there is no room under its button but there is above
-// The screen a panel may use: under a fixed top bar and above a fixed tab bar (phones)
-function uiPickerBounds() {
-    const shown = el => el && el.getClientRects().length && ['fixed', 'sticky'].includes(getComputedStyle(el).position);
+// past, opens upward when there is more room above, and scrolls when it is
+// taller than the room it has. The room is the screen under a fixed top bar and
+// above a fixed tab bar (phones), within every box around the panel that cuts
+// what overflows it (the page's scrolling area).
+function uiPickerBounds(panel) {
+    const fixed = el => el && el.getClientRects().length && ['fixed', 'sticky'].includes(getComputedStyle(el).position);
     const top = document.querySelector('.ui-mtop');
     const bar = document.querySelector('.ui-tabbar');
-    return { top: (shown(top) ? top.getBoundingClientRect().bottom : 0) + 8, bottom: (shown(bar) ? bar.getBoundingClientRect().top : window.innerHeight) - 8 };
+    let lo = fixed(top) ? top.getBoundingClientRect().bottom : 0;
+    let hi = fixed(bar) ? bar.getBoundingClientRect().top : window.innerHeight;
+    for (let box = panel && panel.parentElement; box && box !== document.body; box = box.parentElement) {
+        const style = getComputedStyle(box);
+        if (style.overflowY === 'visible' && style.overflowX === 'visible') continue;
+        const r = box.getBoundingClientRect();
+        if (!r.height) continue;
+        lo = Math.max(lo, r.top);
+        hi = Math.min(hi, r.bottom);
+    }
+    return { top: lo + 8, bottom: hi - 8 };
 }
 function uiPickerPlace(panel) {
     panel.style.transform = '';
     panel.style.maxHeight = '';
+    panel.style.overflowY = '';
     panel.classList.remove('is-up');
     const button = panel.parentElement && panel.parentElement.querySelector('.ui-picker-btn');
-    const bounds = uiPickerBounds();
+    let bounds = uiPickerBounds(panel);
     // A button under a bar (reached with the keyboard) comes into view first
     if (button) {
         const at = button.getBoundingClientRect();
-        if (at.height && (at.bottom > bounds.bottom || at.top < bounds.top) && button.scrollIntoView) button.scrollIntoView({ block: 'center', behavior: 'instant' });
+        if (at.height && (at.bottom > bounds.bottom || at.top < bounds.top) && button.scrollIntoView) {
+            button.scrollIntoView({ block: 'center', behavior: 'instant' });
+            bounds = uiPickerBounds(panel);
+        }
     }
-    const below = panel.getBoundingClientRect();
-    if (button && below.bottom > bounds.bottom) {
-        const at = button.getBoundingClientRect();
-        const roomBelow = bounds.bottom - at.bottom - 6, roomAbove = at.top - 6 - bounds.top;
-        if (roomAbove > roomBelow) panel.classList.add('is-up');
-        // Too tall for either side: it scrolls within the room it has
-        const room = Math.max(roomAbove, roomBelow);
-        if (below.height > room && room > 80) { panel.style.maxHeight = `${Math.floor(room)}px`; panel.style.overflowY = 'auto'; }
+    const down = panel.getBoundingClientRect();
+    if (down.height && down.bottom > bounds.bottom) {
+        // Measured where the panel really hangs from, which is not always its button
+        panel.classList.add('is-up');
+        const up = panel.getBoundingClientRect();
+        if (up.bottom - bounds.top <= bounds.bottom - down.top) panel.classList.remove('is-up');
+    }
+    // Taller than the room on its side: it scrolls within that room
+    const placed = panel.getBoundingClientRect();
+    if (placed.height && (placed.top < bounds.top || placed.bottom > bounds.bottom)) {
+        const room = panel.classList.contains('is-up') ? placed.bottom - bounds.top : bounds.bottom - placed.top;
+        if (room > 80) { panel.style.maxHeight = `${Math.floor(room)}px`; panel.style.overflowY = 'auto'; }
     }
     const rect = panel.getBoundingClientRect();
     const width = document.documentElement.clientWidth;
@@ -2048,19 +2072,31 @@ function uiPickerOpen(id) {
 }
 
 // The search field, else the chosen option or the first one; in a dialog its first control
-// The panel is already placed on the screen, so the focus does not scroll the page
+// The panel is already placed on the screen, so the focus does not scroll the
+// page; a choice further down a long list is scrolled into view inside the panel
+function uiPickerReveal(el, panel) {
+    for (let box = el.parentElement; box; box = box.parentElement) {
+        if (box.scrollHeight > box.clientHeight + 1) {
+            const b = box.getBoundingClientRect(), r = el.getBoundingClientRect();
+            if (r.top < b.top) box.scrollTop -= b.top - r.top;
+            else if (r.bottom > b.bottom) box.scrollTop += r.bottom - b.bottom;
+        }
+        if (box === panel) break;
+    }
+}
 function uiPickerFocusInside(panel) {
     const still = { preventScroll: true };
+    const show = el => { el.focus(still); uiPickerReveal(el, panel); };
     const search = panel.querySelector('.ui-picker-search');
-    if (search) { search.focus(still); return; }
+    if (search) { show(search); return; }
     if (panel.getAttribute('role') === 'listbox') {
         const items = uiPickerItems(panel);
         const target = items.find(o => o.getAttribute('aria-selected') === 'true') || items[0];
-        if (target) target.focus(still);
+        if (target) show(target);
         return;
     }
     const first = panel.querySelector('input[type="radio"]:checked:not(:disabled)') || uiPickerFocusables(panel)[0];
-    if (first) first.focus(still);
+    if (first) show(first);
     else { panel.setAttribute('tabindex', '-1'); panel.focus(still); }
 }
 

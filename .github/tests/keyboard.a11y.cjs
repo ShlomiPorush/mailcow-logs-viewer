@@ -325,6 +325,25 @@ test('a row drawn again on its own keeps its place in the list\'s own order', ()
     assert.deepEqual(names(w), ['beta', 'gamma', 'alpha']);
 });
 
+test('two server sorts in a row that both fail go back to the order the rows show', async () => {
+    const w = page(`<section id="srv"><label class="ui-search"><input id="sq" aria-label="Search"></label><div class="ui-table ui-stack" data-sort-handler="sortServer" data-sort-at="sq" data-sort-default="Sent:desc">
+        <div class="ui-tr ui-tr-head"><span data-sort-key="name" data-sort-kind="text" aria-sort="none">Name</span><span data-sort-key="sent" data-sort-kind="number" aria-sort="descending">Sent</span></div>
+        <div class="ui-tr"><span>a</span><span>1</span></div></div></section>`);
+    w.eval('uiSortWait = 30');
+    w.sortServer = () => {};   // neither request comes back
+    w.uiRefreshTableSorts();
+    w.document.querySelector('.ui-sort-slot input[name$="-by"][value="0"]').click();
+    w.uiRefreshTableSorts();
+    w.document.querySelector('.ui-sort-slot input[name$="-dir"][value="-1"]').click();
+    w.uiRefreshTableSorts();
+    assert.equal(w.document.querySelector('.ui-sort-slot .ui-picker-btn').getAttribute('aria-label'), 'Sort: Name, Z to A');
+    await new Promise(resolve => setTimeout(resolve, 80));
+    assert.equal(w.document.querySelector('.ui-sort-slot .ui-picker-btn').getAttribute('aria-label'), 'Sort: Sent, High to low');
+    const heads = w.document.querySelectorAll('#srv .ui-tr-head > span');
+    assert.equal(heads[0].dataset.sortState, 'none');
+    assert.equal(heads[1].dataset.sortState, 'descending');
+});
+
 test('every stacked list with a header row says where its Sort button goes, or that it has none', () => {
     const dir = path.join(__dirname, '../../frontend');
     const missing = [];
