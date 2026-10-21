@@ -2602,7 +2602,7 @@ function applyQueueFilters() {
 
     container.innerHTML = `
         ${lockedNote}
-        <div class="ui-table ui-stack" style="${cols}">
+        <div class="ui-table ui-stack" data-sort-at="queue-filter-search" data-sort-name="mail queue" style="${cols}">
         ${canAct ? `
             <div class="ui-toolbar ui-table-tools">
                 <button onclick="queueSelectAll()" id="queue-select-all-btn" class="ui-btn ui-btn-sm">Select All</button>
@@ -2617,7 +2617,7 @@ function applyQueueFilters() {
                 <button onclick="queueDeleteAll()" id="queue-delete-all-btn" class="ui-btn ui-btn-sm ui-btn-danger-solid">Delete All</button>
             </div>
         ` : ''}
-            <div class="ui-tr ui-tr-head">${canAct ? '<span></span>' : ''}<span>Recipient</span><span>State</span><span>Last response</span><span class="ui-td-end">Size</span><span class="ui-td-end">Actions</span></div>
+            <div class="ui-tr ui-tr-head">${canAct ? '<span></span>' : ''}<span data-sort-kind="text">Recipient</span><span data-sort-kind="text">State</span><span data-sort-kind="text">Last response</span><span class="ui-td-end" data-sort-kind="number">Size</span><span class="ui-td-end">Actions</span></div>
             ${filteredData.map(item => {
                 const qid = item.queue_id || '';
                 const queueName = (item.queue_name || '').toLowerCase();
@@ -2806,46 +2806,14 @@ async function queueDeleteRequest(itemIds) {
 // =============================================================================
 
 // Client-side sort state for the quarantine list ('newest' matches the backend default order)
-let quarantineSortOrder = 'newest';
 // Last quarantine payload rendered (used to re-sort without re-fetching)
 let quarantineLastData = null;
 
-// Return a sorted copy of quarantine items based on quarantineSortOrder.
-// Items without a numeric score are placed last in both score directions.
 // Reject is the strong verdict; add header and the softer ones read as a warning
 function quarantineActionTone(action) {
     return ['reject', 'discard'].includes(String(action || '').toLowerCase()) ? 'fail' : 'warn';
 }
 
-function sortQuarantineItems(items) {
-    const sorted = [...items];
-    if (quarantineSortOrder !== 'score_desc' && quarantineSortOrder !== 'score_asc') {
-        return sorted; // 'newest' - keep backend order (newest first)
-    }
-    const scoreOf = (item) => (typeof item.score === 'number' && isFinite(item.score)) ? item.score : null;
-    sorted.sort((a, b) => {
-        const sa = scoreOf(a);
-        const sb = scoreOf(b);
-        if (sa === null && sb === null) return 0;
-        if (sa === null) return 1;
-        if (sb === null) return -1;
-        return quarantineSortOrder === 'score_asc' ? sa - sb : sb - sa;
-    });
-    return sorted;
-}
-
-// Handler for the #quarantine-sort dropdown - re-sorts the already-fetched list
-function applyQuarantineSort() {
-    if (typeof uiClearTableSort === 'function') uiClearTableSort('quarantine-logs');
-    const select = document.getElementById('quarantine-sort');
-    if (select) quarantineSortOrder = select.value;
-    uiFilterBarSync();
-    if (quarantineLastData) {
-        renderQuarantineData(quarantineLastData);
-    } else {
-        loadQuarantine();
-    }
-}
 
 async function loadQuarantine() {
     const container = document.getElementById('quarantine-logs');
@@ -2895,7 +2863,7 @@ function renderQuarantineData(data) {
     }
 
     const canAct = mailcowRwConfigured;
-    const items = sortQuarantineItems(data.data);
+    const items = data.data;
 
     const lockedNote = canAct ? '' : `<div class="ui-list-note">${uiLocked('Quarantine actions are locked', `Release, delete, spam learning and the auto-rules ${UI_RW_KEY_TEXT}`)}</div>`;
     const cols = canAct
@@ -2904,7 +2872,7 @@ function renderQuarantineData(data) {
 
     container.innerHTML = `
         ${lockedNote}
-        <div class="ui-table ui-stack" data-phone-sort="off" style="${cols}">
+        <div class="ui-table ui-stack" data-sort-at="quarantine-list-summary" data-sort-name="quarantined messages" data-sort-default="Held:desc" style="${cols}">
         ${!canAct ? '' : `
             <div class="ui-toolbar ui-table-tools">
                 <button onclick="quarantineSelectAll()" id="quarantine-select-all-btn" class="ui-btn ui-btn-sm">Select All</button>
@@ -2918,7 +2886,7 @@ function renderQuarantineData(data) {
                 <button onclick="quarantineDeleteAll()" id="quarantine-delete-all-btn" class="ui-btn ui-btn-sm ui-btn-danger-solid">Delete All</button>
             </div>
         `}
-            <div class="ui-tr ui-tr-head">${canAct ? '<span></span>' : ''}<span>Message</span><span>For</span><span>Why</span><span class="ui-td-end">Score</span><span>Held</span><span class="ui-td-end">Actions</span></div>
+            <div class="ui-tr ui-tr-head">${canAct ? '<span></span>' : ''}<span data-sort-kind="text">Message</span><span data-sort-kind="text">For</span><span data-sort-kind="text">Why</span><span class="ui-td-end" data-sort-kind="number">Score</span><span data-sort-kind="date">Held</span><span class="ui-td-end">Actions</span></div>
             ${items.map(item => {
                 const itemId = item.id !== undefined ? item.id : '';
                 const idArg = escapeJsArg(String(itemId));
@@ -2932,8 +2900,8 @@ function renderQuarantineData(data) {
                     </div>
                     <span class="ui-td">${escapeHtml(item.rcpt || 'Unknown')}</span>
                     <span class="ui-td ui-td-wrap">${uiTag(item.action || 'Quarantined', quarantineActionTone(item.action))}${item.virus_flag ? ` ${uiTag('Virus', 'spam')}` : ''}</span>
-                    <span class="ui-td ui-td-end${hasScore && item.score >= 15 ? ' ui-text-fail' : ''}"><small class="ui-sec-unit">Score </small>${hasScore ? item.score.toFixed(1) : '-'}</span>
-                    <time class="ui-td" title="${escapeHtml(formatTime(item.created))}"><small class="ui-sec-unit">Held </small>${formatAgo(item.created).replace(' ago', '')}</time>
+                    <span class="ui-td ui-td-end${hasScore && item.score >= 15 ? ' ui-text-fail' : ''}"${hasScore && isFinite(Number(item.score)) ? ` data-sort="${Number(item.score)}"` : ''}><small class="ui-sec-unit">Score </small>${hasScore ? item.score.toFixed(1) : '-'}</span>
+                    <time class="ui-td" title="${escapeHtml(formatTime(item.created))}"${isFinite(Date.parse(item.created)) ? ` data-sort="${Date.parse(item.created)}"` : ''}><small class="ui-sec-unit">Held </small>${formatAgo(item.created).replace(' ago', '')}</time>
                     <span class="ui-td ui-td-end ui-row-actions">
                         ${canAct ? `
                             <button onclick="quarantineRelease('${idArg}')" title="Release message" class="quarantine-action-btn ui-btn ui-btn-sm">Release</button>
@@ -4729,7 +4697,7 @@ function renderStatusImport(imports) {
             ` : '<span class="ui-td ui-muted">No data</span><span></span><span></span><span></span>'}
         </div>`;
     container.innerHTML = `
-        <div class="ui-table ui-stack" style="--ui-cols: minmax(130px, 1fr) minmax(110px, 1fr) minmax(110px, 1fr) 110px minmax(150px, 1.2fr); --ui-table-min: 660px">
+        <div class="ui-table ui-stack" data-nosort style="--ui-cols: minmax(130px, 1fr) minmax(110px, 1fr) minmax(110px, 1fr) 110px minmax(150px, 1.2fr); --ui-table-min: 660px">
             <div class="ui-tr ui-tr-head"><span>Source</span><span>Last Fetch Run</span><span>Last Import</span><span class="ui-td-end">Total Entries</span><span>Oldest Entry</span></div>
             ${row('Postfix Logs', imports.postfix)}
             ${row('Rspamd Logs', imports.rspamd)}
@@ -4751,9 +4719,9 @@ function renderStatusCorrelation(correlation, incompleteList, maxAgeMinutes) {
     const pending = document.getElementById('status-correlation-pending');
     if (pending) pending.innerHTML = incompleteList.length > 0 ? `
         <section class="ui-sec-block">
-            <div class="ui-list-head"><h2 class="ui-h2">Waiting to be linked</h2> <span class="ui-count">${incompleteList.length}</span></div>
-            <div class="ui-table ui-stack" style="--ui-cols: minmax(180px, 1.4fr) minmax(220px, 2fr) 90px; --ui-table-min: 560px">
-                <div class="ui-tr ui-tr-head"><span>Message ID</span><span>From and to</span><span class="ui-td-end">Age</span></div>
+            <div class="ui-list-head" id="status-pending-head"><h2 class="ui-h2">Waiting to be linked</h2> <span class="ui-count">${incompleteList.length}</span></div>
+            <div class="ui-table ui-stack" data-sort-at="status-pending-head" data-sort-name="messages waiting to be linked" style="--ui-cols: minmax(180px, 1.4fr) minmax(220px, 2fr) 90px; --ui-table-min: 560px">
+                <div class="ui-tr ui-tr-head"><span data-sort-kind="text">Message ID</span><span data-sort-kind="text">From and to</span><span class="ui-td-end" data-sort-kind="age">Age</span></div>
                 ${incompleteList.map(item => `
                     <div class="ui-tr">
                         <span class="ui-td ui-mono">${copyableText(item.message_id || 'N/A')}</span>

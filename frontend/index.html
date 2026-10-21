@@ -982,16 +982,7 @@
                 <section class="ui-sec-block">
                     <div class="ui-list-head"><h2 class="ui-h2">Quarantined Messages</h2></div>
                     <div class="ui-panel ui-table-card">
-                    <section class="ui-panel ui-filters ui-fbar">
-                        <div class="ui-fbar-pickers">
-                            <select id="quarantine-sort" onchange="applyQuarantineSort()" class="ui-select" aria-label="Sort" data-picker-label="Sort" data-no-filter>
-                                <option value="newest" data-short="Newest">Newest first</option>
-                                <option value="score_desc" data-short="Highest score">Score: high to low</option>
-                                <option value="score_asc" data-short="Lowest score">Score: low to high</option>
-                            </select>
-                        </div>
-                    </section>
-                    <p class="ui-list-summary"><span id="quarantine-count" class="ui-count"></span></p>
+                    <p class="ui-list-summary" id="quarantine-list-summary"><span id="quarantine-count" class="ui-count"></span></p>
                     <div id="quarantine-logs"><div class="ui-loading" role="status"><div class="loading"></div><p>Loading...</p></div></div>
                     </div>
                 </section>
@@ -1261,13 +1252,8 @@
                             <select id="mailbox-stats-domain-filter" onchange="applyMailboxStatsFilters()" class="ui-select" aria-label="Domain" data-picker-label="Domain">
                                 <option value="" data-short="All">All Domains</option>
                             </select>
-                            <select id="mailbox-stats-sort" onchange="applyMailboxStatsFilters()" class="ui-select" aria-label="Sort" data-picker-label="Sort" data-no-filter>
-                                <option value="sent_total-desc" data-short="Sent">Sent (High to Low)</option>
-                                <option value="received_total-desc" data-short="Received">Received (High to Low)</option>
-                                <option value="failure_rate-desc" data-short="Failure rate">Failure Rate (High to Low)</option>
-                                <option value="quota_used-desc" data-short="Quota used">Quota Used (High to Low)</option>
-                                <option value="username-asc" data-short="Username">Username (A-Z)</option>
-                            </select>
+                            <!-- The list's order (field-direction), set by its headers and its Sort button -->
+                            <input type="hidden" id="mailbox-stats-sort" value="sent_total-desc">
                         </div>
                         <div id="mailbox-stats-more" class="ui-fbar-more">
                             <label class="ui-check-label"><input type="checkbox" id="mailbox-stats-active-only" class="ui-check" checked onchange="applyMailboxStatsFilters()"> Active Only</label>
@@ -1610,6 +1596,7 @@
         <div class="ui-dialog ui-dialog-fit">
             <div class="ui-dialog-head">
                 <h3>Fetch history</h3>
+                <span id="dmarc-sync-history-sort" class="ui-sort-host"></span>
                 <button onclick="closeDmarcSyncHistoryModal()" class="ui-icon-btn" title="Close" aria-label="Close"><svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg></button>
             </div>
             <div class="ui-dialog-body">

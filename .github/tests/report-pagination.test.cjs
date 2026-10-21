@@ -290,6 +290,8 @@ function fakeTable(html) {
     const element = (attributes, text) => ({
         attributes, textContent: text, children: [], dataset: {}, classList: { contains: () => false },
         hasAttribute: name => name in attributes, getAttribute: name => attributes[name] ?? null,
+        // The headers show a new order at once, before the server answers
+        setAttribute: (name, value) => { attributes[name] = String(value); }, removeAttribute: name => { delete attributes[name]; }, querySelector: () => null,
         cloneNode() { return { querySelectorAll: () => [], textContent: text }; },
     });
     const table = element(attrs(html.match(/<div ([^>]*class="ui-table[^>]*)>/)[1]), '');
@@ -432,7 +434,8 @@ test('typing is never undone and the search box is never rendered by the list', 
     assert.equal(h.element('dmarc-reports-search'), input);
     assert.equal(input.value, 'example.co');
     for (const id of ['dmarc-reports-management-content', 'dmarc-reports-total', 'dmarc-reports-domains']) {
-        assert.doesNotMatch(h.element(id).innerHTML, /dmarc-reports-search/);
+        // The list names the search as its Sort button's place (data-sort-at); it never draws the field
+        assert.doesNotMatch(h.element(id).innerHTML, /id="dmarc-reports-search"/);
     }
 });
 

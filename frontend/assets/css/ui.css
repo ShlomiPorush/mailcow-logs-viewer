@@ -2331,10 +2331,40 @@ html .markdown-body .markdown-alert-caution .markdown-alert-title { color: var(-
 .ui-sort-btn { all: unset; cursor: pointer; }
 .ui-sort-btn:focus-visible { outline: 2px solid var(--ui-focus); outline-offset: 2px; border-radius: 3px; }
 .ui-sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
-/* Phones hide a list's header row: its Sort picker stands above the list instead */
-.ui-phone-sort { display: none; }
+/* A list's Sort button (utils.js uiSortControlSync): an icon the height of the search
+   beside it, or at the end of the list's header row; its menu holds two groups */
+.ui-sort-slot { display: inline-flex; flex: none; }
+:is(.ui-list-summary, .ui-list-head, .ui-dm-card > header, .ui-sort-head, .ui-dialog-head) > .ui-sort-slot { margin-inline-start: auto; }
+.ui-sort-btn-icon { width: var(--ui-ctl-h); height: var(--ui-ctl-h); border: 1px solid var(--ui-line); background: var(--ui-bg); color: var(--ui-ink); }
+.ui-sort-btn-icon svg { width: 16px; height: 16px; }
+.ui-sort-btn-icon[aria-expanded="true"] { border-color: var(--ui-ink); }
+/* A list in an order of its own choosing stands out, as a filter in use does */
+.ui-sort-btn-icon.is-set { border-color: var(--ui-ink); background: var(--ui-ink); color: var(--ui-bg); }
+:is(.ui-list-summary, .ui-dm-card > header, .ui-sort-head) .ui-sort-btn-icon { width: 30px; height: 30px; }
+.ui-sort-slot .ui-popover { inset-inline-start: auto; inset-inline-end: 0; width: 240px; }
+.ui-sort-panel { display: grid; gap: 12px; padding: 12px; max-height: min(460px, 70vh); overflow-y: auto; font-weight: 400; }
+.ui-sort-group { display: grid; gap: 2px; margin: 0; padding: 0; border: 0; min-width: 0; }
+.ui-sort-group legend { padding: 0 0 4px; color: var(--ui-muted); font-size: 11.5px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
+.ui-sort-opt { display: flex; align-items: center; gap: 10px; padding: 7px 8px; border-radius: var(--ui-radius-sm); color: var(--ui-ink); font-size: 13.5px; cursor: pointer; }
+.ui-sort-opt input { flex: none; margin: 0; accent-color: var(--ui-accent); }
+@media (hover: hover) { .ui-sort-opt:hover { background: color-mix(in srgb, var(--ui-ink) 6%, transparent); } }
+.ui-sort-opt:has(input:checked) { font-weight: 600; }
+.ui-sort-group:disabled .ui-sort-opt { color: var(--ui-muted); cursor: default; }
+.ui-sort-head { display: flex; align-items: center; gap: 8px; }
+/* In a dialog's head the Sort button sits just before Close */
+.ui-dialog-head > .ui-sort-host { margin-inline-start: auto; }
+.ui-dialog-head > .ui-sort-host + .ui-icon-btn, .ui-dialog-head .ui-sort-slot .ui-icon-btn { margin-inline-start: 0; }
+.ui-sort-head > .ui-md-h { margin: 0; }
+/* No card cuts the Sort menu open inside it */
+.ui-dm-card:has(.ui-picker-panel:not(.hidden)) { overflow: visible; }
+/* A menu open in a dialog's head opens over the dialog: the dialog does not cut it, the head stays above the body */
+.ui-dialog:has(> .ui-dialog-head .ui-picker-panel:not(.hidden)) { overflow: visible; }
+.ui-dialog-head:has(.ui-picker-panel:not(.hidden)) { position: relative; z-index: 2; }
 @media (max-width: 760px) {
-    .ui-phone-sort { display: flex; padding: 8px var(--ui-pad-x) 4px; }
+    /* The search keeps its line with the Sort button (and Filters, when there is one) */
+    .ui-fbar-row > .ui-search:has(+ .ui-sort-slot) { flex: 1 1 0; }
+    /* A checkbox after them takes the next line */
+    .ui-fbar-row > .ui-sort-slot ~ .ui-check-label { flex-basis: 100%; }
 }
 
 /* Filters and their table as one card: one panel, the filter row on top, the rows under it */
@@ -2836,6 +2866,8 @@ button.ui-dm-node { cursor: pointer; }
 }
 /* A picker panel stays within the screen and scrolls when its list is long */
 .ui-picker-panel { max-width: calc(100vw - 16px); }
+/* No room under the button: the panel opens above it */
+.ui-popover.is-up { top: auto; bottom: calc(100% + 6px); }
 .ui-picker-panel[role="listbox"] { max-height: min(420px, 60vh); overflow-y: auto; }
 .ui-picker-panel [role="option"][hidden] { display: none; }
 .ui-picker-panel.has-search { width: min(320px, calc(100vw - 16px)); }

@@ -106,7 +106,7 @@ function renderDomains(container, data) {
             </div>
         </section>
         <p class="ui-list-summary"><span id="domain-count-badge" class="ui-count">${uiCountLabel(domains.length, 'domain', 'domains')}</span><button type="button" class="ui-clear-filters hidden" onclick="clearDomainFilters()">Clear filters</button></p>
-        <div id="domains-list" class="ui-table ui-stack ui-domain-table">
+        <div id="domains-list" class="ui-table ui-stack ui-domain-table" data-sort-at="domain-search-input" data-sort-name="domains">
             ${renderDomainRows(domains)}
         </div>
         </div>
@@ -127,7 +127,7 @@ function clearDomainFilters() {
 
 function renderDomainRows(domains) {
     return `
-        <div class="ui-tr ui-tr-head"><span>Domain</span>${DNS_CHECKS.map(([label]) => `<span>${label}</span>`).join('')}<span class="ui-td-end">Storage</span></div>
+        <div class="ui-tr ui-tr-head"><span data-sort-kind="text">Domain</span>${DNS_CHECKS.map(([label]) => `<span data-sort-kind="text">${label}</span>`).join('')}<span class="ui-td-end" data-sort-kind="number">Storage</span></div>
         ${domains.map(domain => renderDomainAccordionRow(domain)).join('')}`;
 }
 

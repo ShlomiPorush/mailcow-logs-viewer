@@ -460,8 +460,8 @@ function renderMailboxStatsAccordion(mailboxes, page = 1, totalPages = 1, total 
     const lastLogin = (label, last) => `<div class="ui-md-fact"><span>Last ${label} login</span><div>${last ? formatTime(last) : 'Never'}</div></div>`;
 
     let html = `
-        <div class="ui-table ui-stack ui-ms-table" data-sort-handler="mailboxStatsSortBy" data-phone-sort="off">
-            <div class="ui-tr ui-tr-head"><span data-sort-key="username"${mailboxStatsSortAttr('username')}>Mailbox</span><span>Activity</span><span class="ui-td-end" data-sort-key="sent_total"${mailboxStatsSortAttr('sent_total')}>Sent</span><span class="ui-td-end" data-sort-key="received_total"${mailboxStatsSortAttr('received_total')}>Received</span><span class="ui-td-end">Delivered</span><span class="ui-td-end" data-sort-key="failure_rate"${mailboxStatsSortAttr('failure_rate')}>Failed</span><span class="ui-td-end">Aliases</span><span class="ui-td-end" data-sort-key="quota_used"${mailboxStatsSortAttr('quota_used')}>Storage</span></div>
+        <div class="ui-table ui-stack ui-ms-table" data-sort-handler="mailboxStatsSortBy" data-sort-at="mailbox-stats-search" data-sort-name="mailboxes" data-sort-default="Sent:desc">
+            <div class="ui-tr ui-tr-head"><span data-sort-key="username" data-sort-kind="text"${mailboxStatsSortAttr('username')}>Mailbox</span><span>Activity</span><span class="ui-td-end" data-sort-key="sent_total" data-sort-kind="number"${mailboxStatsSortAttr('sent_total')}>Sent</span><span class="ui-td-end" data-sort-key="received_total" data-sort-kind="number"${mailboxStatsSortAttr('received_total')}>Received</span><span class="ui-td-end">Delivered</span><span class="ui-td-end" data-sort-key="failure_rate" data-sort-kind="number"${mailboxStatsSortAttr('failure_rate')}>Failed</span><span class="ui-td-end">Aliases</span><span class="ui-td-end" data-sort-key="quota_used" data-sort-kind="number"${mailboxStatsSortAttr('quota_used')}>Storage</span></div>
             ${mailboxes.map((mb, index) => {
         const isExpanded = mailboxStatsCache.expandedMailboxes.has(mb.username);
         const failTone = mb.combined_failure_rate >= 10 ? 'fail' : mb.combined_failure_rate >= 5 ? 'warn' : '';
@@ -507,7 +507,7 @@ function renderMailboxStatsAccordion(mailboxes, page = 1, totalPages = 1, total 
 
                     ${mb.aliases && mb.aliases.length > 0 ? `
                         <h4 class="ui-md-h">Aliases (${mb.aliases.length})</h4>
-                        <div class="ui-table ui-stack ui-ms-aliases" data-phone-sort="off">
+                        <div class="ui-table ui-stack ui-ms-aliases" data-sort-icon="off">
                             <div class="ui-tr ui-tr-head"><span>Alias</span><span class="ui-td-end">Sent</span><span class="ui-td-end">Received</span><span class="ui-td-end">Internal</span><span class="ui-td-end">Delivered</span><span class="ui-td-end">Deferred</span><span class="ui-td-end">Bounced</span><span class="ui-td-end">Rejected</span><span class="ui-td-end">Fail %</span></div>
                             ${aliases.map(alias => {
             const go = (filter, value, label, tone) => `<button type="button" class="ui-td ui-td-end ui-link-cell ui-ms-count${!value ? ' is-zero ui-zero' : tone ? ` ui-text-${tone}` : ''}" onclick="event.stopPropagation(); navigateToMessagesWithFilter({ email: '${escapeJsArg(alias.alias_address)}', filterType: 'search', ${filter} })"><small class="ui-sec-unit">${label} </small>${value || 0}</button>`;
@@ -721,15 +721,8 @@ function mailboxStatsSortAttr(key) {
 }
 
 function mailboxStatsSortBy(key, order) {
-    const select = document.getElementById('mailbox-stats-sort');
-    if (!select) return;
-    const value = `${key}-${order}`;
-    if (![...select.options].some(o => o.value === value)) {
-        const option = document.createElement('option');
-        option.value = value;
-        option.textContent = `${select.querySelector(`option[value^="${key}-"]`)?.textContent.replace(/\s*\(.*\)$/, '') || key} (${order === 'asc' ? 'Low to High' : 'High to Low'})`;
-        select.appendChild(option);
-    }
-    select.value = value;
+    const field = document.getElementById('mailbox-stats-sort');
+    if (!field) return;
+    field.value = `${key}-${order}`;
     applyMailboxStatsFilters();
 }
