@@ -2050,12 +2050,13 @@ function uiRedrawKeepingFocus(container, draw) {
         return bars.find(b => Number(b.dataset.start) <= t && t < Number(b.dataset.end))
             || bars.reduce((best, b) => (!best || Math.abs(b.dataset.start - t) < Math.abs(best.dataset.start - t) ? b : best), null);
     };
-    const target = (was.start !== undefined && container.querySelector(`[data-start="${CSS.escape(was.start)}"]`))
-        || enabled(inGroup ? '[role="group"] button' : 'button').find(b => name(b) === was.name && (!inGroup || inGroup.contains(b)))
-        || (was.picked !== undefined && container.querySelector(`[data-start="${CSS.escape(was.picked)}"]`))
-        || (was.start !== undefined && nearestBar(Number(was.start)))
-        || (inGroup && enabled('button').find(b => inGroup.contains(b)))
-        || null;
+    // A bar goes by its time (bars have no names of their own); a button by its name
+    const target = was.start !== undefined
+        ? container.querySelector(`[data-start="${CSS.escape(was.start)}"]`) || nearestBar(Number(was.start))
+        : enabled(inGroup ? '[role="group"] button' : 'button').find(b => name(b) === was.name && (!inGroup || inGroup.contains(b)))
+            || (was.picked !== undefined && container.querySelector(`[data-start="${CSS.escape(was.picked)}"]`))
+            || (inGroup && enabled('button').find(b => inGroup.contains(b)))
+            || null;
     if (target) target.focus({ preventScroll: true });
 }
 

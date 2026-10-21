@@ -319,8 +319,11 @@ function openAlertActivityMessages() {
     const picked = alertActivityPick === null || !span ? null : alertActivityColumns(data, span).cols.find(c => c.start.getTime() === alertActivityPick);
     const start = picked ? picked.start.toISOString() : data.around.from;
     // The column's last microsecond (the database keeps microseconds; a column ends on a whole millisecond)
-    // The last column, cut at where the data ends (now), ends at that exact moment
-    const atDataEnd = picked && data.data_end && picked.end.getTime() === Date.parse(data.data_end);
+    // The last column, cut at now (its quarter still running), ends at that exact
+    // moment; a whole column ends a microsecond before its end, as it is counted
+    const lastBucket = data.buckets[data.buckets.length - 1];
+    const atDataEnd = picked && data.data_end && lastBucket && lastBucket.partial
+        && picked.end.getTime() === Date.parse(data.data_end);
     const endInclusive = !picked ? data.around.to
         : atDataEnd ? data.data_end : new Date(picked.end.getTime() - 1).toISOString().replace('Z', '999Z');
     closeAlertActivity();

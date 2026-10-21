@@ -148,6 +148,7 @@ test('the columns stop where the data ends, and a zoom shows a span inside it', 
     const last = Date.parse(data.buckets[data.buckets.length - 1].start);
     // ...to the microsecond, as the server sends it
     data.data_end = new Date(last + 5 * 60000 + 123).toISOString().replace('Z', '456Z');
+    data.buckets[data.buckets.length - 1].partial = true;
     const { cols } = h.columns(data, '24h');
     assert.equal(cols[cols.length - 1].end.getTime(), last + 5 * 60000 + 123);
     h.render(data, '24h');
@@ -157,6 +158,14 @@ test('the columns stop where the data ends, and a zoom shows a span inside it', 
     h.run(`pickAlertActivityColumn(${last})`);
     h.run('openAlertActivityMessages()');
     assert.equal(h.opened.pop().endInclusive, data.data_end);
+    // An older alert: its data ends on a whole quarter, counted up to, not at, that end
+    const old = activity({ alert_type: 'volume_spike', subject: 'user@example.com', baseline_value: 0.5 }, { around: data.around });
+    const oldLast = Date.parse(old.buckets[old.buckets.length - 1].start);
+    old.data_end = new Date(oldLast + 15 * 60000).toISOString().replace('Z', '000Z');
+    h.render(old, '24h');
+    h.run(`pickAlertActivityColumn(${oldLast})`);
+    h.run('openAlertActivityMessages()');
+    assert.equal(h.opened.pop().endInclusive, new Date(oldLast + 15 * 60000 - 1).toISOString().replace('Z', '999Z'));
     h.render(data, '24h');
     h.run('alertActivityStep("in")');
     const zoom = h.run('alertActivityZoom');
