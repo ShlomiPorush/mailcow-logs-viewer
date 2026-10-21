@@ -475,6 +475,9 @@ function renderLogEntries(entries, serviceId, replace = false, prepend = false) 
         return;
     }
     
+    // While the user selects or has selected text, new lines neither scroll
+    // it away nor trim the lines it is in
+    const held = !replace && !prepend && uiTextHeld(output);
     const fragment = document.createDocumentFragment();
     const hasFilters = logsState.searchQuery || logsState.activeSmartFilters.length > 0;
 
@@ -514,7 +517,7 @@ function renderLogEntries(entries, serviceId, replace = false, prepend = false) 
     // Trim oldest entries beyond the cap (live stream only - prepend means
     // the user is deliberately paging back through history). The oldest
     // lines sit at the top normally, at the bottom in newest-first mode.
-    if (!prepend && logsState.allEntries.length > MAX_LIVE_LOG_ENTRIES) {
+    if (!prepend && !held && logsState.allEntries.length > MAX_LIVE_LOG_ENTRIES) {
         const excess = logsState.allEntries.length - MAX_LIVE_LOG_ENTRIES;
         logsState.allEntries.splice(0, excess);
         for (let i = 0; i < excess; i++) {
@@ -533,7 +536,7 @@ function renderLogEntries(entries, serviceId, replace = false, prepend = false) 
 
     // Auto-scroll to the newest entry (only for new entries, not when
     // loading older) - bottom normally, top in newest-first mode
-    if (logsState.autoScroll && !prepend) {
+    if (logsState.autoScroll && !prepend && !held) {
         const terminal = document.getElementById('logs-terminal');
         if (terminal) {
             terminal.scrollTop = logsState.newestFirst ? 0 : terminal.scrollHeight;

@@ -268,6 +268,36 @@ test('a drag that selects text in a dialog and ends on the backdrop leaves it op
     assert.equal(w.closed, 2, 'a click with no mouse on the backdrop closes it');
 });
 
+test('a click on a log line selects the line, and the log knows while text is held in it', () => {
+    const w = page(`<div id="log" data-line-select=".line"><div class="line" id="one"><span id="t1">10:00</span> first line</div><div class="line" id="two">second line</div></div><p id="other">Other text</p>`);
+    const d = w.document;
+    const log = d.getElementById('log');
+    const press = (el, x, detail = 1, extra = {}) => el.dispatchEvent(new w.MouseEvent('mousedown', { bubbles: true, clientX: x, clientY: 5, detail, buttons: 1, ...extra }));
+    const click = (el, x, detail = 1, extra = {}) => el.dispatchEvent(new w.MouseEvent('click', { bubbles: true, cancelable: true, clientX: x, clientY: 5, detail, ...extra }));
+    const release = el => el.dispatchEvent(new w.MouseEvent('mouseup', { bubbles: true }));
+    press(d.getElementById('t1'), 10); release(d.getElementById('t1')); click(d.getElementById('t1'), 10);
+    assert.equal(String(w.getSelection()), '10:00 first line', 'a plain click selects the whole line');
+    assert.equal(w.uiTextHeld(log), true, 'a selection in the log holds it');
+    w.getSelection().removeAllRanges();
+    press(d.getElementById('two'), 10); release(d.getElementById('two')); click(d.getElementById('two'), 80);
+    assert.equal(String(w.getSelection()), '', 'the end of a drag is left to the browser');
+    click(d.getElementById('two'), 10, 2);
+    assert.equal(String(w.getSelection()), '', 'a double click is left to the browser');
+    press(d.getElementById('two'), 10); release(d.getElementById('two')); click(d.getElementById('two'), 10, 1, { shiftKey: true });
+    assert.equal(String(w.getSelection()), '', 'Shift+click is left to the browser');
+    press(d.getElementById('two'), 10); click(d.getElementById('two'), 10);
+    press(d.getElementById('two'), 10, 2);
+    assert.equal(String(w.getSelection()), '', 'the second press of a double click clears the line so the browser selects the word');
+    assert.equal(w.uiTextHeld(log), true, 'a press held in the log holds it');
+    d.dispatchEvent(new w.MouseEvent('mousemove', { buttons: 0 }));
+    assert.equal(w.uiTextHeld(log), false, 'moving with no button down ends a press whose release was lost');
+    press(d.getElementById('two'), 10);
+    w.dispatchEvent(new w.Event('blur'));
+    assert.equal(w.uiTextHeld(log), false, 'leaving the window ends the press');
+    press(d.getElementById('other'), 10);
+    assert.equal(w.uiTextHeld(log), false, 'a press elsewhere does not hold the log');
+});
+
 test('every dialog that closes on a backdrop click asks uiBackdropClick', () => {
     const dir = path.join(__dirname, '../../frontend');
     const found = [];

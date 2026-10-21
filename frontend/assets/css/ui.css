@@ -1064,9 +1064,10 @@ html body .ui-main .ui-search input { background: none; border: 0; }
 /* Monospace follows the design mono font */
 html body .ui-main .font-mono { font-family: var(--ui-mono); }
 
-/* Container log: one block per line, a click selects it (app.js) */
-.ui-log-line { display: block; border-radius: 3px; cursor: text; }
-.ui-log-line:hover { background: rgb(255 255 255 / .06); }
+/* Log lines: one block per line, a click selects it (data-line-select, utils.js) */
+.ui-log-line { display: block; }
+:is(.ui-log-line, #logs-output .log-line) { border-radius: 3px; cursor: text; }
+@media (hover: hover) { :is(.ui-log-line, #logs-output .log-line):hover { background: rgb(255 255 255 / .06); } }
 .ui-log-line:empty::after { content: " "; }
 
 /* ---------- App shell (as the mockup): sidebar with brand, server card, counters ---------- */

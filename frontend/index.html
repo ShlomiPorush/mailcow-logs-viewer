@@ -1433,7 +1433,7 @@
 
                         <!-- Terminal Log Output -->
                         <div id="logs-terminal" class="ui-logs-terminal">
-                            <div id="logs-output" style="font-size: 12px; word-wrap: break-word; white-space: pre-wrap;">
+                            <div id="logs-output" data-line-select=".log-line" style="font-size: 12px; word-wrap: break-word; white-space: pre-wrap;">
                                 <span class="text-gray-500">Connecting to log stream...</span>
                             </div>
                         </div>
@@ -1572,7 +1572,7 @@
                 </div>
             </div>
             <div class="flex-1 overflow-y-auto p-4 bg-black font-mono text-xs sm:text-sm text-gray-300">
-                <pre id="container-logs-content" class="whitespace-pre-wrap break-all" onclick="containerLogsLineClick(event)"></pre>
+                <pre id="container-logs-content" class="whitespace-pre-wrap break-all" data-line-select=".ui-log-line"></pre>
             </div>
         </div>
     </div>

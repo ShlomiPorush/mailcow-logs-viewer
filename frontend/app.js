@@ -5275,42 +5275,11 @@ console.log('UI: Dark mode, Modals with tabs, Responsive design');
 
 let containerLogsInterval = null;
 
-// True while the user is selecting or has selected text in the log, so the
-// refresh every 2 seconds does not replace the text under the selection.
-let containerLogsPressed = false;
-document.addEventListener('mousedown', event => {
-    containerLogsPressed = event.target instanceof Element && Boolean(event.target.closest('#container-logs-content'));
-    // The first click of a double click selected the line; clear it so the
-    // browser selects the word
-    if (containerLogsPressed && event.detail > 1) window.getSelection().removeAllRanges();
-});
-document.addEventListener('mouseup', () => { containerLogsPressed = false; });
-// A release outside the window never reaches the page: moving back with no
-// button down, or leaving the window, ends the press too
-document.addEventListener('mousemove', event => { if (containerLogsPressed && !event.buttons) containerLogsPressed = false; });
-window.addEventListener('blur', () => { containerLogsPressed = false; });
-function containerLogsHeld(content) {
-    if (containerLogsPressed) return true;
-    const selection = window.getSelection();
-    return Boolean(selection && selection.rangeCount && String(selection) && selection.getRangeAt(0).intersectsNode(content));
-}
-
-// A plain click on a log line selects the whole line, ready to copy. A drag,
-// a double click on a word or Shift+click selects as usual.
-function containerLogsLineClick(event) {
-    const line = event.target instanceof Element && event.target.closest('.ui-log-line');
-    if (!line || event.detail !== 1 || event.shiftKey || uiPressMoved(event)) return;
-    const range = document.createRange();
-    range.selectNodeContents(line);
-    const selection = window.getSelection();
-    selection.removeAllRanges();
-    selection.addRange(range);
-}
-
 async function fetchContainerLogs(silent = false) {
     const content = document.getElementById('container-logs-content');
 
-    if (content && silent && containerLogsHeld(content)) return;
+    // The refresh leaves the log as it is while the user selects text in it
+    if (content && silent && uiTextHeld(content)) return;
 
     if (content && !silent) {
         content.textContent = 'Loading logs...';
@@ -5325,7 +5294,7 @@ async function fetchContainerLogs(silent = false) {
         const data = await response.json();
 
         if (content && data.logs) {
-            if (silent && containerLogsHeld(content)) return;
+            if (silent && uiTextHeld(content)) return;
             const isScrolledToBottom = content.parentElement
                 ? (content.parentElement.scrollHeight - content.parentElement.scrollTop === content.parentElement.clientHeight)
                 : true;
