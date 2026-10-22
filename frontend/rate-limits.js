@@ -347,7 +347,7 @@ function renderRateLimitSendersTable(senders) {
             `
             : RATE_LIMIT_RESET_LOCKED;
         return `
-            <tr data-rl-sender="${escapeHtml((group.user || '').toLowerCase())}" class="ui-dtable-link"
+            <tr data-rl-sender="${escapeHtml((group.user || '').toLowerCase())}" class="ui-dtable-link" tabindex="0" data-row-open
                 onclick="selectRateLimitSender('${escapeJsArg(group.user)}')">
                 <td class="ui-dtable-wrap">${copyableText(group.user)}</td>
                 <td>${uiTag(group.events, 'fail')}</td>

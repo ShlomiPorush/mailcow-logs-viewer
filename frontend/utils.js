@@ -916,15 +916,55 @@ function uiSortHeads(table) {
     return head ? [...head.children] : [];
 }
 
+// A header's own words, without the order a screen reader is told after them
+function uiSortLabel(cell) {
+    return cell.dataset.sortLabel !== undefined ? cell.dataset.sortLabel : cell.textContent.trim();
+}
+
 function uiTableKey(table) {
     const owner = table.id ? table : table.closest('[id]');
-    return `${owner ? owner.id : ''}|${uiSortHeads(table).map(h => h.textContent.trim()).join('|')}`;
+    return `${owner ? owner.id : ''}|${uiSortHeads(table).map(uiSortLabel).join('|')}`;
 }
 
 function uiSortable(table, cell) {
     if (!cell || table.hasAttribute('data-nosort') || cell.hasAttribute('data-nosort')) return false;
+    // A table in help or release notes is text to read, not a list
+    if (table.closest('.markdown-body')) return false;
     if (table.hasAttribute('data-sort-handler')) return cell.hasAttribute('data-sort-key');
-    return cell.textContent.trim() !== '' && !/^actions?$/i.test(cell.textContent.trim());
+    const label = uiSortLabel(cell);
+    return label !== '' && !/^actions?$/i.test(label);
+}
+
+// The order a header shows: none, ascending or descending. A page that sorts on
+// the server writes it as aria-sort in its header; aria-sort stays only on a real
+// column header (th), and a list's header button says the order in words
+function uiSortState(cell) {
+    return cell.getAttribute('aria-sort') || cell.dataset.sortState || 'none';
+}
+function uiSetSortState(cell, state) {
+    if (cell.dataset.sortState !== state) cell.dataset.sortState = state;
+    if (cell.tagName === 'TH') {
+        if (cell.getAttribute('aria-sort') !== state) cell.setAttribute('aria-sort', state);
+    } else if (cell.hasAttribute('aria-sort')) {
+        cell.removeAttribute('aria-sort');
+    }
+    const said = cell.querySelector(':scope > .ui-sort-btn > .ui-sort-said');
+    const words = cell.tagName === 'TH' || state === 'none' ? '' : `, sorted ${state}`;
+    if (said && said.textContent !== words) said.textContent = words;
+}
+
+// A sortable header holds a button, so the keyboard reaches it and Enter or Space sorts
+function uiSortEnhance(cell) {
+    if (cell.querySelector(':scope > .ui-sort-btn') || cell.querySelector('button, a, input, select, textarea')) return;
+    cell.dataset.sortLabel = cell.textContent.trim();
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'ui-sort-btn';
+    while (cell.firstChild) button.appendChild(cell.firstChild);
+    const said = document.createElement('span');
+    said.className = 'ui-sort-said ui-sr-only';
+    button.appendChild(said);
+    cell.appendChild(button);
 }
 
 // The value a cell sorts by: its data-sort, else its text read as a number,
@@ -988,7 +1028,7 @@ function uiSortUnits(table) {
 
 function uiApplyTableSort(table, index, dir) {
     const heads = uiSortHeads(table);
-    heads.forEach((h, i) => { if (uiSortable(table, h)) h.setAttribute('aria-sort', i === index ? (dir > 0 ? 'ascending' : 'descending') : 'none'); });
+    heads.forEach((h, i) => { if (uiSortable(table, h)) uiSetSortState(h, i === index ? (dir > 0 ? 'ascending' : 'descending') : 'none'); });
     for (const seg of uiSortUnits(table)) {
         const keyed = seg.units.map((unit, pos) => ({ unit, pos, v: uiSortValue(unit[0].children[index]) }));
         keyed.sort((a, b) => {
@@ -1012,13 +1052,30 @@ function uiClearTableSort(owner) {
     for (const key of [...uiTableSorts.keys()]) if (key.startsWith(`${owner}|`)) uiTableSorts.delete(key);
 }
 
-document.addEventListener('click', event => {
-    const cell = event.target.closest('.ui-tr-head > *, thead th');
-    if (!cell) return;
-    const table = cell.closest('.ui-table, table');
-    if (!table || !uiSortable(table, cell)) return;
+// One way to sort, for a header's click or keys and for the phone's Sort picker:
+// the sorted column turns around, another column starts high to low for numbers
+// and A to Z for text
+// A list sorted on the server is drawn again: the focus goes back to the same
+// header, or to the phone's Sort picker, once the new list is there
+let uiSortFocus = null;   // { owner, nth, label, phone, server, from, until }
+function uiSortOwner(table) {
+    const owner = table.id ? table : table.closest('[id]');
+    return owner ? owner.id : '';
+}
+// Which of the lists under one owner this is (a mailbox and its aliases)
+function uiSortNth(table) {
+    const owner = uiSortOwner(table);
+    return [...document.querySelectorAll('.ui-table, table')].filter(t => uiSortOwner(t) === owner).indexOf(table);
+}
+function uiSortBy(table, cell) {
+    const active = document.activeElement;
+    const box = table.previousElementSibling;
+    if (active && (cell.contains(active) || (box && box.classList.contains('ui-phone-sort') && box.contains(active)))) {
+        uiSortFocus = { owner: uiSortOwner(table), nth: uiSortNth(table), label: uiSortLabel(cell), phone: !cell.contains(active),
+            server: table.hasAttribute('data-sort-handler'), from: active, until: Date.now() + 5000 };
+    }
     const index = uiSortHeads(table).indexOf(cell);
-    const current = cell.getAttribute('aria-sort');
+    const current = uiSortState(cell);
     const numeric = uiSortUnits(table).some(seg => seg.units.some(u => uiSortValue(u[0].children[index]).n !== null));
     const dir = current === 'descending' ? 1 : current === 'ascending' ? -1 : (numeric ? -1 : 1);
     const handler = table.getAttribute('data-sort-handler');
@@ -1028,19 +1085,110 @@ document.addEventListener('click', event => {
     }
     uiTableSorts.set(uiTableKey(table), { index, dir });
     uiApplyTableSort(table, index, dir);
+}
+
+document.addEventListener('click', event => {
+    const cell = event.target.closest('.ui-tr-head > *, thead th');
+    if (!cell) return;
+    const table = cell.closest('.ui-table, table');
+    if (!table || !uiSortable(table, cell)) return;
+    uiSortBy(table, cell);
 });
+
+// A row that opens something on click (data-row-open, with tabindex) opens on
+// Enter and Space too, when the row itself has the focus: a button or a copyable
+// value inside it keeps its own keys
+document.addEventListener('keydown', event => {
+    if ((event.key !== 'Enter' && event.key !== ' ') || event.defaultPrevented) return;
+    const row = event.target;
+    if (!(row instanceof Element) || !row.matches('[data-row-open]')) return;
+    event.preventDefault();
+    row.click();
+});
+
+// Phones hide a list's header row, so a list without a sort control of its own
+// gets a Sort picker above it (data-phone-sort="off": the page has its own)
+let uiPhoneSortSeq = 0;
+function uiPhoneSortSync(table, heads) {
+    if (table.matches('[data-phone-sort="off"]') || !table.matches('.ui-stack, .ui-dm-cards')) return false;
+    const sortable = heads.filter(h => uiSortable(table, h));
+    let box = table.previousElementSibling;
+    if (!sortable.length) {
+        if (box && box.classList.contains('ui-phone-sort')) { box.remove(); return true; }
+        return false;
+    }
+    if (!box || !box.classList.contains('ui-phone-sort')) {
+        box = document.createElement('div');
+        box.className = 'ui-phone-sort';
+        // Named after the list's owner, so the picker keeps its id when the list is drawn again
+        const owner = uiSortOwner(table);
+        const nth = uiSortNth(table);
+        const name = owner ? `ui-phone-sort-${owner}${nth > 0 ? `-${nth}` : ''}` : '';
+        const id = name && !document.getElementById(name) ? name : `ui-phone-sort-${++uiPhoneSortSeq}`;
+        box.innerHTML = `<select id="${id}" class="hidden" data-picker-label="Sort" data-no-filter onchange="uiPhoneSortPick(this)"></select>`;
+        table.before(box);
+    }
+    const select = box.querySelector('select');
+    const on = sortable.find(h => uiSortState(h) !== 'none');
+    const arrow = h => (uiSortState(h) === 'descending' ? ' ↓' : ' ↑');
+    const sig = `${sortable.map(uiSortLabel).join('|')}#${on ? uiSortLabel(on) + uiSortState(on) : ''}`;
+    if (select.dataset.sig === sig) return false;
+    select.dataset.sig = sig;
+    select.innerHTML = (on ? '' : '<option value="" data-short="Default">Default order</option>')
+        + sortable.map(h => `<option value="${heads.indexOf(h)}"${h === on ? ` selected data-short="${escapeHtml(uiSortLabel(h) + arrow(h))}"` : ''}>${escapeHtml(uiSortLabel(h))}</option>`).join('');
+    return true;
+}
+function uiPhoneSortPick(select) {
+    const box = select.closest('.ui-phone-sort');
+    const table = box && box.nextElementSibling;
+    if (!table || select.value === '') return;
+    const cell = uiSortHeads(table)[Number(select.value)];
+    if (cell && uiSortable(table, cell)) uiSortBy(table, cell);
+}
 
 // Mark the sortable headers, and put a remembered order back after a refresh
 let uiTableSortQueued = false;
 function uiRefreshTableSorts() {
     uiTableSortQueued = false;
+    let pickers = false;
     document.querySelectorAll('.ui-table, table').forEach(table => {
-        uiSortHeads(table).forEach(h => { if (uiSortable(table, h) && !h.hasAttribute('aria-sort')) h.setAttribute('aria-sort', 'none'); });
-        if (table.hasAttribute('data-sort-handler')) return;
-        const state = uiTableSorts.get(uiTableKey(table));
-        if (state && table.dataset.sortedBy !== `${state.index}:${state.dir}`) uiApplyTableSort(table, state.index, state.dir);
+        const heads = uiSortHeads(table);
+        heads.forEach(h => {
+            if (!uiSortable(table, h)) return;
+            uiSortEnhance(h);
+            uiSetSortState(h, uiSortState(h));
+        });
+        if (!table.hasAttribute('data-sort-handler')) {
+            const state = uiTableSorts.get(uiTableKey(table));
+            if (state && table.dataset.sortedBy !== `${state.index}:${state.dir}`) uiApplyTableSort(table, state.index, state.dir);
+        }
+        if (uiPhoneSortSync(table, heads)) pickers = true;
     });
+    if (pickers && typeof uiFilterBarSync === 'function') uiFilterBarSync();
+    uiSortFocusBack();
 }
+function uiSortFocusBack() {
+    const want = uiSortFocus;
+    if (!want) return;
+    if (Date.now() > want.until) { uiSortFocus = null; return; }
+    // The list was not drawn again yet: the control that sorted is still there
+    if (want.from.isConnected) return;
+    uiSortFocus = null;
+    const active = document.activeElement;
+    // The focus went somewhere already (the user moved on, or the picker took it back)
+    if (active && active !== document.body) return;
+    const table = [...document.querySelectorAll('.ui-table, table')].filter(t => uiSortOwner(t) === want.owner)[want.nth];
+    if (!table) return;   // the answer is no list (nothing found, an error): the layers place the focus
+    const target = want.phone
+        ? table.previousElementSibling?.querySelector?.('.ui-picker-btn')
+        : uiSortHeads(table).find(h => uiSortLabel(h) === want.label)?.querySelector('.ui-sort-btn');
+    if (target && target.getClientRects().length) target.focus({ preventScroll: true });
+}
+// Moving on to anything else ends the wait for the list
+document.addEventListener('focusin', event => {
+    if (uiSortFocus && event.target !== uiSortFocus.from && event.target instanceof Element
+        && !event.target.closest('.ui-tr-head, thead, .ui-phone-sort')) uiSortFocus = null;
+}, true);
 document.addEventListener('DOMContentLoaded', () => {
     new MutationObserver(() => {
         if (uiTableSortQueued) return;

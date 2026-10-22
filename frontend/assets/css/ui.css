@@ -1485,6 +1485,11 @@ button.ui-st-card:hover { outline: 1px solid var(--ui-line); }
 .ui-domain-row { cursor: pointer; }
 .ui-domain-row:hover { background: color-mix(in srgb, var(--ui-accent) 4%, transparent); }
 .ui-domain-chevron { display: inline-block; margin-inline-end: 4px; vertical-align: -2px; color: var(--ui-muted); transition: transform .15s; }
+/* A row that opens on click takes the keyboard too (utils.js, data-row-open); a row with
+   controls of its own opens from its chevron button */
+.ui-row-chev { all: unset; cursor: pointer; }
+.ui-row-chev:focus-visible { outline: 2px solid var(--ui-focus); outline-offset: 2px; border-radius: 3px; }
+[data-row-open]:focus-visible { outline: 2px solid var(--ui-focus); outline-offset: -2px; }
 [dir="rtl"] .ui-domain-chevron { transform: scaleX(-1); }
 .ui-domain-details { grid-column: 1 / -1; display: grid; gap: 16px; padding: 6px 0 10px; cursor: default; }
 .ui-domain-details.hidden { display: none; }
@@ -2274,15 +2279,24 @@ html .markdown-body .markdown-alert-caution .markdown-alert-title { color: var(-
 /* Quarantine Auto-Rules as a tab: the panel is the page, no fold */
 #quarantine-tab-rules .ui-rules-body { padding-top: 4px; }
 
-/* Sortable table headers */
-[aria-sort]:is(.ui-tr-head > *, thead th) { cursor: pointer; user-select: none; }
-[aria-sort]:is(.ui-tr-head > *, thead th):hover { color: var(--ui-ink); }
-[aria-sort]:is(.ui-tr-head > *, thead th)::after { content: ""; display: inline-block; width: 0; height: 0; margin-inline-start: 5px; vertical-align: middle;
+/* Sortable table headers (utils.js): the label is a button, so the keyboard sorts too. A page
+   sorting on the server writes aria-sort, which utils.js keeps only on a real column header */
+:is([data-sort-state], [aria-sort]):is(.ui-tr-head > *, thead th) { cursor: pointer; user-select: none; }
+:is([data-sort-state], [aria-sort]):is(.ui-tr-head > *, thead th):hover { color: var(--ui-ink); }
+:is([data-sort-state], [aria-sort]):is(.ui-tr-head > *, thead th)::after { content: ""; display: inline-block; width: 0; height: 0; margin-inline-start: 5px; vertical-align: middle;
     border-inline: 4px solid transparent; opacity: 0; }
-[aria-sort="none"]:is(.ui-tr-head > *, thead th):hover::after { border-top: 5px solid currentColor; opacity: .35; }
-[aria-sort="descending"]:is(.ui-tr-head > *, thead th)::after { border-top: 5px solid currentColor; opacity: 1; }
-[aria-sort="ascending"]:is(.ui-tr-head > *, thead th)::after { border-bottom: 5px solid currentColor; opacity: 1; }
-[aria-sort="ascending"], [aria-sort="descending"] { color: var(--ui-ink); }
+:is([data-sort-state="none"], [aria-sort="none"]):is(.ui-tr-head > *, thead th):is(:hover, :focus-within)::after { border-top: 5px solid currentColor; opacity: .35; }
+:is([data-sort-state="descending"], [aria-sort="descending"]):is(.ui-tr-head > *, thead th)::after { border-top: 5px solid currentColor; opacity: 1; }
+:is([data-sort-state="ascending"], [aria-sort="ascending"]):is(.ui-tr-head > *, thead th)::after { border-bottom: 5px solid currentColor; opacity: 1; }
+:is([data-sort-state="ascending"], [aria-sort="ascending"]), :is([data-sort-state="descending"], [aria-sort="descending"]) { color: var(--ui-ink); }
+.ui-sort-btn { all: unset; cursor: pointer; }
+.ui-sort-btn:focus-visible { outline: 2px solid var(--ui-focus); outline-offset: 2px; border-radius: 3px; }
+.ui-sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+/* Phones hide a list's header row: its Sort picker stands above the list instead */
+.ui-phone-sort { display: none; }
+@media (max-width: 760px) {
+    .ui-phone-sort { display: flex; padding: 8px var(--ui-pad-x) 4px; }
+}
 
 /* Filters and their table as one card: one panel, the filter row on top, the rows under it */
 /* One column as wide as the card: a wide table scrolls inside it instead of widening the card */

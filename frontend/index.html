@@ -25,7 +25,7 @@
     <!-- Utility classes still used by the markup, compiled once
          (.github/scripts/build-utilities-css.sh); the design system comes last -->
     <link rel="stylesheet" href="/static/assets/css/utilities.css?v=1">
-    <link rel="stylesheet" href="/static/assets/css/ui.css?v=64">
+    <link rel="stylesheet" href="/static/assets/css/ui.css?v=65">
     <style>
         .tab-active {
             border-bottom: 2px solid #3b82f6;
@@ -625,7 +625,7 @@
                         <section class="ui-panel">
                             <div class="ui-panel-head">Latest messages
                                 <button type="button" class="ui-more" onclick="navigateTo('messages')">View all</button></div>
-                            <div id="recent-activity"><div class="ui-loading"><div class="loading"></div><p>Loading...</p></div></div>
+                            <div id="recent-activity"><div class="ui-loading" role="status"><div class="loading"></div><p>Loading...</p></div></div>
                         </section>
                     </div>
 
@@ -634,7 +634,7 @@
                         <section class="ui-panel" id="dashboard-security-panel">
                             <div class="ui-panel-head">Security
                                 <button type="button" class="ui-more" onclick="navigateTo('netfilter')">Open Security</button></div>
-                            <div id="dashboard-security"><div class="ui-loading"><div class="loading"></div><p>Loading...</p></div></div>
+                            <div id="dashboard-security"><div class="ui-loading" role="status"><div class="loading"></div><p>Loading...</p></div></div>
                         </section>
                         <!-- Server health: one card per area, each opens its Status tab -->
                         <section class="ui-panel" id="dashboard-health-panel">
@@ -651,7 +651,7 @@
                         </section>
                         <section class="ui-panel">
                             <div class="ui-panel-head">Hosted</div>
-                            <div id="dashboard-system-summary"><div class="ui-loading"><div class="loading"></div><p>Loading...</p></div></div>
+                            <div id="dashboard-system-summary"><div class="ui-loading" role="status"><div class="loading"></div><p>Loading...</p></div></div>
                         </section>
                     </div>
                 </div>
@@ -773,7 +773,7 @@
                                 <button type="button" id="messages-clear-filters" class="ui-link-row ui-msg-clear hidden" onclick="clearMessagesFilters()">Clear filters</button></p>
                         </div>
                         <div id="messages-logs" class="ui-msg-items">
-                            <div class="ui-loading"><div class="loading"></div><p>Loading...</p></div>
+                            <div class="ui-loading" role="status"><div class="loading"></div><p>Loading...</p></div>
                         </div>
                     </section>
 
@@ -806,7 +806,7 @@
                 <div id="security-tab-overview" class="ui-scroll ui-st-panel" role="tabpanel">
                     <section id="security-protections" class="ui-panel ui-prot-strip" aria-label="Which protections are on"></section>
                     <div class="ui-sec-two">
-                        <section id="security-list" class="ui-panel"><div class="ui-loading"><div class="loading"></div><p>Loading...</p></div></section>
+                        <section id="security-list" class="ui-panel"><div class="ui-loading" role="status"><div class="loading"></div><p>Loading...</p></div></section>
                         <div id="security-countries" class="ui-sec-side"></div>
                     </div>
                 </div>
@@ -838,12 +838,12 @@
                     <div class="ui-panel-head">Security Events
                         <button onclick="exportCSV('netfilter')" class="ui-btn ui-btn-sm ui-head-actions">Export CSV</button>
                     </div>
-                    <div id="netfilter-logs"><div class="ui-loading"><div class="loading"></div><p>Loading...</p></div></div>
+                    <div id="netfilter-logs"><div class="ui-loading" role="status"><div class="loading"></div><p>Loading...</p></div></div>
                 </section>
                 </div>
 
                 <div id="security-tab-lists" class="ui-scroll ui-st-panel hidden" role="tabpanel">
-                    <div id="security-lists"><div class="ui-loading"><div class="loading"></div><p>Loading...</p></div></div>
+                    <div id="security-lists"><div class="ui-loading" role="status"><div class="loading"></div><p>Loading...</p></div></div>
                 </div>
 
                 <div id="security-tab-settings" class="ui-scroll ui-st-panel hidden" role="tabpanel">
@@ -898,7 +898,7 @@
                         </div>
                     </section>
                     <p class="ui-list-summary"><span id="queue-count" class="ui-count"></span><button type="button" class="ui-clear-filters hidden" onclick="clearQueueFilters()">Clear filters</button></p>
-                        <div id="queue-logs"><div class="ui-loading"><div class="loading"></div><p>Loading...</p></div></div>
+                        <div id="queue-logs"><div class="ui-loading" role="status"><div class="loading"></div><p>Loading...</p></div></div>
                     </div>
                 </section>
 
@@ -953,7 +953,7 @@
                     <div id="suppression-rw-note"></div>
                     <div id="suppression-sync-note"></div>
                     <div id="suppression-list">
-                        <div class="ui-loading"><div class="loading"></div><p>Loading...</p></div>
+                        <div class="ui-loading" role="status"><div class="loading"></div><p>Loading...</p></div>
                     </div>
                     </div>
                 </div>
@@ -990,7 +990,7 @@
                         </div>
                     </section>
                     <p class="ui-list-summary"><span id="quarantine-count" class="ui-count"></span></p>
-                    <div id="quarantine-logs"><div class="ui-loading"><div class="loading"></div><p>Loading...</p></div></div>
+                    <div id="quarantine-logs"><div class="ui-loading" role="status"><div class="loading"></div><p>Loading...</p></div></div>
                     </div>
                 </section>
                 </div>
@@ -1052,7 +1052,7 @@
                 </div>
                 <div class="ui-scroll">
                     <div id="rspamd-maps-list" class="ui-sec-block">
-                        <div class="ui-loading"><div class="loading"></div><p>Loading Rspamd maps...</p></div>
+                        <div class="ui-loading" role="status"><div class="loading"></div><p>Loading Rspamd maps...</p></div>
                     </div>
                 </div>
             </div>
@@ -1074,7 +1074,7 @@
                 <!-- Only what needs a decision, with the action next to it -->
                 <section class="ui-panel" id="status-attention-panel">
                     <div class="ui-panel-head">Needs attention <span id="status-attention-count" class="ui-count"></span></div>
-                    <div id="status-attention"><div class="ui-loading"><div class="loading"></div><p>Loading...</p></div></div>
+                    <div id="status-attention"><div class="ui-loading" role="status"><div class="loading"></div><p>Loading...</p></div></div>
                 </section>
 
                 <div class="ui-tabs ui-page-tabs ui-st-tabs" role="tablist" aria-label="Status sections">
@@ -1085,19 +1085,19 @@
 
                 <div id="status-tab-server" class="ui-scroll ui-st-panel" role="tabpanel">
                     <div class="ui-srv-cards">
-                        <section class="ui-srv-card"><h3>Mail storage</h3><div id="status-storage"><div class="ui-loading"><div class="loading"></div><p>Loading...</p></div></div></section>
-                        <section class="ui-srv-card"><h3>mailcow</h3><div id="status-system"><div class="ui-loading"><div class="loading"></div><p>Loading...</p></div></div></section>
-                        <section class="ui-srv-card"><h3>Message linking</h3><div id="status-correlation"><div class="ui-loading"><div class="loading"></div><p>Loading...</p></div></div></section>
+                        <section class="ui-srv-card"><h3>Mail storage</h3><div id="status-storage"><div class="ui-loading" role="status"><div class="loading"></div><p>Loading...</p></div></div></section>
+                        <section class="ui-srv-card"><h3>mailcow</h3><div id="status-system"><div class="ui-loading" role="status"><div class="loading"></div><p>Loading...</p></div></div></section>
+                        <section class="ui-srv-card"><h3>Message linking</h3><div id="status-correlation"><div class="ui-loading" role="status"><div class="loading"></div><p>Loading...</p></div></div></section>
                     </div>
                     <div class="ui-list-head"><h2 class="ui-h2">Containers</h2> <span id="status-containers-summary" class="ui-count"></span>
                         <div class="ui-seg ui-head-actions" role="group" aria-label="Show">
                             <button type="button" aria-pressed="true" data-ctr-filter="all" onclick="statusContainerFilter('all')">All</button>
                             <button type="button" aria-pressed="false" data-ctr-filter="problems" onclick="statusContainerFilter('problems')">Problems</button>
                         </div></div>
-                    <div id="status-containers"><div class="ui-loading"><div class="loading"></div><p>Loading...</p></div></div>
+                    <div id="status-containers"><div class="ui-loading" role="status"><div class="loading"></div><p>Loading...</p></div></div>
                     <section class="ui-sec-block">
                         <div class="ui-list-head"><h2 class="ui-h2">Log import</h2></div>
-                        <div id="status-import"><div class="ui-loading"><div class="loading"></div><p>Loading...</p></div></div>
+                        <div id="status-import"><div class="ui-loading" role="status"><div class="loading"></div><p>Loading...</p></div></div>
                     </section>
                     <div id="status-correlation-pending"></div>
                 </div>
@@ -1115,7 +1115,7 @@
                             <span id="status-blacklist-summary" class="ui-count"></span>
                             <button onclick="checkBlacklists(true)" id="blacklist-check-btn" class="ui-btn ui-btn-sm ui-head-actions"><svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>Check all now</button>
                         </div>
-                        <div id="status-blacklist"><div class="ui-loading"><div class="loading"></div><p>Loading...</p></div></div>
+                        <div id="status-blacklist"><div class="ui-loading" role="status"><div class="loading"></div><p>Loading...</p></div></div>
                     </section>
                 </div>
 
@@ -1126,7 +1126,7 @@
                             <button type="button" aria-pressed="false" data-job-filter="problems" onclick="statusJobFilter('problems')">Problems</button>
                             <button type="button" aria-pressed="false" data-job-filter="off" onclick="statusJobFilter('off')">Off</button>
                         </div></div>
-                    <div id="status-jobs"><div class="ui-loading"><div class="loading"></div><p>Loading...</p></div></div>
+                    <div id="status-jobs"><div class="ui-loading" role="status"><div class="loading"></div><p>Loading...</p></div></div>
                 </div>
 
             </div>
@@ -1151,7 +1151,7 @@
                         </button>
                     </div>
                 </div>
-                <div id="domains-loading" class="ui-loading"><div class="loading"></div><p>Loading domains...</p></div>
+                <div id="domains-loading" class="ui-loading" role="status"><div class="loading"></div><p>Loading domains...</p></div>
                 <div id="domains-content" class="hidden ui-sec-block ui-scroll"></div>
             </div>
 
@@ -1191,7 +1191,7 @@
                 <nav id="dmarc-breadcrumb" class="ui-crumbs ui-crumbs-local hidden" aria-label="Breadcrumb"></nav>
 
                 <!-- The open screen: all domains, a domain, a sender, a day of reports (dmarc.js) -->
-                <div id="dmarc-view" class="ui-scroll ui-dm"><div class="ui-loading"><div class="loading"></div><p>Loading...</p></div></div>
+                <div id="dmarc-view" class="ui-scroll ui-dm"><div class="ui-loading" role="status"><div class="loading"></div><p>Loading...</p></div></div>
             </div>
 
             <!-- Mailbox Stats Tab -->
@@ -1212,8 +1212,8 @@
 
                 <!-- View switcher: Statistics | Rate Limits -->
                 <div id="mailbox-stats-views" class="ui-tabs ui-page-tabs" role="tablist">
-                    <button onclick="mailboxStatsSwitchView('statistics')" id="mailbox-stats-view-statistics" class="modal-tab active" role="tab">Statistics</button>
-                    <button onclick="mailboxStatsSwitchView('rate-limits')" id="mailbox-stats-view-rate-limits" class="modal-tab" role="tab">Rate Limits</button>
+                    <button onclick="mailboxStatsSwitchView('statistics')" id="mailbox-stats-view-statistics" class="modal-tab active" role="tab" aria-selected="true">Statistics</button>
+                    <button onclick="mailboxStatsSwitchView('rate-limits')" id="mailbox-stats-view-rate-limits" class="modal-tab" role="tab" aria-selected="false">Rate Limits</button>
                 </div>
 
                 <!-- Statistics view -->
@@ -1275,7 +1275,7 @@
                     <p class="ui-list-summary"><span id="mailbox-stats-count" class="ui-count"></span><button type="button" class="ui-clear-filters hidden" onclick="resetMailboxStatsFilters()">Clear filters</button></p>
 
 
-                    <div id="mailbox-stats-loading" class="ui-loading"><div class="loading"></div><p>Loading mailbox statistics...</p></div>
+                    <div id="mailbox-stats-loading" class="ui-loading" role="status"><div class="loading"></div><p>Loading mailbox statistics...</p></div>
                     <div id="mailbox-stats-content" class="hidden">
                         <div id="mailbox-stats-list"></div>
                     </div>
@@ -1283,7 +1283,7 @@
                 </div>
                 <!-- Rate Limits view -->
                 <div id="mailbox-stats-rate-limits-view" class="hidden ui-scroll">
-                    <div id="rate-limits-loading" class="ui-loading"><div class="loading"></div><p>Loading rate limits...</p></div>
+                    <div id="rate-limits-loading" class="ui-loading" role="status"><div class="loading"></div><p>Loading rate limits...</p></div>
                     <div id="rate-limits-content" class="hidden">
                         <div class="ui-sec-block">
                             <!-- All three cards are rendered by rate-limits.js -->
@@ -1330,7 +1330,7 @@
                         </div>
                     </section>
                     <p class="ui-list-summary"><span id="devices-count" class="ui-count"></span><button type="button" class="ui-clear-filters hidden" onclick="resetDevicesFilters()">Clear filters</button></p>
-                    <div id="devices-list"><div class="ui-loading"><div class="loading"></div><p>Loading devices...</p></div></div>
+                    <div id="devices-list"><div class="ui-loading" role="status"><div class="loading"></div><p>Loading devices...</p></div></div>
                     </div>
                     <div id="devices-foot" class="ui-list-head ui-list-foot hidden"><span id="devices-pager" class="ui-head-actions"></span></div>
                 </div>
@@ -1355,7 +1355,7 @@
                             <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
                         </button>
                         <div id="logs-service-list" class="ui-logs-services">
-                            <div class="ui-loading"><div class="loading"></div><p>Loading services...</p></div>
+                            <div class="ui-loading" role="status"><div class="loading"></div><p>Loading services...</p></div>
                         </div>
                     </aside>
 
@@ -1464,7 +1464,7 @@
                         <p class="ui-muted">Is everything this app relies on working, and which version is running</p>
                     </div>
                 </div>
-                <div id="about-content" class="ui-sec-block ui-scroll"><div class="ui-loading"><div class="loading"></div><p>Loading...</p></div></div>
+                <div id="about-content" class="ui-sec-block ui-scroll"><div class="ui-loading" role="status"><div class="loading"></div><p>Loading...</p></div></div>
             </div>
 
             <div id="content-settings" class="tab-content hidden ui-page">
@@ -1480,7 +1480,7 @@
                 </div>
 
                 <!-- Loading State -->
-                <div id="settings-loading" class="ui-loading"><div class="loading"></div><p>Loading settings...</p></div>
+                <div id="settings-loading" class="ui-loading" role="status"><div class="loading"></div><p>Loading settings...</p></div>
 
                 <!-- Content -->
                 <div id="settings-content" class="hidden ui-settings ui-scroll"></div>
@@ -1502,15 +1502,15 @@
 
                 <div id="message-modal-header" class="ui-md-header"></div>
 
-                <div class="ui-tabs" role="tablist">
-                    <button id="modal-tab-overview" class="modal-tab active" onclick="switchModalTab('overview')"><span>Overview</span></button>
-                    <button id="modal-tab-postfix" class="modal-tab" onclick="switchModalTab('postfix')"><span>Logs</span></button>
-                    <button id="modal-tab-spam" class="modal-tab" onclick="switchModalTab('spam')"><span>Spam Analysis</span></button>
-                    <button id="modal-tab-netfilter" class="modal-tab" onclick="switchModalTab('netfilter')"><span>Security</span></button>
+                <div class="ui-tabs" role="tablist" aria-label="Message details">
+                    <button type="button" id="modal-tab-overview" class="modal-tab active" role="tab" aria-selected="true" onclick="switchModalTab('overview')"><span>Overview</span></button>
+                    <button type="button" id="modal-tab-postfix" class="modal-tab" role="tab" aria-selected="false" onclick="switchModalTab('postfix')"><span>Logs</span></button>
+                    <button type="button" id="modal-tab-spam" class="modal-tab" role="tab" aria-selected="false" onclick="switchModalTab('spam')"><span>Spam Analysis</span></button>
+                    <button type="button" id="modal-tab-netfilter" class="modal-tab" role="tab" aria-selected="false" onclick="switchModalTab('netfilter')"><span>Security</span></button>
                 </div>
 
                 <div id="message-modal-content" class="ui-dialog-body">
-                    <div class="ui-loading"><div class="loading"></div><p>Loading...</p></div>
+                    <div class="ui-loading" role="status"><div class="loading"></div><p>Loading...</p></div>
                 </div>
             </div>
         </div>
@@ -1576,26 +1576,26 @@
     </div>
 
     <!-- JavaScript -->
-    <script src="/static/utils.js?v=21"></script>
+    <script src="/static/utils.js?v=22"></script>
     <script src="/static/router.js?v=8"></script>
-    <script src="/static/app.js?v=72"></script>
-    <script src="/static/alert-activity.js?v=3"></script>
+    <script src="/static/app.js?v=73"></script>
+    <script src="/static/alert-activity.js?v=4"></script>
     <script src="/static/export.js?v=1"></script>
-    <script src="/static/message-details.js?v=9"></script>
-    <script src="/static/dmarc.js?v=20"></script>
+    <script src="/static/message-details.js?v=10"></script>
+    <script src="/static/dmarc.js?v=21"></script>
     <script src="/static/logs-viewer.js?v=6"></script>
-    <script src="/static/settings.js?v=43"></script>
+    <script src="/static/settings.js?v=44"></script>
     <script src="/static/about.js?v=4"></script>
-    <script src="/static/domains.js?v=9"></script>
-    <script src="/static/mailbox-stats.js?v=8"></script>
+    <script src="/static/domains.js?v=10"></script>
+    <script src="/static/mailbox-stats.js?v=9"></script>
     <script src="/static/devices.js?v=7"></script>
-    <script src="/static/rate-limits.js?v=26"></script>
-    <script src="/static/smtp-abuse.js?v=4"></script>
+    <script src="/static/rate-limits.js?v=27"></script>
+    <script src="/static/smtp-abuse.js?v=5"></script>
     <script src="/static/protection.js?v=2"></script>
-    <script src="/static/security.js?v=9"></script>
-    <script src="/static/search.js?v=12"></script>
-    <script src="/static/notifications.js?v=7"></script>
-    <script src="/static/spam_filter.js?v=18"></script>
+    <script src="/static/security.js?v=10"></script>
+    <script src="/static/search.js?v=13"></script>
+    <script src="/static/notifications.js?v=8"></script>
+    <script src="/static/spam_filter.js?v=19"></script>
 
     <!-- DMARC fetch history -->
     <div id="dmarc-sync-history-modal" class="hidden ui-dialog-backdrop" role="dialog" aria-label="Fetch history">
@@ -1605,7 +1605,7 @@
                 <button onclick="closeDmarcSyncHistoryModal()" class="ui-icon-btn" title="Close" aria-label="Close"><svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg></button>
             </div>
             <div class="ui-dialog-body">
-                <div id="dmarc-sync-history-content"><div class="ui-loading"><div class="loading"></div><p>Loading the fetch history...</p></div></div>
+                <div id="dmarc-sync-history-content"><div class="ui-loading" role="status"><div class="loading"></div><p>Loading the fetch history...</p></div></div>
             </div>
         </div>
     </div>
@@ -1651,7 +1651,7 @@
                         </div>
                     </section>
                     <p class="ui-list-summary"><span id="dmarc-reports-total" class="ui-count"></span></p>
-                    <div id="dmarc-reports-management-content"><div class="ui-loading"><div class="loading"></div><p>Loading reports...</p></div></div>
+                    <div id="dmarc-reports-management-content"><div class="ui-loading" role="status"><div class="loading"></div><p>Loading reports...</p></div></div>
                 </div>
             </div>
         </div>

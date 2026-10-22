@@ -1188,7 +1188,7 @@ async function smartRefreshMessages() {
 function renderMessageRow(msg) {
     const tone = messageRowTone(msg);
     return `
-        <div class="ui-msg-item${tone ? ` ui-msg-${tone}` : ''}" data-key="${escapeHtml(msg.correlation_key || '')}" onclick="viewMessageDetails('${escapeJsArg(msg.correlation_key)}')">
+        <div class="ui-msg-item${tone ? ` ui-msg-${tone}` : ''}" data-key="${escapeHtml(msg.correlation_key || '')}" role="button" tabindex="0" data-row-open onclick="viewMessageDetails('${escapeJsArg(msg.correlation_key)}')">
             <div class="ui-msg-l1">
                 <b class="ui-msg-from">${escapeHtml(msg.sender || 'Unknown')}</b>
                 <time title="${escapeHtml(formatTime(msg.first_seen))}">${formatListTime(msg.first_seen)}</time>
@@ -2327,9 +2327,9 @@ async function loadRecentActivity() {
             const tone = UI_STATUS_TONE[msg.status] || '';
             const state = `${msg.status || 'unknown'}${msg.direction ? `, ${msg.direction}` : ''}`;
             return `
-            <div class="ui-mrow" onclick="viewMessageDetails('${escapeJsArg(msg.correlation_key)}')">
+            <div class="ui-mrow" role="button" tabindex="0" data-row-open onclick="viewMessageDetails('${escapeJsArg(msg.correlation_key)}')">
                 <time title="${escapeHtml(formatTime(msg.time))}">${formatListTime(msg.time)}</time>
-                <i class="ui-mdot${tone ? ` ui-mdot-${tone}` : ''}" title="${escapeHtml(state)}"></i>
+                <i class="ui-mdot${tone ? ` ui-mdot-${tone}` : ''}" title="${escapeHtml(state)}" role="img" aria-label="${escapeHtml(state)}"></i>
                 <span class="ui-mrow-who">${escapeHtml(msg.sender || 'Unknown')} → ${escapeHtml(msg.recipient || 'Unknown')}</span>
                 <span class="ui-mrow-sub" dir="auto" title="${escapeHtml(msg.subject || 'No subject')}">${escapeHtml(msg.subject || 'No subject')}</span>
             </div>`;
@@ -2370,7 +2370,7 @@ async function loadNetfilterLogs(page = 1) {
     uiFilterBarSync();
 
     try {
-        container.innerHTML = '<div class="ui-loading"><div class="loading"></div><p>Loading...</p></div>';
+        container.innerHTML = '<div class="ui-loading" role="status"><div class="loading"></div><p>Loading...</p></div>';
 
         const filters = currentFilters.netfilter || {};
         const params = new URLSearchParams({
@@ -2487,7 +2487,7 @@ async function loadQueue() {
     const id = ++queueAsked;
 
     try {
-        container.innerHTML = '<div class="ui-loading"><div class="loading"></div><p>Loading...</p></div>';
+        container.innerHTML = '<div class="ui-loading" role="status"><div class="loading"></div><p>Loading...</p></div>';
         queueLoading = true;
 
         console.log('Loading Queue...');
@@ -2827,7 +2827,7 @@ async function loadQuarantine() {
     uiFilterBarSync();
 
     try {
-        container.innerHTML = '<div class="ui-loading"><div class="loading"></div><p>Loading...</p></div>';
+        container.innerHTML = '<div class="ui-loading" role="status"><div class="loading"></div><p>Loading...</p></div>';
 
         console.log('Loading Quarantine...');
 
@@ -2879,7 +2879,7 @@ function renderQuarantineData(data) {
 
     container.innerHTML = `
         ${lockedNote}
-        <div class="ui-table ui-stack" style="${cols}">
+        <div class="ui-table ui-stack" data-phone-sort="off" style="${cols}">
         ${!canAct ? '' : `
             <div class="ui-toolbar ui-table-tools">
                 <button onclick="quarantineSelectAll()" id="quarantine-select-all-btn" class="ui-btn ui-btn-sm">Select All</button>
@@ -3079,7 +3079,7 @@ async function showQuarantineDetails(itemId) {
                 </button>
             </div>
             <div class="ui-dialog-body" id="quarantine-detail-content">
-                <div class="ui-loading"><div class="loading"></div><p>Loading details...</p></div>
+                <div class="ui-loading" role="status"><div class="loading"></div><p>Loading details...</p></div>
             </div>
             <div id="quarantine-detail-footer" class="hidden"></div>
         </div>
@@ -3979,7 +3979,7 @@ async function loadMessages(page = 1) {
     const container = document.getElementById('messages-logs');
 
     try {
-        container.innerHTML = '<div class="ui-loading"><div class="loading"></div><p>Loading...</p></div>';
+        container.innerHTML = '<div class="ui-loading" role="status"><div class="loading"></div><p>Loading...</p></div>';
 
         const filters = currentFilters.messages || {};
         loadMessageFacets(filters);
@@ -4128,7 +4128,7 @@ function renderStatusAttention() {
     if (count) count.textContent = items.length ? String(items.length) : '';
     if (!items.length) {
         box.innerHTML = loaded ? '<p class="ui-st-allgood">Everything is running. Nothing needs you right now.</p>'
-            : '<div class="ui-loading"><div class="loading"></div><p>Loading...</p></div>';
+            : '<div class="ui-loading" role="status"><div class="loading"></div><p>Loading...</p></div>';
         return;
     }
     box.innerHTML = items.map(item => `

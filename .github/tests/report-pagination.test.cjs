@@ -288,12 +288,13 @@ const sorterSource = utils.slice(utils.indexOf('const uiTableSorts'), utils.inde
 function fakeTable(html) {
     const attrs = text => Object.fromEntries([...text.matchAll(/([\w-]+)="([^"]*)"/g)].map(m => [m[1], m[2]]));
     const element = (attributes, text) => ({
-        attributes, textContent: text, children: [], classList: { contains: () => false },
+        attributes, textContent: text, children: [], dataset: {}, classList: { contains: () => false },
         hasAttribute: name => name in attributes, getAttribute: name => attributes[name] ?? null,
         cloneNode() { return { querySelectorAll: () => [], textContent: text }; },
     });
     const table = element(attrs(html.match(/<div ([^>]*class="ui-table[^>]*)>/)[1]), '');
     table.tagName = 'DIV';
+    table.closest = () => null;   // not inside help or release notes
     const headHtml = html.match(/<div class="ui-tr ui-tr-head">(.*?)<\/div>/s)[1];
     const heads = [...headHtml.matchAll(/<span([^>]*)>([^<]*)<\/span>/g)].map(m => element(attrs(m[1]), m[2]));
     const head = { children: heads };

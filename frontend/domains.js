@@ -210,7 +210,7 @@ function renderDomainAccordionRow(domain, open = false) {
         <div class="ui-tr ui-domain-row" data-domain-row="${escapeHtml(domain.domain_name)}" onclick="toggleDomainDetails('${escapeJsArg(domainId)}')">
             <div class="ui-td ui-q-who">
                 <div>
-                    <svg id="${domainId}-icon-desktop" class="ui-domain-chevron" width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"${open ? ' style="transform: rotate(90deg)"' : ''}><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg>
+                    <button type="button" class="ui-row-chev" aria-expanded="${open}" aria-controls="${domainId}-details" aria-label="Details of ${escapeHtml(domain.domain_name)}" onclick="event.stopPropagation(); toggleDomainDetails('${escapeJsArg(domainId)}')"><svg id="${domainId}-icon-desktop" class="ui-domain-chevron" width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"${open ? ' style="transform: rotate(90deg)"' : ''}><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg></button>
                     ${copyableText(domain.domain_name)}
                     ${domain.active ? '' : uiTag('Inactive', '')}
                 </div>
@@ -258,6 +258,7 @@ function toggleDomainDetails(domainId) {
     const opening = details.classList.contains('hidden');
     details.classList.toggle('hidden', !opening);
     if (icon) icon.style.transform = opening ? 'rotate(90deg)' : 'rotate(0deg)';
+    icon?.closest('.ui-row-chev')?.setAttribute('aria-expanded', String(opening));
 }
 
 // Label for an SPF checked_ips[].source value (per-check IP sources)
@@ -314,7 +315,7 @@ function renderAliasDomain(aliasDomain) {
 
 function getAliasStatusIcon(status) {
     const [text, tone] = DNS_TAG[status] || ['?', ''];
-    return `<i class="ui-mdot${tone ? ` ui-mdot-${tone}` : ''}" title="${escapeHtml(text)}"></i>`;
+    return `<i class="ui-mdot${tone ? ` ui-mdot-${tone}` : ''}" title="${escapeHtml(text)}" role="img" aria-label="${escapeHtml(text)}"></i>`;
 }
 
 function renderDNSCheck(type, check) {
