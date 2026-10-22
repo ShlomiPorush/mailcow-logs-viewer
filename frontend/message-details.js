@@ -603,8 +603,14 @@ function mdLineOwners(log, dovecot) {
 const MD_DOVECOT_SEVERITY = { stored: 0, forwarded: 1, failed: 2, discarded: 3, rejected: 4 };
 const MD_DISCARD_MARK_RE = /: marked message to be discarded[^<>:]*$/i;
 // One LMTP delivery is the lines of one session for one mailbox, as the server
-// groups them; the session is in the line's prefix lmtp(user)<pid><session>
-const MD_DOVECOT_PREFIX_RE = /^(?:dovecot:s*)?(?:lmtp|lda)([^)]*)((?:<[^>]*>)*)/i;
+// groups them; the session is the last <...> of the line's prefix
+// lmtp(user)<pid><session>, and lda(user) has none
+const MD_DOVECOT_PREFIX_RE = /^(?:dovecot:\s*)?(?:lmtp|lda)\(([^)]*)\)((?:<[^>]*>)*)/i;
+function mdDovecotSession(log) {
+    const ids = (String(log.message || '').trim().match(MD_DOVECOT_PREFIX_RE) || [])[2] || '';
+    const sessions = ids.match(/<[^>]*>/g) || [];
+    return sessions.length ? sessions[sessions.length - 1].slice(1, -1) : '';
+}
 function mdDeliveryVerdict(lines) {
     const marker = log => log.verdict === 'discarded' && MD_DISCARD_MARK_RE.test(String(log.message || ''));
     const definite = lines.filter(log => MD_DOVECOT_SEVERITY[log.verdict] !== undefined && !marker(log));
@@ -618,12 +624,12 @@ function mdDeliveryVerdict(lines) {
 }
 
 // A recipient's Dovecot verdict: each delivery resolved on its own, then the
-// most severe of them, so a store in one mailbox hides no discard in another
+// most severe of them, so a store in one delivery hides no discard in another,
+// in another mailbox or in a second delivery of the message to the same one
 function mdMailboxVerdict(lines) {
     const deliveries = new Map();
     lines.forEach(log => {
-        const session = (String(log.message || '').match(MD_DOVECOT_PREFIX_RE) || [])[1] || '';
-        const key = `${session}|${mdAddressKey(log.recipient)}`;
+        const key = `${mdDovecotSession(log)}|${mdAddressKey(log.recipient)}`;
         if (!deliveries.has(key)) deliveries.set(key, []);
         deliveries.get(key).push(log);
     });
