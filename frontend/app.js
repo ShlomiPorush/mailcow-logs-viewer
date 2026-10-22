@@ -2702,7 +2702,9 @@ function offerAlertUndo(receipt, message, undoName) {
 
 function offerAlertsRefresh(message) {
     showToast(message, 'warning', { duration: Infinity, action: { label: 'Refresh', ariaLabel: 'Refresh Needs attention', onAction: async () => {
+        // The next message takes the keyboard over from this one, whether it worked or not
         if (!(await loadDashboardSecurityAlerts())) offerAlertsRefresh('Needs attention could not be refreshed. Try again.');
+        else showToast('Needs attention is up to date', 'success');
     } } });
 }
 

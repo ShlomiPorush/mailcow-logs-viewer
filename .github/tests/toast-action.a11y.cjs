@@ -115,3 +115,18 @@ test('an action that takes time keeps its toast and the keyboard, and a failure 
     assert.equal(w.document.activeElement.textContent, 'Retry');
     assert.equal(w.document.getElementById('toast-notification').getAttribute('role'), 'alert');
 });
+
+test('an action still running holds its toast after the pointer and the keyboard leave it', async () => {
+    const w = page();
+    let finish;
+    w.showToast('Alert dismissed', 'success', { duration: 60, action: { label: 'Undo', onAction: () => new w.Promise(r => { finish = r; }) } });
+    const toast = w.document.getElementById('toast-notification');
+    toast.querySelector('.ui-toast-action').focus();
+    toast.querySelector('.ui-toast-action').click();
+    w.document.getElementById('row').focus();
+    await wait(2200);
+    assert.ok(toast.isConnected, 'still there while the action runs');
+    finish();
+    await wait(50);
+    assert.equal(toast.isConnected, false, 'gone once it is done');
+});

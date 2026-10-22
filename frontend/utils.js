@@ -677,9 +677,10 @@ function showToast(message, type = 'info', options = {}) {
         ${options.action ? `<button type="button" class="ui-btn ui-btn-sm ui-toast-action"${options.action.ariaLabel ? ` aria-label="${escapeHtml(options.action.ariaLabel)}"` : ''}>${escapeHtml(options.action.label)}</button>` : ''}
         <button type="button" onclick="this.parentElement.remove()" class="ui-icon-btn" title="Close" aria-label="Close">×</button>
     `;
+    // An action still running holds the toast like the pointer or the keyboard does
+    let busy = false;
     if (options.action) {
         const button = toast.querySelector('.ui-toast-action');
-        let busy = false;
         button.addEventListener('click', () => {
             if (busy) return;
             const result = options.action.onAction();
@@ -703,10 +704,12 @@ function showToast(message, type = 'info', options = {}) {
     let left = options.duration || 4000;
     let started = Date.now();
     let timer = null;
-    const hold = () => toast.matches(':hover') || toast.contains(document.activeElement);
+    const hold = () => busy || toast.matches(':hover') || toast.contains(document.activeElement);
     let fading = false;
     const fade = () => {
         if (!toast.parentElement) return;
+        // An action still running: the toast waits for it (its end removes the toast)
+        if (busy) { timer = null; return; }
         fading = true;
         toast.style.opacity = '0';
         toast.style.transition = 'opacity 0.3s';
