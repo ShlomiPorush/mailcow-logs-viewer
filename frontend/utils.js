@@ -1202,6 +1202,21 @@ document.addEventListener('keydown', event => {
     row.click();
 });
 
+// A click that ends selecting text in a row (a drag, a double or triple click on
+// a word, or Shift+click) leaves the row closed so the text can be copied: a
+// row's click handler asks uiRowHeld(event) first. A plain click, also on text
+// already selected, and Enter or Space (a click with no mouse, detail 0) still
+// open it.
+let uiRowPress = null;
+document.addEventListener('mousedown', event => { uiRowPress = { x: event.clientX, y: event.clientY }; }, true);
+function uiRowHeld(event) {
+    if (!event || !event.detail || !(event.currentTarget instanceof Element)) return false;
+    const selection = window.getSelection && window.getSelection();
+    if (!selection || !selection.rangeCount || !String(selection) || !selection.getRangeAt(0).intersectsNode(event.currentTarget)) return false;
+    const dragged = uiRowPress && Math.hypot(event.clientX - uiRowPress.x, event.clientY - uiRowPress.y) > 3;
+    return Boolean(dragged) || event.detail > 1 || event.shiftKey;
+}
+
 // Phones hide a list's header row, so a list without a sort control of its own
 // gets a Sort picker above it (data-phone-sort="off": the page has its own)
 let uiPhoneSortSeq = 0;

@@ -177,3 +177,73 @@ test('a row that opens on click opens on Enter and Space, and its own button kee
     key(w, row, 'a');
     assert.equal(w.opened, 2);
 });
+
+test('selecting text in a row leaves it closed; a plain click, a control inside and Enter still work', () => {
+    const w = page(`<p id="elsewhere">Other text</p>
+        <table><tbody><tr id="row" class="is-go" onclick="if (!uiRowHeld(event)) window.opened = (window.opened || 0) + 1"><td id="cell">mail.example.com</td><td><button type="button" id="inner" onclick="event.stopPropagation(); window.pressed = (window.pressed || 0) + 1">Edit</button></td></tr></tbody></table>
+        <div id="msg" class="ui-mrow" role="button" tabindex="0" data-row-open onclick="if (!uiRowHeld(event)) window.shown = (window.shown || 0) + 1"><span id="subject">Subject</span></div>`);
+    const d = w.document;
+    let pageClicks = 0;
+    d.addEventListener('click', () => { pageClicks++; });   // an outside-click closer, like a picker's
+    // A press at x, then the click at x2 (a drag when they differ); detail 2 is a double click
+    const gesture = (el, x, x2 = x, detail = 1) => {
+        el.dispatchEvent(new w.MouseEvent('mousedown', { bubbles: true, clientX: x, clientY: 5, detail }));
+        el.dispatchEvent(new w.MouseEvent('click', { bubbles: true, cancelable: true, clientX: x2, clientY: 5, detail }));
+    };
+    const select = el => { const range = d.createRange(); range.selectNodeContents(el); w.getSelection().removeAllRanges(); w.getSelection().addRange(range); };
+    const cell = d.getElementById('cell');
+    gesture(cell, 10);
+    assert.equal(w.opened, 1, 'a plain click opens the row');
+    select(cell);
+    gesture(cell, 10, 80);
+    assert.equal(w.opened, 1, 'a drag that selects text in the row opens nothing');
+    assert.equal(String(w.getSelection()), 'mail.example.com', 'the selection stays for copying');
+    assert.equal(pageClicks, 2, 'the held click still reaches the rest of the page');
+    gesture(cell, 20);
+    assert.equal(w.opened, 2, 'a plain click on text already selected opens the row');
+    gesture(cell, 10, 80);
+    assert.equal(w.opened, 2, 'dragging over the same text again opens nothing');
+    gesture(cell, 20, 20, 2);
+    assert.equal(w.opened, 2, 'a double click that selects a word opens nothing more');
+    select(cell);
+    cell.dispatchEvent(new w.MouseEvent('mousedown', { bubbles: true, clientX: 40, clientY: 5, detail: 1, shiftKey: true }));
+    cell.dispatchEvent(new w.MouseEvent('click', { bubbles: true, cancelable: true, clientX: 40, clientY: 5, detail: 1, shiftKey: true }));
+    assert.equal(w.opened, 2, 'Shift+click that extends a selection in the row opens nothing');
+    gesture(d.getElementById('inner'), 30, 90);
+    assert.equal(w.pressed, 1, 'a button inside keeps its click');
+    select(d.getElementById('subject'));
+    gesture(d.getElementById('subject'), 10, 80);
+    assert.equal(w.shown, undefined, 'a div row that opens on click is held too');
+    key(w, d.getElementById('msg'), 'Enter');
+    assert.equal(w.shown, 1, 'Enter opens the row even with text selected in it');
+    select(d.getElementById('elsewhere'));
+    gesture(cell, 10, 80);
+    assert.equal(w.opened, 3, 'a selection outside the row does not hold it');
+});
+
+test('every element that is not a control and opens on click asks uiRowHeld first', () => {
+    const dir = path.join(__dirname, '../../frontend');
+    const files = fs.readdirSync(dir).filter(f => f.endsWith('.js') || f.endsWith('.html'))
+        .map(f => ({ f, text: fs.readFileSync(path.join(dir, f), 'utf8') }));
+    const all = files.map(x => x.text).join('\n');
+    // Helpers a row hands its click to must ask too
+    const asks = name => {
+        const at = all.indexOf(`function ${name}(`);
+        return at >= 0 && all.slice(at, all.indexOf('\n}', at)).includes('uiRowHeld(event)');
+    };
+    // Handlers that only keep the click inside, or close a backdrop clicked itself, open nothing
+    const inert = /^(?:event\.stopPropagation\(\)|if \(event\.target === this\) \w+\(\)|if \(event\.target\.closest\('button'\)\) this\.hidePopover\(\))$/;
+    // Not rows: a Settings choice card is the control that picks, and a sheet's backdrop holds no text
+    const notRows = /^(?:settingsPickCard|uiSheetDismiss)\(/;
+    const missing = [];
+    for (const { f, text } of files) {
+        for (const m of text.matchAll(/<(div|tr|td|li|article|section|span)\b([^<>]*?)\bonclick="([^"]*)"/g)) {
+            const handler = m[3].trim();
+            if (/\bcopyable\b/.test(m[2]) || inert.test(handler) || notRows.test(handler) || handler.startsWith('if (!uiRowHeld(event))')) continue;
+            const helper = handler.match(/(\w+)\(event\b/);
+            if (helper && asks(helper[1])) continue;
+            missing.push(`${f}:${text.slice(0, m.index).split('\n').length} ${handler.slice(0, 60)}`);
+        }
+    }
+    assert.deepEqual(missing, []);
+});

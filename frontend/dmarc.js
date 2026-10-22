@@ -268,7 +268,7 @@ function renderDmarcHome() {
             <table class="ui-dm-tbl ui-dm-cards"><thead><tr><th>Domain</th><th>DMARC policy</th><th class="r">Messages</th><th class="r">Passed DMARC</th><th class="ui-dm-hm">TLS-RPT</th><th class="r ui-dm-hm">Encrypted</th><th class="r ui-dm-hm">Failing senders</th></tr></thead><tbody>
             ${domains.map(d => {
                 const s = d.stats_30d || {}, tls = d.tls_rpt_record || {};
-                return `<tr class="is-go" onclick="loadDomainOverview('${escapeJsArg(d.domain)}')"><td data-sort="${escapeHtml(d.domain)}"><button type="button" class="ui-dm-link">${escapeHtml(d.domain)}</button>${dmarcNotOnServer(d)}</td>
+                return `<tr class="is-go" onclick="if (!uiRowHeld(event)) loadDomainOverview('${escapeJsArg(d.domain)}')"><td data-sort="${escapeHtml(d.domain)}"><button type="button" class="ui-dm-link">${escapeHtml(d.domain)}</button>${dmarcNotOnServer(d)}</td>
                     <td data-label="DMARC policy">${dmarcDomainPolicyTag(d)}</td><td class="r ui-num" data-label="Messages">${d.has_dmarc ? dmarcNum(s.total_messages) : '<span class="ui-muted">-</span>'}</td>
                     <td class="r" data-label="Passed DMARC">${dmarcRate(s.dmarc_pass_pct, d.has_dmarc && s.total_messages)}</td>
                     <td class="ui-dm-hm" data-label="TLS-RPT">${!tls.checked ? dmarcTag('mut', 'Not checked') : tls.found ? dmarcTag('ok', 'Published') : dmarcTag('warn', 'Missing')}</td>
@@ -495,7 +495,7 @@ function dmarcSendersCard(x) {
     const name = escapeJsArg(x.name);
     return `<div class="ui-dm-card"><header>Senders <span class="ui-count">${x.groups.length}</span></header>
         <table class="ui-dm-tbl"><thead><tr><th>Sender</th><th class="r">Messages</th><th class="r">Passed DMARC</th><th class="r ui-dm-hm">SPF aligned</th><th class="r ui-dm-hm">DKIM aligned</th><th class="r ui-dm-hm">Addresses</th></tr></thead><tbody>
-        ${x.groups.map(g => `<tr class="is-go" onclick="loadSourceDetails('${name}', '${escapeJsArg(g.ips[0].source_ip)}')"><td><button type="button" class="ui-dm-link">${escapeHtml(g.name)}</button>${g.place ? `<small class="ui-dm-sub">${escapeHtml(g.place)}</small>` : ''}</td>
+        ${x.groups.map(g => `<tr class="is-go" onclick="if (!uiRowHeld(event)) loadSourceDetails('${name}', '${escapeJsArg(g.ips[0].source_ip)}')"><td><button type="button" class="ui-dm-link">${escapeHtml(g.name)}</button>${g.place ? `<small class="ui-dm-sub">${escapeHtml(g.place)}</small>` : ''}</td>
             <td class="r ui-num">${dmarcNum(g.total)}</td><td class="r">${dmarcRate(g.passPct, g.total)}</td>
             <td class="r ui-dm-hm">${dmarcRate(g.spfPct, g.total)}</td><td class="r ui-dm-hm">${dmarcRate(g.dkimPct, g.total)}</td><td class="r ui-dm-hm">${g.ips.length}</td></tr>`).join('')}</tbody></table></div>`;
 }
@@ -507,7 +507,7 @@ function dmarcDaysCard(x) {
     const open = dmarcState.daysOpen ?? !window.matchMedia('(max-width: 760px)').matches;
     return `<details class="ui-dm-card ui-dm-fold"${open ? ' open' : ''} ontoggle="dmarcState.daysOpen = this.open"><summary>Daily reports <span class="ui-count">${x.days.length}</span></summary>
         <table class="ui-dm-tbl"><thead><tr><th>Day</th><th class="r">Messages</th><th class="r ui-dm-hm">Senders</th><th class="ui-dm-hm">Reported by</th><th class="r">Passed DMARC</th></tr></thead><tbody>
-        ${x.days.map(r => `<tr class="is-go" onclick="loadReportDetails('${name}', '${escapeJsArg(r.date)}')"><td><button type="button" class="ui-dm-link">${dmarcDay(r.date)}</button></td>
+        ${x.days.map(r => `<tr class="is-go" onclick="if (!uiRowHeld(event)) loadReportDetails('${name}', '${escapeJsArg(r.date)}')"><td><button type="button" class="ui-dm-link">${dmarcDay(r.date)}</button></td>
             <td class="r ui-num">${dmarcNum(r.total_messages)}</td><td class="r ui-dm-hm">${dmarcNum(r.unique_ips)}</td><td class="ui-dm-hm ui-muted">${escapeHtml((r.reporters || []).join(', '))}</td>
             <td class="r">${dmarcRate(r.dmarc_pass_pct, r.total_messages)}</td></tr>`).join('')}</tbody></table></details>`;
 }
@@ -712,7 +712,7 @@ function dmarcAuthRecord(x, kind) {
     return `<p class="ui-dm-lead"><b class="ui-text-${dmarcTone(pct)}">${lead}</b> in the last 30 days.</p>
         <p class="ui-dm-note">${note}</p>
         <table class="ui-dm-tbl"><thead><tr><th>Sender</th><th class="r">Messages</th><th class="r">${label} aligned</th></tr></thead><tbody>
-        ${groups.map(g => `<tr class="is-go" onclick="closeDmarcRecordModal(); loadSourceDetails('${name}', '${escapeJsArg(g.ips[0].source_ip)}')"><td><button type="button" class="ui-dm-link">${escapeHtml(g.name)}</button>${g.place ? `<small class="ui-dm-sub">${escapeHtml(g.place)}</small>` : ''}</td>
+        ${groups.map(g => `<tr class="is-go" onclick="if (!uiRowHeld(event)) { closeDmarcRecordModal(); loadSourceDetails('${name}', '${escapeJsArg(g.ips[0].source_ip)}'); }"><td><button type="button" class="ui-dm-link">${escapeHtml(g.name)}</button>${g.place ? `<small class="ui-dm-sub">${escapeHtml(g.place)}</small>` : ''}</td>
             <td class="r ui-num">${dmarcNum(g.total)}</td><td class="r">${dmarcRate(g[field], g.total)}</td></tr>`).join('')}</tbody></table>`;
 }
 
@@ -733,7 +733,7 @@ function dmarcTlsRecord(x) {
 // On a phone a detail table is a list: the name and its count on one line, then the
 // details and the results as tags. Wide screens keep the table.
 function dmarcMRow({ title, count, sub = '', tags = '', note = '', action = '' }) {
-    return `<div class="ui-dm-mrow${action ? ' is-go' : ''}"${action ? ` onclick="${action}"` : ''}>
+    return `<div class="ui-dm-mrow${action ? ' is-go' : ''}"${action ? ` onclick="if (!uiRowHeld(event)) { ${action} }"` : ''}>
         <div class="ui-dm-mrow-top">${title}<span class="ui-dm-mrow-n">${count}</span></div>
         ${sub ? `<div class="ui-dm-mrow-sub">${sub}</div>` : ''}
         ${tags ? `<div class="ui-dm-mrow-tags">${tags}</div>` : ''}${note ? `<small class="ui-dm-mrow-note">${note}</small>` : ''}
@@ -823,7 +823,7 @@ async function loadReportDetails(domain, reportDate, updateUrl = true) {
                 note: s.reporter ? `Reported by ${escapeHtml(s.reporter)}` : '',
                 action: `loadSourceDetails('${name}', '${escapeJsArg(s.source_ip)}')` })).join('')}</div>
             <table class="ui-dm-tbl ui-dm-tbl-wide"><thead><tr><th>Sender</th><th class="ui-dm-hm">Address</th><th class="ui-dm-hm">Envelope from</th><th class="r">Messages</th><th class="r">Passed DMARC</th><th class="r ui-dm-hm">SPF</th><th class="r ui-dm-hm">DKIM</th><th class="ui-dm-hm">Reported by</th></tr></thead><tbody>
-            ${(r.sources || []).map(s => `<tr class="is-go" onclick="loadSourceDetails('${name}', '${escapeJsArg(s.source_ip)}')"><td><button type="button" class="ui-dm-link">${escapeHtml(sender(s))}</button></td>
+            ${(r.sources || []).map(s => `<tr class="is-go" onclick="if (!uiRowHeld(event)) loadSourceDetails('${name}', '${escapeJsArg(s.source_ip)}')"><td><button type="button" class="ui-dm-link">${escapeHtml(sender(s))}</button></td>
                 <td class="ui-dm-hm ui-mono">${escapeHtml(s.source_ip)}</td><td class="ui-dm-hm">${escapeHtml(s.envelope_from || '-')}</td><td class="r ui-num">${dmarcNum(s.volume)}</td>
                 <td class="r">${dmarcRate(s.dmarc_pass_pct, s.volume)}</td><td class="r ui-dm-hm">${dmarcRate(s.spf_pass_pct, s.volume)}</td>
                 <td class="r ui-dm-hm">${dmarcRate(s.dkim_pass_pct, s.volume)}</td><td class="ui-dm-hm ui-muted">${escapeHtml(s.reporter || '-')}</td></tr>`).join('')}</tbody></table></div>

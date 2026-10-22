@@ -117,7 +117,7 @@ function renderRspamdMapsList(maps, rwKeyConfigured) {
                         // Use our metadata description, not the rspamd technical description
                         const displayDesc = _getMapMetaDescription(m.filename) || m.description || '';
                         return `
-                        <div class="ui-tr" role="button" tabindex="0" data-row-open onclick="openMapEditor('${escapeJsArg(m.filename)}')">
+                        <div class="ui-tr" role="button" tabindex="0" data-row-open onclick="if (!uiRowHeld(event)) openMapEditor('${escapeJsArg(m.filename)}')">
                             <div class="ui-td ui-q-who">
                                 <div>${escapeHtml(m.name)} ${m.managed_by_suppression ? uiTag('Auto-managed', 'info') : ''}</div>
                                 <small title="${escapeHtml(displayDesc)}">${escapeHtml(displayDesc)}</small>
