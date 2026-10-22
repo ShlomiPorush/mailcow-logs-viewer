@@ -225,6 +225,9 @@ test('one recipient keeps its strip and error box, with no recipient list', asyn
     assert.match(logs, /Delivery Error/);
     assert.doesNotMatch(logs, /id="md-rcpts"/);
     assert.doesNotMatch(h.element('message-modal-header').innerHTML, /All \d+ recipients/);
+    // The sender shows; the queue ID stays in Overview only
+    assert.match(logs, /sender@example\.com/);
+    assert.doesNotMatch(logs, /Queue ID/);
 });
 
 test('a recipient address from the logs is text, and its row opens it by position', async () => {

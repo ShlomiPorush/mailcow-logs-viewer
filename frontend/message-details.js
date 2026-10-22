@@ -980,12 +980,11 @@ function renderPostfixTab(content, data) {
 
     // Extract key information from logs
     let sender = null, clientIp = null, relay = null;
-    let messageId = null, finalStatus = null, totalDelay = null, queueId = null;
+    let messageId = null, finalStatus = null, totalDelay = null;
     let errorReasons = [];
     let recipientsFromPostfix = new Set(); // Collect all unique recipients from Postfix logs
 
     data.postfix.forEach(log => {
-        if (log.queue_id && !queueId) queueId = log.queue_id;
         if (log.sender && !sender) sender = log.sender;
         if (log.relay && !relay) relay = log.relay;
         if (log.message_id && !messageId) messageId = log.message_id;
@@ -1025,9 +1024,8 @@ function renderPostfixTab(content, data) {
         }
     });
 
-    // Postfix's lines carry neither; the message has both
+    // Postfix's lines do not carry the sender; the message does
     sender = sender || data.sender || null;
-    queueId = queueId || data.queue_id || null;
 
     // A message to many lists its recipients with their outcome and reason, so
     // the strip and the error box speak for a single recipient only
@@ -1084,9 +1082,8 @@ function renderPostfixTab(content, data) {
         sender ? mdFact('From', `<span title="${escapeHtml(sender)}">${copyableText(sender)}</span>`) : '',
         toFact,
         finalStatus && !many ? mdFact('Final Status', uiStatusTag(finalStatus)) : '',
-        queueId ? mdFact('Queue ID', `<span class="ui-mono">${copyableText(queueId)}</span>`) : '',
         clientIp ? mdFact('Client IP', `<span class="ui-mono">${copyableText(clientIp)}</span>`) : '',
-        relay && !many ? mdFact('Relay', `<span class="ui-mono" title="${escapeHtml(relay)}">${escapeHtml(relay)}</span>`) : '',
+        relay && !many ? mdFact('Relay', `<span class="ui-mono ui-md-relay" title="${escapeHtml(relay)}">${escapeHtml(relay)}</span>`) : '',
     ].join('');
 
     content.innerHTML = `
