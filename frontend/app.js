@@ -2188,7 +2188,12 @@ async function loadDashboardAttention() {
 // 30 days in bars cut at the app's own hours, quarters of the day and days;
 // the four figures over the period, with the period before it under them, or
 // those of one bar picked on the chart. The chart zooms in time (uiTimeZoom):
-// a zoomed span asks the server again, in shorter bars as it narrows.
+// a zoomed span asks the server again, in shorter bars as it narrows. A strip
+// under it (uiTimeOverview) shows the whole period with the span shown.
+// Two loaders: the period's own answer (its figures, the strip, the limits)
+// and the zoomed span's. One view revision tells both whether an answer still
+// belongs to what is shown: a change of period or of zoom makes an answer
+// asked before it stale, and it is dropped.
 const DASH_PERIODS = {
     '24h': { name: '24 hours', last: 'last 24 hours', all: 'All 24 hours' },
     '7d': { name: '7 days', last: 'last 7 days', all: 'All 7 days' },
@@ -2197,11 +2202,16 @@ const DASH_PERIODS = {
 const dashFlow = {
     period: '24h',
     data: null,      // the bars and totals shown
+    full: null,      // the period's own answer (the strip draws it, zoomed or not)
     prev: null,      // the period before (no zoom)
     limits: null,    // the period's span: how far the chart zooms out and moves
     zoom: null,      // { from, to } (ms), a span inside the period
     pick: null,      // a bar's start (ms)
-    gen: 0, control: null, loadedAt: 0, zoomer: null, previewing: false,
+    view: 0,         // the view revision: up one at every change of period or zoom
+    periodGen: 0, periodControl: null, zoomGen: 0, zoomControl: null,
+    loadedAt: 0, zoomer: null, overview: null, previewing: false,
+    stale: false,    // an answer was set aside under a gesture: ask again when it ends
+    dataView: -1,    // the view revision the chart shows
     failed: false,   // the last load failed: the next refresh tries again, zoomed or not
 };
 
@@ -2228,6 +2238,8 @@ function setDashFlowPeriod(period) {
     dashFlow.period = period;
     dashFlow.zoom = null;
     dashFlow.pick = null;
+    dashFlow.full = null;
+    dashFlow.view++;
     document.querySelectorAll('#dashboard-flow-period button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.period === period)));
     loadMailFlowChart();
 }
@@ -2270,67 +2282,177 @@ function dashFlowZoom(span) {
     // Zoomed all the way out is no zoom
     dashFlow.zoom = !span || (l && span.from <= l.from + 1 && span.to >= l.to - 1) ? null : { from: span.from, to: span.to };
     dashFlow.pick = null;
+    dashFlow.view++;
+    dashFlow.stale = false;
+    // Back to the whole period: its answer is here already
+    if (!dashFlow.zoom && dashFlow.full) {
+        dashFlow.zoomGen++;
+        if (dashFlow.zoomControl) dashFlow.zoomControl.abort();
+        dashFlow.data = dashFlow.full;
+        dashFlow.failed = false;
+        renderMailFlowChart();
+        return;
+    }
     loadMailFlowChart();
 }
 
-async function loadMailFlowChart() {
+// A gesture on the chart or a drag on the strip is on: nothing is redrawn under it
+function mailFlowBusy() {
+    return dashFlow.previewing || !!(dashFlow.overview && dashFlow.overview.busy());
+}
+
+// A gesture or a strip drag ended with no new span: what was set aside under it is asked for now
+function mailFlowSettle() {
+    if (dashFlow.stale && !mailFlowBusy()) loadMailFlowChart();
+}
+
+function mailFlowGet(query, control) {
+    return authenticatedFetch(`/api/stats/flow?${query}`, control ? { signal: control.signal } : {}).then(res => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.json();
+    });
+}
+
+function mailFlowFailed() {
+    const chart = document.getElementById('dashboard-flow-chart');
+    if (!chart) return;
+    dashFlow.failed = true;
+    const failed = '<p class="ui-empty ui-text-fail ui-flow-failed">Could not load the mail flow. It tries again on the next refresh.</p>';
+    // In the chart's own frame, so the panel keeps its size; no gesture outlives the chart it was on
+    if (dashFlow.zoomer) { dashFlow.zoomer.destroy(); dashFlow.zoomer = null; }
+    dashFlow.previewing = false;
+    const view = chart.querySelector('.ui-flow-view');
+    if (view) view.innerHTML = failed;
+    else chart.innerHTML = mailFlowFrame(failed);
+}
+
+function loadMailFlowChart() {
     const chart = document.getElementById('dashboard-flow-chart');
     if (!chart) return;
     // A gesture is on: it asks again when it ends
-    if (dashFlow.previewing) return;
+    if (mailFlowBusy()) return;
+    dashFlow.stale = false;
     // Before the first answer: the chart's whole frame, so the panel has its size from the start
     if (!chart.querySelector('.ui-flow-view')) chart.innerHTML = mailFlowFrame('<p class="ui-empty ui-flow-failed" role="status">Loading...</p>');
-    const gen = ++dashFlow.gen;
-    if (dashFlow.control) dashFlow.control.abort();
+    if (dashFlow.zoom && dashFlow.full) loadMailFlowZoom();
+    else loadMailFlowPeriod();
+}
+
+// The period's own answer and the period before: the figures with no zoom, the
+// strip and the limits. Zoomed, only the strip and the limits follow it: the
+// zoom stays where it is, kept inside the new limits (dropped if nothing is left).
+async function loadMailFlowPeriod() {
+    const gen = ++dashFlow.periodGen;
+    if (dashFlow.periodControl) dashFlow.periodControl.abort();
     const control = typeof AbortController === 'function' ? new AbortController() : null;
-    dashFlow.control = control;
-    const z = dashFlow.zoom;
-    const iso = t => new Date(t).toISOString();
-    const url = z ? `/api/stats/flow?from=${iso(z.from)}&to=${iso(z.to)}&bucket=${mailFlowBucketFor(z.to - z.from)}`
-        : `/api/stats/flow?period=${dashFlow.period}`;
-    const get = async u => {
-        const res = await authenticatedFetch(u, control ? { signal: control.signal } : {});
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        return res.json();
-    };
+    dashFlow.periodControl = control;
+    const period = dashFlow.period;
     try {
-        const [data, prev] = await Promise.all([get(url), z ? Promise.resolve(dashFlow.prev) : get(`/api/stats/flow?period=${dashFlow.period}&previous=true`)]);
-        if (gen !== dashFlow.gen || dashFlow.previewing) return;
-        dashFlow.data = data;
+        const [data, prev] = await Promise.all([mailFlowGet(`period=${period}`, control), mailFlowGet(`period=${period}&previous=true`, control)]);
+        if (gen !== dashFlow.periodGen || period !== dashFlow.period) return;
+        dashFlow.full = data;
         dashFlow.prev = prev;
         dashFlow.loadedAt = Date.now();
-        dashFlow.failed = false;
-        if (!z) dashFlow.limits = { from: Date.parse(data.from), to: Date.parse(data.to), min: 3600000 };
-        else {
-            // The server widens a span to whole bars: the zoom is what it shows,
-            // so the buttons and the next gesture start from there
-            dashFlow.zoom = { from: Date.parse(data.from), to: Date.parse(data.to) };
-            const l = dashFlow.limits;
-            if (l) dashFlow.limits = { ...l, to: Math.max(l.to, dashFlow.zoom.to) };
-            // Snapped out to the whole period: that is no zoom (the period before and the refresh come back)
-            if (l && dashFlow.zoom.from <= l.from + 1 && dashFlow.zoom.to >= l.to - 1) dashFlow.zoom = null;
+        dashFlow.limits = { from: Date.parse(data.from), to: Date.parse(data.to), min: 3600000 };
+        if (!dashFlow.zoom) {
+            // A gesture is on: the answer waits in full; the gesture's end draws (or asks again)
+            if (mailFlowBusy()) { dashFlow.stale = true; return; }
+            dashFlow.data = data;
+            dashFlow.failed = false;
+            renderMailFlowChart();
+            return;
         }
-        renderMailFlowChart();
+        const l = dashFlow.limits, z = dashFlow.zoom;
+        const from = Math.max(z.from, l.from), to = Math.min(z.to, l.to);
+        const moved = from !== z.from || to !== z.to;
+        if (mailFlowBusy()) {
+            // Under a gesture the zoom still moves inside the new limits; its end asks for it
+            if (moved) { dashFlow.zoom = to - from >= l.min ? { from, to } : null; dashFlow.view++; }
+            dashFlow.stale = true;
+            return;
+        }
+        if (moved) { dashFlowZoom(to - from >= l.min ? { from, to } : null); return; }
+        // A zoom made before this period's answer came (a period switch, then Zoom in): its own answer now
+        if (dashFlow.dataView !== dashFlow.view) { loadMailFlowZoom(); return; }
+        renderMailFlowOverview(true);
     } catch (error) {
-        if (gen !== dashFlow.gen || (error && error.name === 'AbortError')) return;
-        dashFlow.failed = true;
-        const failed = '<p class="ui-empty ui-text-fail ui-flow-failed">Could not load the mail flow. It tries again on the next refresh.</p>';
-        // In the chart's own frame, so the panel keeps its size
-        if (dashFlow.zoomer) { dashFlow.zoomer.destroy(); dashFlow.zoomer = null; }
-        const view = chart.querySelector('.ui-flow-view');
-        if (view) view.innerHTML = failed;
-        else chart.innerHTML = mailFlowFrame(failed);
+        if (gen !== dashFlow.periodGen || (error && error.name === 'AbortError')) return;
+        // Under a gesture nothing is drawn: the gesture's end asks again
+        if (mailFlowBusy()) { dashFlow.failed = true; dashFlow.stale = true; return; }
+        // Zoomed, the strip keeps its last picture; the next refresh tries again
+        if (!dashFlow.zoom) mailFlowFailed();
     }
 }
 
-// The auto refresh: the current period every minute for 24 hours, every five
-// minutes for longer ones; a zoomed chart is left as it is, unless it failed to load
+// The zoomed span, in bars as short as it allows; the zoom becomes what the
+// server shows (it snaps to the nearest bar edges)
+async function loadMailFlowZoom() {
+    const z = dashFlow.zoom, view = dashFlow.view;
+    const gen = ++dashFlow.zoomGen;
+    if (dashFlow.zoomControl) dashFlow.zoomControl.abort();
+    const control = typeof AbortController === 'function' ? new AbortController() : null;
+    dashFlow.zoomControl = control;
+    const iso = t => new Date(t).toISOString();
+    try {
+        const data = await mailFlowGet(`from=${iso(z.from)}&to=${iso(z.to)}&bucket=${mailFlowBucketFor(z.to - z.from)}`, control);
+        if (gen !== dashFlow.zoomGen || view !== dashFlow.view) return;
+        if (mailFlowBusy()) { dashFlow.stale = true; return; }
+        dashFlow.data = data;
+        dashFlow.failed = false;
+        dashFlow.zoom = { from: Date.parse(data.from), to: Date.parse(data.to) };
+        const l = dashFlow.limits;
+        if (l) dashFlow.limits = { ...l, to: Math.max(l.to, dashFlow.zoom.to) };
+        // Snapped out to the whole period: that is no zoom (the period before and the refresh come back)
+        if (l && dashFlow.zoom.from <= l.from + 1 && dashFlow.zoom.to >= l.to - 1) dashFlow.zoom = null;
+        renderMailFlowChart();
+    } catch (error) {
+        if (gen !== dashFlow.zoomGen || view !== dashFlow.view || (error && error.name === 'AbortError')) return;
+        if (mailFlowBusy()) { dashFlow.failed = true; dashFlow.stale = true; return; }
+        mailFlowFailed();
+    }
+}
+
+// The auto refresh: the period every minute for 24 hours, every five minutes
+// for longer ones; zoomed, it refreshes the strip and leaves the zoom as it is
 function refreshMailFlowChart() {
-    if (dashFlow.previewing) return;
+    if (mailFlowBusy()) return;
     if (dashFlow.failed) { loadMailFlowChart(); return; }
-    if (dashFlow.zoom) return;
     const every = dashFlow.period === '24h' ? 60000 : 300000;
-    if (Date.now() - dashFlow.loadedAt >= every) loadMailFlowChart();
+    if (Date.now() - dashFlow.loadedAt >= every) loadMailFlowPeriod();
+}
+
+// The strip under the chart: the whole period, a window over the span shown.
+// alone: only the strip is drawn again (the zoomed chart stays), the focus kept
+function renderMailFlowOverview(alone = false) {
+    const strip = document.querySelector('#dashboard-flow-chart .ui-ov');
+    if (!strip) return;
+    const draw = () => {
+        if (dashFlow.overview) { dashFlow.overview.destroy(); dashFlow.overview = null; }
+        const full = dashFlow.full, l = dashFlow.limits;
+        if (!full || !l) { strip.innerHTML = ''; return; }
+        const bars = full.buckets.map(b => ({ s: Date.parse(b.start), e: Date.parse(b.end), v: b.clean + b.spam }));
+        const max = Math.max(1, ...bars.map(b => b.v));
+        const kept = full.kept_from ? Date.parse(full.kept_from) : null;
+        const i = kept === null ? -1 : bars.findIndex(b => kept < b.e);
+        const gone = kept === null || kept <= l.from ? 0 : i < 0 ? 1 : (i + Math.max(0, kept - bars[i].s) / (bars[i].e - bars[i].s)) / bars.length;
+        strip.innerHTML = `<div class="ui-ov-bars" aria-hidden="true">${bars.map(b => `<i style="height:${Math.max(6, b.v / max * 100)}%"></i>`).join('')}</div>`
+            + (gone ? `<div class="ui-ov-gone" style="width:${gone * 100}%" aria-hidden="true"></div>` : '');
+        const edges = bars.map(b => b.s).concat(l.to);
+        const big = dashFlow.period === '24h' ? 6 * 3600000 : dashFlow.period === '7d' ? 86400000 : 7 * 86400000;
+        dashFlow.overview = uiTimeOverview(strip, {
+            limits: () => dashFlow.limits,
+            span: () => dashFlow.zoom || dashFlow.limits,
+            snap: uiNearestLocalHour,
+            // One step is one bar of the strip; a big step is six hours on 24 hours, a day on 7 days, a week on 30 days
+            step: (t, dir, isBig) => (isBig ? t + dir * big
+                : dir > 0 ? (edges.find(e => e > t + 1) ?? l.to) : ([...edges].reverse().find(e => e < t - 1) ?? l.from)),
+            label: t => `${formatDay(t)}, ${mailFlowHour(t)}`,
+            change: span => dashFlowZoom(span),
+            idle: mailFlowSettle,
+        });
+    };
+    if (alone) uiRedrawKeepingFocus(strip, draw);
+    else draw();
 }
 
 // The foot under the chart: the legend, the zoom buttons and the actions, all
@@ -2355,7 +2477,7 @@ function mailFlowFoot(can) {
 
 // The chart's frame with a line in place of the bars (loading, or a first load that failed)
 function mailFlowFrame(inner) {
-    return `<div class="ui-flow-view">${inner}</div><div class="ui-flow-axis" aria-hidden="true"></div>${mailFlowFoot({})}`;
+    return `<div class="ui-flow-view">${inner}</div><div class="ui-flow-axis" aria-hidden="true"></div><div class="ui-ov" data-zoom></div>${mailFlowFoot({})}`;
 }
 
 function renderMailFlowChart() {
@@ -2375,6 +2497,7 @@ function renderMailFlowChart() {
         return (n <= 10 || (i % 5 === 0 && i < n - 5)) ? `<span class="is-major">${escapeHtml(formatDayMonth(b.s))}</span>` : '<span></span>';
     };
     const zoomed = !!dashFlow.zoom;
+    dashFlow.dataView = dashFlow.view;
     const shown = { from: Date.parse(d.from), to: Date.parse(d.to) };
     // The part older than the logs kept (retention): shaded, so empty bars there do not read as quiet
     const kept = d.kept_from ? Date.parse(d.kept_from) : null;
@@ -2396,7 +2519,9 @@ function renderMailFlowChart() {
             <div class="ui-flow-band hidden" aria-hidden="true"></div>
         </div>
         <div class="ui-flow-axis" aria-hidden="true">${bars.map(label).join('')}</div>
-        ${mailFlowFoot({ zoomed, earlier: zoomed && shown.from > dashFlow.limits.from, out: zoomed, in: shown.to - shown.from > dashFlow.limits.min, later: zoomed && shown.to < dashFlow.limits.to, view: true })}`; });
+        <div class="ui-ov" data-zoom role="group" aria-label="The whole period, with the span shown"></div>
+        ${mailFlowFoot({ zoomed, earlier: zoomed && shown.from > dashFlow.limits.from, out: zoomed, in: shown.to - shown.from > dashFlow.limits.min, later: zoomed && shown.to < dashFlow.limits.to, view: true })}`;
+        renderMailFlowOverview(); });
     const box = chart.querySelector('.ui-flow-bars');
     const view = chart.querySelector('.ui-flow-view');
     const band = chart.querySelector('.ui-flow-band');
@@ -2408,8 +2533,8 @@ function renderMailFlowChart() {
             if (!dashFlow.previewing) {
                 // The gesture is on: an answer still on its way is set aside
                 dashFlow.previewing = true;
-                if (dashFlow.control) dashFlow.control.abort();
-                dashFlow.gen++;
+                if (dashFlow.zoomControl) dashFlow.zoomControl.abort();
+                dashFlow.zoomGen++;
             }
             if (kind === 'select') {
                 const r = view.getBoundingClientRect();
