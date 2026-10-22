@@ -334,6 +334,8 @@
 .ui-select-btn { display: flex; align-items: center; gap: 8px; text-align: start; cursor: pointer; }
 .ui-select-btn > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ui-select-btn svg { flex: none; color: var(--ui-muted); }
+/* The Time Zone picker's button: the zone's offset from UTC after its name */
+.ui-select-btn .ui-zone-offset { margin-inline-start: 4px; color: var(--ui-muted); font-size: inherit; font-variant-numeric: tabular-nums; }
 .ui-select-arrow { transition: transform .15s ease; }
 .ui-chip-row { display: flex; flex-wrap: wrap; gap: 6px; }
 .ui-date-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }

@@ -334,7 +334,7 @@ const zoneOption = (selected, value, text) => new RegExp(literal(
 test('the Time Zone setting is a searchable list of IANA zones under Application', () => {
     const html = settingsField('Europe/Berlin');
     assert.match(html, /<span class="ui-label" id="label-tz">Time Zone/);
-    assert.match(html, /<button type="button" class="ui-select ui-select-btn ui-picker-btn" aria-haspopup="dialog" aria-expanded="false" aria-controls="settings-tz-panel" aria-labelledby="label-tz"><span>Europe\/Berlin<\/span>/);
+    assert.match(html, /<button type="button" class="ui-select ui-select-btn ui-picker-btn" aria-haspopup="dialog" aria-expanded="false" aria-controls="settings-tz-panel" aria-labelledby="label-tz"><span>Europe\/Berlin <small class="ui-zone-offset">UTC\+0[12]:00<\/small><\/span>/);
     assert.match(html, /<input type="search" class="ui-input ui-picker-search" placeholder="Search time zones"/);
     assert.match(html, /<input type="hidden" id="edit-tz" name="tz" value="Europe\/Berlin" data-saved="Europe\/Berlin">/);
     assert.match(html, zoneOption(true, 'Europe/Berlin', 'Europe/Berlin'));
@@ -356,7 +356,24 @@ test('with no zone set the Time Zone field shows UTC, said once', () => {
         assert.doesNotMatch(html, /Changed|Reset to default/);
     }
     assert.match(settingsField(''), zoneOption(true, '', 'Not set (UTC)'));
-    assert.match(settingsField(''), /<span>Not set \(UTC\)<\/span><svg/);
+    assert.match(settingsField(''), /<span>Not set \(UTC\) <small class="ui-zone-offset">UTC\+00:00<\/small><\/span><svg/);
+});
+
+test('every zone shows how far its clock is from UTC', () => {
+    // Zones without daylight saving, so the offsets hold all year
+    const c = load(['settings.js']);
+    for (const [zone, offset] of [['', 'UTC+00:00'], ['UTC', 'UTC+00:00'], ['Asia/Kolkata', 'UTC+05:30'], ['Asia/Kathmandu', 'UTC+05:45'], ['America/Bogota', 'UTC-05:00']]) {
+        assert.equal(c.settingsZoneOffset(zone), offset, zone);
+    }
+    // On the button after the name, and at the end of each option
+    const html = settingsField('Asia/Kolkata');
+    assert.match(html, /<span>Asia\/Kolkata <small class="ui-zone-offset">UTC\+05:30<\/small><\/span>/);
+    for (const [zone, offset] of [['', 'UTC+00:00'], ['UTC', 'UTC+00:00'], ['Asia/Kolkata', 'UTC+05:30'], ['America/Bogota', 'UTC-05:00']]) {
+        assert.match(html, new RegExp(literal(`data-value="${zone}" onclick="settingsPickZone(this)"><span>`) + '[^<]*' + literal(`</span><small>${offset}</small>`)));
+    }
+    // A name the browser does not know has no offset to show
+    assert.equal(c.settingsZoneOffset('Europe/Berlinn'), '');
+    assert.match(settingsField('Europe/Berlinn'), /<span>Europe\/Berlinn<\/span><svg/);
 });
 
 test('the time zone search finds a zone by its words', () => {
