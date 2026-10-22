@@ -2013,6 +2013,7 @@ const ATTENTION_CHECKS = ['connection', 'blocklist', 'containers', 'fail2ban', '
 const ATTENTION_FAILED = { failed: true };
 const attention = {
     ready: false, // the refresh starts once the app's features are known
+    timeout: 20000, // a read without an answer by then has failed
     // ok: null before the first answer, then whether the last one came
     alerts: { seq: 0, busy: null, latest: null, at: 0, ok: null, list: [], total: 0, critical: 0 },
     // ok and items per check
@@ -2040,17 +2041,29 @@ function attentionLoad(state, force, read) {
     return run;
 }
 
+// One read of a source's answer. A read that has not answered in 20 seconds has
+// failed, so a request that hangs never holds the refresh that comes after it
+function attentionRead(url) {
+    return Promise.race([
+        (async () => {
+            try {
+                const res = await authenticatedFetch(url);
+                return res.ok ? await res.json() : ATTENTION_FAILED;
+            } catch (e) {
+                console.warn(`Needs attention could not read ${url}:`, e);
+                return ATTENTION_FAILED;
+            }
+        })(),
+        new Promise(resolve => setTimeout(() => resolve(ATTENTION_FAILED), attention.timeout)),
+    ]);
+}
+
 // The open security alerts (anomaly detection); true when the list was read
 function loadDashboardSecurityAlerts({ force = true } = {}) {
     const s = attention.alerts;
     return attentionLoad(s, force, async () => {
-        let data = null;
-        try {
-            const response = await authenticatedFetch('/api/security-alerts?acknowledged=false&limit=20');
-            if (response.ok) data = await response.json();
-        } catch (e) {
-            console.warn('Failed to load security alerts:', e);
-        }
+        const read = await attentionRead('/api/security-alerts?acknowledged=false&limit=20');
+        const data = read === ATTENTION_FAILED ? null : read;
         return () => {
             s.at = Date.now();
             // A failed read keeps the alerts the last one had
@@ -2285,24 +2298,13 @@ function attentionCheckItems(key, data) {
 }
 
 // The server checks; a check whose read fails keeps the items it had and is
-// tried again in a minute. A read that does not answer in 20 seconds has failed;
-// so has a blocklist check that ended in an error, and container counts read
-// without an answer from mailcow
+// tried again in a minute. A blocklist check that ended in an error has failed
+// too, and so have container counts read without an answer from mailcow
 function loadDashboardAttention({ force = true } = {}) {
     const s = attention.checks;
     return attentionLoad(s, force, async () => {
         const off = feature => (window.disabledFeatures || []).includes(feature);
-        const get = url => Promise.race([
-            (async () => {
-                try {
-                    const res = await authenticatedFetch(url);
-                    return res.ok ? await res.json() : ATTENTION_FAILED;
-                } catch (e) {
-                    return ATTENTION_FAILED;
-                }
-            })(),
-            new Promise(resolve => setTimeout(() => resolve(ATTENTION_FAILED), 20000)),
-        ]);
+        const get = attentionRead;
         const [blocklistRead, summary, dmarc, appVersion, mailcowVersion, connection, fail2ban] = await Promise.all([
             off('blacklist') ? null : get('/api/blacklist/summary'),
             get('/api/status/summary'),

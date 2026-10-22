@@ -321,3 +321,20 @@ test('Refresh reads Needs attention again at once, even when it was just read', 
     assert.ok(w.asked.includes('/api/security-alerts'));
     assert.ok(w.asked.includes('/api/status/summary'));
 });
+
+test('an alerts read that never answers has failed by the time limit, and the next refresh asks again', async () => {
+    const w = page();
+    await loadAll(w);
+    state(w).timeout = 50;
+    // The server stops answering: the list read hangs
+    w.answers['/api/security-alerts'] = () => new Promise(() => {});
+    assert.equal(await w.loadDashboardSecurityAlerts({ force: false }), false);
+    assert.equal(state(w).alerts.ok, false);
+    assert.equal(state(w).alerts.busy, null);
+    assert.match(w.document.getElementById('dashboard-attention-clear').textContent, /Some checks could not run/);
+    // The alerts it showed stay, and the next load goes out instead of joining the hung one
+    assert.equal(state(w).alerts.list.length, 2);
+    w.answers['/api/security-alerts'] = { alerts: [alert(2)], unacknowledged_count: 1, unacknowledged_critical: 0, unacknowledged_ids: [2] };
+    assert.equal(await w.loadDashboardSecurityAlerts({ force: false }), true);
+    assert.deepEqual(state(w).alerts.list.map(a => a.id), [2]);
+});
