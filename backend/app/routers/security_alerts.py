@@ -67,11 +67,18 @@ def list_security_alerts(
         unacked = len(open_ids) if len(open_ids) <= MAX_ACK_IDS else db.query(SecurityAlert).filter(
             SecurityAlert.acknowledged == False  # noqa: E712
         ).count()
+        # The open critical ones, also those past the rows asked for: Needs attention
+        # is marked critical for one even when its list shows only the newest
+        critical = db.query(SecurityAlert).filter(
+            SecurityAlert.acknowledged == False,  # noqa: E712
+            SecurityAlert.severity == 'critical',
+        ).count()
 
         return {
             "enabled": settings.anomaly_detection_enabled,
             "alerts": [_serialize(a) for a in alerts],
             "unacknowledged_count": unacked,
+            "unacknowledged_critical": critical,
             "unacknowledged_ids": open_ids[:MAX_ACK_IDS],
         }
     except Exception as e:

@@ -392,6 +392,11 @@ document.addEventListener('keydown', event => { layerLastAction = layerControl(e
 function uiLayerOpener(el) {
     layerNamedOpener = layerControl(el);
 }
+// Where the focus goes when this layer closes, instead of what opened it; null
+// for the page's heading (a move to another page made from inside the layer)
+function uiLayerReturn(layer, el) {
+    layerOpeners.set(layer, el ? layerControl(el) : null);
+}
 
 function layerUsable(el) {
     return !!el && el.isConnected && layerShown(el) && !el.closest('[inert]') && !el.disabled;
