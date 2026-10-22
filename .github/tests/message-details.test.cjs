@@ -127,3 +127,16 @@ test('the feature script is versioned and loaded after its dependencies', () => 
     assert.ok(scripts.indexOf('message-details.js') > scripts.indexOf('app.js'));
     assert.ok(scripts.indexOf('app.js') > scripts.indexOf('utils.js'));
 });
+
+test('opened as a dialog, the message is last on the page, over a dialog already open', async () => {
+    const h = harness(message());
+    const modal = h.element('message-modal');
+    const appended = [];
+    modal.parentNode = { insertBefore: () => {} };   // its place inside the page shell
+    modal.nextSibling = null;
+    h.document.body.appendChild = node => { appended.push(node); node.parentNode = h.document.body; };
+    // Block details is open (appended to the page before the message is asked for)
+    await h.context.viewMessageDetails('example-key');
+    assert.deepEqual(appended, [modal], 'moved after Block details, so it is drawn on top');
+    assert.equal(modal.classList.contains('ui-docked'), false);
+});
