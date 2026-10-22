@@ -28,7 +28,7 @@ Search, address, outcome and direction filters, or loading more messages, stop a
 
 ### Overview
 
-Repeated steps, such as deferred retries, appear once with the attempt count.
+Repeated steps, such as deferred retries, appear once with the attempt count. A message to several recipients shows one step per outcome with its number of recipients; **View** lists them in the Logs tab.
 
 **Mailbox delivery** explains Sieve discards, refusals, forwarding or storage failures. Postfix reports `status=sent` when it hands a message to Dovecot; only Dovecot tells you what happened afterwards.
 
@@ -38,9 +38,11 @@ Repeated steps, such as deferred retries, appear once with the attempt count.
 
 ### Logs
 
-**Delivery Error** gives the remote server's response or Postfix's reason for failure, per recipient. Repeated identical errors appear once with an attempt count.
+**Delivery Error** gives the remote server's response or Postfix's reason for failure. Repeated identical errors appear once with an attempt count.
 
-The timeline combines Postfix lines for the queue ID with Dovecot delivery lines in time order. Multiple recipients have separate delivery summaries. **No Postfix delivery logs available** means no Postfix lines were linked to this delivery.
+A message to several recipients lists them under **Recipients** instead, problems first, each with the last status Postfix logged for it and the reason. **Not logged** means Postfix has no delivery line for that address yet. Click a recipient, or pick one under **Recipient**, to see only its lines; lines that belong to every recipient stay, dimmed and marked **All recipients**. A status or a search in the list narrows the timeline the same way, to the recipients it shows.
+
+The timeline combines Postfix lines for the queue ID with Dovecot delivery lines in time order. **No Postfix delivery logs available** means no Postfix lines were linked to this delivery.
 
 ### Spam Analysis
 

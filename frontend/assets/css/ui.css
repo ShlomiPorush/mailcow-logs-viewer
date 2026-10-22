@@ -11,6 +11,8 @@
  * OFL-*.txt files there). Onest covers Latin and Cyrillic, Noto Sans Hebrew
  * covers Hebrew, IBM Plex Mono is used for addresses, IDs and IPs. Each file
  * carries a unicode-range, so a browser only downloads the scripts a page uses.
+ * The Plex Mono 500 files also serve heavier weights, so a mono value in bold
+ * text keeps its real letters instead of a bold the browser fakes.
  */
 
 /* ---------- Fonts ---------- */
@@ -44,16 +46,16 @@
 @font-face { font-family: 'IBM Plex Mono'; font-style: normal; font-weight: 400; font-display: swap;
     src: url('../fonts/ibm-plex-mono-cyrillic-ext-400.woff2') format('woff2');
     unicode-range: U+0460-052F, U+1C80-1C8A, U+20B4, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F; }
-@font-face { font-family: 'IBM Plex Mono'; font-style: normal; font-weight: 500; font-display: swap;
+@font-face { font-family: 'IBM Plex Mono'; font-style: normal; font-weight: 500 900; font-display: swap;
     src: url('../fonts/ibm-plex-mono-latin-500.woff2') format('woff2');
     unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD; }
-@font-face { font-family: 'IBM Plex Mono'; font-style: normal; font-weight: 500; font-display: swap;
+@font-face { font-family: 'IBM Plex Mono'; font-style: normal; font-weight: 500 900; font-display: swap;
     src: url('../fonts/ibm-plex-mono-latin-ext-500.woff2') format('woff2');
     unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF; }
-@font-face { font-family: 'IBM Plex Mono'; font-style: normal; font-weight: 500; font-display: swap;
+@font-face { font-family: 'IBM Plex Mono'; font-style: normal; font-weight: 500 900; font-display: swap;
     src: url('../fonts/ibm-plex-mono-cyrillic-500.woff2') format('woff2');
     unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116; }
-@font-face { font-family: 'IBM Plex Mono'; font-style: normal; font-weight: 500; font-display: swap;
+@font-face { font-family: 'IBM Plex Mono'; font-style: normal; font-weight: 500 900; font-display: swap;
     src: url('../fonts/ibm-plex-mono-cyrillic-ext-500.woff2') format('woff2');
     unicode-range: U+0460-052F, U+1C80-1C8A, U+20B4, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F; }
 
@@ -419,6 +421,17 @@
 .ui-md-fact > span { display: block; margin-bottom: 2px; color: var(--ui-muted); font-size: 12px; font-weight: 600; }
 .ui-md-fact > div { overflow-wrap: anywhere; font-weight: 600; }
 .ui-md-fact-wide { grid-column: 1 / -1; }
+/* The relay: the host, cut and never broken, its IP in a tooltip, the port beside it */
+.ui-md-relay { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
+.ui-md-relay-host { position: relative; display: flex; min-width: 0; }
+.ui-md-relay-host .copyable { min-width: 0; }
+.ui-md-relay-host bdi { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ui-md-relay-host[data-tip] bdi { text-decoration: underline dotted var(--ui-muted); text-underline-offset: 3px; }
+/* Under the host, above the pinned timeline head; a tap shows it on a touch screen */
+.ui-md-relay-host[data-tip]:hover::after, .ui-md-relay-host[data-tip].is-tip::after,
+.ui-md-relay-host[data-tip]:focus-visible::after, .ui-md-rrow:focus-visible .ui-md-relay-host[data-tip]::after { content: attr(data-tip); position: absolute; top: calc(100% + 6px); left: 0; z-index: 6;
+    white-space: nowrap; padding: 6px 8px; border-radius: 6px; background: var(--ui-ink); color: var(--ui-bg); font: 600 12px/1.3 var(--ui-font, inherit); pointer-events: none; }
+.ui-md-relay-port { flex: none; padding: 0 6px; border-radius: 5px; background: var(--ui-bg); color: var(--ui-muted); font-size: 12px; font-weight: 600; line-height: 1.6; }
 .ui-md-recipients { display: grid; gap: 2px; max-height: 8rem; overflow-y: auto; }
 .ui-md-strip { padding: 12px var(--ui-pad-x); border-radius: var(--ui-radius); background: var(--ui-panel); flex: none; }
 .ui-md-figures { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; text-align: center; }
@@ -433,8 +446,36 @@
 .ui-md-errors { flex: none; }
 .ui-md-error-list { display: grid; gap: 8px; max-height: 10rem; overflow-y: auto; margin-top: 6px; color: var(--ui-ink); font-weight: 400; }
 .ui-md-error p { margin: 2px 0 0; }
-.ui-md-recipient-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 8px; margin-top: 8px; }
-.ui-md-recipient-grid .ui-md-card { padding: 10px 12px; }
+/* Recipients of a message to many (issue #476): problems first with the reason;
+   a row shows its recipient's lines in the timeline below */
+.ui-md-rcpts { display: grid; gap: 10px; }
+.ui-md-rcpts-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; }
+.ui-md-rcpts-head .ui-input { width: 240px; max-width: 100%; }
+/* Rounded by its first and last rows, not clipped: a relay's tooltip shows past a row */
+.ui-md-rlist { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1px; border: 1px solid var(--ui-line); border-radius: var(--ui-radius); background: var(--ui-line); }
+.ui-md-rlist > :first-child { border-start-start-radius: calc(var(--ui-radius) - 1px); border-start-end-radius: calc(var(--ui-radius) - 1px); }
+.ui-md-rlist > :last-child { border-end-start-radius: calc(var(--ui-radius) - 1px); border-end-end-radius: calc(var(--ui-radius) - 1px); }
+.ui-md-rrow { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 2px 12px; padding: 9px 12px; background: var(--ui-bg); cursor: pointer; }
+@media (hover: hover) { .ui-md-rrow:hover { background: color-mix(in srgb, var(--ui-ink) 4%, var(--ui-bg)); } }
+.ui-md-rrow[aria-pressed="true"] { background: color-mix(in srgb, var(--ui-info) 10%, var(--ui-bg)); box-shadow: inset 3px 0 0 var(--ui-info); }
+.ui-md-rrow-addr { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.ui-md-rrow-sub { grid-column: 1 / -1; display: flex; gap: 6px; min-width: 0; color: var(--ui-muted); font-size: 12px; }
+.ui-md-rrow-sub > span { flex: none; }
+.ui-md-rrow-sub > span:first-child { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The host cuts itself, so the IP's tooltip is not clipped with it */
+.ui-md-rrow-sub > span.ui-md-rrow-via { display: inline-flex; align-items: baseline; gap: 4px; overflow: visible; }
+.ui-md-rrow-via .ui-md-relay { display: inline-flex; gap: 4px; }
+.ui-md-rrow .ui-md-relay-port { padding: 0 5px; background: var(--ui-panel); font-size: 11.5px; }
+.ui-md-rrow-why { grid-column: 1 / -1; font-family: var(--ui-mono); font-size: 11.5px; line-height: 1.45; overflow-wrap: anywhere; }
+.ui-md-rnone { padding: 14px 12px; background: var(--ui-bg); color: var(--ui-muted); font-size: var(--ui-fs-sm); }
+.ui-md-rmore { justify-self: start; }
+@media (max-width: 640px) { .ui-md-rcpts-head .ui-input { width: 100%; } }
+.ui-md-link { flex: none; padding: 0; border: 0; background: none; color: var(--ui-info); font: inherit; font-weight: 600; cursor: pointer; }
+@media (hover: hover) { .ui-md-link:hover { text-decoration: underline; } }
+.ui-md-tally { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+/* On the tinted bar a count keeps its colour on the page's background, readable */
+.ui-md-tally .ui-tag { border: 0; background: var(--ui-bg); font: inherit; font-size: 12.5px; font-weight: 700; padding: 3px 9px; cursor: pointer; }
+@media (hover: hover) { .ui-md-tally .ui-tag:hover { text-decoration: underline; } }
 .ui-md-grow { flex: 1; min-width: 0; }
 .ui-md-truncate { margin: 4px 0 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
 
@@ -443,10 +484,18 @@
 .ui-md-timeline-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
 .ui-md-timeline-entries { display: grid; gap: 6px; align-content: start; }
 .ui-md-timeline-head { position: sticky; top: 0; z-index: 2; padding: 6px 0; background: var(--ui-bg); }
-/* The scrolling body has top padding; the head sticks at the body's visible edge, not below the padding,
-   so no log line shows above it */
-.ui-dialog-body .ui-md-timeline-head { top: calc(-1 * var(--ui-pad-x)); }
-#message-modal.ui-docked .ui-dialog-body .ui-md-timeline-head { top: -20px; }
+/* The header, the tabs and the open tab scroll as one; the tabs stay at the top
+   and the timeline head right under them (message-details.js measures the tabs) */
+#message-modal .ui-md-body { padding: 0; }
+#message-modal .ui-md-body > .ui-tabs { position: sticky; top: 0; z-index: 6; background: var(--ui-bg); }
+#message-modal .ui-md-content { padding: var(--ui-pad-x); }
+#message-modal .ui-md-timeline-head { top: var(--ui-md-tabs-h, 41px); z-index: 5; }
+#message-modal :is(.ui-md-rcpts, .ui-md-timeline) { scroll-margin-top: calc(var(--ui-md-tabs-h, 41px) + 8px); }
+.ui-md-timeline-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
+.ui-md-timeline-tools .ui-picker-btn { max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* With one recipient picked, the lines every recipient shares stay, dimmed */
+.ui-md-log.is-shared { opacity: .62; }
+.ui-md-log .ui-tag-line { font-size: 11px; padding: 1px 6px; }
 .ui-md-fill:has(.ui-md-timeline) { height: auto; }
 .ui-md-log { padding: 10px 12px; border-radius: var(--ui-radius-sm); background: var(--ui-panel); font-size: var(--ui-fs-sm); }
 .ui-md-log p { margin: 3px 0 0; }
@@ -507,8 +556,9 @@
 .ui-tag-dir.ui-dir-inbound { color: var(--ui-dir-in); background: color-mix(in srgb, var(--ui-dir-in) 13%, transparent); }
 .ui-tag-dir.ui-dir-outbound { color: var(--ui-dir-out); background: color-mix(in srgb, var(--ui-dir-out) 13%, transparent); }
 .ui-tag-dir.ui-dir-internal { color: var(--ui-dir-int); background: color-mix(in srgb, var(--ui-dir-int) 13%, transparent); }
-/* Several recipients in the header, one per item */
-.ui-md-to { display: flex; flex-wrap: wrap; gap: 2px 14px; }
+/* To: one line however many recipients; the link opens the full list */
+.ui-md-to { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
+.ui-md-to-list { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ui-fct-ok { background: var(--ui-ok); } .ui-fct-warn { background: var(--ui-warn); } .ui-fct-fail { background: var(--ui-fail); } .ui-fct-spam { background: var(--ui-spam); }
 .ui-fct-export { margin: 16px 8px 0; }
 
@@ -568,7 +618,7 @@
 #message-modal.ui-docked .ui-dialog-head { display: none; }
 #message-modal.ui-docked .ui-md-header { padding: 30px 36px 0; }
 #message-modal.ui-docked .ui-tabs { padding: 0 28px; }
-#message-modal.ui-docked .ui-dialog-body { padding: 20px 36px 60px; }
+#message-modal.ui-docked .ui-md-content { padding: 20px 36px 60px; }
 
 /* Reading pane header: subject, who and when, the outcome */
 .ui-md-header { padding: 20px var(--ui-pad-x) 0; }
@@ -2984,6 +3034,13 @@ button.ui-aa-col:focus-visible { outline: 2px solid var(--ui-focus); outline-off
 .ui-picker-btn[aria-expanded="true"] .ui-select-arrow { transform: rotate(180deg); }
 .ui-picker-search { width: 100%; }
 .ui-picker-list { display: grid; gap: 1px; max-height: min(320px, 45vh); overflow-y: auto; }
+/* A long option is cut, never scrolled sideways; its hint stays whole */
+.ui-picker-list, .ui-picker-panel[role="listbox"] { overflow-x: hidden; }
+.ui-picker-panel [role="option"].ui-fct > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ui-picker-panel [role="option"].ui-fct > small { flex: none; white-space: nowrap; }
+.ui-picker-panel.ui-md-rcpt-panel { width: min(400px, calc(100vw - 16px)); inset-inline-start: auto; inset-inline-end: 0; }
+/* Over the pinned tabs while its picker is open, should the list open upward */
+#message-modal .ui-md-timeline-head:has(.ui-picker-panel:not(.hidden)) { z-index: 7; }
 .ui-picker-none { padding: 4px 8px; font-size: 12.5px; }
 .ui-picker-none.hidden { display: none; }
 .ui-ms-dropdown { width: min(320px, calc(100vw - 16px)); }

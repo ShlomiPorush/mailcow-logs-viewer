@@ -74,6 +74,20 @@ function switchModalTab(tab) {
     } else {
         console.error('No modal data available');
     }
+
+    // Scrolled past the header, the new tab starts right under the pinned tabs
+    const body = document.getElementById('message-modal-body');
+    const header = document.getElementById('message-modal-header');
+    if (body && header && typeof header.offsetHeight === 'number' && body.scrollTop > header.offsetHeight) body.scrollTop = header.offsetHeight;
+}
+
+// The timeline's head sticks right under the tabs, whatever their height
+function measureMessageTabs() {
+    const body = document.getElementById('message-modal-body');
+    const tabs = body && typeof body.querySelector === 'function' ? body.querySelector('.ui-tabs') : null;
+    if (tabs && tabs.offsetHeight && body.style && typeof body.style.setProperty === 'function') {
+        body.style.setProperty('--ui-md-tabs-h', `${tabs.offsetHeight}px`);
+    }
 }
 
 async function viewMessageDetails(correlationKey) {
@@ -101,6 +115,9 @@ async function viewMessageDetails(correlationKey) {
     window.openMessageKey = correlationKey;
     const header = document.getElementById('message-modal-header');
     if (header) header.innerHTML = '';
+    // Each message opens at its top, not where the one before was scrolled to
+    const body = document.getElementById('message-modal-body');
+    if (body) body.scrollTop = 0;
     content.innerHTML = '<div class="ui-loading" role="status"><div class="loading"></div><p>Loading...</p></div>';
 
     try {
@@ -114,8 +131,13 @@ async function viewMessageDetails(correlationKey) {
 
         currentModalData = data;
         currentModalTab = 'overview';
+        mdRecipients = messageRecipients(data);
+        mdOwners = mdAddressOwners(data);
+        Object.assign(mdView, { status: '', query: '', all: false, picked: -1, source: '' });
+        if (typeof uiPickers !== 'undefined') delete uiPickers.query['md-rcpt-pick'];
 
         renderMessageHeader(data);
+        measureMessageTabs();
 
         // Update Security tab indicator
         updateSecurityTabIndicator(data);
@@ -252,12 +274,16 @@ function renderDovecotSummary(dovecot) {
     `;
 }
 
-function renderDovecotTimelineRow(log) {
+// With one recipient picked, a line logged for no recipient in particular
+// belongs to every recipient: it stays, dimmed and marked
+const MD_SHARED_TAG = '<span class="ui-tag ui-tag-line">All recipients</span>';
+
+function renderDovecotTimelineRow(log, shared = false) {
     return `
-        <div class="ui-md-log">
+        <div class="ui-md-log${shared ? ' is-shared' : ''}">
             <div class="ui-md-log-head">
                 <span class="ui-mono ui-muted">${formatTime(log.time)}</span>
-                <span class="ui-tag ui-tag-spam">dovecot</span>
+                <span class="ui-tag ui-tag-spam">dovecot</span>${shared ? MD_SHARED_TAG : ''}
                 ${log.recipient ? `<span class="ui-muted">=> ${escapeHtml(log.recipient)}</span>` : ''}
                 ${log.verdict && DOVECOT_VERDICTS[log.verdict] ? `<span class="ui-md-log-status">${uiTag(log.verdict, UI_STATUS_TONE[log.verdict === 'stored' ? 'delivered' : log.verdict])}</span>` : ''}
             </div>
@@ -266,12 +292,12 @@ function renderDovecotTimelineRow(log) {
     `;
 }
 
-function renderPostfixTimelineRow(log) {
+function renderPostfixTimelineRow(log, shared = false) {
     return `
-        <div class="ui-md-log">
+        <div class="ui-md-log${shared ? ' is-shared' : ''}">
             <div class="ui-md-log-head">
                 <span class="ui-mono ui-muted">${formatTime(log.time)}</span>
-                ${log.program ? `<span class="ui-tag ui-tag-info">${escapeHtml(log.program)}</span>` : ''}
+                ${log.program ? `<span class="ui-tag ui-tag-info">${escapeHtml(log.program)}</span>` : ''}${shared ? MD_SHARED_TAG : ''}
                 ${log.recipient ? `<span class="ui-muted">=> ${escapeHtml(log.recipient)}</span>` : ''}
                 ${log.status ? `<span class="ui-md-log-status">${uiStatusTag(log.status)}</span>` : ''}
             </div>
@@ -293,21 +319,51 @@ function renderLogTimeline(postfixLogs, dovecotLogs) {
     const sources = [...new Set(entries.map(e => timelineSource(e)))];
     const filterBar = sources.length > 1 ? `
         <div class="ui-chip-row" id="log-timeline-filters">
-            <button data-source="" onclick="filterLogTimeline(this)" class="ui-chip" aria-pressed="true">All</button>
+            <button type="button" data-source="" data-md-focus="source-" onclick="filterLogTimeline(this)" class="ui-chip" aria-pressed="${!mdView.source}">All</button>
             ${sources.map(s => `
-                <button data-source="${escapeHtml(s)}" onclick="filterLogTimeline(this)" class="ui-chip" aria-pressed="false">${escapeHtml(s)}</button>
+                <button type="button" data-source="${escapeHtml(s)}" data-md-focus="source-${escapeHtml(s)}" onclick="filterLogTimeline(this)" class="ui-chip" aria-pressed="${mdView.source === s}">${escapeHtml(s)}</button>
             `).join('')}
         </div>
     ` : '';
 
+    // One source, and for a message to many one recipient, or the ones the
+    // Recipients list shows: their own lines and the ones every recipient shares
+    const picked = mdRecipients.length > 1 && mdView.picked >= 0 ? mdRecipients[mdView.picked] : null;
+    const query = mdView.query.trim();
+    const listed = !picked && mdRecipients.length > 1 && (mdView.status || query)
+        ? new Set(mdListedRecipients().map(({ r }) => r.key)) : null;
+    const narrowed = !!(picked || listed);
+    // A line counts for the address the sender wrote (an alias), Dovecot's
+    // lines for every address that reached the mailbox they name
+    const ownersOf = e => mdLineOwners(e.log, e.dovecot);
+    const ownLine = owners => (picked ? owners.includes(picked.key) : owners.some(key => listed.has(key)));
+    const shown = entries.filter(e => (!mdView.source || timelineSource(e) === mdView.source)
+        && (!narrowed || !ownersOf(e).length || ownLine(ownersOf(e))));
+    const listName = listed ? `${[mdView.status ? mdStatusInfo(mdView.status).word : '', query ? `"${query}"` : ''].filter(Boolean).join(' ')} (${listed.size})` : '';
+    const count = shown.length === entries.length ? `${entries.length} entries` : `${shown.length} of ${entries.length} entries`;
+    const picker = mdRecipients.length > 1 ? `
+        ${uiPicker({
+            id: 'md-rcpt-pick', label: 'Recipient', set: narrowed, search: 'Find a recipient', panelLabel: 'Show the logs of', panelClass: 'ui-md-rcpt-panel', onOpen: 'mdRecipientPickerOpen',
+            value: picked ? `<bdi>${escapeHtml(picked.address)}</bdi>` : listed ? `<bdi>${escapeHtml(listName)}</bdi>` : 'All recipients',
+            options: [{ label: 'All recipients', value: -1, selected: !narrowed, onclick: 'pickMessageRecipient(-1)' }]
+                .concat(mdRecipients.map((r, i) => ({ r, i })).sort((a, b) => mdRecipientOrder(a.r, b.r)).map(({ r, i }) => {
+                    const status = mdStatusInfo(r.status);
+                    return { label: r.address, hint: status.word, dot: status.tone, value: i, selected: mdView.picked === i, onclick: `pickMessageRecipient(${i})` };
+                })),
+        })}
+        ${narrowed ? `<button type="button" class="ui-icon-btn ui-icon-btn-sm" onclick="pickMessageRecipient(-1)" title="Show every recipient" aria-label="Show every recipient"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg></button>` : ''}` : '';
+
     return `
-        <div class="ui-md-timeline">
+        <div class="ui-md-timeline" id="md-timeline">
             <div class="ui-md-timeline-head">
-                <h4 class="ui-md-h">Complete Log Timeline <span class="ui-muted" id="log-timeline-count">${entries.length} entries</span></h4>
-                ${filterBar}
+                <h4 class="ui-md-h">Complete Log Timeline <span class="ui-muted" id="log-timeline-count">${count}</span></h4>
+                <div class="ui-md-timeline-tools">${picker}${filterBar}</div>
             </div>
             <div class="ui-md-timeline-entries" id="log-timeline-entries">
-                ${entries.map(e => `<div data-log-source="${escapeHtml(timelineSource(e))}">${e.dovecot ? renderDovecotTimelineRow(e.log) : renderPostfixTimelineRow(e.log)}</div>`).join('')}
+                ${shown.length ? shown.map(e => {
+                    const shared = narrowed && !ownersOf(e).length;
+                    return `<div data-log-source="${escapeHtml(timelineSource(e))}">${e.dovecot ? renderDovecotTimelineRow(e.log, shared) : renderPostfixTimelineRow(e.log, shared)}</div>`;
+                }).join('') : '<p class="ui-muted">No log lines for this filter</p>'}
             </div>
         </div>
     `;
@@ -384,19 +440,8 @@ function timelineSource(entry) {
 // Filter the dialog's log timeline by source. One source at a time; the
 // empty source is "All".
 function filterLogTimeline(button) {
-    const source = button.dataset.source;
-    document.querySelectorAll('#log-timeline-filters button').forEach(b => {
-        b.setAttribute('aria-pressed', String(b === button));
-    });
-    let shown = 0, total = 0;
-    document.querySelectorAll('#log-timeline-entries > [data-log-source]').forEach(row => {
-        total += 1;
-        const match = !source || row.dataset.logSource === source;
-        row.classList.toggle('hidden', !match);
-        if (match) shown += 1;
-    });
-    const count = document.getElementById('log-timeline-count');
-    if (count) count.textContent = source ? `${shown} of ${total} entries` : `${total} entries`;
+    mdView.source = button.dataset.source || '';
+    mdRedrawTimeline();
 }
 
 function toggleDeliveryJourney() {
@@ -416,6 +461,397 @@ function relayHost(relay) {
     if (!relay) return '';
     const host = String(relay).split('[')[0];
     return host === 'none' ? '' : host;
+}
+
+// A relay in its parts; "none" or a socket path stays whole
+function relayParts(relay) {
+    const m = /^([^[\]]+)\[([^\]]+)\](?::(\d+))?$/.exec(String(relay || ''));
+    return m ? { host: m[1], ip: m[2], port: m[3] || '' } : { host: String(relay || ''), ip: '', port: '' };
+}
+
+// A relay: the host (to copy in the strip; a recipient's row opens on a click),
+// its IP in a tooltip, the port beside it. The tooltip is fitted when it shows
+// (mdRelayTipFit): it names the host too when the host is cut. The strip's host
+// takes the focus to show it; a row shows its relay's tooltip while focused.
+function renderRelay(relay, copy = true) {
+    const { host, ip, port } = relayParts(relay);
+    const named = ip && ip !== host;
+    // No browser title on top of the IP's tooltip
+    const name = host === 'none' || !copy ? `<bdi>${escapeHtml(host)}</bdi>` : copyableText(host).replace(' title="Click to copy"', '');
+    const tip = named ? ` data-ip="${escapeHtml(ip)}" data-tip="IP ${escapeHtml(ip)}"` : '';
+    return `<span class="ui-md-relay">
+        <span class="ui-md-relay-host${ip && !named ? ' ui-mono' : ''}" data-host="${escapeHtml(host)}"${tip}${copy ? ' tabindex="0"' : ''} onpointerenter="mdRelayTipFit(this)" onfocus="mdRelayTipFit(this)" onpointerup="mdRelayTipTap(event, this)">${name}${named ? `<span class="ui-sr-only">, IP ${escapeHtml(ip)}</span>` : ''}</span>
+        ${port ? `<span class="ui-md-relay-port">:${escapeHtml(port)}</span>` : ''}
+    </span>`;
+}
+
+// The tooltip for the width the host has now: the IP, and the host too when it is cut
+function mdRelayTipFit(el) {
+    const name = el.querySelector('bdi');
+    const cut = !!name && name.scrollWidth > name.clientWidth;
+    const { host, ip } = el.dataset;
+    const tip = cut ? (ip ? `${host} · IP ${ip}` : host) : (ip ? `IP ${ip}` : '');
+    if (tip) el.dataset.tip = tip;
+    else delete el.dataset.tip;
+}
+
+// A touch screen has no hover: a tap shows the tooltip for a moment.
+// On the wrapper, as a click on the host copies it and stops there.
+function mdRelayTipTap(event, el) {
+    if (event.pointerType === 'mouse') return;
+    mdRelayTipFit(el);
+    if (!el.dataset.tip) return;
+    el.classList.add('is-tip');
+    clearTimeout(el.tipTimer);
+    el.tipTimer = setTimeout(() => el.classList.remove('is-tip'), 2500);
+    // The click this tap makes next belongs to the tooltip, once
+    el.tapClick = true;
+    clearTimeout(el.tapTimer);
+    el.tapTimer = setTimeout(() => { el.tapClick = false; }, 600);
+}
+
+// A tap that just showed a row's relay tooltip does not also open the row;
+// a mouse click, or any later click, does
+function mdRelayTapped(event) {
+    const host = event.target && event.target.closest ? event.target.closest('.ui-md-relay-host') : null;
+    if (!host || !host.tapClick || event.pointerType === 'mouse') return false;
+    host.tapClick = false;
+    return true;
+}
+
+function mdRelayTip(root) {
+    root.querySelectorAll('.ui-md-relay-host').forEach(mdRelayTipFit);
+}
+
+// =============================================================================
+// RECIPIENTS OF A MESSAGE TO MANY (issue #476)
+// =============================================================================
+
+// The recipients of the open message, and what the Logs tab shows of them:
+// a status filter, a search, the whole list or its first rows, the recipient
+// whose lines the timeline shows (-1: all) and the timeline's source
+let mdRecipients = [];
+let mdOwners = new Map();
+const mdView = { status: '', query: '', all: false, picked: -1, source: '' };
+const MD_RCPT_ROWS = 6;
+
+// Postfix's status of one recipient: its word, the word after a count, its tone,
+// and its place in the list (problems first)
+const MD_RCPT_STATUS = {
+    bounced: { word: 'Bounced', many: 'bounced', tone: 'fail', rank: 0 },
+    rejected: { word: 'Rejected', many: 'rejected', tone: 'fail', rank: 0 },
+    expired: { word: 'Expired', many: 'expired', tone: 'fail', rank: 0 },
+    deferred: { word: 'Deferred', many: 'deferred', tone: 'warn', rank: 1 },
+    none: { word: 'Not logged', many: 'not logged yet', tone: '', rank: 2 },
+    sent: { word: 'Delivered', many: 'delivered', tone: 'ok', rank: 3 },
+};
+
+function mdStatusInfo(status) {
+    if (MD_RCPT_STATUS[status]) return MD_RCPT_STATUS[status];
+    const word = String(status);
+    return { word: word.charAt(0).toUpperCase() + word.slice(1), many: word, tone: 'info', rank: 1 };
+}
+
+// What the remote server or Postfix said about a delivery that did not go through
+function mdFailureReason(log) {
+    const message = (log && log.message) || '';
+    const said = message.match(/said:\s*(.+?)(?:\s*\(in reply|$)/i);
+    if (said) return said[1].trim();
+    const paren = message.match(/status=\w+\s*\((.+?)\)$/);
+    return paren ? paren[1].trim() : '';
+}
+
+const mdAddressKey = address => String(address || '').trim().toLowerCase();
+
+// The address the sender wrote for one Postfix delivery line: orig_to when
+// Postfix expanded an alias or a forward, else the address it delivered to.
+// Read only from the fixed start of the line, as the server parses it
+// (correlation.py): an address cannot supply it.
+const MD_PF_ADDR = '(?:"(?:[^"\\\\]|\\\\.)*"|[^>"])*';
+const MD_ORIG_TO_RE = new RegExp(`^[0-9A-F]+: to=<${MD_PF_ADDR}>, orig_to=<(${MD_PF_ADDR})>, `);
+function mdLineAddress(log) {
+    const orig = String(log.message || '').match(MD_ORIG_TO_RE);
+    return (orig && orig[1]) || log.recipient || '';
+}
+
+// Which written addresses each delivered address belongs to: a mailbox two
+// aliases reach belongs to both
+function mdAddressOwners(data) {
+    const owners = new Map();
+    (data.postfix || []).forEach(log => {
+        if (!log.recipient) return;
+        const to = mdAddressKey(log.recipient);
+        if (!owners.has(to)) owners.set(to, new Set());
+        owners.get(to).add(mdAddressKey(mdLineAddress(log)));
+    });
+    return owners;
+}
+
+// The written addresses a timeline line belongs to; none for a line of the
+// whole message (connection, queue, bounce notice)
+function mdLineOwners(log, dovecot) {
+    if (!log.recipient) return [];
+    if (!dovecot) return [mdAddressKey(mdLineAddress(log))];
+    const key = mdAddressKey(log.recipient);
+    return [...(mdOwners.get(key) || [key])];
+}
+
+// Dovecot's verdict for one recipient, as the server resolves a delivery
+// (resolve_session_verdicts): a store cancels a pending discard ("discarded if
+// not explicitly delivered"), and the most severe definite verdict wins. The
+// pending marker is told by the end of its line, which Dovecot writes.
+const MD_DOVECOT_SEVERITY = { stored: 0, forwarded: 1, failed: 2, discarded: 3, rejected: 4 };
+const MD_DISCARD_MARK_RE = /: marked message to be discarded[^<>:]*$/i;
+// One LMTP delivery is the lines of one session for one mailbox, as the server
+// groups them; the session is in the line's prefix lmtp(user)<pid><session>
+const MD_DOVECOT_PREFIX_RE = /^(?:dovecot:s*)?(?:lmtp|lda)([^)]*)((?:<[^>]*>)*)/i;
+function mdDeliveryVerdict(lines) {
+    const marker = log => log.verdict === 'discarded' && MD_DISCARD_MARK_RE.test(String(log.message || ''));
+    const definite = lines.filter(log => MD_DOVECOT_SEVERITY[log.verdict] !== undefined && !marker(log));
+    if (definite.length) {
+        return definite.reduce((a, log) => {
+            const s = MD_DOVECOT_SEVERITY[log.verdict], sa = MD_DOVECOT_SEVERITY[a.verdict];
+            return s > sa || (s === sa && (log.time || '') >= (a.time || '')) ? log : a;
+        }).verdict;
+    }
+    return lines.some(marker) ? 'discarded' : null;
+}
+
+// A recipient's Dovecot verdict: each delivery resolved on its own, then the
+// most severe of them, so a store in one mailbox hides no discard in another
+function mdMailboxVerdict(lines) {
+    const deliveries = new Map();
+    lines.forEach(log => {
+        const session = (String(log.message || '').match(MD_DOVECOT_PREFIX_RE) || [])[1] || '';
+        const key = `${session}|${mdAddressKey(log.recipient)}`;
+        if (!deliveries.has(key)) deliveries.set(key, []);
+        deliveries.get(key).push(log);
+    });
+    return [...deliveries.values()].map(mdDeliveryVerdict).filter(Boolean)
+        .reduce((a, v) => (!a || MD_DOVECOT_SEVERITY[v] > MD_DOVECOT_SEVERITY[a] ? v : a), null);
+}
+
+// Every recipient with the outcome of its own delivery: the recipients Rspamd
+// saw, in their order, then any address only Postfix logged. A delivery to an
+// alias counts for the alias, with the mailboxes it reached. The outcome is the
+// last status Postfix logged for the address (for an alias, its worst mailbox);
+// none yet reads as "not logged", and a message that expired in the queue
+// expires every recipient still waiting.
+function messageRecipients(data) {
+    const byKey = new Map();
+    const add = address => {
+        const key = mdAddressKey(address);
+        if (!key) return null;
+        if (!byKey.has(key)) byKey.set(key, { address: String(address).trim(), key, logs: [], dovecot: [] });
+        return byKey.get(key);
+    };
+    const owners = mdAddressOwners(data);
+    const written = new Set([...owners.values()].flatMap(set => [...set]));
+    // A mailbox only an alias reached is not a recipient of its own. The API
+    // lists the addresses Postfix delivered to when Rspamd named none: only
+    // that list can hold such a mailbox; what Rspamd named is always kept.
+    const expanded = new Set([...owners].filter(([to, set]) => !set.has(to)).map(([to]) => to));
+    const listed = (data.recipients || []).map(mdAddressKey);
+    const deliveredTo = [...new Set((data.postfix || []).filter(log => log.recipient).map(log => mdAddressKey(log.recipient)))];
+    const fromPostfix = listed.length > 0 && listed.length === deliveredTo.length && listed.every((key, i) => key === deliveredTo[i]);
+    (data.recipients || []).forEach(address => {
+        const key = mdAddressKey(address);
+        if (!fromPostfix || !expanded.has(key) || written.has(key)) add(address);
+    });
+    (data.postfix || []).forEach(log => { if (log.recipient) add(mdLineAddress(log)).logs.push(log); });
+    if (!byKey.size && data.recipient) add(data.recipient);
+    ((data.dovecot && data.dovecot.logs) || []).forEach(log => {
+        const key = mdAddressKey(log.recipient);
+        [...(owners.get(key) || [key])].forEach(owner => { if (byKey.has(owner)) byKey.get(owner).dovecot.push(log); });
+    });
+    const expiry = (data.postfix || []).filter(log => !log.recipient && String(log.status || '').toLowerCase() === 'expired').length > 0;
+    const rank = status => mdStatusInfo(status).rank;
+    return [...byKey.values()].map(r => {
+        // Per mailbox reached (one, unless an alias expanded): its last status
+        const reached = new Map();
+        r.logs.filter(log => log.status).forEach(log => {
+            const to = mdAddressKey(log.recipient);
+            const seen = reached.get(to) || { address: log.recipient, attempts: 0, last: null };
+            seen.attempts += 1;
+            if (!seen.last || (log.time || '') >= (seen.last.time || '')) seen.last = log;
+            reached.set(to, seen);
+        });
+        const statusOf = log => { const raw = String(log.status).toLowerCase(); return raw === 'delivered' ? 'sent' : raw === 'reject' ? 'rejected' : raw; };
+        const worst = [...reached.values()].reduce((a, t) => (!a || rank(statusOf(t.last)) < rank(statusOf(a.last))
+            || (rank(statusOf(t.last)) === rank(statusOf(a.last)) && (t.last.time || '') >= (a.last.time || '')) ? t : a), null);
+        const last = worst ? worst.last : null;
+        let status = last ? statusOf(last) : 'none';
+        if (expiry && (status === 'deferred' || status === 'none')) status = 'expired';
+        // Postfix handed it to Dovecot, which may still have dropped it
+        const mailbox = mdMailboxVerdict(r.dovecot);
+        const reason = last && status !== 'sent' ? mdFailureReason(last)
+            : status === 'sent' && mailbox && mailbox !== 'stored' ? `Mailbox delivery: ${DOVECOT_VERDICTS[mailbox].label}` : '';
+        const delivered = [...reached.keys()].filter(to => to !== r.key).map(to => reached.get(to).address);
+        return { ...r, status, last, attempts: worst ? worst.attempts : 0, relay: last ? last.relay : '', reason, delivered };
+    });
+}
+
+function mdStatusCounts(recipients) {
+    const counts = {};
+    recipients.forEach(r => { counts[r.status] = (counts[r.status] || 0) + 1; });
+    return counts;
+}
+
+// The statuses present, in list order, each with its count
+// Problems first, then by address: the Recipients list and the Recipient picker
+function mdRecipientOrder(a, b) {
+    return mdStatusInfo(a.status).rank - mdStatusInfo(b.status).rank || a.address.localeCompare(b.address);
+}
+
+function mdStatusList(recipients) {
+    const counts = mdStatusCounts(recipients);
+    return Object.keys(counts)
+        .sort((a, b) => mdStatusInfo(a).rank - mdStatusInfo(b).rank || a.localeCompare(b))
+        .map(status => ({ status, count: counts[status], ...mdStatusInfo(status) }));
+}
+
+// The outcome of a message to many in one sentence: how many got it. None when
+// nothing is logged per recipient yet, or the message as a whole was stopped.
+function recipientsVerdict(data, recipients) {
+    if (recipients.length < 2 || ['rejected', 'spam', 'discarded'].includes(data.final_status)) return null;
+    const counts = mdStatusCounts(recipients);
+    const n = recipients.length;
+    if ((counts.none || 0) === n) return null;
+    const delivered = counts.sent || 0;
+    if (delivered === n) return { tone: 'ok', text: `Delivered to all ${n} recipients` };
+    if (delivered) return { tone: 'warn', text: `Delivered to ${delivered} of ${n} recipients` };
+    const waiting = counts.deferred || counts.none;
+    const failed = recipients.some(r => mdStatusInfo(r.status).tone === 'fail');
+    return { tone: failed ? 'fail' : 'warn', text: waiting ? `Not delivered yet to any of the ${n} recipients` : `Not delivered to any of the ${n} recipients` };
+}
+
+// The header's link, a status count and a "View" in What happened open the list
+function showMessageRecipients(status) {
+    Object.assign(mdView, { status: status || '', query: '', all: !status, picked: -1 });
+    switchModalTab('postfix');
+    mdReveal('md-rcpts');
+}
+
+function mdReveal(id) {
+    const el = document.getElementById(id);
+    if (!el || typeof el.scrollIntoView !== 'function') return;
+    if (typeof uiDialogSheetFull === 'function') uiDialogSheetFull(document.getElementById('message-modal'));
+    el.scrollIntoView({ block: 'start', behavior: 'smooth' });
+}
+
+// Redraws part of the Logs tab, and gives the focus back to the control that
+// had it (a redraw replaces it)
+function mdRedraw(id, html) {
+    const slot = document.getElementById(id);
+    if (!slot) return;
+    const active = document.activeElement;
+    const focusKey = active && slot.contains && slot.contains(active) && active.dataset ? active.dataset.mdFocus : null;
+    slot.innerHTML = html;
+    if (focusKey && typeof slot.querySelectorAll === 'function') {
+        const again = [...slot.querySelectorAll('[data-md-focus]')].find(el => el.dataset.mdFocus === focusKey);
+        if (again) again.focus({ preventScroll: true });
+    }
+}
+
+function mdRedrawRecipients() {
+    mdRedraw('md-rcpt-results', renderRecipientRows());
+    const list = document.getElementById('md-rcpt-results');
+    if (list) mdRelayTip(list);
+}
+
+function mdRedrawTimeline() {
+    const data = currentModalData || {};
+    mdRedraw('md-timeline-slot', renderLogTimeline(data.postfix, (data.dovecot && data.dovecot.logs) || []));
+}
+
+// The list's status and search filter the timeline too
+function searchMessageRecipients(query) {
+    mdView.query = query;
+    mdView.all = false;
+    mdRedrawRecipients();
+    mdRedrawTimeline();
+}
+
+function filterMessageRecipients(status) {
+    mdView.status = status;
+    mdView.all = false;
+    mdRedrawRecipients();
+    mdRedrawTimeline();
+}
+
+// The Recipient picker opens with the timeline's head pinned under the tabs, so
+// its list hangs down into the timeline instead of up behind the tabs
+function mdRecipientPickerOpen() {
+    const body = document.getElementById('message-modal-body');
+    const head = document.querySelector('#md-timeline .ui-md-timeline-head');
+    if (!body || !head) return;
+    const tabs = body.querySelector(':scope > .ui-tabs');
+    const gap = head.getBoundingClientRect().top - (tabs || body).getBoundingClientRect().bottom;
+    if (gap > 1) body.scrollTop += gap;
+}
+
+// The recipients the list shows, by its status and search
+function mdListedRecipients() {
+    const query = mdView.query.trim().toLowerCase();
+    return mdRecipients.map((r, index) => ({ r, index }))
+        .filter(({ r }) => (!mdView.status || r.status === mdView.status) && (!query || r.address.toLowerCase().includes(query)));
+}
+
+function moreMessageRecipients() {
+    mdView.all = !mdView.all;
+    mdRedrawRecipients();
+}
+
+// A row shows its recipient's lines in the timeline; a second click shows the
+// list's again. The picker in the timeline's head sets the same; its "All
+// recipients" and the clear button (-1) clear the list's filter as well.
+function pickMessageRecipient(index, toggle = false) {
+    mdView.picked = toggle && mdView.picked === index ? -1 : index;
+    if (index < 0) {
+        Object.assign(mdView, { status: '', query: '' });
+        const search = document.querySelector('#md-rcpts input[type="search"]');
+        if (search) search.value = '';
+    }
+    mdRedrawRecipients();
+    mdRedrawTimeline();
+    if (mdView.picked >= 0) mdReveal('md-timeline');
+}
+
+function renderRecipientRows() {
+    const rows = mdListedRecipients().sort((a, b) => mdRecipientOrder(a.r, b.r));
+    const shown = mdView.all ? rows : rows.slice(0, MD_RCPT_ROWS);
+    const chip = (status, word, count) => `<button type="button" class="ui-chip" data-md-focus="status-${escapeHtml(status)}" aria-pressed="${mdView.status === status}" onclick="filterMessageRecipients('${escapeJsArg(status)}')">${escapeHtml(word)} <small>${count}</small></button>`;
+    const row = ({ r, index }) => {
+        const info = mdStatusInfo(r.status);
+        const host = relayHost(r.relay);
+        const sub = !r.last ? `<span>${r.status === 'none' ? 'No delivery logged yet' : 'No delivery attempt logged'}</span>`
+            : `${host ? `<span class="ui-md-rrow-via">via ${renderRelay(r.relay, false)}</span>` : `<span>${escapeHtml(info.word)}</span>`}${r.delivered.length ? `<span>· to <bdi>${escapeHtml(r.delivered.join(', '))}</bdi></span>` : ''}${r.attempts > 1 ? `<span>· ${r.attempts} attempts</span>` : ''}${r.last.time ? `<span>· ${escapeHtml(formatTime(r.last.time))}</span>` : ''}`;
+        return `
+            <div class="ui-md-rrow" role="button" tabindex="0" data-row-open data-md-focus="row-${index}" aria-pressed="${mdView.picked === index}" title="Show the logs of ${escapeHtml(r.address)}" onfocus="mdRelayTip(this)" onclick="if (!uiRowHeld(event) && !mdRelayTapped(event)) pickMessageRecipient(${index}, true)">
+                <span class="ui-md-rrow-addr">${copyableText(r.address)}</span>${uiTag(info.word, info.tone)}
+                <span class="ui-md-rrow-sub">${sub}</span>
+                ${r.reason ? `<span class="ui-md-rrow-why ${info.tone && info.tone !== 'ok' ? `ui-text-${info.tone}` : 'ui-muted'}">${escapeHtml(r.reason)}</span>` : ''}
+            </div>`;
+    };
+    return `
+        <div class="ui-chip-row">
+            ${chip('', 'All', mdRecipients.length)}
+            ${mdStatusList(mdRecipients).map(s => chip(s.status, s.word, s.count)).join('')}
+        </div>
+        <div class="ui-md-rlist">${shown.length ? shown.map(row).join('') : '<div class="ui-md-rnone">No recipient matches</div>'}</div>
+        ${rows.length > MD_RCPT_ROWS ? `<button type="button" class="ui-btn ui-btn-sm ui-md-rmore" data-md-focus="more" onclick="moreMessageRecipients()">${mdView.all ? 'Show fewer' : `Show all ${rows.length}`}</button>` : ''}`;
+}
+
+function renderRecipientsSection() {
+    if (mdRecipients.length < 2) return '';
+    return `
+        <section class="ui-md-rcpts" id="md-rcpts">
+            <div class="ui-md-rcpts-head">
+                <h4 class="ui-md-h">Recipients <span class="ui-muted">${mdRecipients.length}</span></h4>
+                <input type="search" class="ui-input" placeholder="Find a recipient" aria-label="Find a recipient" autocomplete="off" spellcheck="false" value="${escapeHtml(mdView.query)}" oninput="searchMessageRecipients(this.value)">
+            </div>
+            <div class="ui-md-rcpts" id="md-rcpt-results">${renderRecipientRows()}</div>
+        </section>`;
 }
 
 // The outcome of the message in one sentence, with its tone
@@ -444,7 +880,16 @@ function renderMessageHeader(data) {
     const header = document.getElementById('message-modal-header');
     if (!header) return;
     const recipients = (data.recipients && data.recipients.length) ? data.recipients : (data.recipient ? [data.recipient] : []);
-    const verdict = messageVerdict(data);
+    // A message to many: To stays one line, and the outcome counts recipients
+    const all = messageRecipients(data);
+    const many = all.length > 1;
+    const counted = recipientsVerdict(data, all);
+    const verdict = counted || messageVerdict(data);
+    // Each status but Delivered, as a count that opens those recipients
+    const tally = counted ? mdStatusList(all).filter(s => s.status !== 'sent') : [];
+    const toHtml = many
+        ? `<div class="ui-md-to"><span class="ui-md-to-list">${all.slice(0, 12).map(r => `<bdi>${escapeHtml(r.address)}</bdi>`).join(', ')}</span><button type="button" class="ui-md-link" onclick="showMessageRecipients('')">All ${all.length} recipients</button></div>`
+        : copyableText(recipients[0] || '-');
     const facts = [];
     if (data.rspamd && data.rspamd.size) facts.push(formatSize(data.rspamd.size));
     if (data.direction) facts.push(data.direction);
@@ -462,12 +907,13 @@ function renderMessageHeader(data) {
         <h2 class="ui-md-subject" dir="auto" title="${escapeHtml(hasSubject ? data.subject : 'No subject')}">${escapeHtml(hasSubject ? data.subject : 'No subject')}</h2>
         <div class="ui-md-who">
             <span>From</span><div>${copyableText(data.sender || '-')}</div>
-            <span>${recipients.length > 1 ? `To (${recipients.length})` : 'To'}</span><div class="ui-md-to">${recipients.length > 1 ? recipients.map(r => `<span>${copyableText(r)}</span>`).join('') : copyableText(recipients[0] || '-')}</div>
+            <span>${many ? `To (${all.length})` : 'To'}</span><div>${toHtml}</div>
             <span>When</span><div>${formatTime(data.first_seen)}</div>
         </div>
         <div class="ui-md-verdict-bar${verdict.tone ? ` ui-md-verdict-${verdict.tone}` : ''}">
             <div>${escapeHtml(verdict.text)}
-            ${facts.length ? `<small>${escapeHtml(facts.join(', '))}</small>` : ''}</div>
+            ${facts.length ? `<small>${escapeHtml(facts.join(', '))}</small>` : ''}
+            ${tally.length ? `<div class="ui-md-tally">${tally.map(s => `<button type="button" class="ui-tag${s.tone ? ` ui-tag-${s.tone}` : ''}" onclick="showMessageRecipients('${escapeJsArg(s.status)}')">${s.count} ${escapeHtml(s.many)}</button>`).join('')}</div>` : ''}</div>
             ${spamHtml}
         </div>`;
 }
@@ -477,7 +923,12 @@ function renderMessageHeader(data) {
 function buildDeliverySteps(data) {
     const steps = [];
     const add = (time, tone, title, detail, html) => steps.push({ time: time || '', tone, title, detail, ...(html || {}) });
+    // A message to many is told per outcome with its number of recipients, not
+    // one step per delivery: 25 deliveries to one relay are not 25 attempts
+    const recipients = messageRecipients(data);
+    const many = recipients.length > 1;
     for (const log of data.postfix || []) {
+        if (many && log.status && !/NOQUEUE: reject/i.test(log.message || '')) continue;
         const message = log.message || '';
         const program = log.program || 'postfix';
         if (/NOQUEUE: reject/i.test(message)) {
@@ -500,6 +951,25 @@ function buildDeliverySteps(data) {
             else if (log.status === 'bounced') add(log.time, 'fail', target ? `Bounced for ${target}` : 'Bounced', detail);
             else add(log.time, 'fail', `${log.status.charAt(0).toUpperCase()}${log.status.slice(1)}`, detail);
         }
+    }
+    if (many) {
+        const plural = n => `${n} recipient${n === 1 ? '' : 's'}`;
+        mdStatusList(recipients).forEach(group => {
+            const list = recipients.filter(r => r.status === group.status);
+            const time = list.map(r => (r.last && r.last.time) || '').sort().pop();
+            let title = `${group.word} for ${plural(list.length)}`, detail = '';
+            if (group.status === 'sent') {
+                const hosts = [...new Set(list.map(r => relayHost(r.relay)).filter(Boolean))];
+                title = `Delivered to ${plural(list.length)}`;
+                detail = hosts.length === 1 ? `via ${hosts[0]}` : hosts.length ? `via ${hosts.length} servers` : '';
+            } else if (group.status === 'deferred') {
+                detail = 'Postfix will try again';
+            } else if (group.status === 'none') {
+                title = `${plural(list.length)} with no delivery logged yet`;
+            }
+            const view = `<button type="button" class="ui-md-link" onclick="showMessageRecipients('${escapeJsArg(group.status)}')">View</button>`;
+            add(time || '9', group.tone || 'info', title, detail, { detailHtml: `${detail ? `${escapeHtml(detail)} ` : ''}${view}`, showTime: !!time });
+        });
     }
     if (data.rspamd && typeof data.rspamd.score === 'number') {
         add(data.rspamd.time, data.rspamd.is_spam ? 'fail' : 'ok', `Rspamd score ${data.rspamd.score.toFixed(1)}`,
@@ -588,28 +1058,31 @@ function renderPostfixTab(content, data) {
     const dovecotLogs = (data.dovecot && data.dovecot.logs) ? data.dovecot.logs : [];
 
     if (!data.postfix || data.postfix.length === 0) {
+        // The header and What happened link to the recipients: they are here too
         content.innerHTML = dovecotLogs.length ? `
             <div class="ui-md-fill">
                 <p class="ui-muted">No Postfix delivery logs available</p>
-                ${renderLogTimeline([], dovecotLogs)}
+                ${renderRecipientsSection()}
+                <div id="md-timeline-slot">${renderLogTimeline([], dovecotLogs)}</div>
             </div>
         ` : `
-            <div class="ui-empty">
-                <b>No Postfix delivery logs available</b>
+            <div class="ui-md-fill">
+                <div class="ui-empty">
+                    <b>No Postfix delivery logs available</b>
+                </div>
+                ${renderRecipientsSection()}
             </div>
         `;
         return;
     }
 
     // Extract key information from logs
-    let sender = null, clientIp = null, relay = null;
-    let messageId = null, finalStatus = null, totalDelay = null, queueId = null;
+    let clientIp = null, relay = null;
+    let messageId = null, finalStatus = null, totalDelay = null;
     let errorReasons = [];
     let recipientsFromPostfix = new Set(); // Collect all unique recipients from Postfix logs
 
     data.postfix.forEach(log => {
-        if (log.queue_id && !queueId) queueId = log.queue_id;
-        if (log.sender && !sender) sender = log.sender;
         if (log.relay && !relay) relay = log.relay;
         if (log.message_id && !messageId) messageId = log.message_id;
         if (log.status) finalStatus = log.status;
@@ -648,9 +1121,10 @@ function renderPostfixTab(content, data) {
         }
     });
 
-    // Separate system logs from recipient logs
-    const postfixByRecipient = data.postfix_by_recipient || {};
-    const recipientEntries = Object.entries(postfixByRecipient).filter(([key]) => key !== '_system');
+
+    // A message to many lists its recipients with their outcome and reason, so
+    // the strip and the error box speak for a single recipient only
+    const many = mdRecipients.length > 1;
 
     // Every retry logs the same error again; one line with an attempt count
     // says the same thing without crowding the log timeline off the screen
@@ -670,7 +1144,7 @@ function renderPostfixTab(content, data) {
 
     // Build error summary section. The list is capped so many distinct errors
     // scroll inside the box instead of squeezing the timeline below it.
-    const errorSummaryHtml = dedupedErrors.length > 0 ? `
+    const errorSummaryHtml = dedupedErrors.length > 0 && !many ? `
         <div class="ui-banner ui-banner-fail ui-md-errors">
             <div>Delivery Error
                 <div class="ui-md-error-list">
@@ -691,52 +1165,39 @@ function renderPostfixTab(content, data) {
     ` : '';
 
     let toFact = '';
-    if (recipientsFromPostfix.size > 0) {
+    if (many) {
+        // The Recipients list below names them all
+    } else if (recipientsFromPostfix.size > 0) {
         toFact = mdFact(`To (${recipientsFromPostfix.size})`, recipientsFromPostfix.size === 1 ? copyableText(Array.from(recipientsFromPostfix)[0]) : `${recipientsFromPostfix.size} recipients`);
     } else if (data.recipients && data.recipients.length > 0) {
         toFact = mdFact(`To (${data.recipients.length})`, data.recipients.length === 1 ? copyableText(data.recipients[0]) : `${data.recipients.length} recipients`);
     }
+
+    // A message to many names its server when all its recipients went through one;
+    // otherwise each recipient's row does
+    const relays = [...new Set(mdRecipients.map(r => r.relay).filter(Boolean))];
+    const stripRelay = many ? (relays.length === 1 ? relays[0] : '') : relay;
+    const stripFacts = [
+        toFact,
+        finalStatus && !many ? mdFact('Final Status', uiStatusTag(finalStatus)) : '',
+        clientIp ? mdFact('Client IP', `<span class="ui-mono">${copyableText(clientIp)}</span>`) : '',
+        stripRelay ? mdFact('Relay', renderRelay(stripRelay)) : '',
+    ].join('');
 
     content.innerHTML = `
         <div class="ui-md-fill">
             ${errorSummaryHtml}
             <!-- Compact mail summary strip so the logs get the room. The
                  full details live in the Overview tab -->
-            <div class="ui-md-facts ui-md-strip">
-                ${sender ? mdFact('From', `<span title="${escapeHtml(sender)}">${copyableText(sender)}</span>`) : ''}
-                ${toFact}
-                ${finalStatus ? mdFact('Final Status', uiStatusTag(finalStatus)) : ''}
-                ${queueId ? mdFact('Queue ID', `<span class="ui-mono">${copyableText(queueId)}</span>`) : ''}
-                ${clientIp ? mdFact('Client IP', `<span class="ui-mono">${copyableText(clientIp)}</span>`) : ''}
-                ${relay ? mdFact('Relay', `<span class="ui-mono" title="${escapeHtml(relay)}">${escapeHtml(relay)}</span>`) : ''}
-            </div>
+            ${stripFacts ? `<div class="ui-md-facts ui-md-strip">${stripFacts}</div>` : ''}
 
-            <!-- Delivery Summary by Recipient (if multiple recipients) -->
-            ${recipientEntries.length > 1 ? `
-                <section>
-                    <h4 class="ui-md-h">Delivery Summary by Recipient</h4>
-                    <div class="ui-md-recipient-grid">
-                        ${recipientEntries.map(([recipient, logs]) => {
-        const statusLog = logs.find(l => l.status) || logs[0];
-        return `
-                                <div class="ui-md-card">
-                                    <div class="ui-md-tags">
-                                        <span class="ui-md-grow">${copyableText(recipient)}</span>
-                                        ${statusLog.status ? uiStatusTag(statusLog.status) : ''}
-                                    </div>
-                                    ${statusLog.relay ? `<p class="ui-muted ui-md-truncate">via ${escapeHtml(statusLog.relay)}</p>` : ''}
-                                </div>
-                            `;
-    }).join('')}
-                    </div>
-                </section>
-            ` : ''}
+            ${renderRecipientsSection()}
 
-            <!-- Complete Log Timeline - the header and filters stay put, the
-                 entry list takes the remaining height and scrolls alone -->
-            ${renderLogTimeline(data.postfix, dovecotLogs)}
+            <!-- Complete Log Timeline: its head and filters stay under the tabs -->
+            <div id="md-timeline-slot">${renderLogTimeline(data.postfix, dovecotLogs)}</div>
         </div>
     `;
+    mdRelayTip(content);
 }
 
 // Accordion toggle function
@@ -892,20 +1353,14 @@ function closeMessageModal() {
 document.addEventListener('DOMContentLoaded', function () {
     const messageModal = document.getElementById('message-modal');
     if (messageModal) {
+        // Close modal if clicking on the backdrop (not the content). A click
+        // inside goes on to the page's own handlers: the drop-downs in it
+        // (uiPicker) open and close there
         messageModal.addEventListener('click', function (e) {
-            // Close modal if clicking on the backdrop (not the content)
             if (uiBackdropClick(e)) {
                 closeMessageModal();
             }
         });
-
-        // Prevent clicks inside modal content from closing
-        const modalContent = messageModal.querySelector('.ui-dialog');
-        if (modalContent) {
-            modalContent.addEventListener('click', function (e) {
-                e.stopPropagation();
-            });
-        }
     }
 
     // As a dialog the layers in router.js close it; docked beside the list,
