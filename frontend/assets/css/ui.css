@@ -2855,6 +2855,8 @@ button.ui-aa-col:focus-visible { outline: 2px solid var(--ui-focus); outline-off
 .ui-aa-subj { display: flex; justify-content: space-between; gap: 10px; padding: 8px 14px; border-bottom: 1px solid var(--ui-line); font-size: 13px; }
 .ui-aa-subj small { color: var(--ui-muted); white-space: nowrap; }
 .ui-aa-note { margin: 0; font-size: 12.5px; }
+/* The actions inside a window's content (Mailbox Stats' activity) */
+.ui-aa-acts { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
 #alert-activity-foot { flex: none; }
 .ui-aa-open { display: contents; }
 @media (max-width: 760px) {

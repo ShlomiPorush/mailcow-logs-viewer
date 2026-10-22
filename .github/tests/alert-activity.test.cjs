@@ -249,7 +249,9 @@ test('on the night the clocks go back, columns are spans of time that do not ove
     const left = Number(html.match(/<div class="ui-aa-mark" style="left:([\d.]+)%"/)[1]);
     const marked = Math.floor(left / 100 * tips.length);
     // [01:00Z, 03:00Z) is 02:00 to 04:00 CET: seven quarters of 1 and the alert's 50
-    assert.match(tips[marked], /^10\/25\/2026, 02:00: 57 sent/);
+    // The date as formatDay writes it in this machine's language
+    const oct25 = h.run("formatDay(Date.parse('2026-10-25T12:00:00Z'))");
+    assert.ok(tips[marked].startsWith(`${oct25}, 02:00: 57 sent`), tips[marked]);
     assert.match(html, /<span>Alert 02:30<\/span>/);
 });
 
@@ -321,8 +323,9 @@ test('normal traffic sits on the usual level of every column, also one a clock c
         const { data, h } = steadyChart(...steadyCases[0]);
         const html = h.render(data, '7d');
         const line = html.match(/<div class="ui-aa-usual" style="bottom:([\d.]+)%"/);
-        const [tip, bar, own] = drawnColumns(html).find(c => c[1].startsWith('03/29/2026, 00:00')).slice(1);
-        assert.match(tip, /^03\/29\/2026, 00:00: 12 sent in 3 hours$/);
+        const mar29 = h.run("formatDay(Date.parse('2026-03-29T12:00:00Z'))");
+        const [tip, bar, own] = drawnColumns(html).find(c => c[1].startsWith(`${mar29}, 00:00`)).slice(1);
+        assert.equal(tip, `${mar29}, 00:00: 12 sent in 3 hours`);
         assert.equal(Number(own ?? line?.[1]), Number(bar));
     }
     for (const [zone, at, days] of steadyCases) {

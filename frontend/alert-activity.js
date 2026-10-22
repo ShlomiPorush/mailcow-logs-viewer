@@ -32,6 +32,8 @@ async function openAlertActivity(alertId) {
     document.getElementById('alert-activity-dismiss')?.classList.add('hidden');
     const openSlot = document.getElementById('alert-activity-open');
     if (openSlot) openSlot.innerHTML = '';
+    // The footer shows once there is something in it (not while loading, nor after an error)
+    document.getElementById('alert-activity-foot')?.classList.add('hidden');
     modal.classList.remove('hidden');
     try {
         const response = await authenticatedFetch(`/api/security-alerts/${encodeURIComponent(alertId)}/activity`, control ? { signal: control.signal } : {});
@@ -274,6 +276,7 @@ function renderAlertActivity() {
             : 'Many addresses or networks trying one username point to an attack spread out to stay under the ban; one address is a single machine, possibly a device with an old password.'}</p>
 `; });
     // The way on, in the footer
+    document.getElementById('alert-activity-foot')?.classList.remove('hidden');
     const open = document.getElementById('alert-activity-open');
     if (open) uiRedrawKeepingFocus(open, () => {
         open.innerHTML = sent ? `<button type="button" class="ui-btn ui-btn-primary" onclick="openAlertActivityMessages()">${picked ? 'Open this time in Messages' : 'Open in Messages'}</button>`
