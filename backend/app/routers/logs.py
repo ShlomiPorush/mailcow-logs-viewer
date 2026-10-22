@@ -648,6 +648,9 @@ def _security_item(a: dict) -> dict:
         "users": a["users"], "services": a["services"], "hits": a["hits"],
         "country": a["country"], "country_code": a["country_code"], "city": a["city"], "org": a["org"],
         "last_seen": format_datetime_utc(a["last"]), "f2b": a["f2b"], "listed_as": a["listed_as"],
+        # A Fail2ban network ban: its size on the network's row, the network on an address's
+        "network_size": a.get("network_size"), "network_range": a.get("network_range"),
+        "banned_through": a.get("banned_through"),
     }
 
 
@@ -859,6 +862,10 @@ def _bans_covering(ip: str, active_bans) -> List[str]:
             continue
         if net.version == target.version and target.subnet_of(net) and key not in networks:
             networks.append(key)
+    # A network is lifted only by its own ban: a wider one around it holds
+    # addresses outside it, also when the network's own ban has ended meanwhile
+    if target.num_addresses > 1:
+        return [key for key in networks if ipaddress.ip_network(key, strict=False) == target]
     return networks
 
 

@@ -141,7 +141,9 @@ function securityFromServer(x) {
     return {
         ip: x.ip, state: x.state, tries: x.tries, attempts: x.attempts, users: x.users, services: x.services, hits: x.hits,
         country: x.country || '', countryCode: x.country_code || '', city: x.city || '', org: x.org || '', last: x.last_seen || '', f2b: x.f2b,
-        listedAs: x.listed_as || ''
+        listedAs: x.listed_as || '',
+        // A Fail2ban network ban: the network's own row, and the addresses banned through it
+        networkSize: x.network_size || 0, networkRange: x.network_range || null, bannedThrough: x.banned_through || ''
     };
 }
 
@@ -311,6 +313,26 @@ function securityDescribe(a) {
             acts: rw || !hit.owned ? undo : ''
         };
     }
+    if (a.state === 'banned' && a.networkSize) {
+        // IPv6 networks are too large for a count that reads
+        const size = a.ip.includes(':') ? 'Whole network' : `Whole network, ${Number(a.networkSize).toLocaleString()} addresses`;
+        const range = a.networkRange ? `Every address from ${escapeHtml(a.networkRange[0])} to ${escapeHtml(a.networkRange[1])} is blocked. ` : 'Every address in it is blocked. ';
+        return {
+            tag: `${uiTag('Banned', 'fail')}<span class="ui-sec-by">by Fail2ban</span>${uiTag(size, 'warn')}`,
+            why: `${range}<b>${a.f2b.banned_until ? `${escapeHtml(a.f2b.banned_until)} left` : 'Banned now'}</b>, then Fail2ban lets them try again.${a.f2b.queued_for_unban ? ' Unbanning...' : ''}`,
+            // Banning a whole network for good is not offered in one click
+            acts: rw && !a.f2b.queued_for_unban ? `<button ${B} onclick="unbanIP('${escapeJsArg(a.ip)}', this)" title="Unban ${escapeHtml(a.ip)}">Unban</button>` : ''
+        };
+    }
+    if (a.state === 'banned' && a.bannedThrough) {
+        const tries = a.tries ? `${Number(a.tries).toLocaleString()} failed login${a.tries === 1 ? '' : 's'} ${securityWindowText()}${a.services.length ? ` (${escapeHtml(a.services.join(', '))})` : ''}. ` : '';
+        return {
+            tag: `${uiTag('Banned', 'fail')}<span class="ui-sec-by">through ${escapeHtml(a.bannedThrough)}</span>`,
+            why: `${tries}Blocked with its whole network: <b>${a.f2b.banned_until ? `${escapeHtml(a.f2b.banned_until)} left` : 'banned now'}</b>. Unban lifts the whole network.${a.f2b.queued_for_unban ? ' Unbanning...' : ''}`,
+            acts: rw && !a.f2b.queued_for_unban ? `<button ${B} onclick="unbanIP('${escapeJsArg(a.bannedThrough)}', this)" title="Unban ${escapeHtml(a.bannedThrough)}">Unban</button>
+                <button type="button" class="ui-btn ui-btn-sm ui-btn-danger" onclick="banIP('${ipArg}', this)" title="Put it on the denylist">Ban permanently</button>` : ''
+        };
+    }
     if (a.state === 'banned') {
         const tries = a.tries ? `${Number(a.tries).toLocaleString()} failed login${a.tries === 1 ? '' : 's'} ${securityWindowText()}. ` : '';
         return {
@@ -367,6 +389,17 @@ function securityRow(a) {
     const d = securityDescribe(a);
     const open = securityOpenRow === a.ip;
     const where = a.country || a.last ? `${a.country ? escapeHtml(a.country) : ''}${a.country && a.last ? ' · ' : ''}${a.last ? formatAgo(a.last) : ''}` : '';
+    // A network has no log lines of its own: its row does not open
+    if (a.networkSize) {
+        return `
+        <div class="ui-sec-row is-static is-net">
+            <div class="ui-sec-main">
+                <div class="ui-sec-top">${securityPlaceFlag('', '')}<b class="ui-mono">${copyableText(a.ip)}</b>${d.tag}</div>
+                <p class="ui-sec-why">${d.why}</p>
+            </div>
+            <div class="ui-sec-acts">${d.acts}</div>
+        </div>`;
+    }
     return `
         <div class="ui-sec-row${open ? ' is-open' : ''}" onclick="securityRowClick(event, '${escapeJsArg(a.ip)}')" role="button" tabindex="0"
              onkeydown="if (event.key === 'Enter' && event.target === this) securityToggleRow('${escapeJsArg(a.ip)}')" aria-expanded="${open}">

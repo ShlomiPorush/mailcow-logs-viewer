@@ -899,6 +899,10 @@ body.ui-sheet-on { overflow: hidden; }
     .ui-sec-seg { display: grid; grid-template-columns: 1fr 1fr; width: 100%; overflow: visible; }
     .ui-sec-seg button { padding: 6px 8px; font-size: 12.5px; }
     .ui-sec-row .ui-sec-why { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    /* A network row opens no sheet: it shows all it says, and its Unban */
+    .ui-sec-row.is-net .ui-sec-top { flex-wrap: wrap; }
+    .ui-sec-row.is-net .ui-sec-why { white-space: normal; overflow: visible; }
+    .ui-sec-row.is-net .ui-sec-acts { display: flex; }
     .ui-sec-row { grid-template-columns: minmax(0, 1fr); }
     .ui-sec-acts { justify-content: flex-start; }
     /* The period on its own line; the countries without their bars, so a name fits */
