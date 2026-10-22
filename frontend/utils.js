@@ -2464,6 +2464,16 @@ function uiDialogSheet(backdrop) {
     dialog.addEventListener('touchcancel', end);
 }
 
+// A jump to a place further down a phone's sheet (a link to a part of the same
+// dialog) grows the sheet to the full screen first, as scrolling there would:
+// otherwise the sheet takes the jump's scroll to grow and the place stays below
+function uiDialogSheetFull(backdrop) {
+    const dialog = backdrop && backdrop.querySelector(':scope > .ui-dialog');
+    if (!dialog || !uiIsPhone() || backdrop.classList.contains('ui-docked') || backdrop.classList.contains('is-full')) return;
+    backdrop.classList.add('is-grown', 'is-full');
+    dialog.style.height = `${window.innerHeight}px`;
+}
+
 // A dialog is prepared each time it is shown or added to the page (only where
 // there is a page to watch: the frontend tests load this file without one)
 if (typeof MutationObserver !== 'undefined' && document.body) new MutationObserver(records => {

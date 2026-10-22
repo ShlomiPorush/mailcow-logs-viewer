@@ -148,3 +148,97 @@ test('opened as a dialog, the message is last on the page, over a dialog already
     assert.deepEqual(appended, [modal], 'moved after Block details, so it is drawn on top');
     assert.equal(modal.classList.contains('ui-docked'), false);
 });
+
+// A message to many (issue #476): one delivered and one deferred twice through
+// the same relay, one bounced, one Postfix has not logged yet
+function messageToMany() {
+    const at = s => `2026-01-01T00:00:0${s}Z`;
+    const line = (s, recipient, status, message) => ({ time: at(s), program: 'postfix/smtp', recipient, status, relay: 'mx.example.net[192.0.2.9]:25', message });
+    return { ...message(), final_status: 'deferred', dovecot: null,
+        recipients: ['a@example.net', 'b@example.net', 'c@example.net', 'd@example.net'],
+        postfix: [
+            { time: at(0), program: 'postfix/qmgr', message: 'TEST123: from=<sender@example.com>, nrcpt=4 (queue active)' },
+            line(1, 'a@example.net', 'sent', 'TEST123: to=<a@example.net>, status=sent (250 ok)'),
+            line(2, 'b@example.net', 'deferred', 'TEST123: to=<b@example.net>, status=deferred (host mx said: 451 4.7.1 Try later (in reply to RCPT TO command))'),
+            line(3, 'B@example.net', 'deferred', 'TEST123: to=<b@example.net>, status=deferred (host mx said: 451 4.7.1 Try later (in reply to RCPT TO command))'),
+            line(4, 'c@example.net', 'bounced', 'TEST123: to=<c@example.net>, status=bounced (host mx said: 550 5.1.1 No such user (in reply to RCPT TO command))'),
+        ] };
+}
+
+test('a message to many counts its recipients in the header and in What happened', async () => {
+    const h = harness(messageToMany());
+    await h.context.viewMessageDetails('example-key');
+    const header = h.element('message-modal-header').innerHTML;
+    assert.match(header, /To \(4\)/);
+    assert.match(header, /Delivered to 1 of 4 recipients/);
+    assert.match(header, /showMessageRecipients\(''\)">All 4 recipients/);
+    // Every status but Delivered as a count that opens those recipients
+    assert.match(header, /showMessageRecipients\('bounced'\)">1 bounced/);
+    assert.match(header, /showMessageRecipients\('deferred'\)">1 deferred/);
+    assert.match(header, /showMessageRecipients\('none'\)">1 not logged yet/);
+    const overview = h.element('message-modal-content').innerHTML;
+    assert.match(overview, /Delivered to 1 recipient</);
+    assert.match(overview, /via mx\.example\.net/);
+    assert.match(overview, /Deferred for 1 recipient</);
+    assert.match(overview, /Bounced for 1 recipient</);
+    assert.doesNotMatch(overview, /attempts/, 'deliveries to many are not attempts');
+});
+
+test('the Logs tab lists the recipients, problems first, and shows one recipient\'s lines', async () => {
+    const h = harness(messageToMany());
+    await h.context.viewMessageDetails('example-key');
+    h.context.switchModalTab('postfix');
+    const logs = h.element('message-modal-content').innerHTML;
+    const order = ['c@example.net', 'b@example.net', 'd@example.net', 'a@example.net'].map(a => logs.indexOf(`<bdi>${a}</bdi></span>`));
+    assert.ok(order.every((at, i) => at > 0 && (i === 0 || at > order[i - 1])), `problems first: ${order}`);
+    assert.match(logs, /550 5\.1\.1 No such user/);
+    assert.match(logs, /2 attempts/);
+    assert.match(logs, /No delivery logged yet/);
+    assert.doesNotMatch(logs, /Delivery Error/, 'the reasons are in the list');
+    assert.match(logs, /5 entries/);
+    // b@ was logged once in capitals: both its lines, and the shared qmgr line
+    const b = vm.runInContext("mdRecipients.findIndex(r => r.key === 'b@example.net')", h.context);
+    h.context.pickMessageRecipient(b, true);
+    const timeline = h.element('md-timeline-slot').innerHTML;
+    assert.match(timeline, /2 for this recipient, 1 shared/);
+    assert.doesNotMatch(timeline.split('id="log-timeline-entries"')[1], /a@example\.net/, 'the lines, the picker lists everyone');
+    assert.match(timeline, /is-shared[\s\S]*All recipients/);
+    assert.match(h.element('md-rcpt-results').innerHTML, /aria-pressed="true"[^>]*>\s*<span class="ui-md-rrow-addr"><bdi>b@example\.net/);
+    // The same row again shows every recipient
+    h.context.pickMessageRecipient(b, true);
+    assert.match(h.element('md-timeline-slot').innerHTML, /5 entries/);
+    // A count in the header opens the list filtered to its status
+    h.context.showMessageRecipients('bounced');
+    assert.match(h.element('message-modal-content').innerHTML, /aria-pressed="true" onclick="filterMessageRecipients\('bounced'\)"/);
+    h.context.searchMessageRecipients('zzz');
+    assert.match(h.element('md-rcpt-results').innerHTML, /No recipient matches/);
+});
+
+test('one recipient keeps its strip and error box, with no recipient list', async () => {
+    const one = { ...message(), postfix: [{ time: '2026-01-01T00:00:00Z', recipient: 'recipient@example.com', status: 'bounced', relay: 'mx.example.net[192.0.2.9]:25',
+        program: 'postfix/smtp', message: 'TEST123: to=<recipient@example.com>, status=bounced (host mx said: 550 5.1.1 No such user (in reply to RCPT TO command))' }] };
+    const h = harness(one);
+    await h.context.viewMessageDetails('example-key');
+    h.context.switchModalTab('postfix');
+    const logs = h.element('message-modal-content').innerHTML;
+    assert.match(logs, /Final Status/);
+    assert.match(logs, /Delivery Error/);
+    assert.doesNotMatch(logs, /id="md-rcpts"/);
+    assert.doesNotMatch(h.element('message-modal-header').innerHTML, /All \d+ recipients/);
+});
+
+test('a recipient address from the logs is text, and its row opens it by position', async () => {
+    const payload = '"><img src=x onerror=alert(1)>@example.net';
+    const data = messageToMany();
+    data.recipients.push(payload);
+    data.postfix.push({ time: '2026-01-01T00:00:05Z', program: 'postfix/smtp', recipient: payload, status: "sent');alert(1);//", message: 'x' });
+    const h = harness(data);
+    await h.context.viewMessageDetails('example-key');
+    h.context.switchModalTab('postfix');
+    const html = h.element('message-modal-header').innerHTML + h.element('message-modal-content').innerHTML;
+    assert.doesNotMatch(html, /<img/);
+    assert.match(html, /&lt;img src=x onerror=alert\(1\)&gt;/);
+    // escapeJsArg keeps the quote inside the argument (\')
+    assert.doesNotMatch(html, /[^\\]'\);alert\(1\)/, 'a status from the logs never closes a handler argument');
+    assert.match(html, /pickMessageRecipient\(\d+, true\)/);
+});

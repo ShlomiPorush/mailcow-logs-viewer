@@ -433,8 +433,29 @@
 .ui-md-errors { flex: none; }
 .ui-md-error-list { display: grid; gap: 8px; max-height: 10rem; overflow-y: auto; margin-top: 6px; color: var(--ui-ink); font-weight: 400; }
 .ui-md-error p { margin: 2px 0 0; }
-.ui-md-recipient-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 8px; margin-top: 8px; }
-.ui-md-recipient-grid .ui-md-card { padding: 10px 12px; }
+/* Recipients of a message to many (issue #476): problems first with the reason;
+   a row shows its recipient's lines in the timeline below */
+.ui-md-rcpts { display: grid; gap: 10px; }
+.ui-md-rcpts-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; }
+.ui-md-rcpts-head .ui-input { width: 240px; max-width: 100%; }
+.ui-md-rlist { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1px; overflow: hidden; border: 1px solid var(--ui-line); border-radius: var(--ui-radius); background: var(--ui-line); }
+.ui-md-rrow { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 2px 12px; padding: 9px 12px; background: var(--ui-bg); cursor: pointer; }
+@media (hover: hover) { .ui-md-rrow:hover { background: color-mix(in srgb, var(--ui-ink) 4%, var(--ui-bg)); } }
+.ui-md-rrow[aria-pressed="true"] { background: color-mix(in srgb, var(--ui-info) 10%, var(--ui-bg)); box-shadow: inset 3px 0 0 var(--ui-info); }
+.ui-md-rrow-addr { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.ui-md-rrow-sub { grid-column: 1 / -1; display: flex; gap: 6px; min-width: 0; color: var(--ui-muted); font-size: 12px; }
+.ui-md-rrow-sub > span { flex: none; }
+.ui-md-rrow-sub > span:first-child { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ui-md-rrow-why { grid-column: 1 / -1; font-family: var(--ui-mono); font-size: 11.5px; line-height: 1.45; overflow-wrap: anywhere; }
+.ui-md-rnone { padding: 14px 12px; background: var(--ui-bg); color: var(--ui-muted); font-size: var(--ui-fs-sm); }
+.ui-md-rmore { justify-self: start; }
+@media (max-width: 640px) { .ui-md-rcpts-head .ui-input { width: 100%; } }
+.ui-md-link { flex: none; padding: 0; border: 0; background: none; color: var(--ui-info); font: inherit; font-weight: 600; cursor: pointer; }
+@media (hover: hover) { .ui-md-link:hover { text-decoration: underline; } }
+.ui-md-tally { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+/* On the tinted bar a count keeps its colour on the page's background, readable */
+.ui-md-tally .ui-tag { border: 0; background: var(--ui-bg); font: inherit; font-size: 12.5px; font-weight: 700; padding: 3px 9px; cursor: pointer; }
+@media (hover: hover) { .ui-md-tally .ui-tag:hover { text-decoration: underline; } }
 .ui-md-grow { flex: 1; min-width: 0; }
 .ui-md-truncate { margin: 4px 0 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
 
@@ -443,10 +464,18 @@
 .ui-md-timeline-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
 .ui-md-timeline-entries { display: grid; gap: 6px; align-content: start; }
 .ui-md-timeline-head { position: sticky; top: 0; z-index: 2; padding: 6px 0; background: var(--ui-bg); }
-/* The scrolling body has top padding; the head sticks at the body's visible edge, not below the padding,
-   so no log line shows above it */
-.ui-dialog-body .ui-md-timeline-head { top: calc(-1 * var(--ui-pad-x)); }
-#message-modal.ui-docked .ui-dialog-body .ui-md-timeline-head { top: -20px; }
+/* The header, the tabs and the open tab scroll as one; the tabs stay at the top
+   and the timeline head right under them (message-details.js measures the tabs) */
+#message-modal .ui-md-body { padding: 0; }
+#message-modal .ui-md-body > .ui-tabs { position: sticky; top: 0; z-index: 6; background: var(--ui-bg); }
+#message-modal .ui-md-content { padding: var(--ui-pad-x); }
+#message-modal .ui-md-timeline-head { top: var(--ui-md-tabs-h, 41px); z-index: 5; }
+#message-modal :is(.ui-md-rcpts, .ui-md-timeline) { scroll-margin-top: calc(var(--ui-md-tabs-h, 41px) + 8px); }
+.ui-md-timeline-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
+.ui-md-timeline-tools .ui-picker-btn { max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* With one recipient picked, the lines every recipient shares stay, dimmed */
+.ui-md-log.is-shared { opacity: .62; }
+.ui-md-log .ui-tag-line { font-size: 11px; padding: 1px 6px; }
 .ui-md-fill:has(.ui-md-timeline) { height: auto; }
 .ui-md-log { padding: 10px 12px; border-radius: var(--ui-radius-sm); background: var(--ui-panel); font-size: var(--ui-fs-sm); }
 .ui-md-log p { margin: 3px 0 0; }
@@ -507,8 +536,9 @@
 .ui-tag-dir.ui-dir-inbound { color: var(--ui-dir-in); background: color-mix(in srgb, var(--ui-dir-in) 13%, transparent); }
 .ui-tag-dir.ui-dir-outbound { color: var(--ui-dir-out); background: color-mix(in srgb, var(--ui-dir-out) 13%, transparent); }
 .ui-tag-dir.ui-dir-internal { color: var(--ui-dir-int); background: color-mix(in srgb, var(--ui-dir-int) 13%, transparent); }
-/* Several recipients in the header, one per item */
-.ui-md-to { display: flex; flex-wrap: wrap; gap: 2px 14px; }
+/* To: one line however many recipients; the link opens the full list */
+.ui-md-to { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
+.ui-md-to-list { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ui-fct-ok { background: var(--ui-ok); } .ui-fct-warn { background: var(--ui-warn); } .ui-fct-fail { background: var(--ui-fail); } .ui-fct-spam { background: var(--ui-spam); }
 .ui-fct-export { margin: 16px 8px 0; }
 
@@ -568,7 +598,7 @@
 #message-modal.ui-docked .ui-dialog-head { display: none; }
 #message-modal.ui-docked .ui-md-header { padding: 30px 36px 0; }
 #message-modal.ui-docked .ui-tabs { padding: 0 28px; }
-#message-modal.ui-docked .ui-dialog-body { padding: 20px 36px 60px; }
+#message-modal.ui-docked .ui-md-content { padding: 20px 36px 60px; }
 
 /* Reading pane header: subject, who and when, the outcome */
 .ui-md-header { padding: 20px var(--ui-pad-x) 0; }
