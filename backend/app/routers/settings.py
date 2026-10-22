@@ -921,15 +921,23 @@ def update_settings(body: Dict[str, Any], request: Request = None, response: Res
     # One save at a time from the state it starts from to its transition token:
     # two saves at once must not each take the list for kept and one leave its
     # token over the other's
-    from ..services.figures import features_off, note_feature_switches
-    with _LIST_TRANSITION_LOCK:
-        list_was_kept, switches_before = spam_list_kept(), _spam_list_switches()
-        trends_off_before = features_off()
-        save_config_overrides_to_db(db, allowed)
-        reload_settings(db)
-        note_feature_switches(trends_off_before, features_off())
-        rspamd_off_transition = _record_list_transition(
-            db, list_was_kept, spam_list_kept(), switched=_spam_list_switches() != switches_before)
+    from ..services.figures import SamplesBusy, feature_switch_guard
+    try:
+        guard = feature_switch_guard(needed="disabled_features" in allowed)
+        note_trend_switches = guard.__enter__()
+    except SamplesBusy:
+        raise HTTPException(status_code=503, detail="The settings could not be saved right now. Nothing was changed. Try again in a moment.")
+    try:
+        with _LIST_TRANSITION_LOCK:
+            list_was_kept, switches_before = spam_list_kept(), _spam_list_switches()
+            save_config_overrides_to_db(db, allowed)
+            reload_settings(db)
+            # A feature with a trend switched by this save: samples read before it are dropped
+            note_trend_switches()
+            rspamd_off_transition = _record_list_transition(
+                db, list_was_kept, spam_list_kept(), switched=_spam_list_switches() != switches_before)
+    finally:
+        guard.__exit__(None, None, None)
     if _session_bound_values() != prev_sign_in:
         revoke_all_sessions()
         # Keep the operator who saved signed in, with a session issued under the new settings

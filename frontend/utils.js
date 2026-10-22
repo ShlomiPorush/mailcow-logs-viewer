@@ -2160,8 +2160,11 @@ function uiSparkline(points, { days = 7, now = Date.now(), format = v => String(
     const x = t => pad + (Math.max(from, Math.min(now, t)) - from) / (now - from) * (W - 2 * pad);
     const y = v => (hi === lo ? H / 2 : H - pad - (v - lo) / (hi - lo) * (H - 2 * pad));
     const d = pts.map(p => `${p.start ? 'M' : 'L'}${x(p.t).toFixed(1)} ${y(p.v).toFixed(1)}`).join(' ');
+    // A run of one point draws no line: a dot shows it (the latest reading has its own mark)
+    const lone = pts.filter((p, i) => p.start && i < pts.length - 1 && pts[i + 1].start)
+        .map(p => `<circle class="is-lone" cx="${x(p.t).toFixed(1)}" cy="${y(p.v).toFixed(1)}" r="1.2"/>`).join('');
     const words = `${label}, last ${days} days: from ${format(firstRead)} to ${format(lastRead)}, as of ${when(Date.parse(last.as_of || last.slot))}`;
-    return `<svg class="ui-spark-svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="${escapeHtml(words)}"><title>${escapeHtml(words)}</title><path d="${d}"/><circle cx="${x(Date.parse(last.slot)).toFixed(1)}" cy="${y(Number(last.value)).toFixed(1)}" r="1.8"/></svg>`;
+    return `<svg class="ui-spark-svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="${escapeHtml(words)}"><title>${escapeHtml(words)}</title><path d="${d}"/>${lone}<circle cx="${x(Date.parse(last.slot)).toFixed(1)}" cy="${y(Number(last.value)).toFixed(1)}" r="1.8"/></svg>`;
 }
 
 // =============================================================================

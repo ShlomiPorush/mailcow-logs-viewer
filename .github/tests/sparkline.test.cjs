@@ -49,6 +49,17 @@ test('hours with no sample break the line, also inside one six hours: a gap, nev
     assert.equal((pathOf(vm.runInContext(`uiSparkline(__p, { days: 7, now: ${NOW} })`, c)).match(/M/g) || []).length, 2);
 });
 
+test('a sample with no neighbour is a dot: three lone samples are three marks', () => {
+    const c = load();
+    c.__p = ['2026-10-22T00:00:00Z', '2026-10-22T05:00:00Z', '2026-10-22T10:00:00Z'].map((s, i) => ({ slot: s, value: i, as_of: s }));
+    const svg = vm.runInContext(`uiSparkline(__p, { days: 7, now: ${NOW} })`, c);
+    assert.equal((svg.match(/<circle class="is-lone"/g) || []).length, 2, 'the two before the latest');
+    assert.equal((svg.match(/<circle /g) || []).length, 3, 'and the mark of the latest reading');
+    // Samples in a run draw a line and get no dot
+    c.__p = hours(NOW - 7 * 24 * H, NOW, () => 5);
+    assert.doesNotMatch(vm.runInContext(`uiSparkline(__p, { days: 7, now: ${NOW} })`, c), /is-lone/);
+});
+
 test('the mark is the latest reading where it was read, not a six hours\' average', () => {
     const c = load();
     c.__p = [0, 0, 0, 0, 0, 60].map((v, i) => ({ slot: new Date(Date.parse('2026-10-22T00:00:00Z') + i * H).toISOString(), value: v, as_of: '' }));

@@ -20,6 +20,8 @@ import asyncio
 import logging
 import re
 import threading
+import time
+from contextlib import contextmanager
 from datetime import datetime, timedelta
 from typing import Dict, Optional
 
@@ -57,20 +59,62 @@ def bump_feature_epoch(feature: str) -> None:
         _epochs[feature] = _epochs.get(feature, 0) + 1
 
 
-def note_feature_switches(off_before, off_after) -> None:
-    """A save that switches a feature with a trend (on or off) moves its epoch under
-    the lock, so a sample read before the switch is not written after it, also
-    when the feature goes off and on again before its data is deleted."""
-    from ..database import get_db_context
-    changed = {f for f in set(METRICS.values()) if f and ((f in off_before) != (f in off_after))}
-    if not changed:
+class SamplesBusy(Exception):
+    """The samples' lock was not had in time: nothing was changed."""
+
+
+# How long a save of the feature list waits for a write or purge of the samples
+SWITCH_WAIT = '10s'
+
+
+@contextmanager
+def feature_switch_guard(needed: bool = True):
+    """Held across a settings save: the samples' lock (session level, on a connection
+    of its own), taken before anything is saved, so a save that cannot have it
+    changes nothing (SamplesBusy). Inside it, note() moves the epoch of every
+    feature with a trend that the save switched (on or off), so a sample read
+    before the switch is not written after it, also when the feature goes off and
+    on again before its data is deleted. A save that does not touch the feature
+    list (needed false) switches nothing and takes no lock."""
+    if not needed:
+        yield lambda: None
         return
-    with get_db_context() as db:
-        db.execute(text("SET LOCAL lock_timeout = '10s'"))
-        lock_metric_rows(db)
-        for feature in changed:
-            bump_feature_epoch(feature)
-        db.commit()
+    from ..database import engine
+    conn = engine.connect()
+    try:
+        try:
+            # The wait is bounded for this transaction only; the lock outlives it
+            conn.execute(text(f"SET LOCAL lock_timeout = '{SWITCH_WAIT}'"))
+            conn.execute(text('SELECT pg_advisory_lock(:key)'), {'key': _LOCK_KEY})
+            conn.commit()
+        except Exception as e:
+            conn.rollback()
+            raise SamplesBusy(str(e)) from e
+        before = features_off()
+
+        def note():
+            after = features_off()
+            for feature in {f for f in set(METRICS.values()) if f and ((f in before) != (f in after))}:
+                bump_feature_epoch(feature)
+        try:
+            yield note
+        finally:
+            try:
+                conn.execute(text('SELECT pg_advisory_unlock(:key)'), {'key': _LOCK_KEY})
+                conn.commit()
+            except Exception as e:
+                # Never back to the pool holding the lock: closing the connection ends it
+                logger.warning(f"Trend samples' lock released by closing its connection ({e})")
+                conn.invalidate()
+    finally:
+        conn.close()
+
+
+def note_feature_switches(off_before, off_after) -> None:
+    """The epochs of the features switched between two states (tests, and saves that
+    already hold the guard)."""
+    for feature in {f for f in set(METRICS.values()) if f and ((f in off_before) != (f in off_after))}:
+        bump_feature_epoch(feature)
 
 
 def features_off() -> set:
@@ -160,13 +204,28 @@ def security_figures(addresses, fail2ban_known: bool) -> dict:
     }
 
 
-def _in_session(fn):
-    """In a session of its own whose statements stop at the source's time budget
-    (a wait_for on a thread does not stop the thread's query)."""
+def _in_session(fn, budget: float = None):
+    """In a session of its own whose statements together stop at the source's time
+    budget: each one may take only what is left of it (a wait_for on a thread does
+    not stop the thread's query)."""
+    from sqlalchemy import event
     from ..database import get_db_context
+    budget = SOURCE_TIMEOUT - 5 if budget is None else budget
+    deadline = time.monotonic() + budget
+
+    def bounded(conn, cursor, statement, parameters, context, executemany):
+        left = deadline - time.monotonic()
+        if left <= 0.05:
+            raise TimeoutError(f'the source took more than its {budget:.0f} s')
+        cursor.execute(f"SET LOCAL statement_timeout = {int(left * 1000)}")
+
     with get_db_context() as db:
-        db.execute(text(f"SET LOCAL statement_timeout = '{SOURCE_TIMEOUT - 5}s'"))
-        return fn(db)
+        conn = db.connection()
+        event.listen(conn, 'before_cursor_execute', bounded)
+        try:
+            return fn(db)
+        finally:
+            event.remove(conn, 'before_cursor_execute', bounded)
 
 
 async def collect_figures() -> Dict[str, dict]:
@@ -188,7 +247,7 @@ async def collect_figures() -> Dict[str, dict]:
         points['linking_rate'] = linking
     if metric_on('blocklists_listed'):
         from ..routers.blacklist import blacklist_summary_data
-        summary = await bounded(asyncio.to_thread(blacklist_summary_data), 'blocklists')
+        summary = await bounded(asyncio.to_thread(_in_session, blacklist_summary_data), 'blocklists')
         figure = blocklists_figure(summary) if summary else None
         if figure and figure['valid']:
             points['blocklists_listed'] = figure

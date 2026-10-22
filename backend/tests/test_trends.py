@@ -77,7 +77,7 @@ def _fake_sources(monkeypatch, storage='45%', fail2ban=True, blocklists=None):
     monkeypatch.setattr(mailcow_api, 'get_fail2ban', f2b)
     monkeypatch.setattr(security_addresses, 'collect', lambda db, f, now=None, hours=24: [{'list': 'review'}, {'list': 'review'}, {'list': 'banned'}])
     import app.routers.blacklist as blacklist
-    monkeypatch.setattr(blacklist, 'blacklist_summary_data', lambda: blocklists or {
+    monkeypatch.setattr(blacklist, 'blacklist_summary_data', lambda session=None: blocklists or {
         'has_data': True, 'status': 'listed', 'hosts': [{'status': 'listed'}, {'status': 'clean'}, {'status': 'clean'}]})
     return figures
 
@@ -259,8 +259,68 @@ def test_a_quick_off_and_on_through_settings_drops_a_running_sample(db_ready, mo
     assert not _rows('security_review') and _rows('storage_used')
 
 
-def test_a_sources_queries_stop_at_its_time_budget(db_ready):
+def test_a_sources_queries_stop_together_at_its_time_budget(db_ready):
+    """The budget is the source's, not each query's: two queries that each fit
+    but together do not are stopped in the second."""
     from sqlalchemy import text
     from app.services import figures
-    seen = figures._in_session(lambda db: db.execute(text('SHOW statement_timeout')).scalar())
-    assert seen == f'{figures.SOURCE_TIMEOUT - 5}s'
+    done = []
+
+    def two(db):
+        db.execute(text('SELECT pg_sleep(0.8)'))
+        done.append('first')
+        db.execute(text('SELECT pg_sleep(0.8)'))
+        done.append('second')
+    started = time.monotonic()
+    with pytest.raises(Exception, match='statement timeout|canceling statement|took more than'):
+        figures._in_session(two, budget=1.2)
+    assert done == ['first'] and time.monotonic() - started < 1.8
+    # Each query is told what is left
+    seen = figures._in_session(lambda db: db.execute(text('SHOW statement_timeout')).scalar(), budget=20)
+    assert seen.endswith('ms') and 19000 <= int(seen[:-2]) <= 20000
+
+
+def test_the_blocklist_figure_reads_in_the_bounded_session(db_ready):
+    """In the collector's session its query errors are the source's failure, not an empty list."""
+    from app.routers.blacklist import blacklist_summary_data
+
+    class Broken:
+        def query(self, *a, **k):
+            raise RuntimeError('canceling statement due to statement timeout')
+    with pytest.raises(RuntimeError):
+        blacklist_summary_data(Broken())
+
+
+def test_a_save_of_the_feature_list_that_cannot_have_the_samples_lock_changes_nothing(db_ready, monkeypatch):
+    """The lock is had before anything is saved: busy, the save is refused and nothing changed."""
+    from fastapi import HTTPException
+    from sqlalchemy import text
+    from app.database import engine
+    from app.routers import settings as settings_router
+    from app.services import figures
+    monkeypatch.setattr(settings._inner, 'edit_settings_via_ui_enabled', True)
+    monkeypatch.setattr(figures, 'SWITCH_WAIT', '300ms')
+    saved = []
+    monkeypatch.setattr(settings_router, 'save_config_overrides_to_db', lambda db, values: saved.append(values))
+    monkeypatch.setattr(settings_router, 'reload_settings', lambda db: None)
+    epochs = {f: figures.feature_epoch(f) for f in set(figures.METRICS.values()) if f}
+    holder = engine.connect()
+    try:
+        holder.execute(text('SELECT pg_advisory_lock(:key)'), {'key': figures._LOCK_KEY})
+        holder.commit()
+        with pytest.raises(HTTPException) as refused:
+            settings_router.update_settings({'disabled_features': 'netfilter'}, db=object())
+        assert refused.value.status_code == 503 and 'Nothing was changed' in refused.value.detail
+        assert saved == [] and epochs == {f: figures.feature_epoch(f) for f in epochs}
+    finally:
+        holder.execute(text('SELECT pg_advisory_unlock(:key)'), {'key': figures._LOCK_KEY})
+        holder.commit()
+        holder.close()
+    # Free again: the guard leaves no lock and no timeout behind on the pool
+    with figures.feature_switch_guard() as note:
+        note()
+    with engine.connect() as conn:
+        assert conn.execute(text('SELECT pg_try_advisory_lock(:key)'), {'key': figures._LOCK_KEY}).scalar()
+        conn.execute(text('SELECT pg_advisory_unlock(:key)'), {'key': figures._LOCK_KEY})
+        assert conn.execute(text('SHOW lock_timeout')).scalar() == '0'
+        conn.commit()
