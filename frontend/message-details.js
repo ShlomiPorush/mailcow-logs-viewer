@@ -330,15 +330,11 @@ function renderLogTimeline(postfixLogs, dovecotLogs) {
     // the ones every recipient shares
     const picked = mdRecipients.length > 1 && mdView.picked >= 0 ? mdRecipients[mdView.picked] : null;
     // A line counts for the address the sender wrote (an alias), Dovecot's
-    // lines through the mailbox they name
-    const lineFor = e => {
-        if (!e.log.recipient) return '';
-        const key = mdAddressKey(e.dovecot ? e.log.recipient : mdLineAddress(e.log));
-        return e.dovecot ? (mdOwners.get(key) || key) : key;
-    };
+    // lines for every address that reached the mailbox they name
+    const ownersOf = e => mdLineOwners(e.log, e.dovecot);
     const shown = entries.filter(e => (!mdView.source || timelineSource(e) === mdView.source)
-        && (!picked || !lineFor(e) || lineFor(e) === picked.key));
-    const own = picked ? shown.filter(e => lineFor(e) === picked.key).length : 0;
+        && (!picked || !ownersOf(e).length || ownersOf(e).includes(picked.key)));
+    const own = picked ? shown.filter(e => ownersOf(e).includes(picked.key)).length : 0;
     const count = picked ? `${own} for this recipient, ${shown.length - own} shared`
         : shown.length === entries.length ? `${entries.length} entries` : `${shown.length} of ${entries.length} entries`;
     const picker = mdRecipients.length > 1 ? `
@@ -358,7 +354,7 @@ function renderLogTimeline(postfixLogs, dovecotLogs) {
             </div>
             <div class="ui-md-timeline-entries" id="log-timeline-entries">
                 ${shown.length ? shown.map(e => {
-                    const shared = !!picked && !lineFor(e);
+                    const shared = !!picked && !ownersOf(e).length;
                     return `<div data-log-source="${escapeHtml(timelineSource(e))}">${e.dovecot ? renderDovecotTimelineRow(e.log, shared) : renderPostfixTimelineRow(e.log, shared)}</div>`;
                 }).join('') : '<p class="ui-muted">No log lines for this filter</p>'}
             </div>
@@ -511,13 +507,26 @@ function mdLineAddress(log) {
     return (orig && orig[1]) || log.recipient || '';
 }
 
-// Which written address each delivered address belongs to (alias -> mailbox)
+// Which written addresses each delivered address belongs to: a mailbox two
+// aliases reach belongs to both
 function mdAddressOwners(data) {
     const owners = new Map();
     (data.postfix || []).forEach(log => {
-        if (log.recipient) owners.set(mdAddressKey(log.recipient), mdAddressKey(mdLineAddress(log)));
+        if (!log.recipient) return;
+        const to = mdAddressKey(log.recipient);
+        if (!owners.has(to)) owners.set(to, new Set());
+        owners.get(to).add(mdAddressKey(mdLineAddress(log)));
     });
     return owners;
+}
+
+// The written addresses a timeline line belongs to; none for a line of the
+// whole message (connection, queue, bounce notice)
+function mdLineOwners(log, dovecot) {
+    if (!log.recipient) return [];
+    if (!dovecot) return [mdAddressKey(mdLineAddress(log))];
+    const key = mdAddressKey(log.recipient);
+    return [...(mdOwners.get(key) || [key])];
 }
 
 // Dovecot's verdict for one recipient, as the server resolves a delivery
@@ -526,7 +535,10 @@ function mdAddressOwners(data) {
 // pending marker is told by the end of its line, which Dovecot writes.
 const MD_DOVECOT_SEVERITY = { stored: 0, forwarded: 1, failed: 2, discarded: 3, rejected: 4 };
 const MD_DISCARD_MARK_RE = /: marked message to be discarded[^<>:]*$/i;
-function mdMailboxVerdict(lines) {
+// One LMTP delivery is the lines of one session for one mailbox, as the server
+// groups them; the session is in the line's prefix lmtp(user)<pid><session>
+const MD_DOVECOT_PREFIX_RE = /^(?:dovecot:s*)?(?:lmtp|lda)([^)]*)((?:<[^>]*>)*)/i;
+function mdDeliveryVerdict(lines) {
     const marker = log => log.verdict === 'discarded' && MD_DISCARD_MARK_RE.test(String(log.message || ''));
     const definite = lines.filter(log => MD_DOVECOT_SEVERITY[log.verdict] !== undefined && !marker(log));
     if (definite.length) {
@@ -536,6 +548,20 @@ function mdMailboxVerdict(lines) {
         }).verdict;
     }
     return lines.some(marker) ? 'discarded' : null;
+}
+
+// A recipient's Dovecot verdict: each delivery resolved on its own, then the
+// most severe of them, so a store in one mailbox hides no discard in another
+function mdMailboxVerdict(lines) {
+    const deliveries = new Map();
+    lines.forEach(log => {
+        const session = (String(log.message || '').match(MD_DOVECOT_PREFIX_RE) || [])[1] || '';
+        const key = `${session}|${mdAddressKey(log.recipient)}`;
+        if (!deliveries.has(key)) deliveries.set(key, []);
+        deliveries.get(key).push(log);
+    });
+    return [...deliveries.values()].map(mdDeliveryVerdict).filter(Boolean)
+        .reduce((a, v) => (!a || MD_DOVECOT_SEVERITY[v] > MD_DOVECOT_SEVERITY[a] ? v : a), null);
 }
 
 // Every recipient with the outcome of its own delivery: the recipients Rspamd
@@ -553,19 +579,23 @@ function messageRecipients(data) {
         return byKey.get(key);
     };
     const owners = mdAddressOwners(data);
-    const written = new Set(owners.values());
-    // A mailbox an alias expanded to is not a recipient of its own
-    const expanded = new Set([...owners].filter(([to, owner]) => to !== owner).map(([to]) => to));
+    const written = new Set([...owners.values()].flatMap(set => [...set]));
+    // A mailbox only an alias reached is not a recipient of its own. The API
+    // lists the addresses Postfix delivered to when Rspamd named none: only
+    // that list can hold such a mailbox; what Rspamd named is always kept.
+    const expanded = new Set([...owners].filter(([to, set]) => !set.has(to)).map(([to]) => to));
+    const listed = (data.recipients || []).map(mdAddressKey);
+    const deliveredTo = [...new Set((data.postfix || []).filter(log => log.recipient).map(log => mdAddressKey(log.recipient)))];
+    const fromPostfix = listed.length > 0 && listed.length === deliveredTo.length && listed.every((key, i) => key === deliveredTo[i]);
     (data.recipients || []).forEach(address => {
         const key = mdAddressKey(address);
-        if (!expanded.has(key) || written.has(key)) add(address);
+        if (!fromPostfix || !expanded.has(key) || written.has(key)) add(address);
     });
     (data.postfix || []).forEach(log => { if (log.recipient) add(mdLineAddress(log)).logs.push(log); });
     if (!byKey.size && data.recipient) add(data.recipient);
     ((data.dovecot && data.dovecot.logs) || []).forEach(log => {
         const key = mdAddressKey(log.recipient);
-        const recipient = byKey.get(owners.get(key) || key);
-        if (recipient) recipient.dovecot.push(log);
+        [...(owners.get(key) || [key])].forEach(owner => { if (byKey.has(owner)) byKey.get(owner).dovecot.push(log); });
     });
     const expiry = (data.postfix || []).filter(log => !log.recipient && String(log.status || '').toLowerCase() === 'expired').length > 0;
     const rank = status => mdStatusInfo(status).rank;
@@ -700,7 +730,7 @@ function renderRecipientRows() {
             : `<span>${host ? `via ${escapeHtml(host)}` : escapeHtml(info.word)}</span>${r.delivered.length ? `<span>· to <bdi>${escapeHtml(r.delivered.join(', '))}</bdi></span>` : ''}${r.attempts > 1 ? `<span>· ${r.attempts} attempts</span>` : ''}${r.last.time ? `<span>· ${escapeHtml(formatTime(r.last.time))}</span>` : ''}`;
         return `
             <div class="ui-md-rrow" role="button" tabindex="0" data-row-open data-md-focus="row-${index}" aria-pressed="${mdView.picked === index}" title="Show the logs of ${escapeHtml(r.address)}" onclick="if (!uiRowHeld(event)) pickMessageRecipient(${index}, true)">
-                <span class="ui-md-rrow-addr"><bdi>${escapeHtml(r.address)}</bdi></span>${uiTag(info.word, info.tone)}
+                <span class="ui-md-rrow-addr">${copyableText(r.address)}</span>${uiTag(info.word, info.tone)}
                 <span class="ui-md-rrow-sub">${sub}</span>
                 ${r.reason ? `<span class="ui-md-rrow-why ${info.tone && info.tone !== 'ok' ? `ui-text-${info.tone}` : 'ui-muted'}">${escapeHtml(r.reason)}</span>` : ''}
             </div>`;

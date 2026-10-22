@@ -189,7 +189,7 @@ test('the Logs tab lists the recipients, problems first, and shows one recipient
     await h.context.viewMessageDetails('example-key');
     h.context.switchModalTab('postfix');
     const logs = h.element('message-modal-content').innerHTML;
-    const order = ['c@example.net', 'b@example.net', 'd@example.net', 'a@example.net'].map(a => logs.indexOf(`<bdi>${a}</bdi></span>`));
+    const order = ['c@example.net', 'b@example.net', 'd@example.net', 'a@example.net'].map(a => logs.indexOf(`title="Show the logs of ${a}"`));
     assert.ok(order.every((at, i) => at > 0 && (i === 0 || at > order[i - 1])), `problems first: ${order}`);
     assert.match(logs, /550 5\.1\.1 No such user/);
     assert.match(logs, /2 attempts/);
@@ -203,7 +203,7 @@ test('the Logs tab lists the recipients, problems first, and shows one recipient
     assert.match(timeline, /2 for this recipient, 1 shared/);
     assert.doesNotMatch(timeline.split('id="log-timeline-entries"')[1], /a@example\.net/, 'the lines, the picker lists everyone');
     assert.match(timeline, /is-shared[\s\S]*All recipients/);
-    assert.match(h.element('md-rcpt-results').innerHTML, /aria-pressed="true"[^>]*>\s*<span class="ui-md-rrow-addr"><bdi>b@example\.net/);
+    assert.match(h.element('md-rcpt-results').innerHTML, /aria-pressed="true" title="Show the logs of b@example\.net"/);
     // The same row again shows every recipient
     h.context.pickMessageRecipient(b, true);
     assert.match(h.element('md-timeline-slot').innerHTML, /5 entries/);
@@ -263,7 +263,7 @@ test('a delivery to an alias counts for the alias, not as another recipient', as
     assert.match(h2.element('message-modal-header').innerHTML, /Delivered to all 2 recipients/);
     h2.context.switchModalTab('postfix');
     const logs = h2.element('message-modal-content').innerHTML;
-    assert.match(logs, /<bdi>team@example\.com<\/bdi><\/span><span class="ui-tag ui-tag-ok">Delivered/);
+    assert.match(logs, /title="Show the logs of team@example\.com"[\s\S]*?ui-tag ui-tag-ok">Delivered/);
     assert.match(logs, /· to <bdi>dana@example\.com<\/bdi>/);
     // The alias's line is its own in the timeline
     const team = vm.runInContext("mdRecipients.findIndex(r => r.key === 'team@example.com')", h2.context);
@@ -315,4 +315,48 @@ test('a store cancels a pending Sieve discard; an explicit discard still shows',
     const row = address => rows.split('ui-md-rrow"').find(r => r.includes(`<bdi>${address}</bdi>`));
     assert.doesNotMatch(row('a@example.com'), /Mailbox delivery/);
     assert.match(row('b@example.com'), /Mailbox delivery: Discarded by Sieve/);
+});
+
+// Round 2: an alias reaching several mailboxes, a mailbox two aliases reach,
+// and a mailbox Rspamd named itself
+test('aliases and their mailboxes keep each delivery\'s own Dovecot verdict', async () => {
+    const lmtp = (s, to, orig) => ({ ...smtp(s, to, 'sent', orig ? `orig_to=<${orig}>, ` : ''), program: 'postfix/lmtp', relay: 'dovecot[172.22.1.250]:24' });
+    const line = (to, verdict, action) => ({ time: '2026-01-01T00:00:05Z', recipient: to, verdict, message: `lmtp(${to})<1><S>: sieve: msgid=<m@x>: ${action}` });
+    const pending = to => line(to, 'discarded', 'marked message to be discarded if not explicitly delivered (discard action)');
+    const stored = to => line(to, 'stored', "stored mail into mailbox 'INBOX'");
+    // team@ reaches a@ (stored) and b@ (dropped); ops@ and sales@ both reach shared@ (dropped)
+    const data = { ...messageToMany(), recipients: ['team@example.com', 'ops@example.com', 'sales@example.com'],
+        postfix: [lmtp(1, 'a@example.com', 'team@example.com'), lmtp(2, 'b@example.com', 'team@example.com'),
+            lmtp(3, 'shared@example.com', 'ops@example.com'), lmtp(4, 'shared@example.com', 'sales@example.com')],
+        dovecot: { status: 'stored', mailbox: 'INBOX', logs: [stored('a@example.com'), pending('b@example.com'), pending('shared@example.com')] } };
+    const h = harness(data);
+    await h.context.viewMessageDetails('example-key');
+    h.context.switchModalTab('postfix');
+    const rows = h.element('message-modal-content').innerHTML;
+    const row = address => rows.split('ui-md-rrow"').find(r => r.includes(`title="Show the logs of ${address}"`));
+    assert.match(row('team@example.com'), /Mailbox delivery: Discarded by Sieve/, 'a store in a@ hides no discard in b@');
+    assert.match(row('ops@example.com'), /Mailbox delivery: Discarded by Sieve/);
+    assert.match(row('sales@example.com'), /Mailbox delivery: Discarded by Sieve/, 'the second alias of shared@ too');
+    // shared@'s Dovecot line is in both aliases' timelines
+    for (const alias of ['ops@example.com', 'sales@example.com']) {
+        const i = vm.runInContext(`mdRecipients.findIndex(r => r.key === '${alias}')`, h.context);
+        h.context.pickMessageRecipient(i);
+        assert.match(h.element('md-timeline-slot').innerHTML, /2 for this recipient, 0 shared/, alias);
+    }
+    // The address is copied with a click, as before
+    assert.match(row('team@example.com'), /copyToClipboard\('team@example\.com', event\)/);
+});
+
+test('a mailbox Rspamd named stays a recipient though an alias also reached it', async () => {
+    const data = { ...messageToMany(), recipients: ['team@example.com', 'shared@example.com'],
+        postfix: [smtp(1, 'shared@example.com', 'sent', 'orig_to=<team@example.com>, ')] };
+    const h = harness(data);
+    await h.context.viewMessageDetails('example-key');
+    assert.match(h.element('message-modal-header').innerHTML, /To \(2\)/);
+    // The API's own list from Postfix (no Rspamd) still hides the mailbox
+    const fallback = { ...messageToMany(), recipients: ['shared@example.com'],
+        postfix: [smtp(1, 'shared@example.com', 'sent', 'orig_to=<team@example.com>, ')] };
+    const h2 = harness(fallback);
+    await h2.context.viewMessageDetails('example-key');
+    assert.doesNotMatch(h2.element('message-modal-header').innerHTML, /To \(2\)/);
 });
