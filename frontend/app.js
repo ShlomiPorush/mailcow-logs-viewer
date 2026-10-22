@@ -2016,9 +2016,9 @@ async function loadDashboardSecurityAlerts() {
         if (dismissAll) {
             const count = dashboardOpenAlertIds.length, n = count.toLocaleString();
             // "Dismiss all 25 alerts"; one alone is "Dismiss 1 alert" (a narrow panel drops the last word)
-            const words = count === 1 ? ['Dismiss 1', ' alert'] : [`Dismiss all ${n}`, ' alerts'];
-            dismissAll.innerHTML = `${words[0]}<span class="ui-attn-wide">${words[1]}</span>`;
-            dismissAll.setAttribute('aria-label', words.join(''));
+            const words = count === 1 ? ['Dismiss 1', 'alert'] : [`Dismiss all ${n}`, 'alerts'];
+            dismissAll.innerHTML = `${words[0]}<span class="ui-attn-wide">&nbsp;${words[1]}</span>`;
+            dismissAll.setAttribute('aria-label', words.join(' '));
         }
         if (alerts.length === 0) {
             container.classList.add('hidden');

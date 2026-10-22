@@ -1273,6 +1273,8 @@ body { font-family: var(--ui-font); background: var(--ui-bg); color: var(--ui-in
 #dashboard-attention-panel { container-type: inline-size; }
 #dashboard-attention-panel > .ui-panel-head { flex-wrap: nowrap; }
 #dashboard-attention-panel > .ui-panel-head > button { flex: none; }
+/* Its words and the narrow-panel part are one phrase, not two buttons' parts */
+#dashboard-dismiss-all { gap: 0; }
 @container (max-width: 360px) { .ui-attn-wide { display: none; } }
 .ui-attn-scroll.has-more:not(:focus-within) { mask-image: linear-gradient(to bottom, #000 calc(100% - 40px), transparent); }
 .ui-attn-scroll:focus-visible { outline: 2px solid var(--ui-focus); outline-offset: -2px; }
