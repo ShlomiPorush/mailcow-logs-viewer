@@ -316,16 +316,24 @@ function dmarcCalendarCard(x) {
             aria-label="${escapeHtml(words + maybe)}" title="${escapeHtml(words + maybe)}"${d && d.total ? ` onclick="loadReportDetails('${domain}', '${date}')"` : ' aria-disabled="true"'}></button>`);
     }
     const span = last - first + 1;
-    // Bigger squares when there are few weeks; a year scrolls sideways on a narrow screen
+    // A day is a 24px target at least (its square drawn inside), bigger with few weeks; a year scrolls sideways
     const weeks = Math.ceil((lead + span) / 7);
-    const size = weeks <= 16 ? 20 : weeks <= 30 ? 16 : 13;
+    const size = weeks <= 16 ? 28 : 24;
     return `<div class="ui-dm-card"><header>Pass rate per day <span class="ui-muted">last ${span} days</span></header>
-        <div class="ui-dm-body"><div class="ui-dm-cal-scroll"><div class="ui-dm-cal-wrap"><div class="ui-dm-cal" style="--cell:${size}px" role="group" aria-label="DMARC pass rate per day, last ${span} days. Arrow keys move by day and week, Enter opens a day" onkeydown="dmarcCalendarKey(event)">${cells.join('')}</div>
+        <div class="ui-dm-body"><div class="ui-dm-cal-scroll"><div class="ui-dm-cal-wrap"><div class="ui-dm-cal" style="--cell:${size}px" role="group" aria-label="DMARC pass rate per day, last ${span} days. Arrow keys move by day and week, Enter opens a day" onkeydown="dmarcCalendarKey(event)" onfocusin="dmarcCalendarStop(event)">${cells.join('')}</div>
             <div class="ui-dm-x ui-dm-cal-x" aria-hidden="true"><span>${escapeHtml(dayWords(cal.from))}</span><span>${escapeHtml(dayWords(cal.to))}</span></div></div></div>
         <div class="ui-dm-legend ui-dm-cal-legend"><span><i class="is-ok"></i>98% or more</span><span><i class="is-warn"></i>90% to 98%</span><span><i class="is-fail"></i>Under 90%</span><span><i class="is-empty"></i>No reports</span>${old > first ? '<span><i class="is-old"></i>Before the retention</span>' : ''}</div></div></div>`;
 }
 
-// The calendar's keys: one Tab stop (roving), arrows by day (up and down) and week (left and right)
+// The calendar's one Tab stop is the day last focused, also by a click
+function dmarcCalendarStop(event) {
+    const day = event.target.closest && event.target.closest('.ui-dm-cal-day');
+    if (!day) return;
+    event.currentTarget.querySelectorAll('.ui-dm-cal-day').forEach(d => { d.tabIndex = d === day ? 0 : -1; });
+}
+
+// The calendar's keys: one Tab stop (roving), arrows by day (up and down) and week (left and right);
+// time runs left to right in either text direction, like the charts
 function dmarcCalendarKey(event) {
     const days = [...event.currentTarget.querySelectorAll('.ui-dm-cal-day')];
     const at = days.indexOf(document.activeElement);
@@ -338,8 +346,7 @@ function dmarcCalendarKey(event) {
     else if ((event.key === 'Enter' || event.key === ' ') && days[at].getAttribute('aria-disabled') !== 'true') { event.preventDefault(); days[at].click(); return; }
     if (next === null) return;
     event.preventDefault();
-    days[at].tabIndex = -1;
-    days[next].tabIndex = 0;
+    days.forEach(d => { d.tabIndex = d === days[next] ? 0 : -1; });
     days[next].focus();
 }
 
