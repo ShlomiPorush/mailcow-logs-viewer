@@ -840,6 +840,25 @@ function settingsTimeZoneNames() {
 
 const SETTINGS_TZ_NOT_SET = 'Not set (UTC)';
 
+// How far a zone's clock is from UTC now (daylight saving included), as
+// "UTC+03:00"; '' for a name this browser does not know
+function settingsZoneOffset(name) {
+    try {
+        const part = new Intl.DateTimeFormat('en-US', { timeZone: name || 'UTC', timeZoneName: 'longOffset' })
+            .formatToParts(new Date()).find(p => p.type === 'timeZoneName');
+        if (!part) return '';
+        return part.value === 'GMT' ? 'UTC+00:00' : part.value.replace('GMT', 'UTC');
+    } catch (e) {
+        return '';
+    }
+}
+
+// The picker's button: the zone's name, then its offset
+function settingsZoneButton(name) {
+    const offset = settingsZoneOffset(name);
+    return escapeHtml(name || SETTINGS_TZ_NOT_SET) + (offset ? ` <small class="ui-zone-offset">${offset}</small>` : '');
+}
+
 // The Time Zone picker writes its choice to the hidden field the form saves
 function settingsPickZone(option) {
     const field = document.getElementById('edit-tz');
@@ -854,7 +873,7 @@ function settingsPickZone(option) {
 function settingsShowZone(field) {
     const host = field.parentElement.querySelector('.ui-picker');
     if (!host) return;
-    host.querySelector('.ui-picker-btn > span').textContent = field.value || SETTINGS_TZ_NOT_SET;
+    host.querySelector('.ui-picker-btn > span').innerHTML = settingsZoneButton(field.value);
     host.querySelectorAll('[role="option"]').forEach(o => o.setAttribute('aria-selected', String(o.dataset.value === field.value)));
     const note = field.parentElement.querySelector('[data-zone-note]');
     if (note) note.hidden = field.value !== field.dataset.saved;
@@ -1283,11 +1302,12 @@ function renderSettingsEditField(key, value, sensitiveKeys, description, envLock
         const unknown = current !== '' && (!settingsTimeZoneKnown(current)
             || (typeof appTimezoneStatus !== 'undefined' && appTimezoneStatus.valid === false && appTimezoneStatus.configured === current));
         const names = current && !zones.includes(current) ? [current, ...zones] : zones;
-        // A long list, so a picker with a search (utils.js, uiPicker); the hidden field holds the value
+        // A long list, so a picker with a search (utils.js, uiPicker); the hidden field holds the value.
+        // Each zone shows its offset from UTC at its end
         const options = [{ value: '', label: SETTINGS_TZ_NOT_SET }, ...names.map(name => ({ value: name, label: name + (name === current && unknown ? ' (unknown)' : '') }))]
-            .map(o => ({ ...o, selected: o.value === current, onclick: 'settingsPickZone(this)' }));
+            .map(o => ({ ...o, hint: settingsZoneOffset(o.value) || undefined, selected: o.value === current, onclick: 'settingsPickZone(this)' }));
         const picker = uiPicker({
-            id: 'settings-' + key, label, value: escapeHtml(current || SETTINGS_TZ_NOT_SET), options, search: 'Search time zones',
+            id: 'settings-' + key, label, value: settingsZoneButton(current), options, search: 'Search time zones',
             field: true, labelledBy: 'label-' + keyAttr, disabled: envLocked
         });
         // The description already says to pick the server's zone; only a name the app cannot use needs a word more
